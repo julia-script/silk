@@ -149,9 +149,7 @@ export const duplicateTypeParameterCode = 'SEM0050' as const
 export const typeArgumentArityCode = 'SEM0051' as const
 export const typeArgumentInferenceCode = 'SEM0052' as const
 export const polymorphicRecursionCode = 'SEM0053' as const
-/** Stable code for a borrowed view outside an allowed direct type position. */
-export const borrowedViewTypePositionCode = 'SEM0054' as const
-export const invalidBorrowPositionCode = 'SEM0055' as const
+/** Stable code for an operand that cannot form a borrowed view. */
 export const invalidBorrowOperandCode = 'SEM0056' as const
 export const exclusiveBorrowRequiresMutableCode = 'SEM0057' as const
 export const invalidSliceReborrowCode = 'SEM0058' as const
@@ -203,8 +201,6 @@ export const invalidExecutablePropertyConjunctCode = 'SEM0141' as const
 export const executionLayoutMismatchCode = 'SEM0142' as const
 /** Stable code for `mut` where no mutable owned parameter storage exists. */
 export const invalidMutableParameterCode = 'SEM0143' as const
-/** Stable code for applying a callable whose borrowed result has no exact source identity. */
-export const unknownCallableBorrowSourceCode = 'SEM0144' as const
 /** Stable code for mutating an outer callable from a deferred effect recipe. */
 export const deferredCallableMutationCode = 'SEM0145' as const
 /** Stable code for a scalar enum with no declared members. */
@@ -259,8 +255,6 @@ export const genericParameterKindMismatchCode = 'SEM0088' as const
 export const contractRowInferenceCode = 'SEM0089' as const
 /** Stable code for storage, bodies, or defaults inside a source service contract. */
 export const invalidServiceDeclarationCode = 'SEM0090' as const
-export const invalidReturnedBorrowSignatureCode = 'SEM0091' as const
-export const invalidReturnedBorrowOriginCode = 'SEM0092' as const
 /** Stable code for one reachable intrinsic unavailable on the requested execution target. */
 export const intrinsicTargetUnavailableCode = 'SEM0093' as const
 /** Stable code for a float literal spelling no floating-point value can represent. */
@@ -432,6 +426,19 @@ export const unsupportedCLayoutFieldCode = 'SEM0206' as const
 export const invalidForeignCallbackCode = 'SEM0207' as const
 /** Stable code for reachable C data on an execution surface without native symbol linkage. */
 export const foreignStaticTargetUnavailableCode = 'SEM0208' as const
+/** An explicit lifetime does not name a binder in its lexical header scope. */
+export const unknownLifetimeCode = 'SEM0209' as const
+/** An omitted output region has no unique declaration-level input relationship. */
+export const ambiguousLifetimeElisionCode = 'SEM0210' as const
+/** A lifetime binder or outlives bound has an unsupported declaration shape. */
+export const invalidLifetimeBinderCode = 'SEM0211' as const
+export const unsatisfiedLifetimeBoundCode = 'SEM0212' as const
+export const unsatisfiedTypeOutlivesCode = 'SEM0213' as const
+/** Stable code for lifetime storage requiring an unavailable ownership capability. */
+export const unsupportedLifetimeFeatureCode = 'SEM0214' as const
+export const expiredLifetimeCode = 'OWN0019' as const
+/** An owner cannot be preserved by the suspension frame at this run boundary. */
+export const invalidSuspensionOwnershipCode = 'OWN0020' as const
 
 /** Stable code for a use of a binding after its consuming move. */
 export const useAfterMoveCode = 'OWN0001' as const
@@ -464,6 +471,14 @@ export const wordLiteralOutOfRangeCode = 'LAY0001' as const
 
 /** Every stable diagnostic code any phase can produce. */
 export type Code =
+  | typeof unknownLifetimeCode
+  | typeof ambiguousLifetimeElisionCode
+  | typeof invalidLifetimeBinderCode
+  | typeof unsatisfiedLifetimeBoundCode
+  | typeof unsatisfiedTypeOutlivesCode
+  | typeof unsupportedLifetimeFeatureCode
+  | typeof expiredLifetimeCode
+  | typeof invalidSuspensionOwnershipCode
   | typeof unsupportedBytesCode
   | typeof unknownLiteralModifierCode
   | typeof unterminatedStaticLiteralCode
@@ -536,8 +551,6 @@ export type Code =
   | typeof typeArgumentArityCode
   | typeof typeArgumentInferenceCode
   | typeof polymorphicRecursionCode
-  | typeof borrowedViewTypePositionCode
-  | typeof invalidBorrowPositionCode
   | typeof invalidBorrowOperandCode
   | typeof exclusiveBorrowRequiresMutableCode
   | typeof invalidSliceReborrowCode
@@ -573,7 +586,6 @@ export type Code =
   | typeof invalidExecutablePropertyConjunctCode
   | typeof executionLayoutMismatchCode
   | typeof invalidMutableParameterCode
-  | typeof unknownCallableBorrowSourceCode
   | typeof deferredCallableMutationCode
   | typeof emptyEnumCode
   | typeof unsupportedEnumRepresentationCode
@@ -601,8 +613,6 @@ export type Code =
   | typeof genericParameterKindMismatchCode
   | typeof contractRowInferenceCode
   | typeof invalidServiceDeclarationCode
-  | typeof invalidReturnedBorrowSignatureCode
-  | typeof invalidReturnedBorrowOriginCode
   | typeof intrinsicTargetUnavailableCode
   | typeof invalidFloatLiteralCode
   | typeof ambiguousBoundOperationCode
@@ -729,6 +739,8 @@ export type ParserContext = 'syntax' | 'statement' | 'expression' | 'parameter' 
 
 /** Structured per-code data explaining why the originating phase diagnosed. */
 export type Reason =
+  | { readonly _tag: 'ExpiredLifetime'; readonly lifetime: string }
+  | { readonly _tag: 'InvalidSuspensionOwnership'; readonly detail: string }
   | { readonly _tag: 'UnsupportedBytes' }
   | { readonly _tag: 'UnknownLiteralModifier'; readonly modifier: string }
   | {
@@ -829,6 +841,15 @@ export type Reason =
   | { readonly _tag: 'SelfImport'; readonly module: string }
   | { readonly _tag: 'ReservedModuleIdentity'; readonly module: string }
   | { readonly _tag: 'UnknownType'; readonly spelling: string }
+  | { readonly _tag: 'UnknownLifetime'; readonly spelling: string }
+  | { readonly _tag: 'AmbiguousLifetimeElision' }
+  | { readonly _tag: 'InvalidLifetimeBinder'; readonly detail: string }
+  | { readonly _tag: 'UnsatisfiedLifetimeBound'; readonly longer: string; readonly shorter: string }
+  | { readonly _tag: 'UnsatisfiedTypeOutlives'; readonly type: string; readonly lifetime: string }
+  | {
+      readonly _tag: 'UnsupportedLifetimeFeature'
+      readonly feature: 'ExclusiveStorage' | 'DependentDrop' | 'EffectOutcome'
+    }
   | {
       readonly _tag: 'IntegerOutOfRange'
       readonly spelling: string
@@ -890,13 +911,10 @@ export type Reason =
       readonly provider: string
     }
   | { readonly _tag: 'InvalidServiceDeclaration'; readonly detail: string }
-  | { readonly _tag: 'InvalidReturnedBorrowSignature' }
-  | { readonly _tag: 'InvalidReturnedBorrowOrigin' }
   | {
       readonly _tag: 'InvalidMutableParameter'
       readonly context: 'BorrowedView' | 'Contract'
     }
-  | { readonly _tag: 'UnknownCallableBorrowSource' }
   | { readonly _tag: 'DeferredCallableMutation'; readonly spelling: string }
   | {
       readonly _tag: 'IntrinsicTargetUnavailable'
@@ -988,7 +1006,7 @@ export type Reason =
   | {
       readonly _tag: 'InvalidOpaqueResultBinder'
       readonly binder: string
-      readonly actual: 'Value' | 'RequirementRow'
+      readonly actual: 'Lifetime' | 'Value' | 'RequirementRow'
     }
   | { readonly _tag: 'MissingOpaqueRealization'; readonly family: string }
   | {
@@ -1278,11 +1296,13 @@ export type Reason =
       readonly _tag: 'GenericParameterKindMismatch'
       readonly spelling: string
       readonly expected:
+        | 'Lifetime'
         | 'Value'
         | 'RequirementRow'
         | 'CallableRepresentation'
         | 'EffectRepresentation'
       readonly actual:
+        | 'Lifetime'
         | 'Value'
         | 'RequirementRow'
         | 'CallableRepresentation'
@@ -1317,11 +1337,6 @@ export type Reason =
           }
         | { readonly _tag: 'NonFiniteRequirementRow' }
     }
-  | {
-      readonly _tag: 'BorrowedViewTypePosition'
-      readonly position: 'parameter' | 'return' | 'field' | 'type argument'
-    }
-  | { readonly _tag: 'InvalidBorrowPosition' }
   | { readonly _tag: 'InvalidBorrowOperand' }
   | { readonly _tag: 'ExclusiveBorrowRequiresMutable'; readonly spelling: string }
   | {
@@ -1365,7 +1380,7 @@ export type Reason =
     }
   | { readonly _tag: 'ExclusiveMatchRequiresMutable'; readonly spelling: string }
   | { readonly _tag: 'GuardConsumesPattern'; readonly spelling: string }
-  | { readonly _tag: 'InvalidMatchScrutineePlace'; readonly access: 'Move' | 'Exclusive' }
+  | { readonly _tag: 'InvalidMatchScrutineePlace'; readonly access: 'Move' | 'Exclusive' | 'Place' }
   | {
       readonly _tag: 'ConflictingViewLoan'
       readonly existing: 'Shared' | 'Exclusive'
@@ -3770,7 +3785,7 @@ export const inlineOpaqueLayoutCycle = (
 /** Rejects an opaque result binder whose bound is not a callable or Effect representation. */
 export const invalidOpaqueResultBinder = (
   binder: string,
-  actual: 'Value' | 'RequirementRow',
+  actual: 'Lifetime' | 'Value' | 'RequirementRow',
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
@@ -4483,8 +4498,18 @@ export const duplicateTypeParameter = (
 
 export const genericParameterKindMismatch = (
   spelling: string,
-  expected: 'Value' | 'RequirementRow' | 'CallableRepresentation' | 'EffectRepresentation',
-  actual: 'Value' | 'RequirementRow' | 'CallableRepresentation' | 'EffectRepresentation',
+  expected:
+    | 'Lifetime'
+    | 'Value'
+    | 'RequirementRow'
+    | 'CallableRepresentation'
+    | 'EffectRepresentation',
+  actual:
+    | 'Lifetime'
+    | 'Value'
+    | 'RequirementRow'
+    | 'CallableRepresentation'
+    | 'EffectRepresentation',
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
@@ -4672,47 +4697,6 @@ export const polymorphicRecursion = (
     span,
   })
 
-export const borrowedViewTypePosition = (
-  position: 'parameter' | 'return' | 'field' | 'type argument',
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: borrowedViewTypePositionCode,
-    severity: 'error',
-    message:
-      position === 'parameter'
-        ? 'A borrowed view must be the complete type of an ordinary function parameter'
-        : `A borrowed view cannot appear in a ${position} type`,
-    reason: Object.freeze({ _tag: 'BorrowedViewTypePosition', position }),
-    span,
-  })
-
-export const invalidReturnedBorrowSignature = (span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: invalidReturnedBorrowSignatureCode,
-    severity: 'error',
-    message:
-      'A returned borrowed view must belong to an ordinary function with exactly one borrowed parameter, or with none when only program-lifetime literals are returned; an exclusive result requires an exclusive parameter',
-    reason: Object.freeze({ _tag: 'InvalidReturnedBorrowSignature' }),
-    span,
-  })
-
-export const invalidReturnedBorrowOrigin = (span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: invalidReturnedBorrowOriginCode,
-    severity: 'error',
-    message:
-      "The returned borrowed view does not originate from the function's single borrowed parameter or a program-lifetime literal",
-    reason: Object.freeze({ _tag: 'InvalidReturnedBorrowOrigin' }),
-    span,
-  })
-
 /** Diagnoses a reachable sealed operation before its unsupported execution surface is entered. */
 export const intrinsicTargetUnavailable = (
   operation: string,
@@ -4822,17 +4806,6 @@ export const invalidExecutablePropertyConjunct = (
     severity: 'error',
     message: `${conjunct} is not a sealed executable property`,
     reason: Object.freeze({ _tag: 'InvalidExecutablePropertyConjunct', conjunct }),
-    span,
-  })
-
-export const invalidBorrowPosition = (span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: invalidBorrowPositionCode,
-    severity: 'error',
-    message: 'A borrowed view is not valid in this expression position',
-    reason: Object.freeze({ _tag: 'InvalidBorrowPosition' }),
     span,
   })
 
@@ -5198,19 +5171,6 @@ export const invalidMutableParameter = (
     span,
   })
 
-/** Rejects a borrowed callable result when no unchanged exact function or section identifies it. */
-export const unknownCallableBorrowSource = (span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: unknownCallableBorrowSourceCode,
-    severity: 'error',
-    message:
-      'A callable returning a borrowed view requires one unchanged exact function or section identity',
-    reason: Object.freeze({ _tag: 'UnknownCallableBorrowSource' }),
-    span,
-  })
-
 /** Rejects mutation whose execution time cannot preserve the outer callable's exact recipe. */
 export const deferredCallableMutation = (
   spelling: string,
@@ -5378,7 +5338,7 @@ export const partialMove = (span: SourceSpan.SourceSpan): Diagnostic =>
     phase: 'ownership',
     code: partialMoveCode,
     severity: 'error',
-    message: 'Struct fields cannot be moved independently',
+    message: 'This place crosses a boundary that does not support partial moves',
     reason: Object.freeze({ _tag: 'PartialMove' }),
     span,
   })
@@ -5545,7 +5505,7 @@ export const guardConsumesPattern = (spelling: string, span: SourceSpan.SourceSp
   })
 
 export const invalidMatchScrutineePlace = (
-  access: 'Move' | 'Exclusive',
+  access: 'Move' | 'Exclusive' | 'Place',
   span: SourceSpan.SourceSpan,
 ): Diagnostic =>
   Object.freeze({
@@ -5681,4 +5641,136 @@ export const exportSuspends = (
             Object.freeze({ label: 'suspending call', span: callSpan }),
           ]),
         }),
+  })
+
+/** Reports an explicit region outside its declaration or callable binder scope. */
+export const unknownLifetime = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unknownLifetimeCode,
+    severity: 'error',
+    message: `Unknown lifetime ${spelling}`,
+    reason: Object.freeze({ _tag: 'UnknownLifetime', spelling }),
+    span,
+  })
+
+/** Requests a written relationship when an output has no unique borrowed input. */
+export const ambiguousLifetimeElision = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: ambiguousLifetimeElisionCode,
+    severity: 'error',
+    message: 'The omitted output lifetime has no unique input; name its lifetime explicitly',
+    reason: Object.freeze({ _tag: 'AmbiguousLifetimeElision' }),
+    span,
+  })
+
+/** Reports unsupported lifetime binder syntax without inventing a semantic relationship. */
+export const invalidLifetimeBinder = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidLifetimeBinderCode,
+    severity: 'error',
+    message: `Invalid lifetime binder: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidLifetimeBinder', detail }),
+    span,
+  })
+
+/** Rejects a selected lifetime relationship that the caller cannot prove. */
+export const unsatisfiedLifetimeBound = (
+  longer: string,
+  shorter: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unsatisfiedLifetimeBoundCode,
+    severity: 'error',
+    message: `Lifetime ${longer} does not outlive ${shorter}`,
+    reason: Object.freeze({ _tag: 'UnsatisfiedLifetimeBound', longer, shorter }),
+    span,
+  })
+
+/** Rejects a selected generic value whose retained data cannot satisfy its lifetime bound. */
+export const unsatisfiedTypeOutlives = (
+  type: string,
+  lifetime: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unsatisfiedTypeOutlivesCode,
+    severity: 'error',
+    message: `Type ${type} does not remain valid for ${lifetime}`,
+    reason: Object.freeze({ _tag: 'UnsatisfiedTypeOutlives', type, lifetime }),
+    span,
+  })
+
+const lifetimeFeatureMessage = (
+  feature: 'ExclusiveStorage' | 'DependentDrop' | 'EffectOutcome',
+): string => {
+  if (feature === 'ExclusiveStorage')
+    return 'Exclusive references cannot yet be stored inside aggregate values'
+  if (feature === 'DependentDrop')
+    return 'User-defined Drop cannot yet retain non-static borrowed storage'
+  return 'Effect success and failure values cannot yet retain non-static borrowed storage'
+}
+
+/** Rejects lifetime-bearing storage whose required ownership semantics are not yet available. */
+export const unsupportedLifetimeFeature = (
+  feature: 'ExclusiveStorage' | 'DependentDrop' | 'EffectOutcome',
+  span: SourceSpan.SourceSpan,
+): Diagnostic => {
+  return Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: unsupportedLifetimeFeatureCode,
+    severity: 'error',
+    message: lifetimeFeatureMessage(feature),
+    reason: Object.freeze({ _tag: 'UnsupportedLifetimeFeature', feature }),
+    span,
+  })
+}
+
+/** Locates a value use outside the finite validity of its borrowed storage. */
+export const expiredLifetime = (
+  lifetime: string,
+  span: SourceSpan.SourceSpan,
+  origin?: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: expiredLifetimeCode,
+    severity: 'error',
+    message: `Lifetime ${lifetime} does not remain valid at this use`,
+    reason: Object.freeze({ _tag: 'ExpiredLifetime', lifetime }),
+    span,
+    ...(origin === undefined
+      ? {}
+      : {
+          relatedSpans: Object.freeze([
+            Object.freeze({ label: 'borrowed storage originates here', span: origin }),
+          ]),
+        }),
+  })
+
+/** Publishes an ownership planner rejection at the source suspension boundary. */
+export const invalidSuspensionOwnership = (
+  detail: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'ownership',
+    code: invalidSuspensionOwnershipCode,
+    severity: 'error',
+    message: `Cannot preserve ownership across suspension: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidSuspensionOwnership', detail }),
+    span,
   })

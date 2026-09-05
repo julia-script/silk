@@ -2,19 +2,19 @@ interface Ready<T> {
   fn ready(value: T) -> i32
 }
 
-interface Renderer<T, F: fn(i32) -> i32> {
+interface Renderer<'env, T, F: fn<'env>(i32) -> i32> {
   fn render(value: &T) -> i32
 }
 
-struct Box<S, F: fn(i32) -> i32> {
+struct Box<'env, S, F: fn<'env>(i32) -> i32> {
   source: S
   operation: F
 }
 
-fn render<S: Ready<S>, F: fn(i32) -> i32>(value: &Box<S, F>) -> i32 {
+fn render<'env, S: Ready<S>, F: fn<'env>(i32) -> i32>(value: &Box<'env, S, F>) -> i32 {
   return 1
 }
 
-impl<S: Ready<S>, F: fn(i32) -> i32> Renderer<Box<S, F>, F> for Box<S, F> {
+impl<'env, S: Ready<S>, F: fn<'env>(i32) -> i32> Renderer<'env, Box<'env, S, F>, F> for Box<'env, S, F> {
   render: Box.render
 }

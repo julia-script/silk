@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import type * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
@@ -23,6 +24,188 @@ const returnedCall = (
   if (expression?._tag !== 'Call') throw new RangeError(`expected call in function ${ordinal}`)
   return expression
 }
+
+it.effect('proves specialized function-item bounds before retaining them as formation facts', () =>
+  Effect.gen(function* () {
+    const source = `fn extend<'a: 'static>(value: &'a i32) -> &'static i32 { return value }
+fn required<T: 'static>(value: T) -> T { return move value }
+fn invalidLifetime<'b>() -> fn<'static>(&'b i32) -> &'static i32 { return extend }
+fn invalidType<'b>() -> fn<'static>(&'b i32) -> &'b i32 { return required }
+fn validLifetime<'b: 'static>() -> fn<'static>(&'b i32) -> &'static i32 { return extend }
+fn validType<'b: 'static>() -> fn<'static>(&'b i32) -> &'b i32 { return required }
+fn uninstantiated() -> () { let generic = required drop generic return () }
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* Analysis.ofSource('lifetimes/ItemFormation', ascii(source))
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        source: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        {
+          code: 'SEM0212',
+          source:
+            "fn invalidLifetime<'b>() -> fn<'static>(&'b i32) -> &'static i32 { return extend }",
+        },
+        {
+          code: 'SEM0213',
+          source: 'required',
+        },
+      ],
+    )
+  }),
+)
+
+it.effect(
+  'rejects finite storage at static call preconditions even when the result is unused',
+  () =>
+    Effect.gen(function* () {
+      const source = `fn lifetimeRequired<'a: 'static>(value: &'a i32) -> () { return () }
+fn typeRequired<T: 'static>(value: T) -> () { drop value return () }
+struct View<'a> { value: &'a i32 }
+fn namedRequired<'a>(value: &'a i32) -> () { return () }
+fn invalidNamed<'a>() -> () {
+  let value = 42
+  namedRequired<'a>(&value)
+  return ()
+}
+fn validNamed<'a>(value: &'a i32) -> () { namedRequired<'a>(&value.*) return () }
+fn valid(value: &'static i32, text: string<'static>) -> () {
+  lifetimeRequired(value)
+  lifetimeRequired(&value.*)
+  let lifetimeItem = lifetimeRequired
+  lifetimeItem(value)
+  lifetimeItem(&value.*)
+  typeRequired(value)
+  typeRequired(text)
+  let typeItem = typeRequired
+  typeItem(&value.*)
+  typeItem("static text")
+  return ()
+}
+pub fn main() -> i32 {
+  let value = 42
+  lifetimeRequired(&value)
+  let lifetimeItem = lifetimeRequired
+  lifetimeItem(&value)
+  typeRequired(&value)
+  let typeItem = typeRequired
+  typeItem(&value)
+  typeItem(View { value: &value })
+  return 0
+}`
+      const snapshot = yield* Analysis.ofSource('lifetimes/StaticCallPreconditions', ascii(source))
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => ({
+          code: diagnostic.code,
+          source: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+        })),
+        Array.from({ length: 6 }, () => ({ code: 'SEM0212', source: '&value' })),
+      )
+    }),
+)
+
+it.effect('checks transitive generic storage admission without realizing the caller', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/GenericStorageAdmission',
+      ascii(`
+struct Guard<T> { value: T }
+impl<T> Drop for Guard<T> { fn drop(self: &mut Guard<T>) -> () { return () } }
+fn forward<T>(value: T) -> () { return hidden(move value) }
+fn hidden<T>(value: T) -> () { let owner = Guard<T> { value: move value } return () }
+pub fn main() -> i32 { let value = 42 forward(&value) return 0 }`),
+    )
+    const diagnostics = Analysis.diagnostics(snapshot)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0214'],
+    )
+    const reason = diagnostics.at(0)?.reason
+    assert.strictEqual(reason?._tag, 'UnsupportedLifetimeFeature')
+    if (reason?._tag === 'UnsupportedLifetimeFeature')
+      assert.strictEqual(reason.feature, 'DependentDrop')
+  }),
+)
+
+it.effect(
+  'checks storage admission through selected generic and concrete interface implementations',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct Guard<T> { value: T }
+impl<T> Drop for Guard<T> { fn drop(self: &mut Guard<T>) -> () { return () } }
+interface Consume { fn consume(value: Self) -> () }
+struct Wrapper<T> { value: T }
+impl<T> Consume for Wrapper<T> {
+ fn consume(value: Wrapper<T>) -> () { let guard = Guard<T> { value: move value.value } return () }
+}
+fn invoke<T: Consume>(value: T) -> () { return Consume.consume(move value) }
+fn identity<T>(value: T) -> T { return move value }
+fn hidden<T>(value: T) -> () { let guard = Guard<T> { value: move value } return () }
+fn stamped<T: Consume>(value: T, stamp: i32) -> () { return Consume.consume(move value) }
+pub fn main() -> i32 {
+ let value = 42
+ invoke(Wrapper { value: &value })
+ Consume.consume(Wrapper { value: &value })
+ let item = invoke
+ item(Wrapper { value: &value })
+ let section = stamped(0)
+ section(Wrapper { value: &value })
+ let forwarded = identity(invoke)
+ forwarded(Wrapper { value: &value })
+ let indirect = identity(hidden)
+ indirect(&value)
+ return 0
+}`
+      const snapshot = yield* Analysis.ofSource(
+        'lifetimes/InterfaceStorageAdmission',
+        ascii(source),
+      )
+      const calls = [
+        'invoke(Wrapper { value: &value })',
+        'Consume.consume(Wrapper { value: &value })',
+        'item(Wrapper { value: &value })',
+        'section(Wrapper { value: &value })',
+        'forwarded(Wrapper { value: &value })',
+        'indirect(&value)',
+      ]
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => ({
+          code: diagnostic.code,
+          sourceId: diagnostic.span.sourceId,
+          selected: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+        })),
+        calls.map((call) => ({
+          code: 'SEM0214',
+          sourceId: 'lifetimes/InterfaceStorageAdmission',
+          selected: call,
+        })),
+      )
+    }),
+)
+
+it('discards lifetime constraints from a rejected union alternative', () => {
+  const result = analyze(`pub struct Data { value: i32 }
+pub fn wrap<'a, 'b>(value: &'b Data) -> &'a bool | &'b i32 { return &value.value }`)
+  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(Hir.verify(result.hir), [])
+})
+
+it('instantiates callback invocation lifetimes after inferring a borrowed branch state', () => {
+  const result = analyze(`struct State { value: i32 }
+fn dispatch<'env, D, C: once fn<'env>(D, ()) -> ()>(state: D, complete: C) -> () {
+  return complete(move state, ())
+}
+fn completed(state: &mut State, result: ()) -> () {
+  drop result
+  state.value = 42
+  return ()
+}
+fn invoke(state: &mut State) -> () { return dispatch(move state, completed) }
+pub fn main() -> i32 { let mut state = State { value: 0 } invoke(&mut state) return state.value }`)
+  assert.deepEqual(result.diagnostics, [])
+  assert.deepEqual(Hir.verify(result.hir), [])
+})
 
 it('forms shared and exclusive whole-array borrows without encoding source length', () => {
   const result = analyze(`fn scan<T>(values: &[T]) -> i32 { return 1 }
@@ -49,7 +232,7 @@ pub fn main() -> i32 { return short() }`)
     sharedLong?._tag === 'Borrow' &&
     sharedLong.type._tag === 'Available'
   ) {
-    assert.strictEqual(Type.key(shared.type.type), Type.key(sharedLong.type.type))
+    assert.strictEqual(Type.runtimeKey(shared.type.type), Type.runtimeKey(sharedLong.type.type))
   }
   if (exclusive?._tag === 'Borrow' && exclusive.formation._tag === 'FixedArrayBorrow') {
     assert.strictEqual(exclusive.access, 'Exclusive')
@@ -96,7 +279,26 @@ pub fn main() -> i32 { return 0 }`)
   )
 })
 
-it('admits one-source ordinary returned views and rejects ambiguous or strengthened headers', () => {
+it('keeps uncaptured invocation lifetimes quantified in function items and sections', () => {
+  const result = analyze(`struct Cell { value: i32 }
+fn apply<'env>(use: for<'a> once fn<'env>(&'a Cell) -> i32, value: &Cell) -> i32 {
+  return use(value)
+}
+fn read(value: &Cell) -> i32 { return value.value }
+fn add(value: &Cell, amount: i32) -> i32 { return value.value + amount }
+pub fn main() -> i32 {
+  let value = Cell {value: 20}
+  let first = apply(read, &value)
+  return first + apply(add(2), &value)
+}`)
+  assert.deepEqual(result.diagnostics, [])
+  const main = result.functions.at(3)
+  const returned = main?.returnedExpression
+  assert.isDefined(returned)
+  assert.deepEqual(Hir.verify(result.hir), [])
+})
+
+it('elides returned view lifetimes and rejects ambiguous or strengthened headers', () => {
   const result = analyze(`fn identity(values: &[i32]) -> &[i32] { return values }
 fn share(values: &mut [i32]) -> &[i32] { return &values }
 fn ambiguous(left: &[i32], right: &[i32]) -> &[i32] { return left }
@@ -105,13 +307,18 @@ pub fn main() -> i32 { return 0 }`)
 
   assert.deepEqual(
     result.diagnostics.map((diagnostic) => diagnostic.code),
-    ['SEM0091', 'SEM0091', 'SEM0055'],
+    ['SEM0210', 'SEM0058'],
   )
-  assert.strictEqual(result.functions.at(0)?.returnedBorrow?.parameter.id.ordinal, 0)
-  assert.strictEqual(result.functions.at(1)?.returnedBorrow?.access, 'Shared')
+  for (const fn of result.functions.slice(0, 2)) {
+    const input = fn.declaration.parameters.at(0)?.declaredType
+    const output = fn.declaration.returnType
+    assert.isTrue(input?._tag === 'Resolved' && output._tag === 'Resolved')
+    if (input?._tag === 'Resolved' && output._tag === 'Resolved')
+      assert.deepEqual(Type.storageLifetimes(output.type), Type.storageLifetimes(input.type))
+  }
 })
 
-it('applies the one-source returned-view contract to ordinary references', () => {
+it('preserves elided source lifetimes through ordinary reference results', () => {
   const result = analyze(`struct Counter { value: i32 }
 fn shared(counter: &Counter) -> &Counter { return counter }
 fn exclusive(counter: &mut Counter) -> &mut Counter { return move counter }
@@ -119,23 +326,37 @@ fn projected(counter: &Counter) -> &i32 { return &counter.value }
 pub fn main() -> i32 { return 0 }`)
 
   assert.deepEqual(result.diagnostics, [])
-  assert.strictEqual(result.functions.at(0)?.returnedBorrow?.access, 'Shared')
-  assert.strictEqual(result.functions.at(1)?.returnedBorrow?.access, 'Exclusive')
-  assert.strictEqual(result.functions.at(2)?.returnedBorrow?.parameter.id.ordinal, 0)
+  for (const fn of result.functions.slice(0, 3)) {
+    const input = fn.declaration.parameters.at(0)?.declaredType
+    const output = fn.declaration.returnType
+    assert.isTrue(input?._tag === 'Resolved' && output._tag === 'Resolved')
+    if (input?._tag === 'Resolved' && output._tag === 'Resolved')
+      assert.deepEqual(Type.storageLifetimes(output.type), Type.storageLifetimes(input.type))
+  }
 })
 
 it('uses returned-view and ordinary argument diagnostics for reference failures', () => {
-  const invalidReturns = analyze(`struct Counter { value: i32 }
+  const returnSource = `struct Counter { value: i32 }
 fn ambiguous(left: &Counter, right: &Counter) -> &Counter { return left }
 fn strengthen(counter: &Counter) -> &mut Counter { return &mut counter }
 fn local(counter: &Counter) -> &Counter {
   let owned = Counter { value: 0 }
   return &owned
 }
-pub fn main() -> i32 { return 0 }`)
-  const returnCodes = invalidReturns.diagnostics.map((diagnostic) => diagnostic.code)
-  assert.isAtLeast(returnCodes.filter((code) => code === 'SEM0091').length, 2)
-  assert.include(returnCodes, 'SEM0092')
+pub fn main() -> i32 { return 0 }`
+  const invalidReturns = analyze(returnSource)
+  assert.deepEqual(
+    invalidReturns.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      span: returnSource.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+    })),
+    [
+      { code: 'SEM0210', span: '&Counter' },
+      { code: 'SEM0056', span: 'counter' },
+      { code: 'OWN0019', span: '&owned' },
+      { code: 'SEM0212', span: '&owned' },
+    ],
+  )
 
   const ownedArguments = analyze(`struct Counter { value: i32 }
 fn take(counter: Counter) -> i32 { return counter.value }
@@ -174,8 +395,6 @@ pub fn main() -> i32 { return 0 }`)
     })),
     [
       { code: 'SEM0035', context: undefined },
-      { code: 'SEM0143', context: 'BorrowedView' },
-      { code: 'SEM0143', context: 'BorrowedView' },
       { code: 'SEM0143', context: 'Contract' },
       { code: 'SEM0143', context: 'Contract' },
     ],
@@ -183,36 +402,40 @@ pub fn main() -> i32 { return 0 }`)
 })
 
 it('rejects a returned view whose body does not preserve the declared source', () => {
-  const result = analyze(`fn invalid(values: &[i32]) -> &[i32] {
+  const source = `fn invalid(values: &[i32]) -> &[i32] {
   let local = [1, 2]
   return &local
 }
-pub fn main() -> i32 { return 0 }`)
+pub fn main() -> i32 { return 0 }`
+  const result = analyze(source)
 
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    ['SEM0092'],
+    result.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+    })),
+    [
+      { code: 'OWN0019', span: '&local' },
+      { code: 'SEM0212', span: '&local' },
+    ],
   )
 })
 
-it('keeps returned views out of effects, services, captures, and owned storage', () => {
-  const result = analyze(`service Reader {
-  fn read(values: &[i32]) -> &[i32]
+it('retains shared dependencies in stored values and closure environments', () => {
+  const result = analyze(`struct Stored<'a> { view: &'a [i32] }
+fn store<'a>(values: &'a [i32]) -> Stored<'a> {
+  return Stored<'a> { view: values }
 }
-effect fn delayed(values: &[i32]) -> &[i32] { return values }
-fn captured(values: &[i32]) -> once fn() -> &[i32] {
-  return fn() -> &[i32] { return values }
+fn captured<'a>(values: &'a [i32]) -> once fn<'a>() -> &'a [i32] {
+  return fn() -> &'a [i32] { return values }
 }
-struct Stored { view: &[i32] }
 fn array(values: &[i32]) -> i32 {
   let stored = [values]
   return 0
 }
 pub fn main() -> i32 { return 0 }`)
 
-  const codes = result.diagnostics.map((diagnostic) => diagnostic.code)
-  assert.isAtLeast(codes.filter((code) => code === 'SEM0091').length, 2)
-  assert.include(codes, 'SEM0054')
+  assert.deepEqual(result.diagnostics, [])
 })
 
 it('admits lexical and temporary owners while rejecting decay, invalid exclusivity, and unstable subplaces', () => {
@@ -303,15 +526,11 @@ pub fn main() -> i32 { return 0 }`)
   assert.deepEqual(Hir.verify(result.hir), [])
 })
 
-it('rejects slices nested through explicit generic type arguments', () => {
+it('admits shared slices through explicit generic type arguments', () => {
   const result = analyze(`fn make<T>() -> i32 { return 0 }
 pub fn main() -> i32 { return make<&[i32]>() }`)
 
-  assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    ['SEM0054'],
-  )
-  assert.strictEqual(result.diagnostics.at(0)?.reason._tag, 'BorrowedViewTypePosition')
+  assert.deepEqual(result.diagnostics, [])
 })
 
 it('retains an unavailable borrow fact after damaged operand syntax', () => {
@@ -376,7 +595,10 @@ pub fn main() -> i32 { let left = short() let right = long() return left + right
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(scans.length, 1)
-    assert.deepEqual(scans.at(0)?.key.typeArguments, ['i32'])
+    assert.deepEqual(
+      scans.at(0)?.key.typeArguments.filter((argument) => !Lifetime.isLifetime(argument)),
+      ['i32'],
+    )
     assert.strictEqual(
       scans.at(0)?.key.contractRow.some((entry) => entry.includes(';3')),
       false,

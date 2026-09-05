@@ -272,14 +272,16 @@ pub fn main() -&gt; i32 {
   </div>
   <!-- prettier-ignore -->
   <silk-snippet diagnostics hover inlay-hints>
-effect fn load() -&gt; i32 ! string {
+effect fn load() -&gt; i32 ! string&lt;'static&gt; {
   fail &quot;not found&quot;
 }
 </silk-snippet>
 </figure>
 <p>
   A failure payload does not have to inherit from an exception hierarchy, implement an
-  <code>Error</code> marker, or belong to some privileged class of error objects.
+  <code>Error</code> marker, or belong to some privileged class of error objects. Here,
+  <code>string&lt;'static&gt;</code> records that the literal remains valid independently of the
+  function call.
 </p>
 <p>In Silk, error payloads are just values. Effects give those values a typed failure channel.</p>
 <p>Named error types are still useful when the distinction itself matters:</p>
@@ -600,8 +602,8 @@ move message   give it away</code></pre>
   mutation access. Deterministic cleanup follows ownership.
 </p>
 <p>
-  Silk is currently more restrictive than Rust in a few places. Stage-0 Silk, for example, forbids
-  partial moves out of aggregates that remain alive:
+  Moving a field leaves the other initialized fields available. Restore the missing field before
+  using the aggregate as a complete value:
 </p>
 <figure class="pane">
   <div class="panebar">
@@ -609,7 +611,7 @@ move message   give it away</code></pre>
     ><span class="live">live · hover for types</span>
   </div>
   <!-- prettier-ignore -->
-  <silk-snippet diagnostics hover inlay-hints expected-diagnostics="OWN0002">
+  <silk-snippet diagnostics hover inlay-hints>
 struct Token { kind: i32 }
 
 struct Envelope {
@@ -617,11 +619,25 @@ struct Envelope {
   code: i32
 }
 
-fn invalid(envelope: Envelope) -&gt; Token {
-  return move envelope.token
+fn inspect(envelope: &amp;Envelope) -&gt; i32 {
+  return envelope.token.kind
+}
+
+pub fn main() -&gt; i32 {
+  let mut envelope = Envelope { token: Token { kind: 40 }, code: 2 }
+  let token = move envelope.token
+  let code = envelope.code
+  envelope.token = move token
+  return inspect(&amp;envelope) + code
 }
 </silk-snippet>
 </figure>
+<p>
+  Until <code>envelope.token</code> is restored, borrowing the whole envelope would expose a missing
+  field and is rejected. Cleanup releases only the fields that remain initialized. Shared borrowed
+  fields also retain their data lifetimes: moving or copying a view never makes its backing data
+  live longer.
+</p>
 <h3>The allocator is a service</h3>
 <p>
   One thing Zig got exactly right is that allocation policy should not be an invisible library

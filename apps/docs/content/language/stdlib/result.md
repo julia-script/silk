@@ -132,7 +132,7 @@ Constructs a completed failure by moving `error` into the failure arm.
 ### Method `Result.map`
 
 ```silk
-pub fn map<A, F, B>(self: Result<A, F>, transform: once fn(A) -> B) -> silk/result.Result<B, F>
+pub fn map<A, F, B, 'life3>(self: Result<A, F>, transform: once fn<'life3>(A) -> B) -> silk/result.Result<B, F>
 ```
 
 Applies `transform` once to a success value and carries a failure through unchanged.
@@ -147,7 +147,7 @@ success type; use [`mapError`](#declaration-73696c6b2f726573756c743a3a526573756c
 ### Method `Result.mapError`
 
 ```silk
-pub fn mapError<A, F, G>(self: Result<A, F>, transform: once fn(F) -> G) -> silk/result.Result<A, G>
+pub fn mapError<A, F, G, 'life3>(self: Result<A, F>, transform: once fn<'life3>(F) -> G) -> silk/result.Result<A, G>
 ```
 
 Applies `transform` once to a failure value and carries a success through unchanged.
@@ -162,7 +162,7 @@ failure type.
 ### Method `Result.flatMap`
 
 ```silk
-pub fn flatMap<A, F, B>(self: Result<A, F>, transform: once fn(A) -> silk/result.Result<B, F>) -> silk/result.Result<B, F>
+pub fn flatMap<A, F, B, 'life3>(self: Result<A, F>, transform: once fn<'life3>(A) -> silk/result.Result<B, F>) -> silk/result.Result<B, F>
 ```
 
 Continues a success with a transform that answers with a Result of its own, so the outcome

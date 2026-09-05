@@ -99,6 +99,11 @@ export const discoverRoots = (
   const mutable = new Set([
     ...blocks.flatMap((block) =>
       block.operations.flatMap((operation) =>
+        operation._tag === 'SetInitialized' ? [operation.flag.ordinal] : [],
+      ),
+    ),
+    ...blocks.flatMap((block) =>
+      block.operations.flatMap((operation) =>
         operation._tag === 'WritePlace' &&
         fn.localTypes.at(operation.root.ordinal)?._tag !== 'Slice'
           ? [operation.root.ordinal]

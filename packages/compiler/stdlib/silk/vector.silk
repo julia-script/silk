@@ -530,7 +530,7 @@ fn emptySlice<T>(anchor: &[T]) -> &[T] {
 }
 
 fn emptyMutSlice<T>(anchor: &mut [T]) -> &mut [T] {
-  return anchor
+  return move anchor
 }
 
 impl<T> Drop for Vector<T> {

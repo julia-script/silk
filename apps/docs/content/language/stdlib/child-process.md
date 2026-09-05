@@ -312,7 +312,7 @@ produce [`OutOfMemoryError`](./allocator.md#declaration-73696c6b2f616c6c6f636174
 ### Operation `execute`
 
 ```silk
-effect fn execute(request: &silk/child_process.ProcessRequest) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator
+effect<'life0> fn execute<'life0>(request: &'life0 silk/child_process.ProcessRequest) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator
 ```
 
 Runs one request to termination and returns owned captures of both output streams.
@@ -457,7 +457,7 @@ Creates a process failure with a provider-defined numeric code for diagnostics.
 ### Associated function `ChildProcess.providerCode`
 
 ```silk
-pub fn providerCode(error: &silk/child_process.ProcessError) -> silk/option.Option<i32>
+pub fn providerCode<'life0>(error: &'life0 silk/child_process.ProcessError) -> silk/option.Option<i32>
 ```
 
 Returns the provider-defined numeric code, or `None` when the failure has no such code.
@@ -467,7 +467,7 @@ Returns the provider-defined numeric code, or `None` when the failure has no suc
 ### Associated function `ChildProcess.request`
 
 ```silk
-pub effect fn request(program: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn request<'life0>(program: &'life0 silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
 ```
 
 Creates a request for `program` with no arguments, an empty environment, and the caller's
@@ -478,7 +478,7 @@ own working directory.
 ### Associated function `ChildProcess.requestWithin`
 
 ```silk
-pub effect fn requestWithin(program: &silk/filesystem.Path, directory: &silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn requestWithin<'life0: 'env, 'life1: 'env, 'env>(program: &'life0 silk/filesystem.Path, directory: &'life1 silk/filesystem.Path) -> ProcessRequest ! OutOfMemoryError ? &mut Allocator
 ```
 
 Creates a request that runs `program` in `directory` instead of the caller's
@@ -489,7 +489,7 @@ working directory.
 ### Associated function `ChildProcess.addArgument`
 
 ```silk
-pub effect fn addArgument(self: &mut silk/child_process.ProcessRequest, value: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn addArgument<'life0: 'env, 'life1: 'env, 'env>(self: &'life0 mut silk/child_process.ProcessRequest, value: &'life1 [u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends one NUL-free byte argument after all arguments already in the request.
@@ -508,7 +508,7 @@ If allocation fails, do not reuse `self`; it can contain an incomplete argument 
 ### Associated function `ChildProcess.setVariable`
 
 ```silk
-pub effect fn setVariable(self: &mut silk/child_process.ProcessRequest, name: &[u8], value: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn setVariable<'life0: 'env, 'life1: 'env, 'life2: 'env, 'env>(self: &'life0 mut silk/child_process.ProcessRequest, name: &'life1 [u8], value: &'life2 [u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends one NUL-free environment entry as `name`, `=`, and `value` bytes.
@@ -529,7 +529,7 @@ If allocation fails, do not reuse `self`; it can contain an incomplete environme
 ### Associated function `ChildProcess.program`
 
 ```silk
-pub fn program(self: &silk/child_process.ProcessRequest) -> &[u8]
+pub fn program<'life0>(self: &'life0 silk/child_process.ProcessRequest) -> &'life0 [u8]
 ```
 
 Borrows the executable path bytes for the lifetime of the request borrow.
@@ -539,7 +539,7 @@ Borrows the executable path bytes for the lifetime of the request borrow.
 ### Associated function `ChildProcess.arguments`
 
 ```silk
-pub fn arguments(self: &silk/child_process.ProcessRequest) -> &[u8]
+pub fn arguments<'life0>(self: &'life0 silk/child_process.ProcessRequest) -> &'life0 [u8]
 ```
 
 Borrows all ordered arguments as one block of NUL-terminated entries.
@@ -549,7 +549,7 @@ Borrows all ordered arguments as one block of NUL-terminated entries.
 ### Associated function `ChildProcess.argumentCount`
 
 ```silk
-pub fn argumentCount(self: &silk/child_process.ProcessRequest) -> usize
+pub fn argumentCount<'life0>(self: &'life0 silk/child_process.ProcessRequest) -> usize
 ```
 
 Returns the number of calls to [`addArgument`](#declaration-73696c6b2f6368696c645f70726f636573733a3a4368696c6450726f636573732e616464417267756d656e74) that completed successfully.
@@ -559,7 +559,7 @@ Returns the number of calls to [`addArgument`](#declaration-73696c6b2f6368696c64
 ### Associated function `ChildProcess.environment`
 
 ```silk
-pub fn environment(self: &silk/child_process.ProcessRequest) -> &[u8]
+pub fn environment<'life0>(self: &'life0 silk/child_process.ProcessRequest) -> &'life0 [u8]
 ```
 
 Borrows the explicit environment as one block of NUL-terminated `name=value` entries.
@@ -569,7 +569,7 @@ Borrows the explicit environment as one block of NUL-terminated `name=value` ent
 ### Associated function `ChildProcess.environmentCount`
 
 ```silk
-pub fn environmentCount(self: &silk/child_process.ProcessRequest) -> usize
+pub fn environmentCount<'life0>(self: &'life0 silk/child_process.ProcessRequest) -> usize
 ```
 
 Returns the number of calls to [`setVariable`](#declaration-73696c6b2f6368696c645f70726f636573733a3a4368696c6450726f636573732e7365745661726961626c65) that completed successfully.
@@ -579,7 +579,7 @@ Returns the number of calls to [`setVariable`](#declaration-73696c6b2f6368696c64
 ### Associated function `ChildProcess.workingDirectory`
 
 ```silk
-pub fn workingDirectory(self: &silk/child_process.ProcessRequest) -> &[u8]
+pub fn workingDirectory<'life0>(self: &'life0 silk/child_process.ProcessRequest) -> &'life0 [u8]
 ```
 
 Borrows the selected working-directory bytes, or an empty view when the child inherits one.
@@ -589,7 +589,7 @@ Borrows the selected working-directory bytes, or an empty view when the child in
 ### Associated function `ChildProcess.hasWorkingDirectory`
 
 ```silk
-pub fn hasWorkingDirectory(self: &silk/child_process.ProcessRequest) -> bool
+pub fn hasWorkingDirectory<'life0>(self: &'life0 silk/child_process.ProcessRequest) -> bool
 ```
 
 Reports whether the request selects a working directory instead of inheriting one.
@@ -619,7 +619,7 @@ Creates a signaled outcome that owns `output` and `errors`.
 ### Associated function `ChildProcess.isSignaled`
 
 ```silk
-pub fn isSignaled(outcome: &silk/child_process.ProcessOutcome) -> bool
+pub fn isSignaled<'life0>(outcome: &'life0 silk/child_process.ProcessOutcome) -> bool
 ```
 
 Reports whether a signal terminated the child instead of an exit code.
@@ -629,7 +629,7 @@ Reports whether a signal terminated the child instead of an exit code.
 ### Associated function `ChildProcess.exitCode`
 
 ```silk
-pub fn exitCode(outcome: &silk/child_process.ProcessOutcome) -> silk/option.Option<i32>
+pub fn exitCode<'life0>(outcome: &'life0 silk/child_process.ProcessOutcome) -> silk/option.Option<i32>
 ```
 
 Returns the exit code, or `None` when a signal terminated the child.
@@ -639,7 +639,7 @@ Returns the exit code, or `None` when a signal terminated the child.
 ### Associated function `ChildProcess.terminatingSignal`
 
 ```silk
-pub fn terminatingSignal(outcome: &silk/child_process.ProcessOutcome) -> silk/option.Option<i32>
+pub fn terminatingSignal<'life0>(outcome: &'life0 silk/child_process.ProcessOutcome) -> silk/option.Option<i32>
 ```
 
 Returns the terminating signal number, or `None` when the child returned an exit code.
@@ -649,7 +649,7 @@ Returns the terminating signal number, or `None` when the child returned an exit
 ### Associated function `ChildProcess.outputBytes`
 
 ```silk
-pub fn outputBytes(outcome: &silk/child_process.ProcessOutcome) -> &[u8]
+pub fn outputBytes<'life0>(outcome: &'life0 silk/child_process.ProcessOutcome) -> &'life0 [u8]
 ```
 
 Borrows the complete captured standard output without consuming the outcome.
@@ -659,7 +659,7 @@ Borrows the complete captured standard output without consuming the outcome.
 ### Associated function `ChildProcess.errorBytes`
 
 ```silk
-pub fn errorBytes(outcome: &silk/child_process.ProcessOutcome) -> &[u8]
+pub fn errorBytes<'life0>(outcome: &'life0 silk/child_process.ProcessOutcome) -> &'life0 [u8]
 ```
 
 Borrows the complete captured standard error without consuming the outcome.
@@ -669,7 +669,7 @@ Borrows the complete captured standard error without consuming the outcome.
 ### Associated function `ChildProcess.submit`
 
 ```silk
-pub effect fn submit(request: &silk/child_process.ProcessRequest) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator
+pub effect<'life0> fn submit<'life0>(request: &'life0 silk/child_process.ProcessRequest) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut ChildProcess | &mut Allocator
 ```
 
 Runs the active [`ChildProcess`](#declaration-73696c6b2f6368696c645f70726f636573733a3a4368696c6450726f63657373) provider for one request.

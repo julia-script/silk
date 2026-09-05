@@ -294,6 +294,14 @@ export const lowerInstance = (
       ? Type.effectWithRows(
           instance.specialization.result,
           instance.specialization.failureRow ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
+          {
+            ...DeclarationFacts.executableLifetimes(fn.declaration),
+            lifetimeBinders: [],
+            environment: Type.substituteLifetime(
+              DeclarationFacts.executableLifetimes(fn.declaration).environment,
+              instance.substitution,
+            ),
+          },
           'Shared',
           instance.specialization.requirementRow ??
             RowAlgebra.concrete(Type.requirementRowPolicy(), []),
@@ -464,6 +472,7 @@ export const lowerEffectRunner = (
         _tag: 'ReferenceType' as const,
         access: requirement.access === 'Take' ? ('Exclusive' as const) : requirement.access,
         target: requirement.providerType,
+        lifetime: spec.type.type.environment,
       }),
     )
     return type === undefined ? [] : [type]
@@ -572,6 +581,7 @@ export const lowerCatchEffectRunner = (
       Type.reference(
         requirement.access === 'Take' ? ('Exclusive' as const) : requirement.access,
         requirement.providerType,
+        spec.type.type.environment,
       ),
     )
     return type === undefined ? [] : [type]
@@ -686,6 +696,7 @@ export const lowerBuiltinEffectRunner = (
       Type.reference(
         requirement.access === 'Take' ? ('Exclusive' as const) : requirement.access,
         requirement.providerType,
+        spec.type.type.environment,
       ),
     )
     return type === undefined ? [] : [type]
@@ -817,6 +828,7 @@ export const lowerWitnessEffectRunner = (
       Type.reference(
         requirement.access === 'Take' ? ('Exclusive' as const) : requirement.access,
         requirement.providerType,
+        spec.type.type.environment,
       ),
     )
     return type === undefined ? [] : [type]

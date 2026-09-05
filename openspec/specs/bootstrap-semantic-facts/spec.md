@@ -891,7 +891,7 @@ visible in another arm, guard preceding its declaration, or code after the match
 
 ### Requirement: Semantic facts expose generic binding and specialization
 
-Semantic analysis SHALL publish canonical facts for type-parameter declarations and references,
+Semantic analysis SHALL publish canonical facts for type- and lifetime-parameter declarations and references,
 applied nominal types, inferred and explicit call arguments, substitutions, and unavailable
 specializations. Every fact SHALL retain source provenance and causal diagnostic identity.
 
@@ -907,7 +907,7 @@ specializations. Every fact SHALL retain source provenance and causal diagnostic
 
 ### Requirement: Slice types and borrows retain canonical semantic facts
 
-Semantic analysis SHALL publish slice type facts containing canonical element type and shared or
+Semantic analysis SHALL publish slice type facts containing canonical lifetime, element type, and shared or
 exclusive access without a fixed length. Each explicit borrow or reborrow SHALL retain its access,
 stable source root, source type, resulting slice type, call destination, exact syntax provenance,
 and an explicit unavailable state when any prerequisite is missing. Every borrow SHALL retain its
@@ -917,7 +917,7 @@ receive a deterministic compiler-owned identity rather than requiring a source b
 #### Scenario: Resolve different arrays to one slice type
 
 - **WHEN** `&short` and `&long` borrow `Array<i32, 3>` and `Array<i32, 6>` for `&[i32]`
-- **THEN** both borrow facts retain their distinct source types and the same canonical resulting slice type
+- **THEN** both borrow facts retain their distinct source types and semantic lifetimes as appropriate while sharing the same lifetime-erased element/access runtime shape
 
 #### Scenario: Preserve an invalid exclusive borrow
 
@@ -1224,8 +1224,7 @@ transfer diagnostic.
 ### Requirement: Semantic facts derive detached and non-parking executable properties
 
 Analysis SHALL derive `Intrinsic.Detached` for an exact value or executable representation only
-when it owns every value required for later invocation and cleanup and retains no external lexical
-or provider loan. An empty Effect requirement row MUST NOT by itself establish Detached. Analysis
+when an ordinary data value's complete semantic type has no non-static borrowed-content requirement, or an executable's complete environment type has no such requirement and its exact representation or explicit detached representation bound establishes independence from external lexical or provider loans required for invocation and cleanup. Executable environment detachment SHALL NOT establish detached success or failure outcomes; completion and outcome admission SHALL check those boundaries independently. Static shared views SHALL remain eligible; lifetime-bearing nested fields, string views, and environment bounds SHALL be included. An empty Effect requirement row MUST NOT by itself establish Detached. Analysis
 SHALL derive `Intrinsic.NonParking` for an exact callable only when its specialized transitive call
 graph cannot reach `Intrinsic.park`; direct work and nested-only suspension SHALL remain permitted.
 Open generics SHALL preserve either fact only through an explicit sealed-property bound. Facts and
@@ -1279,6 +1278,11 @@ distinct from an unsatisfied Effect requirement-row diagnostic.
 
 - **WHEN** ordinary source declares types or functions named Execution, Wake, Detached, NonParking, Scheduler, Fiber, Deferred, Timer, or Coroutine
 - **THEN** semantic facts grant no intrinsic identity, property, or suspension mode by spelling
+
+#### Scenario: Reject a constrained empty variant
+
+- **WHEN** an empty union variant is already constrained to a short borrowed payload lifetime
+- **THEN** Detached remains unsatisfied despite the active payload being empty; a freshly constructed unconstrained empty value is a distinct case
 
 ### Requirement: Sealed Execution values seed canonical local affinity
 
@@ -1461,3 +1465,17 @@ Every semantic struct fact SHALL identify whether its physical layout is Silk-pr
 
 - **WHEN** analysis creates tuple or anonymous aggregate facts
 - **THEN** every generated fact explicitly carries Silk-private layout
+
+### Requirement: Lifetime and initialization facts are canonical and inspectable
+
+Semantic inspection SHALL publish authored and inferred declaration-relative binders, substitutions, outlives assumptions, well-formedness and variance summaries, environment bounds, and explicit unavailable outcomes with diagnostic identity. Ownership inspection SHALL separately expose source places, loan ancestry, retaining paths, move-path initialization and reachability, restoration, and conditional cleanup. Diagnostics SHALL connect the borrow source, retained value, conflicting invalidation, required later use or cleanup, and applicable partial-move boundary. Presentation SHALL use stable readable names without exposing local compiler IDs as public contracts.
+
+#### Scenario: Inspect a failed holder reset
+
+- **WHEN** a replacement source expires before the holder's required later use or cleanup
+- **THEN** facts retain the invariant destination lifetime, source borrow, attempted installation, and later requirement as diagnostic witnesses
+
+#### Scenario: Inspect a rejected partial owner use
+
+- **WHEN** a whole-value borrow follows a conditional field move
+- **THEN** facts identify the moved path and branch join, initialized siblings, and the complete-value operation that failed

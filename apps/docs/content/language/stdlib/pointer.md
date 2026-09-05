@@ -96,7 +96,7 @@ Reports whether a pointer is null.
 ### Associated function `Pointer.fromRef`
 
 ```silk
-pub fn fromRef<T>(value: &T) -> *const T
+pub fn fromRef<T, 'life1>(value: &'life1 T) -> *const T
 ```
 
 Forms a `*const T` from a shared reference.
@@ -111,7 +111,7 @@ referent and does not keep it alive.
 ### Associated function `Pointer.fromMutRef`
 
 ```silk
-pub fn fromMutRef<T>(value: &mut T) -> *mut T
+pub fn fromMutRef<T, 'life1>(value: &'life1 mut T) -> *mut T
 ```
 
 Forms a `*mut T` from an exclusive reference.
@@ -126,7 +126,7 @@ referent and does not keep it alive.
 ### Associated function `Pointer.fromSlice`
 
 ```silk
-pub fn fromSlice<T>(values: &[T]) -> *const T
+pub fn fromSlice<T, 'life1>(values: &'life1 [T]) -> *const T
 ```
 
 Forms a `*const T` addressing the first element of a shared slice.
@@ -141,7 +141,7 @@ or reads a buffer.
 ### Associated function `Pointer.fromMutSlice`
 
 ```silk
-pub fn fromMutSlice<T>(values: &mut [T]) -> *mut T
+pub fn fromMutSlice<T, 'life1>(values: &'life1 mut [T]) -> *mut T
 ```
 
 Forms a `*mut T` addressing the first element of an exclusive slice.

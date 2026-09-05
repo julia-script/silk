@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
@@ -37,10 +38,10 @@ pub fn main() -> i32 { return 0 }`)
     [
       { code: 'SEM0032', reason: 'IndexOnNonArray' },
       { code: 'SEM0026', reason: 'ProjectionOnNonStruct' },
+      { code: 'SEM0052', reason: 'TypeArgumentInference' },
+      { code: 'SEM0052', reason: 'TypeArgumentInference' },
       { code: 'SEM0012', reason: 'ArgumentTypeMismatch' },
-      { code: 'SEM0012', reason: 'ArgumentTypeMismatch' },
-      { code: 'SEM0012', reason: 'ArgumentTypeMismatch' },
-      { code: 'SEM0012', reason: 'ArgumentTypeMismatch' },
+      { code: 'SEM0052', reason: 'TypeArgumentInference' },
     ],
   )
 })
@@ -74,7 +75,10 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
       )
     }
     if (bytes?.type._tag === 'Available') {
-      assert.strictEqual(Type.key(bytes.type.type), Type.key(Type.slice('Shared', 'u8')))
+      assert.strictEqual(
+        Type.key(bytes.type.type),
+        Type.key(Type.slice('Shared', 'u8', Lifetime.staticLifetime)),
+      )
       assert.deepEqual(bytes.data?.bytes, [104, 195, 169])
     }
 
@@ -96,14 +100,17 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
         assert.isTrue(Type.isString(stringLiteral.type))
       }
       if (byteLiteral?._tag === 'StaticByteViewLiteral') {
-        assert.strictEqual(Type.key(byteLiteral.type), Type.key(Type.slice('Shared', 'u8')))
+        assert.strictEqual(
+          Type.key(byteLiteral.type),
+          Type.key(Type.slice('Shared', 'u8', Lifetime.staticLifetime)),
+        )
       }
       const encoded = Hir.encode(hir)
       assert.include(
         encoded,
         'static-string text:68c3a9 bytes=68c3a9 length=3 provenance=program : string',
       )
-      assert.include(encoded, 'static-bytes bytes:68c3a9 bytes=68c3a9 length=3 : &[u8]')
+      assert.include(encoded, "static-bytes bytes:68c3a9 bytes=68c3a9 length=3 : &'static [u8]")
       assert.deepEqual(Hir.verify(hir), [])
 
       const fn = hir.functions.at(0)
@@ -112,7 +119,7 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
           _tag: 'RuntimeStringView',
           source: byteLiteral,
           heldLoans: Object.freeze([]),
-          type: Type.string,
+          type: Type.string(Lifetime.staticLifetime),
           span: byteLiteral.span,
         })
         const runtimeModule: Hir.Module = Object.freeze({

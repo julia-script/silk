@@ -1,10 +1,14 @@
 import { assert, it } from '@effect/vitest'
+import * as Lifetime from '../src/Lifetime.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Type from '../src/Type.js'
 
 const owner = Object.freeze({ module: 'representation/type', name: 'Pair' })
 const value = Type.parameter(owner, 0, 'A')
-const callableBound = Type.callable([value], value)
+const callableBound = Type.callable([value], value, {
+  environment: Lifetime.staticLifetime,
+  lifetimeBinders: [],
+})
 const representation = Type.parameter(owner, 1, 'F', 'CallableRepresentation', callableBound)
 const open = Type.representationParameterArgument(representation)
 
@@ -16,8 +20,16 @@ const callableIdentity = (name: string) =>
   })
 
 it('separates exact identity, required bounds, and per-use admissibility', () => {
-  const shared = Type.callable(['i32'], 'i32')
-  const once = Type.callable(['i32'], 'i32', 'Take')
+  const shared = Type.callable(['i32'], 'i32', {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
+  const once = Type.callable(
+    ['i32'],
+    'i32',
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Take',
+  )
   const exact = Type.exactRepresentationArgument(callableIdentity('decode'), shared)
   const sharedUse = Type.represented(shared, shared, exact)
   const onceUse = Type.represented(shared, once, exact)
@@ -36,12 +48,36 @@ it('separates exact identity, required bounds, and per-use admissibility', () =>
 })
 
 it('intersects compatible public bounds at their most restrictive access', () => {
-  const shared = Type.callable(['i32'], 'i32')
-  const exclusive = Type.callable(['i32'], 'i32', 'Exclusive')
-  const take = Type.callable(['i32'], 'i32', 'Take')
-  const incompatible = Type.callable(['i32'], 'bool')
-  const sharedEffect = Type.effect('i32', [])
-  const takeEffect = Type.effect('i32', [], 'Take')
+  const shared = Type.callable(['i32'], 'i32', {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
+  const exclusive = Type.callable(
+    ['i32'],
+    'i32',
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Exclusive',
+  )
+  const take = Type.callable(
+    ['i32'],
+    'i32',
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Take',
+  )
+  const incompatible = Type.callable(['i32'], 'bool', {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
+  const sharedEffect = Type.effect('i32', [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
+  const takeEffect = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Take',
+  )
 
   assert.deepEqual(Type.intersectRepresentationBounds(take, exclusive), exclusive)
   assert.deepEqual(Type.intersectRepresentationBounds(take, shared), shared)
@@ -51,9 +87,22 @@ it('intersects compatible public bounds at their most restrictive access', () =>
 })
 
 it('admits every Effect representation contract only at equal or weaker-use bounds', () => {
-  const shared = Type.effect('i32', [])
-  const exclusive = Type.effect('i32', [], 'Exclusive')
-  const take = Type.effect('i32', [], 'Take')
+  const shared = Type.effect('i32', [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
+  const exclusive = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Exclusive',
+  )
+  const take = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Take',
+  )
   const contracts = [shared, exclusive, take] as const
 
   assert.deepEqual(
@@ -80,8 +129,18 @@ it('uses the access order for directional representation-shape comparison', () =
     for (const [suppliedOrdinal, supplied] of accesses.entries())
       assert.strictEqual(
         Type.haveSameRepresentationShape(
-          Type.effect('i32', [], required),
-          Type.effect('i32', [], supplied),
+          Type.effect(
+            'i32',
+            [],
+            { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+            required,
+          ),
+          Type.effect(
+            'i32',
+            [],
+            { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+            supplied,
+          ),
         ),
         expected.at(requiredOrdinal)?.at(suppliedOrdinal) ?? false,
       )
@@ -92,7 +151,7 @@ it('keeps one ordered kinded argument vector on nominal applications', () => {
   const requirements = Type.parameter(owner, 3, 'R', 'RequirementRow')
   const exact = Type.exactRepresentationArgument(
     callableIdentity('decode'),
-    Type.callable(['i32'], 'i32'),
+    Type.callable(['i32'], 'i32', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
   const arguments_: ReadonlyArray<Type.GenericArgument> = [
     'i32',
@@ -121,19 +180,19 @@ it('keeps one ordered kinded argument vector on nominal applications', () => {
 it('implements deterministic equality, ordering, hashing, encoding, and unavailable recovery', () => {
   const first = Type.exactRepresentationArgument(
     callableIdentity('first'),
-    Type.callable(['i32'], 'i32'),
+    Type.callable(['i32'], 'i32', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
   const repeated = Type.exactRepresentationArgument(
     callableIdentity('first'),
-    Type.callable(['i32'], 'i32'),
+    Type.callable(['i32'], 'i32', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
   const second = Type.exactRepresentationArgument(
     callableIdentity('second'),
-    Type.callable(['i32'], 'i32'),
+    Type.callable(['i32'], 'i32', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
   const differentContract = Type.exactRepresentationArgument(
     callableIdentity('first'),
-    Type.callable(['i32'], 'bool'),
+    Type.callable(['i32'], 'bool', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
   const unavailable = Type.unavailableGenericArgument('CallableRepresentation', 'damaged bound')
 
@@ -157,7 +216,10 @@ it('keys exact generic callable specializations by their complete normalized ins
     { _tag: 'Declaration', module: 'representation/type', name: 'identity' },
     [value],
   )
-  const generic = Type.exactRepresentationArgument(genericIdentity, Type.callable([value], value))
+  const generic = Type.exactRepresentationArgument(
+    genericIdentity,
+    Type.callable([value], value, { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
+  )
   const concrete = Type.substituteGenericArgument(generic, new Map([[Type.key(value), 'i32']]))
 
   assert.strictEqual(Type.isExactRepresentationArgument(concrete), true)
@@ -174,8 +236,16 @@ it('keys exact generic callable specializations by their complete normalized ins
 })
 
 it('preserves an exact intrinsic contract when substituting a narrower contextual use bound', () => {
-  const takeBound = Type.callable([value], value, 'Take')
-  const sharedContract = Type.callable(['i32'], 'i32')
+  const takeBound = Type.callable(
+    [value],
+    value,
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Take',
+  )
+  const sharedContract = Type.callable(['i32'], 'i32', {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const exact = Type.exactRepresentationArgument(callableIdentity('shared'), sharedContract)
   const represented = Type.represented(callableBound, takeBound, open)
   const substituted = Type.substitute(
@@ -195,20 +265,24 @@ it('preserves an exact intrinsic contract when substituting a narrower contextua
 it('finds representation divergence through Effect rows and structural unions', () => {
   const first = Type.exactRepresentationArgument(
     callableIdentity('first'),
-    Type.callable(['i32'], 'i32'),
+    Type.callable(['i32'], 'i32', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
   const second = Type.exactRepresentationArgument(
     callableIdentity('second'),
-    Type.callable(['i32'], 'i32'),
+    Type.callable(['i32'], 'i32', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
   const failure = (argument: Type.RepresentationArgument) =>
     Type.nominal('representation/type', 'Failure', [argument])
   const capability = (argument: Type.RepresentationArgument) =>
     Type.nominal('representation/type', 'Capability', [argument])
   const effect = (argument: Type.RepresentationArgument) =>
-    Type.effect('i32', [failure(argument)], 'Shared', [
-      { capability: capability(argument), role: 'DefaultRole', access: 'Shared' },
-    ])
+    Type.effect(
+      'i32',
+      [failure(argument)],
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Shared',
+      [{ capability: capability(argument), role: 'DefaultRole', access: 'Shared' }],
+    )
   const union = (argument: Type.RepresentationArgument) =>
     Type.union([
       Type.nominal('representation/type', 'First', [argument]),
@@ -238,7 +312,10 @@ it('keeps open parameters inside every generic argument non-concrete', () => {
     { _tag: 'Declaration', module: 'representation/type', name: 'open' },
     [value],
   )
-  const exact = Type.exactRepresentationArgument(openIdentity, Type.callable(['i32'], 'i32'))
+  const exact = Type.exactRepresentationArgument(
+    openIdentity,
+    Type.callable(['i32'], 'i32', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
+  )
   const nominal = Type.nominal('representation/type', 'OpenRows', [failure, exact])
 
   assert.strictEqual(Type.isRuntimeConcreteGenericArgument(exact), false)
@@ -258,11 +335,11 @@ it('keeps open parameters inside every generic argument non-concrete', () => {
 it('unifies repeated open representation references and rejects the first mismatch', () => {
   const first = Type.exactRepresentationArgument(
     callableIdentity('first'),
-    Type.callable(['i32'], 'i32'),
+    Type.callable(['i32'], 'i32', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
   const second = Type.exactRepresentationArgument(
     callableIdentity('second'),
-    Type.callable(['i32'], 'i32'),
+    Type.callable(['i32'], 'i32', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
   const pattern = Type.nominal('representation/type', 'RepeatedUse', [open, open])
   const same = Type.nominal('representation/type', 'RepeatedUse', [first, first])

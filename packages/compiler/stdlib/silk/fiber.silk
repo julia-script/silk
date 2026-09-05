@@ -177,37 +177,6 @@ impl<A, E> Fiber<A, E> {
     }
   }
 
-  /// Prepares and atomically publishes one child task, then returns its affine Fiber.
-  ///
-  /// # When to use
-  ///
-  /// Use this operation to run closed work or work that uses the child Scheduler and MonotonicClock
-  /// providers.
-  ///
-  /// # Details
-  ///
-  /// Preparation finishes its exclusive Scheduler dispatch before publication starts. Publication
-  /// returns the Fiber only after the provider accepts the complete child. The provider records that
-  /// acceptance and wakes the parent before it notifies the child's initial readiness. The child body
-  /// starts only when the Scheduler later drives it.
-  ///
-  /// # Gotchas
-  ///
-  /// Allocation refusal or task-identity exhaustion raises the exact preparation failure. Publication
-  /// refusal raises `OutOfMemoryError`, returns no Fiber, and does not activate the child.
-  pub effect fn forkChild(
-    child: once Effect<
-      A
-      ! E
-      ? &mut Scheduler | &mut MonotonicClock
-    >
-  ) -> Fiber<A, E>
-  ! OutOfMemoryError | TaskIdExhaustedError
-  ? &mut Scheduler {
-    let pending = run Scheduler.prepare<A, E>(move child)
-    return run publishPending<A, E>(move pending)
-  }
-
   /// Relinquishes the current Execution once and immediately reports that it is ready.
   ///
   /// # When to use
@@ -567,4 +536,37 @@ effect fn raiseFailure<A, E>(error: E) -> A ! E {
 
 effect fn raiseCancellation<A>() -> A ! Cancelled {
   fail Cancelled {}
+}
+
+impl<A: 'static, E: 'static> Fiber<A, E> {
+  /// Prepares and atomically publishes one child task, then returns its affine Fiber.
+  ///
+  /// # When to use
+  ///
+  /// Use this operation to run closed work or work that uses the child Scheduler and MonotonicClock
+  /// providers.
+  ///
+  /// # Details
+  ///
+  /// Preparation finishes its exclusive Scheduler dispatch before publication starts. Publication
+  /// returns the Fiber only after the provider accepts the complete child. The provider records that
+  /// acceptance and wakes the parent before it notifies the child's initial readiness. The child body
+  /// starts only when the Scheduler later drives it.
+  ///
+  /// # Gotchas
+  ///
+  /// Allocation refusal or task-identity exhaustion raises the exact preparation failure. Publication
+  /// refusal raises `OutOfMemoryError`, returns no Fiber, and does not activate the child.
+  pub effect fn forkChild(
+    child: once Effect<'static;
+      A
+      ! E
+      ? &mut Scheduler | &mut MonotonicClock
+    >
+  ) -> Fiber<A, E>
+  ! OutOfMemoryError | TaskIdExhaustedError
+  ? &mut Scheduler {
+    let pending = run Scheduler.prepare<A, E>(move child)
+    return run publishPending<A, E>(move pending)
+  }
 }

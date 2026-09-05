@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as Presentation from '../src/Presentation.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -17,7 +18,7 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
 const documentationText = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   block: ReturnType<typeof Analysis.documentationAt>,
 ) => {
   if (block === undefined) return undefined
@@ -458,7 +459,7 @@ pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
         occurrence === undefined
           ? undefined
           : Analysis.occurrencePresentation(snapshot, 'main', occurrence)?.text,
-        'pub effect fn map<A, B, E, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B) -> B ! E ? R',
+        "pub effect<'env> fn map<'env, A, B, E, ?R>(self: once Effect<'env; A ! E ? R>, onSuccess: once fn<'env>(A) -> B) -> B ! E ? R",
       )
       return undefined
     }),
@@ -516,7 +517,7 @@ pub fn main() -> i32 {
   drop scheduler
   return 42
 }`
-    return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    return Analysis.ofSource('main', encoder.encode(source)).pipe(
       Effect.map((snapshot) => {
         assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
@@ -555,7 +556,7 @@ pub fn main() -> i32 {
             'Scheduler.prepare<i32',
             'Scheduler.'.length,
             'silk/scheduler',
-            'effect fn prepare<A, E>',
+            "effect<'static> fn prepare<A: 'static, E: 'static>",
             '/// Prepares one lazy child task and returns its affine publication value.',
           ],
           [
@@ -576,7 +577,7 @@ pub fn main() -> i32 {
             'Fiber.forkChild',
             'Fiber.'.length,
             'silk/fiber',
-            'pub effect fn forkChild<A, E>',
+            "pub effect<'static> fn forkChild<A: 'static, E: 'static>",
             '/// Prepares and atomically publishes one child task, then returns its affine Fiber.',
           ],
           [
@@ -597,7 +598,7 @@ pub fn main() -> i32 {
             'LocalScheduler.execute',
             'LocalScheduler.'.length,
             'silk/local_scheduler',
-            'pub effect fn execute<A, E>',
+            "pub effect<'life2> fn execute<A: 'static, E: 'static, 'life2>",
             '/// Runs one lazy root program under this Scheduler and returns its typed outcome.',
           ],
           [
@@ -667,7 +668,7 @@ pub fn main() -> i32 {
           occurrence === undefined
             ? ''
             : (Analysis.occurrencePresentation(snapshot, 'main', occurrence)?.text ?? ''),
-          `fn ${name}<T>`,
+          `fn ${name}<T, 'life1>`,
         )
         assert.strictEqual(
           documentationText(
@@ -849,12 +850,19 @@ pub fn main() -> i32 { return 42 }`
   return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       for (const [spelling, ordinal, expected] of [
-        ['stat', 0, ['effect fn stat(', '! FileError ? &mut FileSystem']],
-        ['exists', 0, ['pub effect fn exists(', '-> bool ! FileError ? &mut FileSystem']],
+        ['stat', 0, ["effect<'life0> fn stat<'life0>(", '! FileError ? &mut FileSystem']],
+        [
+          'exists',
+          0,
+          ["pub effect<'life0> fn exists<'life0>(", '-> bool ! FileError ? &mut FileSystem'],
+        ],
         [
           'resolve',
           0,
-          ['pub effect fn resolve(', '! FileError | OutOfMemoryError ? &mut Allocator'],
+          [
+            "pub effect<'env> fn resolve<'life0: 'env, 'life1: 'env, 'env>(",
+            '! FileError | OutOfMemoryError ? &mut Allocator',
+          ],
         ],
       ] as const) {
         const occurrence = occurrenceAt(snapshot, source, spelling, ordinal)
@@ -942,7 +950,7 @@ pub fn main() -> i32 { let option = Option. return 0 }`
       )
       assert.strictEqual(
         completion?.candidates.find((candidate) => candidate.label === 'map')?.detail?.text,
-        'pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> main.Option<U>',
+        "pub fn map<T, U, 'life2>(self: Option<T>, transform: once fn<'life2>(T) -> U) -> main.Option<U>",
       )
       return undefined
     }),
@@ -1004,25 +1012,28 @@ it.effect('presents canonical string in hover, inlay hints, and semantic occurre
   const source = `fn identity(value: string) -> string {
   let result = value
   return result
-}`
+}
+fn explicit(value: string<'static>) -> string<'static> { return value }`
   return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
-      const occurrence = occurrenceAt(snapshot, source, 'string')
-      const hover = Analysis.hoverSubjectAt(snapshot, 'main', source.indexOf('string'))
       const hints = Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length)
 
-      assert.strictEqual(occurrence?.role, 'Type')
-      assert.deepEqual(occurrence?.resolution, {
-        _tag: 'Available',
-        identity: {
-          _tag: 'IntrinsicActorIdentity',
-          id: { _tag: 'IntrinsicActorId', name: 'string' },
-        },
-      })
-      assert.strictEqual(hover?.presentation.text, 'intrinsic type string')
+      for (const spelling of ['string', "string<'static>"]) {
+        const occurrence = occurrenceAt(snapshot, source, spelling)
+        const hover = Analysis.hoverSubjectAt(snapshot, 'main', source.indexOf(spelling))
+        assert.strictEqual(occurrence?.role, 'Type')
+        assert.deepEqual(occurrence?.resolution, {
+          _tag: 'Available',
+          identity: {
+            _tag: 'IntrinsicActorIdentity',
+            id: { _tag: 'IntrinsicActorId', name: 'string' },
+          },
+        })
+        assert.strictEqual(hover?.presentation.text, 'intrinsic type string')
+      }
       assert.deepEqual(
         hints.map((hint) => hint.presentation.text),
-        ['string'],
+        ["string<'life0>"],
       )
       assert.strictEqual(
         Analysis.expressionsOf(snapshot, 'main').some(
@@ -1683,8 +1694,9 @@ pub struct Other {}`
       assert.strictEqual(Presentation.scopedNominal(box, 'main', scope).text, 'Schema.Box<i32>')
 
       const effect = Type.effect(
-        Type.reference('Exclusive', box),
+        Type.reference('Exclusive', box, Lifetime.staticLifetime),
         [problem, failureRow],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
         'Shared',
         [
           Object.freeze({
@@ -1697,8 +1709,18 @@ pub struct Other {}`
       )
       assert.strictEqual(
         Presentation.type(effect, 'main', scope),
-        'Effect<&mut Schema.Box<i32> ! Problem | E ? &mut Allocator at Heap | R>',
+        "Effect<'static; &'static mut Schema.Box<i32> ! Problem | E ? &mut Allocator at Heap | R>",
       )
+      const retainedType = Type.parameter({ module: 'main', name: 'retain' }, 0, 'T')
+      const retainedEnvironment = Lifetime.bound({ module: 'main', name: 'retain' }, 1, 'env')
+      const retained = Type.effect('i32', [], {
+        environment: retainedEnvironment,
+        lifetimeBinders: [],
+        typeOutlives: [{ type: retainedType, lifetime: retainedEnvironment }],
+      })
+      const retainedPresentation = Presentation.expressionType(retained, 'main', scope)
+      assert.strictEqual(retainedPresentation.text, "Effect<'env; i32>")
+      assert.deepEqual(retainedPresentation.lifetimeRequirements, ["T: 'env"])
       assert.strictEqual(
         Presentation.genericArgument(Type.failureValue([problem]), 'main', scope),
         'Problem',

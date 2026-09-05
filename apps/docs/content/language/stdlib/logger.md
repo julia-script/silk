@@ -161,7 +161,7 @@ newline, timestamp, prefix, allocation, or output destination. The provider owns
 ### Operation `log`
 
 ```silk
-effect fn log(level: LogLevel, message: string) -> () ! LogError ? &mut Logger
+effect<'life0> fn log<'life0>(level: LogLevel, message: string<'life0>) -> () ! LogError ? &mut Logger
 ```
 
 Submits one complete UTF-8 message at one severity to the active provider.
@@ -237,7 +237,7 @@ message capacity. Other attempts retain the eight-event and 64-byte limits of
 ### Associated function `Logger.length`
 
 ```silk
-pub fn length(self: &silk/logger.InMemoryLogger) -> usize
+pub fn length<'life0>(self: &'life0 silk/logger.InMemoryLogger) -> usize
 ```
 
 Returns the number of events that the in-memory logger committed.
@@ -252,7 +252,7 @@ observed.
 ### Associated function `Logger.levelAt`
 
 ```silk
-pub fn levelAt(self: &silk/logger.InMemoryLogger, index: usize) -> LogLevel
+pub fn levelAt<'life0>(self: &'life0 silk/logger.InMemoryLogger, index: usize) -> LogLevel
 ```
 
 Returns the severity of one committed event.
@@ -267,7 +267,7 @@ value instead of trapping. An index of eight or more traps.
 ### Associated function `Logger.messageLengthAt`
 
 ```silk
-pub fn messageLengthAt(self: &silk/logger.InMemoryLogger, index: usize) -> usize
+pub fn messageLengthAt<'life0>(self: &'life0 silk/logger.InMemoryLogger, index: usize) -> usize
 ```
 
 Returns the UTF-8 byte length of one committed message.
@@ -282,7 +282,7 @@ trapping. An index of eight or more traps.
 ### Associated function `Logger.messageByteAt`
 
 ```silk
-pub fn messageByteAt(self: &silk/logger.InMemoryLogger, eventIndex: usize, byteIndex: usize) -> u8
+pub fn messageByteAt<'life0>(self: &'life0 silk/logger.InMemoryLogger, eventIndex: usize, byteIndex: usize) -> u8
 ```
 
 Returns one UTF-8 byte from a committed message.
@@ -298,7 +298,7 @@ of eight or more also traps.
 ### Associated function `Logger.attempts`
 
 ```silk
-pub fn attempts(self: &silk/logger.InMemoryLogger) -> usize
+pub fn attempts<'life0>(self: &'life0 silk/logger.InMemoryLogger) -> usize
 ```
 
 Returns the number of calls attempted, including calls that produced [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).

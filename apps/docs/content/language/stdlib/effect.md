@@ -153,7 +153,7 @@ builtin `Effect<A ! E ? R>` type, which needs no import.
 ### Associated function `Effect.log`
 
 ```silk
-pub effect fn log(message: string) -> () ! LogError ? &mut Logger
+pub effect<'life0> fn log<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Info` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -168,7 +168,7 @@ neither buffers nor recovers that failure. Use [`logAt`](#declaration-73696c6b2f
 ### Associated function `Effect.logAt`
 
 ```silk
-pub effect fn logAt(level: LogLevel, message: string) -> () ! LogError ? &mut Logger
+pub effect<'life0> fn logAt<'life0>(level: LogLevel, message: string<'life0>) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `level` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -183,7 +183,7 @@ destination; its [`LogError`](./logger.md#declaration-73696c6b2f6c6f676765723a3a
 ### Associated function `Effect.logTrace`
 
 ```silk
-pub effect fn logTrace(message: string) -> () ! LogError ? &mut Logger
+pub effect<'life0> fn logTrace<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Trace` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -193,7 +193,7 @@ Sends one complete message at `LogLevel.Trace` through the required mutable [`Lo
 ### Associated function `Effect.logDebug`
 
 ```silk
-pub effect fn logDebug(message: string) -> () ! LogError ? &mut Logger
+pub effect<'life0> fn logDebug<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Debug` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -203,7 +203,7 @@ Sends one complete message at `LogLevel.Debug` through the required mutable [`Lo
 ### Associated function `Effect.logInfo`
 
 ```silk
-pub effect fn logInfo(message: string) -> () ! LogError ? &mut Logger
+pub effect<'life0> fn logInfo<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Info` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -213,7 +213,7 @@ Sends one complete message at `LogLevel.Info` through the required mutable [`Log
 ### Associated function `Effect.logWarning`
 
 ```silk
-pub effect fn logWarning(message: string) -> () ! LogError ? &mut Logger
+pub effect<'life0> fn logWarning<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Warning` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -223,7 +223,7 @@ Sends one complete message at `LogLevel.Warning` through the required mutable [`
 ### Associated function `Effect.logError`
 
 ```silk
-pub effect fn logError(message: string) -> () ! LogError ? &mut Logger
+pub effect<'life0> fn logError<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Error` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -233,7 +233,7 @@ Sends one complete message at `LogLevel.Error` through the required mutable [`Lo
 ### Associated function `Effect.result`
 
 ```silk
-pub effect fn result<A, E, ?R>(protected: once Effect<A ! E ? R>) -> silk/result.Result<A, E> ? R
+pub effect<'env> fn result<'env, A, E, ?R>(protected: once Effect<'env; A ! E ? R>) -> silk/result.Result<A, E> ? R
 ```
 
 Executes `protected` once and converts its success or typed failure into ordinary [`Result`](./result.md#declaration-73696c6b2f726573756c743a3a526573756c74) data.
@@ -276,7 +276,7 @@ pub fn main() -> i32 {
 ### Associated function `Effect.mapBoth`
 
 ```silk
-pub effect fn mapBoth<A, B, E, F, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B, onFailure: once fn(E) -> F) -> B ! F ? R
+pub effect<'env> fn mapBoth<'env, A, B, E, F, ?R>(self: once Effect<'env; A ! E ? R>, onSuccess: once fn<'env>(A) -> B, onFailure: once fn<'env>(E) -> F) -> B ! F ? R
 ```
 
 Transforms both possible typed outcomes with pure callbacks.
@@ -291,7 +291,7 @@ Exactly one callback runs after `self`: `onSuccess` changes `A` to `B`, while `o
 ### Associated function `Effect.map`
 
 ```silk
-pub effect fn map<A, B, E, ?R>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> B) -> B ! E ? R
+pub effect<'env> fn map<'env, A, B, E, ?R>(self: once Effect<'env; A ! E ? R>, onSuccess: once fn<'env>(A) -> B) -> B ! E ? R
 ```
 
 Applies a pure callback to success while preserving typed failure and requirements.
@@ -306,7 +306,7 @@ callback. Use [`flatMap`](#declaration-73696c6b2f6566666563743a3a4566666563742e6
 ### Associated function `Effect.mapError`
 
 ```silk
-pub effect fn mapError<A, E, F, ?R>(self: once Effect<A ! E ? R>, onFailure: once fn(E) -> F) -> A ! F ? R
+pub effect<'env> fn mapError<'env, A, E, F, ?R>(self: once Effect<'env; A ! E ? R>, onFailure: once fn<'env>(E) -> F) -> A ! F ? R
 ```
 
 Applies a pure callback to typed failure while preserving success and requirements.
@@ -321,7 +321,7 @@ Success bypasses the callback. This changes an error value; use [`catchAll`](#de
 ### Associated function `Effect.flatMap`
 
 ```silk
-pub effect fn flatMap<A, B, E, F, ?R, ?S>(self: once Effect<A ! E ? R>, onSuccess: once fn(A) -> Effect<B ! F ? S>) -> B ! E | F ? R | S
+pub effect<'env> fn flatMap<'env, A, B, E, F, ?R, ?S>(self: once Effect<'env; A ! E ? R>, onSuccess: once fn<'env>(A) -> Effect<'env; B ! F ? S>) -> B ! E | F ? R | S
 ```
 
 Runs `self`, then continues its success with an effectful callback.
@@ -337,7 +337,7 @@ use direct `run` statements when named intermediate values are clearer.
 ### Associated function `Effect.flatten`
 
 ```silk
-pub effect fn flatten<A, E, F, ?R, ?S>(self: once Effect<Effect<A ! F ? S> ! E ? R>) -> A ! E | F ? R | S
+pub effect<'env> fn flatten<'env, A, E, F, ?R, ?S>(self: once Effect<'env; Effect<'static; A ! F ? S> ! E ? R>) -> A ! E | F ? R | S
 ```
 
 Runs an outer Effect and then the inner Effect it produces.
@@ -352,7 +352,7 @@ requirement rows are joined. `Effect.flatten(nested)` is the nested-Effect form 
 ### Associated function `Effect.zip`
 
 ```silk
-pub effect fn zip<A, B, E, F, ?R, ?S>(self: once Effect<A ! E ? R>, other: once Effect<B ! F ? S>) -> silk/effect.Pair<A, B> ! E | F ? R | S
+pub effect<'env> fn zip<'env, A, B, E, F, ?R, ?S>(self: once Effect<'env; A ! E ? R>, other: once Effect<'env; B ! F ? S>) -> silk/effect.Pair<A, B> ! E | F ? R | S
 ```
 
 Runs two Effects in declaration order and collects both success values.
@@ -368,7 +368,7 @@ the second step. Both failure and requirement rows are joined. Use the public `P
 ### Associated function `Effect.zip3`
 
 ```silk
-pub effect fn zip3<A, B, C, E, F, G, ?R, ?S, ?T>(self: once Effect<A ! E ? R>, second: once Effect<B ! F ? S>, third: once Effect<C ! G ? T>) -> silk/effect.Triple<A, B, C> ! E | F | G ? R | S | T
+pub effect<'env> fn zip3<'env, A, B, C, E, F, G, ?R, ?S, ?T>(self: once Effect<'env; A ! E ? R>, second: once Effect<'env; B ! F ? S>, third: once Effect<'env; C ! G ? T>) -> silk/effect.Triple<A, B, C> ! E | F | G ? R | S | T
 ```
 
 Runs three Effects in declaration order and collects all three success values.
@@ -384,7 +384,7 @@ successful values are needed together; it does not run them concurrently.
 ### Associated function `Effect.tap`
 
 ```silk
-pub effect fn tap<A, E, F, ?R, ?S>(self: once Effect<A ! E ? R>, callback: once fn(A) -> Effect<A ! F ? S>) -> A ! E | F ? R | S
+pub effect<'env> fn tap<'env, A, E, F, ?R, ?S>(self: once Effect<'env; A ! E ? R>, callback: once fn<'env>(A) -> Effect<'env; A ! F ? S>) -> A ! E | F ? R | S
 ```
 
 Continues success with a callback that returns the value to expose as the overall success.
@@ -401,7 +401,7 @@ callback is skipped when `self` fails.
 ### Associated function `Effect.catchAll`
 
 ```silk
-pub effect fn catchAll<A, B, E, F, ?R, ?S>(self: once Effect<A ! E ? R>, onFailure: once fn(E) -> Effect<B ! F ? S>) -> A | B ! F ? R | S
+pub effect<'env> fn catchAll<'env, A, B, E, F, ?R, ?S>(self: once Effect<'env; A ! E ? R>, onFailure: once fn<'env>(E) -> Effect<'env; B ! F ? S>) -> A | B ! F ? R | S
 ```
 
 Recovers every typed failure in the protected row with another Effect.
@@ -418,7 +418,7 @@ handle one selected member while leaving the other failures in the row.
 ### Associated function `Effect.catch`
 
 ```silk
-pub effect fn catch<S, A, B, E, F, ?R, ?Q>(self: once Effect<A ! E ? R>, onFailure: once fn(S) -> Effect<B ! F ? Q>) -> A | B ! Without<E, S> | F ? R | Q where S in E
+pub effect<'env> fn catch<'env, S, A, B, E, F, ?R, ?Q>(self: once Effect<'env; A ! E ? R>, onFailure: once fn<'env>(S) -> Effect<'env; B ! F ? Q>) -> A | B ! Without<E, S> | F ? R | Q where S in E
 ```
 
 Recovers one selected typed failure.
@@ -439,7 +439,7 @@ the entire failure value regardless of its union member.
 ### Associated function `Effect.ensuring`
 
 ```silk
-pub effect fn ensuring<A, E, ?R, ?S>(self: once Effect<A ! E ? R>, finalizer: once Effect<() ? S>) -> A ! E ? R | S
+pub effect<'env> fn ensuring<'env, A, E, ?R, ?S>(self: once Effect<'env; A ! E ? R>, finalizer: once Effect<'env; () ? S>) -> A ! E ? R | S
 ```
 
 Runs a finalizer after the Effect completes, whatever its outcome, and preserves that outcome.
@@ -465,7 +465,7 @@ every Drop hook.
 ### Associated function `Effect.ifThenElse`
 
 ```silk
-pub effect fn ifThenElse<A, E, F, ?R, ?S>(condition: bool, onTrue: once fn() -> Effect<A ! E ? R>, onFalse: once fn() -> Effect<A ! F ? S>) -> A ! E | F ? R | S
+pub effect<'env> fn ifThenElse<'env, A, E, F, ?R, ?S>(condition: bool, onTrue: once fn<'env>() -> Effect<'env; A ! E ? R>, onFalse: once fn<'env>() -> Effect<'env; A ! F ? S>) -> A ! E | F ? R | S
 ```
 
 Runs exactly one of two suspended branches, selected by a condition.
@@ -495,7 +495,7 @@ raw-identifier form, so the declaration itself could not be spelled `if`.
 ### Associated function `Effect.retry`
 
 ```silk
-pub effect fn retry<A, E, ?R>(self: mut Effect<A ! E ? R>, retries: usize) -> A ! E ? R
+pub effect<'env> fn retry<'env, A, E, ?R>(self: mut Effect<'env; A ! E ? R>, retries: usize) -> A ! E ? R
 ```
 
 Runs a reusable Effect once, then repeats it after typed failure up to `retries` more times.
@@ -511,7 +511,7 @@ Success stops the loop immediately. If every attempt fails, the final typed fail
 ### Associated function `Effect.bindRequirement`
 
 ```silk
-pub effect fn bindRequirement<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: &P) -> A ! E ? Without<R, S> where &P provides S from R
+pub effect<'env1> fn bindRequirement<'env: 'env1, ?S, A, P: 'env1, E, ?R, 'env1>(self: once Effect<'env; A ! E ? R>, provider: &'env P) -> A ! E ? Without<R, S> where &P provides S from R
 ```
 
 Satisfies one exact shared service requirement with a provider borrowed for this execution.
@@ -528,7 +528,7 @@ lexical: the provider remains owned by the caller after the Effect completes.
 ### Associated function `Effect.bindRequirementMut`
 
 ```silk
-pub effect fn bindRequirementMut<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A ! E ? Without<R, S> where &mut P provides S from R
+pub effect<'env1> fn bindRequirementMut<'env: 'env1, ?S, A, P: 'env1, E, ?R, 'env1>(self: once Effect<'env; A ! E ? R>, provider: &'env mut P) -> A ! E ? Without<R, S> where &mut P provides S from R
 ```
 
 Satisfies one service requirement with a provider borrowed exclusively for this execution.
@@ -544,7 +544,7 @@ a synthesized `&mut Logger`. The caller regains exclusive access after the Effec
 ### Associated function `Effect.bindRequirementOwned`
 
 ```silk
-pub effect fn bindRequirementOwned<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: P) -> A ! E ? Without<R, S> where P provides S from R
+pub effect<'env1> fn bindRequirementOwned<'env: 'env1, ?S, A, P: 'env1, E, ?R, 'env1>(self: once Effect<'env; A ! E ? R>, provider: P) -> A ! E ? Without<R, S> where P provides S from R
 ```
 
 Satisfies one typed service requirement by taking ownership of its provider.
@@ -560,7 +560,7 @@ repeatable. The provider is released with the Effect's lexical scope; it is not 
 ### Associated function `Effect.provide`
 
 ```silk
-pub effect fn provide<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: &P) -> A ! E ? Without<R, S> where &P provides S from R
+pub effect<'env1> fn provide<'env: 'env1, ?S, A, P: 'env1, E, ?R, 'env1>(self: once Effect<'env; A ! E ? R>, provider: &'env P) -> A ! E ? Without<R, S> where &P provides S from R
 ```
 
 Provides a shared service for one lexical Effect execution.
@@ -575,7 +575,7 @@ shared row member is removed, and every unrelated requirement remains visible in
 ### Associated function `Effect.provideMut`
 
 ```silk
-pub effect fn provideMut<?S, A, P, E, ?R>(self: once Effect<A ! E ? R>, provider: &mut P) -> A ! E ? Without<R, S> where &mut P provides S from R
+pub effect<'env1> fn provideMut<'env: 'env1, ?S, A, P: 'env1, E, ?R, 'env1>(self: once Effect<'env; A ! E ? R>, provider: &'env mut P) -> A ! E ? Without<R, S> where &mut P provides S from R
 ```
 
 Provides a service from an exclusive borrow for one lexical Effect execution.
@@ -627,7 +627,7 @@ pub fn main() -> i32 {
 ### Associated function `Effect.provideEffect`
 
 ```silk
-pub effect fn provideEffect<?S, A, P, E, F, ?R, ?Q>(self: once Effect<A ! E ? R>, acquire: Effect<P ! F ? Q>) -> A ! E | F ? Without<R, S> | Q where &mut P provides S from R
+pub effect<'env> fn provideEffect<'env, ?S, A, P, E, F, ?R, ?Q>(self: once Effect<'env; A ! E ? R>, acquire: Effect<'env; P ! F ? Q>) -> A ! E | F ? Without<R, S> | Q where &mut P provides S from R
 ```
 
 Acquires and lexically provides one typed service requirement.
@@ -645,7 +645,7 @@ therefore acquires a fresh provider for each attempt. The result keeps acquisiti
 ### Associated function `Effect.suspend`
 
 ```silk
-pub effect fn suspend<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> A ! E ? R
+pub effect<'env> fn suspend<'env, A, E, ?R>(deferred: once Effect<'env; A ! E ? R>) -> A ! E ? R
 ```
 
 Defers one Effect through stack-safe execution while preserving its channels exactly.
@@ -662,7 +662,7 @@ ordinary laziness alone does not require suspension.
 ### Associated function `Effect.of`
 
 ```silk
-pub effect fn of<A>(value: A) -> A
+pub effect<'env> fn of<A: 'env, 'env>(value: A) -> A
 ```
 
 Constructs an Effect that succeeds with the captured value when run.
@@ -679,7 +679,7 @@ it, so that Effect can be consumed only once.
 ### Associated function `Effect.sleep`
 
 ```silk
-pub effect fn sleep(howLong: u64) -> () ? &mut MonotonicClock
+pub effect<'static> fn sleep(howLong: u64) -> () ? &mut MonotonicClock
 ```
 
 Waits for `howLong` nanoseconds on the active [`MonotonicClock`](./monotonic-clock.md#declaration-73696c6b2f6d6f6e6f746f6e69635f636c6f636b3a3a4d6f6e6f746f6e6963436c6f636b) provider's logical timeline.

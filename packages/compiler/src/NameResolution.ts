@@ -9,6 +9,7 @@ import * as ImportPath from './ImportPath.js'
 import * as Intrinsic from './Intrinsic.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ResolutionSeams from './ResolutionSeams.js'
+import * as ResolutionWork from './ResolutionWork.js'
 import * as SourceFile from './SourceFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
@@ -359,10 +360,16 @@ export const lookup = (
   scope: ModuleScope,
   index: DeclarationIndex.Index,
   spelling: string,
+  initiator: ResolutionWork.Initiator = { kind: 'ValueName', key: `${scope.module}/${spelling}` },
 ): Lookup => {
+  const work = ResolutionWork.begin(ResolutionWork.ofIndex(index), initiator, 'NameLookup')
   const conflict = scope.conflicts.find((value) => value.spelling === spelling)
   if (conflict !== undefined) return Object.freeze({ _tag: 'Conflict', spelling, conflict })
-  const binding = scope.bindings.find((value) => value.spelling === spelling)
+  const binding = scope.bindings.find((value) => {
+    ResolutionWork.visit(work)
+    return value.spelling === spelling
+  })
+  if (binding !== undefined) ResolutionWork.accept(work)
   if (binding === undefined) return Object.freeze({ _tag: 'Missing', spelling })
   if (binding._tag === 'IntrinsicActor')
     return Object.freeze({ _tag: 'Intrinsic', spelling, actor: binding.spelling })
@@ -459,13 +466,25 @@ export const lookupAssociated = (
   owner: DeclarationFacts.MemberFact,
   member: string,
   requestingModule: string,
+  initiator?: ResolutionWork.Initiator,
 ): AssociatedLookup => {
   const declaration = erasedOwner(index, owner)
   if (!isNominalOwner(declaration) || declaration.canonical._tag !== 'Canonical')
     return Object.freeze({ _tag: 'Missing' })
-  const candidates = associatedMembersOf(index, declaration.canonical.id).filter(
-    (candidate) => candidate.associatedMember?.name === member,
+  const work = ResolutionWork.begin(
+    ResolutionWork.ofIndex(index),
+    initiator ?? {
+      kind: 'AssociatedMember',
+      key: `${requestingModule}/${declaration.canonical.id.module}.${declaration.canonical.id.name}.${member}`,
+    },
+    'AssociatedLookup',
   )
+  const candidates = associatedMembersOf(index, declaration.canonical.id).filter((candidate) => {
+    ResolutionWork.visit(work)
+    const matches = candidate.associatedMember?.name === member
+    if (matches) ResolutionWork.accept(work)
+    return matches
+  })
   const canonical = candidates.filter((candidate) => candidate.canonical._tag === 'Canonical')
   const selected = canonical.at(0)
   if (selected === undefined) {
@@ -498,8 +517,9 @@ export const lookupQualified = (
   namespace: string,
   member: string,
   token: Token.Token,
+  initiator?: ResolutionWork.Initiator,
 ): Lookup => {
-  const qualifier = lookup(scope, index, namespace)
+  const qualifier = lookup(scope, index, namespace, initiator)
   if (
     qualifier._tag === 'Intrinsic' ||
     qualifier._tag === 'Conflict' ||
@@ -507,7 +527,13 @@ export const lookupQualified = (
   )
     return qualifier
   if (qualifier._tag === 'Resolved') {
-    const associated = lookupAssociated(index, qualifier.declaration, member, scope.module)
+    const associated = lookupAssociated(
+      index,
+      qualifier.declaration,
+      member,
+      scope.module,
+      initiator,
+    )
     if (associated._tag === 'Inherent')
       return Object.freeze({
         _tag: 'Resolved',
@@ -687,13 +713,14 @@ export const lookupPath = (
   scope: ModuleScope,
   index: DeclarationIndex.Index,
   path: DeclarationFacts.TypePathFact,
+  initiator?: ResolutionWork.Initiator,
 ): Lookup => {
   const first = path.segments.at(0)
   const second = path.segments.at(1)
   if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: path.spelling })
   return second === undefined
-    ? lookup(scope, index, first.spelling)
-    : lookupQualified(scope, index, first.spelling, second.spelling, second.token)
+    ? lookup(scope, index, first.spelling, initiator)
+    : lookupQualified(scope, index, first.spelling, second.spelling, second.token, initiator)
 }
 
 export const resolveType = (
@@ -703,6 +730,12 @@ export const resolveType = (
   path: DeclarationFacts.TypePathFact,
   alias?: ResolutionSeams.AliasResolver,
 ): DeclarationFacts.TypeResolution => {
+  const initiator: ResolutionWork.Initiator = {
+    kind: 'TypePath',
+    key: `${module}/${path.spelling}`,
+    span: path.syntax.span,
+  }
+  ResolutionWork.begin(ResolutionWork.ofIndex(index), initiator, 'PathResolution')
   const scope = scopeOf(resolution, module)
   const first = path.segments.at(0)
   const second = path.segments.at(1)
@@ -712,7 +745,7 @@ export const resolveType = (
       diagnostics: Object.freeze([]),
     })
   }
-  const result = lookupPath(scope, index, path)
+  const result = lookupPath(scope, index, path, initiator)
   if (result._tag === 'Intrinsic') {
     if (
       result.actor === 'Intrinsic' &&
@@ -772,6 +805,12 @@ export const resolveItem = (
   module: string,
   path: DeclarationFacts.TypePathFact,
 ): DeclarationFacts.ItemResolution => {
+  const initiator: ResolutionWork.Initiator = {
+    kind: 'ItemPath',
+    key: `${module}/${path.spelling}`,
+    span: path.syntax.span,
+  }
+  ResolutionWork.begin(ResolutionWork.ofIndex(index), initiator, 'PathResolution')
   const scope = scopeOf(resolution, module)
   const first = path.segments.at(0)
   const second = path.segments.at(1)
@@ -785,7 +824,7 @@ export const resolveItem = (
     if (local._tag === 'Ambiguous')
       return Object.freeze({ _tag: 'Ambiguous', count: local.declarations.length })
   }
-  const result = lookupPath(scope, index, path)
+  const result = lookupPath(scope, index, path, initiator)
   if (result._tag === 'Resolved')
     return Object.freeze({ _tag: 'Resolved', declaration: result.declaration })
   if (result._tag === 'EnumMember') return Object.freeze({ _tag: 'Missing' })
@@ -943,5 +982,6 @@ export const analyze = (
   const preliminary = resolve(closure, collected)
   const resolvers = makeResolvers(preliminary, collected)
   const index = DeclarationCompletion.complete(collected, resolvers)
+  ResolutionWork.share(index, collected)
   return Object.freeze({ index, resolution: resolve(closure, index) })
 }

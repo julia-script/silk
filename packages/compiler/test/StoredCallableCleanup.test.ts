@@ -71,7 +71,7 @@ const fieldCleanup = (plan: CleanupPlan.CleanupPlan, ordinal: number): CleanupPl
 }
 
 const takeCapture = `struct Token { value: i32 }
-struct Holder<F: once fn(i32) -> i32> { step: F }
+struct Holder<F: once fn<'static>(i32) -> i32> { step: F }
 fn consume(value: i32, token: Token) -> i32 { return value }
 `
 
@@ -91,7 +91,7 @@ it.effect('records the stored callable obligation on its enclosing aggregate', (
     // The aggregate no longer plans "nothing to clean" for the callable it stores.
     assert.strictEqual(stored._tag, 'RepresentedCallableCleanup')
     if (stored._tag !== 'RepresentedCallableCleanup') return
-    assert.strictEqual(Type.encode(stored.contract), 'once fn(i32) -> i32')
+    assert.strictEqual(Type.encode(stored.contract), "once fn<'static>(i32) -> i32")
   }),
 )
 
@@ -100,8 +100,8 @@ it.effect('carries the obligation through a nested representation-bearing nomina
     const module = 'stored-callable-cleanup/nested'
     const snapshot = yield* realized(
       module,
-      `${takeCapture}struct Boxed<F: once fn(i32) -> i32> { inner: Holder<F> }
-fn nest<F: once fn(i32) -> i32>(inner: Holder<F>) -> Boxed<F> {
+      `${takeCapture}struct Boxed<F: once fn<'static>(i32) -> i32> { inner: Holder<F> }
+fn nest<F: once fn<'static>(i32) -> i32>(inner: Holder<F>) -> Boxed<F> {
   return Boxed<F> { inner: move inner }
 }
 pub fn main() -> i32 {
@@ -161,7 +161,7 @@ it.effect('owes nothing for a stored callable whose captures are all Copy', () =
     const snapshot = yield* realized(
       module,
       `import silk.i32 as i32
-struct Adder<F: fn(i32) -> i32> { step: F }
+struct Adder<F: fn<'static>(i32) -> i32> { step: F }
 pub fn main() -> i32 {
   let adder = Adder { step: i32.add(1) }
   return adder.step(2)
@@ -181,16 +181,16 @@ it.effect('classifies a captured Drop hook as effective without a reclaim ticket
     const module = 'stored-callable-cleanup/hook-only'
     const snapshot = yield* realized(
       module,
-      `struct Guard<F: once fn(i32) -> i32> {
+      `struct Guard<F: once fn<'static>(i32) -> i32> {
   tag: i32
   marker: F
 }
-impl<F: once fn(i32) -> i32> Drop for Guard<F> {
+impl<F: once fn<'static>(i32) -> i32> Drop for Guard<F> {
   fn drop(self: &mut Guard<F>) -> () { return () }
 }
 fn marker(value: i32) -> i32 { return value }
-struct Holder<F: once fn(i32) -> i32> { step: F }
-fn consume<F: once fn(i32) -> i32>(value: i32, guard: Guard<F>) -> i32 {
+struct Holder<F: once fn<'static>(i32) -> i32> { step: F }
+fn consume<F: once fn<'static>(i32) -> i32>(value: i32, guard: Guard<F>) -> i32 {
   return value + guard.tag
 }
 pub fn main() -> i32 {
@@ -220,7 +220,7 @@ it.effect('releases the stored obligation exactly once through a whole-value mov
     const module = 'stored-callable-cleanup/moved'
     const snapshot = yield* realized(
       module,
-      `${takeCapture}fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 { return 0 }
+      `${takeCapture}fn keep<F: once fn<'static>(i32) -> i32>(holder: Holder<F>) -> i32 { return 0 }
 pub fn main() -> i32 {
   let token = Token { value: 1 }
   let holder = Holder { step: consume(move token) }
@@ -316,7 +316,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   }),
 )
 
-const borrowCapture = `struct Holder<F: mut fn(i32) -> i32> { step: F }
+const borrowCapture = `struct Holder<'env, F: mut fn<'env>(i32) -> i32> { step: F }
 fn read(value: i32, values: &mut [i32]) -> i32 { return value }
 `
 
@@ -371,7 +371,7 @@ it.effect('releases a stored capture loan when the aggregate is dropped', () =>
 it.effect('retargets a stored capture loan through a nested whole-value move', () =>
   Effect.gen(function* () {
     const module = 'stored-callable-cleanup/nested-loan-transfer'
-    const source = `${borrowCapture}struct Boxed<F: mut fn(i32) -> i32> { inner: Holder<F> }
+    const source = `${borrowCapture}struct Boxed<'env, F: mut fn<'env>(i32) -> i32> { inner: Holder<'env, F> }
 pub fn main() -> i32 {
   let mut values = [1]
   let holder = Holder { step: read(&mut values) }

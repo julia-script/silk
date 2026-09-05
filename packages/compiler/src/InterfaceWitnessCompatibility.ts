@@ -1,4 +1,6 @@
 import * as Type from './Type.js'
+import * as Lifetime from './Lifetime.js'
+import * as TypeCompatibility from './TypeCompatibility.js'
 
 export type Access = 'Shared' | 'Exclusive' | 'Take'
 
@@ -21,6 +23,7 @@ export interface Contract {
 export interface Witness extends Contract {}
 
 export type Problem =
+  | { readonly _tag: 'LifetimeContract' }
   | { readonly _tag: 'StrongerSafety' }
   | {
       readonly _tag: 'StrongerFlow'
@@ -119,6 +122,49 @@ const operandProblem = (
   return undefined
 }
 
+/** Opens the promised lifetime binders rigidly and rejects stronger witness bounds. */
+export const lifetimeContract = (
+  contract: Type.ExecutableLifetimes,
+  witness: Type.ExecutableLifetimes,
+  context: TypeCompatibility.Context = TypeCompatibility.context(),
+): Compatibility => {
+  const expected = Type.callable([], Type.unit, {
+    ...contract,
+    environment: Lifetime.staticLifetime,
+  })
+  const actual = Type.callable([], Type.unit, { ...witness, environment: Lifetime.staticLifetime })
+  // A mapped declaration has not yet formed a function value. Its specialized free predicates
+  // must be established by the conformance before structural comparison may assume them.
+  const formation = Type.executableFormationRequirements(actual)
+  // The applied operation already promises its own free predicates, including ordinary
+  // generic bounds such as T: 'static. Only the witness may add an unpromised demand.
+  const promisedFormation = Type.executableFormationRequirements(expected)
+  const promisedContext: TypeCompatibility.Context = Object.freeze({
+    ...context,
+    assumptions: Lifetime.assumptions([
+      ...context.assumptions.bounds,
+      ...promisedFormation.lifetimeBounds,
+    ]),
+    typeBounds: [...context.typeBounds, ...promisedFormation.typeOutlives],
+  })
+  if (
+    !formation.lifetimeBounds.every((bound) =>
+      TypeCompatibility.isCompatible(
+        TypeCompatibility.check(
+          Type.string(bound.longer),
+          Type.string(bound.shorter),
+          promisedContext,
+        ),
+      ),
+    ) ||
+    !formation.typeOutlives.every((bound) => TypeCompatibility.typeOutlives(promisedContext, bound))
+  )
+    return incompatible(Object.freeze({ _tag: 'LifetimeContract' }))
+  return TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected, promisedContext))
+    ? Object.freeze({ _tag: 'Compatible' })
+    : incompatible(Object.freeze({ _tag: 'LifetimeContract' }))
+}
+
 /** Checks one substituted interface contract without narrowing or rewriting that caller contract. */
 export const check = (contract: Contract, witness: Witness): Compatibility => {
   if (!contract.unsafe && witness.unsafe)
@@ -189,6 +235,8 @@ export const describe = (self: Compatibility): string | undefined => {
   if (self._tag === 'Compatible') return undefined
   const problem = self.problem
   switch (problem._tag) {
+    case 'LifetimeContract':
+      return 'witness requires a lifetime relationship the interface does not promise'
     case 'StrongerSafety':
       return 'unsafe witness cannot satisfy a safe operation contract'
     case 'StrongerFlow':

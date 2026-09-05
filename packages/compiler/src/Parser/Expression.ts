@@ -164,7 +164,11 @@ export const reservedTemplateStart = (state: State): boolean => {
     index += 1
     token = state.lexical.tokens.at(index)
   }
-  return token?.kind === 'Greater' || (token !== undefined && typeStarts.includes(token.kind))
+  return (
+    token?.kind === 'Greater' ||
+    token?.kind === 'Lifetime' ||
+    (token !== undefined && typeStarts.includes(token.kind))
+  )
 }
 
 /** True only for `callee<T, ...>(` with balanced angles; comparisons never enter call parsing. */
@@ -202,6 +206,8 @@ export const hasCompleteAppliedPostfix = (
       }
     } else if (
       token.kind !== 'Identifier' &&
+      token.kind !== 'Lifetime' &&
+      token.kind !== 'ForKeyword' &&
       token.kind !== 'LeftBracket' &&
       token.kind !== 'Dot' &&
       token.kind !== 'Comma' &&
@@ -1563,7 +1569,11 @@ export function parseMatchExpression(
   const keyword = expect(initial, 'MatchKeyword', ['MoveKeyword', 'Ampersand', ...expressionStarts])
   let state = keyword.state
   let accessChildren: ReadonlyArray<SyntaxTree.Element> = Object.freeze([])
-  if (nextSignificantKind(state) === 'MoveKeyword') {
+  if (hasContextualSpelling(state, 'place') && peek(state, 1) === 'Identifier') {
+    const place = expect(state, 'Identifier', expressionStarts)
+    state = place.state
+    accessChildren = place.elements
+  } else if (nextSignificantKind(state) === 'MoveKeyword') {
     const move = expect(state, 'MoveKeyword', expressionStarts)
     state = move.state
     accessChildren = move.elements

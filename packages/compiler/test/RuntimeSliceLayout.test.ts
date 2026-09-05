@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Layout from '../src/Layout.js'
 import * as LayoutEncode from '../src/LayoutEncode.js'
 import * as LayoutVerify from '../src/LayoutVerify.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -41,8 +42,8 @@ it.effect('plans target-width address plus usize slice layouts and heterogeneous
     assert.strictEqual(nativePlan._tag, 'Available')
     if (wasmPlan._tag !== 'Available' || nativePlan._tag !== 'Available') return
 
-    const shared = Type.slice('Shared', 'i32')
-    const exclusive = Type.slice('Exclusive', 'i32')
+    const shared = Type.slice('Shared', 'i32', Lifetime.staticLifetime)
+    const exclusive = Type.slice('Exclusive', 'i32', Lifetime.staticLifetime)
     const wasmEntry = Layout.entry(wasmPlan.value, shared)
     const nativeEntry = Layout.entry(nativePlan.value, shared)
     assert.strictEqual(wasmEntry?.representation._tag, 'Slice')
@@ -105,8 +106,14 @@ it.effect('retains aggregate and zero-sized element stride independently of logi
 
     const token = Type.nominal('slices/Layout', 'Token')
     const empty = Type.nominal('slices/Layout', 'Empty')
-    const tokenSlice = Layout.entry(selected.value, Type.slice('Shared', token))
-    const emptySlice = Layout.entry(selected.value, Type.slice('Shared', empty))
+    const tokenSlice = Layout.entry(
+      selected.value,
+      Type.slice('Shared', token, Lifetime.staticLifetime),
+    )
+    const emptySlice = Layout.entry(
+      selected.value,
+      Type.slice('Shared', empty, Lifetime.staticLifetime),
+    )
     assert.strictEqual(
       tokenSlice?.representation._tag === 'Slice' ? tokenSlice.representation.stride : undefined,
       8,
@@ -125,7 +132,7 @@ it.effect('rejects a malformed address lane width', () =>
     const selected = Analysis.layoutOf(self)
     assert.strictEqual(selected._tag, 'Available')
     if (selected._tag !== 'Available') return
-    const type = Type.slice('Shared', 'i32')
+    const type = Type.slice('Shared', 'i32', Lifetime.staticLifetime)
     const shape = Layout.callingShape(selected.value, type)
     if (shape === undefined) throw new RangeError('missing shared slice shape')
     const malformedShape: Layout.CallingShape = Object.freeze({
@@ -143,7 +150,7 @@ it.effect('rejects a malformed address lane width', () =>
       ...selected.value,
       callingShapes: Object.freeze(
         selected.value.callingShapes.map((candidate) =>
-          Type.equals(candidate.type, type) ? malformedShape : candidate,
+          Type.runtimeKey(candidate.type) === Type.runtimeKey(type) ? malformedShape : candidate,
         ),
       ),
     })

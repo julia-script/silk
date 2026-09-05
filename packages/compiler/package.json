@@ -110,6 +110,10 @@
       "types": "./dist/Termination.d.ts",
       "import": "./dist/Termination.js"
     },
+    "./LifetimeElision": {
+      "types": "./dist/LifetimeElision.d.ts",
+      "import": "./dist/LifetimeElision.js"
+    },
     "./SourceAction": {
       "types": "./dist/SourceAction.d.ts",
       "import": "./dist/SourceAction.js"
@@ -452,6 +456,7 @@
     "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
     "lexer:bench": "pnpm build && node scripts/lexer-benchmark.mjs",
+    "lifetime:bench": "pnpm build && node scripts/lifetime-benchmark.mjs",
     "stdlib:check": "node scripts/generate-stdlib.mjs --check",
     "stdlib:generate": "node scripts/generate-stdlib.mjs",
     "toolchain:check": "node scripts/generate-toolchain-integrity.mjs --check",

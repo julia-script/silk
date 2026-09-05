@@ -44,7 +44,7 @@ Keyword recognition applies only to a complete identifier. `letter`, `matcher`, 
 identifiers, not a keyword followed by a suffix.
 
 Some grammar positions also give a contextual meaning to an ordinary identifier, such as `where`
-in generic constraints. A contextual word remains an identifier token and is not added to the
+in generic constraints and `place` immediately after `match`. A contextual word remains an identifier token and is not added to the
 closed lexical keyword vocabulary.
 
 **Boundary:** Keyword spelling is lowercase and case-sensitive. A reserved keyword cannot be used
@@ -273,3 +273,21 @@ use their specific lexical diagnostic.
 **Evidence:** [lexer implementation](../../../../packages/compiler/src/Lexer.ts),
 [lossless token model](../../../../packages/compiler/src/Token.ts),
 [lexer tests](../../../../packages/compiler/test/Lexer.test.ts).
+
+## LEXICAL-009 — An apostrophe distinguishes lifetime names from character literals
+
+**Status:** Confirmed
+
+An apostrophe followed by an identifier without a closing character delimiter forms a lifetime
+name, such as `'data` or `'static`. A closed character spelling such as `'a'` remains a character
+literal. Lifetime names use the same ASCII identifier alphabet as ordinary names.
+
+**Boundary:** Lifetime tokens are valid only in lifetime-aware grammar positions. A malformed
+closed character literal retains its character diagnostic; it does not silently become a lifetime
+or consume subsequent declarations.
+
+**Diagnostics:** Character decoding uses the existing character-literal diagnostics. Unknown or
+invalid lifetime binders use the declaration diagnostics in [lifetimes](lifetimes.md).
+
+**Evidence:** [lexer tests](../../../../packages/compiler/test/Lexer.test.ts),
+[lifetime syntax requirements](../../../../openspec/specs/bootstrap-syntax/spec.md).

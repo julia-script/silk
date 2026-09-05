@@ -58,7 +58,7 @@ return weak or partial data after failure.
 ### Operation `fillBytes`
 
 ```silk
-effect fn fillBytes(output: &mut [u8]) -> () ? &mut Random
+effect<'life0> fn fillBytes<'life0>(output: &'life0 mut [u8]) -> () ? &mut Random
 ```
 
 Fills the complete exclusive byte slice with fresh unpredictable data.
@@ -68,7 +68,7 @@ Fills the complete exclusive byte slice with fresh unpredictable data.
 ### Associated function `Random.nextU64`
 
 ```silk
-pub effect fn nextU64() -> u64 ? &mut Random
+pub effect<'static> fn nextU64() -> u64 ? &mut Random
 ```
 
 Returns one secure `u64` decoded least-significant byte first from exactly eight provider bytes.
@@ -78,7 +78,7 @@ Returns one secure `u64` decoded least-significant byte first from exactly eight
 ### Associated function `Random.nextBool`
 
 ```silk
-pub effect fn nextBool() -> bool ? &mut Random
+pub effect<'static> fn nextBool() -> bool ? &mut Random
 ```
 
 Returns whether bit 63 of one secure provider word is set.
@@ -88,7 +88,7 @@ Returns whether bit 63 of one secure provider word is set.
 ### Associated function `Random.below`
 
 ```silk
-pub effect fn below(upperExclusive: u64) -> silk/option.Option<u64> ? &mut Random
+pub effect<'static> fn below(upperExclusive: u64) -> silk/option.Option<u64> ? &mut Random
 ```
 
 Returns an unbiased secure value below `upperExclusive`, or `None` for zero.

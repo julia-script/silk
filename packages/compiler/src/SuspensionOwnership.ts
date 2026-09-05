@@ -178,27 +178,43 @@ const operationDefinitions = (operation: Mir.Operation): ReadonlySet<number> => 
   return definitions
 }
 
-const operationInputs = (operation: Mir.Operation): ReadonlySet<number> => {
+const withBorrowedRoots = (
+  locals: Iterable<number>,
+  borrowedRoots: ReadonlyMap<number, number>,
+): Set<number> =>
+  new Set(
+    [...locals].flatMap((local) => {
+      const root = borrowedRoots.get(local)
+      return root === undefined ? [local] : [local, root]
+    }),
+  )
+
+const operationInputs = (
+  operation: Mir.Operation,
+  borrowedRoots: ReadonlyMap<number, number>,
+): ReadonlySet<number> => {
   const definitions = operationDefinitions(operation)
+  const inputs = Mir.operationTree(operation)
+    .flatMap((nested) =>
+      nested._tag === 'Drop' &&
+      !CleanupPlan.mayReadStorage(nested.cleanup, nested.initialization?.state)
+        ? (nested.initialization?.flags.map((flag) => flag.local) ?? [])
+        : MirVerification.operationLocals(nested),
+    )
+    .map((local) => local.ordinal)
   return new Set(
-    Mir.operationTree(operation)
-      .flatMap((nested) =>
-        nested._tag === 'Drop' && nested.cleanup._tag === 'NoCleanup'
-          ? []
-          : MirVerification.operationLocals(nested),
-      )
-      .map((local) => local.ordinal)
-      .filter((local) => !definitions.has(local)),
+    [...withBorrowedRoots(inputs, borrowedRoots)].filter((local) => !definitions.has(local)),
   )
 }
 
 const transferOperation = (
   operation: Mir.Operation,
   liveAfter: ReadonlySet<number>,
+  borrowedRoots: ReadonlyMap<number, number>,
 ): Set<number> => {
   const definitions = operationDefinitions(operation)
   return SetOf.union(
-    operationInputs(operation),
+    operationInputs(operation, borrowedRoots),
     new Set([...liveAfter].filter((local) => !definitions.has(local))),
   )
 }
@@ -222,16 +238,28 @@ const regionOperations = (region: Mir.Region): ReadonlyArray<Mir.Operation> => {
 const transferSequence = (
   operations: ReadonlyArray<Mir.Operation>,
   liveAfter: ReadonlySet<number>,
+  borrowedRoots: ReadonlyMap<number, number>,
 ): Set<number> => {
-  let live = new Set(liveAfter)
+  let live = withBorrowedRoots(liveAfter, borrowedRoots)
   for (let ordinal = operations.length - 1; ordinal >= 0; ordinal -= 1) {
     const operation = operations.at(ordinal)
-    if (operation !== undefined) live = transferOperation(operation, live)
+    if (operation !== undefined) live = transferOperation(operation, live, borrowedRoots)
   }
   return live
 }
 
 const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<number>> => {
+  const definitions = definitionMap(fn)
+  // A live reference keeps its referent storage live until its last use (including EndLoan).
+  // Cleanup is independent: an owner without cleanup still needs storage while a child borrows it.
+  const borrowedRoots = new Map(
+    fn.localTypes.flatMap((type, ordinal) => {
+      if (type._tag !== 'Reference' && type._tag !== 'Slice' && type._tag !== 'EnvironmentBorrow')
+        return []
+      const root = borrowOf(fn, definitions, { _tag: 'Local', ordinal }).root.ordinal
+      return root === ordinal ? [] : [[ordinal, root] as const]
+    }),
+  )
   const edges = Mir.controlEdges(fn)
   const liveIn = new Map<number, Set<number>>(
     fn.regions.map((region) => [region.id.ordinal, new Set()]),
@@ -246,6 +274,7 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
       const before = transferSequence(
         regionOperations(region),
         SetOf.union(new Set(successors), outcomeUses(region)),
+        borrowedRoots,
       )
       const current = liveIn.get(region.id.ordinal) ?? new Set()
       if (!SetOf.equal(before, current)) {
@@ -301,6 +330,7 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
         const live = transferSequence(
           regionOperations(region),
           SetOf.union(successors(region), outcomeUses(region)),
+          borrowedRoots,
         )
         if (!SetOf.equal(live, before.get(region.id.ordinal) ?? new Set())) {
           before.set(region.id.ordinal, live)
@@ -319,7 +349,7 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
     operations: ReadonlyArray<Mir.Operation>,
     following: ReadonlySet<number>,
   ): Set<number> => {
-    let live = new Set(following)
+    let live = withBorrowedRoots(following, borrowedRoots)
     for (let ordinal = operations.length - 1; ordinal >= 0; ordinal -= 1) {
       const operation = operations.at(ordinal)
       if (operation === undefined) continue
@@ -374,7 +404,7 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
           ),
         )
       }
-      live = transferOperation(operation, live)
+      live = transferOperation(operation, live, borrowedRoots)
     }
     return live
   }
@@ -410,7 +440,10 @@ const borrowOf = (
   } else {
     access = 'Shared'
   }
-  if (seen.has(local.ordinal))
+  if (
+    (type?._tag !== 'Reference' && type?._tag !== 'Slice' && type?._tag !== 'EnvironmentBorrow') ||
+    seen.has(local.ordinal)
+  )
     return Object.freeze({
       _tag: 'BorrowedDependency',
       access,
@@ -689,9 +722,31 @@ export const plan = (
           )
           continue
         }
-        plans.push(
-          planFor(program, index, fn, region, operation, live.get(operation) ?? new Set(), control),
+        const planned = planFor(
+          program,
+          index,
+          fn,
+          region,
+          operation,
+          live.get(operation) ?? new Set(),
+          control,
         )
+        const partial = MirVerification.initializationOf(fn, program.layout).partialBefore.get(
+          operation,
+        )
+        if (planned.slots.some((slot) => partial?.has(slot.local.ordinal))) {
+          violations.push(
+            Object.freeze({
+              _tag: 'SuspensionOwnershipViolation',
+              function: fn.instance,
+              span: operation.provenance.span,
+              detail:
+                'a partially initialized owner cannot cross suspension before its frame initialization state is preserved',
+            }),
+          )
+          continue
+        }
+        plans.push(planned)
       }
     }
   }

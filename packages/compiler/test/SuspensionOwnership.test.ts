@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Projections from './support/projections.js'
 
@@ -80,6 +81,26 @@ it.effect('classifies exact post-normalization MIR locals across relay', () =>
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const ownership = available(self)
+    const sharedStart = source.indexOf(' run shared(&owner)')
+    const caller = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'main')
+    const loan =
+      caller === undefined
+        ? undefined
+        : MirVerification.operations(caller).find(
+            (operation) =>
+              operation._tag === 'BeginLoan' &&
+              operation.access === 'Shared' &&
+              operation.sourceType._tag === 'Nominal' &&
+              operation.sourceType.type.name === 'Owner',
+          )
+    const callerPlan = ownership.plans.find((plan) => plan.span.start === sharedStart)
+    assert.isTrue(
+      loan?._tag === 'BeginLoan' &&
+        callerPlan?.slots.some(
+          (slot) => slot.local.ordinal === loan.root.ordinal && slot.type._tag === 'Nominal',
+        ),
+      'the last shared loan retains its actual owner storage independently of cleanup',
+    )
     const scalar = plansFor(ownership, 'scalar').find((plan) => plan.frame === 'StatefulRelay')
     const owned = plansFor(ownership, 'owned').find(
       (plan) =>
@@ -170,5 +191,38 @@ it.effect('publishes deterministic state ownership and restoration', () =>
         Instances.keyText(plan.function),
       )
     }
+  }),
+)
+
+it.effect('reports partial owner suspension during ordinary realized checking', () =>
+  Effect.gen(function* () {
+    const source = `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Pair { left: Token right: Token }
+effect fn delayed() -> i32 { return run Intrinsic.suspendEffect(effect { return 2 }) }
+effect fn partial() -> i32 {
+  let owner = Pair { left: Token { value: 1 }, right: Token { value: 2 } }
+  let extracted = move owner.left
+  drop extracted
+  let result = run delayed()
+  return owner.right.value + result
+}
+effect fn complete() -> i32 {
+  let owner = Pair { left: Token { value: 1 }, right: Token { value: 2 } }
+  let result = run delayed()
+  return owner.left.value + owner.right.value + result
+}
+pub fn main() -> i32 { let first = run partial() return first + run complete() }`
+    const self = yield* snapshot(source)
+    const start = source.indexOf(' run delayed()')
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => ({
+        code: diagnostic.code,
+        start: diagnostic.span.start,
+        end: diagnostic.span.end,
+      })),
+      [{ code: 'OWN0020', start, end: start + ' run delayed()'.length }],
+    )
+    assert.strictEqual(self.mir._tag, 'Unavailable')
   }),
 )

@@ -3,6 +3,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
 import * as LayoutEncode from './LayoutEncode.js'
 import * as Match from './Match.js'
+import * as MovePath from './MovePath.js'
 import type {
   CoroutineFramePathPlan,
   LocalId,
@@ -39,6 +40,7 @@ const selectorText = (selectors: ReadonlyArray<PlaceSelector>): string =>
   selectors
     .map((selector) => {
       if (selector._tag === 'FieldSelector') return `.#${selector.field.ordinal}`
+      if (selector._tag === 'VariantSelector') return `.variant#${selector.ordinal}`
       if (selector._tag === 'SliceElementSelector') {
         return `[${localText(selector.index)}/slice:${selector.access.toLowerCase()}]`
       }
@@ -50,6 +52,8 @@ const selectorText = (selectors: ReadonlyArray<PlaceSelector>): string =>
 
 const operationText = (operation: Operation): string => {
   switch (operation._tag) {
+    case 'SetInitialized':
+      return `${localText(operation.flag)} = initialized ${operation.initialized} ${provenanceText(operation.provenance)}`
     case 'ForeignStaticLoad':
       return `${localText(operation.destination)} = foreign-static ${operation.direction.toLowerCase()} ${operation.symbol} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ForeignFunctionAddress':
@@ -215,9 +219,9 @@ const operationText = (operation: Operation): string => {
     case 'WritePlace':
       return `write-place ${localText(operation.root)}${selectorText(operation.selectors)} <- ${localText(operation.source)} : ${typeText(operation.type)} replacement=${operation.replacement} commit=${operation.commit} ${provenanceText(operation.provenance)}`
     case 'Drop':
-      return `drop ${localText(operation.local)}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`}${operation.localShared === undefined ? '' : ` element=${SilkType.encode(operation.localShared.element)} layout=${operation.localShared.block.provenance} transition=decrement-or-cleanup-release`} ${provenanceText(operation.provenance)}`
+      return `drop ${localText(operation.local)}${selectorText(operation.selectors ?? [])}${operation.initialization === undefined ? '' : ` initialized=${MovePath.encodeState(operation.initialization.state)} flags=${operation.initialization.flags.map((flag) => `${MovePath.key(flag.path)}:${localText(flag.local)}`).join(',')}`}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`}${operation.localShared === undefined ? '' : ` element=${SilkType.encode(operation.localShared.element)} layout=${operation.localShared.block.provenance} transition=decrement-or-cleanup-release`} ${provenanceText(operation.provenance)}`
     case 'Match':
-      return `${operation.destination === undefined ? 'never' : localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)}${operation.retainsBindings ? ' retain-bindings' : ''} ${provenanceText(operation.provenance)}`
+      return `${operation.destination === undefined ? 'never' : localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}${selectorText(operation.selectors ?? [])} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)}${operation.retainsBindings ? ' retain-bindings' : ''} ${provenanceText(operation.provenance)}`
     case 'Conditional':
       return `${localText(operation.destination)} = conditional ${localText(operation.condition)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ShortCircuit':

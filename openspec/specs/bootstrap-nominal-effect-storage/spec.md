@@ -46,9 +46,7 @@ whole-value moves. Rows SHALL remain compile-time only.
 An unrun stored Effect, a successful or failed run, and a suspending run SHALL clean every live
 environment field exactly once. A concrete reusable Effect whose captures are all Copy snapshots or
 shared borrows MAY participate in an aggregate's sealed Copy proof and then has no cleanup. An owned
-affine or exclusive capture SHALL keep the aggregate affine. Direct affine extraction SHALL report
-the ordinary aggregate partial-move diagnostic, and scoped captures MUST NOT escape through the
-nominal.
+affine or exclusive capture SHALL keep the aggregate affine. Direct extraction of a complete initialized Effect field SHALL use ordinary partial-move boundaries and transfer its environment obligations. Retained captures MUST NOT outlive their source validity through the nominal.
 
 #### Scenario: Copy a reusable stored Effect
 

@@ -265,7 +265,7 @@ it.effect('reports complex constructors and reusable Effects without partial sta
   Effect.gen(function* () {
     const complex = yield* Analysis.ofSourceRealized(
       'test/mir-normalization-complex',
-      encoder.encode(`fn complex(value: i32) -> Effect<i32> {
+      encoder.encode(`fn complex(value: i32) -> Effect<'static; i32> {
   let adjusted = value + 1
   return effect { return adjusted }
 }

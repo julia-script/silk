@@ -108,7 +108,7 @@ An owned sequence of valid UTF-8 bytes that releases its storage on drop.
 ### Associated function `String.fromUtf8Unchecked`
 
 ```silk
-pub unsafe fn fromUtf8Unchecked(values: &[u8]) -> string
+pub unsafe fn fromUtf8Unchecked<'life0>(values: &'life0 [u8]) -> string<'life0>
 ```
 
 Borrows caller-validated UTF-8 bytes as text without runtime validation.
@@ -128,7 +128,7 @@ returned string view. Invalid bytes violate the safety contract.
 ### Associated function `String.fromUtf8`
 
 ```silk
-pub fn fromUtf8(values: &[u8]) -> silk/result.Result<string, silk/string.InvalidUtf8>
+pub fn fromUtf8<'life0>(values: &'life0 [u8]) -> silk/result.Result<string<'life0>, silk/string.InvalidUtf8>
 ```
 
 Validates a complete byte view and borrows it as text without allocating.
@@ -153,7 +153,7 @@ Constructs an empty owned String without allocating.
 ### Associated function `String.copy`
 
 ```silk
-pub effect fn copy(value: string) -> String ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn copy<'life0>(value: string<'life0>) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Copies valid borrowed text into independently owned storage.
@@ -163,7 +163,7 @@ Copies valid borrowed text into independently owned storage.
 ### Associated function `String.copyUtf8`
 
 ```silk
-pub effect fn copyUtf8(values: &[u8]) -> silk/result.Result<silk/string.String, silk/string.InvalidUtf8> ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn copyUtf8<'life0>(values: &'life0 [u8]) -> silk/result.Result<silk/string.String, silk/string.InvalidUtf8> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Validates complete UTF-8 bytes and copies them into independently owned storage.
@@ -183,7 +183,7 @@ Effect failure channel. No owned string is returned in either failure case.
 ### Method `String.append`
 
 ```silk
-pub effect fn append(self: &mut String, value: string) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn append<'life0: 'env, 'life1: 'env, 'env>(self: &'life0 mut String, value: string<'life1>) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends complete valid text atomically with respect to allocation failure.
@@ -201,7 +201,7 @@ If growth fails, `self` keeps its prior contents and byte length.
 ### Method `String.appendOwned`
 
 ```silk
-pub effect fn appendOwned(self: &mut String, value: String) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn appendOwned<'life0>(self: &'life0 mut String, value: String) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends another owned String atomically with respect to allocation failure.
@@ -219,7 +219,7 @@ This function consumes `value`. If growth fails, `self` keeps its prior contents
 ### Method `String.view`
 
 ```silk
-pub fn view(self: &String) -> string
+pub fn view<'life0>(self: &'life0 String) -> string<'life0>
 ```
 
 Borrows the complete owned contents as valid text without allocating or copying.
@@ -229,7 +229,7 @@ Borrows the complete owned contents as valid text without allocating or copying.
 ### Associated function `String.utf8Bytes`
 
 ```silk
-pub fn utf8Bytes(value: string) -> &[u8]
+pub fn utf8Bytes<'life0>(value: string<'life0>) -> &'life0 [u8]
 ```
 
 Borrows a string's immutable UTF-8 encoding.
@@ -239,7 +239,7 @@ Borrows a string's immutable UTF-8 encoding.
 ### Associated function `String.byteLength`
 
 ```silk
-pub fn byteLength(value: string) -> usize
+pub fn byteLength<'life0>(value: string<'life0>) -> usize
 ```
 
 Returns a string's UTF-8 byte length.
@@ -249,7 +249,7 @@ Returns a string's UTF-8 byte length.
 ### Method `String.ownedUtf8Bytes`
 
 ```silk
-pub fn ownedUtf8Bytes(self: &String) -> &[u8]
+pub fn ownedUtf8Bytes<'life0>(self: &'life0 String) -> &'life0 [u8]
 ```
 
 Borrows an owned String's immutable UTF-8 encoding.
@@ -259,7 +259,7 @@ Borrows an owned String's immutable UTF-8 encoding.
 ### Method `String.ownedByteLength`
 
 ```silk
-pub fn ownedByteLength(self: &String) -> usize
+pub fn ownedByteLength<'life0>(self: &'life0 String) -> usize
 ```
 
 Returns an owned String's initialized UTF-8 byte length.
@@ -279,7 +279,7 @@ Creates a cursor at UTF-8 byte offset zero, before the first Unicode scalar.
 ### Associated function `String.cursorByteOffset`
 
 ```silk
-pub fn cursorByteOffset(cursor: &silk/string.ScalarCursor) -> usize
+pub fn cursorByteOffset<'life0>(cursor: &'life0 silk/string.ScalarCursor) -> usize
 ```
 
 Returns a cursor's explicit UTF-8 byte offset.
@@ -289,7 +289,7 @@ Returns a cursor's explicit UTF-8 byte offset.
 ### Associated function `String.scalarValue`
 
 ```silk
-pub fn scalarValue(step: &silk/string.ScalarStep) -> char
+pub fn scalarValue<'life0>(step: &'life0 silk/string.ScalarStep) -> char
 ```
 
 Returns the decoded Unicode scalar value without consuming the step.
@@ -299,7 +299,7 @@ Returns the decoded Unicode scalar value without consuming the step.
 ### Associated function `String.scalarByteOffset`
 
 ```silk
-pub fn scalarByteOffset(step: &silk/string.ScalarStep) -> usize
+pub fn scalarByteOffset<'life0>(step: &'life0 silk/string.ScalarStep) -> usize
 ```
 
 Returns the UTF-8 byte offset at which one step begins.
@@ -319,7 +319,7 @@ Consumes one scalar step and returns the cursor immediately after that scalar.
 ### Associated function `String.nextScalar`
 
 ```silk
-pub fn nextScalar(value: string, cursor: ScalarCursor) -> silk/option.Option<silk/string.ScalarStep>
+pub fn nextScalar<'life0>(value: string<'life0>, cursor: ScalarCursor) -> silk/option.Option<silk/string.ScalarStep>
 ```
 
 Decodes the scalar at a cursor, or returns `None` at the end of the string.

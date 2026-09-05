@@ -53,9 +53,9 @@ impl LocalScheduler {
   /// through its required parent MonotonicClock for the earliest timer; it raises [`StalledError`]
   /// only when no task is ready and no timer registration remains. Before any typed return or failure,
   /// it cancels every unfinished descendant and releases the complete run state.
-  pub effect fn execute<A, E>(
+  pub effect fn execute<A: 'static, E: 'static>(
     self: &mut Self,
-    program: once Effect<
+    program: once Effect<'static;
       A
       ! E
       ? &mut Scheduler | &mut MonotonicClock
@@ -551,8 +551,8 @@ fn publishTaskResult<A, E>(
   }
 }
 
-effect fn runTask<A, E>(
-  body: once Effect<
+effect fn runTask<A: 'static, E: 'static>(
+  body: once Effect<'static;
     A
     ! E
     ? &mut Scheduler | &mut MonotonicClock
@@ -601,8 +601,8 @@ fn extractRoot<A, E>(state: &mut RootState<A, E>, output: &mut RootExtraction<A,
   return ()
 }
 
-effect fn runRoot<A, E>(
-  body: once Effect<
+effect fn runRoot<A: 'static, E: 'static>(
+  body: once Effect<'static;
     A
     ! E
     ? &mut Scheduler | &mut MonotonicClock
@@ -634,9 +634,9 @@ effect fn runRoot<A, E>(
   return ()
 }
 
-effect fn prepareChild<A, E>(
+effect fn prepareChild<A: 'static, E: 'static>(
   self: &mut SchedulerClient,
-  child: once Effect<
+  child: once Effect<'static;
     A
     ! E
     ? &mut Scheduler | &mut MonotonicClock

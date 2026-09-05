@@ -4,14 +4,18 @@ import {
   concreteCleanup,
   generated,
   emitReleases,
+  emitInitializationTransition,
   matchCleanupKey,
   ownerFields,
   lowerBorrowedWriteSelectors,
   lowerBorrowSelectors,
   lowerWriteSelectors,
+  lowerOwnershipPath,
+  ownershipLocal,
   propagationLoanEnds,
   propagationReleases,
   specializedCleanup,
+  transitionAt,
 } from './CleanupEmission.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
@@ -30,6 +34,7 @@ import {
   lowerRunEffectComposite,
   lowerServiceEffectValue,
   ownedWriteRoot,
+  patternPlace,
 } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
@@ -50,6 +55,7 @@ import { lowerSequence } from './LowerStatements.js'
 import { lowerBuiltinExpression } from './LowerBuiltin.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
+import * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Scalar from './Scalar.js'
 import * as Type from './Type.js'
@@ -170,15 +176,59 @@ const lowerOperandWithProvision = (
   )
 }
 
+const lowerTransferredPlace = (
+  fn: FunctionLowering,
+  transition: Ownership.PlaceTransition,
+  semanticType: DeclarationFacts.SemanticType,
+  span: SourceSpan.SourceSpan,
+): LoweredExpression | undefined => {
+  const root = ownershipLocal(fn, transition.root)
+  if (root === undefined) return undefined
+  if (transition.path.length === 0) return { result: root }
+  const type = fn.type(semanticType)
+  const selectors = lowerOwnershipPath(fn, root, transition.path, span)
+  if (type === undefined || selectors === undefined) return undefined
+  const destination = fn.alloc(type)
+  fn.emit({
+    _tag: 'ReadPlace',
+    destination,
+    root,
+    selectors,
+    type,
+    consume: true,
+    ownershipPath: transition.path,
+    provenance: authored(span),
+  })
+  return { result: destination }
+}
+
 export function lowerExpression(
   fn: FunctionLowering,
   expression: Hir.Expression,
   availableRequirements = fn.activeRequirements ?? fn.providedRequirements,
 ): LoweredExpression | undefined {
   const lower = (): LoweredExpression | undefined => {
-    const lowered = lowerExpressionInner(fn, expression, availableRequirements)
+    // Generated wrappers can share the source place's span. Only the place itself extracts
+    // ownership; a match or conversion must still lower its computation and result type.
+    const consuming =
+      expression._tag === 'ParameterReference' ||
+      expression._tag === 'BindingReference' ||
+      expression._tag === 'PatternBindingReference' ||
+      expression._tag === 'Project' ||
+      expression._tag === 'ReferentPlace' ||
+      expression._tag === 'IndexPlace' ||
+      expression._tag === 'SliceIndexPlace'
+        ? transitionAt(fn, expression.span, 'Move')
+        : undefined
+    let lowered: LoweredExpression | undefined
+    if (consuming !== undefined && consuming.path.length > 0 && expression._tag !== 'Unavailable') {
+      lowered = lowerTransferredPlace(fn, consuming, expression.type, expression.span)
+    } else lowered = lowerExpressionInner(fn, expression, availableRequirements)
     if (lowered === 'Transferred') return lowered
-    if (lowered !== undefined) fn.expressionLocals.set(spanKey(expression.span), lowered.result)
+    if (lowered !== undefined) {
+      fn.expressionLocals.set(spanKey(expression.span), lowered.result)
+      if (consuming !== undefined) emitInitializationTransition(fn, consuming)
+    }
     endReturnedViewLoans(fn, expression.span)
     return lowered
   }
@@ -296,12 +346,44 @@ export function lowerExpressionInner(
       return { result: bound }
     }
     case 'PatternBindingReference': {
+      const binding = Ownership.allBindings(fn.ownership).find(
+        (binding) =>
+          binding.site._tag === 'Pattern' &&
+          patternKey(binding.site.binding) === patternKey(expression.binding),
+      )
+      if (binding?.place !== undefined) {
+        const root = ownershipLocal(fn, binding.place.root)
+        const type = fn.type(expression.type)
+        if (root === undefined || type === undefined) return undefined
+        const selectors = lowerOwnershipPath(fn, root, binding.place.path, expression.span)
+        if (selectors === undefined) return undefined
+        if (selectors.length === 0) return { result: root }
+        const destination = fn.alloc(type)
+        fn.emit({
+          _tag: 'ReadPlace',
+          destination,
+          root,
+          selectors,
+          type,
+          provenance: authored(expression.span),
+        })
+        return { result: destination }
+      }
       const bound = fn.patternLocals.get(patternKey(expression.binding))
       if (bound === undefined) return undefined
       return { result: bound }
     }
-    case 'Move':
-      return lowerExpression(fn, expression.subject, availableRequirements)
+    case 'Move': {
+      const transition = transitionAt(fn, expression.span, 'Move')
+      if (transition === undefined)
+        return lowerExpression(fn, expression.subject, availableRequirements)
+      const lowered =
+        expression.subject._tag === 'Unavailable'
+          ? undefined
+          : lowerTransferredPlace(fn, transition, expression.subject.type, expression.span)
+      if (lowered !== undefined) emitInitializationTransition(fn, transition)
+      return lowered
+    }
     case 'Replace':
       return lowerReplaceExpression(fn, expression, availableRequirements)
     case 'FunctionItem':
@@ -530,7 +612,8 @@ function lowerRuntimeStringViewExpression(
   if (
     source === undefined ||
     sourceType?._tag !== 'Slice' ||
-    !Type.equals(sourceType.type, Type.slice('Shared', 'u8')) ||
+    sourceType.type.access !== 'Shared' ||
+    sourceType.type.element !== 'u8' ||
     type?._tag !== 'String'
   )
     return undefined
@@ -670,12 +753,17 @@ function lowerReplaceExpression(
   const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
   const type = fn.type(place.type)
   if (root === undefined || rootType === undefined || type === undefined) return undefined
-  const selectors =
+  const selected =
     place._tag === 'BorrowedWritePlace'
       ? lowerBorrowedWriteSelectors(fn, place.selectors)
       : lowerWriteSelectors(fn, place.selectors)
-  if (selectors === 'Transferred') return selectors
-  if (selectors === undefined) return undefined
+  if (selected === 'Transferred') return selected
+  if (selected === undefined) return undefined
+  const alias =
+    place._tag === 'WritePlace' && place.root._tag === 'PatternWriteRoot'
+      ? patternPlace(fn, place.root.binding, place.span)
+      : undefined
+  const selectors = [...(alias?.selectors ?? []), ...selected]
   fn.emit(
     Object.freeze({
       _tag: 'CheckPlace',
@@ -1907,7 +1995,39 @@ function lowerMatchExpression(
   availableRequirements: FunctionLowering['providedRequirements'],
 ): LoweredExpression | undefined {
   if (expression.scrutinee._tag === 'Unavailable') return undefined
-  const scrutinee = lowerExpression(fn, expression.scrutinee, availableRequirements)
+  let scrutinee: LoweredExpression | undefined
+  let selectors: ReadonlyArray<Mir.PlaceSelector> | undefined
+  if (expression.access === 'Place') {
+    const source = Ownership.placeOf(expression.scrutinee)
+    if (source === undefined) return undefined
+    const alias = Ownership.allBindings(fn.ownership).find(
+      (binding) => Ownership.siteKey(binding.site) === Ownership.siteKey(source.root),
+    )?.place
+    const root = ownershipLocal(fn, alias?.root ?? source.root)
+    if (root === undefined) return undefined
+    selectors = lowerOwnershipPath(
+      fn,
+      root,
+      [...(alias?.path ?? []), ...source.path],
+      expression.scrutinee.span,
+    )
+    if (selectors === undefined) return undefined
+    scrutinee = { result: root }
+  } else {
+    const transition =
+      expression.access === 'Move' ? transitionAt(fn, expression.span, 'Move') : undefined
+    if (transition === undefined)
+      scrutinee = lowerExpression(fn, expression.scrutinee, availableRequirements)
+    else {
+      scrutinee = lowerTransferredPlace(
+        fn,
+        transition,
+        expression.scrutinee.type,
+        expression.scrutinee.span,
+      )
+      if (scrutinee !== undefined) emitInitializationTransition(fn, transition)
+    }
+  }
   if (scrutinee === 'Transferred') return scrutinee
   const scrutineeType = fn.type(expression.scrutinee.type)
   const resultType = fn.type(expression.type)
@@ -1951,7 +2071,7 @@ function lowerMatchExpression(
           specializedMembers.filter(
             (member, ordinal) =>
               specializedMembers.findIndex((candidate) =>
-                Match.identityEquals(candidate, member),
+                Match.identityEquals(candidate, member, 'Runtime'),
               ) === ordinal,
           ),
         )
@@ -1965,6 +2085,7 @@ function lowerMatchExpression(
         guarded: arm.guard !== undefined,
       }),
     ),
+    'Runtime',
   )
   const arms: Array<Mir.MatchArm> = []
   const armStates = new Map<number, DelayedEffectState>()
@@ -1976,13 +2097,14 @@ function lowerMatchExpression(
     restoreDelayedEffectState(fn, branchState)
     const member = arm.member === undefined ? undefined : specializeMember(arm.member)
     const selectedMembers = pendingMembers.filter(
-      (candidate) => arm.universal || (member !== undefined && Match.selects(member, candidate)),
+      (candidate) =>
+        arm.universal || (member !== undefined && Match.selects(member, candidate, 'Runtime')),
     )
     const executes = selectedMembers.length > 0
     const before = transition.before
     const after = transition.after
     const bindings: Array<Mir.MatchBinding> = []
-    for (const binding of executes ? arm.bindings : []) {
+    for (const binding of executes && expression.access !== 'Place' ? arm.bindings : []) {
       const type = fn.type(binding.type)
       if (type === undefined) return undefined
       const destination = fn.alloc(type)
@@ -2139,6 +2261,13 @@ function lowerMatchExpression(
   )
     ? fn.alloc(resultType)
     : undefined
+  // Contextual typing can retain an expected result even when every selected arm transfers.
+  // MIR records the actual join: a transferring match has no result storage or calling lanes.
+  const joinType: Mir.Type =
+    destination === undefined ? Object.freeze({ _tag: 'Bottom', type: 'never' }) : resultType
+  const joinShape =
+    destination === undefined ? Layout.callingShape(fn.layout, 'never') : resultShape
+  if (joinShape === undefined) return undefined
   const decisions = members.map((member) =>
     Object.freeze({
       member,
@@ -2146,7 +2275,8 @@ function lowerMatchExpression(
         arms
           .filter(
             (arm) =>
-              arm.universal || (arm.member !== undefined && Match.selects(arm.member, member)),
+              arm.universal ||
+              (arm.member !== undefined && Match.selects(arm.member, member, 'Runtime')),
           )
           .map((arm) => arm.id),
       ),
@@ -2179,6 +2309,7 @@ function lowerMatchExpression(
       id: expression.id,
       ...(destination === undefined ? {} : { destination }),
       scrutinee: scrutinee.result,
+      ...(selectors === undefined ? {} : { selectors }),
       scrutineeType,
       scrutineeShape,
       access: expression.access,
@@ -2186,8 +2317,8 @@ function lowerMatchExpression(
       members: Object.freeze(members),
       decisions: Object.freeze(mirDecisions),
       arms: Object.freeze(arms),
-      type: resultType,
-      resultShape,
+      type: joinType,
+      resultShape: joinShape,
       provenance: authored(expression.span),
     }),
   )
@@ -2353,6 +2484,10 @@ function lowerSliceBorrowExpression(
       ? lowerExpression(fn, expression.root.value, availableRequirements)
       : undefined
   if (temporary === 'Transferred') return temporary
+  const alias =
+    expression.root._tag === 'PatternSliceRoot'
+      ? patternPlace(fn, expression.root.binding, expression.span)
+      : undefined
   let root: Mir.LocalId | undefined
   switch (expression.root._tag) {
     case 'BindingSliceRoot':
@@ -2362,7 +2497,7 @@ function lowerSliceBorrowExpression(
       root = fn.parameterLocals.get(expression.root.parameter.ordinal)
       break
     case 'PatternSliceRoot':
-      root = fn.patternLocals.get(patternKey(expression.root.binding))
+      root = alias?.root ?? fn.patternLocals.get(patternKey(expression.root.binding))
       break
     case 'TemporarySliceRoot':
       root = temporary?.result
@@ -2379,9 +2514,10 @@ function lowerSliceBorrowExpression(
   }
   const destination = fn.alloc(type)
   const borrow = fn.beginRecipeBorrow(expression.borrow)
-  const selectors = lowerBorrowSelectors(fn, expression.selectors)
-  if (selectors === 'Transferred') return selectors
-  if (selectors === undefined) return undefined
+  const selected = lowerBorrowSelectors(fn, expression.selectors)
+  if (selected === 'Transferred') return selected
+  if (selected === undefined) return undefined
+  const selectors = [...(alias?.selectors ?? []), ...selected]
   fn.emit(
     Object.freeze({
       _tag: 'BeginLoan',
@@ -2421,6 +2557,10 @@ function lowerValueBorrowExpression(
       ? lowerExpression(fn, expression.root.value, availableRequirements)
       : undefined
   if (temporary === 'Transferred') return temporary
+  const alias =
+    expression.root._tag === 'PatternSliceRoot'
+      ? patternPlace(fn, expression.root.binding, expression.span)
+      : undefined
   let root: Mir.LocalId | undefined
   switch (expression.root._tag) {
     case 'BindingSliceRoot':
@@ -2430,7 +2570,7 @@ function lowerValueBorrowExpression(
       root = fn.parameterLocals.get(expression.root.parameter.ordinal)
       break
     case 'PatternSliceRoot':
-      root = fn.patternLocals.get(patternKey(expression.root.binding))
+      root = alias?.root ?? fn.patternLocals.get(patternKey(expression.root.binding))
       break
     case 'TemporarySliceRoot':
       root = temporary?.result
@@ -2443,9 +2583,10 @@ function lowerValueBorrowExpression(
   }
   const destination = fn.alloc(type)
   const borrow = fn.beginRecipeBorrow(expression.borrow)
-  const selectors = lowerBorrowSelectors(fn, expression.selectors)
-  if (selectors === 'Transferred') return selectors
-  if (selectors === undefined) return undefined
+  const selected = lowerBorrowSelectors(fn, expression.selectors)
+  if (selected === 'Transferred') return selected
+  if (selected === undefined) return undefined
+  const selectors = [...(alias?.selectors ?? []), ...selected]
   fn.emit(
     Object.freeze({
       _tag: 'BeginLoan',

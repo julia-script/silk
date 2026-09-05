@@ -15,14 +15,11 @@ const lowerStored = Effect.fnUntraced(function* (
   target: Target.Target,
 ) {
   const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), target.id)
-  assert.notInclude(
-    Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-    'SEM0103',
-  )
+  assert.deepEqual(Analysis.diagnostics(snapshot), [], name)
   return { snapshot, module: Analysis.loweredMir(snapshot) }
 })
 
-const named = `struct Parser<F: fn(i32) -> i32> { parse: F }
+const named = `struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
 fn decode(value: i32) -> i32 { return value + 2 }
 pub fn main() -> i32 {
   let parser = Parser { parse: decode }
@@ -30,23 +27,23 @@ pub fn main() -> i32 {
 }`
 
 const copiedCapture = `import silk.i32 as i32
-struct Parser<F: fn(i32) -> i32> { parse: F }
+struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
 pub fn main() -> i32 {
   let parser = Parser { parse: i32.add(2) }
   return parser.parse(40)
 }`
 
 const sharedReuse = `import silk.i32 as i32
-struct Parser<F: fn(i32) -> i32> { parse: F }
+struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
 pub fn main() -> i32 {
   let parser = Parser { parse: i32.add(1) }
   return parser.parse(20) + parser.parse(20)
 }`
 
 const nested = `import silk.i32 as i32
-struct Parser<F: fn(i32) -> i32> { parse: F }
-struct Boxed<F: fn(i32) -> i32> { inner: Parser<F> }
-fn box<F: fn(i32) -> i32>(inner: Parser<F>) -> Boxed<F> {
+struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
+struct Boxed<F: fn<'static>(i32) -> i32> { inner: Parser<F> }
+fn box<F: fn<'static>(i32) -> i32>(inner: Parser<F>) -> Boxed<F> {
   return Boxed<F> { inner: move inner }
 }
 pub fn main() -> i32 {
@@ -56,7 +53,7 @@ pub fn main() -> i32 {
 }`
 
 const takeDeclarations = `struct Token { value: i32 }
-struct Holder<F: once fn(i32) -> i32> { step: F }
+struct Holder<F: once fn<'static>(i32) -> i32> { step: F }
 fn consume(value: i32, token: Token) -> i32 { return value + token.value }
 `
 
@@ -72,7 +69,7 @@ const called = `${takeDeclarations}pub fn main() -> i32 {
   return holder.step(40)
 }`
 
-const moved = `${takeDeclarations}fn keep<F: once fn(i32) -> i32>(holder: Holder<F>) -> i32 {
+const moved = `${takeDeclarations}fn keep<F: once fn<'static>(i32) -> i32>(holder: Holder<F>) -> i32 {
   return 42
 }
 pub fn main() -> i32 {
@@ -81,7 +78,7 @@ pub fn main() -> i32 {
   return keep(move holder)
 }`
 
-const scopedBorrow = `struct Holder<F: mut fn(i32) -> i32> { step: F }
+const scopedBorrow = `struct Holder<'env, F: mut fn<'env>(i32) -> i32> { step: F }
 fn write(value: i32, values: &mut [i32]) -> i32 {
   values[0] = value
   return values[0]
@@ -95,7 +92,7 @@ pub fn main() -> i32 {
 }`
 
 const specializedCapture = `struct Token<T> { value: T }
-struct Holder<F: once fn(i32) -> i32> { step: F }
+struct Holder<'env, F: once fn<'env>(i32) -> i32> { step: F }
 fn consume<T>(value: i32, token: Token<T>) -> i32 { return value }
 fn apply<T>(token: Token<T>, value: i32) -> i32 {
   let holder = Holder { step: consume<T>(move token) }
@@ -106,7 +103,7 @@ pub fn main() -> i32 {
 }`
 
 const equalShapeSpecializations = `import silk.i32 as i32
-struct Holder<F: fn(i32) -> i32> { step: F }
+struct Holder<F: fn<'static>(i32) -> i32> { step: F }
 fn apply<T>(marker: T, value: i32) -> i32 {
   let holder = Holder { step: i32.add(1) }
   return holder.step(value)

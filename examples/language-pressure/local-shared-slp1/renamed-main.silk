@@ -54,7 +54,7 @@ fn signal(payload: i32, inbox: Shared<SignalBox>, identifier: i32) -> i32 {
   return payload + pushed - identifier
 }
 
-struct Retained<F: once fn(i32) -> i32> {
+struct Retained<F: once fn<'static>(i32) -> i32> {
   notify: F
 }
 
@@ -76,7 +76,7 @@ fn signalCaptured(payload: i32, self: SignalCapture) -> i32 {
 
 pub fn markReady(payload: i32) -> i32 { return payload }
 
-struct SignalCallback<F: once fn(i32) -> i32> {
+struct SignalCallback<F: once fn<'static>(i32) -> i32> {
   notify: F
   capture: SignalCapture
 }
@@ -85,7 +85,7 @@ struct Delivered<A> {
   value: A
 }
 
-struct FutureCell<A, F: once fn(i32) -> i32> {
+struct FutureCell<A, F: once fn<'static>(i32) -> i32> {
   publication: Delivered<A>
   first: SignalCallback<F>
   second: SignalCallback<F>
@@ -95,7 +95,7 @@ struct FutureCell<A, F: once fn(i32) -> i32> {
   publications: i32
 }
 
-struct Sender<F: once fn(i32) -> i32> {
+struct Sender<F: once fn<'static>(i32) -> i32> {
   state: Shared<FutureCell<Parcel, F>>
 }
 
@@ -103,13 +103,13 @@ struct Reader<T> {
   state: Shared<T>
 }
 
-struct Removed<F: once fn(i32) -> i32> {
+struct Removed<F: once fn<'static>(i32) -> i32> {
   first: SignalCallback<F>
   second: SignalCallback<F>
   third: SignalCallback<F>
 }
 
-fn subscribe<F: once fn(i32) -> i32>(
+fn subscribe<F: once fn<'static>(i32) -> i32>(
   self: &mut FutureCell<Parcel, F>,
   callback: SignalCallback<F>,
 ) -> SignalCallback<F> {
@@ -127,7 +127,7 @@ fn subscribe<F: once fn(i32) -> i32>(
   }
 }
 
-fn deliverState<F: once fn(i32) -> i32>(
+fn deliverState<F: once fn<'static>(i32) -> i32>(
   self: &mut FutureCell<Parcel, F>,
   value: Parcel,
   firstReplacement: SignalCallback<F>,
@@ -143,7 +143,7 @@ fn deliverState<F: once fn(i32) -> i32>(
   return Removed { first: move first, second: move second, third: move third }
 }
 
-fn notify<F: once fn(i32) -> i32>(pending: SignalCallback<F>, value: i32) -> i32 {
+fn notify<F: once fn<'static>(i32) -> i32>(pending: SignalCallback<F>, value: i32) -> i32 {
   let SignalCallback<F> { notify, capture } = move pending
   return signalCaptured(notify(value), move capture)
 }
@@ -157,7 +157,7 @@ fn observeParcel(
   return readParcel(&self.publication.value)
 }
 
-fn deliver<F: once fn(i32) -> i32>(
+fn deliver<F: once fn<'static>(i32) -> i32>(
   producer: Sender<F>,
   value: Parcel,
   firstReplacement: SignalCallback<F>,

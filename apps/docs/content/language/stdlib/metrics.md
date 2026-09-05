@@ -88,7 +88,7 @@ Creates a ledger with zero acquisitions, zero releases, and a zero peak.
 ### Associated function `Metrics.copy`
 
 ```silk
-pub fn copy(self: &silk/metrics.AllocationMetrics) -> AllocationMetrics
+pub fn copy<'life0>(self: &'life0 silk/metrics.AllocationMetrics) -> AllocationMetrics
 ```
 
 Copies the current counters without moving or changing the provider's ledger.
@@ -102,7 +102,7 @@ Use this function when a provider must publish metrics while it keeps the mutabl
 ### Associated function `Metrics.live`
 
 ```silk
-pub fn live(self: &silk/metrics.AllocationMetrics) -> usize
+pub fn live<'life0>(self: &'life0 silk/metrics.AllocationMetrics) -> usize
 ```
 
 Returns `acquired - released`, which is the number of recorded live allocations.
@@ -117,7 +117,7 @@ only after its matching successful acquisition.
 ### Associated function `Metrics.recordAcquire`
 
 ```silk
-pub fn recordAcquire(self: &mut silk/metrics.AllocationMetrics) -> ()
+pub fn recordAcquire<'life0>(self: &'life0 mut silk/metrics.AllocationMetrics) -> ()
 ```
 
 Adds one successful acquisition and updates the peak live count.
@@ -137,7 +137,7 @@ the live-count subtraction trap.
 ### Associated function `Metrics.recordRelease`
 
 ```silk
-pub fn recordRelease(self: &mut silk/metrics.AllocationMetrics) -> ()
+pub fn recordRelease<'life0>(self: &'life0 mut silk/metrics.AllocationMetrics) -> ()
 ```
 
 Adds one release without changing the historical peak live count.

@@ -22,6 +22,9 @@ import * as ForeignAvailability from './ForeignAvailability.js'
 import * as ForeignPlanning from './ForeignPlanning.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
 import * as ImportUsage from './ImportUsage.js'
+import type * as DeclarationLifetime from './DeclarationLifetime.js'
+import * as LifetimeElision from './LifetimeElision.js'
+import * as Option from 'effect/Option'
 import * as Layout from './Layout.js'
 import * as LlvmBackend from './LlvmBackend.js'
 import type * as Mir from './Mir.js'
@@ -312,6 +315,60 @@ export const moduleAnalysis = (
   self: FrontendSnapshot,
   module: string,
 ): Elaboration.Result | undefined => self.results.get(module)
+
+/** Plans complete lifetime expansions for declaration headers overlapping a source range. */
+export const explicitLifetimes = (
+  self: FrontendSnapshot,
+  module: string,
+  start: number,
+  end = start,
+): ReadonlyArray<LifetimeElision.LifetimeElision> => {
+  const headers = self.index.modules.find((candidate) => candidate.module === module)
+  const contexts =
+    headers?.members.flatMap((member) => {
+      const declarations =
+        member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration'
+          ? member.operations
+          : [member]
+      return declarations.flatMap(
+        (
+          declaration,
+        ): ReadonlyArray<{
+          readonly context: DeclarationLifetime.Context
+          readonly executable: Type.ExecutableLifetimes | undefined
+        }> =>
+          'lifetimeElaboration' in declaration && declaration.lifetimeElaboration !== undefined
+            ? [
+                {
+                  context: declaration.lifetimeElaboration,
+                  executable:
+                    declaration._tag === 'FunctionDeclaration' ||
+                    declaration._tag === 'ServiceOperation'
+                      ? DeclarationFacts.executableLifetimes(declaration)
+                      : undefined,
+                },
+              ]
+            : [],
+      )
+    }) ?? []
+  return contexts.flatMap(({ context, executable }) => {
+    if (context.syntax.span.start > end || context.syntax.span.end < start) return []
+    const body = SyntaxTree.directNode(context.syntax, 'Block')
+    if (body !== undefined && start >= body.span.start && end <= body.span.end) return []
+    const headerEnd = body?.span.start ?? context.syntax.span.end
+    if (
+      self.index.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.severity === 'error' &&
+          diagnostic.span.sourceId === context.source.id &&
+          diagnostic.span.start >= context.syntax.span.start &&
+          diagnostic.span.start < headerEnd,
+      )
+    )
+      return []
+    return Option.toArray(LifetimeElision.makeExplicit(context, executable))
+  })
+}
 
 /** Returns the root module's elaborated analysis. The root is always loaded. */
 export const rootAnalysis = (self: FrontendSnapshot): Elaboration.Result => {

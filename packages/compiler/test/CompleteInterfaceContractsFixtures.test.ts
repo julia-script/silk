@@ -86,7 +86,7 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       )
       const contract = declaration?.operationContracts.at(0)
       assert.strictEqual(contract?.functionKind, 'Effect')
-      assert.deepEqual(contract?.operands.map(encodedOperand), ['&Self', 'Arguments'])
+      assert.deepEqual(contract?.operands.map(encodedOperand), ["&'life4 Self", 'Arguments'])
       assert.deepEqual(
         contract?.operands.map((operand) => operand.access),
         ['Shared', 'Take'],
@@ -140,7 +140,7 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       assert.strictEqual(matching.application.providerMatches, true)
       assert.strictEqual(matching.application.available, true)
       const contract = matching.application.operations.at(0)
-      assert.deepEqual(contract?.operands.map(encodedOperand), ['&T', 'i32'])
+      assert.deepEqual(contract?.operands.map(encodedOperand), ["&'life4 T", 'i32'])
       assert.strictEqual(
         contract?.success._tag === 'Resolved' ? Type.encode(contract.success.type) : undefined,
         'bool',
@@ -173,10 +173,10 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       const contract = declaration?.operationContracts.at(0)
       assert.strictEqual(declaration?.operationContracts.length, 1)
       assert.deepEqual(contract?.operands.map(encodedOperand), [
-        '&S',
+        "&'life2 S",
         'Unresolved',
-        '&[u8]',
-        '&mut [u8]',
+        "&'life3 [u8]",
+        "&'life4 mut [u8]",
         'Reference',
       ])
       assert.deepEqual(
@@ -255,7 +255,7 @@ layer(NodeServices.layer)('complete interface contract fixtures', (it) => {
       const contract = conformance?.operations.at(0)?.contract
       assert.strictEqual(contract?.functionKind, 'Effect')
       assert.deepEqual(contract?.operands.map(encodedOperand), [
-        '&complete-interface-contracts/mapped-effect.Schema',
+        "&'life5 complete-interface-contracts/mapped-effect.Schema",
         'i32',
       ])
       assert.strictEqual(contract?.receiverAccess, 'Shared')

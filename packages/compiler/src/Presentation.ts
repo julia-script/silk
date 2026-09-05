@@ -1,8 +1,9 @@
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Elaboration from './Elaboration.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as IntrinsicCatalog from './Intrinsic.js'
 import type * as NameResolution from './NameResolution.js'
+import * as Lifetime from './Lifetime.js'
 import * as Operator from './Operator.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -11,6 +12,7 @@ import * as TypeInference from './internal/TypeInference.js'
 
 interface Base {
   readonly text: string
+  readonly lifetimeRequirements?: ReadonlyArray<string>
 }
 
 export type Presentation =
@@ -146,13 +148,46 @@ export const anonymousCallable = (
   const contract = `${anonymous.functionKind === 'Effect' ? 'effect ' : ''}fn(${parameters.join(', ')}) -> ${result}`
   return Object.freeze({
     _tag: 'AnonymousCallablePresentation',
+    lifetimeRequirements:
+      self.type._tag === 'Available' ? lifetimeRequirements(self.type.type, '') : [],
     text: `${contract}\nmode: ${callableMode(self.mode)}\ncaptures: ${captures.length === 0 ? 'none' : captures.join(', ')}`,
   })
 }
 
 const typeParameterName = (parameter: DeclarationFacts.TypeParameterFact): string => {
   const name = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
-  return `${parameter.type.kind === 'RequirementRow' ? '?' : ''}${name}`
+  const bounds = parameter.lifetimeBounds ?? []
+  return `${parameter.type.kind === 'RequirementRow' ? '?' : ''}${name}${bounds.length === 0 ? '' : `: ${bounds.map(Lifetime.display).join(' + ')}`}`
+}
+
+const executableParameterNames = (
+  declaration: DeclarationFacts.DeclarationFact | DeclarationFacts.ServiceOperationFact,
+  parameters: ReadonlyArray<DeclarationFacts.TypeParameterFact> = declaration.typeParameters,
+): ReadonlyArray<string> => {
+  const lifetimes = DeclarationFacts.executableLifetimes(declaration)
+  const names = parameters.map((parameter) => {
+    const argument = Type.parameterArgument(parameter.type)
+    const additional = Lifetime.isLifetime(argument)
+      ? (lifetimes.lifetimeBounds ?? [])
+          .filter((bound) => Lifetime.equals(bound.longer, argument))
+          .map((bound) => bound.shorter)
+      : (lifetimes.typeOutlives ?? [])
+          .filter((bound) => Type.key(bound.type) === Type.key(parameter.type))
+          .map((bound) => bound.lifetime)
+    const bounds = [
+      ...new Map(
+        [...(parameter.lifetimeBounds ?? []), ...additional].map((bound) => [
+          Lifetime.key(bound),
+          bound,
+        ]),
+      ).values(),
+    ]
+    return typeParameterName({ ...parameter, lifetimeBounds: bounds })
+  })
+  const declared = new Set(declaration.typeParameters.map((parameter) => Type.key(parameter.type)))
+  for (const binder of lifetimes.lifetimeBinders)
+    if (!declared.has(Lifetime.key(binder))) names.push(Lifetime.display(binder))
+  return names
 }
 
 /** The `extern "C"`/`export "C"` marker and native symbol, when the declaration has one. */
@@ -172,12 +207,10 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
   const visibility = self.visibility === 'Public' ? 'pub ' : ''
   const phase = self.phase === 'Static' ? 'static ' : ''
   const native = nativeMarker(self)
-  const kind = `${phase}${self.unsafe ? 'unsafe ' : ''}${native?.marker ?? ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
+  const kind = `${phase}${self.unsafe ? 'unsafe ' : ''}${native?.marker ?? ''}${self.functionKind === 'Effect' ? `effect<${Lifetime.display(DeclarationFacts.executableLifetimes(self).environment)}> fn` : 'fn'}`
   const symbol = native === undefined ? '' : ` as "${native.symbol}"`
-  const typeParameters =
-    self.typeParameters.length === 0
-      ? ''
-      : `<${self.typeParameters.map(typeParameterName).join(', ')}>`
+  const parameterNames = executableParameterNames(self)
+  const typeParameters = parameterNames.length === 0 ? '' : `<${parameterNames.join(', ')}>`
   const parameters = self.parameters
     .map((parameter) => {
       const parameterName = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
@@ -207,11 +240,12 @@ export const receiverMethod = (
   scope?: NameResolution.ModuleScope,
 ): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
-  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
+  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? `effect<${Lifetime.display(DeclarationFacts.executableLifetimes(self).environment)}> fn` : 'fn'}`
   const bound = (parameter: DeclarationFacts.TypeParameterFact): boolean =>
     substitution.has(Type.key(parameter.type))
   const free = self.typeParameters.filter((parameter) => !bound(parameter))
-  const typeParameters = free.length === 0 ? '' : `<${free.map(typeParameterName).join(', ')}>`
+  const parameterNames = executableParameterNames(self, free)
+  const typeParameters = parameterNames.length === 0 ? '' : `<${parameterNames.join(', ')}>`
   const rendered = (fact: DeclarationFacts.DeclaredTypeFact): string =>
     fact._tag === 'Resolved' && substitution.size > 0
       ? type(Type.substitute(fact.type, substitution), module, scope)
@@ -258,7 +292,7 @@ export const receiverOperation = (
   self: DeclarationFacts.InterfaceOperationApplicationFact,
 ): Presentation => {
   const name = self.declaration.name._tag === 'Present' ? self.declaration.name.spelling : '_'
-  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
+  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? `effect<${Lifetime.display(DeclarationFacts.executableLifetimes(self.declaration).environment)}> fn` : 'fn'}`
   const parameters = self.operands
     .slice(1)
     .map((operand) => {
@@ -406,13 +440,11 @@ export const roleDeclaration = (self: DeclarationFacts.RoleFact): Presentation =
 /** Renders a complete operation contract nested beneath a service. */
 export const serviceOperation = (self: DeclarationFacts.ServiceOperationFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : '_'
-  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? 'effect fn' : 'fn'}`
+  const kind = `${self.unsafe ? 'unsafe ' : ''}${self.functionKind === 'Effect' ? `effect<${Lifetime.display(DeclarationFacts.executableLifetimes(self).environment)}> fn` : 'fn'}`
   const operator =
     self.operator === undefined ? '' : `operator ${Operator.spelling(self.operator.operator)} `
-  const typeParameters =
-    self.typeParameters.length === 0
-      ? ''
-      : `<${self.typeParameters.map(typeParameterName).join(', ')}>`
+  const parameterNames = executableParameterNames(self)
+  const typeParameters = parameterNames.length === 0 ? '' : `<${parameterNames.join(', ')}>`
   const parameters = self.parameters
     .map((parameter) => {
       const parameterName = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
@@ -473,7 +505,9 @@ export const parameter = (self: DeclarationFacts.ParameterFact): Presentation =>
 
 export const typeParameter = (self: DeclarationFacts.TypeParameterFact): Presentation => {
   const name = self.name._tag === 'Present' ? self.name.spelling : self.type.name
-  const kind = self.type.kind === 'RequirementRow' ? 'requirement row' : 'type'
+  let kind = 'type'
+  if (self.type.kind === 'Lifetime') kind = 'lifetime'
+  else if (self.type.kind === 'RequirementRow') kind = 'requirement row'
   return Object.freeze({ _tag: 'TypeParameterPresentation', name, text: `${kind} ${name}` })
 }
 
@@ -517,6 +551,7 @@ export const type = (
 ): string => {
   if (Type.equals(self, Type.unit)) return '()'
   if (typeof self === 'string') return self
+  if (Type.isString(self)) return `string<${Lifetime.display(self.lifetime)}>`
   if (Type.isNominal(self)) {
     const anonymous = Type.anonymousAggregateDisplay(self)
     if (anonymous !== undefined) return anonymous
@@ -538,9 +573,9 @@ export const type = (
   if (Type.isParameter(self)) return self.name
   if (Type.isFixedArray(self)) return `Array<${type(self.element, module, scope)}, ${self.length}>`
   if (Type.isSlice(self))
-    return `${self.access === 'Exclusive' ? '&mut ' : '&'}[${type(self.element, module, scope)}]`
+    return `&${Lifetime.display(self.lifetime)} ${self.access === 'Exclusive' ? 'mut ' : ''}[${type(self.element, module, scope)}]`
   if (Type.isReference(self))
-    return `${self.access === 'Exclusive' ? '&mut ' : '&'}${type(self.target, module, scope)}`
+    return `&${Lifetime.display(self.lifetime)} ${self.access === 'Exclusive' ? 'mut ' : ''}${type(self.target, module, scope)}`
   if (Type.isPointer(self))
     return `${self.mutable ? '*mut ' : '*const '}${type(self.pointee, module, scope)}`
   if (Type.isCallable(self)) {
@@ -552,7 +587,18 @@ export const type = (
     } else {
       mode = ''
     }
-    return `${self.unsafe ? 'unsafe ' : ''}${mode}fn(${self.parameters.map((entry) => type(entry, module, scope)).join(', ')}) -> ${type(self.result, module, scope)}`
+    const binder =
+      self.lifetimeBinders.length === 0
+        ? ''
+        : `for<${self.lifetimeBinders
+            .map((binder) => {
+              const bounds = self.lifetimeBounds.filter((bound) =>
+                Lifetime.equals(bound.longer, binder),
+              )
+              return `${Lifetime.display(binder)}${bounds.length === 0 ? '' : `: ${bounds.map((bound) => Lifetime.display(bound.shorter)).join(' + ')}`}`
+            })
+            .join(', ')}> `
+    return `${binder}${self.unsafe ? 'unsafe ' : ''}${mode}fn<${Lifetime.display(self.environment)}>(${self.parameters.map((entry) => type(entry, module, scope)).join(', ')}) -> ${type(self.result, module, scope)}`
   }
   if (Type.isEffect(self)) {
     const failureText = RowAlgebra.encode(
@@ -573,7 +619,7 @@ export const type = (
         `${member.access === 'Exclusive' ? '&mut ' : '&'}${member.capability.name}${member.role === RequirementRow.defaultRole ? '' : ` at ${RequirementRow.roleName(member.role)}`}`,
     )
     const requirements = requirementText.length === 0 ? '' : ` ? ${requirementText}`
-    return `Effect<${type(self.success, module, scope)}${failures}${requirements}>`
+    return `Effect<${Lifetime.display(self.environment)}; ${type(self.success, module, scope)}${failures}${requirements}>`
   }
   if (Type.isRepresented(self)) return type(self.contract, module, scope)
   if (Type.isForeignFunction(self)) return Type.encode(self)
@@ -586,6 +632,7 @@ export const genericArgument = (
   module: string,
   scope?: NameResolution.ModuleScope,
 ): string => {
+  if (Lifetime.isLifetime(self)) return Lifetime.display(self)
   if (Type.isUnavailableGenericArgument(self)) {
     return Type.encodeGenericArgument(self)
   }
@@ -640,6 +687,7 @@ function scopedGenericArgumentText(
   module: string,
   scope: NameResolution.ModuleScope | undefined,
 ): string {
+  if (Lifetime.isLifetime(self)) return Lifetime.display(self)
   if (Type.isUnavailableGenericArgument(self)) return Type.encodeGenericArgument(self)
   if (Type.isRepresentationParameterArgument(self)) return self.parameter.name
   if (
@@ -700,6 +748,26 @@ export const providerSelector = (
     }`,
   })
 
+const lifetimeRequirements = (
+  self: Type.Type,
+  module: string,
+  scope?: NameResolution.ModuleScope,
+): ReadonlyArray<string> => {
+  const contract = Type.isRepresented(self) ? self.contract : self
+  if (!Type.isCallable(contract) && !Type.isEffect(contract)) return []
+  const nested = Type.isCallable(contract)
+    ? lifetimeRequirements(contract.result, module, scope)
+    : []
+  return Object.freeze([
+    ...new Set([
+      ...contract.typeOutlives.map(
+        (bound) => `${type(bound.type, module, scope)}: ${Lifetime.display(bound.lifetime)}`,
+      ),
+      ...nested,
+    ]),
+  ])
+}
+
 export const binding = (
   self: Elaboration.BindingDeclarationFact,
   module: string,
@@ -710,6 +778,7 @@ export const binding = (
     _tag: 'BindingPresentation',
     name: self.name.spelling,
     mutability: self.mutability,
+    lifetimeRequirements: lifetimeRequirements(self.inferredType.type, module, scope),
     text: `let ${self.mutability === 'Mutable' ? 'mut ' : ''}${self.name.spelling}: ${type(self.inferredType.type, module, scope)}`,
   })
 }
@@ -724,6 +793,7 @@ export const patternBinding = (
     _tag: 'BindingPresentation',
     name: self.name.spelling,
     mutability: 'Immutable',
+    lifetimeRequirements: lifetimeRequirements(self.type.type, module, scope),
     text: `let ${self.name.spelling}: ${type(self.type.type, module, scope)}`,
   })
 }
@@ -751,4 +821,8 @@ export const expressionType = (
   module: string,
   scope?: NameResolution.ModuleScope,
 ): Presentation =>
-  Object.freeze({ _tag: 'ExpressionTypePresentation', text: type(self, module, scope) })
+  Object.freeze({
+    _tag: 'ExpressionTypePresentation',
+    text: type(self, module, scope),
+    lifetimeRequirements: lifetimeRequirements(self, module, scope),
+  })

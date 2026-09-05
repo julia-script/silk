@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as InterfaceWitnessInference from '../src/InterfaceWitnessInference.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Type from '../src/Type.js'
 
 const owner = Object.freeze({ module: 'witness-inference', name: 'target' })
@@ -15,9 +16,15 @@ it('infers type, row, callable, and Effect representation binders in declaration
   const value = binder(0, 'T')
   const failures = binder(1, 'E')
   const requirements = binder(2, 'R', 'RequirementRow')
-  const callableBound = Type.callable(['i32'], 'bool')
+  const callableBound = Type.callable(['i32'], 'bool', {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const representation = binder(3, 'F', 'CallableRepresentation', callableBound)
-  const effectBound = Type.effect('bool', [])
+  const effectBound = Type.effect('bool', [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const effectRepresentation = binder(4, 'G', 'EffectRepresentation', effectBound)
   const decodeError = Type.nominal('witness-inference', 'DecodeError')
   const clock = Type.nominal('witness-inference', 'Clock')
@@ -50,10 +57,21 @@ it('infers type, row, callable, and Effect representation binders in declaration
       }),
       Object.freeze({
         label: 'rows',
-        pattern: Type.effect('bool', [failures], 'Shared', [], [requirements]),
-        actual: Type.effect('bool', [decodeError], 'Shared', [
-          Object.freeze({ capability: clock, role: 'DefaultRole', access: 'Shared' }),
-        ]),
+        pattern: Type.effect(
+          'bool',
+          [failures],
+          { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+          'Shared',
+          [],
+          [requirements],
+        ),
+        actual: Type.effect(
+          'bool',
+          [decodeError],
+          { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+          'Shared',
+          [Object.freeze({ capability: clock, role: 'DefaultRole', access: 'Shared' })],
+        ),
       }),
     ],
   )

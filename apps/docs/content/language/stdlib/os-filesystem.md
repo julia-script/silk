@@ -84,7 +84,7 @@ Portable absolute paths resolve inside this root. The provider never exposes the
 ### Associated function `OsFileSystem.make`
 
 ```silk
-pub effect fn make(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn make<'life0>(root: string<'life0>) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator
 ```
 
 Copies one absolute native root and creates a confined filesystem provider.

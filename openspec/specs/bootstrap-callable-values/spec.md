@@ -125,15 +125,20 @@ callable with that value. Pipelines SHALL associate left-to-right.
 - **WHEN** an exact function item or section returns a borrowed view backed by a supplied argument or one known trailing capture
 - **THEN** callable application records that exact source and keeps its loan active through the result's last use
 
+#### Scenario: Apply a structural lifetime contract
+
+- **WHEN** application knows a structural callable contract with explicit input/output lifetime relationships
+- **THEN** it instantiates those declared relationships and preserves the callable environment bound without requiring an exact body or guessing hidden sources
+
 #### Scenario: Keep opaque callable provenance unknown
 
-- **WHEN** application knows only a structural callable contract whose result is a borrowed view
-- **THEN** it does not infer a returned-borrow source from an arbitrary argument or hidden environment
+- **WHEN** a structural callable result has no declared or deterministically elided input or environment lifetime relationship
+- **THEN** analysis does not guess a source from arbitrary arguments or hidden captures and rejects an unavailable contract
 
 ### Requirement: Higher-order calls preserve callable guarantees
 
 Function parameters, local bindings, generic substitutions, and Effect combinators SHALL preserve
-callable parameter and result types, invocation modes, capture dependencies, and ownership. An
+callable parameter and result types including lifetime binders, invocation modes, environment validity bounds, capture dependencies, and ownership. An
 operation that stores or transfers a callback in its compiler-known environment SHALL transfer its
 obligations; an operation that may invoke it repeatedly MUST require a compatible reusable mode or
 derive a correspondingly restricted result. Bootstrap MUST NOT erase distinct capture-environment
@@ -200,7 +205,7 @@ off the executable path and require one finite concrete instance before layout o
 Closed Effect values SHALL be valid ordinary parameter, result, local-binding, capture, generic-
 argument, and concretely represented nominal-field values without exposing or erasing their hidden
 construction-site identity. Passing, capturing, or storing an Effect SHALL preserve its success,
-failure, requirement, and run-access contracts and the ownership of every hidden environment field.
+failure, requirement, environment-lifetime, and run-access contracts and the ownership of every hidden environment field.
 A structural Effect contract has no standalone target layout; a concrete represented environment MAY
 contribute inline lanes only through its complete enclosing nominal realization.
 
@@ -218,6 +223,11 @@ contribute inline lanes only through its complete enclosing nominal realization.
 
 - **WHEN** a complete nominal specialization stores one Effect representation in a field
 - **THEN** its runner and environment remain lazy, inline, statically targeted, and unavailable through the structural contract alone
+
+#### Scenario: Retain a hidden short environment
+
+- **WHEN** an Effect capturing a shared borrowed holder or string view passes through a generic identity and nominal field
+- **THEN** its environment bound remains short and escape or Detached admission cannot erase the nested data dependency
 
 ### Requirement: Effectful channel callbacks are ordinary callables
 
@@ -314,3 +324,22 @@ every compiled LLVM target.
 
 - **WHEN** `let taker = token.take` moves an affine `token` and `taker` leaves its region uninvoked
 - **THEN** the callable environment drops the captured token exactly once
+
+### Requirement: Expected callable contracts admit one finite outer lifetime binder
+
+Compatibility SHALL support one outer for<'a, ...> lifetime binder on an expected callable or operation contract, including references to already bound surrounding lifetimes. Checking SHALL introduce scoped rigid placeholders, apply ordinary variance and finite outlives obligations, and reject placeholder escape. The quantified signature SHALL NOT contain nested quantified callable contracts. The checker SHALL reject arbitrary unconstrained higher-rank inference. Compatibility SHALL validate the already selected operation rather than choose implementation or provider candidates.
+
+#### Scenario: Compare a universally borrowed callback
+
+- **WHEN** an expected for<'call> fn(&'call T) -> &'call T contract is supplied a compatible generic identity
+- **THEN** the offered signature satisfies the scoped rigid lifetime for every invocation without a runtime lifetime argument
+
+#### Scenario: Reject a nested quantified signature
+
+- **WHEN** a quantified callable signature contains a second quantified callable type in a parameter or result
+- **THEN** analysis reports the unsupported form without searching alternate quantifier arrangements
+
+#### Scenario: Reject placeholder escape
+
+- **WHEN** checking attempts to store a quantified invocation's rigid reference into surrounding longer-lived storage
+- **THEN** the escape is rejected at the assignment or retaining boundary

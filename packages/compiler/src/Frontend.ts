@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect'
+import * as BodyQuery from './BodyQuery.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationCompletion from './DeclarationCompletion.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
@@ -6,10 +7,12 @@ import * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as IncrementalReuse from './IncrementalReuse.js'
+import * as LifetimeAdmissionQuery from './LifetimeAdmissionQuery.js'
 import * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSemantics from './ModuleSemantics.js'
 import * as ModuleSurface from './ModuleSurface.js'
 import * as NameResolution from './NameResolution.js'
+import * as ResolutionWork from './ResolutionWork.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Ownership from './Ownership.js'
 import * as PhaseReport from './PhaseReport.js'
@@ -74,7 +77,9 @@ const analyzeHeaders = Effect.fnUntraced(function* (
     () => {
       const preliminary = NameResolution.resolve(closure, collected)
       const resolvers = NameResolution.makeResolvers(preliminary, collected)
-      return DeclarationCompletion.complete(collected, resolvers)
+      const completed = DeclarationCompletion.complete(collected, resolvers)
+      ResolutionWork.share(completed, collected)
+      return completed
     },
     (value) => value.modules.reduce((sum, module) => sum + module.members.length, 0),
     (value) => value.diagnostics.length,
@@ -113,6 +118,7 @@ const elaborateModules = Effect.fnUntraced(function* (
   headers: HeaderFacts,
   retained: ReadonlyMap<string, Elaboration.Result> = new Map(),
   precomputed: ReadonlyMap<string, Elaboration.Result> = new Map(),
+  bodyQuery?: BodyQuery.BodyQuery,
 ): Effect.fn.Return<ElaboratedModules> {
   const results = new Map<string, Elaboration.Result>()
   const computed = new Map<string, Elaboration.Result>()
@@ -134,9 +140,11 @@ const elaborateModules = Effect.fnUntraced(function* (
       headers: moduleHeaders,
       scope,
       index: headers.index,
+      ...(bodyQuery === undefined ? {} : { bodyQuery }),
     })
-    results.set(module.name, result)
-    computed.set(module.name, result)
+    const published = bodyQuery === undefined ? result : BodyQuery.publish(bodyQuery, result)
+    results.set(module.name, published)
+    computed.set(module.name, published)
   }
   return Object.freeze({ results, computed })
 })
@@ -153,12 +161,21 @@ const analyzeSemantics = Effect.fnUntraced(function* (
   precomputed?: {
     readonly results: ReadonlyMap<string, Elaboration.Result>
     readonly opaqueRealizations?: OpaqueRealization.Catalog
+    readonly bodyQueries?: BodyQuery.BodyQuery
   },
 ): Effect.fn.Return<Omit<FrontendFacts, 'resolution' | 'surfaces' | 'report'>> {
-  const retained =
+  const candidates =
     reuse === undefined
       ? new Map<string, ModuleSemantics.ModuleSemantics>()
       : yield* IncrementalReuse.retainedSemantics(closure, reuse.previous, reuse.invalidation)
+  const retained =
+    precomputed?.bodyQueries === undefined
+      ? candidates
+      : new Map(
+          [...candidates].filter(
+            ([name, semantics]) => precomputed.results.get(name) === semantics.elaboration,
+          ),
+        )
   const retainedElaborations = IncrementalReuse.retainedElaborations(retained)
   const results = yield* PhaseReport.measureEffectInto(
     report,
@@ -194,21 +211,34 @@ const analyzeSemantics = Effect.fnUntraced(function* (
     headers.index.diagnostics,
     generatedAggregates,
   )
+  const retainedOwnership = new Set<string>()
   const ownership = yield* PhaseReport.measureEffectInto(
     report,
     'ownership',
-    results.size - retained.size,
+    results.size,
     Effect.gen(function* () {
       const ownership = new Map<string, Ownership.ModuleOwnership>()
       const localSharedAccessBoundaries = Ownership.localSharedAccessBoundaryPlan(results)
       let ordinal = 0
       for (const [name, result] of results) {
         yield* IncrementalReuse.checkpointModuleBatch(ordinal)
-        ownership.set(
-          name,
-          retained.get(name)?.ownership ??
-            Ownership.checkModule(result, index, localSharedAccessBoundaries),
+        const checked = Ownership.checkModule(
+          result,
+          index,
+          localSharedAccessBoundaries,
+          precomputed?.bodyQueries,
         )
+        const previous = retained.get(name)?.ownership
+        const unchanged =
+          previous !== undefined &&
+          previous.functions.length === checked.functions.length &&
+          previous.functions.every((fn, ordinal) => fn === checked.functions[ordinal]) &&
+          previous.diagnostics.length === checked.diagnostics.length &&
+          previous.diagnostics.every(
+            (diagnostic, ordinal) => diagnostic === checked.diagnostics[ordinal],
+          )
+        if (unchanged) retainedOwnership.add(name)
+        ownership.set(name, unchanged ? previous : checked)
         ordinal += 1
       }
       return ownership
@@ -220,8 +250,8 @@ const analyzeSemantics = Effect.fnUntraced(function* (
       counters: () =>
         Object.freeze({
           _tag: 'ModuleReuseCounters' as const,
-          reused: retained.size,
-          recomputed: results.size - retained.size,
+          reused: retainedOwnership.size,
+          recomputed: results.size - retainedOwnership.size,
         }),
     },
   )
@@ -241,7 +271,8 @@ const analyzeSemantics = Effect.fnUntraced(function* (
   for (const [module, elaboration] of results) {
     yield* IncrementalReuse.checkpointModuleBatch(semanticOrdinal)
     const reused = retained.get(module)
-    if (reused !== undefined) semantics.set(module, reused)
+    if (reused !== undefined && reused.ownership === ownership.get(module))
+      semantics.set(module, reused)
     else {
       const moduleOwnership = ownership.get(module)
       if (moduleOwnership === undefined)
@@ -256,6 +287,7 @@ const analyzeSemantics = Effect.fnUntraced(function* (
     closure.diagnostics,
     headers.resolution.diagnostics,
     ...[...results.values()].map((result) => result.diagnostics),
+    LifetimeAdmissionQuery.check(index, results),
     opaqueRealizations.diagnostics,
     ...[...ownership.values()].map((facts) => facts.diagnostics),
   )
@@ -329,8 +361,21 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
   )
   yield* Effect.yieldNow
   const headers = yield* analyzeHeaders(closure, report, options)
-  const syntaxRetained = IncrementalReuse.syntaxRetained(closure, previous)
-  const currentElaboration = yield* elaborateModules(closure, headers, syntaxRetained)
+  const bodyQueries = BodyQuery.make(
+    headers.index,
+    [...(previous?.semantics.values() ?? [])].map((module) => module.elaboration),
+  )
+  const currentElaboration = yield* PhaseReport.measureEffectInto(
+    report,
+    'body-queries',
+    headers.index.modules.reduce((sum, module) => sum + module.declarations.length, 0),
+    elaborateModules(closure, headers, new Map(), new Map(), bodyQueries),
+    (value) =>
+      [...value.results.values()].reduce((sum, result) => sum + result.functions.length, 0),
+    (value) =>
+      [...value.results.values()].reduce((sum, result) => sum + result.diagnostics.length, 0),
+    { ...options, counters: () => BodyQuery.counters(bodyQueries) },
+  )
   const currentResults = currentElaboration.results
   const currentOpaqueRealizations = OpaqueRealization.analyze(currentResults)
   yield* Effect.yieldNow
@@ -377,9 +422,17 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
     previous === undefined ? undefined : { previous, invalidation: invalidation.value },
     Object.freeze({
       results: currentElaboration.computed,
+      bodyQueries,
       ...(previous === undefined ? { opaqueRealizations: currentOpaqueRealizations } : {}),
     }),
   )
+  const queryReport = report.findIndex((phase) => phase.phase === 'body-queries')
+  const measuredQuery = report[queryReport]
+  if (measuredQuery !== undefined)
+    report[queryReport] = PhaseReport.make({
+      ...measuredQuery,
+      counters: BodyQuery.counters(bodyQueries),
+    })
   return OpaqueRealization.withCatalog(
     Object.freeze({
       closure,

@@ -1,3 +1,4 @@
+import * as Lifetime from './Lifetime.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
@@ -5,6 +6,7 @@ import * as Elaboration from './Elaboration.js'
 import { analyzeExpression } from './ExpressionAnalysis.js'
 import type * as Hir from './Hir.js'
 import * as TypeInference from './internal/TypeInference.js'
+import * as Canonical from './internal/Canonical.js'
 import * as NameResolution from './NameResolution.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as SourceSpan from './SourceSpan.js'
@@ -41,6 +43,50 @@ export type Result =
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
     }
 
+/** The first declaration-local reason a runtime body needs static selection. */
+export type SelectionReason =
+  | 'StaticArguments'
+  | 'StaticParameter'
+  | 'StaticControlFlow'
+  | 'StaticBinding'
+  | 'UnresolvedConstant'
+  | 'CompileError'
+  | 'StaticCall'
+  | 'UnavailableDeclaration'
+  | 'UnavailableBody'
+
+/** Actual residual body work, distinct from runtime instance count and ownership verification. */
+export interface Counters {
+  readonly _tag: 'ResidualizationCounters'
+  readonly requests: number
+  readonly sourceReused: number
+  readonly checked: number
+  readonly cacheReused: number
+  readonly rejected: number
+  readonly failures: number
+}
+
+export interface Observation {
+  readonly declaration: DeclarationFacts.CanonicalId
+  readonly reason: SelectionReason | 'UnchangedBody'
+  readonly counters: Counters
+}
+
+type MutableCounters = { -readonly [Key in keyof Counters]: Counters[Key] }
+
+const emptyCounters = (): MutableCounters => ({
+  _tag: 'ResidualizationCounters',
+  requests: 0,
+  sourceReused: 0,
+  checked: 0,
+  cacheReused: 0,
+  rejected: 0,
+  failures: 0,
+})
+
+/** Work reported when target selection prevented residualization from starting. */
+export const noWork: Counters = Object.freeze(emptyCounters())
+
 interface State {
   readonly target: Target.Target
   readonly environment: StaticEvaluation.TargetEnvironment
@@ -50,6 +96,9 @@ interface State {
   readonly evaluation: StaticEvaluation.Evaluation<StaticValue.Value>
   readonly residuals: StaticEvaluation.Evaluation<ResidualBody>
   readonly staticResultOrigins: Map<string, StaticEvaluation.TextOrigin>
+  readonly counters: MutableCounters
+  readonly observations: Map<string, Observation & { readonly counters: MutableCounters }>
+  readonly selectionReasons: Map<DeclarationFacts.DeclarationFact, SelectionReason | undefined>
 }
 
 const stateSymbol: unique symbol = Symbol('Residualization.state')
@@ -78,8 +127,49 @@ export const make = (
       evaluation: StaticEvaluation.make<StaticValue.Value>(target, limits),
       residuals: StaticEvaluation.make<ResidualBody>(target, limits),
       staticResultOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
+      counters: emptyCounters(),
+      observations: new Map(),
+      selectionReasons: new Map(),
     },
   })
+
+/** Snapshots work performed by this target-scoped coordinator. */
+export const counters = (self: Coordinator): Counters =>
+  Object.freeze({ ...self[stateSymbol].counters })
+
+/** Snapshots declaration/reason attribution without counting retained proof work as execution. */
+export const observations = (self: Coordinator): ReadonlyArray<Observation> =>
+  Object.freeze(
+    [...self[stateSymbol].observations.entries()]
+      .toSorted(([left], [right]) => {
+        if (left < right) return -1
+        return left > right ? 1 : 0
+      })
+      .map(([, observation]) =>
+        Object.freeze({ ...observation, counters: Object.freeze({ ...observation.counters }) }),
+      ),
+  )
+
+const record = (
+  self: Coordinator,
+  declaration: DeclarationFacts.CanonicalId,
+  reason: Observation['reason'],
+  outcome: 'sourceReused' | 'checked' | 'cacheReused' | 'rejected',
+  failed: boolean,
+): void => {
+  const state = self[stateSymbol]
+  const key = Canonical.record('ResidualBodyWork', [declaration.module, declaration.name, reason])
+  let observation = state.observations.get(key)
+  if (observation === undefined) {
+    observation = { declaration, reason, counters: emptyCounters() }
+    state.observations.set(key, observation)
+  }
+  for (const work of [state.counters, observation.counters]) {
+    work.requests += 1
+    work[outcome] += 1
+    if (failed) work.failures += 1
+  }
+}
 
 const reflectAggregate = (
   self: Coordinator,
@@ -535,7 +625,7 @@ const staticValueType = (value: StaticValue.Value): Type.Type | undefined => {
   if (value._tag === 'BooleanValue') return 'bool'
   if (value._tag === 'CharacterValue') return 'char'
   if (value._tag === 'IntegerValue' || value._tag === 'FloatValue') return value.type
-  if (value._tag === 'TextValue') return Type.string
+  if (value._tag === 'TextValue') return Type.string(Lifetime.staticLifetime)
   return undefined
 }
 
@@ -676,50 +766,63 @@ const containsSyntaxKind = (node: SyntaxTree.Node, kind: SyntaxTree.NodeKind): b
   node.kind === kind ||
   node.children.some((child) => SyntaxTree.isNode(child) && containsSyntaxKind(child, kind))
 
-/**
- * Reports whether one runtime application needs a target/static-argument-specific body. Ordinary
- * functions retain their already-elaborated HIR so residualization cannot perturb unrelated
- * wrapper inlining, capture identities, or ownership facts.
- */
-export const requiresSelection = (self: Coordinator, key: ApplicationKey): boolean => {
+/** Explains static selection without re-walking one declaration for each ordinary specialization. */
+export const selectionReason = (
+  self: Coordinator,
+  key: ApplicationKey,
+): SelectionReason | undefined => {
+  if (key.staticArguments.length > 0) return 'StaticArguments'
   const declaration = declarationOf(self, key.declaration)
-  const input = declaration === undefined ? undefined : moduleInput(self, declaration)
-  const fact =
-    input === undefined
-      ? undefined
-      : Elaboration.executableFunctions(input.result).find(
-          (candidate) => candidate.declaration.id.ordinal === declaration?.id.ordinal,
+  if (declaration === undefined) return 'UnavailableDeclaration'
+  const cache = self[stateSymbol].selectionReasons
+  if (cache.has(declaration)) return cache.get(declaration)
+  const reason = (): SelectionReason | undefined => {
+    if (declaration.parameters.some((parameter) => parameter.phase === 'Static'))
+      return 'StaticParameter'
+    if (
+      containsSyntaxKind(declaration.syntax, 'StaticConditionalStatement') ||
+      containsSyntaxKind(declaration.syntax, 'StaticForStatement')
+    )
+      return 'StaticControlFlow'
+    const input = moduleInput(self, declaration)
+    const fact =
+      input === undefined
+        ? undefined
+        : Elaboration.executableFunctions(input.result).find(
+            (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
+          )
+    if (fact === undefined) return 'UnavailableBody'
+    let found: SelectionReason | undefined
+    Elaboration.visitStatementFacts(fact.statements, {
+      statement: (statement) => {
+        if (
+          found === undefined &&
+          statement._tag === 'BindStatement' &&
+          statement.binding.phase === 'Static'
         )
-  if (declaration === undefined) return true
-  if (
-    key.staticArguments.length > 0 ||
-    declaration.parameters.some((parameter) => parameter.phase === 'Static') ||
-    containsSyntaxKind(declaration.syntax, 'StaticConditionalStatement') ||
-    containsSyntaxKind(declaration.syntax, 'StaticForStatement')
-  )
-    return true
-  if (fact === undefined) return false
-  let required = false
-  Elaboration.visitStatementFacts(fact.statements, {
-    statement: (statement) => {
-      if (statement._tag === 'BindStatement' && statement.binding.phase === 'Static')
-        required = true
-    },
-    expression: (expression) => {
-      if (
-        (expression._tag === 'Constant' && expression.value === undefined) ||
-        expression._tag === 'CompileError' ||
-        (expression._tag === 'Call' &&
+          found = 'StaticBinding'
+      },
+      expression: (expression) => {
+        if (found !== undefined) return
+        if (expression._tag === 'Constant' && expression.value === undefined)
+          found = 'UnresolvedConstant'
+        else if (expression._tag === 'CompileError') found = 'CompileError'
+        else if (
+          expression._tag === 'Call' &&
           expression.reference._tag === 'Resolved' &&
           (expression.reference.declaration.phase === 'Static' ||
             expression.reference.declaration.parameters.some(
               (parameter) => parameter.phase === 'Static',
-            )))
-      )
-        required = true
-    },
-  })
-  return required
+            ))
+        )
+          found = 'StaticCall'
+      },
+    })
+    return found
+  }
+  const selected = reason()
+  cache.set(declaration, selected)
+  return selected
 }
 
 /** Produces one concrete residual HIR body for a demanded runtime application. */
@@ -752,9 +855,17 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
       span,
       Object.freeze([]),
     )
+    record(
+      self,
+      key.declaration,
+      declaration === undefined ? 'UnavailableDeclaration' : 'UnavailableBody',
+      'rejected',
+      true,
+    )
     return Object.freeze({ _tag: 'StaticFailure', failure, diagnostics: Object.freeze([]) })
   }
-  if (!requiresSelection(self, key)) {
+  const reason = selectionReason(self, key)
+  if (reason === undefined) {
     const fact = Elaboration.executableFunctions(input.result).find(
       (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
     )
@@ -764,13 +875,15 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         candidate.declaration.canonical.id.module === key.declaration.module &&
         candidate.declaration.canonical.id.name === key.declaration.name,
     )
-    if (fact !== undefined && fn !== undefined)
+    if (fact !== undefined && fn !== undefined) {
+      record(self, key.declaration, 'UnchangedBody', 'sourceReused', false)
       return Object.freeze({
         _tag: 'ResidualBody',
         function: fn,
         fact,
         diagnostics: Object.freeze([]),
       })
+    }
   }
   const application: StaticEvaluation.Application = Object.freeze({
     declaration: key.declaration,
@@ -780,10 +893,12 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     staticArguments: key.staticArguments,
     span: declaration.syntax.span,
   })
+  let executed = false
   const evaluated = StaticEvaluation.evaluateApplication(
     self[stateSymbol].residuals,
     application,
     (evaluation) => {
+      executed = true
       const typeSubstitution = TypeInference.substitution(
         declaration.typeParameters.map((parameter) => parameter.type),
         key.typeArguments,
@@ -874,6 +989,17 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
         }),
       )
     },
+  )
+  let branch: 'cacheReused' | 'checked' | 'rejected' = 'rejected'
+  if (evaluated.cached) branch = 'cacheReused'
+  else if (executed) branch = 'checked'
+  record(
+    self,
+    key.declaration,
+    reason ?? 'UnavailableBody',
+    branch,
+    evaluated._tag !== 'Complete' ||
+      evaluated.value.diagnostics.some((diagnostic) => diagnostic.severity === 'error'),
   )
   return evaluated._tag === 'Complete'
     ? evaluated.value

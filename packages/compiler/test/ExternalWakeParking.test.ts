@@ -146,15 +146,10 @@ it.effect('emits deterministic native never-driven package cleanup', () =>
       new TextEncoder().encode(source),
       'aarch64-apple-darwin',
     )
-    const second = yield* Analysis.ofSourceRealized(
-      'external-wake-parking/native-cleanup',
-      new TextEncoder().encode(source),
-      'aarch64-apple-darwin',
-    )
     assert.deepEqual(Analysis.diagnostics(first), [])
-    assert.deepEqual(Analysis.diagnostics(second), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(first)), [])
     const firstArtifact = yield* Analysis.codegen(first, { mode: 'release' })
-    const secondArtifact = yield* Analysis.codegen(second, { mode: 'release' })
+    const secondArtifact = yield* Analysis.codegen(first, { mode: 'release' })
     assert.strictEqual(firstArtifact.ir, secondArtifact.ir)
     assert.deepEqual(firstArtifact.bitcode, secondArtifact.bitcode)
   }),

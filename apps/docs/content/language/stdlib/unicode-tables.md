@@ -62,7 +62,7 @@ an inherent member declared in `impl UnicodeTables`, reached through
 ### Associated function `UnicodeTables.dataVersion`
 
 ```silk
-pub fn dataVersion() -> string
+pub fn dataVersion() -> string<'static>
 ```
 
 Returns the Unicode data version that defines all lookup results in this module.

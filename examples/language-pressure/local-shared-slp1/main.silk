@@ -54,7 +54,7 @@ fn enqueue(payload: i32, inbox: Shared<ReadyInbox>, identifier: i32) -> i32 {
   return payload + pushed - identifier
 }
 
-struct Stored<F: once fn(i32) -> i32> {
+struct Stored<F: once fn<'static>(i32) -> i32> {
   notify: F
 }
 
@@ -76,7 +76,7 @@ fn enqueueCaptured(payload: i32, self: CallbackCapture) -> i32 {
 
 pub fn notifyReady(payload: i32) -> i32 { return payload }
 
-struct ReadyCallback<F: once fn(i32) -> i32> {
+struct ReadyCallback<F: once fn<'static>(i32) -> i32> {
   notify: F
   capture: CallbackCapture
 }
@@ -85,7 +85,7 @@ struct Published<A> {
   value: A
 }
 
-struct DeferredState<A, F: once fn(i32) -> i32> {
+struct DeferredState<A, F: once fn<'static>(i32) -> i32> {
   publication: Published<A>
   first: ReadyCallback<F>
   second: ReadyCallback<F>
@@ -95,7 +95,7 @@ struct DeferredState<A, F: once fn(i32) -> i32> {
   publications: i32
 }
 
-struct Producer<F: once fn(i32) -> i32> {
+struct Producer<F: once fn<'static>(i32) -> i32> {
   state: Shared<DeferredState<Payload, F>>
 }
 
@@ -103,13 +103,13 @@ struct Waiter<T> {
   state: Shared<T>
 }
 
-struct Extracted<F: once fn(i32) -> i32> {
+struct Extracted<F: once fn<'static>(i32) -> i32> {
   first: ReadyCallback<F>
   second: ReadyCallback<F>
   third: ReadyCallback<F>
 }
 
-fn register<F: once fn(i32) -> i32>(
+fn register<F: once fn<'static>(i32) -> i32>(
   self: &mut DeferredState<Payload, F>,
   callback: ReadyCallback<F>,
 ) -> ReadyCallback<F> {
@@ -127,7 +127,7 @@ fn register<F: once fn(i32) -> i32>(
   }
 }
 
-fn publishState<F: once fn(i32) -> i32>(
+fn publishState<F: once fn<'static>(i32) -> i32>(
   self: &mut DeferredState<Payload, F>,
   value: Payload,
   firstReplacement: ReadyCallback<F>,
@@ -143,7 +143,7 @@ fn publishState<F: once fn(i32) -> i32>(
   return Extracted { first: move first, second: move second, third: move third }
 }
 
-fn invoke<F: once fn(i32) -> i32>(pending: ReadyCallback<F>, value: i32) -> i32 {
+fn invoke<F: once fn<'static>(i32) -> i32>(pending: ReadyCallback<F>, value: i32) -> i32 {
   let ReadyCallback<F> { notify, capture } = move pending
   return enqueueCaptured(notify(value), move capture)
 }
@@ -157,7 +157,7 @@ fn observePayload(
   return readPayload(&self.publication.value)
 }
 
-fn publish<F: once fn(i32) -> i32>(
+fn publish<F: once fn<'static>(i32) -> i32>(
   producer: Producer<F>,
   value: Payload,
   firstReplacement: ReadyCallback<F>,

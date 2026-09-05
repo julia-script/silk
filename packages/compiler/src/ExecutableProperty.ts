@@ -4,10 +4,12 @@ import * as Diagnostic from './Diagnostic.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
+import * as Lifetime from './Lifetime.js'
 import * as TypeInference from './internal/TypeInference.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import * as Type from './Type.js'
+import * as TypeOutlives from './TypeOutlives.js'
 
 export type Property = Type.SealedStaticProperty
 
@@ -62,14 +64,23 @@ const nestedLoanCauses = (
   type: Type.Type,
   path: ReadonlyArray<string>,
   active: ReadonlySet<string> = new Set(),
+  assumptions: Lifetime.Assumptions = TypeOutlives.context(index.modules).assumptions,
 ): ReadonlyArray<Cause> => {
-  if (Type.isString(type) || Type.isReference(type) || Type.isSlice(type) || Type.isSlot(type))
-    return Object.freeze([cause('NestedLoan', [...path, Type.encode(type)])])
+  if (Type.isString(type) || Type.isReference(type) || Type.isSlice(type))
+    return TypeOutlives.check(
+      type,
+      Lifetime.staticLifetime,
+      TypeOutlives.context(index.modules),
+      (longer, shorter) => Lifetime.outlives(assumptions, longer, shorter),
+    )
+      ? []
+      : Object.freeze([cause('NestedLoan', [...path, Type.encode(type)])])
+  if (Type.isSlot(type)) return Object.freeze([cause('NestedLoan', [...path, Type.encode(type)])])
   if (Type.isFixedArray(type))
-    return nestedLoanCauses(index, type.element, [...path, 'element'], active)
+    return nestedLoanCauses(index, type.element, [...path, 'element'], active, assumptions)
   if (Type.isUnion(type))
     return type.members.flatMap((member, ordinal) =>
-      nestedLoanCauses(index, member, [...path, `member#${ordinal}`], active),
+      nestedLoanCauses(index, member, [...path, `member#${ordinal}`], active, assumptions),
     )
   if (Type.isCallable(type) || Type.isEffect(type) || Type.isRepresented(type)) return []
   if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return []
@@ -109,6 +120,7 @@ const nestedLoanCauses = (
           `${owner}.${field.name._tag === 'Present' ? field.name.spelling : `#${field.id.ordinal}`}`,
         ],
         next,
+        assumptions,
       )
     }
     return [cause('Unavailable', [...path, `${owner}.#${field.id.ordinal}`])]
@@ -125,6 +137,7 @@ export interface EnvironmentCapture {
 const detachedCapture = (
   index: DeclarationIndex.Index,
   capture: EnvironmentCapture,
+  assumptions: Lifetime.Assumptions,
 ): ReadonlyArray<Cause> => {
   const path = [`capture#${capture.ordinal}`, Type.encode(capture.type)]
   if (
@@ -135,20 +148,27 @@ const detachedCapture = (
   if (
     capture.access === 'Shared' ||
     capture.access === 'Exclusive' ||
-    Type.isReference(capture.type) ||
-    Type.isSlice(capture.type) ||
-    Type.isString(capture.type) ||
+    ((Type.isReference(capture.type) ||
+      Type.isSlice(capture.type) ||
+      Type.isString(capture.type)) &&
+      !TypeOutlives.check(
+        capture.type,
+        Lifetime.staticLifetime,
+        TypeOutlives.context(index.modules),
+        (longer, shorter) => Lifetime.outlives(assumptions, longer, shorter),
+      )) ||
     Type.isSlot(capture.type)
   )
     return Object.freeze([cause('LexicalLoan', path)])
-  return nestedLoanCauses(index, capture.type, path)
+  return nestedLoanCauses(index, capture.type, path, new Set(), assumptions)
 }
 
 /** Proves detachment from retained invocation/drop dependencies, never from result payload rows. */
 export const detachedOfEnvironment = (
   index: DeclarationIndex.Index,
   captures: ReadonlyArray<EnvironmentCapture>,
-): Verdict => verdict(captures.flatMap((capture) => detachedCapture(index, capture)))
+  assumptions: Lifetime.Assumptions = TypeOutlives.context(index.modules).assumptions,
+): Verdict => verdict(captures.flatMap((capture) => detachedCapture(index, capture, assumptions)))
 
 /** Proves that one ordinary value representation owns its complete retained environment. */
 export const detachedOfType = (index: DeclarationIndex.Index, type: Type.Type): Verdict =>
@@ -170,11 +190,7 @@ const sameArguments = (
   left: ReadonlyArray<Type.GenericArgument>,
   right: ReadonlyArray<Type.GenericArgument>,
 ): boolean =>
-  left.length === right.length &&
-  left.every((argument, ordinal) => {
-    const candidate = right.at(ordinal)
-    return candidate !== undefined && Type.equalsGenericArgument(argument, candidate)
-  })
+  Type.runtimeArgumentKeys(left).join('\0') === Type.runtimeArgumentKeys(right).join('\0')
 
 const callableSubjectOf = (
   discovery: Instances.Discovery,
@@ -275,6 +291,35 @@ export const derive = (
   index: DeclarationIndex.Index,
   callableIdentity: (self: Instances.CallableInstance) => string,
 ): ReadonlyArray<Fact> => {
+  const declaredAssumptions = TypeOutlives.context(index.modules).assumptions
+  // Selected instance arguments already satisfy their declaration's lifetime preconditions.
+  // Transport those predicates through the existing substitution without assuming Detached.
+  const owners = new Map(
+    discovery.instances.map((instance) => [Instances.keyText(instance.key), instance]),
+  )
+  const ownerAssumptions = new Map<string, Lifetime.Assumptions>()
+  const assumptionsForOwner = (owner: Instances.InstanceKey): Lifetime.Assumptions => {
+    const key = Instances.keyText(owner)
+    const cached = ownerAssumptions.get(key)
+    if (cached !== undefined) return cached
+    const instance = owners.get(key)
+    if (instance === undefined) return declaredAssumptions
+    const bounds = [
+      ...(instance.specialization.compatibility?.assumptions.bounds ?? []),
+      ...(
+        DeclarationFacts.executableLifetimes(instance.function.declaration).lifetimeBounds ?? []
+      ).map((bound) => ({
+        longer: Type.substituteLifetime(bound.longer, instance.substitution),
+        shorter: Type.substituteLifetime(bound.shorter, instance.substitution),
+      })),
+    ]
+    const assumptions =
+      bounds.length === 0
+        ? declaredAssumptions
+        : Lifetime.assumptions([...declaredAssumptions.bounds, ...bounds])
+    ownerAssumptions.set(key, assumptions)
+    return assumptions
+  }
   const effects = discovery.effects.map((effect): Fact =>
     Object.freeze({
       _tag: 'ExecutablePropertyFact',
@@ -283,7 +328,7 @@ export const derive = (
         index,
         effect.captures.map((capture) => ({ type: capture.type })),
       ),
-      detached: detachedOfEnvironment(index, effect.captures),
+      detached: detachedOfEnvironment(index, effect.captures, assumptionsForOwner(effect.owner)),
       nonParking: nonParkingOfSummary(effect.suspension),
     }),
   )
@@ -296,7 +341,11 @@ export const derive = (
         index,
         callable.captures.map((capture) => ({ type: capture.type })),
       ),
-      detached: detachedOfEnvironment(index, callable.captures),
+      detached: detachedOfEnvironment(
+        index,
+        callable.captures,
+        assumptionsForOwner(callable.owner),
+      ),
       nonParking: (() => {
         if (callable.target._tag !== 'DeclarationCallableTarget') return satisfied
         const declaration = callable.target.declaration
@@ -304,11 +353,7 @@ export const derive = (
           (instance) =>
             instance.key.declaration.module === declaration.module &&
             instance.key.declaration.name === declaration.name &&
-            instance.key.typeArguments.length === callable.typeArguments.length &&
-            instance.key.typeArguments.every((argument, ordinal) => {
-              const expected = callable.typeArguments.at(ordinal)
-              return expected !== undefined && Type.equalsGenericArgument(argument, expected)
-            }),
+            sameArguments(instance.key.typeArguments, callable.typeArguments),
         )
         return target === undefined
           ? verdict([cause('Unavailable', [`callable:${identity}`])])
@@ -442,6 +487,7 @@ const factOfExact = (
   self: Instances.Discovery,
   exact: Type.ExactRepresentationArgument,
   facts: ReadonlyArray<Fact>,
+  property: Type.SealedStaticProperty,
 ): Fact | undefined => {
   if (exact.identity._tag === 'EffectIdentityArgument') {
     const effectIdentity = exact.identity
@@ -467,8 +513,12 @@ const factOfExact = (
     const environment = identity.environment
     return (
       environment !== undefined &&
-      Type.callableEnvironmentKey(Instances.callableEnvironmentIdentity(candidate)) ===
-        Type.callableEnvironmentKey(environment)
+      (property === 'Intrinsic.NonParking'
+        ? Type.runtimeCallableEnvironmentIdentityKey(
+            Instances.callableEnvironmentIdentity(candidate),
+          ) === Type.runtimeCallableEnvironmentIdentityKey(environment)
+        : Type.callableEnvironmentKey(Instances.callableEnvironmentIdentity(candidate)) ===
+          Type.callableEnvironmentKey(environment))
     )
   })
   if (callable !== undefined) {
@@ -488,8 +538,8 @@ const factOfExact = (
             sameArguments(instance.key.typeArguments, identity.typeArguments),
         )
       : undefined
-  const summary =
-    target === undefined ? SuspensionMode.direct : Instances.suspensionOf(self, target.key)
+  if (target === undefined) return undefined
+  const summary = Instances.suspensionOf(self, target.key)
   return Object.freeze({
     _tag: 'ExecutablePropertyFact',
     subject: Object.freeze({ _tag: 'Callable', identity: identity.identity }),
@@ -564,8 +614,12 @@ export const violationDiagnostics = (
     const alternatives = exactAlternatives(argument)
     const ordinary = Type.isTypeArgument(argument) ? argument : undefined
     if (alternatives.length === 0 && ordinary === undefined) return []
-    const exactFacts = alternatives.map((alternative) => factOfExact(self, alternative, facts))
     return parameter.staticProperties.flatMap((property) => {
+      // NonParking follows executable control flow shared by lifetime-erased specializations.
+      // Detached must retain the selected semantic environment rather than borrow that proof.
+      const exactFacts = alternatives.map((alternative) =>
+        factOfExact(self, alternative, facts, property),
+      )
       let ordinaryVerdict: Verdict | undefined
       if (ordinary === undefined) {
         ordinaryVerdict = undefined

@@ -118,7 +118,7 @@ Returns whether `field` carries a label or a position.
 ## `fieldLabel`
 
 ```silk
-pub static fn fieldLabel<Owner, Value>(static field: Intrinsic.Field<Owner, Value>) -> string
+pub static fn fieldLabel<Owner, Value>(static field: Intrinsic.Field<Owner, Value>) -> string<'static>
 ```
 
 Returns the source label of a labeled field.
@@ -138,7 +138,7 @@ Returns the source position of a positional field.
 ## `borrowField`
 
 ```silk
-pub fn borrowField<Owner, Value>(owner: &Owner, static field: Intrinsic.Field<Owner, Value>) -> &Value
+pub fn borrowField<Owner, Value, 'life2>(owner: &'life2 Owner, static field: Intrinsic.Field<Owner, Value>) -> &'life2 Value
 ```
 
 Borrows exactly the runtime field authorized by one static descriptor.

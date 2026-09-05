@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Layout from '../src/Layout.js'
 import * as LayoutEncode from '../src/LayoutEncode.js'
 import * as LayoutVerify from '../src/LayoutVerify.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 
@@ -28,7 +29,7 @@ it.effect('selects canonical string storage and calling lanes on every current t
       assert.strictEqual(selected._tag, 'Available')
       if (selected._tag !== 'Available') continue
 
-      const entry = Layout.entry(selected.value, Type.string)
+      const entry = Layout.entry(selected.value, Type.string(Lifetime.staticLifetime))
       assert.strictEqual(entry?.representation._tag, 'String')
       if (entry?.representation._tag !== 'String') continue
       assert.deepEqual(
@@ -50,16 +51,21 @@ it.effect('selects canonical string storage and calling lanes on every current t
         },
       )
 
-      const shape = Layout.callingShape(selected.value, Type.string)
+      const shape = Layout.callingShape(selected.value, Type.string(Lifetime.staticLifetime))
       assert.strictEqual(shape?.tree._tag, 'StringShape')
       assert.strictEqual(shape?.laneCount, 2)
       assert.deepEqual(
         shape?.lanes.map((lane) => ({
           type: typeof lane.type === 'string' ? lane.type : lane.type._tag,
-          provenance: typeof lane.type === 'string' ? undefined : Type.encode(lane.type.element),
+          provenance:
+            typeof lane.type === 'string' ? undefined : Type.runtimeKey(lane.type.element),
           bits: typeof lane.type === 'string' ? undefined : lane.type.bits,
           selector: lane.path.at(0)?._tag,
-          offset: LayoutVerify.laneOffset(selected.value, Type.string, lane.path),
+          offset: LayoutVerify.laneOffset(
+            selected.value,
+            Type.string(Lifetime.staticLifetime),
+            lane.path,
+          ),
         })),
         [
           {
@@ -92,10 +98,10 @@ it.effect('rejects slice representation and calling-shape facts forged for strin
     assert.strictEqual(selected._tag, 'Available')
     if (selected._tag !== 'Available') return
 
-    const stringEntry = Layout.entry(selected.value, Type.string)
-    const sliceType = Type.slice('Shared', 'u8')
+    const stringEntry = Layout.entry(selected.value, Type.string(Lifetime.staticLifetime))
+    const sliceType = Type.slice('Shared', 'u8', Lifetime.staticLifetime)
     const sliceEntry = Layout.entry(selected.value, sliceType)
-    const stringShape = Layout.callingShape(selected.value, Type.string)
+    const stringShape = Layout.callingShape(selected.value, Type.string(Lifetime.staticLifetime))
     const sliceShape = Layout.callingShape(selected.value, sliceType)
     if (
       stringEntry === undefined ||

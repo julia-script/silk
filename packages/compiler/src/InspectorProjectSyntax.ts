@@ -181,42 +181,7 @@ const hirIdentity = (declaration: Hir.HirFunction['declaration']): string => {
   }
 }
 
-const hirTypeText = (type: Type.Type): string => {
-  if (typeof type === 'string') return type
-
-  switch (type._tag) {
-    case 'NominalType': {
-      const argumentsText =
-        type.arguments.length === 0
-          ? ''
-          : `<${type.arguments.map(Type.encodeGenericArgument).join(', ')}>`
-      return `${type.module}.${type.name}${argumentsText}`
-    }
-    case 'TypeParameter':
-      return type.name
-    case 'FixedArrayType':
-      return `Array<${hirTypeText(type.element)}, ${type.length}>`
-    case 'SliceType':
-      return `${type.access === 'Exclusive' ? '&mut ' : '&'}[${hirTypeText(type.element)}]`
-    case 'EffectType': {
-      const failureType = Type.failureType(type)
-      const failureText = failureType === 'never' ? '' : ` ! ${hirTypeText(failureType)}`
-      return `Effect<${hirTypeText(type.success)}${failureText}> ${type.access.toLowerCase()}`
-    }
-    case 'CallableType':
-      return `(${type.parameters.map(hirTypeText).join(', ')}) -> ${hirTypeText(type.result)} ${type.mode.toLowerCase()}`
-    case 'ForeignFunctionType':
-      return Type.encode(type)
-    case 'ReferenceType':
-      return `${type.access === 'Exclusive' ? '&mut ' : '&'}${hirTypeText(type.target)}`
-    case 'PointerType':
-      return `${type.mutable ? '*mut ' : '*const '}${hirTypeText(type.pointee)}`
-    case 'RepresentedType':
-      return Type.encode(type)
-    case 'StructuralUnionType':
-      return type.members.map(hirTypeText).join(' | ')
-  }
-}
+const hirTypeText = (type: Type.Type): string => Type.encode(type)
 
 const hirExpressionLabel = (expression: Hir.Expression): string => {
   switch (expression._tag) {
@@ -439,10 +404,11 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
     if (node._tag === 'Write') {
       let root: string
       if (node.place._tag === 'WritePlace') {
-        root =
-          node.place.root._tag === 'BindingWriteRoot'
-            ? `b${node.place.root.binding.ordinal}`
-            : `p${node.place.root.parameter.ordinal}`
+        if (node.place.root._tag === 'BindingWriteRoot')
+          root = `b${node.place.root.binding.ordinal}`
+        else if (node.place.root._tag === 'PatternWriteRoot')
+          root = `match-b${node.place.root.binding.ordinal}`
+        else root = `p${node.place.root.parameter.ordinal}`
       } else {
         root =
           node.place.root._tag === 'BindingSliceRoot'

@@ -1,9 +1,12 @@
+import * as BodyLifetime from './BodyLifetime.js'
+import * as Lifetime from './Lifetime.js'
 import * as CallableContract from './CallableContract.js'
 import * as ConformanceGoal from './ConformanceGoal.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationLifetime from './DeclarationLifetime.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as DeclarationResolution from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -59,6 +62,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as NameResolution from './NameResolution.js'
 import * as ProviderSelection from './ProviderSelection.js'
+import * as ResolutionWork from './ResolutionWork.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceFile from './SourceFile.js'
@@ -67,6 +71,7 @@ import { unsafeCallDiagnostic } from './StatementAnalysis.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
 import * as Type from './Type.js'
+import * as TypeCompatibility from './TypeCompatibility.js'
 
 export const analyzeArgumentNodes = (
   source: SourceFile.SourceFile,
@@ -78,7 +83,11 @@ export const analyzeArgumentNodes = (
   resolution: ResolutionContext,
   expectedTypes: ReadonlyArray<SemanticType | undefined> = Object.freeze([]),
 ): ArgumentsResult => {
+  const inferred = new Map<string, Type.GenericArgument>()
+  const lifetimes = selectedCallLifetimes(site, [], resolution)
   const analyzed = nodes.flatMap((element, ordinal): ReadonlyArray<ExpressionResult> => {
+    const pattern = expectedTypes.at(ordinal)
+    const expected = pattern === undefined ? undefined : Type.substitute(pattern, inferred)
     const result = analyzeExpression(
       source,
       element,
@@ -86,9 +95,13 @@ export const analyzeArgumentNodes = (
       declaration,
       scope,
       resolution,
-      expectedTypes.at(ordinal),
-      true,
+      expected,
     )
+    if (pattern !== undefined && result?.type !== undefined) {
+      const attempt = new Map(inferred)
+      if (TypeInference.infer(pattern, result.type, attempt, lifetimes.inference))
+        commitSpecialization(inferred, attempt)
+    }
     return result === undefined ? [] : [result]
   })
   const facts = analyzed.map((result, ordinal) =>
@@ -118,6 +131,7 @@ export function analyzeArguments(
   let target: SourceCallable | undefined
   let builtinParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   let builtinTypeParameters: ReadonlyArray<Type.Parameter> = Object.freeze([])
+  let builtinLifetimes: ReadonlyArray<Lifetime.Bound> = Object.freeze([])
   let boundParameters: ReadonlyArray<SemanticType> = Object.freeze([])
   if (first !== undefined && second === undefined) {
     const name = spelling(source, first)
@@ -150,6 +164,11 @@ export function analyzeArguments(
       builtinParameters =
         builtin?.parameters ?? contract?.parameters.map((parameter) => parameter.type) ?? []
       builtinTypeParameters = builtin?.typeParameters ?? contract?.binders ?? []
+      const result = builtin?.result ?? contract?.result
+      builtinLifetimes = freeLifetimeBinders([
+        ...builtinParameters,
+        ...(result === undefined ? [] : [result]),
+      ])
     } else if (qualifier._tag === 'Namespace') {
       const member = DeclarationFacts.lookup(resolution.index, qualifier.module, memberSpelling)
       target =
@@ -173,25 +192,45 @@ export function analyzeArguments(
         memberSpelling,
         memberToken,
       )
-      if (bound?._tag === 'BoundOperation') boundParameters = bound.reference.parameters
+      if (bound?._tag === 'BoundOperation')
+        boundParameters = instantiateInterfaceReference(
+          bound.reference,
+          call,
+          resolution,
+        ).parameters
     }
   }
   const declaredTypeParameters =
     target?.typeParameters.map((parameter) => parameter.type) ?? Object.freeze([])
   const explicitTypes = callTypeArguments?.types
-  const builtinSubstitution =
+  const explicitBuiltinSubstitution =
     callTypeArguments?.explicit === true &&
     explicitTypes !== undefined &&
     explicitTypes.length <= builtinTypeParameters.length
       ? TypeInference.prefixSubstitution(builtinTypeParameters, explicitTypes)
       : undefined
+  const builtinSubstitution = selectedCallLifetimes(
+    call,
+    builtinLifetimes,
+    resolution,
+    explicitBuiltinSubstitution,
+  ).substitution
   // An explicit prefix is context for the value arguments just as a complete list is: the
   // parameters it binds become concrete expected types, and the ones it leaves open stay symbolic
   // exactly as they are when nothing was written.
-  const substitution =
+  const explicitSubstitution =
     callTypeArguments?.explicit === true && explicitTypes !== undefined
       ? TypeInference.prefixSubstitution(declaredTypeParameters, explicitTypes)
       : undefined
+  const substitution =
+    target === undefined
+      ? explicitSubstitution
+      : selectedCallLifetimes(
+          call,
+          DeclarationFacts.executableLifetimes(target).lifetimeBinders,
+          resolution,
+          explicitSubstitution,
+        ).substitution
   let selectedParameters: ReadonlyArray<SemanticType | undefined>
   if (boundParameters.length > 0) selectedParameters = boundParameters
   else if (builtinParameters.length > 0) {
@@ -236,13 +275,14 @@ export interface CallContractResult {
 export interface CallTypeArgumentsResult {
   readonly explicit: boolean
   readonly facts: ReadonlyArray<TypeArgumentFact>
-  readonly types?: ReadonlyArray<SemanticType>
+  readonly types?: ReadonlyArray<Type.GenericArgument>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
 
 const isTypeArgumentNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
   SyntaxTree.isNode(element) &&
-  (element.kind === 'RequirementSelector' ||
+  (element.kind === 'LifetimeType' ||
+    element.kind === 'RequirementSelector' ||
     element.kind === 'TypePath' ||
     element.kind === 'AppliedType' ||
     element.kind === 'FixedArrayType' ||
@@ -371,24 +411,51 @@ export const analyzeCallTypeArguments = (
         : Object.freeze([
             Diagnostic.invalidRequirementType(`role ${rolePath.spelling}`, rolePath.syntax.span),
           ])
-    const raw = DeclarationCollection.analyzeDeclaredType(source, argumentNode, environment)
+    const body = resolution.bodyLifetimes
+    const lifetimeContext =
+      body === undefined
+        ? undefined
+        : DeclarationLifetime.forHeader(
+            source,
+            body.owner,
+            argumentNode,
+            environment,
+            body,
+            (path) => {
+              const rawPath = DeclarationCollection.analyzeDeclaredType(
+                source,
+                path,
+                environment,
+                true,
+              ).fact
+              if (rawPath._tag !== 'Unresolved' || rawPath.path === undefined) return undefined
+              const target = NameResolution.resolveType(
+                nameResolution,
+                resolution.index,
+                source.id,
+                rawPath.path,
+              ).fact
+              return target._tag === 'Resolved' && Type.isNominal(target.type)
+                ? DeclarationResolution.memberByNominal(
+                    resolution.index.modules,
+                    target.type,
+                  )?.typeParameters.map((parameter) => parameter.type)
+                : undefined
+            },
+          )
+    const raw = DeclarationCollection.analyzeDeclaredType(
+      source,
+      argumentNode,
+      environment,
+      true,
+      lifetimeContext,
+    )
     const resolved = DeclarationResolution.resolveTypeFact(
       resolution.index,
       source.id,
       raw.fact,
       (module, path) => NameResolution.resolveType(nameResolution, resolution.index, module, path),
     )
-    let invalidBorrow: Diagnostic.Diagnostic | undefined
-    if (
-      resolved.fact._tag === 'Resolved' &&
-      (Type.isReference(resolved.fact.type)
-        ? Type.containsPositionRestrictedBorrow(resolved.fact.type.target)
-        : Type.containsPositionRestrictedBorrow(resolved.fact.type))
-    ) {
-      invalidBorrow = Diagnostic.borrowedViewTypePosition('type argument', node.span)
-    } else {
-      invalidBorrow = undefined
-    }
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'TypeArgument' as const,
@@ -396,18 +463,14 @@ export const analyzeCallTypeArguments = (
         syntax: node,
         declared: resolved.fact,
         ...(requirementRole === undefined ? {} : { requirementRole }),
-        ...(resolved.fact._tag === 'Resolved' &&
-        invalidBorrow === undefined &&
+        ...((resolved.fact._tag === 'Resolved' || resolved.fact._tag === 'Lifetime') &&
         roleDiagnostics.length === 0
-          ? { type: resolved.fact.type }
+          ? {
+              type: resolved.fact._tag === 'Lifetime' ? resolved.fact.lifetime : resolved.fact.type,
+            }
           : {}),
       }),
-      diagnostics: Diagnostic.merge(
-        raw.diagnostics,
-        resolved.diagnostics,
-        roleDiagnostics,
-        ...(invalidBorrow === undefined ? [] : [[invalidBorrow]]),
-      ),
+      diagnostics: Diagnostic.merge(raw.diagnostics, resolved.diagnostics, roleDiagnostics),
     })
   })
   const facts = Object.freeze(analyzed.map((entry) => entry.fact))
@@ -417,9 +480,7 @@ export const analyzeCallTypeArguments = (
     facts,
     ...(available.every((type) => type !== undefined)
       ? {
-          types: Object.freeze(
-            available.filter((type): type is SemanticType => type !== undefined),
-          ),
+          types: Object.freeze(available.filter((type) => type !== undefined)),
         }
       : {}),
     diagnostics: Diagnostic.merge(...analyzed.map((entry) => entry.diagnostics)),
@@ -565,6 +626,9 @@ export const genericArgumentOfTypeArgument = (
 ): Type.GenericArgument | undefined => {
   const writtenType = fact.type
   if (writtenType === undefined) return undefined
+  if (parameter.kind === 'Lifetime')
+    return Lifetime.isLifetime(writtenType) ? writtenType : undefined
+  if (Lifetime.isLifetime(writtenType)) return undefined
   if (parameter.kind === 'Value') return Type.isTypeArgument(writtenType) ? writtenType : undefined
   if (parameter.kind === 'CallableRepresentation' || parameter.kind === 'EffectRepresentation') {
     if (
@@ -608,6 +672,99 @@ export const genericArgumentOfTypeArgument = (
       ])
 }
 
+interface SelectedCallLifetimes {
+  readonly substitution: Type.Substitution
+  readonly inference?: TypeInference.LifetimeInference
+  readonly compatibility?: TypeCompatibility.Context | undefined
+}
+
+/** Opens an inherent member's header lifetimes before contextual argument checking. */
+export const instantiateSourceParameters = (
+  declaration: SourceCallable,
+  call: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): ReadonlyArray<SemanticType | undefined> => {
+  const selected = selectedCallLifetimes(
+    call,
+    DeclarationFacts.executableLifetimes(declaration).lifetimeBinders,
+    resolution,
+  )
+  return declaration.parameters.map((parameter) =>
+    parameter.declaredType._tag === 'Resolved'
+      ? Type.substitute(parameter.declaredType.type, selected.substitution)
+      : undefined,
+  )
+}
+
+/** Instantiates only the already selected contract's binders, at one declaration-local call site. */
+const selectedCallLifetimes = (
+  call: SyntaxTree.Node,
+  binders: ReadonlyArray<Lifetime.Bound>,
+  resolution: ResolutionContext | undefined,
+  initial: Type.Substitution = new Map(),
+): SelectedCallLifetimes => {
+  const substitution = new Map(initial)
+  const body = resolution?.bodyLifetimes
+  if (body !== undefined) {
+    for (const [ordinal, binder] of binders.entries()) {
+      if (substitution.has(Lifetime.key(binder))) continue
+      const region = BodyLifetime.region(body, call, 'Call', ordinal)
+      if (region !== undefined) substitution.set(Lifetime.key(binder), region)
+    }
+  }
+  const compatibility = resolution?.lifetimeCompatibility
+  return {
+    substitution,
+    compatibility,
+    ...(compatibility === undefined
+      ? {}
+      : {
+          inference: {
+            compatibility,
+            typeOutlives: (type, lifetime) =>
+              TypeCompatibility.typeOutlives(compatibility, { type, lifetime }),
+            accepts: (source: Lifetime.Lifetime, target: Lifetime.Lifetime, invariant: boolean) =>
+              typesCompatible(Type.string(source), Type.string(target), compatibility) &&
+              (!invariant ||
+                typesCompatible(Type.string(target), Type.string(source), compatibility)),
+          },
+        }),
+  }
+}
+
+/** Discharges written call preconditions, retaining local obligations for the body's solver. */
+const selectedLifetimeBoundDiagnostics = (
+  bounds: ReadonlyArray<Lifetime.Outlives>,
+  substitution: Type.Substitution,
+  compatibility: TypeCompatibility.Context | undefined,
+  span: SourceSpan.SourceSpan,
+  typeBounds: ReadonlyArray<Type.TypeOutlives> = [],
+): ReadonlyArray<Diagnostic.Diagnostic> => [
+  ...bounds.flatMap((bound) => {
+    const longer = Type.substituteLifetime(bound.longer, substitution)
+    const shorter = Type.substituteLifetime(bound.shorter, substitution)
+    return typesCompatible(Type.string(longer), Type.string(shorter), compatibility)
+      ? []
+      : [
+          Diagnostic.unsatisfiedLifetimeBound(
+            Lifetime.display(longer),
+            Lifetime.display(shorter),
+            span,
+          ),
+        ]
+  }),
+  ...typeBounds.flatMap((bound) => {
+    const type = Type.substitute(bound.type, substitution)
+    const lifetime = Type.substituteLifetime(bound.lifetime, substitution)
+    return TypeCompatibility.typeOutlives(compatibility ?? TypeCompatibility.context(), {
+      type,
+      lifetime,
+    })
+      ? []
+      : [Diagnostic.unsatisfiedTypeOutlives(Type.display(type), Lifetime.display(lifetime), span)]
+  }),
+]
+
 /**
  * Specializes a call from an explicit prefix of its type arguments plus its value arguments. The
  * prefix seeds the substitution and the parameters past it are inferred exactly as they are when
@@ -627,26 +784,53 @@ export const seededSpecialization = (
   span: SourceSpan.SourceSpan,
   deferred: ReadonlySet<string> = new Set(),
   enclosingSubstitution: Type.Substitution = new Map(),
+  lifetimes?: SelectedCallLifetimes,
 ): SeededSpecialization => {
   const written = new Map<string, TypeArgumentFact>()
-  const seeded = new Map<string, Type.GenericArgument>()
+  const selectedParameters = new Map<TypeArgumentFact, Type.Parameter>()
+  const seeded = new Map<string, Type.GenericArgument>(lifetimes?.substitution)
   const conflicts: Array<SpecializationConflict> = []
+  let lifetimeOrdinal = 0
+  let ordinaryOrdinal = 0
+  const lifetimeParameters = declared.filter((parameter) => parameter.kind === 'Lifetime')
+  const ordinaryParameters = declared.filter((parameter) => parameter.kind !== 'Lifetime')
   for (const fact of explicit) {
-    const parameter = declared.at(fact.ordinal)
+    const parameter =
+      fact.type !== undefined && Lifetime.isLifetime(fact.type)
+        ? lifetimeParameters.at(lifetimeOrdinal++)
+        : ordinaryParameters.at(ordinaryOrdinal++)
     const writtenType = fact.type
-    if (parameter === undefined || writtenType === undefined) continue
+    if (writtenType === undefined) continue
+    if (parameter === undefined) {
+      const lifetime = Lifetime.isLifetime(writtenType)
+      conflicts.push({
+        diagnostic: Diagnostic.typeArgumentArity(
+          target,
+          lifetime ? lifetimeParameters.length : ordinaryParameters.length,
+          explicit.filter(
+            (candidate) =>
+              candidate.type !== undefined && Lifetime.isLifetime(candidate.type) === lifetime,
+          ).length,
+          span,
+        ),
+      })
+      continue
+    }
     const rawArgument = genericArgumentOfTypeArgument(parameter, fact)
     const argument =
       rawArgument === undefined
         ? undefined
         : Type.substituteGenericArgument(rawArgument, enclosingSubstitution)
     if (argument === undefined) {
+      let suppliedKind: Type.ParameterKind = 'Value'
+      if (Lifetime.isLifetime(writtenType)) suppliedKind = 'Lifetime'
+      else if (Type.isNominal(writtenType)) suppliedKind = 'RequirementRow'
       conflicts.push(
         Object.freeze({
           diagnostic: Diagnostic.genericParameterKindMismatch(
             parameter.name,
             parameter.kind,
-            Type.isNominal(writtenType) ? 'RequirementRow' : 'Value',
+            suppliedKind,
             fact.syntax.span,
           ),
         }),
@@ -655,12 +839,13 @@ export const seededSpecialization = (
     }
     seeded.set(Type.key(parameter), argument)
     written.set(Type.key(parameter), fact)
+    selectedParameters.set(fact, parameter)
   }
   const inferred = new Map(seeded)
   let rowFailure: Type.RowInferenceFailure | undefined
   for (const site of sites) {
     const attempt = new Map(inferred)
-    if (TypeInference.infer(site.pattern, site.actual, attempt)) {
+    if (TypeInference.infer(site.pattern, site.actual, attempt, lifetimes?.inference)) {
       commitSpecialization(inferred, attempt)
       continue
     }
@@ -669,7 +854,7 @@ export const seededSpecialization = (
     // working under `take<u8>(1)`.
     const expected = Type.substitute(site.pattern, inferred)
     if (
-      typesCompatible(site.actual, expected) ||
+      typesCompatible(site.actual, expected, lifetimes?.compatibility) ||
       contextualIntegerCompatible(site.expression, expected)
     )
       continue
@@ -689,7 +874,7 @@ export const seededSpecialization = (
           ordinal: site.ordinal,
           diagnostic: Diagnostic.typeArgumentConflict(
             target,
-            declared.at(fact.ordinal)?.name ?? fact.ordinal.toString(),
+            selectedParameters.get(fact)?.name ?? fact.ordinal.toString(),
             Type.encodeGenericArgument(explicitArgument),
             Type.encodeGenericArgument(suppliedArgument),
             fact.syntax.span,
@@ -824,7 +1009,11 @@ export const solveCallableConstraints = (
       relations,
       ...(selected === undefined ? {} : { selected }),
       responsible: span,
-      oracle: Object.freeze({
+      oracle: Object.freeze<ProviderSelection.ConformanceOracle>({
+        observation: {
+          work: ResolutionWork.ofIndex(resolution.index),
+          initiator: { kind: 'CallConstraint', key: selectedKey, span },
+        },
         match: (provider: Type.Type, capability: Type.Nominal) =>
           ConformanceProof.providerMatch(resolution.index, provider, capability),
       }),
@@ -940,7 +1129,7 @@ export const analyzeCallContract = (
       if (
         expected !== undefined &&
         argument.type._tag === 'Available' &&
-        !typesCompatible(argument.type.type, expected)
+        !typesCompatible(argument.type.type, expected, resolution?.lifetimeCompatibility)
       ) {
         let mismatch: Diagnostic.Diagnostic
         if (Type.isForeignFunction(expected) && !Type.isForeignFunction(argument.type.type))
@@ -957,7 +1146,12 @@ export const analyzeCallContract = (
           )
         else
           mismatch =
-            unionConversionDiagnostic(argument.type.type, expected, argument.syntax.span) ??
+            unionConversionDiagnostic(
+              argument.type.type,
+              expected,
+              argument.syntax.span,
+              resolution?.lifetimeCompatibility,
+            ) ??
             Diagnostic.argumentTypeMismatch(
               Type.encode(expected),
               Type.encode(argument.type.type),
@@ -1086,6 +1280,7 @@ export const analyzeCallContract = (
       diagnostics: Object.freeze([diagnostic]),
     })
   }
+  const callLifetimes = selectedCallLifetimes(call, contract.lifetimeBinders, resolution)
   const declaredTypeParameters = contract.binders
   const constraintDeferred = new Set(
     contract.constraints.flatMap((constraint) =>
@@ -1143,6 +1338,7 @@ export const analyzeCallContract = (
       call.span,
       constraintDeferred,
       resolution?.staticContext?.typeSubstitution,
+      callLifetimes,
     )
     const conflict = seeded.conflicts.at(0)
     if (conflict !== undefined) {
@@ -1161,9 +1357,9 @@ export const analyzeCallContract = (
     unresolvedSpecialization = seeded.unresolved
   } else if (declaredTypeParameters.length === 0) {
     typeArguments = Object.freeze([])
-    substitution = new Map()
+    substitution = callLifetimes.substitution
   } else {
-    const inferred = new Map<string, Type.GenericArgument>()
+    const inferred = new Map<string, Type.GenericArgument>(callLifetimes.substitution)
     let compatible = true
     let rowFailure: Type.RowInferenceFailure | undefined
     let pending = [...sites]
@@ -1195,7 +1391,7 @@ export const analyzeCallContract = (
           break
         }
         const attempt = new Map(inferred)
-        if (TypeInference.infer(pattern, representedSupplied, attempt)) {
+        if (TypeInference.infer(pattern, representedSupplied, attempt, callLifetimes.inference)) {
           commitSpecialization(inferred, attempt)
           progressed = true
         } else {
@@ -1290,7 +1486,7 @@ export const analyzeCallContract = (
     const expectedValue = Type.isRepresented(expected) ? expected.contract : expected
     const suppliedValue = Type.isRepresented(site.actual) ? site.actual.contract : site.actual
     if (
-      !typesCompatible(suppliedValue, expectedValue) &&
+      !typesCompatible(suppliedValue, expectedValue, resolution?.lifetimeCompatibility) &&
       !contextualIntegerCompatible(argument.expression, expectedValue)
     ) {
       let mismatch: Diagnostic.Diagnostic
@@ -1310,7 +1506,12 @@ export const analyzeCallContract = (
         mismatch = Diagnostic.implicitSliceDecay(Type.encode(expectedValue), argument.syntax.span)
       } else {
         mismatch =
-          unionConversionDiagnostic(suppliedValue, expectedValue, argument.syntax.span) ??
+          unionConversionDiagnostic(
+            suppliedValue,
+            expectedValue,
+            argument.syntax.span,
+            resolution?.lifetimeCompatibility,
+          ) ??
           Diagnostic.argumentTypeMismatch(
             Type.encode(expectedValue),
             Type.encode(suppliedValue),
@@ -1358,6 +1559,24 @@ export const analyzeCallContract = (
     })
   }
 
+  const lifetimeDiagnostics = selectedLifetimeBoundDiagnostics(
+    contract.lifetimeBounds,
+    substitution,
+    resolution?.lifetimeCompatibility,
+    call.span,
+    contract.typeOutlives,
+  )
+  const lifetimeFailure = lifetimeDiagnostics.at(0)
+  if (lifetimeFailure !== undefined)
+    return Object.freeze({
+      mappings,
+      fact: Object.freeze({
+        _tag: 'Unavailable',
+        reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+        cause: Diagnostic.identity(lifetimeFailure),
+      }),
+      diagnostics: lifetimeDiagnostics,
+    })
   return Object.freeze({
     mappings,
     fact: Object.freeze({
@@ -1373,16 +1592,36 @@ export const analyzeCallContract = (
   })
 }
 
-export const interfaceConstraintDiagnostics = (
+/** Retains the ordinary operation selection so later semantic passes never rediscover witnesses. */
+export const interfaceEvidence = (
   reference: CallReferenceFact,
-  contract: CallContractResult,
+  index: DeclarationIndex.Index,
+): ReadonlyArray<ConformanceGoal.Proof> => {
+  if (
+    reference._tag !== 'ResolvedInterfaceOperation' ||
+    !Type.isRuntimeConcrete(reference.provider)
+  )
+    return []
+  const proof = ConformanceProof.prove(index, reference.provider, reference.capability)
+  return proof._tag === 'Proved' ? [proof] : []
+}
+
+export const interfaceConstraints = (
+  reference: CallReferenceFact,
+  substitution: Type.Substitution | undefined,
   index: DeclarationIndex.Index,
   caller: DeclarationFact,
   span: SourceSpan.SourceSpan,
-): ReadonlyArray<Diagnostic.Diagnostic> => {
-  if (reference._tag !== 'Resolved' || contract.fact._tag !== 'Compatible') return Object.freeze([])
-  const substitution = contract.fact.substitution
-  return Object.freeze(
+): {
+  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+  readonly proofs: ReadonlyArray<ConformanceGoal.Proof>
+} => {
+  const proofs: Array<ConformanceGoal.Proof> = []
+  if (reference._tag !== 'Resolved' || substitution === undefined) {
+    proofs.push(...interfaceEvidence(reference, index))
+    return { diagnostics: [], proofs }
+  }
+  const diagnostics = Object.freeze(
     reference.declaration.typeParameters.flatMap((parameter) => {
       const provider = substitution.get(Type.key(parameter.type))
       if (provider === undefined || !Type.isTypeArgument(provider)) return []
@@ -1446,10 +1685,13 @@ export const interfaceConstraintDiagnostics = (
             ),
           ]
         }
+        const proof = ConformanceProof.prove(index, provider, capability)
+        if (proof._tag === 'Proved') proofs.push(proof)
         return []
       })
     }),
   )
+  return { diagnostics, proofs }
 }
 
 /**
@@ -1491,7 +1733,6 @@ export interface BuiltinSignature {
   readonly parameters: ReadonlyArray<SemanticType>
   readonly result: SemanticType
   readonly unsafe?: boolean
-  readonly returnedBorrowParameter?: number
 }
 
 export const builtinSignature = (
@@ -1508,10 +1749,35 @@ export const builtinSignature = (
     parameters: parameterKind === 'Call' ? catalog.callParameters : catalog.rule.parameters,
     result: catalog.rule.result,
     unsafe: catalog.unsafe,
-    ...(catalog.returnedBorrowParameter === undefined
-      ? {}
-      : { returnedBorrowParameter: catalog.returnedBorrowParameter }),
   })
+}
+
+/** Allocates validity variables only after intrinsic selection; intrinsic templates never escape into caller bodies. */
+const freeLifetimeBinders = (types: ReadonlyArray<Type.Type>): ReadonlyArray<Lifetime.Bound> => [
+  ...new Map(
+    types
+      .flatMap(Type.freeLifetimes)
+      .flatMap((lifetime) =>
+        lifetime._tag === 'BoundLifetime' ? [[Lifetime.key(lifetime), lifetime] as const] : [],
+      ),
+  ).values(),
+]
+
+/** Opens an intrinsic's free template lifetimes in the selected caller's finite region domain. */
+export const instantiateBuiltinSignature = (
+  signature: BuiltinSignature,
+  call: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): BuiltinSignature => {
+  const binders = freeLifetimeBinders([...signature.parameters, signature.result])
+  const selected = selectedCallLifetimes(call, binders, resolution)
+  return {
+    ...signature,
+    parameters: signature.parameters.map((parameter) =>
+      Type.substitute(parameter, selected.substitution),
+    ),
+    result: Type.substitute(signature.result, selected.substitution),
+  }
 }
 
 export const callableResultType = (declaration: SourceCallable): SemanticType | undefined => {
@@ -1520,6 +1786,7 @@ export const callableResultType = (declaration: SourceCallable): SemanticType | 
   return Type.effectWithRows(
     declaration.returnType.type,
     declaration.failureRow.row,
+    { ...DeclarationFacts.executableLifetimes(declaration), lifetimeBinders: [] },
     'Shared',
     declaration.requirementRow.row,
   )
@@ -1532,6 +1799,17 @@ export const callableTypeOfReference = (
     return Type.callable(
       reference.parameters,
       reference.result,
+      {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [
+          ...new Map(
+            reference.parameters
+              .flatMap(Type.freeLifetimes)
+              .filter((lifetime) => lifetime._tag === 'BoundLifetime')
+              .map((lifetime) => [Lifetime.key(lifetime), lifetime]),
+          ).values(),
+        ],
+      },
       'Shared',
       undefined,
       reference.unsafe,
@@ -1547,10 +1825,14 @@ export const callableTypeOfReference = (
   return Type.callable(
     parameters,
     result,
+    { ...DeclarationFacts.executableLifetimes(callable), environment: Lifetime.staticLifetime },
     'Shared',
-    contract === undefined || contract.constraints.length === 0
+    contract === undefined || (contract.constraints.length === 0 && contract.binders.length === 0)
       ? undefined
       : Object.freeze({
+          ...(reference._tag === 'Resolved' && reference.declaration.canonical._tag === 'Canonical'
+            ? { source: reference.declaration.canonical.id }
+            : {}),
           contract,
           binders: contract.binders,
           constraints: contract.constraints,
@@ -1595,7 +1877,10 @@ export const interfaceOperationContract = (
       readonly result: SemanticType
     }
   | undefined => {
-  if (operation.declaration.typeParameters.length > 0 || operation.success._tag !== 'Resolved')
+  if (
+    operation.declaration.typeParameters.some((parameter) => parameter.type.kind !== 'Lifetime') ||
+    operation.success._tag !== 'Resolved'
+  )
     return undefined
   const parameters = operation.operands.flatMap((operand) =>
     operand.type._tag === 'Resolved' ? [operand.type.type] : [],
@@ -1607,6 +1892,7 @@ export const interfaceOperationContract = (
       : Type.effectWithRows(
           operation.success.type,
           operation.failureRow.row,
+          { ...operation.lifetimes, lifetimeBinders: [] },
           'Shared',
           operation.requirementRow.row,
         )
@@ -1615,6 +1901,27 @@ export const interfaceOperationContract = (
     contract: operation,
     parameters: Object.freeze(parameters),
     result,
+  })
+}
+
+/** Opens only the selected interface operation's invocation lifetime binders at this call. */
+export const instantiateInterfaceReference = (
+  reference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedInterfaceOperation' }>,
+  call: SyntaxTree.Node,
+  resolution: ResolutionContext,
+): typeof reference => {
+  const declared = DeclarationFacts.executableLifetimes(reference.declaration)
+  const selected = selectedCallLifetimes(call, declared.lifetimeBinders, resolution)
+  return Object.freeze({
+    ...reference,
+    parameters: reference.parameters.map((parameter) =>
+      Type.substitute(parameter, selected.substitution),
+    ),
+    result: Type.substitute(reference.result, selected.substitution),
+    interfaceContract: DeclarationFacts.instantiateInterfaceOperation(
+      reference.interfaceContract,
+      selected.substitution,
+    ),
   })
 }
 
@@ -1750,9 +2057,6 @@ export const resolvedFunctionReference = (
       parameters: signature.parameters,
       result: signature.result,
       unsafe: signature.unsafe === true,
-      ...(signature.returnedBorrowParameter === undefined
-        ? {}
-        : { returnedBorrowParameter: signature.returnedBorrowParameter }),
     })
   }
   if (qualifierLookup._tag === 'Resolved') {
@@ -1792,6 +2096,7 @@ export const analyzeFunctionItem = (
   node: SyntaxTree.Node,
   declarations: ReadonlyArray<DeclarationFact>,
   resolution: ResolutionContext,
+  caller: DeclarationFact,
   expected?: SemanticType,
 ): ExpressionResult | undefined => {
   const reference = resolvedFunctionReference(source, node, declarations, resolution)
@@ -1897,44 +2202,88 @@ export const analyzeFunctionItem = (
     })
   }
   const contract = resolvedCallableContract(reference)
-  const contextual = new Map<string, Type.GenericArgument>()
+  const expectedValue =
+    expected !== undefined && Type.isRepresented(expected) ? expected.contract : expected
   const expectedCallable =
-    expected !== undefined && Type.isCallable(expected) ? expected : undefined
-  const contextualPattern =
+    expectedValue !== undefined && Type.isCallable(expectedValue) ? expectedValue : undefined
+  const opened =
+    expectedCallable?.lifetimeBinders.length === 0
+      ? (unresolvedCallable?.lifetimeBinders ?? [])
+      : []
+  const callLifetimes = selectedCallLifetimes(node, opened, resolution)
+  // Here the inference pattern is the offered generic item, while the contextual type is the
+  // required use. Argument inference has the opposite orientation; retain that distinction for
+  // lifetime obligations while still inferring the item's own type parameters.
+  const itemInference: TypeInference.LifetimeInference | undefined =
+    callLifetimes.inference === undefined
+      ? undefined
+      : {
+          ...callLifetimes.inference,
+          accepts: (source, target, invariant) =>
+            callLifetimes.inference?.accepts(target, source, invariant) ?? false,
+        }
+  const contextual = new Map<string, Type.GenericArgument>(callLifetimes.substitution)
+  const pattern =
     unresolvedCallable === undefined || expectedCallable === undefined
       ? undefined
       : Type.callable(
           unresolvedCallable.parameters,
           unresolvedCallable.result,
+          {
+            ...unresolvedCallable,
+            environment: expectedCallable.environment,
+            lifetimeBinders:
+              expectedCallable.lifetimeBinders.length === 0
+                ? []
+                : unresolvedCallable.lifetimeBinders,
+          },
           expectedCallable.mode,
           unresolvedCallable.schema,
           unresolvedCallable.unsafe,
         )
+  const substitutedPattern =
+    pattern === undefined ? undefined : Type.substitute(pattern, contextual)
+  const contextualPattern =
+    substitutedPattern !== undefined && Type.isCallable(substitutedPattern)
+      ? substitutedPattern
+      : undefined
   let specialized =
     contextualPattern !== undefined &&
     expectedCallable !== undefined &&
-    TypeInference.infer(contextualPattern, expectedCallable, contextual)
+    TypeInference.infer(contextualPattern, expectedCallable, contextual, itemInference)
   if (!specialized && contextualPattern !== undefined && expectedCallable !== undefined) {
-    const partial = new Map<string, Type.GenericArgument>()
-    const parametersCompatible =
-      contextualPattern.parameters.length === expectedCallable.parameters.length &&
-      contextualPattern.parameters.every((parameter, ordinal) => {
-        const expectedParameter = expectedCallable.parameters.at(ordinal)
-        return (
-          expectedParameter !== undefined &&
-          TypeInference.infer(parameter, expectedParameter, partial)
-        )
-      })
-    const patternResult = contextualPattern.result
-    const expectedResult = expectedCallable.result
-    const resultCompatible =
-      Type.isEffect(patternResult) && Type.isEffect(expectedResult)
-        ? TypeInference.infer(patternResult.success, expectedResult.success, partial)
-        : TypeInference.infer(patternResult, expectedResult, partial)
-    const allBindersDetermined = (contract?.binders ?? []).every((parameter) =>
-      partial.has(Type.key(parameter)),
-    )
-    if (parametersCompatible && resultCompatible && allBindersDetermined) {
+    const partial = new Map<string, Type.GenericArgument>(callLifetimes.substitution)
+    const attempt = (): boolean => {
+      const parametersCompatible =
+        contextualPattern.parameters.length === expectedCallable.parameters.length &&
+        contextualPattern.parameters.every((parameter, ordinal) => {
+          const expectedParameter = expectedCallable.parameters.at(ordinal)
+          return (
+            expectedParameter !== undefined &&
+            TypeInference.infer(parameter, expectedParameter, partial, itemInference)
+          )
+        })
+      const patternResult = contextualPattern.result
+      const expectedResult = expectedCallable.result
+      const resultCompatible =
+        Type.isEffect(patternResult) && Type.isEffect(expectedResult)
+          ? TypeInference.infer(
+              patternResult.success,
+              expectedResult.success,
+              partial,
+              itemInference,
+            )
+          : TypeInference.infer(patternResult, expectedResult, partial, itemInference)
+      const allBindersDetermined = (contract?.binders ?? []).every((parameter) =>
+        partial.has(Type.key(parameter)),
+      )
+      return parametersCompatible && resultCompatible && allBindersDetermined
+    }
+    const accepted =
+      callLifetimes.compatibility === undefined
+        ? attempt()
+        : TypeCompatibility.commitWhen(callLifetimes.compatibility, attempt, (result) => result)
+    if (accepted) {
       contextual.clear()
       for (const [key, argument] of partial) contextual.set(key, argument)
       specialized = true
@@ -1942,7 +2291,21 @@ export const analyzeFunctionItem = (
   }
   let callable = unresolvedCallable
   if (callable !== undefined && specialized) {
-    const contextualCallable = Type.substitute(callable, contextual)
+    const instantiated = Type.callable(
+      callable.parameters,
+      callable.result,
+      {
+        ...callable,
+        lifetimeBinders: callable.lifetimeBinders.filter(
+          (binder) =>
+            expectedCallable?.lifetimeBinders.length !== 0 || !contextual.has(Lifetime.key(binder)),
+        ),
+      },
+      callable.mode,
+      callable.schema,
+      callable.unsafe,
+    )
+    const contextualCallable = Type.substitute(instantiated, contextual)
     callable = Type.isCallable(contextualCallable) ? contextualCallable : undefined
   }
   const typeArguments = Object.freeze(
@@ -1959,21 +2322,48 @@ export const analyzeFunctionItem = (
   const firstClass =
     foreignFirstClassDiagnostic(reference, node) ??
     staticFirstClassDiagnostic(reference, node, resolution)
+  const constraints = interfaceConstraints(
+    reference,
+    contextual,
+    resolution.index,
+    caller,
+    node.span,
+  )
+  // Specialization can turn invocation predicates into free formation facts. Prove them before
+  // publishing the value: structural callable comparison may thereafter assume those facts.
+  const formation =
+    callable === undefined ? undefined : Type.executableFormationRequirements(callable)
+  const lifetimeDiagnostics =
+    formation === undefined
+      ? []
+      : selectedLifetimeBoundDiagnostics(
+          formation.lifetimeBounds,
+          new Map(),
+          resolution.lifetimeCompatibility,
+          node.span,
+          formation.typeOutlives,
+        )
+  const available = firstClass === undefined && lifetimeDiagnostics.length === 0
   const type =
-    callable === undefined || firstClass !== undefined
+    callable === undefined || !available
       ? unavailableExpressionType
       : availableExpressionType(callable)
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'FunctionItem',
+      selectedConformances: constraints.proofs,
       reference,
       path: referencePath(node),
       typeArguments,
       type,
       syntax: node,
     }),
-    diagnostics: Object.freeze(firstClass === undefined ? [] : [firstClass]),
-    type: firstClass === undefined ? callable : undefined,
+    diagnostics: Object.freeze([
+      ...constraints.diagnostics,
+      ...lifetimeDiagnostics,
+      ...(firstClass === undefined ? [] : [firstClass]),
+    ]),
+    type: available ? callable : undefined,
   })
 }
 
@@ -2037,12 +2427,17 @@ export const analyzeSectionContract = (
   arguments_: ReadonlyArray<ArgumentFact>,
   callTypeArguments: CallTypeArgumentsResult,
   captured: ReadonlyArray<number>,
+  resolution?: ResolutionContext,
 ): SectionContractResult => {
   if (reference._tag === 'ResolvedBuiltin') {
     const diagnostics = arguments_.flatMap((argument, ordinal) => {
       if (argument.type._tag !== 'Available') return []
       const expected = parameterAt(reference.parameters, captured, ordinal)
-      if (expected === undefined || typesCompatible(argument.type.type, expected)) return []
+      if (
+        expected === undefined ||
+        typesCompatible(argument.type.type, expected, resolution?.lifetimeCompatibility)
+      )
+        return []
       return [
         Diagnostic.argumentTypeMismatch(
           Type.encode(expected),
@@ -2072,10 +2467,24 @@ export const analyzeSectionContract = (
 
   const callable = resolvedCallableContract(reference)
   if (callable === undefined) throw new RangeError('section lost its callable contract')
+  const capturedLifetimes = new Set(
+    captured.flatMap((ordinal) => {
+      const parameter = callable.parameters.at(ordinal)
+      return parameter === undefined ? [] : Type.storageLifetimes(parameter.type).map(Lifetime.key)
+    }),
+  )
+  const capturedBinders = callable.lifetimeBinders.filter((binder) =>
+    capturedLifetimes.has(Lifetime.key(binder)),
+  )
+  const remainingBinders = callable.lifetimeBinders.filter(
+    (binder) => !capturedLifetimes.has(Lifetime.key(binder)),
+  )
+  const remainingLifetimeKeys = new Set(remainingBinders.map(Lifetime.key))
+  const callLifetimes = selectedCallLifetimes(call, capturedBinders, resolution)
   const declaredParameters = callable.binders
   const diagnostics: Array<Diagnostic.Diagnostic> = []
   const contradicted = new Set<number>()
-  let substitution = new Map<string, Type.GenericArgument>()
+  let substitution = new Map<string, Type.GenericArgument>(callLifetimes.substitution)
   if (callTypeArguments.explicit) {
     if (
       callTypeArguments.types === undefined ||
@@ -2106,9 +2515,12 @@ export const analyzeSectionContract = (
         sectionSpecializationSites(callable, arguments_, captured),
         call.span,
         new Set([
+          ...remainingLifetimeKeys,
           ...remaining.flatMap((parameter) => Type.parameters(parameter.type).map(Type.key)),
           ...constraintDeferred,
         ]),
+        resolution?.staticContext?.typeSubstitution,
+        callLifetimes,
       )
       substitution = new Map(seeded.substitution)
       for (const conflict of seeded.conflicts) {
@@ -2123,7 +2535,12 @@ export const analyzeSectionContract = (
       if (
         argument.type._tag === 'Available' &&
         parameter !== undefined &&
-        !TypeInference.infer(parameter.type, argument.type.type, substitution)
+        !TypeInference.infer(
+          parameter.type,
+          argument.type.type,
+          substitution,
+          callLifetimes.inference,
+        )
       ) {
         const rowFailure = TypeInference.rowInferenceFailure(parameter.type, argument.type.type)
         diagnostics.push(
@@ -2136,6 +2553,7 @@ export const analyzeSectionContract = (
     }
     const remaining = remainingOf(callable.parameters, captured)
     const deferred = new Set([
+      ...remainingLifetimeKeys,
       ...remaining.flatMap((parameter) => Type.parameters(parameter.type).map(Type.key)),
       ...callable.constraints.flatMap((constraint) =>
         constraint._tag === 'ProviderSelectionConstraint' &&
@@ -2159,7 +2577,11 @@ export const analyzeSectionContract = (
     // was reported where the author wrote the type.
     if (contradicted.has(ordinal)) continue
     const expected = Type.substitute(parameter.type, substitution)
-    if (!Type.isConcrete(expected) || typesCompatible(argument.type.type, expected)) continue
+    if (
+      !Type.isConcrete(expected) ||
+      typesCompatible(argument.type.type, expected, resolution?.lifetimeCompatibility)
+    )
+      continue
     diagnostics.push(
       Diagnostic.argumentTypeMismatch(
         Type.encode(expected),
@@ -2168,6 +2590,21 @@ export const analyzeSectionContract = (
       ),
     )
   }
+  diagnostics.push(
+    ...selectedLifetimeBoundDiagnostics(
+      callable.lifetimeBounds.filter(
+        (bound) =>
+          !remainingLifetimeKeys.has(Lifetime.key(bound.longer)) &&
+          !remainingLifetimeKeys.has(Lifetime.key(bound.shorter)),
+      ),
+      substitution,
+      resolution?.lifetimeCompatibility,
+      call.span,
+      callable.typeOutlives.filter(
+        (bound) => !remainingLifetimeKeys.has(Lifetime.key(bound.lifetime)),
+      ),
+    ),
+  )
   const typeArguments = Object.freeze(
     declaredParameters.flatMap((parameter) => {
       const inferred = substitution.get(Type.key(parameter))
@@ -2280,11 +2717,16 @@ export const sectionCallableType = (
   substitution: Type.Substitution,
   mode: Type.CallableMode,
   captured: ReadonlyArray<number>,
+  lifetimes: Type.ExecutableLifetimes | undefined,
 ): Type.Callable | undefined => {
+  if (lifetimes === undefined) return undefined
   if (reference._tag === 'ResolvedBuiltin')
     return Type.callable(
-      remainingOf(reference.parameters, captured),
-      reference.result,
+      remainingOf(reference.parameters, captured).map((parameter) =>
+        Type.substitute(parameter, substitution),
+      ),
+      Type.substitute(reference.result, substitution),
+      lifetimes,
       mode,
       undefined,
       reference.unsafe,
@@ -2296,10 +2738,33 @@ export const sectionCallableType = (
   return Type.callable(
     remaining.map((parameter) => Type.substitute(parameter.type, substitution)),
     Type.substitute(result, substitution),
+    {
+      ...lifetimes,
+      lifetimeBinders: contract.lifetimeBinders.filter(
+        (binder) => !substitution.has(Lifetime.key(binder)),
+      ),
+      lifetimeBounds: [
+        ...(lifetimes.lifetimeBounds ?? []),
+        ...contract.lifetimeBounds.map((bound) => ({
+          longer: Type.substituteLifetime(bound.longer, substitution),
+          shorter: Type.substituteLifetime(bound.shorter, substitution),
+        })),
+      ],
+      typeOutlives: [
+        ...(lifetimes.typeOutlives ?? []),
+        ...contract.typeOutlives.map((bound) => ({
+          type: Type.substitute(bound.type, substitution),
+          lifetime: Type.substituteLifetime(bound.lifetime, substitution),
+        })),
+      ],
+    },
     mode,
-    contract.constraints.length === 0
+    contract.constraints.length === 0 && contract.binders.length === 0
       ? undefined
       : Object.freeze({
+          ...(reference._tag === 'Resolved' && reference.declaration.canonical._tag === 'Canonical'
+            ? { source: reference.declaration.canonical.id }
+            : {}),
           contract,
           binders: contract.binders,
           constraints: contract.constraints,
@@ -2388,7 +2853,9 @@ export const executableSpecializationOwner = (
     ? undefined
     : Object.freeze({
         declaration: Object.freeze({ module: owner.module, name: owner.name }),
-        typeArguments: Object.freeze(declaration.typeParameters.map((parameter) => parameter.type)),
+        typeArguments: Object.freeze(
+          declaration.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
+        ),
       })
 }
 
@@ -2417,6 +2884,14 @@ export const finishCallableSection = (
     argumentsResult.facts,
     callTypeArguments,
     capturedParameters,
+    resolution,
+  )
+  const constraints = interfaceConstraints(
+    reference,
+    contract.substitution,
+    resolution.index,
+    caller,
+    node.span,
   )
   const captures = Object.freeze(
     capturedParameters.map((parameterOrdinal, ordinal) => {
@@ -2443,7 +2918,22 @@ export const finishCallableSection = (
     }),
   )
   const mode = callableMode(captures)
-  const callable = sectionCallableType(reference, contract.substitution, mode, capturedParameters)
+  const callable = sectionCallableType(
+    reference,
+    contract.substitution,
+    mode,
+    capturedParameters,
+    BodyLifetime.environment(
+      resolution.bodyLifetimes,
+      node,
+      captures.flatMap((capture) =>
+        capture.expression.type._tag === 'Available' ? [capture.expression.type.type] : [],
+      ),
+      captures
+        .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
+        .map((capture) => capture.expression.syntax),
+    ),
+  )
   const foreign = foreignFirstClassDiagnostic(reference, node)
   const type =
     contract.valid && callable !== undefined && foreign === undefined
@@ -2453,6 +2943,7 @@ export const finishCallableSection = (
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'CallableSection',
+      selectedConformances: constraints.proofs,
       site: executableSite('CallableSiteId', resolution, node),
       reference,
       path,
@@ -2479,6 +2970,7 @@ export const finishCallableSection = (
       ...argumentsResult.diagnostics,
       ...callTypeArguments.diagnostics,
       ...contract.diagnostics,
+      ...constraints.diagnostics,
       ...(foreign === undefined ? [] : [foreign]),
     ]),
     type: type._tag === 'Available' ? type.type : undefined,
@@ -2553,36 +3045,14 @@ export const finishCallableApplication = (
           ),
         })
       : undefined
-  const returnedBorrowParameter = (reference: CallReferenceFact): number | undefined => {
-    if (reference._tag === 'ResolvedBuiltin') return reference.returnedBorrowParameter
-    if (reference._tag !== 'Resolved') return undefined
-    return DeclarationFacts.returnedBorrow(reference.declaration)?.parameter.id.ordinal
-  }
-  const returnedBorrowSource = (() => {
-    if (exactCallable?._tag === 'FunctionItem') {
-      const parameter = returnedBorrowParameter(exactCallable.reference)
-      return parameter === undefined || argumentsResult.facts.at(parameter) === undefined
-        ? undefined
-        : Object.freeze({ _tag: 'Argument' as const, ordinal: parameter })
-    }
-    if (section !== undefined) {
-      const parameter = returnedBorrowParameter(section.reference)
-      if (parameter === undefined) return undefined
-      const ordinal = section.remainingParameters.indexOf(parameter)
-      if (ordinal >= 0 && argumentsResult.facts.at(ordinal) !== undefined) {
-        return Object.freeze({ _tag: 'Argument' as const, ordinal })
-      }
-      const capture = section.captures.find((candidate) => candidate.parameterOrdinal === parameter)
-      return capture === undefined
-        ? undefined
-        : Object.freeze({ _tag: 'Capture' as const, capture })
-    }
-    return undefined
-  })()
   const schema = callable?.schema
-  const inferred = new Map<string, Type.GenericArgument>(
-    schema?.substitution ?? section?.substitution ?? [],
+  const callLifetimes = selectedCallLifetimes(
+    node,
+    callable?.lifetimeBinders ?? [],
+    resolution,
+    schema?.substitution ?? section?.substitution,
   )
+  const inferred = new Map<string, Type.GenericArgument>(callLifetimes.substitution)
   let evidence: ReadonlyArray<Constraint.ConstraintEvidence> = Object.freeze([])
   let inferredProviderSelectors: ReadonlyArray<InferredProviderSelector> = Object.freeze([])
   let valid =
@@ -2593,16 +3063,7 @@ export const finishCallableApplication = (
       Diagnostic.nonCallableApplication(Type.encode(callee.type), callee.fact.syntax.span),
     )
   }
-  if (
-    callable !== undefined &&
-    (Type.isReference(callable.result) || Type.isSlice(callable.result)) &&
-    returnedBorrowSource === undefined &&
-    stagedSection === undefined &&
-    callable.parameters.length === argumentsResult.facts.length
-  ) {
-    diagnostics.push(Diagnostic.unknownCallableBorrowSource(node.span))
-    valid = false
-  }
+
   if (
     callable?.mode === 'Exclusive' &&
     callee.fact._tag === 'Identifier' &&
@@ -2614,7 +3075,11 @@ export const finishCallableApplication = (
     )
     valid = false
   }
-  if (schema !== undefined && !concreteCallableIdentity(callee.fact, writtenBindings)) {
+  if (
+    schema !== undefined &&
+    schema.source === undefined &&
+    !concreteCallableIdentity(callee.fact, writtenBindings)
+  ) {
     diagnostics.push(Diagnostic.nonConcreteSpecialization('constrained callable', node.span))
     valid = false
   }
@@ -2663,7 +3128,7 @@ export const finishCallableApplication = (
         valid = false
         continue
       }
-      if (!TypeInference.infer(expected, argument.type.type, inferred)) {
+      if (!TypeInference.infer(expected, argument.type.type, inferred, callLifetimes.inference)) {
         const rowFailure = TypeInference.rowInferenceFailure(expected, argument.type.type)
         if (Type.isForeignFunction(expected) && !Type.isForeignFunction(argument.type.type)) {
           diagnostics.push(
@@ -2696,7 +3161,10 @@ export const finishCallableApplication = (
         continue
       }
       const specialized = Type.substitute(expected, inferred)
-      if (Type.isConcrete(specialized) && !typesCompatible(argument.type.type, specialized)) {
+      if (
+        Type.isConcrete(specialized) &&
+        !typesCompatible(argument.type.type, specialized, callLifetimes.compatibility)
+      ) {
         let mismatch: Diagnostic.Diagnostic
         if (Type.isForeignFunction(specialized) && !Type.isForeignFunction(argument.type.type))
           mismatch = Diagnostic.invalidForeignCallback(
@@ -2720,6 +3188,17 @@ export const finishCallableApplication = (
         valid = false
       }
     }
+  }
+  if (callable !== undefined) {
+    const lifetimeDiagnostics = selectedLifetimeBoundDiagnostics(
+      callable.lifetimeBounds,
+      inferred,
+      callLifetimes.compatibility,
+      node.span,
+      callable.typeOutlives,
+    )
+    diagnostics.push(...lifetimeDiagnostics)
+    if (lifetimeDiagnostics.length !== 0) valid = false
   }
   const stagedCaptures =
     stagedSection === undefined || resolution === undefined || caller === undefined
@@ -2779,6 +3258,31 @@ export const finishCallableApplication = (
     diagnostics.push(...solved.diagnostics)
     if (solved.diagnostics.length > 0) valid = false
   }
+  const schemaDeclaration =
+    schema?.source === undefined || resolution === undefined
+      ? undefined
+      : DeclarationFacts.byCanonical(resolution.index, {
+          _tag: 'CanonicalDeclarationId',
+          ...schema.source,
+        })
+  let sourceTarget: Extract<CallReferenceFact, { readonly _tag: 'Resolved' }> | undefined
+  if (exactCallable?.reference._tag === 'Resolved') sourceTarget = exactCallable.reference
+  else if (
+    schemaDeclaration?._tag === 'FunctionDeclaration' &&
+    schemaDeclaration.name._tag === 'Present'
+  )
+    sourceTarget = {
+      _tag: 'Resolved',
+      spelling: schemaDeclaration.name.spelling,
+      token: schemaDeclaration.name.token,
+      declaration: schemaDeclaration,
+    }
+  const selectedConformances =
+    sourceTarget === undefined || resolution === undefined || caller === undefined
+      ? { diagnostics: [], proofs: [] }
+      : interfaceConstraints(sourceTarget, inferred, resolution.index, caller, node.span)
+  diagnostics.push(...selectedConformances.diagnostics)
+  if (selectedConformances.diagnostics.length > 0) valid = false
   const type = (() => {
     if (!valid || callable === undefined) return unavailableExpressionType
     if (stagedSection !== undefined && stagedCaptures !== undefined) {
@@ -2794,6 +3298,16 @@ export const finishCallableApplication = (
         inferred,
         callableMode(stagedCaptures),
         stagedCaptures.map((capture) => capture.parameterOrdinal),
+        BodyLifetime.environment(
+          resolution?.bodyLifetimes,
+          node,
+          stagedCaptures.flatMap((capture) =>
+            capture.expression.type._tag === 'Available' ? [capture.expression.type.type] : [],
+          ),
+          stagedCaptures
+            .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
+            .map((capture) => capture.expression.syntax),
+        ),
       )
       return sectionType === undefined
         ? unavailableExpressionType
@@ -2801,12 +3315,27 @@ export const finishCallableApplication = (
     }
     const result = Type.substitute(callable.result, inferred)
     if (stagedValue !== undefined) {
+      const lifetimes = BodyLifetime.environment(
+        resolution?.bodyLifetimes,
+        node,
+        [
+          callable,
+          ...stagedValue.captures.flatMap((capture) =>
+            capture.expression.type._tag === 'Available' ? [capture.expression.type.type] : [],
+          ),
+        ],
+        stagedValue.captures
+          .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
+          .map((capture) => capture.expression.syntax),
+      )
+      if (lifetimes === undefined) return unavailableExpressionType
       return availableExpressionType(
         Type.callable(
           callable.parameters
             .slice(0, callable.parameters.length - argumentsResult.facts.length)
             .map((parameter) => Type.substitute(parameter, inferred)),
           result,
+          lifetimes,
           strongestEffectAccess(callable.mode, callableMode(stagedValue.captures)),
           callable.schema,
           callable.unsafe,
@@ -2818,6 +3347,7 @@ export const finishCallableApplication = (
         ? Type.effectWithRows(
             result.success,
             result.failureRow,
+            result,
             strongestEffectAccess(
               result.access,
               callable.mode,
@@ -2843,6 +3373,7 @@ export const finishCallableApplication = (
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'CallableSection',
+        selectedConformances: selectedConformances.proofs,
         site: executableSite('CallableSiteId', resolution, node),
         reference: stagedSection.reference,
         path: stagedSection.path,
@@ -2959,13 +3490,14 @@ export const finishCallableApplication = (
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'CallableApply',
+      ...(sourceTarget === undefined ? {} : { sourceTarget }),
+      selectedConformances: selectedConformances.proofs,
       callee: callee.fact,
       arguments: argumentsResult.facts,
       mode,
       ...(callable === undefined ? {} : { contract: callable }),
       substitution: inferred,
       inferredProviderSelectors,
-      ...(returnedBorrowSource === undefined ? {} : { returnedBorrowSource }),
       ...(stagedValue === undefined ? {} : { staged: stagedValue }),
       provenance: provenance ?? Object.freeze({ _tag: 'DirectCallableApplication' as const }),
       type,

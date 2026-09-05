@@ -1,5 +1,8 @@
+import * as Lifetime from '../Lifetime.js'
+import * as TypeCompatibility from '../TypeCompatibility.js'
 import * as RowAlgebra from '../RowAlgebra.js'
 import type {
+  Callable,
   Effect,
   FailureRow,
   GenericArgument,
@@ -11,10 +14,15 @@ import type {
   RowInferenceFailure,
   SealedStaticProperty,
   Substitution,
+  TypeOutlives,
   Type,
 } from '../Type.js'
 import {
+  callable,
   compareAccess,
+  effectWithRows,
+  executableFormationRequirements,
+  lifetimes,
   encode,
   equals,
   failureMemberParameters,
@@ -34,8 +42,11 @@ import {
   isRepresented,
   isRequirementRowArgument,
   isSlice,
+  isString,
   isTypeArgument,
   key,
+  parameterArgument,
+  parameters,
   representationAdmissibility,
   representationArgumentKind,
   requirementMembers,
@@ -44,8 +55,12 @@ import {
   requirementRowParameters,
   requirementRowPolicy,
   requirementSatisfies,
+  someSubterm,
+  string,
+  satisfiesOutlives,
   substitute,
   substituteFailureRow,
+  substituteLifetime,
   substituteRequirementsRow,
   union,
 } from '../Type.js'
@@ -68,10 +83,35 @@ export interface OpenGenericInference {
   readonly conflicts: ReadonlyArray<GenericArgumentConflict>
 }
 
+export interface LifetimeInference {
+  readonly compatibility?: TypeCompatibility.Context
+  /** Declaration-owned lifetime variables still open at this inference boundary. */
+  readonly inferable?: ReadonlySet<string>
+  readonly typeOutlives?: (type: Type, lifetime: Lifetime.Lifetime) => boolean
+  /** Checks one selected source-to-expected region relation; invariant positions require both directions. */
+  readonly accepts: (
+    source: Lifetime.Lifetime,
+    target: Lifetime.Lifetime,
+    invariant: boolean,
+  ) => boolean
+}
+
 interface InferenceContext {
+  readonly lifetimes?: LifetimeInference | undefined
+  readonly invariant?: boolean
+  readonly contravariant?: boolean
   readonly allowOpenGenericArguments: boolean
   readonly conflicts?: Array<GenericArgumentConflict>
 }
+
+const commitTrial = <A>(
+  context: InferenceContext,
+  evaluate: () => A,
+  accepted: (result: A) => boolean,
+): A =>
+  context.lifetimes?.compatibility === undefined
+    ? evaluate()
+    : TypeCompatibility.commitWhen(context.lifetimes.compatibility, evaluate, accepted)
 
 /** Adds structural constraints from one declared type pattern to one supplied concrete type. */
 const bindGenericArgument = (
@@ -108,6 +148,7 @@ const inferRowMembers = <Member>(
   inferred: ReadonlyMap<string, GenericArgument>,
   matches: (pattern: Member, actual: Member, inferred: Map<string, GenericArgument>) => boolean,
   complete: (remaining: ReadonlyArray<Member>, inferred: Map<string, GenericArgument>) => boolean,
+  context: InferenceContext,
 ): ReadonlyMap<string, GenericArgument> | undefined => {
   const search = (
     position: number,
@@ -120,12 +161,18 @@ const inferRowMembers = <Member>(
       return complete(remaining, completed) ? completed : undefined
     }
     for (const [candidatePosition, candidate] of remaining.entries()) {
-      const trial = new Map(current)
-      if (!matches(member, candidate, trial)) continue
-      const found = search(
-        position + 1,
-        remaining.filter((_, index) => index !== candidatePosition),
-        trial,
+      const found = commitTrial(
+        context,
+        () => {
+          const trial = new Map(current)
+          if (!matches(member, candidate, trial)) return undefined
+          return search(
+            position + 1,
+            remaining.filter((_, index) => index !== candidatePosition),
+            trial,
+          )
+        },
+        (result) => result !== undefined,
       )
       if (found !== undefined) return found
     }
@@ -189,6 +236,7 @@ const inferFailureRow = (
       void trial
       return remaining.length === 0
     },
+    context,
   )
   if (matched === undefined) return false
   const trial = new Map(matched)
@@ -315,10 +363,50 @@ const inferRequirementRowArgument = (
         )
       )
     },
+    context,
   )
   if (matched === undefined) return false
   const trial = new Map(matched)
   commitInference(inferred, trial)
+  return true
+}
+
+/** Infers declaration-bound or body-local regions without inventing a longer validity. */
+const inferLifetime = (
+  pattern: Lifetime.Lifetime,
+  actual: Lifetime.Lifetime,
+  inferred: Map<string, GenericArgument>,
+  context: InferenceContext,
+): boolean => {
+  const identity = Lifetime.key(pattern)
+  const previous = inferred.get(identity)
+  if (previous === undefined && context.lifetimes?.inferable?.has(identity)) {
+    inferred.set(identity, actual)
+    return true
+  }
+  if (Lifetime.equals(pattern, actual) && previous === undefined) {
+    if (
+      context.lifetimes === undefined &&
+      (pattern._tag === 'BoundLifetime' || pattern._tag === 'LocalLifetime')
+    )
+      inferred.set(identity, actual)
+    return true
+  }
+  if (context.lifetimes !== undefined) {
+    const expected = previous === undefined ? pattern : previous
+    return (
+      Lifetime.isLifetime(expected) &&
+      context.lifetimes.accepts(
+        context.contravariant === true ? expected : actual,
+        context.contravariant === true ? actual : expected,
+        context.invariant ?? false,
+      )
+    )
+  }
+  if (pattern._tag !== 'BoundLifetime' && pattern._tag !== 'LocalLifetime') return false
+  if (previous !== undefined)
+    return Lifetime.isLifetime(previous) && Lifetime.equals(previous, actual)
+  inferred.set(identity, actual)
   return true
 }
 
@@ -328,6 +416,12 @@ const inferGenericArgument = (
   inferred: Map<string, GenericArgument>,
   context: InferenceContext,
 ): boolean => {
+  if (Lifetime.isLifetime(pattern) || Lifetime.isLifetime(actual))
+    return (
+      Lifetime.isLifetime(pattern) &&
+      Lifetime.isLifetime(actual) &&
+      inferLifetime(pattern, actual, inferred, context)
+    )
   if (isRepresentationParameterArgument(pattern))
     return (
       isRepresentationArgument(actual) &&
@@ -456,7 +550,285 @@ export const rowInferenceFailure = (
   return undefined
 }
 
+/** Includes hidden representation identities when checking whether a rigid region escaped. */
+const argumentLifetimes = (argument: GenericArgument): ReadonlyArray<Lifetime.Lifetime> => {
+  if (Lifetime.isLifetime(argument)) return [argument]
+  if (
+    (typeof argument !== 'string' && argument._tag === 'TypeParameter') ||
+    isTypeArgument(argument)
+  )
+    return lifetimes(argument)
+  switch (argument._tag) {
+    case 'RequirementRowArgument': {
+      const parameters_ = RowAlgebra.parameters(requirementRowPolicy(), argument.row)
+      return [
+        ...RowAlgebra.concreteMembers(requirementRowPolicy(), argument.row).flatMap((member) =>
+          lifetimes(member.capability),
+        ),
+        ...[...parameters_.rows, ...parameters_.members].flatMap(lifetimes),
+      ]
+    }
+    case 'UnavailableGenericArgument':
+      return []
+    case 'RepresentedType':
+      return lifetimes(argument)
+    case 'RepresentationParameterArgument':
+      return lifetimes(argument.parameter)
+    case 'OpaqueRepresentationArgument':
+      return [...lifetimes(argument.contract), ...argument.arguments.flatMap(argumentLifetimes)]
+    case 'ExactRepresentationArgument':
+      return [...lifetimes(argument.contract), ...argumentLifetimes(argument.identity)]
+    case 'CompositeEffectRepresentationArgument':
+      return [...lifetimes(argument.contract), ...argument.alternatives.flatMap(argumentLifetimes)]
+    case 'EffectIdentityArgument':
+      return argument.owner?.typeArguments.flatMap(argumentLifetimes) ?? []
+    case 'CallableIdentityArgument':
+      return [
+        ...argument.typeArguments.flatMap(argumentLifetimes),
+        ...(argument.environment?.owner.typeArguments.flatMap(argumentLifetimes) ?? []),
+      ]
+  }
+}
+
+/** Opens one finite outer binder in a rigid universe and commits only nonescaping inference. */
+const inferQuantifiedExecutable = (
+  pattern: Callable | Effect,
+  actual: Callable | Effect,
+  inferred: Map<string, GenericArgument>,
+  context: InferenceContext,
+): boolean => {
+  if (
+    isCallable(pattern) &&
+    isCallable(actual) &&
+    pattern.lifetimeBinders.length === 0 &&
+    actual.lifetimeBinders.length > 0
+  ) {
+    const expected = substitute(pattern, inferred)
+    const instantiated = isCallable(expected)
+      ? instantiateOfferedCallable(actual, expected, context.lifetimes?.compatibility)
+      : undefined
+    return instantiated !== undefined && inferType(pattern, instantiated, inferred, context)
+  }
+  if (pattern.lifetimeBinders.length !== actual.lifetimeBinders.length) return false
+  const nested = (type: Type): boolean =>
+    someSubterm(
+      type,
+      (part) => (isCallable(part) || isEffect(part)) && part.lifetimeBinders.length > 0,
+    )
+  if (
+    !isCallable(pattern) ||
+    !isCallable(actual) ||
+    [...pattern.parameters, pattern.result, ...actual.parameters, actual.result].some(nested)
+  )
+    return false
+  const patternSubstitution = new Map<string, GenericArgument>()
+  const actualSubstitution = new Map<string, GenericArgument>()
+  const universe = `inference:${key(pattern)}:${key(actual)}`
+  for (const [ordinal, binder] of pattern.lifetimeBinders.entries()) {
+    const supplied = actual.lifetimeBinders.at(ordinal)
+    if (supplied === undefined) return false
+    const rigid = Lifetime.placeholder(binder, universe)
+    patternSubstitution.set(Lifetime.key(binder), rigid)
+    actualSubstitution.set(Lifetime.key(supplied), rigid)
+  }
+  const open = (self: Callable | Effect, substitution: Substitution): Callable | Effect => {
+    const metadata = {
+      environment: self.environment,
+      lifetimeBinders: [],
+      typeOutlives: self.typeOutlives.map((bound) => ({
+        type: substitute(bound.type, substitution),
+        lifetime: substituteLifetime(bound.lifetime, substitution),
+      })),
+      lifetimeBounds: self.lifetimeBounds.map((bound) => ({
+        longer: substituteLifetime(bound.longer, substitution),
+        shorter: substituteLifetime(bound.shorter, substitution),
+      })),
+    }
+    return isCallable(self)
+      ? callable(
+          self.parameters.map((parameter_) => substitute(parameter_, substitution)),
+          substitute(self.result, substitution),
+          metadata,
+          self.mode,
+          self.schema,
+          self.unsafe,
+        )
+      : effectWithRows(
+          substitute(self.success, substitution),
+          substituteFailureRow(self.failureRow, substitution),
+          metadata,
+          self.access,
+          substituteRequirementsRow(self.requirementRow, substitution),
+        )
+  }
+  const trial = new Map(inferred)
+  if (
+    !inferType(open(pattern, patternSubstitution), open(actual, actualSubstitution), trial, context)
+  )
+    return false
+  for (const [identity, argument] of trial) {
+    if (inferred.has(identity)) continue
+    const regions = argumentLifetimes(argument)
+    if (
+      regions.some(
+        (region) => region._tag === 'PlaceholderLifetime' && region.universe === universe,
+      )
+    )
+      return false
+  }
+  commitInference(inferred, trial)
+  return true
+}
+
+/**
+ * Instantiates an offered outer invocation binder at one already selected monomorphic signature.
+ * Only that binder's variables may be solved; surrounding parameters remain rigid. The caller
+ * still checks the offered signature, bounds and variance in the source-to-expected direction.
+ */
+export const instantiateOfferedCallable = (
+  source: Callable,
+  target: Callable,
+  compatibility: TypeCompatibility.Context = TypeCompatibility.context(),
+): Callable | undefined => {
+  const nested = (type: Type): boolean =>
+    someSubterm(
+      type,
+      (part) => (isCallable(part) || isEffect(part)) && part.lifetimeBinders.length > 0,
+    )
+  if (
+    source.lifetimeBinders.length === 0 ||
+    target.lifetimeBinders.length !== 0 ||
+    source.parameters.length !== target.parameters.length ||
+    [...source.parameters, source.result, ...target.parameters, target.result].some(nested)
+  )
+    return undefined
+  const inferable = new Set(source.lifetimeBinders.map(Lifetime.key))
+  const inferred = new Map<string, GenericArgument>(
+    parameters(source).map((parameter_) => [key(parameter_), parameterArgument(parameter_)]),
+  )
+  const context: InferenceContext = {
+    allowOpenGenericArguments: false,
+    lifetimes: {
+      compatibility,
+      inferable,
+      accepts: (longer, shorter, invariant) =>
+        TypeCompatibility.isCompatible(
+          TypeCompatibility.check(string(longer), string(shorter), compatibility),
+        ) &&
+        (!invariant ||
+          TypeCompatibility.isCompatible(
+            TypeCompatibility.check(string(shorter), string(longer), compatibility),
+          )),
+    },
+  }
+  const sites = [...source.parameters, source.result]
+  const expectedSites = [...target.parameters, target.result]
+  for (const [ordinal, site] of sites.entries()) {
+    const expected = expectedSites.at(ordinal)
+    if (expected === undefined || !inferType(site, expected, inferred, context)) return undefined
+  }
+  const substitution = new Map<string, GenericArgument>()
+  for (const binder of source.lifetimeBinders) {
+    const selected = inferred.get(Lifetime.key(binder))
+    if (selected === undefined || !Lifetime.isLifetime(selected)) return undefined
+    substitution.set(Lifetime.key(binder), selected)
+  }
+  // Discharge invocation preconditions while their binders are still known. Once opened, those
+  // predicates are free and must never be reclassified as assumed formation evidence.
+  const formation = executableFormationRequirements(source)
+  const boundsContext = {
+    ...compatibility,
+    typeBounds: [...compatibility.typeBounds, ...target.typeOutlives, ...formation.typeOutlives],
+    assumptions: Lifetime.assumptions([
+      ...compatibility.assumptions.bounds,
+      ...target.lifetimeBounds,
+      ...formation.lifetimeBounds,
+    ]),
+  }
+  if (
+    !source.lifetimeBounds.every((bound) =>
+      TypeCompatibility.isCompatible(
+        TypeCompatibility.check(
+          string(substituteLifetime(bound.longer, substitution)),
+          string(substituteLifetime(bound.shorter, substitution)),
+          boundsContext,
+        ),
+      ),
+    ) ||
+    !source.typeOutlives.every((bound) =>
+      TypeCompatibility.typeOutlives(boundsContext, {
+        type: substitute(bound.type, substitution),
+        lifetime: substituteLifetime(bound.lifetime, substitution),
+      }),
+    )
+  )
+    return undefined
+  const opened = callable(
+    source.parameters,
+    source.result,
+    { ...source, lifetimeBinders: [] },
+    source.mode,
+    source.schema,
+    source.unsafe,
+  )
+  const instantiated = substitute(opened, substitution)
+  return isCallable(instantiated) ? instantiated : undefined
+}
+
+/** Invocation preconditions need implication; independent formation facts travel with the value. */
+const inferExecutableBounds = (
+  pattern: Callable | Effect,
+  actual: Callable | Effect,
+  inferred: Substitution,
+  context: InferenceContext,
+): boolean => {
+  const formation = executableFormationRequirements(actual)
+  const expected = Lifetime.assumptions(
+    [...pattern.lifetimeBounds, ...formation.lifetimeBounds].map((bound) => ({
+      longer: substituteLifetime(bound.longer, inferred),
+      shorter: substituteLifetime(bound.shorter, inferred),
+    })),
+  )
+  const expectedTypes = [...pattern.typeOutlives, ...formation.typeOutlives].map((bound) => ({
+    type: substitute(bound.type, inferred),
+    lifetime: substituteLifetime(bound.lifetime, inferred),
+  }))
+  const proves = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime): boolean =>
+    Lifetime.outlives(expected, longer, shorter) ||
+    (context.lifetimes?.accepts(longer, shorter, false) ?? false)
+  return (
+    actual.typeOutlives.every((bound) => {
+      const type = substitute(bound.type, inferred)
+      const lifetime = substituteLifetime(bound.lifetime, inferred)
+      return (
+        satisfiesOutlives(type, lifetime, expectedTypes, proves) ||
+        (context.lifetimes?.typeOutlives?.(type, lifetime) ?? false)
+      )
+    }) &&
+    actual.lifetimeBounds.every((bound) => {
+      const longer = substituteLifetime(bound.longer, inferred)
+      const shorter = substituteLifetime(bound.shorter, inferred)
+      return (
+        Lifetime.outlives(expected, longer, shorter) ||
+        (context.lifetimes?.accepts(longer, shorter, false) ?? false)
+      )
+    })
+  )
+}
+
 const inferType = (
+  pattern: Type,
+  actual: Type,
+  inferred: Map<string, GenericArgument>,
+  context: InferenceContext,
+): boolean =>
+  commitTrial(
+    context,
+    () => inferSelectedType(pattern, actual, inferred, context),
+    (matched) => matched,
+  )
+
+const inferSelectedType = (
   pattern: Type,
   actual: Type,
   inferred: Map<string, GenericArgument>,
@@ -472,6 +844,29 @@ const inferType = (
       : bindGenericArgument(pattern, actual, inferred, context)
   }
   if (isParameter(pattern)) {
+    const fixed = inferred.get(key(pattern))
+    if (
+      pattern.kind === 'Value' &&
+      fixed !== undefined &&
+      isTypeArgument(fixed) &&
+      context.lifetimes !== undefined
+    ) {
+      const comparison =
+        context.lifetimes.compatibility ??
+        TypeCompatibility.context({
+          outlives: (source, target) =>
+            context.lifetimes?.accepts(source, target, context.invariant ?? false) ?? false,
+          typeOutlives: context.lifetimes.typeOutlives,
+        })
+      const source = context.contravariant ? fixed : actual
+      const target = context.contravariant ? actual : fixed
+      if (
+        TypeCompatibility.isCompatible(TypeCompatibility.check(source, target, comparison)) &&
+        (!context.invariant ||
+          TypeCompatibility.isCompatible(TypeCompatibility.check(target, source, comparison)))
+      )
+        return true
+    }
     return pattern.kind === 'Value' && bindGenericArgument(pattern, actual, inferred, context)
   }
   if (isNominal(pattern) && isNominal(actual)) {
@@ -486,6 +881,8 @@ const inferType = (
       return supplied !== undefined && inferGenericArgument(argument, supplied, inferred, context)
     })
   }
+  if (isString(pattern) && isString(actual))
+    return inferLifetime(pattern.lifetime, actual.lifetime, inferred, context)
   if (isFixedArray(pattern) && isFixedArray(actual)) {
     return (
       pattern.length === actual.length &&
@@ -495,40 +892,72 @@ const inferType = (
   if (isSlice(pattern) && isSlice(actual)) {
     return (
       pattern.access === actual.access &&
-      inferType(pattern.element, actual.element, inferred, context)
+      inferLifetime(pattern.lifetime, actual.lifetime, inferred, context) &&
+      inferType(
+        pattern.element,
+        actual.element,
+        inferred,
+        pattern.access === 'Exclusive' ? { ...context, invariant: true } : context,
+      ) &&
+      (context.lifetimes !== undefined ||
+        pattern.access !== 'Exclusive' ||
+        equals(substitute(pattern.element, inferred), actual.element))
     )
   }
   if (isReference(pattern) && isReference(actual)) {
     return (
       compareAccess(actual.access, pattern.access) &&
-      inferType(pattern.target, actual.target, inferred, context)
+      inferLifetime(pattern.lifetime, actual.lifetime, inferred, context) &&
+      inferType(
+        pattern.target,
+        actual.target,
+        inferred,
+        pattern.access === 'Exclusive' ? { ...context, invariant: true } : context,
+      ) &&
+      (context.lifetimes !== undefined ||
+        pattern.access !== 'Exclusive' ||
+        equals(substitute(pattern.target, inferred), actual.target))
     )
   }
   if (isPointer(pattern) && isPointer(actual)) {
     // `*mut T` satisfies a `*const T` pattern; the reverse does not.
     return (
       (!pattern.mutable || actual.mutable) &&
-      inferType(pattern.pointee, actual.pointee, inferred, context)
+      inferType(pattern.pointee, actual.pointee, inferred, { ...context, invariant: true })
     )
   }
   if (isCallable(pattern) && isCallable(actual)) {
+    if (pattern.lifetimeBinders.length !== 0 || actual.lifetimeBinders.length !== 0)
+      return inferQuantifiedExecutable(pattern, actual, inferred, context)
     return (
+      inferLifetime(pattern.environment, actual.environment, inferred, context) &&
       (!actual.unsafe || pattern.unsafe) &&
       compareAccess(pattern.mode, actual.mode) &&
       pattern.parameters.length === actual.parameters.length &&
       pattern.parameters.every((parameter_, index) => {
         const supplied = actual.parameters.at(index)
-        return supplied !== undefined && inferType(parameter_, supplied, inferred, context)
+        return (
+          supplied !== undefined &&
+          inferType(parameter_, supplied, inferred, {
+            ...context,
+            contravariant: !context.contravariant,
+          })
+        )
       }) &&
-      inferType(pattern.result, actual.result, inferred, context)
+      inferType(pattern.result, actual.result, inferred, context) &&
+      inferExecutableBounds(pattern, actual, inferred, context)
     )
   }
   if (isEffect(pattern) && isEffect(actual)) {
+    if (pattern.lifetimeBinders.length !== 0 || actual.lifetimeBinders.length !== 0)
+      return inferQuantifiedExecutable(pattern, actual, inferred, context)
     return (
+      inferLifetime(pattern.environment, actual.environment, inferred, context) &&
       compareAccess(pattern.access, actual.access) &&
       inferType(pattern.success, actual.success, inferred, context) &&
       inferFailureRows(pattern, actual, inferred, context) &&
-      inferRequirementRows(pattern, actual, inferred, context)
+      inferRequirementRows(pattern, actual, inferred, context) &&
+      inferExecutableBounds(pattern, actual, inferred, context)
     )
   }
   if (isRepresented(pattern) && isRepresented(actual)) {
@@ -547,8 +976,14 @@ export const infer = (
   pattern: Type,
   actual: Type,
   inferred: Map<string, GenericArgument>,
+  lifetimes?: LifetimeInference,
 ): boolean =>
-  inferType(pattern, actual, inferred, Object.freeze({ allowOpenGenericArguments: false }))
+  inferType(
+    pattern,
+    actual,
+    inferred,
+    Object.freeze({ allowOpenGenericArguments: false, lifetimes }),
+  )
 
 /** Infers through generic arguments that remain open over an enclosing declaration. */
 export const inferOpenGenericArguments = (
@@ -567,20 +1002,36 @@ export const inferOpenGenericArguments = (
 }
 
 /**
- * Builds a substitution from a leading run of parameters, binding only the parameters an argument
- * was supplied for. The parameters past the prefix stay open, so inference can determine them
- * afterwards; the result is undefined when an argument's kind does not match its parameter, or
- * when more arguments were supplied than the declaration has parameters.
+ * Binds the supplied prefix independently in the lifetime and ordinary generic namespaces.
+ * Omitted lifetime arguments remain open while an ordinary prefix such as `<A>` binds the first
+ * ordinary parameter. Kind mismatches and excess arguments in either namespace are rejected.
  */
 export const prefixSubstitution = (
   declared: ReadonlyArray<Parameter>,
   arguments_: ReadonlyArray<GenericArgument>,
+): Substitution | undefined => bindPrefix(declared, arguments_)
+
+const bindPrefix = (
+  declared: ReadonlyArray<Parameter>,
+  arguments_: ReadonlyArray<GenericArgument>,
+  representationContext?: TypeCompatibility.Context,
 ): Substitution | undefined => {
   if (arguments_.length > declared.length) return undefined
   const result = new Map<string, GenericArgument>()
-  for (const [index, argument] of arguments_.entries()) {
-    const parameter_ = declared.at(index)
-    if (parameter_ === undefined) return undefined
+  const lifetimeParameters = declared.filter((parameter) => parameter.kind === 'Lifetime')
+  const ordinaryParameters = declared.filter((parameter) => parameter.kind !== 'Lifetime')
+  let lifetimeOrdinal = 0
+  let ordinaryOrdinal = 0
+  const supplied: Array<{ readonly parameter: Parameter; readonly argument: GenericArgument }> = []
+  for (const argument of arguments_) {
+    const parameter = Lifetime.isLifetime(argument)
+      ? lifetimeParameters.at(lifetimeOrdinal++)
+      : ordinaryParameters.at(ordinaryOrdinal++)
+    if (parameter === undefined) return undefined
+    supplied.push({ parameter, argument })
+    result.set(key(parameter), argument)
+  }
+  for (const { parameter: parameter_, argument } of supplied) {
     const rawRepresentationContract = isRepresentationArgument(argument)
       ? representationArgumentContract(argument)
       : undefined
@@ -612,6 +1063,7 @@ export const prefixSubstitution = (
       suppliedStaticProperties === undefined ||
       parameter_.staticProperties.every((property) => suppliedStaticProperties.includes(property))
     if (
+      (parameter_.kind === 'Lifetime' && !Lifetime.isLifetime(argument)) ||
       (parameter_.kind === 'Value' && !isTypeArgument(argument)) ||
       (parameter_.kind === 'RequirementRow' && !isRequirementRowArgument(argument)) ||
       ((parameter_.kind === 'CallableRepresentation' ||
@@ -621,11 +1073,13 @@ export const prefixSubstitution = (
           requiredRepresentationBound === undefined ||
           representationContract === undefined ||
           !preservesStaticProperties ||
-          representationAdmissibility(representationContract, requiredRepresentationBound)._tag !==
-            'Admitted'))
+          representationAdmissibility(
+            representationContract,
+            requiredRepresentationBound,
+            representationContext,
+          )._tag !== 'Admitted'))
     )
       return undefined
-    result.set(key(parameter_), argument)
   }
   return result
 }
@@ -636,3 +1090,44 @@ export const substitution = (
   arguments_: ReadonlyArray<GenericArgument>,
 ): Substitution | undefined =>
   declared.length !== arguments_.length ? undefined : prefixSubstitution(declared, arguments_)
+
+/** Exact semantic arguments and the selected call's proven representation lifetime relations. */
+export interface SelectedSubstitution {
+  readonly substitution: Substitution
+  readonly compatibility: TypeCompatibility.Context
+}
+
+/**
+ * Rebinds a complete invocation selected by semantic checking. Only Instances and ExecutableOrigin
+ * may use this boundary: the caller must supply already checked HIR arguments. Kind, access and
+ * representation structure are verified again; only their accepted lifetime relations are carried
+ * forward as explicit assumptions. Detached and NonParking obligations remain independently checked.
+ */
+export const selectedSubstitution = (
+  declared: ReadonlyArray<Parameter>,
+  arguments_: ReadonlyArray<GenericArgument>,
+): SelectedSubstitution | undefined => {
+  if (declared.length !== arguments_.length) return undefined
+  const bounds: Array<Lifetime.Outlives> = []
+  const typeBounds: Array<TypeOutlives> = []
+  const collect = TypeCompatibility.context({
+    outlives: () => true,
+    commitOutlives: (longer, shorter) => {
+      bounds.push({ longer, shorter })
+    },
+    typeOutlives: () => true,
+    commitTypeOutlives: (type, lifetime) => {
+      typeBounds.push({ type, lifetime })
+    },
+  })
+  const substitution = bindPrefix(declared, arguments_, collect)
+  return substitution === undefined
+    ? undefined
+    : Object.freeze({
+        substitution,
+        compatibility: TypeCompatibility.context({
+          assumptions: Lifetime.assumptions(bounds),
+          typeBounds,
+        }),
+      })
+}

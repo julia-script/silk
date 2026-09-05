@@ -128,7 +128,7 @@ exclusive [`Allocator`](./allocator.md#declaration-73696c6b2f616c6c6f6361746f723
 ### Operation `argumentCount`
 
 ```silk
-effect fn argumentCount() -> usize ! HostInputError ? &mut HostInput
+effect<'static> fn argumentCount() -> usize ! HostInputError ? &mut HostInput
 ```
 
 Returns the argument count, including the program name at index zero.
@@ -142,7 +142,7 @@ A provider that cannot inspect the process arguments fails with `HostInputError`
 ### Operation `argument`
 
 ```silk
-effect fn argument(index: usize) -> silk/option.Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
+effect<'static> fn argument(index: usize) -> silk/option.Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Copies one argument as raw bytes, or returns `None` when `index` is out of range.
@@ -157,7 +157,7 @@ produces `HostInputError`; ownership allocation produces `OutOfMemoryError`.
 ### Operation `variable`
 
 ```silk
-effect fn variable(name: &[u8]) -> silk/option.Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
+effect<'life0> fn variable<'life0>(name: &'life0 [u8]) -> silk/option.Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Copies one environment value as raw bytes, or returns `None` when `name` is unset.
@@ -172,7 +172,7 @@ This operation does not change the environment. Provider lookup failure produces
 ### Operation `workingDirectory`
 
 ```silk
-effect fn workingDirectory() -> Bytes ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
+effect<'static> fn workingDirectory() -> Bytes ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Copies the process working directory as raw bytes.
@@ -197,7 +197,7 @@ Creates a host-input failure for a provider that cannot complete a lookup.
 ### Associated function `HostInput.variableNamed`
 
 ```silk
-pub effect fn variableNamed(name: string) -> silk/option.Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
+pub effect<'life0> fn variableNamed<'life0>(name: string<'life0>) -> silk/option.Option<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Copies one environment value selected by a valid UTF-8 name.
@@ -212,7 +212,7 @@ This function borrows the UTF-8 encoding of `name` and delegates to `HostInput.v
 ### Associated function `HostInput.arguments`
 
 ```silk
-pub effect fn arguments() -> silk/vector.Vector<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
+pub effect<'static> fn arguments() -> silk/vector.Vector<silk/bytes.Bytes> ! HostInputError | OutOfMemoryError ? &mut HostInput | &mut Allocator
 ```
 
 Copies all process arguments into an owned vector in host order.
@@ -235,7 +235,7 @@ at index zero.
 ### Associated function `HostInput.text`
 
 ```silk
-pub fn text(values: &[u8]) -> silk/result.Result<string, silk/string.InvalidUtf8>
+pub fn text<'life0>(values: &'life0 [u8]) -> silk/result.Result<string<'life0>, silk/string.InvalidUtf8>
 ```
 
 Validates host bytes as UTF-8 and returns a borrowed textual view or [`InvalidUtf8`](./string.md#declaration-73696c6b2f737472696e673a3a496e76616c696455746638).

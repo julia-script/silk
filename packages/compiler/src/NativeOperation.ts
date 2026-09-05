@@ -96,6 +96,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'ExecutionPark':
       return yield* NativeExecutionOperation.emit(context.execution, operation)
     case 'Move':
+    case 'SetInitialized':
     case 'BeginLoan':
     case 'EndLoan':
     case 'SliceLength':

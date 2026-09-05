@@ -6,6 +6,7 @@ import * as FloatingPoint from '../src/FloatingPoint.js'
 import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
 import * as Lexer from '../src/Lexer.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as LiteralForm from '../src/LiteralForm.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
@@ -19,6 +20,7 @@ import * as SyntaxTree from '../src/SyntaxTree.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
+import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex')
@@ -337,7 +339,7 @@ it('canonicalizes nominal reflection descriptors and heterogeneous field collect
       owner,
       declarationOrdinal: 0,
       member: { _tag: 'LabeledField', label: 'name' },
-      valueType: 'string',
+      valueType: Type.string(Lifetime.staticLifetime),
       authorization,
       provenance: { sourceId: 'example/reflection.silk', start: 12, end: 24 },
     },
@@ -365,7 +367,7 @@ it('canonicalizes nominal reflection descriptors and heterogeneous field collect
   assert.strictEqual(StaticValue.equals(collection, equivalent), true)
   assert.strictEqual(
     StaticValue.presentation(collection),
-    'fields<example.reflection.Person>[field<example.reflection.Person, string>(name@0), field<example.reflection.Person, u32>(age@1)]',
+    "fields<example.reflection.Person>[field<example.reflection.Person, string<'static>>(name@0), field<example.reflection.Person, u32>(age@1)]",
   )
   assert.strictEqual(
     StaticValue.retainedSize(collection),
@@ -1045,16 +1047,19 @@ pub fn main() -> i32 {
         provenance: field.provenance.sourceId,
       }))
 
-    assert.deepEqual(encoded(descriptors(Type.nominal(sourceId, 'Box', [Type.string]))), [
-      {
-        ownerKind: 'Named',
-        declarationOrdinal: 0,
-        member: 'value',
-        valueType: 'string',
-        authorization: 'silk/reflect.fields',
-        provenance: sourceId,
-      },
-    ])
+    assert.deepEqual(
+      encoded(descriptors(Type.nominal(sourceId, 'Box', [Type.string(Lifetime.staticLifetime)]))),
+      [
+        {
+          ownerKind: 'Named',
+          declarationOrdinal: 0,
+          member: 'value',
+          valueType: "string<'static>",
+          authorization: 'silk/reflect.fields',
+          provenance: sourceId,
+        },
+      ],
+    )
     assert.deepEqual(encoded(descriptors(Type.nominal(sourceId, 'Point'))), [
       {
         ownerKind: 'Positional',
@@ -1120,7 +1125,12 @@ pub fn main() -> i32 {
         valueType,
       })),
       [
-        { ownerKind: 'AnonymousNamed', declarationOrdinal: 0, member: 'name', valueType: 'string' },
+        {
+          ownerKind: 'AnonymousNamed',
+          declarationOrdinal: 0,
+          member: 'name',
+          valueType: "string<'static>",
+        },
         { ownerKind: 'AnonymousNamed', declarationOrdinal: 1, member: 'age', valueType: 'i32' },
       ],
     )
@@ -1209,6 +1219,22 @@ pub fn main() -> i32 { return choose(true, 42) }`),
     const second = Residualization.residualize(coordinator, application)
     assert.strictEqual(first._tag, 'ResidualBody')
     assert.strictEqual(second, first)
+    assert.deepEqual(Residualization.counters(coordinator), {
+      _tag: 'ResidualizationCounters',
+      requests: 2,
+      sourceReused: 0,
+      checked: 1,
+      cacheReused: 1,
+      rejected: 0,
+      failures: 0,
+    })
+    assert.deepEqual(Residualization.observations(coordinator), [
+      {
+        declaration: application.declaration,
+        reason: 'StaticArguments',
+        counters: Residualization.counters(coordinator),
+      },
+    ])
 
     const limited = Residualization.make(
       snapshot.target.target,
@@ -1221,6 +1247,16 @@ pub fn main() -> i32 { return choose(true, 42) }`),
     assert.strictEqual(failed._tag, 'StaticFailure')
     if (failed._tag === 'StaticFailure')
       assert.strictEqual(failed.failure._tag, 'ResidualGrowthLimit')
+    assert.deepEqual(Residualization.residualize(limited, application), failed)
+    assert.deepEqual(Residualization.counters(limited), {
+      _tag: 'ResidualizationCounters',
+      requests: 2,
+      sourceReused: 0,
+      checked: 1,
+      cacheReused: 1,
+      rejected: 0,
+      failures: 2,
+    })
   }),
 )
 
@@ -1270,7 +1306,7 @@ pub fn main() -> i32 { return choose(true, 41) }`),
     )
     assert.strictEqual(
       sha256(ownership),
-      'a51911b1ecff05afe136f413123e590bd35d22cd6210ca98f5388556c13bf398',
+      '210a97833a8d7b4909845775cbd6f639d15400f046c017ed42ae7b1a9d3572c0',
     )
 
     const alternateEvidence = Object.freeze({
@@ -1383,6 +1419,7 @@ it.effect('preserves nested static cycle classification through static calls', (
 pub fn main() -> i32 { return recurse(42) }`),
       Target.x8664UnknownLinuxGnu.id,
     )
+    assert.strictEqual(snapshot.mir._tag, 'Unavailable')
     const diagnostics = Analysis.diagnostics(snapshot)
     assert.deepEqual(
       diagnostics.map((diagnostic) => diagnostic.code),
@@ -1467,7 +1504,7 @@ pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
         literal: '"é"',
         source: `import silk.static_text { byteAt }
 
-static fn second(first: string, value: string) -> string { return value }
+static fn second<'a, 'b>(first: string<'a>, value: string<'b>) -> string<'b> { return value }
 
 static fn inspect() -> bool {
   let result = second("éx", "é")
@@ -1481,7 +1518,7 @@ pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
         literal: '"abc"',
         source: `import silk.static_text { byteAt }
 
-static fn second(first: string, value: string) -> string { return value }
+static fn second<'a, 'b>(first: string<'a>, value: string<'b>) -> string<'b> { return value }
 
 static fn inspect() -> bool {
   let a = second("abcx", "abc")
@@ -1786,6 +1823,48 @@ it.effect('keeps lexical literal sentinels out of parser and semantic diagnostic
       ['LEX0002'],
     )
     assert.strictEqual(Projections.hirOf(snapshot, 'static/lexical-sentinel')?.functions.length, 1)
+  }),
+)
+
+it.effect('restores projected static ownership without replacing its enclosing aggregate', () =>
+  Effect.gen(function* () {
+    const source = `struct Token { value: i32 }
+struct Pair { left: Token right: Token }
+struct State { pair: Pair values: [Token; 2] }
+static fn computed() -> i32 {
+  let mut state = State {
+    pair: Pair { left: Token { value: 1 }, right: Token { value: 2 } },
+    values: [Token { value: 3 }, Token { value: 4 }],
+  }
+  let extracted = move state.pair.left
+  state.pair.left = Token { value: extracted.value + 1 }
+  let element = move state.values[0]
+  state.values[0] = Token { value: element.value + 1 }
+  let before = state.pair.left.value + state.pair.right.value + state.values[0].value + state.values[1].value
+  state.pair = Pair { left: Token { value: 5 }, right: Token { value: 6 } }
+  return before + state.pair.left.value + state.pair.right.value
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'static/projected-restoration',
+      encoder.encode(source),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const computed = Analysis.rootAnalysis(snapshot).functions.at(0) ?? unreachable('static body')
+    const result = completedValue(
+      StaticEvaluation.evaluateStatements(computed.statements, {
+        environment: StaticEvaluation.targetEnvironment(Target.wasm32UnknownUnknown),
+        values: new Map(),
+        valueSpans: new Map(),
+        valueOrigins: new Map(),
+        expressionSpans: new Map(),
+        expressionOrigins: new Map(),
+        trace: [],
+        reflect: () => unreachable('fixture does not reflect'),
+        call: () => unreachable('fixture does not call another function'),
+      }),
+    )
+    assert.strictEqual(result._tag, 'IntegerValue')
+    if (result._tag === 'IntegerValue') assert.strictEqual(result.value, 23n)
   }),
 )
 

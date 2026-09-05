@@ -12,6 +12,7 @@ import * as Mir from './Mir.js'
 import type { LinearTerminator } from './MirLinearization.js'
 import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeDebug from './NativeDebug.js'
+import * as NativeOwnedPlace from './NativeOwnedPlace.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeSuspension from './NativeSuspension.js'
 import * as NativeTermination from './NativeTermination.js'
@@ -46,6 +47,30 @@ const scalar = (context: Context, local: Mir.LocalId): Value.Input => {
     throw new RangeError(`Backend expected scalar local %${local.ordinal}`)
   return first
 }
+
+const discriminants = Effect.fnUntraced(function* (
+  context: Context,
+  local: Mir.LocalId,
+  selectors: ReadonlyArray<Mir.PlaceSelector>,
+  count: number,
+  tag: string,
+) {
+  const values = read(context, local)
+  if (selectors.length === 0) return values.slice(0, count)
+  const root = context.entry.fn.localTypes.at(local.ordinal)
+  const place =
+    root === undefined
+      ? undefined
+      : NativeOwnedPlace.make(context.cleanup.program.layout, Mir.semanticType(root), selectors)
+  if (place === undefined) throw new RangeError('Match discriminant lost its verified owned place')
+  return yield* NativeOwnedPlace.read(
+    place,
+    context.cleanup.arith,
+    values,
+    tag,
+    Array.from({ length: count }, (_, ordinal) => ordinal),
+  )
+})
 
 /** Resolves one MIR control target to its declared LLVM block. */
 export const targetBlock = (
@@ -90,7 +115,14 @@ export const enumMatchBranch = Effect.fnUntraced(function* (
   terminator: Extract<LinearTerminator, { readonly _tag: 'EnumMatchBranch' }>,
   blockOrdinal: number,
 ): Effect.fn.Return<void, LlvmError.LlvmError> {
-  const value = scalar(context, terminator.scrutinee)
+  const value = (yield* discriminants(
+    context,
+    terminator.scrutinee,
+    terminator.selectors ?? [],
+    1,
+    `enum_match${blockOrdinal}`,
+  )).at(0)
+  if (value === undefined) throw new RangeError('LLVM enum match lost its discriminant')
   const lane = NativeType.lanesFor(context.types, terminator.type).at(0)
   if (lane === undefined) throw new RangeError('LLVM enum match lost its scalar lane')
   const type = NativeType.laneType(context.types, lane)
@@ -118,7 +150,17 @@ export const matchBranch = Effect.fnUntraced(function* (
   terminator: Extract<LinearTerminator, { readonly _tag: 'MatchBranch' }>,
   blockOrdinal: number,
 ): Effect.fn.Return<void, LlvmError.LlvmError> {
-  const values = read(context, terminator.scrutinee)
+  const count =
+    terminator.member._tag === 'NominalUnionVariant' && terminator.shape.tree._tag === 'SumShape'
+      ? 2
+      : 1
+  const values = yield* discriminants(
+    context,
+    terminator.scrutinee,
+    terminator.selectors ?? [],
+    count,
+    `match${blockOrdinal}`,
+  )
   const tag = values.at(0)
   if (tag === undefined) throw new RangeError('LLVM match has no tag lane')
   let condition: Value.Value

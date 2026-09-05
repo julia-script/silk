@@ -7,6 +7,7 @@ export type TokenKind =
   | 'DocComment'
   | 'ModuleDocComment'
   | 'Identifier'
+  | 'Lifetime'
   | 'DecimalInteger'
   | 'DecimalFloat'
   | 'DurationLiteral'
@@ -96,6 +97,7 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   DocComment: 'documentation comment',
   ModuleDocComment: 'module documentation comment',
   Identifier: 'identifier',
+  Lifetime: 'lifetime name',
   DecimalInteger: 'decimal integer',
   DecimalFloat: 'decimal floating-point literal',
   DurationLiteral: 'duration literal',

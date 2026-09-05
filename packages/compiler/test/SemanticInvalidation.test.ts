@@ -33,6 +33,18 @@ const observation = (project: ProjectAnalysis.ProjectAnalysis, module: string) =
 const expectReusable = (project: ProjectAnalysis.ProjectAnalysis, module: string): void =>
   assert.strictEqual(observation(project, module)._tag, 'Reusable', `${module} should be reusable`)
 
+const expectBodyChecks = (
+  project: ProjectAnalysis.ProjectAnalysis,
+  checked: number,
+  reused: number,
+): void => {
+  const counters = project.report.find((phase) => phase.phase === 'body-queries')?.counters
+  assert.strictEqual(counters?._tag, 'BodyQueryCounters')
+  if (counters?._tag !== 'BodyQueryCounters') return
+  assert.strictEqual(counters.checked, checked)
+  assert.strictEqual(counters.reused, reused)
+}
+
 const expectReasons = (
   project: ProjectAnalysis.ProjectAnalysis,
   module: string,
@@ -63,10 +75,11 @@ it.effect('keeps unrelated modules and body-only importers reusable', () =>
     expectReusable(current, 'app/A')
     expectReasons(current, 'app/B', ['LocalChange'])
     expectReasons(current, 'app/C', ['LocalChange'])
-    assert.strictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
+    expectBodyChecks(current, 2, 1)
+    assert.notStrictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
     assert.notStrictEqual(current.semantics.get('app/B'), previous.semantics.get('app/B'))
     assert.notStrictEqual(current.semantics.get('app/C'), previous.semantics.get('app/C'))
-    assert.strictEqual(current.toolingModules.get('app/A'), previous.toolingModules.get('app/A'))
+    assert.notStrictEqual(current.toolingModules.get('app/A'), previous.toolingModules.get('app/A'))
     assert.notStrictEqual(current.toolingModules.get('app/B'), previous.toolingModules.get('app/B'))
     assert.notStrictEqual(current.toolingModules.get('app/C'), previous.toolingModules.get('app/C'))
     const view = ProjectAnalysis.view(current, 'app/A') ?? raise('missing app/A view')
@@ -113,7 +126,8 @@ it.effect('keeps importers reusable when an alias target is only re-spelled', ()
 
     expectReusable(current, 'app/A')
     expectReasons(current, 'app/B', ['LocalChange'])
-    assert.strictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
+    expectBodyChecks(current, 0, 1)
+    assert.notStrictEqual(current.semantics.get('app/A'), previous.semantics.get('app/A'))
   }),
 )
 
@@ -187,10 +201,11 @@ it.effect('stops public-surface propagation when an intermediate module stabiliz
       previous,
     )
     expectReasons(bodyOnly, 'chain/C', ['LocalChange'])
+    expectBodyChecks(bodyOnly, 1, 2)
     expectReusable(bodyOnly, 'chain/B')
     expectReusable(bodyOnly, 'chain/A')
     assert.notStrictEqual(bodyOnly.semantics.get('chain/C'), previous.semantics.get('chain/C'))
-    assert.strictEqual(bodyOnly.semantics.get('chain/B'), previous.semantics.get('chain/B'))
+    assert.notStrictEqual(bodyOnly.semantics.get('chain/B'), previous.semantics.get('chain/B'))
     assert.strictEqual(bodyOnly.semantics.get('chain/A'), previous.semantics.get('chain/A'))
 
     const signatureChange = yield* analyze(

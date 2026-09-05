@@ -159,7 +159,7 @@ Creates an empty vector with zero capacity and no allocation.
 ### Method `Vector.length`
 
 ```silk
-pub fn length<T>(self: &Vector<T>) -> usize
+pub fn length<T, 'life1>(self: &'life1 Vector<T>) -> usize
 ```
 
 Returns the number of initialized elements.
@@ -169,7 +169,7 @@ Returns the number of initialized elements.
 ### Method `Vector.capacity`
 
 ```silk
-pub fn capacity<T>(self: &Vector<T>) -> usize
+pub fn capacity<T, 'life1>(self: &'life1 Vector<T>) -> usize
 ```
 
 Returns the total number of elements that fit without another growth allocation.
@@ -179,7 +179,7 @@ Returns the total number of elements that fit without another growth allocation.
 ### Method `Vector.asSlice`
 
 ```silk
-pub fn asSlice<T>(self: &Vector<T>) -> &[T]
+pub fn asSlice<T, 'life1>(self: &'life1 Vector<T>) -> &'life1 [T]
 ```
 
 Borrows the initialized elements as one shared lexical slice.
@@ -193,7 +193,7 @@ Do not retain this slice across an operation that can grow the vector.
 ### Method `Vector.asMutSlice`
 
 ```silk
-pub fn asMutSlice<T>(self: &mut Vector<T>) -> &mut [T]
+pub fn asMutSlice<T, 'life1>(self: &'life1 mut Vector<T>) -> &'life1 mut [T]
 ```
 
 Borrows all initialized elements as one exclusive lexical slice.
@@ -207,7 +207,7 @@ Do not retain this slice across an operation that can grow the vector.
 ### Method `Vector.append`
 
 ```silk
-pub effect fn append<T>(self: &mut Vector<T>, value: T) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn append<T: 'env, 'life1: 'env, 'env>(self: &'life1 mut Vector<T>, value: T) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends one owned value, growing geometrically when capacity is exhausted.
@@ -222,7 +222,7 @@ length, and capacity.
 ### Method `Vector.insert`
 
 ```silk
-pub effect fn insert<T>(self: &mut Vector<T>, index: usize, value: T) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn insert<T: 'env, 'life1: 'env, 'env>(self: &'life1 mut Vector<T>, index: usize, value: T) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Inserts one owned value at an index, shifting later elements without requiring T to be Copy.
@@ -241,7 +241,7 @@ vector keeps its prior contents, length, and capacity.
 ### Method `Vector.get`
 
 ```silk
-pub fn get<T>(self: &Vector<T>, index: usize) -> T
+pub fn get<T, 'life1>(self: &'life1 Vector<T>, index: usize) -> T
 ```
 
 Copies the element at one index and traps when the index is out of range.
@@ -255,7 +255,7 @@ Use this function for a `Copy` element. Use [`asSlice`](#declaration-73696c6b2f7
 ### Method `Vector.pop`
 
 ```silk
-pub fn pop<T>(self: &mut Vector<T>) -> silk/option.Option<T>
+pub fn pop<T, 'life1>(self: &'life1 mut Vector<T>) -> silk/option.Option<T>
 ```
 
 Removes the last element and returns it. Returns an absent value for an empty vector.
@@ -269,7 +269,7 @@ A present result transfers ownership of the removed element. Capacity does not c
 ### Method `Vector.remove`
 
 ```silk
-pub fn remove<T>(self: &mut Vector<T>, index: usize) -> T
+pub fn remove<T, 'life1>(self: &'life1 mut Vector<T>, index: usize) -> T
 ```
 
 Removes the element at one index, shifting the later elements down. Traps out of range.
@@ -283,7 +283,7 @@ Ownership of the removed element passes to the caller. Capacity does not change.
 ### Method `Vector.clear`
 
 ```silk
-pub fn clear<T>(self: &mut Vector<T>) -> ()
+pub fn clear<T, 'life1>(self: &'life1 mut Vector<T>) -> ()
 ```
 
 Drops every initialized element and sets the length to zero, keeping the capacity.
@@ -293,7 +293,7 @@ Drops every initialized element and sets the length to zero, keeping the capacit
 ### Method `Vector.truncate`
 
 ```silk
-pub fn truncate<T>(self: &mut Vector<T>, length: usize) -> ()
+pub fn truncate<T, 'life1>(self: &'life1 mut Vector<T>, length: usize) -> ()
 ```
 
 Drops every element past one length, keeping the capacity. Shorter lengths are left alone.
@@ -307,7 +307,7 @@ If `length` is not less than the current length, this function does nothing.
 ### Method `Vector.set`
 
 ```silk
-pub fn set<T>(self: &mut Vector<T>, index: usize, value: T) -> ()
+pub fn set<T, 'life1>(self: &'life1 mut Vector<T>, index: usize, value: T) -> ()
 ```
 
 Overwrites the element at one index, dropping the old element first. Traps out of range.
@@ -317,7 +317,7 @@ Overwrites the element at one index, dropping the old element first. Traps out o
 ### Method `Vector.reserve`
 
 ```silk
-pub effect fn reserve<T>(self: &mut Vector<T>, additional: usize) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn reserve<T: 'env, 'life1: 'env, 'env>(self: &'life1 mut Vector<T>, additional: usize) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Grows capacity to hold at least `additional` more elements without another allocation.
@@ -332,7 +332,7 @@ remain unchanged.
 ### Method `Vector.sort`
 
 ```silk
-pub effect fn sort<T>(self: &mut Vector<T>) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn sort<T: 'env, 'life1: 'env, 'env>(self: &'life1 mut Vector<T>) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Orders the elements in place. Equal elements keep their input order.
@@ -347,7 +347,7 @@ storage. If allocation fails, the vector remains unchanged.
 ### Method `Vector.binarySearch`
 
 ```silk
-pub fn binarySearch<T>(self: &Vector<T>, target: T) -> silk/option.Option<usize>
+pub fn binarySearch<T, 'life1>(self: &'life1 Vector<T>, target: T) -> silk/option.Option<usize>
 ```
 
 Returns the index of a matching element in a sorted vector, or an absent value when Option.none matches.
@@ -375,7 +375,7 @@ impl Drop for silk/vector.Vector<T>
 ## `appendBytes`
 
 ```silk
-pub effect fn appendBytes(self: &mut silk/vector.Vector<u8>, values: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn appendBytes<'life0: 'env, 'life1: 'env, 'env>(self: &'life0 mut silk/vector.Vector<u8>, values: &'life1 [u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends every byte of one borrowed sequence in source order with one bulk copy.

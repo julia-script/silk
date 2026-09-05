@@ -105,8 +105,7 @@ source-observable and SHALL carry no stable external ABI or serialization promis
 Moving an affine payload into an owned union SHALL consume that payload. A union SHALL be Copy only
 when every normalized member has the compiler's sealed Copy property; copying that union SHALL
 preserve exactly one canonical active member and its complete payload without consuming or mutating
-the source. Otherwise the union SHALL remain one affine owner. Borrowed values SHALL NOT be stored
-as union members, and cleanup SHALL act on exactly the active payload once.
+the source. Otherwise the union SHALL remain one affine owner. Shared borrowed values SHALL retain their lifetime arguments as ordinary union members. Exclusive stored views SHALL remain gated until their storage checker is admitted. Cleanup SHALL act on exactly the initialized active payload remainder once.
 
 #### Scenario: Consume an injected owner
 
@@ -128,15 +127,20 @@ as union members, and cleanup SHALL act on exactly the active payload once.
 - **WHEN** one member of a structural union owns an affine or Drop-bearing field
 - **THEN** the complete union remains affine and a requested whole-value copy is rejected
 
-#### Scenario: Reject a stored borrow
+#### Scenario: Retain a stored shared borrow
 
-- **WHEN** a contextual conversion attempts to inject a shared or exclusive borrow into an owned union
-- **THEN** ownership rejects the conversion without fabricating an owned payload
+- **WHEN** a contextual conversion attempts to inject a shared borrow into an owned union
+- **THEN** ownership accepts the shared payload and preserves its lifetime and loan obligations through the union
 
 #### Scenario: Clean the active ordinary member
 
 - **WHEN** a union holding a droppable non-nominal member leaves scope
 - **THEN** every supported target cleans exactly that active payload once
+
+#### Scenario: Reject a stored borrow
+
+- **WHEN** an injected shared borrow would outlive its source through the union
+- **THEN** ownership rejects the invalid escape while retaining the lifetime-bearing union contract
 
 ### Requirement: Pattern selection uses exact normalized union members
 

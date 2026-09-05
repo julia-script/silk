@@ -388,3 +388,14 @@ completed-outcome primitive.
 
 **Evidence:** [ordinary source implementation](../../../../packages/compiler/stdlib/silk/effect.silk),
 [minimal intrinsic boundary](../../../../openspec/changes/add-nominal-unions/specs/bootstrap-intrinsic-boundary/spec.md).
+
+## Environment validity
+
+An explicit Effect contract may spell its retained environment as `Effect<'env; A ! E ? R>`.
+This lifetime is independent of its three channels and run access. A hidden borrowed capture keeps
+that environment short even when `A` and `E` contain no borrowed values. Omitted environment bounds
+follow declaration or local lifetime elaboration; they do not imply detached ownership.
+
+The current layer preserves environment validity but rejects dependent borrowed success or failure
+channels. [Lifetimes and elision](lifetimes.md) defines explicit binders, outlives relationships,
+ordinary storage, and the quantified callable boundary.

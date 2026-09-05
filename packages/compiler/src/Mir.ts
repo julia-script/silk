@@ -10,6 +10,7 @@ import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import type * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import type * as Match from './Match.js'
+import type * as MovePath from './MovePath.js'
 import { instanceText, operationLocals } from './MirVerification.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -26,7 +27,7 @@ import type {
   SuspensionRunner,
 } from './Suspension.js'
 import * as SilkType from './Type.js'
-import type * as TypeCompatibility from './TypeCompatibility.js'
+import * as TypeCompatibility from './TypeCompatibility.js'
 
 /**
  * MIR is the monomorphic, target-aware, backend-neutral structured control DAG. Structural child
@@ -132,7 +133,7 @@ const callingScalarEquals = (left: Layout.CallingScalar, right: Layout.CallingSc
   typeof left === 'string'
     ? left === right
     : typeof right !== 'string' &&
-      SilkType.equals(left.element, right.element) &&
+      SilkType.runtimeKey(left.element) === SilkType.runtimeKey(right.element) &&
       left.bits === right.bits
 
 export const callingShapeEquals = (
@@ -266,6 +267,11 @@ export const isBinaryOperator = (operation: Hir.BuiltinOperation): operation is 
 
 export type PlaceSelector =
   | {
+      readonly _tag: 'VariantSelector'
+      readonly ordinal: number
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'FieldSelector'
       readonly field: DeclarationFacts.FieldId
       readonly provenance: Provenance
@@ -286,6 +292,13 @@ export type PlaceSelector =
     }
 
 export type Operation =
+  | {
+      /** Updates a compiler-owned Boolean presence flag without reading an owned value. */
+      readonly _tag: 'SetInitialized'
+      readonly flag: LocalId
+      readonly initialized: boolean
+      readonly provenance: Provenance
+    }
   | {
       readonly _tag: 'ForeignStaticLoad'
       readonly destination: LocalId
@@ -1180,6 +1193,8 @@ export type Operation =
       readonly type: Type
       /** Set when a paired same-place write licenses reading a non-Copy value out. */
       readonly consume?: boolean
+      /** Exact canonical path for an owned extraction, distinct from paired borrowed replacement. */
+      readonly ownershipPath?: MovePath.Path
       readonly provenance: Provenance
     }
   | {
@@ -1239,7 +1254,13 @@ export interface ShortCircuitOperation {
 export interface DropOperation {
   readonly _tag: 'Drop'
   readonly local: LocalId
+  /** Optional owned destination projection; cleanup observes only its initialized remainder. */
+  readonly selectors?: ReadonlyArray<PlaceSelector>
   readonly cleanup: CleanupPlan.CleanupPlan
+  readonly initialization?: {
+    readonly state: MovePath.State
+    readonly flags: ReadonlyArray<{ readonly path: MovePath.Path; readonly local: LocalId }>
+  }
   /** Exact target plan for an opaque local-shared core drop. Absent for every other cleanup. */
   readonly localShared?: {
     readonly element: SilkType.Type
@@ -1304,6 +1325,8 @@ export interface MatchOperation {
   readonly id: Match.MatchId
   readonly destination?: LocalId
   readonly scrutinee: LocalId
+  /** Discriminant-only selection addresses this owned subtree without copying its payload. */
+  readonly selectors?: ReadonlyArray<PlaceSelector>
   readonly scrutineeType: Type
   readonly scrutineeShape: Layout.CallingShape
   readonly access: Match.Access
@@ -1604,6 +1627,56 @@ export const applyOperands = <T>(
   )
 }
 
+/**
+ * Checks an operand at an already selected emitted-function boundary. Source lifetime proofs were
+ * checked before lowering; one emitted instance can serve calls from different lifetime domains.
+ * Access and callable mode adaptations still use the ordinary compatibility relation.
+ */
+export const acceptsRuntimeOperand = (actual: SilkType.Type, expected: SilkType.Type): boolean =>
+  SilkType.runtimeKey(actual) === SilkType.runtimeKey(expected) ||
+  TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected)) ||
+  (SilkType.isReference(actual) &&
+    SilkType.isReference(expected) &&
+    expected.access === 'Shared' &&
+    actual.access === 'Exclusive' &&
+    SilkType.runtimeKey(actual.target) === SilkType.runtimeKey(expected.target)) ||
+  (SilkType.isSlice(actual) &&
+    SilkType.isSlice(expected) &&
+    expected.access === 'Shared' &&
+    actual.access === 'Exclusive' &&
+    SilkType.runtimeKey(actual.element) === SilkType.runtimeKey(expected.element)) ||
+  (SilkType.isEffect(actual) &&
+    SilkType.isEffect(expected) &&
+    SilkType.compareAccess(expected.access, actual.access) &&
+    SilkType.runtimeKey({ ...actual, access: expected.access }) ===
+      SilkType.runtimeKey(expected)) ||
+  // A selected function item retains its declaration schema for specialization. A plain callback
+  // parameter carries only the applied signature; its checked schema is not a runtime operand.
+  (SilkType.isCallable(actual) &&
+    SilkType.isCallable(expected) &&
+    expected.schema === undefined &&
+    (!actual.unsafe || expected.unsafe) &&
+    SilkType.compareAccess(expected.mode, actual.mode) &&
+    actual.parameters.length === expected.parameters.length &&
+    actual.parameters.every((parameter, ordinal) => {
+      const compared = expected.parameters.at(ordinal)
+      return compared !== undefined && acceptsRuntimeOperand(compared, parameter)
+    }) &&
+    acceptsRuntimeOperand(actual.result, expected.result))
+
+/** Compares emitted generic arguments after erasing lifetime-only parameter positions. */
+export const runtimeArgumentsEqual = (
+  left: ReadonlyArray<SilkType.GenericArgument>,
+  right: ReadonlyArray<SilkType.GenericArgument>,
+): boolean => {
+  const actual = SilkType.runtimeArgumentKeys(left)
+  const expected = SilkType.runtimeArgumentKeys(right)
+  return (
+    actual.length === expected.length &&
+    actual.every((key, ordinal) => key === expected.at(ordinal))
+  )
+}
+
 /** Tests whether a MIR function realizes one concrete call target. */
 export const matchesInstance = (
   fn: MirFunction,
@@ -1613,14 +1686,7 @@ export const matchesInstance = (
 ): boolean =>
   fn.id.module === declaration.module &&
   fn.id.name === declaration.name &&
-  fn.instance.typeArguments.length === typeArguments.length &&
-  fn.instance.typeArguments.every((argument, index) => {
-    const expected = typeArguments.at(index)
-    return (
-      expected !== undefined &&
-      SilkType.genericArgumentKey(argument) === SilkType.genericArgumentKey(expected)
-    )
-  }) &&
+  runtimeArgumentsEqual(fn.instance.typeArguments, typeArguments) &&
   fn.instance.staticArguments.length === staticArguments.length &&
   fn.instance.staticArguments.every((argument, index) => {
     const expected = staticArguments.at(index)
@@ -1800,6 +1866,7 @@ export interface Violation {
     | 'InvalidEffectOperation'
     | 'InvalidNormalization'
     | 'InvalidEntry'
+    | 'InvalidInitializationState'
     | 'InvalidWrite'
     | 'InvalidLoan'
     | 'InvalidSliceOperation'

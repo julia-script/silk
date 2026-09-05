@@ -149,7 +149,7 @@ pub fn main() -> i32 {
     )
     assert.include(
       completion.items.find((item) => item.label === 'catch')?.detail ?? '',
-      'pub effect fn catch',
+      "pub effect<'env> fn catch",
     )
   } finally {
     await client.close()
@@ -276,7 +276,7 @@ it(
       await client.waitFor((message) => response(message, 1))
       client.send({ method: 'initialized', params: {} })
       const uri = 'file:///silk-lsp-e2e/repair/Main.silk'
-      const source = (line: string) => `fn outer() -> Effect<i32> {
+      const source = (line: string) => `fn outer() -> Effect<'static; i32> {
   let n = 123
   return effect { return n }
 }

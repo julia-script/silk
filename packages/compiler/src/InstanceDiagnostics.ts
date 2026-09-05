@@ -359,7 +359,11 @@ export const copyDropViolations = (
       if (instance.key.typeArguments.length === 0) return []
       const parameter = instance.function.declaration.parameters.at(0)
       if (parameter?.declaredType._tag !== 'Resolved') return []
-      const selfType = Type.substitute(parameter.declaredType.type, instance.substitution)
+      const selfType = Type.substitute(
+        parameter.declaredType.type,
+        instance.substitution,
+        instance.specialization.compatibility,
+      )
       if (!Type.isReference(selfType)) return []
       return ConformanceProof.copyType(index, selfType.target)
         ? [
@@ -383,7 +387,12 @@ export const requirementBindingViolations = (
         const proof = Instances.requirementSelection(instance, binding.provider)
         const capability = proof?.selected.capability
         const provider =
-          proof?.provider ?? Type.substitute(binding.provider.providerType, instance.substitution)
+          proof?.provider ??
+          Type.substitute(
+            binding.provider.providerType,
+            instance.substitution,
+            instance.specialization.compatibility,
+          )
         if (
           capability !== undefined &&
           Type.isNominal(capability) &&
@@ -412,8 +421,16 @@ export const unlowerableWitnessViolations = (
         .flatMap(Hir.expressionTree)
         .flatMap((expression) => {
           if (expression._tag !== 'InterfaceOperationCall') return []
-          const capability = Type.substitute(expression.capability, instance.substitution)
-          const provider = Type.substitute(expression.provider, instance.substitution)
+          const capability = Type.substitute(
+            expression.capability,
+            instance.substitution,
+            instance.specialization.compatibility,
+          )
+          const provider = Type.substitute(
+            expression.provider,
+            instance.substitution,
+            instance.specialization.compatibility,
+          )
           if (!Type.isNominal(capability)) return []
           const intrinsic = ConformanceProof.interfaceOperationIntrinsic(
             index,

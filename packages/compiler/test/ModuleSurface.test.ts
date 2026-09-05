@@ -5,6 +5,7 @@ import * as Schema from 'effect/Schema'
 import * as Analysis from '../src/Analysis.js'
 import * as CallableContract from '../src/CallableContract.js'
 import * as Constraint from '../src/Constraint.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as ModuleSurface from '../src/ModuleSurface.js'
 import * as Presentation from '../src/Presentation.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
@@ -301,14 +302,11 @@ it.effect('keeps string distinct from an immutable byte view in module surfaces'
 
     assert.strictEqual(ModuleSurface.equals(text, bytes), false)
     assert.include(text.canonical, 'string')
-    assert.include(
-      bytes.canonical,
-      '{"tag":"Slice","access":"Shared","element":{"tag":"Atom","value":"u8"}}',
-    )
+    assert.include(bytes.canonical, 'slice:Shared<')
     // Pins the canonical surface encoding byte-for-byte; an encoding change must be deliberate.
     assert.strictEqual(
       text.canonical,
-      '13:ModuleSurface12:surface/Main754:5:Array743:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public7:Runtime8:Ordinary7:5:False6:4:None7:5:Array11:6:Number1:1139:5:Array128:9:Parameter11:6:Number1:021:11:PresentName5:value7:Runtime67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False24:11:PresentName8:identity67:12:ResolvedType40:4:Type31:{"tag":"Atom","value":"string"}7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array6:4:None6:4:None7:5:Array7:5:Array',
+      '13:ModuleSurface12:surface/Main1136:5:Array1124:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public7:Runtime8:Ordinary131:19:ExecutableLifetimes6:static80:5:Array70:13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:07:5:Array7:5:Array7:5:False6:4:None155:5:Array144:13:TypeParameter79:4:Type70:13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:017:14:LifetimeBinder7:5:Array6:4:None7:5:Array11:6:Number1:1187:5:Array176:9:Parameter11:6:Number1:021:11:PresentName5:value7:Runtime114:12:ResolvedType87:4:Type78:string<13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:0>7:5:False24:11:PresentName8:identity114:12:ResolvedType87:4:Type78:string<13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:0>7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array6:4:None6:4:None7:5:Array7:5:Array',
     )
   }),
 )
@@ -390,6 +388,8 @@ it.effect('round-trips constrained callable schemas without source origins', () 
     })
     const assumed = Constraint.assumed(wanted, new Map())
     const contract = CallableContract.make({
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
       functionKind: 'Effect',
       unsafe: true,
       binders: [selectedParameter, providerParameter, sourceParameter],
@@ -398,16 +398,21 @@ it.effect('round-trips constrained callable schemas without source origins', () 
           type: Type.effectWithRows(
             Type.unit,
             RowAlgebra.concrete(Type.failureRowPolicy(), []),
+            { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
             'Take',
             source,
           ),
           mode: 'Take',
         },
-        { type: Type.reference('Exclusive', providerParameter), mode: 'Exclusive' },
+        {
+          type: Type.reference('Exclusive', providerParameter, Lifetime.staticLifetime),
+          mode: 'Exclusive',
+        },
       ],
       result: Type.effectWithRows(
         Type.unit,
         RowAlgebra.concrete(Type.failureRowPolicy(), []),
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
         'Take',
         RowAlgebra.without(Type.requirementRowPolicy(), source, selected),
       ),
@@ -416,6 +421,7 @@ it.effect('round-trips constrained callable schemas without source origins', () 
     const callable = Type.callable(
       [contract.parameters.at(0)?.type ?? 'never'],
       contract.result,
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
       'Exclusive',
       {
         contract,
@@ -490,6 +496,8 @@ it.effect('validates canonical substitutions against their local parameter scope
     const first = Type.parameter(owner, 0, 'First')
     const second = Type.parameter(owner, 1, 'Second')
     const contract = CallableContract.make({
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
       functionKind: 'Function',
       binders: [first, second],
       parameters: [{ type: 'i32', mode: 'Value' }],
@@ -500,6 +508,7 @@ it.effect('validates canonical substitutions against their local parameter scope
       [Type.key(second), 'bool'],
     ])
     const schema: Type.CallableSchema = {
+      source: owner,
       contract,
       binders: contract.binders,
       constraints: contract.constraints,
@@ -510,15 +519,27 @@ it.effect('validates canonical substitutions against their local parameter scope
       evidenceKeys: [],
       origins: [],
     }
-    const callable = Type.callable(['i32'], 'i32', 'Shared', schema)
+    const callable = Type.callable(
+      ['i32'],
+      'i32',
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Shared',
+      schema,
+    )
     const callableEncoding = ModuleSurface.encodeSemanticType(callable)
     const decodedCallable = yield* ModuleSurface.decodeSemanticType(callableEncoding)
     assert.strictEqual(Type.key(decodedCallable), Type.key(callable))
     assert.strictEqual(ModuleSurface.encodeSemanticType(decodedCallable), callableEncoding)
-    const residual = Type.callable(['i32'], 'i32', 'Shared', {
-      ...schema,
-      substitution: new Map<string, Type.GenericArgument>([[Type.key(first), 'i32']]),
-    })
+    const residual = Type.callable(
+      ['i32'],
+      'i32',
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Shared',
+      {
+        ...schema,
+        substitution: new Map<string, Type.GenericArgument>([[Type.key(first), 'i32']]),
+      },
+    )
     const decodedResidual = yield* ModuleSurface.decodeSemanticType(
       ModuleSurface.encodeSemanticType(residual),
     )
@@ -544,6 +565,8 @@ it.effect('validates canonical substitutions against their local parameter scope
       'RequirementRow',
     )
     const rowContract = CallableContract.make({
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
       functionKind: 'Function',
       binders: [rowParameter],
       parameters: [{ type: 'i32', mode: 'Value' }],
@@ -552,17 +575,23 @@ it.effect('validates canonical substitutions against their local parameter scope
     const rowSubstitution: Type.Substitution = new Map([
       [Type.key(rowParameter), Type.requirementRowArgument([])],
     ])
-    const rowCallable = Type.callable(['i32'], 'i32', 'Shared', {
-      contract: rowContract,
-      binders: rowContract.binders,
-      constraints: [],
-      evidence: [],
-      substitution: rowSubstitution,
-      contractKey: CallableContract.key(rowContract),
-      constraintKeys: [],
-      evidenceKeys: [],
-      origins: [],
-    })
+    const rowCallable = Type.callable(
+      ['i32'],
+      'i32',
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Shared',
+      {
+        contract: rowContract,
+        binders: rowContract.binders,
+        constraints: [],
+        evidence: [],
+        substitution: rowSubstitution,
+        contractKey: CallableContract.key(rowContract),
+        constraintKeys: [],
+        evidenceKeys: [],
+        origins: [],
+      },
+    )
     const rowEncoding = ModuleSurface.encodeSemanticType(rowCallable)
     const parsedRow = yield* Effect.try(() => decodeJson(rowEncoding))
     const rowEntry =
@@ -631,7 +660,12 @@ it.effect('round-trips ordered sealed executable properties in semantic type enc
       0,
       'F',
       'EffectRepresentation',
-      Type.effect('i32', [], 'Shared'),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+      ),
       ['Intrinsic.Detached', 'Intrinsic.NonParking'],
     )
     const container = Type.nominal('surface/Executable', 'Deferred', [
@@ -658,7 +692,12 @@ it.effect('rejects noncanonical sealed executable properties in semantic type en
       0,
       'F',
       'EffectRepresentation',
-      Type.effect('i32', [], 'Shared'),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+      ),
       ['Intrinsic.Detached', 'Intrinsic.NonParking'],
     )
     const encoded = ModuleSurface.encodeSemanticType(
@@ -687,24 +726,34 @@ it.effect('round-trips substitutions independently through nested callable scope
   Effect.gen(function* () {
     const innerParameter = Type.parameter({ module: 'surface/Nested', name: 'inner' }, 0, 'Inner')
     const innerContract = CallableContract.make({
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
       functionKind: 'Function',
       binders: [innerParameter],
       parameters: [{ type: innerParameter, mode: 'Value' }],
       result: innerParameter,
     })
-    const inner = Type.callable(['i32'], 'i32', 'Shared', {
-      contract: innerContract,
-      binders: innerContract.binders,
-      constraints: [],
-      evidence: [],
-      substitution: new Map<string, Type.GenericArgument>([[Type.key(innerParameter), 'i32']]),
-      contractKey: CallableContract.key(innerContract),
-      constraintKeys: [],
-      evidenceKeys: [],
-      origins: [],
-    })
+    const inner = Type.callable(
+      ['i32'],
+      'i32',
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Shared',
+      {
+        contract: innerContract,
+        binders: innerContract.binders,
+        constraints: [],
+        evidence: [],
+        substitution: new Map<string, Type.GenericArgument>([[Type.key(innerParameter), 'i32']]),
+        contractKey: CallableContract.key(innerContract),
+        constraintKeys: [],
+        evidenceKeys: [],
+        origins: [],
+      },
+    )
     const outerParameter = Type.parameter({ module: 'surface/Nested', name: 'outer' }, 0, 'Outer')
     const outerContract = CallableContract.make({
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
       functionKind: 'Function',
       binders: [outerParameter],
       parameters: [{ type: inner, mode: 'Value' }],
@@ -721,7 +770,13 @@ it.effect('round-trips substitutions independently through nested callable scope
       evidenceKeys: [],
       origins: [],
     }
-    const outer = Type.callable([inner], 'bool', 'Take', outerSchema)
+    const outer = Type.callable(
+      [inner],
+      'bool',
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Take',
+      outerSchema,
+    )
 
     const decoded = yield* ModuleSurface.decodeSemanticType(ModuleSurface.encodeSemanticType(outer))
     assert.strictEqual(Type.key(decoded), Type.key(outer))
@@ -730,13 +785,19 @@ it.effect('round-trips substitutions independently through nested callable scope
       ModuleSurface.encodeSemanticType(outer),
     )
 
-    const leakedNestedBinder = Type.callable([inner], 'bool', 'Take', {
-      ...outerSchema,
-      substitution: new Map<string, Type.GenericArgument>([
-        [Type.key(innerParameter), 'i32'],
-        [Type.key(outerParameter), 'bool'],
-      ]),
-    })
+    const leakedNestedBinder = Type.callable(
+      [inner],
+      'bool',
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Take',
+      {
+        ...outerSchema,
+        substitution: new Map<string, Type.GenericArgument>([
+          [Type.key(innerParameter), 'i32'],
+          [Type.key(outerParameter), 'bool'],
+        ]),
+      },
+    )
     const failure = yield* Effect.flip(
       ModuleSurface.decodeSemanticType(ModuleSurface.encodeSemanticType(leakedNestedBinder)),
     )
@@ -762,7 +823,13 @@ it.effect('rejects forged failure and requirement member-obligation branding', (
       origin,
     )
     const encoded = ModuleSurface.encodeSemanticType(
-      Type.effectWithRows('i32', failureRow, 'Take', requirementRow),
+      Type.effectWithRows(
+        'i32',
+        failureRow,
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Take',
+        requirementRow,
+      ),
     )
     const failureKey = Type.failureRowPolicy().memberWellFormedKey(failureMember)
     const requirementKey = Type.requirementRowPolicy().memberWellFormedKey(requirementMember)
@@ -790,8 +857,14 @@ it.effect('rejects parameter kinds and builtin operations forged into incompatib
     const noRequirements = RowAlgebra.concrete(Type.requirementRowPolicy(), [])
     const valueParameter = Type.parameter(owner, 0, 'Value')
     const requirementParameter = Type.parameter(owner, 2, 'Requirements', 'RequirementRow')
-    const callable = Type.callable([], Type.unit)
-    const effect = Type.effect(Type.unit, [])
+    const callable = Type.callable([], Type.unit, {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    })
+    const effect = Type.effect(Type.unit, [], {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    })
     const invalidRequirementMember = Type.requirementMemberShape(
       requirementParameter,
       'Exclusive',
@@ -812,6 +885,7 @@ it.effect('rejects parameter kinds and builtin operations forged into incompatib
             RowAlgebra.parameter<Type.Nominal, Type.Parameter, Type.FailureMemberShape>(
               valueParameter,
             ),
+            { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
             'Take',
             noRequirements,
           ),
@@ -823,6 +897,7 @@ it.effect('rejects parameter kinds and builtin operations forged into incompatib
           Type.effectWithRows(
             Type.unit,
             noFailures,
+            { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
             'Take',
             RowAlgebra.parameter<Type.Requirement, Type.Parameter, Type.RequirementMemberShape>(
               valueParameter,
@@ -836,6 +911,7 @@ it.effect('rejects parameter kinds and builtin operations forged into incompatib
           Type.effectWithRows(
             Type.unit,
             noFailures,
+            { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
             'Take',
             RowAlgebra.singleton(Type.requirementRowPolicy(), invalidRequirementMember, origin),
           ),
@@ -895,7 +971,10 @@ it.effect('rejects parameter kinds and builtin operations forged into incompatib
 it.effect('rejects negative semantic ordinals in every serialized identity family', () =>
   Effect.gen(function* () {
     const owner = { module: 'surface/InvalidOrdinals', name: 'decode' }
-    const callable = Type.callable([], Type.unit)
+    const callable = Type.callable([], Type.unit, {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    })
     const callableIdentity = (site: Type.CallableEnvironmentSite): Type.Type =>
       Type.nominal('surface/InvalidOrdinals', 'Holder', [
         Type.callableIdentityArgument(
@@ -956,8 +1035,14 @@ it.effect('rejects negative semantic ordinals in every serialized identity famil
 it.effect('round-trips callable and Effect representation slots with matching kinds', () =>
   Effect.gen(function* () {
     const owner = { module: 'surface/RepresentationSlots', name: 'decode' }
-    const callable = Type.callable([], Type.unit)
-    const effect = Type.effect(Type.unit, [])
+    const callable = Type.callable([], Type.unit, {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    })
+    const effect = Type.effect(Type.unit, [], {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    })
     const values: ReadonlyArray<Type.Type> = [
       Type.nominal('surface/RepresentationSlots', 'OpenCallable', [
         Type.representationParameterArgument(
@@ -1009,6 +1094,10 @@ it.effect('canonicalizes finite collisions, union order, and reducible Without e
     const effect = (failureRow: unknown, requirementRow: unknown) =>
       JSON.stringify({
         tag: 'Effect',
+        environment: { tag: 'StaticLifetime' },
+        lifetimeBinders: [],
+        lifetimeBounds: [],
+        typeOutlives: [],
         success: { tag: 'Atom', value: 'i32' },
         failureRow,
         requirementRow,
@@ -1046,6 +1135,7 @@ it.effect('canonicalizes finite collisions, union order, and reducible Without e
         Type.effectWithRows(
           'i32',
           RowAlgebra.concrete(Type.failureRowPolicy(), [first, second]),
+          { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
           'Take',
           noRequirements,
         ),
@@ -1088,7 +1178,15 @@ it.effect('canonicalizes finite collisions, union order, and reducible Without e
     ])
     assert.strictEqual(
       Type.key(requirementEffect),
-      Type.key(Type.effectWithRows('i32', noFailures, 'Take', expectedRequirements)),
+      Type.key(
+        Type.effectWithRows(
+          'i32',
+          noFailures,
+          { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+          'Take',
+          expectedRequirements,
+        ),
+      ),
     )
 
     const decodedWithout = yield* ModuleSurface.decodeSemanticType(
@@ -1110,6 +1208,7 @@ it.effect('canonicalizes finite collisions, union order, and reducible Without e
         Type.effectWithRows(
           'i32',
           RowAlgebra.concrete(Type.failureRowPolicy(), [second]),
+          { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
           'Take',
           noRequirements,
         ),
@@ -1188,6 +1287,8 @@ it.effect('rejects forged callable-schema brands and structural evidence', () =>
     const wanted = Constraint.failureSubset(selected, source)
     const evidence = Constraint.assumed(wanted, new Map())
     const contract = CallableContract.make({
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
       functionKind: 'Function',
       binders: [selectedParameter, sourceParameter],
       parameters: [
@@ -1208,7 +1309,13 @@ it.effect('rejects forged callable-schema brands and structural evidence', () =>
       evidenceKeys: [Constraint.evidenceKey(evidence)],
       origins: [],
     }
-    const callable = Type.callable(['i32', 'bool'], 'i32', 'Shared', schema)
+    const callable = Type.callable(
+      ['i32', 'bool'],
+      'i32',
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Shared',
+      schema,
+    )
     const encoded = ModuleSurface.encodeSemanticType(callable)
     const forgeries = [
       encoded.replace(
@@ -1238,7 +1345,13 @@ it.effect('rejects forged callable-schema brands and structural evidence', () =>
       assert.instanceOf(failure, ModuleSurface.ModuleSurfaceDecodeError)
       assert.strictEqual(failure.reason._tag, 'InvalidEncoding')
     }
-    const partial = Type.callable(['i32'], 'i32', 'Take', schema)
+    const partial = Type.callable(
+      ['i32'],
+      'i32',
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Take',
+      schema,
+    )
     const decodedPartial = yield* ModuleSurface.decodeSemanticType(
       ModuleSurface.encodeSemanticType(partial),
     )
@@ -1491,8 +1604,8 @@ it.effect('round-trips raw pointer types and keys public pointer signatures by m
     )
     assert.strictEqual(ModuleSurface.equals(mutable, repeated), true)
     assert.strictEqual(ModuleSurface.equals(mutable, constant), false)
-    assert.include(mutable.canonical, '"tag":"Pointer","mutable":true')
-    assert.include(constant.canonical, '"tag":"Pointer","mutable":false')
+    assert.include(mutable.canonical, 'pointer:mut<')
+    assert.include(constant.canonical, 'pointer:const<')
   }),
 )
 

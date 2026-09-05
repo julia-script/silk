@@ -1,4 +1,5 @@
 import * as ConformanceGoal from './ConformanceGoal.js'
+import * as ResolutionWork from './ResolutionWork.js'
 import type * as Constraint from './Constraint.js'
 import type {
   CanonicalId,
@@ -52,10 +53,19 @@ export const conformanceCandidates = (
   self: Index,
   goal: ConformanceGoal.ConformanceGoal,
   admission: 'Selectable' | 'Declared' = 'Selectable',
-): ReadonlyArray<ConformanceCandidate> =>
-  Object.freeze(
+): ReadonlyArray<ConformanceCandidate> => {
+  const work = ResolutionWork.begin(
+    ResolutionWork.ofIndex(self),
+    {
+      kind: 'ConformanceGoal',
+      key: `${admission}:${ConformanceGoal.key(goal)}`,
+    },
+    'ConformanceDiscovery',
+  )
+  return Object.freeze(
     self.modules.flatMap((module) =>
       module.conformances.flatMap((conformance): ReadonlyArray<ConformanceCandidate> => {
+        ResolutionWork.visit(work)
         if (
           conformance.capability._tag !== 'Resolved' ||
           !Type.isNominal(conformance.capability.type) ||
@@ -68,12 +78,14 @@ export const conformanceCandidates = (
         const inferred = new Map<string, Type.GenericArgument>()
         if (!TypeInference.infer(conformance.provider.type, goal.provider, inferred)) return []
         if (!TypeInference.infer(conformance.capability.type, goal.capability, inferred)) return []
+        ResolutionWork.accept(work)
         return Object.freeze([
           Object.freeze({ module: module.module, conformance, substitution: inferred }),
         ])
       }),
     ),
   )
+}
 
 const endpointVisible = (
   declaration: { readonly visibility: 'Public' | 'Private'; readonly canonical: CanonicalState },
@@ -662,7 +674,16 @@ export const interfaceWitnessTarget = (
   capability: Type.Nominal,
   operation: string,
 ): InterfaceWitnessTarget | undefined => {
-  const proof = prove(self, provider, capability)
+  return selectedInterfaceTarget(self, prove(self, provider, capability), operation)
+}
+
+/** Reads an operation target from an existing proof without initiating conformance discovery. */
+export const selectedInterfaceTarget = (
+  self: Index,
+  proof: ConformanceGoal.Proof,
+  operation: string,
+): InterfaceWitnessTarget | undefined => {
+  const provider = proof.goal.provider
   if (proof._tag !== 'Proved' || proof.selection._tag !== 'SourceSelection') return undefined
   const conformance = selectedConformance(self, proof.selection)
   if (conformance === undefined) return undefined

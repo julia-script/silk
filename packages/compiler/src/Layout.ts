@@ -22,6 +22,7 @@ import * as TypeInference from './internal/TypeInference.js'
 import * as LocalSharedAllocationProvenance from './LocalSharedAllocationProvenance.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import * as Match from './Match.js'
+import * as MovePath from './MovePath.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -31,6 +32,14 @@ import type * as StaticText from './StaticText.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
+
+const compareRuntimeTypes = (left: Type.Type, right: Type.Type): number => {
+  const leftKey = Type.runtimeKey(left)
+  const rightKey = Type.runtimeKey(right)
+  if (leftKey < rightKey) return -1
+  if (leftKey > rightKey) return 1
+  return 0
+}
 
 /** Physical placement shared by every aggregate and hidden-environment field. */
 export interface PlacedField extends Packing.PlacedField {}
@@ -343,7 +352,10 @@ const sameExactOwner = (
   left.typeArguments.length === right.typeArguments.length &&
   left.typeArguments.every((argument, ordinal) => {
     const expected = right.typeArguments.at(ordinal)
-    return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+    return (
+      expected !== undefined &&
+      Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(expected)
+    )
   })
 
 const sameVisibleOwner = (
@@ -365,7 +377,10 @@ const sameVisibleOwner = (
     leftVisible.length === rightVisible.length &&
     leftVisible.every((argument, ordinal) => {
       const expected = rightVisible.at(ordinal)
-      return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+      return (
+        expected !== undefined &&
+        Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(expected)
+      )
     })
   )
 }
@@ -588,7 +603,7 @@ export const sliceEntry = (target: Target.Target, type: Type.Slice, element: Ent
   })
 }
 
-export const stringEntry = (target: Target.Target): Entry => {
+export const stringEntry = (target: Target.Target, type: Type.String): Entry => {
   const addressBits: 32 | 64 = target.pointerSize === 4 ? 32 : 64
   const byteLengthOffset = alignUp(target.pointerSize, target.pointerAlignment)
   const alignment = target.pointerAlignment
@@ -596,7 +611,7 @@ export const stringEntry = (target: Target.Target): Entry => {
   const size = alignUp(contentSize, alignment)
   return Object.freeze({
     _tag: 'LayoutEntry',
-    type: Type.string,
+    type,
     copy: true,
     size,
     alignment,
@@ -801,9 +816,9 @@ const dependenciesOf = (
     ) {
       types = [field.declaredType.candidate]
     }
-    for (const type of types) dependencies.set(Type.key(type), type)
+    for (const type of types) dependencies.set(Type.runtimeKey(type), type)
   }
-  return Object.freeze([...dependencies.values()].sort(Type.compare))
+  return Object.freeze([...dependencies.values()].sort(compareRuntimeTypes))
 }
 
 const unavailable = (
@@ -833,27 +848,27 @@ export const catalog = (
       const type = nominalOf(struct)
       return type === undefined ? [] : [Object.freeze({ struct, type })]
     })
-    .sort((left, right) => Type.compare(left.type, right.type))
+    .sort((left, right) => compareRuntimeTypes(left.type, right.type))
   const generatedDeclarations = [...index.generatedAggregates.values()]
     .flatMap((struct) => {
       const type = nominalOf(struct)
       return type === undefined ? [] : [Object.freeze({ struct, type })]
     })
-    .sort((left, right) => Type.compare(left.type, right.type))
+    .sort((left, right) => compareRuntimeTypes(left.type, right.type))
   const enumDeclarations = index.modules
     .flatMap((module) => module.enums)
     .flatMap((enum_) => {
       const type = nominalOf(enum_)
       return type === undefined ? [] : [Object.freeze({ enum_, type })]
     })
-    .sort((left, right) => Type.compare(left.type, right.type))
+    .sort((left, right) => compareRuntimeTypes(left.type, right.type))
   const unionDeclarations = index.modules
     .flatMap((module) => module.unions)
     .flatMap((union) => {
       const type = nominalOf(union)
       return type === undefined ? [] : [Object.freeze({ union, type })]
     })
-    .sort((left, right) => Type.compare(left.type, right.type))
+    .sort((left, right) => compareRuntimeTypes(left.type, right.type))
   const byType = new Map(
     [...declarations, ...generatedDeclarations].map((declaration) => [
       `${declaration.type.module}\u0000${declaration.type.name}`,
@@ -876,7 +891,7 @@ export const catalog = (
       cause = declaration.enum_.representation.cause
     }
     completed.set(
-      Type.key(declaration.type),
+      Type.runtimeKey(declaration.type),
       entry ??
         unavailable(
           declaration.type,
@@ -1015,7 +1030,7 @@ export const catalog = (
     type: Type.Represented,
     realization: FieldRealization.CallableRealization,
   ): CatalogEntry => {
-    const key = Type.key(type)
+    const key = Type.runtimeKey(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
     let copy = true
@@ -1079,7 +1094,7 @@ export const catalog = (
     type: Type.Represented,
     realization: FieldRealization.EffectRealization,
   ): CatalogEntry => {
-    const key = Type.key(type)
+    const key = Type.runtimeKey(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
     const environment = layoutEffectSlots(
@@ -1112,7 +1127,7 @@ export const catalog = (
   }
 
   const layoutNominal = (type: Type.Nominal): CatalogEntry => {
-    const key = Type.key(type)
+    const key = Type.runtimeKey(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
     if (Type.isSharedCore(type) || Type.isExecution(type) || Type.isWake(type)) {
@@ -1625,7 +1640,7 @@ export const catalog = (
     type: Type.Represented,
     active = new Set<string>(),
   ): CatalogEntry => {
-    const typeKey = Type.key(type)
+    const typeKey = Type.runtimeKey(type)
     const existing = completed.get(typeKey)
     if (existing?._tag === 'LayoutEntry') return existing
     if (active.has(typeKey))
@@ -1829,13 +1844,13 @@ export const catalog = (
   const layoutType = (type: DeclarationFacts.SemanticType): CatalogEntry => {
     if (Type.isBuiltin(type)) return scalarEntry(target, type)
     if (Type.isString(type)) {
-      const result = stringEntry(target)
-      completed.set(Type.key(type), result)
+      const result = stringEntry(target, type)
+      completed.set(Type.runtimeKey(type), result)
       return result
     }
     if (Type.isNever(type)) {
       const result = neverEntry()
-      completed.set(Type.key(type), result)
+      completed.set(Type.runtimeKey(type), result)
       return result
     }
     if (Type.isParameter(type)) {
@@ -1846,7 +1861,7 @@ export const catalog = (
     }
     if (Type.isNominal(type)) return layoutNominal(type)
     if (Type.isSlice(type)) {
-      const key = Type.key(type)
+      const key = Type.runtimeKey(type)
       const existing = completed.get(key)
       if (existing !== undefined) return existing
       const element = layoutType(type.element)
@@ -1866,20 +1881,20 @@ export const catalog = (
     }
     if (Type.isReference(type)) {
       const result = referenceEntry(target, type)
-      completed.set(Type.key(type), result)
+      completed.set(Type.runtimeKey(type), result)
       return result
     }
     if (Type.isPointer(type)) {
       const result = pointerEntry(target, type)
-      completed.set(Type.key(type), result)
+      completed.set(Type.runtimeKey(type), result)
       return result
     }
     if (Type.isForeignFunction(type)) {
       const result = foreignFunctionEntry(target, type)
-      completed.set(Type.key(type), result)
+      completed.set(Type.runtimeKey(type), result)
       return result
     }
-    const key = Type.key(type)
+    const key = Type.runtimeKey(type)
     const existing = completed.get(key)
     if (existing !== undefined) return existing
     if (Type.isUnion(type)) {
@@ -1949,7 +1964,7 @@ export const catalog = (
   const referenced = new Map<string, DeclarationFacts.SemanticType>()
   const addReferenced = (type: DeclarationFacts.SemanticType): void => {
     if (!Type.isRuntimeConcrete(type)) return
-    const key = Type.key(type)
+    const key = Type.runtimeKey(type)
     if (referenced.has(key)) return
     referenced.set(key, type)
     if (Type.isNominal(type)) {
@@ -2009,6 +2024,8 @@ export const catalog = (
     if (declaration.union.typeParameters.length === 0) layoutNominal(declaration.type)
   }
   for (const instance of discovery?.instances ?? []) {
+    if (needsInitializationFlags(instance)) addReferenced('bool')
+    for (const represented of representedParameterTypes(instance)) addReferenced(represented)
     const substitution = instance.substitution
     if (instance.function.contract._tag === 'Contract') {
       for (const parameter of instance.specialization.parameters) addReferenced(parameter)
@@ -2094,7 +2111,7 @@ export const catalog = (
     _tag: 'LayoutCatalog',
     target,
     entries: Object.freeze(
-      [...completed.values()].sort((left, right) => Type.compare(left.type, right.type)),
+      [...completed.values()].sort((left, right) => compareRuntimeTypes(left.type, right.type)),
     ),
     wordConstants: Object.freeze(
       index.modules.flatMap((module) =>
@@ -2123,15 +2140,15 @@ const addExpressionTypes = (
 ): void => {
   if (expression._tag === 'Unavailable') return
   const specialized = Type.substitute(expression.type, substitution)
-  types.set(Type.key(specialized), specialized)
+  types.set(Type.runtimeKey(specialized), specialized)
   if (expression._tag === 'BuiltinCall') {
-    if (Scalar.isCheckedOperation(expression.operation)) types.set(Type.key('bool'), 'bool')
+    if (Scalar.isCheckedOperation(expression.operation)) types.set(Type.runtimeKey('bool'), 'bool')
     for (const argument of expression.typeArguments) {
       const specialized = Type.substituteGenericArgument(argument, substitution)
       const type = Type.isTypeArgument(specialized)
         ? specialized
         : Type.representedType(specialized)
-      if (type !== undefined) types.set(Type.key(type), type)
+      if (type !== undefined) types.set(Type.runtimeKey(type), type)
     }
   }
   if (expression._tag === 'Move') addExpressionTypes(types, expression.subject, substitution)
@@ -2148,7 +2165,7 @@ const addExpressionTypes = (
   if (expression._tag === 'EnumValue') addExpressionTypes(types, expression.value, substitution)
   if (expression._tag === 'UnionConvert') {
     const sourceType = Type.substitute(expression.sourceType, substitution)
-    types.set(Type.key(sourceType), sourceType)
+    types.set(Type.runtimeKey(sourceType), sourceType)
     addExpressionTypes(types, expression.source, substitution)
   }
   if (expression._tag === 'Project') addExpressionTypes(types, expression.subject, substitution)
@@ -2192,7 +2209,7 @@ const addExpressionTypes = (
     for (const operand of contract?.operands ?? []) {
       if (operand.type._tag !== 'Resolved') continue
       const type = Type.substitute(operand.type.type, substitution)
-      types.set(Type.key(type), type)
+      types.set(Type.runtimeKey(type), type)
     }
   }
   if (expression._tag === 'CallableSection') {
@@ -2212,27 +2229,28 @@ const addExpressionTypes = (
     addExpressionTypes(types, expression.protected, substitution)
     const provider = Type.substitute(expression.provider.providerType, substitution)
     if (Type.isNominal(provider)) {
-      types.set(Type.key(provider), provider)
+      types.set(Type.runtimeKey(provider), provider)
       const reference = Type.reference(
         expression.provider.selectionAccess === 'Take'
           ? 'Exclusive'
           : expression.provider.selectionAccess,
         provider,
+        Type.substituteLifetime(expression.type.environment, substitution),
       )
-      types.set(Type.key(reference), reference)
+      types.set(Type.runtimeKey(reference), reference)
     }
   }
   if (expression._tag === 'EffectCatch') {
-    types.set(Type.key('never'), 'never')
-    types.set(Type.key('bool'), 'bool')
+    types.set(Type.runtimeKey('never'), 'never')
+    types.set(Type.runtimeKey('bool'), 'bool')
     addExpressionTypes(types, expression.protected, substitution)
     addExpressionTypes(types, expression.handler, substitution)
     if (expression.protected._tag !== 'Unavailable') {
       const protected_ = Type.substitute(expression.protected.type, substitution)
       if (Type.isEffect(protected_)) {
-        types.set(Type.key(protected_.success), protected_.success)
+        types.set(Type.runtimeKey(protected_.success), protected_.success)
         const failure = Type.failureValue(Type.failureMembers(protected_))
-        types.set(Type.key(failure), failure)
+        types.set(Type.runtimeKey(failure), failure)
       }
     }
   }
@@ -2240,15 +2258,15 @@ const addExpressionTypes = (
     addExpressionTypes(types, expression.scrutinee, substitution)
     for (const member of expression.members) {
       const type = Type.substitute(Match.sourceType(member), substitution)
-      types.set(Type.key(type), type)
+      types.set(Type.runtimeKey(type), type)
     }
     for (const arm of expression.arms) {
       if (!arm.reachable) continue
       if (arm.member !== undefined) {
         const memberType = Match.sourceType(arm.member)
-        types.set(Type.key(memberType), memberType)
+        types.set(Type.runtimeKey(memberType), memberType)
       }
-      for (const binding of arm.bindings) types.set(Type.key(binding.type), binding.type)
+      for (const binding of arm.bindings) types.set(Type.runtimeKey(binding.type), binding.type)
       if (arm.guard !== undefined) addExpressionTypes(types, arm.guard, substitution)
       if (arm.body._tag === 'Expression')
         addExpressionTypes(types, arm.body.expression, substitution)
@@ -2266,15 +2284,15 @@ const addStatementTypes = (
     if (statement._tag === 'Unsafe') addStatementTypes(types, statement.statements, substitution)
     if (statement._tag === 'Bind') addExpressionTypes(types, statement.initializer, substitution)
     if (statement._tag === 'PatternBind') {
-      types.set(Type.key('bool'), 'bool')
+      types.set(Type.runtimeKey('bool'), 'bool')
       addExpressionTypes(types, statement.selection.subject, substitution)
       for (const member of statement.selection.members) {
         const type = Type.substitute(Match.sourceType(member), substitution)
-        types.set(Type.key(type), type)
+        types.set(Type.runtimeKey(type), type)
       }
       for (const binding of statement.selection.bindings) {
         const type = Type.substitute(binding.type, substitution)
-        types.set(Type.key(type), type)
+        types.set(Type.runtimeKey(type), type)
       }
     }
     if (statement._tag === 'Evaluate') addExpressionTypes(types, statement.expression, substitution)
@@ -2287,15 +2305,15 @@ const addStatementTypes = (
       addStatementTypes(types, statement.otherwise, substitution)
     }
     if (statement._tag === 'IfLet') {
-      types.set(Type.key('bool'), 'bool')
+      types.set(Type.runtimeKey('bool'), 'bool')
       addExpressionTypes(types, statement.selection.subject, substitution)
       for (const member of statement.selection.members) {
         const type = Type.substitute(Match.sourceType(member), substitution)
-        types.set(Type.key(type), type)
+        types.set(Type.runtimeKey(type), type)
       }
       for (const binding of statement.selection.bindings) {
         const type = Type.substitute(binding.type, substitution)
-        types.set(Type.key(type), type)
+        types.set(Type.runtimeKey(type), type)
       }
       addStatementTypes(types, statement.taken, substitution)
       addStatementTypes(types, statement.otherwise, substitution)
@@ -2315,21 +2333,56 @@ const addStatementTypes = (
   }
 }
 
+const needsInitializationFlags = (instance: Instances.Instance): boolean =>
+  instance.ownership.exits.some((exit) =>
+    exit.releases.some((release) => MovePath.conditionalPaths(release.initialization).length > 0),
+  ) ||
+  instance.ownership.transitions.some(
+    (transition) =>
+      MovePath.conditionalPaths(transition.before).length > 0 ||
+      MovePath.conditionalPaths(transition.after).length > 0,
+  )
+
+/** Materializes the exact composite parameter view used by MIR, including its required access. */
+const representedParameterTypes = (instance: Instances.Instance): ReadonlyArray<Type.Represented> =>
+  instance.specialization.parameters.flatMap((parameter, ordinal) => {
+    if (!Type.isEffect(parameter)) return []
+    const representation = Instances.parameterEffectRepresentationArgument(
+      instance.function,
+      instance.key,
+      ordinal,
+    )
+    if (
+      representation === undefined ||
+      !Type.isCompositeEffectRepresentationArgument(representation)
+    )
+      return []
+    const type = Type.substitute(
+      Type.represented(parameter, parameter, representation),
+      instance.substitution,
+      instance.specialization.compatibility,
+    )
+    return Type.isRepresented(type) ? [type] : []
+  })
+
 const addFunctionTypes = (
   types: Map<string, DeclarationFacts.SemanticType>,
   instance: Instances.Instance,
 ): void => {
   const fn = instance.function
+  for (const represented of representedParameterTypes(instance))
+    types.set(Type.runtimeKey(represented), represented)
+  if (needsInitializationFlags(instance)) types.set(Type.runtimeKey('bool'), 'bool')
   const substitution = instance.substitution
   for (const parameter of fn.declaration.parameters) {
     if (parameter.declaredType._tag === 'Resolved') {
       const type = Type.substitute(parameter.declaredType.type, substitution)
-      types.set(Type.key(type), type)
+      types.set(Type.runtimeKey(type), type)
     }
   }
   if (fn.declaration.returnType._tag === 'Resolved') {
     const type = Type.substitute(fn.declaration.returnType.type, substitution)
-    types.set(Type.key(type), type)
+    types.set(Type.runtimeKey(type), type)
     if (fn.declaration.functionKind === 'Effect') {
       const failures = fn.declaration.failureRow.failures.flatMap((failure) => {
         const specialized = Type.substitute(failure, substitution)
@@ -2339,8 +2392,14 @@ const addFunctionTypes = (
         const capability = Type.substitute(requirement.capability, substitution)
         return Type.isNominal(capability) ? [Object.freeze({ ...requirement, capability })] : []
       })
-      const outcome = Type.effect(type, failures, 'Shared', requirements)
-      types.set(Type.key(outcome), outcome)
+      const outcome = Type.effect(
+        type,
+        failures,
+        { ...DeclarationFacts.executableLifetimes(fn.declaration), lifetimeBinders: [] },
+        'Shared',
+        requirements,
+      )
+      types.set(Type.runtimeKey(outcome), outcome)
     }
   }
   addStatementTypes(types, fn.statements, substitution)
@@ -2353,7 +2412,7 @@ const effectEnvironments = (
   callablePlans: ReadonlyArray<CallableEnvironment>,
 ): ReadonlyArray<EffectEnvironment> => {
   const layouts = new Map(
-    entries.map((candidate) => [Type.key(candidate.type), candidate] as const),
+    entries.map((candidate) => [Type.runtimeKey(candidate.type), candidate] as const),
   )
   const environments: Array<EffectEnvironment> = []
   type EffectFieldDraft = Omit<EffectEnvironmentField, keyof Packing.PlacedField>
@@ -2395,7 +2454,11 @@ const effectEnvironments = (
           if (statement._tag === 'Bind' && statement.initializer._tag !== 'Unavailable') {
             bindingTypes.set(
               statement.binding.ordinal,
-              Type.substitute(statement.initializer.type, instance.substitution),
+              Type.substitute(
+                statement.initializer.type,
+                instance.substitution,
+                instance.specialization.compatibility,
+              ),
             )
           } else if (statement._tag === 'If' || statement._tag === 'IfLet') {
             collectBindings(statement.taken)
@@ -2461,7 +2524,11 @@ const effectEnvironments = (
         .flatMap((expression) => {
           if (expression._tag !== 'BuiltinCall' || expression.witnessEffectSite !== undefined)
             return []
-          const type = Type.substitute(expression.type, instance.substitution)
+          const type = Type.substitute(
+            expression.type,
+            instance.substitution,
+            instance.specialization.compatibility,
+          )
           if (!Type.isEffect(type)) return []
           return [
             Object.freeze({
@@ -2476,7 +2543,11 @@ const effectEnvironments = (
                   const specialized =
                     argument._tag === 'Unavailable'
                       ? undefined
-                      : Type.substitute(argument.type, instance.substitution)
+                      : Type.substitute(
+                          argument.type,
+                          instance.substitution,
+                          instance.specialization.compatibility,
+                        )
                   let access: 'Copy' | 'Shared' | 'Exclusive' | 'Take' = 'Take'
                   if (
                     specialized !== undefined &&
@@ -2505,7 +2576,11 @@ const effectEnvironments = (
         ...builtinSites,
       ])
       for (const block of effectSites) {
-        const structuralEffect = Type.substitute(block.type, instance.substitution)
+        const structuralEffect = Type.substitute(
+          block.type,
+          instance.substitution,
+          instance.specialization.compatibility,
+        )
         if (!Type.isEffect(structuralEffect)) continue
         const effectInstance = discovery.effects.find(
           (candidate) => candidate.identity === Instances.effectIdentity(instance.key, block.site),
@@ -2543,7 +2618,9 @@ const effectEnvironments = (
             unavailable = `capture ${source.toLowerCase()} has no concrete type`
             break
           }
-          const specialized = realized?.type ?? Type.substitute(type, instance.substitution)
+          const specialized =
+            realized?.type ??
+            Type.substitute(type, instance.substitution, instance.specialization.compatibility)
           const representedEffect =
             Type.isRepresented(specialized) &&
             Type.isEffect(specialized.contract) &&
@@ -2670,7 +2747,7 @@ const effectEnvironments = (
               ? undefined
               : (capturedEffectEnvironment ??
                 capturedCompositeLayout ??
-                layouts.get(Type.key(fieldType)))
+                layouts.get(Type.runtimeKey(fieldType)))
           if (!borrowed && !callable && valueLayout === undefined) {
             unavailable = `capture ${source.toLowerCase()} ${ordinal} has no value layout`
             break
@@ -2718,6 +2795,7 @@ const effectEnvironments = (
           effect = Type.effectWithRows(
             structuralEffect.success,
             structuralEffect.failureRow,
+            structuralEffect,
             access,
             structuralEffect.requirementRow,
           )
@@ -2771,7 +2849,11 @@ const effectEnvironments = (
             : [Object.freeze({ expression, contract, site: expression.witnessEffectSite })]
         })
       for (const witness of witnessEffects) {
-        const structuralEffect = Type.substitute(witness.expression.type, instance.substitution)
+        const structuralEffect = Type.substitute(
+          witness.expression.type,
+          instance.substitution,
+          instance.specialization.compatibility,
+        )
         if (!Type.isEffect(structuralEffect)) continue
         let unavailable: string | undefined
         const fieldInputs: Array<Packing.Input<EffectFieldDraft>> = []
@@ -2780,8 +2862,12 @@ const effectEnvironments = (
             unavailable = `interface operand ${ordinal} has no concrete type`
             break
           }
-          const fieldType = Type.substitute(operand.type.type, instance.substitution)
-          const valueLayout = layouts.get(Type.key(fieldType))
+          const fieldType = Type.substitute(
+            operand.type.type,
+            instance.substitution,
+            instance.specialization.compatibility,
+          )
+          const valueLayout = layouts.get(Type.runtimeKey(fieldType))
           if (valueLayout === undefined) {
             unavailable = `interface operand ${ordinal} has no value layout`
             break
@@ -2809,6 +2895,7 @@ const effectEnvironments = (
         const effect = Type.effectWithRows(
           structuralEffect.success,
           structuralEffect.failureRow,
+          structuralEffect,
           access,
           structuralEffect.requirementRow,
         )
@@ -2880,7 +2967,7 @@ const callableEnvironments = (
   entries: ReadonlyArray<Entry>,
   discovery: Instances.Discovery,
 ): ReadonlyArray<CallableEnvironment> => {
-  const layouts = new Map(entries.map((entry) => [Type.key(entry.type), entry] as const))
+  const layouts = new Map(entries.map((entry) => [Type.runtimeKey(entry.type), entry] as const))
   const view = callableView(target)
   const planned = new Map<Instances.CallableInstance, CallableEnvironment>()
   const planning = new Set<Instances.CallableInstance>()
@@ -2928,7 +3015,7 @@ const callableEnvironments = (
         return unavailable(`capture ${capture.ordinal} has no concrete callable environment`)
       }
       const valueLayout =
-        borrowed || callableCapture ? undefined : layouts.get(Type.key(capture.type))
+        borrowed || callableCapture ? undefined : layouts.get(Type.runtimeKey(capture.type))
       if (!borrowed && !callableCapture && valueLayout === undefined) {
         return unavailable(`capture ${capture.ordinal} has no concrete value layout`)
       }
@@ -3035,7 +3122,11 @@ const wordLiteralVerdicts = (
       .flatMap(Hir.expressionTree)
     for (const expression of expressions) {
       if (expression._tag !== 'IntegerLiteral' || expression.constant !== undefined) continue
-      const type = Type.substitute(expression.type, instance.substitution)
+      const type = Type.substitute(
+        expression.type,
+        instance.substitution,
+        instance.specialization.compatibility,
+      )
       if (!isWordType(type)) continue
       add(type, BigInt(expression.value), expression.span)
     }
@@ -3054,12 +3145,12 @@ export const plan = (
 ): Plan => {
   const reached = new Map<string, DeclarationFacts.SemanticType>()
   for (const instance of discovery.instances) addFunctionTypes(reached, instance)
-  for (const effect of discovery.effects) reached.set(Type.key(effect.type), effect.type)
+  for (const effect of discovery.effects) reached.set(Type.runtimeKey(effect.type), effect.type)
   for (const instance of discovery.instances) {
     for (const expression of instance.function.statements
       .flatMap(Hir.statementExpressions)
       .flatMap(Hir.expressionTree)) {
-      if (expression._tag === 'EffectCatch') reached.set(Type.key('bool'), 'bool')
+      if (expression._tag === 'EffectCatch') reached.set(Type.runtimeKey('bool'), 'bool')
       if (
         expression._tag !== 'BuiltinCall' ||
         (expression.operation !== 'ExecutionLayout' &&
@@ -3070,15 +3161,19 @@ export const plan = (
         Instances.concreteEffectRepresentationArgument(
           instance.function,
           instance.key,
-          Type.substituteGenericArgument(argument, instance.substitution),
+          Type.substituteGenericArgument(
+            argument,
+            instance.substitution,
+            instance.specialization.compatibility,
+          ),
         ),
       )
       for (const argument of [arguments_.at(0), arguments_.at(2)])
         if (argument !== undefined && Type.isTypeArgument(argument))
-          reached.set(Type.key(argument), argument)
+          reached.set(Type.runtimeKey(argument), argument)
       for (const argument of [arguments_.at(1), arguments_.at(3)]) {
         const represented = argument === undefined ? undefined : Type.representedType(argument)
-        if (represented !== undefined) reached.set(Type.key(represented), represented)
+        if (represented !== undefined) reached.set(Type.runtimeKey(represented), represented)
       }
     }
   }
@@ -3086,15 +3181,16 @@ export const plan = (
     discovery.entry._tag === 'Resolved' &&
     (discovery.entry.kind === 'Effect' || discovery.entry.result === 'Unit')
   ) {
-    reached.set(Type.key('i32'), 'i32')
+    reached.set(Type.runtimeKey('i32'), 'i32')
   }
   for (const callable of discovery.callables) {
-    for (const capture of callable.captures) reached.set(Type.key(capture.type), capture.type)
+    for (const capture of callable.captures)
+      reached.set(Type.runtimeKey(capture.type), capture.type)
   }
   const entries = new Map<string, Entry>()
   const resolve = (type: DeclarationFacts.SemanticType): Entry | undefined => {
     if (Type.isBuiltin(type)) return scalarEntry(self.target, type)
-    if (Type.isString(type)) return stringEntry(self.target)
+    if (Type.isString(type)) return stringEntry(self.target, type)
     if (Type.isNever(type)) return neverEntry()
     const candidate = catalogEntry(self, type)
     if (candidate?._tag === 'LayoutEntry') return candidate
@@ -3110,7 +3206,7 @@ export const plan = (
     return element === undefined ? undefined : repeatedEntry(type, element)
   }
   const add = (type: DeclarationFacts.SemanticType): void => {
-    const key = Type.key(type)
+    const key = Type.runtimeKey(type)
     if (Type.isEffect(type)) {
       add(type.success)
       for (const failure of Type.failureMembers(type)) add(failure)
@@ -3160,7 +3256,7 @@ export const plan = (
   }
   for (const type of reached.values()) add(type)
   const orderedEntries = Object.freeze(
-    [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
+    [...entries.values()].sort((left, right) => compareRuntimeTypes(left.type, right.type)),
   )
   const literals = wordLiteralVerdicts(self.target, discovery, self.wordConstants)
   const localSharedAllocationProvenance = LocalSharedAllocationProvenance.plan(discovery, index)
@@ -3173,7 +3269,7 @@ export const plan = (
       const raw = expression.typeArguments.at(0)
       const element =
         raw !== undefined && Type.isTypeArgument(raw)
-          ? Type.substitute(raw, instance.substitution)
+          ? Type.substitute(raw, instance.substitution, instance.specialization.compatibility)
           : undefined
       const elementLayout = element === undefined ? undefined : resolve(element)
       if (
@@ -3191,7 +3287,9 @@ export const plan = (
         )
     }
   }
-  const shaped = new Map(orderedEntries.map((entry) => [Type.key(entry.type), entry.type] as const))
+  const shaped = new Map(
+    orderedEntries.map((entry) => [Type.runtimeKey(entry.type), entry.type] as const),
+  )
   for (const type of reached.values()) {
     if (
       Type.isRuntimeConcrete(type) &&
@@ -3200,9 +3298,9 @@ export const plan = (
         (Type.isRepresented(type) &&
           Type.isCompositeEffectRepresentationArgument(type.representation.argument)))
     )
-      shaped.set(Type.key(type), type)
+      shaped.set(Type.runtimeKey(type), type)
   }
-  const shapeTypes = Object.freeze([...shaped.values()].sort(Type.compare))
+  const shapeTypes = Object.freeze([...shaped.values()].sort(compareRuntimeTypes))
   const staticDataById = new Map<string, StaticText.Data>()
   for (const instance of discovery.instances) {
     const expressions = instance.function.statements
@@ -3251,10 +3349,9 @@ export const plan = (
           candidate,
         ): candidate is Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
           candidate._tag === 'CallableEnvironment' &&
-          Type.equalsCallableEnvironmentIdentity(
+          Type.runtimeCallableEnvironmentIdentityKey(
             Instances.callableEnvironmentIdentity(candidate.callable),
-            callableEnvironment,
-          ),
+          ) === Type.runtimeCallableEnvironmentIdentityKey(callableEnvironment),
       )
       return environment === undefined
         ? undefined
@@ -3305,7 +3402,11 @@ export const plan = (
         Instances.concreteEffectRepresentationArgument(
           instance.function,
           instance.key,
-          Type.substituteGenericArgument(argument, instance.substitution),
+          Type.substituteGenericArgument(
+            argument,
+            instance.substitution,
+            instance.specialization.compatibility,
+          ),
         ),
       )
       const result = arguments_.at(0)
@@ -3383,9 +3484,11 @@ export const plan = (
       ),
     ),
   })
-  const specializedShapeTypes = new Map(shapeTypes.map((type) => [Type.key(type), type] as const))
+  const specializedShapeTypes = new Map(
+    shapeTypes.map((type) => [Type.runtimeKey(type), type] as const),
+  )
   for (const environment of effectPlans)
-    specializedShapeTypes.set(Type.key(environment.effect), environment.effect)
+    specializedShapeTypes.set(Type.runtimeKey(environment.effect), environment.effect)
   return Object.freeze({
     _tag: 'LayoutPlan',
     target: self.target,
@@ -3395,7 +3498,7 @@ export const plan = (
     callingShapes: callingShapes(
       self.target,
       orderedEntries,
-      [...specializedShapeTypes.values()].sort(Type.compare),
+      [...specializedShapeTypes.values()].sort(compareRuntimeTypes),
       effectPlans,
       callablePlans,
     ),
@@ -3414,9 +3517,9 @@ export const plan = (
 
 /** Constructs a scalar plan for hand-built MIR samples and focused tests. */
 export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>): Plan => {
-  const entries = new Map(types.map((type) => [Type.key(type), scalarEntry(target, type)]))
+  const entries = new Map(types.map((type) => [Type.runtimeKey(type), scalarEntry(target, type)]))
   const orderedEntries = Object.freeze(
-    [...entries.values()].sort((left, right) => Type.compare(left.type, right.type)),
+    [...entries.values()].sort((left, right) => compareRuntimeTypes(left.type, right.type)),
   )
   return Object.freeze({
     _tag: 'LayoutPlan',
@@ -3492,9 +3595,9 @@ const executableEnvironmentFieldShape = (
     )
     if (environment === undefined)
       throw new RangeError(
-        `callable environment ${Type.genericArgumentKey(identity)} is unavailable to calling-shape planning`,
+        `callable environment ${Type.runtimeGenericArgumentKey(identity)} is unavailable to calling-shape planning`,
       )
-    const nested = withActiveShape(context, `callable:${Type.genericArgumentKey(identity)}`)
+    const nested = withActiveShape(context, `callable:${Type.runtimeGenericArgumentKey(identity)}`)
     const fields = environment.fields.map((capture) =>
       Object.freeze({
         capture: capture.ordinal,
@@ -3546,7 +3649,7 @@ const shapeNode = (
   if (Type.isBuiltin(type)) {
     return Object.freeze({ _tag: 'ScalarShape', type, laneCount: 1 })
   }
-  const enumRepresentation = entries.get(Type.key(type))?.representation
+  const enumRepresentation = entries.get(Type.runtimeKey(type))?.representation
   if (Type.isNominal(type) && enumRepresentation?._tag === 'ScalarEnum') {
     return Object.freeze({
       _tag: 'ScalarEnumShape',
@@ -3562,7 +3665,7 @@ const shapeNode = (
       storage: Object.freeze({
         type: Object.freeze({
           _tag: 'Address',
-          element: Type.string,
+          element: type,
           bits: target.pointerSize === 4 ? 32 : 64,
         }),
         lane: 0,
@@ -3677,7 +3780,7 @@ const shapeNode = (
         laneCount: payloadTypes.length + 1,
       })
     }
-    const entry = entries.get(Type.key(type))
+    const entry = entries.get(Type.runtimeKey(type))
     const executable = entry?.executable
     const stored = entry?.representation
     const storedCallable = stored?._tag === 'CallableEnvironment' ? stored : undefined
@@ -3722,7 +3825,7 @@ const shapeNode = (
       laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
     })
   }
-  const candidate = entries.get(Type.key(type))
+  const candidate = entries.get(Type.runtimeKey(type))
   if (Type.isNominal(type) && candidate?.representation._tag === 'NominalUnion') {
     const variants = Object.freeze(
       candidate.representation.variants.map((variant) => {
@@ -3871,7 +3974,7 @@ export const unifyPayloadTypes = (
             const pointerBits = target.pointerSize === 4 ? 32 : 64
             const leftBits = leftScalar === undefined ? 32 : Scalar.bits(leftScalar, pointerBits)
             const rightBits = rightScalar === undefined ? 32 : Scalar.bits(rightScalar, pointerBits)
-            return rightBits - leftBits || Type.compare(left, right)
+            return rightBits - leftBits || compareRuntimeTypes(left, right)
           })
           .at(0) ?? 'i32'
       )
@@ -4069,16 +4172,15 @@ export const callingShapes = (
   effectEnvironments: ReadonlyArray<EffectEnvironment> = Object.freeze([]),
   callableEnvironments: ReadonlyArray<CallableEnvironment> = Object.freeze([]),
 ): ReadonlyArray<CallingShape> => {
-  const byType = new Map(entries.map((candidate) => [Type.key(candidate.type), candidate]))
+  const byType = new Map(entries.map((candidate) => [Type.runtimeKey(candidate.type), candidate]))
   return Object.freeze(
     types.map((type) => shapeOf(target, type, byType, effectEnvironments, callableEnvironments)),
   )
 }
 
 /**
- * Both lookups run once per lowered operation, so each plan's arrays are indexed by canonical type
- * key on first use; `Type.equals` is key equality, so the index answers exactly what the linear
- * scan answered.
+ * Both lookups run once per lowered operation. Their physical indexes erase lifetime proof
+ * arguments while retaining the original semantic types on entries for inspection.
  */
 const entryIndexCache = new WeakMap<ReadonlyArray<Entry>, Map<string, Entry>>()
 const callingShapeIndexCache = new WeakMap<ReadonlyArray<CallingShape>, Map<string, CallingShape>>()
@@ -4091,7 +4193,7 @@ const indexByTypeKey = <A extends { readonly type: DeclarationFacts.SemanticType
   if (index === undefined) {
     index = new Map()
     for (const value of values) {
-      const key = Type.key(value.type)
+      const key = Type.runtimeKey(value.type)
       if (!index.has(key)) index.set(key, value)
     }
     cache.set(values, index)
@@ -4101,14 +4203,14 @@ const indexByTypeKey = <A extends { readonly type: DeclarationFacts.SemanticType
 
 /** Looks up one canonical runtime-plan entry. */
 export const entry = (self: Plan, type: DeclarationFacts.SemanticType): Entry | undefined =>
-  indexByTypeKey(entryIndexCache, self.entries).get(Type.key(type))
+  indexByTypeKey(entryIndexCache, self.entries).get(Type.runtimeKey(type))
 
 /** Looks up one compiler-owned calling shape by logical type. */
 export const callingShape = (
   self: Plan,
   type: DeclarationFacts.SemanticType,
 ): CallingShape | undefined =>
-  indexByTypeKey(callingShapeIndexCache, self.callingShapes).get(Type.key(type))
+  indexByTypeKey(callingShapeIndexCache, self.callingShapes).get(Type.runtimeKey(type))
 
 /**
  * Plans the bit-exact movement of one nominal failure payload between two tagged carriers.
@@ -4135,7 +4237,7 @@ export const failurePayloadRepacking = (
   const sourceShape = callingShape(self, sourceType)
   const targetShape = callingShape(self, targetType)
   if (sourceShape === undefined || targetShape?.tree._tag !== 'OutcomeShape') return undefined
-  if (!Type.equals(sourceMember, targetMember)) return undefined
+  if (!(Type.runtimeKey(sourceMember) === Type.runtimeKey(targetMember))) return undefined
   const memberShape = callingShape(self, sourceMember)
   if (memberShape === undefined) return undefined
   const sourceOffset = Type.isNominal(sourceType) ? 0 : 1
@@ -4172,10 +4274,9 @@ export const callableEnvironmentByIdentity = (
       candidate,
     ): candidate is Extract<CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
       candidate._tag === 'CallableEnvironment' &&
-      Type.equalsCallableEnvironmentIdentity(
+      Type.runtimeCallableEnvironmentIdentityKey(
         Instances.callableEnvironmentIdentity(candidate.callable),
-        identity,
-      ),
+      ) === Type.runtimeCallableEnvironmentIdentityKey(identity),
   )
 
 /** Resolves the Effect environment a capture field's identity names, including success carriers. */
@@ -4429,13 +4530,18 @@ export const memberFieldSlots = (
   member: Type.Type,
   path: ReadonlyArray<DeclarationFacts.FieldId>,
 ): ReadonlyArray<number> | undefined => {
-  if (path.length === 0 && Type.equals(shape.type, member))
+  if (path.length === 0 && Type.runtimeKey(shape.type) === Type.runtimeKey(member))
     return Object.freeze(Array.from({ length: shape.laneCount }, (_, ordinal) => ordinal))
   let selected: { readonly shape: CallingShapeNode; readonly physicalOffset: number } | undefined
-  if (shape.tree._tag === 'ProductShape' && Type.equals(shape.tree.type, member)) {
+  if (
+    shape.tree._tag === 'ProductShape' &&
+    Type.runtimeKey(shape.tree.type) === Type.runtimeKey(member)
+  ) {
     selected = Object.freeze({ shape: shape.tree, physicalOffset: 0 })
   } else if (shape.tree._tag === 'SumShape') {
-    const candidate = shape.tree.members.find((entry) => Type.equals(entry.member, member))
+    const candidate = shape.tree.members.find(
+      (entry) => Type.runtimeKey(entry.member) === Type.runtimeKey(member),
+    )
     if (candidate !== undefined) {
       selected = Object.freeze({ shape: candidate.shape, physicalOffset: 1 })
     }
@@ -4482,7 +4588,10 @@ export const coverageFieldSlots = (
   if (member._tag !== 'NominalUnionVariant')
     return memberFieldSlots(shape, Match.sourceType(member), path)
   let selected: { readonly shape: CallingShapeNode; readonly physicalOffset: number } | undefined
-  if (shape.tree._tag === 'NominalUnionShape' && Type.equals(shape.tree.type, member.type)) {
+  if (
+    shape.tree._tag === 'NominalUnionShape' &&
+    Type.runtimeKey(shape.tree.type) === Type.runtimeKey(member.type)
+  ) {
     const variant = shape.tree.variants.find(
       (candidate) =>
         candidate.ordinal === member.variantOrdinal &&
@@ -4492,7 +4601,9 @@ export const coverageFieldSlots = (
     )
     if (variant !== undefined) selected = { shape: variant.shape, physicalOffset: 1 }
   } else if (shape.tree._tag === 'SumShape') {
-    const outer = shape.tree.members.find((candidate) => Type.equals(candidate.member, member.root))
+    const outer = shape.tree.members.find(
+      (candidate) => Type.runtimeKey(candidate.member) === Type.runtimeKey(member.root),
+    )
     if (outer?.shape._tag === 'NominalUnionShape') {
       const variant = outer.shape.variants.find(
         (candidate) =>
@@ -4520,4 +4631,5 @@ export const coverageFieldSlots = (
 export const catalogEntry = (
   self: Catalog,
   type: DeclarationFacts.SemanticType,
-): CatalogEntry | undefined => self.entries.find((candidate) => Type.equals(candidate.type, type))
+): CatalogEntry | undefined =>
+  self.entries.find((candidate) => Type.runtimeKey(candidate.type) === Type.runtimeKey(type))

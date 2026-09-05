@@ -1,12 +1,224 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as ConformanceProof from '../src/ConformanceProof.js'
+import * as ExecutableProperty from '../src/ExecutableProperty.js'
+import * as Lifetime from '../src/Lifetime.js'
+import * as MirVerification from '../src/MirVerification.js'
+import * as ModuleSurface from '../src/ModuleSurface.js'
+import * as NominalVariance from '../src/NominalVariance.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
+import * as Type from '../src/Type.js'
+import * as TypeCompatibility from '../src/TypeCompatibility.js'
+import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const snapshot = (source: string) => Analysis.ofSourceRealized('slices/Ownership', ascii(source))
+const analyze = (source: string) => Analysis.ofSource('slices/Ownership', ascii(source))
+
+it.effect('round-trips semantic borrowed types and executable predicates without erasure', () =>
+  Effect.gen(function* () {
+    const owner = { module: 'slices/roundtrip', name: 'header' }
+    const a = Lifetime.bound(owner, 0, 'a')
+    const b = Lifetime.bound(owner, 1, 'b')
+    const call = Lifetime.bound(owner, 0, 'call', [0])
+    const value = Type.parameter(owner, 2, 'T')
+    const callable = Type.callable([Type.reference('Shared', value, call)], Type.string(b), {
+      environment: a,
+      lifetimeBinders: [call],
+      lifetimeBounds: [{ longer: a, shorter: b }],
+      typeOutlives: [{ type: value, lifetime: a }],
+    })
+    const effect = Type.effect(
+      Type.nominal(owner.module, 'Holder', [
+        a,
+        Type.fixedArray(Type.reference('Shared', Type.string(b), a), 2),
+      ]),
+      [],
+      {
+        environment: a,
+        lifetimeBinders: [],
+        typeOutlives: [{ type: value, lifetime: a }],
+      },
+    )
+    const represented = Type.represented(
+      effect,
+      effect,
+      Type.exactRepresentationArgument(
+        Type.effectIdentityArgument('roundtrip', { declaration: owner, typeArguments: [a, value] }),
+        effect,
+      ),
+    )
+    for (const source of [callable, represented]) {
+      const restored = yield* ModuleSurface.decodeSemanticType(
+        ModuleSurface.encodeSemanticType(source),
+      )
+      assert.strictEqual(Type.key(restored), Type.key(source))
+      assert.deepEqual(Type.lifetimes(restored), Type.lifetimes(source))
+      const substitution = new Map<string, Type.GenericArgument>([
+        [Type.key(value), 'i32'],
+        [Lifetime.key(b), a],
+      ])
+      assert.strictEqual(
+        Type.key(Type.substitute(restored, substitution)),
+        Type.key(Type.substitute(source, substitution)),
+      )
+    }
+  }),
+)
+
+it.effect('derives recursive borrowed nominal variance from actual declaration cycles', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSource(
+      'slices/recursive',
+      ascii(`struct Link<'a, T> { value: &'a T }
+struct A<'a> { next: Link<'a, B<'a>> }
+struct B<'a> { next: &'a A<'a> }
+struct Tree<'a> { children: &'a [Tree<'a>] }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    for (const name of ['A', 'Tree'])
+      assert.strictEqual(
+        self.index.modules
+          .flatMap((module) => module.structs)
+          .find(
+            (struct) => struct.canonical._tag === 'Canonical' && struct.canonical.id.name === name,
+          )?.dependency._tag,
+        'Available',
+      )
+    const variance = NominalVariance.derive(self.index)
+    for (const name of ['A', 'B', 'Tree'])
+      assert.deepEqual(
+        variance.summaries.get(
+          TypeCompatibility.nominalVarianceKey(Type.nominal('slices/recursive', name)),
+        ),
+        ['Covariant'],
+      )
+    assert.strictEqual(NominalVariance.derive(self.index), variance)
+  }),
+)
+
+it.effect(
+  'projects independent borrowed fields while rejecting unrelated and owned-inline escapes',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct Pair<'a, 'b> { first: &'a i32 second: &'b i32 }
+struct Inline { values: [i32; 1] }
+fn first<'a, 'b>(pair: Pair<'a, 'b>) -> &'a i32 { return pair.first }
+fn second<'a, 'b>(pair: Pair<'a, 'b>) -> &'b i32 { return pair.second }
+fn wrong<'a, 'b>(pair: Pair<'a, 'b>) -> &'a i32 { return pair.second }
+fn inlineEscape() -> &'static [i32] { let owner = Inline { values: [1] } return &owner.values }`
+      const self = yield* Analysis.ofSource('slices/projections', ascii(source))
+      const diagnostics = Analysis.diagnostics(self)
+      assert.isFalse(
+        diagnostics.some((diagnostic) => diagnostic.span.start < source.indexOf('fn wrong')),
+      )
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === 'SEM0129' &&
+            diagnostic.span.start >= source.indexOf('fn wrong') &&
+            diagnostic.span.start < source.indexOf('fn inlineEscape'),
+        ),
+      )
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === 'OWN0019' &&
+            diagnostic.span.start >= source.indexOf('fn inlineEscape'),
+        ),
+      )
+    }),
+)
+
+it.effect('retains borrowed generic payloads across containers and builtin string views', () =>
+  Effect.gen(function* () {
+    const source = `union Option<T> { Some { value: T }, None }
+tuple Box<T>(T)
+fn identity<T>(value: T) -> T { return move value }
+fn store<'a>(value: &'a i32) -> Option<&'a i32> {
+  let boxed = Box<&'a i32>(value)
+  let positional = (boxed.0,)
+  let record = .{ value: positional.0 }
+  let values = [record.value]
+  return Option<&'a i32>.Some { value: identity(values[0]) }
+}
+fn empty<'a>(proof: &'a i32) -> Option<&'a i32> { return Option<&'a i32>.None }
+fn nested<'a, 'b>(value: &'a &'b i32) -> &'b i32 { return value.* }
+fn bytes<'a>(value: string<'a>) -> &'a [u8] { return Intrinsic.stringUtf8Bytes(value) }
+fn text<'a>(value: &'a [u8]) -> string<'a> { unsafe { return Intrinsic.stringFromUtf8Unchecked(value) } return "" }`
+    const self = yield* Analysis.ofSource('slices/containers', ascii(source))
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const functions = Analysis.rootAnalysis(self).functions
+    for (const name of ['store', 'empty', 'bytes', 'text']) {
+      const fn =
+        functions.find(
+          (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === name,
+        ) ?? unreachable('expected container function')
+      const result = fn.declaration.returnType
+      if (result._tag !== 'Resolved') return unreachable('expected resolved result')
+      assert.strictEqual(
+        ExecutableProperty.detachedOfType(self.index, result.type)._tag,
+        'Unsatisfied',
+      )
+      const parameter = fn.declaration.parameters.at(0)?.declaredType
+      if (parameter?._tag !== 'Resolved') return unreachable('expected resolved parameter')
+      assert.deepEqual(Type.storageLifetimes(result.type), Type.storageLifetimes(parameter.type))
+    }
+  }),
+)
+
+it.effect('requires opt-in Copy for borrowed aggregates and preserves copied dependencies', () =>
+  Effect.gen(function* () {
+    const source = `struct View<'a> { value: &'a i32 }
+impl<'a> Copy for View<'a> {}
+struct Affine<'a> { value: &'a i32 }
+fn duplicate<'a>(value: &'a i32) -> i32 { let holder = View { value: value } let copy = holder return holder.value.* + copy.value.* }
+fn invalidCopy() -> View<'static> { let local = 1 let holder = View { value: &local } let copy = holder return copy }
+fn invalidMove<'a>(value: &'a i32) -> i32 { let holder = Affine { value: value } let moved = move holder return holder.value.* }
+fn invalidExclusive(value: &mut i32) -> i32 { let moved = move value return value.* }`
+    const self = yield* Analysis.ofSource('slices/copy', ascii(source))
+    const diagnostics = Analysis.diagnostics(self)
+    assert.isFalse(
+      diagnostics.some((diagnostic) => diagnostic.span.start < source.indexOf('fn invalidCopy')),
+    )
+    assert.isTrue(
+      diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === 'OWN0019' &&
+          diagnostic.span.start >= source.indexOf('fn invalidCopy') &&
+          diagnostic.span.start < source.indexOf('fn invalidMove'),
+      ),
+    )
+    assert.isTrue(
+      diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === 'OWN0001' &&
+          diagnostic.span.start >= source.indexOf('fn invalidMove') &&
+          diagnostic.span.start < source.indexOf('fn invalidExclusive'),
+      ),
+    )
+    assert.isTrue(
+      diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === 'OWN0001' &&
+          diagnostic.span.start >= source.indexOf('fn invalidExclusive'),
+      ),
+    )
+    const lifetime = Lifetime.bound({ module: 'slices/copy', name: 'proof' }, 0, 'a')
+    assert.isTrue(
+      ConformanceProof.copyType(self.index, Type.nominal('slices/copy', 'View', [lifetime])),
+    )
+    assert.isFalse(
+      ConformanceProof.copyType(self.index, Type.nominal('slices/copy', 'Affine', [lifetime])),
+    )
+    assert.isFalse(
+      ConformanceProof.copyType(self.index, Type.reference('Exclusive', 'i32', lifetime)),
+    )
+  }),
+)
 
 it.effect('records deterministic call-scoped loans and accepts shared aliases', () =>
   Effect.gen(function* () {
@@ -75,7 +287,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('retains a callable capture loan when the callable is stored after invocation', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn inspect(value: i32, values: &[i32]) -> i32 {
+    const source = `fn inspect(value: i32, values: &[i32]) -> i32 {
   return value + values[0]
 }
 pub fn main() -> i32 {
@@ -84,13 +296,19 @@ pub fn main() -> i32 {
   let observed = callback(1)
   let stored = callback
   values[0] = 40
-  drop stored
-  return observed + values[0]
-}`)
-
+  let later = stored(1)
+  return observed + later
+}`
+    const self = yield* analyze(source)
     assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['OWN0011'],
+      Analysis.diagnostics(self).map((d) => ({
+        code: d.code,
+        span: source.slice(d.span.start, d.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0011', span: 'values[0]' },
+        { code: 'OWN0019', span: 'stored' },
+      ],
     )
   }),
 )
@@ -126,27 +344,33 @@ pub fn main() -> i32 { return read(&[Guard { value: 42 }]) }`)
 
 it.effect('keeps a returned shared view live through its last use and then restores mutation', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.usize as usize
-fn identity(values: &[i32]) -> &[i32] { return values }
+    const source = `fn identity(values: &[i32]) -> &[i32] { return values }
 fn conflict() -> i32 {
   let mut values = [1, 2]
   let view = identity(&values)
   values[0] = 3
-  return usize.toI32(view.length)
+  return view[0]
 }
 fn restored() -> i32 {
   let mut values = [1, 2]
   let view = identity(&values)
-  let length = usize.toI32(view.length)
+  let observed = view[0]
   values[0] = 3
-  return length
+  return observed
 }
-pub fn main() -> i32 { return restored() }`)
-
+pub fn main() -> i32 { return restored() }`
+    const self = yield* snapshot(source)
     assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['OWN0011'],
+      Analysis.diagnostics(self).map((d) => ({
+        code: d.code,
+        span: source.slice(d.span.start, d.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0011', span: 'values[0]' },
+        { code: 'OWN0019', span: 'view[0]' },
+      ],
     )
+
     const conflict = Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(1)
     const returned = conflict?.loans.find((loan) => loan.origin === 'ReturnedView')
     assert.strictEqual(returned?.root._tag, 'Let')
@@ -165,7 +389,8 @@ pub fn main() -> i32 { return restored() }`)
 
 it.effect('suspends all owner access for an exclusive returned view until its last use', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`fn identity(values: &mut [i32]) -> &mut [i32] { return values }
+    const self =
+      yield* snapshot(`fn identity(values: &mut [i32]) -> &mut [i32] { return move values }
 fn conflict() -> i32 {
   let mut values = [1, 2]
   let mut view = identity(&mut values)
@@ -243,175 +468,61 @@ pub fn main() -> i32 { return directRestored() + pipelineRestored() }`)
   }),
 )
 
-it.effect('tracks immutable callable aliases and rejects provenance after reassignment', () =>
+it.effect('retains source dependencies through immutable callable aliases', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Counter { value: i32 }
+    const source = `struct Counter { value: i32 }
 fn identity(counter: &mut Counter) -> &mut Counter { return move counter }
-fn select(delta: i32, counter: &mut Counter) -> &mut Counter {
-  counter.value = counter.value + delta
-  return move counter
-}
 fn aliased() -> i32 {
   let mut counter = Counter { value: 1 }
   let callback = identity
-  let mut view = callback(&mut counter)
+  let alias = callback
+  let mut view = alias(&mut counter)
   counter.value = 20
   view.value = 42
   return counter.value
-}
-fn reassigned() -> i32 {
-  let mut left = Counter { value: 1 }
-  let mut right = Counter { value: 2 }
-  let mut callback = select(&mut left)
-  callback = select(&mut right)
-  let mut view = callback(0)
-  right.value = 20
-  view.value = 42
-  return right.value
-}
-pub fn main() -> i32 { return 0 }`)
-
+}`
+    const self = yield* analyze(source)
     assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['OWN0011', 'SEM0080', 'SEM0144'],
-    )
-  }),
-)
-
-it.effect('rejects every opaque callable route that returns a view', () =>
-  Effect.gen(function* () {
-    const self = yield* snapshot(`struct Counter { value: i32 }
-struct Left {}
-struct Right {}
-fn identity(counter: &mut Counter) -> &mut Counter { return move counter }
-fn alternate(counter: &mut Counter) -> &mut Counter { return move counter }
-fn ignore<T>(value: T) -> bool { drop value return false }
-fn diverge() -> never { return diverge() }
-fn select(delta: i32, counter: &mut Counter) -> &mut Counter {
-  counter.value = counter.value + delta
-  return move counter
-}
-fn beforeWrite() -> i32 {
-  let mut counter = Counter { value: 1 }
-  let mut callback = identity
-  let view = callback(&mut counter)
-  callback = alternate
-  return view.value
-}
-fn snapshotAlias() -> i32 {
-  let mut counter = Counter { value: 1 }
-  let mut callback = identity
-  let alias = callback
-  callback = alternate
-  let view = alias(&mut counter)
-  return view.value
-}
-fn terminatingPaths(flag: bool) -> i32 {
-  let mut counter = Counter { value: 1 }
-  let mut callback = identity
-  if flag {
-    let view = callback(&mut counter)
-    return view.value
-  } else {
-    callback = alternate
-    return 0
-  }
-}
-fn matched(choice: Left | Right) -> i32 {
-  let mut counter = Counter { value: 1 }
-  let callback = match move choice {
-    Left {} => identity
-    Right {} => alternate
-  }
-  let view = callback(&mut counter)
-  return view.value
-}
-fn invalidatedAlias() -> i32 {
-  let mut counter = Counter { value: 1 }
-  let mut callback = identity
-  callback = alternate
-  let alias = callback
-  let view = alias(&mut counter)
-  return view.value
-}
-fn grouped() -> i32 {
-  let mut counter = Counter { value: 1 }
-  let mut callback = identity
-  callback = alternate
-  let view = (callback)(&mut counter)
-  return view.value
-}
-fn loopBackedge(flag: bool) -> i32 {
-  let mut counter = Counter { value: 1 }
-  let mut callback = identity
-  while flag {
-    let value = callback(&mut counter).value
-    callback = alternate
-    drop value
-    continue
-  }
-  return 0
-}
-fn terminatingLoop(flag: bool) -> i32 {
-  let mut counter = Counter { value: 1 }
-  let mut callback = identity
-  while flag {
-    let view = callback(&mut counter)
-    callback = alternate
-    return view.value
-  }
-  return 0
-}
-fn conditionWrite() -> i32 {
-  let mut counter = Counter { value: 1 }
-  let mut callback = identity
-  while ignore(Intrinsic.replace(callback, alternate)) { return 0 }
-  let view = callback(&mut counter)
-  return view.value
-}
-fn unreachableLoopWrite(flag: bool) -> i32 {
-  let mut counter = Counter { value: 1 }
-  let mut callback = identity
-  while flag {
-    let impossible = diverge()
-    callback = alternate
-    drop impossible
-  }
-  let view = callback(&mut counter)
-  return view.value
-}
-pub fn main() -> i32 { return 0 }`)
-
-    assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      Analysis.diagnostics(self).map((d) => ({
+        code: d.code,
+        span: source.slice(d.span.start, d.span.end).trim(),
+      })),
       [
-        'SEM0080',
-        'SEM0080',
-        'SEM0080',
-        'SEM0080',
-        'SEM0080',
-        'SEM0144',
-        'SEM0080',
-        'SEM0144',
-        'SEM0144',
-        'SEM0080',
-        'SEM0080',
-        'SEM0144',
-        'SEM0080',
+        { code: 'OWN0011', span: 'counter.value' },
+        { code: 'OWN0019', span: 'view.value' },
       ],
     )
   }),
 )
 
+it.effect('uses declared lifetimes through callable parameters, results and aliases', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`fn identity<'a>(value: &'a i32) -> &'a i32 { return value }
+fn factory() -> for<'a> fn<'static>(&'a i32) -> &'a i32 { return identity }
+fn apply<'env>(callback: for<'a> fn<'env>(&'a i32) -> &'a i32, value: &i32) -> i32 {
+  return callback(value).*
+}
+fn routes(value: &i32) -> i32 {
+  let direct = identity
+  let alias = direct
+  let returned = factory()
+  let first = apply(alias, value)
+  let second = (returned)(value)
+  return first + second.*
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
 it.effect('isolates and rejects deferred mutation of a captured callable', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Counter { value: i32 }
+    const source = `struct Counter { value: i32 }
 fn identity(counter: &mut Counter) -> &mut Counter { return move counter }
 fn alternate(counter: &mut Counter) -> &mut Counter { return move counter }
 fn diverge() -> never { return diverge() }
 fn simple(value: i32) -> i32 { return value }
 fn alternateSimple(value: i32) -> i32 { return value + 1 }
-fn make(value: i32) -> fn(i32) -> i32 { drop value return alternateSimple }
+fn make(value: i32) -> fn<'static>(i32) -> i32 { drop value return alternateSimple }
 fn consume(value: i32, callback: fn(i32) -> i32) -> i32 {
   drop callback
   return value
@@ -511,18 +622,26 @@ fn eagerReplace() -> i32 {
   drop move pending
   return callback(1)
 }
-pub fn main() -> i32 { return 0 }`)
-
+pub fn main() -> i32 { return 0 }`
+    const self = yield* analyze(source)
     assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['SEM0145', 'SEM0145', 'SEM0012', 'SEM0145'],
+      Analysis.diagnostics(self).map((d) => ({
+        code: d.code,
+        span: source.slice(d.span.start, d.span.end).trim(),
+      })),
+      [
+        { code: 'SEM0145', span: 'callback' },
+        { code: 'SEM0145', span: 'callback' },
+        { code: 'SEM0012', span: 'diverge()' },
+        { code: 'SEM0145', span: 'callback' },
+      ],
     )
   }),
 )
 
 it.effect('rejects moving or dropping an owner while a returned view is live', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Token { value: i32 }
+    const source = `struct Token { value: i32 }
 fn identity(values: &[Token]) -> &[Token] { return values }
 fn moved() -> i32 {
   let values = [Token { value: 1 }]
@@ -536,18 +655,26 @@ fn dropped() -> i32 {
   drop values
   return view[0].value
 }
-pub fn main() -> i32 { return 0 }`)
-
+pub fn main() -> i32 { return 0 }`
+    const self = yield* analyze(source)
     assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['OWN0011', 'OWN0011'],
+      Analysis.diagnostics(self).map((d) => ({
+        code: d.code,
+        span: source.slice(d.span.start, d.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0011', span: 'values' },
+        { code: 'OWN0019', span: 'view[0]' },
+        { code: 'OWN0011', span: 'values' },
+        { code: 'OWN0019', span: 'view[0]' },
+      ],
     )
   }),
 )
 
 it.effect('rejects moving a non-Copy value through a borrowed element place', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`struct Token { value: i32 }
+    const self = yield* analyze(`struct Token { value: i32 }
 fn steal(values: &[Token], index: usize) -> Token { return move values[index] }
 pub fn main() -> i32 { return 0 }`)
 
@@ -560,24 +687,29 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('plans exactly one displaced cleanup for exclusive borrowed replacement', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.usize as usize
-struct Token { value: i32 }
+    const self = yield* snapshot(`struct Token { value: i32 }
 struct Empty {}
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
 fn replace(values: &mut [Token], index: usize) -> i32 {
   values[index] = Token { value: 42 }
   return values[index].value
 }
 fn clear(values: &mut [Empty], index: usize) -> i32 {
   values[index] = Empty {}
-  return usize.toI32(values.length)
+  return 0
 }
-pub fn main() -> i32 { return 0 }`)
+pub fn main() -> i32 {
+  let mut empty = [Empty {}]
+  let cleared = clear(&mut empty, 0)
+  let mut values = [Token { value: 1 }]
+  return replace(&mut values, 0) + cleared
+}`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     const replacements =
       Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(0)?.replacements ?? []
     assert.strictEqual(replacements.length, 1)
-    assert.strictEqual(replacements.at(0)?.cleanup._tag, 'StructCleanup')
+    assert.strictEqual(replacements.at(0)?.cleanup._tag, 'HookCleanup')
     const empty =
       Analysis.ownershipOf(self, 'slices/Ownership')?.functions.at(1)?.replacements ?? []
     const cleanup = empty.at(0)?.cleanup
@@ -585,6 +717,33 @@ pub fn main() -> i32 { return 0 }`)
     if (cleanup?._tag === 'StructCleanup') {
       assert.deepEqual(cleanup.fields, [])
     }
+    const mir = self.mir._tag === 'Available' ? self.mir.value : unreachable('replacement MIR')
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const replace = mir.functions.find((fn) => fn.id.name === 'replace') ?? unreachable('replace')
+    const corrupted = {
+      ...mir,
+      functions: mir.functions.map((fn) =>
+        fn !== replace
+          ? fn
+          : {
+              ...fn,
+              regions: fn.regions.map((region) =>
+                region._tag !== 'OperationRegion'
+                  ? region
+                  : {
+                      ...region,
+                      operations: region.operations.filter(
+                        (operation) => operation._tag !== 'WritePlace',
+                      ),
+                    },
+              ),
+            },
+      ),
+    }
+    assert.deepEqual(
+      MirVerification.verify(corrupted).map((violation) => violation.rule),
+      ['InvalidSliceOperation'],
+    )
   }),
 )
 
@@ -620,7 +779,7 @@ it.effect('extends a view loan through a use nested in a place replace', () =>
   Effect.gen(function* () {
     // The view's last use sits inside Place.replace's value operand; the owner write between the
     // direct uses and that nested use must still count as access during the loan.
-    const self = yield* snapshot(`pub fn main() -> i32 {
+    const source = `pub fn main() -> i32 {
   let mut values = [1, 2]
   let view = &values
   let first = view[1]
@@ -628,11 +787,17 @@ it.effect('extends a view loan through a use nested in a place replace', () =>
   let mut sink = 0
   let old = Intrinsic.replace(sink, view[0])
   return first + old + values[0]
-}`)
-
+}`
+    const self = yield* analyze(source)
     assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['OWN0011'],
+      Analysis.diagnostics(self).map((d) => ({
+        code: d.code,
+        span: source.slice(d.span.start, d.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0011', span: 'values[0]' },
+        { code: 'OWN0019', span: 'view[0]' },
+      ],
     )
   }),
 )

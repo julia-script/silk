@@ -4,56 +4,71 @@ import * as Analysis from '../src/Analysis.js'
 
 const encoder = new TextEncoder()
 
-const snapshot = (name: string, source: string, target = 'wasm32-unknown-unknown') =>
-  Analysis.ofSourceRealized(`stabilization/${name}`, encoder.encode(source), target)
+const snapshot = (name: string, source: string) =>
+  Analysis.ofSource(`stabilization/${name}`, encoder.encode(source))
 
-const codes = Effect.fnUntraced(function* (name: string, source: string, target?: string) {
-  const self = yield* snapshot(name, source, target)
-  return Analysis.diagnostics(self).map((diagnostic) => diagnostic.code)
+const diagnostics = Effect.fnUntraced(function* (name: string, source: string) {
+  const self = yield* snapshot(name, source)
+  return Analysis.diagnostics(self).map((diagnostic) => [
+    diagnostic.code,
+    diagnostic.span.start,
+    diagnostic.span.end,
+  ])
 })
 
 // ISSUE-50 — EFFECT-OWN-001: an Effect may not escape with a borrow of function-owned storage.
 it.effect('rejects an Effect escaping with a borrow of a local owner', () =>
   Effect.gen(function* () {
     assert.deepEqual(
-      yield* codes(
+      yield* diagnostics(
         'effect-escape-local',
-        `import silk.effect { Effect }
-effect fn inspect(values: &[i32]) -> i32 { return values[0] }
-fn make() -> Effect<i32> {
+        `effect fn inspect(values: &[i32]) -> i32 { return values[0] }
+fn make() -> Effect<'static; i32> {
   let v = [21]
   return inspect(&v)
 }
 pub fn main() -> i32 { return run make() }`,
       ),
-      ['OWN0018'],
+      [
+        ['OWN0019', 121, 133],
+        ['OWN0018', 130, 132],
+        ['SEM0212', 130, 132],
+      ],
     )
     assert.deepEqual(
-      yield* codes(
+      yield* diagnostics(
         'effect-escape-temp-view',
-        `import silk.effect { Effect }
-fn identity(values: &[i32]) -> &[i32] { return values }
-fn make() -> Effect<i32> {
+        `fn identity(values: &[i32]) -> &[i32] { return values }
+fn make() -> Effect<'static; i32> {
   let view = identity(&[1, 2])
   return effect { return view[0] }
 }
 pub fn main() -> i32 { let e = make() return run e }`,
       ),
-      ['OWN0018'],
+      [
+        ['SEM0212', 114, 121],
+        ['OWN0019', 131, 157],
+        ['OWN0018', 147, 152],
+        ['OWN0019', 147, 152],
+        ['OWN0019', 147, 155],
+      ],
     )
     assert.deepEqual(
-      yield* codes(
+      yield* diagnostics(
         'effect-escape-bound',
-        `import silk.effect { Effect }
-effect fn inspect(values: &[i32]) -> i32 { return values[0] }
-fn make() -> Effect<i32> {
+        `effect fn inspect(values: &[i32]) -> i32 { return values[0] }
+fn make() -> Effect<'static; i32> {
   let v = [21]
   let e = inspect(&v)
   return e
 }
 pub fn main() -> i32 { return run make() }`,
       ),
-      ['OWN0018'],
+      [
+        ['OWN0018', 131, 133],
+        ['SEM0212', 131, 133],
+        ['OWN0019', 143, 145],
+      ],
     )
   }),
 )
@@ -62,18 +77,18 @@ pub fn main() -> i32 { return run make() }`,
 it.effect('rejects borrowing a constant', () =>
   Effect.gen(function* () {
     assert.deepEqual(
-      yield* codes(
+      yield* diagnostics(
         'const-borrow',
         'const x: i32 = 1\nfn peek(v: &i32) -> i32 { return 5 }\npub fn main() -> i32 { return peek(&x) }',
       ),
-      ['SEM0086'],
+      [['SEM0086', 89, 91]],
     )
     assert.deepEqual(
-      yield* codes(
+      yield* diagnostics(
         'const-mut-borrow',
         'const x: i32 = 1\nfn poke(v: &mut i32) -> i32 { return 5 }\npub fn main() -> i32 { return poke(&mut x) }',
       ),
-      ['SEM0086'],
+      [['SEM0086', 93, 99]],
     )
   }),
 )

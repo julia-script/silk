@@ -1,3 +1,5 @@
+import * as BodyQuery from './BodyQuery.js'
+import * as Result from 'effect/Result'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
@@ -7,9 +9,12 @@ import * as Elaboration from './Elaboration.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
-import { equal as setEqual } from './internal/SetOf.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as LocalSharedOwnership from './LocalSharedOwnership.js'
 import * as Match from './Match.js'
+import * as MovePath from './MovePath.js'
+import * as LifetimeFlow from './LifetimeFlow.js'
+import * as Lifetime from './Lifetime.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -33,10 +38,13 @@ export type BindingSite =
   | { readonly _tag: 'Pattern'; readonly binding: Match.BindingId }
   | { readonly _tag: 'Temporary'; readonly owner: Hir.TemporaryOwnerId }
 
-const ownedWriteSite = (root: Hir.OwnedWriteRoot): BindingSite =>
-  root._tag === 'ParameterWriteRoot'
-    ? Object.freeze({ _tag: 'Parameter', parameter: root.parameter })
-    : Object.freeze({ _tag: 'Let', binding: root.binding })
+const ownedWriteSite = (root: Hir.OwnedWriteRoot): BindingSite => {
+  if (root._tag === 'ParameterWriteRoot')
+    return Object.freeze({ _tag: 'Parameter', parameter: root.parameter })
+  if (root._tag === 'PatternWriteRoot')
+    return Object.freeze({ _tag: 'Pattern', binding: root.binding })
+  return Object.freeze({ _tag: 'Let', binding: root.binding })
+}
 
 /** One binding's ownership fact: site, category, live range, and consuming move if any. */
 export interface BindingFact {
@@ -52,6 +60,7 @@ export interface BindingFact {
   readonly liveFrom: SourceSpan.SourceSpan
   readonly liveTo: SourceSpan.SourceSpan
   readonly movedAt?: SourceSpan.SourceSpan
+  readonly place?: { readonly root: BindingSite; readonly path: MovePath.Path }
 }
 
 const supportsExclusiveAccess = (
@@ -69,15 +78,57 @@ export interface Release {
   readonly binding: BindingFact
   readonly fields: ReadonlyArray<DeclarationFacts.FieldId>
   readonly cleanup: CleanupPlan.CleanupPlan
+  readonly initialization: MovePath.State
 }
 
 /** A deterministic compiler-only identity for one lexical borrowed-view loan. */
 export type BorrowId = Hir.BorrowId
 
+/** One concrete validity dependency, retaining its precise known subplace. */
+export interface LoanReferent {
+  readonly root: BindingSite
+  readonly path: ReadonlyArray<Elaboration.BorrowSelectorFact>
+}
+
+/** Canonical subplace identity for inspection and dependency-set normalization. */
+export const referentKey = (self: LoanReferent): string =>
+  `${siteKey(self.root)}/${self.path
+    .map((selector) => {
+      if (selector._tag === 'Field') return MovePath.key(fieldSelectors(selector.field))
+      return selector._tag === 'Index' && selector.bounds._tag === 'Proven'
+        ? `i${selector.bounds.index}`
+        : 'i*'
+    })
+    .join('/')}`
+
+export const referentsOverlap = (left: LoanReferent, right: LoanReferent): boolean => {
+  if (!sameSite(left.root, right.root)) return false
+  for (const [ordinal, selector] of left.path.entries()) {
+    const other = right.path.at(ordinal)
+    if (other === undefined) return true
+    if (
+      selector._tag === 'Field' &&
+      other._tag === 'Field' &&
+      DeclarationFacts.fieldIdKey(selector.field) !== DeclarationFacts.fieldIdKey(other.field)
+    )
+      return false
+    if (
+      selector._tag === 'Index' &&
+      other._tag === 'Index' &&
+      selector.bounds._tag === 'Proven' &&
+      other.bounds._tag === 'Proven' &&
+      selector.bounds.index !== other.bounds.index
+    )
+      return false
+  }
+  return true
+}
+
 export interface LoanFact {
   readonly _tag: 'Loan'
   readonly id: BorrowId
   readonly root: BindingSite
+  readonly referents: ReadonlyArray<LoanReferent>
   readonly access: Type.BorrowAccess
   readonly origin:
     | 'FixedArrayBorrow'
@@ -104,6 +155,17 @@ export interface ReplacementFact {
   readonly type: DeclarationFacts.SemanticType
   readonly cleanup: CleanupPlan.CleanupPlan
   readonly span: SourceSpan.SourceSpan
+  readonly initialization: MovePath.State
+}
+
+/** One committed ownership transition; lowering preserves its selected path and presence flags. */
+export interface PlaceTransition {
+  readonly root: BindingSite
+  readonly path: MovePath.Path
+  readonly kind: 'Move' | 'Write' | 'Drop'
+  readonly span: SourceSpan.SourceSpan
+  readonly before: MovePath.State
+  readonly after: MovePath.State
 }
 
 /** One compiler-planned slot in a concrete callable section environment. */
@@ -201,9 +263,21 @@ export type Verdict =
   | { readonly _tag: 'Violation'; readonly cause: Diagnostic.Identity }
   | { readonly _tag: 'Unavailable'; readonly cause?: Diagnostic.Identity }
 
+/** Actual source ownership operations performed while checking one body. */
+export interface Work {
+  readonly pathChecks: number
+  readonly shapeComputations: number
+  readonly shapeCacheHits: number
+  readonly shapeProjectionSteps: number
+  readonly initializationJoins: number
+  readonly loanAccessChecks: number
+  readonly cleanupPlanQueries: number
+}
+
 /** One function's ownership facts and its target-neutral cleanup plan. */
 export interface FunctionOwnership {
   readonly _tag: 'FunctionOwnership'
+  readonly work?: Work
   readonly declaration: DeclarationFacts.DeclarationFact
   /**
    * Bindings this function's own statements introduce: parameters, `let` statements, and match
@@ -227,6 +301,7 @@ export interface FunctionOwnership {
   readonly callables: ReadonlyArray<CallableEnvironmentFact>
   readonly loans: ReadonlyArray<LoanFact>
   readonly replacements: ReadonlyArray<ReplacementFact>
+  readonly transitions: ReadonlyArray<PlaceTransition>
   readonly verdict: Verdict
 }
 
@@ -292,7 +367,7 @@ const categoryOf = (
   return Object.freeze({ _tag: 'MoveOnly', type })
 }
 
-const siteKey = (site: BindingSite): string => {
+export const siteKey = (site: BindingSite): string => {
   if (site._tag === 'Parameter') {
     return `p${site.parameter.ordinal}`
   }
@@ -320,6 +395,7 @@ interface MutableBinding {
   liveTo: SourceSpan.SourceSpan
   movedAt?: SourceSpan.SourceSpan
   readonly matchAccess?: Match.Access
+  readonly place?: { readonly root: BindingSite; readonly path: MovePath.Path }
 }
 
 interface ExpressionExecution {
@@ -332,6 +408,15 @@ interface ExpressionExecution {
 }
 
 interface CheckState {
+  readonly work: {
+    pathChecks: number
+    shapeComputations: number
+    shapeCacheHits: number
+    shapeProjectionSteps: number
+    initializationJoins: number
+    loanAccessChecks: number
+    cleanupPlanQueries: number
+  }
   nextAcquisition: number
   readonly index: DeclarationIndex.Index
   readonly copyAssumptions: ReadonlySet<string>
@@ -343,17 +428,287 @@ interface CheckState {
   readonly replacements: Array<ReplacementFact>
   execution: ExpressionExecution | undefined
   readonly checkMatch: (
-    live: Set<string>,
+    live: FlowState,
     expression: Extract<Hir.Expression, { readonly _tag: 'Match' }>,
     consuming: boolean,
     guard: boolean,
     escaping: boolean,
   ) => boolean
   readonly propagation: (
-    live: Set<string>,
+    live: FlowState,
     expression: Extract<Hir.Expression, { readonly _tag: 'Run' }>,
   ) => void
+  readonly transitions: Array<PlaceTransition>
+  readonly shapes: Map<string, MovePath.ShapeOf>
 }
+
+type FlowState = Map<string, MovePath.State>
+type ReadonlyFlowState = ReadonlyMap<string, MovePath.State>
+
+const present = (live: ReadonlyFlowState, key: string): boolean => {
+  const value = live.get(key)
+  return value !== undefined && value.initialization !== 'Missing'
+}
+
+const shapeOf = (state: CheckState, site: BindingSite): MovePath.ShapeOf => {
+  const key = siteKey(site)
+  const existing = state.shapes.get(key)
+  if (existing !== undefined) return existing
+  const root = state.bindings.get(key)?.type
+  const cache = new Map<string, MovePath.Shape | undefined>()
+  interface ProjectedType {
+    readonly type: Type.Type | undefined
+    readonly variantFields?: ReadonlyArray<DeclarationFacts.FieldFact>
+  }
+  const projected = new Map<string, ProjectedType>([['', { type: root }]])
+  const projectType = (path: MovePath.Path): ProjectedType => {
+    const pathKey = MovePath.key(path)
+    const cached = projected.get(pathKey)
+    if (cached !== undefined) return cached
+    const selector = path.at(-1)
+    if (selector === undefined) return { type: root }
+    const parent = projectType(path.slice(0, -1))
+    const type = parent.type
+    state.work.shapeProjectionSteps += 1
+    let result: ProjectedType = { type: undefined }
+    if (type !== undefined) {
+      if (selector._tag === 'ConstantIndex') {
+        result = { type: Type.isFixedArray(type) ? type.element : undefined }
+      } else if (selector._tag === 'Variant' && Type.isUnion(type)) {
+        result = { type: type.members.at(selector.ordinal) }
+      } else if (Type.isNominal(type)) {
+        const declaration = DeclarationFacts.byCanonical(state.index, {
+          _tag: 'CanonicalDeclarationId',
+          module: type.module,
+          name: type.name,
+        })
+        if (declaration?._tag === 'StructDeclaration' || declaration?._tag === 'UnionDeclaration') {
+          if (selector._tag === 'Variant') {
+            const fields =
+              declaration._tag === 'UnionDeclaration'
+                ? declaration.variants.find((variant) => variant.id.ordinal === selector.ordinal)
+                    ?.fields
+                : undefined
+            result = fields === undefined ? { type: undefined } : { type, variantFields: fields }
+          } else {
+            const fields =
+              parent.variantFields ??
+              (declaration._tag === 'StructDeclaration' ? declaration.fields : [])
+            const field = fields.find((candidate) => candidate.id.ordinal === selector.ordinal)
+            const substitution = TypeInference.substitution(
+              declaration.typeParameters.map((parameter) => parameter.type),
+              type.arguments,
+            )
+            result = {
+              type:
+                field?.declaredType._tag === 'Resolved' && substitution !== undefined
+                  ? Type.substitute(field.declaredType.type, substitution)
+                  : undefined,
+            }
+          }
+        }
+      }
+    }
+    projected.set(pathKey, result)
+    return result
+  }
+  const resolveShape: MovePath.ShapeOf = (path) => {
+    const pathKey = MovePath.key(path)
+    if (cache.has(pathKey)) {
+      state.work.shapeCacheHits += 1
+      return cache.get(pathKey)
+    }
+    state.work.shapeComputations += 1
+    const { type, variantFields } = projectType(path)
+    let shape: MovePath.Shape | undefined
+    if (variantFields !== undefined) {
+      shape = {
+        _tag: 'Fields',
+        fields: variantFields.map((field) => field.id.ordinal),
+        dropBoundary: false,
+      }
+    } else if (type === undefined) {
+      shape = path.length === 0 ? { _tag: 'Leaf' } : undefined
+    } else if (Type.isFixedArray(type)) {
+      shape = { _tag: 'Array', length: type.length }
+    } else if (Type.isUnion(type)) {
+      shape = {
+        _tag: 'Variants',
+        variants: type.members.map((_, ordinal) => ordinal),
+        dropBoundary: false,
+      }
+    } else if (Type.isNominal(type)) {
+      const declaration = DeclarationFacts.byCanonical(state.index, {
+        _tag: 'CanonicalDeclarationId',
+        module: type.module,
+        name: type.name,
+      })
+      const dropBoundary =
+        ConformanceProof.witness(state.index, type, Type.dropCapability)?._tag ===
+        'SourceConformanceWitness'
+      if (declaration?._tag === 'StructDeclaration')
+        shape = {
+          _tag: 'Fields',
+          fields: declaration.fields.map((field) => field.id.ordinal),
+          dropBoundary,
+        }
+      else if (declaration?._tag === 'UnionDeclaration')
+        shape = {
+          _tag: 'Variants',
+          variants: declaration.variants.map((variant) => variant.id.ordinal),
+          dropBoundary,
+        }
+      else shape = { _tag: 'Leaf' }
+    } else shape = { _tag: 'Leaf' }
+    cache.set(pathKey, shape)
+    return shape
+  }
+  state.shapes.set(key, resolveShape)
+  return resolveShape
+}
+
+const fieldSelectors = (field: DeclarationFacts.FieldId): MovePath.Path =>
+  field.owner._tag === 'UnionVariantFieldOwnerId'
+    ? [
+        { _tag: 'Variant', ordinal: field.owner.variant.ordinal },
+        { _tag: 'Field', ordinal: field.ordinal },
+      ]
+    : [{ _tag: 'Field', ordinal: field.ordinal }]
+
+/** Identifies an owned source place without evaluating it or refining its variant state. */
+export const placeOf = (
+  expression: Hir.Expression,
+): { readonly root: BindingSite; readonly path: MovePath.Path } | undefined => {
+  if (expression._tag === 'Project') {
+    if (expression.subject._tag !== 'Unavailable' && Type.isReference(expression.subject.type))
+      return undefined
+    const subject = placeOf(expression.subject)
+    return subject === undefined
+      ? undefined
+      : { root: subject.root, path: [...subject.path, ...fieldSelectors(expression.field)] }
+  }
+  if (expression._tag === 'IndexPlace') {
+    const subject = placeOf(expression.subject)
+    return subject === undefined || expression.bounds._tag !== 'Proven'
+      ? undefined
+      : {
+          root: subject.root,
+          path: [...subject.path, { _tag: 'ConstantIndex', index: expression.bounds.index }],
+        }
+  }
+  const root = useSite(expression)
+  return root === undefined ? undefined : { root, path: [] }
+}
+
+const canonicalPlace = (
+  state: CheckState,
+  place: { readonly root: BindingSite; readonly path: MovePath.Path } | undefined,
+): { readonly root: BindingSite; readonly path: MovePath.Path } | undefined => {
+  if (place === undefined) return undefined
+  const alias = state.bindings.get(siteKey(place.root))?.place
+  return alias === undefined
+    ? place
+    : canonicalPlace(state, { root: alias.root, path: [...alias.path, ...place.path] })
+}
+
+const selectorPath = (
+  selectors: ReadonlyArray<Hir.BorrowSelector | Hir.WriteSelector>,
+): MovePath.Path | undefined => {
+  const path: Array<MovePath.Selector> = []
+  for (const selector of selectors) {
+    if (selector._tag === 'Field') path.push(...fieldSelectors(selector.field))
+    else if (selector._tag === 'Index' && selector.bounds._tag === 'Proven')
+      path.push({ _tag: 'ConstantIndex', index: selector.bounds.index })
+    else return undefined
+  }
+  return path
+}
+
+const placeFailure = (
+  state: CheckState,
+  binding: MutableBinding,
+  error: MovePath.TransitionFailure,
+  span: SourceSpan.SourceSpan,
+): void => {
+  if (
+    error._tag === 'DropBoundary' ||
+    error._tag === 'InvalidPath' ||
+    error._tag === 'UnrefinedVariant'
+  )
+    state.diagnostics.push(Diagnostic.partialMove(span))
+  else
+    state.diagnostics.push(
+      Diagnostic.useAfterMove(binding.name ?? '?', binding.movedAt ?? binding.liveTo, span),
+    )
+}
+
+const checkPath = (
+  state: CheckState,
+  live: FlowState,
+  root: BindingSite,
+  path: MovePath.Path,
+  span: SourceSpan.SourceSpan,
+  kind?: 'Move' | 'Drop',
+): void => {
+  const key = siteKey(root)
+  const binding = state.bindings.get(key)
+  if (binding === undefined) return
+  if (binding.place !== undefined) {
+    checkPath(state, live, binding.place.root, [...binding.place.path, ...path], span, kind)
+    return
+  }
+  state.work.pathChecks += 1
+  const before = live.get(key) ?? MovePath.make('Missing')
+  const shape = shapeOf(state, root)
+  if (kind === undefined) {
+    const inspected = MovePath.inspect(before, path, shape)
+    if (Result.isFailure(inspected)) placeFailure(state, binding, inspected.failure, span)
+    else if (!inspected.success.complete)
+      state.diagnostics.push(
+        Diagnostic.useAfterMove(binding.name ?? '?', binding.movedAt ?? binding.liveTo, span),
+      )
+    return
+  }
+  const transition =
+    kind === 'Drop'
+      ? MovePath.terminate(before, path, shape)
+      : MovePath.consume(before, path, shape)
+  if (Result.isFailure(transition)) {
+    placeFailure(state, binding, transition.failure, span)
+    return
+  }
+  binding.movedAt ??= span
+  if (path.length === 0) binding.liveTo = span
+  live.set(key, transition.success)
+  state.transitions.push(
+    Object.freeze({ root, path, kind, span, before, after: transition.success }),
+  )
+}
+
+const joinFlows = (state: CheckState, continuing: ReadonlyArray<ReadonlyFlowState>): FlowState => {
+  const joined: FlowState = new Map()
+  const keys = new Set(continuing.flatMap((flow) => [...flow.keys()]))
+  for (const key of keys) {
+    const binding = state.bindings.get(key)
+    if (binding === undefined) continue
+    const incoming = continuing.map((flow) => flow.get(key) ?? MovePath.make('Missing'))
+    const first = incoming.at(0)
+    if (first !== undefined && incoming.every((value) => value === first)) {
+      joined.set(key, first)
+      continue
+    }
+    state.work.initializationJoins += 1
+    joined.set(key, MovePath.join(incoming, shapeOf(state, binding.site)))
+  }
+  return joined
+}
+
+const sameFlow = (left: ReadonlyFlowState, right: ReadonlyFlowState): boolean =>
+  left.size === right.size &&
+  [...left].every(([key, value]) => {
+    const candidate = right.get(key)
+    return candidate !== undefined && MovePath.equivalent(value, candidate)
+  })
 
 const useSite = (expression: Hir.Expression): BindingSite | undefined => {
   switch (expression._tag) {
@@ -431,10 +786,6 @@ const storedEffectContract = (place: Hir.Expression): Type.Effect | undefined =>
   return undefined
 }
 
-/** The root expression one place projects from, which owns or borrows the whole aggregate. */
-const placeRoot = (place: Hir.Expression): Hir.Expression =>
-  place._tag === 'Project' || place._tag === 'IndexPlace' ? placeRoot(place.subject) : place
-
 /**
  * The strongest aggregate receiver access one place offers the callable it stores.
  *
@@ -509,47 +860,17 @@ const storedEffectRunAccess = (
 
 const mergeArmLive = (
   state: CheckState,
-  continuing: ReadonlyArray<ReadonlySet<string>>,
-  span: SourceSpan.SourceSpan,
-): Set<string> => {
-  const [first, ...rest] = continuing
-  const merged = new Set([...(first ?? [])].filter((site) => rest.every((arm) => arm.has(site))))
-  const reported = new Set<string>()
-  for (const candidate of continuing) {
-    for (const key of candidate) {
-      if (merged.has(key) || reported.has(key)) continue
-      reported.add(key)
-      const binding = state.bindings.get(key)
-      if (binding?.category._tag === 'MoveOnly') {
-        state.diagnostics.push(Diagnostic.incompatibleArmMerge(binding.name ?? '?', span))
-      }
-    }
-  }
-  return merged
-}
+  continuing: ReadonlyArray<ReadonlyFlowState>,
+  _span: SourceSpan.SourceSpan,
+): FlowState => joinFlows(state, continuing)
 
 const checkUse = (
   state: CheckState,
-  live: Set<string>,
+  live: FlowState,
   site: BindingSite,
   span: SourceSpan.SourceSpan,
   consuming: boolean,
-): void => {
-  const key = siteKey(site)
-  const binding = state.bindings.get(key)
-  if (binding === undefined) return
-  if (!live.has(key)) {
-    state.diagnostics.push(
-      Diagnostic.useAfterMove(binding.name ?? '?', binding.movedAt ?? binding.liveTo, span),
-    )
-    return
-  }
-  if (consuming) {
-    binding.movedAt ??= span
-    binding.liveTo = span
-    live.delete(key)
-  }
-}
+): void => checkPath(state, live, site, [], span, consuming ? 'Move' : undefined)
 
 const callableEnvironment = (
   state: CheckState,
@@ -583,7 +904,7 @@ const callableEnvironment = (
             : LocalSharedOwnership.none,
         cleanup:
           capture.access === 'Take' && type !== undefined
-            ? CleanupPlan.cleanupPlan(state.index, type)
+            ? cleanupPlan(state, type)
             : Object.freeze({
                 _tag: 'NoCleanup' as const,
                 type: type ?? ('i32' as const),
@@ -731,7 +1052,7 @@ const callableCleanup = (
  */
 const checkPlaceInterior = (
   state: CheckState,
-  live: Set<string>,
+  live: FlowState,
   place: Hir.Expression,
   guard: boolean,
   escaping: boolean,
@@ -753,7 +1074,7 @@ const checkPlaceInterior = (
 const retainTemporary = (state: CheckState, expression: Hir.Expression): void => {
   const execution = state.execution
   if (expression._tag === 'Unavailable' || execution === undefined) return
-  const cleanup = CleanupPlan.cleanupPlan(state.index, expression.type)
+  const cleanup = cleanupPlan(state, expression.type)
   if (cleanup._tag !== 'NoCleanup')
     execution.temporaries.push({
       frame: execution.frames.length - 1,
@@ -769,7 +1090,7 @@ const retainTemporary = (state: CheckState, expression: Hir.Expression): void =>
 /** Applies provisional and borrowed pattern rules to direct uses and deferred captures alike. */
 const checkPatternUse = (
   state: CheckState,
-  live: Set<string>,
+  live: FlowState,
   site: BindingSite,
   span: SourceSpan.SourceSpan,
   consuming: boolean,
@@ -778,6 +1099,12 @@ const checkPatternUse = (
 ): void => {
   const binding = state.bindings.get(siteKey(site))
   const moveOnly = binding?.category._tag === 'MoveOnly'
+  if (binding?.matchAccess === 'Place') {
+    if (consuming && moveOnly)
+      state.diagnostics.push(Diagnostic.explicitMoveRequired(binding.name ?? '?', span))
+    checkUse(state, live, site, span, false)
+    return
+  }
   if (guard && consuming && moveOnly) {
     state.diagnostics.push(Diagnostic.guardConsumesPattern(binding?.name ?? '?', span))
     checkUse(state, live, site, span, false)
@@ -798,7 +1125,7 @@ const checkPatternUse = (
 /** Eager operands retain their acquired values until the containing operation completes. */
 const checkExpression = (
   state: CheckState,
-  live: Set<string>,
+  live: FlowState,
   expression: Hir.Expression,
   consuming: boolean,
   guard = state.execution?.guard ?? false,
@@ -820,7 +1147,7 @@ const checkExpression = (
 
 const checkExpressionOperation = (
   state: CheckState,
-  live: Set<string>,
+  live: FlowState,
   expression: Hir.Expression,
   consuming: boolean,
   guard = state.execution?.guard ?? false,
@@ -859,9 +1186,30 @@ const checkExpressionOperation = (
       return true
     }
     case 'Move': {
+      const place = placeOf(expression.subject)
+      if (place !== undefined) {
+        if (!checkPlaceInterior(state, live, expression.subject, guard, escaping)) return false
+        const binding = state.bindings.get(siteKey(place.root))
+        if (guard)
+          state.diagnostics.push(
+            Diagnostic.guardConsumesPattern(binding?.name ?? '?', expression.span),
+          )
+        else if (binding?.matchAccess === 'Shared' || binding?.matchAccess === 'Exclusive')
+          state.diagnostics.push(Diagnostic.matchBorrowEscape(binding.name ?? '?', expression.span))
+        else checkPath(state, live, place.root, place.path, expression.span, 'Move')
+        return true
+      }
       if (expression.subject._tag === 'Project' || expression.subject._tag === 'IndexPlace') {
         if (!checkExpression(state, live, expression.subject, false, guard, escaping)) return false
         state.diagnostics.push(Diagnostic.partialMove(expression.span))
+        return true
+      }
+      if (
+        expression.subject._tag === 'ReferentPlace' ||
+        expression.subject._tag === 'SliceIndexPlace'
+      ) {
+        if (!checkExpression(state, live, expression.subject, false, guard, escaping)) return false
+        state.diagnostics.push(Diagnostic.borrowedMove(expression.span))
         return true
       }
       const site = useSite(expression.subject)
@@ -887,9 +1235,11 @@ const checkExpressionOperation = (
       return true
     case 'ShortCircuit': {
       if (!checkExpression(state, live, expression.left, false, guard, escaping)) return false
-      const rightLive = new Set(live)
+      const rightLive = new Map(live)
       if (checkExpression(state, rightLive, expression.right, false, guard, escaping)) {
-        for (const site of live) if (!rightLive.has(site)) live.delete(site)
+        const joined = joinFlows(state, [live, rightLive])
+        live.clear()
+        for (const [key, initialization] of joined) live.set(key, initialization)
       }
       return true
     }
@@ -913,6 +1263,22 @@ const checkExpressionOperation = (
       return true
     }
     case 'Project': {
+      const place = placeOf(expression)
+      if (place !== undefined) {
+        if (!checkPlaceInterior(state, live, expression, guard, escaping)) return false
+        checkPath(state, live, place.root, place.path, expression.span)
+        if (
+          consuming &&
+          categoryOf(state.index, expression.type, state.copyAssumptions)._tag === 'MoveOnly'
+        )
+          state.diagnostics.push(
+            Diagnostic.explicitMoveRequired(
+              state.bindings.get(siteKey(place.root))?.name ?? '?',
+              expression.span,
+            ),
+          )
+        return true
+      }
       if (!checkExpression(state, live, expression.subject, false, guard, escaping)) return false
       if (
         consuming &&
@@ -933,6 +1299,22 @@ const checkExpressionOperation = (
       return true
     }
     case 'IndexPlace': {
+      const place = placeOf(expression)
+      if (place !== undefined) {
+        if (!checkPlaceInterior(state, live, expression, guard, escaping)) return false
+        checkPath(state, live, place.root, place.path, expression.span)
+        if (
+          consuming &&
+          categoryOf(state.index, expression.type, state.copyAssumptions)._tag === 'MoveOnly'
+        )
+          state.diagnostics.push(
+            Diagnostic.explicitMoveRequired(
+              state.bindings.get(siteKey(place.root))?.name ?? '?',
+              expression.span,
+            ),
+          )
+        return true
+      }
       if (!checkExpression(state, live, expression.subject, false, guard, escaping)) return false
       if (!checkExpression(state, live, expression.index, false, guard, escaping)) return false
       if (
@@ -958,7 +1340,18 @@ const checkExpressionOperation = (
       } else {
         site = Object.freeze({ _tag: 'Pattern', binding: expression.root.binding })
       }
-      checkUse(state, live, site, expression.span, false)
+      for (const selector of expression.selectors)
+        if (
+          selector._tag !== 'Field' &&
+          !checkExpression(state, live, selector.index, false, guard, escaping)
+        )
+          return false
+      const rootType = state.bindings.get(siteKey(site))?.type
+      const path =
+        rootType !== undefined && (Type.isReference(rootType) || Type.isSlice(rootType))
+          ? []
+          : (selectorPath(expression.selectors) ?? [])
+      checkPath(state, live, site, path, expression.span)
       return true
     }
     case 'SliceLength':
@@ -1004,20 +1397,15 @@ const checkExpressionOperation = (
       if (stored !== undefined) state.diagnostics.push(stored)
       const checkCallee = (): boolean => {
         if (storedCallableContract(expression.callee) !== undefined) {
-          // A stored callable is invoked through its aggregate, never extracted from it. A
-          // consuming invocation takes the whole owner in one use of its root, exactly as invoking
-          // a take-once callable binding does; every weaker mode only reads the place. The
-          // extraction rejection stays for `move parser.decode`, which really does try to leave the
-          // aggregate holding a partially released environment.
-          const rootSite = placeSite(expression.callee)
-          if (expression.access !== 'Take' || stored !== undefined || rootSite === undefined) {
+          const place = placeOf(expression.callee)
+          if (expression.access !== 'Take' || stored !== undefined || place === undefined) {
             if (!checkExpression(state, live, expression.callee, false, guard, escaping))
               return false
             return true
           }
           if (!checkPlaceInterior(state, live, expression.callee, guard, escaping)) return false
-          checkUse(state, live, rootSite, placeRoot(expression.callee).span, true)
-          retainTemporary(state, placeRoot(expression.callee))
+          checkPath(state, live, place.root, place.path, expression.callee.span, 'Move')
+          retainTemporary(state, expression.callee)
           return true
         }
         const site = useSite(expression.callee)
@@ -1198,13 +1586,10 @@ const checkExpressionOperation = (
       const stored = storedEffectRunAccess(state, expression.subject, expression.span)
       if (stored !== undefined) state.diagnostics.push(stored)
       const storedContract = storedEffectContract(expression.subject)
-      const rootSite = placeSite(expression.subject)
-      if (storedContract?.access === 'Take' && stored === undefined && rootSite !== undefined) {
-        // A stored consuming Effect owns its environment through the aggregate. Running it moves
-        // the complete root in one use, including through nested field projections; the Effect
-        // field is never extracted as an independently owned value.
+      const place = placeOf(expression.subject)
+      if (storedContract?.access === 'Take' && stored === undefined && place !== undefined) {
         if (!checkPlaceInterior(state, live, expression.subject, guard, escaping)) return false
-        checkUse(state, live, rootSite, placeRoot(expression.subject).span, true)
+        checkPath(state, live, place.root, place.path, expression.subject.span, 'Move')
         return true
       }
       const site = useSite(expression.subject)
@@ -1241,14 +1626,30 @@ const checkExpressionOperation = (
           parameter: expression.place.root.parameter,
         })
       }
+      let path =
+        expression.place._tag === 'WritePlace'
+          ? selectorPath(expression.place.selectors)
+          : undefined
+      const canonical = canonicalPlace(state, { root: rootSite, path: path ?? [] })
+      if (canonical !== undefined) {
+        rootSite = canonical.root
+        if (path !== undefined) path = canonical.path
+      }
       const rootKey = siteKey(rootSite)
       const root = state.bindings.get(rootKey)
-      const wasLive = live.has(rootKey)
-      if (!wasLive && expression.place.selectors.length > 0 && root !== undefined) {
-        checkUse(state, live, rootSite, expression.place.span, false)
-      }
+      checkPath(state, live, rootSite, path ?? [], expression.place.span)
+      const transitionMark = state.transitions.length
       if (!checkExpression(state, live, expression.value, true)) return false
-      if (wasLive && !live.has(rootKey)) {
+      if (
+        state.transitions
+          .slice(transitionMark)
+          .some(
+            (transition) =>
+              transition.kind !== 'Write' &&
+              siteKey(transition.root) === rootKey &&
+              (path === undefined || MovePath.overlaps(path, transition.path)),
+          )
+      ) {
         state.diagnostics.push(Diagnostic.overlappingAssignment(root?.name ?? '?', expression.span))
       }
       return true
@@ -1308,7 +1709,13 @@ const deferredBlocks = (
   return Hir.expressionChildren(expression).flatMap(deferredBlocks)
 }
 
+const cleanupPlan = (state: CheckState, type: Type.Type): CleanupPlan.CleanupPlan => {
+  state.work.cleanupPlanQueries += 1
+  return CleanupPlan.cleanupPlan(state.index, type)
+}
+
 interface LoanAnalysis {
+  readonly loanAccessChecks: number
   readonly loans: ReadonlyArray<LoanFact>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
@@ -1334,6 +1741,7 @@ const analyzeLoans = (
   index: DeclarationIndex.Index,
   copyAssumptions: ReadonlySet<string>,
 ): LoanAnalysis => {
+  let loanAccessChecks = 0
   const loans: Array<LoanFact> = []
   const diagnostics: Array<Diagnostic.Diagnostic> = []
 
@@ -1341,7 +1749,13 @@ const analyzeLoans = (
     expression: Elaboration.ExpressionFact,
   ): { readonly site: BindingSite; readonly spelling: string } | undefined => {
     if (expression._tag === 'Grouped') return directSite(expression.expression)
-    if (expression._tag === 'Move') return directSite(expression.subject)
+    if (
+      expression._tag === 'Move' ||
+      expression._tag === 'FieldProjection' ||
+      expression._tag === 'IndexProjection' ||
+      expression._tag === 'ReferentProjection'
+    )
+      return directSite(expression.subject)
     if (expression._tag !== 'Identifier') return undefined
     if (expression.reference._tag === 'ResolvedBinding') {
       return Object.freeze({
@@ -1349,6 +1763,11 @@ const analyzeLoans = (
         spelling: expression.reference.spelling,
       })
     }
+    if (expression.reference._tag === 'ResolvedPattern')
+      return {
+        site: { _tag: 'Pattern', binding: expression.reference.binding.id },
+        spelling: expression.reference.spelling,
+      }
     if (expression.reference._tag === 'Resolved') {
       return Object.freeze({
         site: Object.freeze({ _tag: 'Parameter', parameter: expression.reference.parameter.id }),
@@ -1755,77 +2174,216 @@ const analyzeLoans = (
     }
   }
 
-  const returnedArgumentOrdinal = (expression: Elaboration.ExpressionFact): number | undefined => {
-    return Elaboration.returnedBorrowArgument(expression)?.id.ordinal
-  }
-
-  const returnedSource = (
+  const assumptions = Lifetime.assumptions(fn.lifetimeFlow?.input.constraints ?? [])
+  const returnedArgumentOrdinals = (expression: Elaboration.ExpressionFact): ReadonlySet<number> =>
+    new Set(
+      Elaboration.retainedResultArguments(expression, assumptions).map(
+        (argument) => argument.id.ordinal,
+      ),
+    )
+  const returnedSources = (
     expression: Elaboration.ExpressionFact,
-  ): Elaboration.ExpressionFact | undefined => Elaboration.returnedBorrowExpression(expression)
-
-  const viewRoots = new Map<number, BindingSite>()
-  const viewAliases = new Map<number, number>()
-  const sourceSite = (expression: Elaboration.ExpressionFact): BindingSite | undefined => {
-    if (expression._tag === 'Grouped') return sourceSite(expression.expression)
-    if (expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable') {
-      const site = borrowSite(expression.formation.root)
-      return site._tag === 'Let' ? (viewRoots.get(site.binding.ordinal) ?? site) : site
+  ): ReadonlyArray<Elaboration.ExpressionFact> => {
+    const arguments_ = Elaboration.retainedResultArguments(expression, assumptions).map(
+      (argument) => argument.expression,
+    )
+    if (
+      expression._tag === 'CallableApply' &&
+      expression.callee.type._tag === 'Available' &&
+      expression.type._tag === 'Available' &&
+      Elaboration.retainsLifetimes(expression.callee.type.type, expression.type.type, assumptions)
+    )
+      return [...arguments_, expression.callee]
+    return arguments_
+  }
+  const viewRoots = new Map<number, ReadonlyArray<LoanReferent>>()
+  const viewAliases = new Map<number, ReadonlyArray<number>>()
+  const rootsOf = (
+    root: BindingSite,
+    path: ReadonlyArray<Elaboration.BorrowSelectorFact> = [],
+  ): ReadonlyArray<LoanReferent> => {
+    const sources = root._tag === 'Let' ? viewRoots.get(root.binding.ordinal) : undefined
+    return sources === undefined
+      ? [{ root, path }]
+      : sources.map((source) => ({ root: source.root, path: [...source.path, ...path] }))
+  }
+  const physicalPlace = (expression: Elaboration.ExpressionFact): LoanReferent | undefined => {
+    if (expression._tag === 'Grouped') return physicalPlace(expression.expression)
+    if (expression._tag === 'Move') return physicalPlace(expression.subject)
+    if (expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable')
+      return { root: borrowSite(expression.formation.root), path: expression.formation.root.path }
+    if (expression._tag === 'FieldProjection' && expression.state._tag === 'Resolved') {
+      const subject = physicalPlace(expression.subject)
+      return subject === undefined
+        ? undefined
+        : {
+            root: subject.root,
+            path: [
+              ...subject.path,
+              { _tag: 'Field', field: expression.state.field.id, span: expression.syntax.span },
+            ],
+          }
+    }
+    if (
+      expression._tag === 'IndexProjection' &&
+      expression.array !== undefined &&
+      (expression.bounds._tag === 'Proven' || expression.bounds._tag === 'Runtime')
+    ) {
+      const subject = physicalPlace(expression.subject)
+      return subject === undefined
+        ? undefined
+        : {
+            root: subject.root,
+            path: [
+              ...subject.path,
+              {
+                _tag: 'Index',
+                index: expression.index,
+                array: expression.array,
+                bounds: expression.bounds,
+                span: expression.syntax.span,
+              },
+            ],
+          }
     }
     const direct = directSite(expression)?.site
-    if (direct !== undefined) {
-      return direct._tag === 'Let' ? (viewRoots.get(direct.binding.ordinal) ?? direct) : direct
-    }
-    const returned = returnedSource(expression)
-    if (returned !== undefined) return sourceSite(returned)
-    return undefined
+    return direct === undefined ? undefined : { root: direct, path: [] }
   }
-
+  const sourceReferents = (expression: Elaboration.ExpressionFact): ReadonlyArray<LoanReferent> => {
+    if (expression._tag === 'Borrow' && expression.formation._tag !== 'Unavailable')
+      return rootsOf(borrowSite(expression.formation.root), expression.formation.root.path)
+    if (fn.lifetimeFlow !== undefined && expression.type._tag === 'Available') {
+      const origins = LifetimeFlow.sources(fn.lifetimeFlow, expression.type.type).flatMap(
+        (origin) => (origin.root === undefined ? [] : rootsOf(origin.root, origin.path ?? [])),
+      )
+      if (origins.length > 0) return origins
+    }
+    const returned = returnedSources(expression)
+    if (returned.length > 0) return returned.flatMap(sourceReferents)
+    const direct = physicalPlace(expression)
+    return direct === undefined ? [] : rootsOf(direct.root, direct.path)
+  }
   for (const binding of fn.bindings) {
-    const directBorrow =
-      binding.initializer._tag === 'Borrow' && binding.initializer.formation._tag !== 'Unavailable'
     if (
       binding.inferredType._tag !== 'Available' ||
-      !Type.containsViewBorrow(binding.inferredType.type) ||
-      (!directBorrow && returnedSource(binding.initializer) === undefined)
-    ) {
+      Type.storageLifetimes(binding.inferredType.type).length === 0
+    )
       continue
-    }
-    const returned = returnedSource(binding.initializer)
-    if (returned !== undefined) {
-      const source = directSite(returned)?.site
-      if (source?._tag === 'Let') viewAliases.set(binding.id.ordinal, source.binding.ordinal)
-    }
-    const root = sourceSite(binding.initializer)
-    if (root !== undefined) viewRoots.set(binding.id.ordinal, root)
-
+    const sources = sourceReferents(binding.initializer)
+    if (sources.length > 0) viewRoots.set(binding.id.ordinal, sources)
+    const aliases = returnedSources(binding.initializer).flatMap((source) => {
+      const direct = directSite(source)?.site
+      return direct?._tag === 'Let' ? [direct.binding.ordinal] : []
+    })
+    if (aliases.length > 0) viewAliases.set(binding.id.ordinal, aliases)
     if (
       binding.initializer._tag === 'CallableApply' &&
-      binding.initializer.returnedBorrowSource?._tag === 'Capture'
+      binding.initializer.callee.type._tag === 'Available' &&
+      Elaboration.retainsLifetimes(
+        binding.initializer.callee.type.type,
+        binding.inferredType.type,
+        assumptions,
+      )
     ) {
-      const capture = binding.initializer.returnedBorrowSource.capture
-      returnedCallableCaptures.add(captureKey(capture.expression.syntax.span, capture.ordinal))
+      if (binding.initializer.callee._tag === 'CallableSection')
+        for (const capture of binding.initializer.callee.captures) {
+          if (
+            capture.expression.type._tag === 'Available' &&
+            Elaboration.retainsLifetimes(
+              capture.expression.type.type,
+              binding.inferredType.type,
+              assumptions,
+            )
+          )
+            returnedCallableCaptures.add(
+              captureKey(capture.expression.syntax.span, capture.ordinal),
+            )
+        }
       const callable = directSite(binding.initializer.callee)?.site
       const ending = viewEnds.get(binding.id.ordinal)
       if (callable?._tag === 'Let' && ending !== undefined) {
         const previous = callableEnds.get(callable.binding.ordinal)
-        if (previous === undefined || previous.span.end < ending.span.end) {
+        if (previous === undefined || previous.span.end < ending.span.end)
           callableEnds.set(callable.binding.ordinal, ending)
-        }
       }
     }
   }
+  const expressionsBySpan = new Map<string, Elaboration.ExpressionFact>()
+  const expressionSpanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:${span.end}`
+  Elaboration.visitStatementFacts(fn.statements, {
+    expression: (expression) =>
+      expressionsBySpan.set(expressionSpanKey(expression.syntax.span), expression),
+  })
+  const referentsAt = (
+    root: BindingSite,
+    span: SourceSpan.SourceSpan,
+  ): ReadonlyArray<LoanReferent> => {
+    const expression = expressionsBySpan.get(expressionSpanKey(span))
+    const sources = expression === undefined ? [] : sourceReferents(expression)
+    return [
+      ...new Map(
+        (sources.length === 0 ? rootsOf(root) : sources).map((source) => [
+          referentKey(source),
+          source,
+        ]),
+      ).values(),
+    ]
+  }
+  const borrowedRootType = (expression: Elaboration.ExpressionFact): Type.Type | undefined => {
+    if (expression._tag === 'Borrow') return borrowedRootType(expression.subject)
+    if (expression._tag === 'Grouped') return borrowedRootType(expression.expression)
+    if (
+      expression._tag === 'FieldProjection' ||
+      expression._tag === 'IndexProjection' ||
+      expression._tag === 'ReferentProjection' ||
+      expression._tag === 'Move'
+    )
+      return borrowedRootType(expression.subject)
+    if (expression._tag !== 'Identifier' || expression.type._tag !== 'Available') return undefined
+    const type = expression.type.type
+    return Type.isReference(type) || Type.isSlice(type) ? type : undefined
+  }
+  // A descriptor inherits authority from its originating loan; reborrowing uses that capability.
+  // An outstanding sibling loan is absent from the descriptor's provenance and still conflicts.
+  const grantsParentCapability = (
+    loan: LoanFact,
+    root: BindingSite,
+    span: SourceSpan.SourceSpan,
+  ): boolean => {
+    if (sameSite(loan.root, root) || fn.lifetimeFlow === undefined) return false
+    const expression = expressionsBySpan.get(expressionSpanKey(span))
+    const parent = expression === undefined ? undefined : borrowedRootType(expression)
+    return (
+      parent !== undefined &&
+      LifetimeFlow.sources(fn.lifetimeFlow, parent).some(
+        (origin) =>
+          origin.span.sourceId === loan.startSpan.sourceId &&
+          origin.span.start === loan.startSpan.start &&
+          origin.span.end === loan.startSpan.end,
+      )
+    )
+  }
+  const loanConflicts = (loan: LoanFact, root: BindingSite, span: SourceSpan.SourceSpan): boolean =>
+    !grantsParentCapability(loan, root, span) &&
+    referentsAt(root, span).some((source) =>
+      loan.referents.some((referent) => referentsOverlap(referent, source)),
+    )
 
   let propagatedViewEnd = true
   while (propagatedViewEnd) {
     propagatedViewEnd = false
-    for (const [alias, source] of viewAliases) {
-      const ending = viewEnds.get(alias)
-      const previous = viewEnds.get(source)
-      if (ending !== undefined && (previous === undefined || previous.span.end < ending.span.end)) {
-        viewEnds.set(source, ending)
-        propagatedViewEnd = true
+    for (const [alias, sources] of viewAliases)
+      for (const source of sources) {
+        const ending = viewEnds.get(alias)
+        const previous = viewEnds.get(source)
+        if (
+          ending !== undefined &&
+          (previous === undefined || previous.span.end < ending.span.end)
+        ) {
+          viewEnds.set(source, ending)
+          propagatedViewEnd = true
+        }
       }
-    }
   }
 
   // An Effect leaving this function may not retain a borrow rooted in storage this function owns:
@@ -1850,31 +2408,31 @@ const analyzeLoans = (
     readonly access: 'Shared' | 'Exclusive'
     readonly span: SourceSpan.SourceSpan
   }
-  const captureRoot = (
+  const captureRoots = (
     reference:
       | Elaboration.BindingDeclarationFact
       | DeclarationFacts.ParameterFact
       | Elaboration.PatternBindingFact,
     access: 'Copy' | 'Shared' | 'Exclusive' | 'Take',
-  ): BindingSite | undefined => {
+  ): ReadonlyArray<BindingSite> => {
     if (reference._tag === 'BindingFact') {
       const view = viewRoots.get(reference.id.ordinal)
-      if (view !== undefined) return view
+      if (view !== undefined) return view.map((referent) => referent.root)
       const type =
         reference.inferredType._tag === 'Available' ? reference.inferredType.type : undefined
       return (access === 'Shared' || access === 'Exclusive') && !storedByValue(type)
-        ? Object.freeze({ _tag: 'Let', binding: reference.id })
-        : undefined
+        ? [Object.freeze({ _tag: 'Let', binding: reference.id })]
+        : []
     }
     if (reference._tag === 'PatternBinding') {
       const type = reference.type._tag === 'Available' ? reference.type.type : undefined
       return (access === 'Shared' || access === 'Exclusive') && !storedByValue(type)
-        ? Object.freeze({ _tag: 'Pattern', binding: reference.id })
-        : undefined
+        ? [Object.freeze({ _tag: 'Pattern', binding: reference.id })]
+        : []
     }
     return access === 'Shared' || access === 'Exclusive'
-      ? Object.freeze({ _tag: 'Parameter', parameter: reference.id })
-      : undefined
+      ? [Object.freeze({ _tag: 'Parameter', parameter: reference.id })]
+      : []
   }
   const effectEscapes = (
     expression: Elaboration.ExpressionFact,
@@ -1895,7 +2453,7 @@ const analyzeLoans = (
       }
       case 'EffectBlock':
         return expression.captures.flatMap((capture) =>
-          escapingRoot(captureRoot(capture.reference, capture.access))
+          captureRoots(capture.reference, capture.access).some(escapingRoot)
             ? [
                 {
                   spelling:
@@ -1918,7 +2476,7 @@ const analyzeLoans = (
         return [
           ...effectEscapes(expression.protected, seen),
           ...(provider !== undefined &&
-          escapingRoot(captureRoot(provider.reference, provider.captureAccess))
+          captureRoots(provider.reference, provider.captureAccess).some(escapingRoot)
             ? [
                 {
                   spelling:
@@ -1939,15 +2497,7 @@ const analyzeLoans = (
           const candidate = argument.expression
           if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable')
             return effectEscapes(candidate, seen)
-          const direct = borrowSite(candidate.formation.root)
-          const reborrow =
-            candidate.formation._tag === 'SliceReborrow' ||
-            candidate.formation._tag === 'ValueReborrow'
-          const root =
-            direct._tag === 'Let'
-              ? (viewRoots.get(direct.binding.ordinal) ?? (reborrow ? undefined : direct))
-              : direct
-          return escapingRoot(root)
+          return sourceReferents(candidate).some((referent) => escapingRoot(referent.root))
             ? [
                 {
                   spelling: directSite(candidate.subject)?.spelling ?? '?',
@@ -1979,14 +2529,20 @@ const analyzeLoans = (
     }
   }
 
-  const delayedLoansAt = (span: SourceSpan.SourceSpan): ReadonlyArray<LoanFact> =>
-    loans.filter(
-      (loan) =>
+  const delayedLoansAt = (span: SourceSpan.SourceSpan, write = false): ReadonlyArray<LoanFact> =>
+    loans.filter((loan) => {
+      const live =
+        fn.lifetimeFlow === undefined
+          ? undefined
+          : LifetimeFlow.liveAt(fn.lifetimeFlow, loan.startSpan, span, loan.endSpan, write)
+      if (live !== undefined) return live
+      return (
         loan.startSpan.sourceId === span.sourceId &&
         loan.startSpan.end <= span.start &&
         span.end <= loan.endSpan.end &&
-        loan.endSpan.end > loan.startSpan.end,
-    )
+        loan.endSpan.end > loan.startSpan.end
+      )
+    })
 
   const checkDirectAccess = (
     expression: Elaboration.ExpressionFact,
@@ -1994,10 +2550,19 @@ const analyzeLoans = (
     access: 'Read' | 'Write' | 'Move',
   ): void => {
     const direct = directSite(expression)
-    if (direct === undefined) return
+    const place = physicalPlace(expression)
+    if (direct === undefined || place === undefined) return
+    loanAccessChecks += 1
+    const places =
+      borrowedRootType(expression) === undefined ? [place] : rootsOf(place.root, place.path)
     const conflict = active.find(
       (loan) =>
-        sameSite(loan.root, direct.site) && (access !== 'Read' || loan.access === 'Exclusive'),
+        !grantsParentCapability(loan, direct.site, expression.syntax.span) &&
+        (loan.referents.some((referent) =>
+          places.some((selected) => referentsOverlap(referent, selected)),
+        ) ||
+          (loan.suspendsParent && sameSite(loan.root, direct.site))) &&
+        (access !== 'Read' || loan.access === 'Exclusive'),
     )
     if (conflict !== undefined) {
       diagnostics.push(
@@ -2031,21 +2596,18 @@ const analyzeLoans = (
       case 'Identifier':
         checkDirectAccess(
           expression,
-          [...active, ...delayedLoansAt(expression.syntax.span)],
+          [...active, ...delayedLoansAt(expression.syntax.span, access === 'Write')],
           access,
         )
         return
       case 'Borrow': {
         if (expression.formation._tag === 'Unavailable') return
         const directRoot = borrowSite(expression.formation.root)
-        const root =
-          directRoot._tag === 'Let'
-            ? (viewRoots.get(directRoot.binding.ordinal) ?? directRoot)
-            : directRoot
+        const root = directRoot
         const extended = [...active, ...delayedLoansAt(expression.syntax.span)]
         const conflict = extended.find(
           (loan) =>
-            sameSite(loan.root, root) &&
+            loanConflicts(loan, root, expression.syntax.span) &&
             (loan.access === 'Exclusive' || expression.access === 'Exclusive'),
         )
         if (conflict !== undefined) {
@@ -2082,6 +2644,7 @@ const analyzeLoans = (
             startRegion: region,
             endRegion: delayedEnd?.region ?? region,
             startSpan: expression.syntax.span,
+            referents: referentsAt(root, expression.syntax.span),
             endSpan: delayedEnd?.span ?? expression.syntax.span,
           }),
         )
@@ -2093,13 +2656,26 @@ const analyzeLoans = (
       case 'Grouped':
         inspect(expression.expression, region, active, access, delayedEnd)
         return
+      case 'ReferentProjection':
+        inspect(expression.subject, region, active, access, delayedEnd)
+        return
       case 'FieldProjection':
-        inspect(expression.subject, region, active, access)
+      case 'IndexProjection': {
+        const place = physicalPlace(expression)
+        if (place === undefined) inspect(expression.subject, region, active, access)
+        else {
+          checkDirectAccess(
+            expression,
+            [...active, ...delayedLoansAt(expression.syntax.span)],
+            access,
+          )
+          for (const selector of place.path)
+            if (selector._tag !== 'Field') inspect(selector.index, region, active, 'Read')
+        }
+        if (place === undefined && expression._tag === 'IndexProjection')
+          inspect(expression.index, region, active, 'Read')
         return
-      case 'IndexProjection':
-        inspect(expression.subject, region, active, access)
-        inspect(expression.index, region, active, 'Read')
-        return
+      }
       // A value stored in an aggregate outlives the expression that built it, so a delayed end the
       // enclosing binding carries reaches the captures stored inside it too. Without this, a
       // borrow captured by a stored callable would be released while the aggregate still holds it.
@@ -2151,13 +2727,10 @@ const analyzeLoans = (
             )
             continue
           }
-          const root =
-            direct.site._tag === 'Let'
-              ? (viewRoots.get(direct.site.binding.ordinal) ?? direct.site)
-              : direct.site
+          const root = direct.site
           const conflict = callActive.find(
             (loan) =>
-              sameSite(loan.root, root) &&
+              loanConflicts(loan, root, candidate.syntax.span) &&
               (loan.access === 'Exclusive' || operandType.access === 'Exclusive'),
           )
           if (conflict !== undefined)
@@ -2184,6 +2757,7 @@ const analyzeLoans = (
             startRegion: region,
             endRegion: region,
             startSpan: candidate.syntax.span,
+            referents: referentsAt(root, candidate.syntax.span),
             endSpan: expression.syntax.span,
           })
           loans.push(loan)
@@ -2213,17 +2787,14 @@ const analyzeLoans = (
             candidate._tag === 'Borrow' && candidate.formation._tag !== 'Unavailable'
               ? borrowSite(candidate.formation.root)
               : directSite(candidate)?.site
-          const root =
-            directRoot?._tag === 'Let'
-              ? (viewRoots.get(directRoot.binding.ordinal) ?? directRoot)
-              : directRoot
+          const root = directRoot
           if (root === undefined) {
             inspect(candidate, region, captureActive, 'Read')
             continue
           }
           const conflict = captureActive.find(
             (loan) =>
-              sameSite(loan.root, root) &&
+              loanConflicts(loan, root, candidate.syntax.span) &&
               (loan.access === 'Exclusive' || capture.access === 'Exclusive'),
           )
           if (conflict !== undefined) {
@@ -2253,6 +2824,7 @@ const analyzeLoans = (
             startRegion: region,
             endRegion: delayedEnd?.region ?? region,
             startSpan: candidate.syntax.span,
+            referents: referentsAt(root, candidate.syntax.span),
             endSpan: delayedEnd?.span ?? expression.syntax.span,
           })
           loans.push(loan)
@@ -2262,7 +2834,7 @@ const analyzeLoans = (
       }
       case 'CallableApply': {
         const callActive: Array<LoanFact> = [...active, ...delayedLoansAt(expression.syntax.span)]
-        const returnedOrdinal = returnedArgumentOrdinal(expression)
+        const returnedOrdinal = returnedArgumentOrdinals(expression)
         const inspectCallee = (): void => {
           let access: 'Move' | 'Write' | 'Read' = 'Read'
           if (expression.mode === 'Take') access = 'Move'
@@ -2274,13 +2846,10 @@ const analyzeLoans = (
             const candidate = argument.expression
             if (candidate._tag === 'Borrow' && candidate.formation._tag !== 'Unavailable') {
               const directRoot = borrowSite(candidate.formation.root)
-              const root =
-                directRoot._tag === 'Let'
-                  ? (viewRoots.get(directRoot.binding.ordinal) ?? directRoot)
-                  : directRoot
+              const root = directRoot
               const conflict = callActive.find(
                 (loan) =>
-                  sameSite(loan.root, root) &&
+                  loanConflicts(loan, root, candidate.syntax.span) &&
                   (loan.access === 'Exclusive' || candidate.access === 'Exclusive'),
               )
               if (conflict !== undefined) {
@@ -2296,7 +2865,7 @@ const analyzeLoans = (
               // A staged application retains every argument borrow inside the new environment
               // for as long as the resulting callable lives.
               const staged = expression.staged !== undefined
-              const returned = staged || returnedOrdinal === argumentOrdinal
+              const returned = staged || returnedOrdinal.has(argumentOrdinal)
               let origin: LoanFact['origin'] = candidate.formation._tag
               if (staged) origin = 'CallableCapture'
               else if (returned) origin = 'ReturnedView'
@@ -2318,6 +2887,7 @@ const analyzeLoans = (
                 startRegion: region,
                 endRegion: returned ? (delayedEnd?.region ?? region) : region,
                 startSpan: candidate.syntax.span,
+                referents: referentsAt(root, candidate.syntax.span),
                 endSpan: returned
                   ? (delayedEnd?.span ?? expression.syntax.span)
                   : expression.syntax.span,
@@ -2331,7 +2901,7 @@ const analyzeLoans = (
               | undefined
             if (argument.type._tag === 'Available' && Type.isEffect(argument.type.type))
               argumentEnd = delayedEnd
-            else if (returnedOrdinal === argumentOrdinal)
+            else if (returnedOrdinal.has(argumentOrdinal))
               argumentEnd = delayedEnd ?? Object.freeze({ region, span: expression.syntax.span })
             inspect(candidate, region, callActive, naturalAccess(candidate), argumentEnd)
           }
@@ -2355,7 +2925,7 @@ const analyzeLoans = (
             expression.reference.operation === 'SlotDrop')
         for (const [argumentOrdinal, argument] of expression.arguments.entries()) {
           const candidate = argument.expression
-          const returnedOrdinal = returnedArgumentOrdinal(expression)
+          const returnedOrdinal = returnedArgumentOrdinals(expression)
           if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable') {
             const preservesEffectLifetime =
               argument.type._tag === 'Available' && Type.isEffect(argument.type.type)
@@ -2363,7 +2933,7 @@ const analyzeLoans = (
               | { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
               | undefined
             if (preservesEffectLifetime) argumentEnd = delayedEnd
-            else if (returnedOrdinal === argumentOrdinal)
+            else if (returnedOrdinal.has(argumentOrdinal))
               argumentEnd = delayedEnd ?? Object.freeze({ region, span: expression.syntax.span })
             else if (consumesSlot)
               argumentEnd = Object.freeze({ region, span: expression.syntax.span })
@@ -2371,13 +2941,10 @@ const analyzeLoans = (
             continue
           }
           const directRoot = borrowSite(candidate.formation.root)
-          const root =
-            directRoot._tag === 'Let'
-              ? (viewRoots.get(directRoot.binding.ordinal) ?? directRoot)
-              : directRoot
+          const root = directRoot
           const conflict = callActive.find(
             (loan) =>
-              sameSite(loan.root, root) &&
+              loanConflicts(loan, root, candidate.syntax.span) &&
               (loan.access === 'Exclusive' || candidate.access === 'Exclusive'),
           )
           if (conflict !== undefined) {
@@ -2400,7 +2967,9 @@ const analyzeLoans = (
             }),
             root,
             access: candidate.access,
-            origin: returnedOrdinal === argumentOrdinal ? 'ReturnedView' : candidate.formation._tag,
+            origin: returnedOrdinal.has(argumentOrdinal)
+              ? 'ReturnedView'
+              : candidate.formation._tag,
             ...(candidate.formation._tag === 'SliceReborrow' ||
             candidate.formation._tag === 'ValueReborrow'
               ? { parent: root, suspendsParent: candidate.formation.suspendsParent }
@@ -2408,6 +2977,7 @@ const analyzeLoans = (
             startRegion: region,
             endRegion: delayedEnd?.region ?? region,
             startSpan: candidate.syntax.span,
+            referents: referentsAt(root, candidate.syntax.span),
             endSpan: delayedEnd?.span ?? expression.syntax.span,
           })
           loans.push(loan)
@@ -2430,7 +3000,7 @@ const analyzeLoans = (
           const candidateAccess = capture.access === 'Exclusive' ? 'Exclusive' : 'Shared'
           const conflict = captureActive.find(
             (loan) =>
-              sameSite(loan.root, root) &&
+              loanConflicts(loan, root, capture.span) &&
               (loan.access === 'Exclusive' || candidateAccess === 'Exclusive'),
           )
           if (conflict !== undefined) {
@@ -2459,6 +3029,7 @@ const analyzeLoans = (
             startRegion: region,
             endRegion: delayedEnd?.region ?? region,
             startSpan: capture.span,
+            referents: referentsAt(root, capture.span),
             endSpan: delayedEnd?.span ?? expression.syntax.span,
           })
           loans.push(loan)
@@ -2490,7 +3061,7 @@ const analyzeLoans = (
             : Object.freeze({ _tag: 'Parameter', parameter: provider.reference.id })
         const conflict = active.find(
           (loan) =>
-            sameSite(loan.root, root) &&
+            loanConflicts(loan, root, provider.span) &&
             (loan.access === 'Exclusive' || provider.captureAccess === 'Exclusive'),
         )
         if (conflict !== undefined)
@@ -2518,6 +3089,7 @@ const analyzeLoans = (
             startRegion: region,
             endRegion: delayedEnd?.region ?? region,
             startSpan: provider.span,
+            referents: referentsAt(root, provider.span),
             endSpan: delayedEnd?.span ?? expression.syntax.span,
           }),
         )
@@ -2652,12 +3224,13 @@ const analyzeLoans = (
   }
   statements(fn.statements)
   return Object.freeze({
+    loanAccessChecks,
     loans: Object.freeze(loans),
     diagnostics: Object.freeze(diagnostics),
   })
 }
 
-interface CheckedFunction {
+export interface CheckedFunction {
   readonly ownership: FunctionOwnership
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 }
@@ -2669,6 +3242,7 @@ interface ExitDescriptor {
   readonly arm?: 'Taken' | 'Otherwise'
   readonly target?: Hir.LoopId
   readonly sites: ReadonlyArray<string>
+  readonly initialization: ReadonlyFlowState
   readonly temporaries?: ReadonlyArray<TemporaryRelease>
   readonly matches?: ReadonlyArray<MatchRelease>
   readonly loanRegions?: ReadonlyArray<Hir.RegionId>
@@ -2694,9 +3268,22 @@ const checkFunction = (
   )
   const loanAnalysis =
     semantic === undefined
-      ? Object.freeze({ loans: Object.freeze([]), diagnostics: Object.freeze([]) })
+      ? Object.freeze({
+          loanAccessChecks: 0,
+          loans: Object.freeze([]),
+          diagnostics: Object.freeze([]),
+        })
       : analyzeLoans(semantic, index, copyAssumptions)
   const state: CheckState = {
+    work: {
+      pathChecks: 0,
+      shapeComputations: 0,
+      shapeCacheHits: 0,
+      shapeProjectionSteps: 0,
+      initializationJoins: 0,
+      loanAccessChecks: loanAnalysis.loanAccessChecks,
+      cleanupPlanQueries: 0,
+    },
     nextAcquisition: 0,
     index,
     copyAssumptions,
@@ -2706,6 +3293,8 @@ const checkFunction = (
     matches: [],
     callables: [],
     replacements: [],
+    transitions: [],
+    shapes: new Map(),
     execution: undefined,
     checkMatch: (live, expression, consuming, guard, escaping) =>
       checkMatch(live, expression, consuming, guard, escaping),
@@ -2827,7 +3416,7 @@ const checkFunction = (
     }
   }
 
-  const initialLive = new Set<string>()
+  const initialLive: FlowState = new Map()
   for (const parameter of declaration.parameters) {
     if (parameter.phase === 'Static') continue
     const type =
@@ -2849,44 +3438,44 @@ const checkFunction = (
     const key = siteKey(binding.site)
     state.bindings.set(key, binding)
     state.order.push(binding)
-    initialLive.add(key)
+    initialLive.set(key, MovePath.make())
   }
 
   const exits: Array<ExitDescriptor> = []
   /** Bindings local to deferred effect bodies: resolvable for releases, never published. */
   const deferredReleaseOrder: Array<MutableBinding> = []
-  const continueStates = new Map<number, Array<Set<string>>>()
-  const breakStates = new Map<number, Array<Set<string>>>()
+  const continueStates = new Map<number, Array<FlowState>>()
+  const breakStates = new Map<number, Array<FlowState>>()
   const fixedPoints: Array<{
     readonly loop: Hir.LoopId
     readonly span: SourceSpan.SourceSpan
-    readonly incoming: Set<string>
-    readonly repeating: ReadonlyArray<Set<string>>
-    readonly following: Set<string>
+    readonly incoming: FlowState
+    readonly repeating: ReadonlyArray<FlowState>
+    readonly following: FlowState
     readonly compatible: boolean
     readonly iterations: number
   }> = []
   const appendLoopState = (
-    states: Map<number, Array<Set<string>>>,
+    states: Map<number, Array<FlowState>>,
     loop: Hir.LoopId,
-    live: Set<string>,
+    live: FlowState,
   ): void => {
     const existing = states.get(loop.ordinal)
-    if (existing === undefined) states.set(loop.ordinal, [new Set(live)])
-    else existing.push(new Set(live))
+    if (existing === undefined) states.set(loop.ordinal, [new Map(live)])
+    else existing.push(new Map(live))
   }
-  const sameLive = setEqual
-  const intersection = (states: ReadonlyArray<ReadonlySet<string>>): Set<string> => {
-    const [first, ...rest] = states
-    return new Set([...(first ?? [])].filter((site) => rest.every((state) => state.has(site))))
-  }
+  const sameLive = sameFlow
+  const intersection = (flows: ReadonlyArray<ReadonlyFlowState>): FlowState =>
+    joinFlows(state, flows)
   const frameSitesInnerFirst = (
     frames: ReadonlyArray<ReadonlyArray<string>>,
-    live: ReadonlySet<string>,
+    live: ReadonlyFlowState,
   ): ReadonlyArray<string> =>
-    [...frames].reverse().flatMap((frame) => [...frame].reverse().filter((site) => live.has(site)))
+    [...frames]
+      .reverse()
+      .flatMap((frame) => [...frame].reverse().filter((site) => present(live, site)))
 
-  const checkPatternSubject = (selection: Hir.PatternSelection, live: Set<string>): boolean => {
+  const checkPatternSubject = (selection: Hir.PatternSelection, live: FlowState): boolean => {
     const temporaryMark = state.execution?.temporaries.length ?? 0
     const subjectType =
       selection.subject._tag === 'Unavailable' ? undefined : selection.subject.type
@@ -2902,9 +3491,22 @@ const checkFunction = (
       return true
     }
     if (selection.access === 'Move') {
-      if (subjectSite === undefined) {
+      const place = placeOf(selection.subject)
+      if (place === undefined) {
         if (!checkExpression(state, live, selection.subject, true)) return false
-      } else checkUse(state, live, subjectSite, selection.span, true)
+      } else {
+        if (
+          !checkPlaceInterior(
+            state,
+            live,
+            selection.subject,
+            state.execution?.guard ?? false,
+            false,
+          )
+        )
+          return false
+        checkPath(state, live, place.root, place.path, selection.span, 'Move')
+      }
       if (state.execution !== undefined) state.execution.temporaries.length = temporaryMark
       return true
     }
@@ -2922,7 +3524,7 @@ const checkFunction = (
 
   const introducePatternBindings = (
     selection: Hir.PatternSelection,
-    live: Set<string>,
+    live: FlowState,
     frame: Array<string>,
     liveTo: SourceSpan.SourceSpan,
   ): ReadonlyArray<BindingSite> => {
@@ -2944,7 +3546,7 @@ const checkFunction = (
       state.bindings.set(key, mutable)
       state.order.push(mutable)
       frame.push(key)
-      live.add(key)
+      live.set(key, MovePath.make())
       sites.push(site)
     }
     return Object.freeze(sites)
@@ -2952,7 +3554,7 @@ const checkFunction = (
 
   const patternSelectionCleanup = (
     selection: Hir.PatternSelection,
-    live: ReadonlySet<string>,
+    live: ReadonlyFlowState,
     includeBindings: boolean,
   ): MatchOwnership['arms'][number]['cleanup'] => {
     if (selection.access === 'Move') {
@@ -2969,17 +3571,17 @@ const checkFunction = (
           )
           return type === undefined
             ? []
-            : [Object.freeze({ path, cleanup: CleanupPlan.cleanupPlan(index, type) })]
+            : [Object.freeze({ path, cleanup: cleanupPlan(state, type) })]
         }),
         ...(includeBindings
           ? selection.bindings.flatMap((binding) => {
               const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: binding.id })
-              return live.has(siteKey(site)) &&
+              return present(live, siteKey(site)) &&
                 categoryOf(index, binding.type, copyAssumptions)._tag === 'MoveOnly'
                 ? [
                     Object.freeze({
                       path: binding.path,
-                      cleanup: CleanupPlan.cleanupPlan(index, binding.type),
+                      cleanup: cleanupPlan(state, binding.type),
                     }),
                   ]
                 : []
@@ -3012,7 +3614,7 @@ const checkFunction = (
     ),
   })
   const propagation = (
-    live: Set<string>,
+    live: FlowState,
     expression: Extract<Hir.Expression, { readonly _tag: 'Run' }>,
   ): void => {
     if (
@@ -3024,15 +3626,18 @@ const checkFunction = (
     // Immediate owned bindings transfer the source value into a provider bracket. That
     // bracket releases on both outcomes: lowering emits the normal drop, while propagation
     // must retain its owner until the protected execution has produced an outcome.
-    const failureLive = new Set(live)
+    const failureLive = new Map(live)
     let protectedEffect: Hir.Expression = expression.subject
     while (protectedEffect._tag === 'EffectBindRequirement') {
       const provider = protectedEffect.provider
       if (provider.selectionAccess === 'Take') {
         if (provider.binding !== undefined)
-          failureLive.add(siteKey({ _tag: 'Let', binding: provider.binding }))
+          failureLive.set(siteKey({ _tag: 'Let', binding: provider.binding }), MovePath.make())
         else if (provider.parameter !== undefined)
-          failureLive.add(siteKey({ _tag: 'Parameter', parameter: provider.parameter }))
+          failureLive.set(
+            siteKey({ _tag: 'Parameter', parameter: provider.parameter }),
+            MovePath.make(),
+          )
       }
       protectedEffect = protectedEffect.protected
     }
@@ -3041,6 +3646,7 @@ const checkFunction = (
         kind: 'Propagation',
         span: expression.span,
         sites: frameSitesInnerFirst(state.execution?.frames ?? [], failureLive),
+        initialization: new Map(failureLive),
         ...transferCleanup(),
       }),
     )
@@ -3048,10 +3654,10 @@ const checkFunction = (
   const walkStatements = (
     statements: ReadonlyArray<Hir.Statement>,
     enclosingSpan: SourceSpan.SourceSpan,
-    initial: Set<string>,
+    initial: FlowState,
     frames: Array<Array<string>>,
     loopScopes: ReadonlyArray<{ readonly loop: Hir.LoopId; readonly frame: number }> = [],
-  ): { readonly returned: boolean; readonly live: Set<string> } => {
+  ): { readonly returned: boolean; readonly live: FlowState } => {
     const previous = state.execution
     state.execution = {
       regions: [...(previous?.regions ?? [])],
@@ -3069,10 +3675,10 @@ const checkFunction = (
   const walkStatementBody = (
     statements: ReadonlyArray<Hir.Statement>,
     enclosingSpan: SourceSpan.SourceSpan,
-    initial: Set<string>,
+    initial: FlowState,
     frames: Array<Array<string>>,
     loopScopes: ReadonlyArray<{ readonly loop: Hir.LoopId; readonly frame: number }> = [],
-  ): { readonly returned: boolean; readonly live: Set<string> } => {
+  ): { readonly returned: boolean; readonly live: FlowState } => {
     let live = initial
     const evaluate = (expression: Hir.Expression, consuming: boolean): boolean => {
       const mark = state.execution?.temporaries.length ?? 0
@@ -3088,7 +3694,7 @@ const checkFunction = (
       // survive — the body's compiled runner reuses this function's span-keyed exit plans to
       // emit automatic cleanup, and the outer body never looks up a body-statement span.
       for (const block of statementRootExpressions(statement).flatMap(deferredBlocks)) {
-        const bodyLive = new Set(live)
+        const bodyLive = new Map(live)
         const bodyFrame: Array<string> = []
         for (const capture of block.captures) {
           let site: BindingSite | undefined
@@ -3102,7 +3708,7 @@ const checkFunction = (
             site = undefined
           }
           if (site === undefined) continue
-          bodyLive.add(siteKey(site))
+          bodyLive.set(siteKey(site), MovePath.make())
           // A taken capture is owned by the body, so a failure inside it releases the value.
           if (capture.access === 'Take') bodyFrame.push(siteKey(site))
         }
@@ -3128,7 +3734,7 @@ const checkFunction = (
         const result = walkStatements(
           statement.statements,
           statement.span,
-          new Set(live),
+          new Map(live),
           scopeFrames,
           loopScopes,
         )
@@ -3140,7 +3746,10 @@ const checkFunction = (
               kind: 'ScopeEnd' as const,
               span: statement.span,
               region: statement.region,
-              sites: Object.freeze([...frame].reverse().filter((site) => result.live.has(site))),
+              sites: Object.freeze(
+                [...frame].reverse().filter((site) => present(result.live, site)),
+              ),
+              initialization: new Map(result.live),
             }),
           )
         }
@@ -3189,7 +3798,7 @@ const checkFunction = (
         state.bindings.set(key, binding)
         state.order.push(binding)
         frames.at(-1)?.push(key)
-        live.add(key)
+        live.set(key, MovePath.make())
         continue
       }
       if (statement._tag === 'PatternBind') {
@@ -3225,13 +3834,13 @@ const checkFunction = (
       }
       if (statement._tag === 'If') {
         if (!evaluate(statement.condition, false)) return Object.freeze({ returned: true, live })
-        const continuing: Array<Set<string>> = []
+        const continuing: Array<FlowState> = []
         for (const [arm, body] of [
           ['Taken', statement.taken],
           ['Otherwise', statement.otherwise],
         ] as const) {
           const armFrames = [...frames.map((frame) => [...frame]), []]
-          const result = walkStatements(body, statement.span, new Set(live), armFrames, loopScopes)
+          const result = walkStatements(body, statement.span, new Map(live), armFrames, loopScopes)
           const frame = armFrames.at(-1) ?? []
           if (!result.returned && frame.length > 0) {
             exits.push(
@@ -3240,7 +3849,10 @@ const checkFunction = (
                 span: statement.span,
                 region: statement.region,
                 arm,
-                sites: Object.freeze([...frame].reverse().filter((site) => result.live.has(site))),
+                sites: Object.freeze(
+                  [...frame].reverse().filter((site) => present(result.live, site)),
+                ),
+                initialization: new Map(result.live),
               }),
             )
           }
@@ -3256,14 +3868,14 @@ const checkFunction = (
       if (statement._tag === 'IfLet') {
         if (!checkPatternSubject(statement.selection, live))
           return Object.freeze({ returned: true, live })
-        const continuing: Array<Set<string>> = []
+        const continuing: Array<FlowState> = []
         let selectedSites: ReadonlyArray<BindingSite> = Object.freeze([])
         for (const [arm, body] of [
           ['Taken', statement.taken],
           ['Otherwise', statement.otherwise],
         ] as const) {
           const armFrames = [...frames.map((frame) => [...frame]), []]
-          const armLive = new Set(live)
+          const armLive = new Map(live)
           if (arm === 'Taken')
             selectedSites = introducePatternBindings(
               statement.selection,
@@ -3280,7 +3892,10 @@ const checkFunction = (
                 span: statement.span,
                 region: statement.region,
                 arm,
-                sites: Object.freeze([...frame].reverse().filter((site) => result.live.has(site))),
+                sites: Object.freeze(
+                  [...frame].reverse().filter((site) => present(result.live, site)),
+                ),
+                initialization: new Map(result.live),
               }),
             )
           if (!result.returned) {
@@ -3329,44 +3944,81 @@ const checkFunction = (
             parameter: statement.place.root.parameter,
           })
         }
+        let path =
+          statement.place._tag === 'WritePlace'
+            ? selectorPath(statement.place.selectors)
+            : undefined
+        const canonical = canonicalPlace(state, { root: rootSite, path: path ?? [] })
+        if (canonical !== undefined) {
+          rootSite = canonical.root
+          if (path !== undefined) path = canonical.path
+        }
         const rootKey = siteKey(rootSite)
         const root = state.bindings.get(rootKey)
-        const wasLive = live.has(rootKey)
-        if (!wasLive && statement.place.selectors.length > 0 && root !== undefined) {
-          checkUse(state, live, rootSite, statement.place.span, false)
-        }
+        const shape = shapeOf(state, rootSite)
+        const before = live.get(rootKey) ?? MovePath.make('Missing')
+        if (statement.place._tag === 'WritePlace' && path !== undefined) {
+          const target = MovePath.inspect(before, path, shape)
+          if (Result.isFailure(target) && root !== undefined)
+            placeFailure(state, root, target.failure, statement.place.span)
+        } else checkUse(state, live, rootSite, statement.place.span, false)
+        const transitionMark = state.transitions.length
         if (!evaluate(statement.value, true)) return Object.freeze({ returned: true, live })
-        // A borrowed referent is always initialized; an owned place displaces only while live.
-        if (statement.place._tag === 'BorrowedWritePlace' || wasLive) {
-          const cleanup = CleanupPlan.cleanupPlan(state.index, statement.place.type)
-          if (cleanup._tag !== 'NoCleanup') {
-            state.replacements.push(
-              Object.freeze({
-                _tag: 'Replacement',
-                region: statement.region,
-                type: statement.place.type,
-                cleanup,
-                span: statement.span,
-              }),
-            )
-          }
-        }
-        if (wasLive && !live.has(rootKey)) {
+        const overlaps = state.transitions
+          .slice(transitionMark)
+          .some(
+            (transition) =>
+              transition.kind !== 'Write' &&
+              siteKey(transition.root) === rootKey &&
+              (path === undefined || MovePath.overlaps(path, transition.path)),
+          )
+        if (overlaps) {
           state.diagnostics.push(
             Diagnostic.overlappingAssignment(root?.name ?? '?', statement.span),
           )
-        } else if (
-          statement.place._tag === 'WritePlace' &&
-          statement.place.selectors.length === 0
-        ) {
-          live.add(rootKey)
+          continue
+        }
+        const current = live.get(rootKey) ?? MovePath.make('Missing')
+        let selected = MovePath.make()
+        if (statement.place._tag === 'WritePlace' && path !== undefined) {
+          const target = MovePath.inspect(current, path, shape)
+          if (Result.isFailure(target)) continue
+          selected = target.success.state
+        }
+        const cleanup = cleanupPlan(state, statement.place.type)
+        if (selected.initialization !== 'Missing' && cleanup._tag !== 'NoCleanup')
+          state.replacements.push(
+            Object.freeze({
+              _tag: 'Replacement',
+              region: statement.region,
+              type: statement.place.type,
+              cleanup,
+              span: statement.span,
+              initialization: selected,
+            }),
+          )
+        if (statement.place._tag === 'WritePlace' && path !== undefined) {
+          const restored = MovePath.restore(current, path, shape)
+          if (Result.isSuccess(restored)) {
+            live.set(rootKey, restored.success)
+            state.transitions.push(
+              Object.freeze({
+                root: rootSite,
+                path,
+                kind: 'Write',
+                span: statement.span,
+                before: current,
+                after: restored.success,
+              }),
+            )
+          }
         }
         continue
       }
       if (statement._tag === 'While') {
         // The condition re-runs every iteration, so the loop-header baseline is the state at
         // loop entry: a condition that consumes an owner must show up as a back-edge mismatch.
-        const incoming = new Set(live)
+        const incoming = new Map(live)
         if (!evaluate(statement.condition, false)) return Object.freeze({ returned: true, live })
         const previousContinues = continueStates.get(statement.loop.ordinal)?.length ?? 0
         const previousBreaks = breakStates.get(statement.loop.ordinal)?.length ?? 0
@@ -3374,12 +4026,12 @@ const checkFunction = (
         const loopResult = walkStatements(
           statement.body,
           statement.span,
-          new Set(live),
+          new Map(live),
           loopFrames,
           [...loopScopes, { loop: statement.loop, frame: loopFrames.length - 1 }],
         )
         const loopFrame = loopFrames.at(-1) ?? []
-        const repeating: Array<Set<string>> = [
+        const repeating: Array<FlowState> = [
           ...(continueStates.get(statement.loop.ordinal)?.slice(previousContinues) ?? []),
         ]
         if (!loopResult.returned) {
@@ -3389,12 +4041,13 @@ const checkFunction = (
               span: statement.span,
               region: statement.region,
               target: statement.loop,
+              initialization: new Map(loopResult.live),
               sites: Object.freeze(
-                [...loopFrame].reverse().filter((site) => loopResult.live.has(site)),
+                [...loopFrame].reverse().filter((site) => present(loopResult.live, site)),
               ),
             }),
           )
-          repeating.push(new Set(loopResult.live))
+          repeating.push(new Map(loopResult.live))
         }
         for (const candidate of repeating) {
           for (const site of loopFrame) candidate.delete(site)
@@ -3414,8 +4067,8 @@ const checkFunction = (
           loop: statement.loop,
           span: statement.span,
           incoming,
-          repeating: Object.freeze(repeating.map((candidate) => new Set(candidate))),
-          following: new Set(live),
+          repeating: Object.freeze(repeating.map((candidate) => new Map(candidate))),
+          following: new Map(live),
           compatible,
           iterations: repeating.length === 0 ? 1 : 2,
         })
@@ -3428,7 +4081,7 @@ const checkFunction = (
         const transferFrames =
           targetScope === undefined ? [frames.at(-1) ?? []] : frames.slice(targetScope.frame)
         const transferSites = [...transferFrames].reverse().flatMap((frame) => [...frame].reverse())
-        const sites = Object.freeze(transferSites.filter((site) => live.has(site)))
+        const sites = Object.freeze(transferSites.filter((site) => present(live, site)))
         exits.push(
           Object.freeze({
             kind: statement._tag,
@@ -3436,10 +4089,11 @@ const checkFunction = (
             region: statement.region,
             target: statement.target,
             sites,
+            initialization: new Map(live),
             ...transferCleanup(targetScope?.frame ?? frames.length - 1),
           }),
         )
-        const next = new Set(live)
+        const next = new Map(live)
         for (const site of transferSites) next.delete(site)
         appendLoopState(
           statement._tag === 'Break' ? breakStates : continueStates,
@@ -3449,24 +4103,46 @@ const checkFunction = (
         return Object.freeze({ returned: true, live })
       }
       if (statement._tag === 'Drop') {
-        if (!evaluate(statement.expression, true)) return Object.freeze({ returned: true, live })
+        const place = placeOf(statement.expression)
+        if (place !== undefined) {
+          if (
+            !checkPlaceInterior(
+              state,
+              live,
+              statement.expression,
+              state.execution?.guard ?? false,
+              false,
+            )
+          )
+            return Object.freeze({ returned: true, live })
+          const binding = state.bindings.get(siteKey(place.root))
+          if (state.execution?.guard === true)
+            state.diagnostics.push(
+              Diagnostic.guardConsumesPattern(binding?.name ?? '?', statement.expression.span),
+            )
+          else if (
+            (binding?.matchAccess === 'Shared' || binding?.matchAccess === 'Exclusive') &&
+            binding.category._tag === 'MoveOnly'
+          )
+            state.diagnostics.push(
+              Diagnostic.matchBorrowEscape(binding.name ?? '?', statement.expression.span),
+            )
+          else checkPath(state, live, place.root, place.path, statement.span, 'Drop')
+        } else if (!evaluate(statement.expression, true))
+          return Object.freeze({ returned: true, live })
         continue
       }
       if (statement._tag === 'UnavailableStatement') {
         continue
       }
-      const returnsBorrow =
-        statement._tag === 'Return' &&
-        fn.contract._tag === 'Contract' &&
-        Type.containsViewBorrow(fn.contract.result)
-      if (!evaluate(statement.expression, !returnsBorrow))
-        return Object.freeze({ returned: true, live })
+      if (!evaluate(statement.expression, true)) return Object.freeze({ returned: true, live })
       exits.push(
         Object.freeze({
           kind: 'Return' as const,
           span: statement.span,
           region: statement.region,
           sites: frameSitesInnerFirst(frames, live),
+          initialization: new Map(live),
           ...transferCleanup(),
         }),
       )
@@ -3476,7 +4152,7 @@ const checkFunction = (
   }
 
   const checkMatch = (
-    live: Set<string>,
+    live: FlowState,
     expression: Extract<Hir.Expression, { readonly _tag: 'Match' }>,
     consuming: boolean,
     guard: boolean,
@@ -3490,8 +4166,34 @@ const checkFunction = (
     const scrutineeBinding =
       scrutineeSite === undefined ? undefined : state.bindings.get(siteKey(scrutineeSite))
     const temporaryMark = execution.temporaries.length
-    if (expression.access === 'Move' && scrutineeSite !== undefined) {
-      checkUse(state, live, scrutineeSite, expression.span, true)
+    const scrutineePlace = canonicalPlace(state, placeOf(expression.scrutinee))
+    if (expression.access === 'Place') {
+      if (scrutineePlace === undefined) {
+        state.diagnostics.push(Diagnostic.invalidMatchScrutineePlace('Place', expression.span))
+        return false
+      }
+      if (!checkPlaceInterior(state, live, expression.scrutinee, guard, false)) return false
+      const current = live.get(siteKey(scrutineePlace.root)) ?? MovePath.make('Missing')
+      const inspected = MovePath.inspect(
+        current,
+        scrutineePlace.path,
+        shapeOf(state, scrutineePlace.root),
+      )
+      if (Result.isFailure(inspected)) {
+        if (scrutineeBinding !== undefined)
+          placeFailure(state, scrutineeBinding, inspected.failure, expression.span)
+      } else if (inspected.success.discriminant !== 'Initialized' && !inspected.success.complete) {
+        state.diagnostics.push(
+          Diagnostic.useAfterMove(
+            scrutineeBinding?.name ?? '?',
+            scrutineeBinding?.movedAt ?? expression.span,
+            expression.span,
+          ),
+        )
+      }
+    } else if (expression.access === 'Move' && scrutineePlace !== undefined) {
+      if (!checkPlaceInterior(state, live, expression.scrutinee, guard, false)) return false
+      checkPath(state, live, scrutineePlace.root, scrutineePlace.path, expression.span, 'Move')
     } else {
       if (!checkExpression(state, live, expression.scrutinee, expression.access === 'Move', guard))
         return false
@@ -3517,10 +4219,40 @@ const checkFunction = (
       }
     }
     execution.temporaries.length = temporaryMark
+    const memberPrefix = (member: Match.CoverageIdentity): MovePath.Path => {
+      if (scrutineeType === undefined || !Type.isUnion(scrutineeType)) return []
+      const selectedType = member.type
+      const ordinal = scrutineeType.members.findIndex((type) => Type.equals(type, selectedType))
+      return ordinal < 0 ? [] : [{ _tag: 'Variant', ordinal }]
+    }
+    const candidateFor = (member: Match.CoverageIdentity): FlowState => {
+      const candidate = new Map(live)
+      if (expression.access !== 'Place' || scrutineePlace === undefined) return candidate
+      const key = siteKey(scrutineePlace.root)
+      let current = candidate.get(key) ?? MovePath.make('Missing')
+      const shape = shapeOf(state, scrutineePlace.root)
+      const prefix = memberPrefix(member)
+      const structural = prefix.at(0)
+      if (structural?._tag === 'Variant') {
+        const refined = MovePath.refine(current, scrutineePlace.path, structural.ordinal, shape)
+        if (Result.isSuccess(refined)) current = refined.success
+      }
+      if (member._tag === 'NominalUnionVariant') {
+        const refined = MovePath.refine(
+          current,
+          [...scrutineePlace.path, ...prefix],
+          member.variantOrdinal,
+          shape,
+        )
+        if (Result.isSuccess(refined)) current = refined.success
+      }
+      candidate.set(key, current)
+      return candidate
+    }
     const candidates = new Map(
-      expression.members.map((member) => [Match.encodeIdentity(member), new Set(live)]),
+      expression.members.map((member) => [Match.encodeIdentity(member), candidateFor(member)]),
     )
-    const continuing: Array<Set<string>> = []
+    const continuing: Array<FlowState> = []
     const armFacts: Array<MatchOwnership['arms'][number]> = []
     for (const arm of expression.arms) {
       const selected = expression.members.filter(
@@ -3552,28 +4284,44 @@ const checkFunction = (
                 const type = CleanupPlan.cleanupTypeAtPath(index, payloadType, path)
                 return type === undefined
                   ? []
-                  : [Object.freeze({ path, cleanup: CleanupPlan.cleanupPlan(index, type) })]
+                  : [Object.freeze({ path, cleanup: cleanupPlan(state, type) })]
               }),
             )
           : Object.freeze([])
       const payloadOrdinal = state.nextAcquisition++
+      const placeMutability =
+        expression.access === 'Place' && scrutineePlace !== undefined
+          ? (state.bindings.get(siteKey(scrutineePlace.root))?.mutability ?? 'Immutable')
+          : 'Immutable'
       for (const pattern of arm.bindings) {
         const site: BindingSite = Object.freeze({ _tag: 'Pattern', binding: pattern.id })
         const mutable: MutableBinding = {
           ordinal: state.nextAcquisition++,
           site,
           name: pattern.name,
-          mutability: pattern.access === 'Exclusive' ? 'Mutable' : 'Immutable',
+          mutability: pattern.access === 'Exclusive' ? 'Mutable' : placeMutability,
           liveFrom: pattern.span,
           liveTo: arm.span,
           category: categoryOf(index, pattern.type, copyAssumptions),
           type: pattern.type,
           matchAccess: pattern.access,
+          ...(expression.access === 'Place' && scrutineePlace !== undefined
+            ? {
+                place: {
+                  root: scrutineePlace.root,
+                  path: [
+                    ...scrutineePlace.path,
+                    ...(arm.member === undefined ? [] : memberPrefix(arm.member)),
+                    ...pattern.path.flatMap(fieldSelectors),
+                  ],
+                },
+              }
+            : {}),
         }
         const key = siteKey(site)
         state.bindings.set(key, mutable)
         state.order.push(mutable)
-        armLive.add(key)
+        armLive.set(key, MovePath.make())
         sites.push(site)
       }
       state.execution = armExecution
@@ -3587,7 +4335,7 @@ const checkFunction = (
             id: expression.id,
             arm: arm.id,
             cleanup: Object.freeze([
-              { path: Object.freeze([]), cleanup: CleanupPlan.cleanupPlan(index, payloadType) },
+              { path: Object.freeze([]), cleanup: cleanupPlan(state, payloadType) },
             ]),
           }),
         })
@@ -3595,18 +4343,22 @@ const checkFunction = (
         arm.guard === undefined || checkExpression(state, armLive, arm.guard, false, true)
       execution.temporaries.length = temporaryMark
       execution.matches.length = matchMark
-      const afterGuard = new Set(armLive)
+      const afterGuard = new Map(armLive)
       for (const site of sites) afterGuard.delete(siteKey(site))
       for (const member of selected) {
         const key = Match.encodeIdentity(member)
-        if (arm.guard !== undefined && guardCompletes) candidates.set(key, new Set(afterGuard))
+        if (arm.guard !== undefined && guardCompletes) candidates.set(key, new Map(afterGuard))
         else candidates.delete(key)
       }
       let completes = false
       if (guardCompletes) {
         for (const site of sites) {
           const binding = state.bindings.get(siteKey(site))
-          if (binding?.matchAccess !== 'Shared' && binding?.matchAccess !== 'Exclusive')
+          if (
+            binding?.matchAccess !== 'Shared' &&
+            binding?.matchAccess !== 'Exclusive' &&
+            binding?.matchAccess !== 'Place'
+          )
             frame.push(siteKey(site))
         }
         execution.matches.push({
@@ -3631,7 +4383,7 @@ const checkFunction = (
           completes = !result.returned
           const completedLive = [...result.live]
           armLive.clear()
-          for (const key of completedLive) armLive.add(key)
+          for (const [key, initialization] of completedLive) armLive.set(key, initialization)
         }
       }
       execution.temporaries.length = temporaryMark
@@ -3652,7 +4404,8 @@ const checkFunction = (
           Object.freeze({
             kind: 'ArmEnd',
             span: arm.span,
-            sites: Object.freeze([...frame].reverse().filter((site) => armLive.has(site))),
+            sites: Object.freeze([...frame].reverse().filter((site) => present(armLive, site))),
+            initialization: new Map(armLive),
           }),
         )
         for (const site of [...frame, ...sites.map(siteKey)]) armLive.delete(site)
@@ -3660,7 +4413,7 @@ const checkFunction = (
       }
     }
     live.clear()
-    for (const site of intersection(continuing)) live.add(site)
+    for (const [site, initialization] of intersection(continuing)) live.set(site, initialization)
     state.matches.push(
       Object.freeze({
         _tag: 'MatchOwnership',
@@ -3683,6 +4436,7 @@ const checkFunction = (
         kind: 'Return' as const,
         span: fn.statements.at(-1)?.span ?? declaration.syntax.span,
         sites: frameSitesInnerFirst([rootFrame], result.live),
+        initialization: new Map(result.live),
       }),
     )
   }
@@ -3717,10 +4471,11 @@ const checkFunction = (
         binding.cleanup ??
         (binding.type === undefined
           ? Object.freeze({ _tag: 'NoCleanup' as const, type: 'i32' as const })
-          : CleanupPlan.cleanupPlan(index, binding.type)),
+          : cleanupPlan(state, binding.type)),
       liveFrom: binding.liveFrom,
       liveTo: binding.liveTo,
       ...(binding.movedAt === undefined ? {} : { movedAt: binding.movedAt }),
+      ...(binding.place === undefined ? {} : { place: binding.place }),
     })
   const bindings = Object.freeze(state.order.map(bindingFactOf))
   const deferredBindings = Object.freeze(deferredReleaseOrder.map(bindingFactOf))
@@ -3769,6 +4524,7 @@ const checkFunction = (
                     ? CleanupPlan.cleanupFields(index, fact.category.type)
                     : Object.freeze([]),
                 cleanup: fact.cleanup,
+                initialization: exit.initialization.get(site) ?? MovePath.make('Missing'),
               }),
             ]
           }),
@@ -3796,18 +4552,19 @@ const checkFunction = (
     verdict = satisfied
   }
 
-  return Object.freeze({
+  const checked: CheckedFunction = Object.freeze({
     ownership: Object.freeze({
       _tag: 'FunctionOwnership' as const,
+      work: Object.freeze({ ...state.work }),
       declaration,
       bindings,
       deferredBindings,
       exits: exitPlans,
       fixedPoints: Object.freeze(
         fixedPoints.map((point) => {
-          const sites = (keys: ReadonlySet<string>): ReadonlyArray<BindingSite> =>
+          const sites = (keys: ReadonlyFlowState): ReadonlyArray<BindingSite> =>
             Object.freeze(
-              [...keys].flatMap((key): ReadonlyArray<BindingSite> => {
+              [...keys.keys()].flatMap((key): ReadonlyArray<BindingSite> => {
                 const binding = bindingBySite.get(key)
                 return binding === undefined ? [] : [binding.site]
               }),
@@ -3828,28 +4585,107 @@ const checkFunction = (
       callables: Object.freeze(state.callables),
       loans: loanAnalysis.loans,
       replacements: Object.freeze(state.replacements),
+      transitions: Object.freeze(state.transitions),
       verdict,
     }),
     diagnostics: Object.freeze([...state.diagnostics]),
   })
+  if (semantic?.lifetimeFlow === undefined || checked.ownership.verdict._tag !== 'Satisfied')
+    return checked
+  const cleanupDiagnostics = LifetimeFlow.validateCleanup(semantic.lifetimeFlow, checked.ownership)
+  const firstCleanupViolation = cleanupDiagnostics.at(0)
+  if (firstCleanupViolation === undefined) return checked
+  return Object.freeze({
+    ownership: Object.freeze({
+      ...checked.ownership,
+      verdict:
+        checked.ownership.verdict._tag === 'Satisfied'
+          ? Object.freeze({
+              _tag: 'Violation' as const,
+              cause: Diagnostic.identity(firstCleanupViolation),
+            })
+          : checked.ownership.verdict,
+    }),
+    diagnostics: Object.freeze(
+      [...checked.diagnostics, ...cleanupDiagnostics].sort(Diagnostic.compare),
+    ),
+  })
 }
 
-/** Checks one target-selected residual function without reusing declaration-level ownership. */
-export const checkResidualFunction = (
+/** Every input read by the ownership checker, after callback boundaries are selected. */
+export interface CheckInput {
+  readonly function: Hir.HirFunction
+  readonly semantic: Elaboration.FunctionFact | undefined
+  readonly index: DeclarationIndex.Index
+  readonly boundaries: ReadonlyArray<SourceSpan.SourceSpan>
+}
+
+/** Resolves ownership inputs without running the checker or reconstructing prior diagnostics. */
+export const input = (
   fn: Hir.HirFunction,
-  semantic: Elaboration.FunctionFact,
+  semantic: Elaboration.FunctionFact | undefined,
   index: DeclarationIndex.Index,
   accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
-): CheckedFunction =>
-  checkFunction(
-    fn,
-    index,
+): CheckInput =>
+  Object.freeze({
+    function: fn,
     semantic,
-    fn.declaration.canonical._tag === 'Canonical'
-      ? (accessBoundaryPlan.boundaries.get(localSharedTargetKey(fn.declaration.canonical.id)) ??
+    index,
+    boundaries:
+      fn.declaration.canonical._tag === 'Canonical'
+        ? (accessBoundaryPlan.boundaries.get(localSharedTargetKey(fn.declaration.canonical.id)) ??
           Object.freeze([]))
-      : Object.freeze([]),
-  )
+        : Object.freeze([]),
+  })
+
+/** Requires identical semantic authorities and equal ordered access-boundary spans. */
+export const matchesInput = (self: CheckInput, other: CheckInput): boolean =>
+  self.function === other.function &&
+  self.semantic === other.semantic &&
+  self.index === other.index &&
+  self.boundaries.length === other.boundaries.length &&
+  self.boundaries.every((span, ordinal) => {
+    const right = other.boundaries[ordinal]
+    return (
+      right !== undefined &&
+      span.sourceId === right.sourceId &&
+      span.start === right.start &&
+      span.end === right.end
+    )
+  })
+
+/** Executes ownership checking with exactly the supplied semantic authorities. */
+export const check = (self: CheckInput): CheckedFunction =>
+  checkFunction(self.function, self.index, self.semantic, self.boundaries)
+
+interface SourceProof {
+  readonly input: CheckInput
+  readonly checked: CheckedFunction
+}
+
+const sourceProofs = new WeakMap<
+  DeclarationIndex.Index,
+  WeakMap<Hir.HirFunction, Array<SourceProof>>
+>()
+
+/** Reads a result published at the source checker boundary for these exact current inputs. */
+export const sourceProof = (self: CheckInput): CheckedFunction | undefined =>
+  sourceProofs
+    .get(self.index)
+    ?.get(self.function)
+    ?.find((proof) => matchesInput(proof.input, self))?.checked
+
+const publishSourceProof = (self: CheckInput, checked: CheckedFunction): void => {
+  let functions = sourceProofs.get(self.index)
+  if (functions === undefined) {
+    functions = new WeakMap()
+    sourceProofs.set(self.index, functions)
+  }
+  const proofs = functions.get(self.function) ?? []
+  if (!proofs.some((proof) => matchesInput(proof.input, self)))
+    proofs.push({ input: self, checked })
+  functions.set(self.function, proofs)
+}
 
 /** Classifies the result-side ownership facts of one access-scoped callback invocation. */
 export const localSharedResultEscapes = (facts: {
@@ -3857,7 +4693,7 @@ export const localSharedResultEscapes = (facts: {
   readonly capturesRestrictedParameter: boolean
   readonly referencesRestrictedParameter: boolean
 }): boolean =>
-  Type.containsPositionRestrictedBorrow(facts.resultType) ||
+  Type.containsBorrowWrapper(facts.resultType) ||
   facts.capturesRestrictedParameter ||
   ((Type.isEffect(facts.resultType) ||
     Type.isCallable(facts.resultType) ||
@@ -4050,23 +4886,22 @@ export const checkModule = (
   result: Elaboration.Result,
   index: DeclarationIndex.Index,
   accessBoundaryPlan: LocalSharedAccessBoundaryPlan,
+  bodyQuery?: BodyQuery.BodyQuery,
 ): ModuleOwnership => {
   const executableFacts = Elaboration.executableFunctions(result)
-  const checked = result.hir.functions.map((fn) =>
-    checkFunction(
-      fn,
-      index,
-      executableFacts.find(
-        (fact) =>
-          fact.declaration.id.sourceId === fn.declaration.id.sourceId &&
-          fact.declaration.id.ordinal === fn.declaration.id.ordinal,
-      ),
-      fn.declaration.canonical._tag === 'Canonical'
-        ? (accessBoundaryPlan.boundaries.get(localSharedTargetKey(fn.declaration.canonical.id)) ??
-            Object.freeze([]))
-        : Object.freeze([]),
-    ),
-  )
+  const checked = result.hir.functions.map((fn) => {
+    const semantic = executableFacts.find(
+      (fact) =>
+        fact.declaration.id.sourceId === fn.declaration.id.sourceId &&
+        fact.declaration.id.ordinal === fn.declaration.id.ordinal,
+    )
+    const selected = input(fn, semantic, index, accessBoundaryPlan)
+    const compute = () => check(selected)
+    const checked =
+      bodyQuery === undefined ? compute() : BodyQuery.ownership(bodyQuery, selected, compute)
+    publishSourceProof(selected, checked)
+    return checked
+  })
   return Object.freeze({
     _tag: 'OwnershipFacts',
     module: result.syntax.source.id,

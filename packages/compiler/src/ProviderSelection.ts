@@ -2,6 +2,7 @@ import * as Constraint from './Constraint.js'
 import type * as FiniteRow from './FiniteRow.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
+import * as ResolutionWork from './ResolutionWork.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -132,6 +133,10 @@ const rejected = (
 
 export interface ConformanceOracle {
   readonly match: (provider: Type.Type, capability: Type.Nominal) => Constraint.ConformanceOutcome
+  readonly observation?: {
+    readonly work: ResolutionWork.ResolutionWork
+    readonly initiator: ResolutionWork.Initiator
+  }
 }
 
 const compareText = (left: string, right: string): number => {
@@ -198,9 +203,25 @@ const concreteSource = (
 
 const relationCandidates = (relation: Relation, oracle: ConformanceOracle): RelationCandidates => {
   const candidates = new Map<string, CandidateRecord>()
+  const observation = oracle.observation
+  const work =
+    observation === undefined
+      ? undefined
+      : ResolutionWork.begin(
+          observation.work,
+          {
+            ...observation.initiator,
+            key: `${observation.initiator.key}/${Constraint.key(relation.wanted)}`,
+          },
+          'ProviderSelection',
+        )
   for (const member of concreteSource(relation.wanted)?.members ?? []) {
+    if (work !== undefined) ResolutionWork.visit(work)
     const status = candidateStatus(relation.wanted, member, oracle)
-    if (status !== undefined) candidates.set(memberKey(member), Object.freeze({ member, status }))
+    if (status !== undefined) {
+      if (work !== undefined) ResolutionWork.accept(work)
+      candidates.set(memberKey(member), Object.freeze({ member, status }))
+    }
   }
   return Object.freeze({
     constraintKey: Constraint.key(relation.wanted),

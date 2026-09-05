@@ -7,7 +7,7 @@ import * as ImportPath from '@silklang/compiler/ImportPath'
 import * as ImportPlan from '@silklang/compiler/ImportPlan'
 import * as Presentation from '@silklang/compiler/Presentation'
 import * as SemanticOccurrence from '@silklang/compiler/SemanticOccurrence'
-import type * as SourceAction from '@silklang/compiler/SourceAction'
+import * as SourceAction from '@silklang/compiler/SourceAction'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as SourceSpan from '@silklang/compiler/SourceSpan'
 import * as Stdlib from '@silklang/compiler/Stdlib'
@@ -379,7 +379,15 @@ export interface UnusedImportData {
 }
 
 /** Every revision-bound descriptor accepted by code-action resolution. */
-export type CodeActionData = AutoImportData | UnusedImportData
+export interface LifetimeElisionData {
+  readonly _tag: 'SilkLifetimeElision'
+  readonly uri: string
+  readonly version: number
+  readonly module: string
+  readonly target: { readonly start: number; readonly end: number }
+}
+
+export type CodeActionData = AutoImportData | UnusedImportData | LifetimeElisionData
 
 const autoImportData = (
   self: Document,
@@ -444,6 +452,14 @@ export const parseCodeActionData = (value: unknown): CodeActionData | undefined 
     parsedTarget === undefined
   )
     return undefined
+  if (value._tag === 'SilkLifetimeElision')
+    return Object.freeze({
+      _tag: 'SilkLifetimeElision',
+      uri: value.uri,
+      version: value.version,
+      module: value.module,
+      target: parsedTarget,
+    })
   if (value._tag === 'SilkUnusedImport') {
     if (typeof value.spelling !== 'string') return undefined
     return Object.freeze({
@@ -738,7 +754,32 @@ export const codeActions = (
       ]
     },
   )
-  return [...compiler, ...redundancy, ...unused]
+  const expansions = Analysis.explicitLifetimes(
+    snapshot,
+    self.module,
+    LineIndex.offsetOf(self.index, range.start),
+    LineIndex.offsetOf(self.index, range.end),
+  ).flatMap((expansion): ReadonlyArray<CodeAction> => {
+    if (
+      !SourceAction.isCurrent(
+        expansion.plan,
+        new Map([[self.module, SourceFile.make(self.module, self.bytes)]]),
+      )
+    )
+      return []
+    const data: LifetimeElisionData = Object.freeze({
+      _tag: 'SilkLifetimeElision',
+      uri: self.uri,
+      version: self.version,
+      module: self.module,
+      target: Object.freeze({
+        start: expansion.descriptor.target.start,
+        end: expansion.descriptor.target.end,
+      }),
+    })
+    return [{ title: expansion.descriptor.title, kind: CodeActionKind.RefactorRewrite, data }]
+  })
+  return [...compiler, ...redundancy, ...unused, ...expansions]
 }
 
 export const disableCodeAction = (action: CodeAction, reason: string): CodeAction => {
@@ -763,6 +804,36 @@ export const resolveCodeAction = (
     data.version !== self.version
   )
     return disableCodeAction(action, 'The source revision for this action is no longer available')
+  if (data._tag === 'SilkLifetimeElision') {
+    const expansion = Analysis.explicitLifetimes(
+      snapshot,
+      self.module,
+      data.target.start,
+      data.target.end,
+    ).find(
+      (candidate) =>
+        candidate.descriptor.target.start === data.target.start &&
+        candidate.descriptor.target.end === data.target.end,
+    )
+    if (
+      expansion === undefined ||
+      !SourceAction.isCurrent(
+        expansion.plan,
+        new Map([[self.module, SourceFile.make(self.module, self.bytes)]]),
+      )
+    )
+      return disableCodeAction(
+        action,
+        'The lifetime header no longer matches the accepted source revision',
+      )
+    const edit = workspaceEdit(self, snapshot, expansion.plan, uriOf)
+    return edit === undefined
+      ? disableCodeAction(
+          action,
+          'The lifetime expansion could not be mapped to the current document',
+        )
+      : { ...action, edit }
+  }
   if (data._tag === 'SilkUnusedImport') {
     const binding = Analysis.unusedImports(snapshot, data.module).find(
       (candidate) =>
@@ -815,6 +886,11 @@ export const hover = (
       ? undefined
       : Documentation.toDocCommentMarkdown(Documentation.parse(source, raw))
   const signature = `\`\`\`silk\n${subject.presentation.text}\n\`\`\``
+  const lifetimeRequirements = subject.presentation.lifetimeRequirements ?? []
+  const lifetimeDetail =
+    lifetimeRequirements.length === 0
+      ? undefined
+      : `Lifetime requirements: ${lifetimeRequirements.map((bound) => `\`${bound}\``).join(', ')}.`
   const implementations =
     subject.implementedContracts.length === 0
       ? undefined
@@ -824,7 +900,7 @@ export const hover = (
   return {
     contents: {
       kind: 'markdown',
-      value: [signature, documentation, implementations]
+      value: [signature, lifetimeDetail, documentation, implementations]
         .filter((section): section is string => section !== undefined && section.length > 0)
         .join('\n\n'),
     },

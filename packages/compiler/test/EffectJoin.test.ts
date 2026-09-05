@@ -8,7 +8,7 @@ const ascii = (value: string): Uint8Array =>
 
 const nonFiniteSource = `struct First {}
 struct Second {}
-fn choose<F: Effect<i32>>(input: First | Second, operation: F) -> Effect<i32> {
+fn choose<'env, F: Effect<'env; i32>>(input: First | Second, operation: F) -> Effect<'env; i32> {
   return match move input {
     First {} => operation
     Second {} => effect { return 42 }
@@ -18,7 +18,7 @@ fn choose<F: Effect<i32>>(input: First | Second, operation: F) -> Effect<i32> {
 const divergingArmSource = `struct First {}
 struct Second {}
 fn diverge() -> never { return diverge() }
-fn choose(input: First | Second) -> Effect<i32> {
+fn choose(input: First | Second) -> Effect<'static; i32> {
   return match move input {
     First {} => effect { return 42 }
     Second {} => diverge()
@@ -41,7 +41,7 @@ effect fn useLeft() -> i32 ? &LeftClock { return run LeftClock.read() }
 effect fn useRight() -> i32 ? &RightClock { return run RightClock.read() }
 struct First {}
 struct Second {}
-fn choose(input: First | Second) -> Effect<i32 ? &LeftClock | &RightClock> {
+fn choose(input: First | Second) -> Effect<'static; i32 ? &LeftClock | &RightClock> {
   return match move input {
     First {} => useLeft()
     Second {} => useRight()
@@ -61,7 +61,7 @@ const snapshotOf = (name: string, text: string) =>
 
 it.effect('diagnoses a join whose representation is not a closed finite set', () =>
   Effect.gen(function* () {
-    const snapshot = yield* snapshotOf('effect-join/non-finite', nonFiniteSource)
+    const snapshot = yield* Analysis.ofSource('effect-join/non-finite', ascii(nonFiniteSource))
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       ['SEM0132'],
@@ -87,7 +87,7 @@ it.effect('normalizes both requirement rows and retains both provider targets', 
     const available = Analysis.expressionsOf(snapshot, module).flatMap((expression) =>
       expression.type._tag === 'Available' ? [Type.encode(expression.type.type)] : [],
     )
-    assert.include(available, `Effect<i32 ? &${module}.LeftClock | &${module}.RightClock>`)
+    assert.include(available, `Effect<'static; i32 ? &${module}.LeftClock | &${module}.RightClock>`)
     const targets = Analysis.instancesOf(snapshot)
       .calls.filter(
         (call) =>

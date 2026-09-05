@@ -204,11 +204,11 @@ pub fn main() -> i32 {
     assert.strictEqual(wrappers.length, 2)
     assert.deepEqual(
       wrappers
-        .map((instance) => instance.key.typeArguments.map(Type.genericArgumentKey).join(','))
+        .map((instance) => Type.runtimeArgumentKeys(instance.key.typeArguments).join(','))
         .toSorted(),
       [
-        Type.key(Type.nominal('conditional-conformance/specializations', 'Other')),
-        Type.key(Type.nominal('conditional-conformance/specializations', 'Schema')),
+        Type.runtimeKey(Type.nominal('conditional-conformance/specializations', 'Other')),
+        Type.runtimeKey(Type.nominal('conditional-conformance/specializations', 'Schema')),
       ].toSorted(),
     )
     // The base witnesses are reached through the wrapper's own proof, not by being called directly.
@@ -315,9 +315,9 @@ pub fn main() -> i32 {
     const witnessCall = witnessCalls.at(0)
     assert.deepEqual(
       witnessCall?._tag === 'Call'
-        ? witnessCall.typeArguments.map(Type.genericArgumentKey)
+        ? Type.runtimeArgumentKeys(witnessCall.typeArguments)
         : ['no call'],
-      [Type.key(Type.nominal('conditional-conformance/lowering', 'Schema'))],
+      [Type.runtimeKey(Type.nominal('conditional-conformance/lowering', 'Schema'))],
     )
   }),
 )
@@ -444,6 +444,38 @@ pub fn main() -> i32 { return 0 }`,
     assert.isTrue(
       details.some((detail) => detail.includes('which Decoder for') && detail.includes('Encoder')),
       details.join(' | '),
+    )
+  }),
+)
+it.effect('requires witness type lifetime bounds to follow from the conformance', () =>
+  Effect.gen(function* () {
+    const source = `interface Decoder<A> { fn decode(value: A) -> i32 }
+interface StaticDecoder<A> { fn decode(value: A) -> i32 }
+struct Cell<'a> { value: &'a i32 }
+fn decodeTyped<T: 'static>(value: T) -> i32 { drop value return 0 }
+impl<'a> Decoder<&'a i32> for Cell<'a> { decode: Cell.decodeTyped }
+impl<'a: 'static> StaticDecoder<&'a i32> for Cell<'a> { decode: Cell.decodeTyped }
+struct Pending<T> { value: T }
+service Scheduler {
+  effect fn prepare<T: 'static>(child: once Effect<'static; T>) -> Pending<T> ? &mut Scheduler
+}
+struct Provider {}
+effect fn prepare<T: 'static>(self: &mut Provider, child: once Effect<'static; T>) -> Pending<T> {
+  let value = run move child
+  return Pending { value: move value }
+}
+impl Scheduler for Provider { prepare: Provider.prepare }
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* Analysis.ofSource(
+      'conditional-conformance/type-lifetime-bounds',
+      new TextEncoder().encode(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        source: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [{ code: 'SEM0083', source: 'decode: Cell.decodeTyped' }],
     )
   }),
 )

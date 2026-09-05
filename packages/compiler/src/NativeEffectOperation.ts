@@ -4,13 +4,13 @@ import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import * as CleanupPlan from './CleanupPlan.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
+import * as NativeOwnedPlace from './NativeOwnedPlace.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeSuspension from './NativeSuspension.js'
@@ -38,20 +38,6 @@ type Operation = Extract<
   }
 >
 
-/**
- * An exclusive reference operand reborrows into a shared reference parameter: an owned or `&mut`
- * provider dispatching a `&Self` operation passes its `&mut Self` local straight through.
- */
-const acceptsOperand = (
-  expected: DeclarationFacts.SemanticType,
-  actual: DeclarationFacts.SemanticType,
-): boolean =>
-  SilkType.equals(expected, actual) ||
-  (SilkType.isReference(expected) &&
-    SilkType.isReference(actual) &&
-    expected.access === 'Shared' &&
-    SilkType.equals(expected.target, actual.target))
-
 export const emit = Effect.fnUntraced(function* (context: Context, operation: Operation) {
   const {
     arith,
@@ -72,12 +58,33 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   switch (operation._tag) {
     case 'Drop': {
       if (CleanupPlan.hasEffect(operation.cleanup)) {
+        let values = NativeStorage.readLocal(nativeStorage, operation.local)
+        if (operation.selectors !== undefined && operation.selectors.length > 0) {
+          const root = entry.fn.localTypes.at(operation.local.ordinal)
+          const place =
+            root === undefined
+              ? undefined
+              : NativeOwnedPlace.make(
+                  cleanup.program.layout,
+                  Mir.semanticType(root),
+                  operation.selectors,
+                )
+          if (place === undefined)
+            throw new RangeError('Owned place cleanup lost its verified projection')
+          values = yield* NativeOwnedPlace.read(
+            place,
+            cleanup.arith,
+            values,
+            `drop${operation.local.ordinal}_place`,
+          )
+        }
         yield* NativeAggregate.dropThroughPlan(
           cleanup,
           operation.cleanup,
-          NativeStorage.readLocal(nativeStorage, operation.local),
+          values,
           `drop${operation.local.ordinal}`,
           operation.localShared?.block,
+          operation.initialization,
         )
       }
       break
@@ -698,7 +705,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
                 return (
                   actual !== undefined &&
                   expected !== undefined &&
-                  acceptsOperand(Mir.semanticType(expected), Mir.semanticType(actual))
+                  Mir.acceptsRuntimeOperand(Mir.semanticType(actual), Mir.semanticType(expected))
                 )
               }))),
       )

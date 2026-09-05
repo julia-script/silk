@@ -17,6 +17,7 @@ const storedLayout = Effect.fnUntraced(function* (
   target: Target.Target,
 ) {
   const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), target.id)
+  assert.deepEqual(Analysis.diagnostics(snapshot), [])
   const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
   return Layout.plan(catalog, snapshot.instances, snapshot.index)
 })
@@ -89,11 +90,11 @@ pub fn main() -> i32 {
 
 it.effect('keeps nested nominal layouts deterministic', () =>
   Effect.gen(function* () {
-    const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
-struct Pair<F: fn(i32) -> i32> { first: Parser<F> second: Parser<F> }
+    const source = `struct Parser<'env, F: fn<'env>(i32) -> i32> { parse: F }
+struct Pair<'env, F: fn<'env>(i32) -> i32> { first: Parser<'env, F> second: Parser<'env, F> }
 fn decode(value: i32) -> i32 { return value }
-fn pair<F: fn(i32) -> i32>(first: Parser<F>, second: Parser<F>) -> Pair<F> {
-  return Pair<F> { first: move first, second: move second }
+fn pair<'env, F: fn<'env>(i32) -> i32>(first: Parser<'env, F>, second: Parser<'env, F>) -> Pair<'env, F> {
+  return Pair<'env, F> { first: move first, second: move second }
 }
 pub fn main() -> i32 {
   let first = Parser { parse: decode }

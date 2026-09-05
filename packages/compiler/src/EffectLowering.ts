@@ -3,6 +3,8 @@ import {
   cleanupForLocal,
   concreteCleanup,
   generated,
+  ownershipLocal,
+  lowerOwnershipPath,
   propagationLoanEnds,
   propagationReleases,
 } from './CleanupEmission.js'
@@ -14,11 +16,13 @@ import type { FunctionLowering } from './FunctionLowering.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
+import * as Lifetime from './Lifetime.js'
 import type { ProvidedRequirement } from './Lower.js'
-import { borrowKey, specializeProvider } from './Lower.js'
+import { borrowKey, patternKey, specializeProvider } from './Lower.js'
 import type {} from './LowerExpression.js'
 import { lowerExpression, lowerExecution } from './LowerExpression.js'
 import * as Match from './Match.js'
+import * as Ownership from './Ownership.js'
 import * as Mir from './Mir.js'
 import * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -869,7 +873,6 @@ export const lowerEffectCatch = (
   endRunLoans(fn, runSpan)
   return Object.freeze({ result: destination })
 }
-
 export const lowerPlacePath = (
   fn: FunctionLowering,
   expression: Hir.Expression,
@@ -1118,13 +1121,47 @@ export const borrowedWriteRoot = (
     ? fn.parameterLocals.get(root.parameter.ordinal)
     : fn.bindingLocals.get(root.binding.ordinal)
 
+/** Resolves a discriminant-only pattern alias to its original owned storage. */
+export const patternPlace = (
+  fn: FunctionLowering,
+  binding: Match.BindingId,
+  span: SourceSpan.SourceSpan,
+):
+  | { readonly root: Mir.LocalId; readonly selectors: ReadonlyArray<Mir.PlaceSelector> }
+  | undefined => {
+  const place = Ownership.allBindings(fn.ownership).find(
+    (candidate) =>
+      candidate.site._tag === 'Pattern' &&
+      patternKey(candidate.site.binding) === patternKey(binding),
+  )?.place
+  if (place === undefined) return undefined
+  const root = ownershipLocal(fn, place.root)
+  if (root === undefined) return undefined
+  const selectors = lowerOwnershipPath(fn, root, place.path, span)
+  return selectors === undefined ? undefined : { root, selectors }
+}
+
 export const ownedWriteRoot = (
   fn: FunctionLowering,
   root: Hir.OwnedWriteRoot,
-): Mir.LocalId | undefined =>
-  root._tag === 'ParameterWriteRoot'
-    ? fn.parameterLocals.get(root.parameter.ordinal)
-    : fn.bindingLocals.get(root.binding.ordinal)
+): Mir.LocalId | undefined => {
+  switch (root._tag) {
+    case 'ParameterWriteRoot':
+      return fn.parameterLocals.get(root.parameter.ordinal)
+    case 'BindingWriteRoot':
+      return fn.bindingLocals.get(root.binding.ordinal)
+    case 'PatternWriteRoot': {
+      const place = Ownership.allBindings(fn.ownership).find(
+        (candidate) =>
+          candidate.site._tag === 'Pattern' &&
+          patternKey(candidate.site.binding) === patternKey(root.binding),
+      )?.place
+      return place === undefined
+        ? fn.patternLocals.get(patternKey(root.binding))
+        : ownershipLocal(fn, place.root)
+    }
+  }
+}
 
 export const lowerServiceEffectValue = (
   fn: FunctionLowering,
@@ -1222,8 +1259,17 @@ const prepareProvidedEffect = (
       ...(ownedProvider === undefined ? {} : { ownedProvider }),
     })
 
+  if (provider === undefined) return undefined
   const providerType = fn.type(selected.providerType)
-  const referenceType = fn.type(Type.reference(access, selected.providerType))
+  const referenceType = fn.type(
+    Type.reference(
+      access,
+      selected.providerType,
+      forwardedType?._tag === 'Reference'
+        ? forwardedType.type.lifetime
+        : Lifetime.local(fn.owner.key.declaration, 'retained-provider', provider.ordinal),
+    ),
+  )
   const authoredLoan = fn.ownership?.loans.find(
     (candidate) =>
       (candidate.origin === 'EffectCapture' ||
@@ -1318,7 +1364,13 @@ const lowerForwardedProvider = <A>(
     forwarded.selection.witness._tag === 'SourceConformanceWitness'
   ) {
     const providerType = fn.type(forwarded.selection.providerType)
-    const referenceType = fn.type(Type.reference('Exclusive', forwarded.selection.providerType))
+    const referenceType = fn.type(
+      Type.reference(
+        'Exclusive',
+        forwarded.selection.providerType,
+        Lifetime.local(fn.owner.key.declaration, 'owned-provider', provider.result.ordinal),
+      ),
+    )
     if (providerType?._tag !== 'Nominal' || referenceType?._tag !== 'Reference') return undefined
     const borrow = fn.freshSyntheticBorrow(forwarded.provider.span)
     const reference = fn.alloc(referenceType)

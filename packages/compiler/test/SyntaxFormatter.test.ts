@@ -175,6 +175,42 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'WhileStatement',
 ])
 
+it.effect(
+  'formats lifetime bounds and environments without losing comments or elaborating omissions',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct Holder < 'a : 'b + 'c, 'b, 'c, T : Copy + 'a > {
+  value: & 'a T
+  values: & 'b mut [T]
+  text: string < 'c >
+  omitted: &T
+}
+effect < 'env > fn apply <'env,T>(callback: for < 'call > once fn < 'env > (& 'call T)-> & 'call T, pending: Effect < 'env ; // environment
+T ! Error ? &Clock >) -> () {drop pending}
+fn inspect(value: Choice)->i32{return match place value {Choice.Some{field}=>field Choice.None=>0}}`
+      const original = parse('memory://format-lifetimes.silk', source)
+      assert.deepEqual(original.lexicalDiagnostics, [])
+      assert.deepEqual(original.parserDiagnostics, [])
+      const first = yield* SyntaxFormatter.format(original)
+      const text = formattedText(first)
+      assert.include(text, "Holder<'a: 'b + 'c, 'b, 'c, T: Copy + 'a>")
+      assert.include(text, "value: &'a T")
+      assert.include(text, "values: &'b mut [T]")
+      assert.include(text, "text: string<'c>")
+      assert.include(text, 'omitted: &T')
+      assert.include(text, "for<'call> once fn<'env>(&'call T) -> &'call T")
+      assert.include(text, "Effect<'env;")
+      assert.include(text, 'match place value')
+      assert.include(text, "effect<'env> fn apply<'env, T>")
+      const reparsed = parse('memory://format-lifetimes.silk', text)
+      assert.deepEqual(reparsed.parserDiagnostics, [])
+      assert.deepEqual(normalized(reparsed, reparsed.root), normalized(original, original.root))
+      assert.deepEqual(comments(reparsed), comments(original))
+      const second = yield* SyntaxFormatter.format(reparsed)
+      assert.strictEqual(formattedText(second), text)
+    }),
+)
+
 it.effect('preserves singleton tuples and joins contextual record punctuation', () =>
   Effect.gen(function* () {
     const first = yield* SyntaxFormatter.format(

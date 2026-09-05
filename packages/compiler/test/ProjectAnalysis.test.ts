@@ -3,8 +3,11 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
 import * as Analysis from '../src/Analysis.js'
+import * as Elaboration from '../src/Elaboration.js'
 import * as FrontendTooling from '../src/FrontendTooling.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
+import * as Ownership from '../src/Ownership.js'
+import * as ResidualOwnership from '../src/ResidualOwnership.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceOrigin from '../src/SourceOrigin.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -35,10 +38,229 @@ const projectViewIsNotSingleRoot: ProjectAnalysis.View extends Analysis.SingleRo
   ? false
   : true = true
 
+it.effect(
+  'checks only edited bodies and rebinds alpha-renamed lifetime declarations in cached consumers',
+  () =>
+    Effect.gen(function* () {
+      const root = SourceFile.make(
+        'query/Main',
+        ascii(`import shared.Core
+pub fn main() -> i32 { let value = 5 return Core.identity(&value).* }
+fn sibling() -> i32 { return 8 }`),
+      )
+      const library = `pub fn identity<'a>(value: &'a i32) -> &'a i32 { return value }
+fn privateValue() -> i32 { return 1 }
+pub fn value() -> i32 { return privateValue() }`
+      const initial = yield* ProjectAnalysis.make([root]).pipe(
+        Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(library)]]))),
+      )
+      const edited = library.replace('return 1', 'return 23')
+      const revised = yield* ProjectAnalysis.revise(initial, [root]).pipe(
+        Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(edited)]]))),
+      )
+      const queries = revised.report.find((phase) => phase.phase === 'body-queries')?.counters
+      assert.strictEqual(queries?._tag, 'BodyQueryCounters')
+      if (queries?._tag !== 'BodyQueryCounters') return
+      assert.strictEqual(queries.checked, 1)
+      assert.strictEqual(queries.reused, 4)
+      assert.strictEqual(queries.ownershipChecked, 1)
+      assert.strictEqual(queries.ownershipReused, 4)
+      const alpha = edited.replaceAll("'a", "'long")
+      const renamed = yield* ProjectAnalysis.revise(revised, [root]).pipe(
+        Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(alpha)]]))),
+      )
+      const renamedQueries = renamed.report.find(
+        (phase) => phase.phase === 'body-queries',
+      )?.counters
+      assert.strictEqual(renamedQueries?._tag, 'BodyQueryCounters')
+      if (renamedQueries?._tag !== 'BodyQueryCounters') return
+      assert.strictEqual(renamedQueries.checked, 0)
+      assert.strictEqual(renamedQueries.reused, 5)
+      assert.strictEqual(renamedQueries.ownershipChecked, 0)
+      assert.strictEqual(renamedQueries.ownershipReused, 5)
+      const view = ProjectAnalysis.view(renamed, 'query/Main') ?? raise('renamed query view')
+      assert.deepEqual(Analysis.diagnostics(view), [])
+      const consumers = view.results.get('query/Main') ?? raise('consumer facts')
+      const selectedNames: Array<string> = []
+      for (const fn of consumers.functions)
+        Elaboration.visitStatementFacts(fn.statements, {
+          expression: (expression) => {
+            if (expression._tag === 'Call' && expression.reference._tag === 'Resolved')
+              for (const parameter of expression.reference.declaration.typeParameters)
+                if (parameter.name._tag === 'Present') selectedNames.push(parameter.name.spelling)
+          },
+        })
+      assert.deepEqual(selectedNames, ["'long"])
+      const functions = view.results.get('shared/Core')?.functions ?? raise('library facts')
+      const value = functions.at(-1) ?? raise('last library function')
+      assert.strictEqual(
+        alpha.slice(value.declaration.syntax.span.start, value.declaration.syntax.span.end).trim(),
+        'pub fn value() -> i32 { return privateValue() }',
+      )
+      const additionalRoot = SourceFile.make(
+        'query/Main',
+        ascii(`import shared.Core
+pub fn main() -> i32 { let value = 5 return Core.identity(&value).* }
+fn sibling() -> i32 { return 8 }
+fn additional() -> i32 { let value = 6 return Core.identity(&value).* }`),
+      )
+      const additional = yield* ProjectAnalysis.revise(renamed, [additionalRoot]).pipe(
+        Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(alpha)]]))),
+      )
+      const additionalQueries = additional.report.find(
+        (phase) => phase.phase === 'body-queries',
+      )?.counters
+      assert.strictEqual(additionalQueries?._tag, 'BodyQueryCounters')
+      if (additionalQueries?._tag !== 'BodyQueryCounters') return
+      assert.strictEqual(additionalQueries.checked, 1)
+      assert.strictEqual(additionalQueries.reused, 5)
+      const constrained = alpha.replace("identity<'long>", "identity<'long: 'static>")
+      const changedBound = yield* ProjectAnalysis.revise(renamed, [root]).pipe(
+        Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(constrained)]]))),
+      )
+      const boundQueries = changedBound.report.find(
+        (phase) => phase.phase === 'body-queries',
+      )?.counters
+      assert.strictEqual(boundQueries?._tag, 'BodyQueryCounters')
+      if (boundQueries?._tag !== 'BodyQueryCounters') return
+      assert.strictEqual(boundQueries.checked, 2)
+      assert.strictEqual(boundQueries.reused, 3)
+    }),
+)
+
 const assertProjectViewNotRealizable = (view: ProjectAnalysis.View): void => {
   assert.strictEqual(view.realization, 'ProjectView')
   assert.isTrue(projectViewIsNotSingleRoot)
 }
+
+it.effect('invalidates a cached missing imported member only when that member appears', () =>
+  Effect.gen(function* () {
+    const source = `import shared.Core
+pub fn main() -> i32 { return Core.answer() }
+fn sibling() -> i32 { return 0 }`
+    const root = SourceFile.make('query/Missing', ascii(source))
+    const initialLibrary = 'pub fn other() -> i32 { return 1 }'
+    const initial = yield* ProjectAnalysis.make([root]).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(initialLibrary)]]))),
+    )
+    const initialView = ProjectAnalysis.view(initial, root.id) ?? raise('missing initial view')
+    const missing = Analysis.diagnostics(initialView)
+    assert.deepEqual(
+      missing.map((diagnostic) => ({
+        code: diagnostic.code,
+        start: diagnostic.span.start,
+        end: diagnostic.span.end,
+      })),
+      [
+        {
+          code: 'SEM0014',
+          start: source.indexOf('answer'),
+          end: source.indexOf('answer') + 'answer'.length,
+        },
+      ],
+    )
+    const unrelatedLibrary = `${initialLibrary}\nfn unrelated() -> i32 { return 2 }`
+    const unrelated = yield* ProjectAnalysis.revise(initial, [root]).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(unrelatedLibrary)]]))),
+    )
+    const unrelatedWork = unrelated.report.find((phase) => phase.phase === 'body-queries')?.counters
+    assert.strictEqual(unrelatedWork?._tag, 'BodyQueryCounters')
+    if (unrelatedWork?._tag !== 'BodyQueryCounters') return
+    assert.strictEqual(unrelatedWork.checked, 1)
+    assert.strictEqual(unrelatedWork.reused, 3)
+    const unrelatedView =
+      ProjectAnalysis.view(unrelated, root.id) ?? raise('missing unrelated view')
+    assert.deepEqual(
+      Analysis.diagnostics(unrelatedView).map((diagnostic) => diagnostic.code),
+      ['SEM0014'],
+    )
+    const repairedLibrary = `${unrelatedLibrary}\npub fn answer() -> i32 { return 42 }`
+    const repaired = yield* ProjectAnalysis.revise(unrelated, [root]).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['shared/Core', ascii(repairedLibrary)]]))),
+    )
+    const repairedWork = repaired.report.find((phase) => phase.phase === 'body-queries')?.counters
+    assert.strictEqual(repairedWork?._tag, 'BodyQueryCounters')
+    if (repairedWork?._tag !== 'BodyQueryCounters') return
+    assert.strictEqual(repairedWork.checked, 2)
+    assert.strictEqual(repairedWork.reused, 3)
+    const repairedView = ProjectAnalysis.view(repaired, root.id) ?? raise('missing repaired view')
+    assert.deepEqual(Analysis.diagnostics(repairedView), [])
+  }),
+)
+
+it.effect('invalidates transitively consumed static bodies while retaining ordinary siblings', () =>
+  Effect.gen(function* () {
+    const source = `static fn base() -> i32 { return 1 }
+static fn indirect() -> i32 { return base() }
+pub fn main() -> i32 { return indirect() }
+fn spare() -> i32 { return 0 }
+fn recursiveLeft() -> i32 { return recursiveRight() }
+fn recursiveRight() -> i32 { return recursiveLeft() }`
+    const initial = yield* make([SourceFile.make('query/Static', ascii(source))])
+    const changed = yield* ProjectAnalysis.revise(initial, [
+      SourceFile.make('query/Static', ascii(source.replace('return 1', 'return 2'))),
+    ]).pipe(Effect.provide(SourceResolver.memory(sources)))
+    const queries = changed.report.find((phase) => phase.phase === 'body-queries')?.counters
+    assert.strictEqual(queries?._tag, 'BodyQueryCounters')
+    if (queries?._tag !== 'BodyQueryCounters') return
+    assert.strictEqual(queries.checked, 3)
+    assert.strictEqual(queries.reused, 3)
+    assert.strictEqual(queries.recursiveComponents, 1)
+    const view = ProjectAnalysis.view(changed, 'query/Static') ?? raise('static query view')
+    assert.deepEqual(Analysis.diagnostics(view), [])
+  }),
+)
+
+it.effect(
+  'rebinds cached diagnostics, anonymous declaration identities and match bindings after insertion',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct Box { value: i32 }
+fn callback(input: Box) -> i32 {
+  let transform = fn(value: i32) -> i32 { return value }
+  return match input { Box { value } => transform(value) }
+}
+fn broken() -> i32 { return missing() }`
+      const initial = yield* make([SourceFile.make('query/Rebind', ascii(source))])
+      const prefix = 'fn prefix() -> i32 { return 0 }\n'
+      const currentSource = prefix + source
+      const current = yield* ProjectAnalysis.revise(initial, [
+        SourceFile.make('query/Rebind', ascii(currentSource)),
+      ]).pipe(Effect.provide(SourceResolver.memory(sources)))
+      const queries = current.report.find((phase) => phase.phase === 'body-queries')?.counters
+      assert.strictEqual(queries?._tag, 'BodyQueryCounters')
+      if (queries?._tag !== 'BodyQueryCounters') return
+      assert.strictEqual(queries.checked, 1)
+      assert.strictEqual(queries.reused, 2)
+      const oldView =
+        ProjectAnalysis.view(initial, 'query/Rebind') ?? raise('original rebound view')
+      const view = ProjectAnalysis.view(current, 'query/Rebind') ?? raise('current rebound view')
+      const oldDiagnostic = Analysis.diagnostics(oldView).at(0) ?? raise('original unresolved call')
+      const diagnostic = Analysis.diagnostics(view).at(0) ?? raise('rebound unresolved call')
+      assert.strictEqual(diagnostic.code, oldDiagnostic.code)
+      assert.strictEqual(diagnostic.span.start, oldDiagnostic.span.start + prefix.length)
+      assert.strictEqual(diagnostic.span.end, oldDiagnostic.span.end + prefix.length)
+      const result = view.results.get('query/Rebind') ?? raise('rebound module')
+      const hidden = result.hiddenFunctions.at(0) ?? raise('rebound anonymous function')
+      assert.strictEqual(
+        hidden.declaration.id.ordinal,
+        0x70000000 + hidden.declaration.syntax.span.start,
+      )
+      const callback =
+        result.functions.find(
+          (fn) =>
+            fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'callback',
+        ) ?? raise('rebound callback')
+      Elaboration.visitStatementFacts(callback.statements, {
+        expression: (expression) => {
+          if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedPattern') {
+            const span = expression.reference.binding.syntax.span
+            assert.strictEqual(currentSource.slice(span.start, span.end).trim(), 'value')
+          }
+        },
+      })
+    }),
+)
 
 class TrackingMap<K, V> extends Map<K, V> {
   readonly reads: Array<K> = []
@@ -100,6 +322,7 @@ it.effect('analyzes a shared dependency once and derives structurally shared roo
         'declaration-index',
         'name-resolution',
         'module-surface',
+        'body-queries',
         'semantic-invalidation',
         'elaboration',
         'ownership',
@@ -289,6 +512,24 @@ it.effect('reuses exact unchanged syntax and module semantics inside one coheren
     )
     assert.strictEqual(currentView.results.get('app/B'), previousView.results.get('app/B'))
     assert.strictEqual(currentView.ownership.get('app/B'), previousView.ownership.get('app/B'))
+    const retainedResult = currentView.results.get('shared/Core') ?? raise('retained library')
+    const retainedFunction = retainedResult.hir.functions.at(0) ?? raise('retained HIR function')
+    const retainedFact = retainedResult.functions.at(0) ?? raise('retained semantic function')
+    const ownershipInput = Ownership.input(
+      retainedFunction,
+      retainedFact,
+      currentView.index,
+      Ownership.localSharedAccessBoundaryPlan(currentView.results),
+    )
+    const sourceProof = Ownership.sourceProof(ownershipInput) ?? raise('current-index source proof')
+    const residual = ResidualOwnership.make()
+    assert.strictEqual(
+      ResidualOwnership.check(residual, ownershipInput, 'UnchangedBody'),
+      sourceProof,
+    )
+    assert.strictEqual(ResidualOwnership.counters(residual).sourceReused, 1)
+    assert.strictEqual(ResidualOwnership.counters(residual).checked, 0)
+
     assert.deepEqual(current.report.find(({ phase }) => phase === 'elaboration')?.counters, {
       _tag: 'ModuleReuseCounters',
       reused: 2,
@@ -408,4 +649,68 @@ it.effect('recomputes tooling conservatively when prior module tooling is missin
       { _tag: 'ModuleReuseCounters', reused: 2, recomputed: 1 },
     )
   }),
+)
+
+it.effect(
+  'rechecks retained callback ownership when an incoming caller adds an access boundary',
+  () =>
+    Effect.gen(function* () {
+      const callbackSource = ascii('pub fn use(value: &mut i32) -> i32 { return value.* }')
+      const caller = `import shared.Callbacks
+fn conflict() -> i32 { return 0 }
+unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
+      const initial = yield* ProjectAnalysis.make([
+        SourceFile.make('boundary/Main', ascii(caller)),
+      ]).pipe(
+        Effect.provide(SourceResolver.memory(new Map([['shared/Callbacks', callbackSource]]))),
+      )
+      const edited = caller.replace(
+        'return 1',
+        'return Intrinsic.sharedWithMut<i32, i32>(core, Callbacks.use, conflict)',
+      )
+      const revised = yield* ProjectAnalysis.revise(initial, [
+        SourceFile.make('boundary/Main', ascii(edited)),
+      ]).pipe(
+        Effect.provide(SourceResolver.memory(new Map([['shared/Callbacks', callbackSource]]))),
+      )
+      const before = ProjectAnalysis.view(initial, 'boundary/Main') ?? raise('initial view')
+      const after = ProjectAnalysis.view(revised, 'boundary/Main') ?? raise('revised view')
+      assert.deepEqual(Analysis.diagnostics(before), [])
+      assert.deepEqual(Analysis.diagnostics(after), [])
+      const beforeResult = before.results.get('shared/Callbacks') ?? raise('initial callbacks')
+      const afterResult = after.results.get('shared/Callbacks') ?? raise('revised callbacks')
+      assert.strictEqual(afterResult, beforeResult)
+      const fn = afterResult.hir.functions.at(0) ?? raise('callback HIR')
+      const fact = afterResult.functions.at(0) ?? raise('callback fact')
+      const previousInput = Ownership.input(
+        fn,
+        fact,
+        before.index,
+        Ownership.localSharedAccessBoundaryPlan(before.results),
+      )
+      const currentInput = Ownership.input(
+        fn,
+        fact,
+        after.index,
+        Ownership.localSharedAccessBoundaryPlan(after.results),
+      )
+      assert.lengthOf(previousInput.boundaries, 0)
+      assert.lengthOf(currentInput.boundaries, 1)
+      const previousProof = Ownership.sourceProof(previousInput) ?? raise('previous callback proof')
+      const currentProof = Ownership.sourceProof(currentInput) ?? raise('current callback proof')
+      assert.notStrictEqual(currentProof.ownership, previousProof.ownership)
+      assert.notStrictEqual(
+        after.ownership.get('shared/Callbacks'),
+        before.ownership.get('shared/Callbacks'),
+      )
+      assert.strictEqual(
+        after.semantics.get('shared/Callbacks')?.ownership,
+        after.ownership.get('shared/Callbacks'),
+      )
+      const counters = revised.report.find((phase) => phase.phase === 'body-queries')?.counters
+      assert.strictEqual(counters?._tag, 'BodyQueryCounters')
+      if (counters?._tag !== 'BodyQueryCounters') return
+      assert.strictEqual(counters.checked, 1)
+      assert.strictEqual(counters.ownershipChecked, 2)
+    }),
 )

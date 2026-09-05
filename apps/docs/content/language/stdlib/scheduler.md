@@ -416,7 +416,7 @@ before the caller registers the returned publication data and parks for the resp
 ### Operation `prepare`
 
 ```silk
-effect fn prepare<A, E>(child: once Effect<A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> silk/scheduler.PendingPublication<A, E> ! OutOfMemoryError | TaskIdExhaustedError ? &mut Scheduler
+effect<'static> fn prepare<A: 'static, E: 'static>(child: once Effect<'static; A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> silk/scheduler.PendingPublication<A, E> ! OutOfMemoryError | TaskIdExhaustedError ? &mut Scheduler
 ```
 
 Prepares one lazy child task and returns its affine publication value.

@@ -1,3 +1,4 @@
+import * as Lifetime from './Lifetime.js'
 import * as Constraint from './Constraint.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Diagnostic from './Diagnostic.js'
@@ -349,6 +350,7 @@ export type WriteSelector =
 
 export type OwnedWriteRoot =
   | { readonly _tag: 'BindingWriteRoot'; readonly binding: BindingId }
+  | { readonly _tag: 'PatternWriteRoot'; readonly binding: Match.BindingId }
   | {
       readonly _tag: 'ParameterWriteRoot'
       readonly parameter: DeclarationFacts.ParameterId
@@ -1374,10 +1376,11 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
     active.add(expression)
     if (
       (expression._tag === 'StaticStringLiteral' &&
-        (expression.data.kind !== 'Text' || !Type.equals(expression.type, Type.string))) ||
+        (expression.data.kind !== 'Text' ||
+          !Lifetime.equals(expression.type.lifetime, Lifetime.staticLifetime))) ||
       (expression._tag === 'StaticByteViewLiteral' &&
         (expression.data.kind !== 'Bytes' ||
-          !Type.equals(expression.type, Type.slice('Shared', 'u8'))))
+          !Type.equals(expression.type, Type.slice('Shared', 'u8', Lifetime.staticLifetime))))
     ) {
       issues.push(Object.freeze({ _tag: 'InvalidStaticText', span: expression.span }))
     }
@@ -1386,7 +1389,10 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         ? expression.source.element
         : expression.source.element
       if (
-        !Type.equals(expression.type, Type.slice(expression.access, element)) ||
+        !Type.equals(
+          expression.type,
+          Type.slice(expression.access, element, expression.type.lifetime),
+        ) ||
         expression.reborrow !== Type.isSlice(expression.source) ||
         (Type.isSlice(expression.source) &&
           expression.source.access === 'Shared' &&
@@ -1401,7 +1407,10 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
           ? expression.source.target
           : expression.source
       if (
-        !Type.equals(expression.type, Type.reference(expression.access, sourceTarget)) ||
+        !Type.equals(
+          expression.type,
+          Type.reference(expression.access, sourceTarget, expression.type.lifetime),
+        ) ||
         expression.type.access !== expression.access ||
         expression.reborrow !== Type.isReference(expression.source) ||
         expression.suspendsParent !==
@@ -1422,8 +1431,11 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
       const held = expression.heldLoans.map(borrowText)
       if (
         expression.source._tag === 'Unavailable' ||
-        !Type.equals(expression.type, Type.string) ||
-        !Type.equals(expression.source.type, Type.slice('Shared', 'u8')) ||
+        !Type.isString(expression.type) ||
+        !Type.equals(
+          expression.source.type,
+          Type.slice('Shared', 'u8', expression.type.lifetime),
+        ) ||
         begins.length !== held.length ||
         begins.some((begin, ordinal) => begin !== held.at(ordinal)) ||
         new Set(held).size !== held.length
@@ -1435,8 +1447,8 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
       expression._tag === 'StringEquality' &&
       (expression.left._tag === 'Unavailable' ||
         expression.right._tag === 'Unavailable' ||
-        !Type.equals(expression.left.type, Type.string) ||
-        !Type.equals(expression.right.type, Type.string) ||
+        !Type.isString(expression.left.type) ||
+        !Type.isString(expression.right.type) ||
         !Type.equals(expression.type, 'bool') ||
         expression.intrinsic.name !== 'stringEqualsExact')
     ) {
@@ -2073,10 +2085,11 @@ const encodeStatement = (statement: Statement, depth: number): string => {
     case 'Write': {
       let root: string
       if (statement.place._tag === 'WritePlace') {
-        root =
-          statement.place.root._tag === 'BindingWriteRoot'
-            ? `b${statement.place.root.binding.ordinal}`
-            : `p${statement.place.root.parameter.ordinal}`
+        if (statement.place.root._tag === 'BindingWriteRoot')
+          root = `b${statement.place.root.binding.ordinal}`
+        else if (statement.place.root._tag === 'PatternWriteRoot')
+          root = `pattern${statement.place.root.binding.ordinal}`
+        else root = `p${statement.place.root.parameter.ordinal}`
       } else {
         root =
           statement.place.root._tag === 'BindingSliceRoot'

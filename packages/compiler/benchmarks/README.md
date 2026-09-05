@@ -11,3 +11,6 @@ process, or other external boundary is part of the lexer itself.
 The most recent local result is checked in as [`latest.json`](latest.json). It is evidence for the
 loop-shaped implementation, not a CI threshold: shared runners and developer machines have very
 different performance profiles.
+
+The separate [lifetime and partial ownership benchmark](lifetimes.md) measures source proof
+work, sparse move paths, and incremental body-query reuse across independent growth families.

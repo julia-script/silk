@@ -57,6 +57,39 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('relays the exact selected Effect from an owned interface witness adapter', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect { Effect }
+struct Token { value: i32 }
+interface Decode { effect fn decode(value: Self) -> i32 }
+effect fn decode(value: &Token) -> i32 {
+  return run Effect.suspend(effect { return value.value })
+}
+impl Decode for Token { decode: Token.decode }
+effect fn program() -> i32 { return run Decode.decode(Token { value: 42 }) }
+pub fn main() -> i32 { return run program() }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const provisional = available(self)
+    assert.deepEqual(ProvisionalMir.verify(provisional), [])
+    const adapter =
+      provisional.executions.find(
+        (execution) =>
+          execution.key._tag === 'WitnessEffectRunnerExecution' &&
+          execution.key.runner.name === 'program$effect$0',
+      ) ?? unreachable('expected selected witness adapter execution')
+    assert.strictEqual(adapter.classification, 'Suspendable')
+    const relay = adapter.regions.find(
+      (region) => region.outcome._tag === 'RunSuspendableEffect',
+    )?.outcome
+    assert.strictEqual(relay?._tag, 'RunSuspendableEffect')
+    if (relay?._tag !== 'RunSuspendableEffect') return
+    assert.strictEqual(relay.runner.classification, 'Suspendable')
+    assert.strictEqual(relay.runner.declaration?.name, 'decode$effect$-1')
+    assert.strictEqual(relay.runner.instance?.declaration.name, 'decode')
+    assert.deepEqual(relay.relay.preserves, ['Child', 'Origin', 'TypedOutcome'])
+  }),
+)
+
 it.effect('uses ordinary propagation for source-defined combinators', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`import silk.effect { Effect }
@@ -146,15 +179,18 @@ pub fn main() -> i32 {
     assert.isDefined(get)
     if (get === undefined) return
     const other = Type.nominal('provisional-mir/main', 'Other')
+    const otherArguments = get.key.typeArguments.map((argument) =>
+      Type.equalsGenericArgument(argument, token) ? other : argument,
+    )
     const substitution = TypeInference.substitution(
       get.function.declaration.typeParameters.map((parameter) => parameter.type),
-      [other],
+      otherArguments,
     )
     assert.isDefined(substitution)
     if (substitution === undefined) return
     const otherKey: Instances.InstanceKey = Object.freeze({
       ...get.key,
-      typeArguments: Object.freeze([other]),
+      typeArguments: Object.freeze(otherArguments),
     })
     const otherInstance: Instances.Instance = Object.freeze({
       ...get,
@@ -312,4 +348,31 @@ pub fn main() -> i32 {
       ProvisionalMir.encode(forward),
     )
   }),
+)
+
+it.effect(
+  'resolves directly bound service runners before classifying neighboring synchronous runs',
+  () =>
+    Effect.gen(function* () {
+      const self = yield* snapshot(`service Value { effect fn get() -> i32 ? &mut Value }
+struct Provider {}
+effect fn get(self: &mut Provider) -> i32 { return 42 }
+impl Value for Provider { get: Provider.get }
+effect fn seed(value: i32) -> i32 { return value }
+effect fn bound(provider: &mut Provider) -> i32 {
+  let value = run Intrinsic.bindRequirementMut(Value.get(), provider)
+  return run seed(value)
+}
+pub fn main() -> i32 {
+  let mut provider = Provider {}
+  return run bound(&mut provider)
+}`)
+      assert.deepEqual(Analysis.diagnostics(self), [])
+      const provisional = available(self)
+      assert.deepEqual(ProvisionalMir.verify(provisional), [])
+      assert.deepEqual(outcomes(provisional), [])
+      assert.isTrue(
+        provisional.executions.every((execution) => execution.classification === 'Synchronous'),
+      )
+    }),
 )

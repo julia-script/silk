@@ -304,9 +304,15 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   ): Instances.Instance | undefined => {
     const recorded = callAt(instance, expression)
     if (recorded !== undefined) return instances.get(Instances.keyText(recorded.target))
-    if (expression._tag === 'CallableApply') return undefined
+    if (expression._tag === 'CallableApply') {
+      return undefined
+    }
     const typeArguments = expression.typeArguments.map((argument) =>
-      Type.substituteGenericArgument(argument, instance.substitution),
+      Type.substituteGenericArgument(
+        argument,
+        instance.substitution,
+        instance.specialization.compatibility,
+      ),
     )
     const matches = Instances.matchingSpecialization(discovery, {
       declaration: expression.target,
@@ -453,7 +459,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       return raw !== undefined && Type.isTypeArgument(raw)
         ? Object.freeze({
             _tag: 'ConcreteOrigin',
-            element: Type.substitute(raw, instance.substitution),
+            element: Type.substitute(
+              raw,
+              instance.substitution,
+              instance.specialization.compatibility,
+            ),
             span: expression.span,
           })
         : Object.freeze({
@@ -467,7 +477,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
         _tag: 'ExecutionOrigin',
         arguments: Object.freeze(
           expression.typeArguments.map((argument) =>
-            Type.substituteGenericArgument(argument, instance.substitution),
+            Type.substituteGenericArgument(
+              argument,
+              instance.substitution,
+              instance.specialization.compatibility,
+            ),
           ),
         ),
         span: expression.span,
@@ -492,10 +506,21 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       const layouts = expression.arguments.filter(
         (argument) =>
           'type' in argument &&
-          Type.equals(Type.substitute(argument.type, instance.substitution), Type.layout),
+          Type.equals(
+            Type.substitute(
+              argument.type,
+              instance.substitution,
+              instance.specialization.compatibility,
+            ),
+            Type.layout,
+          ),
       )
       const layout = layouts.length === 1 ? layouts.at(0) : undefined
-      const service = Type.substitute(expression.service, instance.substitution)
+      const service = Type.substitute(
+        expression.service,
+        instance.substitution,
+        instance.specialization.compatibility,
+      )
       return layout === undefined || !Type.isNominal(service)
         ? Object.freeze({
             _tag: 'InvalidOrigin',
@@ -855,7 +880,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       const allocation = expression.arguments.at(0)
       const expected =
         raw !== undefined && Type.isTypeArgument(raw)
-          ? Type.substitute(raw, instance.substitution)
+          ? Type.substitute(raw, instance.substitution, instance.specialization.compatibility)
           : undefined
       const unresolved =
         allocation === undefined
@@ -929,7 +954,11 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
           Instances.concreteEffectRepresentationArgument(
             instance.function,
             instance.key,
-            Type.substituteGenericArgument(argument, instance.substitution),
+            Type.substituteGenericArgument(
+              argument,
+              instance.substitution,
+              instance.specialization.compatibility,
+            ),
           ),
         ),
       )

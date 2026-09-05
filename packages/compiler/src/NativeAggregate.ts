@@ -16,6 +16,7 @@ import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
+import * as MovePath from './MovePath.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
 import * as NativeExecutionOperation from './NativeExecutionOperation.js'
@@ -179,12 +180,33 @@ export interface Context {
  * mutated) lanes, struct fields release in declaration order, and every ticket-backed
  * lane calls the release shim exactly once.
  */
+interface Initialization {
+  readonly state: MovePath.State
+  readonly flags: NonNullable<Mir.DropOperation['initialization']>['flags']
+  readonly path?: MovePath.Path
+}
+
+const childInitialization = (
+  self: Initialization | undefined,
+  selector: MovePath.Selector,
+): Initialization | undefined => {
+  if (self === undefined) return undefined
+  const key = MovePath.key([selector])
+  const child = self.state.children.find((candidate) => MovePath.key([candidate.selector]) === key)
+  return {
+    state: child?.state ?? MovePath.make(self.state.initialization),
+    flags: self.flags,
+    path: [...(self.path ?? []), selector],
+  }
+}
+
 export const dropThroughPlan = Effect.fnUntraced(function* (
   context: Context,
   plan: CleanupPlan.CleanupPlan,
   values: ReadonlyArray<Value.Input>,
   tag: string,
   localSharedBlock?: LocalSharedControlBlock.Plan,
+  initialization?: Initialization,
 ): Effect.fn.Return<void, LlvmError.LlvmError> {
   const {
     builder,
@@ -202,6 +224,37 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
     storage,
     types,
   } = context
+  if (initialization?.state.initialization === 'Missing') return
+  if (initialization?.state.initialization === 'Maybe') {
+    const path = initialization.path ?? []
+    const flag = initialization.flags
+      .filter(
+        (candidate) =>
+          candidate.path.length <= path.length && MovePath.overlaps(candidate.path, path),
+      )
+      .sort((left, right) => right.path.length - left.path.length)
+      .at(0)
+    if (flag === undefined) throw new RangeError('Conditional cleanup lost its initialization flag')
+    const condition = yield* FunctionBody.integerCompare(
+      body,
+      'ne',
+      NativeStorage.readScalar(storage, flag.local),
+      yield* Constant.integerSigned(builder, i32, 0n),
+      `${tag}_is_initialized`,
+    )
+    const selected = yield* LlvmBlock.make(body, `${tag}_initialized`)
+    const following = yield* LlvmBlock.make(body, `${tag}_initialization_next`)
+    yield* FunctionBody.conditionalBranch(body, condition, selected, following)
+    yield* LlvmBlock.setInsertionPoint(body, selected)
+    yield* dropThroughPlan(context, plan, values, tag, localSharedBlock, {
+      ...initialization,
+      state: { ...initialization.state, initialization: 'Initialized' },
+    })
+    yield* FunctionBody.branch(body, following)
+    yield* LlvmBlock.setInsertionPoint(body, following)
+    yield* NativeStorage.reloadRoots(storage, `${tag}_initialization_next`)
+    return
+  }
   const semanticLanesOf = (type: SilkType.Type): ReadonlyArray<Layout.CallingLane> => {
     const shape = Layout.callingShape(program.layout, type)
     if (shape === undefined)
@@ -306,6 +359,11 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
             field.cleanup,
             Object.freeze(fieldValues),
             `${tag}_v${variant.ordinal}_f${fieldOrdinal}`,
+            undefined,
+            childInitialization(
+              childInitialization(initialization, { _tag: 'Variant', ordinal: variant.ordinal }),
+              { _tag: 'Field', ordinal: field.field.ordinal },
+            ),
           )
         }
         yield* FunctionBody.branch(body, followingBlock)
@@ -544,6 +602,8 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
           field.cleanup,
           Object.freeze(fieldValues),
           `${tag}_f${fieldOrdinal}`,
+          undefined,
+          childInitialization(initialization, { _tag: 'Field', ordinal: field.field.ordinal }),
         )
       }
       return
@@ -567,6 +627,8 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
           plan.element,
           Object.freeze(elementValues),
           `${tag}_e${index}`,
+          undefined,
+          childInitialization(initialization, { _tag: 'ConstantIndex', index }),
         )
       }
       return
@@ -582,7 +644,8 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
         throw new RangeError('LLVM union cleanup lost its shape')
       }
       for (const caseEntry of plan.cases) {
-        const paths = reclaimContextPaths(caseEntry.cleanup)
+        const paths =
+          initialization === undefined ? reclaimContextPaths(caseEntry.cleanup) : undefined
         if (paths === undefined) {
           const matches = yield* FunctionBody.integerCompare(
             body,
@@ -622,6 +685,8 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
             caseEntry.cleanup,
             Object.freeze(selected),
             `${tag}_u${caseEntry.ordinal}`,
+            undefined,
+            childInitialization(initialization, { _tag: 'Variant', ordinal: caseEntry.ordinal }),
           )
           yield* FunctionBody.branch(body, followingBlock)
           yield* LlvmBlock.setInsertionPoint(body, followingBlock)

@@ -144,7 +144,7 @@ An empty set allocates no storage. The seed fixes bucket order for the same oper
 ### Method `HashSet.length`
 
 ```silk
-pub fn length<T>(self: &HashSet<T>) -> usize
+pub fn length<T, 'life1>(self: &'life1 HashSet<T>) -> usize
 ```
 
 Returns the number of elements the set holds.
@@ -154,7 +154,7 @@ Returns the number of elements the set holds.
 ### Method `HashSet.bucketCount`
 
 ```silk
-pub fn bucketCount<T>(self: &HashSet<T>) -> usize
+pub fn bucketCount<T, 'life1>(self: &'life1 HashSet<T>) -> usize
 ```
 
 Returns the number of buckets the set presents, which is the range `occupiedAt` accepts.
@@ -164,7 +164,7 @@ Returns the number of buckets the set presents, which is the range `occupiedAt` 
 ### Method `HashSet.occupiedAt`
 
 ```silk
-pub fn occupiedAt<T>(self: &HashSet<T>, index: usize) -> bool
+pub fn occupiedAt<T, 'life1>(self: &'life1 HashSet<T>, index: usize) -> bool
 ```
 
 Reports whether one bucket holds an element. Out-of-range buckets hold nothing.
@@ -174,7 +174,7 @@ Reports whether one bucket holds an element. Out-of-range buckets hold nothing.
 ### Method `HashSet.insert`
 
 ```silk
-pub effect fn insert<T>(self: &mut HashSet<T>, value: T) -> bool ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn insert<T: 'env, 'life1: 'env, 'env>(self: &'life1 mut HashSet<T>, value: T) -> bool ! OutOfMemoryError ? &mut Allocator
 ```
 
 Inserts one owned element, reporting whether an equivalent element was already held.
@@ -192,7 +192,7 @@ leaves every prior element present, and leaves the length and the bucket count u
 ### Method `HashSet.contains`
 
 ```silk
-pub fn contains<T>(self: &HashSet<T>, value: T) -> bool
+pub fn contains<T, 'life1>(self: &'life1 HashSet<T>, value: T) -> bool
 ```
 
 Reports whether the set holds an element equivalent to one probe element.
@@ -206,7 +206,7 @@ This function consumes the probe element. It does not change the set or move a s
 ### Method `HashSet.indexOf`
 
 ```silk
-pub fn indexOf<T>(self: &HashSet<T>, value: T) -> silk/option.Option<usize>
+pub fn indexOf<T, 'life1>(self: &'life1 HashSet<T>, value: T) -> silk/option.Option<usize>
 ```
 
 Returns the bucket holding an element equivalent to one probe element, or an absent value.
@@ -221,7 +221,7 @@ This function consumes the probe element.
 ### Method `HashSet.remove`
 
 ```silk
-pub fn remove<T>(self: &mut HashSet<T>, value: T) -> silk/option.Option<T>
+pub fn remove<T, 'life1>(self: &'life1 mut HashSet<T>, value: T) -> silk/option.Option<T>
 ```
 
 Removes the element equivalent to one probe element and answers with it.
@@ -235,7 +235,7 @@ Ownership passes to the caller; the set does not also release it. The probe elem
 ### Method `HashSet.elementAt`
 
 ```silk
-pub fn elementAt<T>(self: &HashSet<T>, index: usize) -> T
+pub fn elementAt<T, 'life1>(self: &'life1 HashSet<T>, index: usize) -> T
 ```
 
 Returns the element held in one bucket. Traps on a bucket that holds no element.

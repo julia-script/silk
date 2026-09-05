@@ -539,6 +539,7 @@ const printServiceOperation = (
       ? undefined
       : directTokens(operatorMarker).find((token) => Operator.isDeclarationToken(token.kind))
   const effectKeyword = directTokens(node).find((token) => token.kind === 'EffectKeyword')
+  const effectEnvironment = directNodes(node).find((child) => child.kind === 'EffectEnvironment')
   const unsafeKeyword = directTokens(node).find((token) => token.kind === 'UnsafeKeyword')
   const typeParameters = directNodes(node).find((child) => child.kind === 'TypeParameterList')
   const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
@@ -573,6 +574,7 @@ const printServiceOperation = (
               ? prefix
               : FormatDocument.empty,
           ),
+          ...(effectEnvironment === undefined ? [] : [printNode(context, effectEnvironment)]),
           FormatDocument.text(' '),
         ]),
     printToken(
@@ -752,9 +754,14 @@ const printFunctionDeclaration = (
   const whereClause = nodes.find((child) => child.kind === 'WhereClause')
   const body = nodes.find((child) => child.kind === 'Block')
   return FormatDocument.concat(
-    ...head.map((token, index) =>
+    ...head.flatMap((token, index) => [
       printToken(context, token, index === 0 ? prefix : FormatDocument.text(' ')),
-    ),
+      ...(token.kind === 'EffectKeyword'
+        ? nodes
+            .filter((child) => child.kind === 'EffectEnvironment')
+            .map((child) => printNode(context, child))
+        : []),
+    ]),
     printToken(context, name, FormatDocument.text(' ')),
     ...(typeParameters === undefined ? [] : [printNode(context, typeParameters)]),
     printNode(context, nodeOf(node, 'ParameterList')),
@@ -905,7 +912,25 @@ const printNode = (
     }
     case 'ImportPath':
     case 'TypePath':
+    case 'LifetimeType':
       return printTokenSequence(context, node, prefix, FormatDocument.empty, preserveBlank)
+    case 'CallableEnvironment':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Less'), prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'Lifetime')),
+        printToken(context, tokenOf(node, 'Greater')),
+      )
+    case 'EffectEnvironment':
+      if (directTokens(node).some((token) => token.kind === 'Less'))
+        return FormatDocument.concat(
+          printToken(context, tokenOf(node, 'Less'), prefix, preserveBlank),
+          printToken(context, tokenOf(node, 'Lifetime')),
+          printToken(context, tokenOf(node, 'Greater')),
+        )
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Lifetime'), prefix, preserveBlank),
+        printToken(context, tokenOf(node, 'Semicolon')),
+      )
     case 'RequirementSelector': {
       const [capability, role] = directNodes(node)
       if (capability === undefined || role === undefined)
@@ -919,7 +944,8 @@ const printNode = (
       const nodes = directNodes(node)
       const failure = nodes.find((child) => child.kind === 'FailureRow')
       const requirements = nodes.find((child) => child.kind === 'RequirementRow')
-      if (failure === undefined && requirements === undefined)
+      const environment = nodes.find((child) => child.kind === 'EffectEnvironment')
+      if (failure === undefined && requirements === undefined && environment === undefined)
         return printDelimited(
           context,
           tokenOf(node, 'Less'),
@@ -929,15 +955,21 @@ const printNode = (
           prefix,
         )
       const arguments_ = nodes.filter(
-        (child) => child.kind !== 'FailureRow' && child.kind !== 'RequirementRow',
+        (child) =>
+          child.kind !== 'FailureRow' &&
+          child.kind !== 'RequirementRow' &&
+          child.kind !== 'EffectEnvironment',
       )
+      const firstArgumentPrefix =
+        environment === undefined ? FormatDocument.empty : FormatDocument.text(' ')
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'Less'), prefix, preserveBlank),
+        ...(environment === undefined ? [] : [printNode(context, environment)]),
         ...arguments_.map((argument, ordinal) =>
           printNode(
             context,
             argument,
-            ordinal === 0 ? FormatDocument.empty : FormatDocument.text(', '),
+            ordinal === 0 ? firstArgumentPrefix : FormatDocument.text(', '),
           ),
         ),
         ...(failure === undefined ? [] : [printNode(context, failure, FormatDocument.text(' '))]),
@@ -948,6 +980,7 @@ const printNode = (
       )
     }
     case 'TypeParameterList':
+    case 'LifetimeBinderList':
     case 'CallTypeArgumentList':
       return printDelimited(
         context,
@@ -957,24 +990,30 @@ const printNode = (
         tokenOf(node, 'Greater'),
         prefix,
       )
-    case 'TypeParameter': {
+    case 'TypeParameter':
+    case 'LifetimeParameter': {
       const marker = directTokens(node).find(
         (token) => token.kind === 'Bang' || token.kind === 'Question',
       )
       const colon = directTokens(node).find((token) => token.kind === 'Colon')
-      const bound = directNodes(node).at(0)
+      const bounds = directNodes(node)
+      const pluses = directTokens(node).filter((token) => token.kind === 'Plus')
       return FormatDocument.concat(
         ...(marker === undefined ? [] : [printToken(context, marker, prefix, preserveBlank)]),
         printToken(
           context,
-          tokenOf(node, 'Identifier'),
+          tokenOf(node, node.kind === 'LifetimeParameter' ? 'Lifetime' : 'Identifier'),
           marker === undefined ? prefix : FormatDocument.empty,
           preserveBlank,
         ),
         ...(colon === undefined ? [] : [printToken(context, colon)]),
-        ...(bound === undefined
-          ? []
-          : [printNode(context, bound, FormatDocument.text(' '), preserveBlank)]),
+        ...bounds.flatMap((bound, ordinal) => {
+          const plus = ordinal === 0 ? undefined : pluses.at(ordinal - 1)
+          return [
+            ...(plus === undefined ? [] : [printToken(context, plus, FormatDocument.text(' '))]),
+            printNode(context, bound, FormatDocument.text(' '), preserveBlank),
+          ]
+        }),
       )
     }
     case 'AppliedType': {
@@ -1175,8 +1214,12 @@ const printNode = (
       )
     case 'SliceType': {
       const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
+      const lifetime = directTokens(node).find((token) => token.kind === 'Lifetime')
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'Ampersand'), prefix, preserveBlank),
+        ...(lifetime === undefined
+          ? []
+          : [printToken(context, lifetime), FormatDocument.text(' ')]),
         ...(mut === undefined ? [] : [printToken(context, mut), FormatDocument.text(' ')]),
         printToken(context, tokenOf(node, 'LeftBracket')),
         printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
@@ -1185,10 +1228,14 @@ const printNode = (
     }
     case 'ReferenceType': {
       const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
+      const lifetime = directTokens(node).find((token) => token.kind === 'Lifetime')
       const at = directTokens(node).find((token) => token.kind === 'At')
       const role = directTokens(node).find((token) => token.kind === 'Identifier')
       return FormatDocument.concat(
         printToken(context, tokenOf(node, 'Ampersand'), prefix, preserveBlank),
+        ...(lifetime === undefined
+          ? []
+          : [printToken(context, lifetime), FormatDocument.text(' ')]),
         ...(mut === undefined ? [] : [printToken(context, mut), FormatDocument.text(' ')]),
         printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
         ...(at === undefined ? [] : [printToken(context, at)]),
@@ -1208,7 +1255,13 @@ const printNode = (
     }
     case 'CallableType':
     case 'ForeignFunctionType': {
-      const nodes = directNodes(node)
+      const nodes = directNodes(node).filter(
+        (child) => child.kind !== 'LifetimeBinderList' && child.kind !== 'CallableEnvironment',
+      )
+      const environment = directNodes(node).find((child) => child.kind === 'CallableEnvironment')
+      const binders = directNodes(node).filter((child) => child.kind === 'LifetimeBinderList')
+      const forKeywords = directTokens(node).filter((token) => token.kind === 'ForKeyword')
+      const callablePrefix = binders.length === 0 ? prefix : FormatDocument.empty
       const result = nodes.at(-1) ?? nodeOf(node, 'TypePath')
       const parameters = nodes.slice(0, -1)
       const mut = directTokens(node).find((token) => token.kind === 'MutKeyword')
@@ -1217,6 +1270,14 @@ const printNode = (
       const externKeyword = directTokens(node).find((token) => token.kind === 'ExternKeyword')
       const abi = directTokens(node).find((token) => token.kind === 'TextLiteral')
       return FormatDocument.concat(
+        ...binders.flatMap((binder, ordinal) => {
+          const keyword = forKeywords.at(ordinal)
+          return [
+            ...(keyword === undefined ? [] : [printToken(context, keyword, prefix, preserveBlank)]),
+            printNode(context, binder),
+            FormatDocument.text(' '),
+          ]
+        }),
         ...(externKeyword === undefined
           ? []
           : [
@@ -1226,24 +1287,42 @@ const printNode = (
             ]),
         ...(unsafe === undefined
           ? []
-          : [printToken(context, unsafe, prefix, preserveBlank), FormatDocument.text(' ')]),
+          : [printToken(context, unsafe, callablePrefix, preserveBlank), FormatDocument.text(' ')]),
         ...(mut === undefined
           ? []
-          : [printToken(context, mut, prefix, preserveBlank), FormatDocument.text(' ')]),
+          : [
+              printToken(
+                context,
+                mut,
+                unsafe === undefined ? callablePrefix : FormatDocument.empty,
+                preserveBlank,
+              ),
+              FormatDocument.text(' '),
+            ]),
         ...(once === undefined
           ? []
-          : [printToken(context, once, prefix, preserveBlank), FormatDocument.text(' ')]),
+          : [
+              printToken(
+                context,
+                once,
+                unsafe === undefined ? callablePrefix : FormatDocument.empty,
+                preserveBlank,
+              ),
+              FormatDocument.text(' '),
+            ]),
         printToken(
           context,
           tokenOf(node, 'FnKeyword'),
           unsafe === undefined &&
             mut === undefined &&
             once === undefined &&
-            externKeyword === undefined
+            externKeyword === undefined &&
+            binders.length === 0
             ? prefix
             : FormatDocument.empty,
           preserveBlank,
         ),
+        ...(environment === undefined ? [] : [printNode(context, environment)]),
         printDelimited(
           context,
           tokenOf(node, 'LeftParenthesis'),

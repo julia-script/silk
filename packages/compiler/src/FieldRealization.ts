@@ -1,6 +1,7 @@
 import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
+import * as Lifetime from './Lifetime.js'
 import type * as Instances from './Instances.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as SuspensionMode from './SuspensionMode.js'
@@ -191,9 +192,9 @@ export interface Index {
   readonly entries: ReadonlyArray<Entry>
 }
 
-/** Canonical realization key; identical to the field resolution key it enriches. */
+/** Physical realization identity; lifetime proof arguments remain in semantic field resolution. */
 export const key = (instance: Type.Nominal, id: RepresentationField.Id): string =>
-  RepresentationField.key(instance, id)
+  `${Type.runtimeKey(instance)}:${RepresentationField.idKey(id)}`
 
 const ownedAccess = (access: CaptureAccess): boolean => access === 'Take'
 
@@ -341,36 +342,42 @@ type EnvironmentCaptures =
 const sameArguments = (
   left: ReadonlyArray<Type.GenericArgument>,
   right: ReadonlyArray<Type.GenericArgument>,
-): boolean =>
-  left.length === right.length &&
-  left.every((argument, ordinal) => {
-    const candidate = right.at(ordinal)
-    if (candidate === undefined) return false
-    if (Type.equalsGenericArgument(argument, candidate)) return true
-    if (!Type.isEffectIdentityArgument(argument) || !Type.isEffectIdentityArgument(candidate))
-      return false
-    const retained = argument.owner === undefined ? candidate : argument
-    const discovered = argument.owner === undefined ? argument : candidate
-    const owner = retained.owner
-    if (owner === undefined || !retained.identity.startsWith('effect:')) return false
-    const ownerPrefix = `${owner.declaration.module}\u0000${owner.declaration.name}\u0000${owner.typeArguments
-      .map(Type.genericArgumentKey)
-      .join('\u0000')}\u0002`
-    return (
-      discovered.identity.startsWith(ownerPrefix) &&
-      discovered.identity.endsWith(`\u0004${retained.identity.slice('effect:'.length)}`)
-    )
-  })
+): boolean => {
+  const physicalLeft = left.filter((argument) => !Lifetime.isLifetime(argument))
+  const physicalRight = right.filter((argument) => !Lifetime.isLifetime(argument))
+  return (
+    physicalLeft.length === physicalRight.length &&
+    physicalLeft.every((argument, ordinal) => {
+      const candidate = physicalRight.at(ordinal)
+      if (candidate === undefined) return false
+      if (Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate))
+        return true
+      if (!Type.isEffectIdentityArgument(argument) || !Type.isEffectIdentityArgument(candidate))
+        return false
+      const retained = argument.owner === undefined ? candidate : argument
+      const discovered = argument.owner === undefined ? argument : candidate
+      const owner = retained.owner
+      if (owner === undefined || !retained.identity.startsWith('effect:')) return false
+      const ownerPrefix = `${owner.declaration.module}\u0000${owner.declaration.name}\u0000${Type.runtimeArgumentKeys(
+        owner.typeArguments,
+      ).join('\u0000')}\u0002`
+      return (
+        discovered.identity.startsWith(ownerPrefix) &&
+        discovered.identity.endsWith(`\u0004${retained.identity.slice('effect:'.length)}`)
+      )
+    })
+  )
+}
 
 export const matchesIdentity = (
   identity: Type.CallableIdentityArgument,
   candidate: Instances.CallableInstance,
 ): boolean =>
   identity.environment !== undefined &&
-  Type.equalsCallableEnvironmentIdentity(
-    identity.environment,
-    Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
-  ) &&
+  Type.runtimeCallableEnvironmentIdentityKey(identity.environment) ===
+    Type.runtimeCallableEnvironmentIdentityKey(
+      Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+    ) &&
   Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
   sameArguments(identity.typeArguments, candidate.typeArguments)
 
@@ -379,7 +386,7 @@ const captureShape = (callable: Instances.CallableInstance): string =>
   callable.captures
     .map(
       (capture) =>
-        `${capture.ordinal}:${capture.parameterOrdinal}:${capture.access}:${Type.key(capture.type)}`,
+        `${capture.ordinal}:${capture.parameterOrdinal}:${capture.access}:${Type.runtimeKey(capture.type)}`,
     )
     .join(' ')
 
@@ -488,12 +495,12 @@ const effectShape = (effect: Instances.EffectInstance): string =>
   [
     effect.identity,
     `${effect.runner.module}.${effect.runner.name}`,
-    effect.typeArguments.map(Type.genericArgumentKey).join(','),
-    Type.key(effect.type),
+    Type.runtimeArgumentKeys(effect.typeArguments).join(','),
+    Type.runtimeKey(effect.type),
     SuspensionMode.has(effect.suspension, 'NestedTransfer') ? 'suspendable' : 'synchronous',
     ...effect.captures.map(
       (capture) =>
-        `${capture.ordinal}:${capture.source}:${capture.sourceOrdinal}:${capture.access}:${Type.key(capture.type)}:${capture.effectIdentity ?? ''}:${capture.callableIdentity === undefined ? '' : Type.genericArgumentKey(capture.callableIdentity)}`,
+        `${capture.ordinal}:${capture.source}:${capture.sourceOrdinal}:${capture.access}:${Type.runtimeKey(capture.type)}:${capture.effectIdentity ?? ''}:${capture.callableIdentity === undefined ? '' : Type.runtimeGenericArgumentKey(capture.callableIdentity)}`,
     ),
   ].join(' ')
 
@@ -672,13 +679,14 @@ export const isEffectRealization = (self: Realization): self is EffectRealizatio
 
 /** True when every realized field of one complete instance has a runtime realization. */
 export const supportsInstance = (self: Index, instance: Type.Nominal): boolean => {
-  const entries = self.entries.filter((entry) =>
-    Type.equals(
-      entry.support._tag === 'Supported'
-        ? entry.support.realization.instance
-        : entry.support.instance,
-      instance,
-    ),
+  const identity = Type.runtimeKey(instance)
+  const entries = self.entries.filter(
+    (entry) =>
+      Type.runtimeKey(
+        entry.support._tag === 'Supported'
+          ? entry.support.realization.instance
+          : entry.support.instance,
+      ) === identity,
   )
   return entries.length > 0 && entries.every((entry) => entry.support._tag === 'Supported')
 }
@@ -693,15 +701,15 @@ export const matchesCallable = (
   Hir.matchesCallableTargetIdentity(candidate.target, self.target) &&
   sameArguments(self.targetArguments, candidate.typeArguments) &&
   self.environment !== undefined &&
-  Type.equalsCallableEnvironmentIdentity(
-    self.environment,
-    Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
-  )
+  Type.runtimeCallableEnvironmentIdentityKey(self.environment) ===
+    Type.runtimeCallableEnvironmentIdentityKey(
+      Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+    )
 
 /** Structural equality for callable runtime facts owned by this actor. */
 const equalsCallable = (left: CallableRealization, right: CallableRealization): boolean =>
   key(left.instance, left.field) === key(right.instance, right.field) &&
-  Type.equals(left.contract, right.contract) &&
+  Type.runtimeKey(left.contract) === Type.runtimeKey(right.contract) &&
   Hir.sameCallableTarget(
     Hir.callableTargetFromIdentity(left.target),
     Hir.callableTargetFromIdentity(right.target),
@@ -710,7 +718,8 @@ const equalsCallable = (left: CallableRealization, right: CallableRealization): 
   ((left.environment === undefined && right.environment === undefined) ||
     (left.environment !== undefined &&
       right.environment !== undefined &&
-      Type.equalsCallableEnvironmentIdentity(left.environment, right.environment))) &&
+      Type.runtimeCallableEnvironmentIdentityKey(left.environment) ===
+        Type.runtimeCallableEnvironmentIdentityKey(right.environment))) &&
   ((left.site === undefined && right.site === undefined) ||
     (left.site !== undefined &&
       right.site !== undefined &&
@@ -723,7 +732,7 @@ const equalsCallable = (left: CallableRealization, right: CallableRealization): 
       capture.ordinal === candidate.ordinal &&
       capture.parameterOrdinal === candidate.parameterOrdinal &&
       capture.access === candidate.access &&
-      Type.equals(capture.type, candidate.type) &&
+      Type.runtimeKey(capture.type) === Type.runtimeKey(candidate.type) &&
       capture.owned === candidate.owned &&
       capture.borrowed === candidate.borrowed
     )
@@ -746,12 +755,13 @@ const equalsEffectEnvironment = (
       slot.source === candidate.source &&
       slot.sourceOrdinal === candidate.sourceOrdinal &&
       slot.access === candidate.access &&
-      Type.equals(slot.type, candidate.type) &&
+      Type.runtimeKey(slot.type) === Type.runtimeKey(candidate.type) &&
       slot.effectIdentity === candidate.effectIdentity &&
       ((slot.callableIdentity === undefined && candidate.callableIdentity === undefined) ||
         (slot.callableIdentity !== undefined &&
           candidate.callableIdentity !== undefined &&
-          Type.equalsGenericArgument(slot.callableIdentity, candidate.callableIdentity))) &&
+          Type.runtimeGenericArgumentKey(slot.callableIdentity) ===
+            Type.runtimeGenericArgumentKey(candidate.callableIdentity))) &&
       ((slot.providedRequirement === undefined && candidate.providedRequirement === undefined) ||
         (slot.providedRequirement !== undefined &&
           candidate.providedRequirement !== undefined &&
@@ -771,8 +781,8 @@ const equalsEffectEnvironment = (
 
 const equalsEffect = (left: EffectRealization, right: EffectRealization): boolean =>
   key(left.instance, left.field) === key(right.instance, right.field) &&
-  Type.equals(left.contract, right.contract) &&
-  Type.equals(left.requiredBound, right.requiredBound) &&
+  Type.runtimeKey(left.contract) === Type.runtimeKey(right.contract) &&
+  Type.runtimeKey(left.requiredBound) === Type.runtimeKey(right.requiredBound) &&
   left.runnerIdentity === right.runnerIdentity &&
   left.runner.module === right.runner.module &&
   left.runner.name === right.runner.name &&

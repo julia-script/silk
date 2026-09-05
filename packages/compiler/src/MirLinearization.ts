@@ -18,6 +18,7 @@ export type LinearTerminator =
   | {
       readonly _tag: 'MatchBranch'
       readonly scrutinee: Mir.LocalId
+      readonly selectors?: ReadonlyArray<Mir.PlaceSelector>
       readonly shape: Layout.CallingShape
       readonly member: Match.CoverageIdentity
       readonly taken: Mir.RegionId
@@ -27,6 +28,7 @@ export type LinearTerminator =
   | {
       readonly _tag: 'EnumMatchBranch'
       readonly scrutinee: Mir.LocalId
+      readonly selectors?: ReadonlyArray<Mir.PlaceSelector>
       readonly discriminant: bigint
       readonly type: Extract<Mir.Type, { readonly _tag: 'Enum' }>
       readonly representation: Extract<Layout.Representation, { readonly _tag: 'ScalarEnum' }>
@@ -71,6 +73,7 @@ export type LinearOperation =
   | {
       readonly _tag: 'BindMatch'
       readonly scrutinee: Mir.LocalId
+      readonly selectors?: ReadonlyArray<Mir.PlaceSelector>
       readonly shape: Layout.CallingShape
       readonly member: Match.CoverageIdentity
       readonly destination: Mir.LocalId
@@ -116,6 +119,8 @@ export interface StructuredBlock {
 
 export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefined => {
   switch (operation._tag) {
+    case 'SetInitialized':
+      return operation.flag
     case 'Literal':
     case 'EnumConstant':
     case 'EnumValue':
@@ -688,7 +693,7 @@ export const expandMatches = (
       const arm = match.arms.find((item) => item.id.ordinal === candidate.ordinal)
       if (arm === undefined) throw new RangeError('LLVM match expansion lost a candidate arm')
       const bindingMember =
-        arm.member?._tag === 'StructuralTypeMember' && Match.selects(arm.member, member)
+        arm.member?._tag === 'StructuralTypeMember' && Match.selects(arm.member, member, 'Runtime')
           ? arm.member
           : member
       const bindings: ReadonlyArray<LinearOperation> = Object.freeze(
@@ -699,6 +704,7 @@ export const expandMatches = (
           Object.freeze({
             _tag: 'BindMatch' as const,
             scrutinee: match.scrutinee,
+            ...(match.selectors === undefined ? {} : { selectors: match.selectors }),
             shape: match.scrutineeShape,
             member: bindingMember,
             destination: binding.destination,
@@ -715,6 +721,7 @@ export const expandMatches = (
           Object.freeze({
             _tag: 'BindMatch' as const,
             scrutinee: match.scrutinee,
+            ...(match.selectors === undefined ? {} : { selectors: match.selectors }),
             shape: match.scrutineeShape,
             member: bindingMember,
             destination: entry.destination,
@@ -800,6 +807,7 @@ export const expandMatches = (
             terminator: Object.freeze({
               _tag: 'EnumMatchBranch',
               scrutinee: match.scrutinee,
+              ...(match.selectors === undefined ? {} : { selectors: match.selectors }),
               discriminant: declared.discriminant,
               type: enumType,
               representation: enumType.representation,
@@ -839,6 +847,7 @@ export const expandMatches = (
           terminator: Object.freeze({
             _tag: 'MatchBranch',
             scrutinee: match.scrutinee,
+            ...(match.selectors === undefined ? {} : { selectors: match.selectors }),
             shape: match.scrutineeShape,
             member: decision.member,
             taken: decisionEntries.at(ordinal) ?? trap,

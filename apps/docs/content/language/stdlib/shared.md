@@ -89,7 +89,7 @@ affinity. `Shared` declares no source Drop hook.
 ### Associated function `Shared.make`
 
 ```silk
-pub effect fn make<T>(value: T) -> silk/shared.Shared<T> ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn make<T: 'env, 'env>(value: T) -> silk/shared.Shared<T> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Allocates one control block and transfers `value` into a new strong handle.
@@ -104,7 +104,7 @@ The returned handle carries no allocator requirement after construction complete
 ### Method `Shared.clone`
 
 ```silk
-pub fn clone<T>(self: &Shared<T>) -> silk/shared.Shared<T>
+pub fn clone<T, 'life1>(self: &'life1 Shared<T>) -> silk/shared.Shared<T>
 ```
 
 Adds one strong handle without allocating or touching the stored value.
@@ -118,7 +118,7 @@ Count exhaustion traps before mutation and does not produce a partial handle.
 ### Method `Shared.withMut`
 
 ```silk
-pub fn withMut<T, A>(self: &Shared<T>, use: once fn(&mut T) -> A) -> A
+pub fn withMut<T, A, 'life2, 'life3>(self: &'life2 Shared<T>, use: for<'call0> once fn<'life3>(&'call0 mut T) -> A) -> A
 ```
 
 Runs one take-once callback Shared.with exclusive access to the stored value.
@@ -133,7 +133,7 @@ any alias traps before the nested callback receives a reference.
 ### Method `Shared.with`
 
 ```silk
-pub fn with<T, A>(self: &Shared<T>, use: once fn(&T) -> A) -> A
+pub fn with<T, A, 'life2, 'life3>(self: &'life2 Shared<T>, use: for<'call0> once fn<'life3>(&'call0 T) -> A) -> A
 ```
 
 Runs one take-once callback Shared.with shared access to the stored value.

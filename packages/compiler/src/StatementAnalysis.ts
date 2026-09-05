@@ -1,6 +1,13 @@
+import * as Lifetime from './Lifetime.js'
+import * as BodyLifetime from './BodyLifetime.js'
+import * as LifetimeFlow from './LifetimeFlow.js'
+import * as LifetimeAdmission from './LifetimeAdmission.js'
+import * as NominalVariance from './NominalVariance.js'
+import * as TypeOutlives from './TypeOutlives.js'
 import { concreteCallableIdentity, exactCallableOf, executableSites } from './CallResolution.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationLifetime from './DeclarationLifetime.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as DeclarationResolution from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -22,8 +29,6 @@ import {
   expressionChildren,
   isExpressionNode,
   representationJoinDiagnostic,
-  returnedBorrowArgument,
-  returnedBorrowExpression,
   spelling,
   typesCompatible,
   unavailableCompatibility,
@@ -396,7 +401,6 @@ export const analyzeStatements = (
       selectionScope,
       context.resolution,
       undefined,
-      true,
     )
     if (initializer === undefined) {
       throw new RangeError(`Semantic analysis cannot analyze ${initializerNode.kind}`)
@@ -674,6 +678,21 @@ export const analyzeStatements = (
                     : [],
                 ),
               ),
+              false,
+              context.resolution.bodyLifetimes === undefined
+                ? undefined
+                : DeclarationLifetime.forBody(
+                    context.source,
+                    context.resolution.bodyLifetimes,
+                    declaredSyntax,
+                    new Map(
+                      context.declaration.typeParameters.flatMap((parameter) =>
+                        parameter.name._tag === 'Present'
+                          ? [[parameter.name.spelling, parameter.type] as const]
+                          : [],
+                      ),
+                    ),
+                  ),
             )
       const nameResolution: NameResolution.Resolution = Object.freeze({
         _tag: 'NameResolution',
@@ -702,7 +721,6 @@ export const analyzeStatements = (
         scope,
         context.resolution,
         expected,
-        true,
       )
       if (initializer === undefined) {
         throw new RangeError(`Semantic analysis cannot analyze ${initializerNode.kind}`)
@@ -711,7 +729,7 @@ export const analyzeStatements = (
       if (
         expected !== undefined &&
         initializer.type !== undefined &&
-        !typesCompatible(initializer.type, expected)
+        !typesCompatible(initializer.type, expected, context.resolution?.lifetimeCompatibility)
       )
         context.diagnostics.push(
           Diagnostic.assignmentTypeMismatch(
@@ -784,7 +802,7 @@ export const analyzeStatements = (
           expected !== undefined &&
           Type.isUnion(expected) &&
           initializer.type !== undefined &&
-          typesCompatible(initializer.type, expected)
+          typesCompatible(initializer.type, expected, context.resolution?.lifetimeCompatibility)
             ? Object.freeze({ _tag: 'Available', type: expected })
             : initializer.fact.type,
         initializer: initializer.fact,
@@ -1222,20 +1240,35 @@ export const analyzeStatements = (
         throw new RangeError(`Semantic analysis cannot analyze ${destinationNode.kind}`)
       }
       context.diagnostics.push(...destination.diagnostics)
+      const root = assignmentRoot(destination.fact)
+      const activatedStart = context.resolution.bodyLifetimes?.activatedConstraints.length ?? 0
+      const writeCompatibility =
+        context.resolution.bodyLifetimes === undefined ||
+        context.resolution.lifetimeCompatibility === undefined
+          ? context.resolution.lifetimeCompatibility
+          : BodyLifetime.activatedCompatibility(
+              context.resolution.bodyLifetimes,
+              context.resolution.lifetimeCompatibility,
+              element,
+              root?.syntax,
+            )
+      const writeResolution: ResolutionContext = {
+        ...context.resolution,
+        ...(writeCompatibility === undefined ? {} : { lifetimeCompatibility: writeCompatibility }),
+      }
       const value = analyzeExpression(
         context.source,
         valueNode,
         context.declarations,
         context.declaration,
         scope,
-        context.resolution,
+        writeResolution,
         destination.type,
       )
       if (value === undefined) {
         throw new RangeError(`Semantic analysis cannot analyze ${valueNode.kind}`)
       }
       context.diagnostics.push(...value.diagnostics)
-      const root = assignmentRoot(destination.fact)
       if (destination.fact._tag === 'ForeignStatic') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(
@@ -1249,7 +1282,7 @@ export const analyzeStatements = (
         if (SyntaxTree.isAvailableSyntax(destinationNode) && destination.diagnostics.length === 0) {
           context.diagnostics.push(Diagnostic.invalidAssignmentPlace(destinationNode.span))
         }
-      } else if (assignmentRootAccess(root) === 'ImmutableOwned') {
+      } else if (assignmentRootAccess(root, destination.fact) === 'ImmutableOwned') {
         context.diagnostics.push(
           Diagnostic.immutableAssignment(
             root.name._tag === 'Present' ? root.name.spelling : '?',
@@ -1257,8 +1290,8 @@ export const analyzeStatements = (
           ),
         )
       } else if (
-        assignmentRootAccess(root) === 'SharedBorrowed' ||
-        (assignmentRootAccess(root) === 'ExclusiveBorrowed' &&
+        assignmentRootAccess(root, destination.fact) === 'SharedBorrowed' ||
+        (assignmentRootAccess(root, destination.fact) === 'ExclusiveBorrowed' &&
           destination.fact._tag !== 'IndexProjection' &&
           destination.fact._tag !== 'ReferentProjection' &&
           destination.fact._tag !== 'FieldProjection')
@@ -1268,7 +1301,7 @@ export const analyzeStatements = (
       const compatible =
         destination.type !== undefined &&
         value.type !== undefined &&
-        typesCompatible(value.type, destination.type)
+        typesCompatible(value.type, destination.type, writeCompatibility)
       if (destination.type !== undefined && value.type !== undefined && !compatible) {
         const expectedOrigin =
           root?._tag === 'BindingFact' ? root.initializer.syntax.span : destinationNode.span
@@ -1280,7 +1313,12 @@ export const analyzeStatements = (
             valueNode.span,
             valueNode.span,
           ) ??
-            unionConversionDiagnostic(value.type, destination.type, valueNode.span) ??
+            unionConversionDiagnostic(
+              value.type,
+              destination.type,
+              valueNode.span,
+              context.resolution?.lifetimeCompatibility,
+            ) ??
             Diagnostic.assignmentTypeMismatch(
               Type.encode(destination.type),
               Type.encode(value.type),
@@ -1324,6 +1362,14 @@ export const analyzeStatements = (
           ...(root === undefined ? {} : { root }),
           value: value.fact,
           compatible,
+          lifetimeProof: Lifetime.assumptions(
+            compatible
+              ? (context.resolution.bodyLifetimes?.activatedConstraints
+                  .slice(activatedStart)
+                  .filter(({ installed }) => installed === element)
+                  .map(({ bound }) => bound) ?? [])
+              : [],
+          ).bounds,
           region,
           syntax: element,
         }),
@@ -1451,7 +1497,6 @@ export const analyzeStatements = (
         scope,
         context.resolution,
         !context.effectBlock ? context.returnType : undefined,
-        !context.effectBlock && DeclarationFacts.returnedBorrow(context.declaration) !== undefined,
       )
       if (expression === undefined) {
         throw new RangeError(`Semantic analysis cannot analyze ${expressionNode.kind}`)
@@ -1857,6 +1902,13 @@ export const analyzeFunctionBody = (
   }
   collectUnsafeSpans(declaration.syntax)
   const nextBindingOrdinal = { value: 0 }
+  const bodyLifetimes = BodyLifetime.make(
+    declaration.canonical._tag === 'Canonical'
+      ? declaration.canonical.id
+      : { module: source.id, name: `#${declaration.id.ordinal}` },
+    declaration.syntax,
+    TypeOutlives.context(resolution.index.modules).parameterBounds,
+  )
   const bodyResolution: ResolutionContext = Object.freeze({
     ...resolution,
     unsafeSpans: Object.freeze(unsafeSpans),
@@ -1866,6 +1918,15 @@ export const analyzeFunctionBody = (
       ? { executableOwner: declaration.canonical.id }
       : {}),
     executableSites: executableSites(declaration.syntax),
+    bodyLifetimes,
+    lifetimeCompatibility: BodyLifetime.compatibility(
+      bodyLifetimes,
+      Lifetime.assumptions([
+        ...(DeclarationFacts.executableLifetimes(declaration).lifetimeBounds ?? []),
+        ...TypeOutlives.context(resolution.index.modules).assumptions.bounds,
+      ]),
+      NominalVariance.derive(resolution.index).summaries,
+    ),
     writtenCallableBindings: new Set<number>(),
     generatedAggregates: new Map(),
     ...(staticContext === undefined ? {} : { staticContext }),
@@ -1926,132 +1987,6 @@ export const analyzeFunctionBody = (
     node.children.some((child) => SyntaxTree.isNode(child) && containsDeferredStaticControl(child))
   const hasDeferredStaticControl =
     staticContext === undefined && containsDeferredStaticControl(blockNode)
-  const returnedBorrow = DeclarationFacts.returnedBorrow(declaration)
-
-  const bindingOrigins = new Map<number, DeclarationFacts.ParameterFact | undefined>()
-  const borrowedPatternOrigins = new Map<string, DeclarationFacts.ParameterFact | undefined>()
-  const originOf = (
-    expression: ExpressionFact,
-    patternOrigins: ReadonlyMap<
-      string,
-      DeclarationFacts.ParameterFact | undefined
-    > = borrowedPatternOrigins,
-  ): DeclarationFacts.ParameterFact | undefined => {
-    if (expression._tag === 'Grouped') return originOf(expression.expression, patternOrigins)
-    if (expression._tag === 'Move') return originOf(expression.subject, patternOrigins)
-    if (expression._tag === 'Identifier') {
-      if (expression.reference._tag === 'Resolved') return expression.reference.parameter
-      if (expression.reference._tag === 'ResolvedBinding') {
-        const ordinal = expression.reference.binding.id.ordinal
-        if (!bindingOrigins.has(ordinal)) {
-          bindingOrigins.set(
-            ordinal,
-            originOf(expression.reference.binding.initializer, patternOrigins),
-          )
-        }
-        return bindingOrigins.get(ordinal)
-      }
-      if (expression.reference._tag === 'ResolvedPattern') {
-        const id = expression.reference.binding.id
-        return patternOrigins.get(`${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`)
-      }
-      return undefined
-    }
-    if (expression._tag === 'Borrow') {
-      if (expression.formation._tag === 'Unavailable') return undefined
-      const root = expression.formation.root
-      if (root._tag === 'ParameterRoot') return root.parameter
-      if (root._tag === 'BindingRoot') return originOf(root.binding.initializer, patternOrigins)
-      if (root._tag === 'TemporaryRoot') return undefined
-      const id = root.binding.id
-      return patternOrigins.get(`${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`)
-    }
-    if (expression._tag === 'FieldProjection' || expression._tag === 'IndexProjection') {
-      return originOf(expression.subject, patternOrigins)
-    }
-    if (expression._tag === 'Call' || expression._tag === 'CallableApply') {
-      const source = returnedBorrowExpression(expression)
-      return source === undefined ? undefined : originOf(source, patternOrigins)
-    }
-    if (expression._tag === 'Match') {
-      const scrutinee = originOf(expression.scrutinee, patternOrigins)
-      const origins = expression.arms
-        .filter(
-          (arm) =>
-            arm.reachable &&
-            arm.body._tag === 'Expression' &&
-            !(arm.body.type._tag === 'Available' && Type.isNever(arm.body.type.type)),
-        )
-        .map((arm) => {
-          const armOrigins = new Map(patternOrigins)
-          for (const binding of arm.bindings) {
-            const id = binding.id
-            armOrigins.set(`${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`, scrutinee)
-          }
-          return arm.body._tag === 'Expression'
-            ? originOf(arm.body.expression, armOrigins)
-            : undefined
-        })
-      if (origins.some((origin) => origin === undefined)) return undefined
-      const first = origins.at(0)
-      return first !== undefined &&
-        origins.every((origin) => origin?.id.ordinal === first.id.ordinal)
-        ? first
-        : undefined
-    }
-    return undefined
-  }
-
-  visitStatementFacts(statements, {
-    descendEffectBlocks: false,
-    expression: (expression) => {
-      if (expression._tag !== 'Match') return
-      const origin = originOf(expression.scrutinee)
-      for (const arm of expression.arms)
-        for (const binding of arm.bindings) {
-          const id = binding.id
-          borrowedPatternOrigins.set(
-            `${id.arm.match.span.start}:${id.arm.ordinal}:${id.ordinal}`,
-            origin,
-          )
-        }
-    },
-  })
-
-  const staticView = DeclarationFacts.returnsStaticView(declaration)
-  if ((returnedBorrow !== undefined || staticView) && context.declaration.phase !== 'Static') {
-    // Program-lifetime sources: static literals, calls carrying no caller view, and bindings of
-    // either. A static-view function may return nothing else.
-    const isBorrowFreeReturn = (expression: ExpressionFact): boolean => {
-      if (expression._tag === 'Grouped') return isBorrowFreeReturn(expression.expression)
-      if (expression._tag === 'Move') return isBorrowFreeReturn(expression.subject)
-      if (expression._tag === 'StaticText') return expression.data !== undefined
-      if (expression._tag === 'Identifier' && expression.reference._tag === 'ResolvedBinding')
-        return isBorrowFreeReturn(expression.reference.binding.initializer)
-      if (expression._tag !== 'Call' || expression.reference._tag !== 'Resolved') return false
-      const argument = returnedBorrowArgument(expression)
-      return (
-        argument === undefined &&
-        expression.type._tag === 'Available' &&
-        Type.containsViewBorrow(expression.type.type) &&
-        expression.arguments.every(
-          (candidate) =>
-            candidate.type._tag === 'Available' && !Type.containsViewBorrow(candidate.type.type),
-        )
-      )
-    }
-    for (const statement of returnFlowOf(statements).returns) {
-      const origin = originOf(statement.expression)
-      if (
-        origin?.id.ordinal !== returnedBorrow?.parameter.id.ordinal &&
-        !isBorrowFreeReturn(statement.expression)
-      )
-        context.diagnostics.push(
-          Diagnostic.invalidReturnedBorrowOrigin(statement.expression.syntax.span),
-        )
-    }
-  }
-
   type Terminal = Extract<StatementFact, { _tag: 'ReturnStatement' | 'FailStatement' }>
   const terminalOf = (body: ReadonlyArray<StatementFact>): Terminal | undefined => {
     for (const statement of [...body].reverse()) {
@@ -2094,8 +2029,16 @@ export const analyzeFunctionBody = (
       const actual = returned.expression.type.type
       if (
         staticContext?.typeSubstitution === undefined
-          ? declaredReturnTypesCompatible(declaration, returned.expression)
-          : typesCompatible(actual, returnType ?? declaration.returnType.type)
+          ? declaredReturnTypesCompatible(
+              declaration,
+              returned.expression,
+              bodyResolution?.lifetimeCompatibility,
+            )
+          : typesCompatible(
+              actual,
+              returnType ?? declaration.returnType.type,
+              bodyResolution?.lifetimeCompatibility,
+            )
       )
         continue
       validReturnContract = false
@@ -2111,6 +2054,7 @@ export const analyzeFunctionBody = (
             actual,
             returnType ?? declaration.returnType.type,
             returned.expression.syntax.span,
+            bodyResolution?.lifetimeCompatibility,
           ) ??
           Diagnostic.returnTypeMismatch(
             Type.encode(returnType ?? declaration.returnType.type),
@@ -2138,10 +2082,30 @@ export const analyzeFunctionBody = (
   const resultRepresentation = validReturnContract
     ? returnSiteEffectJoin(context, declaration, returnFlow.returns)
     : undefined
+  const lifetimeFlow = LifetimeFlow.analyze(
+    declaration,
+    statements,
+    bodyLifetimes,
+    resolution.index,
+  )
+  context.diagnostics.push(...lifetimeFlow.diagnostics)
+  const lifetimeAdmission = LifetimeAdmission.body(
+    LifetimeAdmission.withAggregates(
+      LifetimeAdmission.context(resolution.index),
+      bodyResolution.generatedAggregates?.values() ?? [],
+    ),
+    statements,
+  )
+  context.diagnostics.push(...lifetimeAdmission.diagnostics)
 
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'FunctionFact',
+      ...(bodyResolution.lifetimeCompatibility === undefined
+        ? {}
+        : { comparisonWork: Object.freeze({ ...bodyResolution.lifetimeCompatibility.work }) }),
+      lifetimeFlow,
+      lifetimeAdmission: lifetimeAdmission.obligations,
       declaration,
       statements,
       bindings: Object.freeze([...context.bindings]),
@@ -2151,7 +2115,6 @@ export const analyzeFunctionBody = (
       ...(resultRepresentation === undefined ? {} : { resultRepresentation }),
       generatedAggregates: Object.freeze([...(bodyResolution.generatedAggregates?.values() ?? [])]),
       staticIterations: Object.freeze([...context.staticIterations]),
-      ...(returnedBorrow === undefined ? {} : { returnedBorrow }),
     }),
     diagnostics: Object.freeze([...context.diagnostics]),
   })

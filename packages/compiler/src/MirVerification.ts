@@ -1,3 +1,5 @@
+import * as MirInitialization from './MirInitialization.js'
+import * as Lifetime from './Lifetime.js'
 import * as CAbi from './CAbi.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
@@ -21,6 +23,7 @@ import type {
   LocalId,
   LoopId,
   LoopRegion,
+  MatchArm,
   MatchOperation,
   MirFunction,
   Module,
@@ -34,6 +37,7 @@ import type {
   Violation,
 } from './Mir.js'
 import {
+  acceptsRuntimeOperand,
   callingShapeEquals,
   executionOperations,
   regionsTree,
@@ -67,8 +71,16 @@ type LoanPathState = 'Dormant' | 'Live' | 'Ended'
 
 interface StructuredCfgPathSemantics<State> {
   readonly initial: ReadonlySet<State>
+  readonly before?: (operation: Operation, incoming: ReadonlySet<State>) => ReadonlySet<State>
+  readonly after?: (operation: Operation, incoming: ReadonlySet<State>) => ReadonlySet<State>
+  readonly enterArm?: (arm: MatchArm, incoming: ReadonlySet<State>) => ReadonlySet<State>
+  readonly select?: (
+    operation: MatchOperation,
+    member: Match.CoverageIdentity,
+    incoming: ReadonlySet<State>,
+  ) => ReadonlySet<State>
   readonly transfer: (operation: Operation, incoming: ReadonlySet<State>) => ReadonlySet<State>
-  readonly terminal: (states: ReadonlySet<State>) => void
+  readonly terminal: (states: ReadonlySet<State>, outcome?: Outcome) => void
   readonly repeat: (states: ReadonlySet<State>) => ReadonlySet<State>
   readonly merge: (...groups: ReadonlyArray<ReadonlySet<State>>) => ReadonlySet<State>
 }
@@ -90,7 +102,10 @@ const structuredCfgPathsValid = <State>(
     incoming: ReadonlySet<State>,
   ): ReadonlySet<State> => {
     let states = incoming
-    for (const operation of operations) states = transfer(operation, states)
+    for (const operation of operations) {
+      states = transfer(operation, states)
+      states = semantics.after?.(operation, states) ?? states
+    }
     return states
   }
   const execution = (value: Execution, initial: ReadonlySet<State>): ReadonlySet<State> => {
@@ -130,7 +145,8 @@ const structuredCfgPathsValid = <State>(
       const outcome = region.outcome
       if (outcome._tag === 'Complete') for (const state of result) completed.add(state)
       else if (outcome._tag === 'Forward') add(outcome.target, result)
-      else if (outcome._tag === 'Return' || outcome._tag === 'Trap') semantics.terminal(result)
+      else if (outcome._tag === 'Return' || outcome._tag === 'Trap')
+        semantics.terminal(result, outcome)
       else if (outcome._tag === 'Repeat' || outcome._tag === 'Exit') {
         const loop = loops.get(outcome.loop.ordinal)
         if (loop === undefined) {
@@ -171,13 +187,15 @@ const structuredCfgPathsValid = <State>(
       valid = false
       return new Set()
     }
-    const guarded = arm.guard === undefined ? incoming : execution(arm.guard.execution, incoming)
+    const bound = semantics.enterArm?.(arm, incoming) ?? incoming
+    const guarded = arm.guard === undefined ? bound : execution(arm.guard.execution, bound)
     const selected = execution(arm.selected.execution, guarded)
     return arm.guard === undefined
       ? selected
       : semantics.merge(selected, matchCandidates(operation, candidates, ordinal + 1, guarded))
   }
   const transfer = (operation: Operation, incoming: ReadonlySet<State>): ReadonlySet<State> => {
+    incoming = semantics.before?.(operation, incoming) ?? incoming
     if (operation._tag === 'PropagateEffectFailure') {
       semantics.terminal(incoming)
       return new Set()
@@ -206,7 +224,12 @@ const structuredCfgPathsValid = <State>(
       }
       return semantics.merge(
         ...operation.decisions.map((decision) =>
-          matchCandidates(operation, decision.candidates, 0, incoming),
+          matchCandidates(
+            operation,
+            decision.candidates,
+            0,
+            semantics.select?.(operation, decision.member, incoming) ?? incoming,
+          ),
         ),
       )
     }
@@ -226,7 +249,8 @@ const structuredCfgPathsValid = <State>(
   const route = (region: OperationRegion | CleanupRegion, states: ReadonlySet<State>): void => {
     const outcome = region.outcome
     if (outcome._tag === 'Forward') enqueue(outcome.target, states)
-    else if (outcome._tag === 'Return' || outcome._tag === 'Trap') semantics.terminal(states)
+    else if (outcome._tag === 'Return' || outcome._tag === 'Trap')
+      semantics.terminal(states, outcome)
     else if (outcome._tag === 'Repeat') {
       const loop = loops.get(outcome.loop.ordinal)
       if (loop !== undefined) enqueue(loop.condition, semantics.repeat(states))
@@ -258,6 +282,35 @@ const structuredCfgPathsValid = <State>(
     else route(region, sequence(operationsOf(region), states))
   }
   return valid
+}
+
+const initializationCache = new WeakMap<
+  MirFunction,
+  WeakMap<Layout.Plan, MirInitialization.Analysis>
+>()
+
+/** Shares path initializedness between MIR verification and post-normalization suspension planning. */
+export const initializationOf = (
+  fn: MirFunction,
+  layout: Layout.Plan,
+): MirInitialization.Analysis => {
+  const previous = initializationCache.get(fn)?.get(layout)
+  if (previous !== undefined) return previous
+  const regions = regionsTree(fn.regions)
+  const byId = new Map(regions.map((region) => [region.id.ordinal, region]))
+  const loops = new Map(
+    regions.flatMap((region) =>
+      region._tag === 'LoopRegion' ? [[region.loop.ordinal, region] as const] : [],
+    ),
+  )
+  const result = MirInitialization.analyze(fn, layout, operationLocals, (semantics) =>
+    structuredCfgPathsValid(fn, byId, loops, semantics),
+  )
+  const cache =
+    initializationCache.get(fn) ?? new WeakMap<Layout.Plan, MirInitialization.Analysis>()
+  cache.set(layout, result)
+  initializationCache.set(fn, cache)
+  return result
 }
 
 /** Candidate selection stops when a guard transfers; only a Boolean result can reject it. */
@@ -877,6 +930,8 @@ const outcomeOf = (region: Region): Outcome | undefined =>
 /** Every local named by one operation, including definitions and structured child results. */
 export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
+    case 'SetInitialized':
+      return [operation.flag]
     case 'ForeignStaticLoad':
     case 'ForeignFunctionAddress':
     case 'Literal':
@@ -1094,11 +1149,16 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'WritePlace':
       return [operation.root, operation.source, ...selectorLocals(operation.selectors)]
     case 'Drop':
-      return [operation.local]
+      return [
+        operation.local,
+        ...selectorLocals(operation.selectors ?? []),
+        ...(operation.initialization?.flags.map((flag) => flag.local) ?? []),
+      ]
     case 'Match':
       return [
         ...(operation.destination === undefined ? [] : [operation.destination]),
         operation.scrutinee,
+        ...selectorLocals(operation.selectors ?? []),
         ...operation.arms.flatMap((arm) => [
           ...arm.bindings.map((binding) => binding.destination),
           ...(arm.guard?.execution.result === undefined ? [] : [arm.guard.execution.result]),
@@ -1175,6 +1235,9 @@ const placeType = (
 ): DeclarationFacts.SemanticType | undefined => {
   const rootType = fn.localTypes.at(root.ordinal)
   let current = rootType === undefined ? undefined : semanticType(rootType)
+  let variant:
+    | Extract<Layout.Representation, { readonly _tag: 'NominalUnion' }>['variants'][number]
+    | undefined
   // A reference root reads and writes through the borrow, so the place is on its target.
   if (
     current !== undefined &&
@@ -1184,18 +1247,33 @@ const placeType = (
     current = current.target
   }
   for (const selector of selectors) {
+    if (selector._tag === 'VariantSelector') {
+      if (current === undefined) return undefined
+      if (SilkType.isUnion(current)) {
+        current = current.members.at(selector.ordinal)
+      } else {
+        const representation = Layout.entry(layout, current)?.representation
+        if (representation?._tag !== 'NominalUnion') return undefined
+        variant = representation.variants.find(
+          (candidate) => candidate.ordinal === selector.ordinal,
+        )
+        if (variant === undefined) return undefined
+      }
+      continue
+    }
     if (selector._tag === 'FieldSelector') {
       const entry =
         current !== undefined && SilkType.isNominal(current)
           ? Layout.entry(layout, current)
           : undefined
-      const field =
-        entry?.representation._tag === 'Aggregate'
-          ? entry.representation.fields.find((candidate) =>
-              DeclarationFacts.sameFieldId(candidate.id, selector.field),
-            )
-          : undefined
+      const fields =
+        variant?.fields ??
+        (entry?.representation._tag === 'Aggregate' ? entry.representation.fields : [])
+      const field = fields.find((candidate) =>
+        DeclarationFacts.sameFieldId(candidate.id, selector.field),
+      )
       current = field?.type
+      variant = undefined
       continue
     }
     if (selector._tag === 'SliceElementSelector') {
@@ -1298,7 +1376,7 @@ const sameCoverage = (
   left.length === right.length &&
   left.every((member, ordinal) => {
     const candidate = right.at(ordinal)
-    return candidate !== undefined && Match.identityEquals(member, candidate)
+    return candidate !== undefined && Match.identityEquals(member, candidate, 'Runtime')
   })
 
 const enumRepresentationMatches = (
@@ -1349,6 +1427,10 @@ export const instanceText = Instances.keyText
 
 const localText = (local: LocalId): string => `%${local.ordinal}`
 
+// MIR verifies physical contracts after source lifetime obligations have been discharged.
+const sameRuntimeType = (left: SilkType.Type, right: SilkType.Type): boolean =>
+  SilkType.runtimeKey(left) === SilkType.runtimeKey(right)
+
 const callArgumentCompatible = (actual: Type, expected: Type): boolean => {
   const actualSemantic = semanticType(actual)
   const expectedSemantic = semanticType(expected)
@@ -1362,8 +1444,7 @@ const callArgumentCompatible = (actual: Type, expected: Type): boolean => {
     (SilkType.isCallable(expectedSemantic.contract) || SilkType.isEffect(expectedSemantic.contract))
       ? expectedSemantic.contract
       : expectedSemantic
-  if (TypeCompatibility.isCompatible(TypeCompatibility.check(actualContract, expectedContract)))
-    return true
+  if (acceptsRuntimeOperand(actualContract, expectedContract)) return true
   if (
     actual._tag !== 'EffectValue' ||
     expected._tag !== 'EffectValue' ||
@@ -1809,6 +1890,8 @@ const storedEffectCleanupValid = (
 
 const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.SemanticType> => {
   switch (operation._tag) {
+    case 'SetInitialized':
+      return ['bool']
     case 'ForeignStaticLoad':
     case 'ForeignFunctionAddress':
     case 'Literal':
@@ -1826,16 +1909,16 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'CheckPlace':
       return [semanticType(operation.type)]
     case 'StaticString':
-      return [SilkType.string]
+      return [operation.type.type]
     case 'PackEffectComposite':
       return [semanticType(operation.type)]
     case 'StringFromUtf8Unchecked':
-      return [SilkType.slice('Shared', 'u8'), SilkType.string]
+      return [SilkType.slice('Shared', 'u8', operation.type.type.lifetime), operation.type.type]
     case 'StringUtf8Bytes':
-      return [SilkType.string, semanticType(operation.type)]
+      return [semanticType(operation.type)]
     case 'StringByteLength':
     case 'StringEqualsExact':
-      return [SilkType.string, semanticType(operation.type)]
+      return [semanticType(operation.type)]
     case 'EnumValue':
       return [
         SilkType.nominal(operation.enum.module, operation.enum.name),
@@ -2073,6 +2156,8 @@ interface ActiveLoan {
 
 const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
+    case 'SetInitialized':
+      return []
     case 'ForeignStaticLoad':
     case 'ForeignFunctionAddress':
       return []
@@ -3016,7 +3101,10 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
       (fn.suspension?.regions ?? []).flatMap((region) => {
         if (
           region._tag !== 'RunSuspendableEffectRegion' ||
-          region.runner.classification === 'Unknown'
+          region.runner.classification === 'Unknown' ||
+          // Parking originates an external transfer in this execution. Its suspension region
+          // carries continuation state, but it does not call a separate child runner.
+          region.operation._tag === 'ExecutionPark'
         )
           return []
         const declaration = region.runner.declaration
@@ -3525,7 +3613,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         if (
           returned === undefined ||
           (returned._tag !== 'Bottom' &&
-            !SilkType.equals(semanticType(returned), semanticType(fn.result)))
+            SilkType.runtimeKey(semanticType(returned)) !==
+              SilkType.runtimeKey(semanticType(fn.result)))
         )
           violations.push(
             Object.freeze({
@@ -3566,7 +3655,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         if (
           returned !== undefined &&
           returned._tag !== 'Bottom' &&
-          !SilkType.equals(semanticType(returned), semanticType(fn.result))
+          SilkType.runtimeKey(semanticType(returned)) !==
+            SilkType.runtimeKey(semanticType(fn.result))
         ) {
           violations.push(
             Object.freeze({
@@ -3656,6 +3746,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           if (
             destination?._tag !== 'String' ||
             operation.type._tag !== 'String' ||
+            !Lifetime.equals(operation.type.type.lifetime, Lifetime.staticLifetime) ||
             data?.kind !== 'Text' ||
             !data.utf8 ||
             data.bytes.length !== operation.byteLength
@@ -3670,7 +3761,10 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           const destination = fn.localTypes.at(operation.destination.ordinal)
           if (
             bytes?._tag !== 'Slice' ||
-            !SilkType.equals(bytes.type, SilkType.slice('Shared', 'u8')) ||
+            !SilkType.equals(
+              bytes.type,
+              SilkType.slice('Shared', 'u8', operation.type.type.lifetime),
+            ) ||
             destination?._tag !== 'String' ||
             operation.type._tag !== 'String' ||
             operation.authorization !== 'Unsafe' ||
@@ -3687,8 +3781,9 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           if (
             string?._tag !== 'String' ||
             destination?._tag !== 'Slice' ||
-            !SilkType.equals(destination.type, SilkType.slice('Shared', 'u8')) ||
-            !SilkType.equals(operation.type.type, SilkType.slice('Shared', 'u8')) ||
+            !SilkType.equals(destination.type, operation.type.type) ||
+            operation.type.type.access !== 'Shared' ||
+            operation.type.type.element !== 'u8' ||
             !heldStringLoansValid(operation.heldLoans)
           ) {
             invalidString(
@@ -4129,7 +4224,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             parameters.every((expected, ordinal) => {
               const argument = operation.arguments.at(ordinal)
               const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
-              return actual !== undefined && SilkType.equals(semanticType(actual), expected)
+              return actual !== undefined && sameRuntimeType(semanticType(actual), expected)
             })
           if (
             catalog?.unsafe !== true ||
@@ -4302,14 +4397,14 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             rule.parameters.every((expected, ordinal) => {
               const argument = operation.arguments.at(ordinal)
               const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
-              return actual !== undefined && SilkType.equals(semanticType(actual), expected)
+              return actual !== undefined && sameRuntimeType(semanticType(actual), expected)
             })
           if (
             catalog?.unsafe !== true ||
             expectedResult === undefined ||
             destination === undefined ||
-            !SilkType.equals(semanticType(destination), expectedResult) ||
-            !SilkType.equals(semanticType(operation.type), expectedResult) ||
+            !sameRuntimeType(semanticType(destination), expectedResult) ||
+            !sameRuntimeType(semanticType(operation.type), expectedResult) ||
             !argumentsValid
           ) {
             violations.push(
@@ -4514,22 +4609,6 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             execution?._tag === 'Nominal' && SilkType.isExecution(execution.type)
               ? SilkType.typeArgumentAt(execution.type, 0)
               : undefined
-          const completeContract =
-            branch === undefined || result === undefined
-              ? undefined
-              : SilkType.callable(
-                  Object.freeze([semanticType(branch), result]),
-                  SilkType.unit,
-                  'Take',
-                )
-          const suspendContract =
-            branch === undefined || result === undefined
-              ? undefined
-              : SilkType.callable(
-                  Object.freeze([semanticType(branch), SilkType.execution(result)]),
-                  SilkType.unit,
-                  'Take',
-                )
           const completeSemantic = complete === undefined ? undefined : semanticType(complete)
           const completeActual =
             completeSemantic !== undefined && SilkType.isRepresented(completeSemantic)
@@ -4540,6 +4619,30 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             suspendSemantic !== undefined && SilkType.isRepresented(suspendSemantic)
               ? suspendSemantic.contract
               : suspendSemantic
+          const completeContract =
+            branch === undefined ||
+            result === undefined ||
+            completeActual === undefined ||
+            !SilkType.isCallable(completeActual)
+              ? undefined
+              : SilkType.callable(
+                  Object.freeze([semanticType(branch), result]),
+                  SilkType.unit,
+                  completeActual,
+                  'Take',
+                )
+          const suspendContract =
+            branch === undefined ||
+            result === undefined ||
+            suspendActual === undefined ||
+            !SilkType.isCallable(suspendActual)
+              ? undefined
+              : SilkType.callable(
+                  Object.freeze([semanticType(branch), SilkType.execution(result)]),
+                  SilkType.unit,
+                  suspendActual,
+                  'Take',
+                )
           const driveCallbackCleanupValid = (
             local: Type | undefined,
             cleanup: CleanupPlan.CleanupPlan,
@@ -4585,12 +4688,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             suspendContract === undefined ||
             completeActual === undefined ||
             suspendActual === undefined ||
-            !TypeCompatibility.isCompatible(
-              TypeCompatibility.check(completeActual, completeContract),
-            ) ||
-            !TypeCompatibility.isCompatible(
-              TypeCompatibility.check(suspendActual, suspendContract),
-            ) ||
+            !acceptsRuntimeOperand(completeActual, completeContract) ||
+            !acceptsRuntimeOperand(suspendActual, suspendContract) ||
             !driveCallbackCleanupValid(complete, operation.completionCleanup) ||
             !driveCallbackCleanupValid(suspend, operation.suspensionCleanup) ||
             operation.executionAccess !== 'Take' ||
@@ -4671,9 +4770,16 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               ? registerSemantic.contract
               : registerSemantic
           const expected =
-            guard === undefined
+            guard === undefined ||
+            registerActual === undefined ||
+            !SilkType.isCallable(registerActual)
               ? undefined
-              : SilkType.callable(Object.freeze([SilkType.wake]), semanticType(guard), 'Take')
+              : SilkType.callable(
+                  Object.freeze([SilkType.wake]),
+                  semanticType(guard),
+                  registerActual,
+                  'Take',
+                )
           const callableCleanupValid = (
             local: Extract<Type, { readonly _tag: 'CallableValue' }>,
             cleanup: CleanupPlan.CleanupPlan,
@@ -4789,16 +4895,26 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             elementLayout === undefined
               ? undefined
               : LocalSharedControlBlock.plan(self.layout.target, operation.element, elementLayout)
-          const useContract = SilkType.callable(
-            Object.freeze([SilkType.reference('Exclusive', operation.element)]),
-            semanticType(operation.type),
-            'Take',
-          )
-          const conflictContract = SilkType.callable(
-            Object.freeze([]),
-            semanticType(operation.type),
-            'Take',
-          )
+          const useContract =
+            use?._tag !== 'CallableValue' || payload?._tag !== 'Reference'
+              ? undefined
+              : SilkType.callable(
+                  Object.freeze([
+                    SilkType.reference('Exclusive', operation.element, payload.type.lifetime),
+                  ]),
+                  semanticType(operation.type),
+                  use.type,
+                  'Take',
+                )
+          const conflictContract =
+            conflict?._tag !== 'CallableValue'
+              ? undefined
+              : SilkType.callable(
+                  Object.freeze([]),
+                  semanticType(operation.type),
+                  conflict.type,
+                  'Take',
+                )
           const takeUse =
             use?._tag === 'CallableValue'
               ? Object.freeze({ ...use.type, mode: 'Take' as const })
@@ -4808,11 +4924,11 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               ? Object.freeze({ ...conflict.type, mode: 'Take' as const })
               : undefined
           const retainsRestrictedLoan = (local: Type): boolean => {
-            if (SilkType.containsPositionRestrictedBorrow(semanticType(local))) return true
+            if (SilkType.containsBorrowWrapper(semanticType(local))) return true
             if (local._tag === 'CallableValue' || local._tag === 'EffectValue')
               return (
                 local.environment?.fields.some((field) =>
-                  SilkType.containsPositionRestrictedBorrow(field.type),
+                  SilkType.containsBorrowWrapper(field.type),
                 ) ?? false
               )
             if (local._tag === 'EffectComposite')
@@ -4869,7 +4985,9 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             !TypeCompatibility.isCompatible(
               TypeCompatibility.check(takeConflict, operation.conflictType),
             ) ||
+            useContract === undefined ||
             !SilkType.equals(operation.useType, useContract) ||
+            conflictContract === undefined ||
             !SilkType.equals(operation.conflictType, conflictContract) ||
             !callableCleanupValid(use, operation.useCleanup) ||
             !callableCleanupValid(conflict, operation.conflictCleanup) ||
@@ -5216,6 +5334,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               }),
             )
           const source = fn.localTypes.at(operation.scrutinee.ordinal)
+          const selectedSource = placeType(
+            fn,
+            self.layout,
+            operation.scrutinee,
+            operation.selectors ?? [],
+          )
           const destination =
             operation.destination === undefined
               ? undefined
@@ -5227,25 +5351,23 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           const plannedResult = Layout.callingShape(self.layout, semanticType(operation.type))
           const enumScrutineeValid =
             operation.scrutineeType._tag !== 'Enum' ||
-            (source?._tag === 'Enum' &&
-              enumRepresentationMatches(
-                source.representation,
-                operation.scrutineeType.representation,
-              ) &&
+            (selectedSource !== undefined &&
+              SilkType.equals(selectedSource, operation.scrutineeType.type) &&
               Layout.entry(self.layout, operation.scrutineeType.type)?.representation._tag ===
                 'ScalarEnum')
           if (
             source === undefined ||
             !enumScrutineeValid ||
             (destination === undefined && operation.type._tag !== 'Bottom') ||
-            !SilkType.equals(semanticType(source), semanticType(operation.scrutineeType)) ||
+            selectedSource === undefined ||
+            !sameRuntimeType(selectedSource, semanticType(operation.scrutineeType)) ||
             (destination !== undefined &&
-              !SilkType.equals(semanticType(destination), semanticType(operation.type))) ||
-            !SilkType.equals(
+              !sameRuntimeType(semanticType(destination), semanticType(operation.type))) ||
+            !sameRuntimeType(
               operation.scrutineeShape.type,
               semanticType(operation.scrutineeType),
             ) ||
-            !SilkType.equals(operation.resultShape.type, semanticType(operation.type)) ||
+            !sameRuntimeType(operation.resultShape.type, semanticType(operation.type)) ||
             plannedScrutinee === undefined ||
             plannedResult === undefined ||
             !callingShapeEquals(plannedScrutinee, operation.scrutineeShape) ||
@@ -5269,6 +5391,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               universal: arm.universal,
               guarded: arm.guard !== undefined,
             })),
+            'Runtime',
           )
           const enumRepresentation =
             operation.scrutineeType._tag === 'Enum'
@@ -5301,11 +5424,11 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                   arm.universal ||
                   (arm.member !== undefined &&
                     member !== undefined &&
-                    Match.selects(arm.member, member)),
+                    Match.selects(arm.member, member, 'Runtime')),
               )
               return (
                 member !== undefined &&
-                Match.identityEquals(decision.member, member) &&
+                Match.identityEquals(decision.member, member, 'Runtime') &&
                 decision.candidates.length === expected.length &&
                 decision.candidates.every(
                   (candidate, candidateOrdinal) =>
@@ -5343,8 +5466,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               if (
                 localType === undefined ||
                 selected === undefined ||
-                !SilkType.equals(semanticType(localType), semanticType(binding.type)) ||
-                !SilkType.equals(selected, semanticType(binding.type)) ||
+                !sameRuntimeType(semanticType(localType), semanticType(binding.type)) ||
+                !sameRuntimeType(selected, semanticType(binding.type)) ||
                 binding.access !== operation.access
               ) {
                 violations.push(
@@ -5381,7 +5504,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               (selectable.has(arm.id.ordinal) &&
                 resultType !== undefined &&
                 resultType._tag !== 'Bottom' &&
-                !SilkType.equals(semanticType(resultType), semanticType(operation.type)))
+                !sameRuntimeType(semanticType(resultType), semanticType(operation.type)))
             ) {
               violations.push(
                 Object.freeze({
@@ -5488,7 +5611,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         if (operation._tag === 'Drop') {
           const dropped = fn.localTypes.at(operation.local.ordinal)
           const cleanup = operation.cleanup
-          const droppedSemantic = dropped === undefined ? undefined : semanticType(dropped)
+          const droppedSemantic = placeType(
+            fn,
+            self.layout,
+            operation.local,
+            operation.selectors ?? [],
+          )
           const cleanupTypeMatches =
             droppedSemantic !== undefined &&
             (SilkType.equals(droppedSemantic, cleanup.type) ||
@@ -5624,7 +5752,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 field.stored?._tag === 'StoredCallableField' &&
                 declared !== undefined &&
                 valueType?._tag === 'CallableValue' &&
-                SilkType.equals(field.stored.type, declared.type) &&
+                sameRuntimeType(field.stored.type, declared.type) &&
                 TypeCompatibility.isCompatible(
                   TypeCompatibility.check(valueType.type, field.stored.realization.contract),
                 ) &&
@@ -5639,7 +5767,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 field.stored?._tag === 'StoredEffectField' &&
                 declared !== undefined &&
                 valueType?._tag === 'EffectValue' &&
-                SilkType.equals(field.stored.type, declared.type) &&
+                sameRuntimeType(field.stored.type, declared.type) &&
                 TypeCompatibility.isCompatible(
                   TypeCompatibility.check(valueType.type, field.stored.realization.contract),
                 ) &&
@@ -5656,7 +5784,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 declared.id.ordinal === field.field.ordinal &&
                 valueType !== undefined &&
                 ((field.stored === undefined &&
-                  SilkType.equals(semanticType(valueType), declared.type)) ||
+                  sameRuntimeType(semanticType(valueType), declared.type)) ||
                   storedCallableValid ||
                   storedEffectValid)
               )
@@ -5697,7 +5825,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 field.stored?._tag === 'StoredCallableField' &&
                 declared !== undefined &&
                 valueType?._tag === 'CallableValue' &&
-                SilkType.equals(field.stored.type, declared.type) &&
+                sameRuntimeType(field.stored.type, declared.type) &&
                 TypeCompatibility.isCompatible(
                   TypeCompatibility.check(valueType.type, field.stored.realization.contract),
                 ) &&
@@ -5712,7 +5840,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 field.stored?._tag === 'StoredEffectField' &&
                 declared !== undefined &&
                 valueType?._tag === 'EffectValue' &&
-                SilkType.equals(field.stored.type, declared.type) &&
+                sameRuntimeType(field.stored.type, declared.type) &&
                 TypeCompatibility.isCompatible(
                   TypeCompatibility.check(valueType.type, field.stored.realization.contract),
                 ) &&
@@ -5729,7 +5857,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 DeclarationFacts.sameFieldId(declared.id, field.field) &&
                 valueType !== undefined &&
                 ((field.stored === undefined &&
-                  SilkType.equals(semanticType(valueType), declared.type)) ||
+                  sameRuntimeType(semanticType(valueType), declared.type)) ||
                   storedCallableValid ||
                   storedEffectValid)
               )
@@ -5782,7 +5910,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                   (candidate) => candidate.id.ordinal === operation.field.ordinal,
                 )
               : undefined
-          if (field === undefined || !SilkType.equals(field.type, semanticType(operation.type))) {
+          if (field === undefined || !sameRuntimeType(field.type, semanticType(operation.type))) {
             violations.push(
               Object.freeze({
                 _tag: 'Violation',
@@ -5891,7 +6019,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             )
           if (
             selected === undefined ||
-            !SilkType.equals(selected, semanticType(operation.type)) ||
+            !sameRuntimeType(selected, semanticType(operation.type)) ||
             !consumingReadValid ||
             (operation._tag === 'ReadPlace' &&
               !isCopy(self.layout, selected) &&
@@ -5938,8 +6066,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             source === undefined ||
             root === undefined ||
             !checked ||
-            !SilkType.equals(selected, semanticType(operation.type)) ||
-            !SilkType.equals(semanticType(source), selected) ||
+            !sameRuntimeType(selected, semanticType(operation.type)) ||
+            !sameRuntimeType(semanticType(source), selected) ||
             !SilkType.equals(semanticType(root), semanticType(operation.rootType)) ||
             (rootSemantic !== undefined &&
               SilkType.isReference(rootSemantic) &&
@@ -5979,7 +6107,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 callArgumentCompatible(actual, expected)
               )
             }) &&
-            SilkType.equals(semanticType(operation.type), semanticType(target.result))
+            sameRuntimeType(semanticType(operation.type), semanticType(target.result))
           if (!valid) {
             const argumentsDetail = operation.arguments
               .map((argument, ordinal) => {
@@ -6038,9 +6166,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 capture.ordinal === field.ordinal &&
                 capture.parameterOrdinal === field.parameterOrdinal &&
                 capture.access === field.access &&
-                TypeCompatibility.isCompatible(
-                  TypeCompatibility.check(semanticType(source), field.type),
-                )
+                acceptsRuntimeOperand(semanticType(source), field.type)
               )
             })
           const valid =
@@ -6080,9 +6206,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               return (
                 actual !== undefined &&
                 expected !== undefined &&
-                TypeCompatibility.isCompatible(
-                  TypeCompatibility.check(semanticType(actual), expected),
-                )
+                acceptsRuntimeOperand(semanticType(actual), expected)
               )
             })
           const environmentForm =
@@ -6575,9 +6699,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                   return (
                     actual !== undefined &&
                     expectedType !== undefined &&
-                    TypeCompatibility.isCompatible(
-                      TypeCompatibility.check(actual, semanticType(expectedType)),
-                    )
+                    acceptsRuntimeOperand(actual, semanticType(expectedType))
                   )
                 })
               return (
@@ -6638,9 +6760,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               return (
                 actual !== undefined &&
                 expected !== undefined &&
-                TypeCompatibility.isCompatible(
-                  TypeCompatibility.check(semanticType(actual), semanticType(expected)),
-                )
+                acceptsRuntimeOperand(semanticType(actual), semanticType(expected))
               )
             })
           const propagationValid = runPropagationValid(self.layout, fn, operation)
@@ -6725,7 +6845,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(operation.successShape.type, operation.outcomeType.type.success)
               ? undefined
               : 'success-shape',
-            SilkType.equals(operation.outcomeShape.type, operation.outcomeType.type)
+            SilkType.runtimeKey(operation.outcomeShape.type) ===
+            SilkType.runtimeKey(operation.outcomeType.type)
               ? undefined
               : 'outcome-shape',
             SilkType.equals(operation.failureValueShape.type, expectedFailureValue)
@@ -6810,6 +6931,14 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           }
         }
       }
+    }
+    if (
+      !violations.some(
+        (violation) =>
+          violation.function?.module === fn.id.module && violation.function.name === fn.id.name,
+      )
+    ) {
+      violations.push(...initializationOf(fn, self.layout).violations)
     }
   }
   for (const verdict of self.normalization ?? []) {

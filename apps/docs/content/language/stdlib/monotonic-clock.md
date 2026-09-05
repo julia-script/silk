@@ -60,7 +60,7 @@ Every operation belongs to the same logical provider timeline.
 ### Operation `now`
 
 ```silk
-effect fn now() -> Instant ? &mut MonotonicClock
+effect<'static> fn now() -> Instant ? &mut MonotonicClock
 ```
 
 Reads a canonical mark on the active provider's unspecified timeline.
@@ -71,7 +71,7 @@ Successive reads are non-decreasing but may be equal.
 ### Operation `getResolution`
 
 ```silk
-effect fn getResolution() -> u64 ? &mut MonotonicClock
+effect<'static> fn getResolution() -> u64 ? &mut MonotonicClock
 ```
 
 Returns the provider-reported positive nominal resolution in whole nanoseconds.
@@ -82,7 +82,7 @@ The value may be a lower bound on actual observable precision.
 ### Operation `waitUntil`
 
 ```silk
-effect fn waitUntil(when: Instant) -> () ? &mut MonotonicClock
+effect<'static> fn waitUntil(when: Instant) -> () ? &mut MonotonicClock
 ```
 
 Waits until the provider's logical mark is at least `when`.
@@ -97,7 +97,7 @@ returns immediately. The official native provider blocks its calling host thread
 ### Operation `waitFor`
 
 ```silk
-effect fn waitFor(howLong: u64) -> () ? &mut MonotonicClock
+effect<'static> fn waitFor(howLong: u64) -> () ? &mut MonotonicClock
 ```
 
 Waits for at least `howLong` nanoseconds on the provider's logical timeline.
@@ -112,7 +112,7 @@ wrapping when the derived absolute deadline cannot be represented.
 ### Associated function `MonotonicClock.deadlineAfter`
 
 ```silk
-pub fn deadlineAfter(start: &silk/system_clock.Instant, howLong: u64) -> Instant
+pub fn deadlineAfter<'life0>(start: &'life0 silk/system_clock.Instant, howLong: u64) -> Instant
 ```
 
 Derives the canonical absolute deadline `howLong` nanoseconds after `start`.

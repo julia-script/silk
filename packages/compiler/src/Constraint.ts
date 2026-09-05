@@ -1,3 +1,4 @@
+import * as Lifetime from './Lifetime.js'
 import * as FiniteRow from './FiniteRow.js'
 import * as Canonical from './internal/Canonical.js'
 import * as RowAlgebra from './RowAlgebra.js'
@@ -333,7 +334,7 @@ const specializeFailureRow = (
 ): Type.FailureRow =>
   RowAlgebra.mapConcreteMembers(Type.failureRowPolicy(), row, (failure) => {
     const specialized = specializeType(failure)
-    return Type.isNominal(specialized) ? specialized : failure
+    return specialized
   })
 
 const specializeRequirementRow = (
@@ -463,6 +464,10 @@ export const specializeCallableSchemaExecutableOwner: Type.CallableSchemaOwnerSp
   )
   const contract = Object.freeze({
     ...schema.contract,
+    typeOutlives: schema.contract.typeOutlives.map((bound) => ({
+      ...bound,
+      type: specializeType(bound.type),
+    })),
     parameters: Object.freeze(
       schema.contract.parameters.map((parameter) =>
         Object.freeze({ ...parameter, type: specializeType(parameter.type) }),
@@ -473,6 +478,11 @@ export const specializeCallableSchemaExecutableOwner: Type.CallableSchemaOwnerSp
   })
   const contractKey = Canonical.record('CallableContract', [
     contract.functionKind,
+    Lifetime.key(contract.environment),
+    Canonical.array(contract.lifetimeBinders.map(Lifetime.key)),
+    Lifetime.assumptions(contract.lifetimeBounds).key,
+    Type.typeOutlivesKey(contract.typeOutlives),
+    contract.unsafe ? 'unsafe' : 'safe',
     Canonical.array(contract.binders.map(Type.key)),
     Canonical.array(
       contract.parameters.map((parameter) =>

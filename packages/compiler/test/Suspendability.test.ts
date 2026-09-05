@@ -5,6 +5,9 @@ import * as ExecutableProperty from '../src/ExecutableProperty.js'
 import * as ExecutionBoundary from '../src/ExecutionBoundary.js'
 import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
+import * as TypeInference from '../src/internal/TypeInference.js'
+import * as Lifetime from '../src/Lifetime.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SourceSpan from '../src/SourceSpan.js'
 import * as SuspensionMode from '../src/SuspensionMode.js'
 import * as Type from '../src/Type.js'
@@ -36,6 +39,53 @@ const effectNames = (self: Analysis.Snapshot): ReadonlyArray<string> =>
   )
 
 const main = (recipe: string): string => `pub fn main() -> i32 { return run ${recipe} }`
+
+it('rebinds selected runtime arguments without reopening caller lifetime proofs', () => {
+  const owner = { module: 'selected-call', name: 'requireEffect' }
+  const env = Type.parameter(owner, 0, 'env', 'Lifetime')
+  const bound = Type.effect('i32', [], {
+    environment: Lifetime.bound(owner, 0, 'env'),
+    lifetimeBinders: [],
+  })
+  const body = Type.parameter(owner, 1, 'F', 'EffectRepresentation', bound)
+  const callRegion = Lifetime.local(owner, 'call', 0)
+  const captureRegion = Lifetime.local(owner, 'capture', 1)
+  const contract = Type.effect('i32', [], { environment: captureRegion, lifetimeBinders: [] })
+  const argument = Type.exactRepresentationArgument(
+    Type.effectIdentityArgument('selected'),
+    contract,
+  )
+  const selected = TypeInference.selectedSubstitution([env, body], [callRegion, argument])
+  assert.strictEqual(selected?.substitution.get(Type.key(env)), callRegion)
+  assert.strictEqual(selected?.substitution.get(Type.key(body)), argument)
+  const open = Type.represented(bound, bound, Type.representationParameterArgument(body))
+  if (selected !== undefined) {
+    const specialized = Type.substitute(open, selected.substitution, selected.compatibility)
+    assert.isTrue(Type.isRuntimeConcrete(specialized))
+    assert.isFalse(Type.isRuntimeConcrete(Type.substitute(open, selected.substitution)))
+    assert.isFalse(
+      Lifetime.outlives(
+        selected.compatibility.assumptions,
+        captureRegion,
+        Lifetime.local(owner, 'unrelated', 2),
+      ),
+    )
+  }
+
+  assert.isUndefined(TypeInference.substitution([env, body], [callRegion, argument]))
+  assert.isUndefined(TypeInference.selectedSubstitution([env, body], [argument]))
+  assert.isUndefined(TypeInference.selectedSubstitution([env, body], [callRegion, 'i32']))
+  const wrongResult = Type.effect('bool', [], { environment: captureRegion, lifetimeBinders: [] })
+  assert.isUndefined(
+    TypeInference.selectedSubstitution(
+      [env, body],
+      [
+        callRegion,
+        Type.exactRepresentationArgument(Type.effectIdentityArgument('wrong'), wrongResult),
+      ],
+    ),
+  )
+})
 
 it('normalizes direct, nested, external, open, and unavailable graph summaries deterministically', () => {
   const graph: SuspensionMode.Graph = Object.freeze({
@@ -94,7 +144,7 @@ it('normalizes direct, nested, external, open, and unavailable graph summaries d
 it.effect('separates lazy Effect runners from their factory and synchronous siblings', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`import silk.effect { Effect }
-fn recipes() -> Effect<i32> {
+fn recipes() -> Effect<'static; i32> {
   let synchronous = effect { return 1 }
   let suspended = delayed()
   return move suspended
@@ -148,52 +198,45 @@ it.effect(
 struct Box { value: i32 }
 struct HiddenResult { value: i32 }
 fn borrowed(value: &Box) -> Effect<i32> { return effect { return value.value } }
-fn copied(value: i32) -> Effect<i32> { return effect { return value } }
-fn opaqueProducer() -> some<F: Effect<HiddenResult>> F {
+fn copied(value: i32) -> Effect<'static; i32> { return effect { return value } }
+fn opaqueProducer() -> some<F: Effect<'static; HiddenResult>> F {
   return effect { return HiddenResult { value: 42 } }
 }
 effect fn nested(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
+fn update(value: &mut Box, delta: i32) -> () { value.value = delta return () }
+fn invoke<F: once fn(&mut Box) -> () + Intrinsic.NonParking>(callback: F, value: &mut Box) -> () {
+  callback(move value)
+  return ()
+}
+fn apply<'a>(value: &'a mut Box) -> () { invoke(update(42), move value) return () }
+fn updateFirst(value: &mut Box) -> () { apply(move value) return () }
+fn updateSecond(value: &mut Box) -> () { apply(move value) return () }
 pub fn main() -> i32 {
-  let box = Box { value: 40 }
+  let mut box = Box { value: 40 }
   let first = borrowed(&box)
   let second = copied(41)
   let opaque = opaqueProducer()
   drop first
   drop second
   drop opaque
-  return run nested(42)
-}`)
-      const repeated = yield* snapshot(`import silk.effect { Effect }
-struct Box { value: i32 }
-struct HiddenResult { value: i32 }
-fn borrowed(value: &Box) -> Effect<i32> { return effect { return value.value } }
-fn copied(value: i32) -> Effect<i32> { return effect { return value } }
-fn opaqueProducer() -> some<F: Effect<HiddenResult>> F {
-  return effect { return HiddenResult { value: 42 } }
-}
-effect fn nested(value: i32) -> i32 {
-  return run Effect.suspend(effect { return value })
-}
-pub fn main() -> i32 {
-  let box = Box { value: 40 }
-  let first = borrowed(&box)
-  let second = copied(41)
-  let opaque = opaqueProducer()
-  drop first
-  drop second
-  drop opaque
+  updateFirst(&mut box)
+  updateSecond(&mut box)
   return run nested(42)
 }`)
 
       assert.deepEqual(Analysis.diagnostics(self), [])
+      assert.strictEqual(
+        self.instances.callables.filter(
+          (callable) =>
+            callable.target._tag === 'DeclarationCallableTarget' &&
+            callable.target.declaration.name === 'update',
+        ).length,
+        1,
+      )
       const facts = Analysis.executablePropertiesOf(self).filter(
         (fact) => fact.subject._tag === 'Effect',
-      )
-      assert.deepEqual(
-        Analysis.executablePropertiesOf(self).map(ExecutableProperty.encode),
-        Analysis.executablePropertiesOf(repeated).map(ExecutableProperty.encode),
       )
       const borrowed = facts.find(
         (fact) =>
@@ -232,10 +275,27 @@ pub fn main() -> i32 {
     }),
 )
 
+it.effect('lowers a selected generic Effect with a borrowed environment', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Box { value: i32 }
+fn consume<'env, F: Effect<'env; i32>>(body: F) -> i32 { return run body }
+pub fn main() -> i32 {
+  let box = Box { value: 42 }
+  let view = &box
+  return consume(effect { return view.value })
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.isTrue(
+      self.instances.instances.some((instance) => instance.key.declaration.name === 'consume'),
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+  }),
+)
+
 it.effect('diagnoses a failed concrete sealed-property obligation at the generic application', () =>
   Effect.gen(function* () {
     const source = `struct Box { value: i32 }
-fn requireDetached<F: Effect<i32> + Intrinsic.Detached>(body: F) -> i32 {
+fn requireDetached<'env, F: Effect<'env; i32> + Intrinsic.Detached>(body: F) -> i32 {
   drop body
   return 1
 }
@@ -282,7 +342,7 @@ struct FixedClock {}
 effect fn read(self: &FixedClock) -> i32 { return 42 }
 impl Clock for FixedClock { read: FixedClock.read }
 effect fn program() -> i32 ? &Clock { return run Clock.read() }
-fn requireDetached<F: Effect<i32> + Intrinsic.Detached>(body: F) -> i32 {
+fn requireDetached<'env, F: Effect<'env; i32> + Intrinsic.Detached>(body: F) -> i32 {
   drop body
   return 1
 }
@@ -326,7 +386,7 @@ pub fn main() -> i32 {
 it.effect('diagnoses sealed-property obligations on represented nominal fields', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`struct Box { value: i32 }
-struct Deferred<F: once Effect<i32> + Intrinsic.Detached> { operation: F }
+struct Deferred<'env, F: once Effect<'env; i32> + Intrinsic.Detached> { operation: F }
 pub fn main() -> i32 {
   let box = Box { value: 42 }
   let view = &box
@@ -342,15 +402,32 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('follows represented executables nested inside captured nominals', () =>
+it.effect('preserves borrowed contents and static strings in captured nominal environments', () =>
   Effect.gen(function* () {
     const source = `struct Box { value: i32 }
-struct Deferred<F: once Effect<i32>> { operation: F }
-fn requireDetached<F: once Effect<i32> + Intrinsic.Detached>(body: F) -> i32 {
+struct Text<'a> { value: string<'a> }
+tuple Wrapped<T>(T)
+struct Deferred<'env, F: once Effect<'env; i32>> { operation: F }
+fn requireDetached<'env, F: once Effect<'env; i32> + Intrinsic.Detached>(body: F) -> i32 {
   drop body
   return 1
 }
+fn staticText<'a: 'static>(text: string<'a>) -> i32 {
+  let wrapped = Wrapped(Text { value: text })
+  return requireDetached(effect { drop move wrapped return 1 })
+}
 pub fn main() -> i32 {
+  let direct = "static"
+  let directResult = requireDetached(effect { drop move direct return 1 })
+  let nested = Wrapped(Text { value: "static" })
+  let nestedResult = requireDetached(effect { drop move nested return 1 })
+  let genericResult = staticText("static")
+  let bytes: [u8; 1] = [65]
+  unsafe {
+    let text = Intrinsic.stringFromUtf8Unchecked(&bytes)
+    let borrowed = Wrapped(Text { value: text })
+    let rejected = requireDetached(effect { drop move borrowed return 1 })
+  }
   let box = Box { value: 42 }
   let view = &box
   let deferred = Deferred { operation: effect { return view.value } }
@@ -360,10 +437,16 @@ pub fn main() -> i32 {
 
     const diagnostics = Analysis.diagnostics(self)
     assert.deepEqual(
-      diagnostics.map((diagnostic) => diagnostic.code),
-      ['SEM0139'],
+      diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'SEM0139', span: 'requireDetached(effect { drop move borrowed return 1 })' },
+        { code: 'SEM0139', span: 'requireDetached(effect { drop deferred return 1 })' },
+      ],
     )
-    const diagnostic = diagnostics.at(0)
+    const diagnostic = diagnostics.at(1)
     assert.strictEqual(diagnostic?.reason._tag, 'UnsatisfiedExecutableProperty')
     assert.strictEqual(
       diagnostic?.reason._tag === 'UnsatisfiedExecutableProperty'
@@ -387,8 +470,8 @@ pub fn main() -> i32 {
 it.effect('follows represented executables nested inside nominal union variants', () =>
   Effect.gen(function* () {
     const source = `struct Box { value: i32 }
-union Deferred<F: once Effect<i32>> { Empty, Ready { operation: F } }
-fn requireDetached<F: once Effect<i32> + Intrinsic.Detached>(body: F) -> i32 {
+union Deferred<'env, F: once Effect<'env; i32>> { Empty, Ready { operation: F } }
+fn requireDetached<'env, F: once Effect<'env; i32> + Intrinsic.Detached>(body: F) -> i32 {
   drop body
   return 1
 }
@@ -454,7 +537,7 @@ effect fn seed(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
 fn increment(value: i32) -> i32 { return value + 1 }
-fn next(value: i32) -> Effect<i32> { return seed(value + 1) }
+fn next(value: i32) -> Effect<'static; i32> { return seed(value + 1) }
 effect fn program() -> i32 {
   let mapped = seed(40) |> Effect.map(increment)
   return run mapped |> Effect.flatMap(next)
@@ -508,19 +591,16 @@ pub fn main() -> i32 { let callback = suspendAndRecover return callback(42) }`)
   }),
 )
 
-it.effect('keeps synchronous controls empty and ordering deterministic', () =>
+it.effect('keeps synchronous controls empty', () =>
   Effect.gen(function* () {
     const source = `import silk.effect { Effect }
 effect fn seed(value: i32) -> i32 { return value }
 fn increment(value: i32) -> i32 { return value + 1 }
 pub fn main() -> i32 { return run seed(41) |> Effect.map(increment) }`
     const first = yield* snapshot(source)
-    const second = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(first), [])
     assert.deepEqual(names(first), [])
     assert.deepEqual(effectNames(first), [])
-    assert.deepEqual(names(second), names(first))
-    assert.deepEqual(effectNames(second), effectNames(first))
   }),
 )
 

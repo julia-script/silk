@@ -507,17 +507,25 @@ const lowerBuiltinOperation = (
       block?._tag !== 'LocalSharedControlBlockPlan'
     )
       return undefined
-    const payloadType = fn.type(Type.reference('Exclusive', element))
+    const payloadContract = useType.type.parameters.at(0)
+    if (payloadContract === undefined || !Type.isReference(payloadContract)) return undefined
+    const payloadType = fn.type(payloadContract)
     if (payloadType?._tag !== 'Reference') return undefined
     const payload = fn.alloc(payloadType)
     const destination = fn.alloc(type)
     const loan = fn.freshSyntheticBorrow(expression.span)
     const useContract = Type.callable(
-      Object.freeze([Type.reference('Exclusive', element)]),
+      Object.freeze([payloadContract]),
       Mir.semanticType(type),
+      useType.type,
       'Take',
     )
-    const conflictContract = Type.callable(Object.freeze([]), Mir.semanticType(type), 'Take')
+    const conflictContract = Type.callable(
+      Object.freeze([]),
+      Mir.semanticType(type),
+      conflictType.type,
+      'Take',
+    )
     fn.emit(
       Object.freeze({
         _tag: 'SharedWithMut' as const,

@@ -99,7 +99,7 @@ it.effect('parses a callable contract type argument on a generic call or literal
     assert.deepEqual(codes(literal), [Diagnostic.typeArgumentConflictCode])
     const valid = yield* realized(
       'stabilization/generic-callable-valid',
-      `fn add(a: i32, b: i32) -> i32 { return a + b }\nfn makeAdder(base: i32) -> fn(i32) -> i32 { return add(base) }\nfn apply<A>(x: i32, f: once fn(i32) -> A) -> A { return f(x) }\npub fn main() -> i32 {\n  let f = apply<fn(i32) -> i32>(2, makeAdder)\n  return f(40)\n}\n`,
+      `fn add(a: i32, b: i32) -> i32 { return a + b }\nfn makeAdder(base: i32) -> fn<'static>(i32) -> i32 { return add(base) }\nfn apply<A>(x: i32, f: once fn(i32) -> A) -> A { return f(x) }\npub fn main() -> i32 {\n  let f = apply<fn<'static>(i32) -> i32>(2, makeAdder)\n  return f(40)\n}\n`,
     )
     assert.deepEqual(codes(valid), [])
   }),

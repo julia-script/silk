@@ -1,17 +1,92 @@
 import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
+import * as Diagnostic from '../src/Diagnostic.js'
+import * as NominalVariance from '../src/NominalVariance.js'
 import * as CallableContract from '../src/CallableContract.js'
 import * as Constraint from '../src/Constraint.js'
 import * as FiniteRow from '../src/FiniteRow.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
+import * as Lifetime from '../src/Lifetime.js'
+import * as LifetimeFlow from '../src/LifetimeFlow.js'
 import * as RequirementRow from '../src/RequirementRow.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceSpan from '../src/SourceSpan.js'
 import * as Type from '../src/Type.js'
 import * as TypeCompatibility from '../src/TypeCompatibility.js'
+import * as TypeOutlives from '../src/TypeOutlives.js'
 import { unreachable } from './support/raise.js'
+
+const detached: Type.ExecutableLifetimes = Object.freeze({
+  environment: Lifetime.staticLifetime,
+  lifetimeBinders: [],
+})
+const staticText = Type.string(Lifetime.staticLifetime)
 
 const span = (sourceId: string, start: number, end: number): SourceSpan.SourceSpan =>
   SourceSpan.fromOffsets(sourceId, start, end) ?? unreachable('expected a valid source span')
+
+it('canonicalizes lifetime binders without erasing declaration, scope or assumptions', () => {
+  const owner = { module: 'lifetimes', name: 'choose' }
+  const long = Lifetime.bound(owner, 0, 'long')
+  const short = Lifetime.bound(owner, 1, 'short')
+  const use = Lifetime.bound(owner, 2, 'use')
+  assert.strictEqual(Lifetime.key(long), Lifetime.key(Lifetime.bound(owner, 0, 'renamed')))
+  assert.notStrictEqual(Lifetime.key(long), Lifetime.key(Lifetime.bound(owner, 0, 'long', [0])))
+  assert.notStrictEqual(
+    Lifetime.key(long),
+    Lifetime.key(Lifetime.bound({ ...owner, name: 'other' }, 0, 'long')),
+  )
+  const bounds = Lifetime.assumptions([
+    { longer: long, shorter: short },
+    { longer: short, shorter: use },
+  ])
+  assert.isTrue(Lifetime.outlives(bounds, long, use))
+  assert.isFalse(Lifetime.outlives(bounds, use, long))
+  assert.isFalse(Lifetime.outlives(Lifetime.assumptions([]), long, use))
+  assert.isTrue(Lifetime.outlives(bounds, Lifetime.staticLifetime, long))
+  assert.isFalse(Lifetime.outlives(bounds, long, Lifetime.staticLifetime))
+  assert.notStrictEqual(
+    Lifetime.key(Lifetime.placeholder(long, 'first invocation')),
+    Lifetime.key(Lifetime.placeholder(long, 'second invocation')),
+  )
+})
+
+it('propagates later lifetime requirements through finite cycles and reports expired sources', () => {
+  const owner = { module: 'lifetimes', name: 'reset' }
+  const source = Lifetime.local(owner, 'body', 0)
+  const holder = Lifetime.local(owner, 'body', 1)
+  const copied = Lifetime.local(owner, 'body', 2)
+  const solution = Lifetime.solve({
+    pointCount: 4,
+    regions: [
+      { lifetime: source, available: new Set([0, 1]), required: new Set([0]) },
+      { lifetime: holder, available: new Set([0, 1, 2, 3]), required: new Set([1]) },
+      { lifetime: copied, available: new Set([0, 1, 2, 3]), required: new Set([3]) },
+    ],
+    constraints: [
+      { longer: source, shorter: holder },
+      { longer: holder, shorter: copied },
+      { longer: copied, shorter: holder },
+    ],
+  })
+  if (solution._tag !== 'Solved') return unreachable('expected a finite region solution')
+  assert.deepEqual(solution.violations, [{ lifetime: source, point: 3 }])
+  assert.deepEqual(solution.required.get(Lifetime.key(source)), new Set([0, 1, 3]))
+  assert.strictEqual(solution.work.propagatedPoints, 4)
+})
+
+it('rejects missing lifetime solver inputs instead of treating them as unconstrained validity', () => {
+  const source = Lifetime.local({ module: 'lifetimes', name: 'missing' }, 'body', 0)
+  assert.deepEqual(
+    Lifetime.solve({
+      pointCount: 1,
+      regions: [],
+      constraints: [{ longer: source, shorter: Lifetime.staticLifetime }],
+    }),
+    { _tag: 'InvalidDomain', dimension: 'MissingRegion', lifetime: source },
+  )
+})
 
 it('keeps nominal identity independent of field shape and import spelling', () => {
   const first = Type.nominal('syntax/Tree', 'Node')
@@ -32,7 +107,7 @@ it('selects failure-carrier members only under their explicit tag convention', (
     normalized._tag === 'Normalized' && Type.isUnion(normalized.type)
       ? normalized.type
       : unreachable('expected a structural union')
-  const effect = Type.effect('i32', [first, second])
+  const effect = Type.effect('i32', [first, second], detached)
 
   assert.strictEqual(Type.failureCarrierMember(first, 0, 'ZeroBased'), first)
   assert.strictEqual(Type.failureCarrierMember('i32', 0, 'ZeroBased'), 'i32')
@@ -56,7 +131,7 @@ it('refuses carrier tags whose member order can change after specialization', ()
   const member = Type.parameter(owner, 1, 'T')
   const alpha = Type.nominal('types/failure-carrier', 'Alpha')
   const zed = Type.nominal('types/failure-carrier', 'Zed')
-  const openEffect = Type.effect('i32', [zed, failures])
+  const openEffect = Type.effect('i32', [zed, failures], detached)
 
   assert.isUndefined(Type.failureCarrierMember(openEffect, 1, 'OneBased'))
   const specializedEffect = Type.substitute(
@@ -108,7 +183,7 @@ it('refuses carrier tags whose member order can change after specialization', ()
   assert.strictEqual(Type.failureCarrierMember(concreteOuter, 0, 'ZeroBased'), concreteOuter)
   assert.isUndefined(Type.failureCarrierMember(openUnion, 0, 'ZeroBased'))
 
-  const unavailableEffect = Type.effect(unavailableOuter, [unavailableOuter], 'Shared', [
+  const unavailableEffect = Type.effect(unavailableOuter, [unavailableOuter], detached, 'Shared', [
     { capability: unavailableOuter, role: 'DefaultRole', access: 'Shared' },
   ])
   const unavailableUnionResult = Type.union([unavailableOuter, zed])
@@ -116,12 +191,12 @@ it('refuses carrier tags whose member order can change after specialization', ()
     unavailableUnionResult._tag === 'Normalized' && Type.isUnion(unavailableUnionResult.type)
       ? unavailableUnionResult.type
       : unreachable('expected a nested-unavailable structural union')
-  const unavailableCallable = Type.callable([unavailableOuter], unavailableOuter)
+  const unavailableCallable = Type.callable([unavailableOuter], unavailableOuter, detached)
   const unavailableIdentity = Type.effectIdentityArgument('types/failure-carrier.effect', {
     declaration: owner,
     typeArguments: [unavailableOuter],
   })
-  const concreteContract = Type.effect('i32', [])
+  const concreteContract = Type.effect('i32', [], detached)
   const unavailableRepresentation = Type.represented(
     concreteContract,
     concreteContract,
@@ -144,7 +219,7 @@ it('refuses carrier tags whose member order can change after specialization', ()
   )
   assert.isTrue(
     Type.isRuntimeConcrete(
-      Type.effect(concreteOuter, [zed], 'Shared', [
+      Type.effect(concreteOuter, [zed], detached, 'Shared', [
         { capability: concreteOuter, role: 'DefaultRole', access: 'Shared' },
       ]),
     ),
@@ -177,7 +252,7 @@ it('specializes executable owners throughout nested callable schemas without cap
   const nestedOwner = Object.freeze({ module: 'types/schema-owner', name: 'section' })
   const nested = Type.parameter(nestedOwner, 0, 'A')
   const marker = Type.nominal('types/schema-owner', 'Marker')
-  const effect = Type.effect('i32', [])
+  const effect = Type.effect('i32', [], detached)
   const ownedIdentity = Type.exactRepresentationArgument(
     Type.effectIdentityArgument('types/schema-owner.effect', {
       declaration,
@@ -193,12 +268,13 @@ it('specializes executable owners throughout nested callable schemas without cap
   const constraint = Constraint.providerSelection('Shared', provider, requirements, requirements)
   const evidence = Constraint.assumed(constraint, new Map([[Type.key(nested), ownedIdentity]]))
   const contract = CallableContract.make({
+    ...detached,
     functionKind: 'Function',
     binders: [nested],
     result: 'i32',
     constraints: [constraint],
   })
-  const callable = Type.callable([], 'i32', 'Shared', {
+  const callable = Type.callable([], 'i32', detached, 'Shared', {
     contract,
     binders: [nested],
     constraints: [constraint],
@@ -259,25 +335,29 @@ it('keeps string canonical, non-scalar, borrowed, and structurally atomic', () =
   const owner = { module: 'work', name: 'identity' }
   const parameter = Type.parameter(owner, 0, 'T')
   const substitution = new Map([[Type.key(parameter), 'u8' as const]])
-  const values: ReadonlyArray<Type.Type> = [Type.string, 'i32', Type.nominal('text', 'Owner')]
+  const values: ReadonlyArray<Type.Type> = [staticText, 'i32', Type.nominal('text', 'Owner')]
 
-  assert.strictEqual(Type.isString(Type.string), true)
-  assert.strictEqual(Type.isBuiltin(Type.string), false)
-  assert.strictEqual(Type.key(Type.string), 'string')
-  assert.strictEqual(Type.encode(Type.string), 'string')
-  assert.deepEqual([...values].sort(Type.compare).map(Type.encode), ['i32', 'text.Owner', 'string'])
-  assert.strictEqual(Type.substitute(Type.string, substitution), Type.string)
-  assert.strictEqual(Type.isConcrete(Type.string), true)
-  assert.deepEqual(Type.parameters(Type.string), [])
-  assert.deepEqual(Type.nominals(Type.string), [])
-  assert.strictEqual(Type.containsBorrow(Type.string), true)
+  assert.strictEqual(Type.isString(staticText), true)
+  assert.strictEqual(Type.isBuiltin(staticText), false)
+  assert.strictEqual(Type.key(staticText), 'string<static>')
+  assert.strictEqual(Type.encode(staticText), "string<'static>")
+  assert.deepEqual([...values].sort(Type.compare).map(Type.encode), [
+    'i32',
+    'text.Owner',
+    "string<'static>",
+  ])
+  assert.strictEqual(Type.substitute(staticText, substitution), staticText)
+  assert.strictEqual(Type.isConcrete(staticText), true)
+  assert.deepEqual(Type.parameters(staticText), [])
+  assert.deepEqual(Type.nominals(staticText), [])
+  assert.strictEqual(Type.containsBorrow(staticText), true)
   assert.strictEqual(
-    TypeCompatibility.isCompatible(TypeCompatibility.check(Type.string, Type.string)),
+    TypeCompatibility.isCompatible(TypeCompatibility.check(staticText, staticText)),
     true,
   )
   assert.strictEqual(
     TypeCompatibility.isCompatible(
-      TypeCompatibility.check(Type.string, Type.slice('Shared', 'u8')),
+      TypeCompatibility.check(staticText, Type.slice('Shared', 'u8', Lifetime.staticLifetime)),
     ),
     false,
   )
@@ -285,8 +365,8 @@ it('keeps string canonical, non-scalar, borrowed, and structurally atomic', () =
 
 it('classifies ordinary references and slices as lexical views', () => {
   const nominal = Type.nominal('test', 'Counter')
-  const reference = Type.reference('Exclusive', nominal)
-  const slice = Type.slice('Shared', nominal)
+  const reference = Type.reference('Exclusive', nominal, Lifetime.staticLifetime)
+  const slice = Type.slice('Shared', nominal, Lifetime.staticLifetime)
 
   assert.strictEqual(Type.isViewBorrow(reference), true)
   assert.strictEqual(Type.isViewBorrow(slice), true)
@@ -358,17 +438,19 @@ it('normalizes empty, singleton, scalar, and aggregate union members', () => {
     )
 })
 
-it('admits only finite detached union storage and renormalizes generic members', () => {
+it('admits finite shared borrow union storage and renormalizes generic members', () => {
   const owner = { module: 'model/GenericUnion', name: 'choose' }
   const left = Type.parameter(owner, 0, 'L')
   const right = Type.parameter(owner, 1, 'R')
-  const borrowed = Type.slice('Shared', 'i32')
-  assert.deepEqual(Type.union(['i32', borrowed]), {
+  const borrowed = Type.slice('Shared', 'i32', Lifetime.staticLifetime)
+  assert.strictEqual(Type.union(['i32', borrowed])._tag, 'Normalized')
+  const mutable = Type.reference('Exclusive', 'i32', Lifetime.staticLifetime)
+  assert.deepEqual(Type.union(['i32', mutable]), {
     _tag: 'InvalidMembers',
-    members: [borrowed],
+    members: [mutable],
   })
-  const callable = Type.callable(['i32'], 'i32')
-  const effect = Type.effect('i32', [])
+  const callable = Type.callable(['i32'], 'i32', detached)
+  const effect = Type.effect('i32', [], detached)
   assert.deepEqual(Type.union(['i32', callable]), {
     _tag: 'InvalidMembers',
     members: [callable],
@@ -396,37 +478,46 @@ it('normalizes compiler-private effect contract identity and traverses substitut
   const parameter = Type.parameter(owner, 0, 'T')
   const first = Type.nominal('errors', 'First')
   const second = Type.nominal('errors', 'Second')
-  const contract = Type.effect(parameter, [second, first, second], 'Take')
-  const permuted = Type.effect(parameter, [first, second], 'Take')
+  const contract = Type.effect(parameter, [second, first, second], detached, 'Take')
+  const permuted = Type.effect(parameter, [first, second], detached, 'Take')
 
   assert.strictEqual(Type.isEffect(contract), true)
   assert.strictEqual(Type.equals(contract, permuted), true)
-  assert.strictEqual(Type.encode(contract), 'once Effect<T ! errors.First | errors.Second>')
+  assert.strictEqual(
+    Type.encode(contract),
+    "once Effect<'static; T ! errors.First | errors.Second>",
+  )
   assert.deepEqual(Type.parameters(contract), [parameter])
   assert.deepEqual(Type.nominals(contract).map(Type.encode), ['errors.First', 'errors.Second'])
 
   const substituted = Type.substitute(contract, new Map([[Type.key(parameter), 'usize']]))
-  assert.strictEqual(Type.encode(substituted), 'once Effect<usize ! errors.First | errors.Second>')
+  assert.strictEqual(
+    Type.encode(substituted),
+    "once Effect<'static; usize ! errors.First | errors.Second>",
+  )
   assert.strictEqual(Type.isConcrete(substituted), true)
 })
 
 it('canonicalizes callable contracts and orders invocation guarantees', () => {
   const owner = { module: 'work', name: 'apply' }
   const parameter = Type.parameter(owner, 0, 'T')
-  const shared = Type.callable([parameter, 'bool'], parameter)
-  const unsafe = Type.callable([parameter, 'bool'], parameter, 'Shared', undefined, true)
-  const exclusive = Type.callable([parameter, 'bool'], parameter, 'Exclusive')
-  const once = Type.callable([parameter, 'bool'], parameter, 'Take')
+  const shared = Type.callable([parameter, 'bool'], parameter, detached)
+  const unsafe = Type.callable([parameter, 'bool'], parameter, detached, 'Shared', undefined, true)
+  const exclusive = Type.callable([parameter, 'bool'], parameter, detached, 'Exclusive')
+  const once = Type.callable([parameter, 'bool'], parameter, detached, 'Take')
   const substitution = new Map([[Type.key(parameter), 'i32' as const]])
 
-  assert.strictEqual(Type.encode(shared), 'fn(T, bool) -> T')
-  assert.strictEqual(Type.encode(unsafe), 'unsafe fn(T, bool) -> T')
-  assert.strictEqual(Type.encode(exclusive), 'mut fn(T, bool) -> T')
-  assert.strictEqual(Type.encode(once), 'once fn(T, bool) -> T')
-  assert.strictEqual(Type.encode(Type.substitute(shared, substitution)), 'fn(i32, bool) -> i32')
+  assert.strictEqual(Type.encode(shared), "fn<'static>(T, bool) -> T")
+  assert.strictEqual(Type.encode(unsafe), "unsafe fn<'static>(T, bool) -> T")
+  assert.strictEqual(Type.encode(exclusive), "mut fn<'static>(T, bool) -> T")
+  assert.strictEqual(Type.encode(once), "once fn<'static>(T, bool) -> T")
+  assert.strictEqual(
+    Type.encode(Type.substitute(shared, substitution)),
+    "fn<'static>(i32, bool) -> i32",
+  )
   assert.strictEqual(
     Type.encode(Type.substitute(unsafe, substitution)),
-    'unsafe fn(i32, bool) -> i32',
+    "unsafe fn<'static>(i32, bool) -> i32",
   )
   assert.deepEqual(Type.parameters(shared), [parameter])
   assert.strictEqual(
@@ -458,10 +549,10 @@ it('applies the Shared < Exclusive < Take order across compatibility and inferen
   for (const [requiredOrdinal, required] of accesses.entries()) {
     for (const [suppliedOrdinal, supplied] of accesses.entries()) {
       const accepted = expected.at(requiredOrdinal)?.at(suppliedOrdinal) ?? false
-      const requiredCallable = Type.callable(['i32'], 'i32', required)
-      const suppliedCallable = Type.callable(['i32'], 'i32', supplied)
-      const requiredEffect = Type.effect('i32', [], required)
-      const suppliedEffect = Type.effect('i32', [], supplied)
+      const requiredCallable = Type.callable(['i32'], 'i32', detached, required)
+      const suppliedCallable = Type.callable(['i32'], 'i32', detached, supplied)
+      const requiredEffect = Type.effect('i32', [], detached, required)
+      const suppliedEffect = Type.effect('i32', [], detached, supplied)
 
       assert.strictEqual(Type.compareAccess(supplied, required), accepted)
       assert.strictEqual(
@@ -483,11 +574,11 @@ it('applies the Shared < Exclusive < Take order across compatibility and inferen
 
 it('widens Effect requirement rows only from fewer requirements to an allowed superset', () => {
   const capability = Type.nominal('test', 'Capability')
-  const allowed = Type.effect('i32', [], 'Take', [
+  const allowed = Type.effect('i32', [], detached, 'Take', [
     { capability, role: 'DefaultRole', access: 'Exclusive' },
   ])
-  const closed = Type.effect('i32', [], 'Take')
-  const requiring = Type.effect('i32', [], 'Take', [
+  const closed = Type.effect('i32', [], detached, 'Take')
+  const requiring = Type.effect('i32', [], detached, 'Take', [
     { capability, role: 'DefaultRole', access: 'Shared' },
   ])
 
@@ -496,16 +587,16 @@ it('widens Effect requirement rows only from fewer requirements to an allowed su
 })
 
 it('searches every nested type position including requirement capabilities', () => {
-  const borrowed = Type.slice('Shared', 'u8')
+  const borrowed = Type.slice('Shared', 'u8', Lifetime.staticLifetime)
   const capability = Type.nominal('test', 'Capability', [borrowed])
-  const effect = Type.effect('i32', [], 'Shared', [
+  const effect = Type.effect('i32', [], detached, 'Shared', [
     { capability, role: 'DefaultRole', access: 'Shared' },
   ])
 
   assert.strictEqual(Type.someSubterm(effect, Type.isSlice), true)
   assert.strictEqual(Type.containsBorrow(effect), true)
   assert.strictEqual(Type.containsViewBorrow(effect), true)
-  assert.strictEqual(Type.containsPositionRestrictedBorrow(effect), true)
+  assert.strictEqual(Type.containsBorrowWrapper(effect), true)
 })
 
 it('normalizes finite rows and applies total exact set operations deterministically', () => {
@@ -594,7 +685,7 @@ it('renormalizes requirement collisions introduced by substitution', () => {
   const owner = { module: 'work', name: 'provide' }
   const capability = Type.parameter(owner, 0, 'P')
   const logger = Type.nominal('silk/logger', 'Logger')
-  const contract = Type.effect('never', [], 'Shared', [
+  const contract = Type.effect('never', [], detached, 'Shared', [
     { capability, role: 'Default', access: 'Shared' },
     { capability: logger, role: 'Default', access: 'Exclusive' },
   ])
@@ -998,10 +1089,16 @@ it('keys callable contracts and branded constraint evidence without source locat
   )
 
   const contract = CallableContract.make({
+    ...detached,
     functionKind: 'Effect',
     binders: [selectedParameter, providerParameter],
-    parameters: [{ type: Type.reference('Exclusive', providerParameter), mode: 'Exclusive' }],
-    result: Type.effect('never', []),
+    parameters: [
+      {
+        type: Type.reference('Exclusive', providerParameter, Lifetime.staticLifetime),
+        mode: 'Exclusive',
+      },
+    ],
+    result: Type.effect('never', [], detached),
     constraints: [loggerWanted],
     captures: [{ parameter: 0, capture: 0 }],
   })
@@ -1009,8 +1106,9 @@ it('keys callable contracts and branded constraint evidence without source locat
   assert.strictEqual(Object.isFrozen(contract), true)
 
   const quantified = Type.callable(
-    [Type.reference('Exclusive', providerParameter)],
-    Type.effect('never', []),
+    [Type.reference('Exclusive', providerParameter, Lifetime.staticLifetime)],
+    Type.effect('never', [], detached),
+    detached,
     'Exclusive',
     {
       contract,
@@ -1027,6 +1125,7 @@ it('keys callable contracts and branded constraint evidence without source locat
   const movedOrigin = Type.callable(
     quantified.parameters,
     quantified.result,
+    detached,
     quantified.mode,
     quantified.schema === undefined
       ? undefined
@@ -1037,7 +1136,7 @@ it('keys callable contracts and branded constraint evidence without source locat
   assert.strictEqual(Type.key(quantified), Type.key(movedOrigin))
   assert.notStrictEqual(
     Type.key(quantified),
-    Type.key(Type.callable(quantified.parameters, quantified.result, quantified.mode)),
+    Type.key(Type.callable(quantified.parameters, quantified.result, detached, quantified.mode)),
   )
 })
 
@@ -1067,12 +1166,13 @@ it('keeps neutral witness identity specialization-complete and origin-distinct',
 it('keeps a free parameter open when a nested callable schema binds the same parameter', () => {
   const parameter = Type.parameter({ module: 'work', name: 'wrap' }, 0, 'T')
   const contract = CallableContract.make({
+    ...detached,
     functionKind: 'Function',
     binders: [parameter],
     parameters: [{ type: parameter, mode: 'Shared' }],
     result: parameter,
   })
-  const quantified = Type.callable([parameter], parameter, 'Shared', {
+  const quantified = Type.callable([parameter], parameter, detached, 'Shared', {
     contract,
     binders: [parameter],
     constraints: [],
@@ -1086,7 +1186,7 @@ it('keeps a free parameter open when a nested callable schema binds the same par
   assert.deepEqual(Type.parameters(quantified), [])
   assert.strictEqual(Type.isConcrete(quantified), true)
 
-  const wrapped = Type.callable([parameter], quantified)
+  const wrapped = Type.callable([parameter], quantified, detached)
   assert.deepEqual(Type.parameters(wrapped), [parameter])
   assert.strictEqual(Type.isConcrete(wrapped), false)
 })
@@ -1108,7 +1208,7 @@ it('keys raw pointers by mutability and pointee and widens only *mut to *const a
   ])
   assert.strictEqual(Type.isViewBorrow(mutI32), false)
   assert.strictEqual(Type.containsBorrow(mutI32), false)
-  assert.strictEqual(Type.containsPositionRestrictedBorrow(mutI32), false)
+  assert.strictEqual(Type.containsBorrowWrapper(mutI32), false)
 
   const mutU8 = Type.pointer(true, 'u8')
   const constU8 = Type.pointer(false, 'u8')
@@ -1133,4 +1233,968 @@ it('keys raw pointers by mutability and pointee and widens only *mut to *const a
     ),
     Type.key(Type.pointer(true, 'u32')),
   )
+})
+
+it('preserves lifetime arguments through generic substitution and erases only runtime identity', () => {
+  const owner = { module: 'lifetimes', name: 'transport' }
+  const first = Lifetime.bound(owner, 0, 'data')
+  const second = Lifetime.local(owner, 'call', 0)
+  const binder = Type.parameter(owner, 0, 'data', 'Lifetime')
+  const source = Type.nominal('lifetimes', 'Holder', [
+    first,
+    Type.fixedArray(Type.reference('Shared', Type.string(first), first), 2),
+  ])
+  const substitution =
+    TypeInference.prefixSubstitution([binder], [second]) ??
+    unreachable('expected a lifetime-kind substitution')
+  const result = Type.substitute(source, substitution)
+  assert.strictEqual(Type.key(binder), Lifetime.key(first))
+  assert.deepEqual(Type.parameterArgument(binder), first)
+  assert.notStrictEqual(Type.key(source), Type.key(result))
+  assert.strictEqual(Type.runtimeKey(source), Type.runtimeKey(result))
+  assert.deepEqual(Type.lifetimes(result), [second])
+  assert.isFalse(Type.isTypeArgument(first))
+
+  const effect = Type.effect(source, [], {
+    environment: first,
+    lifetimeBinders: [],
+    lifetimeBounds: [{ longer: first, shorter: second }],
+  })
+  const represented = Type.represented(
+    effect,
+    effect,
+    Type.exactRepresentationArgument(
+      Type.effectIdentityArgument('lifetimes/transport', {
+        declaration: owner,
+        typeArguments: [first, source],
+      }),
+      effect,
+    ),
+  )
+  const updated = Type.substitute(represented, substitution)
+  assert.deepEqual(Type.lifetimes(updated), [second])
+  assert.notStrictEqual(Type.key(represented), Type.key(updated))
+  assert.strictEqual(Type.runtimeKey(represented), Type.runtimeKey(updated))
+  assert.isUndefined(TypeInference.prefixSubstitution([binder], ['i32']))
+})
+
+it('checks declared lifetime covariance while keeping mutable storage and cache assumptions invariant', () => {
+  const owner = { module: 'lifetimes', name: 'variance' }
+  const long = Lifetime.bound(owner, 0, 'long')
+  const short = Lifetime.bound(owner, 1, 'short')
+  const longView = Type.reference('Shared', 'i32', long)
+  const shortView = Type.reference('Shared', 'i32', short)
+  const holder = Type.nominal('lifetimes', 'Holder', [longView])
+  const shorterHolder = Type.nominal('lifetimes', 'Holder', [shortView])
+  const assumptions = Lifetime.assumptions([{ longer: long, shorter: short }])
+  const context = TypeCompatibility.context({
+    assumptions,
+    nominalVariance: new Map([[TypeCompatibility.nominalVarianceKey(holder), ['Covariant']]]),
+  })
+  assert.isTrue(
+    TypeCompatibility.isCompatible(TypeCompatibility.check(holder, shorterHolder, context)),
+  )
+  assert.isTrue(
+    TypeCompatibility.isCompatible(TypeCompatibility.check(holder, shorterHolder, context)),
+  )
+  assert.strictEqual(context.work.cacheHits, 1)
+  assert.isFalse(
+    TypeCompatibility.isCompatible(TypeCompatibility.check(shorterHolder, holder, context)),
+  )
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(holder, shorterHolder)))
+  assert.isFalse(
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(
+        Type.reference('Exclusive', holder, long),
+        Type.reference('Exclusive', shorterHolder, short),
+        context,
+      ),
+    ),
+  )
+  assert.isTrue(
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(Type.string(long), Type.string(short), context),
+    ),
+  )
+  assert.isFalse(
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(Type.string(short), Type.string(long), context),
+    ),
+  )
+})
+
+it('checks finite callable binders with rigid placeholders and rejects stronger bounds or nested quantification', () => {
+  const offeredOwner = { module: 'lifetimes', name: 'offered' }
+  const expectedOwner = { module: 'lifetimes', name: 'expected' }
+  const a = Lifetime.bound(offeredOwner, 0, 'a')
+  const b = Lifetime.bound(offeredOwner, 1, 'b')
+  const x = Lifetime.bound(expectedOwner, 0, 'x')
+  const y = Lifetime.bound(expectedOwner, 1, 'y')
+  const make = (
+    first: Lifetime.Bound,
+    second: Lifetime.Bound,
+    bounds: ReadonlyArray<Lifetime.Outlives>,
+  ) =>
+    Type.callable(
+      [Type.reference('Shared', 'i32', first)],
+      Type.reference('Shared', 'i32', second),
+      {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [first, second],
+        lifetimeBounds: bounds,
+      },
+    )
+  const offered = make(a, b, [{ longer: a, shorter: b }])
+  const expected = make(x, y, [{ longer: x, shorter: y }])
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(offered, expected)))
+  const inference = new Map<string, Type.GenericArgument>()
+  assert.isTrue(TypeInference.infer(expected, offered, inference))
+  assert.strictEqual(inference.size, 0)
+  assert.isFalse(TypeInference.infer(make(x, y, []), offered, new Map()))
+  assert.isFalse(
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(make(a, b, [{ longer: b, shorter: a }]), expected),
+    ),
+  )
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(offered, make(x, y, []))))
+  assert.strictEqual(
+    Type.key(
+      Type.substituteLifetimes(offered, new Map([[Lifetime.key(a), Lifetime.staticLifetime]])),
+    ),
+    Type.key(offered),
+  )
+  assert.deepEqual(Type.freeLifetimes(offered), [Lifetime.staticLifetime])
+  const nested = Type.callable([offered], 'i32', {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [x],
+  })
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(nested, nested)))
+  assert.isFalse(TypeInference.infer(nested, nested, new Map()))
+  const consumer = Type.callable([offered], 'i32', detached)
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(consumer, consumer)))
+  assert.isTrue(
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(consumer, Type.callable([expected], 'i32', detached)),
+    ),
+  )
+  const escaping = Type.callable(
+    [Type.reference('Shared', 'i32', a)],
+    Type.reference('Shared', 'i32', a),
+    { environment: a, lifetimeBinders: [] },
+  )
+  const universal = Type.callable(
+    [Type.reference('Shared', 'i32', x)],
+    Type.reference('Shared', 'i32', x),
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [x] },
+  )
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(escaping, universal)))
+  const selected = Type.callable(
+    [Type.reference('Shared', 'i32', y)],
+    Type.reference('Shared', 'i32', y),
+    detached,
+  )
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(universal, selected)))
+  const selectedInference = new Map<string, Type.GenericArgument>()
+  assert.isTrue(TypeInference.infer(selected, universal, selectedInference))
+  assert.deepEqual([...selectedInference], [[Lifetime.key(y), y]])
+  const restricted = Type.callable(universal.parameters, universal.result, {
+    ...universal,
+    lifetimeBounds: [{ longer: x, shorter: Lifetime.staticLifetime }],
+  })
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(restricted, selected)))
+  assert.isFalse(TypeInference.infer(selected, restricted, new Map()))
+  const outerType = Type.parameter(offeredOwner, 2, 'T')
+  const typeRestricted = Type.callable(universal.parameters, universal.result, {
+    ...universal,
+    typeOutlives: [{ type: outerType, lifetime: x }],
+  })
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(typeRestricted, selected)))
+  assert.isFalse(TypeInference.infer(selected, typeRestricted, new Map()))
+  const captured = Type.callable(universal.parameters, universal.result, {
+    ...universal,
+    environment: a,
+  })
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(captured, selected)))
+  assert.isFalse(TypeInference.infer(selected, captured, new Map()))
+})
+
+it('infers a selected call with a common local region and preserves mutable pointee invariance', () => {
+  const owner = { module: 'lifetimes', name: 'selected' }
+  const a = Lifetime.bound(owner, 0, 'a')
+  const left = Lifetime.bound({ module: 'lifetimes', name: 'caller' }, 0, 'left')
+  const right = Lifetime.bound({ module: 'lifetimes', name: 'caller' }, 1, 'right')
+  const common = Lifetime.local(owner, 'Call:0', 0)
+  const obligations: Array<Lifetime.Outlives> = []
+  const context = TypeCompatibility.context({
+    assumptions: Lifetime.assumptions([{ longer: left, shorter: right }]),
+    outlives: (longer, shorter) => {
+      if (longer._tag !== 'LocalLifetime' && shorter._tag !== 'LocalLifetime') return false
+      obligations.push({ longer, shorter })
+      return true
+    },
+  })
+  const inference: TypeInference.LifetimeInference = {
+    accepts: (source, target, invariant) =>
+      TypeCompatibility.isCompatible(
+        TypeCompatibility.check(Type.string(source), Type.string(target), context),
+      ) &&
+      (!invariant ||
+        TypeCompatibility.isCompatible(
+          TypeCompatibility.check(Type.string(target), Type.string(source), context),
+        )),
+  }
+  const inferred = new Map<string, Type.GenericArgument>([[Lifetime.key(a), common]])
+  const parameter = Type.reference('Shared', 'i32', a)
+  assert.isTrue(
+    TypeInference.infer(parameter, Type.reference('Shared', 'i32', left), inferred, inference),
+  )
+  assert.isTrue(
+    TypeInference.infer(parameter, Type.reference('Shared', 'i32', right), inferred, inference),
+  )
+  assert.deepEqual(Type.substitute(parameter, inferred), Type.reference('Shared', 'i32', common))
+  assert.deepEqual(obligations, [
+    { longer: left, shorter: common },
+    { longer: right, shorter: common },
+  ])
+  assert.isFalse(
+    TypeInference.infer(
+      Type.reference('Exclusive', Type.string(right), Lifetime.staticLifetime),
+      Type.reference('Exclusive', Type.string(left), Lifetime.staticLifetime),
+      new Map(),
+      inference,
+    ),
+  )
+  assert.isTrue(
+    TypeInference.infer(
+      Type.reference('Exclusive', Type.string(a), Lifetime.staticLifetime),
+      Type.reference('Exclusive', Type.string(left), Lifetime.staticLifetime),
+      inferred,
+      inference,
+    ),
+  )
+  assert.isTrue(
+    obligations.some(
+      (bound) => Lifetime.equals(bound.longer, common) && Lifetime.equals(bound.shorter, left),
+    ),
+  )
+})
+
+it.effect(
+  'checks finite borrowed uses and return escapes without inferring a public lifetime contract',
+  () =>
+    Effect.gen(function* () {
+      const source = `fn identity<'a>(value: &'a i32) -> &'a i32 { return value }
+fn invalid() -> &'static i32 { let local = 1 let view = &local return view }
+fn caller() -> i32 { let local = 2 let view = identity(&local) return view.* }`
+      const snapshot = yield* Analysis.ofSource(
+        'lifetimes/flow',
+        Uint8Array.from(source, (character) => character.charCodeAt(0)),
+      )
+      const diagnostics = Analysis.diagnostics(snapshot)
+      assert.include(
+        diagnostics.map((diagnostic) => diagnostic.code),
+        Diagnostic.expiredLifetimeCode,
+      )
+      assert.include(
+        diagnostics
+          .filter((diagnostic) => diagnostic.code === Diagnostic.expiredLifetimeCode)
+          .map((diagnostic) => diagnostic.span.start),
+        source.indexOf('return view') + 'return'.length,
+      )
+      assert.isFalse(
+        diagnostics.some((diagnostic) => diagnostic.span.start >= source.indexOf('fn caller')),
+      )
+      const functions = Analysis.rootAnalysis(snapshot).functions
+      const valid = functions.find(
+        (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'caller',
+      )
+      assert.strictEqual(valid?.lifetimeFlow?.solution._tag, 'Solved')
+      assert.deepEqual(valid?.lifetimeFlow?.diagnostics, [])
+    }),
+)
+
+it.effect('derives finite nominal variance from shared, exclusive and callable storage', () =>
+  Effect.gen(function* () {
+    const source = `struct Shared<'a> { value: &'a i32 }
+struct Mutable<'a> { value: &'static mut &'a i32 }
+struct Callback<'a> { value: fn<'static>(&'a i32) -> i32 }`
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/variance',
+      Uint8Array.from(source, (character) => character.charCodeAt(0)),
+    )
+    const derived = NominalVariance.derive(snapshot.index)
+    assert.deepEqual(
+      derived.summaries.get(
+        TypeCompatibility.nominalVarianceKey(Type.nominal('lifetimes/variance', 'Shared')),
+      ),
+      ['Covariant'],
+    )
+    assert.deepEqual(
+      derived.summaries.get(
+        TypeCompatibility.nominalVarianceKey(Type.nominal('lifetimes/variance', 'Mutable')),
+      ),
+      ['Invariant'],
+    )
+    assert.deepEqual(
+      derived.summaries.get(
+        TypeCompatibility.nominalVarianceKey(Type.nominal('lifetimes/variance', 'Callback')),
+      ),
+      ['Contravariant'],
+    )
+    assert.strictEqual(NominalVariance.derive(snapshot.index), derived)
+  }),
+)
+
+it.effect(
+  'retains every selected input source through borrowed aggregate and multi-source returns',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct Pair<'a> { left: &'a i32 right: &'a i32 }
+fn choose<'a>(left: &'a i32, right: &'a i32, flag: bool) -> &'a i32 {
+  if flag { return left } return right
+}
+fn pair<'a>(left: &'a i32, right: &'a i32) -> Pair<'a> { return Pair<'a> { left: left, right: right } }
+fn caller() -> i32 {
+  let left = 1 let right = 2
+  let selected = choose(&left, &right, true)
+  let values = pair(&left, &right)
+  return values.left.*
+}`
+      const snapshot = yield* Analysis.ofSource(
+        'lifetimes/selected',
+        Uint8Array.from(source, (character) => character.charCodeAt(0)),
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => ({
+          code: diagnostic.code,
+          span: diagnostic.span.start,
+        })),
+        [],
+      )
+      const caller = Analysis.rootAnalysis(snapshot).functions.at(-1) ?? unreachable('caller body')
+      const flow = caller.lifetimeFlow ?? unreachable('finite lifetime proof')
+      assert.strictEqual(flow.solution._tag, 'Solved')
+      assert.deepEqual(flow.diagnostics, [])
+      const parentCounts = new Map<string, number>()
+      for (const edge of flow.input.constraints)
+        if (edge.shorter._tag === 'LocalLifetime' && edge.shorter.context.startsWith('Call:'))
+          parentCounts.set(
+            Lifetime.key(edge.shorter),
+            (parentCounts.get(Lifetime.key(edge.shorter)) ?? 0) + 1,
+          )
+      assert.isTrue([...parentCounts.values()].some((count) => count >= 2))
+      const selected = caller.bindings.find(
+        (binding) => binding.name._tag === 'Present' && binding.name.spelling === 'selected',
+      )
+      assert.isDefined(selected)
+      if (selected?.inferredType._tag === 'Available') {
+        const sources = LifetimeFlow.sources(flow, selected.inferredType.type)
+        assert.strictEqual(
+          new Set(
+            sources.flatMap((origin) =>
+              origin.root?._tag === 'Let' ? [origin.root.binding.ordinal] : [],
+            ),
+          ).size,
+          2,
+        )
+        assert.strictEqual(LifetimeFlow.sources(flow, selected.inferredType.type), sources)
+      }
+    }),
+)
+
+it.effect('rejects a borrowed temporary which escapes its full expression', () =>
+  Effect.gen(function* () {
+    const source = `fn invalid() -> &'static [i32] { let view = &[1, 2] return view }`
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/temporary',
+      Uint8Array.from(source, (character) => character.charCodeAt(0)),
+    )
+    assert.include(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      Diagnostic.expiredLifetimeCode,
+    )
+  }),
+)
+
+it.effect('releases a replaced local reference before its former source expires', () =>
+  Effect.gen(function* () {
+    const source = `fn reset() -> i32 {
+  let outer = 1
+  let mut view = &outer
+  if true { let inner = 2 view = &inner view = &outer }
+  return view.*
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/reset',
+      Uint8Array.from(source, (character) => character.charCodeAt(0)),
+    )
+    assert.deepStrictEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
+it('separates stored executable environments from hypothetical outcome and invocation lifetimes', () => {
+  const owner = { module: 'lifetimes/storage', name: 'value' }
+  const a = Lifetime.bound(owner, 0, 'a')
+  const b = Lifetime.bound(owner, 1, 'b')
+  const callable = Type.callable([Type.reference('Shared', 'i32', a)], Type.string(b), {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [a],
+    lifetimeBounds: [{ longer: a, shorter: b }],
+  })
+  assert.deepEqual(Type.storageLifetimes(callable), [Lifetime.staticLifetime])
+  assert.includeMembers(Type.lifetimes(callable).map(Lifetime.key), [
+    Lifetime.key(a),
+    Lifetime.key(b),
+  ])
+  assert.strictEqual(Type.encode(callable), "for<'a: 'b> fn<'static>(&'a i32) -> string<'b>")
+  const effect = Type.effect(Type.string(b), [], detached)
+  assert.deepEqual(Type.storageLifetimes(effect), [Lifetime.staticLifetime])
+  const promised = Type.parameter(
+    owner,
+    2,
+    'F',
+    'EffectRepresentation',
+    Type.effect(Type.string(a), [], { environment: b, lifetimeBinders: [] }),
+    ['Intrinsic.Detached'],
+  )
+  const represented =
+    Type.representedType(Type.representationParameterArgument(promised)) ??
+    unreachable('represented Effect')
+  assert.deepEqual(Type.storageLifetimes(represented), [Lifetime.staticLifetime])
+  assert.includeMembers(Type.freeLifetimes(represented).map(Lifetime.key), [
+    Lifetime.key(a),
+    Lifetime.key(b),
+  ])
+  assert.deepEqual(Type.storageLifetimes(Type.nominal('test', 'Holder', [Type.string(b)])), [b])
+  const inferred = new Map<string, Type.GenericArgument>()
+  assert.isTrue(TypeInference.infer(Type.string(a), Type.string(a), inferred))
+  assert.strictEqual(inferred.get(Lifetime.key(a)), a)
+})
+
+it.effect('requires declared type outlives bounds at applied nominal storage boundaries', () =>
+  Effect.gen(function* () {
+    const source = `struct Holder<'a, T: 'a> { value: T marker: &'a i32 }
+struct Reference<'a, T> { value: &'a T }
+fn inherited<'a, T>(value: Holder<'a, T>) -> Holder<'a, T> { return move value }
+fn borrowed<'a, T>(proof: &'a T) -> Reference<'a, T> { return Reference<'a, T> { value: proof } }
+fn valid<'a, T: 'a>(value: Holder<'a, T>) -> i32 { return value.marker.* }
+fn implied<'a, T>(value: T, proof: &'a T, marker: &'a i32) -> Holder<'a, T> { return Holder<'a, T> { value: move value, marker: marker } }
+fn invalid<'a, T>(value: T, marker: &'a i32) -> Holder<'a, T> { return Holder<'a, T> { value: move value, marker: marker } }
+fn concrete<'a>(value: Holder<'a, i32>) -> i32 { return value.marker.* }
+fn expired<'a>(value: &'a i32, marker: &'static i32) -> Holder<'static, &'a i32> { return Holder<'static, &'a i32> { value: value, marker: marker } }`
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/wellformed',
+      Uint8Array.from(source, (character) => character.charCodeAt(0)),
+    )
+    const failures = Analysis.diagnostics(snapshot).filter(
+      (diagnostic) => diagnostic.code === Diagnostic.unsatisfiedLifetimeBoundCode,
+    )
+    assert.isTrue(
+      failures.some(
+        (diagnostic) =>
+          diagnostic.span.start >= source.indexOf('fn invalid') &&
+          diagnostic.span.start < source.indexOf('fn concrete'),
+      ),
+    )
+    assert.isTrue(
+      failures.some((diagnostic) => diagnostic.span.start >= source.indexOf('fn expired')),
+    )
+    assert.isFalse(
+      failures.some((diagnostic) => diagnostic.span.start < source.indexOf('fn invalid')),
+    )
+    assert.isFalse(
+      failures.some(
+        (diagnostic) =>
+          diagnostic.span.start >= source.indexOf('fn concrete') &&
+          diagnostic.span.start < source.indexOf('fn expired'),
+      ),
+    )
+  }),
+)
+
+it.effect('keeps a borrowed pattern field tied to the outer referent across match arms', () =>
+  Effect.gen(function* () {
+    const source = `struct Left { value: [i32; 1] }
+struct Right { value: [i32; 1] }
+struct Both { value: Left | Right }
+fn view<'a>(outer: &'a Both) -> &'a [i32] {
+  return match &outer.value { Left { value } => &value Right { value } => &value }
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/pattern',
+      Uint8Array.from(source, (character) => character.charCodeAt(0)),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((d) => ({ code: d.code, start: d.span.start })),
+      [],
+    )
+  }),
+)
+
+it('binds authored lifetime and ordinary generic prefixes in independent namespaces', () => {
+  const owner = { module: 'lifetimes/prefix', name: 'map' }
+  const env = Type.parameter(owner, 0, 'env', 'Lifetime')
+  const value = Type.parameter(owner, 1, 'A')
+  const call = Type.parameter(owner, 2, 'call', 'Lifetime')
+  const result = Type.parameter(owner, 3, 'B')
+  const ordinary = TypeInference.prefixSubstitution([env, value, call, result], ['i32'])
+  assert.strictEqual(ordinary?.get(Type.key(value)), 'i32')
+  assert.isFalse(ordinary?.has(Type.key(env)))
+  const supplied = TypeInference.prefixSubstitution(
+    [env, value, call, result],
+    ['i32', Lifetime.staticLifetime, 'bool'],
+  )
+  assert.strictEqual(supplied?.get(Type.key(env)), Lifetime.staticLifetime)
+  assert.strictEqual(supplied?.get(Type.key(value)), 'i32')
+  assert.strictEqual(supplied?.get(Type.key(result)), 'bool')
+  assert.isUndefined(TypeInference.prefixSubstitution([env, value], ['i32', 'bool']))
+})
+
+it.effect('does not strengthen a universal lifetime through a local reborrow', () =>
+  Effect.gen(function* () {
+    const source = `fn invalid<'a>(value: &'a i32) -> &'static i32 { return &value.* }
+fn valid<'a>(value: &'a i32) -> &'a i32 { return &value.* }`
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/universal',
+      Uint8Array.from(source, (character) => character.charCodeAt(0)),
+    )
+    const failures = Analysis.diagnostics(snapshot)
+    assert.isTrue(
+      failures.some(
+        (diagnostic) =>
+          diagnostic.code === Diagnostic.unsatisfiedLifetimeBoundCode &&
+          diagnostic.span.start < source.indexOf('fn valid'),
+      ),
+    )
+    assert.isFalse(
+      failures.some((diagnostic) => diagnostic.span.start >= source.indexOf('fn valid')),
+    )
+  }),
+)
+
+it.effect('requires captured generic data to prove the returned callable environment', () =>
+  Effect.gen(function* () {
+    const source = `fn discard<T>(result: i32, value: T) -> i32 { return result }
+fn invalid<T>(value: T) -> once fn<'static>(i32) -> i32 { return discard(move value) }
+fn valid<'a, T: 'a>(value: T) -> once fn<'a>(i32) -> i32 { return discard(move value) }`
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/generic-capture',
+      Uint8Array.from(source, (character) => character.charCodeAt(0)),
+    )
+    const failures = Analysis.diagnostics(snapshot)
+    assert.isTrue(
+      failures.some(
+        (diagnostic) =>
+          diagnostic.code === Diagnostic.expiredLifetimeCode &&
+          diagnostic.span.start >= source.indexOf('fn invalid') &&
+          diagnostic.span.start < source.indexOf('fn valid'),
+      ),
+    )
+    assert.isFalse(
+      failures.some((diagnostic) => diagnostic.span.start >= source.indexOf('fn valid')),
+    )
+  }),
+)
+
+it.effect('keeps declared executable environment bounds in universal invocation checking', () =>
+  Effect.gen(function* () {
+    const source = `fn apply<'env>(use: for<'a> once fn<'env>(&'a i32) -> i32, value: &i32) -> i32 { return use(value) }`
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/invoke',
+      Uint8Array.from(source, (c) => c.charCodeAt(0)),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
+it('retains type outlives predicates through quantifier comparison, substitution and runtime erasure', () => {
+  const owner = { module: 'lifetimes/predicates', name: 'source' }
+  const value = Type.parameter(owner, 0, 'T')
+  const a = Lifetime.bound(owner, 1, 'a')
+  const b = Lifetime.bound({ ...owner, name: 'other' }, 0, 'b')
+  const bare = Type.callable([], 'i32', { ...detached, lifetimeBinders: [a] })
+  const required = Type.callable([], 'i32', {
+    ...detached,
+    lifetimeBinders: [a],
+    typeOutlives: [{ type: value, lifetime: a }],
+  })
+  const renamed = Type.callable([], 'i32', {
+    ...detached,
+    lifetimeBinders: [b],
+    typeOutlives: [{ type: value, lifetime: b }],
+  })
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(required, bare)))
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(bare, required)))
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(required, renamed)))
+  assert.isFalse(TypeInference.infer(bare, required, new Map()))
+  assert.isTrue(TypeInference.infer(required, renamed, new Map()))
+  assert.notStrictEqual(Type.key(required), Type.key(bare))
+  assert.strictEqual(Type.runtimeKey(required), Type.runtimeKey(bare))
+  const changed = Type.substitute(required, new Map([[Type.key(value), 'i32']]))
+  assert.isTrue(Type.isCallable(changed))
+  if (Type.isCallable(changed)) assert.strictEqual(changed.typeOutlives.at(0)?.type, 'i32')
+})
+
+it('carries executable formation facts without assuming invocation predicates or strengthening environments', () => {
+  const owner = { module: 'lifetimes/formation', name: 'retained' }
+  const env = Lifetime.bound(owner, 0, 'env')
+  const source = Lifetime.bound(owner, 1, 'source')
+  const value = Type.parameter(owner, 2, 'T')
+  const outer = Type.parameter({ ...owner, name: 'outer' }, 0, 'U')
+  const plain = Type.callable([], 'i32', { environment: env, lifetimeBinders: [] })
+  const retained = Type.callable([], 'i32', {
+    ...plain,
+    lifetimeBounds: [{ longer: source, shorter: env }],
+    typeOutlives: [{ type: outer, lifetime: env }],
+  })
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(retained, plain)))
+  assert.isTrue(TypeInference.infer(plain, retained, new Map()))
+  const forgedEnvironment = Type.callable([], 'i32', {
+    ...retained,
+    lifetimeBounds: [{ longer: env, shorter: Lifetime.staticLifetime }],
+  })
+  assert.isFalse(
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(forgedEnvironment, Type.callable([], 'i32', detached)),
+    ),
+  )
+  assert.isFalse(
+    TypeInference.infer(Type.callable([], 'i32', detached), forgedEnvironment, new Map()),
+  )
+  const contract = CallableContract.make({
+    ...detached,
+    functionKind: 'Function',
+    binders: [value],
+    parameters: [],
+    result: 'i32',
+    constraints: [],
+    captures: [],
+  })
+  const schema: Type.CallableSchema = {
+    contract,
+    binders: contract.binders,
+    constraints: [],
+    evidence: [],
+    substitution: new Map(),
+    contractKey: CallableContract.key(contract),
+    constraintKeys: [],
+    evidenceKeys: [],
+    origins: [],
+  }
+  const generic = Type.callable(
+    [],
+    'i32',
+    {
+      ...plain,
+      typeOutlives: [{ type: value, lifetime: env }],
+    },
+    'Shared',
+    schema,
+  )
+  assert.deepEqual(Type.executableFormationRequirements(generic).typeOutlives, [])
+  assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(generic, plain)))
+  assert.isFalse(TypeInference.infer(plain, generic, new Map()))
+  const selected = Type.callable(
+    [],
+    'i32',
+    {
+      ...generic,
+      typeOutlives: [{ type: outer, lifetime: env }],
+    },
+    'Shared',
+    schema,
+  )
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(selected, plain)))
+  assert.isTrue(TypeInference.infer(plain, selected, new Map()))
+  const effect = Type.effect('i32', [], { ...retained, lifetimeBinders: [] })
+  const expectedEffect = Type.effect('i32', [], { ...plain, lifetimeBinders: [] })
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(effect, expectedEffect)))
+  assert.isTrue(TypeInference.infer(expectedEffect, effect, new Map()))
+})
+
+it.effect('keeps captured generic Effect storage bounded independently from its result type', () =>
+  Effect.gen(function* () {
+    const source = `effect fn retain<T>(value: T) -> i32 { return 0 }
+fn invalid<T>(value: T) -> once Effect<'static; i32> { return retain(move value) }
+fn valid<'a, T: 'a>(value: T) -> once Effect<'a; i32> { return retain(move value) }`
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/generic-effect',
+      Uint8Array.from(source, (c) => c.charCodeAt(0)),
+    )
+    const failures = Analysis.diagnostics(snapshot)
+    assert.isTrue(
+      failures.some(
+        (d) =>
+          d.code === Diagnostic.unsatisfiedLifetimeBoundCode &&
+          d.span.start >= source.indexOf('\nfn invalid') &&
+          d.span.start < source.indexOf('fn valid'),
+      ),
+    )
+    assert.isFalse(failures.some((d) => d.span.start >= source.indexOf('fn valid')))
+  }),
+)
+
+it('compares quantified contracts on the same representation without merging distinct representations', () => {
+  const owner = { module: 'lifetimes/representation', name: 'operation' }
+  const a = Lifetime.bound(owner, 0, 'a', [0])
+  const b = Lifetime.bound({ ...owner, name: 'required' }, 0, 'b', [0])
+  const offered = Type.callable([Type.reference('Shared', 'i32', a)], 'i32', {
+    ...detached,
+    lifetimeBinders: [a],
+  })
+  const wanted = Type.callable([Type.reference('Shared', 'i32', b)], 'i32', {
+    ...detached,
+    lifetimeBinders: [b],
+  })
+  const representation = Type.parameter(owner, 1, 'F', 'CallableRepresentation', offered)
+  const argument = Type.representationParameterArgument(representation)
+  const source = Type.represented(offered, offered, argument)
+  const target = Type.represented(wanted, wanted, argument)
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(source, target)))
+  const different = Type.representationParameterArgument(
+    Type.parameter(owner, 2, 'G', 'CallableRepresentation', wanted),
+  )
+  assert.isFalse(
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(source, Type.represented(wanted, wanted, different)),
+    ),
+  )
+  const env = Type.parameter(owner, 4, 'env', 'Lifetime')
+  const required = Type.parameter(
+    owner,
+    3,
+    'R',
+    'CallableRepresentation',
+    Type.callable([], 'i32', { environment: Lifetime.bound(owner, 4, 'env'), lifetimeBinders: [] }),
+  )
+  const supplied = Type.representationParameterArgument(
+    Type.parameter(owner, 5, 'S', 'CallableRepresentation', Type.callable([], 'i32', detached)),
+  )
+  assert.isDefined(
+    TypeInference.prefixSubstitution([required, env], [supplied, Lifetime.staticLifetime]),
+  )
+})
+
+it('substitutes the retained contract of an open representation parameter', () => {
+  const owner = { module: 'lifetimes/representation', name: 'substitution' }
+  const value = Type.parameter(owner, 0, 'D')
+  const env = Lifetime.bound(owner, 1, 'env')
+  const bound = Type.callable([value], value, { environment: env, lifetimeBinders: [] })
+  const parameter = Type.parameter(owner, 2, 'F', 'CallableRepresentation', bound)
+  const argument = Type.representationParameterArgument(parameter)
+  const source = Type.represented(bound, bound, argument)
+  const result = Type.substitute(
+    source,
+    new Map<string, Type.GenericArgument>([
+      [Type.key(value), 'i32'],
+      [Lifetime.key(env), Lifetime.staticLifetime],
+    ]),
+  )
+  assert.isTrue(Type.isRepresented(result))
+  if (!Type.isRepresented(result)) return unreachable('expected represented result')
+  const expected = Type.callable(['i32'], 'i32', detached)
+  assert.isTrue(Type.equals(result.contract, expected))
+  assert.isTrue(Type.equals(result.representation.requiredBound, expected))
+  assert.isTrue(Type.equalsGenericArgument(result.representation.argument, argument))
+  const environmentApplied = Type.substitute(
+    source,
+    new Map([[Lifetime.key(env), Lifetime.staticLifetime]]),
+  )
+  const sequential = Type.substitute(environmentApplied, new Map([[Type.key(value), 'i32']]))
+  assert.isTrue(Type.equals(sequential, result))
+  assert.deepEqual(Type.storageLifetimes(sequential), [Lifetime.staticLifetime])
+  const holder = Type.nominal(owner.module, 'Holder', [argument])
+  const appliedHolder = Type.substitute(
+    holder,
+    new Map([[Lifetime.key(env), Lifetime.staticLifetime]]),
+  )
+  assert.deepEqual(Type.storageLifetimes(appliedHolder), [Lifetime.staticLifetime])
+})
+
+it('checks fixed generic arguments under callable variance without reinferring their type', () => {
+  const owner = { module: 'lifetimes/inference', name: 'fixed' }
+  const long = Lifetime.bound(owner, 0, 'long')
+  const short = Lifetime.bound(owner, 1, 'short')
+  const parameter = Type.parameter(owner, 2, 'T')
+  const fixed = Type.reference('Shared', 'i32', long)
+  const shorter = Type.reference('Shared', 'i32', short)
+  const assumptions = Lifetime.assumptions([{ longer: long, shorter: short }])
+  const lifetimes: TypeInference.LifetimeInference = {
+    accepts: (source, target, invariant) =>
+      Lifetime.outlives(assumptions, source, target) &&
+      (!invariant || Lifetime.outlives(assumptions, target, source)),
+  }
+  const inferred = new Map<string, Type.GenericArgument>([[Type.key(parameter), fixed]])
+  assert.isTrue(
+    TypeInference.infer(
+      Type.callable([parameter], Type.unit, detached),
+      Type.callable([shorter], Type.unit, detached),
+      inferred,
+      lifetimes,
+    ),
+  )
+  assert.isFalse(TypeInference.infer(parameter, shorter, inferred, lifetimes))
+  assert.isFalse(
+    TypeInference.infer(
+      Type.reference('Exclusive', parameter, Lifetime.staticLifetime),
+      Type.reference('Exclusive', shorter, Lifetime.staticLifetime),
+      inferred,
+      lifetimes,
+    ),
+  )
+  assert.deepEqual(inferred.get(Type.key(parameter)), fixed)
+})
+
+it.effect('derives nominal well-formedness assumptions from requirement and impl headers', () =>
+  Effect.gen(function* () {
+    const source = `struct Holder<'a, T: 'a> { value: T }
+interface Marker {}
+impl<'a, T> Marker for Holder<'a, T> {}
+impl<'a, T> Holder<'a, T> { fn count(self: &Self) -> i32 { return 1 } }
+service Store<'a, T: 'a> { effect fn save(value: T) -> () }
+effect fn requiring<'a, T>() -> () ? &Store<'a, T> { return () }`
+    const snapshot = yield* Analysis.ofSource(
+      'lifetimes/header-obligations',
+      Uint8Array.from(source, (character) => character.charCodeAt(0)),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const index = Analysis.declarationIndex(snapshot)
+    const scope = TypeOutlives.context(index.modules)
+    const module =
+      index.modules.find((module) => module.module === 'lifetimes/header-obligations') ??
+      unreachable('expected source module')
+    const requiring = module.members.find(
+      (member) =>
+        member._tag === 'FunctionDeclaration' &&
+        member.name._tag === 'Present' &&
+        member.name.spelling === 'requiring',
+    )
+    if (requiring?._tag !== 'FunctionDeclaration')
+      return unreachable('expected requirement declaration')
+    for (const declaration of [requiring, ...module.conformances, ...module.inherentImpls]) {
+      const parameter =
+        declaration.typeParameters.find((parameter) => parameter.type.name === 'T') ??
+        unreachable('expected retained generic parameter')
+      assert.isTrue(
+        (scope.parameterBounds.get(Type.key(parameter.type))?.length ?? 0) > 0,
+        Type.key(parameter.type),
+      )
+    }
+  }),
+)
+
+it('discards rejected compatibility proofs and replays cached obligations after acceptance', () => {
+  const owner = { module: 'lifetimes/proof', name: 'compatibility' }
+  const local = Lifetime.local(owner, 'source', 0)
+  const target = Lifetime.bound(owner, 0, 'target')
+  const obligations: Array<Lifetime.Outlives> = []
+  const context = TypeCompatibility.context({
+    outlives: () => true,
+    commitOutlives: (longer, shorter) => {
+      obligations.push({ longer, shorter })
+    },
+  })
+  const source = Type.reference('Shared', 'i32', local)
+  const expected = Type.reference('Shared', 'i32', target)
+  assert.isFalse(
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(source, Type.reference('Shared', 'bool', target), context),
+    ),
+  )
+  assert.deepEqual(obligations, [])
+  TypeCompatibility.commitWhen(
+    context,
+    () => {
+      assert.isTrue(
+        TypeCompatibility.isCompatible(TypeCompatibility.check(source, expected, context)),
+      )
+      return false
+    },
+    (accepted) => accepted,
+  )
+  assert.deepEqual(obligations, [])
+  const hits = context.work.cacheHits
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(source, expected, context)))
+  assert.isAbove(context.work.cacheHits, hits)
+  assert.deepEqual(obligations, [{ longer: local, shorter: target }])
+})
+
+it('rolls back failed inference while retaining a later cached successful proof', () => {
+  const owner = { module: 'lifetimes/proof', name: 'inference' }
+  const source = Lifetime.local(owner, 'source', 0)
+  const target = Lifetime.bound(owner, 0, 'target')
+  const obligations: Array<Lifetime.Outlives> = []
+  const compatibility = TypeCompatibility.context({
+    outlives: () => true,
+    commitOutlives: (longer, shorter) => {
+      obligations.push({ longer, shorter })
+    },
+  })
+  const inference: TypeInference.LifetimeInference = {
+    compatibility,
+    accepts: (longer, shorter) =>
+      TypeCompatibility.isCompatible(
+        TypeCompatibility.check(Type.string(longer), Type.string(shorter), compatibility),
+      ),
+  }
+  const pattern = Type.callable([Type.reference('Shared', 'i32', target)], 'bool', detached)
+  assert.isFalse(
+    TypeInference.infer(
+      pattern,
+      Type.callable([Type.reference('Shared', 'i32', source)], 'i32', detached),
+      new Map(),
+      inference,
+    ),
+  )
+  assert.deepEqual(obligations, [])
+  const hits = compatibility.work.cacheHits
+  assert.isTrue(
+    TypeInference.infer(
+      pattern,
+      Type.callable([Type.reference('Shared', 'i32', source)], 'bool', detached),
+      new Map(),
+      inference,
+    ),
+  )
+  assert.isAbove(compatibility.work.cacheHits, hits)
+  assert.deepEqual(obligations, [{ longer: target, shorter: source }])
+})
+
+it('commits only the successful complete row inference alternative', () => {
+  const owner = { module: 'lifetimes/proof', name: 'row' }
+  const a = Lifetime.bound(owner, 0, 'a')
+  const b = Lifetime.bound(owner, 1, 'b')
+  const left = Lifetime.local(owner, 'source', 0)
+  const right = Lifetime.local(owner, 'source', 1)
+  const parameter = Type.parameter(owner, 2, 'T')
+  const failure = (region: Lifetime.Lifetime, value: Type.Type) =>
+    Type.nominal(owner.module, 'Failure', [region, value])
+  const obligations: Array<Lifetime.Outlives> = []
+  const compatibility = TypeCompatibility.context({
+    outlives: () => true,
+    commitOutlives: (longer, shorter) => {
+      obligations.push({ longer, shorter })
+    },
+  })
+  const inference: TypeInference.LifetimeInference = {
+    compatibility,
+    accepts: (longer, shorter) =>
+      TypeCompatibility.isCompatible(
+        TypeCompatibility.check(Type.string(longer), Type.string(shorter), compatibility),
+      ),
+  }
+  const inferred = new Map<string, Type.GenericArgument>()
+  assert.isTrue(
+    TypeInference.infer(
+      Type.effect('i32', [failure(a, parameter), failure(b, 'bool')], detached),
+      Type.effect('i32', [failure(left, 'bool'), failure(right, 'i32')], detached),
+      inferred,
+      inference,
+    ),
+  )
+  assert.deepEqual(inferred.get(Type.key(parameter)), 'i32')
+  assert.sameDeepMembers(obligations, [
+    { longer: right, shorter: a },
+    { longer: left, shorter: b },
+  ])
 })

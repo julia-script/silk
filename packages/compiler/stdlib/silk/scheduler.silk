@@ -153,8 +153,8 @@ pub service Scheduler {
   /// The child can require only its owned Scheduler and MonotonicClock providers. Preparation
   /// reserves all child endpoints and one task identity before it returns. It does not activate
   /// the child.
-  effect fn prepare<A, E>(
-    child: once Effect<
+  effect fn prepare<A: 'static, E: 'static>(
+    child: once Effect<'static;
       A
       ! E
       ? &mut Scheduler | &mut MonotonicClock

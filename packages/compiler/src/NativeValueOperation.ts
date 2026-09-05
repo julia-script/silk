@@ -8,6 +8,7 @@ import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeArith from './NativeArith.js'
+import * as NativeOwnedPlace from './NativeOwnedPlace.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeType from './NativeType.js'
@@ -51,12 +52,24 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         throw new RangeError('LLVM match lost a pattern payload path')
       }
       const source = NativeStorage.readLocal(nativeStorage, operation.scrutinee)
-      const sourceLanes = operation.shape.lanes
+      const root = context.entry.fn.localTypes.at(operation.scrutinee.ordinal)
+      const place =
+        (operation.selectors?.length ?? 0) === 0 || root === undefined
+          ? undefined
+          : NativeOwnedPlace.make(
+              context.program.layout,
+              Mir.semanticType(root),
+              operation.selectors ?? [],
+            )
+      if ((operation.selectors?.length ?? 0) > 0 && place === undefined)
+        throw new RangeError('LLVM pattern binding lost its owned scrutinee path')
+      const sourceLanes = place?.source.lanes ?? operation.shape.lanes
       const targetLanes = NativeType.lanesFor(types, operation.type)
       const selected: Array<Value.Input> = []
       for (const [targetOrdinal, ordinal] of physical.entries()) {
-        const value = source.at(ordinal)
-        const sourceLane = sourceLanes.at(ordinal)
+        const slot = place === undefined ? ordinal : place.slots.at(ordinal)
+        const value = slot === undefined ? undefined : source.at(slot)
+        const sourceLane = slot === undefined ? undefined : sourceLanes.at(slot)
         const targetLane = targetLanes.at(targetOrdinal)
         if (value === undefined || sourceLane === undefined || targetLane === undefined) {
           continue

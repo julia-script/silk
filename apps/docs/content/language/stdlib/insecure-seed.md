@@ -73,7 +73,7 @@ A shared capability that returns one provider-stable [`Seed`](#declaration-73696
 ### Operation `get`
 
 ```silk
-effect fn get() -> Seed ? &InsecureSeed
+effect<'static> fn get() -> Seed ? &InsecureSeed
 ```
 
 Returns a copy of the provider's stable seed.
@@ -83,7 +83,7 @@ Returns a copy of the provider's stable seed.
 ### Associated function `InsecureSeed.first`
 
 ```silk
-pub fn first(seed: &silk/insecure_seed.Seed) -> u64
+pub fn first<'life0>(seed: &'life0 silk/insecure_seed.Seed) -> u64
 ```
 
 Returns the first word of `seed`.
@@ -93,7 +93,7 @@ Returns the first word of `seed`.
 ### Associated function `InsecureSeed.second`
 
 ```silk
-pub fn second(seed: &silk/insecure_seed.Seed) -> u64
+pub fn second<'life0>(seed: &'life0 silk/insecure_seed.Seed) -> u64
 ```
 
 Returns the second word of `seed`.
@@ -113,7 +113,7 @@ Creates a deterministic provider from two explicit words without requiring secur
 ### Associated function `InsecureSeed.fromRandom`
 
 ```silk
-pub effect fn fromRandom() -> FixedInsecureSeed ? &mut Random
+pub effect<'static> fn fromRandom() -> FixedInsecureSeed ? &mut Random
 ```
 
 Samples two secure words once and returns an immutable seed provider.

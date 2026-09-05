@@ -66,6 +66,12 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   BackendError | LlvmError.LlvmError
 > {
   const suspensionEnabled = program.functions.some((fn) => (fn.suspension?.regions.length ?? 0) > 0)
+  // A retained execution can be destroyed without ever running its body. Its package still owns
+  // the continuation chain and therefore needs frame cleanup even when no relay was emitted.
+  const needsFrameCleanup = program.layout.executionPackages.plans.some(
+    (plan) => plan.initialContinuationSegment,
+  )
+  const frameRuntimeEnabled = suspensionEnabled || needsFrameCleanup
   const runtimeFeatures = new Set<RuntimeFeature>()
   const i32Layout = Layout.entry(program.layout, 'i32')
   if (i32Layout === undefined || i32Layout.representation._tag !== 'SignedInteger') {
@@ -93,7 +99,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   let usizeType: LlvmType.Type | undefined
   if (usizeLayout?.representation._tag === 'UnsignedInteger') {
     usizeType = yield* LlvmType.integer(builder, usizeLayout.representation.bits)
-  } else if (suspensionEnabled) {
+  } else if (frameRuntimeEnabled) {
     usizeType = yield* LlvmType.integer(builder, program.layout.target.pointerSize * 8)
   } else {
     usizeType = undefined
@@ -106,7 +112,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     if (!integerTypes.has(bits)) integerTypes.set(bits, yield* LlvmType.integer(builder, bits))
   }
   const hasAddressLane =
-    suspensionEnabled ||
+    frameRuntimeEnabled ||
     (program.staticData?.length ?? 0) > 0 ||
     program.functions.some((fn) =>
       MirVerification.operations(fn).some(
@@ -243,7 +249,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
           yield* LlvmType.functionType(builder, pointer, [usizeType, usizeType]),
         )
       : undefined
-  const coroutineFramePop = suspensionEnabled
+  const coroutineFramePop = frameRuntimeEnabled
     ? yield* FunctionActor.declare(
         builder,
         CoroutineRuntime.popSymbol,
@@ -616,7 +622,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(resumeThunkType === undefined ? {} : { resumeThunkType }),
     }),
   )
-  if (originThunks.size > 0 || resumeThunks.size > 0) runtimeFeatures.add('NestedSuspensionRuntime')
+  if (needsFrameCleanup || originThunks.size > 0 || resumeThunks.size > 0)
+    runtimeFeatures.add('NestedSuspensionRuntime')
 
   // The module is verified before it is encoded: what reaches Clang has already been checked
   // for the SSA invariants Clang itself will not check on `-x ir` input.
@@ -643,7 +650,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     nativeRuntimeSymbols: Object.freeze([
       ...[...osRuntimes.values()].map((runtime) => runtime.symbol),
       ...(needsHostWrite ? ['silk_standard_stream_write_v1'] : []),
-      ...(suspensionEnabled ? CoroutineRuntime.symbols : []),
+      ...(coroutineFramePush === undefined ? [] : [CoroutineRuntime.pushSymbol]),
+      ...(coroutineFramePop === undefined ? [] : [CoroutineRuntime.popSymbol]),
     ]),
     runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),
     foreignImports: Object.freeze(

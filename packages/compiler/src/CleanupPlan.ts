@@ -4,6 +4,7 @@ import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as FieldRealization from './FieldRealization.js'
 import type * as Hir from './Hir.js'
 import * as TypeInference from './internal/TypeInference.js'
+import * as MovePath from './MovePath.js'
 import * as Type from './Type.js'
 
 export type CallableEnvironmentLocator =
@@ -121,6 +122,24 @@ export type CleanupPlan =
       }>
     }
 
+/** Whether cleanup may access storage after applying its exact sparse initialization mask. */
+export const mayReadStorage = (
+  self: CleanupPlan,
+  state: MovePath.State = MovePath.make(),
+): boolean => {
+  if (self._tag === 'NoCleanup' || state.initialization === 'Missing') return false
+  if (self._tag !== 'StructCleanup') return true
+  return self.fields.some((field) =>
+    mayReadStorage(
+      field.cleanup,
+      state.children.find(
+        (child) =>
+          child.selector._tag === 'Field' && child.selector.ordinal === field.field.ordinal,
+      )?.state ?? MovePath.make(state.initialization),
+    ),
+  )
+}
+
 export const hasHook = (self: CleanupPlan): boolean =>
   self._tag === 'HookCleanup' ||
   (self._tag === 'StructCleanup' && self.fields.some((field) => hasHook(field.cleanup))) ||
@@ -177,10 +196,58 @@ export const cleanupFields = (
   )
 }
 
+/** Actual cleanup derivation work retained by one immutable declaration context. */
+export interface Work {
+  readonly requests: number
+  readonly computations: number
+  readonly cacheHits: number
+}
+
+interface Catalog {
+  readonly plans: Map<string, CleanupPlan>
+  readonly work: { requests: number; computations: number; cacheHits: number }
+}
+
+const catalogs = new WeakMap<DeclarationIndex.Index, Catalog>()
+const catalogOf = (index: DeclarationIndex.Index): Catalog => {
+  const cached = catalogs.get(index)
+  if (cached !== undefined) return cached
+  const catalog = {
+    plans: new Map<string, CleanupPlan>(),
+    work: { requests: 0, computations: 0, cacheHits: 0 },
+  }
+  catalogs.set(index, catalog)
+  return catalog
+}
+
+/** Reads work counters without initiating any cleanup derivation. */
+export const work = (index: DeclarationIndex.Index): Work =>
+  Object.freeze({ ...catalogOf(index).work })
+
+/** Reuses complete type recipes independently of body initialization masks. */
 export const cleanupPlan = (
   index: DeclarationIndex.Index,
   type: DeclarationFacts.SemanticType,
-  seen = new Set<string>(),
+  seen: ReadonlySet<string> = new Set<string>(),
+): CleanupPlan => {
+  const catalog = catalogOf(index)
+  catalog.work.requests += 1
+  const key = Type.key(type)
+  const cached = seen.size === 0 ? catalog.plans.get(key) : undefined
+  if (cached !== undefined) {
+    catalog.work.cacheHits += 1
+    return cached
+  }
+  catalog.work.computations += 1
+  const result = deriveCleanup(index, type, seen)
+  if (seen.size === 0) catalog.plans.set(key, result)
+  return result
+}
+
+const deriveCleanup = (
+  index: DeclarationIndex.Index,
+  type: DeclarationFacts.SemanticType,
+  seen: ReadonlySet<string>,
 ): CleanupPlan => {
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isString(type)) return Object.freeze({ _tag: 'NoCleanup', type })

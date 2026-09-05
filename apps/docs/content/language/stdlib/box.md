@@ -93,7 +93,7 @@ Owns one heap-allocated `T` and releases both the value and its allocation on dr
 ### Associated function `Box.make`
 
 ```silk
-pub effect fn make<T>(value: T) -> silk/box.Box<T> ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn make<T: 'env, 'env>(value: T) -> silk/box.Box<T> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Moves one value into a new box with storage for exactly one element.
@@ -108,7 +108,7 @@ The returned box owns the value and the allocation. Allocation failure produces
 ### Method `Box.get`
 
 ```silk
-pub fn get<T>(self: &Box<T>) -> &[T]
+pub fn get<T, 'life1>(self: &'life1 Box<T>) -> &'life1 [T]
 ```
 
 Borrows the held value as a shared slice of length one.
@@ -122,7 +122,7 @@ The slice borrows the box and remains valid only for the lexical borrow.
 ### Method `Box.getMut`
 
 ```silk
-pub fn getMut<T>(self: &mut Box<T>) -> &mut [T]
+pub fn getMut<T, 'life1>(self: &'life1 mut Box<T>) -> &'life1 mut [T]
 ```
 
 Borrows the held value as an exclusive slice of length one.

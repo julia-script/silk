@@ -80,6 +80,16 @@ invalidate its dependents.
 - **WHEN** a public struct gains or loses a field or changes a field contract
 - **THEN** modules whose semantic inputs include that struct surface are marked for dependency-surface recomputation
 
+#### Scenario: Revalidate only an edited semantic body
+
+- **WHEN** one private body changes among unrelated declarations while all directly consumed exported facts stay equal
+- **THEN** the edited body is checked again but sibling and downstream semantic body query executions remain reusable; dependency-fingerprint validation is distinguished from executing a body checker
+
+#### Scenario: Invalidate an exported lifetime consumer
+
+- **WHEN** an exported outlives relationship, variance summary, environment bound, or consumed cleanup fact changes
+- **THEN** only actual semantic consumers invalidate, including a negative invalidation witness that rules out an always-reuse cache
+
 ### Requirement: Surface propagation stops when exported meaning stabilizes
 
 Invalidation SHALL propagate through dependents according to the newly analyzed semantic surface,
@@ -99,21 +109,22 @@ input changed.
 
 ### Requirement: Cyclic dependencies invalidate as conservative components
 
-Modules participating in an import cycle SHALL be planned as one deterministic strongly connected
-component. A local or dependency-surface change affecting any member SHALL mark every current
-member of that component for recomputation. Dependency-graph changes SHALL be evaluated over enough
-previous and current graph information to handle component merges and splits conservatively.
-Propagation beyond the component SHALL occur only when its exposed surfaces change.
+Import-graph planning SHALL identify import components for deterministic dependency validation, while semantic body recomputation SHALL follow actual consumed declaration edges and actual recursive semantic components. A changed member SHALL NOT force unrelated bodies in the same module or merely cyclic import group to rerun. Dependency merges and splits SHALL validate sufficient previous and current graph facts to avoid stale reuse. Propagation beyond a changed component SHALL occur only when consumed semantic facts change.
 
-#### Scenario: Edit one member of a cycle
+#### Scenario: Edit an actual recursive semantic component
 
-- **WHEN** `A` and `B` import one another and either member changes a local semantic input
-- **THEN** the plan marks both `A` and `B` for recomputation
+- **WHEN** `A` and `B` form an actual recursive semantic declaration component and either member changes an input consumed throughout that component
+- **THEN** the plan marks the affected component members for recomputation without broadening that execution to unrelated declarations
 
 #### Scenario: Keep a dependent outside a stable cycle reusable
 
 - **WHEN** `C` depends on cyclic modules `A` and `B` and the cycle is recomputed without changing its exposed surfaces
 - **THEN** the plan keeps `C` reusable
+
+#### Scenario: Edit one member of a cycle
+
+- **WHEN** A and B import each other and one body changes without changing any exported fact consumed by the other
+- **THEN** the import component is dependency-validated but only affected semantic bodies recompute
 
 ### Requirement: Invalidation evidence is complete and deterministic
 
@@ -261,3 +272,17 @@ A module semantic surface SHALL encode a public struct's physical-layout contrac
 
 - **WHEN** a public ordinary struct changes to an otherwise identical C-layout struct
 - **THEN** its semantic surface changes and direct dependents are selected for recomputation
+
+### Requirement: Module surfaces encode declaration-relative lifetime contracts
+
+Module surfaces SHALL retain canonical binder structure, reference and nominal lifetime arguments, outlives and implied well-formedness relationships, derived variance, quantified callable contracts, environment bounds, and consumed representation or cleanup facts. Surface equality SHALL ignore alpha-renaming while preserving semantic changes. Concrete loan IDs, caller roots, local inference IDs, and partial initialization subsets SHALL remain absent. Explicit static body and code-generation dependencies SHALL retain separate implementation fingerprints and MUST NOT masquerade as semantic interface changes.
+
+#### Scenario: Publish an inferred field contract
+
+- **WHEN** a public holder declares two omitted field lifetimes
+- **THEN** its surface exposes two canonical independent binders and clients consume the same relationships as an explicit declaration
+
+#### Scenario: Keep body-dependent static work honest
+
+- **WHEN** a consumer explicitly evaluates an exported body in its upstream static context
+- **THEN** a body edit invalidates that recorded dependency even when ordinary signature-only consumers remain reusable

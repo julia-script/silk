@@ -161,7 +161,7 @@ it.effect('resolves one binder used more than once in the complete result', () =
   Effect.gen(function* () {
     const self = yield* index(
       'opaque-result/repeated',
-      'pub fn make() -> some<F: fn(i32) -> i32> fn(F) -> F { return 0 }',
+      "pub fn make() -> some<F: fn<'static>(i32) -> i32> fn<'static>(F) -> F { return 0 }",
     )
     const found = declaration(self, 'opaque-result/repeated', 'make')
     assert.strictEqual(found?.returnType._tag, 'Resolved')

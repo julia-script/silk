@@ -51,7 +51,7 @@ one import that reaches `Execution.make(...)` and the rest. It is unrelated to t
 ### Associated function `Execution.make`
 
 ```silk
-pub effect fn make<A, F, O, R>(body: F, readyState: O, onReady: R) -> Intrinsic.Execution<A> ! OutOfMemoryError ? &mut Allocator
+pub effect<'static> fn make<A, F, O, R>(body: F, readyState: O, onReady: R) -> Intrinsic.Execution<A> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Allocates one combined package and transfers the lazy body and fixed endpoint into it.
@@ -67,7 +67,7 @@ growth is a fatal trap and is not a `OutOfMemoryError`.
 ### Associated function `Execution.drive`
 
 ```silk
-pub effect fn drive<A, D, C, S>(execution: Intrinsic.Execution<A>, branchState: D, onComplete: C, onSuspend: S) -> ()
+pub effect<'env1> fn drive<'env: 'env1, A: 'env1, D: 'env1, C, S, 'env1>(execution: Intrinsic.Execution<A>, branchState: D, onComplete: C, onSuspend: S) -> ()
 ```
 
 Drives one `Initial`, `InitialReady`, or `Eligible` activation and transfers `branchState` to one outcome callback.
@@ -87,7 +87,7 @@ Driving a dormant, notifying, completed, or destroyed Execution is a fatal state
 ### Associated function `Execution.notifyInitial`
 
 ```silk
-pub fn notifyInitial<A>(execution: &mut Intrinsic.Execution<A>) -> ()
+pub fn notifyInitial<A, 'life1>(execution: &'life1 mut Intrinsic.Execution<A>) -> ()
 ```
 
 Notifies the fixed readiness endpoint for one `Initial` Execution exactly once.
@@ -107,7 +107,7 @@ Execution has been driven, parked, completed, or destroyed, is a fatal state tra
 ### Associated function `Execution.park`
 
 ```silk
-pub effect fn park<G, F>(register: F) -> ()
+pub effect<'env> fn park<'env, G, F>(register: F) -> ()
 ```
 
 Relinquishes the currently Running Execution until one external readiness signal arrives.

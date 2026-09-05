@@ -699,6 +699,20 @@ const parseCallableContractTail = (
   })
 }
 
+const parseEffectDeclarationEnvironment = (initial: State): NodeResult => {
+  const left = expect(initial, 'Less', ['Lifetime', 'Greater', 'FnKeyword'])
+  const lifetime = expect(left.state, 'Lifetime', ['Greater', 'FnKeyword'])
+  const right = expect(lifetime.state, 'Greater', ['FnKeyword', 'Identifier'])
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'EffectEnvironment', [
+      ...left.elements,
+      ...lifetime.elements,
+      ...right.elements,
+    ]),
+  })
+}
+
 export const parseServiceOperation = (initial: State): NodeResult => {
   const operatorMarker = hasContextualSpelling(initial, 'operator')
     ? parseOperatorMarker(initial)
@@ -718,6 +732,7 @@ export const parseServiceOperation = (initial: State): NodeResult => {
   const effectKeyword =
     nextSignificantKind(unsafeKeyword.state) === 'EffectKeyword'
       ? expect(unsafeKeyword.state, 'EffectKeyword', [
+          'Less',
           'FnKeyword',
           'Identifier',
           ...serviceOperationFollowing,
@@ -726,7 +741,11 @@ export const parseServiceOperation = (initial: State): NodeResult => {
           state: unsafeKeyword.state,
           elements: Object.freeze([]),
         })
-  const fnKeyword = expect(effectKeyword.state, 'FnKeyword', [
+  const effectEnvironment =
+    effectKeyword.elements.length > 0 && nextSignificantKind(effectKeyword.state) === 'Less'
+      ? parseEffectDeclarationEnvironment(effectKeyword.state)
+      : undefined
+  const fnKeyword = expect(effectEnvironment?.state ?? effectKeyword.state, 'FnKeyword', [
     'Identifier',
     'LeftParenthesis',
     ...serviceOperationFollowing,
@@ -748,6 +767,7 @@ export const parseServiceOperation = (initial: State): NodeResult => {
       ...(operatorMarker === undefined ? [] : [operatorMarker.node]),
       ...unsafeKeyword.elements,
       ...effectKeyword.elements,
+      ...(effectEnvironment === undefined ? [] : [effectEnvironment.node]),
       ...fnKeyword.elements,
       ...name.elements,
       ...(contract.typeParameters === undefined ? [] : [contract.typeParameters.node]),
@@ -1067,9 +1087,13 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
   const afterExtern = abi?.state ?? unsafeKeyword.state
   const effectKeyword =
     nextSignificantKind(afterExtern) === 'EffectKeyword'
-      ? expect(afterExtern, 'EffectKeyword', ['FnKeyword', 'Identifier', 'LeftParenthesis'])
+      ? expect(afterExtern, 'EffectKeyword', ['Less', 'FnKeyword', 'Identifier', 'LeftParenthesis'])
       : Object.freeze({ state: afterExtern, elements: Object.freeze([]) })
-  const fnKeyword = expect(effectKeyword.state, 'FnKeyword', [
+  const effectEnvironment =
+    effectKeyword.elements.length > 0 && nextSignificantKind(effectKeyword.state) === 'Less'
+      ? parseEffectDeclarationEnvironment(effectKeyword.state)
+      : undefined
+  const fnKeyword = expect(effectEnvironment?.state ?? effectKeyword.state, 'FnKeyword', [
     'Identifier',
     ...(allowDropName ? (['DropKeyword'] as const) : []),
     'LeftParenthesis',
@@ -1093,6 +1117,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     ...(marker?.elements ?? []),
     ...(abi?.elements ?? []),
     ...effectKeyword.elements,
+    ...(effectEnvironment === undefined ? [] : [effectEnvironment.node]),
     ...fnKeyword.elements,
     ...name.elements,
     ...(contract.typeParameters === undefined ? [] : [contract.typeParameters.node]),

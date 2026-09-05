@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as InterfaceWitnessCompatibility from '../src/InterfaceWitnessCompatibility.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Type from '../src/Type.js'
 
 const schema = Type.nominal('test', 'Schema')
@@ -25,7 +26,7 @@ const contract = Object.freeze({
   functionKind: 'Effect' as const,
   unsafe: false,
   operands: Object.freeze([
-    operand('self', Type.reference('Exclusive', schema), true),
+    operand('self', Type.reference('Exclusive', schema, Lifetime.staticLifetime), true),
     operand('encoded', 'i32'),
   ]),
   success: 'bool' as const,
@@ -42,7 +43,7 @@ it('admits a pure witness with smaller rows and weaker receiver and requirement 
     functionKind: 'Ordinary' as const,
     unsafe: false,
     operands: Object.freeze([
-      operand('self', Type.reference('Shared', schema), true),
+      operand('self', Type.reference('Shared', schema, Lifetime.staticLifetime), true),
       operand('encoded', 'i32'),
     ]),
     success: 'bool' as const,
@@ -67,7 +68,7 @@ it('reports the first stronger receiver demand before later row demands', () => 
   const receiverContract = Object.freeze({
     ...contract,
     operands: Object.freeze([
-      operand('self', Type.reference('Shared', schema), true),
+      operand('self', Type.reference('Shared', schema, Lifetime.staticLifetime), true),
       operand('encoded', 'i32'),
     ]),
   })
@@ -75,7 +76,7 @@ it('reports the first stronger receiver demand before later row demands', () => 
     functionKind: 'Effect' as const,
     unsafe: false,
     operands: Object.freeze([
-      operand('self', Type.reference('Exclusive', schema), true),
+      operand('self', Type.reference('Exclusive', schema, Lifetime.staticLifetime), true),
       operand('encoded', 'i32'),
     ]),
     success: 'bool' as const,
@@ -105,8 +106,8 @@ it('rejects stronger parameter, failure, and requirement demands deterministical
   const strongerParameter = Object.freeze({
     ...contract,
     operands: Object.freeze([
-      operand('self', Type.reference('Shared', schema), true),
-      operand('encoded', Type.reference('Exclusive', 'i32')),
+      operand('self', Type.reference('Shared', schema, Lifetime.staticLifetime), true),
+      operand('encoded', Type.reference('Exclusive', 'i32', Lifetime.staticLifetime)),
     ]),
     failures: Object.freeze([]),
     requirements: Object.freeze([]),
@@ -114,8 +115,8 @@ it('rejects stronger parameter, failure, and requirement demands deterministical
   const borrowedContract = Object.freeze({
     ...contract,
     operands: Object.freeze([
-      operand('self', Type.reference('Shared', schema), true),
-      operand('encoded', Type.reference('Shared', 'i32')),
+      operand('self', Type.reference('Shared', schema, Lifetime.staticLifetime), true),
+      operand('encoded', Type.reference('Shared', 'i32', Lifetime.staticLifetime)),
     ]),
     failures: Object.freeze([]),
     requirements: Object.freeze([]),
@@ -191,7 +192,7 @@ it('rejects stronger flow and non-exact operand or success types', () => {
   const widerOperand = Object.freeze({
     ...contract,
     operands: Object.freeze([
-      operand('self', Type.reference('Exclusive', schema), true),
+      operand('self', Type.reference('Exclusive', schema, Lifetime.staticLifetime), true),
       operand('encoded', union.type),
     ]),
   })
@@ -305,7 +306,9 @@ it('allows a take-capable value promise to satisfy a shared-borrow witness opera
   })
   const borrowedWitness = Object.freeze({
     ...valueContract,
-    operands: Object.freeze([operand('value', Type.reference('Shared', schema))]),
+    operands: Object.freeze([
+      operand('value', Type.reference('Shared', schema, Lifetime.staticLifetime)),
+    ]),
   })
 
   assert.strictEqual(
@@ -322,7 +325,7 @@ it('applies the Shared < Exclusive < Take order to every witness operand pair', 
     [false, false, true],
   ] as const
   const operandType = (access: (typeof accesses)[number]): Type.Type =>
-    access === 'Take' ? schema : Type.reference(access, schema)
+    access === 'Take' ? schema : Type.reference(access, schema, Lifetime.staticLifetime)
 
   for (const [requiredOrdinal, required] of accesses.entries()) {
     for (const [suppliedOrdinal, supplied] of accesses.entries()) {

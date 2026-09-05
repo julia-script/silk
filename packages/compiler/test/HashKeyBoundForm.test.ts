@@ -79,8 +79,13 @@ fn cellHashByValue(value: &Cell, seed: HashSeed) -> u64 { return seed.value }
 impl HashKey for Cell { equals: Cell.cellEquals hash: Cell.cellHashByValue }
 pub fn main() -> i32 { return 0 }`,
     )
-    assert.deepEqual(messages(snapshot), [
-      'Invalid conformance: Cell.cellHashByValue is incompatible with HashKey.hash: parameter seed requires take access but the interface promises shared access',
-    ])
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start,
+        diagnostic.span.end,
+      ]),
+      [['SEM0083', 464, 491]],
+    )
   }),
 )

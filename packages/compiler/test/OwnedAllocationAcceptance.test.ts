@@ -1,71 +1,47 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Type from '../src/Type.js'
 import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
 
-it.effect('relates a callback-borrow escape to its local-shared access boundary', () =>
+it.effect('rejects a callback-dependent Effect environment at a local-shared boundary', () =>
   Effect.gen(function* () {
-    const source = ascii(`import silk.allocator { OutOfMemoryError }
-struct Pair { first: i32 second: i32 }
-fn deferred(value: &mut Pair) -> Effect<i32> {
+    const source = ascii(`struct Pair { first: i32 second: i32 }
+fn deferred<'a>(value: &'a mut Pair) -> Effect<'a; i32> {
   return effect { return value.first }
 }
-fn fallback() -> Effect<i32> { return effect { return 0 } }
-effect fn construct() -> i32 ! OutOfMemoryError {
-  let layout = Intrinsic.sharedLayout<Pair>()
-  let allocation = run Intrinsic.systemAllocationAcquire(move layout)
-  unsafe {
-    let core = Intrinsic.sharedFromAllocation<Pair>(move allocation, Pair { first: 20, second: 22 })
-    let escaped = Intrinsic.sharedWithMut<Pair, Effect<i32>>(&core, deferred, fallback)
-    drop escaped
-    drop core
-  }
-  return 0
+fn fallback() -> Effect<'static; i32> { return effect { return 0 } }
+unsafe fn construct<'scope>(core: &'scope Intrinsic.SharedCore<Pair>) -> () {
+  let escaped = Intrinsic.sharedWithMut<Pair, Effect<'scope; i32>>(core, deferred, fallback)
+  drop escaped
+  return ()
 }
 pub fn main() -> i32 { return 0 }`)
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'local-shared-lifecycle/escape',
-      source,
-      'wasm32-unknown-unknown',
-    )
-    const diagnostic = Analysis.diagnostics(snapshot).find(
-      (candidate) => candidate.code === 'OWN0016',
-    )
-    assert.exists(
-      diagnostic,
-      Json.stringify(
-        Analysis.diagnostics(snapshot).map((candidate) => ({
-          code: candidate.code,
-          reason: candidate.reason._tag,
-          span: candidate.span,
-        })),
-      ),
-    )
-    assert.strictEqual(diagnostic?.reason._tag, 'LocalSharedAccessEscape')
-    assert.strictEqual(diagnostic?.span.sourceId, 'local-shared-lifecycle/escape')
-    assert.strictEqual(diagnostic?.relatedSpans?.length, 1)
-    assert.strictEqual(
-      diagnostic?.relatedSpans?.at(0)?.span.sourceId,
-      'local-shared-lifecycle/escape',
-    )
-    assert.isBelow(diagnostic?.span.start ?? Number.MAX_SAFE_INTEGER, diagnostic?.span.end ?? -1)
-    assert.isBelow(
-      diagnostic?.relatedSpans?.at(0)?.span.start ?? Number.MAX_SAFE_INTEGER,
-      diagnostic?.relatedSpans?.at(0)?.span.end ?? -1,
+    const snapshot = yield* Analysis.ofSource('local-shared-lifecycle/escape', source)
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0076'],
     )
   }),
 )
 
 it('classifies inexpressible local-shared escape containers at the ownership-fact tier', () => {
-  const narrowed = Type.slice('Shared', 'i32')
+  const narrowed = Type.slice('Shared', 'i32', Lifetime.staticLifetime)
   const genericAggregate = Type.nominal('test', 'Box', [narrowed])
-  const failureValue = Type.effect('i32', [Type.nominal('test', 'Problem', [narrowed])])
-  const storedCallable = Type.callable([], narrowed, 'Take')
+  const failureValue = Type.effect('i32', [Type.nominal('test', 'Problem', [narrowed])], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
+  const storedCallable = Type.callable(
+    [],
+    narrowed,
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Take',
+  )
   for (const resultType of [narrowed, genericAggregate, failureValue, storedCallable]) {
     assert.isTrue(
       Ownership.localSharedResultEscapes({
@@ -84,43 +60,20 @@ it('classifies inexpressible local-shared escape containers at the ownership-fac
   )
 })
 
-it.effect('rejects a direct local-shared callback borrow at its access boundary', () =>
+it.effect('rejects a direct callback-dependent reference at a local-shared boundary', () =>
   Effect.gen(function* () {
     const source = ascii(`struct Pair { first: i32 second: i32 }
-fn direct(value: &mut Pair) -> &mut Pair { return value }
-fn directConflict() -> &mut Pair { return directConflict() }
-unsafe fn directProbe(core: &Intrinsic.SharedCore<Pair>) -> &mut Pair {
-  return Intrinsic.sharedWithMut<Pair, &mut Pair>(core, direct, directConflict)
+fn direct<'a>(value: &'a mut Pair) -> &'a mut Pair { return move value }
+fn directConflict<'a>() -> &'a mut Pair { return directConflict() }
+unsafe fn directProbe<'scope>(core: &'scope Intrinsic.SharedCore<Pair>) -> &'scope mut Pair {
+  return Intrinsic.sharedWithMut<Pair, &'scope mut Pair>(core, direct, directConflict)
 }
 pub fn main() -> i32 { return 0 }`)
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'local-shared-lifecycle/direct-escape',
-      source,
-      'wasm32-unknown-unknown',
+    const snapshot = yield* Analysis.ofSource('local-shared-lifecycle/direct-escape', source)
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['SEM0076'],
     )
-    const diagnostics = Analysis.diagnostics(snapshot).filter(
-      (candidate) => candidate.code === 'OWN0016',
-    )
-    assert.strictEqual(
-      diagnostics.length,
-      1,
-      Json.stringify(
-        Analysis.diagnostics(snapshot).map((candidate) => ({
-          code: candidate.code,
-          reason: candidate.reason._tag,
-          start: candidate.span.start,
-          end: candidate.span.end,
-        })),
-      ),
-    )
-    for (const diagnostic of diagnostics) {
-      assert.strictEqual(diagnostic.reason._tag, 'LocalSharedAccessEscape')
-      assert.strictEqual(diagnostic.relatedSpans?.length, 1)
-      assert.strictEqual(
-        diagnostic.relatedSpans?.at(0)?.span.sourceId,
-        'local-shared-lifecycle/direct-escape',
-      )
-    }
   }),
 )
 
@@ -129,24 +82,23 @@ it.effect('rejects generic aggregate capture and suspension across local-shared 
     const source = ascii(`struct Pair { first: i32 second: i32 }
 struct Box<A> { value: A }
 fn wrap<A>(value: A) -> Box<A> { return Box<A> { value: move value } }
-fn deferred(value: &mut Pair) -> Box<Effect<i32>> {
+fn deferred<'a>(value: &'a mut Pair) -> Box<Effect<'a; i32>> {
   let escaped = effect { return value.first }
-  return wrap<Effect<i32>>(move escaped)
+  return wrap<Effect<'a; i32>>(move escaped)
 }
-fn deferredConflict() -> Box<Effect<i32>> {
-  return wrap<Effect<i32>>(effect { return 0 })
+fn deferredConflict() -> Box<Effect<'static; i32>> {
+  return wrap<Effect<'static; i32>>(effect { return 0 })
 }
 effect fn read(value: &mut Pair) -> i32 { return value.second }
 fn suspended(value: &mut Pair) -> i32 {
-  let result = run read(value)
+  let result = run read(move value)
   return result
 }
 fn numberConflict() -> i32 { return 0 }
-unsafe fn aggregateProbe(core: &Intrinsic.SharedCore<Pair>) -> Box<Effect<i32>> {
-  let callback = deferred
-  return Intrinsic.sharedWithMut<Pair, Box<Effect<i32>>>(
+unsafe fn aggregateProbe<'scope>(core: &'scope Intrinsic.SharedCore<Pair>) -> Box<Effect<'scope; i32>> {
+  return Intrinsic.sharedWithMut<Pair, Box<Effect<'scope; i32>>>(
     core,
-    move callback,
+    deferred,
     deferredConflict,
   )
 }
@@ -154,10 +106,15 @@ unsafe fn suspensionProbe(core: &Intrinsic.SharedCore<Pair>) -> i32 {
   return Intrinsic.sharedWithMut<Pair, i32>(core, suspended, numberConflict)
 }
 pub fn main() -> i32 { return 0 }`)
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* Analysis.ofSource(
       'local-shared-lifecycle/aggregate-suspension-escape',
       source,
-      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot)
+        .map((diagnostic) => diagnostic.code)
+        .sort(),
+      ['OWN0016', 'SEM0076'],
     )
     const diagnostics = Analysis.diagnostics(snapshot).filter(
       (candidate) => candidate.code === 'OWN0016',
@@ -168,7 +125,7 @@ pub fn main() -> i32 { return 0 }`)
           ? diagnostic.reason.kind
           : diagnostic.reason._tag,
       ),
-      ['Result', 'Suspension'],
+      ['Suspension'],
     )
     for (const diagnostic of diagnostics) {
       assert.strictEqual(diagnostic.relatedSpans?.length, 1)
@@ -177,7 +134,6 @@ pub fn main() -> i32 { return 0 }`)
         'local-shared-lifecycle/aggregate-suspension-escape',
       )
     }
-    assert.isUndefined(Analysis.loweredMir(snapshot).coroutineFrames)
   }),
 )
 
@@ -595,8 +551,9 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
           'buffer-moves-under-a-live-slot',
           guarded(`    let slot = RawBuffer.slot(&mut buffer, 0)
     let moved = move buffer
+    let value = Slot.take(move slot)
     drop moved
-    return 1`),
+    return value`),
           'OWN0011',
         ],
         [
@@ -618,18 +575,23 @@ pub fn main() -> i32 { return 0 }`,
       ]
 
       for (const [name, source, code] of cases) {
-        const snapshot = yield* Analysis.ofSourceRealized(
-          `owned-allocation-negative/${name}`,
-          ascii(source),
-          'wasm32-unknown-unknown',
-        )
+        const realized =
+          code === 'SEM0138'
+            ? yield* Analysis.ofSourceRealized(
+                `owned-allocation-negative/${name}`,
+                ascii(source),
+                'wasm32-unknown-unknown',
+              )
+            : undefined
+        const snapshot =
+          realized ?? (yield* Analysis.ofSource(`owned-allocation-negative/${name}`, ascii(source)))
         assert.include(
           Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
           code,
           `${name}\n${Hir.encode(Analysis.rootAnalysis(snapshot).hir)}`,
         )
-        if (code === 'SEM0138')
-          assert.throws(() => Analysis.loweredMir(snapshot), /MIR is unavailable/)
+        if (realized !== undefined)
+          assert.throws(() => Analysis.loweredMir(realized), /MIR is unavailable/)
       }
     }),
   // Measured near the 60s floor while the full parallel gate saturates the host; the timeout

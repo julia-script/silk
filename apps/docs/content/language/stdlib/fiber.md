@@ -73,7 +73,7 @@ An affine handle that observes one task result or cancellation.
 ### Associated function `Fiber.prepare`
 
 ```silk
-pub effect fn prepare<A, E>() -> silk/fiber.PreparedFiber<A, E> ! OutOfMemoryError ? &mut Allocator
+pub effect<'static> fn prepare<A, E>() -> silk/fiber.PreparedFiber<A, E> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Allocates the producer, canceller, and affine Fiber endpoints for one task.
@@ -137,7 +137,7 @@ cancellation endpoint and allocates no storage.
 ### Method `Fiber.await`
 
 ```silk
-pub effect fn await<A, E>(self: Fiber<A, E>) -> silk/fiber.Outcome<A, E>
+pub effect<'env> fn await<A: 'env, E: 'env, 'env>(self: Fiber<A, E>) -> silk/fiber.Outcome<A, E>
 ```
 
 Consumes a Fiber and returns its success, typed failure, or cancellation as data.
@@ -152,7 +152,7 @@ exactly one Wake. Observation and resumption allocate no storage.
 ### Method `Fiber.join`
 
 ```silk
-pub effect fn join<A, E>(self: Fiber<A, E>) -> A ! E | Cancelled
+pub effect<'env> fn join<A: 'env, E: 'env, 'env>(self: Fiber<A, E>) -> A ! E | Cancelled
 ```
 
 Consumes a Fiber, returns its success value, and propagates failure or cancellation.
@@ -162,12 +162,32 @@ Consumes a Fiber, returns its success value, and propagates failure or cancellat
 A typed task failure is raised unchanged. Cancellation raises [`Cancelled`](#declaration-73696c6b2f66696265723a3a43616e63656c6c6564). A pending Fiber
 parks with the same allocation-free one-observer protocol as [`await`](#declaration-73696c6b2f66696265723a3a46696265722e6177616974).
 
+<a id="declaration-73696c6b2f66696265723a3a46696265722e7969656c644e6f77"></a>
+
+### Associated function `Fiber.yieldNow`
+
+```silk
+pub effect<'static> fn yieldNow() -> ()
+```
+
+Relinquishes the current Execution once and immediately reports that it is ready.
+
+#### When to use
+
+Use this operation to let tasks that are already ready run before the current task continues
+under a FIFO provider.
+
+#### Details
+
+This operation consumes its Wake during registration. It needs no Scheduler service and
+allocates no storage. The provider selects the next activation order.
+
 <a id="declaration-73696c6b2f66696265723a3a46696265722e666f726b4368696c64"></a>
 
 ### Associated function `Fiber.forkChild`
 
 ```silk
-pub effect fn forkChild<A, E>(child: once Effect<A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> silk/fiber.Fiber<A, E> ! OutOfMemoryError | TaskIdExhaustedError ? &mut Scheduler
+pub effect<'static> fn forkChild<A: 'static, E: 'static>(child: once Effect<'static; A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> silk/fiber.Fiber<A, E> ! OutOfMemoryError | TaskIdExhaustedError ? &mut Scheduler
 ```
 
 Prepares and atomically publishes one child task, then returns its affine Fiber.
@@ -188,26 +208,6 @@ starts only when the Scheduler later drives it.
 
 Allocation refusal or task-identity exhaustion raises the exact preparation failure. Publication
 refusal raises `OutOfMemoryError`, returns no Fiber, and does not activate the child.
-
-<a id="declaration-73696c6b2f66696265723a3a46696265722e7969656c644e6f77"></a>
-
-### Associated function `Fiber.yieldNow`
-
-```silk
-pub effect fn yieldNow() -> ()
-```
-
-Relinquishes the current Execution once and immediately reports that it is ready.
-
-#### When to use
-
-Use this operation to let tasks that are already ready run before the current task continues
-under a FIFO provider.
-
-#### Details
-
-This operation consumes its Wake during registration. It needs no Scheduler service and
-allocates no storage. The provider selects the next activation order.
 
 <a id="declaration-73696c6b2f66696265723a3a4f7574636f6d65"></a>
 
