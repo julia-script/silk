@@ -473,11 +473,15 @@ int silk_os_file_open_v1(const unsigned char *root, size_t root_length,
   free(leaf); close(parent);
   if (fd < 0) { silk_failure(reason, native_code, opened_errno); return 0; }
   struct stat info;
-  if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
+  if (fstat(fd, &info) != 0) {
     int selected = errno;
     close(fd);
-    if (selected != 0) silk_failure(reason, native_code, selected);
-    else silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE);
+    silk_failure(reason, native_code, selected);
+    return 0;
+  }
+  if (!S_ISREG(info.st_mode)) {
+    close(fd);
+    silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE);
     return 0;
   }
   silk_native_handle *native = silk_allocate_handle(0, fd, NULL);
@@ -755,9 +759,16 @@ static int silk_spawn(char *program_string, char **argv, char **envp, char *dire
     silk_failure(reason, native_code, selected);
     return 0;
   }
-  if (pipe(notice) != 0 || fcntl(notice[1], F_SETFD, FD_CLOEXEC) != 0) {
+  if (pipe(notice) != 0) {
     int selected = errno;
     close(output[0]); close(output[1]); close(errors[0]); close(errors[1]);
+    silk_failure(reason, native_code, selected);
+    return 0;
+  }
+  if (fcntl(notice[1], F_SETFD, FD_CLOEXEC) != 0) {
+    int selected = errno;
+    close(output[0]); close(output[1]); close(errors[0]); close(errors[1]);
+    close(notice[0]); close(notice[1]);
     silk_failure(reason, native_code, selected);
     return 0;
   }

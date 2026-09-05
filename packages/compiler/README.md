@@ -148,3 +148,16 @@ Ordinary source errors remain typed facts. Lexer and parser recovery always make
 the original token stream, and keep later declarations independently analyzable. Operational
 resolver failures stay in Effect's typed error channel; artifact-producing driver outcomes retain
 target, distribution, backend, and external-tool failures as separate structured data.
+
+## Native final-artifact cache eligibility
+
+Native final-artifact lookup and publication require complete accounting of every link-affecting
+input, including selected tool contents, implicit platform inputs, and resolved named libraries.
+The current toolchain model cannot establish that completeness. Native requests therefore perform
+the requested link or archive operation and report its actual result, ignoring existing final
+cache entries and publishing none. Explicit object/archive hashing and ordered input encoding
+remain available, but a key alone does not establish eligibility. Command spelling and version
+text do not establish complete tool identity, and unresolved inputs are not reproducible inputs.
+
+Backend-emission reuse, runtime-object caching, and the existing LLVM-to-WebAssembly cache policy
+remain independent of this native final-artifact admission rule.

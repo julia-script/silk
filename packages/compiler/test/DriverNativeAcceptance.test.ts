@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { platform, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -139,6 +139,74 @@ const consumerSource = `#include "answer.h"
 int main(void) { return increment(40) + (int32_t)silk_abi_version; }
 `
 
+it.effect('relinks named archives after content and search-resolution changes', () =>
+  NativeToolchain.withBuildScope('named-archive-cache', (scope) =>
+    Effect.gen(function* () {
+      const target = yield* NativeToolchain.hostTarget()
+      const earlier = join(scope.root, 'earlier')
+      const later = join(scope.root, 'later')
+      yield* Effect.sync(() => {
+        mkdirSync(earlier)
+        mkdirSync(later)
+      })
+      const archive = Effect.fnUntraced(function* (directory: string, value: number) {
+        const object = yield* NativeToolchain.compileCObject(
+          toolchain,
+          scope,
+          target,
+          'selected',
+          `int silk_cache_selected(void) { return ${value}; }`,
+        )
+        yield* NativeToolchain.NativeFinalizer.finalize(
+          toolchain,
+          scope,
+          'NativeStaticLibrary',
+          target,
+          [object.artifact],
+          [],
+          join(directory, 'libsilk_cache_selected.a'),
+        )
+      })
+      const source = `unsafe extern "C" fn silk_cache_selected() -> i32
+pub fn main() -> i32 { return unsafe silk_cache_selected() }`
+      const options = {
+        cache: true,
+        nativeLinkInputs: [
+          NativeLinkInput.searchPath(earlier),
+          NativeLinkInput.searchPath(later),
+          // Darwin's ordinary -l selection falls back to the sole .a fixture.
+          NativeLinkInput.library(
+            'silk_cache_selected',
+            platform() === 'darwin' ? 'Dynamic' : 'Static',
+          ),
+        ],
+      }
+      const statuses: Array<number | null> = []
+      const phases: Array<ReadonlyArray<string>> = []
+      for (const [directory, value] of [
+        [later, 11],
+        [later, 22],
+        [earlier, 33],
+      ] as const) {
+        yield* archive(directory, value)
+        const outcome = yield* compileSource('named-archive-cache', source, undefined, options)
+        assert.strictEqual(outcome._tag, 'Compiled')
+        if (outcome._tag !== 'Compiled') return
+        const run = yield* runCompiled(outcome.path, undefined)
+        statuses.push(run.status)
+        phases.push(outcome.report.map((entry) => entry.phase))
+      }
+      assert.deepStrictEqual(statuses, [11, 22, 33])
+      for (const report of phases) {
+        assert.include(report, 'link')
+        assert.notInclude(report, 'artifact-cache')
+      }
+      assert.include(phases[1] ?? [], 'backend-cache')
+      assert.include(phases[2] ?? [], 'backend-cache')
+    }),
+  ),
+)
+
 it.effect(
   'builds loadable shared/static libraries with only C exports visible',
   () =>
@@ -229,7 +297,7 @@ it.effect(
       )
       assert.include(
         cachedShared.report.map((entry) => entry.phase),
-        'artifact-cache',
+        'link',
       )
       assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.h')), firstHeader)
       assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.abi.json')), firstManifest)

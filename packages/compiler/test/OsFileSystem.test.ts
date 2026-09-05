@@ -51,6 +51,95 @@ const returnedStatusTermination: Termination.Contract = Object.freeze({
   report: Termination.emptyReport,
 })
 
+it('classifies file-open metadata independently of stale errno and cleanup errors', () => {
+  const source = `#define _GNU_SOURCE 1
+#define _DARWIN_C_SOURCE 1
+#define _POSIX_C_SOURCE 200809L
+#define open silk_test_open
+#define openat silk_test_openat
+#define fstat silk_test_fstat
+#define close silk_test_close
+${OsRuntime.source(['silk_os_file_open_v1'])}
+#include <stdio.h>
+
+static int metadata_status;
+static int metadata_errno;
+static int parent_closes;
+static int file_closes;
+static int unexpected_closes;
+
+int silk_test_open(const char *path, int flags, ...) {
+  (void)path; (void)flags;
+  return 70;
+}
+int silk_test_openat(int parent, const char *path, int flags, ...) {
+  (void)parent; (void)path; (void)flags;
+  return 71;
+}
+int silk_test_fstat(int fd, struct stat *info) {
+  if (fd != 71) return -1;
+  info->st_mode = S_IFDIR;
+  errno = metadata_errno;
+  return metadata_status;
+}
+int silk_test_close(int fd) {
+  if (fd == 70) parent_closes += 1;
+  else if (fd == 71) file_closes += 1;
+  else unexpected_closes += 1;
+  errno = EIO;
+  return -1;
+}
+
+int main(void) {
+  const int statuses[] = { 0, 0, -1 };
+  const int errors[] = { EACCES, ENOENT, EACCES };
+  for (int index = 0; index < 3; index += 1) {
+    metadata_status = statuses[index]; metadata_errno = errors[index];
+    parent_closes = 0; file_closes = 0; unexpected_closes = 0;
+    int reason = -1, kind = -1, active = 0;
+    uint32_t native_code = 0;
+    size_t identity = 0;
+    int result = silk_os_file_open_v1((const unsigned char *)"/root", 5,
+      (const unsigned char *)"/entry", 6, 0, &reason, &native_code, &identity, &kind, &active);
+    printf("%d %d %d %d %d %d %d\\n", result, reason,
+      native_code == (index == 2 ? (uint32_t)EACCES : 0), parent_closes, file_closes,
+      unexpected_closes, identity == 0 && active == 0);
+  }
+  return 0;
+}
+`
+  const sourcePath = join(destinationRoot, 'file-open-metadata.c')
+  const executable = join(destinationRoot, 'file-open-metadata')
+  writeFileSync(sourcePath, source)
+  const built = spawnSync(
+    '/usr/bin/clang',
+    [
+      '-std=c11',
+      '-Wall',
+      '-Wextra',
+      '-Werror',
+      '-Wno-unused-function',
+      sourcePath,
+      '-o',
+      executable,
+    ],
+    { encoding: 'utf8' },
+  )
+  assert.strictEqual(built.status, 0, built.stderr)
+  const run = spawnSync(executable, [], { encoding: 'utf8' })
+  assert.strictEqual(run.status, 0, run.stderr)
+  const outcomes = run.stdout
+    .trim()
+    .split('\n')
+    .map((line) => line.split(' ').map(Number))
+  // result, reason, original native code preserved, parent/file/unexpected closes, no handle.
+  assert.deepStrictEqual(outcomes, [
+    [0, 4, 1, 1, 1, 0, 1],
+    [0, 4, 1, 1, 1, 0, 1],
+    [0, 2, 1, 1, 1, 0, 1],
+  ])
+})
+
 it.effect('loads the ordinary canonical OS provider without compiler-known library privilege', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(

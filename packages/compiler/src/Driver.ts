@@ -44,9 +44,8 @@ const phaseWithHeap = (entry: PhaseReport.PhaseReport): DriverPhaseReport => {
 /**
  * Backend emission is deterministic over the source closure, the target, the emission mode, and
  * the compiler build itself (the determinism suites pin byte-identical artifacts across
- * processes), so its output is content-addressable BEFORE it is produced. The executable cache
- * below already skips Clang; this key lets an unchanged compilation skip the LLVM emission pass
- * as well, which measures far above the Clang stage on scheduler-scale programs.
+ * processes), so its output is content-addressable BEFORE it is produced. This key lets an
+ * unchanged compilation skip LLVM emission independently of final-artifact cache eligibility.
  */
 const backendEmissionCacheKey = (
   distributionDigest: string,
@@ -518,8 +517,11 @@ export const compile = Effect.fn('Driver.compile')(function* (
       nativeLinkInputs,
       request.destination,
     )
+  const cacheAdmission = NativeToolchain.finalArtifactCacheAdmission(cacheKind)
   const artifactCache =
-    request.cache !== false && artifact._tag === 'LlvmBitcodeArtifact'
+    cacheAdmission._tag !== 'Ineligible' &&
+    request.cache !== false &&
+    artifact._tag === 'LlvmBitcodeArtifact'
       ? (request.toolchain.artifactCache ??
         NativeToolchain.defaultArtifactCache(nativeCacheDirectory))
       : undefined
