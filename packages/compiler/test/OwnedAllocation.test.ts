@@ -7,6 +7,43 @@ import * as MirVerification from '../src/MirVerification.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
+it.effect(
+  'preserves slot storage lifetimes across ordinary functions and invariant payload writes',
+  () =>
+    Effect.gen(function* () {
+      const source = `import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+fn select<'a, T>(buffer: &'a mut RawBuffer<T>) -> Slot<'a, T> { return RawBuffer.slot<T>(move buffer, 0) }
+fn take<'a, T>(slot: Slot<'a, T>) -> T { return Slot.take<T>(move slot) }
+fn invalid<'a>(allocation: Allocation) -> Slot<'a, i32> {
+  let mut buffer = RawBuffer.from<i32>(move allocation, 1)
+  return select(&mut buffer)
+}
+fn smuggle<'long, 'short>(slot: Slot<'short, &'long i32>, value: &'short i32) -> () {
+  return Slot.write<&'long i32>(move slot, value)
+}`
+      const self = yield* Analysis.ofSource('allocation/slot-lifetimes', ascii(source))
+      const diagnostics = Analysis.diagnostics(self)
+      assert.isFalse(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.span.sourceId === 'allocation/slot-lifetimes' &&
+            diagnostic.span.start < source.indexOf('fn invalid'),
+        ),
+      )
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) => diagnostic.code === 'OWN0019' || diagnostic.code === 'SEM0212',
+        ),
+      )
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.span.start >= source.indexOf('fn smuggle') && diagnostic.code === 'SEM0100',
+        ),
+      )
+    }),
+)
 const sharedReadSource = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.layout { Layout }

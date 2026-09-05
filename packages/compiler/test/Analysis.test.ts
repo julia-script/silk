@@ -695,7 +695,9 @@ pub fn main() -> i32 { return 0 }`
     assert.isFalse(Type.isIntrinsicNominal(forgedCore))
     assert.strictEqual(ExecutionAffinity.ofType(self.index, forgedCore)._tag, 'Unrestricted')
     assert.strictEqual(
-      LocalSharedOwnership.count(LocalSharedOwnership.ofType(self.index, Type.slot(openCore))),
+      LocalSharedOwnership.count(
+        LocalSharedOwnership.ofType(self.index, Type.slot(openCore, Lifetime.staticLifetime)),
+      ),
       0,
     )
 
@@ -849,7 +851,7 @@ pub fn main() -> i32 { return 42 }`,
       lexical._tag === 'Unsatisfied' ? lexical.causes.at(0)?.reason : undefined,
       'LexicalLoan',
     )
-    for (const borrowed of [Type.string(localLifetime), Type.slot('i32')]) {
+    for (const borrowed of [Type.string(localLifetime), Type.slot('i32', localLifetime)]) {
       const verdict = ExecutableProperty.detachedOfEnvironment(self.index, [
         { ordinal: 0, access: 'Take', type: borrowed },
       ])

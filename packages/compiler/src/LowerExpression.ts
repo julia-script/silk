@@ -1,5 +1,6 @@
 import {
   authored,
+  lowerBorrowedWritePlace,
   callableLocalCleanup,
   concreteCleanup,
   generated,
@@ -7,7 +8,6 @@ import {
   emitInitializationTransition,
   matchCleanupKey,
   ownerFields,
-  lowerBorrowedWriteSelectors,
   lowerBorrowSelectors,
   lowerWriteSelectors,
   lowerOwnershipPath,
@@ -746,24 +746,30 @@ function lowerReplaceExpression(
   // Swap one writable place: the old value reads out before the replacement commits, and
   // both halves ride the existing checked place operations.
   const place = expression.place
-  const root =
+  let root =
     place._tag === 'BorrowedWritePlace'
       ? borrowedWriteRoot(fn, place.root)
       : ownedWriteRoot(fn, place.root)
-  const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
+  let rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
   const type = fn.type(place.type)
   if (root === undefined || rootType === undefined || type === undefined) return undefined
-  const selected =
-    place._tag === 'BorrowedWritePlace'
-      ? lowerBorrowedWriteSelectors(fn, place.selectors)
-      : lowerWriteSelectors(fn, place.selectors)
-  if (selected === 'Transferred') return selected
-  if (selected === undefined) return undefined
-  const alias =
-    place._tag === 'WritePlace' && place.root._tag === 'PatternWriteRoot'
-      ? patternPlace(fn, place.root.binding, place.span)
-      : undefined
-  const selectors = [...(alias?.selectors ?? []), ...selected]
+  let selectors: ReadonlyArray<Mir.PlaceSelector>
+  if (place._tag === 'BorrowedWritePlace') {
+    const lowered = lowerBorrowedWritePlace(fn, root, place.selectors, place.type, place.span)
+    if (lowered === undefined || lowered === 'Transferred') return lowered
+    root = lowered.root
+    selectors = lowered.selectors
+  } else {
+    const selected = lowerWriteSelectors(fn, place.selectors)
+    if (selected === undefined || selected === 'Transferred') return selected
+    const alias =
+      place.root._tag === 'PatternWriteRoot'
+        ? patternPlace(fn, place.root.binding, place.span)
+        : undefined
+    selectors = [...(alias?.selectors ?? []), ...selected]
+  }
+  rootType = fn.localTypes.at(root.ordinal)
+  if (rootType === undefined) return undefined
   fn.emit(
     Object.freeze({
       _tag: 'CheckPlace',
@@ -1945,6 +1951,7 @@ function lowerUnionConvertExpression(
       destination,
       source: source.result,
       sourceType,
+      sourceSemantic: fn.semantic(expression.sourceType),
       targetType,
       conversion: expression.conversion,
       mappings,

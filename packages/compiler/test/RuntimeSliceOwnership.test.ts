@@ -18,6 +18,233 @@ const ascii = (value: string): Uint8Array =>
 const snapshot = (source: string) => Analysis.ofSourceRealized('slices/Ownership', ascii(source))
 const analyze = (source: string) => Analysis.ofSource('slices/Ownership', ascii(source))
 
+it.effect('retains dependent remainder cleanup after a non-suspending incoming failure', () =>
+  Effect.gen(function* () {
+    const source = `import silk.effect { Effect }
+struct Problem {}
+struct Guard<'a> { value: &'a mut i32 code: i32 }
+impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { self.value.* = self.value.* + 1 return () } }
+struct Pair<'a> { left: Guard<'a> right: Guard<'a> }
+effect fn incoming<'a>(value: Guard<'a>) -> i32 ! Problem { drop value fail Problem {} }
+effect fn replace<'a>(a: &'a mut i32, b: &'a mut i32, c: &'a mut i32) -> i32 ! Problem {
+  let mut pair = Pair { left: Guard { value: move a, code: 1 }, right: Guard { value: move b, code: 2 } }
+  pair.left = Guard { value: move c, code: run incoming(move pair.right) }
+  return 0
+}
+effect fn recover(error: Problem) -> i32 { return 42 }
+pub fn main() -> i32 {
+  let mut a = 0 let mut b = 0 let mut c = 0
+  let mut parent = &mut a let nested = &mut parent
+  nested.*.* = 0 drop nested drop parent
+  return run Effect.catchAll(replace(&mut a, &mut b, &mut c), recover)
+}`
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const ownership = Analysis.ownershipOf(self, 'slices/Ownership') ?? unreachable('ownership')
+    const replace =
+      ownership.functions.find(
+        (fn) =>
+          fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'replace',
+      ) ?? unreachable('replace ownership')
+    const remainder = replace.exits
+      .flatMap((exit) => exit.releases)
+      .find(
+        (release) =>
+          release.binding.name === 'pair' &&
+          release.initialization.children.some((child) => child.state.initialization === 'Missing'),
+      )
+    assert.isDefined(remainder)
+    const program = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const hook =
+      program.functions.find((fn) =>
+        MirVerification.operations(fn).some(
+          (operation) =>
+            operation._tag === 'ReadPlace' &&
+            operation.type._tag === 'Reference' &&
+            operation.selectors.some((selector) => selector._tag === 'FieldSelector'),
+        ),
+      ) ?? unreachable('Drop MIR')
+    const descriptor = MirVerification.operations(hook).find(
+      (operation) => operation._tag === 'ReadPlace' && operation.type._tag === 'Reference',
+    )
+    if (descriptor?._tag !== 'ReadPlace') return unreachable('stored reference descriptor')
+    const corrupted = {
+      ...program,
+      functions: program.functions.map((fn) =>
+        fn !== hook
+          ? fn
+          : {
+              ...fn,
+              regions: fn.regions.map((region) =>
+                region._tag === 'OperationRegion' && region.operations.includes(descriptor)
+                  ? {
+                      ...region,
+                      outcome: {
+                        _tag: 'Return' as const,
+                        value: descriptor.destination,
+                        provenance: descriptor.provenance,
+                      },
+                    }
+                  : region,
+              ),
+            },
+      ),
+    }
+    assert.isTrue(
+      MirVerification.verify(corrupted).some(
+        (violation) => violation.rule === 'InvalidAggregateOperation',
+      ),
+    )
+  }),
+)
+
+it.effect(
+  'keeps exclusive replacement and whole Drop-field extraction within their declared boundaries',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct Guard<'a> { value: &'a mut i32 }
+impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { return () } }
+struct Outer<'a> { guard: Guard<'a> code: i32 }
+fn extract<'a>(outer: Outer<'a>) -> Guard<'a> { return move outer.guard }
+fn replace<T>(slot: &mut T, value: T) -> T { return Intrinsic.replace(slot.*, move value) }
+fn swap<T>(left: &mut T, right: &mut T, spare: T) -> T {
+  let oldLeft = Intrinsic.replace(left.*, move spare)
+  let oldRight = Intrinsic.replace(right.*, move oldLeft)
+  return Intrinsic.replace(left.*, move oldRight)
+}
+fn valid<'a>(guard: &mut Guard<'a>, other: &'a mut i32) -> Guard<'a> {
+  return replace(move guard, Guard { value: move other })
+}
+fn invalidMove<'a>(guard: Guard<'a>) -> &'a mut i32 { return move guard.value }
+fn invalidReplace<'a, 'b>(guard: &mut Guard<'a>, other: &'b mut i32) -> Guard<'a> {
+  return replace(move guard, Guard { value: move other })
+}`
+      const self = yield* analyze(source)
+      const diagnostics = Analysis.diagnostics(self)
+      assert.isFalse(
+        diagnostics.some((diagnostic) => diagnostic.span.start < source.indexOf('fn invalidMove')),
+      )
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === 'OWN0002' &&
+            diagnostic.span.start >= source.indexOf('fn invalidMove') &&
+            diagnostic.span.start < source.indexOf('fn invalidReplace'),
+        ),
+      )
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.span.start >= source.indexOf('fn invalidReplace') &&
+            ['SEM0052', 'SEM0129', 'SEM0212'].includes(diagnostic.code),
+        ),
+      )
+    }),
+)
+
+it.effect(
+  'preserves exclusive stored views through extraction and child reborrow restoration',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct View<'a> { value: &'a mut i32 }
+struct Wrap<T> { value: T }
+fn extract<'a>(view: View<'a>) -> &'a mut i32 { return move view.value }
+fn identity<T>(value: T) -> T { return move value }
+fn chain(value: &mut i32) -> i32 {
+  let first = View { value: &mut value.* }
+  let second = View { value: &mut first.value.* }
+  let third = View { value: &mut second.value.* }
+  let child = &third.value.* let copy = child drop child
+  let result = copy.* drop copy drop third drop second drop first
+  value.* = result return result
+}
+fn restored() -> i32 {
+  let mut value = 1
+  let mut holder = Wrap { value: View { value: &mut value } }
+  let extracted = move holder.value
+  holder.value = identity(move extracted)
+  let parent = extract(move holder.value)
+  let child = &parent.*
+  let copy = child
+  let observed = copy.*
+  parent.* = observed + 1
+  return parent.*
+}`
+      const self = yield* analyze(source)
+      assert.deepEqual(Analysis.diagnostics(self), [])
+    }),
+)
+
+it.effect('keeps dependent destructor uses live even without explicit payload reads', () =>
+  Effect.gen(function* () {
+    const source = `struct Guard<'a> { value: &'a i32 }
+impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { return () } }
+fn valid() -> i32 { let mut source = 1 let guard = Guard { value: &source } drop guard source = 2 return source }
+fn invalid() -> i32 { let mut source = 1 let guard = Guard { value: &source } source = 2 return 0 }`
+    const self = yield* analyze(source)
+    const diagnostics = Analysis.diagnostics(self)
+    assert.isFalse(
+      diagnostics.some((diagnostic) => diagnostic.span.start < source.indexOf('fn invalid')),
+    )
+    assert.isTrue(
+      diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === 'OWN0011' && diagnostic.span.start >= source.indexOf('fn invalid'),
+      ),
+    )
+  }),
+)
+
+it.effect('rejects destructor-only exclusive aliases until dependent cleanup completes', () =>
+  Effect.gen(function* () {
+    const source = `struct Guard<'a> { value: &'a mut i32 }
+impl<'a> Drop for Guard<'a> { fn drop(self: &mut Guard<'a>) -> () { return () } }
+fn invalid() -> i32 { let mut source = 1 let guard = Guard { value: &mut source } let child = &source return child.* }`
+    const self = yield* analyze(source)
+    assert.isTrue(Analysis.diagnostics(self).some((diagnostic) => diagnostic.code === 'OWN0010'))
+  }),
+)
+
+it.effect(
+  'rejects conflicting access through stored exclusive parents and surviving child copies',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct View<'a> { value: &'a mut i32 }
+fn childCopy() -> i32 {
+  let mut value = 1
+  let holder = View { value: &mut value }
+  let child = &holder.value.*
+  let copy = child
+  drop child
+  holder.value.* = 2
+  return copy.*
+}
+fn duplicate() -> i32 {
+  let mut value = 1
+  let holder = View { value: &mut value }
+  let first = move holder.value
+  let second = move holder.value
+  return first.* + second.*
+}`
+      const self = yield* analyze(source)
+      const diagnostics = Analysis.diagnostics(self)
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === 'OWN0011' && diagnostic.span.start < source.indexOf('fn duplicate'),
+        ),
+      )
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === 'OWN0001' &&
+            diagnostic.span.start >= source.indexOf('fn duplicate'),
+        ),
+      )
+    }),
+)
+
 it.effect('round-trips semantic borrowed types and executable predicates without erasure', () =>
   Effect.gen(function* () {
     const owner = { module: 'slices/roundtrip', name: 'header' }

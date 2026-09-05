@@ -6,6 +6,62 @@ import * as MirVerification from '../src/MirVerification.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
+it.effect(
+  'retains external lifetimes through borrowed Vector insertion and ordinary extraction',
+  () =>
+    Effect.gen(function* () {
+      const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.vector { Vector }
+struct Entry<'a> { value: &'a mut i32 }
+impl<'a> Drop for Entry<'a> { fn drop(self: &mut Entry<'a>) -> () { return () } }
+effect fn shared<'a>(value: &'a i32) -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let mut values = Vector.make<&'a i32>()
+  run Vector.append<&'a i32>(&mut values, value)
+  run Vector.insert<&'a i32>(&mut values, 0, value)
+  let old = Vector.set<&'a i32>(&mut values, 0, value)
+  let saved = Vector.remove<&'a i32>(&mut values, 0)
+  drop values
+  return saved.*
+}
+effect fn exclusive<'a>(value: &'a mut i32) -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let mut values = Vector.make<Entry<'a>>()
+  run Vector.append<Entry<'a>>(&mut values, Entry { value: move value })
+  let saved = Vector.remove<Entry<'a>>(&mut values, 0)
+  drop values
+  return saved.value.*
+}
+effect fn invalidExtracted() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let mut source = 1 let mut values = Vector.make<&i32>()
+  run Vector.append<&i32>(&mut values, &source)
+  let saved = Vector.remove<&i32>(&mut values, 0) drop values
+  source = 2 return saved.*
+}
+effect fn invalidCleanup() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let mut source = 1 let mut values = Vector.make<Entry>()
+  run Vector.append<Entry>(&mut values, Entry { value: &mut source })
+  source = 2 return 0
+}`
+      const self = yield* Analysis.ofSource('vector-acceptance/dependent-elements', ascii(source))
+      const diagnostics = Analysis.diagnostics(self)
+      assert.isFalse(
+        diagnostics.some(
+          (diagnostic) => diagnostic.span.start < source.indexOf('effect fn invalidExtracted'),
+        ),
+      )
+      for (const name of ['invalidExtracted', 'invalidCleanup']) {
+        const start = source.indexOf('source = 2', source.indexOf(`effect fn ${name}`))
+        assert.isTrue(
+          diagnostics.some(
+            (diagnostic) =>
+              diagnostic.code === 'OWN0011' &&
+              diagnostic.span.start >= source.indexOf(`effect fn ${name}`) &&
+              diagnostic.span.end <= start + 'source = 2'.length,
+          ),
+        )
+      }
+    }),
+)
+
 it.effect('rejects a shared vector read when one union member is move-only', () =>
   Effect.gen(function* () {
     const source = `import silk.allocator { Allocator }

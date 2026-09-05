@@ -11,17 +11,15 @@ import * as TypeInference from './internal/TypeInference.js'
 /** A gated storage use retained until a selected generic application supplies its data types. */
 export interface Obligation {
   readonly type: Type.Type
-  readonly storage: boolean
   readonly span: SourceSpan.SourceSpan
 }
 
-type Feature = 'ExclusiveStorage' | 'DependentDrop' | 'EffectOutcome'
+type Feature = 'EffectOutcome'
 
 /** Declaration-owned storage facts used by the current lifetime feature admission boundary. */
 export interface Context {
   readonly index: DeclarationIndex.Index
   readonly nominals: ReadonlyMap<string, DeclarationFacts.StructFact | DeclarationFacts.UnionFact>
-  readonly dropProviders: ReadonlyArray<Type.Type>
   readonly lifetimes: TypeOutlives.Context
   readonly cache: Map<string, ReadonlyArray<Feature>>
 }
@@ -47,16 +45,6 @@ export const context = (index: DeclarationIndex.Index): Context => {
   const result: Context = {
     index,
     nominals,
-    dropProviders: index.modules.flatMap((module) =>
-      module.conformances.flatMap((conformance) =>
-        conformance.hook !== undefined &&
-        conformance.provider._tag === 'Resolved' &&
-        conformance.capability._tag === 'Resolved' &&
-        Type.equals(conformance.capability.type, Type.dropCapability)
-          ? [conformance.provider.type]
-          : [],
-      ),
-    ),
     lifetimes: TypeOutlives.context(index.modules),
     cache: new Map(),
   }
@@ -86,42 +74,34 @@ const dependent = (self: Context, type: Type.Type): boolean =>
     (region) => !Lifetime.outlives(self.lifetimes.assumptions, region, Lifetime.staticLifetime),
   )
 
-const features = (self: Context, type: Type.Type, storage: boolean): ReadonlyArray<Feature> => {
-  const identity = `${storage}:${Type.key(type)}`
+const features = (self: Context, type: Type.Type): ReadonlyArray<Feature> => {
+  const identity = Type.key(type)
   const cached = self.cache.get(identity)
   if (cached !== undefined) return cached
   const found = new Set<Feature>()
-  const visit = (type: Type.Type, stored: boolean, seen: ReadonlySet<string>): void => {
+  const visit = (type: Type.Type, seen: ReadonlySet<string>): void => {
     if (Type.isReference(type) || Type.isSlice(type)) {
-      if (stored && type.access === 'Exclusive') found.add('ExclusiveStorage')
-      visit(Type.isReference(type) ? type.target : type.element, Type.isSlice(type), seen)
-    } else if (Type.isFixedArray(type)) visit(type.element, true, seen)
-    else if (Type.isUnion(type)) for (const member of type.members) visit(member, true, seen)
-    else if (Type.isPointer(type)) visit(type.pointee, true, seen)
-    else if (Type.isRepresented(type)) visit(type.contract, false, seen)
+      visit(Type.isReference(type) ? type.target : type.element, seen)
+    } else if (Type.isFixedArray(type)) visit(type.element, seen)
+    else if (Type.isUnion(type)) for (const member of type.members) visit(member, seen)
+    else if (Type.isPointer(type)) visit(type.pointee, seen)
+    else if (Type.isRepresented(type)) visit(type.contract, seen)
     else if (Type.isParameter(type)) {
-      if (type.representationBound !== undefined) visit(type.representationBound, false, seen)
+      if (type.representationBound !== undefined) visit(type.representationBound, seen)
     } else if (Type.isCallable(type) || Type.isForeignFunction(type)) {
-      for (const parameter of type.parameters) visit(parameter, false, seen)
-      visit(type.result, false, seen)
+      for (const parameter of type.parameters) visit(parameter, seen)
+      visit(type.result, seen)
     } else if (Type.isEffect(type)) {
       for (const outcome of [type.success, ...Type.failureMembers(type)]) {
         if (dependent(self, outcome)) found.add('EffectOutcome')
-        visit(outcome, false, seen)
+        visit(outcome, seen)
       }
     } else if (Type.isNominal(type)) {
-      if (
-        dependent(self, type) &&
-        self.dropProviders.some((provider) =>
-          TypeInference.infer(provider, type, new Map<string, Type.GenericArgument>()),
-        )
-      )
-        found.add('DependentDrop')
       const declarationKey = nominalKey(type)
       const declaration = self.nominals.get(declarationKey)
       if (declaration === undefined || seen.has(declarationKey)) {
         for (const argument of type.arguments)
-          if (Type.isTypeArgument(argument)) visit(argument, true, seen)
+          if (Type.isTypeArgument(argument)) visit(argument, seen)
         return
       }
       const substitution = TypeInference.substitution(
@@ -136,10 +116,10 @@ const features = (self: Context, type: Type.Type, storage: boolean): ReadonlyArr
       const next = new Set(seen).add(declarationKey)
       for (const field of fields)
         if (field.declaredType._tag === 'Resolved')
-          visit(Type.substitute(field.declaredType.type, substitution), true, next)
+          visit(Type.substitute(field.declaredType.type, substitution), next)
     }
   }
-  visit(type, storage, new Set())
+  visit(type, new Set())
   const result = Object.freeze([...found])
   self.cache.set(identity, result)
   return result
@@ -150,12 +130,9 @@ export const check = (
   self: Context,
   type: Type.Type,
   span: SourceSpan.SourceSpan,
-  storage = false,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   Object.freeze(
-    features(self, type, storage).map((feature) =>
-      Diagnostic.unsupportedLifetimeFeature(feature, span),
-    ),
+    features(self, type).map((feature) => Diagnostic.unsupportedLifetimeFeature(feature, span)),
   )
 
 /** Discharges retained body uses at an already selected source-level generic application. */
@@ -167,7 +144,7 @@ export const instantiate = (
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   Diagnostic.merge(
     ...obligations.map((obligation) =>
-      check(self, Type.substitute(obligation.type, substitution), span, obligation.storage),
+      check(self, Type.substitute(obligation.type, substitution), span),
     ),
   )
 
@@ -177,9 +154,8 @@ export const moduleDiagnostics = (
   module: DeclarationFacts.ModuleHeaders,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const inspect = (fact: DeclarationFacts.DeclaredTypeFact, storage = false): void => {
-    if (fact._tag === 'Resolved')
-      diagnostics.push(...check(self, fact.type, fact.syntax.span, storage))
+  const inspect = (fact: DeclarationFacts.DeclaredTypeFact): void => {
+    if (fact._tag === 'Resolved') diagnostics.push(...check(self, fact.type, fact.syntax.span))
   }
   const operation = (
     member: DeclarationFacts.DeclarationFact | DeclarationFacts.ServiceOperationFact,
@@ -204,7 +180,7 @@ export const moduleDiagnostics = (
         member._tag === 'StructDeclaration'
           ? member.fields
           : member.variants.flatMap((variant) => variant.fields)
-      for (const field of fields) inspect(field.declaredType, true)
+      for (const field of fields) inspect(field.declaredType)
       if (member.canonical._tag === 'Canonical')
         diagnostics.push(
           ...check(
@@ -241,7 +217,6 @@ export const body = (
       if (Type.parameters(type).length > 0)
         obligations.set(Type.key(type), {
           type,
-          storage: false,
           span: expression.syntax.span,
         })
     },

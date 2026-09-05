@@ -1515,9 +1515,7 @@ export const hirExpression = (
       }),
     )
     const heldLoans = Object.freeze(
-      fact.reference.operation === 'RawBufferSlot'
-        ? directLoanEnds
-        : loanEndsOf(fact.arguments, (ordinal) => retainedOrdinals.has(ordinal)),
+      loanEndsOf(fact.arguments, (ordinal) => retainedOrdinals.has(ordinal)),
     )
     if (fact.reference.operation === 'StringFromUtf8Unchecked') {
       const source = arguments_.at(0)
@@ -1579,11 +1577,7 @@ export const hirExpression = (
           : [],
       ),
       arguments: arguments_,
-      loanEnds: Object.freeze(
-        fact.reference.operation === 'RawBufferSlot'
-          ? []
-          : [...directLoanEnds, ...nestedSlotLoanEnds],
-      ),
+      loanEnds: Object.freeze([...directLoanEnds, ...nestedSlotLoanEnds]),
       heldLoans,
       type: fact.type.type,
       span: fact.syntax.span,

@@ -676,14 +676,16 @@ eligible shared view retains another dependent use rather than detaching the sou
 aggregate still needs an admitted `impl Copy`, and every realized field must satisfy that property.
 
 **Boundary:** Moving an owner together with a reference into its own inline storage does not create
-a valid self-referential value. Exclusive borrowed storage and a user `Drop` hook on a
-lifetime-dependent owner remain unsupported in this layer. Effect success and failure channels
+a valid self-referential value. Exclusive borrowed storage remains affine, and a user `Drop` hook
+requires every observable borrowed component to remain valid through its invocation. Generic
+recursive cleanup keeps the same conservative obligation without inspecting hook bodies.
+Effect success and failure channels
 cannot yet carry dependent borrowed values. Callable and Effect environments retain their explicit
 environment bounds even when their public result channels contain no references.
 
 **Diagnostics:** Invalid validity escape reports `OWN0019` at the violating use or retention
-boundary. Unsupported exclusive storage or dependent cleanup reports the corresponding ownership
-admission diagnostic. Named lifetime and elision failures follow [the lifetime reference](lifetimes.md).
+boundary. Conflicting access during a retained loan reports `OWN0010` or `OWN0011`.
+Named lifetime and elision failures follow [the lifetime reference](lifetimes.md).
 
 **Evidence:** [lifetime requirements](../../../../openspec/specs/bootstrap-lifetimes/spec.md),
 [lifetime tests](../../../../packages/compiler/test/Type.test.ts).

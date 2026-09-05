@@ -119,7 +119,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'BeginLoan': {
-      if (operation.sourceType._tag === 'Slice') {
+      const descriptor = Mir.borrowsDescriptor(operation)
+      if (!descriptor && operation.sourceType._tag === 'Slice') {
         nativeStorage.locals.set(
           operation.destination.ordinal,
           NativeStorage.readLocal(nativeStorage, operation.root),
@@ -130,7 +131,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
       if (rootSemantic === undefined)
         throw new RangeError('LLVM borrow formation lost its root type')
-      if (SilkType.isSlice(rootSemantic)) {
+      if (!descriptor && SilkType.isSlice(rootSemantic)) {
         const [selector, ...suffixSelectors] = operation.selectors
         const [base, length] = NativeStorage.readLocal(nativeStorage, operation.root)
         if (
@@ -221,7 +222,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         checkOrdinal += 1
         break
       }
-      let selected = SilkType.isReference(rootSemantic) ? rootSemantic.target : rootSemantic
+      let selected =
+        !descriptor && SilkType.isReference(rootSemantic) ? rootSemantic.target : rootSemantic
       let staticOffset = 0
       const dynamicOffsets: Array<{
         readonly local: Mir.LocalId
@@ -321,7 +323,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               )
       }
       let rootBase: Value.Input | undefined
-      if (SilkType.isReference(rootSemantic)) {
+      if (!descriptor && SilkType.isReference(rootSemantic)) {
         const address = NativeStorage.readLocal(nativeStorage, operation.root).at(0)
         if (address === undefined)
           throw new RangeError('LLVM projected borrow lost its reference address')

@@ -183,7 +183,7 @@ export const complete = (
     )
       return undefined
     const reached = memberByNominal(self.modules, resolved.fact.type)
-    if (reached === undefined) return undefined
+    if (reached === undefined) return Type.intrinsicNominalParameters(resolved.fact.type)
     const closed = finalize(reached)
     return 'typeParameters' in closed
       ? closed.typeParameters.map((parameter) => parameter.type)
@@ -192,9 +192,25 @@ export const complete = (
   const finalizeHead = (head: InherentImplFact): InherentImplFact => {
     const cached = finalizedHeads.get(head)
     if (cached !== undefined) return cached
-    const candidate = DeclarationCollection.finalizeLifetimeHeader(head, (path) =>
-      nominalParameters(head.module, path),
-    )
+    // An impl names its local declaration even when a builtin storage type has the same name.
+    // Apply that identity before elision so builtin lifetimes cannot enter the local head.
+    const localOwner = self.modules
+      .find((module) => module.module === head.module)
+      ?.members.find(
+        (member) =>
+          member.name._tag === 'Present' &&
+          member.name.spelling === head.ownerSpelling &&
+          NameResolution.isNominalOwner(member),
+      )
+    const candidate = DeclarationCollection.finalizeLifetimeHeader(head, (path) => {
+      const owner =
+        path.spelling === head.ownerSpelling && localOwner !== undefined
+          ? finalize(localOwner)
+          : undefined
+      return owner !== undefined && 'typeParameters' in owner
+        ? owner.typeParameters.map((parameter) => parameter.type)
+        : nominalParameters(head.module, path)
+    })
     const closed = candidate._tag === 'InherentImplDeclaration' ? candidate : head
     finalizedHeads.set(head, closed)
     return closed
@@ -259,8 +275,10 @@ export const complete = (
         resolved.fact.type.arguments.length > 0
       )
         return undefined
-      return memberByNominal(headers, resolved.fact.type)?.typeParameters.map(
-        (parameter) => parameter.type,
+      return (
+        memberByNominal(headers, resolved.fact.type)?.typeParameters.map(
+          (parameter) => parameter.type,
+        ) ?? Type.intrinsicNominalParameters(resolved.fact.type)
       )
     }
     const members = module.members.map((member): MemberFact => {

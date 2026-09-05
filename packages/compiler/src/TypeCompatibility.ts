@@ -427,7 +427,9 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
     nominalVarianceKey(source) === nominalVarianceKey(target) &&
     source.arguments.length === target.arguments.length
   ) {
-    const variance = self.nominalVariance.get(nominalVarianceKey(source))
+    const variance =
+      self.nominalVariance.get(nominalVarianceKey(source)) ??
+      (Type.isSlot(source) ? (['Covariant', 'Invariant'] as const) : undefined)
     if (
       source.arguments.every((argument, ordinal) => {
         const expected = target.arguments.at(ordinal)

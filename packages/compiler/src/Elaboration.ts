@@ -1138,7 +1138,7 @@ export const retainsLifetimes = (
   )
 }
 
-/** Every supplied argument retained by the selected result contract, including nested payloads. */
+/** Arguments whose access capability, or owned payload, is retained by the selected result. */
 export const retainedResultArguments = (
   self: ExpressionFact,
   assumptions: Lifetime.Assumptions,
@@ -1149,11 +1149,19 @@ export const retainedResultArguments = (
   )
     return []
   const result = self.type.type
-  return self.arguments.filter(
-    (argument) =>
-      argument.type._tag === 'Available' &&
-      retainsLifetimes(argument.type.type, result, assumptions),
-  )
+  return self.arguments.filter((argument) => {
+    if (argument.type._tag !== 'Available') return false
+    const source = argument.type.type
+    // Extracting T from &mut Owner<T> transfers T's external dependencies, not the access
+    // capability to Owner's storage. Only the outer borrow can retain that storage loan.
+    if (Type.isReference(source) || Type.isSlice(source))
+      return Type.storageLifetimes(result).some(
+        (output) =>
+          output._tag !== 'StaticLifetime' &&
+          Lifetime.outlives(assumptions, source.lifetime, output),
+      )
+    return retainsLifetimes(source, result, assumptions)
+  })
 }
 
 /** A deterministic argument identity within one caller and concrete call site. */

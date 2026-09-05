@@ -142,7 +142,9 @@ Owns an initialized prefix of a growable contiguous allocation.
 ### Details
 
 The vector releases each initialized element and its storage on drop. Length counts initialized
-elements. Capacity counts elements that fit without growth.
+elements. Capacity counts elements that fit without growth. Borrowed elements retain their
+referent lifetimes through replacement, extraction, and required cleanup. An allocation does
+not make its payload detached.
 
 <a id="declaration-73696c6b2f766563746f723a3a566563746f722e6d616b65"></a>
 
