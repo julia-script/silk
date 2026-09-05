@@ -1098,6 +1098,10 @@ export const validateCleanup = (
       { ...region, available: new Set(region.available), required: new Set(region.required) },
     ]),
   )
+  const activatedConstraints = (self.input.activatedConstraints ?? []).map((bound) => ({
+    ...bound,
+    points: new Set(bound.points),
+  }))
   const spans = new Map(self.spans)
   let pointCount = self.input.pointCount
   for (const exit of ownership.exits) {
@@ -1106,6 +1110,10 @@ export const validateCleanup = (
     for (const release of exit.releases) {
       const point = pointCount++
       spans.set(point, exit.span)
+      // Ordered destructor points inherit the bounds active at this exit, including
+      // dependencies installed after the holder's original acquisition.
+      for (const bound of activatedConstraints)
+        if (sourcePoint !== undefined && bound.points.has(sourcePoint)) bound.points.add(point)
       for (const region of regions.values()) {
         const origin = self.origins.get(Lifetime.key(region.lifetime))
         if (origin?.root === undefined || !released.has(Ownership.siteKey(origin.root))) {
@@ -1121,7 +1129,12 @@ export const validateCleanup = (
       released.add(Ownership.siteKey(release.binding.site))
     }
   }
-  const solution = Lifetime.solve({ ...self.input, pointCount, regions: [...regions.values()] })
+  const solution = Lifetime.solve({
+    ...self.input,
+    pointCount,
+    regions: [...regions.values()],
+    activatedConstraints,
+  })
   return {
     diagnostics: diagnosticsOf(solution, self.origins, spans, ownership.declaration.syntax.span),
     ...(solution._tag === 'Solved' ? { work: solution.work } : {}),

@@ -171,6 +171,8 @@ export const lowerPatternSelection = (
     )
   }
   const selectedExecution = lowerExecution(fn, selection.span, () => {
+    for (const binding of selection.bindings)
+      initializeBinding(fn, { _tag: 'Pattern', binding: binding.id }, selection.span)
     for (const operation of finalizedSelectedOperations) fn.emit(operation)
     return selectedResult
   })
