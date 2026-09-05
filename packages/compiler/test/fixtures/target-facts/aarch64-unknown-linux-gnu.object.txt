@@ -19,7 +19,7 @@ ElfHeader {
   Version: 1
   Entry: 0x0
   ProgramHeaderOffset: 0x0
-  SectionHeaderOffset: 0x190
+  SectionHeaderOffset: 0x198
   Flags [ (0x0)
   ]
   HeaderSize: 64
@@ -69,7 +69,7 @@ Symbols [
   Symbol {
     Name: silk_primitive_facts (16)
     Value: 0x0
-    Size: 72
+    Size: 80
     Binding: Global (0x1)
     Type: Object (0x1)
     Other: 0

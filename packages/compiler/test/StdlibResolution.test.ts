@@ -58,7 +58,7 @@ it('keeps the ordinary target actor manifest entry, syntax, and intrinsic phase 
     path: 'silk/target.silk',
     layer: 'portable',
     namespace: 'Target',
-    aliases: ['Arch', 'Profile'],
+    aliases: ['Arch'],
   })
 
   const syntax = Parser.parse(Lexer.lex(SourceFile.make('silk/target', targetSource)))
@@ -72,9 +72,8 @@ it('keeps the ordinary target actor manifest entry, syntax, and intrinsic phase 
     generated.stdout.indexOf("module: 'silk/target'"),
     generated.stdout.indexOf("module: 'silk/u16'"),
   )
-  assert.include(targetEntry, "staticInventory: ['targetProfile']")
+  assert.include(targetEntry, "'targetPointerBits'")
   assert.include(targetEntry, 'runtimeInventory: []')
-  assert.notInclude(targetEntry, "runtimeInventory: ['targetProfile']")
 })
 
 it.effect(
@@ -102,16 +101,6 @@ it.effect(
         })),
         [
           {
-            name: 'Profile',
-            visibility: 'Public',
-            members: [
-              { name: 'Aarch64AppleDarwin', value: 0n },
-              { name: 'Aarch64UnknownLinuxGnu', value: 1n },
-              { name: 'Wasm32UnknownUnknown', value: 2n },
-              { name: 'X86_64UnknownLinuxGnu', value: 3n },
-            ],
-          },
-          {
             name: 'Arch',
             visibility: 'Public',
             members: [
@@ -120,6 +109,34 @@ it.effect(
               { name: 'X86_64', value: 2n },
             ],
           },
+          {
+            name: 'OperatingSystem',
+            visibility: 'Public',
+            members: [
+              { name: 'Darwin', value: 0n },
+              { name: 'Linux', value: 1n },
+              { name: 'Freestanding', value: 2n },
+            ],
+          },
+          {
+            name: 'Abi',
+            visibility: 'Public',
+            members: [
+              { name: 'Apple', value: 0n },
+              { name: 'Gnu', value: 1n },
+              { name: 'Wasm', value: 2n },
+            ],
+          },
+          {
+            name: 'ObjectFormat',
+            visibility: 'Public',
+            members: [
+              { name: 'MachO', value: 0n },
+              { name: 'Elf', value: 1n },
+              { name: 'Wasm', value: 2n },
+            ],
+          },
+          { name: 'Endianness', visibility: 'Public', members: [{ name: 'Little', value: 0n }] },
         ],
       )
       assert.deepEqual(
@@ -131,8 +148,14 @@ it.effect(
             parameterCount: declaration.parameterCount,
           })),
         [
-          { name: 'profile', phase: 'Static', parameterCount: 0 },
           { name: 'arch', phase: 'Static', parameterCount: 0 },
+          { name: 'operatingSystem', phase: 'Static', parameterCount: 0 },
+          { name: 'abi', phase: 'Static', parameterCount: 0 },
+          { name: 'objectFormat', phase: 'Static', parameterCount: 0 },
+          { name: 'endianness', phase: 'Static', parameterCount: 0 },
+          { name: 'cpu', phase: 'Static', parameterCount: 0 },
+          { name: 'deployment', phase: 'Static', parameterCount: 0 },
+          { name: 'hasCpuFeature', phase: 'Static', parameterCount: 1 },
         ],
       )
       assert.deepEqual(
@@ -146,6 +169,7 @@ it.effect(
           { name: 'usizeMax', visibility: 'Public', type: 'Resolved' },
           { name: 'isizeMax', visibility: 'Public', type: 'Resolved' },
           { name: 'isizeMin', visibility: 'Public', type: 'Resolved' },
+          { name: 'pointerAlignment', visibility: 'Public', type: 'Resolved' },
         ],
       )
     }),
@@ -167,11 +191,20 @@ it('derives deterministic catalog metadata and enforces portable dependency dire
     assert.strictEqual(createHash('sha256').update(entry.bytes).digest('hex'), entry.digest)
     assert.deepEqual(
       entry.staticInventory,
-      intrinsicInventory.filter((operation) => operation === 'targetProfile'),
+      intrinsicInventory.filter((operation) =>
+        /^(target(Architecture|OperatingSystem|Abi|ObjectFormat|Endianness|PointerBits|PointerAlignment)|profile(Text|Flag|Contains))$/.test(
+          operation,
+        ),
+      ),
     )
     assert.deepEqual(
       entry.runtimeInventory,
-      intrinsicInventory.filter((operation) => operation !== 'targetProfile'),
+      intrinsicInventory.filter(
+        (operation) =>
+          !/^(target(Architecture|OperatingSystem|Abi|ObjectFormat|Endianness|PointerBits|PointerAlignment)|profile(Text|Flag|Contains))$/.test(
+            operation,
+          ),
+      ),
     )
     if (entry.layer === 'portable') assert.isUndefined(entry.providerTargets)
     else assert.isAbove(entry.providerTargets?.length ?? 0, 0)

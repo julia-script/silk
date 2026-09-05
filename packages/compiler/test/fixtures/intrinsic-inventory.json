@@ -5520,11 +5520,74 @@
       "identity": "ContractRule.CatchFailure"
     },
     {
-      "operation": "Intrinsic.targetProfile",
-      "signature": "fn Intrinsic.targetProfile() -> u8",
+      "operation": "Intrinsic.targetArchitecture",
+      "signature": "fn Intrinsic.targetArchitecture() -> string<'static>",
       "unsafe": false,
       "admission": "Language",
-      "consumer": "silk/target.profile"
+      "consumer": "silk/target.targetArchitecture"
+    },
+    {
+      "operation": "Intrinsic.targetOperatingSystem",
+      "signature": "fn Intrinsic.targetOperatingSystem() -> string<'static>",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/target.targetOperatingSystem"
+    },
+    {
+      "operation": "Intrinsic.targetAbi",
+      "signature": "fn Intrinsic.targetAbi() -> string<'static>",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/target.targetAbi"
+    },
+    {
+      "operation": "Intrinsic.targetObjectFormat",
+      "signature": "fn Intrinsic.targetObjectFormat() -> string<'static>",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/target.targetObjectFormat"
+    },
+    {
+      "operation": "Intrinsic.targetEndianness",
+      "signature": "fn Intrinsic.targetEndianness() -> string<'static>",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/target.targetEndianness"
+    },
+    {
+      "operation": "Intrinsic.targetPointerBits",
+      "signature": "fn Intrinsic.targetPointerBits() -> u32",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/target.targetPointerBits"
+    },
+    {
+      "operation": "Intrinsic.targetPointerAlignment",
+      "signature": "fn Intrinsic.targetPointerAlignment() -> u32",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/target.targetPointerAlignment"
+    },
+    {
+      "operation": "Intrinsic.profileText",
+      "signature": "fn Intrinsic.profileText(key: string<'static>) -> string<'static>",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/target.profileText"
+    },
+    {
+      "operation": "Intrinsic.profileFlag",
+      "signature": "fn Intrinsic.profileFlag(key: string<'static>) -> bool",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/target.profileFlag"
+    },
+    {
+      "operation": "Intrinsic.profileContains",
+      "signature": "fn Intrinsic.profileContains(key: string<'static>, value: string<'static>) -> bool",
+      "unsafe": false,
+      "admission": "Language",
+      "consumer": "silk/target.profileContains"
     },
     {
       "operation": "Intrinsic.staticTextByteLength",

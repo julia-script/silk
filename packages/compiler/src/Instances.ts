@@ -1081,7 +1081,14 @@ export const discover = (
     return Object.freeze({ ...invalid(rootModule), entry, foreignExports })
   }
 
-  const residualization = Residualization.make(completion.profile, results, resolution, index, undefined, completion.values)
+  const residualization = Residualization.make(
+    completion.profile,
+    results,
+    resolution,
+    index,
+    undefined,
+    completion.values,
+  )
   const residualOwnership = ResidualOwnership.make()
   const accessBoundaryPlan = Ownership.localSharedAccessBoundaryPlan(results)
   interface PreparedInstance {

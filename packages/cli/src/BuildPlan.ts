@@ -1,3 +1,4 @@
+import type * as ProjectProfile from '@silklang/compiler/ProjectProfile'
 import { join } from 'node:path'
 import * as ArtifactKind from '@silklang/compiler/ArtifactKind'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
@@ -15,7 +16,8 @@ export interface BuildPlan {
   readonly project: Project.Project
   readonly target: Target.Target
   readonly artifactKind: ArtifactKind.ArtifactKind
-  readonly profile: ToolchainPlan.OptimizationProfile
+  readonly configuration?: ProjectProfile.Profile
+  readonly optimization: ToolchainPlan.OptimizationProfile
   readonly destination: string
   readonly toolchain: NativeToolchain.Toolchain
   /** The manifest's ordered native inputs for a native target; empty for WebAssembly. */
@@ -23,6 +25,7 @@ export interface BuildPlan {
 }
 
 export type BuildPlanErrorReason =
+  | { readonly _tag: 'UnsupportedProfileArtifact'; readonly artifact: string }
   | { readonly _tag: 'InvalidPackageName'; readonly name: string }
   | { readonly _tag: 'NonExecutableRunArtifact'; readonly artifactKind: ArtifactKind.ArtifactKind }
   | {
@@ -38,7 +41,7 @@ export type BuildPlanErrorReason =
   | { readonly _tag: 'ForeignRunTarget'; readonly target: Target.Id; readonly host: Target.Id }
   | { readonly _tag: 'HostUnavailable'; readonly error: Target.TargetError }
 
-/** Project target/profile selection cannot produce the requested workflow. */
+/** Project target/optimization selection cannot produce the requested workflow. */
 export class BuildPlanError extends Data.TaggedError('BuildPlanError')<{
   readonly operation: 'BuildPlan.make'
   readonly message: string
@@ -47,7 +50,8 @@ export class BuildPlanError extends Data.TaggedError('BuildPlanError')<{
 
 export interface Options {
   readonly target: Target.Target
-  readonly profile: ToolchainPlan.OptimizationProfile
+  readonly configuration?: ProjectProfile.Profile
+  readonly optimization: ToolchainPlan.OptimizationProfile
   readonly purpose?: Purpose
   readonly clang?: string
   readonly llvmAr?: string
@@ -67,15 +71,34 @@ export const make = (
       }),
     )
   }
-  if (options.purpose === 'run') {
-    if (project.build.artifact !== 'NativeExecutable') {
+  let artifactKind = Target.isNative(options.target)
+    ? project.build.artifact
+    : ArtifactKind.webAssemblyModule
+  const logicalArtifact = options.configuration?.input.artifact
+  if (logicalArtifact !== undefined) {
+    if (logicalArtifact === 'object')
       return Result.fail(
         new BuildPlanError({
           operation: 'BuildPlan.make',
-          message: `Cannot run ${ArtifactKind.manifestSpelling(project.build.artifact)} artifact`,
+          message: 'Object-only profiles require the compiler object-emission API',
+          reason: { _tag: 'UnsupportedProfileArtifact', artifact: logicalArtifact },
+        }),
+      )
+    if (Target.isNative(options.target)) {
+      if (logicalArtifact === 'executable') artifactKind = 'NativeExecutable'
+      else if (logicalArtifact === 'static-archive') artifactKind = 'NativeStaticLibrary'
+      else artifactKind = 'NativeSharedLibrary'
+    }
+  }
+  if (options.purpose === 'run') {
+    if (artifactKind !== 'NativeExecutable') {
+      return Result.fail(
+        new BuildPlanError({
+          operation: 'BuildPlan.make',
+          message: `Cannot run ${ArtifactKind.manifestSpelling(artifactKind)} artifact`,
           reason: {
             _tag: 'NonExecutableRunArtifact',
-            artifactKind: project.build.artifact,
+            artifactKind,
           },
         }),
       )
@@ -105,17 +128,18 @@ export const make = (
     }
   }
 
-  const artifactKind = Target.isNative(options.target)
-    ? project.build.artifact
-    : ArtifactKind.webAssemblyModule
-  if (!Target.isNative(options.target) && project.build.artifact !== 'NativeExecutable') {
+  if (
+    !Target.isNative(options.target) &&
+    logicalArtifact === undefined &&
+    project.build.artifact !== 'NativeExecutable'
+  ) {
     return Result.fail(
       new BuildPlanError({
         operation: 'BuildPlan.make',
-        message: `Artifact ${ArtifactKind.manifestSpelling(project.build.artifact)} is incompatible with target ${options.target.id}`,
+        message: `Artifact ${ArtifactKind.manifestSpelling(artifactKind)} is incompatible with target ${options.target.id}`,
         reason: {
           _tag: 'IncompatibleArtifactTarget',
-          artifactKind: project.build.artifact,
+          artifactKind,
           target: options.target.id,
         },
       }),
@@ -134,7 +158,7 @@ export const make = (
     project.build.outputDirectory,
     'llvm',
     options.target.id,
-    options.profile,
+    options.optimization,
     ArtifactKind.fileName(artifactKind, project.name, options.target),
   )
   const toolchain = Object.freeze({
@@ -142,10 +166,10 @@ export const make = (
     clang: options.clang ?? 'clang',
     llvmAr: options.llvmAr ?? 'llvm-ar',
   })
-  if (Target.isNative(options.target)) {
+  if (Target.isNative(options.target) && artifactKind !== 'WebAssemblyModule') {
     const nativePlan = ToolchainPlan.nativeCommand(
       toolchain,
-      project.build.artifact,
+      artifactKind,
       options.target,
       Object.freeze([]),
       project.build.nativeLinkInputs,
@@ -167,7 +191,8 @@ export const make = (
       project,
       target: options.target,
       artifactKind,
-      profile: options.profile,
+      optimization: options.optimization,
+      ...(options.configuration === undefined ? {} : { configuration: options.configuration }),
       destination,
       toolchain,
       nativeLinkInputs: Target.isNative(options.target)

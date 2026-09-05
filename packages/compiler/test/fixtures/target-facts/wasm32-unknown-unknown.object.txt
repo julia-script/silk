@@ -13,6 +13,6 @@ Symbols [
     ]
     Offset: 0x0
     Segment: 0x0
-    Size: 0x48
+    Size: 0x50
   }
 ]

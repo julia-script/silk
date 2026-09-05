@@ -155,8 +155,8 @@ The sealed `Intrinsic` namespace exposes static-only `targetArchitecture`, `targ
 `targetPointerBits` and `targetPointerAlignment` return `u32`. Individual logical build domains are
 queried through static-only `profileText(key: string) -> string`, `profileFlag(key: string) -> bool`
 and `profileContains(key: string, value: string) -> bool`. Keys are closed compiler-owned domain
-names: text keys are `cpu`, `deployment`, `libc`, `artifact`, `entry`, `link`, `code-model`,
-`relocation`, `optimization`, `safety`, `threading`, `unwind`, `runtime`; flag key is `debug`;
+names: text keys are `cpu`, `deployment`, `libc`, `artifact`, `entry-kind`, `entry-name`, `link`, `code-model`,
+`relocation`, `optimization`, `safety`, `threading`, `unwind`, `runtime-kind`, `runtime-name`; flag key is `debug`;
 set keys are `cpu-features` and `sanitizers`. Invalid keys are structured static diagnostics.
 Ordinary Silk wrappers own nominal domain enums and ergonomic operations. Package parameters are
 read by declaration identity, not through arbitrary library-field key lookup. No ordinal target
@@ -170,3 +170,5 @@ provide the complete input object; target-triple shorthand selects a default log
 that target. Conflicting explicit modes are errors. Without an explicit mode, tooling uses the
 project default, then an explicitly supplied host fallback. Compiler and language-server analysis
 consume the same normalized model.
+
+Named entry/runtime selections expose their kind separately from their name. A named value spelled `default` remains distinct from the default request.

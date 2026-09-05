@@ -1,9 +1,13 @@
 //! Typed compile-time facts for the selected compilation profile.
 //!
-//! Machine facts and logical build choices are read during static evaluation. The compiler
-//! provides primitive facts; this module owns their nominal source representation.
+//! # When to use
+//! Use [`arch`] and [`operatingSystem`] to select source behavior for a machine. Use [`pointerBits`]
+//! for pointer-sized arithmetic. Read logical artifact and runtime requests through `silk.compilation`.
+//!
+//! # Details
+//! These facts are fixed before static evaluation. They have no runtime storage.
 
-/// The selected Arch domain.
+/// The instruction-set architectures supported by the compiler.
 pub enum Arch {
   /// The Aarch64 choice.
   Aarch64,
@@ -22,7 +26,7 @@ pub static fn arch() -> Arch {
   compileError("Unknown Arch fact")
 }
 
-/// The selected OperatingSystem domain.
+/// The operating systems supported by the compiler.
 pub enum OperatingSystem {
   /// The Darwin choice.
   Darwin,
@@ -41,7 +45,7 @@ pub static fn operatingSystem() -> OperatingSystem {
   compileError("Unknown OperatingSystem fact")
 }
 
-/// The selected Abi domain.
+/// The platform calling conventions supported by the compiler.
 pub enum Abi {
   /// The Apple choice.
   Apple,
@@ -60,7 +64,7 @@ pub static fn abi() -> Abi {
   compileError("Unknown Abi fact")
 }
 
-/// The selected ObjectFormat domain.
+/// The object-file formats supported by the compiler.
 pub enum ObjectFormat {
   /// The MachO choice.
   MachO,
@@ -79,7 +83,7 @@ pub static fn objectFormat() -> ObjectFormat {
   compileError("Unknown ObjectFormat fact")
 }
 
-/// The selected Endianness domain.
+/// The byte orders supported by the compiler.
 pub enum Endianness {
   /// The Little choice.
   Little
@@ -128,8 +132,6 @@ pub static fn cpu() -> string<'static> { return Intrinsic.profileText("cpu") }
 /// Returns the logical deployment selection.
 pub static fn deployment() -> string<'static> { return Intrinsic.profileText("deployment") }
 
-/// Whether debug information is requested.
-pub const debug: bool = Intrinsic.profileFlag("debug")
 
 /// Whether a canonical CPU feature is enabled.
 pub static fn hasCpuFeature(value: string<'static>) -> bool { return Intrinsic.profileContains("cpu-features", value) }

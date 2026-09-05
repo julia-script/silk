@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX`  | Lexical   | 12    |
 | `PAR`  | Parser    | 5     |
 | `MOD`  | Module    | 3     |
-| `SEM`  | Semantic  | 199   |
+| `SEM`  | Semantic  | 200   |
 | `OWN`  | Ownership | 19    |
 | `LAY`  | Layout    | 1     |
 
-There are 239 codes in total.
+There are 240 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -260,6 +260,7 @@ There are 239 codes in total.
 | `SEM0211` | A lifetime binder or outlives bound has an unsupported declaration shape.                                    | `Invalid lifetime binder: <detail>`                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `SEM0212` |                                                                                                              | `Lifetime <longer> does not outlive <shorter>`                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `SEM0213` |                                                                                                              | `Type <type> does not remain valid for <lifetime>`                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `SEM0214` | Stable code for rejected profile inputs, package schemas, defaults, or predicates.                           | `Invalid compilation configuration: <message>`                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ## Ownership (`OWN`)
 

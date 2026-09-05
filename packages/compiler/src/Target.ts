@@ -13,7 +13,16 @@ export interface Primitive {
   readonly alignment: 1 | 2 | 4 | 8
 }
 
-export type PrimitiveName = 'bool' | 'i8' | 'i16' | 'i32' | 'i64' | 'f32' | 'f64' | 'cLong'
+export type PrimitiveName =
+  | 'bool'
+  | 'cBool'
+  | 'i8'
+  | 'i16'
+  | 'i32'
+  | 'i64'
+  | 'f32'
+  | 'f64'
+  | 'cLong'
 
 /** The closed set of target identities supported by the bootstrap compiler. */
 export type Id =
@@ -88,7 +97,8 @@ const make = (
     pointerAlignment: pointerSize,
     endianness: 'little',
     primitives: Object.freeze({
-      bool: primitive(1),
+      bool: primitive(4),
+      cBool: primitive(1),
       i8: primitive(1),
       i16: primitive(2),
       i32: primitive(4),
@@ -313,7 +323,7 @@ export const encode = (self: Target): string =>
     Canonical.array(self.supportedFeatures),
     Canonical.array(
       Object.entries(self.primitives)
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .sort(([a], [b]) => Canonical.compare(a, b))
         .map(([name, fact]) => Canonical.record(name, [String(fact.size), String(fact.alignment)])),
     ),
   ])

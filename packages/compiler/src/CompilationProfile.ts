@@ -272,13 +272,10 @@ export const decode = Effect.fn('CompilationProfile.decode')(function* (
     typeof deploymentInput === 'string'
       ? [...deploymentInput.split('.'), '0', '0'].slice(0, 3).join('.')
       : undefined
-  const libc = yield* choice(
-    input,
-    'libc',
-    ['none', 'system', 'gnu'],
-    target.abi === 'apple' ? 'system' : target.abi === 'gnu' ? 'gnu' : 'none',
-    origin,
-  )
+  let defaultLibc: Libc = 'none'
+  if (target.abi === 'apple') defaultLibc = 'system'
+  if (target.abi === 'gnu') defaultLibc = 'gnu'
+  const libc = yield* choice(input, 'libc', ['none', 'system', 'gnu'], defaultLibc, origin)
   const artifact = yield* choice(
     input,
     'artifact',
@@ -385,11 +382,7 @@ export const publish = Effect.fn('CompilationProfile.publish')(function* (
   parameters: ReadonlyArray<Parameter>,
 ): Effect.fn.Return<CompilationProfile, ConfigurationError.ConfigurationError> {
   const ordered = [...parameters].sort((left, right) =>
-    parameterKey(left) < parameterKey(right)
-      ? -1
-      : parameterKey(left) > parameterKey(right)
-        ? 1
-        : 0,
+    Canonical.compare(parameterKey(left), parameterKey(right)),
   )
   const retained: Array<Parameter> = []
   const seen = new Set<string>()
@@ -434,6 +427,27 @@ export const publish = Effect.fn('CompilationProfile.publish')(function* (
 
 /** Returns the canonical versioned encoding used as the profile's semantic identity. */
 export const encode = (self: CompilationProfile | Initial): string => self.identity
+
+/** Projects normalized facts back into the portable logical request shape. */
+export const input = (self: CompilationProfile | Initial): Input =>
+  Object.freeze({
+    target: self.target.id,
+    cpu: self.cpu,
+    ...(self.deployment === undefined ? {} : { deployment: self.deployment }),
+    libc: self.libc,
+    artifact: self.artifact,
+    entry: self.entry,
+    link: self.link,
+    codeModel: self.codeModel,
+    relocation: self.relocation,
+    optimization: self.optimization,
+    debug: self.debug,
+    safety: self.safety,
+    threading: self.threading,
+    sanitizers: self.sanitizers,
+    unwind: self.unwind,
+    runtime: self.runtime,
+  })
 
 /** Looks up a final value by stable identity without exposing mutable profile storage. */
 export const parameter = (

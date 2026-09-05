@@ -14,18 +14,18 @@ import { unreachable } from './support/raise.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const lowerAnalyzed = (frontend: Analysis.SingleRootFrontendSnapshot) => {
-  const snapshot = Analysis.realize(frontend, Target.wasm32UnknownUnknown.id, {
+const lowerAnalyzed = Effect.fnUntraced(function* (frontend: Analysis.SingleRootFrontendSnapshot) {
+  const snapshot = yield* Analysis.realize(frontend, Target.wasm32UnknownUnknown.id, {
     normalizeMir: false,
   })
   assert.deepEqual(Analysis.diagnostics(snapshot), [])
   const layout =
     snapshot.layout._tag === 'Available' ? snapshot.layout.value : unreachable('expected layout')
   return { module: Analysis.loweredMir(snapshot), layout }
-}
+})
 
 const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
-  return lowerAnalyzed(yield* Analysis.ofSource(name, ascii(source)))
+  return yield* lowerAnalyzed(yield* Analysis.ofSource(name, ascii(source)))
 })
 
 it.effect(
@@ -133,8 +133,8 @@ pub fn main() -> i32 {
   return boxed.inner.parse(2)
 }`
     const frontend = yield* Analysis.ofSource('stored-callable-mir/determinism', ascii(source))
-    const first = lowerAnalyzed(frontend)
-    const second = lowerAnalyzed(frontend)
+    const first = yield* lowerAnalyzed(frontend)
+    const second = yield* lowerAnalyzed(frontend)
     const facts = (snapshot: typeof first) => ({
       layout: LayoutEncode.encode(snapshot.layout),
       instances: snapshot.module.functions.map((fn) => Instances.keyText(fn.instance)),

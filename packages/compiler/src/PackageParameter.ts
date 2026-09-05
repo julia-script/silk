@@ -1,3 +1,4 @@
+import * as Canonical from './internal/Canonical.js'
 import * as Effect from 'effect/Effect'
 import * as ConfigurationError from './ConfigurationError.js'
 import type * as ConfigurationOrigin from './ConfigurationOrigin.js'
@@ -30,11 +31,13 @@ export type Schema = { readonly type: Type.Type } & (
   | { readonly kind: 'array'; readonly length: number; readonly element: Schema }
   | {
       readonly kind: 'record'
+      readonly name: string
       readonly identity: StaticValue.NominalAggregateIdentity
       readonly fields: ReadonlyArray<Field>
     }
   | {
       readonly kind: 'optional'
+      readonly name: string
       readonly absent: StaticValue.NominalAggregateIdentity
       readonly present: StaticValue.NominalAggregateIdentity
       readonly field: Field
@@ -140,7 +143,13 @@ const describeType = Effect.fnUntraced(function* (
     if (declaration.aggregateKind !== 'Named' && declaration.aggregateKind !== 'AnonymousNamed')
       return yield* invalid(origin)
     const fields = yield* describeFields(context, declaration.fields, substitution, origin, next)
-    return Object.freeze({ kind: 'record', type, identity, fields })
+    return Object.freeze({
+      kind: 'record',
+      name: `${ownership.package}/${ownership.module}/${type.name}`,
+      type,
+      identity,
+      fields,
+    })
   }
   // The optional transport is structural: no standard-library variant or field name is privileged.
   const absent = declaration.variants.find((variant) => variant.fields.length === 0)
@@ -157,6 +166,7 @@ const describeType = Effect.fnUntraced(function* (
   if (field === undefined) return yield* invalid(origin)
   return Object.freeze({
     kind: 'optional',
+    name: `${ownership.package}/${ownership.module}/${type.name}`,
     type,
     field,
     absent: Object.freeze({
@@ -414,3 +424,53 @@ export const unbind = Effect.fn('PackageParameter.unbind')(function* (
   if (admitted._tag === 'Rejected') return yield* invalid(origin)
   return yield* unbindValue(schema, admitted.value, origin)
 })
+
+/** Encodes the full recursive schema, including nominal identity and nested integer widths. */
+export const encode = (self: Schema): string => {
+  switch (self.kind) {
+    case 'boolean':
+    case 'string':
+      return Canonical.record(self.kind)
+    case 'integer':
+      return Canonical.record('integer', [self.scalar])
+    case 'enum':
+      return Canonical.record('enum', [
+        self.name,
+        self.declaration.representation._tag === 'Available'
+          ? self.declaration.representation.scalar.spelling
+          : '',
+        Canonical.array(
+          self.declaration.members.map((member) =>
+            Canonical.record('member', [
+              member.name._tag === 'Present' ? member.name.spelling : '',
+              member.discriminant._tag === 'Available' ? member.discriminant.value.toString() : '',
+            ]),
+          ),
+        ),
+      ])
+    case 'array':
+      return Canonical.record('array', [String(self.length), encode(self.element)])
+    case 'record':
+      return Canonical.record('record', [
+        self.name,
+        Canonical.array(self.identity.typeArguments),
+        Canonical.array(
+          self.fields.map((field) =>
+            Canonical.record(field.name, [String(field.id.ordinal), encode(field.schema)]),
+          ),
+        ),
+      ])
+    case 'optional':
+      return Canonical.record('optional', [
+        self.name,
+        Canonical.array(self.present.typeArguments),
+        String(self.absent.variant?.ordinal),
+        String(self.present.variant?.ordinal),
+        self.field.name,
+        String(self.field.id.ordinal),
+        self.absent.variant?.name ?? '',
+        self.present.variant?.name ?? '',
+        encode(self.field.schema),
+      ])
+  }
+}

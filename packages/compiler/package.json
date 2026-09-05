@@ -342,6 +342,10 @@
       "types": "./dist/ProjectAnalysis.d.ts",
       "import": "./dist/ProjectAnalysis.js"
     },
+    "./ProjectProfile": {
+      "types": "./dist/ProjectProfile.d.ts",
+      "import": "./dist/ProjectProfile.js"
+    },
     "./ProviderSelection": {
       "types": "./dist/ProviderSelection.d.ts",
       "import": "./dist/ProviderSelection.js"

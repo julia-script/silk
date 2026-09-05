@@ -21,6 +21,7 @@ export interface CompilationRequest {
   readonly root: SourceFile.SourceFile
   readonly target?: string
   readonly configuration?: {
+    readonly package?: string
     readonly profile: CompilationProfile.Input
     readonly bindings?: ReadonlyArray<PackageConfiguration.Binding>
     readonly modules?: ReadonlyArray<Omit<PackageConfiguration.Module, 'bytes'>>

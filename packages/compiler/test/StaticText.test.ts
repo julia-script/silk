@@ -1,3 +1,5 @@
+import * as Schema from 'effect/Schema'
+import * as SourceResolver from '../src/SourceResolver.js'
 import { createHash } from 'node:crypto'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -80,128 +82,149 @@ const application = (
     span: staticSpan,
   })
 
-it('keys and caches complete static applications by target and canonical values', () => {
-  const evaluation = StaticEvaluation.make<string>(Target.x8664UnknownLinuxGnu)
-  let calls = 0
-  const callback: StaticEvaluation.EvaluationCallback<string> = (context) => {
-    calls += 1
-    assert.strictEqual(context.step(), undefined)
-    assert.strictEqual(context.retain(staticArgument), undefined)
-    return StaticEvaluation.complete('residual body')
-  }
-  const first = StaticEvaluation.evaluateApplication(evaluation, application('render'), callback)
-  const second = StaticEvaluation.evaluateApplication(evaluation, application('render'), callback)
+it.effect('keys and caches complete static applications by target and canonical values', () =>
+  Effect.gen(function* () {
+    const profilewasm32UnknownUnknown = yield* CompilationProfile.normalize({
+      target: Target.wasm32UnknownUnknown.id,
+    })
+    const profilex8664UnknownLinuxGnu = yield* CompilationProfile.normalize({
+      target: Target.x8664UnknownLinuxGnu.id,
+    })
 
-  assert.strictEqual(first._tag, 'Complete')
-  assert.strictEqual(first.cached, false)
-  assert.strictEqual(second._tag, 'Complete')
-  assert.strictEqual(second.cached, true)
-  assert.strictEqual(first.key, second.key)
-  assert.strictEqual(calls, 1)
-  assert.strictEqual(evaluation.environment.profile, 3)
-  assert.deepEqual(StaticEvaluation.budget(evaluation), {
-    steps: 1,
-    callDepth: 0,
-    maximumCallDepth: 1,
-    retainedValueBytes: StaticValue.retainedSize(staticArgument),
-    residualNodes: 0,
-  })
-  assert.strictEqual(StaticEvaluation.cacheEntries(evaluation).at(0)?.state._tag, 'Complete')
+    const evaluation = StaticEvaluation.make<string>(profilex8664UnknownLinuxGnu)
+    let calls = 0
+    const callback: StaticEvaluation.EvaluationCallback<string> = (context) => {
+      calls += 1
+      assert.strictEqual(context.step(), undefined)
+      assert.strictEqual(context.retain(staticArgument), undefined)
+      return StaticEvaluation.complete('residual body')
+    }
+    const first = StaticEvaluation.evaluateApplication(evaluation, application('render'), callback)
+    const second = StaticEvaluation.evaluateApplication(evaluation, application('render'), callback)
 
-  const wasm = StaticEvaluation.make<string>(Target.wasm32UnknownUnknown)
-  const wasmResult = StaticEvaluation.evaluateApplication(wasm, application('render'), callback)
-  assert.notStrictEqual(first.key, wasmResult.key)
-  assert.strictEqual(wasm.environment.profile, 2)
-  assert.strictEqual(Object.isFrozen(wasm.environment), true)
-  assert.strictEqual(Object.isFrozen(wasm.limits), true)
-})
+    assert.strictEqual(first._tag, 'Complete')
+    assert.strictEqual(first.cached, false)
+    assert.strictEqual(second._tag, 'Complete')
+    assert.strictEqual(second.cached, true)
+    assert.strictEqual(first.key, second.key)
+    assert.strictEqual(calls, 1)
+    assert.strictEqual(evaluation.environment.compilation.target.architecture, 'x86_64')
+    assert.deepEqual(StaticEvaluation.budget(evaluation), {
+      steps: 1,
+      callDepth: 0,
+      maximumCallDepth: 1,
+      retainedValueBytes: StaticValue.retainedSize(staticArgument),
+      residualNodes: 0,
+    })
+    assert.strictEqual(StaticEvaluation.cacheEntries(evaluation).at(0)?.state._tag, 'Complete')
 
-it('detects pending cycles with logical application and selected-arm frames', () => {
-  const evaluation = StaticEvaluation.make<string>(Target.x8664UnknownLinuxGnu)
-  const render = application('render')
-  const result = StaticEvaluation.evaluateApplication(evaluation, render, (context) => {
-    const selected = context.withTrace(StaticEvaluation.selectedArmFrame('Taken', staticSpan))
-    const nested = selected.evaluate(render, () => StaticEvaluation.complete('unreachable'))
-    return nested._tag === 'Failed'
-      ? StaticEvaluation.failed(nested.failure)
-      : StaticEvaluation.complete(nested.value)
-  })
+    const wasm = StaticEvaluation.make<string>(profilewasm32UnknownUnknown)
+    const wasmResult = StaticEvaluation.evaluateApplication(wasm, application('render'), callback)
+    assert.notStrictEqual(first.key, wasmResult.key)
+    assert.strictEqual(wasm.environment.compilation.target.architecture, 'wasm32')
+    assert.strictEqual(Object.isFrozen(wasm.environment), true)
+    assert.strictEqual(Object.isFrozen(wasm.limits), true)
+  }),
+)
 
-  assert.strictEqual(result._tag, 'Failed')
-  if (result._tag === 'Failed') {
-    assert.strictEqual(result.failure._tag, 'Cycle')
+it.effect('detects pending cycles with logical application and selected-arm frames', () =>
+  Effect.gen(function* () {
+    const profilex8664UnknownLinuxGnu = yield* CompilationProfile.normalize({
+      target: Target.x8664UnknownLinuxGnu.id,
+    })
+
+    const evaluation = StaticEvaluation.make<string>(profilex8664UnknownLinuxGnu)
+    const render = application('render')
+    const result = StaticEvaluation.evaluateApplication(evaluation, render, (context) => {
+      const selected = context.withTrace(StaticEvaluation.selectedArmFrame('Taken', staticSpan))
+      const nested = selected.evaluate(render, () => StaticEvaluation.complete('unreachable'))
+      return nested._tag === 'Failed'
+        ? StaticEvaluation.failed(nested.failure)
+        : StaticEvaluation.complete(nested.value)
+    })
+
+    assert.strictEqual(result._tag, 'Failed')
+    if (result._tag === 'Failed') {
+      assert.strictEqual(result.failure._tag, 'Cycle')
+      assert.deepEqual(
+        result.failure.trace.map((frame) => frame._tag),
+        ['StaticApplicationFrame', 'SelectedStaticArmFrame', 'StaticApplicationFrame'],
+      )
+    }
+    assert.strictEqual(StaticEvaluation.cacheEntries(evaluation).at(0)?.state._tag, 'Failed')
+  }),
+)
+
+it.effect('reports compile errors, phase violations, and four distinct deterministic limits', () =>
+  Effect.gen(function* () {
+    const profilex8664UnknownLinuxGnu = yield* CompilationProfile.normalize({
+      target: Target.x8664UnknownLinuxGnu.id,
+    })
+
+    const trace = Object.freeze([
+      StaticEvaluation.selectedArmFrame('Otherwise', staticSpan),
+      StaticEvaluation.staticTextFrame(staticSpan, 3),
+    ])
+    assert.strictEqual(
+      StaticEvaluation.compileError('bad template', staticSpan, trace)._tag,
+      'CompileError',
+    )
+    assert.strictEqual(
+      StaticEvaluation.phaseViolation('call', 'ordinary function', staticSpan, trace)._tag,
+      'PhaseViolation',
+    )
+
+    const limited = (
+      policy: StaticEvaluation.Limits,
+      callback: StaticEvaluation.EvaluationCallback<string>,
+    ) => {
+      const evaluation = StaticEvaluation.make<string>(profilex8664UnknownLinuxGnu, policy)
+      return StaticEvaluation.evaluateApplication(evaluation, application('limited'), callback)
+    }
+    const base = { steps: 10, callDepth: 10, retainedValueBytes: 10_000, residualNodes: 10 }
+    const step = limited({ ...base, steps: 0 }, (context) => {
+      context.step()
+      return StaticEvaluation.complete('partial')
+    })
+    const retained = limited({ ...base, retainedValueBytes: 0 }, (context) => {
+      context.retain(staticArgument)
+      return StaticEvaluation.complete('partial')
+    })
+    const residual = limited({ ...base, residualNodes: 0 }, (context) => {
+      context.growResidual()
+      return StaticEvaluation.complete('partial')
+    })
+    const depth = limited({ ...base, callDepth: 1 }, (context) => {
+      const nested = context.evaluate(application('nested'), () =>
+        StaticEvaluation.complete('partial'),
+      )
+      return nested._tag === 'Failed'
+        ? StaticEvaluation.failed(nested.failure)
+        : StaticEvaluation.complete(nested.value)
+    })
+
+    const failureTag = (result: StaticEvaluation.ApplicationResult<string>): string =>
+      result._tag === 'Failed' ? result.failure._tag : 'Complete'
+    assert.deepEqual([step, depth, retained, residual].map(failureTag), [
+      'StepLimit',
+      'CallDepthLimit',
+      'RetainedValueLimit',
+      'ResidualGrowthLimit',
+    ])
     assert.deepEqual(
-      result.failure.trace.map((frame) => frame._tag),
-      ['StaticApplicationFrame', 'SelectedStaticArmFrame', 'StaticApplicationFrame'],
+      [step, depth, retained, residual].map((result) => {
+        if (result._tag !== 'Failed' || !('limit' in result.failure)) return []
+        return [result.failure.limit, result.failure.attempted]
+      }),
+      [
+        [0, 1],
+        [1, 2],
+        [0, StaticValue.retainedSize(staticArgument)],
+        [0, 1],
+      ],
     )
-  }
-  assert.strictEqual(StaticEvaluation.cacheEntries(evaluation).at(0)?.state._tag, 'Failed')
-})
-
-it('reports compile errors, phase violations, and four distinct deterministic limits', () => {
-  const trace = Object.freeze([
-    StaticEvaluation.selectedArmFrame('Otherwise', staticSpan),
-    StaticEvaluation.staticTextFrame(staticSpan, 3),
-  ])
-  assert.strictEqual(
-    StaticEvaluation.compileError('bad template', staticSpan, trace)._tag,
-    'CompileError',
-  )
-  assert.strictEqual(
-    StaticEvaluation.phaseViolation('call', 'ordinary function', staticSpan, trace)._tag,
-    'PhaseViolation',
-  )
-
-  const limited = (
-    policy: StaticEvaluation.Limits,
-    callback: StaticEvaluation.EvaluationCallback<string>,
-  ) => {
-    const evaluation = StaticEvaluation.make<string>(Target.x8664UnknownLinuxGnu, policy)
-    return StaticEvaluation.evaluateApplication(evaluation, application('limited'), callback)
-  }
-  const base = { steps: 10, callDepth: 10, retainedValueBytes: 10_000, residualNodes: 10 }
-  const step = limited({ ...base, steps: 0 }, (context) => {
-    context.step()
-    return StaticEvaluation.complete('partial')
-  })
-  const retained = limited({ ...base, retainedValueBytes: 0 }, (context) => {
-    context.retain(staticArgument)
-    return StaticEvaluation.complete('partial')
-  })
-  const residual = limited({ ...base, residualNodes: 0 }, (context) => {
-    context.growResidual()
-    return StaticEvaluation.complete('partial')
-  })
-  const depth = limited({ ...base, callDepth: 1 }, (context) => {
-    const nested = context.evaluate(application('nested'), () =>
-      StaticEvaluation.complete('partial'),
-    )
-    return nested._tag === 'Failed'
-      ? StaticEvaluation.failed(nested.failure)
-      : StaticEvaluation.complete(nested.value)
-  })
-
-  const failureTag = (result: StaticEvaluation.ApplicationResult<string>): string =>
-    result._tag === 'Failed' ? result.failure._tag : 'Complete'
-  assert.deepEqual([step, depth, retained, residual].map(failureTag), [
-    'StepLimit',
-    'CallDepthLimit',
-    'RetainedValueLimit',
-    'ResidualGrowthLimit',
-  ])
-  assert.deepEqual(
-    [step, depth, retained, residual].map((result) => {
-      if (result._tag !== 'Failed' || !('limit' in result.failure)) return []
-      return [result.failure.limit, result.failure.attempted]
-    }),
-    [
-      [0, 1],
-      [1, 2],
-      [0, StaticValue.retainedSize(staticArgument)],
-      [0, 1],
-    ],
-  )
-})
+  }),
+)
 
 it('canonicalizes finite static values without observing construction identity', () => {
   const left = admitted(
@@ -569,10 +592,18 @@ it('normalizes float NaNs and rejects resource-bearing or malformed candidates',
   )
 })
 
-it('evaluates real literal syntax with contextual scalar and target ranges', () => {
-  const file = SourceFile.make(
-    'static/literals',
-    encoder.encode(`pub fn main() -> () {
+it.effect('evaluates real literal syntax with contextual scalar and target ranges', () =>
+  Effect.gen(function* () {
+    const profilewasm32UnknownUnknown = yield* CompilationProfile.normalize({
+      target: Target.wasm32UnknownUnknown.id,
+    })
+    const profilex8664UnknownLinuxGnu = yield* CompilationProfile.normalize({
+      target: Target.x8664UnknownLinuxGnu.id,
+    })
+
+    const file = SourceFile.make(
+      'static/literals',
+      encoder.encode(`pub fn main() -> () {
   let unit = ()
   let boolean = true
   let character = 'é'
@@ -581,248 +612,252 @@ it('evaluates real literal syntax with contextual scalar and target ranges', () 
   let text = "hé"
   return ()
 }`),
-  )
-  const parsed = Parser.parse(Lexer.lex(file))
-  assert.deepEqual(parsed.lexicalDiagnostics, [])
-  assert.deepEqual(parsed.parserDiagnostics, [])
-  const all = syntaxNodes(parsed.root)
-  const literal = (kind: SyntaxTree.Node['kind']): SyntaxTree.Node => {
-    const found = all.find((node) => node.kind === kind)
-    if (found === undefined) throw new Error(`expected ${kind}`)
-    return found
-  }
-  const environment = StaticEvaluation.targetEnvironment(Target.x8664UnknownLinuxGnu)
-  assert.strictEqual(
-    completedValue(
-      StaticEvaluation.evaluateLiteral(environment, file, literal('UnitExpression'), 'unit'),
-    )._tag,
-    'UnitValue',
-  )
-  assert.deepEqual(
-    completedValue(
-      StaticEvaluation.evaluateLiteral(
-        environment,
-        file,
-        literal('BooleanLiteralExpression'),
-        'bool',
-      ),
-    ),
-    { _tag: 'BooleanValue', value: true },
-  )
-  assert.deepEqual(
-    completedValue(
-      StaticEvaluation.evaluateLiteral(
-        environment,
-        file,
-        literal('CharacterLiteralExpression'),
-        'char',
-      ),
-    ),
-    { _tag: 'CharacterValue', value: 0xe9 },
-  )
-  assert.deepEqual(
-    completedValue(
-      StaticEvaluation.evaluateLiteral(
-        environment,
-        file,
-        literal('IntegerLiteralExpression'),
-        'i8',
-      ),
-    ),
-    { _tag: 'IntegerValue', type: 'i8', value: -42n },
-  )
-  assert.deepEqual(
-    completedValue(
-      StaticEvaluation.evaluateLiteral(
-        environment,
-        file,
-        literal('FloatingLiteralExpression'),
-        'f32',
-      ),
-    ),
-    { _tag: 'FloatValue', type: 'f32', bits: 0xbfc0_0000n },
-  )
-  assert.deepEqual(
-    completedValue(
-      StaticEvaluation.evaluateLiteral(
-        environment,
-        file,
-        literal('StaticTextLiteralExpression'),
-        'string',
-      ),
-    ),
-    { _tag: 'TextValue', bytes: [0x68, 0xc3, 0xa9] },
-  )
-
-  const wideFile = SourceFile.make(
-    'static/target-range',
-    encoder.encode('pub fn main() -> usize { return 4294967296 }'),
-  )
-  const wideParsed = Parser.parse(Lexer.lex(wideFile))
-  const wideNode = syntaxNodes(wideParsed.root).find(
-    (node) => node.kind === 'IntegerLiteralExpression',
-  )
-  if (wideNode === undefined) throw new Error('expected target-width integer')
-  assert.strictEqual(
-    StaticEvaluation.evaluateLiteral(
-      StaticEvaluation.targetEnvironment(Target.wasm32UnknownUnknown),
-      wideFile,
-      wideNode,
-      'usize',
-    )._tag,
-    'Failed',
-  )
-  assert.strictEqual(
-    StaticEvaluation.evaluateLiteral(environment, wideFile, wideNode, 'usize')._tag,
-    'Complete',
-  )
-})
-
-it('evaluates checked primitive, enum, text, aggregate, and target-profile operations', () => {
-  const environment = StaticEvaluation.targetEnvironment(Target.x8664UnknownLinuxGnu)
-  const integer = (type: 'i8' | 'i32' | 'usize', value: bigint): StaticValue.Value =>
-    admitted(StaticValue.admit({ _tag: 'IntegerValue', type, value }, { pointerBits: 64 }))
-  const floating = (type: 'f32' | 'f64', value: number): StaticValue.Value => {
-    const encoded = FloatingPoint.fromNumber(value, type === 'f32' ? 32 : 64)
-    return admitted(
-      StaticValue.admit({ _tag: 'FloatValue', type, bits: encoded.bits }, { pointerBits: 64 }),
     )
-  }
-  assert.deepEqual(
-    completedValue(
-      StaticEvaluation.evaluatePrimitive(
-        environment,
-        'Multiply',
-        [integer('i32', 6n), integer('i32', 7n)],
-        staticSpan,
+    const parsed = Parser.parse(Lexer.lex(file))
+    assert.deepEqual(parsed.lexicalDiagnostics, [])
+    assert.deepEqual(parsed.parserDiagnostics, [])
+    const all = syntaxNodes(parsed.root)
+    const literal = (kind: SyntaxTree.Node['kind']): SyntaxTree.Node => {
+      const found = all.find((node) => node.kind === kind)
+      if (found === undefined) throw new Error(`expected ${kind}`)
+      return found
+    }
+    const environment = StaticEvaluation.targetEnvironment(profilex8664UnknownLinuxGnu)
+    assert.strictEqual(
+      completedValue(
+        StaticEvaluation.evaluateLiteral(environment, file, literal('UnitExpression'), 'unit'),
+      )._tag,
+      'UnitValue',
+    )
+    assert.deepEqual(
+      completedValue(
+        StaticEvaluation.evaluateLiteral(
+          environment,
+          file,
+          literal('BooleanLiteralExpression'),
+          'bool',
+        ),
       ),
-    ),
-    { _tag: 'IntegerValue', type: 'i32', value: 42n },
-  )
-  assert.strictEqual(
-    StaticEvaluation.evaluatePrimitive(
-      environment,
-      'Add',
-      [integer('i8', 127n), integer('i8', 1n)],
-      staticSpan,
-    )._tag,
-    'Failed',
-  )
-  assert.deepEqual(
-    completedValue(
+      { _tag: 'BooleanValue', value: true },
+    )
+    assert.deepEqual(
+      completedValue(
+        StaticEvaluation.evaluateLiteral(
+          environment,
+          file,
+          literal('CharacterLiteralExpression'),
+          'char',
+        ),
+      ),
+      { _tag: 'CharacterValue', value: 0xe9 },
+    )
+    assert.deepEqual(
+      completedValue(
+        StaticEvaluation.evaluateLiteral(
+          environment,
+          file,
+          literal('IntegerLiteralExpression'),
+          'i8',
+        ),
+      ),
+      { _tag: 'IntegerValue', type: 'i8', value: -42n },
+    )
+    assert.deepEqual(
+      completedValue(
+        StaticEvaluation.evaluateLiteral(
+          environment,
+          file,
+          literal('FloatingLiteralExpression'),
+          'f32',
+        ),
+      ),
+      { _tag: 'FloatValue', type: 'f32', bits: 0xbfc0_0000n },
+    )
+    assert.deepEqual(
+      completedValue(
+        StaticEvaluation.evaluateLiteral(
+          environment,
+          file,
+          literal('StaticTextLiteralExpression'),
+          'string',
+        ),
+      ),
+      { _tag: 'TextValue', bytes: [0x68, 0xc3, 0xa9] },
+    )
+
+    const wideFile = SourceFile.make(
+      'static/target-range',
+      encoder.encode('pub fn main() -> usize { return 4294967296 }'),
+    )
+    const wideParsed = Parser.parse(Lexer.lex(wideFile))
+    const wideNode = syntaxNodes(wideParsed.root).find(
+      (node) => node.kind === 'IntegerLiteralExpression',
+    )
+    if (wideNode === undefined) throw new Error('expected target-width integer')
+    assert.strictEqual(
+      StaticEvaluation.evaluateLiteral(
+        StaticEvaluation.targetEnvironment(profilewasm32UnknownUnknown),
+        wideFile,
+        wideNode,
+        'usize',
+      )._tag,
+      'Failed',
+    )
+    assert.strictEqual(
+      StaticEvaluation.evaluateLiteral(environment, wideFile, wideNode, 'usize')._tag,
+      'Complete',
+    )
+  }),
+)
+
+it.effect('evaluates checked primitive, enum, text, aggregate, and target-profile operations', () =>
+  Effect.gen(function* () {
+    const profilex8664UnknownLinuxGnu = yield* CompilationProfile.normalize({
+      target: Target.x8664UnknownLinuxGnu.id,
+    })
+
+    const environment = StaticEvaluation.targetEnvironment(profilex8664UnknownLinuxGnu)
+    const integer = (type: 'i8' | 'i32' | 'usize', value: bigint): StaticValue.Value =>
+      admitted(StaticValue.admit({ _tag: 'IntegerValue', type, value }, { pointerBits: 64 }))
+    const floating = (type: 'f32' | 'f64', value: number): StaticValue.Value => {
+      const encoded = FloatingPoint.fromNumber(value, type === 'f32' ? 32 : 64)
+      return admitted(
+        StaticValue.admit({ _tag: 'FloatValue', type, bits: encoded.bits }, { pointerBits: 64 }),
+      )
+    }
+    assert.deepEqual(
+      completedValue(
+        StaticEvaluation.evaluatePrimitive(
+          environment,
+          'Multiply',
+          [integer('i32', 6n), integer('i32', 7n)],
+          staticSpan,
+        ),
+      ),
+      { _tag: 'IntegerValue', type: 'i32', value: 42n },
+    )
+    assert.strictEqual(
       StaticEvaluation.evaluatePrimitive(
         environment,
         'Add',
-        [floating('f32', 1.5), floating('f32', 2.25)],
+        [integer('i8', 127n), integer('i8', 1n)],
         staticSpan,
+      )._tag,
+      'Failed',
+    )
+    assert.deepEqual(
+      completedValue(
+        StaticEvaluation.evaluatePrimitive(
+          environment,
+          'Add',
+          [floating('f32', 1.5), floating('f32', 2.25)],
+          staticSpan,
+        ),
       ),
-    ),
-    { _tag: 'FloatValue', type: 'f32', bits: 0x4070_0000n },
-  )
-  assert.deepEqual(
-    completedValue(
-      StaticEvaluation.evaluatePrimitive(
-        environment,
-        'Not',
-        [StaticValue.boolean(true)],
-        staticSpan,
+      { _tag: 'FloatValue', type: 'f32', bits: 0x4070_0000n },
+    )
+    assert.deepEqual(
+      completedValue(
+        StaticEvaluation.evaluatePrimitive(
+          environment,
+          'Not',
+          [StaticValue.boolean(true)],
+          staticSpan,
+        ),
       ),
-    ),
-    { _tag: 'BooleanValue', value: false },
-  )
+      { _tag: 'BooleanValue', value: false },
+    )
 
-  const enumType = Object.freeze({
-    _tag: 'CanonicalDeclarationId' as const,
-    module: 'silk.target',
-    name: 'Architecture',
-  })
-  const native = completedValue(
-    StaticEvaluation.constructEnum(environment, enumType, 'X86_64', 'u8', 0n, staticSpan),
-  )
-  const wasm = completedValue(
-    StaticEvaluation.constructEnum(environment, enumType, 'Wasm32', 'u8', 1n, staticSpan),
-  )
-  if (native._tag !== 'EnumValue' || wasm._tag !== 'EnumValue')
-    throw new Error('expected scalar enum values')
-  assert.deepEqual(
-    completedValue(StaticEvaluation.evaluateEnumEquality('NotEquals', native, wasm, staticSpan)),
-    { _tag: 'BooleanValue', value: true },
-  )
-
-  const text = admitted(
-    StaticValue.admit(
-      { _tag: 'TextValue', bytes: Array.from(encoder.encode('hé')) },
-      { pointerBits: 64 },
-    ),
-  )
-  if (text._tag !== 'TextValue') throw new Error('expected static text')
-  assert.deepEqual(
-    completedValue(StaticEvaluation.staticTextByteLength(environment, text, staticSpan)),
-    {
-      _tag: 'IntegerValue',
-      type: 'usize',
-      value: 3n,
-    },
-  )
-  assert.deepEqual(
-    completedValue(StaticEvaluation.staticTextByteAt(environment, text, 1n, staticSpan)),
-    {
-      _tag: 'IntegerValue',
-      type: 'u8',
-      value: 0xc3n,
-    },
-  )
-  assert.deepEqual(
-    completedValue(StaticEvaluation.staticTextConcat(environment, text, text, staticSpan)),
-    { _tag: 'TextValue', bytes: [0x68, 0xc3, 0xa9, 0x68, 0xc3, 0xa9] },
-  )
-  assert.deepEqual(
-    completedValue(StaticEvaluation.staticTextSlice(environment, text, 1n, 3n, staticSpan)),
-    { _tag: 'TextValue', bytes: [0xc3, 0xa9] },
-  )
-  const splitScalar = StaticEvaluation.staticTextSlice(environment, text, 1n, 2n, staticSpan)
-  assert.strictEqual(splitScalar._tag, 'Failed')
-  if (splitScalar._tag === 'Failed') {
-    assert.strictEqual(splitScalar.failure._tag, 'PhaseViolation')
-    assert.strictEqual(splitScalar.failure.trace.at(-1)?._tag, 'StaticTextFrame')
-    const diagnostic = StaticEvaluation.diagnostic(splitScalar.failure, environment.target)
-    if (diagnostic.reason._tag !== 'StaticPhaseViolation')
-      throw new Error('expected a static phase diagnostic')
-    assert.deepEqual(diagnostic.reason.trace.at(-1), {
-      kind: 'StaticText',
-      label: 'static text byte 1',
-      arguments: ['byteOffset=1'],
-      span: staticSpan,
+    const enumType = Object.freeze({
+      _tag: 'CanonicalDeclarationId' as const,
+      module: 'silk.target',
+      name: 'Architecture',
     })
-  }
+    const native = completedValue(
+      StaticEvaluation.constructEnum(environment, enumType, 'X86_64', 'u8', 0n, staticSpan),
+    )
+    const wasm = completedValue(
+      StaticEvaluation.constructEnum(environment, enumType, 'Wasm32', 'u8', 1n, staticSpan),
+    )
+    if (native._tag !== 'EnumValue' || wasm._tag !== 'EnumValue')
+      throw new Error('expected scalar enum values')
+    assert.deepEqual(
+      completedValue(StaticEvaluation.evaluateEnumEquality('NotEquals', native, wasm, staticSpan)),
+      { _tag: 'BooleanValue', value: true },
+    )
 
-  const aggregate = completedValue(
-    StaticEvaluation.constructAggregate(
-      environment,
-      { _tag: 'ArrayAggregateIdentity', element: 'i32', length: 2 },
-      [
-        { ordinal: 0, value: integer('i32', 4n) },
-        { ordinal: 1, value: integer('i32', 2n) },
-      ],
-      staticSpan,
-    ),
-  )
-  assert.strictEqual(aggregate._tag, 'AggregateValue')
-  assert.deepEqual(completedValue(StaticEvaluation.targetProfile(environment, staticSpan)), {
-    _tag: 'IntegerValue',
-    type: 'u8',
-    value: 3n,
-  })
-  assert.deepEqual(
-    completedValue(
-      StaticEvaluation.targetProfile(
-        StaticEvaluation.targetEnvironment(Target.aarch64AppleDarwin),
+    const text = admitted(
+      StaticValue.admit(
+        { _tag: 'TextValue', bytes: Array.from(encoder.encode('hé')) },
+        { pointerBits: 64 },
+      ),
+    )
+    if (text._tag !== 'TextValue') throw new Error('expected static text')
+    assert.deepEqual(
+      completedValue(StaticEvaluation.staticTextByteLength(environment, text, staticSpan)),
+      {
+        _tag: 'IntegerValue',
+        type: 'usize',
+        value: 3n,
+      },
+    )
+    assert.deepEqual(
+      completedValue(StaticEvaluation.staticTextByteAt(environment, text, 1n, staticSpan)),
+      {
+        _tag: 'IntegerValue',
+        type: 'u8',
+        value: 0xc3n,
+      },
+    )
+    assert.deepEqual(
+      completedValue(StaticEvaluation.staticTextConcat(environment, text, text, staticSpan)),
+      { _tag: 'TextValue', bytes: [0x68, 0xc3, 0xa9, 0x68, 0xc3, 0xa9] },
+    )
+    assert.deepEqual(
+      completedValue(StaticEvaluation.staticTextSlice(environment, text, 1n, 3n, staticSpan)),
+      { _tag: 'TextValue', bytes: [0xc3, 0xa9] },
+    )
+    const splitScalar = StaticEvaluation.staticTextSlice(environment, text, 1n, 2n, staticSpan)
+    assert.strictEqual(splitScalar._tag, 'Failed')
+    if (splitScalar._tag === 'Failed') {
+      assert.strictEqual(splitScalar.failure._tag, 'PhaseViolation')
+      assert.strictEqual(splitScalar.failure.trace.at(-1)?._tag, 'StaticTextFrame')
+      const diagnostic = StaticEvaluation.diagnostic(splitScalar.failure, environment.target)
+      if (diagnostic.reason._tag !== 'StaticPhaseViolation')
+        throw new Error('expected a static phase diagnostic')
+      assert.deepEqual(diagnostic.reason.trace.at(-1), {
+        kind: 'StaticText',
+        label: 'static text byte 1',
+        arguments: ['byteOffset=1'],
+        span: staticSpan,
+      })
+    }
+
+    const aggregate = completedValue(
+      StaticEvaluation.constructAggregate(
+        environment,
+        { _tag: 'ArrayAggregateIdentity', element: 'i32', length: 2 },
+        [
+          { ordinal: 0, value: integer('i32', 4n) },
+          { ordinal: 1, value: integer('i32', 2n) },
+        ],
         staticSpan,
       ),
-    ),
-    { _tag: 'IntegerValue', type: 'u8', value: 0n },
-  )
-})
+    )
+    assert.strictEqual(aggregate._tag, 'AggregateValue')
+    assert.deepEqual(
+      completedValue(
+        StaticEvaluation.profileFact(environment, 'targetPointerBits', [], staticSpan) ??
+          unreachable('expected profile fact'),
+      ),
+      {
+        _tag: 'IntegerValue',
+        type: 'u32',
+        value: 64n,
+      },
+    )
+  }),
+)
 
 it.effect('rejects a runtime static iterable before elaborating its body', () =>
   Effect.gen(function* () {
@@ -863,7 +898,7 @@ pub fn main() -> i32 { return invalid([1]) }`
       return
     const residual = Residualization.residualize(
       Residualization.make(
-        snapshot.target.target,
+        snapshot.profile ?? unreachable('expected completed profile'),
         snapshot.results,
         snapshot.resolution,
         snapshot.index,
@@ -938,7 +973,7 @@ pub fn main() -> i32 { return rejected() }`),
       return
     const residual = Residualization.residualize(
       Residualization.make(
-        snapshot.target.target,
+        snapshot.profile ?? unreachable('expected completed profile'),
         snapshot.results,
         snapshot.resolution,
         snapshot.index,
@@ -1014,7 +1049,7 @@ pub fn main() -> i32 {
     if (declaration === undefined || declaration.canonical._tag !== 'Canonical') return
     const declarationId = declaration.canonical.id
     const coordinator = Residualization.make(
-      snapshot.target.target,
+      snapshot.profile ?? unreachable('expected completed profile'),
       snapshot.results,
       snapshot.resolution,
       snapshot.index,
@@ -1216,7 +1251,7 @@ pub fn main() -> i32 { return choose(true, 42) }`),
       staticArguments: selected.key.staticArguments,
     })
     const coordinator = Residualization.make(
-      snapshot.target.target,
+      snapshot.profile ?? unreachable('expected completed profile'),
       snapshot.results,
       snapshot.resolution,
       snapshot.index,
@@ -1243,7 +1278,7 @@ pub fn main() -> i32 { return choose(true, 42) }`),
     ])
 
     const limited = Residualization.make(
-      snapshot.target.target,
+      snapshot.profile ?? unreachable('expected completed profile'),
       snapshot.results,
       snapshot.resolution,
       snapshot.index,
@@ -1834,6 +1869,10 @@ it.effect('keeps lexical literal sentinels out of parser and semantic diagnostic
 
 it.effect('restores projected static ownership without replacing its enclosing aggregate', () =>
   Effect.gen(function* () {
+    const profilewasm32UnknownUnknown = yield* CompilationProfile.normalize({
+      target: Target.wasm32UnknownUnknown.id,
+    })
+
     const source = `struct Token { value: i32 }
 struct Pair { left: Token right: Token }
 struct State { pair: Pair values: [Token; 2] }
@@ -1858,7 +1897,7 @@ static fn computed() -> i32 {
     const computed = Analysis.rootAnalysis(snapshot).functions.at(0) ?? unreachable('static body')
     const result = completedValue(
       StaticEvaluation.evaluateStatements(computed.statements, {
-        environment: StaticEvaluation.targetEnvironment(Target.wasm32UnknownUnknown),
+        environment: StaticEvaluation.targetEnvironment(profilewasm32UnknownUnknown),
         values: new Map(),
         valueSpans: new Map(),
         valueOrigins: new Map(),
@@ -2140,7 +2179,10 @@ pub fn main() -> i32 { return 0 }`
       ]),
     )
     assert.strictEqual(secret.code, 'ForbiddenProvenance')
-    assert.notInclude(JSON.stringify(secret), 'DO_NOT_ECHO_123')
+    assert.notInclude(
+      yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(secret),
+      'DO_NOT_ECHO_123',
+    )
     const translated = {
       ...binding,
       origin: {
@@ -2201,5 +2243,190 @@ pub fn main() -> i32 { return 0 }`),
         { kind: 'integer', value: '12' },
       ],
     )
+  }),
+)
+
+it.effect('specializes one source under distinct same-target completed profiles', () =>
+  Effect.gen(function* () {
+    const source = `pub param enabled: bool = false
+pub param count: i32 = choose() where count > 0
+static fn choose() -> i32 { if enabled { return 42 } else { return 7 } }
+pub fn main() -> i32 { static if enabled { return count } else { return 0 } }`
+    const frontend = yield* Analysis.ofSource('configured', encoder.encode(source))
+    for (const enabled of [false, true]) {
+      const snapshot = yield* Analysis.realize(frontend, {
+        profile: { target: Target.wasm32UnknownUnknown.id },
+        modules: [{ canonical: 'configured', package: 'demo@1.0.0', module: 'configured' }],
+        bindings: [
+          {
+            package: 'demo@1.0.0',
+            module: 'configured',
+            parameter: 'enabled',
+            tier: 'profile',
+            value: { kind: 'boolean', value: enabled },
+            origin: ConfigurationOrigin.literal('test profile'),
+          },
+        ],
+      })
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.strictEqual(snapshot.mir._tag, 'Available')
+      assert.deepEqual(
+        snapshot.profile?.parameters.find((parameter) => parameter.parameter === 'count')?.value,
+        { kind: 'integer', value: enabled ? '42' : '7' },
+      )
+    }
+  }),
+)
+
+it.effect('resolves imported defaults and validates overrides using final target facts', () =>
+  Effect.gen(function* () {
+    const root = `import config.helper as Defaults
+pub param count: u32 = Defaults.choose() where Defaults.validate(count)
+pub fn main() -> i32 { return 0 }`
+    const helper = `pub param word: u32 = Intrinsic.targetPointerBits()
+pub static fn choose() -> u32 { return word }
+pub static fn validate(value: u32) -> bool { if value == 0 { compileError("count must be positive") } return true }
+static fn unused() -> u32 { return unused() }`
+    const snapshot = yield* Analysis.make({
+      root: SourceFile.make('main', encoder.encode(root)),
+    }).pipe(
+      Effect.provide(SourceResolver.memory(new Map([['config/helper', encoder.encode(helper)]]))),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const source = bootstrapSource(snapshot)
+    for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
+      const initial = yield* CompilationProfile.normalize({ target: target.id })
+      const completed = yield* ProfileBootstrap.complete(initial, source)
+      assert.deepEqual(
+        completed.profile.parameters.find((parameter) => parameter.parameter === 'count')?.value,
+        {
+          kind: 'integer',
+          value: String(target.pointerSize * 8),
+        },
+      )
+      assert.notInclude(completed.bootstrapIdentity, 'unused')
+      const invalid = yield* Effect.flip(
+        ProfileBootstrap.complete(initial, source, [
+          {
+            package: 'demo@1.0.0',
+            module: 'main',
+            parameter: 'count',
+            tier: 'project',
+            value: { kind: 'integer', value: '0' },
+            origin: ConfigurationOrigin.literal('explicit zero'),
+          },
+        ]),
+      )
+      assert.strictEqual(invalid.code, 'ValidationFailed')
+      assert.strictEqual(invalid.staticFailure?._tag, 'CompileError')
+      assert.isAbove(invalid.staticFailure?.trace.length ?? 0, 0)
+    }
+  }),
+)
+
+it.effect(
+  'rejects missing required values and duplicate equal bindings before defaults execute',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSource(
+        'required',
+        encoder.encode('pub param enabled: bool\npub fn main() -> i32 { return 0 }'),
+      )
+      const initial = yield* CompilationProfile.normalize({
+        target: Target.wasm32UnknownUnknown.id,
+      })
+      const source = bootstrapSource(snapshot)
+      assert.strictEqual(
+        (yield* Effect.flip(ProfileBootstrap.complete(initial, source))).code,
+        'MissingParameter',
+      )
+      const binding: PackageConfiguration.Binding = {
+        package: 'demo@1.0.0',
+        module: 'required',
+        parameter: 'enabled',
+        tier: 'project',
+        value: { kind: 'boolean', value: true },
+        origin: ConfigurationOrigin.literal('required binding'),
+      }
+      assert.strictEqual(
+        (yield* Effect.flip(
+          ProfileBootstrap.complete(initial, source, [binding, { ...binding, tier: 'workspace' }]),
+        )).code,
+        'ConflictingBindings',
+      )
+      assert.deepEqual(
+        (yield* ProfileBootstrap.complete(initial, source, [binding])).profile.parameters[0]?.value,
+        { kind: 'boolean', value: true },
+      )
+    }),
+)
+
+it.effect('rejects recursive schema shapes before attempting a required default', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'schema-cycle',
+      encoder.encode(
+        'pub struct Node { pub next: Node }\npub param node: Node\npub fn main() -> i32 { return 0 }',
+      ),
+    )
+    const initial = yield* CompilationProfile.normalize({ target: Target.wasm32UnknownUnknown.id })
+    const error = yield* Effect.flip(ProfileBootstrap.complete(initial, bootstrapSource(snapshot)))
+    assert.strictEqual(error.code, 'DependencyCycle')
+    assert.isAbove(error.dependencies.length, 1)
+  }),
+)
+
+it.effect('tracks demanded source changes separately from completed logical value identity', () =>
+  Effect.gen(function* () {
+    const initial = yield* CompilationProfile.normalize({ target: Target.wasm32UnknownUnknown.id })
+    const completed: Array<ProfileBootstrap.Completion> = []
+    for (const [used, unused] of [
+      ['32', '1'],
+      ['16 + 16', '1'],
+      ['16 + 16', '2'],
+    ]) {
+      const source = `pub param count: u32 = selected()\nstatic fn selected() -> u32 { return ${used} }\nstatic fn unused() -> u32 { return ${unused} }\npub fn main() -> i32 { return 0 }`
+      const snapshot = yield* Analysis.ofSource('dependencies', encoder.encode(source))
+      completed.push(yield* ProfileBootstrap.complete(initial, bootstrapSource(snapshot)))
+    }
+    const first = completed[0] ?? unreachable('expected first profile')
+    const second = completed[1] ?? unreachable('expected second profile')
+    const third = completed[2] ?? unreachable('expected third profile')
+    assert.strictEqual(first.profile.identity, second.profile.identity)
+    assert.notStrictEqual(first.bootstrapIdentity, second.bootstrapIdentity)
+    assert.strictEqual(second.bootstrapIdentity, third.bootstrapIdentity)
+  }),
+)
+
+it.effect('snapshots configuration bindings before publishing a frontend', () =>
+  Effect.gen(function* () {
+    const value = { kind: 'boolean', value: false }
+    const profile = { target: 'wasm32-unknown-unknown', debug: false }
+    const frontend = yield* Analysis.make({
+      root: SourceFile.make(
+        'main',
+        encoder.encode('pub param enabled: bool\npub fn main() -> i32 { return 0 }'),
+      ),
+      configuration: {
+        package: 'demo@1.0.0',
+        profile,
+        bindings: [
+          {
+            package: 'demo@1.0.0',
+            module: 'main',
+            parameter: 'enabled',
+            tier: 'profile',
+            value,
+            origin: ConfigurationOrigin.literal('request'),
+          },
+        ],
+      },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    value.value = true
+    profile.debug = true
+    const completed = yield* Analysis.realize(frontend)
+    assert.deepEqual(Analysis.diagnostics(completed), [])
+    assert.strictEqual(completed.profile?.debug, false)
+    assert.deepEqual(completed.profile?.parameters[0]?.value, { kind: 'boolean', value: false })
   }),
 )

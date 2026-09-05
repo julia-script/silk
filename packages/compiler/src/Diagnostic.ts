@@ -5735,6 +5735,16 @@ export const invalidSuspensionOwnership = (
   })
 
 /** Preserves typed configuration origins and dependency failures without interpolating values. */
-export const invalidConfiguration = (error: ConfigurationError.ConfigurationError, span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({_tag: 'Diagnostic', phase: 'semantic', code: invalidConfigurationCode, severity: 'error',
-    message: error.message, reason: Object.freeze({_tag: 'InvalidConfiguration', error}), span})
+export const invalidConfiguration = (
+  error: ConfigurationError.ConfigurationError,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidConfigurationCode,
+    severity: 'error',
+    message: `Invalid compilation configuration: ${error.message}`,
+    reason: Object.freeze({ _tag: 'InvalidConfiguration', error }),
+    span,
+  })

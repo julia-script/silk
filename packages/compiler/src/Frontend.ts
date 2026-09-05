@@ -1,3 +1,9 @@
+import * as ConfigurationValue from './ConfigurationValue.js'
+import * as ConfigurationOrigin from './ConfigurationOrigin.js'
+import type * as PackageConfiguration from './PackageConfiguration.js'
+import * as CompilationProfile from './CompilationProfile.js'
+import * as Result from 'effect/Result'
+import type * as ConfigurationError from './ConfigurationError.js'
 import * as Effect from 'effect/Effect'
 import * as BodyQuery from './BodyQuery.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
@@ -39,6 +45,8 @@ interface FrontendFacts {
 /** Immutable compiler frontend facts shared by Analysis and Driver. */
 export interface Frontend extends FrontendFacts {
   readonly closure: ModuleClosure.Closure
+  readonly initialProfile?: CompilationProfile.Initial
+  readonly configurationError?: ConfigurationError.ConfigurationError
   readonly requestedTarget?: string
   readonly configuration?: ModuleClosure.CompilationRequest['configuration']
 }
@@ -320,6 +328,43 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
   request: ModuleClosure.CompilationRequest,
   options: Options = {},
 ): Effect.fn.Return<Frontend, never, SourceResolver.SourceResolver> {
+  const initialInput =
+    request.configuration?.profile ??
+    (request.target === undefined ? undefined : { target: request.target })
+  const initial =
+    initialInput === undefined
+      ? undefined
+      : yield* Effect.result(CompilationProfile.normalize(initialInput))
+  const bindingSnapshot = yield* Effect.result(
+    Effect.gen(function* () {
+      const bindings: Array<PackageConfiguration.Binding> = []
+      for (const binding of request.configuration?.bindings ?? []) {
+        const origin = ConfigurationOrigin.snapshot(binding.origin)
+        const value = yield* ConfigurationValue.decode(binding.value, origin)
+        bindings.push(Object.freeze({ ...binding, origin, value }))
+      }
+      return Object.freeze(bindings)
+    }),
+  )
+  let configuration = request.configuration
+  if (configuration !== undefined) {
+    const profile =
+      initial !== undefined && Result.isSuccess(initial)
+        ? CompilationProfile.input(initial.success)
+        : configuration.profile
+    configuration = Object.freeze({
+      ...configuration,
+      profile,
+      bindings: Result.isSuccess(bindingSnapshot) ? bindingSnapshot.success : Object.freeze([]),
+      ...(configuration.modules === undefined
+        ? {}
+        : {
+            modules: Object.freeze(
+              configuration.modules.map((module) => Object.freeze({ ...module })),
+            ),
+          }),
+    })
+  }
   const report: Array<PhaseReport.PhaseReport> = []
   const closure = yield* PhaseReport.measureEffectInto(
     report,
@@ -332,11 +377,18 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
   )
   yield* Effect.yieldNow
   const facts = yield* analyzeFrontend(closure, report, options)
+  let initialFacts: Pick<Frontend, 'initialProfile' | 'configurationError'> = {}
+  if (initial !== undefined)
+    initialFacts = Result.isSuccess(initial)
+      ? { initialProfile: initial.success }
+      : { configurationError: initial.failure }
   return OpaqueRealization.withCatalog(
     Object.freeze({
       closure,
       ...facts,
-      ...(request.configuration === undefined ? {} : {configuration: request.configuration}),
+      ...initialFacts,
+      ...(configuration === undefined ? {} : { configuration }),
+      ...(Result.isFailure(bindingSnapshot) ? { configurationError: bindingSnapshot.failure } : {}),
       ...(request.target === undefined ? {} : { requestedTarget: request.target }),
     }),
     OpaqueRealization.catalogOf(facts),

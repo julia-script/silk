@@ -1,3 +1,4 @@
+import type * as ConfigurationError from './ConfigurationError.js'
 import type * as CompilationProfile from './CompilationProfile.js'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
@@ -71,6 +72,7 @@ export type Targeted<A> =
 export interface FrontendSnapshot {
   readonly _tag: 'AnalysisSnapshot' | 'ProjectAnalysisView'
   readonly realization: 'SingleRoot' | 'ProjectView'
+  readonly profile?: CompilationProfile.CompilationProfile
   readonly configuration?: ModuleClosure.CompilationRequest['configuration']
   readonly closure: ModuleClosure.Closure
   readonly index: DeclarationIndex.Index
@@ -85,6 +87,8 @@ export interface FrontendSnapshot {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
   readonly semanticInvalidation?: SemanticInvalidation.SemanticInvalidation
+  readonly initialProfile?: CompilationProfile.Initial
+  readonly configurationError?: ConfigurationError.ConfigurationError
   readonly requestedTarget?: string
 }
 
@@ -155,7 +159,8 @@ export const make = Effect.fn('Analysis.make')(function* (
 /** Explicitly derives one immutable runtime snapshot from completed frontend facts. */
 export const realize = Effect.fn('Analysis.realize')(function* (
   self: SingleRootFrontendSnapshot,
-  target: string | undefined = self.requestedTarget ?? Target.x8664UnknownLinuxGnu.id,
+  target: string | ModuleClosure.CompilationRequest['configuration'] = self.requestedTarget ??
+    Target.x8664UnknownLinuxGnu.id,
   options: Frontend.Options = {},
 ): Effect.fn.Return<Snapshot> {
   const realization = yield* Realization.realize(self, target, options)

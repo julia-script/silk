@@ -456,14 +456,16 @@ export const views: ReadonlyArray<ViewDefinition> = [
     phase: 'native',
     tag: 'TCH',
     group: 'backend',
-    project: ({ snapshot, profile }) => {
-      const commands = toolchainCommands(snapshot, profile)
+    project: ({ snapshot }) => {
+      const commands = toolchainCommands(snapshot)
       if (commands._tag === 'Unavailable') {
         return { rows: noRows, unavailable: `Toolchain unavailable — ${commands.message}` }
       }
       return {
         rows: toolchainRows(commands.commands),
-        facts: [{ text: `clang · ${commands.target} · ${profile}`, tone: 'muted' }],
+        facts: [
+          { text: `clang · ${commands.target} · ${snapshot.profile?.optimization}`, tone: 'muted' },
+        ],
         meta: `${commands.commands.length} cmd`,
       }
     },

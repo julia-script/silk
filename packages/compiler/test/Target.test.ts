@@ -1,3 +1,5 @@
+import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
+import * as Schema from 'effect/Schema'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -116,6 +118,17 @@ it.effect('agrees with pinned LLVM and independently compiled C/object primitive
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
     const root = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures/target-facts')
+    const provenance = yield* Schema.decodeEffect(
+      Schema.fromJsonString(
+        Schema.Struct({
+          sourceSha256: Schema.String,
+        }),
+      ),
+    )(yield* fs.readFileString(resolve(root, 'provenance.json')))
+    assert.strictEqual(
+      ToolchainIntegrity.contentDigest(yield* fs.readFile(resolve(root, 'primitives.c'))),
+      provenance.sourceSha256,
+    )
     for (const target of Target.all) {
       const ir = yield* fs.readFileString(resolve(root, `${target.id}.ll`))
       const object = yield* fs.readFileString(resolve(root, `${target.id}.object.txt`))
@@ -158,6 +171,7 @@ it.effect('agrees with pinned LLVM and independently compiled C/object primitive
         observed,
         [
           target.primitives.bool,
+          target.primitives.cBool,
           target.primitives.i8,
           target.primitives.i16,
           target.primitives.i32,
@@ -264,7 +278,10 @@ it.effect('rejects unsupported combinations and physical or secret profile input
       }),
     )
     assert.strictEqual(secret.code, 'ForbiddenProvenance')
-    assert.notInclude(JSON.stringify(secret), 'never expose me')
+    assert.notInclude(
+      yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(secret),
+      'never expose me',
+    )
   }),
 )
 

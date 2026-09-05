@@ -1603,6 +1603,14 @@ ${integerParsingRanges
 
 export const corpus: ReadonlyArray<CorpusProgram> = [
   {
+    name: 'package-parameter-final-defaults',
+    source: `pub param enabled: bool = true
+pub param answer: i32 = choose() where answer == 42
+static fn choose() -> i32 { if enabled { return 42 } return 7 }
+pub fn main() -> i32 { return answer }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'literal',
     source: 'pub fn main() -> i32 { return 42 }',
     expected: { _tag: 'Completes', result: 42 },

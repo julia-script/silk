@@ -17,13 +17,22 @@ export const targets = Flag.choice('target', targetIds).pipe(
   Flag.atLeast(0),
 )
 
-export const profile = Flag.choice('profile', profiles).pipe(
-  Flag.withDescription('Compilation profile.'),
+export const profile = Flag.string('profile').pipe(
+  Flag.withDescription('Named project compilation profile.'),
+  Flag.optional,
+)
+export const profileInput = Flag.string('profile-input').pipe(
+  Flag.withDescription('Complete logical profile as a JSON object.'),
+  Flag.optional,
+)
+
+export const optimization = Flag.choice('optimization', profiles).pipe(
+  Flag.withDescription('Compilation optimization.'),
   Flag.optional,
 )
 
 export const release = Flag.boolean('release').pipe(
-  Flag.withDescription('Build with the release profile.'),
+  Flag.withDescription('Build with the release optimization.'),
   Flag.withDefault(false),
 )
 
@@ -35,41 +44,49 @@ export const watch = Flag.boolean('watch').pipe(
 export interface Input {
   readonly manifestPath?: string
   readonly targets?: ReadonlyArray<string>
-  readonly profile?: ToolchainPlan.OptimizationProfile
+  readonly profile?: string
+  readonly profileInput?: string
+  readonly optimization?: ToolchainPlan.OptimizationProfile
   readonly release: boolean
 }
 
 export interface ProjectOptions {
   readonly manifestPath?: string
   readonly targets?: ReadonlyArray<string>
-  readonly profile: ToolchainPlan.OptimizationProfile
+  readonly profile?: string
+  readonly profileInput?: string
+  readonly optimization?: ToolchainPlan.OptimizationProfile
 }
 
 /** Project command flags contradict one another. */
 export class ProjectOptionsError extends Data.TaggedError('ProjectOptionsError')<{
   readonly operation: 'ProjectOptions.resolve'
   readonly message: string
-  readonly reason: { readonly _tag: 'ConflictingProfile'; readonly profile: string }
+  readonly reason: { readonly _tag: 'ConflictingProfile'; readonly optimization: string }
 }> {}
 
 /** Resolves shared project flags before project discovery or compilation begins. */
 export const resolve = (input: Input): Result.Result<ProjectOptions, ProjectOptionsError> => {
-  if (input.release && input.profile !== undefined && input.profile !== 'release') {
+  if (input.release && input.optimization !== undefined && input.optimization !== 'release') {
     return Result.fail(
       new ProjectOptionsError({
         operation: 'ProjectOptions.resolve',
-        message: `--release conflicts with --profile ${input.profile}`,
-        reason: { _tag: 'ConflictingProfile', profile: input.profile },
+        message: `--release conflicts with --optimization ${input.optimization}`,
+        reason: { _tag: 'ConflictingProfile', optimization: input.optimization },
       }),
     )
   }
+  let optimization = input.optimization
+  if (input.release) optimization = 'release'
   return Result.succeed(
     Object.freeze({
       ...(input.manifestPath === undefined ? {} : { manifestPath: input.manifestPath }),
       ...(input.targets === undefined || input.targets.length === 0
         ? {}
         : { targets: input.targets }),
-      profile: input.release ? ('release' as const) : (input.profile ?? 'debug'),
+      ...(optimization === undefined ? {} : { optimization }),
+      ...(input.profile === undefined ? {} : { profile: input.profile }),
+      ...(input.profileInput === undefined ? {} : { profileInput: input.profileInput }),
     }),
   )
 }

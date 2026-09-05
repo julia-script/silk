@@ -1,3 +1,4 @@
+import * as ConfigurationValue from './ConfigurationValue.js'
 import * as Effect from 'effect/Effect'
 import * as CompilationProfile from './CompilationProfile.js'
 import * as ConfigurationError from './ConfigurationError.js'
@@ -8,9 +9,8 @@ import type * as NameResolution from './NameResolution.js'
 import * as PackageConfiguration from './PackageConfiguration.js'
 import * as PackageParameter from './PackageParameter.js'
 import * as Residualization from './Residualization.js'
-import * as StaticEvaluation from './StaticEvaluation.js'
+import type * as StaticEvaluation from './StaticEvaluation.js'
 import type * as StaticValue from './StaticValue.js'
-import * as Type from './Type.js'
 
 /** The unconditional source graph needed to resolve package defaults before specialization. */
 export interface Source {
@@ -24,24 +24,22 @@ const failure = (
   parameter: PackageConfiguration.Parameter,
   value: StaticEvaluation.StaticFailure,
   validation: boolean,
-) =>
-  new ConfigurationError.ConfigurationError({
-    ...ConfigurationError.make(
-      'ProfileBootstrap.complete',
-      value._tag === 'Cycle'
-        ? 'DependencyCycle'
-        : validation
-          ? 'ValidationFailed'
-          : 'InvalidDefault',
-      CompilationProfile.parameterKey(parameter),
-      [parameter.origin],
-      value._tag === 'Cycle' ? [`${value.declaration.module}/${value.declaration.name}`] : [],
-    ),
-    staticFailure: value,
-  })
+) => {
+  let code: ConfigurationError.Code = validation ? 'ValidationFailed' : 'InvalidDefault'
+  if (value._tag === 'Cycle') code = 'DependencyCycle'
+  return ConfigurationError.make(
+    'ProfileBootstrap.complete',
+    code,
+    CompilationProfile.parameterKey(parameter),
+    [parameter.origin],
+    value._tag === 'Cycle' ? [`${value.declaration.module}/${value.declaration.name}`] : [],
+    value,
+  )
+}
 
 /** A completed profile paired with immutable source-typed values for ordinary specialization. */
 export interface Completion {
+  readonly bootstrapIdentity: string
   readonly profile: CompilationProfile.CompilationProfile
   readonly values: ReadonlyMap<string, StaticValue.Value>
 }
@@ -69,12 +67,11 @@ export const complete = Effect.fn('ProfileBootstrap.complete')(function* (
   }
   // This coordinator is private to the bootstrap. All explicit values exist before any demand;
   // recursive defaults, including demands made by helpers, use the ordinary evaluator's cycle guard.
-  const coordinator = Residualization.make(
+  const coordinator = Residualization.makeBootstrap(
     initial,
     source.results,
     source.resolution,
     source.index,
-    StaticEvaluation.defaultLimits,
     explicit,
   )
   const completed: Array<CompilationProfile.Parameter> = []
@@ -83,7 +80,11 @@ export const complete = Effect.fn('ProfileBootstrap.complete')(function* (
     const evaluated = Residualization.evaluateConstant(coordinator, parameter.declaration)
     if (evaluated._tag === 'Failed') return yield* failure(parameter, evaluated.failure, false)
     const canonical = parameter.declaration.canonical
-    if (canonical._tag === 'Canonical') values.set(Canonical.record('PackageParameter', [canonical.id.module, canonical.id.name]), evaluated.value)
+    if (canonical._tag === 'Canonical')
+      values.set(
+        Canonical.record('PackageParameter', [canonical.id.module, canonical.id.name]),
+        evaluated.value,
+      )
     const value = yield* PackageParameter.unbind(
       parameter.schema,
       evaluated.value,
@@ -95,7 +96,7 @@ export const complete = Effect.fn('ProfileBootstrap.complete')(function* (
         package: parameter.package,
         module: parameter.module,
         parameter: parameter.parameter,
-        type: Type.encode(parameter.schema.type),
+        type: PackageParameter.encode(parameter.schema),
         value,
         origin: parameter.origin,
       }),
@@ -112,5 +113,20 @@ export const complete = Effect.fn('ProfileBootstrap.complete')(function* (
         [parameter.origin],
       )
   }
-  return Object.freeze({profile: yield* CompilationProfile.publish(initial, completed), values})
+  return Object.freeze({
+    profile: yield* CompilationProfile.publish(initial, completed),
+    values,
+    bootstrapIdentity: Canonical.record('ProfileBootstrap.v1', [
+      initial.identity,
+      Canonical.array(
+        completed.map((parameter) =>
+          Canonical.record(CompilationProfile.parameterKey(parameter), [
+            parameter.type,
+            ConfigurationValue.encode(parameter.value),
+          ]),
+        ),
+      ),
+      Residualization.dependencies(coordinator),
+    ]),
+  })
 })

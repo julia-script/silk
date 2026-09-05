@@ -1,3 +1,4 @@
+import * as Target from '../src/Target.js'
 import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -169,7 +170,7 @@ it.effect(
 
       assert.isAbove(encoded.mir.length, 0)
       assert.include(encoded.mir, `mir-module ${module_}`)
-      assert.include(encoded.mir, 'target wasm32-unknown-unknown')
+      assert.include(encoded.mir, `target ${Target.encode(Target.wasm32UnknownUnknown)}`)
 
       assert.strictEqual(encoded.native.length, 64)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

@@ -1,3 +1,4 @@
+import * as CompilationProfile from '../src/CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
 import {
   existsSync,
@@ -261,6 +262,18 @@ const malformedExtendedNameArchive = (nameLength: number): Uint8Array => {
   return bytes
 }
 
+const profileFor = Effect.fnUntraced(function* (
+  target: Target.Target,
+  optimization: ToolchainPlan.OptimizationProfile = 'release',
+) {
+  const initial = yield* CompilationProfile.normalize({
+    target: target.id,
+    optimization: optimization === 'debug' ? 'none' : 'speed',
+    debug: optimization !== 'release',
+  })
+  return yield* CompilationProfile.publish(initial, [])
+})
+
 const artifactFor = Effect.fnUntraced(function* (
   target: Target.Target,
   profile: ToolchainPlan.OptimizationProfile,
@@ -275,66 +288,78 @@ const artifactFor = Effect.fnUntraced(function* (
   return yield* Analysis.codegen(snapshot, { mode: ToolchainPlan.codegenModeFor(profile) })
 })
 
-it('plans fixed profile arguments against the canonical target id', () => {
-  const target = Target.aarch64AppleDarwin
-  const debug = ToolchainPlan.objectCommand(clang, target, 'debug', 'in.bc', 'out.o')
-  const release = ToolchainPlan.objectCommand(clang, target, 'release', 'in.bc', 'out.o')
-  assert.deepEqual(debug.arguments, [
-    '--target=aarch64-apple-darwin',
-    '-c',
-    '-x',
-    'ir',
-    'in.bc',
-    '-fPIC',
-    '-O0',
-    '-g',
-    '-o',
-    'out.o',
-  ])
-  assert.deepEqual(release.arguments, [
-    '--target=aarch64-apple-darwin',
-    '-c',
-    '-x',
-    'ir',
-    'in.bc',
-    '-fPIC',
-    '-O2',
-    '-o',
-    'out.o',
-  ])
-  const runtime = ToolchainPlan.cObjectCommand(clang, target, 'silk_runtime.c', 'silk_runtime.o')
-  assert.deepEqual(runtime.arguments, [
-    '--target=aarch64-apple-darwin',
-    '-c',
-    '-x',
-    'c',
-    'silk_runtime.c',
-    '-O2',
-    '-fPIC',
-    '-fvisibility=hidden',
-    '-o',
-    'silk_runtime.o',
-  ])
-  const link = ToolchainPlan.nativeCommand(
-    { clang, llvmAr: 'llvm-ar' },
-    'NativeExecutable',
-    target,
-    ['program.o', 'silk_runtime.o', 'extra.o'],
-    [NativeLinkInput.library('m', 'Dynamic'), NativeLinkInput.library('c', 'Dynamic')],
-    'out',
-  )
-  if (link._tag !== 'PlannedCommand') return assert.fail('expected executable link plan')
-  assert.deepEqual(link.arguments, [
-    '--target=aarch64-apple-darwin',
-    'program.o',
-    'silk_runtime.o',
-    'extra.o',
-    '-lm',
-    '-lc',
-    '-o',
-    'out',
-  ])
-})
+it.effect('plans fixed profile arguments against the canonical target id', () =>
+  Effect.gen(function* () {
+    const target = Target.aarch64AppleDarwin
+    const debug = ToolchainPlan.objectCommand(
+      clang,
+      yield* profileFor(target, 'debug'),
+      'in.bc',
+      'out.o',
+    )
+    const release = ToolchainPlan.objectCommand(
+      clang,
+      yield* profileFor(target, 'release'),
+      'in.bc',
+      'out.o',
+    )
+    assert.deepEqual(debug.arguments, [
+      '--target=aarch64-apple-darwin',
+      '-c',
+      '-x',
+      'ir',
+      'in.bc',
+      '-fPIC',
+      '-O0',
+      '-g',
+      '-o',
+      'out.o',
+    ])
+    assert.deepEqual(release.arguments, [
+      '--target=aarch64-apple-darwin',
+      '-c',
+      '-x',
+      'ir',
+      'in.bc',
+      '-fPIC',
+      '-O2',
+      '-o',
+      'out.o',
+    ])
+    const runtime = ToolchainPlan.cObjectCommand(clang, target, 'silk_runtime.c', 'silk_runtime.o')
+    assert.deepEqual(runtime.arguments, [
+      '--target=aarch64-apple-darwin',
+      '-c',
+      '-x',
+      'c',
+      'silk_runtime.c',
+      '-O2',
+      '-fPIC',
+      '-fvisibility=hidden',
+      '-o',
+      'silk_runtime.o',
+    ])
+    const link = ToolchainPlan.nativeCommand(
+      { clang, llvmAr: 'llvm-ar' },
+      'NativeExecutable',
+      target,
+      ['program.o', 'silk_runtime.o', 'extra.o'],
+      [NativeLinkInput.library('m', 'Dynamic'), NativeLinkInput.library('c', 'Dynamic')],
+      'out',
+    )
+    if (link._tag !== 'PlannedCommand') return assert.fail('expected executable link plan')
+    assert.deepEqual(link.arguments, [
+      '--target=aarch64-apple-darwin',
+      'program.o',
+      'silk_runtime.o',
+      'extra.o',
+      '-lm',
+      '-lc',
+      '-o',
+      'out',
+    ])
+  }),
+)
 
 it('plans shared links and deterministic static archives from structured inputs', () => {
   const shared = ToolchainPlan.nativeCommand(
@@ -525,6 +550,7 @@ it('separates a process entry from library-only hidden runtime source', () => {
 it.effect('includes the selected native clock runtime in the artifact cache identity', () =>
   Effect.gen(function* () {
     const target = yield* NativeToolchain.hostTarget()
+    const compilation = yield* profileFor(target)
     const selected = [
       [],
       ['silk_os_monotonic_clock_now_v1'],
@@ -536,8 +562,7 @@ it.effect('includes the selected native clock runtime in the artifact cache iden
         yield* NativeToolchain.artifactCacheKey(
           toolchain,
           'NativeExecutable',
-          target,
-          'release',
+          compilation,
           Uint8Array.from([0, 1, 2, 3]),
           ToolchainPlan.executableSource(termination(), symbols),
           join(testRoot, 'clock-runtime-cache'),
@@ -552,6 +577,7 @@ it.effect(
   'includes the selected LLVM-Wasm freestanding runtime in the artifact cache identity',
   () =>
     Effect.gen(function* () {
+      const compilationwasm32UnknownUnknown = yield* profileFor(Target.wasm32UnknownUnknown)
       const bitcode = Uint8Array.from([0, 1, 2, 3])
       const runtimeSource = NativeToolchain.artifactRuntimeSource(
         'WebAssemblyModule',
@@ -563,8 +589,7 @@ it.effect(
         NativeToolchain.artifactCacheKey(
           toolchain,
           'WebAssemblyModule',
-          Target.wasm32UnknownUnknown,
-          'release',
+          compilationwasm32UnknownUnknown,
           bitcode,
           runtimeSource,
           join(testRoot, 'runtime.wasm'),
@@ -580,6 +605,7 @@ it.effect(
 it.effect('separates every final artifact kind in cache identity and extension', () =>
   Effect.gen(function* () {
     const target = yield* NativeToolchain.hostTarget()
+    const compilation = yield* profileFor(target)
     const bitcode = Uint8Array.from([0, 1, 2, 3])
     const kinds = ['NativeExecutable', 'NativeSharedLibrary', 'NativeStaticLibrary'] as const
     const keys = []
@@ -588,8 +614,7 @@ it.effect('separates every final artifact kind in cache identity and extension',
         yield* NativeToolchain.artifactCacheKey(
           toolchain,
           kind,
-          target,
-          'release',
+          compilation,
           bitcode,
           kind === 'NativeExecutable'
             ? ToolchainPlan.executableSource(termination())
@@ -607,13 +632,13 @@ it.effect('separates every final artifact kind in cache identity and extension',
 
 it.effect('separates Darwin shared-library install names in one artifact cache', () =>
   Effect.gen(function* () {
+    const compilationaarch64AppleDarwin = yield* profileFor(Target.aarch64AppleDarwin)
     const cache = NativeToolchain.makeDiskArtifactCache(join(testRoot, 'darwin-install-cache'))
     const keyFor = (name: string) =>
       NativeToolchain.artifactCacheKey(
         toolchain,
         'NativeSharedLibrary',
-        Target.aarch64AppleDarwin,
-        'release',
+        compilationaarch64AppleDarwin,
         Uint8Array.from([0, 1, 2, 3]),
         ToolchainPlan.runtimeSource(),
         join(testRoot, name),
@@ -659,6 +684,7 @@ it.effect('authenticates artifact-cache payloads and rejects body or trailing co
 it.effect('covers request-supplied object bytes and the ordered library list in the key', () =>
   Effect.gen(function* () {
     const target = yield* NativeToolchain.hostTarget()
+    const compilation = yield* profileFor(target)
     const objectA = join(testRoot, 'key-a.o')
     const objectB = join(testRoot, 'key-b.o')
     writeFileSync(objectA, Uint8Array.from([1, 2, 3]))
@@ -667,8 +693,7 @@ it.effect('covers request-supplied object bytes and the ordered library list in 
       NativeToolchain.artifactCacheKey(
         toolchain,
         'NativeExecutable',
-        target,
-        'release',
+        compilation,
         Uint8Array.from([0, 1, 2, 3]),
         ToolchainPlan.executableSource(termination()),
         join(testRoot, 'native-input-cache'),
@@ -701,6 +726,7 @@ it.effect('covers request-supplied object bytes and the ordered library list in 
 it.effect('yields a typed spawn failure with command, stage, and arbitrary cause', () =>
   Effect.gen(function* () {
     const target = yield* NativeToolchain.hostTarget()
+    const compilation = yield* profileFor(target)
     const artifact = yield* artifactFor(target, 'release')
     let scopeRoot = ''
     const result = yield* Effect.result(
@@ -710,8 +736,7 @@ it.effect('yields a typed spawn failure with command, stage, and arbitrary cause
           { _tag: 'Toolchain', clang: '/nonexistent/clang', llvmAr: 'llvm-ar' },
           scope,
           artifact,
-          target,
-          'release',
+          compilation,
         )
       }),
     )
@@ -1303,17 +1328,12 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const target = yield* NativeToolchain.hostTarget()
+      const compilation = yield* profileFor(target)
       const artifact = yield* artifactFor(target, 'release')
       const destination = join(testRoot, 'linked-program')
       const linked = yield* NativeToolchain.withBuildScope('link-run', (scope) =>
         Effect.gen(function* () {
-          const object = yield* NativeToolchain.emitObject(
-            toolchain,
-            scope,
-            artifact,
-            target,
-            'release',
-          )
+          const object = yield* NativeToolchain.emitObject(toolchain, scope, artifact, compilation)
           const runtime = yield* NativeToolchain.compileExecutableRuntime(
             toolchain,
             scope,

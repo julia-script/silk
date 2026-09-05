@@ -1,3 +1,7 @@
+import type * as CompilationProfile from './CompilationProfile.js'
+import type * as ConfigurationError from './ConfigurationError.js'
+import * as Diagnostic from './Diagnostic.js'
+import * as Realization from './Realization.js'
 import * as Effect from 'effect/Effect'
 import type * as Analysis from './Analysis.js'
 import * as Frontend from './Frontend.js'
@@ -40,7 +44,13 @@ export interface View extends Analysis.FrontendSnapshot {
 }
 
 /** One immutable multi-root compiler frontend and its structurally shared root views. */
+export interface Options {
+  readonly configuration?: ModuleClosure.CompilationRequest['configuration']
+  readonly configurationError?: ConfigurationError.ConfigurationError
+}
+
 export interface ProjectAnalysis {
+  readonly profile?: CompilationProfile.CompilationProfile
   readonly _tag: 'ProjectAnalysis'
   readonly roots: ReadonlyArray<string>
   readonly closure: ModuleClosure.ProjectClosure
@@ -62,9 +72,10 @@ const opaqueRealizationsOf = (self: ProjectAnalysis): OpaqueRealization.Catalog 
 
 const analyze = Effect.fnUntraced(function* (
   roots: ReadonlyArray<SourceFile.SourceFile>,
-  previous?: ProjectAnalysis,
+  previous: ProjectAnalysis | undefined,
+  options: Options,
 ): Effect.fn.Return<ProjectAnalysis, never, SourceResolver.SourceResolver> {
-  const frontend = yield* Frontend.frontendProject(
+  const unconfigured = yield* Frontend.frontendProject(
     {
       roots,
       ...(previous === undefined ? {} : { previous: previous.closure }),
@@ -80,6 +91,30 @@ const analyze = Effect.fnUntraced(function* (
           environment: previous.semanticEnvironment,
         },
   )
+  const root = unconfigured.closure.rootModules[0]
+  const closure = root === undefined ? undefined : ModuleClosure.view(unconfigured.closure, root)
+  const configured =
+    closure === undefined || options.configuration === undefined
+      ? undefined
+      : yield* Realization.configure(
+          OpaqueRealization.withCatalog(
+            { ...unconfigured, closure, configuration: options.configuration },
+            OpaqueRealization.catalogOf(unconfigured),
+          ),
+          undefined,
+        )
+  const span = closure?.modules.find((module) => module.name === root)?.syntax.root.span
+  const diagnostics = configured?.frontend.diagnostics ?? unconfigured.diagnostics
+  const frontend = {
+    ...unconfigured,
+    diagnostics:
+      options.configurationError === undefined || span === undefined
+        ? diagnostics
+        : Diagnostic.merge(diagnostics, [
+            Diagnostic.invalidConfiguration(options.configurationError, span),
+          ]),
+    ...(configured?.completion === undefined ? {} : { profile: configured.completion.profile }),
+  }
   yield* Effect.yieldNow
   const tooling = yield* FrontendTooling.make(frontend, previous?.toolingModules)
   const previousModules = new Map(
@@ -137,13 +172,14 @@ const analyze = Effect.fnUntraced(function* (
           semanticInvalidation: frontend.semanticInvalidation,
           report,
         }),
-        OpaqueRealization.catalogOf(frontend),
+        OpaqueRealization.catalogOf(unconfigured),
       ),
     )
   }
   return OpaqueRealization.withCatalog(
     Object.freeze({
       _tag: 'ProjectAnalysis',
+      ...(frontend.profile === undefined ? {} : { profile: frontend.profile }),
       roots: frontend.closure.rootModules,
       closure: frontend.closure,
       views,
@@ -155,23 +191,25 @@ const analyze = Effect.fnUntraced(function* (
       semanticInvalidation: frontend.semanticInvalidation,
       report,
     }),
-    OpaqueRealization.catalogOf(frontend),
+    OpaqueRealization.catalogOf(unconfigured),
   )
 })
 
 /** Constructs one history-independent frontend analysis for the union closure of all roots. */
 export const make = Effect.fn('ProjectAnalysis.make')(function* (
   roots: ReadonlyArray<SourceFile.SourceFile>,
+  options: Options = {},
 ): Effect.fn.Return<ProjectAnalysis, never, SourceResolver.SourceResolver> {
-  return yield* analyze(roots)
+  return yield* analyze(roots, undefined, options)
 })
 
 /** Constructs a new coherent project while reusing safe syntax from one completed prior project. */
 export const revise = Effect.fn('ProjectAnalysis.revise')(function* (
   previous: ProjectAnalysis,
   roots: ReadonlyArray<SourceFile.SourceFile>,
+  options: Options = {},
 ): Effect.fn.Return<ProjectAnalysis, never, SourceResolver.SourceResolver> {
-  return yield* analyze(roots, previous)
+  return yield* analyze(roots, previous, options)
 })
 
 /** Returns the requested root view, or `undefined` when it was not part of the project request. */

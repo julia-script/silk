@@ -222,7 +222,7 @@ const failuresIn = (name: string, cases: ReadonlyArray<Case>) =>
     const compiled = yield* Driver.compile({
       compilation: { root: SourceFile.make(name, ascii(source)) },
       toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
-      profile: 'release',
+      optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, name.replaceAll('/', '-')),
     }).pipe(Effect.provide(SourceResolver.empty))

@@ -436,22 +436,24 @@ arguments produces the same code, semantic details, related spans, and trace enc
 
 **Status:** Confirmed
 
-The ordinary standard-library module `silk.target` exposes two zero-argument static queries and four
-primitive constants:
+The ordinary standard-library module `silk.target` exposes individual machine facts:
 
-| Member               | Type             | Value                                                                     |
-| -------------------- | ---------------- | ------------------------------------------------------------------------- |
-| `Target.profile()`   | `Target.Profile` | Nominal profile enum member for the selected target                       |
-| `Target.arch()`      | `Target.Arch`    | Nominal architecture enum member for the selected target                  |
-| `Target.pointerBits` | `u32`            | `32` for `wasm32-unknown-unknown`; `64` for every canonical native target |
-| `Target.usizeMax`    | `usize`          | Largest `usize` at the selected pointer width                             |
-| `Target.isizeMax`    | `isize`          | Largest `isize` at the selected pointer width                             |
-| `Target.isizeMin`    | `isize`          | Smallest `isize` at the selected pointer width                            |
+| Member                     | Type                     | Value                                  |
+| -------------------------- | ------------------------ | -------------------------------------- |
+| `Target.arch()`            | `Target.Arch`            | Instruction-set architecture           |
+| `Target.operatingSystem()` | `Target.OperatingSystem` | Operating system                       |
+| `Target.abi()`             | `Target.Abi`             | Platform ABI                           |
+| `Target.objectFormat()`    | `Target.ObjectFormat`    | Object-file format                     |
+| `Target.endianness()`      | `Target.Endianness`      | Byte order                             |
+| `Target.pointerBits`       | `u32`                    | Data-pointer width in bits             |
+| `Target.pointerAlignment`  | `u32`                    | Data-pointer alignment in bytes        |
+| `Target.usizeMax`          | `usize`                  | Largest unsigned pointer-sized integer |
+| `Target.isizeMax`          | `isize`                  | Largest signed pointer-sized integer   |
+| `Target.isizeMin`          | `isize`                  | Smallest signed pointer-sized integer  |
 
-`Target.Profile` is closed over `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`,
-`wasm32-unknown-unknown`, and `x86_64-unknown-linux-gnu`. `Target.Arch` is closed over the
-architectures represented by those profiles. Source target checks compare nominal enum values,
-not target strings.
+Use `silk.compilation` for typed logical build choices. Source checks use the narrow domain needed
+for the decision. The complete [compilation profile](compilation-profiles.md) also contains resolved
+package parameters and controls static-evaluation identity.
 
 ```silk,ignore
 import silk.target as Target
@@ -469,8 +471,7 @@ The selected target is fixed before any demanded specialization executes. The re
 selection is ordinary residual source; no target-profile parameter or runtime probe remains.
 
 **Boundary:** `silk.target` is ordinary source and receives no compiler-known name privilege. The
-sealed `Intrinsic.targetProfile() -> u8` operation is static-only and has no LLVM or WebAssembly
-runtime lowering. Target data cannot be changed by source, inferred from the host when an
+sealed individual target and profile-fact intrinsics are static-only and have no runtime lowering. Target data cannot be changed by source, inferred from the host when an
 explicit target was selected, or queried dynamically at runtime. A selected cleanup-free target
 value may appear in residual code only as an embedded ordinary value.
 

@@ -1,3 +1,5 @@
+import * as SourceResolver from './SourceResolver.js'
+import * as Canonical from './internal/Canonical.js'
 import * as Effect from 'effect/Effect'
 import * as CompilationProfile from './CompilationProfile.js'
 import * as ConfigurationError from './ConfigurationError.js'
@@ -32,10 +34,6 @@ export interface Parameter extends CompilationProfile.ParameterIdentity {
   readonly explicit?: StaticValue.Value
 }
 
-const logicalModule = (value: string): boolean =>
-  value.length > 0 &&
-  value.split('/').every((part) => /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(part) && part !== '..')
-
 /** Resolves source identities and all explicit tiers before any default may execute. */
 export const prepare = Effect.fn('PackageConfiguration.prepare')(function* (
   index: DeclarationIndex.Index,
@@ -57,7 +55,7 @@ export const prepare = Effect.fn('PackageConfiguration.prepare')(function* (
   const identities = new Map<string, Module>()
   for (const module of modules) {
     if (
-      !logicalModule(module.module) ||
+      !SourceResolver.isCanonicalModule(module.module) ||
       !/^[A-Za-z_][A-Za-z0-9_.-]*@[^/\\\s]+$/.test(module.package)
     )
       return yield* ConfigurationError.make(
@@ -161,7 +159,7 @@ export const prepare = Effect.fn('PackageConfiguration.prepare')(function* (
     const rank = binding.tier === 'project' || binding.tier === 'workspace' ? 1 : 2
     const tierKey = `${rank}:${key}`
     const sameTier = tiers.get(tierKey)
-    if (sameTier !== undefined && sameTier.value !== canonical)
+    if (sameTier !== undefined)
       return yield* ConfigurationError.make(
         'PackageConfiguration.prepare',
         'ConflictingBindings',
@@ -179,9 +177,7 @@ export const prepare = Effect.fn('PackageConfiguration.prepare')(function* (
       })
   }
   const output: Array<Parameter> = []
-  for (const [key, parameter] of [...parameters].toSorted(([a], [b]) =>
-    a < b ? -1 : a > b ? 1 : 0,
-  )) {
+  for (const [key, parameter] of [...parameters].toSorted(([a], [b]) => Canonical.compare(a, b))) {
     const binding = selected.get(key)
     if (binding === undefined && !parameter.declaration.hasDefault)
       return yield* ConfigurationError.make(

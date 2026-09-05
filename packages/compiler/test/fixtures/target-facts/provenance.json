@@ -2,7 +2,7 @@
   "schema": 1,
   "clang": "22.1.8",
   "llvmReadobj": "22.1.8",
-  "sourceSha256": "56f523db20be90c7b714e3a86d9466bf1b724d4dc792235094cc7bd3cfd2ab81",
+  "sourceSha256": "b3db8f86a3d1ecfa727103d7dd2f616f1a2508defb4d42941eb26192302e179c",
   "headers": [],
   "targets": [
     {
@@ -12,7 +12,8 @@
         "--target=aarch64-apple-darwin",
         "-ffreestanding",
         "-nostdinc",
-        "-std=c11"
+        "-std=c11",
+        "-mmacosx-version-min=11.0.0"
       ],
       "dataLayout": "target datalayout = \"e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32\""
     },
@@ -49,5 +50,9 @@
       ],
       "dataLayout": "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\""
     }
-  ]
+  ],
+  "storageNotes": {
+    "bool": "Silk bool uses i32 storage. The independent C witness uses unsigned int, not C _Bool.",
+    "cBool": "C _Bool is separately witnessed and is not Silk bool."
+  }
 }

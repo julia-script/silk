@@ -1,3 +1,4 @@
+import type * as ModuleClosure from '@silklang/compiler/ModuleClosure'
 import * as Analysis from '@silklang/compiler/Analysis'
 import type * as ArtifactKind from '@silklang/compiler/ArtifactKind'
 import * as Diagnostic from '@silklang/compiler/Diagnostic'
@@ -10,7 +11,6 @@ import * as Project from '@silklang/compiler/Project'
 import type * as SourceEntry from '@silklang/compiler/SourceEntry'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import type * as Target from '@silklang/compiler/Target'
-import * as TargetSelector from '@silklang/compiler/TargetSelector'
 import type * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
@@ -52,7 +52,8 @@ export interface ProjectSelection extends ProjectOptions.ProjectOptions {
 export interface CompileOptions {
   readonly entry: SourceEntry.SourceEntry
   readonly target?: string
-  readonly profile: ToolchainPlan.OptimizationProfile
+  readonly configuration?: ModuleClosure.CompilationRequest['configuration']
+  readonly optimization?: ToolchainPlan.OptimizationProfile
   readonly artifactKind: ArtifactKind.ArtifactKind
   readonly packageName: string
   readonly destination: string
@@ -79,7 +80,9 @@ const planBatch = (
 ) =>
   BuildBatch.make(project, {
     ...(options.targets === undefined ? {} : { targets: options.targets }),
-    profile: options.profile,
+    ...(options.optimization === undefined ? {} : { optimization: options.optimization }),
+    ...(options.profile === undefined ? {} : { profile: options.profile }),
+    ...(options.profileInput === undefined ? {} : { profileInput: options.profileInput }),
     purpose,
     ...(options.clang === undefined ? {} : { clang: options.clang }),
     ...(options.llvmAr === undefined ? {} : { llvmAr: options.llvmAr }),
@@ -133,7 +136,10 @@ export const compile = Effect.fn('Workflow.compile')(function* (
     Driver.compile({
       compilation: {
         root: SourceFile.make(options.entry.module, options.entry.bytes),
-        ...(options.target === undefined ? {} : { target: options.target }),
+        ...(options.configuration === undefined && options.target !== undefined
+          ? { target: options.target }
+          : {}),
+        ...(options.configuration === undefined ? {} : { configuration: options.configuration }),
       },
       toolchain: options.toolchain,
       artifactKind: options.artifactKind,
@@ -141,7 +147,9 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       ...(options.nativeLinkInputs === undefined
         ? {}
         : { nativeLinkInputs: options.nativeLinkInputs }),
-      profile: options.profile,
+      ...(options.configuration !== undefined || options.optimization === undefined
+        ? {}
+        : { optimization: options.optimization }),
       destination: options.destination,
       scopeName: options.scopeName,
       saveTemps: options.saveTemps ?? false,
@@ -202,13 +210,22 @@ interface CheckAttempt {
 
 const checkTarget = Effect.fnUntraced(function* (
   project: Project.Project,
-  target: Target.Target,
+  plan: BuildPlan.BuildPlan,
 ): Effect.fn.Return<CheckAttempt, never, FileSystem.FileSystem | Path.Path> {
+  const target = plan.target
   const path = yield* Path.Path
   const resolver = FileSourceResolver.make(project.entry.sourceRoot)
   const analysis = yield* Analysis.makeRealized({
     root: SourceFile.make(project.entry.module, project.entry.bytes),
-    target: target.id,
+    ...(plan.configuration === undefined
+      ? { target: target.id }
+      : {
+          configuration: {
+            package: `${project.name}@${project.version}`,
+            profile: plan.configuration.input,
+            bindings: plan.configuration.bindings,
+          },
+        }),
   }).pipe(Effect.provide(FileSourceResolver.layer(resolver)))
   const catalog = Report.catalog(resolver, Analysis.sources(analysis), path)
   const renderedDiagnostics = Report.diagnostics(Analysis.diagnostics(analysis), catalog)
@@ -234,12 +251,11 @@ export const checkProject = Effect.fn('Workflow.checkProject')(function* (
   project: Project.Project,
   options: ProjectSelection,
 ): Effect.fn.Return<ExitStatus, never, FileSystem.FileSystem | Path.Path> {
-  const selectors = options.targets ?? project.build.targets
-  const resolved = TargetSelector.resolveAll(selectors, NativeToolchain.hostSelection())
-  if (Result.isFailure(resolved)) return yield* reportPreparationFailure(resolved.failure)
+  const planned = yield* Effect.result(planBatch(project, options))
+  if (Result.isFailure(planned)) return yield* reportPreparationFailure(planned.failure)
   const attempts = yield* Effect.forEach(
-    resolved.success,
-    (target) => checkTarget(project, target),
+    planned.success.plans,
+    (plan) => checkTarget(project, plan),
     { concurrency: 1 },
   )
   for (const attempt of attempts) {
@@ -270,7 +286,7 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
   never,
   FileSystem.FileSystem | HeapObservation.HeapObservation | Path.Path
 > {
-  const planned = planBatch(project, options)
+  const planned = yield* Effect.result(planBatch(project, options))
   if (Result.isFailure(planned)) return yield* reportPreparationFailure(planned.failure)
   const attempts = yield* Effect.forEach(
     planned.success.plans,
@@ -278,7 +294,15 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
       compile({
         entry: plan.project.entry,
         target: plan.target.id,
-        profile: plan.profile,
+        ...(plan.configuration === undefined
+          ? { optimization: plan.optimization }
+          : {
+              configuration: {
+                package: `${project.name}@${project.version}`,
+                profile: plan.configuration.input,
+                bindings: plan.configuration.bindings,
+              },
+            }),
         artifactKind: plan.artifactKind,
         packageName: plan.project.name,
         destination: plan.destination,
@@ -562,17 +586,21 @@ export const run = Effect.fn('Workflow.run')(function* (
 > {
   const loaded = yield* Effect.result(loadProject(options))
   if (Result.isFailure(loaded)) return yield* reportPreparationFailure(loaded.failure)
-  const planned = BuildBatch.make(loaded.success, {
-    targets: ['host'],
-    profile: options.profile,
-    purpose: 'run',
-  })
+  const planned = yield* Effect.result(planBatch(loaded.success, options, 'run'))
   if (Result.isFailure(planned)) return yield* reportPreparationFailure(planned.failure)
   const plan = planned.success.plans[0]
   const attempted = yield* compile({
     entry: plan.project.entry,
     target: plan.target.id,
-    profile: plan.profile,
+    ...(plan.configuration === undefined
+      ? { optimization: plan.optimization }
+      : {
+          configuration: {
+            package: `${plan.project.name}@${plan.project.version}`,
+            profile: plan.configuration.input,
+            bindings: plan.configuration.bindings,
+          },
+        }),
     artifactKind: plan.artifactKind,
     packageName: plan.project.name,
     destination: plan.destination,

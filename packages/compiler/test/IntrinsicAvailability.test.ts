@@ -85,7 +85,7 @@ it('requires normalized target metadata in every sealed inventory entry', () => 
 })
 
 it('rejects static-only intrinsic leakage at runtime availability and integrity seams', () => {
-  const operation = Intrinsic.findOperation('Intrinsic', 'targetProfile')
+  const operation = Intrinsic.findOperation('Intrinsic', 'targetPointerBits')
   const span = SourceSpan.fromOffsets('availability/static-only', 0, 0)
   assert.isDefined(operation)
   assert.isDefined(span)
@@ -95,7 +95,7 @@ it('rejects static-only intrinsic leakage at runtime availability and integrity 
     const availability = IntrinsicAvailability.select(calls, target)
     assert.strictEqual(availability._tag, 'Unavailable')
     if (availability._tag === 'Unavailable')
-      assert.deepEqual(availability.operations, ['Intrinsic.targetProfile'])
+      assert.deepEqual(availability.operations, ['Intrinsic.targetPointerBits'])
     const integrity = ToolchainIntegrity.validateTarget(
       ToolchainIntegrity.installed(),
       target,
@@ -104,26 +104,27 @@ it('rejects static-only intrinsic leakage at runtime availability and integrity 
     )
     assert.strictEqual(integrity._tag, 'UnsupportedTarget')
     if (integrity._tag === 'UnsupportedTarget')
-      assert.deepEqual(integrity.operations, ['Intrinsic.targetProfile'])
+      assert.deepEqual(integrity.operations, ['Intrinsic.targetPointerBits'])
   }
   assert.isFalse(
     ToolchainIntegrity.installed().components.some(
       (component) =>
-        component.kind === 'RuntimeSupport' && component.id.endsWith('/Intrinsic.targetProfile'),
+        component.kind === 'RuntimeSupport' &&
+        component.id.endsWith('/Intrinsic.targetPointerBits'),
     ),
   )
 })
 
-it.effect('does not admit targetProfile into runtime HIR', () =>
+it.effect('does not admit targetPointerBits into runtime HIR', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(
-      'pub fn main() -> u8 { return Intrinsic.targetProfile() }',
+      'pub fn main() -> u32 { return Intrinsic.targetPointerBits() }',
       'wasm32-unknown-unknown',
     )
     assert.isAbove(Analysis.diagnostics(self).length, 0)
     assert.isFalse(
       self.instances.intrinsics.some(
-        (call) => Intrinsic.operationText(call.operation) === 'Intrinsic.targetProfile',
+        (call) => Intrinsic.operationText(call.operation) === 'Intrinsic.targetPointerBits',
       ),
     )
   }),

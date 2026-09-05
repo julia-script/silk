@@ -1,9 +1,9 @@
-; ModuleID = 'packages/compiler/test/fixtures/target-facts/primitives.c'
-source_filename = "packages/compiler/test/fixtures/target-facts/primitives.c"
+; ModuleID = 'primitives.c'
+source_filename = "primitives.c"
 target datalayout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"
-target triple = "arm64-apple-macosx15.0.0"
+target triple = "arm64-apple-macosx11.0.0"
 
-@silk_primitive_facts = constant [18 x i32] [i32 1, i32 1, i32 1, i32 1, i32 2, i32 2, i32 4, i32 4, i32 8, i32 8, i32 4, i32 4, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8], align 4
+@silk_primitive_facts = constant [20 x i32] [i32 4, i32 4, i32 1, i32 1, i32 1, i32 1, i32 2, i32 2, i32 4, i32 4, i32 8, i32 8, i32 4, i32 4, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8], align 4
 
 !llvm.module.flags = !{!0, !1, !2}
 !llvm.ident = !{!3}

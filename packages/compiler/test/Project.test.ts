@@ -1,3 +1,7 @@
+import * as Schema from 'effect/Schema'
+import * as ProjectProfile from '../src/ProjectProfile.js'
+import * as ConfigurationOrigin from '../src/ConfigurationOrigin.js'
+import * as CompilationProfile from '../src/CompilationProfile.js'
 import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -207,4 +211,76 @@ it.effect('rejects roots that are not exact Silk files or escape the source root
     const outside = yield* Effect.flip(Project.load({ workingDirectory: root }))
     assert.strictEqual(outside.reason._tag, 'InvalidEntry')
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)
+
+it.effect(
+  'selects named profiles, complete overrides and target shorthand with one precedence policy',
+  () =>
+    Effect.gen(function* () {
+      const origin = ConfigurationOrigin.literal('project manifest')
+      const binding = {
+        package: 'demo@1.0.0',
+        module: 'main',
+        parameter: 'enabled',
+        value: { kind: 'boolean', value: true },
+        origin: { source: 'manifest binding', provenance: 'literal' },
+      }
+      const catalog = yield* ProjectProfile.catalog(
+        { wasm: { target: 'wasm32-unknown-unknown', debug: false, bindings: [binding] } },
+        'wasm',
+        [],
+        origin,
+      )
+      const selected = yield* ProjectProfile.select(catalog, {}, 'aarch64-apple-darwin')
+      assert.strictEqual(selected.input.target, 'wasm32-unknown-unknown')
+      assert.strictEqual(selected.bindings[0]?.tier, 'profile')
+      const lsp = yield* ProjectProfile.selection({ profile: 'wasm' }, origin)
+      assert.deepEqual(yield* ProjectProfile.select(catalog, lsp), selected)
+      const shorthand = yield* ProjectProfile.select(catalog, {
+        target: 'x86_64-unknown-linux-gnu',
+      })
+      assert.strictEqual(shorthand.input.target, 'x86_64-unknown-linux-gnu')
+      const override = yield* ProjectProfile.decode(
+        { target: 'aarch64-unknown-linux-gnu', cpu: { features: ['crc'] }, bindings: [] },
+        origin,
+      )
+      const full = yield* ProjectProfile.select(catalog, { override })
+      assert.strictEqual(full.input.target, 'aarch64-unknown-linux-gnu')
+      assert.strictEqual(
+        (yield* CompilationProfile.normalize(full.input)).identity,
+        (yield* CompilationProfile.normalize(override.input)).identity,
+      )
+      assert.strictEqual(
+        (yield* Effect.flip(ProjectProfile.select(catalog, { name: 'missing' }))).code,
+        'InvalidInput',
+      )
+      assert.strictEqual(
+        (yield* Effect.flip(ProjectProfile.select(catalog, { name: 'wasm', override }))).code,
+        'ConflictingBindings',
+      )
+      const secret = yield* Effect.flip(
+        ProjectProfile.catalog(
+          {
+            wasm: {
+              target: 'wasm32-unknown-unknown',
+              bindings: [
+                {
+                  ...binding,
+                  value: 'PRIVATE_MARKER',
+                  origin: { source: 'secret store', provenance: 'secret' },
+                },
+              ],
+            },
+          },
+          undefined,
+          undefined,
+          origin,
+        ),
+      )
+      assert.strictEqual(secret.code, 'ForbiddenProvenance')
+      assert.notInclude(
+        yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(secret),
+        'PRIVATE_MARKER',
+      )
+    }),
 )

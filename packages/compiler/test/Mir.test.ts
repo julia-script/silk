@@ -504,7 +504,7 @@ it('carries and encodes exactly one compiler-owned target layout plan', () => {
   const sample = straight ?? raise('expected sample')
 
   assert.strictEqual(sample.layout.entries.at(0)?.size, 4)
-  assert.include(MirEncoding.encode(sample), 'target aarch64-apple-darwin')
+  assert.include(MirEncoding.encode(sample), `target ${Target.encode(sample.layout.target)}`)
   assert.include(MirEncoding.encode(sample), 'layout i32 size=4 align=4 repr=signed-i32')
 })
 

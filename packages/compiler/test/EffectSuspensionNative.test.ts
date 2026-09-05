@@ -73,7 +73,7 @@ it.effect('runs one million suspended native recursive frames with bounded machi
         root: SourceFile.make('suspension-native/deep', ascii(recursiveSource(1_000_000))),
       },
       toolchain,
-      profile: 'release',
+      optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'deep'),
     }).pipe(Effect.provide(SourceResolver.empty))
@@ -133,7 +133,7 @@ it.effect('propagates a failure after a resumed retry into its native handler', 
         root: SourceFile.make('suspension-native/retry-failure', ascii(retryFailureSource)),
       },
       toolchain,
-      profile: 'release',
+      optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'retry-failure'),
     }).pipe(Effect.provide(SourceResolver.empty))

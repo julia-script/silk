@@ -250,6 +250,7 @@ export const make = Effect.fn('ProjectWorkerRuntime.make')(function* <R>(
         sourceRoot: source.sourceRoot,
         module: source.module,
         bytes: source.bytes,
+        configuration: source.configuration,
       }),
     )
     const work = Effect.gen(function* () {

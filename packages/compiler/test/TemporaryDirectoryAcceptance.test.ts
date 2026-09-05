@@ -253,7 +253,7 @@ it.effect(
         // Release, so this also stands as the regression test for #130: the backend used to let
         // a cleanup arm's reloaded lanes escape into the arm's join block, which is invalid SSA,
         // and Clang crashed on it at -O2 instead of diagnosing it.
-        profile: 'release',
+        optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native'),
       }).pipe(Effect.provide(SourceResolver.empty))
@@ -293,7 +293,7 @@ it.effect(
         },
         toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
         // Release for the same reason as above — this is the walk #130 crashed on.
-        profile: 'release',
+        optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-tree'),
       }).pipe(Effect.provide(SourceResolver.empty))
@@ -324,7 +324,7 @@ it.effect(
           root: SourceFile.make('temporary-directory/native-many', ascii(nativeManySource)),
         },
         toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
-        profile: 'release',
+        optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-many'),
       }).pipe(Effect.provide(SourceResolver.empty))

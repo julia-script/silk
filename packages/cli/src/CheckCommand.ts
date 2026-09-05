@@ -12,7 +12,9 @@ export const command = Command.make(
   {
     manifestPath: ProjectOptions.manifestPath,
     targets: ProjectOptions.targets,
+    optimization: ProjectOptions.optimization,
     profile: ProjectOptions.profile,
+    profileInput: ProjectOptions.profileInput,
     release: ProjectOptions.release,
     watch: ProjectOptions.watch,
   },
@@ -20,7 +22,9 @@ export const command = Command.make(
     const options = ProjectOptions.resolve({
       ...(Option.isNone(config.manifestPath) ? {} : { manifestPath: config.manifestPath.value }),
       targets: config.targets,
+      ...(Option.isNone(config.optimization) ? {} : { optimization: config.optimization.value }),
       ...(Option.isNone(config.profile) ? {} : { profile: config.profile.value }),
+      ...(Option.isNone(config.profileInput) ? {} : { profileInput: config.profileInput.value }),
       release: config.release,
     })
     if (Result.isFailure(options)) {

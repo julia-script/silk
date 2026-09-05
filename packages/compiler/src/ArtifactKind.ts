@@ -1,3 +1,4 @@
+import type * as CompilationProfile from './CompilationProfile.js'
 import type * as Target from './Target.js'
 
 /** The closed set of durable artifacts the compiler can produce. */
@@ -75,3 +76,10 @@ export const fileName = (
 
 /** Deterministic cache/debug encoding. */
 export const encode = (self: ArtifactKind): string => self
+
+/** Maps a durable artifact request into the corresponding logical profile fact. */
+export const profileArtifact = (self: ArtifactKind): CompilationProfile.Artifact => {
+  if (self === 'NativeStaticLibrary') return 'static-archive'
+  if (self === 'NativeExecutable') return 'executable'
+  return 'loadable-module'
+}

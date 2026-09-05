@@ -130,3 +130,5 @@ to name unresolved boundaries rather than inventing rules to make the table look
 
 Tutorials, task-oriented guides, design rationale, compiler architecture, and standard-library API
 documentation remain separate from this reference.
+
+- [Compilation profiles and package configuration](compilation-profiles.md)

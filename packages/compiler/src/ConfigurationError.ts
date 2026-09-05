@@ -34,6 +34,7 @@ export const make = (
   subject: string,
   origins: ReadonlyArray<ConfigurationOrigin.ConfigurationOrigin> = [],
   dependencies: ReadonlyArray<string> = [],
+  staticFailure?: StaticEvaluation.StaticFailure,
 ): ConfigurationError =>
   new ConfigurationError({
     operation,
@@ -42,4 +43,5 @@ export const make = (
     message: `${code}: ${subject}`,
     origins: Object.freeze(origins.map(ConfigurationOrigin.snapshot)),
     dependencies: Object.freeze([...dependencies]),
+    ...(staticFailure === undefined ? {} : { staticFailure }),
   })

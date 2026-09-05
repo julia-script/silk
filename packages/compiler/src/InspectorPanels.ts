@@ -54,20 +54,19 @@ export type ToolchainCommands =
 /**
  * The commands the LLVM toolchain would run for the selected target.
  */
-export const toolchainCommands = (
-  snapshot: Analysis.Snapshot,
-  profile: ToolchainPlan.OptimizationProfile,
-): ToolchainCommands => {
+export const toolchainCommands = (snapshot: Analysis.Snapshot): ToolchainCommands => {
   const selection = Analysis.targetOf(snapshot)
   if (selection._tag !== 'Resolved') {
     return { _tag: 'Unavailable', message: selection.error.message }
   }
 
+  const profile = snapshot.profile
+  if (profile === undefined)
+    return { _tag: 'Unavailable', message: 'Configuration did not complete' }
   const target = selection.target
   if (target.kind === 'WebAssembly') {
     const planned = ToolchainPlan.wasmCommand(
       clang,
-      target,
       profile,
       '<scope>/program.bc',
       '<scope>/silk_wasm_runtime.o',
@@ -98,13 +97,7 @@ export const toolchainCommands = (
       [
         'object',
         commandText(
-          ToolchainPlan.objectCommand(
-            clang,
-            target,
-            profile,
-            '<scope>/program.bc',
-            '<scope>/program.o',
-          ),
+          ToolchainPlan.objectCommand(clang, profile, '<scope>/program.bc', '<scope>/program.o'),
         ),
       ],
       [

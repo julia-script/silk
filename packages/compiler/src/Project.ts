@@ -1,3 +1,6 @@
+import * as ProjectProfile from './ProjectProfile.js'
+import * as ConfigurationOrigin from './ConfigurationOrigin.js'
+import type * as ConfigurationError from './ConfigurationError.js'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -19,6 +22,7 @@ export interface Project {
   readonly manifestPath: string
   readonly directory: string
   readonly entry: SourceEntry.SourceEntry
+  readonly profiles?: ProjectProfile.Catalog
   readonly build: BuildConfiguration
 }
 
@@ -31,6 +35,7 @@ export interface BuildConfiguration {
 }
 
 export type ProjectErrorReason =
+  | { readonly _tag: 'InvalidProfile'; readonly error: ConfigurationError.ConfigurationError }
   | { readonly _tag: 'ManifestNotFound'; readonly startDirectory: string }
   | { readonly _tag: 'InvalidManifest'; readonly detail: string }
   | { readonly _tag: 'InvalidEntry'; readonly error: SourceEntry.SourceEntryError }
@@ -95,7 +100,14 @@ const hasExactKeys = (table: TomlTable, keys: ReadonlyArray<string>): boolean =>
   return actual.length === expected.length && actual.every((key, index) => key === expected[index])
 }
 
-const buildKeys = Object.freeze(['targets', 'output-dir', 'artifact', 'native-link-inputs'])
+const buildKeys = Object.freeze([
+  'targets',
+  'output-dir',
+  'artifact',
+  'native-link-inputs',
+  'profile',
+  'bindings',
+])
 
 const decodeNativeLinkInput = (value: TomlValue): NativeLinkInput.NativeLinkInput | undefined => {
   if (!isTable(value)) return undefined
@@ -190,6 +202,22 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
       `build.${unsupportedBuildKey} is not a supported field`,
     )
   const defaultTargets: ReadonlyArray<TargetSelector.TargetSelector> = ['host']
+  const profiles = yield* ProjectProfile.catalog(
+    document.profiles,
+    buildTable?.profile,
+    buildTable?.bindings,
+    ConfigurationOrigin.literal(manifestPath),
+  ).pipe(
+    Effect.mapError(
+      (error) =>
+        new ProjectError({
+          operation: 'Project.load',
+          manifestPath,
+          message: error.message,
+          reason: { _tag: 'InvalidProfile', error },
+        }),
+    ),
+  )
   const targetsValue = buildTable?.targets ?? defaultTargets
   if (
     !Array.isArray(targetsValue) ||
@@ -248,6 +276,7 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
   return {
     name,
     version,
+    profiles,
     root,
     sourceRoot,
     targets: Object.freeze([...targetsValue]) as ReadonlyArray<TargetSelector.TargetSelector>,
@@ -340,6 +369,7 @@ export const load = Effect.fn('Project.load')(function* (
     _tag: 'Project' as const,
     name: manifest.name,
     version: manifest.version,
+    profiles: manifest.profiles,
     manifestPath,
     directory,
     entry,

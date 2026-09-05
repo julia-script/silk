@@ -1,3 +1,4 @@
+import type * as CompilationProfile from './CompilationProfile.js'
 /**
  * Pure planning for the pinned native toolchain: fixed optimization profiles, the exact
  * structured commands the orchestration issues (never a shell string), and the minimal C runtime
@@ -28,37 +29,48 @@ export interface PlannedCommand {
 export const codegenModeFor = (profile: OptimizationProfile): 'debug' | 'release' =>
   profile === 'release' ? 'release' : 'debug'
 
-const profileArguments = (profile: OptimizationProfile): ReadonlyArray<string> => {
-  switch (profile) {
-    case 'debug':
-      return ['-O0', '-g']
-    case 'release':
-      return ['-O2']
-    case 'release-with-debug':
-      return ['-O2', '-g']
-  }
+/** Projects logical optimization/debug choices into the fixed toolchain optimization labels. */
+export const optimizationFor = (
+  self: Pick<CompilationProfile.Input, 'optimization' | 'debug'>,
+): OptimizationProfile => {
+  if (self.optimization !== 'speed') return 'debug'
+  return self.debug === false ? 'release' : 'release-with-debug'
 }
+
+/** Lowers logical code-generation choices into deterministic Clang arguments. */
+export const compilationArguments = (
+  profile: CompilationProfile.CompilationProfile,
+): ReadonlyArray<string> =>
+  Object.freeze([
+    profile.optimization === 'none' ? '-O0' : '-O2',
+    ...(profile.debug ? ['-g'] : []),
+    ...(profile.target.kind === 'Native' && profile.codeModel === 'large'
+      ? ['-mcmodel=large']
+      : []),
+    ...(profile.target.operatingSystem === 'darwin' && profile.deployment !== undefined
+      ? [`-mmacosx-version-min=${profile.deployment}`]
+      : []),
+  ])
 
 /** Plans the pinned Clang `-c` invocation that turns bitcode into a target object. */
 export const objectCommand = (
   clang: string,
-  target: Target.Target,
-  profile: OptimizationProfile,
+  profile: CompilationProfile.CompilationProfile,
   bitcodePath: string,
   objectPath: string,
 ): PlannedCommand =>
   Object.freeze({
     _tag: 'PlannedCommand',
-    target,
+    target: profile.target,
     command: clang,
     arguments: Object.freeze([
-      `--target=${target.id}`,
+      `--target=${profile.target.id}`,
       '-c',
       '-x',
       'ir',
       bitcodePath,
-      '-fPIC',
-      ...profileArguments(profile),
+      profile.relocation === 'pic' ? '-fPIC' : '-fno-pic',
+      ...compilationArguments(profile),
       '-o',
       objectPath,
     ]),
@@ -194,18 +206,17 @@ export const cObjectCommand = (
 /** Plans standalone LLVM-bitcode to WebAssembly finalization through pinned Clang. */
 export const wasmCommand = (
   clang: string,
-  target: Target.Target,
-  profile: OptimizationProfile,
+  profile: CompilationProfile.CompilationProfile,
   bitcodePath: string,
   runtimeObjectPath: string,
   destination: string,
 ): PlannedCommand =>
   Object.freeze({
     _tag: 'PlannedCommand',
-    target,
+    target: profile.target,
     command: clang,
     arguments: Object.freeze([
-      `--target=${target.id}`,
+      `--target=${profile.target.id}`,
       '-nostdlib',
       '-x',
       'ir',
@@ -213,7 +224,7 @@ export const wasmCommand = (
       '-x',
       'none',
       runtimeObjectPath,
-      ...profileArguments(profile),
+      ...compilationArguments(profile),
       '-Wl,--no-entry',
       '-Wl,--export=silk_main',
       '-o',

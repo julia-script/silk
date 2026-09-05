@@ -210,7 +210,7 @@ const runNative = (id: string, source: string, destination: string) =>
     const compiled = yield* Driver.compile({
       compilation: { root: SourceFile.make(id, ascii(source)) },
       toolchain,
-      profile: 'release',
+      optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination,
     })
