@@ -168,7 +168,53 @@ export const complete = (
       if (member._tag === 'AliasDeclaration')
         diagnostics.push(...(resolvers.alias?.(member).diagnostics ?? []))
   const finalized = new Map<MemberFact, MemberFact>()
+  const finalizedHeads = new Map<InherentImplFact, InherentImplFact>()
   const active = new Set<MemberFact>()
+  const nominalParameters = (
+    module: string | undefined,
+    path: TypePathFact,
+  ): ReadonlyArray<Type.Parameter> | undefined => {
+    if (module === undefined) return undefined
+    const resolved = resolvers.type(module, path)
+    if (
+      resolved.fact._tag !== 'Resolved' ||
+      !Type.isNominal(resolved.fact.type) ||
+      resolved.fact.type.arguments.length > 0
+    )
+      return undefined
+    const reached = memberByNominal(self.modules, resolved.fact.type)
+    if (reached === undefined) return Type.intrinsicNominalParameters(resolved.fact.type)
+    const closed = finalize(reached)
+    return 'typeParameters' in closed
+      ? closed.typeParameters.map((parameter) => parameter.type)
+      : undefined
+  }
+  const finalizeHead = (head: InherentImplFact): InherentImplFact => {
+    const cached = finalizedHeads.get(head)
+    if (cached !== undefined) return cached
+    // An impl names its local declaration even when a builtin storage type has the same name.
+    // Apply that identity before elision so builtin lifetimes cannot enter the local head.
+    const localOwner = self.modules
+      .find((module) => module.module === head.module)
+      ?.members.find(
+        (member) =>
+          member.name._tag === 'Present' &&
+          member.name.spelling === head.ownerSpelling &&
+          NameResolution.isNominalOwner(member),
+      )
+    const candidate = DeclarationCollection.finalizeLifetimeHeader(head, (path) => {
+      const owner =
+        path.spelling === head.ownerSpelling && localOwner !== undefined
+          ? finalize(localOwner)
+          : undefined
+      return owner !== undefined && 'typeParameters' in owner
+        ? owner.typeParameters.map((parameter) => parameter.type)
+        : nominalParameters(head.module, path)
+    })
+    const closed = candidate._tag === 'InherentImplDeclaration' ? candidate : head
+    finalizedHeads.set(head, closed)
+    return closed
+  }
   const finalize = (member: MemberFact): MemberFact => {
     const cached = finalized.get(member)
     if (cached !== undefined) return cached
@@ -176,29 +222,27 @@ export const complete = (
     active.add(member)
     const module =
       'lifetimeElaboration' in member ? member.lifetimeElaboration?.owner.module : undefined
-    const nominalParameters = (path: TypePathFact): ReadonlyArray<Type.Parameter> | undefined => {
-      if (module === undefined) return undefined
-      const resolved = resolvers.type(module, path)
-      if (
-        resolved.fact._tag !== 'Resolved' ||
-        !Type.isNominal(resolved.fact.type) ||
-        resolved.fact.type.arguments.length > 0
-      )
-        return undefined
-      const reached = memberByNominal(self.modules, resolved.fact.type)
-      if (reached === undefined) return Type.intrinsicNominalParameters(resolved.fact.type)
-      const closed = finalize(reached)
-      return 'typeParameters' in closed
-        ? closed.typeParameters.map((parameter) => parameter.type)
-        : undefined
-    }
+    const association = member._tag === 'FunctionDeclaration' ? member.associatedMember : undefined
+    const head =
+      association === undefined
+        ? undefined
+        : self.modules
+            .find((candidate) => candidate.module === module)
+            ?.inherentImpls.find((candidate) => candidate.ordinal === association.ordinal)
     const candidate =
       member._tag === 'FunctionDeclaration' ||
       member._tag === 'StructDeclaration' ||
       member._tag === 'UnionDeclaration'
-        ? DeclarationCollection.finalizeLifetimeHeader(member, nominalParameters)
+        ? DeclarationCollection.finalizeLifetimeHeader(
+            member,
+            (path) => nominalParameters(module, path),
+            head === undefined ? undefined : finalizeHead(head),
+          )
         : member
-    const closed = candidate._tag === 'ServiceOperation' ? member : candidate
+    const closed =
+      candidate._tag === 'ServiceOperation' || candidate._tag === 'InherentImplDeclaration'
+        ? member
+        : candidate
     active.delete(member)
     finalized.set(member, closed)
     return closed
@@ -207,6 +251,7 @@ export const complete = (
     const members = module.members.map(finalize)
     return Object.freeze({
       ...module,
+      inherentImpls: Object.freeze(module.inherentImpls.map(finalizeHead)),
       members: Object.freeze(members),
       declarations: Object.freeze(
         members.filter(
@@ -716,23 +761,52 @@ export const complete = (
           member.canonical.id.name === head.ownerSpelling &&
           NameResolution.isNominalOwner(member),
       )
+      const binders = head.typeParameters.filter((parameter) => parameter.duplicateOf === undefined)
+      if (
+        localOwner !== undefined &&
+        'typeParameters' in localOwner &&
+        (localOwner.typeParameters.length !== binders.length ||
+          localOwner.typeParameters.some(
+            (parameter) =>
+              localOwner.typeParameters.filter(
+                (candidate) => candidate.type.kind === parameter.type.kind,
+              ).length !==
+              binders.filter((candidate) => candidate.type.kind === parameter.type.kind).length,
+          ))
+      ) {
+        const diagnostic = Diagnostic.invalidInherentHead(
+          head.ownerSpelling,
+          'Specialized',
+          tightSpan(head.owner.syntax),
+        )
+        diagnostics.push(diagnostic)
+        return Object.freeze({
+          ...head,
+          owner: owner.fact,
+          validity: Object.freeze({
+            _tag: 'Invalid' as const,
+            cause: Diagnostic.identity(diagnostic),
+          }),
+        })
+      }
       if (
         localOwner !== undefined &&
         localOwner.canonical._tag === 'Canonical' &&
         owner.fact._tag === 'Resolved'
       ) {
-        // The resolver's fact keeps the head's argument facts for tooling; only its type is replaced
-        // by the local declaration's nominal, and its diagnostics stand unless they came from the
-        // builtin that shadows the local spelling.
+        // Keep resolved nominal arguments in the declaration's canonical order, including inferred
+        // lifetimes. Only a builtin shadow requires rebuilding the local declaration's nominal.
         if (Type.isNominal(owner.fact.type)) diagnostics.push(...owner.diagnostics)
-        const binders = head.typeParameters.filter(
-          (parameter) => parameter.duplicateOf === undefined,
-        )
-        const ownerType = Type.nominal(
-          module.module,
-          localOwner.canonical.id.name,
-          binders.map((parameter) => Type.parameterArgument(parameter.type)),
-        )
+        const ownerType =
+          Type.isNominal(owner.fact.type) &&
+          owner.fact.type.module === module.module &&
+          owner.fact.type.name === localOwner.canonical.id.name
+            ? owner.fact.type
+            : Type.nominal(
+                module.module,
+                localOwner.canonical.id.name,
+                binders.map((parameter) => Type.parameterArgument(parameter.type)),
+              )
         return Object.freeze({ ...head, owner: Object.freeze({ ...owner.fact, type: ownerType }) })
       }
       const ownerType = owner.fact._tag === 'Resolved' ? owner.fact.type : undefined
