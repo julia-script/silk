@@ -3101,7 +3101,10 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
       (fn.suspension?.regions ?? []).flatMap((region) => {
         if (
           region._tag !== 'RunSuspendableEffectRegion' ||
-          region.runner.classification === 'Unknown'
+          region.runner.classification === 'Unknown' ||
+          // Parking originates an external transfer in this execution. Its suspension region
+          // carries continuation state, but it does not call a separate child runner.
+          region.operation._tag === 'ExecutionPark'
         )
           return []
         const declaration = region.runner.declaration
