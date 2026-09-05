@@ -1,7 +1,20 @@
 # Critical lifetime cleanup fixes
 
-Base: `3ca10d4d09f666ff5161f14554f905986bfb486b`.
-Branch: `julia/lifetimes-critical-fixes`.
+Validated implementation commit: `1d230105` on `julia/lifetimes-critical-fixes`.
+Implementation base: `3ca10d4d09f666ff5161f14554f905986bfb486b`.
+
+## Successful retry — 2026-09-05
+
+After disk space was freed, every required local gate passed:
+
+- `openspec validate fix-lifetime-cleanup-safety --strict`.
+- `pnpm typecheck` (18 cached tasks).
+- `pnpm format:check` and `pnpm lint`.
+- `pnpm test` (22 successful tasks, 14 cached): the fresh compiler suite passed all 2,275 tests across 211 files, including the 83 ownership tests; all 316 native acceptance tests passed; all 60 standard-library doctests passed. The complete workspace test command finished in 23m51s.
+- `pnpm check`: passed, reusing build/typecheck/test results and freshly running formatting, lint, and script checks.
+- `pnpm release:candidate`: passed all 10 tests in 27 seconds; prerequisite build tasks were cache hits.
+
+No implementation code changed during this retry. Task 3.1 is complete. The later conflict with main is limited to the generated toolchain fingerprint and does not change which implementation commit these results validate.
 
 ## Regression evidence
 
@@ -10,20 +23,12 @@ Branch: `julia/lifetimes-critical-fixes`.
 - Before compiler edits: 4 failures, 79 passes. Both invalid installed-borrow witnesses were accepted, and both match and statement-pattern selected entries lacked flag resets.
 - After ISSUE-004 alone: 2 failures, 81 passes. Installed lifetime rejection and the earlier-referent control passed; pattern regressions remained red.
 - After both fixes: 83 passes. Both selected-execution entries reset the same flag cleared by conditional partial cleanup. MIR verification passed.
-- The rejection assertions also pin the installed borrow's diagnostic code and origin span.
+- Final rejection assertions pin the installed borrow's diagnostic code and origin span. The full successful retry includes these final assertions.
 
-## Repository gates
+## Earlier attempts
 
-- `openspec validate fix-lifetime-cleanup-safety --strict`: passed.
-- `pnpm typecheck`: passed.
-- `pnpm format:check`: passed.
-- `pnpm lint`: passed.
-- Initial `pnpm test`: docgen's standard-library fenced-example compilation timed out at 180000ms. The pinned review previously recorded this test passing in approximately 93 seconds; the cause of this run's timeout is not established.
-- Initial `pnpm check`: docs Next.js build failed with `ENOSPC` while writing `_clientMiddlewareManifest.js`. This is an environment failure, not a compiler assertion. The worktree's generated `.next` output was cleaned afterward.
+The initial workspace test run timed out in docgen's fenced-example compilation after 180 seconds. The cause was not established; the same suite passed on retry. Two earlier `pnpm check` attempts failed with disk-space errors, first in the docs build and then during Turbo log handling. These failures were resolved by the successful retry above.
 
-- Compiler package run: generated-data, documentation policy, and all 60 stdlib doctests passed. The 211-file non-native suite reported 2273 passes and two failures in the new diagnostic-origin span assertions, which incorrectly omitted leading whitespace. After correcting those assertions, the full 83-test ownership file passed again. No compiler implementation edits followed that broader run.
-- Second `pnpm check`: docs build passed, but Turbo aborted during test scheduling with `StorageFull` / `Cannot write logs: No space left on device (os error 28)`.
+An intermediate compiler run had two failures in new diagnostic-origin span assertions that omitted leading whitespace. Those assertions were corrected before the successful full retry; compiler implementation code did not change afterward.
 
-Full integration validation remains incomplete. Native acceptance was not reached. The initial docgen timeout is not established as pre-existing; the repeated storage errors are environmental. Raw logs are retained under `.scratch/lifetimes-critical-fixes/` in this worktree.
-
-`pnpm release:candidate`: passed, 10/10 tests (34.72 seconds); prerequisite build tasks were cache hits.
+Raw logs for the initial runs and the successful retry are retained under `.scratch/lifetimes-critical-fixes/` in this worktree. This directory is gitignored.

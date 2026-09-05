@@ -10,4 +10,4 @@
 
 ## 3. Integration
 
-- [ ] 3.1 Run strict change validation and repository typecheck, format:check, lint, test, and check; record results and any pre-existing failures.
+- [x] 3.1 Run strict change validation and repository typecheck, format:check, lint, test, and check; record results and any pre-existing failures.
