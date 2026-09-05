@@ -1,0 +1,7134 @@
+{
+  "environment": {
+    "node": "v26.7.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "pipeline": "target-neutral frontend; no backend emission or optimizer",
+    "memoryUnits": {
+      "heapUsed": "bytes",
+      "processMaxRss": "host resourceUsage maxRSS units"
+    },
+    "heapUsed": 75761032,
+    "processMaxRss": 244496
+  },
+  "dimensions": [4, 8, 16],
+  "attribution": {
+    "retainedProofs": "Cumulative proof artifacts in this snapshot, including reused bodies; query counters report actual work for this revision.",
+    "comparisons": "Final source-body comparison contexts; anonymous preliminary analysis is not included.",
+    "conditionalPaths": "Required conditional state paths; MIR flag construction is not executed in this frontend workload.",
+    "resolution": "Lifetime actors receive no resolver; candidate-discovery counts are not instrumented here.",
+    "residualOwnership": "Not requested by this frontend-only workload."
+  },
+  "results": [
+    {
+      "family": "wrappers",
+      "size": 4,
+      "dimensions": {
+        "wrapperDepth": 4
+      },
+      "sourceBytes": 243,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 33.69675,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 3.885167
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 3.7625830000000065
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 6.2339170000000195
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.0724999999999909
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.5518749999999955
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 7.592167
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.44745799999998326
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.023917
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 5.510125
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 1.387958
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.102333
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 7,
+        "syntaxPoints": 20,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 1,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 1,
+          "shapeComputations": 6,
+          "shapeCacheHits": 1,
+          "shapeProjectionSteps": 5,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 1,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 5,
+          "iterations": 2,
+          "typeVisits": 12
+        },
+        "typeOutlives": {
+          "declarations": 6,
+          "headers": 6,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 7,
+          "computations": 7,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "unions",
+      "size": 4,
+      "dimensions": {
+        "unionWidth": 4,
+        "independentUnions": 1
+      },
+      "sourceBytes": 178,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 5.318333,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.859167
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.57487500000002
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.8268750000000296
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.01637500000003911
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.13483300000001464
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.826792
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.05808400000000802
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.010584
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.609875
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.226083
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.012583
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 1,
+        "syntaxPoints": 18,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 3,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 1,
+          "shapeComputations": 1,
+          "shapeCacheHits": 1,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 1,
+        "uniqueStateNodes": 2,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 1,
+          "iterations": 2,
+          "typeVisits": 4
+        },
+        "typeOutlives": {
+          "declarations": 2,
+          "headers": 5,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 6,
+          "computations": 5,
+          "cacheHits": 1
+        }
+      }
+    },
+    {
+      "family": "loans",
+      "size": 4,
+      "dimensions": {
+        "liveLoans": 4,
+        "invalidations": 0
+      },
+      "sourceBytes": 169,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 7.646833,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.890833
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.13104199999997945
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.1479580000000169
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.005749999999977717
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.03483300000004874
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 3.382625
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.10895900000002712
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.016458
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 1.599375
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.356666
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.070167
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 5,
+        "syntaxPoints": 37,
+        "lifetimeSolver": {
+          "regions": 4,
+          "constraints": 0,
+          "requiredPoints": 8,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 6,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 8,
+          "shapeComputations": 8,
+          "shapeCacheHits": 8,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 4,
+        "loanReferents": 4,
+        "transitions": 0,
+        "uniqueStateNodes": 8,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 17,
+          "computations": 5,
+          "cacheHits": 12
+        }
+      }
+    },
+    {
+      "family": "reborrows",
+      "size": 4,
+      "dimensions": {
+        "reborrowDepth": 4
+      },
+      "sourceBytes": 121,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 4.035,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.559167
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.1459169999999972
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.1875
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.004833000000019183
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.04399999999998272
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.30025
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.04075000000000273
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.009542
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.73975
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.13375
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.031834
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 6,
+        "syntaxPoints": 29,
+        "lifetimeSolver": {
+          "regions": 5,
+          "constraints": 4,
+          "requiredPoints": 10,
+          "propagatedPoints": 20,
+          "edgeVisits": 20
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 6,
+          "shapeComputations": 6,
+          "shapeCacheHits": 6,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 5,
+        "loanReferents": 5,
+        "transitions": 0,
+        "uniqueStateNodes": 5,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 1,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 12,
+          "computations": 6,
+          "cacheHits": 6
+        }
+      }
+    },
+    {
+      "family": "recursive",
+      "size": 4,
+      "dimensions": {
+        "recursiveTypeComponent": 4,
+        "recursiveCallComponent": 4
+      },
+      "sourceBytes": 385,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 10.951041,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 5,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 5,
+        "ownershipReused": 0,
+        "recursiveComponents": 1
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 1.362125
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.8343340000000126
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 1.964999999999975
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.02375000000000682
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.19379199999997354
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 4.176167
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.09283299999998462
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.011333
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.688334
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.278792
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.015584
+        }
+      ],
+      "retainedProofs": {
+        "functions": 5,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 3,
+        "syntaxPoints": 67,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 2,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 5,
+          "cacheHits": 4,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 5,
+          "shapeComputations": 5,
+          "shapeCacheHits": 5,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 4,
+          "iterations": 2,
+          "typeVisits": 16
+        },
+        "typeOutlives": {
+          "declarations": 9,
+          "headers": 9,
+          "iterations": 1,
+          "lifetimeObligations": 5,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 13,
+          "computations": 2,
+          "cacheHits": 11
+        }
+      }
+    },
+    {
+      "family": "movedFields",
+      "size": 4,
+      "dimensions": {
+        "movedFields": 4,
+        "branches": 0
+      },
+      "sourceBytes": 240,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 4.539833,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.580625
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.19079199999998764
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.401457999999991
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.006499999999959982
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.068458000000021
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.847542
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.07133399999997891
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.009667
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.817875
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.171
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.026542
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 3,
+        "syntaxPoints": 25,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 5,
+          "shapeComputations": 5,
+          "shapeCacheHits": 8,
+          "shapeProjectionSteps": 4,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 5,
+        "uniqueStateNodes": 14,
+        "retainedStateEdges": 10,
+        "maximumStateNodes": 5,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 2,
+          "iterations": 1,
+          "typeVisits": 2
+        },
+        "typeOutlives": {
+          "declarations": 3,
+          "headers": 6,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 19,
+          "computations": 12,
+          "cacheHits": 7
+        }
+      }
+    },
+    {
+      "family": "sparseArrays",
+      "size": 4,
+      "dimensions": {
+        "arrayLength": 16,
+        "accessedIndices": 2
+      },
+      "sourceBytes": 129,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 3.119917,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.466
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.17962499999998727
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.4000419999999849
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.00837500000000091
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.040374999999983174
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.73125
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.040000000000020464
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.005917
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.402625
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.093
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.016333
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 4,
+        "syntaxPoints": 20,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 3,
+          "shapeComputations": 3,
+          "shapeCacheHits": 4,
+          "shapeProjectionSteps": 2,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 3,
+        "uniqueStateNodes": 8,
+        "retainedStateEdges": 3,
+        "maximumStateNodes": 3,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 1,
+          "iterations": 1,
+          "typeVisits": 1
+        },
+        "typeOutlives": {
+          "declarations": 2,
+          "headers": 2,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 8,
+          "computations": 4,
+          "cacheHits": 4
+        }
+      }
+    },
+    {
+      "family": "projections",
+      "size": 4,
+      "dimensions": {
+        "projectionDepth": 4,
+        "movedFields": 1
+      },
+      "sourceBytes": 204,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 2.995083,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.430041
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.1787909999999897
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.4006249999999909
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.006833000000028733
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.08241699999996399
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.675375
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.04475000000002183
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.005417
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.3255
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.123083
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.025083
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 6,
+        "syntaxPoints": 16,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 2,
+          "shapeComputations": 5,
+          "shapeCacheHits": 2,
+          "shapeProjectionSteps": 4,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 2,
+        "uniqueStateNodes": 8,
+        "retainedStateEdges": 4,
+        "maximumStateNodes": 5,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 5,
+          "iterations": 1,
+          "typeVisits": 5
+        },
+        "typeOutlives": {
+          "declarations": 6,
+          "headers": 6,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 10,
+          "computations": 9,
+          "cacheHits": 1
+        }
+      }
+    },
+    {
+      "family": "joins",
+      "size": 4,
+      "dimensions": {
+        "independentlyJoinedFields": 4,
+        "loopIterations": 0
+      },
+      "sourceBytes": 268,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 4.513167,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.639792
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.18558300000000827
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.3457920000000172
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.005999999999971806
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.08625000000000682
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.21525
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.08266700000001492
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.016042
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.817125
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.148667
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.019
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 4,
+        "syntaxPoints": 41,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 9,
+          "shapeComputations": 9,
+          "shapeCacheHits": 16,
+          "shapeProjectionSteps": 4,
+          "initializationJoins": 4
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 5,
+        "uniqueStateNodes": 18,
+        "retainedStateEdges": 20,
+        "maximumStateNodes": 5,
+        "conditionalPaths": 4,
+        "nominalVariance": {
+          "declarations": 2,
+          "iterations": 1,
+          "typeVisits": 2
+        },
+        "typeOutlives": {
+          "declarations": 3,
+          "headers": 10,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 14,
+          "computations": 11,
+          "cacheHits": 3
+        }
+      }
+    },
+    {
+      "family": "callbacks",
+      "size": 4,
+      "dimensions": {
+        "anonymousCallbacks": 4
+      },
+      "sourceBytes": 252,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 7.591541,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 5,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.736917
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.10895900000002712
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.21025000000003047
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.005499999999983629
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.14808299999998553
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 3.946292
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.10824999999999818
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.007667
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.946875
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.224167
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.312583
+        }
+      ],
+      "retainedProofs": {
+        "functions": 5,
+        "hiddenFunctions": 4,
+        "retainedTypeKeys": 2,
+        "syntaxPoints": 101,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 8,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 5,
+          "cacheHits": 10,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 8,
+          "shapeComputations": 8,
+          "shapeCacheHits": 8,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 4,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 17,
+          "computations": 2,
+          "cacheHits": 15
+        }
+      }
+    },
+    {
+      "family": "effects",
+      "size": 4,
+      "dimensions": {
+        "effectCaptureDepth": 4
+      },
+      "sourceBytes": 202,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 3.99825,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.485208
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.10062499999997954
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.1530419999999708
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.007584000000008473
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.037750000000016826
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.641083
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.04550000000000409
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.008167
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.635666
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.064625
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.018792
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 2,
+        "syntaxPoints": 37,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 10,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 9,
+          "shapeComputations": 5,
+          "shapeCacheHits": 13,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 5,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 16,
+          "computations": 2,
+          "cacheHits": 14
+        }
+      }
+    },
+    {
+      "family": "loans-invalid",
+      "size": 4,
+      "dimensions": {
+        "liveLoans": 4,
+        "invalidations": 1
+      },
+      "sourceBytes": 177,
+      "expectedInvalid": true,
+      "expectationMatched": true,
+      "elapsedMs": 3.87575,
+      "diagnostics": [
+        {
+          "code": "OWN0011",
+          "source": "benchmark/loans-invalid/4",
+          "start": 133,
+          "end": 136
+        },
+        {
+          "code": "OWN0019",
+          "source": "benchmark/loans-invalid/4",
+          "start": 149,
+          "end": 154
+        }
+      ],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.466208
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.10520800000000463
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.1133750000000191
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.009958999999980733
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.03908400000000256
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.547
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.03283300000003919
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.008292
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.557
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.093375
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.032708
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 5,
+        "syntaxPoints": 40,
+        "lifetimeSolver": {
+          "regions": 4,
+          "constraints": 0,
+          "requiredPoints": 8,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 7,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 8,
+          "shapeComputations": 8,
+          "shapeCacheHits": 13,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 4,
+        "loanReferents": 4,
+        "transitions": 1,
+        "uniqueStateNodes": 9,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 19,
+          "computations": 5,
+          "cacheHits": 14
+        }
+      }
+    },
+    {
+      "family": "joins-invalid",
+      "size": 4,
+      "dimensions": {
+        "independentlyJoinedFields": 4,
+        "loopIterations": 0
+      },
+      "sourceBytes": 282,
+      "expectedInvalid": true,
+      "expectationMatched": true,
+      "elapsedMs": 3.835042,
+      "diagnostics": [
+        {
+          "code": "OWN0001",
+          "source": "benchmark/joins-invalid/4",
+          "start": 268,
+          "end": 280
+        }
+      ],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.66675
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.21270800000002055
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.3731669999999667
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.00858299999998735
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.05237499999998363
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.849916
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.02250000000003638
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.005167
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.706667
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.195958
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.023125
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 4,
+        "syntaxPoints": 42,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 9,
+          "shapeComputations": 9,
+          "shapeCacheHits": 21,
+          "shapeProjectionSteps": 4,
+          "initializationJoins": 4
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 4,
+        "uniqueStateNodes": 18,
+        "retainedStateEdges": 20,
+        "maximumStateNodes": 5,
+        "conditionalPaths": 4,
+        "nominalVariance": {
+          "declarations": 2,
+          "iterations": 1,
+          "typeVisits": 2
+        },
+        "typeOutlives": {
+          "declarations": 3,
+          "headers": 10,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 16,
+          "computations": 11,
+          "cacheHits": 5
+        }
+      }
+    },
+    {
+      "family": "binderWidth",
+      "size": 4,
+      "dimensions": {
+        "binderWidth": 4,
+        "repeatedComparisons": 32
+      },
+      "compatible": true,
+      "work": {
+        "comparisons": 5,
+        "cacheHits": 32,
+        "outlivesObligations": 1,
+        "rigidBinders": 4
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 4,
+      "dimensions": {
+        "importingModules": 4,
+        "revision": "cold"
+      },
+      "elapsedMs": 7.969542,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 6,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 6,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 1.451833
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.40500000000002956
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.8023749999999836
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.05229199999996581
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.13837499999999636
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 2.757875
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.09816699999998946
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.020708
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.660125
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.382876
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.025125
+        }
+      ],
+      "retainedProofs": {
+        "functions": 6,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 10,
+        "syntaxPoints": 88,
+        "lifetimeSolver": {
+          "regions": 9,
+          "constraints": 8,
+          "requiredPoints": 14,
+          "propagatedPoints": 12,
+          "edgeVisits": 24
+        },
+        "finalBodyComparisons": {
+          "comparisons": 18,
+          "cacheHits": 8,
+          "outlivesObligations": 12,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 5,
+          "shapeComputations": 5,
+          "shapeCacheHits": 5,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 6,
+          "headers": 5,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 10,
+          "computations": 6,
+          "cacheHits": 4
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 4,
+      "dimensions": {
+        "importingModules": 4,
+        "revision": "warm"
+      },
+      "elapsedMs": 4.730042,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 0,
+        "reused": 6,
+        "rebound": 0,
+        "validatedDependencies": 6,
+        "dependencyCacheHits": 4,
+        "ownershipChecked": 0,
+        "ownershipReused": 6,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.348833
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.3261669999999981
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.700917000000004
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.025792000000024018
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.12749999999999773
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.852833
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.2167500000000473
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.008958
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.071833
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.023250000000018645
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0
+        }
+      ],
+      "retainedProofs": {
+        "functions": 6,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 10,
+        "syntaxPoints": 88,
+        "lifetimeSolver": {
+          "regions": 9,
+          "constraints": 8,
+          "requiredPoints": 14,
+          "propagatedPoints": 12,
+          "edgeVisits": 24
+        },
+        "finalBodyComparisons": {
+          "comparisons": 18,
+          "cacheHits": 8,
+          "outlivesObligations": 12,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 5,
+          "shapeComputations": 5,
+          "shapeCacheHits": 5,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 6,
+          "headers": 5,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 0,
+          "computations": 0,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 4,
+      "dimensions": {
+        "importingModules": 4,
+        "revision": "private-body-edit"
+      },
+      "elapsedMs": 6.788417,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 5,
+        "rebound": 5,
+        "validatedDependencies": 5,
+        "dependencyCacheHits": 4,
+        "ownershipChecked": 1,
+        "ownershipReused": 5,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.452
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.37408400000003894
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.4925840000000221
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.023000000000024556
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.10170800000003055
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 3.145667
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.16429200000004585
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.00975
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.570875
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.013249999999970896
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.279625
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.028167
+        }
+      ],
+      "retainedProofs": {
+        "functions": 6,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 10,
+        "syntaxPoints": 88,
+        "lifetimeSolver": {
+          "regions": 9,
+          "constraints": 8,
+          "requiredPoints": 14,
+          "propagatedPoints": 12,
+          "edgeVisits": 24
+        },
+        "finalBodyComparisons": {
+          "comparisons": 18,
+          "cacheHits": 8,
+          "outlivesObligations": 12,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 5,
+          "shapeComputations": 5,
+          "shapeCacheHits": 5,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 6,
+          "headers": 5,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 1,
+          "computations": 1,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 4,
+      "dimensions": {
+        "importingModules": 4,
+        "revision": "alpha-rename"
+      },
+      "elapsedMs": 5.340333,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 0,
+        "reused": 6,
+        "rebound": 6,
+        "validatedDependencies": 6,
+        "dependencyCacheHits": 4,
+        "ownershipChecked": 0,
+        "ownershipReused": 6,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.4595
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.3498330000001033
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.5153330000000551
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.036166999999977634
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.1037499999999909
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 2.026416
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.08575000000007549
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.009625
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.436375
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.012583000000063294
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.24412699999999996
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.031000000000000003
+        }
+      ],
+      "retainedProofs": {
+        "functions": 6,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 10,
+        "syntaxPoints": 88,
+        "lifetimeSolver": {
+          "regions": 9,
+          "constraints": 8,
+          "requiredPoints": 14,
+          "propagatedPoints": 12,
+          "edgeVisits": 24
+        },
+        "finalBodyComparisons": {
+          "comparisons": 18,
+          "cacheHits": 8,
+          "outlivesObligations": 12,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 5,
+          "shapeComputations": 5,
+          "shapeCacheHits": 5,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 6,
+          "headers": 5,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 0,
+          "computations": 0,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 4,
+      "dimensions": {
+        "importingModules": 4,
+        "revision": "exported-bound-edit"
+      },
+      "elapsedMs": 6.980584,
+      "diagnostics": [
+        {
+          "code": "SEM0212",
+          "source": "growth/Client0",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client1",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client2",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client3",
+          "start": 18,
+          "end": 91
+        }
+      ],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 5,
+        "reused": 1,
+        "rebound": 1,
+        "validatedDependencies": 6,
+        "dependencyCacheHits": 3,
+        "ownershipChecked": 5,
+        "ownershipReused": 1,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.415625
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.43479200000001583
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.5402499999999009
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.030250000000023647
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.10604200000000219
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 3.50975
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.10158300000000509
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.01025
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.456333
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.008083000000056018
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.233375
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.025374
+        }
+      ],
+      "retainedProofs": {
+        "functions": 6,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 10,
+        "syntaxPoints": 89,
+        "lifetimeSolver": {
+          "regions": 14,
+          "constraints": 13,
+          "requiredPoints": 14,
+          "propagatedPoints": 12,
+          "edgeVisits": 24
+        },
+        "finalBodyComparisons": {
+          "comparisons": 22,
+          "cacheHits": 8,
+          "outlivesObligations": 16,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 5,
+          "shapeComputations": 5,
+          "shapeCacheHits": 5,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 6,
+          "headers": 5,
+          "iterations": 1,
+          "lifetimeObligations": 1,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 9,
+          "computations": 5,
+          "cacheHits": 4
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 4,
+      "dimensions": {
+        "importingModules": 4,
+        "revision": "additional-generic-call"
+      },
+      "elapsedMs": 4.694375,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 6,
+        "rebound": 1,
+        "validatedDependencies": 6,
+        "dependencyCacheHits": 4,
+        "ownershipChecked": 1,
+        "ownershipReused": 6,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.555375
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.4223749999999882
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.4774999999999636
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.02491700000007313
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.11879099999998743
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.762041
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.06520800000009785
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.008375
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.259625
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.008000000000038199
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.088208
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.009541
+        }
+      ],
+      "retainedProofs": {
+        "functions": 7,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 12,
+        "syntaxPoints": 105,
+        "lifetimeSolver": {
+          "regions": 11,
+          "constraints": 10,
+          "requiredPoints": 17,
+          "propagatedPoints": 15,
+          "edgeVisits": 30
+        },
+        "finalBodyComparisons": {
+          "comparisons": 22,
+          "cacheHits": 10,
+          "outlivesObligations": 15,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 6,
+          "shapeComputations": 6,
+          "shapeCacheHits": 6,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 7,
+          "headers": 6,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 2,
+          "computations": 1,
+          "cacheHits": 1
+        }
+      }
+    },
+    {
+      "family": "wrappers",
+      "size": 8,
+      "dimensions": {
+        "wrapperDepth": 8
+      },
+      "sourceBytes": 395,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 5.973208,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.653791
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.38941699999998036
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 1.1127919999998994
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.008875000000102773
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.07758400000000165
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.308792
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.04420799999991232
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.007125
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.4915
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.214958
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.016541
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 11,
+        "syntaxPoints": 24,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 1,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 1,
+          "shapeComputations": 10,
+          "shapeCacheHits": 1,
+          "shapeProjectionSteps": 9,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 1,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 9,
+          "iterations": 2,
+          "typeVisits": 20
+        },
+        "typeOutlives": {
+          "declarations": 10,
+          "headers": 10,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 11,
+          "computations": 11,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "unions",
+      "size": 8,
+      "dimensions": {
+        "unionWidth": 8,
+        "independentUnions": 1
+      },
+      "sourceBytes": 270,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 3.028541,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.561917
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.3424169999999549
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.5411659999999756
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.007624999999961801
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.07274999999992815
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.399042
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.02170800000010331
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.004709
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.249125
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.128875
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.006958
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 1,
+        "syntaxPoints": 18,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 3,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 1,
+          "shapeComputations": 1,
+          "shapeCacheHits": 1,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 1,
+        "uniqueStateNodes": 2,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 1,
+          "iterations": 2,
+          "typeVisits": 4
+        },
+        "typeOutlives": {
+          "declarations": 2,
+          "headers": 9,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 10,
+          "computations": 9,
+          "cacheHits": 1
+        }
+      }
+    },
+    {
+      "family": "loans",
+      "size": 8,
+      "dimensions": {
+        "liveLoans": 8,
+        "invalidations": 0
+      },
+      "sourceBytes": 309,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 4.674833,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.603209
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.1215829999999869
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.11570899999992434
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.005667000000016742
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.02275000000008731
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.653792
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.022708999999963453
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.006125
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 1.251625
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.185167
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.05625
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 9,
+        "syntaxPoints": 69,
+        "lifetimeSolver": {
+          "regions": 8,
+          "constraints": 0,
+          "requiredPoints": 16,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 14,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 16,
+          "shapeComputations": 16,
+          "shapeCacheHits": 16,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 8,
+        "loanReferents": 8,
+        "transitions": 0,
+        "uniqueStateNodes": 16,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 33,
+          "computations": 9,
+          "cacheHits": 24
+        }
+      }
+    },
+    {
+      "family": "reborrows",
+      "size": 8,
+      "dimensions": {
+        "reborrowDepth": 8
+      },
+      "sourceBytes": 181,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 3.652833,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.441375
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.09704099999999016
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.12816700000007586
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.004708999999934349
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.033666000000039276
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.161583
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.0548750000000382
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.00675
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 1.000917
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.082167
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.034458
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 10,
+        "syntaxPoints": 45,
+        "lifetimeSolver": {
+          "regions": 9,
+          "constraints": 8,
+          "requiredPoints": 18,
+          "propagatedPoints": 72,
+          "edgeVisits": 72
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 10,
+          "shapeComputations": 10,
+          "shapeCacheHits": 10,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 9,
+        "loanReferents": 9,
+        "transitions": 0,
+        "uniqueStateNodes": 9,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 1,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 20,
+          "computations": 10,
+          "cacheHits": 10
+        }
+      }
+    },
+    {
+      "family": "recursive",
+      "size": 8,
+      "dimensions": {
+        "recursiveTypeComponent": 8,
+        "recursiveCallComponent": 8
+      },
+      "sourceBytes": 709,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 11.826625,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 9,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 9,
+        "ownershipReused": 0,
+        "recursiveComponents": 1
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 1.098125
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.6973750000000791
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 3.473875000000021
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.02287499999999909
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.20783400000004804
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 3.110166
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.043750000000045475
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.008458
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.492416
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.394959
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.035875
+        }
+      ],
+      "retainedProofs": {
+        "functions": 9,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 3,
+        "syntaxPoints": 115,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 2,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 9,
+          "cacheHits": 8,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 9,
+          "shapeComputations": 9,
+          "shapeCacheHits": 9,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 8,
+          "iterations": 2,
+          "typeVisits": 32
+        },
+        "typeOutlives": {
+          "declarations": 17,
+          "headers": 17,
+          "iterations": 1,
+          "lifetimeObligations": 9,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 25,
+          "computations": 2,
+          "cacheHits": 23
+        }
+      }
+    },
+    {
+      "family": "movedFields",
+      "size": 8,
+      "dimensions": {
+        "movedFields": 8,
+        "branches": 0
+      },
+      "sourceBytes": 392,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 3.720583,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.558916
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.2055000000000291
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.38112499999999727
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.006500000000073669
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.053291000000058375
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.045
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.02537500000005366
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.005958
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.527416
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.157542
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.024708
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 3,
+        "syntaxPoints": 41,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 9,
+          "shapeComputations": 9,
+          "shapeCacheHits": 16,
+          "shapeProjectionSteps": 8,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 9,
+        "uniqueStateNodes": 26,
+        "retainedStateEdges": 36,
+        "maximumStateNodes": 9,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 2,
+          "iterations": 1,
+          "typeVisits": 2
+        },
+        "typeOutlives": {
+          "declarations": 3,
+          "headers": 10,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 35,
+          "computations": 20,
+          "cacheHits": 15
+        }
+      }
+    },
+    {
+      "family": "sparseArrays",
+      "size": 8,
+      "dimensions": {
+        "arrayLength": 256,
+        "accessedIndices": 2
+      },
+      "sourceBytes": 131,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 1.794125,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.259375
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.0907919999999649
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.17720799999995052
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.0051249999999072315
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.033084000000030755
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.480333
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.018915999999990163
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.004709
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.212584
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.054792
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.00975
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 4,
+        "syntaxPoints": 20,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 3,
+          "shapeComputations": 3,
+          "shapeCacheHits": 4,
+          "shapeProjectionSteps": 2,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 3,
+        "uniqueStateNodes": 8,
+        "retainedStateEdges": 3,
+        "maximumStateNodes": 3,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 1,
+          "iterations": 1,
+          "typeVisits": 1
+        },
+        "typeOutlives": {
+          "declarations": 2,
+          "headers": 2,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 8,
+          "computations": 4,
+          "cacheHits": 4
+        }
+      }
+    },
+    {
+      "family": "projections",
+      "size": 8,
+      "dimensions": {
+        "projectionDepth": 8,
+        "movedFields": 1
+      },
+      "sourceBytes": 324,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 3.712292,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.495417
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.21258299999999508
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.5557499999999891
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.008624999999938154
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.06100000000003547
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.870333
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.02254199999993034
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.005209
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.375458
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.191208
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.017458
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 10,
+        "syntaxPoints": 20,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 2,
+          "shapeComputations": 9,
+          "shapeCacheHits": 2,
+          "shapeProjectionSteps": 8,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 2,
+        "uniqueStateNodes": 12,
+        "retainedStateEdges": 8,
+        "maximumStateNodes": 9,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 9,
+          "iterations": 1,
+          "typeVisits": 9
+        },
+        "typeOutlives": {
+          "declarations": 10,
+          "headers": 10,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 14,
+          "computations": 13,
+          "cacheHits": 1
+        }
+      }
+    },
+    {
+      "family": "joins",
+      "size": 8,
+      "dimensions": {
+        "independentlyJoinedFields": 8,
+        "loopIterations": 0
+      },
+      "sourceBytes": 448,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 4.15675,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.747583
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.2679999999999154
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.5113339999999198
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.006375000000048203
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.07633299999997689
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.046292
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.02470800000003237
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.005209
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.5505
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.198416
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.024875
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 4,
+        "syntaxPoints": 73,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 17,
+          "shapeComputations": 17,
+          "shapeCacheHits": 32,
+          "shapeProjectionSteps": 8,
+          "initializationJoins": 8
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 9,
+        "uniqueStateNodes": 34,
+        "retainedStateEdges": 72,
+        "maximumStateNodes": 9,
+        "conditionalPaths": 8,
+        "nominalVariance": {
+          "declarations": 2,
+          "iterations": 1,
+          "typeVisits": 2
+        },
+        "typeOutlives": {
+          "declarations": 3,
+          "headers": 18,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 26,
+          "computations": 19,
+          "cacheHits": 7
+        }
+      }
+    },
+    {
+      "family": "callbacks",
+      "size": 8,
+      "dimensions": {
+        "anonymousCallbacks": 8
+      },
+      "sourceBytes": 476,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 5.554458,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 9,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.843208
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.12312500000007276
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.0907919999999649
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.004249999999956344
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.022333000000003267
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 2.97
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.023290999999971973
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.005583
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.742417
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.162958
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.070792
+        }
+      ],
+      "retainedProofs": {
+        "functions": 9,
+        "hiddenFunctions": 8,
+        "retainedTypeKeys": 2,
+        "syntaxPoints": 197,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 16,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 9,
+          "cacheHits": 22,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 16,
+          "shapeComputations": 16,
+          "shapeCacheHits": 16,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 8,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 33,
+          "computations": 2,
+          "cacheHits": 31
+        }
+      }
+    },
+    {
+      "family": "effects",
+      "size": 8,
+      "dimensions": {
+        "effectCaptureDepth": 8
+      },
+      "sourceBytes": 338,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 3.780459,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.4925
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.09329200000001947
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.10224999999991269
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.004624999999919055
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.0342080000000351
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.258125
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.0251660000000129
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.00525
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.552208
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.069083
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.018083
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 2,
+        "syntaxPoints": 61,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 18,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 17,
+          "shapeComputations": 9,
+          "shapeCacheHits": 25,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 9,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 28,
+          "computations": 2,
+          "cacheHits": 26
+        }
+      }
+    },
+    {
+      "family": "loans-invalid",
+      "size": 8,
+      "dimensions": {
+        "liveLoans": 8,
+        "invalidations": 1
+      },
+      "sourceBytes": 317,
+      "expectedInvalid": true,
+      "expectationMatched": true,
+      "elapsedMs": 3.418375,
+      "diagnostics": [
+        {
+          "code": "OWN0011",
+          "source": "benchmark/loans-invalid/8",
+          "start": 245,
+          "end": 248
+        },
+        {
+          "code": "OWN0019",
+          "source": "benchmark/loans-invalid/8",
+          "start": 261,
+          "end": 266
+        }
+      ],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.51975
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.10591699999997672
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.10475000000008095
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.00483299999996234
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.024834000000055312
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.467667
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.024875000000065484
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.0055
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.499625
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.111958
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.042166
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 9,
+        "syntaxPoints": 72,
+        "lifetimeSolver": {
+          "regions": 8,
+          "constraints": 0,
+          "requiredPoints": 16,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 15,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 16,
+          "shapeComputations": 16,
+          "shapeCacheHits": 21,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 8,
+        "loanReferents": 8,
+        "transitions": 1,
+        "uniqueStateNodes": 17,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 35,
+          "computations": 9,
+          "cacheHits": 26
+        }
+      }
+    },
+    {
+      "family": "joins-invalid",
+      "size": 8,
+      "dimensions": {
+        "independentlyJoinedFields": 8,
+        "loopIterations": 0
+      },
+      "sourceBytes": 462,
+      "expectedInvalid": true,
+      "expectationMatched": true,
+      "elapsedMs": 4.620042,
+      "diagnostics": [
+        {
+          "code": "OWN0001",
+          "source": "benchmark/joins-invalid/8",
+          "start": 448,
+          "end": 460
+        }
+      ],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.765
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.2823750000000018
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.5689160000000584
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.03300000000001546
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.06700000000000728
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.080708
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.02366600000004837
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.004959
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.724375
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.192167
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.022666
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 4,
+        "syntaxPoints": 74,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 17,
+          "shapeComputations": 17,
+          "shapeCacheHits": 41,
+          "shapeProjectionSteps": 8,
+          "initializationJoins": 8
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 8,
+        "uniqueStateNodes": 34,
+        "retainedStateEdges": 72,
+        "maximumStateNodes": 9,
+        "conditionalPaths": 8,
+        "nominalVariance": {
+          "declarations": 2,
+          "iterations": 1,
+          "typeVisits": 2
+        },
+        "typeOutlives": {
+          "declarations": 3,
+          "headers": 18,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 28,
+          "computations": 19,
+          "cacheHits": 9
+        }
+      }
+    },
+    {
+      "family": "binderWidth",
+      "size": 8,
+      "dimensions": {
+        "binderWidth": 8,
+        "repeatedComparisons": 32
+      },
+      "compatible": true,
+      "work": {
+        "comparisons": 9,
+        "cacheHits": 32,
+        "outlivesObligations": 1,
+        "rigidBinders": 8
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 8,
+      "dimensions": {
+        "importingModules": 8,
+        "revision": "cold"
+      },
+      "elapsedMs": 8.827792,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 10,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 10,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 1.274417
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.5380410000000211
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.653458999999998
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.0416250000000673
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.13995899999997619
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 3.845791
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.07733300000006693
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.0745
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.690333
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.28350000000000003
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.028167999999999995
+        }
+      ],
+      "retainedProofs": {
+        "functions": 10,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 18,
+        "syntaxPoints": 156,
+        "lifetimeSolver": {
+          "regions": 17,
+          "constraints": 16,
+          "requiredPoints": 26,
+          "propagatedPoints": 24,
+          "edgeVisits": 48
+        },
+        "finalBodyComparisons": {
+          "comparisons": 34,
+          "cacheHits": 16,
+          "outlivesObligations": 24,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 9,
+          "shapeComputations": 9,
+          "shapeCacheHits": 9,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 10,
+          "headers": 9,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 18,
+          "computations": 10,
+          "cacheHits": 8
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 8,
+      "dimensions": {
+        "importingModules": 8,
+        "revision": "warm"
+      },
+      "elapsedMs": 4.150208,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 0,
+        "reused": 10,
+        "rebound": 0,
+        "validatedDependencies": 10,
+        "dependencyCacheHits": 8,
+        "ownershipChecked": 0,
+        "ownershipReused": 10,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.316208
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.6118340000000444
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.8537919999999986
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.057040999999912856
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.15591699999993125
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.901542
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.08791600000006383
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.033167
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.078958
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.010916000000065651
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0
+        }
+      ],
+      "retainedProofs": {
+        "functions": 10,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 18,
+        "syntaxPoints": 156,
+        "lifetimeSolver": {
+          "regions": 17,
+          "constraints": 16,
+          "requiredPoints": 26,
+          "propagatedPoints": 24,
+          "edgeVisits": 48
+        },
+        "finalBodyComparisons": {
+          "comparisons": 34,
+          "cacheHits": 16,
+          "outlivesObligations": 24,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 9,
+          "shapeComputations": 9,
+          "shapeCacheHits": 9,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 10,
+          "headers": 9,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 0,
+          "computations": 0,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 8,
+      "dimensions": {
+        "importingModules": 8,
+        "revision": "private-body-edit"
+      },
+      "elapsedMs": 7.599333,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 9,
+        "rebound": 9,
+        "validatedDependencies": 9,
+        "dependencyCacheHits": 8,
+        "ownershipChecked": 1,
+        "ownershipReused": 9,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.430708
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.43466699999999037
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.5177500000000919
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.036582999999950516
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.11416599999995469
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 3.703042
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.08854199999996126
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.027041
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.701209
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.009584000000018023
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.34100100000000005
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.032917999999999996
+        }
+      ],
+      "retainedProofs": {
+        "functions": 10,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 18,
+        "syntaxPoints": 156,
+        "lifetimeSolver": {
+          "regions": 17,
+          "constraints": 16,
+          "requiredPoints": 26,
+          "propagatedPoints": 24,
+          "edgeVisits": 48
+        },
+        "finalBodyComparisons": {
+          "comparisons": 34,
+          "cacheHits": 16,
+          "outlivesObligations": 24,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 9,
+          "shapeComputations": 9,
+          "shapeCacheHits": 9,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 10,
+          "headers": 9,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 1,
+          "computations": 1,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 8,
+      "dimensions": {
+        "importingModules": 8,
+        "revision": "alpha-rename"
+      },
+      "elapsedMs": 7.228042,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 0,
+        "reused": 10,
+        "rebound": 10,
+        "validatedDependencies": 10,
+        "dependencyCacheHits": 8,
+        "ownershipChecked": 0,
+        "ownershipReused": 10,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.481084
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.5405000000000655
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.5968750000000682
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.038708000000042375
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.16937499999994543
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 2.884833
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.08995800000002419
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.029875
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.754417
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.011999999999943611
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.36754200000000004
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.043918
+        }
+      ],
+      "retainedProofs": {
+        "functions": 10,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 18,
+        "syntaxPoints": 156,
+        "lifetimeSolver": {
+          "regions": 17,
+          "constraints": 16,
+          "requiredPoints": 26,
+          "propagatedPoints": 24,
+          "edgeVisits": 48
+        },
+        "finalBodyComparisons": {
+          "comparisons": 34,
+          "cacheHits": 16,
+          "outlivesObligations": 24,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 9,
+          "shapeComputations": 9,
+          "shapeCacheHits": 9,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 10,
+          "headers": 9,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 0,
+          "computations": 0,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 8,
+      "dimensions": {
+        "importingModules": 8,
+        "revision": "exported-bound-edit"
+      },
+      "elapsedMs": 9.415542,
+      "diagnostics": [
+        {
+          "code": "SEM0212",
+          "source": "growth/Client0",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client1",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client2",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client3",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client4",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client5",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client6",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client7",
+          "start": 18,
+          "end": 91
+        }
+      ],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 9,
+        "reused": 1,
+        "rebound": 1,
+        "validatedDependencies": 10,
+        "dependencyCacheHits": 7,
+        "ownershipChecked": 9,
+        "ownershipReused": 1,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.545625
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.47870799999998326
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.5977079999998978
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.04174999999997908
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.15058399999998073
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 5.037917
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.13808299999993778
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.058416
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.76675
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.017166999999972177
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.31037700000000007
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.028624999999999998
+        }
+      ],
+      "retainedProofs": {
+        "functions": 10,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 18,
+        "syntaxPoints": 157,
+        "lifetimeSolver": {
+          "regions": 26,
+          "constraints": 25,
+          "requiredPoints": 26,
+          "propagatedPoints": 24,
+          "edgeVisits": 48
+        },
+        "finalBodyComparisons": {
+          "comparisons": 42,
+          "cacheHits": 16,
+          "outlivesObligations": 32,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 9,
+          "shapeComputations": 9,
+          "shapeCacheHits": 9,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 10,
+          "headers": 9,
+          "iterations": 1,
+          "lifetimeObligations": 1,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 17,
+          "computations": 9,
+          "cacheHits": 8
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 8,
+      "dimensions": {
+        "importingModules": 8,
+        "revision": "additional-generic-call"
+      },
+      "elapsedMs": 7.156875,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 10,
+        "rebound": 1,
+        "validatedDependencies": 10,
+        "dependencyCacheHits": 8,
+        "ownershipChecked": 1,
+        "ownershipReused": 10,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.566875
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.5205409999999802
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.6713750000000118
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.053541999999993095
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.12970800000005056
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 3.548458
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.11470799999995052
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.035625
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.352209
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.01587500000005093
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.1145
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.010125
+        }
+      ],
+      "retainedProofs": {
+        "functions": 11,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 20,
+        "syntaxPoints": 173,
+        "lifetimeSolver": {
+          "regions": 19,
+          "constraints": 18,
+          "requiredPoints": 29,
+          "propagatedPoints": 27,
+          "edgeVisits": 54
+        },
+        "finalBodyComparisons": {
+          "comparisons": 38,
+          "cacheHits": 18,
+          "outlivesObligations": 27,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 10,
+          "shapeComputations": 10,
+          "shapeCacheHits": 10,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 11,
+          "headers": 10,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 2,
+          "computations": 1,
+          "cacheHits": 1
+        }
+      }
+    },
+    {
+      "family": "wrappers",
+      "size": 16,
+      "dimensions": {
+        "wrapperDepth": 16
+      },
+      "sourceBytes": 713,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 9.02325,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.959334
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.6920410000000174
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 2.541291000000001
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.010416000000077474
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.11741700000004585
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 2.51125
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.05354099999999562
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.008542
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.642834
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.257292
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.0135
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 19,
+        "syntaxPoints": 32,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 1,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 1,
+          "shapeComputations": 18,
+          "shapeCacheHits": 1,
+          "shapeProjectionSteps": 17,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 1,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 17,
+          "iterations": 2,
+          "typeVisits": 36
+        },
+        "typeOutlives": {
+          "declarations": 18,
+          "headers": 18,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 19,
+          "computations": 19,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "unions",
+      "size": 16,
+      "dimensions": {
+        "unionWidth": 16,
+        "independentUnions": 1
+      },
+      "sourceBytes": 460,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 2.997292,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.69775
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.36183299999993324
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.46479199999998855
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.0026249999999663487
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.07224999999993997
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.413
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.019334000000071683
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.004417
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.221209
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.145458
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.005791
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 1,
+        "syntaxPoints": 18,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 3,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 1,
+          "shapeComputations": 1,
+          "shapeCacheHits": 1,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 1,
+        "uniqueStateNodes": 2,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 1,
+          "iterations": 2,
+          "typeVisits": 4
+        },
+        "typeOutlives": {
+          "declarations": 2,
+          "headers": 17,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 18,
+          "computations": 17,
+          "cacheHits": 1
+        }
+      }
+    },
+    {
+      "family": "loans",
+      "size": 16,
+      "dimensions": {
+        "liveLoans": 16,
+        "invalidations": 0
+      },
+      "sourceBytes": 619,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 9.453208,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 1.009417
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.1658750000000282
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.0827080000000251
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.0024159999999255888
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.02108300000008967
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 2.2825
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.024416999999971267
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.006167
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 4.985791
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.17275
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.066208
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 17,
+        "syntaxPoints": 133,
+        "lifetimeSolver": {
+          "regions": 16,
+          "constraints": 0,
+          "requiredPoints": 32,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 30,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 32,
+          "shapeComputations": 32,
+          "shapeCacheHits": 32,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 16,
+        "loanReferents": 16,
+        "transitions": 0,
+        "uniqueStateNodes": 32,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 65,
+          "computations": 17,
+          "cacheHits": 48
+        }
+      }
+    },
+    {
+      "family": "reborrows",
+      "size": 16,
+      "dimensions": {
+        "reborrowDepth": 16
+      },
+      "sourceBytes": 315,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 5.575375,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.55525
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.14637500000003456
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.1135829999999487
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.0025000000000545697
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.03220899999996618
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.520458
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.04854199999999764
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.009875
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 2.148541
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.129833
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.044166
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 18,
+        "syntaxPoints": 77,
+        "lifetimeSolver": {
+          "regions": 17,
+          "constraints": 16,
+          "requiredPoints": 34,
+          "propagatedPoints": 272,
+          "edgeVisits": 272
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 18,
+          "shapeComputations": 18,
+          "shapeCacheHits": 18,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 17,
+        "loanReferents": 17,
+        "transitions": 0,
+        "uniqueStateNodes": 17,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 1,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 36,
+          "computations": 18,
+          "cacheHits": 18
+        }
+      }
+    },
+    {
+      "family": "recursive",
+      "size": 16,
+      "dimensions": {
+        "recursiveTypeComponent": 16,
+        "recursiveCallComponent": 16
+      },
+      "sourceBytes": 1381,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 24.428541,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 17,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 17,
+        "ownershipReused": 0,
+        "recursiveComponents": 1
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 1.814542
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 1.1379579999999123
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 12.000625000000014
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.014374999999972715
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.32416700000010223
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 5.232041
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.04279199999996308
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.007792
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.744917
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.534208
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.028833
+        }
+      ],
+      "retainedProofs": {
+        "functions": 17,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 3,
+        "syntaxPoints": 211,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 2,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 17,
+          "cacheHits": 16,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 17,
+          "shapeComputations": 17,
+          "shapeCacheHits": 17,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 16,
+          "iterations": 2,
+          "typeVisits": 64
+        },
+        "typeOutlives": {
+          "declarations": 33,
+          "headers": 33,
+          "iterations": 1,
+          "lifetimeObligations": 17,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 49,
+          "computations": 2,
+          "cacheHits": 47
+        }
+      }
+    },
+    {
+      "family": "movedFields",
+      "size": 16,
+      "dimensions": {
+        "movedFields": 16,
+        "branches": 0
+      },
+      "sourceBytes": 714,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 4.940542,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.734041
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.3075420000000122
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.5690419999999676
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.00358399999993253
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.06316600000002381
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.313792
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.03912500000001273
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.007792
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.826667
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.289959
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.039292
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 3,
+        "syntaxPoints": 73,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 17,
+          "shapeComputations": 17,
+          "shapeCacheHits": 32,
+          "shapeProjectionSteps": 16,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 17,
+        "uniqueStateNodes": 50,
+        "retainedStateEdges": 136,
+        "maximumStateNodes": 17,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 2,
+          "iterations": 1,
+          "typeVisits": 2
+        },
+        "typeOutlives": {
+          "declarations": 3,
+          "headers": 18,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 67,
+          "computations": 36,
+          "cacheHits": 31
+        }
+      }
+    },
+    {
+      "family": "sparseArrays",
+      "size": 16,
+      "dimensions": {
+        "arrayLength": 65536,
+        "accessedIndices": 2
+      },
+      "sourceBytes": 135,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 1.736375,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.241458
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.09979199999997945
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.22912499999995362
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.003041000000052918
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.03166699999997036
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 0.369625
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.01816600000006474
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.004208
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.175792
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.074167
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.010166
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 4,
+        "syntaxPoints": 20,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 3,
+          "shapeComputations": 3,
+          "shapeCacheHits": 4,
+          "shapeProjectionSteps": 2,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 3,
+        "uniqueStateNodes": 8,
+        "retainedStateEdges": 3,
+        "maximumStateNodes": 3,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 1,
+          "iterations": 1,
+          "typeVisits": 1
+        },
+        "typeOutlives": {
+          "declarations": 2,
+          "headers": 2,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 8,
+          "computations": 4,
+          "cacheHits": 4
+        }
+      }
+    },
+    {
+      "family": "projections",
+      "size": 16,
+      "dimensions": {
+        "projectionDepth": 16,
+        "movedFields": 1
+      },
+      "sourceBytes": 578,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 5.169125,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.621291
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.2931659999999283
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.8987079999999423
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.005249999999932697
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.07445900000004713
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.5945
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.03133300000001782
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.006833
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.518166
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.248459
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.012542
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 18,
+        "syntaxPoints": 28,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 2,
+          "shapeComputations": 17,
+          "shapeCacheHits": 2,
+          "shapeProjectionSteps": 16,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 2,
+        "uniqueStateNodes": 20,
+        "retainedStateEdges": 16,
+        "maximumStateNodes": 17,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 17,
+          "iterations": 1,
+          "typeVisits": 17
+        },
+        "typeOutlives": {
+          "declarations": 18,
+          "headers": 18,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 22,
+          "computations": 21,
+          "cacheHits": 1
+        }
+      }
+    },
+    {
+      "family": "joins",
+      "size": 16,
+      "dimensions": {
+        "independentlyJoinedFields": 16,
+        "loopIterations": 0
+      },
+      "sourceBytes": 832,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 6.326708,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 1.019625
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.4157920000000104
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.6683749999999691
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.00537500000007185
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.1135829999999487
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.738042
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.02345900000000256
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.005417
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 1.188292
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.293459
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.029583
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 4,
+        "syntaxPoints": 137,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 33,
+          "shapeComputations": 33,
+          "shapeCacheHits": 64,
+          "shapeProjectionSteps": 16,
+          "initializationJoins": 16
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 17,
+        "uniqueStateNodes": 66,
+        "retainedStateEdges": 272,
+        "maximumStateNodes": 17,
+        "conditionalPaths": 16,
+        "nominalVariance": {
+          "declarations": 2,
+          "iterations": 1,
+          "typeVisits": 2
+        },
+        "typeOutlives": {
+          "declarations": 3,
+          "headers": 34,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 50,
+          "computations": 35,
+          "cacheHits": 15
+        }
+      }
+    },
+    {
+      "family": "callbacks",
+      "size": 16,
+      "dimensions": {
+        "anonymousCallbacks": 16
+      },
+      "sourceBytes": 942,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 9.834583,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 17,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 1.542917
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.3096250000000964
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.10804099999995742
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.0025829999999587017
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.02612499999997908
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 4.369542
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.02437499999996362
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.009167
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 1.668
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.260833
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.083375
+        }
+      ],
+      "retainedProofs": {
+        "functions": 17,
+        "hiddenFunctions": 16,
+        "retainedTypeKeys": 2,
+        "syntaxPoints": 389,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 32,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 17,
+          "cacheHits": 46,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 32,
+          "shapeComputations": 32,
+          "shapeCacheHits": 32,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 16,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 65,
+          "computations": 2,
+          "cacheHits": 63
+        }
+      }
+    },
+    {
+      "family": "effects",
+      "size": 16,
+      "dimensions": {
+        "effectCaptureDepth": 16
+      },
+      "sourceBytes": 624,
+      "expectedInvalid": false,
+      "expectationMatched": true,
+      "elapsedMs": 4.440667,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.82425
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.13845900000001166
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.11329200000000128
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.0030000000000427463
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.029208000000039647
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 2.018709
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.02183300000001509
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.004834
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.702292
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.092208
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.021458
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 2,
+        "syntaxPoints": 109,
+        "lifetimeSolver": {
+          "regions": 1,
+          "constraints": 0,
+          "requiredPoints": 34,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 33,
+          "shapeComputations": 17,
+          "shapeCacheHits": 49,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 17,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 52,
+          "computations": 2,
+          "cacheHits": 50
+        }
+      }
+    },
+    {
+      "family": "loans-invalid",
+      "size": 16,
+      "dimensions": {
+        "liveLoans": 16,
+        "invalidations": 1
+      },
+      "sourceBytes": 627,
+      "expectedInvalid": true,
+      "expectationMatched": true,
+      "elapsedMs": 5.090875,
+      "diagnostics": [
+        {
+          "code": "OWN0011",
+          "source": "benchmark/loans-invalid/16",
+          "start": 493,
+          "end": 496
+        },
+        {
+          "code": "OWN0019",
+          "source": "benchmark/loans-invalid/16",
+          "start": 509,
+          "end": 514
+        }
+      ],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.953292
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.15704200000004676
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.08166699999992488
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.0025830000000723885
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.02241700000001856
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 2.234917
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.03141700000003311
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.006958
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.80875
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.19
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.049125
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 17,
+        "syntaxPoints": 136,
+        "lifetimeSolver": {
+          "regions": 16,
+          "constraints": 0,
+          "requiredPoints": 32,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 1,
+          "cacheHits": 31,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 32,
+          "shapeComputations": 32,
+          "shapeCacheHits": 37,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 16,
+        "loanReferents": 16,
+        "transitions": 1,
+        "uniqueStateNodes": 33,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 1,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 1,
+          "headers": 0,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 67,
+          "computations": 17,
+          "cacheHits": 50
+        }
+      }
+    },
+    {
+      "family": "joins-invalid",
+      "size": 16,
+      "dimensions": {
+        "independentlyJoinedFields": 16,
+        "loopIterations": 0
+      },
+      "sourceBytes": 846,
+      "expectedInvalid": true,
+      "expectationMatched": true,
+      "elapsedMs": 5.832459,
+      "diagnostics": [
+        {
+          "code": "OWN0001",
+          "source": "benchmark/joins-invalid/16",
+          "start": 832,
+          "end": 844
+        }
+      ],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 1,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 1.084084
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.4077500000000782
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.5207910000000311
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.005625000000009095
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.07666700000004312
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.663667
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.019290999999952874
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.004875
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 1.07975
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.268083
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.028375
+        }
+      ],
+      "retainedProofs": {
+        "functions": 1,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 4,
+        "syntaxPoints": 138,
+        "lifetimeSolver": {
+          "regions": 0,
+          "constraints": 0,
+          "requiredPoints": 0,
+          "propagatedPoints": 0,
+          "edgeVisits": 0
+        },
+        "finalBodyComparisons": {
+          "comparisons": 0,
+          "cacheHits": 0,
+          "outlivesObligations": 0,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 33,
+          "shapeComputations": 33,
+          "shapeCacheHits": 81,
+          "shapeProjectionSteps": 16,
+          "initializationJoins": 16
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 16,
+        "uniqueStateNodes": 66,
+        "retainedStateEdges": 272,
+        "maximumStateNodes": 17,
+        "conditionalPaths": 16,
+        "nominalVariance": {
+          "declarations": 2,
+          "iterations": 1,
+          "typeVisits": 2
+        },
+        "typeOutlives": {
+          "declarations": 3,
+          "headers": 34,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 52,
+          "computations": 35,
+          "cacheHits": 17
+        }
+      }
+    },
+    {
+      "family": "binderWidth",
+      "size": 16,
+      "dimensions": {
+        "binderWidth": 16,
+        "repeatedComparisons": 32
+      },
+      "compatible": true,
+      "work": {
+        "comparisons": 17,
+        "cacheHits": 32,
+        "outlivesObligations": 1,
+        "rigidBinders": 16
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 16,
+      "dimensions": {
+        "importingModules": 16,
+        "revision": "cold"
+      },
+      "elapsedMs": 15.019708,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 18,
+        "reused": 0,
+        "rebound": 0,
+        "validatedDependencies": 0,
+        "dependencyCacheHits": 0,
+        "ownershipChecked": 18,
+        "ownershipReused": 0,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 2.289917
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.8167080000000624
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 1.070333000000005
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.07912500000009004
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.2921250000000555
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 6.379375
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.10199999999997544
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.05025
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 1.00675
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.48558700000000005
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.03450000000000001
+        }
+      ],
+      "retainedProofs": {
+        "functions": 18,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 34,
+        "syntaxPoints": 292,
+        "lifetimeSolver": {
+          "regions": 33,
+          "constraints": 32,
+          "requiredPoints": 50,
+          "propagatedPoints": 48,
+          "edgeVisits": 96
+        },
+        "finalBodyComparisons": {
+          "comparisons": 66,
+          "cacheHits": 32,
+          "outlivesObligations": 48,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 17,
+          "shapeComputations": 17,
+          "shapeCacheHits": 17,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 18,
+          "headers": 17,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 34,
+          "computations": 18,
+          "cacheHits": 16
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 16,
+      "dimensions": {
+        "importingModules": 16,
+        "revision": "warm"
+      },
+      "elapsedMs": 4.946375,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 0,
+        "reused": 18,
+        "rebound": 0,
+        "validatedDependencies": 18,
+        "dependencyCacheHits": 16,
+        "ownershipChecked": 0,
+        "ownershipReused": 18,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.411958
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.7171670000000177
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.8374170000000731
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.04774999999995089
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.18662499999993543
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 1.43075
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.1442499999999427
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.044042
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.098708
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.007958000000030552
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0
+        }
+      ],
+      "retainedProofs": {
+        "functions": 18,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 34,
+        "syntaxPoints": 292,
+        "lifetimeSolver": {
+          "regions": 33,
+          "constraints": 32,
+          "requiredPoints": 50,
+          "propagatedPoints": 48,
+          "edgeVisits": 96
+        },
+        "finalBodyComparisons": {
+          "comparisons": 66,
+          "cacheHits": 32,
+          "outlivesObligations": 48,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 17,
+          "shapeComputations": 17,
+          "shapeCacheHits": 17,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 18,
+          "headers": 17,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 0,
+          "computations": 0,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 16,
+      "dimensions": {
+        "importingModules": 16,
+        "revision": "private-body-edit"
+      },
+      "elapsedMs": 12.133,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 17,
+        "rebound": 17,
+        "validatedDependencies": 17,
+        "dependencyCacheHits": 16,
+        "ownershipChecked": 1,
+        "ownershipReused": 17,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.52175
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.7066670000000386
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.8401250000000573
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.0466670000000704
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.18600000000003547
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 6.372792
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.13333299999999326
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.052458
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 1.298292
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.011875000000031832
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.514503
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.041378000000000005
+        }
+      ],
+      "retainedProofs": {
+        "functions": 18,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 34,
+        "syntaxPoints": 292,
+        "lifetimeSolver": {
+          "regions": 33,
+          "constraints": 32,
+          "requiredPoints": 50,
+          "propagatedPoints": 48,
+          "edgeVisits": 96
+        },
+        "finalBodyComparisons": {
+          "comparisons": 66,
+          "cacheHits": 32,
+          "outlivesObligations": 48,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 17,
+          "shapeComputations": 17,
+          "shapeCacheHits": 17,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 18,
+          "headers": 17,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 1,
+          "computations": 1,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 16,
+      "dimensions": {
+        "importingModules": 16,
+        "revision": "alpha-rename"
+      },
+      "elapsedMs": 11.173375,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 0,
+        "reused": 18,
+        "rebound": 18,
+        "validatedDependencies": 18,
+        "dependencyCacheHits": 16,
+        "ownershipChecked": 0,
+        "ownershipReused": 18,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.608625
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.7938749999999573
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.8957499999999072
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.042208999999957086
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.25108299999999417
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 5.006084
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.125458999999978
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.066875
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 1.171291
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.010291000000052009
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.563914
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.05287500000000001
+        }
+      ],
+      "retainedProofs": {
+        "functions": 18,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 34,
+        "syntaxPoints": 292,
+        "lifetimeSolver": {
+          "regions": 33,
+          "constraints": 32,
+          "requiredPoints": 50,
+          "propagatedPoints": 48,
+          "edgeVisits": 96
+        },
+        "finalBodyComparisons": {
+          "comparisons": 66,
+          "cacheHits": 32,
+          "outlivesObligations": 48,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 17,
+          "shapeComputations": 17,
+          "shapeCacheHits": 17,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 18,
+          "headers": 17,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 0,
+          "computations": 0,
+          "cacheHits": 0
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 16,
+      "dimensions": {
+        "importingModules": 16,
+        "revision": "exported-bound-edit"
+      },
+      "elapsedMs": 14.377083,
+      "diagnostics": [
+        {
+          "code": "SEM0212",
+          "source": "growth/Client0",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client1",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client10",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client11",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client12",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client13",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client14",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client15",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client2",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client3",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client4",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client5",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client6",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client7",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client8",
+          "start": 18,
+          "end": 91
+        },
+        {
+          "code": "SEM0212",
+          "source": "growth/Client9",
+          "start": 18,
+          "end": 91
+        }
+      ],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 17,
+        "reused": 1,
+        "rebound": 1,
+        "validatedDependencies": 18,
+        "dependencyCacheHits": 15,
+        "ownershipChecked": 17,
+        "ownershipReused": 1,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.546
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.7311670000000277
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 0.767832999999996
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.04233400000009624
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.1804579999999305
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 8.594542
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.21345799999994597
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.052666
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 1.108041
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.013790999999969245
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.542294
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.04341700000000002
+        }
+      ],
+      "retainedProofs": {
+        "functions": 18,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 34,
+        "syntaxPoints": 293,
+        "lifetimeSolver": {
+          "regions": 50,
+          "constraints": 49,
+          "requiredPoints": 50,
+          "propagatedPoints": 48,
+          "edgeVisits": 96
+        },
+        "finalBodyComparisons": {
+          "comparisons": 82,
+          "cacheHits": 32,
+          "outlivesObligations": 64,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 17,
+          "shapeComputations": 17,
+          "shapeCacheHits": 17,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 18,
+          "headers": 17,
+          "iterations": 1,
+          "lifetimeObligations": 1,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 33,
+          "computations": 17,
+          "cacheHits": 16
+        }
+      }
+    },
+    {
+      "family": "moduleFanout",
+      "size": 16,
+      "dimensions": {
+        "importingModules": 16,
+        "revision": "additional-generic-call"
+      },
+      "elapsedMs": 8.307125,
+      "diagnostics": [],
+      "queries": {
+        "_tag": "BodyQueryCounters",
+        "checked": 1,
+        "reused": 18,
+        "rebound": 1,
+        "validatedDependencies": 18,
+        "dependencyCacheHits": 16,
+        "ownershipChecked": 1,
+        "ownershipReused": 18,
+        "recursiveComponents": 0
+      },
+      "phases": [
+        {
+          "phase": "closure",
+          "elapsedMs": 0.814875
+        },
+        {
+          "phase": "declaration-collection",
+          "elapsedMs": 0.79099999999994
+        },
+        {
+          "phase": "declaration-index",
+          "elapsedMs": 1.015957999999955
+        },
+        {
+          "phase": "name-resolution",
+          "elapsedMs": 0.05658400000004349
+        },
+        {
+          "phase": "module-surface",
+          "elapsedMs": 0.2442919999999731
+        },
+        {
+          "phase": "body-queries",
+          "elapsedMs": 3.559833
+        },
+        {
+          "phase": "semantic-invalidation",
+          "elapsedMs": 0.13541600000007747
+        },
+        {
+          "phase": "elaboration",
+          "elapsedMs": 0.043125
+        },
+        {
+          "phase": "ownership",
+          "elapsedMs": 0.33
+        },
+        {
+          "phase": "opaque-realization",
+          "elapsedMs": 0.009583000000020547
+        },
+        {
+          "phase": "semantic-occurrences",
+          "elapsedMs": 0.086375
+        },
+        {
+          "phase": "anonymous-expressions",
+          "elapsedMs": 0.006208
+        }
+      ],
+      "retainedProofs": {
+        "functions": 19,
+        "hiddenFunctions": 0,
+        "retainedTypeKeys": 36,
+        "syntaxPoints": 309,
+        "lifetimeSolver": {
+          "regions": 35,
+          "constraints": 34,
+          "requiredPoints": 53,
+          "propagatedPoints": 51,
+          "edgeVisits": 102
+        },
+        "finalBodyComparisons": {
+          "comparisons": 70,
+          "cacheHits": 34,
+          "outlivesObligations": 51,
+          "rigidBinders": 0
+        },
+        "ownershipOperations": {
+          "pathChecks": 18,
+          "shapeComputations": 18,
+          "shapeCacheHits": 18,
+          "shapeProjectionSteps": 0,
+          "initializationJoins": 0
+        },
+        "loans": 0,
+        "loanReferents": 0,
+        "transitions": 0,
+        "uniqueStateNodes": 0,
+        "retainedStateEdges": 0,
+        "maximumStateNodes": 0,
+        "conditionalPaths": 0,
+        "nominalVariance": {
+          "declarations": 0,
+          "iterations": 1,
+          "typeVisits": 0
+        },
+        "typeOutlives": {
+          "declarations": 19,
+          "headers": 18,
+          "iterations": 1,
+          "lifetimeObligations": 0,
+          "typeObligations": 0
+        },
+        "cleanupDerivation": {
+          "requests": 2,
+          "computations": 1,
+          "cacheHits": 1
+        }
+      }
+    }
+  ]
+}

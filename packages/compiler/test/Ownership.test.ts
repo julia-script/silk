@@ -1,15 +1,184 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
 import * as Analysis from '../src/Analysis.js'
 import * as Lexer from '../src/Lexer.js'
+import * as MovePath from '../src/MovePath.js'
+import * as MirVerification from '../src/MirVerification.js'
+import type * as Mir from '../src/Mir.js'
 import * as Ownership from '../src/Ownership.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as Type from '../src/Type.js'
 import { elaborate, ownership } from './support/elaborate.js'
-import { raise } from './support/raise.js'
+import { raise, unreachable } from './support/raise.js'
+
+const movedState = (
+  result: Result.Result<MovePath.State, MovePath.TransitionFailure>,
+): MovePath.State =>
+  Result.isSuccess(result) ? result.success : unreachable(`unexpected ${result.failure._tag}`)
+
+const moveInspection = (
+  state: MovePath.State,
+  path: MovePath.Path,
+  shape: MovePath.ShapeOf,
+): MovePath.Inspection => {
+  const result = MovePath.inspect(state, path, shape)
+  return Result.isSuccess(result)
+    ? result.success
+    : unreachable(`unexpected ${result.failure._tag}`)
+}
+
+const fieldPath = (ordinal: number): MovePath.Selector => ({ _tag: 'Field', ordinal })
+
+it.effect(
+  'keeps loans live across loop backedges while respecting break and disjoint branch exits',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct Data { value: i32 }
+fn read(x: &Data) -> i32 { return x.value }
+fn bad() -> i32 {
+  let mut x = Data { value: 1 } let r = &x let mut i = 0
+  while i < 2 { i = read(r) x = Data { value: 2 } }
+  return i
+}
+fn stopped() -> i32 {
+  let mut x = Data { value: 1 } let r = &x let mut i = 0
+  while i < 2 { i = read(r) x = Data { value: 2 } break }
+  return i
+}
+fn branches<'a>(x: &'a i32, flag: bool) -> &'a i32 {
+  let mut n = 1 let r = &n
+  if flag { n = 2 return x } else { drop r }
+  return x
+}`
+      const snapshot = yield* Analysis.ofSource(
+        'ownership/cfg-loans',
+        Uint8Array.from(source, (character) => character.charCodeAt(0)),
+      )
+      const diagnostics = Analysis.diagnostics(snapshot)
+      assert.isAbove(diagnostics.length, 0)
+      assert.isTrue(
+        diagnostics.every(
+          (diagnostic) => diagnostic.code === 'OWN0011' || diagnostic.code === 'OWN0019',
+        ),
+      )
+      assert.isTrue(
+        diagnostics.every(
+          (diagnostic) =>
+            diagnostic.span.start >= source.indexOf('fn bad') &&
+            diagnostic.span.end < source.indexOf('fn stopped'),
+        ),
+      )
+    }),
+)
+
+it('restores sparse children while refusing projections through a consumed ancestor', () => {
+  const outer = fieldPath(0)
+  const left = fieldPath(0)
+  const right = fieldPath(1)
+  const shape: MovePath.ShapeOf = (path) =>
+    path.length < 2 ? { _tag: 'Fields', fields: [0, 1], dropBoundary: false } : { _tag: 'Leaf' }
+  const initial = MovePath.make()
+  const partial = movedState(MovePath.consume(initial, [outer, left], shape))
+  assert.strictEqual(moveInspection(partial, [], shape).complete, false)
+  assert.strictEqual(moveInspection(partial, [outer, right], shape).complete, true)
+  assert.strictEqual(moveInspection(partial, [], shape).conditional, false)
+  const bothMissing = movedState(MovePath.consume(partial, [outer, right], shape))
+  assert.strictEqual(moveInspection(bothMissing, [outer], shape).empty, true)
+  const firstRestored = movedState(MovePath.restore(bothMissing, [outer, left], shape))
+  const restored = movedState(MovePath.restore(firstRestored, [outer, right], shape))
+  assert.isTrue(MovePath.equivalent(restored, initial))
+  const consumed = movedState(MovePath.consume(initial, [outer], shape))
+  const invalid = MovePath.restore(consumed, [outer, left], shape)
+  assert.isTrue(Result.isFailure(invalid))
+  if (Result.isFailure(invalid)) {
+    assert.strictEqual(invalid.failure._tag, 'MissingAncestor')
+    assert.deepEqual(invalid.failure.path, [outer])
+  }
+  assert.isTrue(
+    MovePath.equivalent(movedState(MovePath.restore(consumed, [outer], shape)), initial),
+  )
+})
+
+it('joins sparse array holes to conditional state and reaches a finite fixed point', () => {
+  const shape: MovePath.ShapeOf = (path) =>
+    path.length === 0 ? { _tag: 'Array', length: 1_000_000 } : { _tag: 'Leaf' }
+  const slot: MovePath.Selector = { _tag: 'ConstantIndex', index: 999_999 }
+  const initial = MovePath.make()
+  const partial = movedState(MovePath.consume(initial, [slot], shape))
+  assert.deepEqual(
+    partial.children.map((child) => child.selector),
+    [slot],
+  )
+  const joined = MovePath.join([initial, partial], shape)
+  assert.strictEqual(moveInspection(joined, [slot], shape).conditional, true)
+  assert.strictEqual(
+    moveInspection(joined, [{ _tag: 'ConstantIndex', index: 0 }], shape).complete,
+    true,
+  )
+  assert.isTrue(MovePath.equivalent(MovePath.join([joined, partial], shape), joined))
+  assert.isTrue(MovePath.equivalent(MovePath.join([partial, initial], shape), joined))
+  assert.isTrue(MovePath.equivalent(movedState(MovePath.restore(joined, [slot], shape)), initial))
+  assert.isTrue(Result.isFailure(MovePath.consume(joined, [slot], shape)))
+  assert.isFalse(MovePath.overlaps([slot], [{ _tag: 'ConstantIndex', index: 0 }]))
+})
+
+it('joins only feasible variant predecessors while preserving a partial discriminant', () => {
+  const variant: MovePath.Selector = { _tag: 'Variant', ordinal: 0 }
+  const payload = fieldPath(0)
+  const shape: MovePath.ShapeOf = (path) => {
+    if (path.length === 0) return { _tag: 'Variants', variants: [0, 1], dropBoundary: false }
+    if (path.length === 1) return { _tag: 'Fields', fields: [0], dropBoundary: false }
+    return { _tag: 'Leaf' }
+  }
+  const initial = MovePath.make()
+  assert.isTrue(Result.isFailure(MovePath.consume(initial, [variant, payload], shape)))
+  const first = movedState(MovePath.refine(initial, [], 0, shape))
+  const moved = movedState(MovePath.consume(first, [variant, payload], shape))
+  assert.strictEqual(moveInspection(moved, [], shape).discriminant, 'Initialized')
+  const second = movedState(MovePath.refine(initial, [], 1, shape))
+  const joined = MovePath.join([moved, second], shape)
+  assert.strictEqual(joined.activeVariant, undefined)
+  const selected = movedState(MovePath.refine(joined, [], 0, shape))
+  const inspected = moveInspection(selected, [variant, payload], shape)
+  assert.strictEqual(inspected.empty, true)
+  assert.strictEqual(inspected.conditional, false)
+  const consumed = movedState(MovePath.terminate(selected, [], shape))
+  assert.isTrue(Result.isFailure(MovePath.refine(consumed, [], 0, shape)))
+})
+
+it('allows a complete Drop child to move but rejects extraction through its hook boundary', () => {
+  const outer = fieldPath(0)
+  const inner = fieldPath(0)
+  const shape: MovePath.ShapeOf = (path) =>
+    path.length < 2
+      ? { _tag: 'Fields', fields: [0], dropBoundary: path.length === 1 }
+      : { _tag: 'Leaf' }
+  const initial = MovePath.make()
+  assert.isTrue(Result.isSuccess(MovePath.consume(initial, [outer], shape)))
+  const invalid = MovePath.consume(initial, [outer, inner], shape)
+  assert.isTrue(Result.isFailure(invalid))
+  if (Result.isFailure(invalid)) assert.strictEqual(invalid.failure._tag, 'DropBoundary')
+})
+
+it('terminates partial and conditional owners once without reviving empty moved values', () => {
+  const shape: MovePath.ShapeOf = (path) =>
+    path.length === 0 ? { _tag: 'Fields', fields: [0, 1], dropBoundary: false } : { _tag: 'Leaf' }
+  const initial = MovePath.make()
+  const partial = movedState(MovePath.consume(initial, [fieldPath(0)], shape))
+  const terminated = movedState(MovePath.terminate(partial, [], shape))
+  assert.isTrue(Result.isFailure(MovePath.terminate(terminated, [], shape)))
+  const conditional = MovePath.join([initial, terminated], shape)
+  assert.isTrue(Result.isSuccess(MovePath.terminate(conditional, [], shape)))
+  assert.isTrue(Result.isFailure(MovePath.restore(conditional, [fieldPath(0)], shape)))
+  const emptyShape: MovePath.ShapeOf = () => ({ _tag: 'Array', length: 0 })
+  const emptyMoved = movedState(MovePath.consume(initial, [], emptyShape))
+  assert.strictEqual(moveInspection(emptyMoved, [], emptyShape).complete, false)
+  assert.isTrue(Result.isFailure(MovePath.consume(emptyMoved, [], emptyShape)))
+})
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -25,6 +194,301 @@ pub fn main() -> i32 { return 0 }`
 
 const check = (id: string, text: string): Ownership.ModuleOwnership =>
   ownership(elaborate(Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text))))))
+
+const checkPartial = (id: string, text: string): Ownership.ModuleOwnership => {
+  const syntax = Parser.parse(Lexer.lex(SourceFile.make(id, ascii(text))))
+  assert.deepEqual(syntax.lexicalDiagnostics, [])
+  assert.deepEqual(syntax.parserDiagnostics, [])
+  const result = elaborate(syntax)
+  assert.deepEqual(result.diagnostics, [], JSON.stringify(result.diagnostics))
+  return ownership(result)
+}
+
+it('tracks projected transfers and restores complete aggregate use after a field assignment', () => {
+  const facts = checkPartial(
+    'ownership://partial-restoration.silk',
+    `
+struct Token { value: i32 }
+struct Pair { left: Token right: Token }
+fn total(pair: Pair) -> i32 { return pair.left.value + pair.right.value }
+pub fn main() -> i32 {
+  let mut pair = Pair { left: Token { value: 1 }, right: Token { value: 2 } }
+  let first = move pair.left
+  pair.left = Token { value: first.value }
+  return total(move pair)
+}`,
+  )
+  assert.deepEqual(facts.diagnostics, [])
+  const main = facts.functions.at(-1) ?? unreachable('expected main ownership')
+  assert.deepEqual(
+    main.transitions.map((transition) => [transition.kind, MovePath.key(transition.path)]),
+    [
+      ['Move', 'f0'],
+      ['Write', 'f0'],
+      ['Move', ''],
+    ],
+  )
+  assert.deepEqual(main.replacements, [])
+})
+
+it('retains only conditional field presence at an exit while disjoint fields remain usable', () => {
+  const facts = checkPartial(
+    'ownership://partial-branch.silk',
+    `
+struct Token { value: i32 }
+struct Pair { left: Token right: Token }
+fn choose(flag: bool, pair: Pair) -> i32 {
+  if flag { let first = move pair.left }
+  return pair.right.value
+}`,
+  )
+  assert.deepEqual(facts.diagnostics, [])
+  const release =
+    facts.functions
+      .at(0)
+      ?.exits.at(-1)
+      ?.releases.find((item) => item.binding.name === 'pair') ??
+    unreachable('expected remaining pair cleanup')
+  assert.strictEqual(release.initialization.initialization, 'Initialized')
+  assert.deepEqual(
+    release.initialization.children.map((child) => [
+      MovePath.key([child.selector]),
+      child.state.initialization,
+    ]),
+    [['f0', 'Maybe']],
+  )
+})
+
+it.effect(
+  'lowers conditional field cleanup through lazy flags and consuming owned place reads',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'ownership/partial-cleanup-mir',
+        ascii(`
+struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Pair { left: Token right: Token }
+fn choose(flag: bool) -> i32 {
+  let pair = Pair { left: Token { value: 1 }, right: Token { value: 2 } }
+  if flag { let first = move pair.left }
+  return pair.right.value
+}
+pub fn main() -> i32 { return choose(true) }
+`),
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const program = Analysis.loweredMir(snapshot)
+      assert.deepEqual(MirVerification.verify(program), [])
+      const operations = program.functions.flatMap((fn) => MirVerification.operations(fn))
+      assert.isTrue(
+        operations.some(
+          (operation) =>
+            operation._tag === 'ReadPlace' &&
+            operation.consume === true &&
+            MovePath.key(operation.ownershipPath ?? []) === 'f0',
+        ),
+      )
+      const partial = operations.find(
+        (operation) =>
+          operation._tag === 'Drop' &&
+          operation.initialization?.state.children.some(
+            (child) => child.state.initialization === 'Maybe',
+          ),
+      )
+      if (partial?._tag !== 'Drop') return unreachable('expected conditional cleanup')
+      assert.deepEqual(
+        partial.initialization?.flags.map((flag) => MovePath.key(flag.path)),
+        ['f0'],
+      )
+      assert.isTrue(
+        operations.some(
+          (operation) => operation._tag === 'SetInitialized' && !operation.initialized,
+        ),
+      )
+      const initialization =
+        partial.initialization ?? unreachable('expected partial initialization')
+      const replaceCleanup = (replacement: Mir.DropOperation): Mir.Module => ({
+        ...program,
+        functions: program.functions.map((fn) => ({
+          ...fn,
+          regions: fn.regions.map((region): Mir.Region => {
+            if (region._tag === 'OperationRegion')
+              return {
+                ...region,
+                operations: region.operations.map((operation) =>
+                  operation === partial ? replacement : operation,
+                ),
+              }
+            if (region._tag === 'CleanupRegion')
+              return {
+                ...region,
+                releases: region.releases.map((release) =>
+                  release === partial ? replacement : release,
+                ),
+              }
+            return region
+          }),
+        })),
+      })
+      for (const corrupted of [
+        { ...partial, initialization: { ...initialization, flags: [] } },
+        { ...partial, initialization: { state: MovePath.make(), flags: [] } },
+      ])
+        assert.isTrue(
+          MirVerification.verify(replaceCleanup(corrupted)).some(
+            (violation) => violation.rule === 'InvalidInitializationState',
+          ),
+        )
+    }),
+)
+
+it('restores constant array elements and rejects dynamic moves and descent through a Drop boundary', () => {
+  const source = `struct Token { value: i32 }
+struct Guarded { token: Token }
+impl Drop for Guarded { fn drop(self: &mut Guarded) -> () { return () } }
+fn restore(mut values: [Token; 2]) -> [Token; 2] {
+  let first = move values[0]
+  values[0] = Token { value: first.value }
+  return move values
+}
+fn dynamic(values: [Token; 2], index: usize) -> i32 {
+  let selected = move values[index]
+  return selected.value
+}
+fn guarded(value: Guarded) -> i32 {
+  let selected = move value.token
+  return selected.value
+}`
+  const facts = checkPartial('ownership://partial-array-boundary.silk', source)
+  const restore =
+    facts.functions.find(
+      (fn) =>
+        fn.declaration.canonical._tag === 'Canonical' &&
+        fn.declaration.canonical.id.name === 'restore',
+    ) ?? unreachable('expected restored array')
+  assert.deepEqual(
+    restore.transitions.map((transition) => [transition.kind, MovePath.key(transition.path)]),
+    [
+      ['Move', 'i0'],
+      ['Write', 'i0'],
+      ['Move', ''],
+    ],
+  )
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+    })),
+    [
+      { code: 'OWN0002', span: 'move values[index]' },
+      { code: 'OWN0002', span: 'move value.token' },
+    ],
+  )
+})
+
+it('keeps disjoint field loans separate and retains every source when reborrowing a selected result', () => {
+  const source = `struct Token { value: i32 }
+struct Pair { left: Token right: Token }
+fn sum(left: &mut Token, right: &mut Token) -> i32 { return left.value + right.value }
+fn disjoint(mut pair: Pair) -> i32 { return sum(&mut pair.left, &mut pair.right) }
+fn overlapping(mut pair: Pair) -> i32 { return sum(&mut pair.left, &mut pair.left) }
+fn choose<'a>(left: &'a i32, right: &'a i32, flag: bool) -> &'a i32 { if flag { return left } return right }
+fn selected(mut left: i32, mut right: i32) -> i32 {
+  let chosen = choose(&left, &right, true)
+  let borrowed = &chosen.*
+  return borrowed.*
+}`
+  const facts = checkPartial('ownership://loan-referents.silk', source)
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+    })),
+    [{ code: 'OWN0010', span: '&mut pair.left' }],
+  )
+  const disjoint = facts.functions.at(1) ?? unreachable('disjoint field loans')
+  assert.deepEqual(
+    disjoint.loans.map((loan) => loan.referents.map(Ownership.referentKey)),
+    [['p0/f0'], ['p0/f1']],
+  )
+  const selected = facts.functions.at(-1) ?? unreachable('selected result holder')
+  const reborrow =
+    selected.loans.find((loan) => loan.root._tag === 'Let' && loan.referents.length === 2) ??
+    unreachable('every selected input source retained')
+  assert.deepEqual(reborrow.referents.map((referent) => Ownership.siteKey(referent.root)).sort(), [
+    'p0',
+    'p1',
+  ])
+})
+
+it('refines a discriminant-only match and moves aliases from the original variant payload', () => {
+  const facts = checkPartial(
+    'ownership://partial-variant.silk',
+    `
+struct Token { value: i32 }
+union Choice { First { token: Token }, Second }
+fn choose(input: Choice) -> i32 {
+  let result = match place input {
+    Choice.First { token } => { let selected = move token return selected.value }
+    Choice.Second {} => 0
+  }
+  drop input
+  return result
+}
+fn restore(mut input: Choice) -> Choice {
+  match place input {
+    Choice.First { token } => { let selected = move token token = Token { value: selected.value } }
+    Choice.Second {} => {}
+  }
+  return move input
+}`,
+  )
+  assert.deepEqual(facts.diagnostics, [])
+  const choose = facts.functions.at(0) ?? unreachable('expected choose ownership')
+  const move = choose.transitions.find((transition) => transition.kind === 'Move')
+  assert.strictEqual(move?.root._tag, 'Parameter')
+  assert.strictEqual(MovePath.key(move?.path ?? []), 'v0/f0')
+  assert.isTrue(choose.bindings.some((binding) => binding.place !== undefined))
+  const restore = facts.functions.at(1) ?? unreachable('expected restored variant')
+  assert.deepEqual(
+    restore.transitions.map((transition) => [transition.kind, MovePath.key(transition.path)]),
+    [
+      ['Move', 'v0/f0'],
+      ['Write', 'v0/f0'],
+      ['Move', ''],
+    ],
+  )
+})
+
+it('rejects whole use after a projected move and records explicit partial-place termination', () => {
+  const facts = checkPartial(
+    'ownership://partial-drop.silk',
+    `
+struct Token { value: i32 }
+struct Pair { left: Token right: Token }
+fn total(pair: Pair) -> i32 { return pair.left.value + pair.right.value }
+fn invalid(pair: Pair) -> i32 { let first = move pair.left return total(move pair) }
+fn cleanup(pair: Pair) -> i32 { let first = move pair.left drop pair return first.value }
+`,
+  )
+  assert.deepEqual(
+    facts.diagnostics.map((diagnostic) => diagnostic.code),
+    ['OWN0001'],
+  )
+  const cleanup = facts.functions.at(-1) ?? unreachable('expected cleanup ownership')
+  assert.strictEqual(cleanup.verdict._tag, 'Satisfied')
+  assert.deepEqual(
+    cleanup.transitions.map((transition) => [transition.kind, MovePath.key(transition.path)]),
+    [
+      ['Move', 'f0'],
+      ['Drop', ''],
+    ],
+  )
+  assert.isFalse(
+    cleanup.exits.some((exit) => exit.releases.some((release) => release.binding.name === 'pair')),
+  )
+})
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
@@ -468,7 +932,7 @@ pub fn main() -> i32 {
 it('moves an owned provider into a take-once Effect wrapper', () => {
   const facts = check(
     'ownership://moved-provider.silk',
-    `struct Token { action: once fn() -> i32 }
+    `struct Token { action: once fn<'static>() -> i32 }
 struct Clock { token: Token }
 fn tick() -> i32 { return 1 }
 effect fn read() -> i32 ? &mut Clock { return 42 }
@@ -1118,7 +1582,7 @@ pub fn main() -> i32 { return 0 }`,
   )
 })
 
-it('reports an owner moved in only some branch arms and accepts a move in every arm', () => {
+it('joins conditional owner presence and omits cleanup when every branch transfers it', () => {
   const oneArm = check(
     'ownership://if-one-arm-move.silk',
     `struct Token { value: i32 }
@@ -1152,11 +1616,26 @@ fn branch(token: Token) -> () {
 pub fn main() -> i32 { return 0 }`,
   )
 
-  assert.deepEqual(
-    oneArm.diagnostics.map((diagnostic) => diagnostic.code),
-    ['OWN0017'],
-  )
+  assert.deepEqual(oneArm.diagnostics, [])
   assert.deepEqual(bothArms.diagnostics, [])
+  const conditional = oneArm.functions
+    .find(
+      (fn) =>
+        fn.declaration.canonical._tag === 'Canonical' &&
+        fn.declaration.canonical.id.name === 'branch',
+    )
+    ?.exits.flatMap((exit) => exit.releases)
+    .find((release) => release.binding.name === 'token')
+  assert.strictEqual(conditional?.initialization.initialization, 'Maybe')
+  assert.isFalse(
+    bothArms.functions
+      .find(
+        (fn) =>
+          fn.declaration.canonical._tag === 'Canonical' &&
+          fn.declaration.canonical.id.name === 'branch',
+      )
+      ?.exits.some((exit) => exit.releases.some((release) => release.binding.name === 'token')),
+  )
 })
 
 it('copies a raw pointer binding freely without a move or cleanup', () => {

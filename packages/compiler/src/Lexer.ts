@@ -328,6 +328,18 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
       continue
     }
 
+    // A closing quote keeps even a malformed multi-character literal on the literal path.
+    // Otherwise the identifier after an apostrophe is one lifetime, bounded by its own spelling.
+    if (byte === 0x27 && ByteClass.isIdentifierStart(bytes[index + 1])) {
+      let lifetimeEnd = index + 2
+      while (ByteClass.isIdentifierContinue(bytes[lifetimeEnd])) lifetimeEnd += 1
+      if (bytes[lifetimeEnd] !== 0x27 && bytes[lifetimeEnd] !== 0x5c) {
+        index = lifetimeEnd
+        pushToken('Lifetime', start, index)
+        continue
+      }
+    }
+
     const form = LiteralForm.recognize(bytes, index)
     const unknown = form === undefined ? LiteralForm.recognizeUnknown(bytes, index) : undefined
     if (form !== undefined || unknown !== undefined) {

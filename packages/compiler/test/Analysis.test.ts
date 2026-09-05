@@ -6,6 +6,7 @@ import * as ExecutableProperty from '../src/ExecutableProperty.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
 import * as ExecutionLifecycle from '../src/ExecutionLifecycle.js'
 import * as Hir from '../src/Hir.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as LocalSharedOwnership from '../src/LocalSharedOwnership.js'
 import * as ExpressionNesting from '../src/Parser/ExpressionNesting.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -832,14 +833,18 @@ pub fn main() -> i32 { return 42 }`,
       'LocalExecution',
     )
     const lexical = ExecutableProperty.detachedOfEnvironment(self.index, [
-      { ordinal: 0, access: 'Take', type: Type.reference('Shared', 'i32') },
+      {
+        ordinal: 0,
+        access: 'Take',
+        type: Type.reference('Shared', 'i32', Lifetime.staticLifetime),
+      },
     ])
     assert.strictEqual(lexical._tag, 'Unsatisfied')
     assert.strictEqual(
       lexical._tag === 'Unsatisfied' ? lexical.causes.at(0)?.reason : undefined,
       'LexicalLoan',
     )
-    for (const borrowed of ['string' as const, Type.slot('i32')]) {
+    for (const borrowed of [Type.string(Lifetime.staticLifetime), Type.slot('i32')]) {
       const verdict = ExecutableProperty.detachedOfEnvironment(self.index, [
         { ordinal: 0, access: 'Take', type: borrowed },
       ])

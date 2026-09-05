@@ -78,7 +78,7 @@ Creates a deterministic hash seed from one `u64` value.
 ### Associated function `Hash.mix`
 
 ```silk
-pub fn mix(seed: &silk/hash.HashSeed, value: u64) -> u64
+pub fn mix<'life0>(seed: &'life0 silk/hash.HashSeed, value: u64) -> u64
 ```
 
 Mixes the first integer field of a key with one seed into a 64-bit hash.
@@ -173,7 +173,7 @@ If a witness breaks the rule, a present key can become unreachable.
 ### Operation `equals`
 
 ```silk
-operator == fn equals(left: &Self, right: &Self) -> bool
+operator == fn equals<'life0, 'life1>(left: &'life0 Self, right: &'life1 Self) -> bool
 ```
 
 Reports whether two keys name the same collection entry.
@@ -187,7 +187,7 @@ If this returns `true`, `HashKey.hash` must return equal hashes for both keys un
 ### Operation `hash`
 
 ```silk
-fn hash(value: &Self, seed: &silk/hash.HashSeed) -> u64
+fn hash<'life0, 'life1>(value: &'life0 Self, seed: &'life1 silk/hash.HashSeed) -> u64
 ```
 
 Computes the key's deterministic 64-bit hash under the collection seed.

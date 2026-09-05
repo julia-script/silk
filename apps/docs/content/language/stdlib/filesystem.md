@@ -83,7 +83,7 @@ representation is private so every `Path` satisfies the normalization rules.
 ### Associated function `Path.make`
 
 ```silk
-pub effect fn make(value: string) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn make<'life0>(value: string<'life0>) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
 ```
 
 Copies UTF-8 text into an owned, normalized provider-absolute [`Path`](#declaration-73696c6b2f66696c6573797374656d3a3a50617468).
@@ -99,7 +99,7 @@ no trailing slash, NUL, `.` component, or `..` component. Invalid input fails wi
 ### Associated function `Path.fromBytes`
 
 ```silk
-pub effect fn fromBytes(values: &[u8]) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn fromBytes<'life0>(values: &'life0 [u8]) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
 ```
 
 Constructs an owned normalized provider-absolute Path from exact platform bytes.
@@ -117,7 +117,7 @@ required, so a Path built this way may have no `string` view.
 ### Associated function `Path.root`
 
 ```silk
-pub effect fn root() -> Path ! OutOfMemoryError ? &mut Allocator
+pub effect<'static> fn root() -> Path ! OutOfMemoryError ? &mut Allocator
 ```
 
 Allocates the portable root path `/` in the selected allocator.
@@ -127,7 +127,7 @@ Allocates the portable root path `/` in the selected allocator.
 ### Method `Path.rawBytes`
 
 ```silk
-pub fn rawBytes(self: &Path) -> &[u8]
+pub fn rawBytes<'life0>(self: &'life0 Path) -> &'life0 [u8]
 ```
 
 Borrows the complete normalized path as exact platform bytes.
@@ -142,7 +142,7 @@ bytes are not well-formed text, which the `string` view cannot promise.
 ### Method `Path.view`
 
 ```silk
-pub fn view(self: &Path) -> string
+pub fn view<'life0>(self: &'life0 Path) -> string<'life0>
 ```
 
 Borrows the complete path as text when its bytes are known to be valid UTF-8.
@@ -157,7 +157,7 @@ created with [`fromBytes`](#declaration-73696c6b2f66696c6573797374656d3a3a506174
 ### Method `Path.isRoot`
 
 ```silk
-pub fn isRoot(self: &Path) -> bool
+pub fn isRoot<'life0>(self: &'life0 Path) -> bool
 ```
 
 Returns `true` exactly when this path is the portable root `/`.
@@ -167,7 +167,7 @@ Returns `true` exactly when this path is the portable root `/`.
 ### Method `Path.name`
 
 ```silk
-pub fn name(self: &Path) -> string
+pub fn name<'life0>(self: &'life0 Path) -> string<'life0>
 ```
 
 Borrows the final component as text; root returns empty text.
@@ -181,7 +181,7 @@ This has the same UTF-8 precondition as [`view`](#declaration-73696c6b2f66696c65
 ### Associated function `Path.join`
 
 ```silk
-pub effect fn join(base: &silk/filesystem.Path, fragment: string) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn join<'life0: 'env, 'life1: 'env, 'env>(base: &'life0 silk/filesystem.Path, fragment: string<'life1>) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
 ```
 
 Appends one normalized relative text fragment to an absolute base path.
@@ -196,7 +196,7 @@ trailing slash. Use [`resolve`](#declaration-73696c6b2f66696c6573797374656d3a3a5
 ### Associated function `Path.joinUtf8`
 
 ```silk
-pub effect fn joinUtf8(base: &silk/filesystem.Path, fragment: &[u8]) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn joinUtf8<'life0: 'env, 'life1: 'env, 'env>(base: &'life0 silk/filesystem.Path, fragment: &'life1 [u8]) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
 ```
 
 Validates UTF-8 bytes as one normalized relative fragment and appends them to `base`.
@@ -211,7 +211,7 @@ same malformed components rejected by [`join`](#declaration-73696c6b2f66696c6573
 ### Associated function `Path.resolve`
 
 ```silk
-pub effect fn resolve(base: &silk/filesystem.Path, relativeText: string) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn resolve<'life0: 'env, 'life1: 'env, 'env>(base: &'life0 silk/filesystem.Path, relativeText: string<'life1>) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
 ```
 
 Resolves relative text lexically against an explicit absolute base.
@@ -227,7 +227,7 @@ fails with the `InvalidPath` reason. Resolution is lexical and never accesses th
 ### Method `Path.parent`
 
 ```silk
-pub effect fn parent(self: &Path) -> silk/option.Option<silk/filesystem.Path> ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn parent<'life0>(self: &'life0 Path) -> silk/option.Option<silk/filesystem.Path> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Allocates an independently owned parent path, or [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30) when `self` is root.
@@ -433,7 +433,7 @@ pub effect fn store(path: &Path, contents: &[u8]) -> usize
 ### Operation `readFile`
 
 ```silk
-effect fn readFile(path: &silk/filesystem.Path) -> Bytes ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
+effect<'life0> fn readFile<'life0>(path: &'life0 silk/filesystem.Path) -> Bytes ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Reads one complete regular file into independently owned bytes.
@@ -448,7 +448,7 @@ independently of the provider read.
 ### Operation `writeFile`
 
 ```silk
-effect fn writeFile(path: &silk/filesystem.Path, bytes: &[u8]) -> () ! FileError ? &mut FileSystem
+effect<'env> fn writeFile<'life0: 'env, 'life1: 'env, 'env>(path: &'life0 silk/filesystem.Path, bytes: &'life1 [u8]) -> () ! FileError ? &mut FileSystem
 ```
 
 Writes one complete byte view with create-or-truncate semantics.
@@ -463,7 +463,7 @@ does not create missing parent directories—use [`writeFileWithParents`](#decla
 ### Operation `stat`
 
 ```silk
-effect fn stat(path: &silk/filesystem.Path) -> silk/filesystem.DirectoryInfo | silk/filesystem.FileInfo ! FileError ? &mut FileSystem
+effect<'life0> fn stat<'life0>(path: &'life0 silk/filesystem.Path) -> silk/filesystem.DirectoryInfo | silk/filesystem.FileInfo ! FileError ? &mut FileSystem
 ```
 
 Returns [`FileInfo`](#declaration-73696c6b2f66696c6573797374656d3a3a46696c65496e666f) or [`DirectoryInfo`](#declaration-73696c6b2f66696c6573797374656d3a3a4469726563746f7279496e666f) for the path without opening file contents.
@@ -478,7 +478,7 @@ particular kind, not for this discriminating query.
 ### Operation `listDirectory`
 
 ```silk
-effect fn listDirectory(path: &silk/filesystem.Path) -> silk/vector.Vector<silk/filesystem.DirectoryEntry> ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
+effect<'life0> fn listDirectory<'life0>(path: &'life0 silk/filesystem.Path) -> silk/vector.Vector<silk/filesystem.DirectoryEntry> ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Returns immediate owned children in deterministic complete-path byte order.
@@ -493,7 +493,7 @@ retained after the listing vector is released.
 ### Operation `createDirectory`
 
 ```silk
-effect fn createDirectory(path: &silk/filesystem.Path) -> () ! FileError ? &mut FileSystem
+effect<'life0> fn createDirectory<'life0>(path: &'life0 silk/filesystem.Path) -> () ! FileError ? &mut FileSystem
 ```
 
 Creates exactly one missing directory whose parent already exists.
@@ -508,7 +508,7 @@ missing component.
 ### Operation `removeFile`
 
 ```silk
-effect fn removeFile(path: &silk/filesystem.Path) -> () ! FileError ? &mut FileSystem
+effect<'life0> fn removeFile<'life0>(path: &'life0 silk/filesystem.Path) -> () ! FileError ? &mut FileSystem
 ```
 
 Removes exactly one regular file and fails with `WrongType` for a directory.
@@ -518,7 +518,7 @@ Removes exactly one regular file and fails with `WrongType` for a directory.
 ### Operation `removeDirectory`
 
 ```silk
-effect fn removeDirectory(path: &silk/filesystem.Path) -> () ! FileError ? &mut FileSystem
+effect<'life0> fn removeDirectory<'life0>(path: &'life0 silk/filesystem.Path) -> () ! FileError ? &mut FileSystem
 ```
 
 Removes exactly one empty directory.
@@ -533,7 +533,7 @@ descendants are intentionally in scope for removal.
 ### Operation `createTemporaryDirectory`
 
 ```silk
-effect fn createTemporaryDirectory(parent: &silk/filesystem.Path, prefix: &[u8]) -> Path ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
+effect<'env> fn createTemporaryDirectory<'life0: 'env, 'life1: 'env, 'env>(parent: &'life0 silk/filesystem.Path, prefix: &'life1 [u8]) -> Path ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Creates one directory under an existing parent under a name no other caller holds.
@@ -846,7 +846,7 @@ the fields callers should use for recovery.
 ### Associated function `FileSystem.providerCode`
 
 ```silk
-pub fn providerCode(error: &silk/filesystem.FileError) -> silk/option.Option<i32>
+pub fn providerCode<'life0>(error: &'life0 silk/filesystem.FileError) -> silk/option.Option<i32>
 ```
 
 Borrows an error and returns its provider-specific numeric detail, if one was retained.
@@ -856,7 +856,7 @@ Borrows an error and returns its provider-specific numeric detail, if one was re
 ### Associated function `FileSystem.temporaryDirectory`
 
 ```silk
-pub effect fn temporaryDirectory(parent: &silk/filesystem.Path, prefix: string) -> TemporaryDirectory ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
+pub effect<'env> fn temporaryDirectory<'life0: 'env, 'life1: 'env, 'env>(parent: &'life0 silk/filesystem.Path, prefix: string<'life1>) -> TemporaryDirectory ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Creates an explicitly owned temporary directory under `parent` with a name beginning in `prefix`.
@@ -872,7 +872,7 @@ one operation.
 ### Associated function `FileSystem.release`
 
 ```silk
-pub effect fn release(self: TemporaryDirectory) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
+pub effect<'static> fn release(self: TemporaryDirectory) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Consumes one TemporaryDirectory and removes it together with everything inside it.
@@ -889,7 +889,7 @@ removal fails, so copy any diagnostic path information needed before calling.
 ### Associated function `FileSystem.releaseIgnored`
 
 ```silk
-pub effect fn releaseIgnored(self: TemporaryDirectory) -> () ? &mut FileSystem | &mut Allocator
+pub effect<'static> fn releaseIgnored(self: TemporaryDirectory) -> () ? &mut FileSystem | &mut Allocator
 ```
 
 Consumes one TemporaryDirectory, removes it, and discards a failed removal.
@@ -913,7 +913,7 @@ starts. Derive the required paths before you give the owner to the finalizer.
 ### Associated function `FileSystem.removeDirectoryRecursively`
 
 ```silk
-pub effect fn removeDirectoryRecursively(path: &silk/filesystem.Path) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
+pub effect<'life0> fn removeDirectoryRecursively<'life0>(path: &'life0 silk/filesystem.Path) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Removes a directory, every descendant file, and every descendant directory.
@@ -935,7 +935,7 @@ removals already completed remain completed and the remaining tree is left in pl
 ### Associated function `FileSystem.createDirectoriesRecursively`
 
 ```silk
-pub effect fn createDirectoriesRecursively(path: &silk/filesystem.Path) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
+pub effect<'life0> fn createDirectoriesRecursively<'life0>(path: &'life0 silk/filesystem.Path) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Ensures that `path` and every missing ancestor exist as directories.
@@ -951,7 +951,7 @@ composition, so concurrent namespace changes may still race according to provide
 ### Associated function `FileSystem.writeFileWithParents`
 
 ```silk
-pub effect fn writeFileWithParents(path: &silk/filesystem.Path, bytes: &[u8]) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
+pub effect<'env> fn writeFileWithParents<'life0: 'env, 'life1: 'env, 'env>(path: &'life0 silk/filesystem.Path, bytes: &'life1 [u8]) -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &mut Allocator
 ```
 
 Ensures every parent directory exists, then writes the complete byte view to `path`.
@@ -967,7 +967,7 @@ not transactional, so a later failure may leave newly created parents behind.
 ### Associated function `FileSystem.exists`
 
 ```silk
-pub effect fn exists(path: &silk/filesystem.Path) -> bool ! FileError ? &mut FileSystem
+pub effect<'life0> fn exists<'life0>(path: &'life0 silk/filesystem.Path) -> bool ! FileError ? &mut FileSystem
 ```
 
 Returns whether a file or directory exists at `path`.

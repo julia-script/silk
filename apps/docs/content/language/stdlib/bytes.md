@@ -88,7 +88,7 @@ Creates an empty `Bytes` value without allocating storage.
 ### Associated function `Bytes.zeroed`
 
 ```silk
-pub effect fn zeroed(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator
+pub effect<'static> fn zeroed(length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator
 ```
 
 Allocates an owned initialized byte buffer of exactly `length` zero octets.
@@ -102,7 +102,7 @@ A zero length returns an empty value without an allocation.
 ### Method `Bytes.length`
 
 ```silk
-pub fn length(self: &Bytes) -> usize
+pub fn length<'life0>(self: &'life0 Bytes) -> usize
 ```
 
 Returns the initialized byte count.
@@ -112,7 +112,7 @@ Returns the initialized byte count.
 ### Associated function `Bytes.copy`
 
 ```silk
-pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn copy<'life0>(values: &'life0 [u8]) -> Bytes ! OutOfMemoryError ? &mut Allocator
 ```
 
 Copies a complete borrowed byte sequence into independently owned storage.
@@ -122,7 +122,7 @@ Copies a complete borrowed byte sequence into independently owned storage.
 ### Method `Bytes.append`
 
 ```silk
-pub effect fn append(self: &mut Bytes, values: &[u8]) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn append<'life0: 'env, 'life1: 'env, 'env>(self: &'life0 mut Bytes, values: &'life1 [u8]) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends a complete borrowed byte sequence in source order.
@@ -136,7 +136,7 @@ If growth fails, the original bytes and their length remain unchanged.
 ### Method `Bytes.asSlice`
 
 ```silk
-pub fn asSlice(self: &Bytes) -> &[u8]
+pub fn asSlice<'life0>(self: &'life0 Bytes) -> &'life0 [u8]
 ```
 
 Borrows all initialized octets as one shared lexical slice.
@@ -146,7 +146,7 @@ Borrows all initialized octets as one shared lexical slice.
 ### Method `Bytes.asMutSlice`
 
 ```silk
-pub fn asMutSlice(self: &mut Bytes) -> &mut [u8]
+pub fn asMutSlice<'life0>(self: &'life0 mut Bytes) -> &'life0 mut [u8]
 ```
 
 Borrows all initialized octets as one exclusive lexical slice.

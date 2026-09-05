@@ -73,7 +73,7 @@ export const instanceText = (
   declaration: { readonly module: string; readonly name: string },
   typeArguments: ReadonlyArray<Type.GenericArgument>,
   staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
-): string => Specialization.key({ declaration, typeArguments, staticArguments })
+): string => Specialization.runtimeKey({ declaration, typeArguments, staticArguments })
 
 export const effectEntryAdapterId = (module: string): DeclarationFacts.CanonicalId =>
   Object.freeze({

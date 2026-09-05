@@ -9,31 +9,26 @@ exposing raw pointers, or requiring dynamic allocation.
 
 ### Requirement: Slice types make borrowed access explicit
 
-An ordinary function parameter SHALL accept the shared slice type `&[T]` or the exclusive slice
-type `&mut [T]`, where `T` is one available concrete or generic element type. Slice type identity
-SHALL include the canonical element type and access mode but SHALL NOT include the source array
-length. Slice parameters MUST NOT be accepted on lazy or capturing function forms in this bootstrap
-slice.
+Slice types SHALL accept shared `&'a [T]` and exclusive `&'a mut [T]` forms and their elided forms. Semantic identity SHALL retain the lifetime, canonical element type, and access mode without a fixed source-array length. Lazy or capturing functions SHALL admit lifetime-bearing captures only when their environment bounds preserve source validity and access; new borrowed outcomes remain gated until outcome checking is admitted.
 
 #### Scenario: Declare shared and exclusive slice parameters
 
 - **WHEN** ordinary functions declare `values: &[i32]` and `values: &mut [i32]`
 - **THEN** both parameter types resolve with canonical element `i32`, distinct access modes, and no fixed length
 
-#### Scenario: Reject a slice on a lazy function boundary
+#### Scenario: Preserve a slice on a lazy function boundary
 
 - **WHEN** a lazy or capturing function form declares or captures a slice
-- **THEN** analysis rejects the escaping boundary without inventing ownership for the borrowed storage
+- **THEN** analysis retains its environment lifetime and rejects execution or escape beyond the borrowed storage's validity
+
+#### Scenario: Reject a slice on a lazy function boundary
+
+- **WHEN** a lazy computation retains a slice beyond its source validity
+- **THEN** analysis rejects the escape while preserving its environment lifetime witness
 
 ### Requirement: Whole-array borrowing is explicit and call-scoped
 
-A call argument `&array` SHALL create a shared slice and `&mut array` SHALL create an exclusive
-slice over the complete stable fixed-array root. The operand MUST be a direct live array binding
-whose lifetime encloses the complete call, and exclusive formation MUST additionally require a
-mutable root. There SHALL be no implicit fixed-array-to-slice conversion. Standalone slice local
-bindings and stable projected or materialized temporary roots SHALL use the same lexical loan
-tracking as call arguments. Storing slices in owned values SHALL remain unsupported. Ordinary
-functions MAY return one-source lexical views under the returned-view contract below.
+An explicit `&array` SHALL create a shared slice and `&mut array` an exclusive slice over initialized stable fixed-array storage. Formation SHALL require sufficient source validity for all retained uses, and exclusive formation SHALL require mutable access. Direct bindings, stable projected places, and materialized temporary owners SHALL follow the same lifetime and loan rules. There SHALL be no implicit fixed-array-to-slice conversion. Shared slice locals, ordinary aggregate storage, generic propagation, and declared ordinary-function results SHALL preserve semantic lifetime arguments; views spanning a missing element SHALL be rejected.
 
 #### Scenario: Borrow two array lengths for one function
 
@@ -45,16 +40,21 @@ functions MAY return one-source lexical views under the returned-view contract b
 - **WHEN** a fixed array is passed directly to a slice parameter without `&` or `&mut`
 - **THEN** the call remains incompatible and reports the missing explicit borrow
 
-#### Scenario: Reject a standalone slice binding
+#### Scenario: Retain a standalone slice binding
 
 - **WHEN** a binding initializer attempts `let view = &values`
-- **THEN** analysis rejects the unsupported lifetime-bearing local while retaining the borrow syntax and source place
+- **THEN** analysis admits the local view and retains its source place and lifetime through every dependent use
+
+#### Scenario: Reject a standalone slice binding
+
+- **WHEN** a standalone slice would span a missing array element or outlive its backing storage
+- **THEN** analysis rejects the invalid view while retaining its source place and reason
 
 ### Requirement: Slice parameters support compatible call-scoped reborrows
 
 A shared slice parameter SHALL be forwardable only as a shared call-scoped reborrow. An exclusive
 slice parameter SHALL support shared or exclusive call-scoped reborrowing; the parent exclusive
-access SHALL be suspended for the complete nested call and restored when that call returns. An
+access SHALL be suspended for the complete nested call and restored only when that call and every retained child dependent have ended. An
 exclusive slice MUST NOT be copied or forwarded as an independent alias.
 
 #### Scenario: Reborrow exclusive storage through a helper
@@ -104,12 +104,9 @@ MUST be rejected because it would leave borrowed storage partially initialized.
 - **WHEN** source attempts to move one non-Copy element or field out of a slice
 - **THEN** ownership rejects the partial move and keeps the backing owner's cleanup obligation intact
 
-### Requirement: Ordinary functions may return one-source lexical views
+### Requirement: Ordinary functions return declared lifetime-bearing values
 
-An ordinary function SHALL be permitted to return a shared or exclusive reference or slice view
-only when the result is proven to originate from exactly one borrowed parameter. A shared returned
-view MAY originate from `&T` or `&mut T`; an exclusive returned view MUST originate from `&mut T`.
-Effect, service, interface, and other owned result contracts MUST NOT return borrowed views.
+An ordinary function SHALL return a shared or exclusive reference, slice, or shared borrowed aggregate when its declared lifetime relationships are satisfied by its body and concrete callers. Explicit relationships SHALL support multiple possible sources and independently named stored lifetimes; shared results SHALL derive only shared permission and exclusive results SHALL require exclusive permission. Structural callable and interface operation contracts SHALL carry those same relationships without requiring an exact implementation body at application. Effect success and failure borrows SHALL remain gated until outcome checking is admitted. References into invalid locals, expired temporaries, or by-value inline parameter storage SHALL be rejected; forwarding external data retained by a by-value wrapper SHALL remain valid.
 
 #### Scenario: Return a shared subview
 
@@ -126,10 +123,10 @@ Effect, service, interface, and other owned result contracts MUST NOT return bor
 - **WHEN** an ordinary function takes only a shared parameter and attempts to return an exclusive view
 - **THEN** analysis rejects the result because no exclusive origin exists
 
-#### Scenario: Reject multiple possible origins
+#### Scenario: Admit declared multiple possible origins
 
-- **WHEN** a returned view may originate from either of two borrowed parameters
-- **THEN** analysis rejects the function without inventing lifetime parameters or a merged origin
+- **WHEN** a returned view may originate from either of two borrowed parameters whose explicit signature shares one result lifetime
+- **THEN** analysis accepts the function and requires every possible source to remain valid for the returned view's required uses
 
 #### Scenario: Return a nominal reference through a pipeline
 
@@ -141,17 +138,29 @@ Effect, service, interface, and other owned result contracts MUST NOT return bor
 - **WHEN** a known section captures the declaration's one returned-borrow parameter and a later exact application produces the result
 - **THEN** the result retains that capture's loan rather than ending it at application
 
+#### Scenario: Use a structural callable lifetime contract
+
+- **WHEN** a structural callable contract declares its borrowed input/output lifetime relationships without an exact function item or section
+- **THEN** analysis instantiates the declared relationships against supplied arguments and preserves the callable environment bound without inspecting a body
+
+#### Scenario: Return stored data independently of wrapper storage
+
+- **WHEN** a getter returns an explicitly named data lifetime from a borrowed holder, while another getter returns a reference to the holder's own index
+- **THEN** the data view can survive moving or dropping the wrapper while the index reference prevents invalidating its wrapper place
+
+#### Scenario: Reject multiple possible origins
+
+- **WHEN** a result can derive from two independent borrowed inputs but its signature declares only one input as supporting its lifetime
+- **THEN** the body fails its declared relationship rather than manufacturing a merged public source contract
+
 #### Scenario: Do not guess through an opaque callable
 
-- **WHEN** only a structural callable contract with a borrowed result is known and no exact function item or section identifies its source
-- **THEN** analysis does not infer provenance from arbitrary supplied arguments or captures
+- **WHEN** a structural callable has an ambiguous undeclared result lifetime and no deterministic elision default
+- **THEN** analysis rejects the incomplete contract without inspecting hidden bodies or captures
 
-### Requirement: Returned views remain lexical and non-storable
+### Requirement: Returned views preserve validity through ordinary storage
 
-A returned view SHALL be usable as a local lexical binding and as a compatible call-scoped reborrow.
-Its lifetime MUST NOT exceed the lexical lifetime of its source owner. Lifetime-bearing references
-and slices MUST remain forbidden in structs, arrays, unions, Effect success or failure values,
-captures, and other owned storage.
+A returned view SHALL be usable in local bindings, compatible reborrows, shared borrowed aggregate storage, generic payloads, and valid callable or Effect captures. Every nested lifetime SHALL remain visible to compatibility, ownership, and escape checking. Retained uses MUST NOT exceed referent validity. Exclusive stored borrows, dependent user Drop, and borrowed Effect success or failure values SHALL remain explicitly gated until their respective proofs are implemented.
 
 #### Scenario: Use and release a returned local view
 
@@ -163,10 +172,15 @@ captures, and other owned storage.
 - **WHEN** control could preserve a returned view after its source owner's lexical scope ends
 - **THEN** ownership rejects the escape at the boundary that would outlive the owner
 
+#### Scenario: Store a shared returned view
+
+- **WHEN** source attempts to place a shared returned view in a struct field or array element
+- **THEN** analysis accepts the lifetime-bearing payload and retains the view's loans through its containing value's uses
+
 #### Scenario: Reject storing a returned view
 
-- **WHEN** source attempts to place a returned borrowed view in a struct field or array element
-- **THEN** analysis retains the stored-borrow prohibition and reports that the lifetime-bearing value is not an owned field value
+- **WHEN** storing a view would permit a later use after its source storage becomes invalid
+- **THEN** analysis rejects the escape and identifies the retaining aggregate path
 
 ### Requirement: Value borrows preserve stable field projections
 

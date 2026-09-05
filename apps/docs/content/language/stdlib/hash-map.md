@@ -148,7 +148,7 @@ and is the only thing besides the sequence of operations that decides it.
 ### Method `HashMap.length`
 
 ```silk
-pub fn length<K, V>(self: &HashMap<K, V>) -> usize
+pub fn length<K, V, 'life2>(self: &'life2 HashMap<K, V>) -> usize
 ```
 
 Returns the number of entries the map holds.
@@ -158,7 +158,7 @@ Returns the number of entries the map holds.
 ### Method `HashMap.bucketCount`
 
 ```silk
-pub fn bucketCount<K, V>(self: &HashMap<K, V>) -> usize
+pub fn bucketCount<K, V, 'life2>(self: &'life2 HashMap<K, V>) -> usize
 ```
 
 Returns the number of buckets the map presents, which is the range `occupiedAt` accepts.
@@ -168,7 +168,7 @@ Returns the number of buckets the map presents, which is the range `occupiedAt` 
 ### Method `HashMap.occupiedAt`
 
 ```silk
-pub fn occupiedAt<K, V>(self: &HashMap<K, V>, index: usize) -> bool
+pub fn occupiedAt<K, V, 'life2>(self: &'life2 HashMap<K, V>, index: usize) -> bool
 ```
 
 Reports whether one bucket holds an entry. Out-of-range buckets hold nothing.
@@ -178,7 +178,7 @@ Reports whether one bucket holds an entry. Out-of-range buckets hold nothing.
 ### Method `HashMap.insert`
 
 ```silk
-pub effect fn insert<K, V>(self: &mut HashMap<K, V>, key: K, value: V) -> silk/option.Option<V> ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn insert<K: 'env, V: 'env, 'life2: 'env, 'env>(self: &'life2 mut HashMap<K, V>, key: K, value: V) -> silk/option.Option<V> ! OutOfMemoryError ? &mut Allocator
 ```
 
 Inserts one owned key and value, answering with the value an equivalent key already held.
@@ -196,7 +196,7 @@ leaves every prior entry at its own key, and leaves the length and the bucket co
 ### Method `HashMap.contains`
 
 ```silk
-pub fn contains<K, V>(self: &HashMap<K, V>, key: K) -> bool
+pub fn contains<K, V, 'life2>(self: &'life2 HashMap<K, V>, key: K) -> bool
 ```
 
 Reports whether the map holds an entry under a key equivalent to one probe key.
@@ -210,7 +210,7 @@ This function consumes the probe key. It does not change the map or move a store
 ### Method `HashMap.indexOf`
 
 ```silk
-pub fn indexOf<K, V>(self: &HashMap<K, V>, key: K) -> silk/option.Option<usize>
+pub fn indexOf<K, V, 'life2>(self: &'life2 HashMap<K, V>, key: K) -> silk/option.Option<usize>
 ```
 
 Returns the bucket holding an entry under a key equivalent to one probe key, or an absent value.
@@ -226,7 +226,7 @@ This function consumes the probe key.
 ### Method `HashMap.get`
 
 ```silk
-pub fn get<K, V>(self: &HashMap<K, V>, key: K) -> silk/option.Option<V>
+pub fn get<K, V, 'life2>(self: &'life2 HashMap<K, V>, key: K) -> silk/option.Option<V>
 ```
 
 Returns the value held under a key equivalent to one probe key, or an absent value.
@@ -242,7 +242,7 @@ This function consumes the probe key and does not change the map.
 ### Method `HashMap.withMut`
 
 ```silk
-pub fn withMut<K, V, F>(self: &mut HashMap<K, V>, key: K, use: F) -> bool
+pub fn withMut<K, V, F, 'life4, 'life5>(self: &'life5 mut HashMap<K, V>, key: K, use: F) -> bool
 ```
 
 Runs one take-once callback with exclusive access to an existing value.
@@ -262,7 +262,7 @@ count unchanged.
 ### Method `HashMap.remove`
 
 ```silk
-pub fn remove<K, V>(self: &mut HashMap<K, V>, key: K) -> silk/option.Option<V>
+pub fn remove<K, V, 'life2>(self: &'life2 mut HashMap<K, V>, key: K) -> silk/option.Option<V>
 ```
 
 Removes the entry under a key equivalent to one probe key and answers with its value.
@@ -277,7 +277,7 @@ held is released, and the probe key is released as well.
 ### Method `HashMap.keyAt`
 
 ```silk
-pub fn keyAt<K, V>(self: &HashMap<K, V>, index: usize) -> K
+pub fn keyAt<K, V, 'life2>(self: &'life2 HashMap<K, V>, index: usize) -> K
 ```
 
 Returns the key held in one bucket. Traps on a bucket that holds no entry.
@@ -295,7 +295,7 @@ If `index` is out of range or [`occupiedAt`](#declaration-73696c6b2f686173685f6d
 ### Method `HashMap.valueAt`
 
 ```silk
-pub fn valueAt<K, V>(self: &HashMap<K, V>, index: usize) -> V
+pub fn valueAt<K, V, 'life2>(self: &'life2 HashMap<K, V>, index: usize) -> V
 ```
 
 Returns the value held in one bucket. Traps on a bucket that holds no entry.

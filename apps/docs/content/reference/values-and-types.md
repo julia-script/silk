@@ -117,6 +117,8 @@ relations applies:
 3. A structural union widens into another containing every source member.
 4. Callable invocation mode weakens under CALLABLE-003.
 5. Effect run access weakens under the Effect ownership rules.
+6. Proven outlives relationships and declared variance permit lifetime shortening; exclusive
+   reference targets remain invariant. See [lifetimes](lifetimes.md).
 
 No other subtyping or implicit conversion exists.
 
@@ -348,7 +350,7 @@ than a diagnostic or trap.
 **Status:** Confirmed
 
 `string` is a Copy immutable view of valid UTF-8, distinct from every scalar and from `&[u8]`.
-An ordinary text literal has type `string` and program lifetime. A byte-string literal has type
+An ordinary text literal has type `string<'static>`. A byte-string literal has type
 `&[u8]` and preserves exact bytes.
 
 ```silk
@@ -605,7 +607,7 @@ cycle diagnostic without losing its nominal declaration identity.
 A struct is affine unless it explicitly requests `Copy`. The compiler accepts `impl Copy` only when
 every field is Copy and the struct has no cleanup behavior. Copying never runs user code.
 
-Aggregate moves, partial-move prohibition, mutation, and cleanup are defined by the ownership
+Complete and eligible partial moves, mutation, and cleanup are defined by the ownership
 reference rather than by field shape alone.
 
 **Boundary:** A field-only scalar struct does not become Copy automatically. An owner of allocated
@@ -749,7 +751,7 @@ branch construct the same declared type.
 
 Anonymous aggregates follow ordinary struct ownership. Even when every member is Copy, an
 anonymous aggregate remains affine because no Copy conformance was declared for its hidden nominal
-type. Whole-value moves transfer its one cleanup obligation; borrows and partial-move rejection are
+type. Whole-value moves transfer its one cleanup obligation; borrows and eligible partial moves are
 the ordinary struct rules.
 
 **Evidence:** [tuple and contextual record specification](../../../../openspec/changes/add-tuples-and-contextual-record-literals/specs/tuple-and-contextual-record-literals/spec.md),
@@ -896,8 +898,8 @@ fields. Their environment, runner, access, suspension, and cleanup facts exist o
 that declares the field; an inactive variant has no speculative payload to evaluate or release.
 
 **Boundary:** All-Copy fields do not imply Copy for the parent. Extracting one owned represented
-field as an arbitrary partial move remains invalid; consume it through a variant pattern whose
-ownership accounts for the rest of the active payload.
+field requires an initialized owned projection and current variant proof; a `match place` arm or
+a complete consuming variant pattern supplies that proof. A consuming pattern's ownership accounts for the rest of the active payload.
 
 **Evidence:** [ownership tests](../../../../packages/compiler/test/Ownership.test.ts),
 [represented variant tests](../../../../packages/compiler/test/StructValues.test.ts),
@@ -1163,7 +1165,7 @@ out-of-bounds index `SEM0034`. A dynamic overrun is a runtime trap rather than a
 
 `&T` and `&mut T` are shared and exclusive lexical references to one complete `T`. `&[T]` and
 `&mut [T]` are shared and exclusive runtime-length contiguous views. Slice type identity includes
-element type and access mode, but not the source array's length.
+element type, access mode, and lifetime, but not the source array's length.
 
 ```silk
 fn first(values: &[i32]) -> i32 {
@@ -1181,16 +1183,17 @@ borrow's lexical lifetime. Arrays of different lengths may therefore be borrowed
 `&[T]` parameter.
 
 **Boundary:** There is no implicit array-to-slice decay. Shared access cannot strengthen to
-exclusive access, and borrowed views cannot become owned values. Valid type positions, reborrowing,
-returned views, storage restrictions, and loan endings follow the ownership reference.
+exclusive access. Shared views may be stored in ordinary values whose declared lifetimes retain
+their validity. Explicit `&'a T`, `&'a [T]`, and `string<'a>` spellings and deterministic omissions
+follow the [lifetime reference](lifetimes.md). Reborrowing and loan endings follow the ownership reference.
 
-**Diagnostics:** Invalid borrowed-view positions report `SEM0054`; invalid borrow positions and operands use
-`SEM0055` and `SEM0056`; exclusive borrowing of an immutable root uses `SEM0057`; invalid reborrowing
+**Diagnostics:** Invalid borrow operands report `SEM0056`; exclusive borrowing of an immutable root
+uses `SEM0057`; ambiguous lifetime elision uses `SEM0210`; expired validity uses `OWN0019`; invalid reborrowing
 uses `SEM0058`; implicit array decay uses `SEM0059`.
 
 **Evidence:** [runtime slice specification](../../../../openspec/specs/bootstrap-runtime-slices/spec.md),
 [borrow rules](ownership-and-borrowing.md#borrow-001--a-shared-borrow-grants-temporary-read-access),
-[returned views](ownership-and-borrowing.md#view-001--an-ordinary-function-may-return-a-view-from-one-borrowed-parameter).
+[returned views](ownership-and-borrowing.md#view-001--an-ordinary-result-follows-declared-lifetime-relationships).
 
 ## Raw pointers
 

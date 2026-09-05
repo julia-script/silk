@@ -409,27 +409,23 @@ const keyOf = (
       contractRow:
         contract._tag === 'Contract'
           ? Object.freeze([
-              ...contract.parameters.map((type) => Type.key(Type.substitute(type, substitution))),
-              `result:${Type.key(Type.substitute(contract.result, substitution))}`,
+              ...contract.parameters.map((type) =>
+                Type.runtimeKey(Type.substitute(type, substitution)),
+              ),
+              `result:${Type.runtimeKey(Type.substitute(contract.result, substitution))}`,
               ...(contract.failureRow === undefined
                 ? []
                 : [
-                    `failures:${RowAlgebra.key(
-                      Type.failureRowPolicy(),
-                      Type.substituteFailureRow(contract.failureRow, substitution),
-                    )}`,
+                    `failures:${Type.runtimeFailureRowKey(Type.substituteFailureRow(contract.failureRow, substitution))}`,
                   ]),
               ...(contract.requirementRow === undefined
                 ? []
                 : [
-                    `requirements:${RowAlgebra.key(
-                      Type.requirementRowPolicy(),
-                      Type.substituteRequirementsRow(contract.requirementRow, substitution),
-                    )}`,
+                    `requirements:${Type.runtimeRequirementsRowKey(Type.substituteRequirementsRow(contract.requirementRow, substitution))}`,
                   ]),
               ...contract.constraints.map(
                 (constraint) =>
-                  `constraint:${Constraint.key(Constraint.substitute(constraint, substitution))}`,
+                  `constraint:${Type.runtimeConstraintKey(Constraint.substitute(constraint, substitution))}`,
               ),
             ])
           : Object.freeze([]),
@@ -441,9 +437,9 @@ const keyTextCache = new WeakMap<InstanceKey, string>()
 export const keyText = (key: InstanceKey): string => {
   let cached = keyTextCache.get(key)
   if (cached === undefined) {
-    cached = `${key.declaration.module}\u0000${key.declaration.name}\u0000${key.typeArguments
-      .map(Type.genericArgumentKey)
-      .join('\u0000')}${key.evidence.length === 0 ? '' : `\u0004${key.evidence.join('\u0000')}`}${
+    cached = `${key.declaration.module}\u0000${key.declaration.name}\u0000${Type.runtimeArgumentKeys(
+      key.typeArguments,
+    ).join('\u0000')}${key.evidence.length === 0 ? '' : `\u0004${key.evidence.join('\u0000')}`}${
       key.staticArguments.length === 0
         ? ''
         : `\u0001${key.staticArguments.map(StaticValue.key).join('\u0000')}`
@@ -661,8 +657,8 @@ export const matchingSpecialization = (
   self: Discovery,
   specialization: Specialization.Specialization,
 ): ReadonlyArray<Instance> => {
-  const identity = Specialization.key(specialization)
-  return self.instances.filter((candidate) => Specialization.key(candidate.key) === identity)
+  const identity = Specialization.runtimeKey(specialization)
+  return self.instances.filter((candidate) => Specialization.runtimeKey(candidate.key) === identity)
 }
 
 export const effectIdentity = (owner: InstanceKey, site: Hir.EffectSiteId): string =>
@@ -849,7 +845,7 @@ export const parameterCallableIdentity = (
 }
 
 export const callableIdentity = (self: CallableInstance): string =>
-  `${keyText(self.owner)}\u0001${Hir.executableSiteKey(self.site)}\u0001${self.typeArguments.map(Type.genericArgumentKey).join('\u0000')}`
+  `${keyText(self.owner)}\u0001${Hir.executableSiteKey(self.site)}\u0001${Type.runtimeArgumentKeys(self.typeArguments).join('\u0000')}`
 
 /** Returns the canonical specialized identity of one discovered callable environment. */
 export const callableEnvironmentIdentity = (
@@ -1132,17 +1128,15 @@ export const discover = (
     if (environment === undefined) return undefined
     for (const candidate of recordedCallables.values()) {
       if (
-        Type.equalsCallableEnvironmentIdentity(
-          environment,
-          callableEnvironmentIdentity(candidate),
-        ) &&
+        Type.runtimeCallableEnvironmentIdentityKey(environment) ===
+          Type.runtimeCallableEnvironmentIdentityKey(callableEnvironmentIdentity(candidate)) &&
         Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
         candidate.typeArguments.length === identity.typeArguments.length &&
         candidate.typeArguments.every((argument, ordinal) => {
           const expected = identity.typeArguments.at(ordinal)
           return (
             expected !== undefined &&
-            Type.genericArgumentKey(argument) === Type.genericArgumentKey(expected)
+            Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(expected)
           )
         })
       )
@@ -1171,7 +1165,7 @@ export const discover = (
       const candidate = right.typeArguments.at(index)
       return (
         candidate !== undefined &&
-        Type.genericArgumentKey(argument) === Type.genericArgumentKey(candidate)
+        Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate)
       )
     })
   const sameVisibleArguments = (left: InstanceKey, right: InstanceKey): boolean => {
@@ -1187,7 +1181,7 @@ export const discover = (
         const candidate = rightVisible.at(index)
         return (
           candidate !== undefined &&
-          Type.genericArgumentKey(argument) === Type.genericArgumentKey(candidate)
+          Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate)
         )
       })
     )

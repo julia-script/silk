@@ -6147,6 +6147,63 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
+    name: 'partial-owner-cleanup-and-refinement',
+    source: `unsafe extern "C" fn silk_record_drop(value: i32) -> ()
+unsafe extern "C" fn silk_verify_drops() -> i32
+struct Token { value: i32 }
+impl Drop for Token {
+  fn drop(self: &mut Token) -> () {
+    unsafe { silk_record_drop(self.value) }
+    return ()
+  }
+}
+struct Pair { left: Token right: Token }
+union Packet { Empty, Ready { left: Token, right: Token } }
+struct Envelope { packet: Packet footer: Token }
+fn conditional(take: bool) -> () {
+  let pair = Pair { left: Token { value: 1 }, right: Token { value: 2 } }
+  if take { let extracted = move pair.left drop extracted }
+  return ()
+}
+fn restored() -> () {
+  let mut pair = Pair { left: Token { value: 3 }, right: Token { value: 4 } }
+  let extracted = move pair.left
+  drop extracted
+  pair.left = Token { value: 5 }
+  drop pair
+  return ()
+}
+fn refined(packet: Packet) -> () {
+  let envelope = Envelope { packet: move packet, footer: Token { value: 8 } }
+  match place envelope.packet {
+    Packet.Ready { left, .. } => { let extracted = move left drop extracted }
+    Packet.Empty => {}
+  }
+  drop envelope
+  return ()
+}
+pub fn main() -> i32 {
+  conditional(false)
+  conditional(true)
+  restored()
+  refined(Packet.Ready { left: Token { value: 6 }, right: Token { value: 7 } })
+  unsafe { return silk_verify_drops() }
+}`,
+    nativeCSources: {
+      drops: `#include <stdint.h>
+#include <stdio.h>
+static char events[32];
+static unsigned count;
+void silk_record_drop(int32_t value) {
+  if (count < sizeof(events) - 1) events[count++] = (char)('0' + value);
+}
+int32_t silk_verify_drops(void) { puts(events); return 42; }
+`,
+    },
+    nativeStdout: '1212354678\n',
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'match-statement-arm-control',
     source: `struct Left { value: i32 }
 struct Right {}

@@ -119,7 +119,7 @@ Constructs a present option by moving `value` into it.
 ### Method `Option.map`
 
 ```silk
-pub fn map<T, U>(self: Option<T>, transform: once fn(T) -> U) -> silk/option.Option<U>
+pub fn map<T, U, 'life2>(self: Option<T>, transform: once fn<'life2>(T) -> U) -> silk/option.Option<U>
 ```
 
 Applies `transform` once to a present value and keeps an absent value absent.
@@ -134,7 +134,7 @@ The callback is not called for [`None`](#declaration-73696c6b2f6f7074696f6e3a3a4
 ### Method `Option.flatMap`
 
 ```silk
-pub fn flatMap<T, U>(self: Option<T>, transform: once fn(T) -> silk/option.Option<U>) -> silk/option.Option<U>
+pub fn flatMap<T, U, 'life2>(self: Option<T>, transform: once fn<'life2>(T) -> silk/option.Option<U>) -> silk/option.Option<U>
 ```
 
 Continues a present value with a transform that itself answers with an Option, so the

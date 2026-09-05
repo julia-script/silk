@@ -1,3 +1,4 @@
+import * as BodyQuery from './BodyQuery.js'
 import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
 import type * as CallableContract from './CallableContract.js'
@@ -6,6 +7,7 @@ import type * as Constraint from './Constraint.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as NominalVariance from './NominalVariance.js'
 import * as Hir from './Hir.js'
 import type * as Intrinsic from './Intrinsic.js'
 import type * as Match from './Match.js'
@@ -20,6 +22,7 @@ import type * as StaticValue from './StaticValue.js'
 import type * as SyntaxFile from './SyntaxFile.js'
 import * as SyntaxTree from './SyntaxTree.js'
 import type * as Token from './Token.js'
+import * as Lifetime from './Lifetime.js'
 import * as Type from './Type.js'
 import * as TypeCompatibility from './TypeCompatibility.js'
 
@@ -207,7 +210,6 @@ export type CallReferenceFact =
       readonly parameters: ReadonlyArray<SemanticType>
       readonly result: SemanticType
       readonly unsafe: boolean
-      readonly returnedBorrowParameter?: number
     }
   | {
       readonly _tag: 'ResolvedEnumOperation'
@@ -407,6 +409,8 @@ export interface PatternBindingFact {
   readonly path: ReadonlyArray<DeclarationFacts.FieldId>
   readonly type: ExpressionTypeFact
   readonly access: Match.Access
+  /** Owned place aliases inherit assignment permission from the matched root. */
+  readonly placeMutability?: 'Mutable' | 'Immutable'
   readonly syntax: SyntaxTree.Node
 }
 
@@ -908,10 +912,6 @@ export interface CallableApplyExpressionFact {
   /** Generic evidence learned from the newly supplied callable arguments. */
   readonly substitution: Type.Substitution
   readonly inferredProviderSelectors: ReadonlyArray<InferredProviderSelector>
-  /** The exact supplied argument or section capture whose lexical loan backs this result. */
-  readonly returnedBorrowSource?:
-    | { readonly _tag: 'Argument'; readonly ordinal: number }
-    | { readonly _tag: 'Capture'; readonly capture: CallableCaptureFact }
   /**
    * Present when the supplied arguments are a proper trailing suffix of a callable value's
    * remaining parameters: the application stages a new section over the value instead of
@@ -1112,44 +1112,39 @@ export type ExpressionFact =
       readonly syntax: SyntaxTree.Node
     }
 
-/** The unique call argument whose lexical storage may back this call's result. */
-export const returnedBorrowArgument = (self: ExpressionFact): ArgumentFact | undefined => {
-  if (self._tag === 'CallableApply') {
-    const source = self.returnedBorrowSource
-    const ordinal = source?._tag === 'Argument' ? source.ordinal : undefined
-    return ordinal === undefined ? undefined : self.arguments.at(ordinal)
-  }
-  if (self._tag !== 'Call') return undefined
-  if (self.reference._tag === 'ResolvedBuiltin') {
-    const ordinal = self.reference.returnedBorrowParameter
-    return ordinal === undefined ? undefined : self.arguments.at(ordinal)
-  }
-  if (self.reference._tag === 'ResolvedIntrinsicContract') {
-    const ordinal = self.reference.intrinsic.returnedBorrowParameter
-    return ordinal === undefined ? undefined : self.arguments.at(ordinal)
-  }
-  if (self.reference._tag !== 'Resolved') return undefined
-  const declared = DeclarationFacts.returnedBorrow(self.reference.declaration)
-  if (declared !== undefined) {
-    return self.mappings.find(
-      (mapping) => mapping.parameter.id.ordinal === declared.parameter.id.ordinal,
-    )?.argument
-  }
-  if (self.type._tag !== 'Available' || !Type.containsViewBorrow(self.type.type)) return undefined
-  const candidates = self.mappings.filter(
-    (mapping) =>
-      mapping.argument.type._tag === 'Available' &&
-      Type.containsViewBorrow(mapping.argument.type.type),
+/** Whether a selected result retains any validity requirement carried by an input value. */
+export const retainsLifetimes = (
+  source: SemanticType,
+  result: SemanticType,
+  assumptions: Lifetime.Assumptions,
+): boolean => {
+  const required = Type.storageLifetimes(result).filter(
+    (lifetime) => lifetime._tag !== 'StaticLifetime',
   )
-  return candidates.length === 1 ? candidates.at(0)?.argument : undefined
+  return (
+    required.length > 0 &&
+    Type.storageLifetimes(source).some((lifetime) =>
+      required.some((output) => Lifetime.outlives(assumptions, lifetime, output)),
+    )
+  )
 }
 
-/** The exact lexical expression whose storage may back this invocation's borrowed-view result. */
-export const returnedBorrowExpression = (self: ExpressionFact): ExpressionFact | undefined => {
-  if (self._tag === 'CallableApply' && self.returnedBorrowSource?._tag === 'Capture') {
-    return self.returnedBorrowSource.capture.expression
-  }
-  return returnedBorrowArgument(self)?.expression
+/** Every supplied argument retained by the selected result contract, including nested payloads. */
+export const retainedResultArguments = (
+  self: ExpressionFact,
+  assumptions: Lifetime.Assumptions,
+): ReadonlyArray<ArgumentFact> => {
+  if (
+    (self._tag !== 'Call' && self._tag !== 'CallableApply' && self._tag !== 'Operator') ||
+    self.type._tag !== 'Available'
+  )
+    return []
+  const result = self.type.type
+  return self.arguments.filter(
+    (argument) =>
+      argument.type._tag === 'Available' &&
+      retainsLifetimes(argument.type.type, result, assumptions),
+  )
 }
 
 /** A deterministic argument identity within one caller and concrete call site. */
@@ -1182,7 +1177,7 @@ export interface TypeArgumentFact {
   readonly ordinal: number
   readonly syntax: SyntaxTree.Node
   readonly declared: DeclaredTypeFact
-  readonly type?: SemanticType
+  readonly type?: SemanticType | Lifetime.Lifetime
   /** Canonical role of an access-independent requirement selector such as `T at Role`. */
   readonly requirementRole?: Type.Requirement['role']
 }
@@ -1230,7 +1225,7 @@ export type CallContractFact =
 /** Whether one returned expression is known to match its declared result type. */
 export type ReturnCompatibility = { readonly _tag: 'Compatible' } | { readonly _tag: 'Unavailable' }
 
-export type AssignmentRootFact = BindingDeclarationFact | ParameterFact
+export type AssignmentRootFact = BindingDeclarationFact | ParameterFact | PatternBindingFact
 
 export type AssignmentRootAccess =
   | 'ImmutableOwned'
@@ -1240,6 +1235,10 @@ export type AssignmentRootAccess =
 
 /** Classifies writable roots without conflating owned binding mutability with pointee access. */
 export const assignmentRootAccess = (root: AssignmentRootFact): AssignmentRootAccess => {
+  if (root._tag === 'PatternBinding')
+    return root.access === 'Place' && root.placeMutability === 'Mutable'
+      ? 'MutableOwned'
+      : 'ImmutableOwned'
   let type: Type.Type | undefined
   if (root._tag === 'ParameterDeclaration') {
     if (root.declaredType._tag === 'Resolved') {
@@ -1264,6 +1263,8 @@ export const assignmentRoot = (fact: ExpressionFact): AssignmentRootFact | undef
   if (fact._tag === 'Identifier') {
     if (fact.reference._tag === 'ResolvedBinding') return fact.reference.binding
     if (fact.reference._tag === 'Resolved') return fact.reference.parameter
+    if (fact.reference._tag === 'ResolvedPattern' && fact.reference.binding.access === 'Place')
+      return fact.reference.binding
     return undefined
   }
   if (
@@ -1375,6 +1376,9 @@ export type StatementFact =
 /** One function's declaration, statements, bindings, and compatibility facts. */
 export interface FunctionFact {
   readonly _tag: 'FunctionFact'
+  readonly comparisonWork?: Readonly<import('./TypeCompatibility.js').Work>
+  readonly lifetimeFlow?: import('./LifetimeFlow.js').LifetimeFlow
+  readonly lifetimeAdmission?: ReadonlyArray<import('./LifetimeAdmission.js').Obligation>
   readonly declaration: DeclarationFact
   readonly statements: ReadonlyArray<StatementFact>
   readonly bindings: ReadonlyArray<BindingDeclarationFact>
@@ -1383,7 +1387,6 @@ export interface FunctionFact {
   readonly returnCompatibility: ReturnCompatibility
   /** The finite composite Effect representation joined across distinct return sites. */
   readonly resultRepresentation?: SemanticType
-  readonly returnedBorrow?: DeclarationFacts.ReturnedBorrowFact
   readonly generatedAggregates: ReadonlyArray<DeclarationFacts.StructFact>
   /** Static-only authored loops and their independently elaborated target-selected scopes. */
   readonly staticIterations: ReadonlyArray<StaticIterationFact>
@@ -1455,24 +1458,28 @@ export const availableExpressionType = (type: SemanticType): ExpressionTypeFact 
 }
 export const unavailableExpressionType: ExpressionTypeFact = Object.freeze({ _tag: 'Unavailable' })
 
-export const typesCompatible = (source: SemanticType, target: SemanticType): boolean =>
-  TypeCompatibility.isCompatible(TypeCompatibility.check(source, target))
+export const typesCompatible = (
+  source: SemanticType,
+  target: SemanticType,
+  context?: TypeCompatibility.Context,
+): boolean => TypeCompatibility.isCompatible(TypeCompatibility.check(source, target, context))
 
 export const declaredReturnTypesCompatible = (
   declaration: DeclarationFact,
   expression: ExpressionFact,
+  context?: TypeCompatibility.Context,
 ): boolean => {
   if (declaration.returnType._tag !== 'Resolved' || expression.type._tag !== 'Available')
     return false
   const source = expression.type.type
   const target = declaration.returnType.type
-  if (typesCompatible(source, target)) return true
+  if (typesCompatible(source, target, context)) return true
   const representation = representationOfExpression(expression)
   const contract = Type.isRepresented(source) ? source.contract : source
   if (
     representation !== undefined &&
     (Type.isCallable(contract) || Type.isEffect(contract)) &&
-    typesCompatible(Type.represented(contract, contract, representation), target)
+    typesCompatible(Type.represented(contract, contract, representation), target, context)
   )
     return true
   if (
@@ -1540,8 +1547,9 @@ export const unionConversionDiagnostic = (
   source: SemanticType,
   target: SemanticType,
   span: SourceSpan.SourceSpan,
+  context?: TypeCompatibility.Context,
 ): Diagnostic.Diagnostic | undefined => {
-  const compatibility = TypeCompatibility.check(source, target)
+  const compatibility = TypeCompatibility.check(source, target, context)
   return compatibility._tag === 'Incompatible' &&
     (Type.isUnion(source) || Type.isNever(source) || Type.isUnion(target) || Type.isNever(target))
     ? Diagnostic.incompatibleUnionConversion(
@@ -2085,6 +2093,7 @@ const lexicalScopesOf = (
 
 /** Elaborates every declaration body into immutable facts and the module's HIR. */
 export interface Input {
+  readonly bodyQuery?: BodyQuery.BodyQuery
   readonly syntax: SyntaxFile.SyntaxFile
   readonly headers: DeclarationFacts.ModuleHeaders
   readonly scope: NameResolution.ModuleScope
@@ -2092,6 +2101,11 @@ export interface Input {
 }
 
 const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): Hir.HirFunction => {
+  const lifetimeAssumptions = Lifetime.assumptions(fact.lifetimeFlow?.input.constraints ?? [])
+  const lifetimeCompatibility = TypeCompatibility.context({
+    assumptions: lifetimeAssumptions,
+    nominalVariance: NominalVariance.derive(index).summaries,
+  })
   const originalEntryRegion =
     fact.regionOrder.at(0) ??
     Object.freeze({
@@ -2179,6 +2193,7 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
     const type = Type.effectWithRows(
       fact.declaration.returnType.type,
       fact.declaration.failureRow.row,
+      { ...DeclarationFacts.executableLifetimes(fact.declaration), lifetimeBinders: [] },
       access,
       fact.declaration.requirementRow.row,
     )
@@ -2201,6 +2216,8 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
         span: siteSpan,
       }),
       statements: lowerStatements(fact.statements, {
+        lifetimeAssumptions,
+        lifetimeCompatibility,
         resultType: fact.declaration.returnType.type,
         functionId: fact.declaration.id,
         eraseIntrinsicSections: true,
@@ -2253,6 +2270,8 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
     entryRegion: originalEntryRegion,
     regionOrder: fact.regionOrder,
     statements: lowerStatements(fact.statements, {
+      lifetimeAssumptions,
+      lifetimeCompatibility,
       ...(fact.declaration.returnType._tag === 'Resolved'
         ? { resultType: fact.declaration.returnType.type }
         : {}),
@@ -2284,14 +2303,18 @@ export const elaborateModule = (input: Input): Result => {
   // A foreign header has a native body: it is indexed and callable but never analyzed here.
   const analyzed = declarations
     .filter((declaration) => declaration.foreign === undefined)
-    .map((declaration) =>
-      analyzeFunctionBody(
-        source,
-        declaration,
-        declarations,
-        Object.freeze({ scope, index, hiddenFunctions }),
-      ),
-    )
+    .map((declaration) => {
+      const compute = () =>
+        analyzeFunctionBody(
+          source,
+          declaration,
+          declarations,
+          Object.freeze({ scope, index, hiddenFunctions }),
+        )
+      return input.bodyQuery === undefined
+        ? compute()
+        : BodyQuery.check(input.bodyQuery, source, scope, declaration, hiddenFunctions, compute)
+    })
   const constantDiagnostics = headers.constants.flatMap((constant) =>
     constant.name._tag === 'Present'
       ? analyzeConstant(constant, constant.name.token, constant.initializer, true).diagnostics

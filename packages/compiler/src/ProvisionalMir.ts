@@ -536,12 +536,14 @@ const runnerOf = (
   const expressionType =
     'type' in expression
       ? Type.substitute(expression.type, context.instance.substitution)
-      : Type.effect('never', [])
+      : undefined
   const effect =
     resolved?.effect ??
     stored?.contract ??
     (environment?._tag === 'EffectEnvironment' ? environment.effect : undefined) ??
-    (Type.isEffect(expressionType) ? expressionType : Type.effect(expressionType, []))
+    (expressionType !== undefined && Type.isEffect(expressionType) ? expressionType : undefined)
+  if (effect === undefined)
+    throw new RangeError('Provisional runner requires a resolved Effect contract')
   const availableProviders = resolved?.providers ?? providersOf(expression, context)
   const providers = Object.freeze(
     Type.requirementMembers(effect).flatMap((requirement) => {

@@ -77,15 +77,9 @@ whose type is unavailable SHALL retain an explicit failed projection and exact c
 - **WHEN** another module projects a default-private field of a public struct
 - **THEN** the field candidate and use-site provenance remain visible but no readable place or value is produced
 
-### Requirement: Bootstrap structs move only as whole values
+### Requirement: Structs support complete and eligible partial moves
 
-Every user-defined struct value SHALL be move-only in this slice. Moving a whole struct SHALL
-consume its source binding, and a later read or move SHALL be rejected. Reading a Copy scalar field
-SHALL copy that field without consuming the owner. Moving an individual field out of a struct MUST
-be rejected as a partial move; struct patterns, replacement operations, and user-declared `Copy`
-remain outside this capability. A consuming let binding, call argument, or return of a bound struct
-SHALL require explicit `move`; a fresh literal or call result MAY flow directly because it has no
-source binding that could be copied accidentally.
+User-defined struct values SHALL remain affine unless their explicit sealed Copy implementation is admitted. Moving a complete struct SHALL consume its source place and later use SHALL be rejected. Ordinary reads of Copy fields SHALL preserve owner initialization. Eligible definitely initialized visible fields SHALL support partial moves with independent sibling use, unchanged-type restoration, and exact remainder cleanup under ordinary ownership rules. Whole-value uses SHALL require completeness. Consuming an affine bound struct SHALL require explicit move; a fresh literal or call result SHALL flow directly because it has no source binding that could be copied accidentally.
 
 #### Scenario: Move a complete struct through a call
 
@@ -99,13 +93,18 @@ source binding that could be copied accidentally.
 
 #### Scenario: Refuse an implicit nominal copy
 
-- **WHEN** a bound struct is passed to an owning parameter without `move`
+- **WHEN** an affine bound struct is passed to an owning parameter without `move`
 - **THEN** ownership rejects the transfer and leaves the source binding live
+
+#### Scenario: Move one eligible nested field
+
+- **WHEN** code attempts `move outer.inner` from a definitely initialized visible field without a conflicting loan or enclosing user Drop
+- **THEN** ownership transfers inner and preserves initialization and cleanup for the outer remainder
 
 #### Scenario: Refuse moving one nested field
 
-- **WHEN** code attempts `move outer.inner`
-- **THEN** ownership rejects the partial move while leaving `outer`'s whole-value state explicit
+- **WHEN** a requested nested field move crosses an enclosing user Drop hook
+- **THEN** ownership rejects the move despite any promised later restoration
 
 ### Requirement: Struct cleanup follows declared ownership
 

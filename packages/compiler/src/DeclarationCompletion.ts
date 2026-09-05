@@ -18,15 +18,15 @@ import type {
   ServiceFact,
   StructFact,
   TypeParameterFact,
+  TypePathFact,
   UnionFact,
 } from './DeclarationFacts.js'
 import {
   closeConformanceSelf,
   interfaceApplication,
   interfaceOperationContracts,
-  returnedBorrow,
-  returnsStaticView,
 } from './DeclarationFacts.js'
+import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationIndex from './DeclarationIndex.js'
 import * as NameResolution from './NameResolution.js'
 import {
@@ -53,6 +53,9 @@ import {
   witnessBinding,
 } from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
+import * as TypeOutlives from './TypeOutlives.js'
+import * as LifetimeAdmission from './LifetimeAdmission.js'
+import * as Lifetime from './Lifetime.js'
 import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -158,8 +161,87 @@ export const complete = (
   resolvers: ResolutionSeams.ResolutionSeams,
 ): DeclarationIndex.Index => {
   const diagnostics: Array<Diagnostic.Diagnostic> = [...self.diagnostics]
-  let modules = self.modules.map((module): ModuleHeaders => {
+  const finalized = new Map<MemberFact, MemberFact>()
+  const active = new Set<MemberFact>()
+  const finalize = (member: MemberFact): MemberFact => {
+    const cached = finalized.get(member)
+    if (cached !== undefined) return cached
+    if (active.has(member)) return member
+    active.add(member)
+    const module =
+      'lifetimeElaboration' in member ? member.lifetimeElaboration?.owner.module : undefined
+    const nominalParameters = (path: TypePathFact): ReadonlyArray<Type.Parameter> | undefined => {
+      if (module === undefined) return undefined
+      const resolved = resolvers.type(module, path)
+      if (
+        resolved.fact._tag !== 'Resolved' ||
+        !Type.isNominal(resolved.fact.type) ||
+        resolved.fact.type.arguments.length > 0
+      )
+        return undefined
+      const reached = memberByNominal(self.modules, resolved.fact.type)
+      if (reached === undefined) return undefined
+      const closed = finalize(reached)
+      return 'typeParameters' in closed
+        ? closed.typeParameters.map((parameter) => parameter.type)
+        : undefined
+    }
+    const candidate =
+      member._tag === 'FunctionDeclaration' ||
+      member._tag === 'StructDeclaration' ||
+      member._tag === 'UnionDeclaration'
+        ? DeclarationCollection.finalizeLifetimeHeader(member, nominalParameters)
+        : member
+    const closed = candidate._tag === 'ServiceOperation' ? member : candidate
+    active.delete(member)
+    finalized.set(member, closed)
+    return closed
+  }
+  const headers = self.modules.map((module): ModuleHeaders => {
+    const members = module.members.map(finalize)
+    return Object.freeze({
+      ...module,
+      members: Object.freeze(members),
+      declarations: Object.freeze(
+        members.filter(
+          (member): member is DeclarationFact => member._tag === 'FunctionDeclaration',
+        ),
+      ),
+      structs: Object.freeze(
+        members.filter((member): member is StructFact => member._tag === 'StructDeclaration'),
+      ),
+      unions: Object.freeze(
+        members.filter((member): member is UnionFact => member._tag === 'UnionDeclaration'),
+      ),
+    })
+  })
+  let modules = headers.map((module): ModuleHeaders => {
+    const nominalParameters = (path: TypePathFact): ReadonlyArray<Type.Parameter> | undefined => {
+      const resolved = resolvers.type(module.module, path)
+      if (
+        resolved.fact._tag !== 'Resolved' ||
+        !Type.isNominal(resolved.fact.type) ||
+        resolved.fact.type.arguments.length > 0
+      )
+        return undefined
+      return memberByNominal(headers, resolved.fact.type)?.typeParameters.map(
+        (parameter) => parameter.type,
+      )
+    }
     const members = module.members.map((member): MemberFact => {
+      if ('lifetimeElaboration' in member && member.lifetimeElaboration !== undefined)
+        diagnostics.push(
+          ...member.lifetimeElaboration.diagnostics.filter(
+            (candidate) =>
+              !diagnostics.some(
+                (prior) =>
+                  prior.code === candidate.code &&
+                  prior.span.sourceId === candidate.span.sourceId &&
+                  prior.span.start === candidate.span.start &&
+                  prior.span.end === candidate.span.end,
+              ),
+          ),
+        )
       if (member._tag === 'AliasDeclaration') {
         // The resolver memoizes each alias, so a use that already forced it reported its
         // diagnostics; this forcing only guarantees every alias resolves at least once.
@@ -170,12 +252,7 @@ export const complete = (
         return Object.freeze({ ...member, target: resolved.fact })
       }
       if (member._tag === 'ConstantDeclaration' || member._tag === 'ForeignStaticDeclaration') {
-        const resolved = resolveDeclaredType(
-          module.module,
-          member.declaredType,
-          resolvers,
-          self.modules,
-        )
+        const resolved = resolveDeclaredType(module.module, member.declaredType, resolvers, headers)
         diagnostics.push(...resolved.diagnostics)
         if (member._tag === 'ConstantDeclaration') {
           diagnostics.push(...foreignFunctionPointerAdmission(resolved.fact))
@@ -235,14 +312,14 @@ export const complete = (
           module.module,
           member.typeParameters,
           resolvers,
-          self.modules,
+          headers,
           diagnostics,
         )
         const opaqueResult = resolveOpaqueResult(
           module.module,
           member.opaqueResult,
           resolvers,
-          self.modules,
+          headers,
           diagnostics,
         )
         const typeParameterResolvers = withResolvedRepresentationParameters(
@@ -263,7 +340,7 @@ export const complete = (
             module.module,
             parameter.declaredType,
             memberResolvers,
-            self.modules,
+            headers,
           )
           diagnostics.push(...resolved.diagnostics)
           return Object.freeze({ ...parameter, declaredType: resolved.fact })
@@ -272,7 +349,7 @@ export const complete = (
           module.module,
           member.returnType,
           memberResolvers,
-          self.modules,
+          headers,
         )
         diagnostics.push(...resolvedResult.diagnostics)
         const result = closeOpaqueReturnType(
@@ -284,21 +361,21 @@ export const complete = (
           module.module,
           member.failureRow,
           memberResolvers,
-          self.modules,
+          headers,
         )
         diagnostics.push(...failureRow.diagnostics)
         const requirementRow = resolveRequirementRow(
           module.module,
           member.requirementRow,
           memberResolvers,
-          self.modules,
+          headers,
         )
         diagnostics.push(...requirementRow.diagnostics)
         const constraints = resolveConstraintFacts(
           module.module,
           member.constraints,
           memberResolvers,
-          self.modules,
+          headers,
         )
         diagnostics.push(...constraints.diagnostics)
         const admission =
@@ -340,7 +417,7 @@ export const complete = (
           module.module,
           member.typeParameters,
           resolvers,
-          self.modules,
+          headers,
           diagnostics,
         )
         const memberResolvers = withResolvedRepresentationParameters(
@@ -348,7 +425,25 @@ export const complete = (
           member.typeParameters,
           resolvedMemberTypeParameters,
         )
-        const operations = member.operations.map((operation) => {
+        const operations = member.operations.map((collectedOperation) => {
+          const finalizedOperation = DeclarationCollection.finalizeLifetimeHeader(
+            collectedOperation,
+            nominalParameters,
+          )
+          const operation =
+            finalizedOperation._tag === 'ServiceOperation' ? finalizedOperation : collectedOperation
+          diagnostics.push(
+            ...(operation.lifetimeElaboration?.diagnostics ?? []).filter(
+              (candidate) =>
+                !diagnostics.some(
+                  (prior) =>
+                    prior.code === candidate.code &&
+                    prior.span.sourceId === candidate.span.sourceId &&
+                    prior.span.start === candidate.span.start &&
+                    prior.span.end === candidate.span.end,
+                ),
+            ),
+          )
           if (operation.opaqueResult !== undefined) {
             const owner = member.name._tag === 'Present' ? member.name.spelling : '<anonymous>'
             const name = operation.name._tag === 'Present' ? operation.name.spelling : '<anonymous>'
@@ -364,14 +459,14 @@ export const complete = (
             module.module,
             operation.typeParameters,
             memberResolvers,
-            self.modules,
+            headers,
             diagnostics,
           )
           const opaqueResult = resolveOpaqueResult(
             module.module,
             operation.opaqueResult,
             memberResolvers,
-            self.modules,
+            headers,
             diagnostics,
           )
           const operationTypeParameterResolvers = withResolvedRepresentationParameters(
@@ -392,7 +487,7 @@ export const complete = (
               module.module,
               parameter.declaredType,
               operationResolvers,
-              self.modules,
+              headers,
             )
             diagnostics.push(...resolved.diagnostics)
             return Object.freeze({ ...parameter, declaredType: resolved.fact })
@@ -401,7 +496,7 @@ export const complete = (
             module.module,
             operation.returnType,
             operationResolvers,
-            self.modules,
+            headers,
           )
           const result = closeOpaqueReturnType(resolvedResult.fact, opaqueResult, [
             ...resolvedMemberTypeParameters,
@@ -411,19 +506,19 @@ export const complete = (
             module.module,
             operation.failureRow,
             operationResolvers,
-            self.modules,
+            headers,
           )
           const requirementRow = resolveRequirementRow(
             module.module,
             operation.requirementRow,
             operationResolvers,
-            self.modules,
+            headers,
           )
           const constraints = resolveConstraintFacts(
             module.module,
             operation.constraints,
             operationResolvers,
-            self.modules,
+            headers,
           )
           diagnostics.push(
             ...resolvedResult.diagnostics,
@@ -465,7 +560,7 @@ export const complete = (
               module.module,
               field.declaredType,
               resolvers,
-              self.modules,
+              headers,
             )
             diagnostics.push(...resolved.diagnostics)
             diagnostics.push(...foreignFunctionPointerAdmission(resolved.fact))
@@ -491,7 +586,7 @@ export const complete = (
             module.module,
             member.typeParameters,
             resolvers,
-            self.modules,
+            headers,
             diagnostics,
           ),
           variants,
@@ -513,7 +608,7 @@ export const complete = (
           module.module,
           member.typeParameters,
           resolvers,
-          self.modules,
+          headers,
           diagnostics,
         ),
         fields: resolveFields(member.fields),
@@ -524,14 +619,9 @@ export const complete = (
         module.module,
         conformance.capability,
         resolvers,
-        self.modules,
+        headers,
       )
-      const provider = resolveDeclaredType(
-        module.module,
-        conformance.provider,
-        resolvers,
-        self.modules,
-      )
+      const provider = resolveDeclaredType(module.module, conformance.provider, resolvers, headers)
       diagnostics.push(...capability.diagnostics, ...provider.diagnostics)
       const hook =
         conformance.hook === undefined
@@ -541,25 +631,25 @@ export const complete = (
                 module.module,
                 conformance.hook.parameterType,
                 resolvers,
-                self.modules,
+                headers,
               )
               const returnType = resolveDeclaredType(
                 module.module,
                 conformance.hook.returnType,
                 resolvers,
-                self.modules,
+                headers,
               )
               const failureRow = resolveFailureRow(
                 module.module,
                 conformance.hook.failureRow,
                 resolvers,
-                self.modules,
+                headers,
               )
               const requirementRow = resolveRequirementRow(
                 module.module,
                 conformance.hook.requirementRow,
                 resolvers,
-                self.modules,
+                headers,
               )
               diagnostics.push(
                 ...parameterType.diagnostics,
@@ -580,7 +670,7 @@ export const complete = (
           module.module,
           requirement.capability,
           resolvers,
-          self.modules,
+          headers,
         )
         diagnostics.push(...resolved.diagnostics)
         return Object.freeze({ ...requirement, capability: resolved.fact })
@@ -604,7 +694,7 @@ export const complete = (
     // checks that need scope run here: the owner must be a nominal of this module named directly
     // (not through an alias), or the head publishes no members.
     const inherentImpls = module.inherentImpls.map((head): InherentImplFact => {
-      const owner = resolveDeclaredType(module.module, head.owner, resolvers, self.modules)
+      const owner = resolveDeclaredType(module.module, head.owner, resolvers, headers)
       // A head already rejected at collection keeps only that diagnostic; its owner is resolved
       // for closing `Self` in its members, not for a second report.
       if (head.validity._tag === 'Invalid') return Object.freeze({ ...head, owner: owner.fact })
@@ -634,14 +724,14 @@ export const complete = (
         const ownerType = Type.nominal(
           module.module,
           localOwner.canonical.id.name,
-          binders.map((parameter) => parameter.type),
+          binders.map((parameter) => Type.parameterArgument(parameter.type)),
         )
         return Object.freeze({ ...head, owner: Object.freeze({ ...owner.fact, type: ownerType }) })
       }
       const ownerType = owner.fact._tag === 'Resolved' ? owner.fact.type : undefined
       const nominal = ownerType !== undefined && Type.isNominal(ownerType) ? ownerType : undefined
       const ownerDeclaration =
-        nominal === undefined ? undefined : nominalOwnerDeclaration(self.modules, nominal)
+        nominal === undefined ? undefined : nominalOwnerDeclaration(headers, nominal)
       const localAlias = module.members.some(
         (member) =>
           member._tag === 'AliasDeclaration' &&
@@ -697,7 +787,7 @@ export const complete = (
       readonly span: SourceSpan.SourceSpan
     }
     const ownerItemNames = (owner: Type.Nominal): ReadonlyMap<string, OwnerItem> => {
-      const declaration = nominalOwnerDeclaration(self.modules, owner)
+      const declaration = nominalOwnerDeclaration(headers, owner)
       const names = new Map<string, OwnerItem>()
       const add = (name: DeclaredName, kind: string): void => {
         if (name._tag === 'Present') names.set(name.spelling, { kind, span: name.token.span })
@@ -776,7 +866,7 @@ export const complete = (
                     Type.equals(capability, bound.application.capability)
                   )
                     return bound
-                  const declaration = memberByNominal(self.modules, capability)
+                  const declaration = memberByNominal(headers, capability)
                   const application =
                     declaration?._tag === 'InterfaceDeclaration' ||
                     declaration?._tag === 'ServiceDeclaration'
@@ -1104,8 +1194,6 @@ export const complete = (
     }),
   )
 
-  const containsPositionRestrictedBorrow = Type.containsPositionRestrictedBorrow
-
   const invalidConformances = new Set<ConformanceFact>()
   const inferredWitnessArguments = new Map<
     ConformanceFact['operations'][number],
@@ -1219,9 +1307,10 @@ export const complete = (
       }
       if (conformance.termination._tag === 'NonTerminating') continue
       if (conformance.coherence._tag === 'Overlapping') continue
-      const usedParameterKeys = new Set(
-        Type.parameters(provider).map((parameter) => Type.key(parameter)),
-      )
+      const usedParameterKeys = new Set([
+        ...Type.parameters(provider).map(Type.key),
+        ...Type.freeLifetimes(provider).map(Lifetime.key),
+      ])
       const unused = declaredParameters.filter(
         (parameter) => !usedParameterKeys.has(Type.key(parameter)),
       )
@@ -1630,101 +1719,17 @@ export const complete = (
       }),
     )
 
+  // A declared borrowed type is admitted through its elaborated lifetime contract. Concrete
+  // referent validity is checked in body analysis, including fields and returned aggregates.
   for (const module of modules) {
     for (const member of module.members) {
-      if (member._tag === 'ConstantDeclaration') continue
-      if (member._tag === 'FunctionDeclaration') {
-        for (const parameter of member.parameters) {
-          const mut = SyntaxTree.directToken(parameter.syntax, 'MutKeyword')
-          if (
-            mut !== undefined &&
-            parameter.declaredType._tag === 'Resolved' &&
-            (Type.isReference(parameter.declaredType.type) ||
-              Type.isSlice(parameter.declaredType.type))
-          ) {
-            diagnostics.push(Diagnostic.invalidMutableParameter('BorrowedView', mut.span))
-          }
-          if (
-            parameter.declaredType._tag === 'Resolved' &&
-            !Type.isParameterBorrowType(parameter.declaredType.type)
-          ) {
-            diagnostics.push(
-              Diagnostic.borrowedViewTypePosition('parameter', parameter.declaredType.syntax.span),
-            )
-          }
-        }
-        if (
-          member.returnType._tag === 'Resolved' &&
-          containsPositionRestrictedBorrow(member.returnType.type) &&
-          (!Type.isSlot(member.returnType.type) ||
-            containsPositionRestrictedBorrow(
-              Type.typeArgumentAt(member.returnType.type, 0) ?? 'never',
-            )) &&
-          (!Type.isViewBorrow(member.returnType.type) ||
-            (returnedBorrow(member) === undefined && !returnsStaticView(member)))
-        ) {
-          diagnostics.push(
-            Type.isViewBorrow(member.returnType.type)
-              ? Diagnostic.invalidReturnedBorrowSignature(member.returnType.syntax.span)
-              : Diagnostic.borrowedViewTypePosition('return', member.returnType.syntax.span),
-          )
-        }
-        continue
-      }
       if (member._tag === 'ServiceDeclaration' || member._tag === 'InterfaceDeclaration') {
-        for (const operation of member.operations) {
+        for (const operation of member.operations)
           for (const parameter of operation.parameters) {
             const mut = SyntaxTree.directToken(parameter.syntax, 'MutKeyword')
-            if (mut !== undefined) {
+            if (mut !== undefined)
               diagnostics.push(Diagnostic.invalidMutableParameter('Contract', mut.span))
-            }
-            if (
-              parameter.declaredType._tag === 'Resolved' &&
-              !Type.isParameterBorrowType(parameter.declaredType.type)
-            )
-              diagnostics.push(
-                Diagnostic.borrowedViewTypePosition(
-                  'parameter',
-                  parameter.declaredType.syntax.span,
-                ),
-              )
           }
-          if (
-            operation.returnType._tag === 'Resolved' &&
-            containsPositionRestrictedBorrow(operation.returnType.type) &&
-            (!Type.isSlot(operation.returnType.type) ||
-              containsPositionRestrictedBorrow(
-                Type.typeArgumentAt(operation.returnType.type, 0) ?? 'never',
-              ))
-          )
-            diagnostics.push(
-              Type.isViewBorrow(operation.returnType.type)
-                ? Diagnostic.invalidReturnedBorrowSignature(operation.returnType.syntax.span)
-                : Diagnostic.borrowedViewTypePosition('return', operation.returnType.syntax.span),
-            )
-        }
-        continue
-      }
-      if (
-        member._tag === 'RoleDeclaration' ||
-        member._tag === 'EnumDeclaration' ||
-        member._tag === 'AliasDeclaration' ||
-        member._tag === 'ForeignStaticDeclaration'
-      )
-        continue
-      const fields =
-        member._tag === 'UnionDeclaration'
-          ? member.variants.flatMap((variant) => variant.fields)
-          : member.fields
-      for (const field of fields) {
-        if (
-          field.declaredType._tag === 'Resolved' &&
-          containsPositionRestrictedBorrow(field.declaredType.type)
-        ) {
-          diagnostics.push(
-            Diagnostic.borrowedViewTypePosition('field', field.declaredType.syntax.span),
-          )
-        }
       }
     }
   }
@@ -1958,5 +1963,26 @@ export const complete = (
     })
   })
 
+  const lifetimeScope = TypeOutlives.context(modules)
+  modules = modules.map((module) => {
+    const lifetimeDiagnostics = TypeOutlives.moduleDiagnostics(module, lifetimeScope)
+    diagnostics.push(...lifetimeDiagnostics)
+    return Object.freeze({
+      ...module,
+      diagnostics: Diagnostic.merge(module.diagnostics, lifetimeDiagnostics),
+    })
+  })
+
+  const lifetimeAdmission = LifetimeAdmission.context(
+    DeclarationIndex.make('Complete', modules, []),
+  )
+  modules = modules.map((module) => {
+    const admissionDiagnostics = LifetimeAdmission.moduleDiagnostics(lifetimeAdmission, module)
+    diagnostics.push(...admissionDiagnostics)
+    return Object.freeze({
+      ...module,
+      diagnostics: Diagnostic.merge(module.diagnostics, admissionDiagnostics),
+    })
+  })
   return DeclarationIndex.make('Complete', modules, Diagnostic.merge(diagnostics))
 }

@@ -6,6 +6,7 @@ import * as Path from 'effect/Path'
 import * as Analysis from '../src/Analysis.js'
 import * as FieldRealization from '../src/FieldRealization.js'
 import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as RepresentationField from '../src/RepresentationField.js'
 import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
@@ -82,6 +83,11 @@ pub fn main() -> i32 {
 it.effect('realizes a named callable field with a static target and no capture lanes', () =>
   Effect.gen(function* () {
     const snapshot = yield* realized('callable-field/named', namedCallable)
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(
+      realizationsOf(snapshot).entries.filter((entry) => entry.support._tag !== 'Supported'),
+      [],
+    )
     const realization = soleRealization(realizationsOf(snapshot))
 
     assert.deepEqual(realization.target, {
@@ -294,7 +300,10 @@ it('walks Effect owner arguments as canonical semantic children', () => {
   const declaration = Object.freeze({ module: 'effect-field/owner-walk', name: 'retain' })
   const open = Type.parameter(declaration, 0, 'T')
   const marker = Type.nominal('effect-field/owner-walk', 'Marker')
-  const contract = Type.effect('i32', [])
+  const contract = Type.effect('i32', [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const holder = Type.nominal('effect-field/owner-walk', 'Holder', [
     Type.exactRepresentationArgument(
       Type.effectIdentityArgument('effect-field/owner-walk.effect', {
@@ -395,7 +404,13 @@ pub fn main() -> i32 {
         role: 'Audit',
         access: 'Exclusive' as const,
       })
-      const contract = Type.effect('i32', [failure], 'Take', [requirement])
+      const contract = Type.effect(
+        'i32',
+        [failure],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Take',
+        [requirement],
+      )
       const arguments_ = Object.freeze([
         Type.nominal('effect-field/row-evidence', 'Marker'),
         Type.failureValue([failure]),
@@ -481,7 +496,10 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
     const plan =
       RepresentationField.plansOf(snapshot.index, instance).at(0) ??
       unreachable('expected one representation field plan')
-    const bound = Type.callable(['i32'], 'i32')
+    const bound = Type.callable(['i32'], 'i32', {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    })
 
     // An unavailable #187 resolution never becomes a realization; it keeps an explicit proof. The
     // resolution comes from #187 itself rather than a fabricated record, so this pins the real
@@ -509,7 +527,10 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
     )
 
     // An Effect identity without its canonical discovered runner stays explicitly unsupported.
-    const effect = Type.effect('i32', [])
+    const effect = Type.effect('i32', [], {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    })
     const stored = FieldRealization.realizeField(
       snapshot.index,
       Object.freeze({
@@ -746,7 +767,7 @@ it.effect('mints the represented Effect origin in exactly one frontend module', 
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
 
-it.effect('rejects extracting an owned callable field as an ordinary partial move', () =>
+it.effect('allows moving an owned callable field', () =>
   Effect.gen(function* () {
     const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
 fn decode(value: i32) -> i32 { return value }
@@ -756,15 +777,11 @@ pub fn main() -> i32 {
   return 0
 }`
     const snapshot = yield* realized('callable-field/extraction', source)
-    const diagnostic = Analysis.diagnostics(snapshot).find(
-      (candidate) => candidate.code === 'OWN0002',
-    )
-
-    assert.strictEqual(diagnostic?.reason._tag, 'PartialMove')
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
   }),
 )
 
-it.effect('keeps an ordinary struct field on the general partial-move rejection', () =>
+it.effect('allows moving an ordinary owned struct field', () =>
   Effect.gen(function* () {
     const source = `struct Token { value: i32 }
 struct Holder { token: Token }
@@ -774,9 +791,7 @@ pub fn main() -> i32 {
   return 0
 }`
     const snapshot = yield* realized('callable-field/ordinary-extraction', source)
-    const codes = Analysis.diagnostics(snapshot).map((candidate) => candidate.code)
-
-    assert.include(codes, 'OWN0002')
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
   }),
 )
 

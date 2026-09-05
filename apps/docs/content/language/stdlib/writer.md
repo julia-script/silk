@@ -76,7 +76,7 @@ A replaceable mutable service for complete byte writes and explicit flush operat
 ### Operation `writeAll`
 
 ```silk
-effect fn writeAll(val: &[u8]) -> () ! WriterError ? &mut Writer
+effect<'life0> fn writeAll<'life0>(val: &'life0 [u8]) -> () ! WriterError ? &mut Writer
 ```
 
 Writes one complete immutable byte sequence through the active Writer provider.
@@ -86,7 +86,7 @@ Writes one complete immutable byte sequence through the active Writer provider.
 ### Operation `flush`
 
 ```silk
-effect fn flush() -> () ! WriterError ? &mut Writer
+effect<'static> fn flush() -> () ! WriterError ? &mut Writer
 ```
 
 Requests that the active Writer provider commit its buffered output.
@@ -116,7 +116,7 @@ Creates a process-backed Writer provider for standard error.
 ### Associated function `Writer.ignoreError`
 
 ```silk
-pub effect fn ignoreError<A, E, ?R>(self: once Effect<A ! E ? R>) -> () | A ? R
+pub effect<'life3> fn ignoreError<A, E, ?R, 'life3>(self: once Effect<'life3; A ! E ? R>) -> () | A ? R
 ```
 
 Runs one Effect and converts its typed failure to unit while it preserves a successful value.
@@ -131,7 +131,7 @@ error value when the Effect fails.
 ### Associated function `Writer.writeString`
 
 ```silk
-pub effect fn writeString(val: string) -> () ! WriterError ? &mut Writer
+pub effect<'life0> fn writeString<'life0>(val: string<'life0>) -> () ! WriterError ? &mut Writer
 ```
 
 Writes the UTF-8 bytes of `val` through the active Writer provider.

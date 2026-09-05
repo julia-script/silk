@@ -47,7 +47,7 @@ import silk.string { String }
 
 /// A typed failure from a Writer provider that did not complete one write or flush operation.
 pub struct WriterError {
-  message: string
+  message: string<'static>
 }
 
 /// A replaceable mutable service for complete byte writes and explicit flush operations.

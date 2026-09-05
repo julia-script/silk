@@ -6,6 +6,7 @@ import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as Diagnostic from '../src/Diagnostic.js'
 import * as FormattedDocument from '../src/FormattedDocument.js'
 import * as Instances from '../src/Instances.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Mir from '../src/Mir.js'
@@ -202,14 +203,21 @@ it('normalizes contract rows and infers selected-entry remainders', () => {
   const pattern = Type.effect(
     'i32',
     [failureRemainder],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
     'Shared',
     [{ capability: clock, role: 'Primary', access: 'Shared' }],
     [requirementRemainder],
   )
-  const actual = Type.effect('i32', [other, problem, other], 'Shared', [
-    { capability: clock, role: 'Primary', access: 'Shared' },
-    { capability: allocator, role: 'DefaultRole', access: 'Exclusive' },
-  ])
+  const actual = Type.effect(
+    'i32',
+    [other, problem, other],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    [
+      { capability: clock, role: 'Primary', access: 'Shared' },
+      { capability: allocator, role: 'DefaultRole', access: 'Exclusive' },
+    ],
+  )
   const inferred = new Map<string, Type.GenericArgument>()
 
   assert.strictEqual(TypeInference.infer(pattern, actual, inferred), true)
@@ -398,8 +406,16 @@ it('distinguishes row inference failure causes deterministically', () => {
   const problem = Type.nominal('generics/Rows', 'Problem')
   const clock = Type.nominal('generics/Rows', 'Clock')
   const requirement = { capability: clock, role: 'Primary', access: 'Shared' as const }
-  const closed = Type.effect('i32', [], 'Shared')
-  const absentFailure = TypeInference.rowInferenceFailure(Type.effect('i32', [problem]), closed)
+  const closed = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+  )
+  const absentFailure = TypeInference.rowInferenceFailure(
+    Type.effect('i32', [problem], { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
+    closed,
+  )
 
   assert.strictEqual(absentFailure?._tag, 'AbsentFailureMember')
   if (absentFailure !== undefined)
@@ -417,44 +433,112 @@ it('distinguishes row inference failure causes deterministically', () => {
       { code: 'SEM0089', reason: 'ContractRowInference' },
     )
   assert.strictEqual(
-    TypeInference.rowInferenceFailure(Type.effect('i32', [], 'Shared', [requirement]), closed)
-      ?._tag,
+    TypeInference.rowInferenceFailure(
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [requirement],
+      ),
+      closed,
+    )?._tag,
     'AbsentRequirementMember',
   )
   assert.strictEqual(
     TypeInference.rowInferenceFailure(
-      Type.effect('i32', [], 'Shared', [requirement]),
-      Type.effect('i32', [], 'Shared', [{ ...requirement, role: 'Secondary' }]),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [requirement],
+      ),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [{ ...requirement, role: 'Secondary' }],
+      ),
     )?._tag,
     'IncompatibleRequirementRole',
   )
   assert.strictEqual(
     TypeInference.rowInferenceFailure(
-      Type.effect('i32', [], 'Shared', [requirement]),
-      Type.effect('i32', [], 'Shared', [{ ...requirement, access: 'Exclusive' }]),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [requirement],
+      ),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [{ ...requirement, access: 'Exclusive' }],
+      ),
     )?._tag,
     'IncompatibleRequirementAccess',
   )
   assert.strictEqual(
     TypeInference.rowInferenceFailure(
-      Type.effect('i32', [], 'Shared', [], [firstRequirement, secondRequirement]),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [],
+        [firstRequirement, secondRequirement],
+      ),
       closed,
     )?._tag,
     'AmbiguousRequirementRemainder',
   )
   assert.strictEqual(
     TypeInference.rowInferenceFailure(
-      Type.effect('i32', [], 'Shared', [], [firstRequirement]),
-      Type.effect('i32', [], 'Shared', [], [secondRequirement]),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [],
+        [firstRequirement],
+      ),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [],
+        [secondRequirement],
+      ),
     )?._tag,
     'NonFiniteRequirementRow',
   )
 })
 
 it('orders Effect access bounds from reusable through take-capable', () => {
-  const shared = Type.effect('i32', [], 'Shared')
-  const exclusive = Type.effect('i32', [], 'Exclusive')
-  const take = Type.effect('i32', [], 'Take')
+  const shared = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+  )
+  const exclusive = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Exclusive',
+  )
+  const take = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Take',
+  )
 
   assert.isTrue(TypeInference.infer(take, shared, new Map()))
   assert.isTrue(TypeInference.infer(take, exclusive, new Map()))

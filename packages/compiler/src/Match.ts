@@ -1,10 +1,11 @@
 import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as Lifetime from './Lifetime.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
 /** The lexical way a match observes or takes its scrutinee. */
-export type Access = 'Copy' | 'Move' | 'Shared' | 'Exclusive'
+export type Access = 'Copy' | 'Move' | 'Place' | 'Shared' | 'Exclusive'
 
 /** Stable source identity for one match expression. */
 export interface MatchId {
@@ -200,7 +201,10 @@ export type Join =
   | { readonly _tag: 'Incompatible'; readonly types: ReadonlyArray<Type.Type> }
 
 /** Joins reachable arm results using the language's one canonical match-result rule. */
-export const join = (inputs: ReadonlyArray<Type.Type>): Join => {
+export const join = (
+  inputs: ReadonlyArray<Type.Type>,
+  lifetimes?: Type.ExecutableLifetimes,
+): Join => {
   const contributing = inputs.filter((type) => !Type.isNever(type))
   const first = contributing.at(0)
   if (first === undefined) return Object.freeze({ _tag: 'Joined', type: 'never' })
@@ -212,6 +216,23 @@ export const join = (inputs: ReadonlyArray<Type.Type>): Join => {
     return Type.isEffect(contract) ? [contract] : []
   })
   if (effects.length === contributing.length) {
+    const firstEffect = effects.at(0)
+    const metadata =
+      lifetimes ??
+      (firstEffect !== undefined &&
+      effects.every(
+        (effect) =>
+          Lifetime.equals(effect.environment, firstEffect.environment) &&
+          effect.lifetimeBinders.length === 0,
+      )
+        ? {
+            environment: firstEffect.environment,
+            lifetimeBinders: [],
+            lifetimeBounds: effects.flatMap((effect) => effect.lifetimeBounds),
+          }
+        : undefined)
+    if (metadata === undefined)
+      return Object.freeze({ _tag: 'Incompatible', types: Object.freeze([...contributing]) })
     const success = Type.union(effects.map((effect) => effect.success))
     if (success._tag !== 'Normalized')
       return Object.freeze({ _tag: 'Incompatible', types: Object.freeze([...contributing]) })
@@ -228,7 +249,7 @@ export const join = (inputs: ReadonlyArray<Type.Type>): Join => {
     else if (effects.some((effect) => effect.access === 'Exclusive')) access = 'Exclusive'
     return Object.freeze({
       _tag: 'Joined',
-      type: Type.effectWithRows(success.type, failureRow, access, requirementRow),
+      type: Type.effectWithRows(success.type, failureRow, metadata, access, requirementRow),
     })
   }
   for (const [leftOrdinal, left] of contributing.entries()) {

@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Lifetime from '../src/Lifetime.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -8,18 +9,16 @@ import * as Type from '../src/Type.js'
 
 const encoder = new TextEncoder()
 
-const source = `import silk.u8 as u8
-import silk.usize as usize
-fn passthrough(value: string) -> string { return value }
+const source = `fn passthrough(value: string) -> string { return value }
 pub fn main() -> i32 {
-  let mut bytes = [u8.toU8(104), u8.toU8(195), u8.toU8(169)]
+  let mut bytes: [u8; 3] = [104, 195, 169]
   unsafe {
     let runtime = Intrinsic.stringFromUtf8Unchecked(&bytes)
     let returned = passthrough(runtime)
     let raw = Intrinsic.stringUtf8Bytes(returned)
     let length = Intrinsic.stringByteLength(returned)
     if returned != "hé" { return 1 }
-    return usize.toI32(raw.length) + usize.toI32(length)
+    return Intrinsic.usizeToI32(raw.length) + Intrinsic.usizeToI32(length)
   }
   return 1
 }`
@@ -132,7 +131,7 @@ it.effect('rejects forged, mutable, confused, unterminated, and call-mismatched 
             ...operation,
             type: Object.freeze({
               _tag: 'Slice' as const,
-              type: Type.slice('Exclusive', 'u8'),
+              type: Type.slice('Exclusive', 'u8', Lifetime.staticLifetime),
             }),
           })
         : operation,

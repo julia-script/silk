@@ -372,7 +372,7 @@ const verifyEntry = (
   if (Type.isFixedArray(candidate.type)) {
     const element = Type.isBuiltin(candidate.type.element)
       ? scalarEntry(target, candidate.type.element)
-      : available.get(Type.key(candidate.type.element))
+      : available.get(Type.runtimeKey(candidate.type.element))
     if (element === undefined || candidate.representation._tag !== 'Repeated') {
       return Object.freeze([
         invalid(
@@ -399,7 +399,7 @@ const verifyEntry = (
         ])
   }
   if (Type.isString(candidate.type)) {
-    const expected = stringEntry(target)
+    const expected = stringEntry(target, candidate.type)
     return candidate.size === expected.size &&
       candidate.alignment === expected.alignment &&
       representationEquals(candidate.representation, expected.representation)
@@ -415,7 +415,7 @@ const verifyEntry = (
   if (Type.isSlice(candidate.type)) {
     const element = Type.isBuiltin(candidate.type.element)
       ? scalarEntry(target, candidate.type.element)
-      : available.get(Type.key(candidate.type.element))
+      : available.get(Type.runtimeKey(candidate.type.element))
     if (element === undefined) {
       return Object.freeze([
         invalid(
@@ -484,7 +484,7 @@ const verifyEntry = (
   }
   if (Type.isUnion(candidate.type)) {
     const members = candidate.type.members.flatMap((member): ReadonlyArray<Entry> => {
-      const memberLayout = available.get(Type.key(member))
+      const memberLayout = available.get(Type.runtimeKey(member))
       return memberLayout === undefined ? [] : [memberLayout]
     })
     if (members.length !== candidate.type.members.length) {
@@ -529,7 +529,9 @@ const verifyEntry = (
     if (Type.isCompositeEffectRepresentationArgument(argument)) {
       const alternatives = argument.alternatives.map((alternative) =>
         available.get(
-          Type.key(Type.represented(type.contract, type.representation.requiredBound, alternative)),
+          Type.runtimeKey(
+            Type.represented(type.contract, type.representation.requiredBound, alternative),
+          ),
         ),
       )
       const payloadAlignment = alternatives.reduce(
@@ -584,7 +586,7 @@ const verifyEntry = (
         if (!borrowed && !executable) {
           fieldLayout = Type.isBuiltin(field.type)
             ? scalarEntry(target, field.type)
-            : available.get(Type.key(field.type))
+            : available.get(Type.runtimeKey(field.type))
         }
         let size = fieldLayout?.size ?? 0
         let alignment = fieldLayout?.alignment ?? 1
@@ -622,6 +624,7 @@ const verifyEntry = (
                 Type.effectWithRows(
                   slot.type.success,
                   slot.type.failureRow,
+                  slot.type,
                   field.type.access,
                   slot.type.requirementRow,
                 ),
@@ -684,7 +687,7 @@ const verifyEntry = (
       if (!borrowed && !executable) {
         fieldLayout = Type.isBuiltin(field.type)
           ? scalarEntry(target, field.type)
-          : available.get(Type.key(field.type))
+          : available.get(Type.runtimeKey(field.type))
       }
       let size = fieldLayout?.size ?? 0
       let alignment = fieldLayout?.alignment ?? 1
@@ -801,7 +804,7 @@ const verifyEntry = (
       const expected = variant.fields.map((field) => {
         const fieldLayout = Type.isBuiltin(field.type)
           ? scalarEntry(target, field.type)
-          : available.get(Type.key(field.type))
+          : available.get(Type.runtimeKey(field.type))
         return Object.freeze({
           value: field,
           size: fieldLayout?.size ?? 0,
@@ -928,7 +931,7 @@ const verifyEntry = (
   const layouts = candidate.representation.fields.map((field) =>
     Type.isBuiltin(field.type)
       ? scalarEntry(target, field.type)
-      : available.get(Type.key(field.type)),
+      : available.get(Type.runtimeKey(field.type)),
   )
   const packed = Packing.pack(
     layouts.map((fieldLayout, ordinal) => ({
@@ -1010,13 +1013,15 @@ const commonViolations = (
   }
   const available = new Map(
     entries.flatMap((candidate) =>
-      candidate._tag === 'LayoutEntry' ? [[Type.key(candidate.type), candidate] as const] : [],
+      candidate._tag === 'LayoutEntry'
+        ? [[Type.runtimeKey(candidate.type), candidate] as const]
+        : [],
     ),
   )
   const seen = new Set<string>()
   let previous: DeclarationFacts.SemanticType | undefined
   for (const candidate of entries) {
-    const key = Type.key(candidate.type)
+    const key = Type.runtimeKey(candidate.type)
     if (seen.has(key)) {
       violations.push(
         invalid(
@@ -1026,7 +1031,7 @@ const commonViolations = (
         ),
       )
     }
-    if (previous !== undefined && Type.compare(previous, candidate.type) > 0) {
+    if (previous !== undefined && Type.runtimeKey(previous) > Type.runtimeKey(candidate.type)) {
       violations.push(
         invalid(
           'NonCanonicalOrder',

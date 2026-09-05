@@ -29,11 +29,13 @@ import type {
 } from './DeclarationFacts.js'
 import {
   copyApplication,
+  executableLifetimes,
   interfaceApplication,
   lookupDeclaration,
   requirementRoleIdentity,
 } from './DeclarationFacts.js'
 import type { Index } from './DeclarationIndex.js'
+import * as Lifetime from './Lifetime.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.js'
 import * as InterfaceWitnessInference from './InterfaceWitnessInference.js'
@@ -98,14 +100,14 @@ const resolveExactRepresentation = (
     )
   if (declaration.typeParameters.length !== arguments_.length)
     return reject(open(declaration.typeParameters.length), declaration)
-  const supplied = arguments_.map((argument, ordinal) =>
-    argument.fact._tag === 'Resolved'
-      ? genericArgumentForParameter(
-          declaration.typeParameters.at(ordinal)?.type,
-          argument.fact.type,
-        )
-      : undefined,
-  )
+  const supplied = arguments_.map((argument, ordinal) => {
+    if (argument.fact._tag === 'Lifetime') return argument.fact.lifetime
+    if (argument.fact._tag !== 'Resolved') return undefined
+    return genericArgumentForParameter(
+      declaration.typeParameters.at(ordinal)?.type,
+      argument.fact.type,
+    )
+  })
   if (supplied.some((argument) => argument === undefined))
     return reject(open(declaration.typeParameters.length), declaration)
   const concrete = supplied.filter(
@@ -141,6 +143,7 @@ const resolveExactRepresentation = (
       parameter._tag === 'Resolved' ? [Type.substitute(parameter.type, substitution)] : [],
     ),
     Type.substitute(declaredReturn.fact.type, substitution),
+    { ...executableLifetimes(declaration), environment: Lifetime.staticLifetime },
     'Shared',
     undefined,
     declaration.unsafe,
@@ -175,6 +178,7 @@ export const resolveDeclaredType = (
   resolvers: ResolutionSeams.ResolutionSeams,
   modules: ReadonlyArray<ModuleHeaders>,
 ): TypeResolution => {
+  if (fact._tag === 'Lifetime') return Object.freeze({ fact, diagnostics: Object.freeze([]) })
   if (fact._tag === 'RepresentationParameter') {
     const parameter =
       resolvers.representationBindings?.get(Type.key(fact.parameter)) ?? fact.parameter
@@ -204,6 +208,18 @@ export const resolveDeclaredType = (
     const expected =
       declaration?.typeParameters.length ?? Type.intrinsicNominalArity(resolved.fact.type)
     if (expected === 0) return resolved
+    if (
+      fact.implicitLifetimeArguments !== undefined &&
+      declaration !== undefined &&
+      declaration.typeParameters.every((parameter) => parameter.type.kind === 'Lifetime') &&
+      expected === fact.implicitLifetimeArguments.length
+    ) {
+      const type = Type.specializeNominal(resolved.fact.type, fact.implicitLifetimeArguments)
+      return Object.freeze({
+        fact: Object.freeze({ ...resolved.fact, type, spelling: Type.encode(type) }),
+        diagnostics: resolved.diagnostics,
+      })
+    }
     const diagnostic = Diagnostic.typeArgumentArity(fact.spelling, expected, 0, fact.token.span)
     return Object.freeze({
       fact: Object.freeze({
@@ -232,7 +248,14 @@ export const resolveDeclaredType = (
       )
       const type =
         fact._tag === 'Callable'
-          ? Type.callable(resolvedParameters, result.fact.type, fact.mode, undefined, fact.unsafe)
+          ? Type.callable(
+              resolvedParameters,
+              result.fact.type,
+              fact.lifetimes,
+              fact.mode,
+              undefined,
+              fact.unsafe,
+            )
           : Type.foreignFunction(resolvedParameters, result.fact.type)
       return Object.freeze({
         fact: Object.freeze({
@@ -349,6 +372,7 @@ export const resolveDeclaredType = (
       const base = Type.effect(
         success.fact.type,
         failureTypes,
+        fact.lifetimes,
         fact.access,
         requirementTypes,
         fact.requirementParameters,
@@ -369,6 +393,7 @@ export const resolveDeclaredType = (
       const type = Type.effectWithRows(
         success.fact.type,
         failureRow,
+        fact.lifetimes,
         fact.access,
         requirementExpression === undefined
           ? base.requirementRow
@@ -441,12 +466,22 @@ export const resolveDeclaredType = (
           ? 0
           : (declaration?.typeParameters.length ?? Type.intrinsicNominalArity(target.fact.type))
       const declaredParameters = declaration?.typeParameters.map((parameter) => parameter.type)
-      const valueArguments = arguments_.map(
-        (argument, ordinal): Type.GenericArgument | undefined => {
-          if (argument.fact._tag !== 'Resolved') return undefined
-          return genericArgumentForParameter(declaredParameters?.at(ordinal), argument.fact.type)
-        },
+      const ordinaryParameters = declaredParameters?.filter(
+        (parameter) => parameter.kind !== 'Lifetime',
       )
+      const writtenLifetimes = arguments_.filter((argument) => argument.fact._tag === 'Lifetime')
+      const ordinaryArguments = arguments_.filter((argument) => argument.fact._tag !== 'Lifetime')
+      const valueArguments = ordinaryArguments.map(
+        (argument, ordinal): Type.GenericArgument | undefined =>
+          argument.fact._tag === 'Resolved'
+            ? genericArgumentForParameter(ordinaryParameters?.at(ordinal), argument.fact.type)
+            : undefined,
+      )
+      const lifetimeArguments =
+        fact.implicitLifetimeArguments ??
+        writtenLifetimes.flatMap((argument) =>
+          argument.fact._tag === 'Lifetime' ? [argument.fact.lifetime] : [],
+        )
       const requirementTypes = requirements.flatMap(
         (requirement): ReadonlyArray<Type.Requirement> =>
           requirement.capability.fact._tag === 'Resolved' &&
@@ -477,8 +512,20 @@ export const resolveDeclaredType = (
                 : undefined,
             ],
       )
-      const available = Object.freeze([...valueArguments, ...rowArguments])
-      const suppliedCount = available.length
+      const written = [...valueArguments, ...rowArguments]
+      let lifetimeOrdinal = 0
+      let ordinaryOrdinal = 0
+      const available = Object.freeze(
+        declaredParameters === undefined
+          ? [...lifetimeArguments, ...written]
+          : declaredParameters.map((parameter) =>
+              parameter.kind === 'Lifetime'
+                ? lifetimeArguments.at(lifetimeOrdinal++)
+                : written.at(ordinaryOrdinal++),
+            ),
+      )
+      const suppliedCount =
+        arguments_.length + rowArguments.length + (fact.implicitLifetimeArguments?.length ?? 0)
       if (expected === suppliedCount && available.every((argument) => argument !== undefined)) {
         const concrete = available.filter(
           (argument): argument is Type.GenericArgument => argument !== undefined,
@@ -580,6 +627,7 @@ export const resolveDeclaredType = (
           const mismatch = concrete.findIndex((argument, ordinal) => {
             const parameter = declaredParameters?.at(ordinal)
             if (parameter === undefined) return false
+            if (parameter.kind === 'Lifetime') return !Lifetime.isLifetime(argument)
             if (parameter.kind === 'Value') return !Type.isTypeArgument(argument)
             if (parameter.kind === 'RequirementRow') return !Type.isRequirementRowArgument(argument)
             return (
@@ -590,7 +638,8 @@ export const resolveDeclaredType = (
           const parameter = declaredParameters?.at(mismatch)
           const supplied = arguments_.at(mismatch)
           if (incompatibleBound < 0 && parameter !== undefined && supplied !== undefined) {
-            let suppliedKind: Type.ParameterKind = 'Value'
+            let suppliedKind: Type.ParameterKind =
+              supplied.fact._tag === 'Lifetime' ? 'Lifetime' : 'Value'
             if (supplied.fact._tag === 'Resolved' && Type.isRepresented(supplied.fact.type)) {
               suppliedKind =
                 supplied.fact.type.contract._tag === 'CallableType'
@@ -739,7 +788,7 @@ export const resolveDeclaredType = (
   if (fact._tag === 'Slice') {
     const element = resolveDeclaredType(module, fact.element, resolvers, modules)
     if (element.fact._tag === 'Resolved') {
-      const type = Type.slice(fact.access, element.fact.type)
+      const type = Type.slice(fact.access, element.fact.type, fact.lifetime)
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
@@ -768,7 +817,7 @@ export const resolveDeclaredType = (
   if (fact._tag === 'Reference') {
     const target = resolveDeclaredType(module, fact.target, resolvers, modules)
     if (target.fact._tag === 'Resolved') {
-      const type = Type.reference(fact.access, target.fact.type)
+      const type = Type.reference(fact.access, target.fact.type, fact.lifetime)
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
@@ -1202,7 +1251,10 @@ export const inferInterfaceWitnessTarget = (
     }),
   )
   const covered = new Set(
-    constraints.flatMap((constraint) => Type.parameters(constraint.pattern).map(Type.key)),
+    constraints.flatMap((constraint) => [
+      ...Type.parameters(constraint.pattern).map(Type.key),
+      ...Type.freeLifetimes(constraint.pattern).map(Lifetime.key),
+    ]),
   )
   if (binders.some((binder) => !covered.has(Type.key(binder))))
     constraints.push(
@@ -1211,12 +1263,14 @@ export const inferInterfaceWitnessTarget = (
         pattern: Type.effectWithRows(
           Type.unit,
           implementation.failureRow.row,
+          { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
           'Shared',
           implementation.requirementRow.row,
         ),
         actual: Type.effectWithRows(
           Type.unit,
           contract.failureRow.row,
+          { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
           'Shared',
           contract.requirementRow.row,
         ),
@@ -1243,6 +1297,39 @@ export const interfaceWitnessCompatibility = (
   substitution: Type.Substitution,
 ): InterfaceWitnessCompatibility.Compatibility | undefined => {
   if (contract === undefined || contract.success._tag !== 'Resolved') return undefined
+  const writtenLifetimes = (
+    parameters: ReadonlyArray<TypeParameterFact>,
+  ): Type.ExecutableLifetimes => ({
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: parameters.flatMap((parameter) =>
+      parameter.type.kind === 'Lifetime'
+        ? [Lifetime.bound(parameter.type.owner, parameter.type.ordinal, parameter.type.name)]
+        : [],
+    ),
+    lifetimeBounds: parameters.flatMap((parameter) =>
+      parameter.type.kind === 'Lifetime'
+        ? (parameter.lifetimeBounds ?? []).map((shorter) => ({
+            longer: Lifetime.bound(
+              parameter.type.owner,
+              parameter.type.ordinal,
+              parameter.type.name,
+            ),
+            shorter,
+          }))
+        : [],
+    ),
+  })
+  const expectedLifetimes = writtenLifetimes(contract.source.declaration.typeParameters)
+  const actualLifetimes = writtenLifetimes(implementation.typeParameters)
+  const lifetimeCompatibility = InterfaceWitnessCompatibility.lifetimeContract(expectedLifetimes, {
+    ...actualLifetimes,
+    lifetimeBinders: expectedLifetimes.lifetimeBinders,
+    lifetimeBounds: (actualLifetimes.lifetimeBounds ?? []).map((bound) => ({
+      longer: Type.substituteLifetime(bound.longer, substitution),
+      shorter: Type.substituteLifetime(bound.shorter, substitution),
+    })),
+  })
+  if (lifetimeCompatibility._tag === 'Incompatible') return lifetimeCompatibility
   const contractOperands = contract.operands.flatMap((operand) =>
     operand.type._tag === 'Resolved'
       ? [compatibilityOperand(operand.parameter, operand.type.type, contract.provider)]
@@ -1269,6 +1356,7 @@ export const interfaceWitnessCompatibility = (
     Type.effectWithRows(
       Type.unit,
       implementation.failureRow.row,
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
       'Shared',
       implementation.requirementRow.row,
     ),
@@ -1728,7 +1816,15 @@ export const resolveRequirementRow = (
         )
     }
   }
-  const normalized = Type.requirementMembers(Type.effect('never', [], 'Shared', requirements))
+  const normalized = Type.requirementMembers(
+    Type.effect(
+      'never',
+      [],
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Shared',
+      requirements,
+    ),
+  )
   return Object.freeze({
     fact: Object.freeze({
       ...row,
@@ -1787,8 +1883,9 @@ type InlineParameters = ReadonlyMap<string, ReadonlySet<number>>
  * representations do not embed `T`, so the walk names them and stops rather than descending into
  * the element. Every other nominal is entered only through the arguments its own declaration
  * reaches inline, which `inlineParameters` supplies.
- * Arrays, slices, references, callables, effects, and unions descend exactly as `Type.nominals`
- * does, so this graph is narrower than the reported dependency graph and never wider.
+ * References and slices store addresses, so their pointee layouts are also indirect. Arrays,
+ * callables, effects, and unions descend exactly as `Type.nominals` does, so this graph is
+ * narrower than the reported dependency graph and never wider.
  */
 const inlineReach = (
   self: Type.Type,
@@ -1815,14 +1912,11 @@ const inlineReach = (
       visit(type)
       return
     }
-    if (Type.isFixedArray(type) || Type.isSlice(type)) {
+    if (Type.isFixedArray(type)) {
       descend(type.element)
       return
     }
-    if (Type.isReference(type)) {
-      descend(type.target)
-      return
-    }
+    if (Type.isReference(type) || Type.isSlice(type)) return
     // A raw pointer is one address; its layout never embeds the pointee.
     if (Type.isPointer(type)) return
     // A C function pointer is likewise one address; its signature does not embed its types.

@@ -7,11 +7,18 @@ import {
   delayedLoopLoans,
   effectContract,
   emitReleases,
+  emitInitializationTransition,
   generated,
+  initializationFor,
+  initializeBinding,
   lowerBorrowedWriteSelectors,
   lowerWriteSelectors,
+  lowerOwnershipPath,
+  ownershipLocal,
   ownerFields,
+  prepareInitialization,
   specializedCleanup,
+  transitionAt,
   terminalLoopLoanEndings,
   withDelayedFailureLoanEndings,
   withoutLoanEndings,
@@ -19,6 +26,7 @@ import {
 import type { LoweredExpression } from './EffectLowering.js'
 import {
   borrowedWriteRoot,
+  endLoans,
   endReturnedViewLoans,
   ownedWriteRoot,
   retainedEffectLoans,
@@ -42,6 +50,7 @@ import type {} from './LowerExpression.js'
 import { lowerExpression, lowerExecution } from './LowerExpression.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
+import * as MovePath from './MovePath.js'
 import * as Ownership from './Ownership.js'
 import * as Type from './Type.js'
 import { effectValueByIdentity, instanceText } from './ValueType.js'
@@ -253,6 +262,20 @@ export const lowerSequence = (
   // Iterative: a sequence is as long as the author wrote it, so its length must not become
   // JavaScript stack depth. Only nested blocks recurse.
   let region = id
+  const initialization = prepareInitialization(fn)
+  if (initialization.length > 0) {
+    region = fn.reserve()
+    fn.publish({
+      _tag: 'OperationRegion',
+      id,
+      operations: initialization,
+      outcome: {
+        _tag: 'Forward',
+        target: region,
+        provenance: generated(fn.owner.function.declaration.syntax.span),
+      },
+    })
+  }
   for (const statement of statements) {
     const previousLoop = fn.ownerLoop
     fn.ownerLoop = ownerLoop
@@ -487,6 +510,7 @@ const lowerStatement = (
         fn.slotLoans.set(destination.ordinal, heldLoans)
       }
       fn.bindingLocals.set(statement.binding.ordinal, destination)
+      initializeBinding(fn, { _tag: 'Let', binding: statement.binding }, statement.span)
       const destinationType = fn.localTypes.at(destination.ordinal)
       if (destinationType?._tag === 'EffectValue') {
         const retained = retainedEffectLoans(fn, statement.initializer)
@@ -559,10 +583,11 @@ const lowerStatement = (
 
   if (statement._tag === 'Write') {
     const place = statement.place
-    const root =
-      place._tag === 'BorrowedWritePlace'
-        ? borrowedWriteRoot(fn, place.root)
-        : ownedWriteRoot(fn, place.root)
+    const transition = transitionAt(fn, statement.span, 'Write')
+    let root: Mir.LocalId | undefined
+    if (place._tag === 'BorrowedWritePlace') root = borrowedWriteRoot(fn, place.root)
+    else if (transition !== undefined) root = ownershipLocal(fn, transition.root)
+    else root = ownedWriteRoot(fn, place.root)
     const rootType = root === undefined ? undefined : fn.localTypes.at(root.ordinal)
     // A whole callable binding keeps its exact representation; the written value carries the same
     // identity once analysis admitted the write.
@@ -571,10 +596,12 @@ const lowerStatement = (
       (rootType?._tag === 'CallableValue' && place.selectors.length === 0 ? rootType : undefined)
     const [written, operations] = fn.capture(() => {
       if (root === undefined || rootType === undefined || type === undefined) return false
-      const selectors =
-        place._tag === 'BorrowedWritePlace'
-          ? lowerBorrowedWriteSelectors(fn, place.selectors)
-          : lowerWriteSelectors(fn, place.selectors)
+      let selectors: ReadonlyArray<Mir.PlaceSelector> | 'Transferred' | undefined
+      if (place._tag === 'BorrowedWritePlace')
+        selectors = lowerBorrowedWriteSelectors(fn, place.selectors)
+      else if (transition !== undefined)
+        selectors = lowerOwnershipPath(fn, root, transition.path, place.span)
+      else selectors = lowerWriteSelectors(fn, place.selectors)
       if (selectors === 'Transferred') return selectors
       if (selectors === undefined) return false
       fn.emit(
@@ -598,8 +625,24 @@ const lowerStatement = (
       )
       const displacedCleanup =
         replacement === undefined ? undefined : cleanupForLocal(fn, replacement.cleanup, type)
+      if (place._tag === 'WritePlace' && displacedCleanup !== undefined) {
+        const initialization =
+          replacement === undefined || transition === undefined
+            ? undefined
+            : initializationFor(fn, transition.root, replacement.initialization, transition.path)
+        fn.emit({
+          _tag: 'Drop',
+          local: root,
+          selectors,
+          cleanup: displacedCleanup,
+          ...(initialization === undefined ? {} : { initialization }),
+          provenance: authored(statement.span),
+        })
+      }
       const displaced =
-        displacedCleanup !== undefined && CleanupPlan.hasEffect(displacedCleanup)
+        place._tag === 'BorrowedWritePlace' &&
+        displacedCleanup !== undefined &&
+        CleanupPlan.hasEffect(displacedCleanup)
           ? fn.alloc(type)
           : undefined
       if (displaced !== undefined) {
@@ -639,6 +682,7 @@ const lowerStatement = (
           }),
         )
       }
+      if (transition !== undefined) emitInitializationTransition(fn, transition)
       endReturnedViewLoans(fn, statement.span)
       return true
     })
@@ -662,6 +706,52 @@ const lowerStatement = (
   }
 
   if (statement._tag === 'Drop') {
+    const transition = transitionAt(fn, statement.span, 'Drop')
+    if (transition !== undefined && ownershipLocal(fn, transition.root) !== undefined) {
+      const root = ownershipLocal(fn, transition.root)
+      const type = 'type' in statement.expression ? fn.type(statement.expression.type) : undefined
+      if (root === undefined || type === undefined) return undefined
+      const selectors = lowerOwnershipPath(fn, root, transition.path, statement.span)
+      if (selectors === undefined) return undefined
+      let selected = transition.before
+      for (const selector of transition.path)
+        selected =
+          selected.children.find(
+            (child) => MovePath.key([child.selector]) === MovePath.key([selector]),
+          )?.state ?? MovePath.make(selected.initialization)
+      const initialization = initializationFor(fn, transition.root, selected, transition.path)
+      const [, operations] = fn.capture(() => {
+        const authoredEndings = (fn.ownership?.loans ?? [])
+          .filter((loan) => spanKey(loan.endSpan) === spanKey(statement.span))
+          .map((loan) => loan.id)
+        const retainedEndings =
+          transition.root._tag === 'Let' && transition.path.length === 0
+            ? (fn.effectLoanEnds.get(transition.root.binding.ordinal) ?? [])
+            : []
+        endLoans(fn, [...authoredEndings, ...retainedEndings], statement.span)
+        if (transition.root._tag === 'Let' && transition.path.length === 0)
+          fn.effectLoanEnds.delete(transition.root.binding.ordinal)
+        fn.emit({
+          _tag: 'Drop',
+          local: root,
+          selectors,
+          cleanup: concreteCleanup(fn, Mir.semanticType(type)),
+          ...(initialization === undefined ? {} : { initialization }),
+          provenance: authored(statement.span),
+        })
+        emitInitializationTransition(fn, transition)
+        endReturnedViewLoans(fn, statement.span)
+      })
+      const following = fn.reserve()
+      fn.publish({
+        _tag: 'OperationRegion',
+        id,
+        ...ownerFields(ownerLoop),
+        operations,
+        outcome: { _tag: 'Forward', target: following, provenance: generated(statement.span) },
+      })
+      return following
+    }
     const droppedExpression =
       statement.expression._tag === 'Move' ? statement.expression.subject : statement.expression
     const droppedRecipe = callableRecipe(fn, droppedExpression)

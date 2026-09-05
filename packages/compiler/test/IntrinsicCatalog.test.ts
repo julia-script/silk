@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CallableContract from '../src/CallableContract.js'
 import * as Intrinsic from '../src/Intrinsic.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Scalar from '../src/Scalar.js'
 import * as Type from '../src/Type.js'
 
@@ -448,9 +449,9 @@ it.effect('infers the suspension intrinsic exact Effect channels', () =>
     const module = 'intrinsic/suspend-rows'
     const source = `struct Problem {}
 service Clock {}
-fn suspend(
-  deferred: once Effect<i32 ! Problem ? &Clock>
-) -> once Effect<i32 ! Problem ? &Clock> {
+fn suspend<'env>(
+  deferred: once Effect<'env; i32 ! Problem ? &Clock>
+) -> once Effect<'env; i32 ! Problem ? &Clock> {
   return Intrinsic.suspendEffect(move deferred)
 }
 pub fn main() -> i32 { return 42 }`
@@ -462,10 +463,18 @@ pub fn main() -> i32 { return 42 }`
         expression.reference._tag === 'ResolvedBuiltin' &&
         expression.reference.operation === 'EffectSuspend',
     )
-    assert.strictEqual(
-      suspended?.type._tag === 'Available' ? Type.encode(suspended.type.type) : undefined,
-      `once Effect<i32 ! ${module}.Problem ? &${module}.Clock>`,
-    )
+    const type = suspended?.type._tag === 'Available' ? suspended.type.type : undefined
+    assert.isTrue(type !== undefined && Type.isEffect(type))
+    if (type !== undefined && Type.isEffect(type)) {
+      assert.strictEqual(type.access, 'Take')
+      assert.strictEqual(type.success, 'i32')
+      assert.deepEqual(Type.failureMembers(type).map(Type.encode), [`${module}.Problem`])
+      assert.deepEqual(
+        Type.requirementMembers(type).map((member) => Type.encode(member.capability)),
+        [`${module}.Clock`],
+      )
+      assert.notStrictEqual(type.environment._tag, 'StaticLifetime')
+    }
   }),
 )
 
@@ -682,6 +691,10 @@ it('classifies targetProfile as a static-only u8 intrinsic with no runtime ident
         contract: {
           functionKind: 'Function',
           unsafe: false,
+          environment: Lifetime.staticLifetime,
+          lifetimeBinders: [],
+          lifetimeBounds: [],
+          typeOutlives: [],
           binders: [],
           parameters: [],
           result: 'u8',
@@ -752,7 +765,11 @@ it('models borrowField as one mixed shared lane plus one consumed static lane', 
     { name: 'owner', type: '&Owner' },
     { name: 'field', type: 'Field<Owner, Value>', phase: 'Static' },
   ])
-  assert.strictEqual(operation.returnedBorrowParameter, 0)
+  if (operation.rule._tag !== 'MixedFieldProjectionRule') return
+  assert.deepEqual(
+    Type.storageLifetimes(operation.rule.contract.parameters[0]?.type ?? Type.unit),
+    Type.storageLifetimes(operation.rule.contract.result),
+  )
   assert.strictEqual(
     Intrinsic.signature(operation),
     'fn Intrinsic.borrowField<Owner, Value>(owner: &Owner, static field: Field<Owner, Value>) -> &Value',

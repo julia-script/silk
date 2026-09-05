@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as InstanceDiagnostics from '../src/InstanceDiagnostics.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 
@@ -49,7 +50,7 @@ it.effect('realizes exact represented callable storage through layout and MIR', 
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'representation-fence/callable-exact',
-      `struct Parser<F: fn(i32) -> i32> { parse: F }
+      `struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
 fn decode(value: i32) -> i32 { return value }
 pub fn main() -> i32 {
   let parser = Parser { parse: decode }
@@ -63,9 +64,9 @@ pub fn main() -> i32 {
 
 it.effect('realizes an open callable field after reachable exact specialization', () =>
   Effect.gen(function* () {
-    const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
+    const source = `struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
 fn decode(value: i32) -> i32 { return value }
-fn make<F: fn(i32) -> i32>(parse: F) -> Parser<F> {
+fn make<F: fn<'static>(i32) -> i32>(parse: F) -> Parser<F> {
   return Parser<F> { parse: move parse }
 }
 pub fn main() -> i32 {
@@ -81,7 +82,7 @@ it.effect('realizes exact represented Effect storage through layout and MIR', ()
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'representation-fence/effect-exact',
-      `struct Deferred<F: Effect<i32>> { operation: F }
+      `struct Deferred<F: Effect<'static; i32>> { operation: F }
 pub fn main() -> i32 {
   let deferred = Deferred { operation: effect { return 1 } }
   return run deferred.operation
@@ -95,9 +96,9 @@ pub fn main() -> i32 {
 it.effect('realizes represented Effect storage for every proven run mode', () =>
   Effect.gen(function* () {
     const modes = [
-      ['shared', 'Effect<i32>'],
-      ['exclusive', 'mut Effect<i32>'],
-      ['consuming', 'once Effect<i32>'],
+      ['shared', "Effect<'static; i32>"],
+      ['exclusive', "mut Effect<'static; i32>"],
+      ['consuming', "once Effect<'static; i32>"],
     ] as const
 
     for (const [name, bound] of modes) {
@@ -117,8 +118,8 @@ pub fn main() -> i32 {
 
 it.effect('realizes an open Effect field after reachable exact specialization', () =>
   Effect.gen(function* () {
-    const source = `struct Deferred<F: Effect<i32>> { operation: F }
-fn defer<F: Effect<i32>>(operation: F) -> Deferred<F> {
+    const source = `struct Deferred<F: Effect<'static; i32>> { operation: F }
+fn defer<F: Effect<'static; i32>>(operation: F) -> Deferred<F> {
   return Deferred<F> { operation: move operation }
 }
 pub fn main() -> i32 {
@@ -133,7 +134,7 @@ pub fn main() -> i32 {
 it.effect('fences a represented callable element nested in a specialized fixed array', () =>
   Effect.gen(function* () {
     const source = `fn decode(value: i32) -> i32 { return value }
-fn singleton<F: fn(i32) -> i32>(value: F) -> [F; 1] {
+fn singleton<F: fn<'static>(i32) -> i32>(value: F) -> [F; 1] {
   return [move value]
 }
 pub fn main() -> i32 {
@@ -164,7 +165,7 @@ pub fn main() -> i32 {
 
 it.effect('fences a represented Effect element nested in a specialized fixed array', () =>
   Effect.gen(function* () {
-    const source = `fn singleton<F: Effect<i32>>(value: F) -> [F; 1] {
+    const source = `fn singleton<F: Effect<'static; i32>>(value: F) -> [F; 1] {
   return [move value]
 }
 pub fn main() -> i32 {
@@ -195,9 +196,9 @@ pub fn main() -> i32 {
 
 it.effect('fences represented callable storage through nested arrays inside a struct field', () =>
   Effect.gen(function* () {
-    const source = `struct Bucket<F: fn(i32) -> i32> { values: [[F; 1]; 1] }
+    const source = `struct Bucket<F: fn<'static>(i32) -> i32> { values: [[F; 1]; 1] }
 fn decode(value: i32) -> i32 { return value }
-fn bucket<F: fn(i32) -> i32>(value: F) -> Bucket<F> {
+fn bucket<F: fn<'static>(i32) -> i32>(value: F) -> Bucket<F> {
   return Bucket<F> { values: [[move value]] }
 }
 pub fn main() -> i32 {
@@ -216,8 +217,8 @@ pub fn main() -> i32 {
 
 it.effect('fences an array whose elements are represented Effect nominals', () =>
   Effect.gen(function* () {
-    const source = `struct Deferred<F: Effect<i32>> { operation: F }
-fn singleton<F: Effect<i32>>(operation: F) -> [Deferred<F>; 1] {
+    const source = `struct Deferred<F: Effect<'static; i32>> { operation: F }
+fn singleton<F: Effect<'static; i32>>(operation: F) -> [Deferred<F>; 1] {
   return [Deferred<F> { operation: move operation }]
 }
 pub fn main() -> i32 {
@@ -239,7 +240,7 @@ pub fn main() -> i32 {
 it.effect('fences a specialized zero-length represented callable array', () =>
   Effect.gen(function* () {
     const source = `fn decode(value: i32) -> i32 { return value }
-fn empty<F: fn(i32) -> i32>(value: F) -> [F; 0] {
+fn empty<F: fn<'static>(i32) -> i32>(value: F) -> [F; 0] {
   return []
 }
 pub fn main() -> i32 {
@@ -258,7 +259,10 @@ it.effect('keeps array and slice traversal symmetric without descending through 
       'representation-fence/container-shapes',
       ascii('pub fn main() -> i32 { return 0 }'),
     )
-    const callable = Type.callable(['i32'], 'i32')
+    const callable = Type.callable(['i32'], 'i32', {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    })
     const callableArgument = Type.exactRepresentationArgument(
       Type.callableIdentityArgument('container-shapes.decode', {
         _tag: 'Declaration',
@@ -268,7 +272,10 @@ it.effect('keeps array and slice traversal symmetric without descending through 
       callable,
     )
     const representedCallable = Type.represented(callable, callable, callableArgument)
-    const effect = Type.effect('i32', [])
+    const effect = Type.effect('i32', [], {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    })
     const representedEffect = Type.represented(
       effect,
       effect,
@@ -297,7 +304,7 @@ it.effect('keeps array and slice traversal symmetric without descending through 
     assert.strictEqual(
       InstanceDiagnostics.storedRepresentation(
         snapshot.index,
-        Type.slice('Shared', representedEffect),
+        Type.slice('Shared', representedEffect, Lifetime.staticLifetime),
         'Effect',
       )?.contract._tag,
       'EffectType',
@@ -305,7 +312,7 @@ it.effect('keeps array and slice traversal symmetric without descending through 
     assert.strictEqual(
       InstanceDiagnostics.storedRepresentation(
         snapshot.index,
-        Type.reference('Shared', representedCallable),
+        Type.reference('Shared', representedCallable, Lifetime.staticLifetime),
         'Callable',
       ),
       undefined,
@@ -318,8 +325,8 @@ it.effect('does not recurse through references to represented executable values'
     const callable = yield* realized(
       'representation-fence/callable-reference',
       `import silk.i32 as i32
-struct Pointer<F: fn(i32) -> i32> { operation: &F }
-fn point<F: fn(i32) -> i32>(operation: &F) -> Pointer<F> {
+struct Pointer<F: fn<'static>(i32) -> i32> { operation: &F }
+fn point<F: fn<'static>(i32) -> i32>(operation: &F) -> Pointer<F> {
   return Pointer<F> { operation }
 }
 pub fn main() -> i32 {
@@ -330,8 +337,8 @@ pub fn main() -> i32 {
     )
     const effect = yield* realized(
       'representation-fence/effect-reference',
-      `struct Pointer<F: Effect<i32>> { operation: &F }
-fn point<F: Effect<i32>>(operation: &F) -> Pointer<F> {
+      `struct Pointer<F: Effect<'static; i32>> { operation: &F }
+fn point<F: Effect<'static; i32>>(operation: &F) -> Pointer<F> {
   return Pointer<F> { operation }
 }
 pub fn main() -> i32 {
@@ -358,10 +365,10 @@ it.effect(
     Effect.gen(function* () {
       const snapshot = yield* realized(
         'representation-fence/callable-nested-repeated',
-        `struct Parser<F: fn(i32) -> i32> { parse: F }
-struct Pair<F: fn(i32) -> i32> { first: Parser<F> second: Parser<F> }
+        `struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
+struct Pair<F: fn<'static>(i32) -> i32> { first: Parser<F> second: Parser<F> }
 fn decode(value: i32) -> i32 { return value }
-fn pair<F: fn(i32) -> i32>(first: Parser<F>, second: Parser<F>) -> Pair<F> {
+fn pair<F: fn<'static>(i32) -> i32>(first: Parser<F>, second: Parser<F>) -> Pair<F> {
   return Pair<F> { first: move first, second: move second }
 }
 pub fn main() -> i32 {
@@ -379,9 +386,9 @@ it.effect('realizes nested repeated represented Effect fields through the shared
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'representation-fence/effect-nested-repeated',
-      `struct Deferred<F: Effect<i32>> { operation: F }
-struct Pair<F: Effect<i32>, G: Effect<i32>> { first: Deferred<F> second: Deferred<G> }
-fn pair<F: Effect<i32>, G: Effect<i32>>(
+      `struct Deferred<F: Effect<'static; i32>> { operation: F }
+struct Pair<F: Effect<'static; i32>, G: Effect<'static; i32>> { first: Deferred<F> second: Deferred<G> }
+fn pair<F: Effect<'static; i32>, G: Effect<'static; i32>>(
   first: Deferred<F>,
   second: Deferred<G>
 ) -> Pair<F, G> {

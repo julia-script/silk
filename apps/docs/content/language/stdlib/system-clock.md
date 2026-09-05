@@ -99,7 +99,7 @@ service does not install an implementation or expose a clock-setting operation.
 ### Operation `now`
 
 ```silk
-effect fn now() -> Instant ? &mut SystemClock
+effect<'static> fn now() -> Instant ? &mut SystemClock
 ```
 
 Reads the current Unix-epoch instant.
@@ -111,7 +111,7 @@ reference may be adjusted.
 ### Operation `getResolution`
 
 ```silk
-effect fn getResolution() -> u64 ? &mut SystemClock
+effect<'static> fn getResolution() -> u64 ? &mut SystemClock
 ```
 
 Returns the provider-reported positive nominal resolution in whole nanoseconds.
@@ -137,7 +137,7 @@ instead of being normalized into another field pair.
 ### Associated function `SystemClock.seconds`
 
 ```silk
-pub fn seconds(self: &silk/system_clock.Instant) -> i64
+pub fn seconds<'life0>(self: &'life0 silk/system_clock.Instant) -> i64
 ```
 
 Returns the signed whole-second component of an instant.
@@ -147,7 +147,7 @@ Returns the signed whole-second component of an instant.
 ### Associated function `SystemClock.nanoseconds`
 
 ```silk
-pub fn nanoseconds(self: &silk/system_clock.Instant) -> i64
+pub fn nanoseconds<'life0>(self: &'life0 silk/system_clock.Instant) -> i64
 ```
 
 Returns the canonical non-negative nanosecond fraction of an instant.

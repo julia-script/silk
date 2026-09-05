@@ -294,6 +294,14 @@ export const lowerInstance = (
       ? Type.effectWithRows(
           instance.specialization.result,
           instance.specialization.failureRow ?? RowAlgebra.concrete(Type.failureRowPolicy(), []),
+          {
+            ...DeclarationFacts.executableLifetimes(fn.declaration),
+            lifetimeBinders: [],
+            environment: Type.substituteLifetime(
+              DeclarationFacts.executableLifetimes(fn.declaration).environment,
+              instance.substitution,
+            ),
+          },
           'Shared',
           instance.specialization.requirementRow ??
             RowAlgebra.concrete(Type.requirementRowPolicy(), []),
@@ -454,7 +462,7 @@ export const lowerEffectRunner = (
     layout,
     opaqueRealizations,
   )
-  if (captureParameterTypes.length !== block.captures.length) return undefined
+  if (captureParameterTypes.length !== block.captures.length) { console.log('TEMP capture-fail', id.name); return undefined }
   const parameterizedRequirements = spec.providedRequirements.filter(
     (requirement) => requirement.witness._tag === 'SourceConformanceWitness',
   )
@@ -464,6 +472,7 @@ export const lowerEffectRunner = (
         _tag: 'ReferenceType' as const,
         access: requirement.access === 'Take' ? ('Exclusive' as const) : requirement.access,
         target: requirement.providerType,
+        lifetime: spec.type.type.environment,
       }),
     )
     return type === undefined ? [] : [type]
@@ -510,6 +519,7 @@ export const lowerEffectRunner = (
     provenance: generated(block.span),
   })
   const entry = lowerSequence(lowering, block.statements, indexExits(plan), undefined, terminal)
+  if (id.name.includes('catchAll')) console.log('TEMP entry', id.name, entry, lowering.regions.map((r) => r?._tag))
   if (
     entry === undefined ||
     lowering.regions.some(
@@ -572,6 +582,7 @@ export const lowerCatchEffectRunner = (
       Type.reference(
         requirement.access === 'Take' ? ('Exclusive' as const) : requirement.access,
         requirement.providerType,
+        spec.type.type.environment,
       ),
     )
     return type === undefined ? [] : [type]
@@ -686,6 +697,7 @@ export const lowerBuiltinEffectRunner = (
       Type.reference(
         requirement.access === 'Take' ? ('Exclusive' as const) : requirement.access,
         requirement.providerType,
+        spec.type.type.environment,
       ),
     )
     return type === undefined ? [] : [type]
@@ -817,6 +829,7 @@ export const lowerWitnessEffectRunner = (
       Type.reference(
         requirement.access === 'Take' ? ('Exclusive' as const) : requirement.access,
         requirement.providerType,
+        spec.type.type.environment,
       ),
     )
     return type === undefined ? [] : [type]

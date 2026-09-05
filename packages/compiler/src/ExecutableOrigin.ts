@@ -1,7 +1,6 @@
 import * as CAbi from './CAbi.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
-import * as Constraint from './Constraint.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Elaboration from './Elaboration.js'
@@ -286,7 +285,10 @@ export const make = (operations: Operations) => {
       leftVisible.length === rightVisible.length &&
       leftVisible.every((argument, ordinal) => {
         const expected = rightVisible.at(ordinal)
-        return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+        return (
+          expected !== undefined &&
+          Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(expected)
+        )
       })
     )
   }
@@ -296,7 +298,10 @@ export const make = (operations: Operations) => {
     left.typeArguments.length === right.typeArguments.length &&
     left.typeArguments.every((argument, ordinal) => {
       const expected = right.typeArguments.at(ordinal)
-      return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+      return (
+        expected !== undefined &&
+        Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(expected)
+      )
     })
   /** Converts proved strict-subterm obligations into the only structurally descending call edges. */
   const witnessDependencyCallTargets = (
@@ -492,7 +497,7 @@ export const make = (operations: Operations) => {
           Object.freeze({
             declaration: expression.target,
             typeArguments: expression.typeArguments,
-            evidence: expression.evidence.map(Constraint.evidenceKey),
+            evidence: expression.evidence.map(Type.runtimeEvidenceKey),
             ...(expression._tag === 'Call' || expression._tag === 'EffectConstruct'
               ? { staticArguments: expression.staticArguments }
               : {}),
@@ -986,6 +991,7 @@ export const make = (operations: Operations) => {
     context: EffectOriginContext,
   ): InstanceKey | undefined => {
     const callable = appliedCallableOriginOf(expression, context)
+    if (context.owner.declaration.module.includes('local-shared-allocation')) console.log('TEMP origin', JSON.stringify({callee: expression.callee._tag, callable: callable === undefined ? undefined : {target: callable.target, args: callable.typeArguments.map(Type.encodeGenericArgument)}, targetParams: callable?.target._tag === 'Declaration' ? targetFunction(context.results, { _tag: 'CanonicalDeclarationId', module: callable.target.module, name: callable.target.name })?.declaration.typeParameters.map((p) => p.type.name) : undefined}))
     if (callable?.target._tag !== 'Declaration') return undefined
     const declaration: DeclarationFacts.CanonicalId = Object.freeze({
       _tag: 'CanonicalDeclarationId',
@@ -1044,7 +1050,10 @@ export const make = (operations: Operations) => {
           })
         }
       }
-      if (identity === undefined) return undefined
+      if (identity === undefined) {
+        if (context.owner.declaration.module.includes('local-shared-allocation')) console.log('TEMP missing-effect-origin', ordinal, argument?._tag)
+        return undefined
+      }
       hiddenArguments.push(Type.effectIdentityArgument(identity))
     }
     for (const ordinal of callableParameterOrdinals(target, targetSubstitution)) {
@@ -1138,7 +1147,7 @@ export const make = (operations: Operations) => {
           resolving: new Set(resolving).add(identity),
         }),
       ),
-      Type.genericArgumentKey,
+      Type.runtimeGenericArgumentKey,
     )
   }
 
@@ -1249,9 +1258,8 @@ export const make = (operations: Operations) => {
       const source = Type.substituteRequirementsRow(constraint.source, targetSubstitution)
       const concrete = RowAlgebra.concretize(Type.requirementRowPolicy(), selected)
       const requirement = concrete._tag === 'Concrete' ? concrete.row.members.at(0) : undefined
-      const hasProviderParameter = target.contract.parameters.some((candidate, ordinal) => {
+      const providerParameter = target.contract.parameters.map((candidate) => Type.substitute(candidate, targetSubstitution)).find((specialized, ordinal) => {
         if (ordinal === effectParameter) return false
-        const specialized = Type.substitute(candidate, targetSubstitution)
         if (constraint.mode === 'Take') return Type.equals(specialized, provider)
         return (
           Type.isReference(specialized) &&
@@ -1266,7 +1274,7 @@ export const make = (operations: Operations) => {
         requirement === undefined ||
         !Type.isNominal(requirement.capability) ||
         !RowAlgebra.equals(Type.requirementRowPolicy(), effect.requirementRow, source) ||
-        !hasProviderParameter ||
+        providerParameter === undefined ||
         !Type.equals(
           Type.substitute(service.expression.service, service.context.substitution),
           requirement.capability,
@@ -1279,7 +1287,7 @@ export const make = (operations: Operations) => {
         continue
       const witness = ConformanceProof.witness(context.index, provider, requirement.capability)
       if (witness?._tag === 'SourceConformanceWitness')
-        return targetKeyOfServiceCall(service.expression, witness, service.context)
+        return targetKeyOfServiceCall(service.expression, witness, service.context, providerParameter)
     }
     return undefined
   }
@@ -1316,7 +1324,11 @@ export const make = (operations: Operations) => {
         binding.provider.selectionAccess !== 'Take')
     )
       return undefined
-    return targetKeyOfServiceCall(service.expression, witness, service.context)
+    return targetKeyOfServiceCall(service.expression, witness, service.context,
+      binding.provider.selectionAccess === 'Take' ? witness.provider : Type.reference(
+        binding.provider.selectionAccess, witness.provider,
+        Type.substituteLifetime(binding.type.environment, targetSubstitution),
+      ))
   }
 
   const forwardedServiceTargetOfCall = (
@@ -1351,7 +1363,11 @@ export const make = (operations: Operations) => {
         binding.provider.selectionAccess !== 'Take')
     )
       return undefined
-    return targetKeyOfServiceCall(service.expression, witness, service.context)
+    return targetKeyOfServiceCall(service.expression, witness, service.context,
+      binding.provider.selectionAccess === 'Take' ? witness.provider : Type.reference(
+        binding.provider.selectionAccess, witness.provider,
+        Type.substituteLifetime(binding.type.environment, targetSubstitution),
+      ))
   }
 
   const compositeEffectRepresentationOf = (
@@ -1414,7 +1430,7 @@ export const make = (operations: Operations) => {
             substitution,
           }),
         ),
-        Type.genericArgumentKey,
+        Type.runtimeGenericArgumentKey,
       )
     }
     if (expression._tag === 'CallableApply') {
@@ -1442,7 +1458,7 @@ export const make = (operations: Operations) => {
             substitution,
           }),
         ),
-        Type.genericArgumentKey,
+        Type.runtimeGenericArgumentKey,
       )
     }
     return undefined
@@ -1524,7 +1540,7 @@ export const make = (operations: Operations) => {
       target.declaration.typeParameters.map((parameter) => parameter.type),
       [...typeArguments, ...hiddenArguments],
       expression.staticArguments,
-      expression.evidence.map(Constraint.evidenceKey),
+      expression.evidence.map(Type.runtimeEvidenceKey),
     )
     context.recordResolvedCall?.(expression, key)
     return key
@@ -1537,23 +1553,39 @@ export const make = (operations: Operations) => {
       { readonly _tag: 'SourceConformanceWitness' }
     >,
     context: EffectOriginContext,
+    receiver: Type.Type,
   ): InstanceKey | undefined {
     const operation = ConformanceProof.witnessOperation(witness, expression.operation)
     const target = operation === undefined ? undefined : targetFunction(context.results, operation)
     if (operation === undefined || target === undefined) return undefined
-    const service = Type.substitute(expression.service, context.substitution)
-    const serviceArgumentCount = Type.isNominal(service) ? service.arguments.length : 0
-    const typeArguments = [
-      ...witness.typeArguments,
-      ...expression.typeArguments
-        .slice(serviceArgumentCount)
-        .map((argument) => Type.substituteGenericArgument(argument, context.substitution)),
-    ]
-    const targetSubstitution = TypeInference.substitution(
-      target.declaration.typeParameters.map((parameter) => parameter.type),
-      typeArguments,
+    if (target.contract._tag !== 'Contract') return undefined
+    const conformance = context.index.modules.find((module) => module.module === witness.module)
+      ?.conformances.find((candidate) => candidate.ordinal === witness.ordinal)
+    const conformanceSubstitution = conformance === undefined ? undefined : TypeInference.substitution(
+      conformance.typeParameters.map((parameter) => parameter.type), witness.typeArguments,
     )
-    if (targetSubstitution === undefined) return undefined
+    const mapped = conformance?.operations.find((candidate) =>
+      candidate.name._tag === 'Present' && candidate.name.spelling === expression.operation)?.targetArguments
+    const targetSubstitution = new Map<string, Type.GenericArgument>()
+    for (const [ordinal, parameter] of target.declaration.typeParameters.entries()) {
+      const argument = mapped?.at(ordinal)
+      if (argument === undefined || conformanceSubstitution === undefined) continue
+      const specialized = Type.substituteGenericArgument(argument, conformanceSubstitution)
+      if (Type.genericArgumentKey(specialized) !== Type.genericArgumentKey(Type.parameterArgument(parameter.type)))
+        targetSubstitution.set(Type.key(parameter.type), specialized)
+    }
+    const actualParameters = [receiver, ...expression.arguments.flatMap((argument) =>
+      argument._tag === 'Unavailable' ? [] : [Type.substitute(argument.type, context.substitution)])]
+    if (actualParameters.length !== target.contract.parameters.length) return undefined
+    for (const [ordinal, parameter] of target.contract.parameters.entries()) {
+      const actual = actualParameters.at(ordinal)
+      if (actual === undefined || !TypeInference.infer(parameter, actual, targetSubstitution)) return undefined
+    }
+    const typeArguments = target.declaration.typeParameters.flatMap((parameter) => {
+      const argument = targetSubstitution.get(Type.key(parameter.type))
+      return argument === undefined ? [] : [argument]
+    })
+    if (typeArguments.length !== target.declaration.typeParameters.length) return undefined
     const hiddenArguments: Array<
       | Type.EffectIdentityArgument
       | Type.CallableIdentityArgument
@@ -2302,11 +2334,12 @@ export const make = (operations: Operations) => {
       const base =
         environment === undefined
           ? undefined
-          : (instances.find((candidate) =>
-              Type.equalsCallableEnvironmentIdentity(
-                environment,
-                Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
-              ),
+          : (instances.find(
+              (candidate) =>
+                Type.runtimeCallableEnvironmentIdentityKey(environment) ===
+                Type.runtimeCallableEnvironmentIdentityKey(
+                  Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+                ),
             ) ?? resolveCallable(identity))
       if (environment !== undefined && base === undefined) continue
       const calleeType =
@@ -2428,8 +2461,8 @@ export const make = (operations: Operations) => {
               : []
           })
           .sort((left, right) => {
-            const leftKey = `${left.parameter ?? -1}\0${Type.key(left.capability)}\0${left.role}`
-            const rightKey = `${right.parameter ?? -1}\0${Type.key(right.capability)}\0${right.role}`
+            const leftKey = `${left.parameter ?? -1}\0${Type.runtimeKey(left.capability)}\0${left.role}`
+            const rightKey = `${right.parameter ?? -1}\0${Type.runtimeKey(right.capability)}\0${right.role}`
             if (leftKey < rightKey) {
               return -1
             }
@@ -2738,15 +2771,18 @@ export const make = (operations: Operations) => {
       callables.find(
         (candidate) =>
           identity.environment !== undefined &&
-          Type.equalsCallableEnvironmentIdentity(
-            identity.environment,
-            Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
-          ) &&
+          Type.runtimeCallableEnvironmentIdentityKey(identity.environment) ===
+            Type.runtimeCallableEnvironmentIdentityKey(
+              Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+            ) &&
           Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
           identity.typeArguments.length === candidate.typeArguments.length &&
           identity.typeArguments.every((argument, ordinal) => {
             const expected = candidate.typeArguments.at(ordinal)
-            return expected !== undefined && Type.equalsGenericArgument(argument, expected)
+            return (
+              expected !== undefined &&
+              Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(expected)
+            )
           }),
       )
     let refined = new Map(effects)
@@ -2793,6 +2829,7 @@ export const make = (operations: Operations) => {
             type: Type.effectWithRows(
               effect.type.success,
               effect.type.failureRow,
+              effect.type,
               access,
               effect.type.requirementRow,
             ),
@@ -2858,6 +2895,7 @@ export const make = (operations: Operations) => {
       readonly selected: Type.Requirement
       readonly witness: DeclarationFacts.ConformanceWitness
       readonly providerAccess: 'Shared' | 'Exclusive' | 'Take'
+      readonly receiver: Type.Type
     }
     const providerBindings = new Map<string, ProviderBinding>()
     const resolveEffectIdentity = (identity: Type.EffectIdentityArgument): string | undefined => {
@@ -3263,6 +3301,10 @@ export const make = (operations: Operations) => {
                 selected,
                 witness,
                 providerAccess: expression.provider.selectionAccess,
+                receiver: expression.provider.selectionAccess === 'Take'
+                  ? witness.provider
+                  : Type.reference(expression.provider.selectionAccess, witness.provider,
+                    Type.substituteLifetime(expression.type.environment, instance.substitution)),
               }),
             )
         } else if (expression._tag === 'Call') {
@@ -3348,6 +3390,7 @@ export const make = (operations: Operations) => {
             serviceCall.expression,
             binding.witness,
             serviceCall.context,
+            binding.receiver,
           )
           if (target !== undefined) {
             providedTargets.set(

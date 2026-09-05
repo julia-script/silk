@@ -10,6 +10,7 @@ import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import type * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
 import type * as Match from './Match.js'
+import type * as MovePath from './MovePath.js'
 import { instanceText, operationLocals } from './MirVerification.js'
 import type * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -266,6 +267,11 @@ export const isBinaryOperator = (operation: Hir.BuiltinOperation): operation is 
 
 export type PlaceSelector =
   | {
+      readonly _tag: 'VariantSelector'
+      readonly ordinal: number
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'FieldSelector'
       readonly field: DeclarationFacts.FieldId
       readonly provenance: Provenance
@@ -286,6 +292,13 @@ export type PlaceSelector =
     }
 
 export type Operation =
+  | {
+      /** Updates a compiler-owned Boolean presence flag without reading an owned value. */
+      readonly _tag: 'SetInitialized'
+      readonly flag: LocalId
+      readonly initialized: boolean
+      readonly provenance: Provenance
+    }
   | {
       readonly _tag: 'ForeignStaticLoad'
       readonly destination: LocalId
@@ -1180,6 +1193,8 @@ export type Operation =
       readonly type: Type
       /** Set when a paired same-place write licenses reading a non-Copy value out. */
       readonly consume?: boolean
+      /** Exact canonical path for an owned extraction, distinct from paired borrowed replacement. */
+      readonly ownershipPath?: MovePath.Path
       readonly provenance: Provenance
     }
   | {
@@ -1239,7 +1254,13 @@ export interface ShortCircuitOperation {
 export interface DropOperation {
   readonly _tag: 'Drop'
   readonly local: LocalId
+  /** Optional owned destination projection; cleanup observes only its initialized remainder. */
+  readonly selectors?: ReadonlyArray<PlaceSelector>
   readonly cleanup: CleanupPlan.CleanupPlan
+  readonly initialization?: {
+    readonly state: MovePath.State
+    readonly flags: ReadonlyArray<{ readonly path: MovePath.Path; readonly local: LocalId }>
+  }
   /** Exact target plan for an opaque local-shared core drop. Absent for every other cleanup. */
   readonly localShared?: {
     readonly element: SilkType.Type
@@ -1304,6 +1325,8 @@ export interface MatchOperation {
   readonly id: Match.MatchId
   readonly destination?: LocalId
   readonly scrutinee: LocalId
+  /** Discriminant-only selection addresses this owned subtree without copying its payload. */
+  readonly selectors?: ReadonlyArray<PlaceSelector>
   readonly scrutineeType: Type
   readonly scrutineeShape: Layout.CallingShape
   readonly access: Match.Access
@@ -1618,7 +1641,7 @@ export const matchesInstance = (
     const expected = typeArguments.at(index)
     return (
       expected !== undefined &&
-      SilkType.genericArgumentKey(argument) === SilkType.genericArgumentKey(expected)
+      SilkType.runtimeGenericArgumentKey(argument) === SilkType.runtimeGenericArgumentKey(expected)
     )
   }) &&
   fn.instance.staticArguments.length === staticArguments.length &&
@@ -1800,6 +1823,7 @@ export interface Violation {
     | 'InvalidEffectOperation'
     | 'InvalidNormalization'
     | 'InvalidEntry'
+    | 'InvalidInitializationState'
     | 'InvalidWrite'
     | 'InvalidLoan'
     | 'InvalidSliceOperation'

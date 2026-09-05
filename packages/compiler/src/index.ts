@@ -40,6 +40,7 @@ export * as InterfaceWitnessCompatibility from './InterfaceWitnessCompatibility.
 export * as Intrinsic from './Intrinsic.js'
 export * as IntrinsicAvailability from './IntrinsicAvailability.js'
 export * as Layout from './Layout.js'
+export * as LifetimeElision from './LifetimeElision.js'
 export * as LayoutEncode from './LayoutEncode.js'
 export * as LayoutVerify from './LayoutVerify.js'
 export * as Lexer from './Lexer.js'

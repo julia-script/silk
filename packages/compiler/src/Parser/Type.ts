@@ -19,6 +19,16 @@ import {
 } from './Expression.js'
 import { typeStarts } from './Grammar.js'
 
+const argumentStarts: ReadonlyArray<Token.TokenKind> = Object.freeze(['Lifetime', ...typeStarts])
+
+const parseLifetime = (initial: State, following: ReadonlyArray<Token.TokenKind>): NodeResult => {
+  const lifetime = expect(initial, 'Lifetime', following)
+  return Object.freeze({
+    state: lifetime.state,
+    node: syntaxNode(lifetime.state, 'LifetimeType', lifetime.elements),
+  })
+}
+
 export const parseTypePath = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
@@ -69,13 +79,26 @@ export const parseTypeArgumentList = (
   following: ReadonlyArray<Token.TokenKind>,
 ): NodeResult => {
   const left = expect(initial, 'Less', [
-    ...typeStarts,
+    ...argumentStarts,
     ...(kind === 'TypeArgumentList' ? (['Bang', 'Question'] as const) : []),
     'Greater',
     ...following,
   ])
   let state = left.state
   let children: ReadonlyArray<SyntaxTree.Element> = left.elements
+  if (
+    kind === 'TypeArgumentList' &&
+    (nextSignificantKind(state) === 'Semicolon' ||
+      (nextSignificantKind(state) === 'Lifetime' && peek(state, 1) === 'Semicolon'))
+  ) {
+    const lifetime = expect(state, 'Lifetime', ['Semicolon', ...typeStarts, ...following])
+    const separator = expect(lifetime.state, 'Semicolon', [...typeStarts, 'Greater', ...following])
+    state = separator.state
+    children = Object.freeze([
+      ...children,
+      syntaxNode(state, 'EffectEnvironment', [...lifetime.elements, ...separator.elements]),
+    ])
+  }
   if (nextSignificantKind(state) === 'Greater') {
     const missing = missingToken(state, 'Identifier')
     state = addDiagnostic(state, Diagnostic.missingToken('Identifier', missing.span))
@@ -88,7 +111,17 @@ export const parseTypeArgumentList = (
     !(kind === 'TypeArgumentList' && nextSignificantKind(state) === 'Question') &&
     !following.includes(nextSignificantKind(state) ?? 'EndOfFile')
   ) {
-    const argument = parseType(state, ['Comma', 'Bang', 'Question', 'Greater', ...following])
+    const argumentFollowing: ReadonlyArray<Token.TokenKind> = [
+      'Comma',
+      'Bang',
+      'Question',
+      'Greater',
+      ...following,
+    ]
+    const argument =
+      nextSignificantKind(state) === 'Lifetime'
+        ? parseLifetime(state, argumentFollowing)
+        : parseType(state, argumentFollowing)
     if (kind === 'CallTypeArgumentList' && hasContextualSpelling(argument.state, 'at')) {
       const at = expect(argument.state, 'Identifier', [
         'Identifier',
@@ -107,7 +140,7 @@ export const parseTypeArgumentList = (
       state = argument.state
     }
     if (nextSignificantKind(state) !== 'Comma') break
-    const comma = expect(state, 'Comma', [...typeStarts, 'Greater', ...following])
+    const comma = expect(state, 'Comma', [...argumentStarts, 'Greater', ...following])
     children = Object.freeze([...children, ...comma.elements])
     state = comma.state
   }
@@ -132,7 +165,11 @@ export const parseTypeParameterList = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
 ): NodeResult => {
-  const parameterStarts: ReadonlyArray<Token.TokenKind> = Object.freeze(['Identifier', 'Question'])
+  const parameterStarts: ReadonlyArray<Token.TokenKind> = Object.freeze([
+    'Lifetime',
+    'Identifier',
+    'Question',
+  ])
   const left = expect(initial, 'Less', [...parameterStarts, 'Greater', ...following])
   let state = left.state
   let children: ReadonlyArray<SyntaxTree.Element> = left.elements
@@ -151,7 +188,8 @@ export const parseTypeParameterList = (
       markerKind === 'Question'
         ? expect(state, markerKind, ['Identifier', 'Comma', 'Greater', ...following])
         : undefined
-    const name = expect(marker?.state ?? state, 'Identifier', [
+    const lifetimeParameter = markerKind === 'Lifetime'
+    const name = expect(marker?.state ?? state, lifetimeParameter ? 'Lifetime' : 'Identifier', [
       'Colon',
       'Comma',
       'Greater',
@@ -159,17 +197,25 @@ export const parseTypeParameterList = (
     ])
     const colon =
       marker === undefined && nextSignificantKind(name.state) === 'Colon'
-        ? expect(name.state, 'Colon', [...typeStarts, 'Comma', 'Greater', ...following])
+        ? expect(name.state, 'Colon', [...argumentStarts, 'Comma', 'Greater', ...following])
         : undefined
     let boundState = colon?.state
     let boundElements: ReadonlyArray<SyntaxTree.Element> = Object.freeze([])
     if (colon !== undefined) {
       while (boundState !== undefined) {
-        const bound = parseType(boundState, ['Plus', 'Comma', 'Greater', ...following], true)
+        const bound =
+          nextSignificantKind(boundState) === 'Lifetime'
+            ? parseLifetime(boundState, ['Plus', 'Comma', 'Greater', ...following])
+            : parseType(boundState, ['Plus', 'Comma', 'Greater', ...following], true)
         boundElements = Object.freeze([...boundElements, bound.node])
         boundState = bound.state
         if (nextSignificantKind(boundState) !== 'Plus') break
-        const plus = expect(boundState, 'Plus', [...typeStarts, 'Comma', 'Greater', ...following])
+        const plus = expect(boundState, 'Plus', [
+          ...argumentStarts,
+          'Comma',
+          'Greater',
+          ...following,
+        ])
         boundElements = Object.freeze([...boundElements, ...plus.elements])
         boundState = plus.state
       }
@@ -177,7 +223,7 @@ export const parseTypeParameterList = (
     const completedState = boundState ?? name.state
     children = Object.freeze([
       ...children,
-      syntaxNode(completedState, 'TypeParameter', [
+      syntaxNode(completedState, lifetimeParameter ? 'LifetimeParameter' : 'TypeParameter', [
         ...(marker?.elements ?? []),
         ...name.elements,
         ...(colon?.elements ?? []),
@@ -275,6 +321,30 @@ export const parseTypePrimary = (
   following: ReadonlyArray<Token.TokenKind>,
   preserveFieldStart = false,
 ): NodeResult => {
+  if (nextSignificantKind(initial) === 'ForKeyword') {
+    const keyword = expect(initial, 'ForKeyword', ['Less', ...typeStarts, ...following])
+    const parameters = parseTypeParameterList(keyword.state, [
+      'FnKeyword',
+      'MutKeyword',
+      'OnceKeyword',
+      'UnsafeKeyword',
+      ...following,
+    ])
+    const binders = syntaxNode(parameters.state, 'LifetimeBinderList', parameters.node.children)
+    const callable = parseTypePrimary(parameters.state, following, preserveFieldStart)
+    const state =
+      callable.node.kind === 'CallableType'
+        ? callable.state
+        : addDiagnostic(callable.state, Diagnostic.missingToken('FnKeyword', callable.node.span))
+    return Object.freeze({
+      state,
+      node: syntaxNode(state, 'CallableType', [
+        ...keyword.elements,
+        binders,
+        ...callable.node.children,
+      ]),
+    })
+  }
   if (isRowWithoutStart(initial)) {
     const keyword = expect(initial, 'Identifier', ['Less', ...following])
     const left = expect(keyword.state, 'Less', [...typeStarts, ...following])
@@ -394,8 +464,31 @@ export const parseTypePrimary = (
       callableMode === 'MutKeyword' || callableMode === 'OnceKeyword'
         ? expect(callableStart, callableMode, ['FnKeyword', 'LeftParenthesis', ...following])
         : undefined
-    const fn = expect(mode?.state ?? callableStart, 'FnKeyword', ['LeftParenthesis', ...following])
-    const left = expect(fn.state, 'LeftParenthesis', [
+    const fn = expect(mode?.state ?? callableStart, 'FnKeyword', [
+      'Less',
+      'LeftParenthesis',
+      ...following,
+    ])
+    let environment: NodeResult | undefined
+    if (nextSignificantKind(fn.state) === 'Less') {
+      const left = expect(fn.state, 'Less', [
+        'Lifetime',
+        'Greater',
+        'LeftParenthesis',
+        ...following,
+      ])
+      const lifetime = expect(left.state, 'Lifetime', ['Greater', 'LeftParenthesis', ...following])
+      const right = expect(lifetime.state, 'Greater', ['LeftParenthesis', ...following])
+      environment = Object.freeze({
+        state: right.state,
+        node: syntaxNode(right.state, 'CallableEnvironment', [
+          ...left.elements,
+          ...lifetime.elements,
+          ...right.elements,
+        ]),
+      })
+    }
+    const left = expect(environment?.state ?? fn.state, 'LeftParenthesis', [
       ...typeStarts,
       'RightParenthesis',
       'Arrow',
@@ -430,6 +523,7 @@ export const parseTypePrimary = (
         ...(unsafe?.elements ?? []),
         ...(mode?.elements ?? []),
         ...fn.elements,
+        ...(environment === undefined ? [] : [environment.node]),
         ...left.elements,
         ...parameters,
         ...right.elements,
@@ -457,17 +551,28 @@ export const parseTypePrimary = (
   }
   if (nextSignificantKind(initial) === 'Ampersand') {
     const ampersand = expect(initial, 'Ampersand', [
+      'Lifetime',
       'MutKeyword',
       'LeftBracket',
       ...typeStarts,
       ...following,
     ])
-    const mut =
-      nextSignificantKind(ampersand.state) === 'MutKeyword'
-        ? expect(ampersand.state, 'MutKeyword', ['LeftBracket', ...typeStarts, ...following])
+    const lifetime =
+      nextSignificantKind(ampersand.state) === 'Lifetime'
+        ? expect(ampersand.state, 'Lifetime', [
+            'MutKeyword',
+            'LeftBracket',
+            ...typeStarts,
+            ...following,
+          ])
         : undefined
-    if (nextSignificantKind(mut?.state ?? ampersand.state) !== 'LeftBracket') {
-      const subject = parseTypePrimary(mut?.state ?? ampersand.state, ['At', ...following])
+    const accessState = lifetime?.state ?? ampersand.state
+    const mut =
+      nextSignificantKind(accessState) === 'MutKeyword'
+        ? expect(accessState, 'MutKeyword', ['LeftBracket', ...typeStarts, ...following])
+        : undefined
+    if (nextSignificantKind(mut?.state ?? accessState) !== 'LeftBracket') {
+      const subject = parseTypePrimary(mut?.state ?? accessState, ['At', ...following])
       let role: ElementsResult | undefined
       if (nextSignificantKind(subject.state) === 'At') {
         const at = expect(subject.state, 'At', ['Identifier', ...following])
@@ -481,13 +586,14 @@ export const parseTypePrimary = (
         state: role?.state ?? subject.state,
         node: syntaxNode(role?.state ?? subject.state, 'ReferenceType', [
           ...ampersand.elements,
+          ...(lifetime?.elements ?? []),
           ...(mut?.elements ?? []),
           subject.node,
           ...(role?.elements ?? []),
         ]),
       })
     }
-    const left = expect(mut?.state ?? ampersand.state, 'LeftBracket', [
+    const left = expect(mut?.state ?? accessState, 'LeftBracket', [
       ...typeStarts,
       'RightBracket',
       ...following,
@@ -498,6 +604,7 @@ export const parseTypePrimary = (
       state: right.state,
       node: syntaxNode(right.state, 'SliceType', [
         ...ampersand.elements,
+        ...(lifetime?.elements ?? []),
         ...(mut?.elements ?? []),
         ...left.elements,
         element.node,

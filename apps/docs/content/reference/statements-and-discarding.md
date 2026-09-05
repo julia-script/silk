@@ -47,3 +47,8 @@ Dropping an Effect value does not run it. `drop answer()` constructs and discard
 **Evidence:** [expression-statement requirements](../../../../openspec/specs/bootstrap-expression-statements/spec.md),
 [semantic implementation](../../../../packages/compiler/src/Elaboration.ts),
 [elaboration tests](../../../../packages/compiler/test/Elaboration.test.ts).
+
+When the operand is an owned place, `drop place` performs cleanup on its live remainder, including
+a partial aggregate. It ends that place's ownership and skips components already moved away.
+This differs from passing `move place` to an ordinary function, which requires a complete value.
+Active loans and whole-value user `Drop` boundaries still apply; a second drop is use after move.

@@ -1,4 +1,6 @@
 import * as Type from './Type.js'
+import * as Lifetime from './Lifetime.js'
+import * as TypeCompatibility from './TypeCompatibility.js'
 
 export type Access = 'Shared' | 'Exclusive' | 'Take'
 
@@ -21,6 +23,7 @@ export interface Contract {
 export interface Witness extends Contract {}
 
 export type Problem =
+  | { readonly _tag: 'LifetimeContract' }
   | { readonly _tag: 'StrongerSafety' }
   | {
       readonly _tag: 'StrongerFlow'
@@ -119,6 +122,21 @@ const operandProblem = (
   return undefined
 }
 
+/** Opens the promised lifetime binders rigidly and rejects stronger witness bounds. */
+export const lifetimeContract = (
+  contract: Type.ExecutableLifetimes,
+  witness: Type.ExecutableLifetimes,
+): Compatibility => {
+  const expected = Type.callable([], Type.unit, {
+    ...contract,
+    environment: Lifetime.staticLifetime,
+  })
+  const actual = Type.callable([], Type.unit, { ...witness, environment: Lifetime.staticLifetime })
+  return TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected))
+    ? Object.freeze({ _tag: 'Compatible' })
+    : incompatible(Object.freeze({ _tag: 'LifetimeContract' }))
+}
+
 /** Checks one substituted interface contract without narrowing or rewriting that caller contract. */
 export const check = (contract: Contract, witness: Witness): Compatibility => {
   if (!contract.unsafe && witness.unsafe)
@@ -189,6 +207,8 @@ export const describe = (self: Compatibility): string | undefined => {
   if (self._tag === 'Compatible') return undefined
   const problem = self.problem
   switch (problem._tag) {
+    case 'LifetimeContract':
+      return 'witness requires a lifetime relationship the interface does not promise'
     case 'StrongerSafety':
       return 'unsafe witness cannot satisfy a safe operation contract'
     case 'StrongerFlow':

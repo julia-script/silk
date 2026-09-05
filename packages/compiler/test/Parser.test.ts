@@ -160,6 +160,99 @@ const diagnosticView = (result: SyntaxFile.SyntaxFile) =>
     reason: diagnostic.reason,
   }))
 
+it('retains distinct lifetime binders, arguments, borrowed types and callable environment syntax', () => {
+  const source = `struct Holder<'a: 'b + 'c, 'b, 'c, T: Copy + 'a> {
+  value: &'a T
+  values: &'b mut [T]
+  text: string<'c>
+}
+effect<'env> fn use<'env, T>(value: &'env mut Holder<'env, 'static, 'env, T>, callback: for<'call> once fn<'env>(&'call T) -> &'call T, pending: Effect<'env; T ! Error ? &Clock>) -> () {
+  drop identity<'env, T>(value)
+}
+service Store<'a, T: 'a> { effect fn save(value: T) -> () }
+effect fn requiring<'a, T>() -> () ? &Store<'a, T> { return () }
+fn refine(value: Choice, place: i32) -> i32 {
+  drop value.field
+  return match place value { Choice.Some { field } if true => field Choice.None => match place { i32 n => n } }
+}`
+  const syntax = parseText('memory://lifetime-syntax.silk', source)
+  assert.deepEqual(syntax.lexicalDiagnostics, [])
+  assert.deepEqual(syntax.parserDiagnostics, [])
+  assert.deepEqual(reconstructedBytes(syntax), ascii(source))
+  const nodes = descendants(syntax.root).filter(SyntaxTree.isNode)
+  const parameters = nodes.filter((node) => node.kind === 'LifetimeParameter')
+  assert.deepEqual(
+    parameters.map((node) => directTokenText(syntax, node, 'Lifetime')),
+    ["'a", "'b", "'c", "'env", "'call", "'a", "'a"],
+  )
+  const borrowed = nodes.filter(
+    (node) => node.kind === 'ReferenceType' || node.kind === 'SliceType',
+  )
+  assert.deepEqual(
+    borrowed.map((node) => [node.kind, directTokenText(syntax, node, 'Lifetime')]),
+    [
+      ['ReferenceType', "'a"],
+      ['SliceType', "'b"],
+      ['ReferenceType', "'env"],
+      ['ReferenceType', "'call"],
+      ['ReferenceType', "'call"],
+    ],
+  )
+  const environment =
+    nodes.find(
+      (node) =>
+        node.kind === 'EffectEnvironment' &&
+        SyntaxTree.directToken(node, 'Semicolon') !== undefined,
+    ) ?? raise('missing environment')
+  const declarationEnvironment = nodes.find(
+    (node) =>
+      node.kind === 'EffectEnvironment' && SyntaxTree.directToken(node, 'Less') !== undefined,
+  )
+  assert.strictEqual(
+    declarationEnvironment === undefined
+      ? undefined
+      : directTokenText(syntax, declarationEnvironment, 'Lifetime'),
+    "'env",
+  )
+  assert.strictEqual(directTokenText(syntax, environment, 'Lifetime'), "'env")
+  assert.strictEqual(directTokenText(syntax, environment, 'Semicolon'), ';')
+  const callableEnvironment =
+    nodes.find((node) => node.kind === 'CallableEnvironment') ??
+    raise('missing callable environment')
+  assert.strictEqual(directTokenText(syntax, callableEnvironment, 'Lifetime'), "'env")
+  const accesses = nodes.filter((node) => node.kind === 'MatchAccess')
+  assert.deepEqual(
+    accesses.map((node) => directTokenText(syntax, node, 'Identifier')),
+    ['place', undefined],
+  )
+  const callable = nodes.find((node) => node.kind === 'CallableType') ?? raise('missing callable')
+  assert.strictEqual(
+    SyntaxTree.directNode(callable, 'LifetimeBinderList')?.kind,
+    'LifetimeBinderList',
+  )
+  const call =
+    nodes.find((node) => node.kind === 'CallTypeArgumentList') ?? raise('missing call arguments')
+  assert.strictEqual(SyntaxTree.directNode(call, 'LifetimeType')?.kind, 'LifetimeType')
+})
+
+it('recovers malformed lifetime types and rejects lifetime annotations on value borrows', () => {
+  for (const declaration of [
+    "fn damaged<'a>(value: &'a, next: i32) -> () {}",
+    'fn damaged(value: Effect<; i32>) -> () {}',
+    'fn damaged(value: fn<>(i32) -> i32) -> () {}',
+    "fn damaged(value: for<'a> i32) -> () {}",
+    "fn damaged(value: for<'a fn(&'a i32) -> &'a i32) -> () {}",
+    "fn damaged(value: i32) -> () { drop &'a value }",
+  ]) {
+    const source = `${declaration}\nfn later() -> () {}`
+    const syntax = parseText('memory://damaged-lifetime.silk', source)
+    assert.deepEqual(syntax.lexicalDiagnostics, [])
+    assert.isAbove(syntax.parserDiagnostics.length, 0, declaration)
+    assert.deepEqual(reconstructedBytes(syntax), ascii(source))
+    assert.strictEqual(directFunctionDeclarations(syntax.root).length, 2, declaration)
+  }
+})
+
 it('derives expression child depths without consuming the shared parent depth', () => {
   const parent = ExpressionNesting.root
   const firstSibling = ExpressionNesting.child(parent)

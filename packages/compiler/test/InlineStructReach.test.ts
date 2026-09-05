@@ -45,6 +45,23 @@ const structNamed = (
     .flatMap((module) => module.structs)
     .find((struct) => struct.canonical._tag === 'Canonical' && struct.canonical.id.name === name)
 
+it.effect('accepts recursive lifetime-bearing references and slices through generic wrappers', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('borrowed', [
+      [
+        'borrowed',
+        `struct Link<'a, T> { value: &'a T }
+struct A<'a> { next: Link<'a, B<'a>> }
+struct B<'a> { next: &'a A<'a> }
+struct Tree<'a> { children: &'a [Tree<'a>] }`,
+      ],
+    ])
+    assert.deepEqual(codesOf(index), [])
+    assert.strictEqual(structNamed(index, 'A')?.dependency._tag, 'Available')
+    assert.strictEqual(structNamed(index, 'Tree')?.dependency._tag, 'Available')
+  }),
+)
+
 /**
  * The compiler-owned indirections are the base case of the whole rule: their representations are
  * `{$allocation, count}` and `{$address}` whatever they hold, so a field of `RawBuffer<Node>` needs

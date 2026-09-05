@@ -679,7 +679,7 @@ Returns `true` when `left` is greater than or equal to `right`.
 ## `parse`
 
 ```silk
-pub fn parse(text: string) -> silk/result.Result<isize, silk/format.ParseError>
+pub fn parse<'life0>(text: string<'life0>) -> silk/result.Result<isize, silk/format.ParseError>
 ```
 
 Reads the complete text as a signed decimal `isize`.

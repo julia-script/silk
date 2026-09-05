@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Backend from '../src/Backend.js'
+import * as Layout from '../src/Layout.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
@@ -987,5 +990,72 @@ pub fn main() -> i32 {
         { name: 'probe', arguments: ['*mut silk/vector.Vector<i32>'] },
       ],
     )
+  }),
+)
+
+it.effect('shares runtime instances and layouts across distinct proven lifetime arguments', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`struct View<'a> { value: &'a i32 }
+fn wrap<'a>(value: &'a i32) -> View<'a> { return View<'a> { value: value } }
+fn read<'a>(value: &'a i32) -> i32 { return value.* }
+pub fn main() -> i32 {
+  let left = 20
+  let right = 22
+  let first = wrap(&left)
+  let second = wrap(&right)
+  return read(first.value) + read(second.value)
+}`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(result)), [])
+    const discovery = Analysis.instancesOf(result)
+    assert.strictEqual(
+      discovery.instances.filter((instance) => instance.key.declaration.name === 'read').length,
+      1,
+    )
+    assert.strictEqual(
+      discovery.instances.filter((instance) => instance.key.declaration.name === 'wrap').length,
+      1,
+    )
+    const plan = Analysis.layoutOf(result)
+    assert.strictEqual(plan._tag, 'Available')
+    if (plan._tag !== 'Available') return
+    const first = Type.reference(
+      'Shared',
+      'i32',
+      Lifetime.bound({ module: 'test', name: 'one' }, 0, "'first"),
+    )
+    const second = Type.reference(
+      'Shared',
+      'i32',
+      Lifetime.bound({ module: 'test', name: 'two' }, 0, "'second"),
+    )
+    assert.notStrictEqual(Type.key(first), Type.key(second))
+    assert.isDefined(Layout.entry(plan.value, first))
+    assert.strictEqual(Layout.entry(plan.value, first), Layout.entry(plan.value, second))
+    const firstView = Type.nominal('golden/program', 'View', [first.lifetime])
+    const secondView = Type.nominal('golden/program', 'View', [second.lifetime])
+    assert.include(
+      plan.value.entries.map((entry) => Type.runtimeKey(entry.type)),
+      Type.runtimeKey(firstView),
+    )
+    assert.strictEqual(Layout.entry(plan.value, firstView), Layout.entry(plan.value, secondView))
+    assert.strictEqual(
+      Layout.callingShape(plan.value, first),
+      Layout.callingShape(plan.value, second),
+    )
+    const fn =
+      Analysis.loweredMir(result).functions.find((fn) => fn.id.name === 'read') ??
+      unreachable('missing read instance')
+    const key = fn.instance
+    const alternate = {
+      ...fn,
+      instance: {
+        ...key,
+        typeArguments: key.typeArguments.map((argument) =>
+          Lifetime.isLifetime(argument) ? Lifetime.staticLifetime : argument,
+        ),
+      },
+    }
+    assert.strictEqual(Backend.symbolFor(fn, undefined), Backend.symbolFor(alternate, undefined))
   }),
 )

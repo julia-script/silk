@@ -11,6 +11,7 @@ import type { LinearOperation } from './MirLinearization.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeDebug from './NativeDebug.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
+import * as NativeOwnedPlace from './NativeOwnedPlace.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeTermination from './NativeTermination.js'
@@ -23,6 +24,7 @@ type Operation = Extract<
   {
     readonly _tag:
       | 'Move'
+      | 'SetInitialized'
       | 'BeginLoan'
       | 'EndLoan'
       | 'SliceLength'
@@ -36,6 +38,33 @@ type Operation = Extract<
       | 'WritePlace'
   }
 >
+
+const candidateCondition = Effect.fnUntraced(function* (
+  context: Context,
+  indices: NativeOwnedPlace.Candidate['indices'],
+  tag: string,
+) {
+  let condition: Value.Input | undefined
+  for (const [ordinal, index] of indices.entries()) {
+    const expected = yield* Constant.integerUnsigned(
+      context.builder,
+      context.usizeType ?? context.i32,
+      BigInt(index.value),
+    )
+    const equal = yield* FunctionBody.integerCompare(
+      context.body,
+      'eq',
+      NativeStorage.readScalar(context.storage, index.local),
+      expected,
+      `${tag}_${ordinal}_index`,
+    )
+    condition =
+      condition === undefined
+        ? equal
+        : yield* FunctionBody.binary(context.body, 'and', condition, equal, `${tag}_${ordinal}_all`)
+  }
+  return condition
+})
 
 export const emit = Effect.fnUntraced(function* (context: Context, operation: Operation) {
   const {
@@ -55,6 +84,21 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   let trapBlock: LlvmBlock.Block | undefined
   let checkOrdinal = context.state.checkOrdinal
   switch (operation._tag) {
+    case 'SetInitialized': {
+      const type = entry.fn.localTypes.at(operation.flag.ordinal)
+      const lane = type === undefined ? undefined : NativeType.lanesFor(types, type).at(0)
+      if (type?._tag !== 'bool' || lane === undefined)
+        throw new RangeError('Ownership initialization flag must have a boolean lane')
+      const value = yield* Constant.integerUnsigned(
+        builder,
+        NativeType.laneType(types, lane),
+        operation.initialized ? 1n : 0n,
+      )
+      const values = Object.freeze([value])
+      nativeStorage.locals.set(operation.flag.ordinal, values)
+      yield* NativeStorage.storeMutable(nativeStorage, operation.flag, values)
+      break
+    }
     case 'Move': {
       const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
       if (sourceType?._tag === 'Bottom') {
@@ -499,6 +543,27 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         throw new RangeError('Backend place read lost its root type')
       }
       const sourceSemantic = Mir.semanticType(sourceType)
+      if (
+        !SilkType.isReference(sourceSemantic) &&
+        !SilkType.isSlice(sourceSemantic) &&
+        operation.selectors.every(
+          (selector) =>
+            selector._tag === 'FieldSelector' ||
+            selector._tag === 'VariantSelector' ||
+            (selector._tag === 'ElementSelector' && selector.index._tag === 'Proven'),
+        )
+      ) {
+        const place = NativeOwnedPlace.make(program.layout, sourceSemantic, operation.selectors)
+        if (place === undefined) throw new RangeError('Owned read lost its verified projection')
+        const selected = yield* NativeOwnedPlace.read(
+          place,
+          arith.lane,
+          NativeStorage.readLocal(nativeStorage, operation.root),
+          `owned_read${operation.destination.ordinal}`,
+        )
+        nativeStorage.locals.set(operation.destination.ordinal, selected)
+        break
+      }
       if (SilkType.isReference(sourceSemantic)) {
         // Resolve the selected value to one checked address, then load each calling lane.
         const address = NativeStorage.readLocal(nativeStorage, operation.root).at(0)
@@ -741,9 +806,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         checkOrdinal += 1
         break
       }
-      const sourceLanes = NativeType.valueLanesFor(types, sourceType)
       const sourceValues = NativeStorage.readLocal(nativeStorage, operation.root)
-      const destinationLanes = NativeType.lanesFor(types, operation.type)
       const runtimeSelectors = operation.selectors.flatMap((selector, ordinal) =>
         selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
           ? [
@@ -784,102 +847,51 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* LlvmBlock.setInsertionPoint(body, continueBlock)
       }
 
-      const selectedValues: Array<Value.Input> = []
-      for (const [destinationOrdinal, destinationLane] of destinationLanes.entries()) {
-        const candidates = sourceLanes.flatMap((sourceLane, sourceOrdinal) => {
-          if (sourceLane.path.length !== operation.selectors.length + destinationLane.path.length) {
-            return []
-          }
-          const runtimeElements: Array<{
-            readonly local: Mir.LocalId
-            readonly element: number
-          }> = []
-          for (const [selectorOrdinal, selector] of operation.selectors.entries()) {
-            const physical = sourceLane.path.at(selectorOrdinal)
-            if (physical === undefined) return []
-            if (selector._tag === 'FieldSelector') {
-              if (
-                physical._tag !== 'FieldId' ||
-                !DeclarationFacts.sameFieldId(physical, selector.field)
-              ) {
-                return []
-              }
-            } else {
-              if (physical._tag !== 'ElementSelector') return []
-              if (selector.index._tag === 'Proven' && physical.index !== selector.index.value) {
-                return []
-              }
-              if (selector.index._tag === 'Runtime') {
-                runtimeElements.push(
-                  Object.freeze({
-                    local: selector.index.local,
-                    element: physical.index,
-                  }),
-                )
-              }
-            }
-          }
-          const suffix = sourceLane.path.slice(operation.selectors.length)
-          const sameSuffix = suffix.every((physical, ordinal) => {
-            const expected = destinationLane.path.at(ordinal)
-            return expected !== undefined && LayoutVerify.selectorEquals(physical, expected)
-          })
-          const selected = sourceValues.at(sourceOrdinal)
-          return sameSuffix && selected !== undefined
-            ? [Object.freeze({ value: selected, runtimeElements })]
-            : []
-        })
-        const first = candidates.at(0)
-        if (
-          first === undefined &&
-          operation.selectors.some(
-            (selector) => selector._tag === 'ElementSelector' && selector.length === 0,
-          )
-        ) {
-          selectedValues.push(yield* Constant.integerSigned(builder, i32, 0n))
-          continue
-        }
-        if (first === undefined) {
-          throw new RangeError(`Backend could not realize place-read lane ${destinationOrdinal}`)
-        }
-        let selected = first.value
-        for (const [candidateOrdinal, candidate] of candidates.slice(1).entries()) {
-          let condition: Value.Input | undefined
-          for (const [elementOrdinal, element] of candidate.runtimeElements.entries()) {
-            const expected = yield* Constant.integerUnsigned(
-              builder,
-              usizeType ?? i32,
-              BigInt(element.element),
-            )
-            const equal = yield* FunctionBody.integerCompare(
-              body,
-              'eq',
-              NativeStorage.readScalar(nativeStorage, element.local),
-              expected,
-              `index${checkOrdinal}_${destinationOrdinal}_${candidateOrdinal}_${elementOrdinal}`,
-            )
-            condition =
-              condition === undefined
-                ? equal
-                : yield* FunctionBody.binary(
-                    body,
-                    'and',
-                    condition,
-                    equal,
-                    `index${checkOrdinal}_${destinationOrdinal}_${candidateOrdinal}_${elementOrdinal}_all`,
-                  )
-          }
-          if (condition !== undefined) {
-            selected = yield* FunctionBody.select(
-              body,
-              condition,
-              candidate.value,
-              selected,
-              `index${checkOrdinal}_${destinationOrdinal}_${candidateOrdinal}_value`,
+      const candidates = NativeOwnedPlace.candidates(
+        program.layout,
+        sourceSemantic,
+        operation.selectors,
+      )
+      let selectedValues: ReadonlyArray<Value.Input> | undefined
+      for (const [ordinal, candidate] of candidates.entries()) {
+        const values = yield* NativeOwnedPlace.read(
+          candidate.place,
+          arith.lane,
+          sourceValues,
+          `read${checkOrdinal}_${ordinal}`,
+        )
+        const condition = yield* candidateCondition(
+          context,
+          candidate.indices,
+          `read${checkOrdinal}_${ordinal}`,
+        )
+        if (selectedValues === undefined || condition === undefined) selectedValues = values
+        else {
+          const selected: Array<Value.Input> = []
+          for (const [lane, value] of values.entries()) {
+            const previous = selectedValues.at(lane)
+            if (previous === undefined)
+              throw new RangeError('Owned read candidates disagree on lane count')
+            selected.push(
+              yield* FunctionBody.select(
+                body,
+                condition,
+                value,
+                previous,
+                `read${checkOrdinal}_${ordinal}_${lane}`,
+              ),
             )
           }
+          selectedValues = selected
         }
-        selectedValues.push(selected)
+      }
+      if (selectedValues === undefined) {
+        // Zero-length arrays have already branched to the bounds trap. Keep the unreachable
+        // continuation well typed without reading any source lane.
+        const empty: Array<Value.Input> = []
+        for (const lane of NativeType.lanesFor(types, operation.type))
+          empty.push(yield* Constant.nullValue(builder, NativeType.laneType(types, lane)))
+        selectedValues = empty
       }
       checkOrdinal += 1
       nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(selectedValues))
@@ -1145,119 +1157,45 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* NativeStorage.reloadAddressRoots(nativeStorage)
         break
       }
-      const rootLanes = NativeType.valueLanesFor(types, operation.rootType)
       const rootValues = NativeStorage.readLocal(nativeStorage, operation.root)
-      const sourceLanes = NativeType.lanesFor(types, operation.type)
       const sourceValues = NativeStorage.readLocal(nativeStorage, operation.source)
-      if (operation.selectors.length === 0) {
-        nativeStorage.locals.set(operation.root.ordinal, sourceValues)
-        yield* NativeStorage.storeMutable(nativeStorage, operation.root, sourceValues)
-        if (nativeStorage.addressRoots.has(operation.root.ordinal)) {
-          yield* NativeStorage.storeAddressValues(
-            nativeStorage,
-            operation.root.ordinal,
-            sourceValues,
-            `write_addr${operation.root.ordinal}`,
-          )
-        }
-        break
-      }
-      const updated: Array<Value.Input> = []
-      for (const [rootOrdinal, rootLane] of rootLanes.entries()) {
-        const previous = rootValues.at(rootOrdinal)
-        if (previous === undefined) throw new RangeError('Mutable root lost a lane')
-        const runtimeElements: Array<{
-          readonly local: Mir.LocalId
-          readonly element: number
-        }> = []
-        let matches = true
-        for (const [selectorOrdinal, selector] of operation.selectors.entries()) {
-          const physical = rootLane.path.at(selectorOrdinal)
-          if (physical === undefined) {
-            matches = false
-            break
-          }
-          if (selector._tag === 'FieldSelector') {
-            if (
-              physical._tag !== 'FieldId' ||
-              !DeclarationFacts.sameFieldId(physical, selector.field)
-            ) {
-              matches = false
-              break
-            }
-          } else if (selector._tag === 'SliceElementSelector') {
-            matches = false
-            break
-          } else if (physical._tag !== 'ElementSelector') {
-            matches = false
-            break
-          } else if (selector.index._tag === 'Proven') {
-            if (physical.index !== selector.index.value) {
-              matches = false
-              break
-            }
-          } else {
-            runtimeElements.push(
-              Object.freeze({
-                local: selector.index.local,
-                element: physical.index,
-              }),
+      const candidates = NativeOwnedPlace.candidates(
+        program.layout,
+        Mir.semanticType(operation.rootType),
+        operation.selectors,
+      )
+      let updated = rootValues
+      for (const [ordinal, candidate] of candidates.entries()) {
+        const values = yield* NativeOwnedPlace.write(
+          candidate.place,
+          arith.lane,
+          updated,
+          sourceValues,
+          `write${checkOrdinal}_${ordinal}`,
+        )
+        const condition = yield* candidateCondition(
+          context,
+          candidate.indices,
+          `write${checkOrdinal}_${ordinal}`,
+        )
+        if (condition === undefined) updated = values
+        else {
+          const selected = [...updated]
+          for (const slot of candidate.place.slots) {
+            const previous = updated.at(slot)
+            const value = values.at(slot)
+            if (previous === undefined || value === undefined)
+              throw new RangeError('Owned write lost its original lane')
+            selected[slot] = yield* FunctionBody.select(
+              body,
+              condition,
+              value,
+              previous,
+              `write${checkOrdinal}_${ordinal}_${slot}`,
             )
           }
+          updated = selected
         }
-        if (!matches) {
-          updated.push(previous)
-          continue
-        }
-        const suffix = rootLane.path.slice(operation.selectors.length)
-        const sourceOrdinal = sourceLanes.findIndex(
-          (lane) =>
-            lane.path.length === suffix.length &&
-            lane.path.every((physical, ordinal) => {
-              const expected = suffix.at(ordinal)
-              return expected !== undefined && LayoutVerify.selectorEquals(physical, expected)
-            }),
-        )
-        const replacement = sourceValues.at(sourceOrdinal)
-        if (replacement === undefined) {
-          throw new RangeError(`Backend could not realize place-write lane ${rootOrdinal}`)
-        }
-        let condition: Value.Input | undefined
-        for (const [elementOrdinal, element] of runtimeElements.entries()) {
-          const expected = yield* Constant.integerUnsigned(
-            builder,
-            usizeType ?? i32,
-            BigInt(element.element),
-          )
-          const equal = yield* FunctionBody.integerCompare(
-            body,
-            'eq',
-            NativeStorage.readScalar(nativeStorage, element.local),
-            expected,
-            `write_index${checkOrdinal}_${rootOrdinal}_${elementOrdinal}`,
-          )
-          condition =
-            condition === undefined
-              ? equal
-              : yield* FunctionBody.binary(
-                  body,
-                  'and',
-                  condition,
-                  equal,
-                  `write_index${checkOrdinal}_${rootOrdinal}_${elementOrdinal}_all`,
-                )
-        }
-        updated.push(
-          condition === undefined
-            ? replacement
-            : yield* FunctionBody.select(
-                body,
-                condition,
-                replacement,
-                previous,
-                `write_index${checkOrdinal}_${rootOrdinal}_value`,
-              ),
-        )
       }
       checkOrdinal += 1
       const frozen = Object.freeze(updated)

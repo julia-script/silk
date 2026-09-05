@@ -1,5 +1,6 @@
 import { assert, it } from '@effect/vitest'
 import * as ConformanceHead from '../src/ConformanceHead.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Type from '../src/Type.js'
 
 const owner = (name: string) => Object.freeze({ module: 'heads', name })
@@ -135,66 +136,123 @@ it('separates two closed failure rows that name different members', () => {
 })
 
 it('separates closed Effect heads with disjoint success types', () => {
-  const leftEffect = Type.effect('i32', [])
-  const rightEffect = Type.effect('bool', [])
+  const leftEffect = Type.effect('i32', [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
+  const rightEffect = Type.effect('bool', [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const left = ConformanceHead.make(decoder(leftEffect), leftEffect)
   const right = ConformanceHead.make(decoder(rightEffect), rightEffect)
   assert.isFalse(ConformanceHead.mayOverlap(left, right))
 })
 
 it('separates closed Effect heads with disjoint failure rows', () => {
-  const leftEffect = Type.effect('i32', [Type.nominal('heads', 'Problem')])
-  const rightEffect = Type.effect('i32', [Type.nominal('heads', 'Other')])
+  const leftEffect = Type.effect('i32', [Type.nominal('heads', 'Problem')], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
+  const rightEffect = Type.effect('i32', [Type.nominal('heads', 'Other')], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const left = ConformanceHead.make(decoder(leftEffect), leftEffect)
   const right = ConformanceHead.make(decoder(rightEffect), rightEffect)
   assert.isFalse(ConformanceHead.mayOverlap(left, right))
 })
 
 it('separates closed Effect heads with disjoint requirement rows', () => {
-  const leftEffect = Type.effect('i32', [], 'Shared', [
-    Object.freeze({
-      capability: Type.nominal('heads', 'Left'),
-      role: 'provider',
-      access: 'Shared',
-    }),
-  ])
-  const rightEffect = Type.effect('i32', [], 'Shared', [
-    Object.freeze({
-      capability: Type.nominal('heads', 'Right'),
-      role: 'provider',
-      access: 'Shared',
-    }),
-  ])
+  const leftEffect = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    [
+      Object.freeze({
+        capability: Type.nominal('heads', 'Left'),
+        role: 'provider',
+        access: 'Shared',
+      }),
+    ],
+  )
+  const rightEffect = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    [
+      Object.freeze({
+        capability: Type.nominal('heads', 'Right'),
+        role: 'provider',
+        access: 'Shared',
+      }),
+    ],
+  )
   const left = ConformanceHead.make(decoder(leftEffect), leftEffect)
   const right = ConformanceHead.make(decoder(rightEffect), rightEffect)
   assert.isFalse(ConformanceHead.mayOverlap(left, right))
 })
 
 it('treats an open Effect requirement row as covering a compatible closed row', () => {
-  const openEffect = Type.effect('i32', [], 'Shared', [], [binder('a', 0, 'R', 'RequirementRow')])
-  const closedEffect = Type.effect('i32', [], 'Shared', [
-    Object.freeze({
-      capability: Type.nominal('heads', 'Clock'),
-      role: 'provider',
-      access: 'Shared',
-    }),
-  ])
+  const openEffect = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    [],
+    [binder('a', 0, 'R', 'RequirementRow')],
+  )
+  const closedEffect = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    [
+      Object.freeze({
+        capability: Type.nominal('heads', 'Clock'),
+        role: 'provider',
+        access: 'Shared',
+      }),
+    ],
+  )
   const left = ConformanceHead.make(decoder(openEffect), openEffect)
   const right = ConformanceHead.make(decoder(closedEffect), closedEffect)
   assert.isTrue(ConformanceHead.mayOverlap(left, right))
 })
 
 it('reports overlap between Effect heads whose access modes share one admissible actual', () => {
-  const shared = Type.effect('i32', [], 'Shared')
-  const exclusive = Type.effect('i32', [], 'Exclusive')
+  const shared = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+  )
+  const exclusive = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Exclusive',
+  )
   const left = ConformanceHead.make(decoder(shared), shared)
   const right = ConformanceHead.make(decoder(exclusive), exclusive)
   assert.isTrue(ConformanceHead.mayOverlap(left, right))
 })
 
 it('reports overlap between callable heads whose modes share one admissible actual', () => {
-  const shared = Type.callable(['i32'], 'i32', 'Shared')
-  const consuming = Type.callable(['i32'], 'i32', 'Take')
+  const shared = Type.callable(
+    ['i32'],
+    'i32',
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+  )
+  const consuming = Type.callable(
+    ['i32'],
+    'i32',
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Take',
+  )
   const left = ConformanceHead.make(decoder(shared), shared)
   const right = ConformanceHead.make(decoder(consuming), consuming)
   assert.isTrue(ConformanceHead.mayOverlap(left, right))
@@ -202,12 +260,20 @@ it('reports overlap between callable heads whose modes share one admissible actu
 
 it('reports overlap between closed requirement rows whose access shares one actual', () => {
   const capability = Type.nominal('heads', 'Clock')
-  const shared = Type.effect('i32', [], 'Shared', [
-    Object.freeze({ capability, role: 'provider', access: 'Shared' }),
-  ])
-  const exclusive = Type.effect('i32', [], 'Shared', [
-    Object.freeze({ capability, role: 'provider', access: 'Exclusive' }),
-  ])
+  const shared = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    [Object.freeze({ capability, role: 'provider', access: 'Shared' })],
+  )
+  const exclusive = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    [Object.freeze({ capability, role: 'provider', access: 'Exclusive' })],
+  )
   const left = ConformanceHead.make(decoder(shared), shared)
   const right = ConformanceHead.make(decoder(exclusive), exclusive)
   assert.isTrue(ConformanceHead.mayOverlap(left, right))
@@ -216,8 +282,14 @@ it('reports overlap between closed requirement rows whose access shares one actu
 it('separates representation-bounded headers whose bounds cannot intersect', () => {
   // The admissibility and intersection answers are the ones representation parameters already own;
   // this only asks them the coherence question.
-  const callableBound = Type.callable(['i32'], 'i32')
-  const effectBound = Type.effect('i32', [])
+  const callableBound = Type.callable(['i32'], 'i32', {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
+  const effectBound = Type.effect('i32', [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const callableParameter = binder('a', 0, 'F', 'CallableRepresentation', callableBound)
   const effectParameter = binder('b', 0, 'G', 'EffectRepresentation', effectBound)
   const callableHead = Type.represented(
@@ -244,10 +316,16 @@ it('separates representation-bounded headers whose bounds cannot intersect', () 
 
 it('normalizes parameters inside representation bounds before comparing overlap', () => {
   const leftValue = binder('a', 0, 'T')
-  const leftBound = Type.callable([leftValue], leftValue)
+  const leftBound = Type.callable([leftValue], leftValue, {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const leftRepresentation = binder('a', 1, 'F', 'CallableRepresentation', leftBound)
   const rightValue = binder('b', 1, 'Element')
-  const rightBound = Type.callable([rightValue], rightValue)
+  const rightBound = Type.callable([rightValue], rightValue, {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const rightRepresentation = binder('b', 0, 'Operation', 'CallableRepresentation', rightBound)
   const left = ConformanceHead.make(
     Type.nominal('heads', 'Holder', [Type.representationParameterArgument(leftRepresentation)]),
@@ -278,10 +356,16 @@ it('normalizes parameters inside representation bounds before comparing overlap'
 
 it('normalizes ordinary binders nested only inside Effect representation bounds', () => {
   const leftValue = binder('a', 0, 'T')
-  const leftBound = Type.effect(leftValue, [])
+  const leftBound = Type.effect(leftValue, [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const leftRepresentation = binder('a', 1, 'F', 'EffectRepresentation', leftBound)
   const rightValue = binder('b', 1, 'Element')
-  const rightBound = Type.effect(rightValue, [])
+  const rightBound = Type.effect(rightValue, [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const rightRepresentation = binder('b', 0, 'Operation', 'EffectRepresentation', rightBound)
   const left = ConformanceHead.make(
     Type.nominal('heads', 'Holder', [Type.representationParameterArgument(leftRepresentation)]),
@@ -311,10 +395,16 @@ it('normalizes ordinary binders nested only inside Effect representation bounds'
 
 it('reports overlap between an open callable bound and an alpha-renamed exact callable', () => {
   const openValue = binder('open', 0, 'T')
-  const openBound = Type.callable([openValue], openValue)
+  const openBound = Type.callable([openValue], openValue, {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const openRepresentation = binder('open', 1, 'F', 'CallableRepresentation', openBound)
   const exactValue = binder('exact', 0, 'Element')
-  const exactContract = Type.callable([exactValue], exactValue)
+  const exactContract = Type.callable([exactValue], exactValue, {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const exactRepresentation = Type.exactRepresentationArgument(
     Type.callableIdentityArgument(
       'heads.identity',
@@ -337,7 +427,7 @@ it('reports overlap between an open callable bound and an alpha-renamed exact ca
       module: 'heads',
       name: 'i32Identity',
     }),
-    Type.callable(['i32'], 'i32'),
+    Type.callable(['i32'], 'i32', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
   const ground = ConformanceHead.make(
     Type.nominal('heads', 'Holder', [groundRepresentation]),
@@ -351,10 +441,16 @@ it('reports overlap between an open callable bound and an alpha-renamed exact ca
 
 it('reports overlap between an open Effect bound and an alpha-renamed exact Effect', () => {
   const openValue = binder('open', 0, 'T')
-  const openBound = Type.effect(openValue, [])
+  const openBound = Type.effect(openValue, [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const openRepresentation = binder('open', 1, 'F', 'EffectRepresentation', openBound)
   const exactValue = binder('exact', 0, 'Element')
-  const exactContract = Type.effect(exactValue, [])
+  const exactContract = Type.effect(exactValue, [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   const exactRepresentation = Type.exactRepresentationArgument(
     Type.effectIdentityArgument('heads.identityEffect'),
     exactContract,
@@ -369,7 +465,7 @@ it('reports overlap between an open Effect bound and an alpha-renamed exact Effe
   )
   const groundRepresentation = Type.exactRepresentationArgument(
     Type.effectIdentityArgument('heads.i32IdentityEffect'),
-    Type.effect('i32', []),
+    Type.effect('i32', [], { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
   const ground = ConformanceHead.make(
     Type.nominal('heads', 'Holder', [groundRepresentation]),

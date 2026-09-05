@@ -92,7 +92,7 @@ impl Unicode {
   ///
   /// The version is data, not identity: a later database changes what this returns and what the
   /// tables contain, and changes neither a compiler type nor a target ABI.
-  pub fn dataVersion() -> string {
+  pub fn dataVersion() -> string<'static> {
     return UnicodeTables.dataVersion()
   }
 

@@ -46,7 +46,7 @@ pub struct UnicodeTables {}
 
 impl UnicodeTables {
   /// Returns the Unicode data version that defines all lookup results in this module.
-  pub fn dataVersion() -> string {
+  pub fn dataVersion() -> string<'static> {
     return "17.0.0"
   }
 

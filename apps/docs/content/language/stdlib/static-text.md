@@ -18,7 +18,7 @@ Public declarations: 4.
 ## `byteLength`
 
 ```silk
-pub static fn byteLength(static value: string) -> usize
+pub static fn byteLength<'life0>(static value: string<'life0>) -> usize
 ```
 
 Returns the UTF-8 byte length of `value` during static evaluation.
@@ -28,7 +28,7 @@ Returns the UTF-8 byte length of `value` during static evaluation.
 ## `byteAt`
 
 ```silk
-pub static fn byteAt(static value: string, static index: usize) -> u8
+pub static fn byteAt<'life0>(static value: string<'life0>, static index: usize) -> u8
 ```
 
 Returns one UTF-8 byte at `index`, or reports a static phase violation when out of bounds.
@@ -38,7 +38,7 @@ Returns one UTF-8 byte at `index`, or reports a static phase violation when out 
 ## `concat`
 
 ```silk
-pub static fn concat(static left: string, static right: string) -> string
+pub static fn concat<'life0, 'life1>(static left: string<'life0>, static right: string<'life1>) -> string<'static>
 ```
 
 Concatenates two static texts and retains `left` as the source anchor for diagnostics.
@@ -48,7 +48,7 @@ Concatenates two static texts and retains `left` as the source anchor for diagno
 ## `slice`
 
 ```silk
-pub static fn slice(static value: string, static start: usize, static end: usize) -> string
+pub static fn slice<'life0>(static value: string<'life0>, static start: usize, static end: usize) -> string<'static>
 ```
 
 Returns the UTF-8 byte range `start..end` when both boundaries are scalar boundaries.

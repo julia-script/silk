@@ -6,6 +6,7 @@ import * as FloatingPoint from '../src/FloatingPoint.js'
 import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
 import * as Lexer from '../src/Lexer.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as LiteralForm from '../src/LiteralForm.js'
 import * as OwnershipEncoding from '../src/OwnershipEncoding.js'
 import * as Parser from '../src/Parser.js'
@@ -337,7 +338,7 @@ it('canonicalizes nominal reflection descriptors and heterogeneous field collect
       owner,
       declarationOrdinal: 0,
       member: { _tag: 'LabeledField', label: 'name' },
-      valueType: 'string',
+      valueType: "string<'static>",
       authorization,
       provenance: { sourceId: 'example/reflection.silk', start: 12, end: 24 },
     },
@@ -1045,16 +1046,19 @@ pub fn main() -> i32 {
         provenance: field.provenance.sourceId,
       }))
 
-    assert.deepEqual(encoded(descriptors(Type.nominal(sourceId, 'Box', [Type.string]))), [
-      {
-        ownerKind: 'Named',
-        declarationOrdinal: 0,
-        member: 'value',
-        valueType: 'string',
-        authorization: 'silk/reflect.fields',
-        provenance: sourceId,
-      },
-    ])
+    assert.deepEqual(
+      encoded(descriptors(Type.nominal(sourceId, 'Box', [Type.string(Lifetime.staticLifetime)]))),
+      [
+        {
+          ownerKind: 'Named',
+          declarationOrdinal: 0,
+          member: 'value',
+          valueType: "string<'static>",
+          authorization: 'silk/reflect.fields',
+          provenance: sourceId,
+        },
+      ],
+    )
     assert.deepEqual(encoded(descriptors(Type.nominal(sourceId, 'Point'))), [
       {
         ownerKind: 'Positional',
@@ -1120,7 +1124,12 @@ pub fn main() -> i32 {
         valueType,
       })),
       [
-        { ownerKind: 'AnonymousNamed', declarationOrdinal: 0, member: 'name', valueType: 'string' },
+        {
+          ownerKind: 'AnonymousNamed',
+          declarationOrdinal: 0,
+          member: 'name',
+          valueType: "string<'static>",
+        },
         { ownerKind: 'AnonymousNamed', declarationOrdinal: 1, member: 'age', valueType: 'i32' },
       ],
     )

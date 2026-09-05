@@ -47,7 +47,10 @@ nearest valid construct. No stable general code is assigned.
 
 The matched expression is evaluated exactly once. Its ordinary syntax chooses access: a Copy value
 may be read bare, `move value` consumes an owner, `&value` creates shared bindings, and
-`&mut value` creates exclusive bindings. Patterns contain no second move or borrow language.
+`&mut value` creates exclusive bindings. Patterns contain no second move or borrow language. `match place value` additionally refines an
+owned discriminant without reading its complete payload. Its bindings denote selected places, so
+explicit field moves may leave a partial owner after guard success; the variant proof ends at the
+arm boundary. This access mode belongs to `match`, not `let` or `if let`.
 
 ```silk
 if let Token { kind } = &event {

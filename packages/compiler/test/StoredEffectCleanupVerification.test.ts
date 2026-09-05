@@ -22,6 +22,7 @@ const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
     ascii(source),
     Target.wasm32UnknownUnknown.id,
   )
+  assert.deepEqual(Analysis.diagnostics(snapshot), [])
   const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
   const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
   const module = Lower.lowerProgram(
@@ -78,13 +79,13 @@ it.effect('rejects incomplete cleanup inside nested Effect and callable captures
   Effect.gen(function* () {
     const { catalog, module } = yield* lowerStored(
       'stored-effect-cleanup-verification/nested-executables',
-      `struct Token<F: once fn(i32) -> i32> { value: i32 marker: F }
-struct Deferred<F: once Effect<i32>> { operation: F }
+      `struct Token<F: once fn<'static>(i32) -> i32> { value: i32 marker: F }
+struct Deferred<F: once Effect<'static; i32>> { operation: F }
 fn marker(value: i32) -> i32 { return value }
-fn consume<F: once fn(i32) -> i32>(value: i32, token: Token<F>) -> i32 {
+fn consume<F: once fn<'static>(i32) -> i32>(value: i32, token: Token<F>) -> i32 {
   return value + token.value
 }
-impl<F: once fn(i32) -> i32> Drop for Token<F> {
+impl<F: once fn<'static>(i32) -> i32> Drop for Token<F> {
   fn drop(self: &mut Token<F>) -> () { return () }
 }
 pub fn main() -> i32 {
@@ -247,6 +248,7 @@ pub fn main() -> i32 {
           type: Type.callable(
             callableSlot.cleanup.type.parameters,
             'i64',
+            callableSlot.cleanup.type,
             callableSlot.cleanup.type.mode,
             callableSlot.cleanup.type.schema,
             callableSlot.cleanup.type.unsafe,

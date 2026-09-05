@@ -63,7 +63,7 @@ This service is unsuitable for secrets, credentials, keys, nonces, tokens, and h
 ### Operation `nextU64`
 
 ```silk
-effect fn nextU64() -> u64 ? &mut InsecureRandom
+effect<'static> fn nextU64() -> u64 ? &mut InsecureRandom
 ```
 
 Returns the next deterministic word and advances the active provider once.
@@ -87,7 +87,7 @@ Every seed, including zero, expands through four successive SplitMix64 steps.
 ### Associated function `InsecureRandom.nextBool`
 
 ```silk
-pub effect fn nextBool() -> bool ? &mut InsecureRandom
+pub effect<'static> fn nextBool() -> bool ? &mut InsecureRandom
 ```
 
 Returns whether bit 63 of the next deterministic provider word is set.
@@ -97,7 +97,7 @@ Returns whether bit 63 of the next deterministic provider word is set.
 ### Associated function `InsecureRandom.below`
 
 ```silk
-pub effect fn below(upperExclusive: u64) -> silk/option.Option<u64> ? &mut InsecureRandom
+pub effect<'static> fn below(upperExclusive: u64) -> silk/option.Option<u64> ? &mut InsecureRandom
 ```
 
 Returns a deterministic value below `upperExclusive`, or `None` when the bound is zero.
@@ -111,7 +111,7 @@ Positive bounds use complete-word rejection sampling. Progress requires eventual
 ### Associated function `InsecureRandom.fillBytes`
 
 ```silk
-pub effect fn fillBytes(output: &mut [u8]) -> () ? &mut InsecureRandom
+pub effect<'life0> fn fillBytes<'life0>(output: &'life0 mut [u8]) -> () ? &mut InsecureRandom
 ```
 
 Fills `output` from deterministic provider words in least-significant-byte-first order.

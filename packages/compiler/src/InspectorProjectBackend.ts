@@ -25,42 +25,7 @@ import type * as NameResolution from './NameResolution.js'
 import type * as Ownership from './Ownership.js'
 import * as Type from './Type.js'
 
-const typeText = (type: Type.Type): string => {
-  if (typeof type === 'string') return type
-
-  switch (type._tag) {
-    case 'NominalType': {
-      const argumentsText =
-        type.arguments.length === 0
-          ? ''
-          : `<${type.arguments.map(Type.encodeGenericArgument).join(', ')}>`
-      return `${type.module}.${type.name}${argumentsText}`
-    }
-    case 'TypeParameter':
-      return type.name
-    case 'FixedArrayType':
-      return `Array<${typeText(type.element)}, ${type.length}>`
-    case 'SliceType':
-      return `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
-    case 'EffectType': {
-      const failureType = Type.failureType(type)
-      const failureText = failureType === 'never' ? '' : ` ! ${typeText(failureType)}`
-      return `Effect<${typeText(type.success)}${failureText}> ${type.access.toLowerCase()}`
-    }
-    case 'CallableType':
-      return `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
-    case 'ForeignFunctionType':
-      return Type.encode(type)
-    case 'ReferenceType':
-      return `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
-    case 'PointerType':
-      return `${type.mutable ? '*mut ' : '*const '}${typeText(type.pointee)}`
-    case 'RepresentedType':
-      return Type.encode(type)
-    case 'StructuralUnionType':
-      return type.members.map(typeText).join(' | ')
-  }
-}
+const typeText = (type: Type.Type): string => Type.encode(type)
 
 const callingScalarText = (scalar: Layout.CallingScalar): string =>
   typeof scalar === 'string' ? scalar : `Address<${Type.encode(scalar.element)},i${scalar.bits}>`
@@ -774,6 +739,8 @@ const placeText = (root: Mir.LocalId, selectors: ReadonlyArray<Mir.PlaceSelector
       switch (selector._tag) {
         case 'FieldSelector':
           return `.#${selector.field.ordinal}`
+        case 'VariantSelector':
+          return `.variant#${selector.ordinal}`
         case 'SliceElementSelector':
           return `[${localText(selector.index)} · ${selector.access.toLowerCase()} slice]`
         case 'ElementSelector': {
@@ -791,6 +758,8 @@ const placeText = (root: Mir.LocalId, selectors: ReadonlyArray<Mir.PlaceSelector
 
 const operationLabel = (operation: Mir.Operation): string => {
   switch (operation._tag) {
+    case 'SetInitialized':
+      return `${localText(operation.flag)} = initialized ${operation.initialized}`
     case 'ForeignStaticLoad':
       return `${localText(operation.destination)} = foreign static ${operation.symbol}`
     case 'ForeignFunctionAddress':

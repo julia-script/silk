@@ -86,7 +86,7 @@ inherent member declared in `impl Unicode`, reached through `import silk.unicode
 ### Associated function `Unicode.dataVersion`
 
 ```silk
-pub fn dataVersion() -> string
+pub fn dataVersion() -> string<'static>
 ```
 
 Returns the Unicode version that defines this module's normalization results.
@@ -131,7 +131,7 @@ Unicode scalar value represented as its unsigned code point.
 ### Associated function `Unicode.normalizeNfd`
 
 ```silk
-pub effect fn normalizeNfd(value: string) -> String ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn normalizeNfd<'life0>(value: string<'life0>) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Returns the Normalization Form D of text: fully decomposed, in canonical order.
@@ -151,7 +151,7 @@ Canonically equivalent inputs produce equal NFD text under the same Unicode data
 ### Associated function `Unicode.normalizeNfc`
 
 ```silk
-pub effect fn normalizeNfc(value: string) -> String ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn normalizeNfc<'life0>(value: string<'life0>) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Returns the Normalization Form C of text: decomposed, canonically ordered, then recomposed.

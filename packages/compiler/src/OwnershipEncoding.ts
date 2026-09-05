@@ -4,7 +4,9 @@ import * as ExecutionAffinity from './ExecutionAffinity.js'
 import * as Hir from './Hir.js'
 import * as LocalSharedOwnership from './LocalSharedOwnership.js'
 import * as Match from './Match.js'
+import * as MovePath from './MovePath.js'
 import type { BindingSite, ModuleOwnership, Verdict } from './Ownership.js'
+import { referentKey } from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
@@ -136,7 +138,7 @@ export const encode = (self: ModuleOwnership): string =>
           const parent = loan.parent === undefined ? '?' : siteText(loan.parent)
           origin = `reborrow parent=${parent} suspended=${loan.suspendsParent}`
         } else if (loan.origin === 'ReturnedView') origin = 'returned-view'
-        return `  loan l${loan.id.ordinal} ${loan.access.toLowerCase()} ${siteText(loan.root)} ${origin} region=${loan.startRegion.ordinal}->${loan.endRegion.ordinal} ${spanText(loan.startSpan)}..${spanText(loan.endSpan)}`
+        return `  loan l${loan.id.ordinal} ${loan.access.toLowerCase()} ${siteText(loan.root)} referents=${loan.referents.map(referentKey).join(',')} ${origin} region=${loan.startRegion.ordinal}->${loan.endRegion.ordinal} ${spanText(loan.startSpan)}..${spanText(loan.endSpan)}`
       }),
       ...fn.replacements.map(
         (replacement) =>
@@ -145,6 +147,10 @@ export const encode = (self: ModuleOwnership): string =>
       ...fn.callables.map(
         (callable) =>
           `  callable ${Hir.executableSiteLabel(callable.site)} ${callable.mode.toLowerCase()} affinity=${ExecutionAffinity.encode(callable.executionAffinity)} obligations=${LocalSharedOwnership.encode(callable.localSharedObligations)} slots=${callable.slots.map((slot) => `#${slot.ordinal}:p${slot.parameterOrdinal}:${slot.access.toLowerCase()}:${slot.type === undefined ? '?' : Type.encode(slot.type)}:${ExecutionAffinity.encode(slot.executionAffinity)}:${LocalSharedOwnership.encode(slot.localSharedObligations)}:${cleanupText(slot.cleanup)}`).join(',') || 'none'} retained=${callable.retainedDependencies.join(',') || 'none'} drop=${callable.dropOrder.map((ordinal) => `#${ordinal}`).join(',') || 'none'}`,
+      ),
+      ...fn.transitions.map(
+        (transition) =>
+          `  ${transition.kind.toLowerCase()} ${siteText(transition.root)}${transition.path.length === 0 ? '' : `/${MovePath.key(transition.path)}`} ${spanText(transition.span)} ${MovePath.encodeState(transition.before)} -> ${MovePath.encodeState(transition.after)}`,
       ),
       ...fn.exits.map((exit) => {
         let label: string
@@ -183,7 +189,7 @@ export const encode = (self: ModuleOwnership): string =>
           `  exit ${label} ${spanText(exit.span)} loan-ends ${loanEnds}`,
           ...exit.releases.map(
             (release) =>
-              `    release ${siteText(release.binding.site)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}${release.cleanup._tag === 'ArrayCleanup' || release.cleanup._tag === 'CallableCleanup' ? ` cleanup ${cleanupText(release.cleanup)}` : ''}`,
+              `    release ${siteText(release.binding.site)} initialization=${MovePath.encodeState(release.initialization)}${release.fields.length === 0 ? '' : ` fields ${release.fields.map((field) => `#${field.ordinal}`).join(',')}`}${release.cleanup._tag === 'ArrayCleanup' || release.cleanup._tag === 'CallableCleanup' ? ` cleanup ${cleanupText(release.cleanup)}` : ''}`,
           ),
           ...exit.temporaries.map(
             (temporary) =>

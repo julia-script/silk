@@ -362,7 +362,7 @@ impl Format {
   /// }
   /// ```
   pub effect fn format<Args>(
-    static template: string,
+    static template: string<'static>,
     args: &Args
   ) -> () ! WriterError ? &mut Writer {
     let mut formatter = Format.makeDefault()
@@ -538,8 +538,8 @@ enum PartMode {
 // compileError, and ordinal is meaningful only for positional placeholders.
 struct Part {
   mode: PartMode
-  text: string
-  source: string
+  text: string<'static>
+  source: string<'static>
   ordinal: usize
 }
 
@@ -559,8 +559,8 @@ static fn identifierContinue(byte: u8) -> bool {
 static fn appendPart(
   parts: Intrinsic.StaticSequence<Part>,
   mode: PartMode,
-  text: string,
-  source: string,
+  text: string<'static>,
+  source: string<'static>,
   ordinal: usize
 ) -> Intrinsic.StaticSequence<Part> {
   return StaticSequence.append<Part>(
@@ -574,11 +574,11 @@ static fn appendPart(
   )
 }
 
-static fn malformed(template: string, start: usize, end: usize) -> never {
+static fn malformed(template: string<'static>, start: usize, end: usize) -> never {
   compileError(StaticText.slice(template, start, end))
 }
 
-static fn parseTemplate(template: string) -> TemplatePlan {
+static fn parseTemplate(template: string<'static>) -> TemplatePlan {
   let mut parts = StaticSequence.empty<Part>()
   let length = StaticText.byteLength(template)
   let mut index = usize.ZERO
@@ -698,7 +698,7 @@ static fn hasPositionalPart(
   return found
 }
 
-static fn visibleNamedFields<Args>() -> string {
+static fn visibleNamedFields<Args>() -> string<'static> {
   let mut labels = ""
   let mut first = true
   static for field in Reflect.fields<Args>() {
@@ -713,7 +713,7 @@ static fn visibleNamedFields<Args>() -> string {
 }
 
 static fn validatedTemplate<Args>(
-  template: string
+  template: string<'static>
 ) -> Intrinsic.StaticSequence<Part> {
   let plan = parseTemplate(template)
   let parts = plan.parts
@@ -1177,7 +1177,7 @@ impl Display for isize {
   }
 }
 
-impl Display for string {
+impl<'text> Display for string<'text> {
   /// Writes the string's UTF-8 bytes through the ambient mutable Writer.
   ///
   /// # Details

@@ -264,7 +264,7 @@ export const symbolFor = (fn: Mir.MirFunction, entry: Instances.InstanceKey | un
     : `silk_${sanitize(fn.id.module)}_${sanitize(fn.id.name)}__${[
         fn.instance.declaration.module,
         fn.instance.declaration.name,
-        ...fn.instance.typeArguments.map(Type.genericArgumentKey),
+        ...Type.runtimeArgumentKeys(fn.instance.typeArguments),
         ...fn.instance.staticArguments.map(StaticValue.key),
         ...fn.instance.contractRow,
       ]

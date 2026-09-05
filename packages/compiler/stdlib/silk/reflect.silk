@@ -44,7 +44,7 @@ pub static fn fieldKind<Owner, Value>(field: Intrinsic.Field<Owner, Value>) -> u
 }
 
 /// Returns the source label of a labeled field.
-pub static fn fieldLabel<Owner, Value>(field: Intrinsic.Field<Owner, Value>) -> string {
+pub static fn fieldLabel<Owner, Value>(field: Intrinsic.Field<Owner, Value>) -> string<'static> {
   return Intrinsic.reflectFieldLabel<Owner, Value>(field)
 }
 

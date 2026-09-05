@@ -4,6 +4,7 @@ import * as Diagnostic from '../src/Diagnostic.js'
 import * as ProviderSelection from '../src/ProviderSelection.js'
 import * as RequirementRow from '../src/RequirementRow.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
+import * as ResolutionWork from '../src/ResolutionWork.js'
 import * as SourceSpan from '../src/SourceSpan.js'
 import * as Type from '../src/Type.js'
 import { unreachable } from './support/raise.js'
@@ -78,12 +79,19 @@ it('rejects an empty relation set as an internal invariant violation', () => {
 })
 
 it('intersects complete candidate maps before selecting a late common member', () => {
+  const work = ResolutionWork.make()
   const first = relation(['A', 'B', 'C'], 20)
   const second = relation(['C'], 10)
   const solved = ProviderSelection.solve({
     relations: [first, second],
     responsible: applicationOrigin,
-    oracle: oracle(),
+    oracle: {
+      ...oracle(),
+      observation: {
+        work,
+        initiator: { kind: 'CallConstraint', key: 'call', span: applicationOrigin },
+      },
+    },
   })
   const permuted = ProviderSelection.solve({
     relations: [second, first],
@@ -92,6 +100,18 @@ it('intersects complete candidate maps before selecting a late common member', (
   })
 
   assert.strictEqual(solved._tag, 'Selected')
+  assert.deepEqual(
+    ResolutionWork.snapshot(work)
+      .map((entry) => [entry.queries, entry.candidatesVisited, entry.candidatesAccepted])
+      .sort(),
+    [
+      [1, 1, 1],
+      [1, 3, 3],
+    ],
+  )
+  assert.isTrue(
+    ResolutionWork.snapshot(work).every((entry) => entry.initiator.span === applicationOrigin),
+  )
   assert.strictEqual(permuted._tag, 'Selected')
   if (solved._tag === 'Selected' && permuted._tag === 'Selected') {
     assert.strictEqual(Type.encode(solved.member.capability), 'work.C')

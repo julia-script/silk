@@ -1,3 +1,4 @@
+import * as Lifetime from './Lifetime.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Diagnostic from './Diagnostic.js'
@@ -535,7 +536,7 @@ const staticValueType = (value: StaticValue.Value): Type.Type | undefined => {
   if (value._tag === 'BooleanValue') return 'bool'
   if (value._tag === 'CharacterValue') return 'char'
   if (value._tag === 'IntegerValue' || value._tag === 'FloatValue') return value.type
-  if (value._tag === 'TextValue') return Type.string
+  if (value._tag === 'TextValue') return Type.string(Lifetime.staticLifetime)
   return undefined
 }
 

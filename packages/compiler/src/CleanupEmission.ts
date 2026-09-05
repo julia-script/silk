@@ -6,13 +6,15 @@ import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
 import type * as Hir from './Hir.js'
+import * as TypeInference from './internal/TypeInference.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type { DelayedEffectState } from './Lower.js'
-import { borrowKey, patternKey, spanKey } from './Lower.js'
+import { bool, borrowKey, patternKey, spanKey } from './Lower.js'
 import type {} from './LowerExpression.js'
 import { lowerExpression } from './LowerExpression.js'
 import * as Mir from './Mir.js'
+import * as MovePath from './MovePath.js'
 import * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
@@ -30,6 +32,192 @@ export interface ExitIndex {
   readonly armEnds: ReadonlyMap<string, Ownership.ExitPlan>
   readonly loopFallthroughs: ReadonlyMap<number, Ownership.ExitPlan>
   readonly transfers: ReadonlyMap<string, Ownership.ExitPlan>
+}
+
+const conditionalPaths = (
+  state: MovePath.State,
+  path: MovePath.Path = [],
+): ReadonlyArray<MovePath.Path> => [
+  ...(state.initialization === 'Maybe' || state.discriminant === 'Maybe' ? [path] : []),
+  ...state.children.flatMap((child) => conditionalPaths(child.state, [...path, child.selector])),
+]
+
+/** Allocates only flags demanded by a conditional ownership fact, before entering any branch. */
+export const prepareInitialization = (fn: FunctionLowering): ReadonlyArray<Mir.Operation> => {
+  if (fn.initializationStarted) return []
+  fn.initializationStarted = true
+  const roots = new Map<string, Map<string, MovePath.Path>>()
+  const collect = (root: Ownership.BindingSite, state: MovePath.State): void => {
+    const key = Ownership.siteKey(root)
+    const paths = roots.get(key) ?? new Map<string, MovePath.Path>()
+    for (const path of conditionalPaths(state)) paths.set(MovePath.key(path), path)
+    if (paths.size > 0) roots.set(key, paths)
+  }
+  for (const exit of fn.ownership?.exits ?? [])
+    for (const release of exit.releases) collect(release.binding.site, release.initialization)
+  for (const transition of fn.ownership?.transitions ?? []) {
+    collect(transition.root, transition.before)
+    collect(transition.root, transition.after)
+  }
+  const operations: Array<Mir.Operation> = []
+  for (const [root, paths] of [...roots].sort(([left], [right]) => left.localeCompare(right))) {
+    const flags = [...paths]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, path]) => {
+        const local = fn.alloc(bool)
+        operations.push({
+          _tag: 'SetInitialized',
+          flag: local,
+          initialized: true,
+          provenance: generated(fn.owner.function.declaration.syntax.span),
+        })
+        return Object.freeze({ path, local })
+      })
+    fn.initializationFlags.set(root, Object.freeze(flags))
+  }
+  return Object.freeze(operations)
+}
+
+/** Resets an acquired binding's sparse flags, including on repeated loop entry. */
+export const initializeBinding = (
+  fn: FunctionLowering,
+  root: Ownership.BindingSite,
+  span: SourceSpan.SourceSpan,
+): void => {
+  for (const flag of fn.initializationFlags.get(Ownership.siteKey(root)) ?? [])
+    fn.emit({
+      _tag: 'SetInitialized',
+      flag: flag.local,
+      initialized: true,
+      provenance: generated(span),
+    })
+}
+
+/** Mirrors one committed move/write/drop into the flags its later conditional cleanup observes. */
+export const emitInitializationTransition = (
+  fn: FunctionLowering,
+  transition: Ownership.PlaceTransition,
+): void => {
+  for (const flag of fn.initializationFlags.get(Ownership.siteKey(transition.root)) ?? []) {
+    if (flag.path.length < transition.path.length || !MovePath.overlaps(flag.path, transition.path))
+      continue
+    fn.emit({
+      _tag: 'SetInitialized',
+      flag: flag.local,
+      initialized: transition.kind === 'Write',
+      provenance: generated(transition.span),
+    })
+  }
+}
+
+/** Resolves exact conditional state relative to the local being cleaned, preserving sparse paths. */
+export const initializationFor = (
+  fn: FunctionLowering,
+  root: Ownership.BindingSite,
+  state: MovePath.State,
+  path: MovePath.Path = [],
+): Mir.DropOperation['initialization'] => {
+  if (state.initialization === 'Initialized' && state.children.length === 0) return undefined
+  const required = new Set(conditionalPaths(state).map(MovePath.key))
+  const flags = (fn.initializationFlags.get(Ownership.siteKey(root)) ?? []).flatMap((flag) =>
+    flag.path.length >= path.length &&
+    MovePath.overlaps(flag.path, path) &&
+    required.has(MovePath.key(flag.path.slice(path.length)))
+      ? [{ path: Object.freeze(flag.path.slice(path.length)), local: flag.local }]
+      : [],
+  )
+  return Object.freeze({ state, flags: Object.freeze(flags) })
+}
+
+export const transitionAt = (
+  fn: FunctionLowering,
+  span: SourceSpan.SourceSpan,
+  kind: Ownership.PlaceTransition['kind'],
+): Ownership.PlaceTransition | undefined =>
+  fn.ownership?.transitions.find(
+    (transition) => transition.kind === kind && spanKey(transition.span) === spanKey(span),
+  )
+
+/** Resolves a canonical source owner to its retained MIR storage. */
+export const ownershipLocal = (
+  fn: FunctionLowering,
+  site: Ownership.BindingSite,
+): Mir.LocalId | undefined => {
+  if (site._tag === 'Parameter') return fn.parameterLocals.get(site.parameter.ordinal)
+  if (site._tag === 'Let') return fn.bindingLocals.get(site.binding.ordinal)
+  if (site._tag === 'Pattern') return fn.patternLocals.get(patternKey(site.binding))
+  return undefined
+}
+
+/** Resolves canonical field and variant identities through the actual specialized owner type. */
+export const lowerOwnershipPath = (
+  fn: FunctionLowering,
+  root: Mir.LocalId,
+  path: MovePath.Path,
+  span: SourceSpan.SourceSpan,
+): ReadonlyArray<Mir.PlaceSelector> | undefined => {
+  const rootType = fn.localTypes.at(root.ordinal)
+  if (rootType === undefined) return undefined
+  let type: Type.Type = Mir.semanticType(rootType)
+  let variantFields: ReadonlyArray<DeclarationFacts.FieldFact> | undefined
+  const selectors: Array<Mir.PlaceSelector> = []
+  for (const selector of path) {
+    if (selector._tag === 'ConstantIndex') {
+      if (!Type.isFixedArray(type)) return undefined
+      selectors.push({
+        _tag: 'ElementSelector',
+        length: type.length,
+        index: { _tag: 'Proven', value: selector.index },
+        provenance: generated(span),
+      })
+      type = type.element
+      continue
+    }
+    if (selector._tag === 'Variant' && Type.isUnion(type)) {
+      const member = type.members.at(selector.ordinal)
+      if (member === undefined) return undefined
+      selectors.push({
+        _tag: 'VariantSelector',
+        ordinal: selector.ordinal,
+        provenance: generated(span),
+      })
+      type = member
+      continue
+    }
+    if (!Type.isNominal(type)) return undefined
+    const declaration = DeclarationFacts.byCanonical(fn.index, {
+      _tag: 'CanonicalDeclarationId',
+      module: type.module,
+      name: type.name,
+    })
+    if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
+      return undefined
+    if (selector._tag === 'Variant') {
+      variantFields =
+        declaration._tag === 'UnionDeclaration'
+          ? declaration.variants.find((variant) => variant.id.ordinal === selector.ordinal)?.fields
+          : undefined
+      if (variantFields === undefined) return undefined
+      selectors.push({
+        _tag: 'VariantSelector',
+        ordinal: selector.ordinal,
+        provenance: generated(span),
+      })
+      continue
+    }
+    const fields =
+      variantFields ?? (declaration._tag === 'StructDeclaration' ? declaration.fields : [])
+    const field = fields.find((candidate) => candidate.id.ordinal === selector.ordinal)
+    const substitution = TypeInference.substitution(
+      declaration.typeParameters.map((parameter) => parameter.type),
+      type.arguments,
+    )
+    if (field?.declaredType._tag !== 'Resolved' || substitution === undefined) return undefined
+    selectors.push({ _tag: 'FieldSelector', field: field.id, provenance: generated(span) })
+    type = Type.substitute(field.declaredType.type, substitution)
+    variantFields = undefined
+  }
+  return Object.freeze(selectors)
 }
 
 export const indexExits = (plan: Ownership.FunctionOwnership | undefined): ExitIndex => {
@@ -354,6 +542,7 @@ const exitDrops = (
     readonly local: Mir.LocalId
     readonly cleanup: CleanupPlan.CleanupPlan
     readonly span: SourceSpan.SourceSpan
+    readonly initialization?: Mir.DropOperation['initialization']
   }> = []
   for (const release of exit?.releases ?? []) {
     const site = release.binding.site
@@ -368,6 +557,7 @@ const exitDrops = (
         local,
         cleanup: release.cleanup,
         span: release.binding.liveFrom,
+        initialization: initializationFor(fn, release.binding.site, release.initialization),
       })
   }
   for (const selected of exit?.matches ?? []) {
@@ -404,6 +594,9 @@ const exitDrops = (
                 _tag: 'Drop',
                 local: release.local,
                 cleanup: cleanupForLocal(fn, release.cleanup, localType),
+                ...(release.initialization === undefined
+                  ? {}
+                  : { initialization: release.initialization }),
                 provenance: generated(release.span),
               }),
             ]

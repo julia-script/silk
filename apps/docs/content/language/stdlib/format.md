@@ -125,7 +125,7 @@ Starts a Formatter session with [`defaultOptions`](#declaration-73696c6b2f666f72
 ### Associated function `Format.hasWidth`
 
 ```silk
-pub fn hasWidth(self: &silk/format.Formatter) -> bool
+pub fn hasWidth<'life0>(self: &'life0 silk/format.Formatter) -> bool
 ```
 
 Reports whether a minimum width was supplied.
@@ -135,7 +135,7 @@ Reports whether a minimum width was supplied.
 ### Associated function `Format.width`
 
 ```silk
-pub fn width(self: &silk/format.Formatter) -> usize
+pub fn width<'life0>(self: &'life0 silk/format.Formatter) -> usize
 ```
 
 Returns the requested minimum width in Unicode scalars, not UTF-8 bytes or terminal cells, or
@@ -146,7 +146,7 @@ zero when no width was supplied.
 ### Associated function `Format.alignment`
 
 ```silk
-pub fn alignment(self: &silk/format.Formatter) -> Alignment
+pub fn alignment<'life0>(self: &'life0 silk/format.Formatter) -> Alignment
 ```
 
 Returns the requested alignment.
@@ -156,7 +156,7 @@ Returns the requested alignment.
 ### Associated function `Format.fill`
 
 ```silk
-pub fn fill(self: &silk/format.Formatter) -> char
+pub fn fill<'life0>(self: &'life0 silk/format.Formatter) -> char
 ```
 
 Returns the requested fill scalar.
@@ -166,7 +166,7 @@ Returns the requested fill scalar.
 ### Associated function `Format.sign`
 
 ```silk
-pub fn sign(self: &silk/format.Formatter) -> Sign
+pub fn sign<'life0>(self: &'life0 silk/format.Formatter) -> Sign
 ```
 
 Returns the requested sign policy.
@@ -176,7 +176,7 @@ Returns the requested sign policy.
 ### Associated function `Format.alternate`
 
 ```silk
-pub fn alternate(self: &silk/format.Formatter) -> bool
+pub fn alternate<'life0>(self: &'life0 silk/format.Formatter) -> bool
 ```
 
 Reports whether alternate presentation is requested.
@@ -186,7 +186,7 @@ Reports whether alternate presentation is requested.
 ### Associated function `Format.zeroPad`
 
 ```silk
-pub fn zeroPad(self: &silk/format.Formatter) -> bool
+pub fn zeroPad<'life0>(self: &'life0 silk/format.Formatter) -> bool
 ```
 
 Reports whether width-driven integer zero padding is requested. A supplied precision disables
@@ -197,7 +197,7 @@ that padding when presenting an integer.
 ### Associated function `Format.hasPrecision`
 
 ```silk
-pub fn hasPrecision(self: &silk/format.Formatter) -> bool
+pub fn hasPrecision<'life0>(self: &'life0 silk/format.Formatter) -> bool
 ```
 
 Reports whether a numeric precision was supplied.
@@ -207,7 +207,7 @@ Reports whether a numeric precision was supplied.
 ### Associated function `Format.precision`
 
 ```silk
-pub fn precision(self: &silk/format.Formatter) -> usize
+pub fn precision<'life0>(self: &'life0 silk/format.Formatter) -> usize
 ```
 
 Returns the requested minimum digit count, or zero when no numeric precision was supplied. For
@@ -218,7 +218,7 @@ integers, a supplied precision disables width-driven zero padding.
 ### Associated function `Format.color`
 
 ```silk
-pub fn color(self: &silk/format.Formatter) -> bool
+pub fn color<'life0>(self: &'life0 silk/format.Formatter) -> bool
 ```
 
 Reports whether a presentation may emit balanced ANSI styling.
@@ -228,7 +228,7 @@ Reports whether a presentation may emit balanced ANSI styling.
 ### Associated function `Format.write`
 
 ```silk
-pub effect fn write(self: &mut silk/format.Formatter, bytes: &[u8]) -> () ! WriterError ? &mut Writer
+pub effect<'env> fn write<'life0: 'env, 'life1: 'env, 'env>(self: &'life0 mut silk/format.Formatter, bytes: &'life1 [u8]) -> () ! WriterError ? &mut Writer
 ```
 
 Writes one byte sequence through the ambient Writer.
@@ -243,7 +243,7 @@ remains written.
 ### Associated function `Format.writeText`
 
 ```silk
-pub effect fn writeText(self: &mut silk/format.Formatter, text: string) -> () ! WriterError ? &mut Writer
+pub effect<'env> fn writeText<'life0: 'env, 'life1: 'env, 'env>(self: &'life0 mut silk/format.Formatter, text: string<'life1>) -> () ! WriterError ? &mut Writer
 ```
 
 Writes valid UTF-8 content without applying width policy.
@@ -258,7 +258,7 @@ remains written.
 ### Associated function `Format.writePadding`
 
 ```silk
-pub effect fn writePadding(self: &mut silk/format.Formatter, count: usize) -> () ! WriterError ? &mut Writer
+pub effect<'life0> fn writePadding<'life0>(self: &'life0 mut silk/format.Formatter, count: usize) -> () ! WriterError ? &mut Writer
 ```
 
 Writes `count` copies of the session's fill scalar in bounded chunks.
@@ -273,7 +273,7 @@ remains written.
 ### Associated function `Format.leadingPadding`
 
 ```silk
-pub fn leadingPadding(self: &silk/format.Formatter, contentWidth: usize) -> usize
+pub fn leadingPadding<'life0>(self: &'life0 silk/format.Formatter, contentWidth: usize) -> usize
 ```
 
 Returns the number of fill scalars before content with this visible width.
@@ -292,7 +292,7 @@ requested width does not exceed `contentWidth`.
 ### Associated function `Format.trailingPadding`
 
 ```silk
-pub fn trailingPadding(self: &silk/format.Formatter, contentWidth: usize) -> usize
+pub fn trailingPadding<'life0>(self: &'life0 silk/format.Formatter, contentWidth: usize) -> usize
 ```
 
 Returns the number of fill scalars after content with this visible width.
@@ -309,7 +309,7 @@ extra scalar up. No padding is returned when the requested width does not exceed
 ### Associated function `Format.writeLeadingPadding`
 
 ```silk
-pub effect fn writeLeadingPadding(self: &mut silk/format.Formatter, contentWidth: usize) -> () ! WriterError ? &mut Writer
+pub effect<'life0> fn writeLeadingPadding<'life0>(self: &'life0 mut silk/format.Formatter, contentWidth: usize) -> () ! WriterError ? &mut Writer
 ```
 
 Emits all fill required before content whose width is the supplied Unicode-scalar count, not a
@@ -325,7 +325,7 @@ failure remains written.
 ### Associated function `Format.writeTrailingPadding`
 
 ```silk
-pub effect fn writeTrailingPadding(self: &mut silk/format.Formatter, contentWidth: usize) -> () ! WriterError ? &mut Writer
+pub effect<'life0> fn writeTrailingPadding<'life0>(self: &'life0 mut silk/format.Formatter, contentWidth: usize) -> () ! WriterError ? &mut Writer
 ```
 
 Emits all fill required after content whose width is the supplied Unicode-scalar count, not a
@@ -341,7 +341,7 @@ failure remains written.
 ### Associated function `Format.display`
 
 ```silk
-pub effect fn display<T>(value: &T) -> () ! WriterError ? &mut Writer
+pub effect<'env> fn display<T: 'env, 'life1: 'env, 'env>(value: &'life1 T) -> () ! WriterError ? &mut Writer
 ```
 
 Displays one value with canonical defaults through the ambient mutable Writer.
@@ -356,7 +356,7 @@ accepted prefix remains written and the original `WriterError` is preserved.
 ### Associated function `Format.displayWith`
 
 ```silk
-pub effect fn displayWith<T>(value: &T, options: FormatOptions) -> () ! WriterError ? &mut Writer
+pub effect<'env> fn displayWith<T: 'env, 'life1: 'env, 'env>(value: &'life1 T, options: FormatOptions) -> () ! WriterError ? &mut Writer
 ```
 
 Displays one value with explicit options through the ambient mutable Writer.
@@ -373,7 +373,7 @@ is preserved.
 ### Associated function `Format.format`
 
 ```silk
-pub effect fn format<Args>(static template: string, args: &Args) -> () ! WriterError ? &mut Writer
+pub effect<'env> fn format<Args: 'env, 'life1: 'env, 'env>(static template: string<'static>, args: &'life1 Args) -> () ! WriterError ? &mut Writer
 ```
 
 Writes a statically validated template with values from one borrowed tuple or record.
@@ -435,7 +435,7 @@ pub fn main() -> i32 {
 ### Associated function `Format.unsignedValue`
 
 ```silk
-pub fn unsignedValue(text: string) -> silk/result.Result<u64, silk/format.ParseError>
+pub fn unsignedValue<'life0>(text: string<'life0>) -> silk/result.Result<u64, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an unsigned value.
@@ -451,7 +451,7 @@ than after it.
 ### Associated function `Format.signedValue`
 
 ```silk
-pub fn signedValue(text: string) -> silk/result.Result<i64, silk/format.ParseError>
+pub fn signedValue<'life0>(text: string<'life0>) -> silk/result.Result<i64, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a signed value, accepting one leading `-`.
@@ -466,7 +466,7 @@ is not accepted. A value outside `i64.MIN`–`i64.MAX` is `OutOfRange`.
 ### Associated function `Format.u8Value`
 
 ```silk
-pub fn u8Value(text: string) -> silk/result.Result<u8, silk/format.ParseError>
+pub fn u8Value<'life0>(text: string<'life0>) -> silk/result.Result<u8, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a `u8`, rejecting a value above `u8.MAX`.
@@ -476,7 +476,7 @@ Reads complete decimal text as a `u8`, rejecting a value above `u8.MAX`.
 ### Associated function `Format.u16Value`
 
 ```silk
-pub fn u16Value(text: string) -> silk/result.Result<u16, silk/format.ParseError>
+pub fn u16Value<'life0>(text: string<'life0>) -> silk/result.Result<u16, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a `u16`, rejecting a value above `u16.MAX`.
@@ -486,7 +486,7 @@ Reads complete decimal text as a `u16`, rejecting a value above `u16.MAX`.
 ### Associated function `Format.u32Value`
 
 ```silk
-pub fn u32Value(text: string) -> silk/result.Result<u32, silk/format.ParseError>
+pub fn u32Value<'life0>(text: string<'life0>) -> silk/result.Result<u32, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a `u32`, rejecting a value above `u32.MAX`.
@@ -496,7 +496,7 @@ Reads complete decimal text as a `u32`, rejecting a value above `u32.MAX`.
 ### Associated function `Format.u64Value`
 
 ```silk
-pub fn u64Value(text: string) -> silk/result.Result<u64, silk/format.ParseError>
+pub fn u64Value<'life0>(text: string<'life0>) -> silk/result.Result<u64, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a `u64`, rejecting a value above `u64.MAX`.
@@ -506,7 +506,7 @@ Reads complete decimal text as a `u64`, rejecting a value above `u64.MAX`.
 ### Associated function `Format.usizeValue`
 
 ```silk
-pub fn usizeValue(text: string) -> silk/result.Result<usize, silk/format.ParseError>
+pub fn usizeValue<'life0>(text: string<'life0>) -> silk/result.Result<usize, silk/format.ParseError>
 ```
 
 Reads complete decimal text as a `usize`, rejecting a value the target's pointer width cannot
@@ -517,7 +517,7 @@ hold.
 ### Associated function `Format.i8Value`
 
 ```silk
-pub fn i8Value(text: string) -> silk/result.Result<i8, silk/format.ParseError>
+pub fn i8Value<'life0>(text: string<'life0>) -> silk/result.Result<i8, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an `i8`, rejecting a value outside `i8.MIN`–`i8.MAX`.
@@ -527,7 +527,7 @@ Reads complete decimal text as an `i8`, rejecting a value outside `i8.MIN`–`i8
 ### Associated function `Format.i16Value`
 
 ```silk
-pub fn i16Value(text: string) -> silk/result.Result<i16, silk/format.ParseError>
+pub fn i16Value<'life0>(text: string<'life0>) -> silk/result.Result<i16, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an `i16`, rejecting a value outside `i16.MIN`–`i16.MAX`.
@@ -537,7 +537,7 @@ Reads complete decimal text as an `i16`, rejecting a value outside `i16.MIN`–`
 ### Associated function `Format.i32Value`
 
 ```silk
-pub fn i32Value(text: string) -> silk/result.Result<i32, silk/format.ParseError>
+pub fn i32Value<'life0>(text: string<'life0>) -> silk/result.Result<i32, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an `i32`, rejecting a value outside `i32.MIN`–`i32.MAX`.
@@ -547,7 +547,7 @@ Reads complete decimal text as an `i32`, rejecting a value outside `i32.MIN`–`
 ### Associated function `Format.i64Value`
 
 ```silk
-pub fn i64Value(text: string) -> silk/result.Result<i64, silk/format.ParseError>
+pub fn i64Value<'life0>(text: string<'life0>) -> silk/result.Result<i64, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an `i64`, rejecting a value outside `i64.MIN`–`i64.MAX`.
@@ -557,7 +557,7 @@ Reads complete decimal text as an `i64`, rejecting a value outside `i64.MIN`–`
 ### Associated function `Format.isizeValue`
 
 ```silk
-pub fn isizeValue(text: string) -> silk/result.Result<isize, silk/format.ParseError>
+pub fn isizeValue<'life0>(text: string<'life0>) -> silk/result.Result<isize, silk/format.ParseError>
 ```
 
 Reads complete decimal text as an `isize`, rejecting a value the target's pointer width cannot
@@ -784,7 +784,7 @@ remains written and the original `WriterError` is preserved.
 ### Operation `display`
 
 ```silk
-effect fn display(self: &Self, formatter: &mut silk/format.Formatter) -> () ! WriterError ? &mut Writer
+effect<'env> fn display<'life0: 'env, 'life1: 'env, 'env>(self: &'life0 Self, formatter: &'life1 mut silk/format.Formatter) -> () ! WriterError ? &mut Writer
 ```
 
 Emits one presentation through the ambient mutable Writer.
@@ -1006,10 +1006,10 @@ display = isize.impl@9.display
 
 <a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a3130"></a>
 
-## Implementation `Display for string`
+## Implementation `Display for string<'text>`
 
 ```silk
-impl Display for string
+impl Display for string<'text>
 ```
 
 <a id="declaration-73696c6b2f666f726d61743a3a696d706c656d656e746174696f6e3a31303a3a6f7065726174696f6e3a30"></a>

@@ -9,6 +9,7 @@ import type * as Layout from './Layout.js'
 import type { ExecutableEffectType, ProvidedRequirement } from './Lower.js'
 import { borrowKey, local, mirType } from './Lower.js'
 import type * as Mir from './Mir.js'
+import type * as MovePath from './MovePath.js'
 import type * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -26,6 +27,11 @@ export class FunctionLowering {
   readonly localTypes: Array<Mir.Type> = []
   readonly bindingLocals = new Map<number, Mir.LocalId>()
   readonly parameterLocals = new Map<number, Mir.LocalId>()
+  readonly initializationFlags = new Map<
+    string,
+    ReadonlyArray<{ readonly path: MovePath.Path; readonly local: Mir.LocalId }>
+  >()
+  initializationStarted = false
   readonly effectRecipes = new Map<number, Hir.Expression>()
   readonly callableRecipes = new Map<number, Hir.Expression>()
   readonly effectLoanEnds = new Map<number, ReadonlyArray<Hir.BorrowId>>()

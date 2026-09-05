@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as Presentation from '../src/Presentation.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -1683,8 +1684,9 @@ pub struct Other {}`
       assert.strictEqual(Presentation.scopedNominal(box, 'main', scope).text, 'Schema.Box<i32>')
 
       const effect = Type.effect(
-        Type.reference('Exclusive', box),
+        Type.reference('Exclusive', box, Lifetime.staticLifetime),
         [problem, failureRow],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
         'Shared',
         [
           Object.freeze({
@@ -1697,8 +1699,18 @@ pub struct Other {}`
       )
       assert.strictEqual(
         Presentation.type(effect, 'main', scope),
-        'Effect<&mut Schema.Box<i32> ! Problem | E ? &mut Allocator at Heap | R>',
+        "Effect<'static; &'static mut Schema.Box<i32> ! Problem | E ? &mut Allocator at Heap | R>",
       )
+      const retainedType = Type.parameter({ module: 'main', name: 'retain' }, 0, 'T')
+      const retainedEnvironment = Lifetime.bound({ module: 'main', name: 'retain' }, 1, 'env')
+      const retained = Type.effect('i32', [], {
+        environment: retainedEnvironment,
+        lifetimeBinders: [],
+        typeOutlives: [{ type: retainedType, lifetime: retainedEnvironment }],
+      })
+      const retainedPresentation = Presentation.expressionType(retained, 'main', scope)
+      assert.strictEqual(retainedPresentation.text, "Effect<'env; i32>")
+      assert.deepEqual(retainedPresentation.lifetimeRequirements, ["T: 'env"])
       assert.strictEqual(
         Presentation.genericArgument(Type.failureValue([problem]), 'main', scope),
         'Problem',

@@ -46,10 +46,10 @@ export const mirType = (
     return Object.freeze({ _tag: 'Enum', type: specialized, representation })
   if (typeof specialized === 'string') {
     if (Type.isBuiltin(specialized)) return Object.freeze({ _tag: specialized })
-    if (Type.isString(specialized)) return Object.freeze({ _tag: 'String', type: specialized })
     if (Type.isNever(specialized)) return Object.freeze({ _tag: 'Bottom', type: specialized })
     return undefined
   }
+  if (Type.isString(specialized)) return Object.freeze({ _tag: 'String', type: specialized })
   if (Type.isNominal(specialized)) return Object.freeze({ _tag: 'Nominal', type: specialized })
   if (Type.isFixedArray(specialized))
     return Object.freeze({ _tag: 'FixedArray', type: specialized })
@@ -345,6 +345,7 @@ export const lowerProgram = (
     )
     const block = returnedEffectBlock(instance.function)
     const type = block === undefined ? undefined : effectValueType(layout, instance.key, block)
+    if (instance.key.declaration.name === 'Effect.catchAll') console.log('TEMP lower', JSON.stringify({ block: block?.site.ordinal, type: type?._tag, envs: layout.effectEnvironments.filter((env) => env.instance.declaration.name === 'Effect.catchAll').map((env) => ({ tag: env._tag, same: Instances.keyText(env.instance) === Instances.keyText(instance.key), site: env.site.ordinal, reason: 'reason' in env ? env.reason : undefined })) }))
     if (type !== undefined && block !== undefined) {
       effectResults.set(resultKey, type)
       generatedRunners.push(
@@ -626,6 +627,11 @@ export const lowerProgram = (
     return unavailableEntryModule(discovery.entry.reason)
   }
   const resolvedEntry = discovery.entry
+  const entrySource = discovery.instances.find(
+    (instance) => Instances.keyText(instance.key) === Instances.keyText(resolvedEntry.key),
+  )
+  if (entrySource === undefined) throw new RangeError('Entry lowering lost its source declaration')
+  const entrySpan = entrySource.function.declaration.syntax.span
   let entry: Mir.Entry
   if (resolvedEntry.kind === 'Ordinary') {
     if (resolvedEntry.result === 'Status') {
@@ -639,18 +645,7 @@ export const lowerProgram = (
         Mir.matchesInstance(fn, resolvedEntry.key.declaration, resolvedEntry.key.typeArguments),
       )
       if (target === undefined) throw new RangeError('Unit entry lowering lost its target')
-      const span = target.regions
-        .flatMap((region) => {
-          if (region._tag === 'OperationRegion') {
-            return region.operations.map((operation) => operation.provenance.span)
-          }
-          if (region._tag === 'CleanupRegion') {
-            return region.releases.map((operation) => operation.provenance.span)
-          }
-          return [region.provenance.span]
-        })
-        .at(0)
-      if (span === undefined) throw new RangeError('Unit entry lowering lost source provenance')
+      const span = entrySpan
       const adapterId = unitEntryAdapterId(discovery.rootModule)
       const adapterKey: Instances.InstanceKey = Object.freeze({
         _tag: 'InstanceKey',
@@ -735,18 +730,7 @@ export const lowerProgram = (
       staticArguments: Object.freeze([]),
       contractRow: Object.freeze(['generated:effect-entry']),
     })
-    const span = target.regions
-      .flatMap((region) => {
-        if (region._tag === 'OperationRegion') {
-          return region.operations.map((operation) => operation.provenance.span)
-        }
-        if (region._tag === 'CleanupRegion') {
-          return region.releases.map((operation) => operation.provenance.span)
-        }
-        return [region.provenance.span]
-      })
-      .at(0)
-    if (span === undefined) throw new RangeError('Effect entry lowering lost source provenance')
+    const span = entrySpan
     const failures = resolvedEntry.failures.map((failure, ordinal) =>
       Object.freeze({
         tag: ordinal + 1,

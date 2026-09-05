@@ -177,10 +177,58 @@ export const cleanupFields = (
   )
 }
 
+/** Actual cleanup derivation work retained by one immutable declaration context. */
+export interface Work {
+  readonly requests: number
+  readonly computations: number
+  readonly cacheHits: number
+}
+
+interface Catalog {
+  readonly plans: Map<string, CleanupPlan>
+  readonly work: { requests: number; computations: number; cacheHits: number }
+}
+
+const catalogs = new WeakMap<DeclarationIndex.Index, Catalog>()
+const catalogOf = (index: DeclarationIndex.Index): Catalog => {
+  const cached = catalogs.get(index)
+  if (cached !== undefined) return cached
+  const catalog = {
+    plans: new Map<string, CleanupPlan>(),
+    work: { requests: 0, computations: 0, cacheHits: 0 },
+  }
+  catalogs.set(index, catalog)
+  return catalog
+}
+
+/** Reads work counters without initiating any cleanup derivation. */
+export const work = (index: DeclarationIndex.Index): Work =>
+  Object.freeze({ ...catalogOf(index).work })
+
+/** Reuses complete type recipes independently of body initialization masks. */
 export const cleanupPlan = (
   index: DeclarationIndex.Index,
   type: DeclarationFacts.SemanticType,
-  seen = new Set<string>(),
+  seen: ReadonlySet<string> = new Set<string>(),
+): CleanupPlan => {
+  const catalog = catalogOf(index)
+  catalog.work.requests += 1
+  const key = Type.key(type)
+  const cached = seen.size === 0 ? catalog.plans.get(key) : undefined
+  if (cached !== undefined) {
+    catalog.work.cacheHits += 1
+    return cached
+  }
+  catalog.work.computations += 1
+  const result = deriveCleanup(index, type, seen)
+  if (seen.size === 0) catalog.plans.set(key, result)
+  return result
+}
+
+const deriveCleanup = (
+  index: DeclarationIndex.Index,
+  type: DeclarationFacts.SemanticType,
+  seen: ReadonlySet<string>,
 ): CleanupPlan => {
   if (Type.isBuiltin(type)) return Object.freeze({ _tag: 'NoCleanup', type })
   if (Type.isString(type)) return Object.freeze({ _tag: 'NoCleanup', type })

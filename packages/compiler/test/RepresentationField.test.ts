@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
 import * as RepresentationField from '../src/RepresentationField.js'
@@ -31,22 +32,28 @@ const exactCallable = (module: string, name = 'decode') =>
       module,
       name,
     }),
-    Type.callable(['i32'], 'i32'),
+    Type.callable(['i32'], 'i32', { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
   )
 
 const exactEffect = (identity: string) => {
-  const contract = Type.effect('i32', [])
+  const contract = Type.effect('i32', [], {
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders: [],
+  })
   return Type.exactRepresentationArgument(Type.effectIdentityArgument(identity), contract)
 }
 
 it.effect('keeps field and specialization keys stable across rename and span movement', () =>
   Effect.gen(function* () {
     const module = 'representation-field/stable'
-    const first = yield* declarations(module, `struct Parser<F: fn(i32) -> i32> { parse: F }`)
+    const first = yield* declarations(
+      module,
+      `struct Parser<F: fn<'static>(i32) -> i32> { parse: F }`,
+    )
     const moved = yield* declarations(
       module,
       `
-struct Parser<F: fn(i32) -> i32> {
+struct Parser<F: fn<'static>(i32) -> i32> {
   renamed: F
 }`,
     )
@@ -113,8 +120,8 @@ it.effect('resolves nested repeated fields once per complete nominal instance', 
     const module = 'representation-field/nested'
     const index = yield* declarations(
       module,
-      `struct Inner<F: fn(i32) -> i32> { operation: F }
-struct Outer<F: fn(i32) -> i32> { first: Inner<F> second: Inner<F> }`,
+      `struct Inner<F: fn<'static>(i32) -> i32> { operation: F }
+struct Outer<F: fn<'static>(i32) -> i32> { first: Inner<F> second: Inner<F> }`,
     )
     const argument = exactCallable(module)
     const instance = Type.nominal(module, 'Outer', [argument])
@@ -148,8 +155,8 @@ it.effect('resolves every represented use forwarded through one nested physical 
     const module = 'representation-field/nested-multiple'
     const index = yield* declarations(
       module,
-      `struct Inner<F: fn(i32) -> i32, G: Effect<i32>> { callable: F deferred: G }
-struct Outer<F: fn(i32) -> i32, G: Effect<i32>> { inner: Inner<F, G> }`,
+      `struct Inner<F: fn<'static>(i32) -> i32, G: Effect<'static; i32>> { callable: F deferred: G }
+struct Outer<F: fn<'static>(i32) -> i32, G: Effect<'static; i32>> { inner: Inner<F, G> }`,
     )
     const callable = exactCallable(module, 'decode')
     const effect = exactEffect(`${module}.effect`)
@@ -197,9 +204,9 @@ it.effect('assigns deterministic use ordinals to every represented union member'
     const module = 'representation-field/union-multiple'
     const index = yield* declarations(
       module,
-      `struct Left<F: fn(i32) -> i32> { operation: F }
-struct Right<G: fn(i32) -> i32> { operation: G }
-struct Choice<F: fn(i32) -> i32, G: fn(i32) -> i32> { operation: Left<F> | Right<G> }`,
+      `struct Left<F: fn<'static>(i32) -> i32> { operation: F }
+struct Right<G: fn<'static>(i32) -> i32> { operation: G }
+struct Choice<F: fn<'static>(i32) -> i32, G: fn<'static>(i32) -> i32> { operation: Left<F> | Right<G> }`,
     )
     const first = exactCallable(module, 'first')
     const second = exactCallable(module, 'second')
@@ -231,7 +238,7 @@ it.effect('keeps represented fields scoped to their nominal union variants', () 
     const module = 'representation-field/nominal-union'
     const index = yield* declarations(
       module,
-      `union Choice<F: fn(i32) -> i32> {
+      `union Choice<F: fn<'static>(i32) -> i32> {
   Left { operation: F },
   Right { operation: F },
 }`,
@@ -259,7 +266,10 @@ it.effect('keeps represented fields scoped to their nominal union variants', () 
 it.effect('retains explicit open recovery facts after the source specialization gate', () =>
   Effect.gen(function* () {
     const module = 'representation-field/open'
-    const index = yield* declarations(module, `struct Parser<F: fn(i32) -> i32> { parse: F }`)
+    const index = yield* declarations(
+      module,
+      `struct Parser<F: fn<'static>(i32) -> i32> { parse: F }`,
+    )
     const plan = RepresentationField.plansOf(index, Type.nominal(module, 'Parser')).at(0)
     assert.notStrictEqual(plan, undefined)
     if (plan === undefined) return
@@ -287,7 +297,10 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const module = 'representation-field/recovery'
-      const index = yield* declarations(module, `struct Parser<F: fn(i32) -> i32> { parse: F }`)
+      const index = yield* declarations(
+        module,
+        `struct Parser<F: fn<'static>(i32) -> i32> { parse: F }`,
+      )
       const plan = RepresentationField.plansOf(index, Type.nominal(module, 'Parser')).at(0)
       assert.notStrictEqual(plan, undefined)
       if (plan === undefined) return
@@ -297,7 +310,10 @@ it.effect(
           module,
           name: 'wrong',
         }),
-        Type.callable(['i32'], 'bool'),
+        Type.callable(['i32'], 'bool', {
+          environment: Lifetime.staticLifetime,
+          lifetimeBinders: [],
+        }),
       )
       const instances = [
         Type.nominal(module, 'Parser'),
@@ -332,8 +348,8 @@ it.effect('keeps one exact identity under shared and once field-use bounds', () 
     const module = 'representation-field/bounds'
     const index = yield* declarations(
       module,
-      `struct Shared<F: fn(i32) -> i32> { operation: F }
-struct Once<F: once fn(i32) -> i32> { operation: F }`,
+      `struct Shared<F: fn<'static>(i32) -> i32> { operation: F }
+struct Once<F: once fn<'static>(i32) -> i32> { operation: F }`,
     )
     const argument = exactCallable(module)
     const shared = Type.nominal(module, 'Shared', [argument])
@@ -368,8 +384,8 @@ struct Once<F: once fn(i32) -> i32> { operation: F }`,
 it.effect('resolves one source callable identity under shared and once source bounds', () =>
   Effect.gen(function* () {
     const module = 'representation-field/source-bounds'
-    const source = `struct Shared<F: fn(i32) -> i32> { operation: F }
-struct Once<F: once fn(i32) -> i32> { operation: F }
+    const source = `struct Shared<F: fn<'static>(i32) -> i32> { operation: F }
+struct Once<F: once fn<'static>(i32) -> i32> { operation: F }
 fn decode(value: i32) -> i32 { return value }
 pub fn main() -> i32 {
   let shared = Shared { operation: decode }
@@ -411,8 +427,8 @@ it.effect('keeps executable identities stable across edit shifts and source-path
   Effect.gen(function* () {
     const module = 'representation-field/executable-sites'
     const source = `import silk.i32 as i32
-struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
-struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
+struct Mappers<F: fn<'static>(i32) -> i32, G: fn<'static>(i32) -> i32> { first: F second: G }
+struct Deferred<F: Effect<'static; i32>, G: Effect<'static; i32>> { first: F second: G }
 pub fn main() -> i32 {
   let mappers = Mappers { first: i32.add(1), second: i32.add(1) }
   let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
@@ -421,8 +437,8 @@ pub fn main() -> i32 {
     const shifted = `import silk.i32 as i32
 // Leading comments and whitespace move every diagnostic span.
 
-struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
-struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
+struct Mappers<F: fn<'static>(i32) -> i32, G: fn<'static>(i32) -> i32> { first: F second: G }
+struct Deferred<F: Effect<'static; i32>, G: Effect<'static; i32>> { first: F second: G }
 pub fn main() -> i32 {
   // The executable sites retain their structural ordinals.
   let mappers = Mappers { first: i32.add(1), second: i32.add(1) }

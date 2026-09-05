@@ -49,7 +49,7 @@ Constructs a reusable local Scheduler value.
 ### Method `LocalScheduler.execute`
 
 ```silk
-pub effect fn execute<A, E>(self: &mut LocalScheduler, program: once Effect<A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> A ! E | OutOfMemoryError | StalledError ? &mut MonotonicClock
+pub effect<'life2> fn execute<A: 'static, E: 'static, 'life2>(self: &'life2 mut LocalScheduler, program: once Effect<'static; A ! E ? &mut silk/monotonic_clock.MonotonicClock | &mut silk/scheduler.Scheduler>) -> A ! E | OutOfMemoryError | StalledError ? &mut MonotonicClock
 ```
 
 Runs one lazy root program under this Scheduler and returns its typed outcome.

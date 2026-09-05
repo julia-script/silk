@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as ExecutionPackage from '../src/ExecutionPackage.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as SuspensionMode from '../src/SuspensionMode.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
@@ -9,9 +10,18 @@ import * as Type from '../src/Type.js'
 const specialization = (suspension: SuspensionMode.Summary): ExecutionPackage.Specialization =>
   Object.freeze({
     result: 'i32',
-    body: Type.effect('i32', Object.freeze([]), 'Take'),
+    body: Type.effect(
+      'i32',
+      Object.freeze([]),
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Take',
+    ),
     endpoint: Type.unit,
-    callback: Type.callable(Object.freeze([Type.reference('Shared', Type.unit)]), Type.unit),
+    callback: Type.callable(
+      Object.freeze([Type.reference('Shared', Type.unit, Lifetime.staticLifetime)]),
+      Type.unit,
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    ),
     suspension,
   })
 
@@ -126,8 +136,8 @@ struct Ready {}
 fn ready(state: &Ready) -> () { return () }
 fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
 effect fn create<
-  F: once Effect<i32> + Intrinsic.Detached,
-  R: fn(&Ready) -> () + Intrinsic.Detached + Intrinsic.NonParking
+  F: once Effect<'static; i32> + Intrinsic.Detached,
+  R: fn<'static>(&Ready) -> () + Intrinsic.Detached + Intrinsic.NonParking
 >(body: F, onReady: R) -> Intrinsic.Execution<i32>
 ! OutOfMemoryError
 ? &mut Allocator {

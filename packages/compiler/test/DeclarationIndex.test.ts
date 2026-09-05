@@ -1,9 +1,13 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Analysis from '../src/Analysis.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import type * as DeclarationIndex from '../src/DeclarationIndex.js'
+import * as LifetimeElision from '../src/LifetimeElision.js'
+import * as Option from 'effect/Option'
+import * as Lifetime from '../src/Lifetime.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
 import type * as Scalar from '../src/Scalar.js'
@@ -370,7 +374,7 @@ pub service Logger<T> {
           name: 'log',
           state: 'Unique',
           kind: 'Effect',
-          parameters: ['&[u8]', 'T'],
+          parameters: ["&'life1 [u8]", 'T'],
           result: '()',
           failures: ['root.WriteFailure'],
           requirements: [{ type: 'root.Logger<T>', access: 'Exclusive' }],
@@ -604,7 +608,9 @@ impl Present for i32 {
 }
 
 interface Combined { operator + fn add(left: Self, right: Self) -> Self }
-impl Combined for i32 { add: Intrinsic.i32WrappingAdd }`,
+impl Combined for i32 { add: Intrinsic.i32WrappingAdd }
+interface Compared { operator < fn less(left: &Self, right: &Self) -> bool }
+impl Compared for i32 { fn less(left: &Self, right: &Self) -> bool { return false } }`,
       ],
     ])
     const present = Type.nominal('root', 'Present')
@@ -626,6 +632,25 @@ impl Combined for i32 { add: Intrinsic.i32WrappingAdd }`,
       ConformanceProof.interfaceWitnessImplementation(index, 'i32', combined, 'add'),
     )
     assert.strictEqual(intrinsic?.id.name, 'i32WrappingAdd')
+    const comparison = index.modules
+      .at(0)
+      ?.interfaces.find(
+        (member) => member.name._tag === 'Present' && member.name.spelling === 'Compared',
+      )
+      ?.operations.at(0)
+    assert.deepEqual(
+      comparison?.typeParameters.map((parameter) => parameter.type.kind),
+      ['Lifetime', 'Lifetime'],
+    )
+    assert.strictEqual(comparison?.operator?.operator, 'LessThan')
+    assert.isDefined(
+      ConformanceProof.interfaceWitnessImplementation(
+        index,
+        'i32',
+        Type.nominal('root', 'Compared'),
+        'less',
+      ),
+    )
   }),
 )
 
@@ -731,17 +756,20 @@ pub fn identity(value: string, boxed: Box<string>) -> string { return value }`,
 
     assert.deepEqual(
       parameterTypes?.map((type) => (typeof type === 'string' ? type : Type.encode(type))),
-      ['string', 'root.Box<string>'],
+      ["string<'life0>", "root.Box<string<'life1>>"],
     )
     assert.strictEqual(
       declaration?.returnType._tag === 'Resolved'
-        ? Type.equals(declaration.returnType.type, Type.string)
+        ? Type.isString(declaration.returnType.type)
         : false,
       true,
     )
-    assert.strictEqual(Type.isBuiltin(Type.string), false)
-    assert.strictEqual(ConformanceProof.copyType(index, Type.string), true)
-    assert.strictEqual(DeclarationFacts.containsLexicalBorrow(index, Type.string), true)
+    assert.strictEqual(Type.isBuiltin(Type.string(Lifetime.staticLifetime)), false)
+    assert.strictEqual(ConformanceProof.copyType(index, Type.string(Lifetime.staticLifetime)), true)
+    assert.strictEqual(
+      DeclarationFacts.containsLexicalBorrow(index, Type.string(Lifetime.staticLifetime)),
+      true,
+    )
     assert.deepEqual(index.diagnostics, [])
   }),
 )
@@ -780,7 +808,7 @@ it.effect('resolves callable parameter and result contracts canonically', () =>
           ? Type.encode(parameter.declaredType.type)
           : parameter.declaredType._tag,
       ),
-      ['fn(T) -> T', 'mut fn(T) -> bool', 'once fn() -> T'],
+      ["fn<'life1>(T) -> T", "mut fn<'life2>(T) -> bool", "once fn<'life3>() -> T"],
     )
     assert.deepEqual(index.diagnostics, [])
   }),
@@ -791,7 +819,7 @@ it.effect('indexes failure payloads as values and requirements as row binders', 
     const index = yield* collect('root', [
       [
         'root',
-        'effect fn transform<A, E, ?R>(self: Effect<A ! E ? R>, value: A) -> Effect<A ! E ? R> ! E ? R { return self }',
+        "effect fn transform<A, E, ?R>(self: Effect<'static; A ! E ? R>, value: A) -> Effect<'static; A ! E ? R> ! E ? R { return self }",
       ],
     ])
     const declaration = index.modules.at(0)?.declarations.at(0)
@@ -964,7 +992,7 @@ it.effect('resolves explicit Effect contracts and canonical requirement rows', (
 service FileSystem {}
 service Allocator {}
 role Scratch
-fn later() -> Effect<i32 ! Problem ? &FileSystem | &mut Allocator at Scratch> {
+fn later() -> Effect<'static; i32 ! Problem ? &FileSystem | &mut Allocator at Scratch> {
   return effect { return 1 }
 }
 effect fn work() -> i32 ! Problem ? &FileSystem | &mut Allocator at Scratch { return 1 }`,
@@ -1337,7 +1365,7 @@ it.effect('resolves forward nominal fields into a canonical acyclic dependency s
   }),
 )
 
-it.effect('resolves direct generic slice parameters and rejects borrowed storage types', () =>
+it.effect('resolves generic slice storage and diagnoses an ambiguous returned slice', () =>
   Effect.gen(function* () {
     const source =
       'fn scan<T>(shared: &[T], exclusive: &mut [T]) -> i32 { return 0 }\n' +
@@ -1353,20 +1381,11 @@ it.effect('resolves direct generic slice parameters and rejects borrowed storage
           ? parameter.declaredType.spelling
           : parameter.declaredType._tag,
       ),
-      ['&[T]', '&mut [T]'],
+      ["&'life1 [T]", "&'life2 mut [T]"],
     )
     assert.deepEqual(
-      index.diagnostics.map((diagnostic) => ({
-        code: diagnostic.code,
-        position:
-          diagnostic.reason._tag === 'BorrowedViewTypePosition'
-            ? diagnostic.reason.position
-            : undefined,
-      })),
-      [
-        { code: 'SEM0054', position: 'parameter' },
-        { code: 'SEM0054', position: 'field' },
-      ],
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0210'],
     )
   }),
 )
@@ -1580,8 +1599,14 @@ impl Copy for u32 {}`,
       index.modules.at(0)?.conformances.map((conformance) => conformance.validity._tag),
       ['InvalidConformance', 'InvalidConformance', 'InvalidConformance'],
     )
-    assert.strictEqual(ConformanceProof.copyType(index, Type.reference('Shared', 'u32')), true)
-    assert.strictEqual(ConformanceProof.copyType(index, Type.reference('Exclusive', 'u32')), false)
+    assert.strictEqual(
+      ConformanceProof.copyType(index, Type.reference('Shared', 'u32', Lifetime.staticLifetime)),
+      true,
+    )
+    assert.strictEqual(
+      ConformanceProof.copyType(index, Type.reference('Exclusive', 'u32', Lifetime.staticLifetime)),
+      false,
+    )
   }),
 )
 
@@ -1979,7 +2004,7 @@ it.effect(
           'SEM0188',
           ['<?S, P, ?R>', 'where P provides S from R'],
         ],
-        ['export "C" fn bad() -> string { return "" }', 'SEM0187', ['string']],
+        ['export "C" fn bad() -> string<\'static> { return "" }', 'SEM0187', ["string<'static>"]],
         ['export "C" fn bad(flag: bool) -> char { return \'a\' }', 'SEM0187', ['bool', 'char']],
         ['export "C" fn f() -> () as "not a symbol" { }', 'SEM0190', ['"not a symbol"']],
         ['export "C" fn f() -> i32 as "main" { return 1 }', 'SEM0191', ['"main"']],
@@ -2053,4 +2078,340 @@ fn take(value: *const i32, nested: *mut *const u8, handle: *mut Handle) -> *mut 
       'NoCleanup',
     )
   }),
+)
+
+it.effect('elaborates lifetime headers independently of function bodies and source offsets', () =>
+  Effect.gen(function* () {
+    const header = `struct View<'a, T: 'a> { value: &'a T }
+fn choose<'a: 'b, 'b>(left: &'a i32, right: &'b i32) -> &'b i32 { return right }
+fn identity(value: &i32) -> &i32 { return value }
+fn visit(callback: for<'a> fn(&'a i32) -> &'a i32) {}`
+    const first = yield* collect('root', [['root', header]])
+    const second = yield* collect('root', [
+      ['root', `// offset change\n${header.replace('return value', 'return value;')}`],
+    ])
+    assert.deepEqual(
+      first.diagnostics.map((diagnostic) => diagnostic.code),
+      [],
+    )
+    assert.deepEqual(
+      second.diagnostics.map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const signatures = (index: DeclarationIndex.Index) =>
+      index.modules.at(0)?.declarations.map((declaration) => ({
+        parameters: declaration.parameters.map((parameter) =>
+          parameter.declaredType._tag === 'Resolved'
+            ? Type.key(parameter.declaredType.type)
+            : parameter.declaredType._tag,
+        ),
+        result:
+          declaration.returnType._tag === 'Resolved'
+            ? Type.key(declaration.returnType.type)
+            : declaration.returnType._tag,
+        binders: declaration.typeParameters.map((parameter) => Type.key(parameter.type)),
+      }))
+    assert.deepEqual(signatures(first), signatures(second))
+    const identity = first.modules
+      .at(0)
+      ?.declarations.find(
+        (declaration) =>
+          declaration.name._tag === 'Present' && declaration.name.spelling === 'identity',
+      )
+    assert.strictEqual(identity?.typeParameters.length, 1)
+    assert.strictEqual(identity?.typeParameters.at(0)?.implicitLifetime, true)
+    const choose = first.modules
+      .at(0)
+      ?.declarations.find(
+        (declaration) =>
+          declaration.name._tag === 'Present' && declaration.name.spelling === 'choose',
+      )
+    assert.strictEqual(choose?.typeParameters.at(0)?.lifetimeBounds?.length, 1)
+    if (choose !== undefined)
+      assert.strictEqual(DeclarationFacts.executableLifetimes(choose).lifetimeBounds?.length, 1)
+  }),
+)
+
+it.effect('diagnoses ambiguous outputs and unknown lifetime names at authored annotations', () =>
+  Effect.gen(function* () {
+    const text = `fn ambiguous(left: &i32, right: &i32) -> &i32 { return left }
+fn missing(value: &'lost i32) {}`
+    const index = yield* collect('root', [['root', text]])
+    const diagnostics = index.diagnostics.filter(
+      (diagnostic) => diagnostic.code === 'SEM0210' || diagnostic.code === 'SEM0209',
+    )
+    assert.deepEqual([...new Set(diagnostics.map((diagnostic) => diagnostic.code))].sort(), [
+      'SEM0209',
+      'SEM0210',
+    ])
+    assert.isTrue(
+      diagnostics.some(
+        (diagnostic) => text.slice(diagnostic.span.start, diagnostic.span.end).trim() === '&i32',
+      ),
+    )
+    assert.isTrue(
+      diagnostics.some(
+        (diagnostic) => text.slice(diagnostic.span.start, diagnostic.span.end) === "'lost",
+      ),
+    )
+  }),
+)
+
+it.effect('fills omitted nominal lifetime arguments after resolving their declarations', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `struct View<'a, T> { value: &'a T }
+fn implicit(left: View<i32>, right: Wrapper) {}
+struct Wrapper { value: Text }
+struct Text { value: &i32 }
+fn explicit<'a>(value: View<'a, i32>) {}`,
+      ],
+    ])
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const implicit = index.modules
+      .at(0)
+      ?.declarations.find(
+        (declaration) =>
+          declaration.name._tag === 'Present' && declaration.name.spelling === 'implicit',
+      )
+    assert.deepEqual(
+      implicit?.typeParameters.map((parameter) => parameter.type.kind),
+      ['Lifetime', 'Lifetime'],
+    )
+    assert.deepEqual(
+      implicit?.parameters.map((parameter) =>
+        parameter.declaredType._tag === 'Resolved' && Type.isNominal(parameter.declaredType.type)
+          ? parameter.declaredType.type.arguments.length
+          : -1,
+      ),
+      [2, 1],
+    )
+  }),
+)
+
+it.effect('rejects a witness lifetime bound stronger than the quantified interface contract', () =>
+  Effect.gen(function* () {
+    const text = `interface Select { fn choose<'a, 'b>(left: &'a i32, right: &'b i32) -> &'a i32 }
+impl Select for i32 { fn choose<'x: 'y, 'y>(left: &'x i32, right: &'y i32) -> &'x i32 { return left } }
+interface Bounded { fn choose<'a: 'b, 'b>(left: &'a i32, right: &'b i32) -> &'a i32 }
+impl Bounded for i32 { fn choose<'x: 'y, 'y>(left: &'x i32, right: &'y i32) -> &'x i32 { return left } }`
+    const index = yield* collect('root', [['root', text]])
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0083'],
+    )
+    const diagnostic = index.diagnostics.at(0)
+    assert.isTrue(
+      diagnostic !== undefined && diagnostic.span.start < text.indexOf('interface Bounded'),
+    )
+  }),
+)
+
+it.effect('makes lifetime headers explicit without changing canonical contracts or comments', () =>
+  Effect.gen(function* () {
+    const source = `struct Pair<T> { // independent views
+  first: &T
+  second: &[T]
+}
+fn apply<T>(value: &T, callback: fn(&T) -> &T) -> &T { return value }`
+    const original = yield* collect('root', [['root', source]])
+    assert.deepEqual(
+      original.diagnostics.map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const contexts =
+      original.modules
+        .at(0)
+        ?.members.flatMap((member) =>
+          'lifetimeElaboration' in member && member.lifetimeElaboration !== undefined
+            ? [member.lifetimeElaboration]
+            : [],
+        ) ?? []
+    const plans = contexts.map((context) =>
+      Option.getOrThrow(LifetimeElision.makeExplicit(context)),
+    )
+    const edits = plans
+      .flatMap((plan) => plan.plan.changes.get('root') ?? [])
+      .sort((left, right) => right.span.start - left.span.start)
+    const expanded = edits.reduce(
+      (text, edit) =>
+        `${text.slice(0, edit.span.start)}${edit.replacement}${text.slice(edit.span.end)}`,
+      source,
+    )
+    assert.include(expanded, '// independent views')
+    assert.include(expanded, "Pair<T, 'life1, 'life2>")
+    assert.include(expanded, "for<'call0> fn<'life2>")
+    const explicit = yield* collect('root', [['root', expanded]])
+    assert.deepEqual(
+      explicit.diagnostics.map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const keys = (index: DeclarationIndex.Index) =>
+      index.modules.at(0)?.members.map((member) => ({
+        parameters:
+          'typeParameters' in member
+            ? member.typeParameters.map((parameter) => Type.key(parameter.type))
+            : [],
+        fields:
+          member._tag === 'StructDeclaration'
+            ? member.fields.map((field) =>
+                field.declaredType._tag === 'Resolved'
+                  ? Type.key(field.declaredType.type)
+                  : field.declaredType._tag,
+              )
+            : [],
+        contract:
+          member._tag === 'FunctionDeclaration'
+            ? member.parameters.map((parameter) =>
+                parameter.declaredType._tag === 'Resolved'
+                  ? Type.key(parameter.declaredType.type)
+                  : parameter.declaredType._tag,
+              )
+            : [],
+      }))
+    assert.deepEqual(keys(explicit), keys(original))
+    assert.isTrue(
+      explicit.modules
+        .at(0)
+        ?.members.every(
+          (member) =>
+            !('lifetimeElaboration' in member) ||
+            member.lifetimeElaboration === undefined ||
+            Option.isNone(LifetimeElision.makeExplicit(member.lifetimeElaboration)),
+        ),
+    )
+  }),
+)
+
+it.effect('makes retained Effect environments explicit without strengthening the contract', () =>
+  Effect.gen(function* () {
+    const source = `effect fn retain<T>(value: T) -> i32 { return 0 }
+effect fn combine<'a, 'b>(left: &'a i32, right: &'b i32) -> i32 { return left.* + right.* }
+effect fn bounded<'a, 'b, T: 'a + 'b>(value: T) -> i32 { return 0 }
+service Work { effect<'static> fn tick() -> i32 }`
+    const original = yield* collect('root', [['root', source]])
+    assert.deepEqual(original.diagnostics, [])
+    const declarations = original.modules.at(0)?.declarations ?? []
+    const edits = declarations
+      .flatMap((declaration) => {
+        const context = declaration.lifetimeElaboration
+        if (context === undefined) return []
+        const expansion = Option.getOrThrow(
+          LifetimeElision.makeExplicit(context, DeclarationFacts.executableLifetimes(declaration)),
+        )
+        return expansion.plan.changes.get('root') ?? []
+      })
+      .sort((left, right) => right.span.start - left.span.start)
+    const expanded = edits.reduce(
+      (text, edit) =>
+        `${text.slice(0, edit.span.start)}${edit.replacement}${text.slice(edit.span.end)}`,
+      source,
+    )
+    assert.include(expanded, "effect<'env> fn retain<T: 'env, 'env>")
+    assert.include(expanded, "effect<'env> fn combine<'a: 'env, 'b: 'env, 'env>")
+    assert.include(expanded, "effect<'env> fn bounded<'a, 'b, T: 'a + 'b + 'env, 'env>")
+    const explicit = yield* collect('root', [['root', expanded]])
+    assert.deepEqual(explicit.diagnostics, [])
+    const contracts = (index: DeclarationIndex.Index) =>
+      index.modules
+        .at(0)
+        ?.declarations.map((declaration) =>
+          Type.key(Type.effect('i32', [], DeclarationFacts.executableLifetimes(declaration))),
+        )
+    assert.deepEqual(contracts(explicit), contracts(original))
+    for (const declaration of explicit.modules.at(0)?.declarations ?? []) {
+      const context = declaration.lifetimeElaboration
+      if (context !== undefined)
+        assert.isTrue(
+          Option.isNone(
+            LifetimeElision.makeExplicit(
+              context,
+              DeclarationFacts.executableLifetimes(declaration),
+            ),
+          ),
+        )
+    }
+  }),
+)
+
+it.effect('gates later lifetime storage features after resolving aliases and generic fields', () =>
+  Effect.gen(function* () {
+    const cases = [
+      ["struct Holder<'a> { value: &'a mut i32 }", 'ExclusiveStorage'],
+      [
+        "type Borrowed = &'static mut i32\nstruct Holder { values: [Borrowed; 1] }",
+        'ExclusiveStorage',
+      ],
+      [
+        "struct Holder<T> { value: T }\nfn inspect<'a>(value: Holder<&'a mut i32>) -> i32 { return 0 }",
+        'ExclusiveStorage',
+      ],
+      [
+        "struct Guard<T> { value: T }\nimpl<T> Drop for Guard<T> { fn drop(self: &mut Guard<T>) -> () { return () } }\nfn inspect<'a>(value: Guard<&'a i32>) -> i32 { return 0 }",
+        'DependentDrop',
+      ],
+      [
+        "struct Holder<T> { value: T }\nfn inspect<'a>(value: &'a mut i32) -> i32 { let held = Holder { value: move value } return 0 }",
+        'ExclusiveStorage',
+      ],
+      [
+        "fn inspect<'a>(value: &'a i32) -> i32 { let pending = effect { return value } return 0 }",
+        'EffectOutcome',
+      ],
+      ["effect fn borrowed<'a>(value: &'a i32) -> &'a i32 { return value }", 'EffectOutcome'],
+      ["effect fn borrowed<'a>(value: string<'a>) -> string<'a> { return value }", 'EffectOutcome'],
+      [
+        "struct Problem<'a> { message: string<'a> }\neffect fn failBorrowed<'a>(problem: Problem<'a>) -> i32 ! Problem<'a> { fail move problem }",
+        'EffectOutcome',
+      ],
+    ] as const
+    for (const [source, feature] of cases) {
+      const snapshot = yield* Analysis.ofSource('admission', ascii(source))
+      const gated = Analysis.diagnostics(snapshot).filter(
+        (diagnostic) => diagnostic.code === 'SEM0214',
+      )
+      assert.isTrue(
+        gated.some(
+          (diagnostic) =>
+            diagnostic.reason?._tag === 'UnsupportedLifetimeFeature' &&
+            diagnostic.reason.feature === feature,
+        ),
+        source,
+      )
+      assert.isTrue(
+        gated.every(
+          (diagnostic) =>
+            diagnostic.span.sourceId === 'admission' && diagnostic.span.start < diagnostic.span.end,
+        ),
+      )
+    }
+  }),
+)
+
+it.effect(
+  'keeps ordinary exclusive access, abstract Drop storage, and callable invocation outcomes admitted',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct Cell { value: i32 }
+fn inspect(value: &mut Cell) -> i32 { return value.value }
+struct Guard<T> { value: T }
+impl<T> Drop for Guard<T> { fn drop(self: &mut Guard<T>) -> () { return () } }
+fn retain<T>(value: T) -> i32 { let held = Guard { value: move value } return 0 }
+fn invoke<'env>(callback: for<'a> fn<'env>(&'a i32) -> &'a i32) -> i32 { return 0 }
+effect fn staticText() -> string<'static> { return "ready" }`
+      const snapshot = yield* Analysis.ofSource('admission-valid', ascii(source))
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const retained = [...snapshot.results.values()]
+        .flatMap((module) => module.functions)
+        .find(
+          (fn) =>
+            fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'retain',
+        )
+      assert.isTrue((retained?.lifetimeAdmission?.length ?? 0) > 0)
+    }),
 )

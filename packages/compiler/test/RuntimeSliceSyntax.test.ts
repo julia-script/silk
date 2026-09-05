@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FormattedDocument from '../src/FormattedDocument.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Lexer from '../src/Lexer.js'
 import * as Parser from '../src/Parser.js'
@@ -67,20 +68,31 @@ it.effect('formats slice syntax and borrow expressions idempotently', () =>
 
 it('keeps slice identity, substitution, inference, and borrow containment canonical', () => {
   const parameter = Type.parameter({ module: 'slices/Syntax', name: 'scan' }, 0, 'T')
-  const shared = Type.slice('Shared', parameter)
-  const exclusive = Type.slice('Exclusive', Type.nominal('model/Token', 'Token'))
+  const shared = Type.slice('Shared', parameter, Lifetime.staticLifetime)
+  const exclusive = Type.slice(
+    'Exclusive',
+    Type.nominal('model/Token', 'Token'),
+    Lifetime.staticLifetime,
+  )
   const substitution = new Map([[Type.key(parameter), Type.nominal('model/Token', 'Token')]])
 
-  assert.strictEqual(Type.encode(shared), '&[T]')
+  assert.strictEqual(Type.encode(shared), "&'static [T]")
   assert.notStrictEqual(Type.key(shared), Type.key(exclusive))
   assert.strictEqual(Type.containsBorrow(Type.fixedArray(shared, 1)), true)
   assert.strictEqual(Type.containsBorrow(Type.nominal('model/Box', 'Box', [shared])), true)
   assert.strictEqual(Type.containsBorrow(Type.fixedArray('i32', 2)), false)
-  assert.deepEqual(Type.substitute(shared, substitution), Type.slice('Shared', exclusive.element))
+  assert.deepEqual(
+    Type.substitute(shared, substitution),
+    Type.slice('Shared', exclusive.element, Lifetime.staticLifetime),
+  )
 
   const inferred = new Map<string, Type.Type>()
   assert.strictEqual(
-    TypeInference.infer(shared, Type.slice('Shared', exclusive.element), inferred),
+    TypeInference.infer(
+      shared,
+      Type.slice('Shared', exclusive.element, Lifetime.staticLifetime),
+      inferred,
+    ),
     true,
   )
   assert.deepEqual(inferred.get(Type.key(parameter)), exclusive.element)

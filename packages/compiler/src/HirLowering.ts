@@ -1,3 +1,4 @@
+import * as Lifetime from './Lifetime.js'
 import { callableSectionOf, genericArgumentOfTypeArgument } from './CallResolution.js'
 import type * as Diagnostic from './Diagnostic.js'
 import type {
@@ -15,7 +16,8 @@ import type {
 import {
   assignmentRootAccess,
   contextualIntegerCompatible,
-  returnedBorrowArgument,
+  retainedResultArguments,
+  retainsLifetimes,
 } from './Elaboration.js'
 import { representationOfExpression } from './ExpressionAnalysis.js'
 import type * as Hir from './Hir.js'
@@ -98,7 +100,12 @@ const staticValueExpression = (
         bytes: value.bytes,
         utf8: true,
       })
-      return Object.freeze({ _tag: 'StaticStringLiteral', data, type: Type.string, span })
+      return Object.freeze({
+        _tag: 'StaticStringLiteral',
+        data,
+        type: Type.string(Lifetime.staticLifetime),
+        span,
+      })
     }
     case 'EnumValue':
       return Type.isNominal(type)
@@ -227,6 +234,8 @@ export const hirPatternSelection = (
 }
 
 export interface LowerStatementOptions {
+  readonly lifetimeAssumptions?: Lifetime.Assumptions
+  readonly lifetimeCompatibility?: TypeCompatibility.Context
   readonly resultType?: SemanticType
   /** A composite Effect representation every return site packs into (EFF-013). */
   readonly resultRepresentation?: SemanticType
@@ -416,15 +425,7 @@ export const lowerStatements = (
         if (statement._tag === 'DropStatement')
           return Object.freeze({
             _tag: 'Drop',
-            expression:
-              statement.expression.type._tag === 'Available'
-                ? Object.freeze({
-                    _tag: 'Move' as const,
-                    subject: hirExpression(statement.expression, undefined, options),
-                    type: statement.expression.type.type,
-                    span: statement.expression.syntax.span,
-                  })
-                : hirExpression(statement.expression, undefined, options),
+            expression: hirExpression(statement.expression, undefined, options),
             region: statement.region,
             span: statement.syntax.span,
           })
@@ -564,14 +565,14 @@ export const hirExpression = (
       return Object.freeze({
         _tag: 'StaticStringLiteral',
         data: fact.data,
-        type: Type.string,
+        type: Type.string(Lifetime.staticLifetime),
         span: fact.syntax.span,
       })
     }
     return Object.freeze({
       _tag: 'StaticByteViewLiteral',
       data: fact.data,
-      type: Type.slice('Shared', 'u8'),
+      type: Type.slice('Shared', 'u8', Lifetime.staticLifetime),
       span: fact.syntax.span,
     })
   }
@@ -639,7 +640,7 @@ export const hirExpression = (
       return Object.freeze({
         _tag: 'StaticStringLiteral',
         data: fact.value.data,
-        type: Type.string,
+        type: Type.string(Lifetime.staticLifetime),
         span: fact.syntax.span,
       })
     return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
@@ -1338,19 +1339,32 @@ export const hirExpression = (
   if (fact._tag === 'CallableApply') {
     if (fact.type._tag !== 'Available')
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
-    const returnedBorrowOrdinal = returnedBorrowArgument(fact)?.id.ordinal
-    const returnedCapture =
-      fact.returnedBorrowSource?._tag === 'Capture' ? fact.returnedBorrowSource.capture : undefined
-    const returnedSection = callableSectionOf(fact.callee)
-    const returnedCaptureLoan =
-      returnedCapture === undefined || returnedSection === undefined
-        ? undefined
-        : Object.freeze({
-            _tag: 'BorrowId' as const,
-            function: returnedSection.site.function,
-            callSpan: returnedSection.syntax.span,
-            ordinal: returnedCapture.ordinal,
-          })
+    const resultType = fact.type.type
+    const retainedOrdinals = new Set(
+      retainedResultArguments(fact, options.lifetimeAssumptions ?? Lifetime.assumptions([])).map(
+        (argument) => argument.id.ordinal,
+      ),
+    )
+    const retainedSection = callableSectionOf(fact.callee)
+    const retainedCaptures =
+      retainedSection?.captures.filter(
+        (capture) =>
+          capture.expression.type._tag === 'Available' &&
+          retainsLifetimes(
+            capture.expression.type.type,
+            resultType,
+            options.lifetimeAssumptions ?? Lifetime.assumptions([]),
+          ),
+      ) ?? []
+    const retainedCaptureLoans: ReadonlyArray<Hir.BorrowId> =
+      retainedSection === undefined
+        ? []
+        : retainedCaptures.map((capture) => ({
+            _tag: 'BorrowId',
+            function: retainedSection.site.function,
+            callSpan: retainedSection.syntax.span,
+            ordinal: capture.ordinal,
+          }))
     return Object.freeze({
       _tag: 'CallableApply',
       callee: hirExpression(fact.callee, undefined, options),
@@ -1362,14 +1376,14 @@ export const hirExpression = (
       // A staged application retains every argument loan inside the new environment.
       loanEnds: loanEndsOf(
         fact.arguments,
-        (ordinal) => fact.staged === undefined && returnedBorrowOrdinal !== ordinal,
+        (ordinal) => fact.staged === undefined && !retainedOrdinals.has(ordinal),
       ),
       heldLoans: Object.freeze([
         ...loanEndsOf(
           fact.arguments,
-          (ordinal) => fact.staged !== undefined || returnedBorrowOrdinal === ordinal,
+          (ordinal) => fact.staged !== undefined || retainedOrdinals.has(ordinal),
         ),
-        ...(returnedCaptureLoan === undefined ? [] : [returnedCaptureLoan]),
+        ...retainedCaptureLoans,
       ]),
       ...(fact.staged === undefined
         ? {}
@@ -1450,11 +1464,12 @@ export const hirExpression = (
     fact.contract._tag === 'Compatible' &&
     fact.type._tag === 'Available'
   ) {
-    const returnedBorrowParameter = fact.reference.returnedBorrowParameter
-    const directLoanEnds = loanEndsOf(
-      fact.arguments,
-      (ordinal) => returnedBorrowParameter !== ordinal,
+    const retainedOrdinals = new Set(
+      retainedResultArguments(fact, options.lifetimeAssumptions ?? Lifetime.assumptions([])).map(
+        (argument) => argument.id.ordinal,
+      ),
     )
+    const directLoanEnds = loanEndsOf(fact.arguments, (ordinal) => !retainedOrdinals.has(ordinal))
     const nestedSlotLoanEnds =
       fact.reference.operation === 'SlotWrite' ||
       fact.reference.operation === 'SlotTake' ||
@@ -1480,17 +1495,17 @@ export const hirExpression = (
     const heldLoans = Object.freeze(
       fact.reference.operation === 'RawBufferSlot'
         ? directLoanEnds
-        : loanEndsOf(fact.arguments, (ordinal) => returnedBorrowParameter === ordinal),
+        : loanEndsOf(fact.arguments, (ordinal) => retainedOrdinals.has(ordinal)),
     )
     if (fact.reference.operation === 'StringFromUtf8Unchecked') {
       const source = arguments_.at(0)
-      return source === undefined || source._tag === 'Unavailable'
+      return source === undefined || source._tag === 'Unavailable' || !Type.isSlice(source.type)
         ? Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
         : Object.freeze({
             _tag: 'RuntimeStringView',
             source,
             heldLoans,
-            type: Type.string,
+            type: Type.string(source.type.lifetime),
             span: fact.syntax.span,
           })
     }
@@ -1613,7 +1628,11 @@ export const hirExpression = (
       return staticValueExpression(fact.staticValue, fact.type.type, fact.syntax.span)
     const target = fact.reference.declaration
     const substitution = fact.contract.substitution
-    const returnedBorrowOrdinal = returnedBorrowArgument(fact)?.id.ordinal
+    const retainedOrdinals = new Set(
+      retainedResultArguments(fact, options.lifetimeAssumptions ?? Lifetime.assumptions([])).map(
+        (argument) => argument.id.ordinal,
+      ),
+    )
     const staticArgumentOrigins = Object.freeze(
       (fact._tag === 'Call' ? (fact.staticArguments ?? []) : []).map(
         (argument) => argument.textOrigin,
@@ -1653,12 +1672,12 @@ export const hirExpression = (
       loanEnds: loanEndsOf(
         fact.arguments,
         (ordinal) =>
-          target.parameters.at(ordinal)?.phase !== 'Static' && returnedBorrowOrdinal !== ordinal,
+          target.parameters.at(ordinal)?.phase !== 'Static' && !retainedOrdinals.has(ordinal),
       ),
       heldLoans: loanEndsOf(
         fact.arguments,
         (ordinal) =>
-          target.parameters.at(ordinal)?.phase !== 'Static' && returnedBorrowOrdinal === ordinal,
+          target.parameters.at(ordinal)?.phase !== 'Static' && retainedOrdinals.has(ordinal),
       ),
       type: fact.type.type,
       span: fact.syntax.span,
@@ -1751,9 +1770,14 @@ export const hirExpectedExpression = (
   const source = loweredSource
   if (Type.isRepresented(target) && Type.haveSameRepresentationShape(source.type, target))
     return source
-  const compatibility = TypeCompatibility.check(representedSource ?? source.type, target)
+  const compatibility = TypeCompatibility.check(
+    representedSource ?? source.type,
+    target,
+    options.lifetimeCompatibility,
+  )
   if (compatibility._tag === 'Exact') return source
   if (
+    compatibility._tag === 'Lifetime' ||
     compatibility._tag === 'CallableMode' ||
     compatibility._tag === 'EffectAccess' ||
     compatibility._tag === 'ReferenceAccess' ||
@@ -1788,6 +1812,10 @@ export const hirWritePlace = (
   const walk = (current: ExpressionFact): boolean => {
     if (current._tag === 'Grouped') return walk(current.expression)
     if (current._tag === 'Identifier') {
+      if (root._tag === 'PatternBinding')
+        return (
+          current.reference._tag === 'ResolvedPattern' && current.reference.binding.id === root.id
+        )
       return root._tag === 'ParameterDeclaration'
         ? current.reference._tag === 'Resolved' &&
             current.reference.parameter.id.ordinal === root.id.ordinal
@@ -1838,12 +1866,15 @@ export const hirWritePlace = (
     return false
   }
   if (!walk(fact) || fact.type._tag !== 'Available') return undefined
+  let ownedRoot: Hir.OwnedWriteRoot
+  if (root._tag === 'ParameterDeclaration')
+    ownedRoot = { _tag: 'ParameterWriteRoot', parameter: root.id }
+  else if (root._tag === 'PatternBinding')
+    ownedRoot = { _tag: 'PatternWriteRoot', binding: root.id }
+  else ownedRoot = { _tag: 'BindingWriteRoot', binding: root.id }
   return Object.freeze({
     _tag: 'WritePlace',
-    root:
-      root._tag === 'ParameterDeclaration'
-        ? Object.freeze({ _tag: 'ParameterWriteRoot' as const, parameter: root.id })
-        : Object.freeze({ _tag: 'BindingWriteRoot' as const, binding: root.id }),
+    root: ownedRoot,
     selectors: Object.freeze(selectors),
     type: fact.type.type,
     span: fact.syntax.span,
@@ -1851,6 +1882,8 @@ export const hirWritePlace = (
 }
 
 export const assignmentRootType = (root: AssignmentRootFact): SemanticType | undefined => {
+  if (root._tag === 'PatternBinding')
+    return root.type._tag === 'Available' ? root.type.type : undefined
   if (root._tag === 'ParameterDeclaration') {
     return root.declaredType._tag === 'Resolved' ? root.declaredType.type : undefined
   }
@@ -1862,6 +1895,7 @@ export const hirBorrowedWritePlace = (
   root: AssignmentRootFact,
   options: LowerStatementOptions = {},
 ): Hir.BorrowedWritePlace | undefined => {
+  if (root._tag === 'PatternBinding') return undefined
   const rootType = assignmentRootType(root)
   if (
     rootType === undefined ||

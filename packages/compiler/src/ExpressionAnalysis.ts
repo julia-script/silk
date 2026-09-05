@@ -1,10 +1,14 @@
 import * as Option from 'effect/Option'
 import * as AggregateIdentity from './AggregateIdentity.js'
+import * as BodyLifetime from './BodyLifetime.js'
+import * as Lifetime from './Lifetime.js'
+import * as TypeCompatibility from './TypeCompatibility.js'
 import * as CallableContract from './CallableContract.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationLifetime from './DeclarationLifetime.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as DeclarationResolution from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
@@ -328,7 +332,7 @@ export const analyzeConstant = (
   } else if (Type.isString(declared.type) && literal._tag === 'StringLiteral') {
     if (literal.data.kind !== 'Text') detail = 'a byte-string literal does not produce a string'
     else {
-      type = Type.string
+      type = Type.string(Lifetime.staticLifetime)
       value = Object.freeze({ _tag: 'String', data: literal.data })
     }
   } else if (declared.type === 'bool' && literal._tag === 'BooleanLiteral') {
@@ -1057,7 +1061,6 @@ export const analyzeBorrow = (
   scope: Scope,
   resolution: ResolutionContext,
   expected: SemanticType | undefined,
-  borrowAllowed: boolean,
 ): ExpressionResult => {
   const access: Type.BorrowAccess =
     directToken(node, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
@@ -1066,18 +1069,7 @@ export const analyzeBorrow = (
     subjectNode === undefined
       ? undefined
       : analyzeExpression(source, subjectNode, declarations, declaration, scope, resolution)
-  const subject = subjectResult?.fact ?? unavailableExpression(node)
-  const diagnostics = subjectResult?.diagnostics ?? Object.freeze([])
-  if (!borrowAllowed) {
-    return unavailableBorrow(
-      node,
-      access,
-      subject,
-      diagnostics,
-      Diagnostic.invalidBorrowPosition(node.span),
-    )
-  }
-  return borrowSubject(node, subjectNode, subjectResult, access, expected, declaration)
+  return borrowSubject(node, subjectNode, subjectResult, access, expected, declaration, resolution)
 }
 
 /**
@@ -1091,6 +1083,7 @@ export const borrowSubject = (
   access: Type.BorrowAccess,
   expected: SemanticType | undefined,
   declaration: DeclarationFact,
+  resolution: ResolutionContext,
 ): ExpressionResult => {
   const subject = subjectResult?.fact ?? unavailableExpression(node)
   const diagnostics = subjectResult?.diagnostics ?? Object.freeze([])
@@ -1105,6 +1098,10 @@ export const borrowSubject = (
         node.span,
       ),
     )
+  const lifetime =
+    resolution.bodyLifetimes === undefined
+      ? undefined
+      : BodyLifetime.region(resolution.bodyLifetimes, node, 'Borrow')
   const sourceType = subjectResult?.type
   const root =
     borrowRoot(subject) ??
@@ -1121,7 +1118,7 @@ export const borrowSubject = (
           value: subject,
           path: Object.freeze([]),
         }))
-  if (root === undefined || sourceType === undefined) {
+  if (root === undefined || sourceType === undefined || lifetime === undefined) {
     return unavailableBorrow(
       node,
       access,
@@ -1135,6 +1132,12 @@ export const borrowSubject = (
       ? subject.state.reference
       : undefined
   const parentReference = Type.isReference(sourceType) ? sourceType : projectedReference
+  if (resolution.bodyLifetimes !== undefined) {
+    if (parentReference !== undefined)
+      BodyLifetime.constrain(resolution.bodyLifetimes, parentReference.lifetime, lifetime)
+    if (Type.isSlice(sourceType))
+      BodyLifetime.constrain(resolution.bodyLifetimes, sourceType.lifetime, lifetime)
+  }
   if (
     parentReference !== undefined &&
     (projectedReference !== undefined || (expected !== undefined && Type.isReference(expected)))
@@ -1155,7 +1158,7 @@ export const borrowSubject = (
         Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
       )
     }
-    const type = Type.reference(access, target)
+    const type = Type.reference(access, target, lifetime)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Borrow',
@@ -1192,7 +1195,7 @@ export const borrowSubject = (
         Diagnostic.exclusiveBorrowRequiresMutable(name, subjectNode?.span ?? node.span),
       )
     }
-    const type = Type.reference(access, sourceType)
+    const type = Type.reference(access, sourceType, lifetime)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Borrow',
@@ -1238,7 +1241,7 @@ export const borrowSubject = (
         Diagnostic.invalidBorrowOperand(subjectNode?.span ?? node.span),
       )
     }
-    const type = Type.reference(access, sourceType)
+    const type = Type.reference(access, sourceType, lifetime)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Borrow',
@@ -1266,7 +1269,7 @@ export const borrowSubject = (
         Diagnostic.exclusiveBorrowRequiresMutable(name, subjectNode?.span ?? node.span),
       )
     }
-    const type = Type.slice(access, sourceType.element)
+    const type = Type.slice(access, sourceType.element, lifetime)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Borrow',
@@ -1290,7 +1293,7 @@ export const borrowSubject = (
         Diagnostic.invalidSliceReborrow(sourceType.access, access, node.span),
       )
     }
-    const type = Type.slice(access, sourceType.element)
+    const type = Type.slice(access, sourceType.element, lifetime)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Borrow',
@@ -1417,7 +1420,15 @@ export const resolveStructTarget = (
       parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
     ),
   )
-  const analyzed = DeclarationCollection.analyzeDeclaredType(source, syntax, environment)
+  const analyzed = DeclarationCollection.analyzeDeclaredType(
+    source,
+    syntax,
+    environment,
+    false,
+    resolution.bodyLifetimes === undefined
+      ? undefined
+      : DeclarationLifetime.forBody(source, resolution.bodyLifetimes, syntax, environment),
+  )
   const nameResolution: NameResolution.Resolution = Object.freeze({
     _tag: 'NameResolution',
     modules: Object.freeze([resolution.scope]),
@@ -1624,7 +1635,15 @@ export const resolveUnionVariantTarget = (
       parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
     ),
   )
-  const analyzed = DeclarationCollection.analyzeDeclaredType(source, parentSyntax, environment)
+  const analyzed = DeclarationCollection.analyzeDeclaredType(
+    source,
+    parentSyntax,
+    environment,
+    false,
+    resolution.bodyLifetimes === undefined
+      ? undefined
+      : DeclarationLifetime.forBody(source, resolution.bodyLifetimes, parentSyntax, environment),
+  )
   const nameResolution: NameResolution.Resolution = Object.freeze({
     _tag: 'NameResolution',
     modules: Object.freeze([resolution.scope]),
@@ -1799,6 +1818,7 @@ const resolveBareUnionVariantTarget = (
 }
 
 export interface PatternCounters {
+  readonly placeMutability?: 'Mutable' | 'Immutable'
   pattern: number
   binding: number
   invalid: boolean
@@ -1826,7 +1846,15 @@ export const resolvePatternType = (
       parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
     ),
   )
-  const analyzed = DeclarationCollection.analyzeDeclaredType(source, syntax, environment)
+  const analyzed = DeclarationCollection.analyzeDeclaredType(
+    source,
+    syntax,
+    environment,
+    false,
+    resolution.bodyLifetimes === undefined
+      ? undefined
+      : DeclarationLifetime.forBody(source, resolution.bodyLifetimes, syntax, environment),
+  )
   const nameResolution: NameResolution.Resolution = Object.freeze({
     _tag: 'NameResolution',
     modules: Object.freeze([resolution.scope]),
@@ -1853,6 +1881,21 @@ export const patternDeclaredName = (
   token === undefined
     ? Object.freeze({ _tag: 'Unavailable', syntax })
     : Object.freeze({ _tag: 'Present', spelling: spelling(source, token), token })
+
+const selectedPatternMember = (
+  written: SemanticType | undefined,
+  expected: SemanticType | undefined,
+  resolution: ResolutionContext,
+): SemanticType | undefined => {
+  if (written === undefined || expected === undefined) return written
+  return (
+    (Type.isUnion(expected) ? expected.members : [expected]).find(
+      (member) =>
+        Type.runtimeKey(member) === Type.runtimeKey(written) &&
+        typesCompatible(member, written, resolution.lifetimeCompatibility),
+    ) ?? written
+  )
+}
 
 export const analyzePattern = (
   source: SourceFile.SourceFile,
@@ -2033,7 +2076,7 @@ export const analyzePattern = (
       childNode(node, 'TypePath')
     const bindingTarget = resolvePatternType(source, bindingTargetSyntax, resolution, declaration)
     const bindingDiagnostics: Array<Diagnostic.Diagnostic> = [...bindingTarget.diagnostics]
-    const member = bindingTarget.type
+    const member = selectedPatternMember(bindingTarget.type, expected, resolution)
     const bindingToken = node.children.find(
       (element): element is Token.Token =>
         SyntaxTree.isToken(element) && element.kind === 'Identifier',
@@ -2068,6 +2111,9 @@ export const analyzePattern = (
       path: prefix,
       type: member === undefined ? unavailableExpressionType : availableExpressionType(member),
       access,
+      ...(counters.placeMutability === undefined
+        ? {}
+        : { placeMutability: counters.placeMutability }),
       syntax: node,
     })
     counters.binding += 1
@@ -2116,7 +2162,13 @@ export const analyzePattern = (
     target.fact._tag === 'Resolved' && 'variant' in target.fact ? target.fact.variant : undefined
   const aggregate = struct ?? union
   const aggregateFields = struct?.fields ?? variant?.fields ?? Object.freeze([])
-  const nominal = target.fact._tag === 'Resolved' ? target.fact.type : undefined
+  const selectedType = selectedPatternMember(
+    target.fact._tag === 'Resolved' ? target.fact.type : undefined,
+    expected,
+    resolution,
+  )
+  const nominal =
+    selectedType !== undefined && Type.isNominal(selectedType) ? selectedType : undefined
   const structSubstitution =
     aggregate === undefined || nominal === undefined
       ? new Map<string, SemanticType>()
@@ -2262,6 +2314,9 @@ export const analyzePattern = (
         path: Object.freeze([...prefix, resolvedField.id]),
         type: bindingType,
         access,
+        ...(counters.placeMutability === undefined
+          ? {}
+          : { placeMutability: counters.placeMutability }),
         syntax: fieldNode,
       })
       counters.binding += 1
@@ -2345,7 +2400,10 @@ export const analyzePattern = (
       fact: Object.freeze({
         _tag: 'UnionVariantPattern',
         id,
-        target: unionTarget.fact,
+        target:
+          unionTarget.fact._tag === 'Resolved' && nominal !== undefined
+            ? { ...unionTarget.fact, type: nominal }
+            : unionTarget.fact,
         ...(nominal === undefined ? {} : { member: nominal }),
         ...(coverage === undefined ? {} : { coverage }),
         fields: Object.freeze(fields),
@@ -2362,7 +2420,10 @@ export const analyzePattern = (
     fact: Object.freeze({
       _tag: 'NominalPattern',
       id,
-      target: structTarget?.fact ?? Object.freeze({ _tag: 'Unavailable' }),
+      target:
+        structTarget?.fact._tag === 'Resolved' && nominal !== undefined
+          ? Object.freeze({ ...structTarget.fact, type: nominal })
+          : (structTarget?.fact ?? Object.freeze({ _tag: 'Unavailable' })),
       ...(nominal === undefined ? {} : { member: nominal }),
       fields: Object.freeze(fields),
       bindings: Object.freeze(bindings),
@@ -2387,6 +2448,7 @@ export const matchAccess = (node: SyntaxTree.Node): Match.Access => {
   const access = SyntaxTree.directNode(node, 'MatchAccess')
   if (access === undefined) return 'Copy'
   if (directToken(access, 'MoveKeyword') !== undefined) return 'Move'
+  if (directToken(access, 'Identifier') !== undefined) return 'Place'
   if (directToken(access, 'Ampersand') === undefined) return 'Copy'
   return directToken(access, 'MutKeyword') === undefined ? 'Shared' : 'Exclusive'
 }
@@ -2408,7 +2470,6 @@ export const analyzeMatch = (
   scope: Scope,
   resolution: ResolutionContext,
   expected?: SemanticType,
-  borrowAllowed = false,
 ): ExpressionResult => {
   const id: Match.MatchId = Object.freeze({
     _tag: 'MatchId',
@@ -2434,6 +2495,12 @@ export const analyzeMatch = (
     members = Match.enumMembersOf(enumScrutinee)
   }
 
+  const placeRoot =
+    access === 'Place' && scrutinee !== undefined ? assignmentRoot(scrutinee.fact) : undefined
+  const placeMutability =
+    placeRoot !== undefined && assignmentRootAccess(placeRoot) === 'MutableOwned'
+      ? 'Mutable'
+      : 'Immutable'
   const preliminary = SyntaxTree.directNodes(node, 'MatchArm').map((armNode, ordinal) => {
     const armId: Match.ArmId = Object.freeze({ _tag: 'MatchArmId', match: id, ordinal })
     const patternNode =
@@ -2457,6 +2524,7 @@ export const analyzeMatch = (
         pattern: 0,
         binding: 0,
         invalid: false,
+        ...(access === 'Place' ? { placeMutability } : {}),
       },
       scrutinee?.type,
     )
@@ -2642,7 +2710,6 @@ export const analyzeMatch = (
               armScope,
               resolution,
               expected,
-              borrowAllowed,
             )
       if (result !== undefined) diagnostics.push(...result.diagnostics)
       const expression = result?.fact ?? unavailableExpression(resultNode ?? armNode)
@@ -2725,7 +2792,18 @@ export const analyzeMatch = (
   const joined: Match.Join =
     anonymousDisagreement || unitDisagreement
       ? Object.freeze({ _tag: 'Incompatible', types: Object.freeze(reachableTypes) })
-      : Match.join(reachableTypes)
+      : expected !== undefined &&
+          reachableTypes.every(
+            (type) =>
+              Type.isNever(type) ||
+              (Type.runtimeKey(type) === Type.runtimeKey(expected) &&
+                typesCompatible(type, expected, resolution.lifetimeCompatibility)),
+          )
+        ? Object.freeze({ _tag: 'Joined', type: expected })
+        : Match.join(
+            reachableTypes,
+            BodyLifetime.environment(resolution?.bodyLifetimes, node, reachableTypes),
+          )
   if (joined._tag === 'Incompatible') {
     let divergentRepresentations:
       | {
@@ -3430,7 +3508,11 @@ export const analyzeAggregateLiteral = (
             const candidateSubstitution = new Map(currentSubstitution)
             if (
               !TypeInference.infer(expectedType, expression.type, candidateSubstitution) &&
-              !typesCompatible(actualValue, Type.substitute(expectedType, currentSubstitution))
+              !typesCompatible(
+                actualValue,
+                Type.substitute(expectedType, currentSubstitution),
+                resolution?.lifetimeCompatibility,
+              )
             ) {
               const impliedSubstitution = new Map<string, Type.GenericArgument>()
               if (TypeInference.infer(expectedType, expression.type, impliedSubstitution)) {
@@ -3521,11 +3603,20 @@ export const analyzeAggregateLiteral = (
           for (const [parameterKey, inferred] of inferredArguments)
             compatibilitySubstitution.set(parameterKey, inferred.argument)
           const compatibleExpected = Type.substitute(expectedValue, compatibilitySubstitution)
-          const compatibleValue = typesCompatible(actualValue, compatibleExpected)
+          const compatibleValue = typesCompatible(
+            actualValue,
+            compatibleExpected,
+            resolution?.lifetimeCompatibility,
+          )
           if (representationDiagnostic !== undefined || !compatibleValue) {
             const diagnostic =
               representationDiagnostic ??
-              unionConversionDiagnostic(actualValue, compatibleExpected, expressionNode.span) ??
+              unionConversionDiagnostic(
+                actualValue,
+                compatibleExpected,
+                expressionNode.span,
+                resolution?.lifetimeCompatibility,
+              ) ??
               Diagnostic.structFieldTypeMismatch(
                 name,
                 Type.display(compatibleExpected),
@@ -3732,7 +3823,7 @@ export const analyzeArrayLiteral = (
     let compatibility: ArrayElementFact['compatibility']
     if (element.type === undefined || elementType === undefined) {
       compatibility = Object.freeze({ _tag: 'Unavailable' })
-    } else if (!typesCompatible(element.type, elementType)) {
+    } else if (!typesCompatible(element.type, elementType, resolution?.lifetimeCompatibility)) {
       const diagnostic =
         representationJoinDiagnostic(
           elementType,
@@ -3741,7 +3832,12 @@ export const analyzeArrayLiteral = (
           elementNode.span,
           elementNode.span,
         ) ??
-        unionConversionDiagnostic(element.type, elementType, elementNode.span) ??
+        unionConversionDiagnostic(
+          element.type,
+          elementType,
+          elementNode.span,
+          resolution?.lifetimeCompatibility,
+        ) ??
         Diagnostic.arrayElementTypeMismatch(
           Type.display(elementType),
           Type.display(element.type),
@@ -4154,6 +4250,7 @@ import {
   analyzeFunctionItem,
   boundOperationReference,
   builtinSignature,
+  instantiateBuiltinSignature,
   callArityDiagnostic,
   captureAccess,
   copyAssumptionsOf,
@@ -4165,6 +4262,7 @@ import {
   hasAvailableCallSyntax,
   interfaceConstraintDiagnostics,
   interfaceOperationContract,
+  instantiateInterfaceReference,
   isSectionArity,
   ownedProviderCaptureAccess,
   serviceOperation,
@@ -4265,7 +4363,7 @@ export function analyzePlaceReplace(
   const compatible =
     destination.type !== undefined &&
     value.type !== undefined &&
-    typesCompatible(value.type, destination.type)
+    typesCompatible(value.type, destination.type, resolution?.lifetimeCompatibility)
   if (destination.type !== undefined && value.type !== undefined && !compatible) {
     const expectedOrigin =
       root?._tag === 'BindingFact' ? root.initializer.syntax.span : destinationNode.span
@@ -4277,7 +4375,12 @@ export function analyzePlaceReplace(
         valueNode.span,
         valueNode.span,
       ) ??
-        unionConversionDiagnostic(value.type, destination.type, valueNode.span) ??
+        unionConversionDiagnostic(
+          value.type,
+          destination.type,
+          valueNode.span,
+          resolution?.lifetimeCompatibility,
+        ) ??
         Diagnostic.assignmentTypeMismatch(
           Type.display(destination.type),
           Type.display(value.type),
@@ -4353,18 +4456,23 @@ export const intrinsicContractReference = (
     operation.rule._tag !== 'MixedFieldProjectionRule'
   )
     throw new RangeError('intrinsic contract reference requires a contract operation')
-  const contract =
-    operation.rule.contract.unsafe === operation.unsafe
-      ? operation.rule.contract
-      : CallableContract.make({
-          functionKind: operation.rule.contract.functionKind,
-          unsafe: operation.unsafe,
-          binders: operation.rule.contract.binders,
-          parameters: operation.rule.contract.parameters,
-          result: operation.rule.contract.result,
-          constraints: operation.rule.contract.constraints,
-          captures: operation.rule.contract.captures,
-        })
+  const declared = operation.rule.contract
+  const lifetimeBinders = [
+    ...new Map(
+      [
+        ...declared.lifetimeBinders,
+        ...[...declared.parameters.map((parameter) => parameter.type), declared.result]
+          .flatMap(Type.freeLifetimes)
+          .filter((lifetime): lifetime is Lifetime.Bound => lifetime._tag === 'BoundLifetime'),
+      ].map((lifetime) => [Lifetime.key(lifetime), lifetime]),
+    ).values(),
+  ]
+  const contract = CallableContract.make({
+    ...declared,
+    environment: Lifetime.staticLifetime,
+    lifetimeBinders,
+    unsafe: operation.unsafe,
+  })
   return Object.freeze({
     _tag: 'ResolvedIntrinsicContract',
     spelling: `Intrinsic.${operation.spelling}`,
@@ -4743,7 +4851,23 @@ const mixedFieldProjection = (
       type: undefined,
     })
   }
-  const type = Type.reference('Shared', descriptor.valueType)
+  const lifetime =
+    resolution.bodyLifetimes === undefined
+      ? undefined
+      : BodyLifetime.region(resolution.bodyLifetimes, call, 'Borrow')
+  if (lifetime === undefined)
+    return {
+      fact: callFact(unavailableExpressionType),
+      diagnostics: Object.freeze(commonDiagnostics),
+      type: undefined,
+    }
+  if (
+    ownerArgument.type._tag === 'Available' &&
+    Type.isReference(ownerArgument.type.type) &&
+    resolution.bodyLifetimes !== undefined
+  )
+    BodyLifetime.constrain(resolution.bodyLifetimes, ownerArgument.type.type.lifetime, lifetime)
+  const type = Type.reference('Shared', descriptor.valueType, lifetime)
   return Object.freeze({
     fact: Object.freeze({
       _tag: 'Borrow',
@@ -4854,6 +4978,7 @@ export const finishIntrinsicContractCall = (
           Type.effectWithRows(
             substitutedResult.success,
             substitutedResult.failureRow,
+            substitutedResult,
             intrinsicEffectCaptureAccess(
               operation,
               argumentsResult.facts,
@@ -5028,7 +5153,9 @@ export function analyzeBuiltinCall(
       resolution,
       caller,
     )
-  const signature = builtinSignature(actorSpelling, operationSpelling)
+  const template = builtinSignature(actorSpelling, operationSpelling)
+  const signature =
+    template === undefined ? undefined : instantiateBuiltinSignature(template, call, resolution)
   const declaredTypeParameters = signature?.typeParameters ?? Object.freeze([])
   const specializationDiagnostic =
     typeArguments.explicit &&
@@ -5057,7 +5184,20 @@ export function analyzeBuiltinCall(
     for (const [ordinal, parameter] of signature.parameters.entries()) {
       const argument = argumentsResult.facts.at(ordinal)
       if (argument?.type._tag === 'Available')
-        TypeInference.infer(parameter, argument.type.type, substitution)
+        TypeInference.infer(parameter, argument.type.type, substitution, {
+          accepts: (source, target, invariant) =>
+            typesCompatible(
+              Type.string(source),
+              Type.string(target),
+              resolution.lifetimeCompatibility,
+            ) &&
+            (!invariant ||
+              typesCompatible(
+                Type.string(target),
+                Type.string(source),
+                resolution.lifetimeCompatibility,
+              )),
+        })
     }
   }
   const missingInference = declaredTypeParameters.find(
@@ -5113,9 +5253,6 @@ export function analyzeBuiltinCall(
       parameters: instantiatedParameters,
       result: instantiatedResult ?? signature.result,
       unsafe: signature.unsafe === true,
-      ...(signature.returnedBorrowParameter === undefined
-        ? {}
-        : { returnedBorrowParameter: signature.returnedBorrowParameter }),
     })
   } else {
     reference = Object.freeze({
@@ -5139,7 +5276,15 @@ export function analyzeBuiltinCall(
       caller,
     )
   }
-  const callContract = analyzeCallContract(call, reference, argumentsResult.facts)
+  const callContract = analyzeCallContract(
+    call,
+    reference,
+    argumentsResult.facts,
+    hasAvailableCallSyntax(call),
+    undefined,
+    resolution,
+    caller,
+  )
   const expressionType =
     hasAvailableCallSyntax(call) &&
     reference._tag === 'ResolvedBuiltin' &&
@@ -5385,7 +5530,7 @@ const analyzeAggregateElements = (
       } else if (
         expected !== undefined &&
         analyzed.type !== undefined &&
-        !typesCompatible(analyzed.type, expected) &&
+        !typesCompatible(analyzed.type, expected, resolution?.lifetimeCompatibility) &&
         !contextualIntegerCompatible(analyzed.fact, expected)
       ) {
         const diagnostic = Diagnostic.structFieldTypeMismatch(
@@ -5860,22 +6005,12 @@ export const analyzeGroupedExpression = (
   scope: Scope,
   resolution: ResolutionContext,
   expected?: SemanticType,
-  borrowAllowed = false,
 ): ExpressionResult => {
   const child = node.children.find(isExpressionNode)
   const expression =
     child === undefined
       ? undefined
-      : analyzeExpression(
-          source,
-          child,
-          declarations,
-          declaration,
-          scope,
-          resolution,
-          expected,
-          borrowAllowed,
-        )
+      : analyzeExpression(source, child, declarations, declaration, scope, resolution, expected)
   if (expression === undefined) {
     return Object.freeze({
       fact: Object.freeze({
@@ -6066,17 +6201,58 @@ export const concreteOperatorSelections = (
 export const operatorSelectionMatches = (
   selection: OperatorContractSelection,
   arguments_: ReadonlyArray<ArgumentFact>,
-): boolean =>
-  selection.parameters.length === arguments_.length &&
-  arguments_.every((argument, ordinal) => {
-    const expected = selection.parameters.at(ordinal)
-    return (
-      expected !== undefined &&
-      argument.type._tag === 'Available' &&
-      (typesCompatible(argument.type.type, expected) ||
-        contextualIntegerCompatible(argument.expression, expected))
-    )
+  node: SyntaxTree.Node,
+  token: Token.Token,
+  resolution: ResolutionContext,
+): boolean => {
+  // Candidate probing must not retain constraints from operations that are not selected.
+  const lifetimes = TypeCompatibility.context({
+    ...(resolution.lifetimeCompatibility === undefined
+      ? {}
+      : {
+          assumptions: resolution.lifetimeCompatibility.assumptions,
+          nominalVariance: resolution.lifetimeCompatibility.nominalVariance,
+        }),
+    outlives: (longer, shorter) =>
+      longer._tag === 'LocalLifetime' || shorter._tag === 'LocalLifetime',
   })
+  const reference = selectedOperatorReference(selection, node, token, resolution)
+  return (
+    reference.parameters.length === arguments_.length &&
+    arguments_.every((argument, ordinal) => {
+      const expected = reference.parameters.at(ordinal)
+      return (
+        expected !== undefined &&
+        argument.type._tag === 'Available' &&
+        (typesCompatible(argument.type.type, expected, lifetimes) ||
+          contextualIntegerCompatible(argument.expression, expected))
+      )
+    })
+  )
+}
+
+const selectedOperatorReference = (
+  selection: OperatorContractSelection,
+  node: SyntaxTree.Node,
+  token: Token.Token,
+  resolution: ResolutionContext,
+): Extract<CallReferenceFact, { readonly _tag: 'ResolvedInterfaceOperation' }> =>
+  instantiateInterfaceReference(
+    {
+      _tag: 'ResolvedInterfaceOperation',
+      spelling: selection.label,
+      token,
+      capability: selection.capability,
+      provider: selection.provider,
+      operation: selection.operation,
+      declaration: selection.declaration,
+      interfaceContract: selection.contract,
+      parameters: selection.parameters,
+      result: selection.result,
+    },
+    node,
+    resolution,
+  )
 
 export const finishInterfaceOperator = (
   source: SourceFile.SourceFile,
@@ -6090,6 +6266,7 @@ export const finishInterfaceOperator = (
   resolution: ResolutionContext,
   selection: OperatorContractSelection,
 ): ExpressionResult => {
+  const reference = selectedOperatorReference(selection, node, operatorToken, resolution)
   const argumentsResult = analyzeArgumentNodes(
     source,
     node,
@@ -6098,7 +6275,7 @@ export const finishInterfaceOperator = (
     declaration,
     scope,
     resolution,
-    selection.parameters,
+    reference.parameters,
   )
   const arguments_ = Object.freeze(
     argumentsResult.facts.map((argument) => {
@@ -6109,22 +6286,10 @@ export const finishInterfaceOperator = (
         : Object.freeze({ ...argument, expression, syntax: expression.syntax })
     }),
   )
-  const reference: CallReferenceFact = Object.freeze({
-    _tag: 'ResolvedInterfaceOperation',
-    spelling: selection.label,
-    token: operatorToken,
-    capability: selection.capability,
-    provider: selection.provider,
-    operation: selection.operation,
-    declaration: selection.declaration,
-    interfaceContract: selection.contract,
-    parameters: selection.parameters,
-    result: selection.result,
-  })
-  const contract = analyzeCallContract(node, reference, arguments_, true)
+  const contract = analyzeCallContract(node, reference, arguments_, true, undefined, resolution)
   const type =
     contract.fact._tag === 'Compatible'
-      ? availableExpressionType(selection.result)
+      ? availableExpressionType(reference.result)
       : unavailableExpressionType
   return Object.freeze({
     fact: Object.freeze({
@@ -6133,7 +6298,7 @@ export const finishInterfaceOperator = (
       reference,
       arguments: arguments_,
       mappings: Object.freeze(
-        selection.parameters.flatMap((expected, ordinal) => {
+        reference.parameters.flatMap((expected, ordinal) => {
           const argument = arguments_.at(ordinal)
           return argument === undefined
             ? []
@@ -6385,7 +6550,9 @@ export const analyzeOperatorExpression = (
     const candidates = [
       ...boundOperatorSelections(declaration, operator),
       ...concreteOperatorSelections(resolution.index, source.id, operator),
-    ].filter((candidate) => operatorSelectionMatches(candidate, argumentsResult.facts))
+    ].filter((candidate) =>
+      operatorSelectionMatches(candidate, argumentsResult.facts, node, operatorToken, resolution),
+    )
     if (candidates.length === 1) {
       const candidate = candidates.at(0)
       if (candidate !== undefined)
@@ -6448,8 +6615,9 @@ export const analyzeOperatorExpression = (
     selectedActor = Scalar.defaultInteger.spelling
   }
   const target = Operator.target(operator, selectedActor)
-  const signature = builtinSignature(target.actor, target.operation, 'Primitive')
-  if (signature === undefined) throw new RangeError('Compiler operator table is inconsistent')
+  const template = builtinSignature(target.actor, target.operation, 'Primitive')
+  if (template === undefined) throw new RangeError('Compiler operator table is inconsistent')
+  const signature = instantiateBuiltinSignature(template, node, resolution)
   const operatorParameters = signature.parameters
   const operatorResult = signature.result
   const reference: CallReferenceFact = Object.freeze({
@@ -6468,6 +6636,8 @@ export const analyzeOperatorExpression = (
     reference,
     argumentsResult.facts,
     isAvailableSyntax(node),
+    undefined,
+    resolution,
   )
   const expressionType =
     contract.fact._tag === 'Compatible'
@@ -6943,6 +7113,7 @@ const synthesizeReceiver = (
   subjectResult: ExpressionResult,
   parameterType: SemanticType | undefined,
   declaration: DeclarationFact,
+  resolution: ResolutionContext,
 ): ExpressionResult => {
   const subjectType = subjectResult.type
   if (parameterType !== undefined && Type.isReference(parameterType)) {
@@ -6961,6 +7132,7 @@ const synthesizeReceiver = (
       parameterType.access,
       parameterType,
       declaration,
+      resolution,
     )
   }
   if (borrowRoot(subjectResult.fact) === undefined) return subjectResult
@@ -7014,6 +7186,7 @@ const finishBoundMethod = (
     subject,
     declaredParameterType(candidate.declaration.parameters.at(0)),
     declaration,
+    resolution,
   )
   return finishCallableSection(
     node,
@@ -7075,7 +7248,6 @@ const analyzeMethodCall = (
     scope,
     resolution,
     undefined,
-    true,
   )
   if (subjectResult === undefined) return undefined
   const argumentList = childNode(node, 'ArgumentList')
@@ -7229,7 +7401,13 @@ const analyzeMethodCall = (
     candidate._tag === 'Inherent'
       ? candidate.declaration.parameters.map(declaredParameterType)
       : candidate.reference.parameters
-  const receiver = synthesizeReceiver(subjectNode, subjectResult, parameterTypes.at(0), declaration)
+  const receiver = synthesizeReceiver(
+    subjectNode,
+    subjectResult,
+    parameterTypes.at(0),
+    declaration,
+    resolution,
+  )
   // An explicit list binds the member's own binders: the receiver already fixes the owner's, so
   // they are prepended from the receiver's type exactly as an applied qualifier would supply them.
   const typeArguments =
@@ -7695,7 +7873,6 @@ export const analyzePipelineExpression = (
             appliedTarget._tag === 'Resolved'
               ? appliedTarget.reference.parameters.at(0)
               : undefined,
-            true,
           )
     const inputFact = input?.fact ?? unavailableExpression(inputNode ?? node)
     return finishAppliedInterfaceOperation(
@@ -7729,7 +7906,6 @@ export const analyzePipelineExpression = (
           scope,
           resolution,
           expectedInput,
-          true,
         )
   const inputFact = input?.fact ?? unavailableExpression(inputNode ?? node)
   const callableResult =
@@ -8190,7 +8366,9 @@ const anonymousCaptureMode = (captures: ReadonlyArray<AnonymousCaptureFact>): Ty
   return 'Shared'
 }
 
-const anonymousCapturedType = (capture: AnonymousCaptureFact): Type.Type | undefined => {
+const anonymousCapturedType = (
+  capture: Pick<AnonymousCaptureFact, 'reference'>,
+): Type.Type | undefined => {
   if (capture.reference._tag === 'BindingFact')
     return capture.reference.inferredType._tag === 'Available'
       ? capture.reference.inferredType.type
@@ -8427,6 +8605,17 @@ const analyzeAnonymousCallable = (
   )
   resolution.hiddenFunctions?.push(hidden.fact)
   const mode = anonymousCaptureMode(captures)
+  const lifetimes = BodyLifetime.environment(
+    resolution.bodyLifetimes,
+    node,
+    captures.flatMap((capture) => {
+      const type = anonymousCapturedType(capture)
+      return type === undefined ? [] : [type]
+    }),
+    captures
+      .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
+      .map((capture) => capture.expression.syntax),
+  )
   let result: Type.Type | undefined =
     hiddenDeclaration.returnType._tag === 'Resolved' ? hiddenDeclaration.returnType.type : undefined
   if (result !== undefined && hiddenDeclaration.functionKind === 'Effect') {
@@ -8439,6 +8628,7 @@ const analyzeAnonymousCallable = (
     result = Type.effectWithRows(
       result,
       hiddenDeclaration.failureRow.row,
+      { ...DeclarationFacts.executableLifetimes(hiddenDeclaration), lifetimeBinders: [] },
       strongestEffectAccess(
         ...effectCaptures.flatMap((capture) => (capture.access === 'Copy' ? [] : [capture.access])),
       ),
@@ -8450,7 +8640,9 @@ const analyzeAnonymousCallable = (
   )
   const complete = result !== undefined && parameterTypes.length === authoredParameters.length
   const callable =
-    complete && result !== undefined ? Type.callable(parameterTypes, result, mode) : undefined
+    complete && result !== undefined && lifetimes !== undefined
+      ? Type.callable(parameterTypes, result, lifetimes, mode)
+      : undefined
   const token = directToken(node, 'FnKeyword')
   const reference: CallReferenceFact =
     token === undefined
@@ -8532,7 +8724,6 @@ export function analyzeExpression(
   scope: Scope,
   resolution: ResolutionContext,
   expected?: SemanticType,
-  borrowAllowed = false,
 ): ExpressionResult | undefined {
   if (
     declaration.phase === 'Static' &&
@@ -8557,7 +8748,6 @@ export function analyzeExpression(
         unsafeCallSpans: Object.freeze([...(resolution.unsafeCallSpans ?? []), call.span]),
       }),
       expected,
-      borrowAllowed,
     )
     if (analyzed === undefined) return undefined
     const invokesUnsafe = (() => {
@@ -8656,7 +8846,10 @@ export function analyzeExpression(
     // (EFF-007), and the recorded failures still form its failure channel.
     if (returned.length === 0 && !returnFlowOf(statements).fallsThrough) success = 'never'
     else if (returned.length > 0 && returnedTypes.length === returned.length) {
-      const joined = Match.join(returnedTypes)
+      const joined = Match.join(
+        returnedTypes,
+        BodyLifetime.environment(resolution?.bodyLifetimes, node, returnedTypes),
+      )
       if (joined._tag === 'Joined') success = joined.type
       else {
         const first = returnedTypes.at(0)
@@ -8701,9 +8894,20 @@ export function analyzeExpression(
     const access = strongestEffectAccess(
       ...captures.flatMap((capture) => (capture.access === 'Copy' ? [] : [capture.access])),
     )
+    const lifetimes = BodyLifetime.environment(
+      resolution.bodyLifetimes,
+      node,
+      captures.flatMap((capture) => {
+        const type = anonymousCapturedType(capture)
+        return type === undefined ? [] : [type]
+      }),
+      captures
+        .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
+        .map((capture) => capture.expression?.syntax ?? capture.reference.syntax),
+    )
     const type =
-      success !== undefined
-        ? availableExpressionType(Type.effect(success, failures, access))
+      success !== undefined && lifetimes !== undefined
+        ? availableExpressionType(Type.effect(success, failures, lifetimes, access))
         : unavailableExpressionType
     return Object.freeze({
       fact: Object.freeze({
@@ -8810,7 +9014,9 @@ export function analyzeExpression(
       type = unavailableExpressionType
     } else {
       type = availableExpressionType(
-        data.kind === 'Text' ? Type.string : Type.slice('Shared', 'u8'),
+        data.kind === 'Text'
+          ? Type.string(Lifetime.staticLifetime)
+          : Type.slice('Shared', 'u8', Lifetime.staticLifetime),
       )
     }
     return Object.freeze({
@@ -8875,7 +9081,7 @@ export function analyzeExpression(
       declaration,
       scope,
       resolution,
-      Type.string,
+      Type.string(Lifetime.staticLifetime),
     )
     if (message === undefined) return undefined
     return Object.freeze({
@@ -9028,29 +9234,11 @@ export function analyzeExpression(
   }
 
   if (node.kind === 'BorrowExpression') {
-    return analyzeBorrow(
-      source,
-      node,
-      declarations,
-      declaration,
-      scope,
-      resolution,
-      expected,
-      borrowAllowed,
-    )
+    return analyzeBorrow(source, node, declarations, declaration, scope, resolution, expected)
   }
 
   if (node.kind === 'MatchExpression') {
-    return analyzeMatch(
-      source,
-      node,
-      declarations,
-      declaration,
-      scope,
-      resolution,
-      expected,
-      borrowAllowed,
-    )
+    return analyzeMatch(source, node, declarations, declaration, scope, resolution, expected)
   }
 
   if (node.kind === 'AppliedMemberExpression') {
@@ -9133,7 +9321,6 @@ export function analyzeExpression(
       scope,
       resolution,
       expected,
-      borrowAllowed,
     )
   }
 
@@ -9773,6 +9960,26 @@ export const finishDeclarationCall = (
             return Type.effectWithRows(
               success,
               Type.substituteFailureRow(callable.failureRow.row, substitution),
+              {
+                ...DeclarationFacts.executableLifetimes(callable),
+                lifetimeBinders: [],
+                environment: Type.substituteLifetime(
+                  DeclarationFacts.executableLifetimes(callable).environment,
+                  substitution,
+                ),
+                lifetimeBounds: (
+                  DeclarationFacts.executableLifetimes(callable).lifetimeBounds ?? []
+                ).map((bound) => ({
+                  longer: Type.substituteLifetime(bound.longer, substitution),
+                  shorter: Type.substituteLifetime(bound.shorter, substitution),
+                })),
+                typeOutlives: (
+                  DeclarationFacts.executableLifetimes(callable).typeOutlives ?? []
+                ).map((bound) => ({
+                  type: Type.substitute(bound.type, substitution),
+                  lifetime: Type.substituteLifetime(bound.lifetime, substitution),
+                })),
+              },
               effectCaptureAccess(
                 argumentsResult.facts,
                 resolution.index,
@@ -9840,7 +10047,7 @@ export const finishDeclarationCall = (
 /** Finishes one statically selected interface operation call. */
 export const finishInterfaceOperationCall = (
   node: SyntaxTree.Node,
-  reference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedInterfaceOperation' }>,
+  selectedReference: Extract<CallReferenceFact, { readonly _tag: 'ResolvedInterfaceOperation' }>,
   argumentsResult: ArgumentsResult,
   callTypeArguments: CallTypeArgumentsResult,
   resolution: ResolutionContext,
@@ -9848,6 +10055,7 @@ export const finishInterfaceOperationCall = (
   interfaceApplication?: DeclarationFacts.DeclaredTypeFact,
   path: ReferencePathFact = referencePath(node),
 ): ExpressionResult => {
+  const reference = instantiateInterfaceReference(selectedReference, node, resolution)
   const syntaxAvailable =
     node.kind === 'PipelineExpression' ? isAvailableSyntax(node) : hasAvailableCallSyntax(node)
   const typeArgumentDiagnostic =
@@ -9859,7 +10067,14 @@ export const finishInterfaceOperationCall = (
           node.span,
         )
       : undefined
-  const callContract = analyzeCallContract(node, reference, argumentsResult.facts, syntaxAvailable)
+  const callContract = analyzeCallContract(
+    node,
+    reference,
+    argumentsResult.facts,
+    syntaxAvailable,
+    undefined,
+    resolution,
+  )
   const unsafeDiagnostic = unsafeCallDiagnostic(
     reference.interfaceContract.unsafe,
     reference.spelling,
@@ -9998,6 +10213,8 @@ export interface BodyContext {
 }
 
 export interface ResolutionContext {
+  readonly bodyLifetimes?: BodyLifetime.BodyLifetime
+  readonly lifetimeCompatibility?: TypeCompatibility.Context
   /** The current eager execution boundary and its lexical loop destinations. */
   readonly execution?: {
     readonly context: BodyContext

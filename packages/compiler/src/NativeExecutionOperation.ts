@@ -86,7 +86,9 @@ const MirMatches = (
   left.every((argument, ordinal) => {
     const candidate = right.at(ordinal)
     if (candidate === undefined) throw new RangeError('missing generic argument')
-    return SilkType.genericArgumentKey(argument) === SilkType.genericArgumentKey(candidate)
+    return (
+      SilkType.runtimeGenericArgumentKey(argument) === SilkType.runtimeGenericArgumentKey(candidate)
+    )
   })
 
 const applyCallable = Effect.fnUntraced(function* (

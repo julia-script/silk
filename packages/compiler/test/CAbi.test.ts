@@ -5,6 +5,7 @@ import * as CAbi from '../src/CAbi.js'
 import * as CHeader from '../src/CHeader.js'
 import * as CLayout from '../src/CLayout.js'
 import * as ForeignSymbol from '../src/ForeignSymbol.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 
@@ -26,9 +27,9 @@ const admitted: ReadonlyArray<readonly [Type.Builtin, string]> = [
 const rejected: ReadonlyArray<readonly [string, Type.Type]> = [
   ['bool', 'bool'],
   ['char', 'char'],
-  ['string', Type.string],
-  ['reference', Type.reference('Shared', 'i32')],
-  ['slice', Type.slice('Shared', 'u8')],
+  ['string', Type.string(Lifetime.staticLifetime)],
+  ['reference', Type.reference('Shared', 'i32', Lifetime.staticLifetime)],
+  ['slice', Type.slice('Shared', 'u8', Lifetime.staticLifetime)],
   ['struct', Type.nominal('app/main', 'Point')],
   ['type parameter', Type.parameter({ module: 'app/main', name: 'f' }, 0, 'T')],
 ]
@@ -37,7 +38,7 @@ it('admits exactly the non-nominal C-layout field vocabulary', () => {
   const resolveNothing: CLayout.ResolveStruct = () => undefined
   const acceptedFields: ReadonlyArray<Type.Type> = [
     ...admitted.map(([type]) => type),
-    Type.pointer(false, Type.string),
+    Type.pointer(false, Type.string(Lifetime.staticLifetime)),
     Type.pointer(true, Type.nominal('app/main', 'Opaque')),
     Type.fixedArray('u16', 3),
     Type.fixedArray(Type.fixedArray('f64', 2), 4),
@@ -45,10 +46,10 @@ it('admits exactly the non-nominal C-layout field vocabulary', () => {
   const rejectedFields: ReadonlyArray<readonly [Type.Type, CLayout.RejectionReason]> = [
     ['bool', 'UnsupportedType'],
     ['char', 'UnsupportedType'],
-    [Type.string, 'UnsupportedType'],
+    [Type.string(Lifetime.staticLifetime), 'UnsupportedType'],
     [Type.unit, 'UnknownRecord'],
-    [Type.reference('Shared', 'i32'), 'UnsupportedType'],
-    [Type.slice('Shared', 'u8'), 'UnsupportedType'],
+    [Type.reference('Shared', 'i32', Lifetime.staticLifetime), 'UnsupportedType'],
+    [Type.slice('Shared', 'u8', Lifetime.staticLifetime), 'UnsupportedType'],
     [Type.fixedArray('u8', 0), 'ZeroLengthArray'],
     [Type.fixedArray('bool', 2), 'UnsupportedType'],
   ]

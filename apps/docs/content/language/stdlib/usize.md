@@ -662,7 +662,7 @@ Returns `true` when `left` is greater than or equal to `right`.
 ## `parse`
 
 ```silk
-pub fn parse(text: string) -> silk/result.Result<usize, silk/format.ParseError>
+pub fn parse<'life0>(text: string<'life0>) -> silk/result.Result<usize, silk/format.ParseError>
 ```
 
 Reads the complete text as an unsigned decimal `usize`.

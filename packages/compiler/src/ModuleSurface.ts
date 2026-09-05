@@ -4,10 +4,11 @@ import * as Fn from 'effect/Function'
 import * as CallableContract from './CallableContract.js'
 import * as ConformanceHead from './ConformanceHead.js'
 import * as ContractConstraint from './Constraint.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as FiniteRow from './FiniteRow.js'
 import * as Canonical from './internal/Canonical.js'
+import * as Lifetime from './Lifetime.js'
 import * as RequirementRow from './RequirementRow.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Type from './Type.js'
@@ -107,6 +108,7 @@ const decodeParameterKind = (value: unknown, context: string): Type.ParameterKin
   const kind = serializedString(value, context)
   if (
     kind !== 'Value' &&
+    kind !== 'Lifetime' &&
     kind !== 'RequirementRow' &&
     kind !== 'CallableRepresentation' &&
     kind !== 'EffectRepresentation'
@@ -428,6 +430,8 @@ const genericArgumentMatchesKind = (
 ): boolean => {
   if (Type.isUnavailableGenericArgument(argument)) return argument.expectedKind === kind
   switch (kind) {
+    case 'Lifetime':
+      return Lifetime.isLifetime(argument)
     case 'Value':
       return Type.isTypeArgument(argument)
     case 'RequirementRow':
@@ -481,6 +485,7 @@ const parametersInFailureRow = (row: Type.FailureRow): ReadonlyArray<Type.Parame
     Type.effectWithRows(
       Type.unit,
       row,
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
       'Shared',
       RowAlgebra.concrete(Type.requirementRowPolicy(), []),
     ),
@@ -488,7 +493,13 @@ const parametersInFailureRow = (row: Type.FailureRow): ReadonlyArray<Type.Parame
 
 const parametersInRequirementRow = (row: Type.RequirementsRow): ReadonlyArray<Type.Parameter> =>
   Type.parameters(
-    Type.effectWithRows(Type.unit, RowAlgebra.concrete(Type.failureRowPolicy(), []), 'Shared', row),
+    Type.effectWithRows(
+      Type.unit,
+      RowAlgebra.concrete(Type.failureRowPolicy(), []),
+      { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+      'Shared',
+      row,
+    ),
   )
 
 const constraintParameters = (
@@ -550,7 +561,108 @@ const decodeExecutableOwner = (value: unknown): Type.ExecutableSpecializationOwn
   })
 }
 
+function encodeLifetime(value: Lifetime.Lifetime): SerializedRecord {
+  switch (value._tag) {
+    case 'StaticLifetime':
+      return { tag: 'StaticLifetime' }
+    case 'BoundLifetime':
+      return {
+        tag: 'BoundLifetime',
+        owner: value.owner,
+        binder: value.binder,
+        ordinal: value.ordinal,
+        name: value.name,
+      }
+    case 'LocalLifetime':
+      return {
+        tag: 'LocalLifetime',
+        owner: value.owner,
+        context: value.context,
+        ordinal: value.ordinal,
+      }
+    case 'PlaceholderLifetime':
+      return {
+        tag: 'PlaceholderLifetime',
+        parameter: encodeLifetime(value.parameter),
+        universe: value.universe,
+      }
+  }
+}
+
+function decodeLifetime(value: unknown): Lifetime.Lifetime {
+  const encoded = serializedRecord(value, 'lifetime')
+  const tag = serializedTag(encoded, 'lifetime')
+  if (tag === 'StaticLifetime') return Lifetime.staticLifetime
+  if (tag === 'PlaceholderLifetime') {
+    const parameter = decodeLifetime(encoded.parameter)
+    if (parameter._tag !== 'BoundLifetime')
+      throw new InvalidModuleSurfaceEncoding('placeholder parameter must be a lifetime binder')
+    return Lifetime.placeholder(
+      parameter,
+      serializedString(encoded.universe, 'placeholder universe'),
+    )
+  }
+  const ownerRecord = serializedRecord(encoded.owner, 'lifetime owner')
+  const owner = {
+    module: serializedString(ownerRecord.module, 'lifetime owner module'),
+    name: serializedString(ownerRecord.name, 'lifetime owner name'),
+  }
+  const ordinal = serializedNonNegativeInteger(encoded.ordinal, 'lifetime ordinal')
+  if (tag === 'BoundLifetime')
+    return Lifetime.bound(
+      owner,
+      ordinal,
+      serializedString(encoded.name, 'lifetime name'),
+      serializedArray(encoded.binder, 'lifetime binder path').map((part) =>
+        serializedNonNegativeInteger(part, 'lifetime binder ordinal'),
+      ),
+    )
+  if (tag === 'LocalLifetime')
+    return Lifetime.local(owner, serializedString(encoded.context, 'lifetime context'), ordinal)
+  throw new InvalidModuleSurfaceEncoding(`unknown lifetime tag ${tag}`)
+}
+
+const encodeExecutableLifetimes = (value: Type.ExecutableLifetimes): SerializedRecord => ({
+  environment: encodeLifetime(value.environment),
+  lifetimeBinders: value.lifetimeBinders.map(encodeLifetime),
+  lifetimeBounds: (value.lifetimeBounds ?? []).map((bound) => ({
+    longer: encodeLifetime(bound.longer),
+    shorter: encodeLifetime(bound.shorter),
+  })),
+  typeOutlives: (value.typeOutlives ?? []).map((bound) => ({
+    type: encodeTypeNode(bound.type),
+    lifetime: encodeLifetime(bound.lifetime),
+  })),
+})
+
+const decodeExecutableLifetimes = (encoded: SerializedRecord): Type.ExecutableLifetimes => {
+  const lifetimeBinders = serializedArray(encoded.lifetimeBinders, 'lifetime binders').map(
+    (value) => {
+      const lifetime = decodeLifetime(value)
+      if (lifetime._tag !== 'BoundLifetime')
+        throw new InvalidModuleSurfaceEncoding('executable lifetime binder must be universal')
+      return lifetime
+    },
+  )
+  if (new Set(lifetimeBinders.map(Lifetime.key)).size !== lifetimeBinders.length)
+    throw new InvalidModuleSurfaceEncoding('executable lifetime binders must be distinct')
+  return {
+    environment: decodeLifetime(encoded.environment),
+    lifetimeBinders,
+    lifetimeBounds: serializedArray(encoded.lifetimeBounds, 'lifetime bounds').map((value) => {
+      const bound = serializedRecord(value, 'lifetime bound')
+      return { longer: decodeLifetime(bound.longer), shorter: decodeLifetime(bound.shorter) }
+    }),
+    typeOutlives: serializedArray(encoded.typeOutlives, 'type outlives bounds').map((value) => {
+      const bound = serializedRecord(value, 'type outlives bound')
+      return { type: decodeTypeNode(bound.type), lifetime: decodeLifetime(bound.lifetime) }
+    }),
+  }
+}
+
 function encodeGenericArgumentNode(value: Type.GenericArgument): SerializedRecord {
+  if (Lifetime.isLifetime(value))
+    return { tag: 'LifetimeArgument', lifetime: encodeLifetime(value) }
   if (Type.isRequirementRowArgument(value))
     return { tag: 'RequirementRowArgument', row: encodeRequirementRow(value.row) }
   if (Type.isEffectIdentityArgument(value))
@@ -761,6 +873,8 @@ function decodeGenericArgumentNode(value: unknown): Type.GenericArgument {
         decodeParameterKind(encoded.expectedKind, 'unavailable expected kind'),
         serializedString(encoded.reason, 'unavailable reason'),
       )
+    case 'LifetimeArgument':
+      return decodeLifetime(encoded.lifetime)
     case 'TypeArgument':
       return decodeTypeNode(encoded.type)
     default:
@@ -772,6 +886,7 @@ function decodeGenericArgumentNode(value: unknown): Type.GenericArgument {
 
 function encodeTypeNode(value: Type.Type): unknown {
   if (typeof value === 'string') return { tag: 'Atom', value }
+  if (Type.isString(value)) return { tag: 'String', lifetime: encodeLifetime(value.lifetime) }
   if (Type.isNominal(value))
     return {
       tag: 'Nominal',
@@ -783,14 +898,25 @@ function encodeTypeNode(value: Type.Type): unknown {
   if (Type.isFixedArray(value))
     return { tag: 'FixedArray', element: encodeTypeNode(value.element), length: value.length }
   if (Type.isSlice(value))
-    return { tag: 'Slice', access: value.access, element: encodeTypeNode(value.element) }
+    return {
+      tag: 'Slice',
+      access: value.access,
+      element: encodeTypeNode(value.element),
+      lifetime: encodeLifetime(value.lifetime),
+    }
   if (Type.isReference(value))
-    return { tag: 'Reference', access: value.access, target: encodeTypeNode(value.target) }
+    return {
+      tag: 'Reference',
+      access: value.access,
+      target: encodeTypeNode(value.target),
+      lifetime: encodeLifetime(value.lifetime),
+    }
   if (Type.isPointer(value))
     return { tag: 'Pointer', mutable: value.mutable, pointee: encodeTypeNode(value.pointee) }
   if (Type.isCallable(value))
     return {
       tag: 'Callable',
+      ...encodeExecutableLifetimes(value),
       unsafe: value.unsafe,
       mode: value.mode,
       parameters: value.parameters.map(encodeTypeNode),
@@ -820,6 +946,7 @@ function encodeTypeNode(value: Type.Type): unknown {
   if (Type.isEffect(value))
     return {
       tag: 'Effect',
+      ...encodeExecutableLifetimes(value),
       success: encodeTypeNode(value.success),
       failureRow: encodeFailureRow(value.failureRow),
       requirementRow: encodeRequirementRow(value.requirementRow),
@@ -839,6 +966,7 @@ function encodeTypeNode(value: Type.Type): unknown {
 function encodeCallableContract(value: CallableContract.CallableContract): SerializedRecord {
   return {
     tag: 'CallableContract',
+    ...encodeExecutableLifetimes(value),
     functionKind: value.functionKind,
     unsafe: value.unsafe,
     binders: value.binders.map(encodeParameter),
@@ -892,6 +1020,7 @@ function decodeCallableContract(value: unknown): CallableContract.CallableContra
     return Object.freeze({ parameter, capture: captured })
   })
   return CallableContract.make({
+    ...decodeExecutableLifetimes(encoded),
     functionKind,
     unsafe: serializedBoolean(encoded.unsafe, 'callable contract unsafe qualifier'),
     binders: serializedArray(encoded.binders, 'callable contract binders').map(decodeParameter),
@@ -996,10 +1125,12 @@ function decodeTypeNode(value: unknown): Type.Type {
   switch (serializedTag(encoded, 'type')) {
     case 'Atom': {
       const atom = serializedString(encoded.value, 'type atom')
-      if (!Type.isBuiltin(atom) && !Type.isString(atom) && atom !== 'never')
+      if (!Type.isBuiltin(atom) && atom !== 'never')
         throw new InvalidModuleSurfaceEncoding(`unknown type atom ${atom}`)
       return atom
     }
+    case 'String':
+      return Type.string(decodeLifetime(encoded.lifetime))
     case 'Nominal':
       return Type.nominal(
         serializedString(encoded.module, 'nominal module'),
@@ -1017,13 +1148,17 @@ function decodeTypeNode(value: unknown): Type.Type {
       const access = serializedString(encoded.access, 'slice access')
       if (access !== 'Shared' && access !== 'Exclusive')
         throw new InvalidModuleSurfaceEncoding('slice access must be Shared or Exclusive')
-      return Type.slice(access, decodeTypeNode(encoded.element))
+      return Type.slice(access, decodeTypeNode(encoded.element), decodeLifetime(encoded.lifetime))
     }
     case 'Reference': {
       const access = serializedString(encoded.access, 'reference access')
       if (access !== 'Shared' && access !== 'Exclusive')
         throw new InvalidModuleSurfaceEncoding('reference access must be Shared or Exclusive')
-      return Type.reference(access, decodeTypeNode(encoded.target))
+      return Type.reference(
+        access,
+        decodeTypeNode(encoded.target),
+        decodeLifetime(encoded.lifetime),
+      )
     }
     case 'Pointer':
       return Type.pointer(
@@ -1047,6 +1182,7 @@ function decodeTypeNode(value: unknown): Type.Type {
       return Type.callable(
         parameters,
         result,
+        decodeExecutableLifetimes(encoded),
         mode,
         schema,
         serializedBoolean(encoded.unsafe, 'callable unsafe qualifier'),
@@ -1064,6 +1200,7 @@ function decodeTypeNode(value: unknown): Type.Type {
       return Type.effectWithRows(
         decodeTypeNode(encoded.success),
         decodeFailureRow(encoded.failureRow),
+        decodeExecutableLifetimes(encoded),
         access,
         decodeRequirementRow(encoded.requirementRow),
       )
@@ -1462,7 +1599,7 @@ export const decodeProviderMatch = Effect.fn('ModuleSurface.decodeProviderMatch'
   return yield* decode('ModuleSurface.decodeProviderMatch', value, decodeProviderMatchNode)
 })
 
-const type = (value: Type.Type): string => record('Type', [encodeSemanticType(value)])
+const type = (value: Type.Type): string => record('Type', [Type.key(value)])
 
 const canonicalId = (value: DeclarationFacts.CanonicalId): string =>
   record('CanonicalId', [value.module, value.name])
@@ -1515,8 +1652,18 @@ const requirementRoleFact = (value: DeclarationFacts.RequirementRoleFact): strin
   }
 }
 
+const executableLifetimeSignature = (value: Type.ExecutableLifetimes): string =>
+  record('ExecutableLifetimes', [
+    Lifetime.key(value.environment),
+    array(value.lifetimeBinders.map(Lifetime.key)),
+    Lifetime.assumptions(value.lifetimeBounds ?? []).key,
+    Type.typeOutlivesKey(value.typeOutlives ?? []),
+  ])
+
 const declaredType = (value: DeclarationFacts.DeclaredTypeFact): string => {
   switch (value._tag) {
+    case 'Lifetime':
+      return record('Lifetime', [Lifetime.key(value.lifetime)])
     case 'Resolved':
       return record('ResolvedType', [type(value.type), boolean(value.exposureCause !== undefined)])
     case 'Unresolved':
@@ -1531,12 +1678,14 @@ const declaredType = (value: DeclarationFacts.DeclaredTypeFact): string => {
     case 'Slice':
       return record('SliceType', [
         value.access,
+        Lifetime.key(value.lifetime),
         declaredType(value.element),
         boolean(value.cause !== undefined),
       ])
     case 'Reference':
       return record('ReferenceType', [
         value.access,
+        Lifetime.key(value.lifetime),
         declaredType(value.target),
         boolean(value.cause !== undefined),
       ])
@@ -1549,6 +1698,7 @@ const declaredType = (value: DeclarationFacts.DeclaredTypeFact): string => {
     case 'Callable':
       return record('CallableType', [
         value.mode,
+        executableLifetimeSignature(value.lifetimes),
         array(value.parameters.map(declaredType)),
         declaredType(value.result),
         boolean(value.cause !== undefined),
@@ -1583,6 +1733,7 @@ const declaredType = (value: DeclarationFacts.DeclaredTypeFact): string => {
       ])
     case 'Effect':
       return record('EffectType', [
+        executableLifetimeSignature(value.lifetimes),
         declaredType(value.success),
         array(value.failures.map(declaredType)),
         array(
@@ -1732,7 +1883,7 @@ const interfaceOperationContract = (
     failureRow(value.failureRow),
     requirementRow(value.requirementRow),
     array(value.declaration.constraints.map(constraint)),
-    array(value.declaration.constraintContracts.map(encodeConstraint)),
+    array(value.declaration.constraintContracts.map(ContractConstraint.key)),
     value.receiverAccess,
   ])
 
@@ -1749,7 +1900,7 @@ const interfaceOperationApplication = (
     failureRow(value.failureRow),
     requirementRow(value.requirementRow),
     array(value.declaration.constraints.map(constraint)),
-    array(value.declaration.constraintContracts.map(encodeConstraint)),
+    array(value.declaration.constraintContracts.map(ContractConstraint.key)),
     value.receiverAccess,
   ])
 
@@ -1774,18 +1925,24 @@ const bound = (value: DeclarationFacts.BoundFact): string => {
 const typeParameter = (value: DeclarationFacts.TypeParameterFact): string =>
   record('TypeParameter', [
     type(value.type),
-    name(value.name),
+    value.type.kind === 'Lifetime' ? record('LifetimeBinder') : name(value.name),
+    array((value.lifetimeBounds ?? []).map(Lifetime.key)),
     optional(value.duplicateOf === undefined ? undefined : type(value.duplicateOf)),
     array(value.bounds.map(bound)),
   ])
 
-const declaration = (value: DeclarationFacts.DeclarationFact): string =>
+const declaration = (
+  value: DeclarationFacts.DeclarationFact,
+  includeImplementation = true,
+  includeOrdinal = true,
+): string =>
   record('FunctionDeclaration', [
-    declarationIdOrdinal(value.id),
+    includeOrdinal ? declarationIdOrdinal(value.id) : record('StableDeclaration'),
     canonicalState(value.canonical),
     value.visibility,
     value.phase,
     value.functionKind,
+    executableLifetimeSignature(DeclarationFacts.executableLifetimes(value)),
     boolean(value.unsafe),
     optional(
       value.foreign === undefined
@@ -1801,9 +1958,9 @@ const declaration = (value: DeclarationFacts.DeclarationFact): string =>
     failureRow(value.failureRow),
     requirementRow(value.requirementRow),
     array(value.constraints.map(constraint)),
-    array(value.constraintContracts.map(encodeConstraint)),
+    array(value.constraintContracts.map(ContractConstraint.key)),
     optional(
-      value.bodyTemplate === undefined
+      !includeImplementation || value.bodyTemplate === undefined
         ? undefined
         : record('FunctionBodyTemplate', [value.bodyTemplate.canonical]),
     ),
@@ -1998,7 +2155,7 @@ const serviceOperation = (value: DeclarationFacts.ServiceOperationFact): string 
     failureRow(value.failureRow),
     requirementRow(value.requirementRow),
     array(value.constraints.map(constraint)),
-    array(value.constraintContracts.map(encodeConstraint)),
+    array(value.constraintContracts.map(ContractConstraint.key)),
   ])
 
 const service = (value: DeclarationFacts.ServiceFact | DeclarationFacts.InterfaceFact): string =>
@@ -2171,6 +2328,37 @@ const inherentImpl = (value: DeclarationFacts.InherentImplFact): string =>
     declaredType(value.owner),
     record('InherentImplValidity', [value.validity._tag]),
   ])
+
+/** Encodes the semantic input of one resolved declaration without implementation or source identity. */
+export const memberSignature = (value: DeclarationFacts.MemberFact): string =>
+  value._tag === 'FunctionDeclaration'
+    ? declaration(value, false, false)
+    : member({ ...value, id: { ...value.id, ordinal: 0 } })
+
+/** Encodes explicitly consumed static syntax independently of an ordinary callable signature. */
+export const memberImplementation = (value: DeclarationFacts.MemberFact): string => {
+  if (value._tag !== 'FunctionDeclaration') return memberSignature(value)
+  let canonical = value.bodyTemplate?.canonical ?? ''
+  for (const parameter of value.typeParameters)
+    if (parameter.type.kind === 'Lifetime' && parameter.name._tag === 'Present')
+      canonical = canonical.replaceAll(
+        JSON.stringify(['Token', 'Lifetime', parameter.name.spelling]),
+        JSON.stringify(['Token', 'Lifetime', `@${parameter.type.ordinal}`]),
+      )
+  return canonical
+}
+
+/** Encodes the implementation and provider discovery catalog consumed by body resolution. */
+export const resolutionSignature = (index: DeclarationIndex.Index): string =>
+  array(
+    index.modules.map((module) =>
+      record('ResolutionCatalog', [
+        module.module,
+        array(module.conformances.map(conformance)),
+        array(module.inherentImpls.map(inherentImpl)),
+      ]),
+    ),
+  )
 
 /** Construct the exact surface for one module's completed headers. */
 export const make = (headers: DeclarationFacts.ModuleHeaders): ModuleSurface =>

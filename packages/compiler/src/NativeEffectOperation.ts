@@ -11,6 +11,7 @@ import type { LinearOperation } from './MirLinearization.js'
 import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
+import * as NativeOwnedPlace from './NativeOwnedPlace.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeSuspension from './NativeSuspension.js'
@@ -72,12 +73,33 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   switch (operation._tag) {
     case 'Drop': {
       if (CleanupPlan.hasEffect(operation.cleanup)) {
+        let values = NativeStorage.readLocal(nativeStorage, operation.local)
+        if (operation.selectors !== undefined && operation.selectors.length > 0) {
+          const root = entry.fn.localTypes.at(operation.local.ordinal)
+          const place =
+            root === undefined
+              ? undefined
+              : NativeOwnedPlace.make(
+                  cleanup.program.layout,
+                  Mir.semanticType(root),
+                  operation.selectors,
+                )
+          if (place === undefined)
+            throw new RangeError('Owned place cleanup lost its verified projection')
+          values = yield* NativeOwnedPlace.read(
+            place,
+            cleanup.arith,
+            values,
+            `drop${operation.local.ordinal}_place`,
+          )
+        }
         yield* NativeAggregate.dropThroughPlan(
           cleanup,
           operation.cleanup,
-          NativeStorage.readLocal(nativeStorage, operation.local),
+          values,
           `drop${operation.local.ordinal}`,
           operation.localShared?.block,
+          operation.initialization,
         )
       }
       break

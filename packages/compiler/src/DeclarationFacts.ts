@@ -1,3 +1,5 @@
+import type * as DeclarationLifetime from './DeclarationLifetime.js'
+import * as Lifetime from './Lifetime.js'
 import type * as AggregateIdentity from './AggregateIdentity.js'
 import * as CallableContract from './CallableContract.js'
 import type * as ConformanceHead from './ConformanceHead.js'
@@ -19,6 +21,7 @@ import * as Type from './Type.js'
 /** One function declaration header and its syntax-owned semantic facts. */
 export interface DeclarationFact {
   readonly _tag: 'FunctionDeclaration'
+  readonly lifetimeElaboration?: DeclarationLifetime.Context
   readonly id: DeclarationId
   readonly canonical: CanonicalState
   readonly visibility: 'Public' | 'Private'
@@ -203,6 +206,8 @@ export type BoundFact =
 /** One ordered, declaration-owned generic type parameter with exact source provenance. */
 export interface TypeParameterFact {
   readonly _tag: 'TypeParameterDeclaration'
+  readonly lifetimeBounds?: ReadonlyArray<Lifetime.Lifetime>
+  readonly implicitLifetime?: boolean
   readonly type: Type.Parameter
   readonly name: DeclaredName
   readonly syntax: SyntaxTree.Node
@@ -283,6 +288,13 @@ export type ArrayLengthFact =
 /** The resolved, unresolved, or syntax-unavailable declared type. */
 export type DeclaredTypeFact =
   | {
+      readonly _tag: 'Lifetime'
+      readonly lifetime: Lifetime.Lifetime
+      readonly spelling: string
+      readonly token: Token.Token
+      readonly syntax: SyntaxTree.Node
+    }
+  | {
       readonly _tag: 'Resolved'
       readonly type: SemanticType
       readonly spelling: string
@@ -299,6 +311,7 @@ export type DeclaredTypeFact =
     }
   | {
       readonly _tag: 'Unresolved'
+      readonly implicitLifetimeArguments?: ReadonlyArray<Lifetime.Lifetime>
       readonly spelling: string
       readonly token: Token.Token
       readonly syntax: SyntaxTree.Element
@@ -316,6 +329,7 @@ export type DeclaredTypeFact =
     }
   | {
       readonly _tag: 'Slice'
+      readonly lifetime: Lifetime.Lifetime
       readonly access: Type.Slice['access']
       readonly element: DeclaredTypeFact
       readonly spelling: string
@@ -325,6 +339,7 @@ export type DeclaredTypeFact =
     }
   | {
       readonly _tag: 'Reference'
+      readonly lifetime: Lifetime.Lifetime
       readonly access: Type.BorrowAccess
       readonly target: DeclaredTypeFact
       readonly spelling: string
@@ -343,6 +358,7 @@ export type DeclaredTypeFact =
     }
   | {
       readonly _tag: 'Callable'
+      readonly lifetimes: Type.ExecutableLifetimes
       readonly unsafe: boolean
       readonly mode: Type.CallableMode
       readonly parameters: ReadonlyArray<DeclaredTypeFact>
@@ -363,6 +379,7 @@ export type DeclaredTypeFact =
     }
   | {
       readonly _tag: 'Applied'
+      readonly implicitLifetimeArguments?: ReadonlyArray<Lifetime.Lifetime>
       readonly target: DeclaredTypeFact
       readonly arguments: ReadonlyArray<DeclaredTypeFact>
       readonly requirementRow?: {
@@ -382,6 +399,7 @@ export type DeclaredTypeFact =
     }
   | {
       readonly _tag: 'Effect'
+      readonly lifetimes: Type.ExecutableLifetimes
       readonly access: Type.Effect['access']
       readonly success: DeclaredTypeFact
       readonly failures: ReadonlyArray<DeclaredTypeFact>
@@ -532,68 +550,6 @@ export interface ParameterFact {
   readonly syntax: SyntaxTree.Node
 }
 
-/** The single borrowed parameter an ordinary returned view is lexically tied to. */
-export interface ReturnedBorrowFact {
-  readonly _tag: 'ReturnedBorrow'
-  readonly parameter: ParameterFact
-  readonly access: Type.BorrowAccess
-}
-
-/**
- * An ordinary function returning a shared position-restricted view with no borrowed parameter:
- * every returned view must then be a program-lifetime literal (or derive from one).
- */
-export const returnsStaticView = (declaration: DeclarationFact): boolean => {
-  const result =
-    declaration.returnType._tag === 'Resolved' ? declaration.returnType.type : undefined
-  return (
-    declaration.functionKind === 'Ordinary' &&
-    result !== undefined &&
-    (Type.isSlice(result) || Type.isReference(result)) &&
-    result.access === 'Shared' &&
-    !declaration.parameters.some(
-      (parameter) =>
-        parameter.declaredType._tag === 'Resolved' &&
-        Type.isViewBorrow(parameter.declaredType.type),
-    )
-  )
-}
-
-/**
- * Derives the deliberately conservative returned-view contract from an ordinary function header.
- * No lifetime names are inferred: a valid header has one, and only one, possible borrowed source.
- */
-export const returnedBorrow = (declaration: DeclarationFact): ReturnedBorrowFact | undefined => {
-  const result =
-    declaration.returnType._tag === 'Resolved' ? declaration.returnType.type : undefined
-  if (
-    declaration.functionKind !== 'Ordinary' ||
-    result === undefined ||
-    !Type.isViewBorrow(result)
-  ) {
-    return undefined
-  }
-  const borrowed = declaration.parameters.filter(
-    (parameter) =>
-      parameter.declaredType._tag === 'Resolved' && Type.isViewBorrow(parameter.declaredType.type),
-  )
-  const parameter = borrowed.length === 1 ? borrowed[0] : undefined
-  if (parameter?.declaredType._tag !== 'Resolved') return undefined
-  const source = parameter.declaredType.type
-  const sourceAccess: Type.BorrowAccess =
-    Type.isSlice(source) || Type.isReference(source) ? source.access : 'Shared'
-  const resultAccess: Type.BorrowAccess =
-    Type.isSlice(result) || Type.isReference(result) ? result.access : 'Shared'
-  if (resultAccess === 'Exclusive' && sourceAccess !== 'Exclusive') {
-    return undefined
-  }
-  return Object.freeze({
-    _tag: 'ReturnedBorrow',
-    parameter,
-    access: resultAccess,
-  })
-}
-
 /** The source-retained literal carried by one compile-time constant header. */
 export type ConstantLiteralFact =
   | { readonly _tag: 'BooleanLiteral'; readonly value: boolean; readonly token: Token.Token }
@@ -719,6 +675,7 @@ export type StructDependency =
 
 /** One nominal struct declaration header and its ordered fields. */
 export interface StructFact {
+  readonly lifetimeElaboration?: DeclarationLifetime.Context
   readonly _tag: 'StructDeclaration'
   readonly id: DeclarationId
   readonly canonical: CanonicalState
@@ -776,6 +733,7 @@ export type UnionValidity =
 
 /** One nominal tagged union declaration and its subordinate ordered variants. */
 export interface UnionFact {
+  readonly lifetimeElaboration?: DeclarationLifetime.Context
   readonly _tag: 'UnionDeclaration'
   readonly id: DeclarationId
   readonly canonical: CanonicalState
@@ -913,6 +871,7 @@ export type ServiceOperationState =
 
 /** One complete operation contract owned by a source-declared service. */
 export interface ServiceOperationFact {
+  readonly lifetimeElaboration?: DeclarationLifetime.Context
   readonly _tag: 'ServiceOperation'
   readonly id: DeclarationId
   readonly state: ServiceOperationState
@@ -942,6 +901,123 @@ const contractParameterMode = (type: Type.Type): CallableContract.ParameterMode 
   return 'Value'
 }
 
+/** Computes the retained environment from a declaration's input contracts and written bounds. */
+export const executableLifetimes = (
+  declaration: DeclarationFact | ServiceOperationFact,
+): Type.ExecutableLifetimes => {
+  const inputs = declaration.parameters.flatMap((parameter) =>
+    parameter.declaredType._tag === 'Resolved' ? [parameter.declaredType.type] : [],
+  )
+  const retained =
+    declaration.functionKind === 'Effect'
+      ? [
+          ...new Map(
+            inputs
+              .flatMap(Type.storageLifetimes)
+              .filter((region) => region._tag !== 'StaticLifetime')
+              .map((region) => [Lifetime.key(region), region]),
+          ).values(),
+        ]
+      : []
+  const genericStorage =
+    declaration.functionKind === 'Effect'
+      ? [
+          ...new Map(
+            inputs
+              .flatMap(Type.storageParameters)
+              .filter((parameter) => !parameter.staticProperties.includes('Intrinsic.Detached'))
+              .map((parameter) => [Type.key(parameter), parameter]),
+          ).values(),
+        ]
+      : []
+  const lifetimeBinders = declaration.typeParameters.flatMap((parameter) =>
+    parameter.type.kind === 'Lifetime'
+      ? [Lifetime.bound(parameter.type.owner, parameter.type.ordinal, parameter.type.name)]
+      : [],
+  )
+  const owner = declaration.lifetimeElaboration?.owner ??
+    lifetimeBinders.at(0)?.owner ?? {
+      module: declaration.id.sourceId,
+      name: `function#${declaration.id.ordinal}`,
+    }
+  const lifetimeBounds: Array<Lifetime.Outlives> = []
+  const typeOutlives: Array<Type.TypeOutlives> = []
+  for (const parameter of declaration.typeParameters)
+    for (const shorter of parameter.lifetimeBounds ?? []) {
+      const argument = Type.parameterArgument(parameter.type)
+      if (Lifetime.isLifetime(argument)) lifetimeBounds.push({ longer: argument, shorter })
+      else if (Type.isTypeArgument(argument))
+        typeOutlives.push({ type: argument, lifetime: shorter })
+      else if (Type.isRepresentationArgument(argument)) {
+        const type = Type.representedType(argument)
+        if (type !== undefined) typeOutlives.push({ type, lifetime: shorter })
+      }
+    }
+  const explicitEnvironment =
+    declaration.functionKind === 'Effect'
+      ? declaration.lifetimeElaboration?.explicitEnvironment
+      : undefined
+  let environment: Lifetime.Lifetime = Lifetime.staticLifetime
+  const sole = retained.at(0)
+  let synthesized = false
+  if (explicitEnvironment !== undefined) environment = explicitEnvironment
+  else if (retained.length === 1 && sole !== undefined && genericStorage.length === 0)
+    environment = sole
+  else if (retained.length > 1 || genericStorage.length > 0) {
+    const assumptions = Lifetime.assumptions(lifetimeBounds)
+    const proves = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime): boolean =>
+      Lifetime.outlives(assumptions, longer, shorter)
+    const candidates = [
+      ...new Map(
+        [...retained, ...lifetimeBinders, ...typeOutlives.map((bound) => bound.lifetime)].map(
+          (candidate) => [Lifetime.key(candidate), candidate],
+        ),
+      ).values(),
+    ].filter(
+      (candidate) =>
+        retained.every((source) => proves(source, candidate)) &&
+        genericStorage.every((type) =>
+          Type.satisfiesOutlives(type, candidate, typeOutlives, proves),
+        ),
+    )
+    const common = candidates.filter((candidate) =>
+      candidates.every((other) => proves(other, candidate)),
+    )
+    const selected = common.length === 1 ? common.at(0) : undefined
+    if (selected !== undefined) environment = selected
+    else {
+      const names = new Set(
+        declaration.typeParameters.map((parameter) => parameter.type.name.replace(/^'/, '')),
+      )
+      let name = 'env'
+      let suffix = 1
+      while (names.has(name)) name = `env${suffix++}`
+      environment = Lifetime.bound(
+        owner,
+        Math.max(-1, ...declaration.typeParameters.map((parameter) => parameter.type.ordinal)) + 1,
+        name,
+      )
+      lifetimeBinders.push(environment)
+      synthesized = true
+    }
+  }
+  if (synthesized || explicitEnvironment !== undefined)
+    lifetimeBounds.push(...retained.map((longer) => ({ longer, shorter: environment })))
+  typeOutlives.push(...genericStorage.map((type) => ({ type, lifetime: environment })))
+  return Object.freeze({
+    environment,
+    lifetimeBinders: Object.freeze(lifetimeBinders),
+    lifetimeBounds: Lifetime.assumptions(lifetimeBounds).bounds,
+    typeOutlives: Type.normalizeTypeOutlives(typeOutlives),
+  })
+}
+
+/** Row normalization has no stored values and therefore no retained environment. */
+const rowLifetimes: Type.ExecutableLifetimes = Object.freeze({
+  environment: Lifetime.staticLifetime,
+  lifetimeBinders: Object.freeze([]),
+})
+
 /** Adapts a resolved source callable to the same contract consumed by sealed intrinsics. */
 export const callableContract = (
   declaration: DeclarationFact | ServiceOperationFact,
@@ -953,11 +1029,13 @@ export const callableContract = (
       ? Type.effectWithRows(
           success,
           declaration.failureRow.row,
+          { ...executableLifetimes(declaration), lifetimeBinders: [] },
           'Shared',
           declaration.requirementRow.row,
         )
       : success
   return CallableContract.make({
+    ...executableLifetimes(declaration),
     functionKind: declaration.functionKind === 'Effect' ? 'Effect' : 'Function',
     unsafe: declaration.unsafe,
     binders: [...enclosingTypeParameters, ...declaration.typeParameters].map(
@@ -1121,7 +1199,11 @@ const interfaceOperationContract = (
     operation.name._tag !== 'Present'
       ? []
       : (() => {
-          const type = Type.reference(serviceAccess, provider)
+          const type = Type.reference(
+            serviceAccess,
+            provider,
+            executableLifetimes(operation).environment,
+          )
           const declaredType: DeclaredTypeFact = Object.freeze({
             _tag: 'Resolved',
             type,
@@ -1192,12 +1274,14 @@ const substituteDeclaredTypeFact = (
 ): DeclaredTypeFact => {
   if (fact._tag === 'Reference') {
     const target = substituteDeclaredTypeFact(fact.target, substitution, module)
-    return target === fact.target
+    const lifetime = Type.substituteLifetime(fact.lifetime, substitution)
+    return target === fact.target && Lifetime.equals(lifetime, fact.lifetime)
       ? fact
       : Object.freeze({
           ...fact,
+          lifetime,
           target,
-          spelling: `${fact.access === 'Exclusive' ? '&mut ' : '&'}${target._tag === 'Unavailable' ? '_' : target.spelling}`,
+          spelling: `&${Lifetime.display(lifetime)} ${fact.access === 'Exclusive' ? 'mut ' : ''}${target._tag === 'Unavailable' ? '_' : target.spelling}`,
         })
   }
   // ponytail: Callable, Applied, and Union facts keep their `Self` spelling; recurse when a
@@ -1262,6 +1346,7 @@ export const closeConformanceSelf = (
   const rowsBefore = Type.effectWithRows(
     Type.unit,
     declaration.failureRow.row,
+    rowLifetimes,
     'Shared',
     declaration.requirementRow.row,
   )
@@ -1306,7 +1391,9 @@ export const closeConformanceSelf = (
       returnType: closeFact(declaration.returnType),
     })
   }
-  const rows = Type.isEffect(rowsType) ? rowsType : Type.effect(Type.unit, [], 'Shared')
+  const rows = Type.isEffect(rowsType)
+    ? rowsType
+    : Type.effect(Type.unit, [], rowLifetimes, 'Shared')
   return Object.freeze({
     ...declaration,
     parameters: Object.freeze(
@@ -1431,12 +1518,18 @@ const applyInterfaceOperation = (
     }),
   )
   const substitutedRows = Type.substitute(
-    Type.effectWithRows(Type.unit, source.failureRow.row, 'Shared', source.requirementRow.row),
+    Type.effectWithRows(
+      Type.unit,
+      source.failureRow.row,
+      rowLifetimes,
+      'Shared',
+      source.requirementRow.row,
+    ),
     substitution,
   )
   const rows = Type.isEffect(substitutedRows)
     ? substitutedRows
-    : Type.effect(Type.unit, [], 'Shared')
+    : Type.effect(Type.unit, [], rowLifetimes, 'Shared')
   return Object.freeze({
     _tag: 'InterfaceOperationApplication',
     declaration: source.declaration,
@@ -1457,6 +1550,21 @@ const applyInterfaceOperation = (
     receiverAccess: interfaceReceiverAccess(operands, provider),
   })
 }
+
+/** Instantiates invocation binders after an interface application has already selected its provider. */
+export const instantiateInterfaceOperation = (
+  self: InterfaceOperationApplicationFact,
+  substitution: Type.Substitution,
+): InterfaceOperationApplicationFact =>
+  Object.freeze({
+    ...applyInterfaceOperation(
+      { ...self, _tag: 'InterfaceOperationContract' },
+      self.capability,
+      self.provider,
+      substitution,
+    ),
+    source: self.source,
+  })
 
 const interfaceOperationAvailable = (operation: InterfaceOperationApplicationFact): boolean =>
   operation.operands.every((operand) => operand.type._tag === 'Resolved') &&

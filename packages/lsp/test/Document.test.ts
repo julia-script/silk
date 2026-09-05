@@ -209,7 +209,7 @@ pub fn main() -> i32 {
     const reference = Document.hover(document, snapshot, positionOf(source, 'recover', 1))
     assert.deepEqual(declaration?.contents, {
       kind: 'markdown',
-      value: '```silk\neffect fn recover(error: OutOfMemoryError) -> i32\n```',
+      value: "```silk\neffect<'static> fn recover(error: OutOfMemoryError) -> i32\n```",
     })
     assert.deepEqual(reference?.contents, declaration?.contents)
   }),
@@ -226,7 +226,7 @@ pub effect fn main() -> i32 {
     const reference = Document.hover(document, snapshot, positionOf(source, 'read', 1))
     assert.deepEqual(declaration?.contents, {
       kind: 'markdown',
-      value: '```silk\npub unsafe effect fn read(value: i32) -> i32\n```',
+      value: "```silk\npub unsafe effect<'static> fn read(value: i32) -> i32\n```",
     })
     assert.deepEqual(reference?.contents, declaration?.contents)
 
@@ -237,7 +237,7 @@ pub effect fn main() -> i32 {
     )
     assert.strictEqual(
       signature?.signatures[0]?.label,
-      'pub unsafe effect fn read(value: i32) -> i32',
+      "pub unsafe effect<'static> fn read(value: i32) -> i32",
     )
 
     const completion = Document.completion(
@@ -247,7 +247,7 @@ pub effect fn main() -> i32 {
     )
     assert.include(
       completion.items.find((item) => item.label === 'read')?.detail ?? '',
-      'unsafe effect fn read',
+      "unsafe effect<'static> fn read",
     )
   }),
 )
@@ -334,7 +334,7 @@ pub struct Problem { pub code: i32 }
     const definition = Document.hover(document, snapshot, positionOf(source, 'recover', 1))
     const reference = Document.hover(document, snapshot, positionOf(source, 'recover', 2))
     const expected = `\`\`\`silk
-effect fn recover(problem: Problem) -> i32
+effect<'static> fn recover(problem: Problem) -> i32
 \`\`\`
 
 Recovers a problem.
@@ -374,7 +374,7 @@ pub fn main() -> i32 {
       owner.slice(0, owner.indexOf('\n\n***')),
       '```silk\npub struct Effect\n```\n\nThe owner of the Effect combinators.',
     )
-    assert.include(text('catch') ?? '', 'pub effect fn catch')
+    assert.include(text('catch') ?? '', "pub effect<'env> fn catch")
     assert.strictEqual(text('Problem', 1), '```silk\nstruct Problem\n```')
   }),
 )
@@ -595,7 +595,7 @@ pub fn main() -> i32 {
     )
     assert.include(
       completion.items.find((item) => item.label === 'catch')?.detail ?? '',
-      'pub effect fn catch',
+      "pub effect<'env> fn catch",
     )
 
     const allocatorSource = `import silk.allocator { Allocator, SystemAllocator }
@@ -613,7 +613,7 @@ pub fn main() -> i32 {
     )
     assert.include(
       allocatorCompletion.items.find((item) => item.label === 'allocate')?.detail ?? '',
-      'effect fn allocate',
+      "effect<'static> fn allocate",
     )
   }),
 )
@@ -864,7 +864,7 @@ pub fn main() -> i32 { let counter = Counter.make(1) return Counter.value(&count
     )
     const expected = {
       kind: 'markdown' as const,
-      value: '```silk\npub fn value(self: &Counter) -> i32\n```',
+      value: "```silk\npub fn value<'life0>(self: &'life0 Counter) -> i32\n```",
     }
     assert.deepEqual(
       Document.hover(document, snapshot, positionOf(source, 'value(self'))?.contents,
@@ -2292,6 +2292,73 @@ const applyDocumentEdits = (
   return revised
 }
 
+it.effect('resolves explicit lifetime edits only for the analyzed document revision and text', () =>
+  Effect.gen(function* () {
+    const source = `// π🙂 preserved
+struct View<T> { value: &T }`
+    const { document, snapshot } = yield* open(source)
+    const inventory = inventoryOf([{ module: 'main', text: source }])
+    const actions = Document.codeActions(document, snapshot, wholeDocument(source), uriOfModule)
+    const selected = actions.find((action) => action.title === 'Make lifetimes explicit')
+    assert.isDefined(selected)
+    if (selected === undefined) return
+    assert.isUndefined(selected.edit)
+    const resolved = Document.resolveCodeAction(
+      document,
+      snapshot,
+      inventory,
+      selected,
+      uriOfModule,
+    )
+    const edits = resolved.edit?.changes?.[document.uri]
+    assert.isDefined(edits)
+    if (edits === undefined) return
+    const revised = applyDocumentEdits(source, edits)
+    assert.strictEqual(
+      revised,
+      `// π🙂 preserved
+struct View<T, 'life1> { value: &'life1 T }`,
+    )
+    const result = yield* Analysis.ofSource('main', encoder.encode(revised))
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(
+      Analysis.explicitLifetimes(result, 'main', 0, encoder.encode(revised).length),
+      [],
+    )
+    for (const stale of [
+      Document.make({ ...document, version: 2 }),
+      Document.make({ ...document, bytes: encoder.encode(source.replace('value', 'other')) }),
+    ]) {
+      const rejected = Document.resolveCodeAction(stale, snapshot, inventory, resolved, uriOfModule)
+      assert.isDefined(rejected.disabled)
+      assert.isUndefined(rejected.edit)
+    }
+  }),
+)
+
+it.effect('withholds lifetime expansions from invalid headers and requests inside a body', () =>
+  Effect.gen(function* () {
+    for (const source of [
+      'fn ambiguous(left: &i32, right: &i32) -> &i32 { return left }',
+      'struct Invalid { value: &Missing }',
+      'fn inspect(value: &i32) -> i32 { return 1 }',
+    ]) {
+      const { document, snapshot } = yield* open(source)
+      const body = source.indexOf('return')
+      const range = source.startsWith('fn inspect')
+        ? { start: positionAt(source, body), end: positionAt(source, body + 6) }
+        : wholeDocument(source)
+      assert.deepEqual(
+        Document.codeActions(document, snapshot, range, uriOfModule).filter(
+          (action) => action.title === 'Make lifetimes explicit',
+        ),
+        [],
+        source,
+      )
+    }
+  }),
+)
+
 it.effect('offers compiling failure propagation and recovery actions', () =>
   Effect.gen(function* () {
     const source = `pub struct Problem {}
@@ -2299,7 +2366,12 @@ effect fn risky() -> i32 ! Problem { fail Problem {} }
 effect fn recover(error: Problem) -> i32 { return 42 }
 pub effect fn main() -> i32 { return run risky() }`
     const { document, snapshot } = yield* open(source)
-    const actions = Document.codeActions(document, snapshot, wholeDocument(source), uriOfModule)
+    const actions = Document.codeActions(
+      document,
+      snapshot,
+      wholeDocument(source),
+      uriOfModule,
+    ).filter((action) => action.kind === 'quickfix')
     assert.deepEqual(
       actions.map((action) => action.title),
       ['Propagate Problem from this Effect', 'Recover this Effect with recover'],
@@ -2326,7 +2398,12 @@ pub effect fn main() -> i32 {
   return run Clock.read()
 }`
     const { document, snapshot } = yield* open(source)
-    const actions = Document.codeActions(document, snapshot, wholeDocument(source), uriOfModule)
+    const actions = Document.codeActions(
+      document,
+      snapshot,
+      wholeDocument(source),
+      uriOfModule,
+    ).filter((action) => action.kind === 'quickfix')
     assert.deepEqual(
       actions.map((action) => action.title),
       ['Propagate &Clock from this Effect', 'Provide this Effect with provider'],
@@ -2944,5 +3021,23 @@ pub fn main() -> i32 { return helper(1) + double(2) + helper(3) }
         { name: 'double', calls: 1 },
       ],
     )
+  }),
+)
+
+it.effect('shows retained generic requirements outside the hover source signature', () =>
+  Effect.gen(function* () {
+    const source = `effect fn retain<T>(value: T) -> i32 { return 0 }
+fn hold<T>(value: T) -> i32 {
+  let pending = retain(move value)
+  drop pending
+  return 0
+}`
+    const { document, snapshot } = yield* open(source)
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const hover = Document.hover(document, snapshot, positionOf(source, 'pending'))
+    const markdown = hover?.contents
+    assert.isTrue(typeof markdown === 'object' && 'value' in markdown)
+    if (typeof markdown !== 'object' || !('value' in markdown)) return
+    assert.match(markdown.value, /```\n\nLifetime requirements: `T: '[^`]+`\./)
   }),
 )

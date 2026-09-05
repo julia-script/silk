@@ -177,7 +177,7 @@ After [`EndOfInput`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a456e
 ### Operation `read`
 
 ```silk
-effect fn read(buffer: &mut [u8]) -> ReadOutcome ! StreamReadError ? &mut StandardInput
+effect<'life0> fn read<'life0>(buffer: &'life0 mut [u8]) -> ReadOutcome ! StreamReadError ? &mut StandardInput
 ```
 
 Reads at most the buffer length and reports the exact committed prefix or end-of-input.
@@ -231,7 +231,7 @@ Creates an outcome that reports permanent end-of-input after a valid non-empty r
 ### Associated function `StandardInput.count`
 
 ```silk
-pub fn count(outcome: &silk/standard_input.ReadOutcome) -> usize
+pub fn count<'life0>(outcome: &'life0 silk/standard_input.ReadOutcome) -> usize
 ```
 
 Returns the committed byte count, or zero for end-of-input.
@@ -246,7 +246,7 @@ distinction controls another read.
 ### Associated function `StandardInput.isEndOfInput`
 
 ```silk
-pub fn isEndOfInput(outcome: &silk/standard_input.ReadOutcome) -> bool
+pub fn isEndOfInput<'life0>(outcome: &'life0 silk/standard_input.ReadOutcome) -> bool
 ```
 
 Reports whether the outcome guarantees that no later read produces bytes.
@@ -256,7 +256,7 @@ Reports whether the outcome guarantees that no later read produces bytes.
 ### Associated function `StandardInput.receive`
 
 ```silk
-pub effect fn receive(buffer: &mut [u8]) -> ReadOutcome ! StreamReadError ? &mut StandardInput
+pub effect<'life0> fn receive<'life0>(buffer: &'life0 mut [u8]) -> ReadOutcome ! StreamReadError ? &mut StandardInput
 ```
 
 Reads through the active [`StandardInput`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e707574) provider into a mutable buffer.

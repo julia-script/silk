@@ -1,3 +1,4 @@
+import * as Lifetime from './Lifetime.js'
 import * as CallableContract from './CallableContract.js'
 import * as Constraint from './Constraint.js'
 import type * as Hir from './Hir.js'
@@ -107,7 +108,7 @@ export interface Operation {
   readonly targets: ReadonlyArray<Target.Id>
   readonly invariant?: string
   readonly hostImport?: string
-  readonly returnedBorrowParameter?: number
+
   readonly rule: Rule
 }
 
@@ -233,7 +234,7 @@ const builtin = (options: {
   readonly semanticResult: Type.Type
   readonly unsafe?: boolean
   readonly targets?: ReadonlyArray<Target.Id>
-  readonly returnedBorrowParameter?: number
+
 }): BuiltinOperation => {
   const spelling = intrinsicSpelling(options.actor, options.name)
   let invariant: string | undefined
@@ -277,9 +278,7 @@ const builtin = (options: {
     ...(options.actor === 'Host' && options.name === 'write'
       ? { hostImport: 'silk_standard_stream_write_v1' }
       : {}),
-    ...(options.returnedBorrowParameter === undefined
-      ? {}
-      : { returnedBorrowParameter: options.returnedBorrowParameter }),
+
     rule: Object.freeze({
       _tag: 'BuiltinRule',
       operation: options.operation,
@@ -338,6 +337,11 @@ const actor = (
     operations: Object.freeze(Array.from(operations)),
   })
 
+// Intrinsic headers quantify their borrowed inputs and retained environments. A call
+// instantiates these declaration-owned regions before validating its selected contract.
+const contractLifetime = (name: string): Lifetime.Bound =>
+  Lifetime.bound({ module: 'Intrinsic', name }, 0, 'call')
+
 const rawElement = Type.parameter({ module: 'silk/core', name: '$RawStorage' }, 0, 'T')
 const rawTypeParameters = Object.freeze([rawElement])
 const pointerElement = Type.parameter({ module: 'Intrinsic', name: '$Pointer' }, 0, 'T')
@@ -346,9 +350,15 @@ const sharedElement = Type.parameter({ module: 'Intrinsic', name: '$LocalShared'
 const sharedResult = Type.parameter({ module: 'Intrinsic', name: '$LocalShared' }, 1, 'A')
 const sharedTypeParameters = Object.freeze([sharedElement])
 const sharedLifecycleTypeParameters = Object.freeze([sharedElement, sharedResult])
+const sharedAccessLifetime = Lifetime.bound({ module: 'Intrinsic', name: 'SharedWithMut.use' }, 0, 'access')
 const executionPackageOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionPackage' })
 const executionResult = Type.parameter(executionPackageOwner, 0, 'A')
-const executionBodyBound = Type.effect(executionResult, Object.freeze([]), 'Take')
+const executionBodyBound = Type.effect(
+  executionResult,
+  Object.freeze([]),
+  { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+  'Take',
+)
 const executionBody = Type.parameter(
   executionPackageOwner,
   1,
@@ -365,9 +375,13 @@ const executionEndpoint = Type.parameter(
   undefined,
   Object.freeze(['Intrinsic.Detached']),
 )
+const executionReadyLifetime = contractLifetime('executionReadyBound')
 const executionReadyBound = Type.callable(
-  Object.freeze([Type.reference('Shared', executionEndpoint)]),
+  Object.freeze([
+    Type.reference('Shared', executionEndpoint, executionReadyLifetime),
+  ]),
   Type.unit,
+  { environment: Lifetime.staticLifetime, lifetimeBinders: [executionReadyLifetime] },
   'Shared',
 )
 const executionReady = Type.parameter(
@@ -397,7 +411,12 @@ const representedExecutionReady = Type.represented(
 const executionDriveOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionDrive' })
 const drivenResult = Type.parameter(executionDriveOwner, 0, 'A')
 const driveBranch = Type.parameter(executionDriveOwner, 1, 'D')
-const completionBound = Type.callable(Object.freeze([driveBranch, drivenResult]), Type.unit, 'Take')
+const completionBound = Type.callable(
+  Object.freeze([driveBranch, drivenResult]),
+  Type.unit,
+  { environment: contractLifetime('completionBound'), lifetimeBinders: [] },
+  'Take',
+)
 const completionCallback = Type.parameter(
   executionDriveOwner,
   2,
@@ -409,6 +428,7 @@ const completionCallback = Type.parameter(
 const suspensionBound = Type.callable(
   Object.freeze([driveBranch, Type.execution(drivenResult)]),
   Type.unit,
+  { environment: contractLifetime('suspensionBound'), lifetimeBinders: [] },
   'Take',
 )
 const suspensionCallback = Type.parameter(
@@ -439,7 +459,12 @@ const representedSuspension = Type.represented(
 )
 const parkingOwner = Object.freeze({ module: 'Intrinsic', name: '$ExecutionPark' })
 const registrationGuard = Type.parameter(parkingOwner, 0, 'G')
-const registrationBound = Type.callable(Object.freeze([Type.wake]), registrationGuard, 'Take')
+const registrationBound = Type.callable(
+  Object.freeze([Type.wake]),
+  registrationGuard,
+  { environment: contractLifetime('registrationBound'), lifetimeBinders: [] },
+  'Take',
+)
 const registrationCallback = Type.parameter(
   parkingOwner,
   1,
@@ -497,13 +522,28 @@ const bindingSelectedRow = RowAlgebra.parameter<
   Type.RequirementMemberShape
 >(bindingSelected)
 const bindingContract = (mode: Constraint.ProviderMode): CallableContract.CallableContract => {
-  const provider = mode === 'Take' ? bindingProvider : Type.reference(mode, bindingProvider)
+  const provider =
+    mode === 'Take'
+      ? bindingProvider
+      : Type.reference(mode, bindingProvider, contractLifetime('provider'))
   return CallableContract.make({
+    environment: contractLifetime('bindingContract'),
+    lifetimeBinders: [],
+    lifetimeBounds:
+      mode === 'Take'
+        ? []
+        : [{ longer: contractLifetime('provider'), shorter: contractLifetime('bindingContract') }],
     functionKind: 'Effect',
     binders: bindingTypeParameters,
     parameters: Object.freeze([
       Object.freeze({
-        type: Type.effectWithRows(bindingSuccess, bindingFailureRow, 'Take', bindingRequirementRow),
+        type: Type.effectWithRows(
+          bindingSuccess,
+          bindingFailureRow,
+          { environment: contractLifetime('bindingContract'), lifetimeBinders: [] },
+          'Take',
+          bindingRequirementRow,
+        ),
         mode: 'Take' as const,
       }),
       Object.freeze({ type: provider, mode }),
@@ -511,6 +551,7 @@ const bindingContract = (mode: Constraint.ProviderMode): CallableContract.Callab
     result: Type.effectWithRows(
       bindingSuccess,
       bindingFailureRow,
+      { environment: contractLifetime('bindingContract'), lifetimeBinders: [] },
       'Shared',
       RowAlgebra.without(Type.requirementRowPolicy(), bindingRequirementRow, bindingSelectedRow),
     ),
@@ -580,6 +621,8 @@ const catchJoinedSuccess = Type.union([catchSuccess, catchHandlerSuccess])
 if (catchJoinedSuccess._tag !== 'Normalized')
   throw new RangeError('catch success parameters must form an ordinary union')
 const catchContract = CallableContract.make({
+  environment: contractLifetime('catchContract'),
+  lifetimeBinders: [],
   functionKind: 'Effect',
   binders: catchTypeParameters,
   parameters: Object.freeze([
@@ -587,6 +630,7 @@ const catchContract = CallableContract.make({
       type: Type.effectWithRows(
         catchSuccess,
         catchProtectedFailureRow,
+        { environment: contractLifetime('catchContract'), lifetimeBinders: [] },
         'Take',
         catchProtectedRequirementRow,
       ),
@@ -598,9 +642,11 @@ const catchContract = CallableContract.make({
         Type.effectWithRows(
           catchHandlerSuccess,
           catchHandlerFailureRow,
+          { environment: contractLifetime('catchContract'), lifetimeBinders: [] },
           'Shared',
           catchHandlerRequirementRow,
         ),
+        { environment: contractLifetime('catchContract'), lifetimeBinders: [] },
         'Take',
       ),
       mode: 'Take' as const,
@@ -613,6 +659,7 @@ const catchContract = CallableContract.make({
       RowAlgebra.without(Type.failureRowPolicy(), catchProtectedFailureRow, catchSelectedRow),
       catchHandlerFailureRow,
     ),
+    { environment: contractLifetime('catchContract'), lifetimeBinders: [] },
     'Shared',
     RowAlgebra.union(
       Type.requirementRowPolicy(),
@@ -624,16 +671,22 @@ const catchContract = CallableContract.make({
     Constraint.failureSubset(catchSelectedRow, catchProtectedFailureRow),
   ]),
 })
-const byteSlice = Type.slice('Shared', 'u8')
-const mutableI32 = Type.reference('Exclusive', 'i32')
-const mutableI64 = Type.reference('Exclusive', 'i64')
-const mutableU32 = Type.reference('Exclusive', 'u32')
-const mutableU64 = Type.reference('Exclusive', 'u64')
-const mutableUsize = Type.reference('Exclusive', 'usize')
-const mutableHandle = Type.reference('Exclusive', Type.osHandle)
+const byteSlice = Type.slice('Shared', 'u8', contractLifetime('byteSlice'))
+const mutableI32 = Type.reference('Exclusive', 'i32', contractLifetime('mutableI32'))
+const mutableI64 = Type.reference('Exclusive', 'i64', contractLifetime('mutableI64'))
+const mutableU32 = Type.reference('Exclusive', 'u32', contractLifetime('mutableU32'))
+const mutableU64 = Type.reference('Exclusive', 'u64', contractLifetime('mutableU64'))
+const mutableUsize = Type.reference('Exclusive', 'usize', contractLifetime('mutableUsize'))
+const mutableHandle = Type.reference('Exclusive', Type.osHandle, contractLifetime('mutableHandle'))
 
 const osEffect = (value: Type.Type): Type.Effect =>
-  Type.effect(value, Object.freeze([]), undefined, Object.freeze([]))
+  Type.effect(
+    value,
+    Object.freeze([]),
+    { environment: contractLifetime('osEffect'), lifetimeBinders: [] },
+    undefined,
+    Object.freeze([]),
+  )
 
 const osBuiltin = (options: {
   readonly name: string
@@ -671,8 +724,18 @@ const osOpen = (options: {
     name: `$Os.${options.name}`,
   })
   const carrierResult = Type.parameter(carrierOwner, 0, 'R')
-  const success = Type.callable(Object.freeze([Type.osHandle]), carrierResult, 'Take')
-  const failure = Type.callable(Object.freeze([]), carrierResult, 'Take')
+  const success = Type.callable(
+    Object.freeze([Type.osHandle]),
+    carrierResult,
+    { environment: contractLifetime('success'), lifetimeBinders: [] },
+    'Take',
+  )
+  const failure = Type.callable(
+    Object.freeze([]),
+    carrierResult,
+    { environment: contractLifetime('failure'), lifetimeBinders: [] },
+    'Take',
+  )
   return Object.freeze({
     ...builtin({
       actor: 'Os',
@@ -726,7 +789,11 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
     operation.parameters ?? Object.freeze(parameterNames.map(() => scalar.spelling))
   const borrowed = operation.code === 'LessThan'
   const contractParameters = borrowed
-    ? Object.freeze(semanticParameters.map((type) => Type.reference('Shared', type)))
+    ? Object.freeze(
+        semanticParameters.map((type) =>
+          Type.reference('Shared', type, contractLifetime('contractParameters')),
+        ),
+      )
     : semanticParameters
   const carrierParameters = checked
     ? Object.freeze([
@@ -736,8 +803,18 @@ const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Op
     : Object.freeze([])
   const semanticCarrierParameters = checked
     ? Object.freeze([
-        Type.callable(Object.freeze([concreteResult]), carrierResult, 'Take'),
-        Type.callable(Object.freeze([]), carrierResult, 'Take'),
+        Type.callable(
+          Object.freeze([concreteResult]),
+          carrierResult,
+          { environment: contractLifetime('semanticCarrierParameters'), lifetimeBinders: [] },
+          'Take',
+        ),
+        Type.callable(
+          Object.freeze([]),
+          carrierResult,
+          { environment: contractLifetime('semanticCarrierParameters'), lifetimeBinders: [] },
+          'Take',
+        ),
       ])
     : Object.freeze([])
   return builtin({
@@ -776,9 +853,9 @@ const stringOperations = Object.freeze([
       parameters: Object.freeze([valueParameter('bytes', '&[u8]')]),
       semanticParameters: Object.freeze([byteSlice]),
       result: 'string',
-      semanticResult: Type.string,
+      semanticResult: Type.string(byteSlice.lifetime),
       unsafe: true,
-      returnedBorrowParameter: 0,
+
     }),
     invariant:
       'bytes remain live and immutable for the returned view lifetime and contain complete valid UTF-8',
@@ -788,17 +865,17 @@ const stringOperations = Object.freeze([
     name: 'utf8Bytes',
     operation: 'StringUtf8Bytes',
     parameters: Object.freeze([valueParameter('value', 'string')]),
-    semanticParameters: Object.freeze([Type.string]),
+    semanticParameters: Object.freeze([Type.string(byteSlice.lifetime)]),
     result: '&[u8]',
     semanticResult: byteSlice,
-    returnedBorrowParameter: 0,
+
   }),
   builtin({
     actor: 'string',
     name: 'byteLength',
     operation: 'StringByteLength',
     parameters: Object.freeze([valueParameter('value', 'string')]),
-    semanticParameters: Object.freeze([Type.string]),
+    semanticParameters: Object.freeze([Type.string(contractLifetime('byteLength'))]),
     result: 'usize',
     semanticResult: 'usize',
   }),
@@ -810,7 +887,10 @@ const stringOperations = Object.freeze([
       valueParameter('left', 'string'),
       valueParameter('right', 'string'),
     ]),
-    semanticParameters: Object.freeze([Type.string, Type.string]),
+    semanticParameters: Object.freeze([
+      Type.string(contractLifetime('equalsExact')),
+      Type.string(contractLifetime('equalsExact')),
+    ]),
     result: 'bool',
     semanticResult: 'bool',
   }),
@@ -832,7 +912,12 @@ const targetProfileOperation: Operation = Object.freeze({
   targets: Object.freeze([]),
   rule: Object.freeze({
     _tag: 'StaticOnlyRule',
-    contract: CallableContract.make({ functionKind: 'Function', result: 'u8' }),
+    contract: CallableContract.make({
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+      functionKind: 'Function',
+      result: 'u8',
+    }),
   }),
 })
 
@@ -858,6 +943,8 @@ const staticTextOperation = (
     rule: Object.freeze({
       _tag: 'StaticOnlyRule',
       contract: CallableContract.make({
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
         functionKind: 'Function',
         parameters: semanticParameters.map((type) =>
           Object.freeze({ type, mode: 'Value' as const }),
@@ -871,23 +958,26 @@ const staticTextOperations = Object.freeze([
   staticTextOperation(
     'staticTextByteLength',
     Object.freeze([valueParameter('value', 'string')]),
-    Object.freeze([Type.string]),
+    Object.freeze([Type.string(contractLifetime('staticTextOperations'))]),
     'usize',
     'usize',
   ),
   staticTextOperation(
     'staticTextByteAt',
     Object.freeze([valueParameter('value', 'string'), valueParameter('index', 'usize')]),
-    Object.freeze([Type.string, 'usize']),
+    Object.freeze([Type.string(contractLifetime('staticTextOperations')), 'usize']),
     'u8',
     'u8',
   ),
   staticTextOperation(
     'staticTextConcat',
     Object.freeze([valueParameter('left', 'string'), valueParameter('right', 'string')]),
-    Object.freeze([Type.string, Type.string]),
+    Object.freeze([
+      Type.string(contractLifetime('staticTextOperations')),
+      Type.string(contractLifetime('staticTextOperations')),
+    ]),
     'string',
-    Type.string,
+    Type.string(Lifetime.staticLifetime),
   ),
   staticTextOperation(
     'staticTextSlice',
@@ -896,9 +986,9 @@ const staticTextOperations = Object.freeze([
       valueParameter('start', 'usize'),
       valueParameter('end', 'usize'),
     ]),
-    Object.freeze([Type.string, 'usize', 'usize']),
+    Object.freeze([Type.string(contractLifetime('staticTextOperations')), 'usize', 'usize']),
     'string',
-    Type.string,
+    Type.string(Lifetime.staticLifetime),
   ),
 ])
 
@@ -928,6 +1018,8 @@ const staticGenericOperation = (input: {
     rule: Object.freeze({
       _tag: 'StaticOnlyRule',
       contract: CallableContract.make({
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
         functionKind: 'Function',
         binders: input.typeParameters,
         parameters: input.semanticParameters.map((type) =>
@@ -991,7 +1083,7 @@ const reflectionOperations = Object.freeze([
     parameters: Object.freeze([valueParameter('field', 'Field<Owner, Value>')]),
     semanticParameters: Object.freeze([Type.fieldDescriptor(reflectionOwner, reflectionValue)]),
     result: 'string',
-    semanticResult: Type.string,
+    semanticResult: Type.string(contractLifetime('reflectFieldLabel')),
     consumer: 'silk/reflect.fieldLabel',
   }),
   staticGenericOperation({
@@ -1020,20 +1112,25 @@ const borrowFieldOperation: Operation = Object.freeze({
   admission: 'Language',
   consumer: 'silk/reflect.borrowField',
   targets: Object.freeze([]),
-  returnedBorrowParameter: 0,
+
   rule: Object.freeze({
     _tag: 'MixedFieldProjectionRule',
     contract: CallableContract.make({
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
       functionKind: 'Function',
       binders: Object.freeze([projectionOwner, projectionValue]),
       parameters: Object.freeze([
-        Object.freeze({ type: Type.reference('Shared', projectionOwner), mode: 'Value' }),
+        Object.freeze({
+          type: Type.reference('Shared', projectionOwner, contractLifetime('borrowFieldOperation')),
+          mode: 'Value',
+        }),
         Object.freeze({
           type: Type.fieldDescriptor(projectionOwner, projectionValue),
           mode: 'Value',
         }),
       ]),
-      result: Type.reference('Shared', projectionValue),
+      result: Type.reference('Shared', projectionValue, contractLifetime('borrowFieldOperation')),
     }),
     runtimeOwnerParameter: 0,
     staticDescriptorParameter: 1,
@@ -1174,7 +1271,9 @@ const intrinsicOperations = Object.freeze([
       name: 'randomFill',
       operation: 'OsRandomFill',
       parameters: Object.freeze([valueParameter('output', '&mut [u8]')]),
-      semanticParameters: Object.freeze([Type.slice('Exclusive', 'u8')]),
+      semanticParameters: Object.freeze([
+        Type.slice('Exclusive', 'u8', contractLifetime('randomFill')),
+      ]),
       result: 'Effect<bool>',
       semanticResult: 'bool',
       invariant:
@@ -1206,7 +1305,7 @@ const intrinsicOperations = Object.freeze([
       ]),
       semanticParameters: Object.freeze([
         mutableHandle,
-        Type.slice('Exclusive', 'u8'),
+        Type.slice('Exclusive', 'u8', contractLifetime('fileRead')),
         mutableUsize,
         mutableI32,
         mutableU32,
@@ -1267,7 +1366,7 @@ const intrinsicOperations = Object.freeze([
       ]),
       semanticParameters: Object.freeze([
         mutableHandle,
-        Type.slice('Exclusive', 'u8'),
+        Type.slice('Exclusive', 'u8', contractLifetime('directoryNext')),
         mutableUsize,
         mutableI32,
         mutableUsize,
@@ -1320,7 +1419,7 @@ const intrinsicOperations = Object.freeze([
         byteSlice,
         byteSlice,
         byteSlice,
-        Type.slice('Exclusive', 'u8'),
+        Type.slice('Exclusive', 'u8', contractLifetime('directoryCreateUnique')),
         mutableUsize,
         mutableUsize,
         mutableI32,
@@ -1377,7 +1476,7 @@ const intrinsicOperations = Object.freeze([
         valueParameter('nativeCode', '&mut u32'),
       ]),
       semanticParameters: Object.freeze([
-        Type.slice('Exclusive', 'u8'),
+        Type.slice('Exclusive', 'u8', contractLifetime('standardInputRead')),
         mutableUsize,
         mutableI32,
         mutableU32,
@@ -1433,7 +1532,7 @@ const intrinsicOperations = Object.freeze([
       semanticParameters: Object.freeze([
         'i32',
         'usize',
-        Type.slice('Exclusive', 'u8'),
+        Type.slice('Exclusive', 'u8', contractLifetime('processCapture')),
         mutableUsize,
         mutableI32,
         mutableU32,
@@ -1468,7 +1567,7 @@ const intrinsicOperations = Object.freeze([
       ]),
       semanticParameters: Object.freeze([
         'usize',
-        Type.slice('Exclusive', 'u8'),
+        Type.slice('Exclusive', 'u8', contractLifetime('hostArgument')),
         mutableUsize,
         mutableI32,
         mutableU32,
@@ -1490,7 +1589,7 @@ const intrinsicOperations = Object.freeze([
       ]),
       semanticParameters: Object.freeze([
         byteSlice,
-        Type.slice('Exclusive', 'u8'),
+        Type.slice('Exclusive', 'u8', contractLifetime('hostVariable')),
         mutableUsize,
         mutableI32,
         mutableU32,
@@ -1510,7 +1609,7 @@ const intrinsicOperations = Object.freeze([
         valueParameter('nativeCode', '&mut u32'),
       ]),
       semanticParameters: Object.freeze([
-        Type.slice('Exclusive', 'u8'),
+        Type.slice('Exclusive', 'u8', contractLifetime('hostWorkingDirectory')),
         mutableUsize,
         mutableI32,
         mutableU32,
@@ -1587,7 +1686,12 @@ const intrinsicOperations = Object.freeze([
         representedSuspension,
       ]),
       result: 'Effect<()>',
-      semanticResult: Type.effect(Type.unit, Object.freeze([]), 'Take'),
+      semanticResult: Type.effect(
+        Type.unit,
+        Object.freeze([]),
+        { environment: contractLifetime('drive'), lifetimeBinders: [] },
+        'Take',
+      ),
     }),
     builtin({
       actor: 'Execution',
@@ -1597,7 +1701,11 @@ const intrinsicOperations = Object.freeze([
       semanticTypeParameters: Object.freeze([notifiedResult]),
       parameters: Object.freeze([valueParameter('execution', '&mut Execution<A>')]),
       semanticParameters: Object.freeze([
-        Type.reference('Exclusive', Type.execution(notifiedResult)),
+        Type.reference(
+          'Exclusive',
+          Type.execution(notifiedResult),
+          contractLifetime('notifyInitial'),
+        ),
       ]),
       result: '()',
       semanticResult: Type.unit,
@@ -1620,7 +1728,12 @@ const intrinsicOperations = Object.freeze([
       parameters: Object.freeze([valueParameter('register', 'F')]),
       semanticParameters: Object.freeze([representedRegistration]),
       result: 'Effect<()>',
-      semanticResult: Type.effect(Type.unit, Object.freeze([]), 'Take'),
+      semanticResult: Type.effect(
+        Type.unit,
+        Object.freeze([]),
+        { environment: contractLifetime('park'), lifetimeBinders: [] },
+        'Take',
+      ),
     }),
   ]),
   ...Object.freeze([
@@ -1657,7 +1770,9 @@ const intrinsicOperations = Object.freeze([
       typeParameters: Object.freeze(['T']),
       semanticTypeParameters: sharedTypeParameters,
       parameters: Object.freeze([valueParameter('self', '&SharedCore<T>')]),
-      semanticParameters: Object.freeze([Type.reference('Shared', Type.sharedCore(sharedElement))]),
+      semanticParameters: Object.freeze([
+        Type.reference('Shared', Type.sharedCore(sharedElement), contractLifetime('clone')),
+      ]),
       result: 'SharedCore<T>',
       semanticResult: Type.sharedCore(sharedElement),
     }),
@@ -1673,13 +1788,19 @@ const intrinsicOperations = Object.freeze([
         valueParameter('onConflict', 'once fn() -> A'),
       ]),
       semanticParameters: Object.freeze([
-        Type.reference('Shared', Type.sharedCore(sharedElement)),
+        Type.reference('Shared', Type.sharedCore(sharedElement), contractLifetime('withMut')),
         Type.callable(
-          Object.freeze([Type.reference('Exclusive', sharedElement)]),
+          Object.freeze([Type.reference('Exclusive', sharedElement, sharedAccessLifetime)]),
           sharedResult,
+          { environment: contractLifetime('withMut'), lifetimeBinders: [sharedAccessLifetime] },
           'Take',
         ),
-        Type.callable(Object.freeze([]), sharedResult, 'Take'),
+        Type.callable(
+          Object.freeze([]),
+          sharedResult,
+          { environment: contractLifetime('withMut'), lifetimeBinders: [] },
+          'Take',
+        ),
       ]),
       result: 'A',
       semanticResult: sharedResult,
@@ -1696,6 +1817,7 @@ const intrinsicOperations = Object.freeze([
       semanticResult: Type.effect(
         Type.allocation,
         Object.freeze([Type.storageFailure]),
+        { environment: contractLifetime('acquire'), lifetimeBinders: [] },
         undefined,
         Object.freeze([]),
       ),
@@ -1710,11 +1832,15 @@ const intrinsicOperations = Object.freeze([
         valueParameter('destination', 'bool'),
         valueParameter('bytes', '&[u8]'),
       ]),
-      semanticParameters: Object.freeze(['bool', Type.slice('Shared', 'u8')]),
+      semanticParameters: Object.freeze([
+        'bool',
+        Type.slice('Shared', 'u8', contractLifetime('write')),
+      ]),
       result: 'Effect<() ! WriterError>',
       semanticResult: Type.effect(
         Type.unit,
         Object.freeze([Type.streamWriteFailure]),
+        { environment: contractLifetime('write'), lifetimeBinders: [] },
         undefined,
         Object.freeze([]),
       ),
@@ -1749,14 +1875,14 @@ const intrinsicOperations = Object.freeze([
         valueParameter('length', 'usize'),
       ]),
       semanticParameters: Object.freeze([
-        Type.reference('Shared', Type.rawBuffer(rawElement)),
+        Type.reference('Shared', Type.rawBuffer(rawElement), contractLifetime('view')),
         'usize',
         'usize',
       ]),
       result: '&[T]',
-      semanticResult: Type.slice('Shared', rawElement),
+      semanticResult: Type.slice('Shared', rawElement, contractLifetime('view')),
       unsafe: true,
-      returnedBorrowParameter: 0,
+
     }),
     builtin({
       actor: 'RawBuffer',
@@ -1770,14 +1896,14 @@ const intrinsicOperations = Object.freeze([
         valueParameter('length', 'usize'),
       ]),
       semanticParameters: Object.freeze([
-        Type.reference('Exclusive', Type.rawBuffer(rawElement)),
+        Type.reference('Exclusive', Type.rawBuffer(rawElement), contractLifetime('viewMut')),
         'usize',
         'usize',
       ]),
       result: '&mut [T]',
-      semanticResult: Type.slice('Exclusive', rawElement),
+      semanticResult: Type.slice('Exclusive', rawElement, contractLifetime('viewMut')),
       unsafe: true,
-      returnedBorrowParameter: 0,
+
     }),
     builtin({
       actor: 'RawBuffer',
@@ -1790,7 +1916,7 @@ const intrinsicOperations = Object.freeze([
         valueParameter('index', 'usize'),
       ]),
       semanticParameters: Object.freeze([
-        Type.reference('Exclusive', Type.rawBuffer(rawElement)),
+        Type.reference('Exclusive', Type.rawBuffer(rawElement), contractLifetime('slot')),
         'usize',
       ]),
       result: 'Slot<T>',
@@ -1804,7 +1930,9 @@ const intrinsicOperations = Object.freeze([
       typeParameters: Object.freeze(['T']),
       semanticTypeParameters: rawTypeParameters,
       parameters: Object.freeze([valueParameter('buffer', '&RawBuffer<T>')]),
-      semanticParameters: Object.freeze([Type.reference('Shared', Type.rawBuffer(rawElement))]),
+      semanticParameters: Object.freeze([
+        Type.reference('Shared', Type.rawBuffer(rawElement), contractLifetime('count')),
+      ]),
       result: 'usize',
       semanticResult: 'usize',
     }),
@@ -1819,7 +1947,7 @@ const intrinsicOperations = Object.freeze([
         valueParameter('index', 'usize'),
       ]),
       semanticParameters: Object.freeze([
-        Type.reference('Shared', Type.rawBuffer(rawElement)),
+        Type.reference('Shared', Type.rawBuffer(rawElement), contractLifetime('read')),
         'usize',
       ]),
       result: 'T',
@@ -1839,9 +1967,9 @@ const intrinsicOperations = Object.freeze([
         valueParameter('length', 'usize'),
       ]),
       semanticParameters: Object.freeze([
-        Type.reference('Exclusive', Type.rawBuffer(rawElement)),
+        Type.reference('Exclusive', Type.rawBuffer(rawElement), contractLifetime('copy')),
         'usize',
-        Type.slice('Shared', rawElement),
+        Type.slice('Shared', rawElement, contractLifetime('copy')),
         'usize',
       ]),
       result: '()',
@@ -1859,7 +1987,7 @@ const intrinsicOperations = Object.freeze([
         valueParameter('value', 'u8'),
       ]),
       semanticParameters: Object.freeze([
-        Type.reference('Exclusive', Type.rawBuffer('u8')),
+        Type.reference('Exclusive', Type.rawBuffer('u8'), contractLifetime('fill')),
         'usize',
         'usize',
         'u8',
@@ -1899,7 +2027,9 @@ const intrinsicOperations = Object.freeze([
       typeParameters: Object.freeze(['T']),
       semanticTypeParameters: pointerTypeParameters,
       parameters: Object.freeze([valueParameter('value', '&T')]),
-      semanticParameters: Object.freeze([Type.reference('Shared', pointerElement)]),
+      semanticParameters: Object.freeze([
+        Type.reference('Shared', pointerElement, contractLifetime('fromRef')),
+      ]),
       result: '*const T',
       semanticResult: Type.pointer(false, pointerElement),
     }),
@@ -1910,7 +2040,9 @@ const intrinsicOperations = Object.freeze([
       typeParameters: Object.freeze(['T']),
       semanticTypeParameters: pointerTypeParameters,
       parameters: Object.freeze([valueParameter('value', '&mut T')]),
-      semanticParameters: Object.freeze([Type.reference('Exclusive', pointerElement)]),
+      semanticParameters: Object.freeze([
+        Type.reference('Exclusive', pointerElement, contractLifetime('fromMutRef')),
+      ]),
       result: '*mut T',
       semanticResult: Type.pointer(true, pointerElement),
     }),
@@ -1921,7 +2053,9 @@ const intrinsicOperations = Object.freeze([
       typeParameters: Object.freeze(['T']),
       semanticTypeParameters: pointerTypeParameters,
       parameters: Object.freeze([valueParameter('values', '&[T]')]),
-      semanticParameters: Object.freeze([Type.slice('Shared', pointerElement)]),
+      semanticParameters: Object.freeze([
+        Type.slice('Shared', pointerElement, contractLifetime('fromSlice')),
+      ]),
       result: '*const T',
       semanticResult: Type.pointer(false, pointerElement),
     }),
@@ -1932,7 +2066,9 @@ const intrinsicOperations = Object.freeze([
       typeParameters: Object.freeze(['T']),
       semanticTypeParameters: pointerTypeParameters,
       parameters: Object.freeze([valueParameter('values', '&mut [T]')]),
-      semanticParameters: Object.freeze([Type.slice('Exclusive', pointerElement)]),
+      semanticParameters: Object.freeze([
+        Type.slice('Exclusive', pointerElement, contractLifetime('fromMutSlice')),
+      ]),
       result: '*mut T',
       semanticResult: Type.pointer(true, pointerElement),
     }),
@@ -2056,6 +2192,7 @@ const intrinsicOperations = Object.freeze([
         Type.effectWithRows(
           suspensionSuccess,
           suspensionFailureRow,
+          { environment: contractLifetime('suspendEffect'), lifetimeBinders: [] },
           'Take',
           suspensionRequirementRow,
         ),
@@ -2064,6 +2201,7 @@ const intrinsicOperations = Object.freeze([
       semanticResult: Type.effectWithRows(
         suspensionSuccess,
         suspensionFailureRow,
+        { environment: contractLifetime('suspendEffect'), lifetimeBinders: [] },
         'Take',
         suspensionRequirementRow,
       ),

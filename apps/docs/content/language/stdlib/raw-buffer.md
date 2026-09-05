@@ -101,7 +101,7 @@ The caller must prove that the allocation has the size and alignment for `count`
 ### Associated function `RawBuffer.slot`
 
 ```silk
-pub fn slot<T>(buffer: &mut silk/core.RawBuffer<T>, index: usize) -> silk/core.Slot<T>
+pub fn slot<T, 'life1>(buffer: &'life1 mut silk/core.RawBuffer<T>, index: usize) -> silk/core.Slot<T>
 ```
 
 Selects one raw storage slot without checking bounds or initialization.
@@ -116,7 +116,7 @@ initialized.
 ### Associated function `RawBuffer.count`
 
 ```silk
-pub fn count<T>(buffer: &silk/core.RawBuffer<T>) -> usize
+pub fn count<T, 'life1>(buffer: &'life1 silk/core.RawBuffer<T>) -> usize
 ```
 
 Returns the element capacity recorded by a raw buffer.
@@ -126,7 +126,7 @@ Returns the element capacity recorded by a raw buffer.
 ### Associated function `RawBuffer.read`
 
 ```silk
-pub fn read<T>(buffer: &silk/core.RawBuffer<T>, index: usize) -> T
+pub fn read<T, 'life1>(buffer: &'life1 silk/core.RawBuffer<T>, index: usize) -> T
 ```
 
 Copies one initialized element without changing its slot state.
@@ -140,7 +140,7 @@ Copies one initialized element without changing its slot state.
 ### Associated function `RawBuffer.copy`
 
 ```silk
-pub fn copy<T>(destination: &mut silk/core.RawBuffer<T>, destinationOffset: usize, source: &[T], length: usize) -> ()
+pub fn copy<T, 'life1, 'life2>(destination: &'life1 mut silk/core.RawBuffer<T>, destinationOffset: usize, source: &'life2 [T], length: usize) -> ()
 ```
 
 Moves a caller-proven initialized range into selected storage in one bulk transfer.
@@ -160,7 +160,7 @@ initialized.
 ### Associated function `RawBuffer.fill`
 
 ```silk
-pub fn fill(buffer: &mut silk/core.RawBuffer<u8>, offset: usize, length: usize, value: u8) -> ()
+pub fn fill<'life0>(buffer: &'life0 mut silk/core.RawBuffer<u8>, offset: usize, length: usize, value: u8) -> ()
 ```
 
 Initializes a selected byte range with one repeated byte value.
@@ -174,7 +174,7 @@ Initializes a selected byte range with one repeated byte value.
 ### Associated function `RawBuffer.view`
 
 ```silk
-pub fn view<T>(buffer: &silk/core.RawBuffer<T>, offset: usize, length: usize) -> &[T]
+pub fn view<T, 'life1>(buffer: &'life1 silk/core.RawBuffer<T>, offset: usize, length: usize) -> &'life1 [T]
 ```
 
 Borrows a shared view of an initialized element range.
@@ -188,7 +188,7 @@ The selected range must be in bounds, and each selected slot must be initialized
 ### Associated function `RawBuffer.viewMut`
 
 ```silk
-pub fn viewMut<T>(buffer: &mut silk/core.RawBuffer<T>, offset: usize, length: usize) -> &mut [T]
+pub fn viewMut<T, 'life1>(buffer: &'life1 mut silk/core.RawBuffer<T>, offset: usize, length: usize) -> &'life1 mut [T]
 ```
 
 Borrows an exclusive view of an initialized element range.

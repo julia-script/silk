@@ -2,42 +2,7 @@ import type * as Elaboration from './Elaboration.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
 
-const typeText = (type: Type.Type): string => {
-  if (typeof type === 'string') return type
-
-  switch (type._tag) {
-    case 'NominalType': {
-      const argumentsText =
-        type.arguments.length === 0
-          ? ''
-          : `<${type.arguments.map(Type.encodeGenericArgument).join(', ')}>`
-      return `${type.module}.${type.name}${argumentsText}`
-    }
-    case 'TypeParameter':
-      return type.name
-    case 'FixedArrayType':
-      return `Array<${typeText(type.element)}, ${type.length}>`
-    case 'SliceType':
-      return `${type.access === 'Exclusive' ? '&mut ' : '&'}[${typeText(type.element)}]`
-    case 'EffectType': {
-      const failureType = Type.failureType(type)
-      const failureText = failureType === 'never' ? '' : ` ! ${typeText(failureType)}`
-      return `Effect<${typeText(type.success)}${failureText}> ${type.access.toLowerCase()}`
-    }
-    case 'CallableType':
-      return `(${type.parameters.map(typeText).join(', ')}) -> ${typeText(type.result)} ${type.mode.toLowerCase()}`
-    case 'ForeignFunctionType':
-      return Type.encode(type)
-    case 'ReferenceType':
-      return `${type.access === 'Exclusive' ? '&mut ' : '&'}${typeText(type.target)}`
-    case 'PointerType':
-      return `${type.mutable ? '*mut ' : '*const '}${typeText(type.pointee)}`
-    case 'RepresentedType':
-      return Type.encode(type)
-    case 'StructuralUnionType':
-      return type.members.map(typeText).join(' | ')
-  }
-}
+const typeText = (type: Type.Type): string => Type.encode(type)
 
 export type FlowItemState = 'Connected' | 'Stopped' | 'Branched' | 'Unmatched'
 

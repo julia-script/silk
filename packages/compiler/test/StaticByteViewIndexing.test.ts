@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
+import * as Lifetime from '../src/Lifetime.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -64,7 +65,10 @@ it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, 
     const literal = expressions.find((expression) => expression._tag === 'StaticByteViewLiteral')
     assert.strictEqual(literal?._tag, 'StaticByteViewLiteral')
     if (literal?._tag === 'StaticByteViewLiteral') {
-      assert.strictEqual(Type.key(literal.type), Type.key(Type.slice('Shared', 'u8')))
+      assert.strictEqual(
+        Type.key(literal.type),
+        Type.key(Type.slice('Shared', 'u8', Lifetime.staticLifetime)),
+      )
       assert.deepEqual(literal.data.bytes, [153, 19, 29, 0])
     }
     assert.isTrue(expressions.some((expression) => expression._tag === 'SliceIndexPlace'))

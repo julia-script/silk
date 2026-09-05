@@ -3,6 +3,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Intrinsic from '../src/Intrinsic.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
 
@@ -35,7 +36,18 @@ it('publishes the minimal portable string intrinsic catalog with exact signature
             signature: Intrinsic.signature(operation),
             unsafe: operation.unsafe,
             targets: operation.targets,
-            returnedBorrowParameter: operation.returnedBorrowParameter,
+            retainedInputs:
+              operation.rule._tag !== 'BuiltinRule'
+                ? []
+                : operation.rule.parameters.flatMap((parameter, ordinal) =>
+                    Type.storageLifetimes(parameter).some((input) =>
+                      Type.storageLifetimes(
+                        operation.rule._tag === 'BuiltinRule' ? operation.rule.result : Type.unit,
+                      ).some((output) => Lifetime.equals(input, output)),
+                    )
+                      ? [ordinal]
+                      : [],
+                  ),
           },
     ),
     [
@@ -43,25 +55,25 @@ it('publishes the minimal portable string intrinsic catalog with exact signature
         signature: 'unsafe fn Intrinsic.stringFromUtf8Unchecked(bytes: &[u8]) -> string',
         unsafe: true,
         targets: Intrinsic.runtimeTargets,
-        returnedBorrowParameter: 0,
+        retainedInputs: [0],
       },
       {
         signature: 'fn Intrinsic.stringUtf8Bytes(value: string) -> &[u8]',
         unsafe: false,
         targets: Intrinsic.runtimeTargets,
-        returnedBorrowParameter: 0,
+        retainedInputs: [0],
       },
       {
         signature: 'fn Intrinsic.stringByteLength(value: string) -> usize',
         unsafe: false,
         targets: Intrinsic.runtimeTargets,
-        returnedBorrowParameter: undefined,
+        retainedInputs: [],
       },
       {
         signature: 'fn Intrinsic.stringEqualsExact(left: string, right: string) -> bool',
         unsafe: false,
         targets: Intrinsic.runtimeTargets,
-        returnedBorrowParameter: undefined,
+        retainedInputs: [],
       },
     ],
   )

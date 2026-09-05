@@ -77,7 +77,7 @@ A mutable service that acquires owned storage described by a layout.
 ### Operation `allocate`
 
 ```silk
-effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemoryError ? &mut Allocator
+effect<'static> fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemoryError ? &mut Allocator
 ```
 
 Acquires one allocation for `layout`, or fails without returning partial storage.
@@ -87,7 +87,7 @@ Acquires one allocation for `layout`, or fails without returning partial storage
 ### Associated function `Allocator.outOfMemory`
 
 ```silk
-pub effect fn outOfMemory() -> never ! OutOfMemoryError
+pub effect<'static> fn outOfMemory() -> never ! OutOfMemoryError
 ```
 
 Fails immediately with `OutOfMemoryError`.

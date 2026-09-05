@@ -526,10 +526,9 @@ The pipeline does not insert an argument into syntax. `add(3)` is first an ordin
 for `left`; the pipeline then invokes that callable with `2`.
 
 The left expression may be an explicit `&` or `&mut` borrow when the callable expects a borrowed
-view. If the invoked function returns that view under the one-source return contract, the result
-retains the same source provenance and loan lifetime as the equivalent direct call. The same rule
-applies when the exact source is a supplied argument or a trailing capture of a known section;
-opaque callable values do not invent a source.
+view. A result follows the callable's declared or deterministically elided lifetime relationships,
+just as in an equivalent direct call. Supplied arguments and retained captures preserve their
+concrete loans; structural callable contracts do not require inspecting a hidden implementation.
 
 **Boundary:** The right side may be a function item, section, binding, grouped expression, or any
 other compatible unary callable. An applied interface operation such as
@@ -674,7 +673,9 @@ receives a parser diagnostic. Ownership and cleanup conflicts at a transfer use 
 
 A match evaluates its scrutinee exactly once. `match value` is available only when the scrutinee is
 Copy. `match move value` consumes one complete owner. `match &value` borrows it shared, and
-`match &mut value` borrows one mutable place exclusively.
+`match &mut value` borrows one mutable place exclusively. `match place value` inspects the tag of
+an owned place and introduces arm-local projection proof without consuming or borrowing the whole
+payload. Its explicit field moves occur only after a guard succeeds.
 
 ```silk
 struct Token { kind: i32 }
@@ -692,8 +693,9 @@ The shared match leaves `event` owned by the function. Pattern bindings inherit 
 mode; a consuming match transfers complete selected payload ownership into its arm.
 
 **Boundary:** A bare affine match is invalid because it would hide whether the operation copies,
-borrows, or consumes. A shared or exclusive pattern binding cannot escape its arm or be placed in
-owned storage. An exclusive match requires a mutable place.
+borrows, or consumes. A shared or exclusive pattern place cannot escape its arm; a copied stored shared view keeps its
+own declared data lifetime. Place refinement cannot leave missing storage through a reference or
+an enclosing whole-value user `Drop` hook. An exclusive match requires a mutable place.
 
 **Diagnostics:** A bare affine match reports `OWN0003`. Exclusive access to an immutable root
 reports `OWN0007`. An invalid borrowed scrutinee place reports `OWN0009`; escaping a borrowed pattern

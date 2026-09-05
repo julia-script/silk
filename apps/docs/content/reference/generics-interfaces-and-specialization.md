@@ -33,6 +33,13 @@ the provider. This does not introduce methods or runtime interface values.
 
 ## Generic declarations and applications
 
+Lifetime parameters use the same declaration list with a distinct argument namespace. For example,
+`View<'data, T>` retains both a data-validity parameter and an ordinary type parameter. Omitting
+lifetimes follows [header elision](lifetimes.md); the explicit-prefix and inference rules below
+continue to govern ordinary arguments. `T: 'data` constrains borrowed contents, and
+`'long: 'short` constrains validity regions. These predicates never initiate implementation search.
+Lifetime arguments are erased from runtime specialization and physical layout identity.
+
 ### GEN-001 — Each generic parameter has a declaration-local canonical identity
 
 **Status:** Confirmed

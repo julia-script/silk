@@ -1258,6 +1258,34 @@ it('lexes a character literal and every accepted escape as one CharLiteral token
   }
 })
 
+it('distinguishes lifetime names from closed characters and bounds names at a newline', () => {
+  const text = "'data 'static 'a' 'ab' 'next\nfn later() {}"
+  const source = SourceFile.make('memory://lifetimes.silk', ascii(text))
+  const result = Lexer.lex(source)
+  assert.deepEqual(
+    result.tokens
+      .filter((token) => token.kind !== 'Whitespace' && token.kind !== 'EndOfFile')
+      .map((token) => [token.kind, tokenView(source, token).slice]),
+    [
+      ['Lifetime', "'data"],
+      ['Lifetime', "'static"],
+      ['CharLiteral', "'a'"],
+      ['InvalidStaticLiteral', "'ab'"],
+      ['Lifetime', "'next"],
+      ['FnKeyword', 'fn'],
+      ['Identifier', 'later'],
+      ['LeftParenthesis', '('],
+      ['RightParenthesis', ')'],
+      ['LeftBrace', '{'],
+      ['RightBrace', '}'],
+    ],
+  )
+  assert.deepEqual(
+    result.diagnostics.map(({ code, span }) => [code, span.start, span.end]),
+    [['LEX0007', 18, 22]],
+  )
+})
+
 it('diagnoses a character literal that does not hold exactly one scalar', () => {
   for (const [spelling, scalars] of [
     ["''", 0],
@@ -1287,14 +1315,14 @@ it('diagnoses a character literal that does not hold exactly one scalar', () => 
 })
 
 it('stops an unterminated character literal before the line ending with one diagnostic', () => {
-  const source = SourceFile.make('memory://char-open.silk', ascii("'a\nnext"))
+  const source = SourceFile.make('memory://char-open.silk', ascii("'!\nnext"))
   const result = Lexer.lex(source)
   assert.deepEqual(
     result.tokens
       .filter((token) => token.kind !== 'EndOfFile')
       .map((token) => tokenView(source, token)),
     [
-      { kind: 'InvalidStaticLiteral', start: 0, end: 2, slice: "'a" },
+      { kind: 'InvalidStaticLiteral', start: 0, end: 2, slice: "'!" },
       { kind: 'Whitespace', start: 2, end: 3, slice: '\n' },
       { kind: 'Identifier', start: 3, end: 7, slice: 'next' },
     ],

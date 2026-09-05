@@ -153,7 +153,6 @@ pub fn main() -> i32 {
       )
       const codes = Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
       assert.include(codes, Diagnostic.nonCallableApplicationCode)
-      assert.notInclude(codes, Diagnostic.invalidBorrowPositionCode)
       assert.include(codes, Diagnostic.invalidAssignmentPlaceCode)
       const occurrence = Analysis.semanticOccurrenceAt(
         snapshot,

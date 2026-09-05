@@ -127,7 +127,7 @@ An implementation must define a strict total order. If two different values are 
 ### Operation `lessThan`
 
 ```silk
-operator < fn lessThan(left: &Self, right: &Self) -> bool
+operator < fn lessThan<'life0, 'life1>(left: &'life0 Self, right: &'life1 Self) -> bool
 ```
 
 Reports whether `left` orders strictly before `right`. An implementation must define a strict
@@ -188,7 +188,7 @@ If the witness leaves different values incomparable, this function reports them 
 ### Associated function `Order.isLess`
 
 ```silk
-pub fn isLess(ordering: &silk/order.Ordering) -> bool
+pub fn isLess<'life0>(ordering: &'life0 silk/order.Ordering) -> bool
 ```
 
 Reports whether an ordering is `Less`.
@@ -198,7 +198,7 @@ Reports whether an ordering is `Less`.
 ### Associated function `Order.isEqual`
 
 ```silk
-pub fn isEqual(ordering: &silk/order.Ordering) -> bool
+pub fn isEqual<'life0>(ordering: &'life0 silk/order.Ordering) -> bool
 ```
 
 Reports whether an ordering is `Equal`.
@@ -208,7 +208,7 @@ Reports whether an ordering is `Equal`.
 ### Associated function `Order.isGreater`
 
 ```silk
-pub fn isGreater(ordering: &silk/order.Ordering) -> bool
+pub fn isGreater<'life0>(ordering: &'life0 silk/order.Ordering) -> bool
 ```
 
 Reports whether an ordering is `Greater`.

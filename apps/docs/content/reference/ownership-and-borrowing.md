@@ -21,27 +21,28 @@ the diagnostic a programmer should expect when that boundary is crossed.
   program may move or discard the value; it does not have to consume it explicitly before leaving
   scope.
 - A **read** obtains a Copy value without changing the source's ownership.
-- A **move** transfers a complete value to a new owner and makes the source binding unavailable.
+- A **move** transfers an initialized value to a new owner and makes its source place unavailable.
 - A **place** is a stable storage location, such as a local binding, a field rooted in a local, or
   an indexed element rooted in a local.
 - A **root owner** is the binding at the start of a place. The root owner of `tokens[index].kind` is
   `tokens`.
 - A value is **live** when its place is initialized and available for use.
-- A **partial move** attempts to move only one owned part out of an aggregate while leaving the
+- A **partial move** transfers one initialized owned part out of an aggregate while leaving the
   aggregate itself in place.
 - A **replacement** assigns a complete new value to a live place. The displaced value is cleaned
   exactly once if its type requires cleanup.
 - A **borrow** grants temporary access to a place without transferring its ownership.
 - A **loan** is the compiler's record that a place remains borrowed. The loan restricts conflicting
   access until the borrow ends.
-- A borrow's **lifetime** is the region of the program during which its loan remains active.
+- A **lifetime** is a static validity region carried by a type. A concrete loan separately records
+  the borrowed place and the uses or cleanup that require it to remain valid.
 - A **shared reference** `&T` permits read access to one `T`.
 - An **exclusive reference** `&mut T` permits sole read and mutation access to one `T`.
 - A **slice** is a borrowed runtime-length view: `&[T]` is shared and `&mut [T]` is exclusive.
 - A **borrowed view** is a reference, slice, or another non-owning value such as `string` whose
   validity remains tied to a root owner.
-- A **returned view** is a borrowed view passed back from an ordinary call while retaining the
-  identity of the borrowed parameter and caller-owned root from which it originated.
+- A **returned view** is a borrowed value passed back under the lifetimes declared in its result type.
+  Concrete loans retain the caller-owned referents on which that value depends.
 - A view's **provenance** identifies that source parameter, root owner, and projection path.
 - A **reborrow** creates a shorter borrow through an existing reference or slice without changing
   ownership of the original value.
@@ -183,64 +184,47 @@ the earlier consuming move. A second move is the same use-after-move error.
 **Evidence:** [ownership specification](../../../../openspec/specs/bootstrap-ownership/spec.md),
 [ownership tests](../../../../packages/compiler/test/Ownership.test.ts).
 
-### OWN-004 — Owned aggregates move as complete values
+### OWN-004 — Eligible owned projections support partial moves
 
 **Status:** Confirmed
 
-Silk does not leave an owned struct, array, or union partially initialized. A move must transfer the
-complete aggregate rather than extracting one affine field or element from it.
+An explicit move may extract a definitely initialized visible field, nested field, or fixed-array
+element at a statically known in-bounds index. The selected subtree becomes unavailable; disjoint
+initialized siblings remain usable. Moving a Copy field explicitly also leaves a hole.
 
-```silk,ignore
+```silk
 struct Token { kind: i32 }
-struct Envelope {
-  token: Token
-  code: i32
-}
+struct Envelope { token: Token code: i32 }
 
-fn invalid(envelope: Envelope) -> Token {
+fn take(envelope: Envelope) -> Token {
+  let code = envelope.code
   return move envelope.token
 }
 ```
 
-The field move is invalid even though `envelope.token` is a valid place. Allowing it would leave an
-`Envelope` whose `token` field no longer contains a live value while the root still appears usable.
+The returned token owns its cleanup. The envelope's automatic cleanup visits only its remaining
+initialized fields. Whole-value reads, borrows, moves, captures, returns, and ordinary receiver
+calls require every component of the accessed subtree to be initialized.
 
-Copy leaves remain readable, and the whole aggregate can still be moved afterward:
+**Boundary:** A move cannot leave a hole through a reference, at a dynamic index, or beneath an
+ancestor with a whole-value user `Drop` hook. Moving a complete Drop-bearing child from an outer
+owner without its own hook is valid. Visibility and active loans still constrain access. A union
+payload requires current variant proof from `match place` before projected extraction.
 
-```silk
-struct Token { kind: i32 }
+**Diagnostics:** Unsupported extraction boundaries report `OWN0002`; using missing storage reports
+`OWN0001`. The diagnostic identifies the source place rather than classifying every projection as
+an invalid move.
 
-struct Envelope {
-  token: Token
-  code: i32
-}
-
-fn transfer(envelope: Envelope) -> Envelope {
-  let code = envelope.code
-  return move envelope
-}
-```
-
-**Boundary:** A consuming match may destructure a complete aggregate because ownership of the whole
-scrutinee enters exactly one selected arm before its fields are distributed or cleaned. That is not
-a partial move from a still-live source; MATCH-002 defines the resulting pattern ownership.
-
-Moving a field out and assigning another value later is not supported as a temporary
-partially-initialized state. Replace the complete field or aggregate directly instead.
-
-**Diagnostics:** Moving a non-Copy field or indexed element reports `OWN0002` at the projected move.
-The root remains classified as a complete owner for recovery, so one invalid partial move does not
-cause misleading duplicate-cleanup or use-after-move diagnostics.
-
-**Evidence:** [struct-value tests](../../../../packages/compiler/test/StructValues.test.ts),
-[fixed-array tests](../../../../packages/compiler/test/FixedArraySemantics.test.ts).
+**Evidence:** [partial-move requirements](../../../../openspec/specs/bootstrap-ownership/spec.md),
+[ownership tests](../../../../packages/compiler/test/Ownership.test.ts).
 
 ### OWN-005 — Mutation requires one live mutable root owner
 
 **Status:** Confirmed
 
-Assignment may replace a complete local, field, or indexed element only when its root is a live
-mutable owner and no conflicting borrow is active.
+Assignment may replace or initialize a local, field, or indexed element when its root permits
+mutation and no conflicting borrow is active. Writing a missing subtree restores it; replacing a
+live or conditionally live subtree cleans only its old initialized contents.
 
 ```silk
 struct Token { kind: i32 }
@@ -265,7 +249,8 @@ fn replace() -> i32 {
 }
 ```
 
-The root remains one complete initialized owner before and after the replacement.
+The destination is initialized after replacement. A partial enclosing owner becomes complete once
+all its required components are definitely initialized on every reaching path.
 
 The same storage rule applies to an owned ordinary-function parameter declared `mut name: T`.
 Calling the function and returning an affine value still require explicit `move`; the prefix only
@@ -274,13 +259,13 @@ once, and a value explicitly moved out may be reinitialized before later use.
 
 **Boundary:** `mut` grants one owned local or parameter root permission to change; it does not
 override an active shared or exclusive loan under BORROW-001 and BORROW-002. Assignment must
-replace a complete value of the destination type—it cannot create a temporarily uninitialized
-place. `mut` is invalid on borrowed parameters and on service or interface contract parameters.
+install a complete value of the unchanged destination type. A projection inside a wholly missing
+subtree is unavailable until that subtree itself is initialized. `mut` is invalid on borrowed parameters and on service or interface contract parameters.
 
 **Diagnostics:** Mutation through an immutable root reports `SEM0035` at the assignment target.
 Invalid parameter-level `mut` reports `SEM0143` at the keyword.
-Assignment to a consumed or borrowed root reports the applicable ownership diagnostic rather than
-reviving that root implicitly.
+An explicit assignment may reinitialize consumed owned storage. Borrowed storage cannot be left
+uninitialized, and active loans still report the applicable ownership diagnostic.
 
 **Evidence:** [ownership specification](../../../../openspec/specs/bootstrap-ownership/spec.md),
 [mutable-loop and replacement tests](../../../../packages/compiler/test/MutableLoops.test.ts).
@@ -330,8 +315,8 @@ fn copy(values: [i32; 2]) -> i32 {
 }
 ```
 
-An array of affine values can expose Copy leaves without being consumed, but an affine element
-cannot be moved out by index:
+An array of affine values can expose Copy leaves without being consumed. A known index may move
+one initialized element under OWN-004; a dynamic index cannot:
 
 ```silk,ignore
 struct Token { kind: i32 }
@@ -341,14 +326,14 @@ fn invalid(tokens: [Token; 2], index: usize) -> Token {
 }
 ```
 
-The valid ownership transfer is `move tokens`, not an indexed extraction. A mutable array may
-replace one complete element under OWN-005.
+A complete `move tokens` or a known-index extraction such as `move tokens[0]` is valid when its
+accessed storage is initialized. A mutable array may restore that element under OWN-005.
 
 **Boundary:** `[Token; 0]` remains affine because ownership is derived uniformly from `Token`, not
 special-cased by the runtime element count. This keeps generic ownership independent of a particular
 length value, but it is an explicit stabilization choice to review.
 
-**Diagnostics:** Moving a non-Copy indexed element reports `OWN0002`. Passing, returning, or binding
+**Diagnostics:** Moving an element at a dynamic index reports `OWN0002`. Passing, returning, or binding
 an affine array by value without `move` reports `OWN0003`.
 
 **Evidence:** [ownership specification](../../../../openspec/specs/bootstrap-ownership/spec.md),
@@ -607,8 +592,7 @@ fn valid() -> i32 {
 `&mut array` analogously creates `&mut [T]`. The array length is not part of the resulting slice
 type.
 
-Under the one-source returned-view model, a local view may also extend a hidden temporary owner's
-lifetime:
+A local view may also extend a hidden temporary owner's lifetime:
 
 ```silk
 fn identity(values: &[i32]) -> &[i32] { return values }
@@ -671,50 +655,38 @@ aggregate partial-move diagnostic `OWN0002`.
 [reference projection tests](../../../../packages/compiler/test/ReferenceProjection.test.ts),
 [slice ownership tests](../../../../packages/compiler/test/RuntimeSliceOwnership.test.ts).
 
-### BORROW-008 — Borrowed bindings are allowed, but borrows are not owned data
+### BORROW-008 — Ordinary values retain their borrowed contents
 
 **Status:** Confirmed
 
-A reference or slice carries a lifetime tied to another owner. It may be bound as a local borrowed
-view. The loan remains active through the binding's last use, and the owner must remain live for that
-complete lifetime.
+Shared references, shared slices, and strings may appear in generic arguments, named or synthesized
+aggregate fields, fixed arrays, and ordinary unions. Their containing values retain the declared
+lifetimes and the concrete loans needed by later uses and cleanup.
 
 ```silk
-fn valid() -> i32 {
-  let values = [1, 2]
-  let view = &values
-  return view[0]
+struct View<'data> { value: &'data i32 }
+
+fn wrap<'data>(value: &'data i32) -> View<'data> {
+  return View<'data> { value: value }
 }
 ```
 
-The binding `view` does not own or copy `values`. It keeps a shared loan of `values` active until
-its last use. An exclusive local view analogously keeps one exclusive loan active and requires a
-mutable owner.
+Moving the wrapper transfers its dependencies; it does not move its external referent. Copying an
+eligible shared view retains another dependent use rather than detaching the source. A Copy
+aggregate still needs an admitted `impl Copy`, and every realized field must satisfy that property.
 
-Last-use analysis follows the complete containing expression. A use nested in a place replacement,
-a backing-value observation such as `Enum.value(...)`, `Effect.result`, or requirement binding
-extends the loan through that nested use; an outer wrapper or an earlier direct callable invocation
-does not end it prematurely.
+**Boundary:** Moving an owner together with a reference into its own inline storage does not create
+a valid self-referential value. Exclusive borrowed storage and a user `Drop` hook on a
+lifetime-dependent owner remain unsupported in this layer. Effect success and failure channels
+cannot yet carry dependent borrowed values. Callable and Effect environments retain their explicit
+environment bounds even when their public result channels contain no references.
 
-A borrowed value cannot be stored inside a struct, array, union, generic wrapper, Effect success or
-failure value, or other owned value. Callable and Effect captures must satisfy the captured-loan
-rules in Batch 4 rather than gaining an untracked lifetime.
+**Diagnostics:** Invalid validity escape reports `OWN0019` at the violating use or retention
+boundary. Unsupported exclusive storage or dependent cleanup reports the corresponding ownership
+admission diagnostic. Named lifetime and elision failures follow [the lifetime reference](lifetimes.md).
 
-**Boundary:** A local borrowed binding is not owned storage. It has a compiler-tracked provenance
-and cannot outlive its root owner. Placing the same reference inside an owned aggregate would make
-that aggregate claim an independently movable lifetime-bearing value and may create a
-self-referential owner-and-view structure, so owned storage remains invalid.
-
-**Diagnostics:** A borrowed view nested in owned storage or supplied as an ordinary generic type argument
-reports `SEM0054` at the invalid type position. A borrowed binding that outlives its root reports an
-ownership escape diagnostic at the escaping use. Escape through a callable, Effect, or return
-boundary reports that boundary's specific diagnostic rather than silently extending the owner's
-lifetime.
-
-**Evidence:** [runtime-slice specification](../../../../openspec/specs/bootstrap-runtime-slices/spec.md),
-[loan live-range correction](../../../../openspec/changes/archive/2026-08-26-compiler-review-stability-fixes/specs/bootstrap-ownership/spec.md),
-[slice semantics tests](../../../../packages/compiler/test/RuntimeSliceSemantics.test.ts),
-[loan regression tests](../../../../packages/compiler/test/RuntimeSliceOwnership.test.ts).
+**Evidence:** [lifetime requirements](../../../../openspec/specs/bootstrap-lifetimes/spec.md),
+[lifetime tests](../../../../packages/compiler/test/Type.test.ts).
 
 ### BORROW-009 — Slice length is runtime information
 
@@ -862,13 +834,14 @@ fn invalid(token: Token, consumeNow: bool) -> i32 {
 }
 ```
 
-**Boundary:** A complete replacement may restore a moved mutable binding before paths join. The
-binding must have one compatible live state on every continuing path; the compiler does not choose
-an ownership state from whichever path happens to run at runtime.
+**Boundary:** A complete replacement may restore moved mutable storage before paths join.
+Initializedness is joined independently for each place. Differing branches may leave a root or
+field conditionally initialized; disjoint initialized siblings remain available, and later cleanup
+visits only the live remainder on the executed path.
 
-**Diagnostics:** Continuing `if` or `if let` arms that disagree on whether a move-only binding is
-live report `OWN0017` at the merge, even when there is no later use. A use reached by a path on which
-its binding was consumed also reports `OWN0001` and relates the consuming move. Branch-local
+**Diagnostics:** A use requiring a complete value reports `OWN0001` when any reaching path leaves
+its accessed place uninitialized, and relates the consuming move. A join with no invalid subsequent
+use does not itself report an ownership error. Branch-local
 bindings are unavailable outside their declared region and use the ordinary name or scope
 diagnostic rather than an ownership merge error.
 
@@ -879,12 +852,15 @@ diagnostic rather than an ownership merge error.
 
 **Status:** Confirmed
 
-The match prefix selects one of four ownership modes:
+The match prefix selects ownership access:
 
 - `match value` reads a Copy scrutinee.
 - `match move value` consumes an affine or Copy scrutinee.
 - `match &value` holds one shared loan through the selected arm.
 - `match &mut value` holds one exclusive loan through the selected arm and requires a mutable place.
+- `match place value` reads an owned place's discriminant without borrowing or consuming its payload.
+  Its arm bindings denote refined places; explicit moves may extract initialized fields after a
+  guard succeeds. Variant proof ends with the arm and must be re-established after a join.
 
 ```silk
 struct Token { kind: i32 }
@@ -904,7 +880,8 @@ match makes the source unavailable and transfers its active payload into exactly
 
 **Boundary:** Borrowed match modes require a borrowable place. They cannot borrow an expression that
 has no owner or hidden owner satisfying BORROW-006. Bare match syntax never implicitly consumes an
-affine scrutinee.
+affine scrutinee. Complete copy, consuming, and borrowed matches require initialized scrutinees;
+`match place` may inspect the tag of a partial owner without reading its missing payload.
 
 **Diagnostics:** A bare affine match reports `OWN0003`. An exclusive match of an immutable root
 reports `OWN0007`. An invalid borrowed scrutinee place reports `OWN0009`. Using a source after
@@ -1025,9 +1002,6 @@ constraint or a separately specialized interface operation.
 error applicable to a potentially affine value. A concrete type that does not satisfy `T: Copy`
 reports a constraint error at specialization. Stable diagnostics for the accepted sealed Copy
 constraint remain to be assigned with `impl Copy` implementation.
-
-**Current compiler:** Generic whole-value moves and cleanup specialization are implemented. The
-accepted sealed `Copy` declaration and constraint surface still require reconciliation.
 
 **Evidence:** [ownership specification](../../../../openspec/specs/bootstrap-ownership/spec.md),
 [type-generic tests](../../../../packages/compiler/test/TypeGenerics.test.ts).
@@ -1507,16 +1481,16 @@ Access to the aggregate bounds access to its executable field:
 - Exclusive aggregate access may also invoke or run exclusive reusable fields.
 - Whole-owner access may invoke or run any field, including a take-once field.
 
-Invoking or running a take-once field consumes the complete enclosing owner rather than partially
-moving the field out and leaving a residual aggregate.
+Take-once invocation consumes its complete executable value and transfers the environment.
+Explicitly extracting an initialized field first follows OWN-004 and leaves its eligible enclosing
+aggregate partial.
 
-**Boundary:** Direct extraction of an affine callable or Effect field remains a partial move under
-OWN-004. A Copy executable field may be read like any other Copy field. Compiler representation and
+**Boundary:** Direct extraction of an affine callable or Effect field obeys the same verified
+partial-move boundaries as an ordinary field under OWN-004. A Copy executable field may be read like any other Copy field. Compiler representation and
 layout choices must not force an otherwise Copy, cleanup-free source value to become affine.
 
 **Diagnostics:** Insufficient access to a stored callable reports `OWN0014`; insufficient access to
-a stored Effect reports `OWN0015`. Direct affine field extraction reports the ordinary `OWN0002`
-partial-move diagnostic. Executable representation does not introduce another diagnostic or
+a stored Effect reports `OWN0015`. An extraction through a borrowed or whole-value Drop boundary reports `OWN0002`. Executable representation does not introduce another diagnostic or
 ownership category.
 
 **Evidence:** [nominal callable storage specification](../../../../openspec/specs/bootstrap-nominal-callable-storage/spec.md),
@@ -1602,7 +1576,7 @@ automatic and produces no source diagnostic.
 [owned-allocation specification](../../../../openspec/specs/bootstrap-owned-allocation/spec.md),
 [typed-failure cleanup](typed-failures.md#fail-006--typed-failure-applies-ordinary-cleanup-and-preserves-diagnostic-context).
 
-### DROP-001 — `drop` consumes a complete owner immediately
+### DROP-001 — `drop` cleans the live remainder of an owned place
 
 **Status:** Confirmed
 
@@ -1622,13 +1596,14 @@ fn finish(resource: Resource) -> () {
 `drop` is consuming even when its operand is Copy. Dropping a Copy value ends that binding without
 emitting runtime cleanup, just as an explicit `move` of a Copy value still consumes its source.
 
-**Boundary:** Early drop applies to a complete owner. Dropping an affine field or element directly
-is a partial move under OWN-004. An owner cannot be dropped while a live loan still depends on it.
+**Boundary:** `drop place` is an explicit cleanup statement, so it may terminate a partial owner
+and clean its initialized remainder. It does not pass an incomplete value to a generic function.
+Cleanup of a projected owned place obeys the same borrowing and whole-value Drop boundaries as
+OWN-004. An owner cannot be dropped while a live loan still depends on it.
 The loan may end at its last use or through explicit cleanup of the value retaining it before the
 owner is dropped.
 
-**Diagnostics:** Any later use or second drop reports `OWN0001`. Dropping only an affine projection
-reports `OWN0002`. Dropping a borrowed root while its loan remains live reports `OWN0011`.
+**Diagnostics:** Any later use or second drop reports `OWN0001`. Dropping a projection across an unsupported extraction boundary reports `OWN0002`. Dropping a borrowed root while its loan remains live reports `OWN0011`.
 
 **Evidence:** [owned-allocation specification](../../../../openspec/specs/bootstrap-owned-allocation/spec.md),
 [Drop execution tests](../../../../packages/compiler/test/DropHookExecution.test.ts),
@@ -1811,56 +1786,36 @@ Stable process-status and presentation rules remain to be assigned.
 
 ## Batch 6 — Returned views
 
-### VIEW-001 — An ordinary function may return a view from one borrowed parameter
+### VIEW-001 — An ordinary result follows declared lifetime relationships
 
 **Status:** Confirmed
 
-An ordinary function may return a borrowed view when its signature contains exactly one borrowed
-parameter and the returned expression is proven to derive from that parameter. The returned view
-retains the parameter's caller-owned root and projection path as provenance.
+An ordinary function may return a direct view or an aggregate containing views when its body proves
+the lifetimes declared by its result. Several inputs may share a declared lifetime without sharing
+a concrete source owner.
 
 ```silk
-fn identity(values: &[i32]) -> &[i32] {
-  return values
-}
-```
-
-A shared result may derive from a shared or exclusive parameter. An exclusive result requires one
-exclusive parameter and cannot strengthen shared access.
-
-The exactly-one rule makes the result source unambiguous without named lifetime parameters or
-source annotations. A function with two borrowed inputs cannot return a view even when its body
-always selects one of them; such an API requires a future syntax that identifies the source in its
-public contract.
-
-```silk,ignore
-fn choose(flag: bool, left: &[i32], right: &[i32]) -> &[i32] {
+fn choose<'data>(flag: bool, left: &'data i32, right: &'data i32) -> &'data i32 {
   if flag { return left }
   return right
 }
 ```
 
-**Boundary:** The returned view must derive from the borrowed parameter itself, a compatible
-reborrow, or a stable field or slice projection of it. It cannot derive from a local owner, a hidden
-temporary owner, a by-value parameter, a global mutable place, or a different borrowed parameter.
+The caller must keep either possible referent valid for the selected result's uses. An explicit
+result may instead name only one independent input lifetime. Returning external data from a
+by-value holder is valid when its field type carries that data lifetime; returning a reference to
+the holder's own inline storage is invalid.
 
-This rule covers direct borrowed results from ordinary functions. An Effect cannot carry a borrowed
-view as its success or failure value. A callable or Effect environment that retains borrowed
-captures follows CAPTURE-001, CAPTURE-002, and its own escape checks instead of turning the borrow
-into an owned result.
+**Boundary:** [Header elision](lifetimes.md) supplies omitted output lifetimes from an outer borrowed
+receiver, otherwise one top-level borrowed input. Two independent inputs without such a default
+require explicit output relationships. Bodies never choose a public relationship. Shared access
+cannot strengthen into exclusive access, and dependent Effect outcomes remain unsupported.
 
-**Diagnostics:** A borrowed return type on a non-ordinary function, without exactly one borrowed
-parameter, or with insufficient exclusive access reports `SEM0091`. A returned expression that does
-not derive from that parameter reports `SEM0092` at the expression and identifies the required
-source.
+**Diagnostics:** Ambiguous output elision reports `SEM0210`. A violated declared lifetime bound
+reports `SEM0212`; a result retaining expired local or temporary storage reports `OWN0019`.
 
-**Current compiler:** Direct slice and nominal-reference returns implement this exactly-one
-contract, including direct calls, pipelines, and exact callable-section applications. An earlier
-direction forbade every returned borrow; this rule instead adopts the conservative contract
-already implemented for slices.
-
-**Evidence:** [runtime-slice specification](../../../../openspec/specs/bootstrap-runtime-slices/spec.md),
-[returned-view ownership tests](../../../../packages/compiler/test/RuntimeSliceOwnership.test.ts).
+**Evidence:** [returned-value requirements](../../../../openspec/specs/bootstrap-runtime-slices/spec.md),
+[lifetime tests](../../../../packages/compiler/test/Type.test.ts).
 
 ### VIEW-002 — A returned view remains lexical and tied to its source owner
 
@@ -1908,22 +1863,15 @@ fn invalid() -> &[i32] {
 }
 ```
 
-**Boundary:** A returned view is not owned data. It cannot be placed in a struct, array, union,
-ordinary generic wrapper, Effect success or failure value, global, or constant. Capturing it in a
-callable or Effect is permitted only when the capture retains the same root dependency and the
-delayed value cannot outlive that root under Batch 4.
+**Boundary:** A returned view may be stored in an ordinary lifetime-bearing aggregate or captured
+by a delayed value when its containing type preserves validity. Storage and copying never detach
+its concrete loans. Dependent Effect success and failure values remain unsupported in this layer.
 
-A wrapper may return the view again only when its own return satisfies VIEW-001, thereby translating
-the provenance to its own single borrowed parameter. No operation may detach a view from its root.
+A wrapper may return the view again when its own declared result satisfies VIEW-001. No operation may detach a view from its root.
 
 **Diagnostics:** Conflicting source-owner access while the view remains live reports `OWN0011` and
-relates the view's origin. Invalid owned storage reports `SEM0054`. Returning or otherwise escaping
-the view beyond its root reports the relevant `SEM0091`, `SEM0092`, capture-escape, or storage
-diagnostic at the boundary.
-
-**Current compiler:** Returned views from named borrowed sources and their caller-side loan tracking
-are implemented. Hidden ownership for a temporary argument remains the `SEM0056` implementation
-gap recorded under BORROW-006.
+relates the view's origin. Returning or retaining a view beyond the validity of its source reports
+`OWN0019`; unsatisfied public outlives bounds report `SEM0212`.
 
 **Evidence:** [runtime-slice specification](../../../../openspec/specs/bootstrap-runtime-slices/spec.md),
 [returned-view ownership tests](../../../../packages/compiler/test/RuntimeSliceOwnership.test.ts),
