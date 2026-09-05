@@ -541,6 +541,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './LayoutEncode',
       './LayoutVerify',
       './Lexer',
+      './LifetimeElision',
       './LiteralForm',
       './LlvmBackend',
       './LocalSharedOwnership',

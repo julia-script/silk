@@ -2,6 +2,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SuspensionOwnership from '../src/SuspensionOwnership.js'
 import * as Projections from './support/projections.js'
 
@@ -80,6 +81,26 @@ it.effect('classifies exact post-normalization MIR locals across relay', () =>
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
     const ownership = available(self)
+    const sharedStart = source.indexOf(' run shared(&owner)')
+    const caller = Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'main')
+    const loan =
+      caller === undefined
+        ? undefined
+        : MirVerification.operations(caller).find(
+            (operation) =>
+              operation._tag === 'BeginLoan' &&
+              operation.access === 'Shared' &&
+              operation.sourceType._tag === 'Nominal' &&
+              operation.sourceType.type.name === 'Owner',
+          )
+    const callerPlan = ownership.plans.find((plan) => plan.span.start === sharedStart)
+    assert.isTrue(
+      loan?._tag === 'BeginLoan' &&
+        callerPlan?.slots.some(
+          (slot) => slot.local.ordinal === loan.root.ordinal && slot.type._tag === 'Nominal',
+        ),
+      'the last shared loan retains its actual owner storage independently of cleanup',
+    )
     const scalar = plansFor(ownership, 'scalar').find((plan) => plan.frame === 'StatefulRelay')
     const owned = plansFor(ownership, 'owned').find(
       (plan) =>
