@@ -15,7 +15,12 @@ import {
 } from './ownedAllocatorSuspension.js'
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
-import { borrowedBox, borrowedStream, borrowedFailure } from './borrowedOutcomes.js'
+import {
+  borrowedBox,
+  borrowedStream,
+  borrowedFailure,
+  affineBorrowedStream,
+} from './borrowedOutcomes.js'
 import { storedCatchSuspension } from './storedCatchSuspension.js'
 
 // Folded from Transcendental.test.ts: every runtime bit pattern is committed independently of the
@@ -6154,6 +6159,7 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     { name: 'borrowed-outcome-box', source: borrowedBox },
     { name: 'borrowed-outcome-stream', source: borrowedStream },
     { name: 'borrowed-outcome-failure', source: borrowedFailure },
+    { name: 'borrowed-outcome-affine-stream', source: affineBorrowedStream },
   ].map((program): CorpusProgram => ({ ...program, expected: { _tag: 'Completes', result: 42 } })),
 
   {

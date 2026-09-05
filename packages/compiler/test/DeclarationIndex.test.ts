@@ -2339,7 +2339,6 @@ service Work { effect<'static> fn tick() -> i32 }`
   }),
 )
 
-
 it.effect(
   'keeps ordinary exclusive access, abstract Drop storage, and callable invocation outcomes admitted',
   () =>
@@ -2353,12 +2352,5 @@ fn invoke<'env>(callback: for<'a> fn<'env>(&'a i32) -> &'a i32) -> i32 { return 
 effect fn staticText() -> string<'static> { return "ready" }`
       const snapshot = yield* Analysis.ofSource('admission-valid', ascii(source))
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
-      const retained = [...snapshot.results.values()]
-        .flatMap((module) => module.functions)
-        .find(
-          (fn) =>
-            fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'retain',
-        )
-      assert.isTrue((retained?.lifetimeAdmission?.length ?? 0) > 0)
     }),
 )

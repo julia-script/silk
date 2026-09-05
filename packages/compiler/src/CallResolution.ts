@@ -2265,15 +2265,20 @@ export const analyzeFunctionItem = (
         })
       const patternResult = contextualPattern.result
       const expectedResult = expectedCallable.result
+      // The inputs may determine the named callback before the enclosing combinator has
+      // inferred its result parameter. Leave that parameter to enclosing argument inference;
+      // every binder of the offered callback must still be determined here.
       const resultCompatible =
         Type.isEffect(patternResult) && Type.isEffect(expectedResult)
-          ? Type.isParameter(expectedResult.success) || TypeInference.infer(
+          ? Type.isParameter(expectedResult.success) ||
+            TypeInference.infer(
               patternResult.success,
               expectedResult.success,
               partial,
               itemInference,
             )
-          : Type.isParameter(expectedResult) || TypeInference.infer(patternResult, expectedResult, partial, itemInference)
+          : Type.isParameter(expectedResult) ||
+            TypeInference.infer(patternResult, expectedResult, partial, itemInference)
       const allBindersDetermined = (contract?.binders ?? []).every((parameter) =>
         partial.has(Type.key(parameter)),
       )

@@ -491,7 +491,11 @@ const releasesOf = (operation: Mir.Operation): ReadonlyArray<Release> =>
   operation._tag === 'RunStaticEffect'
     ? Object.freeze(
         (operation.releases ?? []).map((release) =>
-          Object.freeze({ local: release.local, cleanup: release.cleanup, initialization: release.initialization }),
+          Object.freeze({
+            local: release.local,
+            cleanup: release.cleanup,
+            initialization: release.initialization,
+          }),
         ),
       )
     : Object.freeze([])
@@ -579,14 +583,22 @@ const planFor = (
   const operationDefined = operationDefinitions(operation)
   const parkGuard = operation._tag === 'ExecutionPark' ? operation.guard.ordinal : undefined
   const states = MirVerification.initializationOf(fn, program.layout).before.get(operation)
-  const flagsByRoot = new Map((fn.initializationFlags ?? []).map((entry) => [entry.root.ordinal, entry.flags]))
+  const flagsByRoot = new Map(
+    (fn.initializationFlags ?? []).map((entry) => [entry.root.ordinal, entry.flags]),
+  )
   const initializationOf = (ordinal: number): Mir.DropOperation['initialization'] => {
     const state = states?.get(ordinal)
-    if (state === undefined || (state.initialization === 'Initialized' && state.children.length === 0)) return undefined
+    if (
+      state === undefined ||
+      (state.initialization === 'Initialized' && state.children.length === 0)
+    )
+      return undefined
     const required = new Set(MovePath.conditionalPaths(state).map(MovePath.key))
     return {
       state,
-      flags: (flagsByRoot.get(ordinal) ?? []).filter((flag) => required.has(MovePath.key(flag.path))),
+      flags: (flagsByRoot.get(ordinal) ?? []).filter((flag) =>
+        required.has(MovePath.key(flag.path)),
+      ),
     }
   }
   const retained = new Set([...live, ...(parkGuard === undefined ? [] : [parkGuard])])
@@ -750,11 +762,24 @@ export const plan = (
           live.get(operation) ?? new Set(),
           control,
         )
-        const assignedFlags = MirVerification.initializationOf(fn, program.layout).flagsBefore.get(operation)
-        if (planned.slots.some((slot) => slot.initialization !== undefined &&
-          (MovePath.conditionalPaths(slot.initialization.state).length !== slot.initialization.flags.length ||
-            slot.initialization.flags.some((flag) => !assignedFlags?.has(flag.local.ordinal) ||
-              !planned.slots.some((retained) => retained.local.ordinal === flag.local.ordinal))))) {
+        const assignedFlags = MirVerification.initializationOf(fn, program.layout).flagsBefore.get(
+          operation,
+        )
+        if (
+          planned.slots.some(
+            (slot) =>
+              slot.initialization !== undefined &&
+              (MovePath.conditionalPaths(slot.initialization.state).length !==
+                slot.initialization.flags.length ||
+                slot.initialization.flags.some(
+                  (flag) =>
+                    !assignedFlags?.has(flag.local.ordinal) ||
+                    !planned.slots.some(
+                      (retained) => retained.local.ordinal === flag.local.ordinal,
+                    ),
+                )),
+          )
+        ) {
           violations.push(
             Object.freeze({
               _tag: 'SuspensionOwnershipViolation',

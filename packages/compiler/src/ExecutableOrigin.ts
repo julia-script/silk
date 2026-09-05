@@ -413,7 +413,9 @@ export const make = (operations: Operations) => {
       ]
     }
     if (expression._tag === 'Replace')
-      return Hir.expressionChildren(expression).flatMap((child) => callTargets(child, index, substitution))
+      return Hir.expressionChildren(expression).flatMap((child) =>
+        callTargets(child, index, substitution),
+      )
     if (expression._tag === 'Move') return callTargets(expression.subject, index, substitution)
     if (expression._tag === 'RuntimeStringView')
       return callTargets(expression.source, index, substitution)

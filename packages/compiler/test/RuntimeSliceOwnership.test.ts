@@ -1,4 +1,9 @@
-import { borrowedBox, borrowedStream, borrowedFailure } from './support/borrowedOutcomes.js'
+import {
+  borrowedBox,
+  borrowedStream,
+  borrowedFailure,
+  affineBorrowedStream,
+} from './support/borrowedOutcomes.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -25,8 +30,13 @@ it.effect('constructs ordinary boxes with externally borrowed elements', () =>
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
-    const invalid = yield* analyze(source.replace('  let result = Box.into', '  drop value\n  let result = Box.into'))
-    assert.include(Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code), 'OWN0019')
+    const invalid = yield* analyze(
+      source.replace('  let result = Box.into', '  drop value\n  let result = Box.into'),
+    )
+    assert.include(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      'OWN0019',
+    )
   }),
 )
 
@@ -37,7 +47,10 @@ it.effect('implements fixed externally borrowed stream items with fresh operatio
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
     const invalid = yield* analyze(source.replace('  drop stream', '  drop values\n  drop stream'))
-    assert.include(Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code), 'OWN0019')
+    assert.include(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      'OWN0019',
+    )
   }),
 )
 
@@ -62,36 +75,60 @@ pub fn main() -> i32 {
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
-    const invalid = yield* analyze(source.replace('  let result = run pending', '  drop provider\n  let result = run pending').replace('  drop pending\n  drop provider', '  drop pending'))
-    assert.include(Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code), 'OWN0019')
+    const invalid = yield* analyze(
+      source
+        .replace('  let result = run pending', '  drop provider\n  let result = run pending')
+        .replace('  drop pending\n  drop provider', '  drop pending'),
+    )
+    assert.include(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      'OWN0019',
+    )
   }),
 )
 
 it.effect('transfers affine borrowed items out of an ordinary owning stream', () =>
   Effect.gen(function* () {
-    const source = `import silk.option { Option }
-interface Stream<Item> { effect fn take<'call>(self: &'call mut Self) -> Option<Item> }
-struct Item<'data> { value: &'data mut i32 }
-impl<'data> Drop for Item<'data> { fn drop(self: &mut Item<'data>) -> () { self.value.* = 42 return () } }
-struct OnceStream<'data> { pending: Option<Item<'data>> }
-impl<'data> Stream<Item<'data>> for OnceStream<'data> {
-  effect fn take<'call>(self: &'call mut OnceStream<'data>) -> Option<Item<'data>> {
-    return Intrinsic.replace(self.pending, Option.none<Item<'data>>())
-  }
-}
-pub fn main() -> i32 {
-  let mut value = 0
-  let mut stream = OnceStream { pending: Option.some(Item { value: &mut value }) }
-  let item = run Stream.take(&mut stream)
-  drop stream
-  drop item
-  return value
-}`
+    const source = affineBorrowedStream
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
     const invalid = yield* analyze(source.replace('  drop item', '  value = 1\n  drop item'))
-    assert.isTrue(Analysis.diagnostics(invalid).some((diagnostic) => ['OWN0010', 'OWN0011', 'OWN0019'].includes(diagnostic.code)))
+    assert.isTrue(
+      Analysis.diagnostics(invalid).some((diagnostic) =>
+        ['OWN0010', 'OWN0011', 'OWN0019'].includes(diagnostic.code),
+      ),
+    )
+  }),
+)
+
+it.effect('copies fixed stream items while retaining their nested external borrow', () =>
+  Effect.gen(function* () {
+    const source = `interface Stream<Item> { effect fn take<'call>(self: &'call mut Self) -> Item }
+struct View<'data> { value: &'data i32 }
+impl<'data> Copy for View<'data> {}
+struct Repeated<'data> { item: View<'data> }
+impl<'data> Stream<View<'data>> for Repeated<'data> {
+  effect fn take<'call>(self: &'call mut Repeated<'data>) -> View<'data> { return self.item }
+}
+pub fn main() -> i32 {
+  let value = 21
+  let mut stream = Repeated { item: View { value: &value } }
+  let first = run Stream.take(&mut stream)
+  let copied = first
+  let second = run Stream.take(&mut stream)
+  drop stream
+  drop first
+  return copied.value.* + second.value.*
+}`
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const invalid = yield* analyze(source.replace('  drop first', '  drop value\n  drop first'))
+    assert.include(
+      Analysis.diagnostics(invalid).map((d) => d.code),
+      'OWN0019',
+    )
   }),
 )
 
@@ -106,7 +143,10 @@ impl<'data> Stream<&'data i32> for Scratch {
   }
 }
 pub fn main() -> i32 { return 0 }`)
-    assert.include(Analysis.diagnostics(self).map((diagnostic) => diagnostic.code), 'SEM0212')
+    assert.include(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      'SEM0212',
+    )
   }),
 )
 
@@ -129,8 +169,14 @@ pub fn main() -> i32 {
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
-    const invalid = yield* analyze(source.replace('  let second =', '  holder.count = 4\n  let second ='))
-    assert.isTrue(Analysis.diagnostics(invalid).some((diagnostic) => ['OWN0010', 'OWN0011', 'OWN0019'].includes(diagnostic.code)))
+    const invalid = yield* analyze(
+      source.replace('  let second =', '  holder.count = 4\n  let second ='),
+    )
+    assert.isTrue(
+      Analysis.diagnostics(invalid).some((diagnostic) =>
+        ['OWN0010', 'OWN0011', 'OWN0019'].includes(diagnostic.code),
+      ),
+    )
   }),
 )
 
@@ -153,7 +199,10 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
     const invalid = yield* analyze(source.replace('  drop holder', '  drop value\n  drop holder'))
-    assert.include(Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code), 'OWN0019')
+    assert.include(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      'OWN0019',
+    )
   }),
 )
 
@@ -166,14 +215,19 @@ effect fn failure<'a>() -> i32 ! &'a i32 { let value = 1 fail &value }
 pub fn main() -> i32 { return 0 }`)
     const diagnostics = Analysis.diagnostics(self)
     for (const name of ['local', 'captured', 'failure']) {
-      const fn = Analysis.ownershipOf(self, 'slices/Ownership')?.functions.find(
-        (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === name,
-      ) ?? unreachable(name)
-      assert.isTrue(diagnostics.some((diagnostic) =>
-        (diagnostic.code === 'OWN0019' || diagnostic.code === 'SEM0144') &&
-        diagnostic.span.start >= fn.declaration.syntax.span.start &&
-        diagnostic.span.end <= fn.declaration.syntax.span.end,
-      ), name)
+      const fn =
+        Analysis.ownershipOf(self, 'slices/Ownership')?.functions.find(
+          (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === name,
+        ) ?? unreachable(name)
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === 'OWN0019' &&
+            diagnostic.span.start >= fn.declaration.syntax.span.start &&
+            diagnostic.span.end <= fn.declaration.syntax.span.end,
+        ),
+        name,
+      )
     }
   }),
 )
@@ -184,8 +238,13 @@ it.effect('propagates nested borrowed failures through ordinary recovery', () =>
     const self = yield* snapshot(source)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
-    const invalid = yield* analyze(source.replace('  return result.*', '  drop value\n  return result.*'))
-    assert.include(Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code), 'OWN0019')
+    const invalid = yield* analyze(
+      source.replace('  return result.*', '  drop value\n  return result.*'),
+    )
+    assert.include(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      'OWN0019',
+    )
   }),
 )
 

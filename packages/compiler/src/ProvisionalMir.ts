@@ -1720,9 +1720,14 @@ export const classificationOfRun = (
 }
 
 /** Explicit transfer origins cannot be normalized into synchronous direct calls. */
-export const isOriginOfRun = (self: Module, instance: Instances.InstanceKey, span: SourceSpan.SourceSpan): boolean =>
-  executionForInstance(self, instance)?.regions.some((region) =>
-    region.outcome._tag === 'SuspendEffect' && sameSpan(region.outcome.span, span)) ?? false
+export const isOriginOfRun = (
+  self: Module,
+  instance: Instances.InstanceKey,
+  span: SourceSpan.SourceSpan,
+): boolean =>
+  executionForInstance(self, instance)?.regions.some(
+    (region) => region.outcome._tag === 'SuspendEffect' && sameSpan(region.outcome.span, span),
+  ) ?? false
 
 export interface RunControl {
   readonly id: ControlId

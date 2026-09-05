@@ -151,10 +151,12 @@ export const ownershipLocal = (
 export const initializationFlagsOf = (
   fn: FunctionLowering,
 ): NonNullable<Mir.MirFunction['initializationFlags']> =>
-  Object.freeze([...fn.initializationFlags].flatMap(([identity, flags]) => {
-    const root = fn.initializationFlagRoots.get(identity)
-    return root === undefined ? [] : [{ root, flags }]
-  }))
+  Object.freeze(
+    [...fn.initializationFlags].flatMap(([identity, flags]) => {
+      const root = fn.initializationFlagRoots.get(identity)
+      return root === undefined ? [] : [{ root, flags }]
+    }),
+  )
 
 /** Resolves canonical field and variant identities through the actual specialized owner type. */
 export const lowerOwnershipPath = (

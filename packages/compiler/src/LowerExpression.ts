@@ -1367,8 +1367,8 @@ function lowerRunExpression(
         const target =
           propagationType === undefined
             ? undefined
-            : Type.failureMembers(propagationType.type).findIndex((candidate) =>
-                Type.runtimeKey(candidate) === Type.runtimeKey(failure),
+            : Type.failureMembers(propagationType.type).findIndex(
+                (candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(failure),
               )
         return target === undefined || target < 0
           ? []
@@ -1838,8 +1838,8 @@ function lowerRunExpression(
       if (propagationType?._tag !== 'EffectOutcome' || propagationShape === undefined)
         return undefined
       const tagMappings = Type.failureMembers(recipe.type).flatMap((failure, source) => {
-        const target = Type.failureMembers(propagationType.type).findIndex((candidate) =>
-          Type.runtimeKey(candidate) === Type.runtimeKey(failure),
+        const target = Type.failureMembers(propagationType.type).findIndex(
+          (candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(failure),
         )
         return target < 0 ? [] : [Object.freeze({ source: source + 1, target: target + 1 })]
       })

@@ -62,3 +62,22 @@ pub fn main() -> i32 {
   let result: &i32 = run Effect.flatMap(mapped, continueWith)
   return result.*
 }`
+
+export const affineBorrowedStream = `import silk.option { Option }
+interface Stream<Item> { effect fn take<'call>(self: &'call mut Self) -> Option<Item> }
+struct Item<'data> { value: &'data mut i32 }
+impl<'data> Drop for Item<'data> { fn drop(self: &mut Item<'data>) -> () { self.value.* = 42 return () } }
+struct OnceStream<'data> { pending: Option<Item<'data>> }
+impl<'data> Stream<Item<'data>> for OnceStream<'data> {
+  effect fn take<'call>(self: &'call mut OnceStream<'data>) -> Option<Item<'data>> {
+    return Intrinsic.replace(self.pending, Option.none<Item<'data>>())
+  }
+}
+pub fn main() -> i32 {
+  let mut value = 0
+  let mut stream = OnceStream { pending: Option.some(Item { value: &mut value }) }
+  let item = run Stream.take(&mut stream)
+  drop stream
+  drop item
+  return value
+}`

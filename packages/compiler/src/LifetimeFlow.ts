@@ -275,8 +275,11 @@ export const analyze = (
     if (sliceIndex?._tag === 'SliceIndex') {
       constrain(sliceIndex.slice.lifetime, lifetime)
       origins.set(Lifetime.key(lifetime), {
-        lifetime, root: rootSite(source), path: source.path,
-        parent: sliceIndex.slice.lifetime, span,
+        lifetime,
+        root: rootSite(source),
+        path: source.path,
+        parent: sliceIndex.slice.lifetime,
+        span,
       })
       return
     }

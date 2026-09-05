@@ -7,7 +7,6 @@ import { concreteCallableIdentity, exactCallableOf, executableSites } from './Ca
 import * as DeclarationCollection from './DeclarationCollection.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as DeclarationLifetime from './DeclarationLifetime.js'
-import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as DeclarationResolution from './DeclarationResolution.js'
 import * as Diagnostic from './Diagnostic.js'
 import type {

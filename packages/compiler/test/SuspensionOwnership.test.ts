@@ -1,3 +1,4 @@
+import { unreachable } from './support/raise.js'
 import { partialSuspension } from './support/partialSuspension.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -226,15 +227,46 @@ pub fn main() -> i32 { let first = run partial() let second = run conditional(tr
     const program = Analysis.loweredMir(self)
     assert.deepEqual(MirVerification.verify(program), [])
     const plan = plansFor(available(self), 'partial').at(0)
-    const owner = plan?.slots.find((slot) => slot.type._tag === 'Nominal' && slot.type.type.name === 'Pair')
-    assert.deepEqual(owner?.initialization?.state.children.map((child) => ({ selector: child.selector, initialization: child.state.initialization })),
-      [{ selector: { _tag: 'Field', ordinal: 0 }, initialization: 'Missing' }])
-    assert.deepEqual(plan?.failure.releases.find((release) => release.local.ordinal === owner?.local.ordinal)?.initialization, owner?.initialization)
+    const owner = plan?.slots.find(
+      (slot) => slot.type._tag === 'Nominal' && slot.type.type.name === 'Pair',
+    )
+    assert.deepEqual(
+      owner?.initialization?.state.children.map((child) => ({
+        selector: child.selector,
+        initialization: child.state.initialization,
+      })),
+      [{ selector: { _tag: 'Field', ordinal: 0 }, initialization: 'Missing' }],
+    )
+    assert.deepEqual(
+      plan?.failure.releases.find((release) => release.local.ordinal === owner?.local.ordinal)
+        ?.initialization,
+      owner?.initialization,
+    )
     const conditional = plansFor(available(self), 'conditional').at(0)
-    const partial = conditional?.slots.find((slot) => slot.initialization?.state.children.some((child) => child.state.initialization === 'Maybe'))
+    const partial = conditional?.slots.find((slot) =>
+      slot.initialization?.state.children.some((child) => child.state.initialization === 'Maybe'),
+    )
     assert.isDefined(partial)
     assert.lengthOf(partial?.initialization?.flags ?? [], 1)
-    assert.isTrue(partial?.initialization?.flags.every((flag) => conditional?.slots.some((slot) => slot.local.ordinal === flag.local.ordinal && slot.type._tag === 'bool')))
+    assert.isTrue(
+      partial?.initialization?.flags.every((flag) =>
+        conditional?.slots.some(
+          (slot) => slot.local.ordinal === flag.local.ordinal && slot.type._tag === 'bool',
+        ),
+      ),
+    )
+    const missingRead = source.replace(
+      'return owner.right.value + result',
+      'return owner.left.value + result',
+    )
+    const rejected = yield* snapshot(missingRead)
+    assert.deepEqual(
+      Analysis.diagnostics(rejected).map((d) => ({
+        code: d.code,
+        span: missingRead.slice(d.span.start, d.span.end).trim(),
+      })),
+      [{ code: 'OWN0001', span: 'owner.left.value' }],
+    )
   }),
 )
 
@@ -246,31 +278,57 @@ it.effect('retains conditional owners inside independently cancellable frames', 
     assert.deepEqual(MirVerification.verify(program), [])
     const corrupted = {
       ...program,
-      functions: program.functions.map((fn) => fn.suspension === undefined ? fn : ({
-        ...fn,
-        suspension: { ...fn.suspension, regions: fn.suspension.regions.map((region) =>
-          region._tag !== 'RunSuspendableEffectRegion' || region.relay.state === undefined ? region : ({
-            ...region,
-            relay: { ...region.relay, state: { ...region.relay.state,
-              slots: region.relay.state.slots.map((slot) => ({ ...slot, initialization: undefined })),
-            } },
-          })),
-        },
-      })),
+      functions: program.functions.map((fn) =>
+        fn.suspension === undefined
+          ? fn
+          : {
+              ...fn,
+              suspension: {
+                ...fn.suspension,
+                regions: fn.suspension.regions.map((region) =>
+                  region._tag !== 'RunSuspendableEffectRegion' || region.relay.state === undefined
+                    ? region
+                    : {
+                        ...region,
+                        relay: {
+                          ...region.relay,
+                          state: {
+                            ...region.relay.state,
+                            slots: region.relay.state.slots.map((slot) => ({
+                              ...slot,
+                              initialization: undefined,
+                            })),
+                          },
+                        },
+                      },
+                ),
+              },
+            },
+      ),
     }
-    assert.isTrue(MirVerification.verify(corrupted).some((violation) => violation.rule === 'InvalidCoroutineFrame'))
+    assert.isTrue(
+      MirVerification.verify(corrupted).some(
+        (violation) => violation.rule === 'InvalidCoroutineFrame',
+      ),
+    )
+    const frames = program.coroutineFrames ?? unreachable('expected coroutine frame layouts')
     const lostPayloadFlags = {
       ...program,
-      coroutineFrames: program.coroutineFrames === undefined ? undefined : {
-        ...program.coroutineFrames,
-        entries: program.coroutineFrames.entries.map((entry) => ({ ...entry,
-          states: entry.states.map((state) => ({ ...state,
+      coroutineFrames: {
+        ...frames,
+        entries: frames.entries.map((entry) => ({
+          ...entry,
+          states: entry.states.map((state) => ({
+            ...state,
             payload: state.payload.map((field) => ({ ...field, initialization: undefined })),
           })),
         })),
       },
     }
-    assert.isTrue(MirVerification.verify(lostPayloadFlags).some((violation) => violation.rule === 'InvalidCoroutineFrame'))
-
+    assert.isTrue(
+      MirVerification.verify(lostPayloadFlags).some(
+        (violation) => violation.rule === 'InvalidCoroutineFrame',
+      ),
+    )
   }),
 )

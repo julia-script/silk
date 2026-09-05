@@ -246,12 +246,17 @@ const operationClassification = (
     Mir.Operation,
     { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' | 'CloseEffectEntry' }
   >,
-): ProvisionalMir.Classification =>
-  operation._tag === 'CloseEffectEntry'
-    ? ProvisionalMir.classificationOfRunner(provisional, operation.runner, operation.typeArguments)
-    : ProvisionalMir.isOriginOfRun(provisional, fn.instance, operation.provenance.span)
-      ? 'Suspendable'
-      : ProvisionalMir.classificationOfRun(provisional, fn.instance, operation.provenance.span)
+): ProvisionalMir.Classification => {
+  if (operation._tag === 'CloseEffectEntry')
+    return ProvisionalMir.classificationOfRunner(
+      provisional,
+      operation.runner,
+      operation.typeArguments,
+    )
+  if (ProvisionalMir.isOriginOfRun(provisional, fn.instance, operation.provenance.span))
+    return 'Suspendable'
+  return ProvisionalMir.classificationOfRun(provisional, fn.instance, operation.provenance.span)
+}
 
 /** Applies normalization within every explicit execution without flattening its control flow. */
 const mapRegions = (

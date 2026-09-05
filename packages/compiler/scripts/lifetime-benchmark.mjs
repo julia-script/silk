@@ -43,41 +43,62 @@ const sumWork = (values) => {
 
 const generators = {
   effectComposition: (size, invalid = false) => ({
-    dimensions: { compositionDepth: size }, invalid,
+    dimensions: { compositionDepth: size },
+    invalid,
     source: `effect fn step0<'a>(value: &'a i32) -> &'a i32 { return value }
-${range(size).map((i) => `effect fn step${i + 1}<'a>(value: &'a i32) -> &'a i32 { return run step${i}(value) }`).join('\n')}
+${range(size)
+  .map(
+    (i) => `effect fn step${i + 1}<'a>(value: &'a i32) -> &'a i32 { return run step${i}(value) }`,
+  )
+  .join('\n')}
 pub fn main() -> i32 { let value = 42 let result = run step${size}(&value) ${invalid ? 'drop value' : ''} return result.* }`,
   }),
   effectCallbacks: (size, invalid = false) => ({
-    dimensions: { callbacks: size, binderWidth: size }, invalid,
+    dimensions: { callbackApplications: size, binderWidth: 1 },
+    invalid,
     source: `import silk.effect { Effect }
 effect fn start<'a>(value: &'a i32) -> &'a i32 { return value }
 fn identity<'a>(value: &'a i32) -> &'a i32 { return value }
 pub fn main() -> i32 { let value = 42 let e0 = start(&value)
-${range(size).map((i) => `let e${i + 1} = Effect.map(e${i}, identity)`).join('\n')}
+${range(size)
+  .map((i) => `let e${i + 1} = Effect.map(e${i}, identity)`)
+  .join('\n')}
 let result = run e${size} ${invalid ? 'drop value' : ''} return result.* }`,
   }),
   effectProviders: (size, invalid = false) => ({
-    dimensions: { forwardingDepth: size, selectedProviders: 1 }, invalid,
+    dimensions: { forwardingDepth: size, selectedProviders: 1 },
+    invalid,
     source: `import silk.effect { Effect }
 service Clock { effect fn now() -> i32 ? &Clock }
 struct Fixed { value: i32 }
 impl Clock for Fixed { effect fn now(self: &Self) -> i32 { return self.value } }
 effect fn step0<'a>(value: &'a i32) -> &'a i32 ? &Clock { let tick = run Clock.now() return value }
-${range(size).map((i) => `effect fn step${i + 1}<'a>(value: &'a i32) -> &'a i32 ? &Clock { return run step${i}(value) }`).join('\n')}
+${range(size)
+  .map(
+    (i) =>
+      `effect fn step${i + 1}<'a>(value: &'a i32) -> &'a i32 ? &Clock { return run step${i}(value) }`,
+  )
+  .join('\n')}
 pub fn main() -> i32 { let value = 42 let provider = Fixed { value: 0 }
 let pending = Effect.provide(step${size}(&value), &provider) ${invalid ? 'drop provider' : ''}
 let result = run pending return result.* }`,
   }),
   partialSuspension: (size, invalid = false) => ({
-    dimensions: { conditionalFields: size, suspensionPoints: 1 }, invalid,
+    dimensions: { conditionalFields: size, suspensionPoints: 1 },
+    invalid,
     source: `struct Token { value: i32 }
 impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
-struct Record { ${range(size).map((i) => `f${i}: Token`).join(' ')} }
+struct Record { ${range(size)
+      .map((i) => `f${i}: Token`)
+      .join(' ')} }
 effect fn delayed(value: i32) -> i32 { return run Intrinsic.suspendEffect(effect { return value }) }
 effect fn body(flag: bool) -> i32 {
-let record = Record { ${range(size).map((i) => `f${i}: Token { value: ${i} }`).join(', ')} }
-${range(size).map((i) => `if flag { let taken${i} = move record.f${i} drop taken${i} }`).join('\n')}
+let record = Record { ${range(size)
+      .map((i) => `f${i}: Token { value: ${i} }`)
+      .join(', ')} }
+${range(size)
+  .map((i) => `if flag { let taken${i} = move record.f${i} drop taken${i} }`)
+  .join('\n')}
 let result = run delayed(42) ${invalid ? 'let missing = record.f0.value' : ''} drop record return result }
 pub fn main() -> i32 { return run body(true) }`,
   }),
@@ -437,27 +458,40 @@ const checkSource = Effect.fnUntraced(
     const result = observe(project, root, duration)
     let realization
     if (process.argv.includes('--verify-codegen')) {
-      const realized = yield* Analysis.ofSourceRealized(root, bytes(input.source), 'x86_64-unknown-linux-gnu')
+      const realized = yield* Analysis.ofSourceRealized(
+        root,
+        bytes(input.source),
+        'x86_64-unknown-linux-gnu',
+      )
       const diagnostics = diagnosticObservations(Analysis.diagnostics(realized))
       const mir = realized.mir._tag === 'Available' ? realized.mir.value : undefined
       const profiles = []
       for (const mode of ['debug', 'release']) {
-        profiles.push(mir === undefined || diagnostics.length > 0
-          ? { mode, accepted: false, diagnostics }
-          : yield* Analysis.codegen(realized, { mode }).pipe(Effect.match({
-            onFailure: (error) => ({ mode, accepted: false, error: String(error) }),
-            onSuccess: () => ({ mode, accepted: true }),
-          })))
+        profiles.push(
+          mir === undefined || diagnostics.length > 0
+            ? { mode, accepted: false, diagnostics }
+            : yield* Analysis.codegen(realized, { mode }).pipe(
+                Effect.match({
+                  onFailure: (error) => ({ mode, accepted: false, error: String(error) }),
+                  onSuccess: () => ({ mode, accepted: true }),
+                }),
+              ),
+        )
       }
       realization = {
         instances: realized.instances.instances.length,
         phases: realized.report,
         mirViolations: mir === undefined ? [] : MirVerification.verify(mir),
-        frameSlots: mir?.functions.flatMap((fn) => fn.suspension?.frame?.states ?? []).map((state) => ({
-          slots: state.slots.length,
-          conditionalFlags: state.slots.reduce((sum, slot) => sum + (slot.initialization?.flags.length ?? 0), 0),
-          cleanupReleases: state.failure.releases.length,
-        })),
+        frameSlots: mir?.functions
+          .flatMap((fn) => fn.suspension?.frame?.states ?? [])
+          .map((state) => ({
+            slots: state.slots.length,
+            conditionalFlags: state.slots.reduce(
+              (sum, slot) => sum + (slot.initialization?.flags.length ?? 0),
+              0,
+            ),
+            cleanupReleases: state.failure.releases.length,
+          })),
         profiles,
         verdictsAgree: profiles.every((profile) => profile.accepted === !input.invalid),
       }
@@ -808,10 +842,14 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
     return yield* new BenchmarkError({ message: 'sizes must be integers from 2 through 128' })
   const residualOnly = process.argv.includes('--residual-only')
   const effectOutcomes = process.argv.includes('--effect-outcomes')
-  const families = process.argv
-    .find((argument) => argument.startsWith('--families='))
-    ?.slice('--families='.length)
-    .split(',') ?? (effectOutcomes ? ['effectComposition', 'effectCallbacks', 'effectProviders', 'partialSuspension'] : undefined)
+  const families =
+    process.argv
+      .find((argument) => argument.startsWith('--families='))
+      ?.slice('--families='.length)
+      .split(',') ??
+    (effectOutcomes
+      ? ['effectComposition', 'effectCallbacks', 'effectProviders', 'partialSuspension']
+      : undefined)
   if (families?.some((family) => !(family in generators)))
     return yield* new BenchmarkError({ message: 'families must name source workload generators' })
   const results = []
@@ -824,7 +862,16 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
     for (const [family, generate] of Object.entries(generators))
       if (families === undefined || families.includes(family))
         results.push(yield* checkSource(family, size, generate(size)))
-    for (const family of ['loans', 'joins', 'exclusiveChains', 'exclusiveReplacements', 'effectComposition', 'effectCallbacks', 'effectProviders', 'partialSuspension'])
+    for (const family of [
+      'loans',
+      'joins',
+      'exclusiveChains',
+      'exclusiveReplacements',
+      'effectComposition',
+      'effectCallbacks',
+      'effectProviders',
+      'partialSuspension',
+    ])
       if (families === undefined || families.includes(family))
         results.push(yield* checkSource(`${family}-invalid`, size, generators[family](size, true)))
     if (families === undefined || effectOutcomes) {
@@ -840,15 +887,19 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
     catch: (cause) =>
       new BenchmarkError({ message: 'cannot read process resource observation', cause }),
   })
+  let pipeline = 'target-neutral frontend; no backend emission or optimizer'
+  if (residualOnly)
+    pipeline =
+      'frontend then target-selected residual queries; no MIR, backend emission or optimizer'
+  else if (process.argv.includes('--verify-codegen'))
+    pipeline = 'frontend, realized MIR, debug and release LLVM emission'
   yield* Console.log(
     yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown, { space: 2 }))({
       environment: {
         node: process.version,
         platform: process.platform,
         arch: process.arch,
-        pipeline: residualOnly
-          ? 'frontend then target-selected residual queries; no MIR, backend emission or optimizer'
-          : process.argv.includes('--verify-codegen') ? 'frontend, realized MIR, debug and release LLVM emission' : 'target-neutral frontend; no backend emission or optimizer',
+        pipeline,
         ...(residualOnly ? { target: Target.x8664UnknownLinuxGnu.id } : {}),
         memoryUnits: { heapUsed: 'bytes', processMaxRss: 'host resourceUsage maxRSS units' },
         ...memory,
@@ -873,7 +924,6 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
           ? result
           : {
               ...result,
-              realization: result.realization,
               resolution: compactResolution(result.resolution, process.argv.includes('--details')),
             },
       ),
