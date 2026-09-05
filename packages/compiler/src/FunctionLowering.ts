@@ -31,6 +31,7 @@ export class FunctionLowering {
     string,
     ReadonlyArray<{ readonly path: MovePath.Path; readonly local: Mir.LocalId }>
   >()
+  readonly initializationFlagRoots = new Map<string, Mir.LocalId>()
   initializationStarted = false
   readonly effectRecipes = new Map<number, Hir.Expression>()
   readonly callableRecipes = new Map<number, Hir.Expression>()

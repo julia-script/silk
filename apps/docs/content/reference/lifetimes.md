@@ -30,12 +30,11 @@ unions. Each containing type retains their lifetimes. A reference into a local o
 storage cannot become `'static`, and moving an owner together with such a reference does not make
 a valid self-referential value. Exclusive fields remain affine. A dependent user `Drop` keeps all
 observable borrowed components valid through cleanup, even without an explicit source read.
-Borrowed Effect success or failure outcomes remain unsupported in this layer.
+Effect successes and failures preserve these same lifetimes through run, propagation and recovery.
 
 **Diagnostics:** An unknown lifetime reports `SEM0209`. Duplicate, invalid, or unsupported binders
 report the corresponding declaration diagnostic, including `SEM0211` for invalid lifetime forms.
-A use beyond a referent's validity reports `OWN0019`. Effect outcome forms reserved
-for the next lifetime layer report `SEM0214`, including when selected through generic helpers.
+A use beyond a referent's validity reports `OWN0019`, including through generic Effect outcomes.
 
 **Evidence:** [lifetime requirements](../../../../openspec/specs/bootstrap-lifetimes/spec.md),
 [lifetime syntax tests](../../../../packages/compiler/test/Parser.test.ts),
@@ -147,8 +146,9 @@ success and failure types contain no views.
 
 **Boundary:** Nested quantified callable signatures and unconstrained higher-rank inference are
 unsupported. A callback cannot store a fresh invocation borrow into longer-lived surrounding
-storage. Environment lifetime annotations do not admit borrowed Effect outcomes or suspension of
-partial owners; those boundaries remain diagnosed until their cleanup and suspension rules exist.
+storage. An outcome may outlive its computation when it borrows independently valid external data;
+it cannot borrow storage destroyed with the computation. Suspended partial owners retain their
+initialized remainder and conditional cleanup flags.
 
 **Diagnostics:** Unsupported quantifier structure reports `SEM0211`. Callable incompatibility
 reports `SEM0076`; invalid retention uses the ordinary lifetime or ownership diagnostic.
@@ -183,8 +183,8 @@ committing installation. A typed failure cleans the actual remaining state, incl
 permitted moves, without rollback.
 
 **Boundary:** Raw storage callers still prove bounds, initializedness and aliasing. Hooks remain
-synchronous, infallible, non-allocating, requirement-free and non-escaping. Borrowed Effect outcomes
-and suspension with a partial owner remain gated. Fatal traps do not unwind source cleanup.
+synchronous, infallible, non-allocating, requirement-free and non-escaping. Suspension preserves
+partial state; cancellation cleans only initialized components. Fatal traps do not unwind source cleanup.
 
 **Diagnostics:** Conflicting access reports `OWN0010` or `OWN0011`; invalidation beyond validity
 reports `OWN0019`. Invalid replacement uses the ordinary type and lifetime diagnostics.

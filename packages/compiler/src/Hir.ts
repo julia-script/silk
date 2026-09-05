@@ -1099,7 +1099,12 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
       case 'EnumValue':
         return [expression.value]
       case 'Replace':
-        return [expression.value]
+        return [
+          ...expression.place.selectors.flatMap((selector) =>
+            selector._tag === 'Index' || selector._tag === 'SliceIndex' ? [selector.index] : [],
+          ),
+          expression.value,
+        ]
       case 'IndexPlace':
         return [expression.subject, expression.index]
       case 'SliceLength':

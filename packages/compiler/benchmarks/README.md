@@ -14,3 +14,7 @@ different performance profiles.
 
 The separate [lifetime and partial ownership benchmark](lifetimes.md) measures source proof
 work, sparse move paths, and incremental body-query reuse across independent growth families.
+
+The [borrowed Effect outcome workloads](lifetimes-outcomes.md) extend those measurements to
+generic composition, selected providers, and partial suspension, with debug/release emission
+verdicts and actual retained frame flags.

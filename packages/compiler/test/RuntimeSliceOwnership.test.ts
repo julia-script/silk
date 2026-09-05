@@ -1,3 +1,9 @@
+import {
+  borrowedBox,
+  borrowedStream,
+  borrowedFailure,
+  affineBorrowedStream,
+} from './support/borrowedOutcomes.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -17,6 +23,230 @@ const ascii = (value: string): Uint8Array =>
 
 const snapshot = (source: string) => Analysis.ofSourceRealized('slices/Ownership', ascii(source))
 const analyze = (source: string) => Analysis.ofSource('slices/Ownership', ascii(source))
+
+it.effect('constructs ordinary boxes with externally borrowed elements', () =>
+  Effect.gen(function* () {
+    const source = borrowedBox
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const invalid = yield* analyze(
+      source.replace('  let result = Box.into', '  drop value\n  let result = Box.into'),
+    )
+    assert.include(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      'OWN0019',
+    )
+  }),
+)
+
+it.effect('implements fixed externally borrowed stream items with fresh operation receivers', () =>
+  Effect.gen(function* () {
+    const source = borrowedStream
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const invalid = yield* analyze(source.replace('  drop stream', '  drop values\n  drop stream'))
+    assert.include(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      'OWN0019',
+    )
+  }),
+)
+
+it.effect('preserves provided environment loans independently of external outcome loans', () =>
+  Effect.gen(function* () {
+    const source = `import silk.effect { Effect }
+service Source { effect fn read<'data>(value: &'data i32) -> &'data i32 ? &Source }
+struct Fixed { count: i32 }
+impl Source for Fixed {
+  effect fn read<'data>(self: &Fixed, value: &'data i32) -> &'data i32 { return value }
+}
+effect fn read<'data>(proof: &'data i32) -> &'data i32 ? &Source { return run Source.read(proof) }
+pub fn main() -> i32 {
+  let value = 42
+  let provider = Fixed { count: 0 }
+  let pending = Effect.provide(read(&value), &provider)
+  let result = run pending
+  drop pending
+  drop provider
+  return result.*
+}`
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const invalid = yield* analyze(
+      source
+        .replace('  let result = run pending', '  drop provider\n  let result = run pending')
+        .replace('  drop pending\n  drop provider', '  drop pending'),
+    )
+    assert.include(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      'OWN0019',
+    )
+  }),
+)
+
+it.effect('transfers affine borrowed items out of an ordinary owning stream', () =>
+  Effect.gen(function* () {
+    const source = affineBorrowedStream
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const invalid = yield* analyze(source.replace('  drop item', '  value = 1\n  drop item'))
+    assert.isTrue(
+      Analysis.diagnostics(invalid).some((diagnostic) =>
+        ['OWN0010', 'OWN0011', 'OWN0019'].includes(diagnostic.code),
+      ),
+    )
+  }),
+)
+
+it.effect('copies fixed stream items while retaining their nested external borrow', () =>
+  Effect.gen(function* () {
+    const source = `interface Stream<Item> { effect fn take<'call>(self: &'call mut Self) -> Item }
+struct View<'data> { value: &'data i32 }
+impl<'data> Copy for View<'data> {}
+struct Repeated<'data> { item: View<'data> }
+impl<'data> Stream<View<'data>> for Repeated<'data> {
+  effect fn take<'call>(self: &'call mut Repeated<'data>) -> View<'data> { return self.item }
+}
+pub fn main() -> i32 {
+  let value = 21
+  let mut stream = Repeated { item: View { value: &value } }
+  let first = run Stream.take(&mut stream)
+  let copied = first
+  let second = run Stream.take(&mut stream)
+  drop stream
+  drop first
+  return copied.value.* + second.value.*
+}`
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const invalid = yield* analyze(source.replace('  drop first', '  drop value\n  drop first'))
+    assert.include(
+      Analysis.diagnostics(invalid).map((d) => d.code),
+      'OWN0019',
+    )
+  }),
+)
+
+it.effect('rejects fixed-item lending from receiver-owned scratch', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`import silk.option { Option }
+interface Stream<Item> { effect fn take<'call>(self: &'call mut Self) -> Option<Item> }
+struct Scratch { value: i32 }
+impl<'data> Stream<&'data i32> for Scratch {
+  effect fn take<'call>(self: &'call mut Scratch) -> Option<&'data i32> {
+    return Option.some(&self.value)
+  }
+}
+pub fn main() -> i32 { return 0 }`)
+    assert.include(
+      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
+      'SEM0212',
+    )
+  }),
+)
+
+it.effect('retains reusable exclusive captures between borrowed-outcome runs', () =>
+  Effect.gen(function* () {
+    const source = `struct Holder<'data> { value: &'data i32 count: i32 }
+effect fn take<'call, 'data>(self: &'call mut Holder<'data>) -> &'data i32 {
+  self.count = self.count + 1 return self.value
+}
+pub fn main() -> i32 {
+  let value = 42
+  let mut holder = Holder { value: &value, count: 0 }
+  let pending = take(&mut holder)
+  let first = run pending
+  let second = run pending
+  drop pending
+  holder.count = 3
+  return first.* + second.*
+}`
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const invalid = yield* analyze(
+      source.replace('  let second =', '  holder.count = 4\n  let second ='),
+    )
+    assert.isTrue(
+      Analysis.diagnostics(invalid).some((diagnostic) =>
+        ['OWN0010', 'OWN0011', 'OWN0019'].includes(diagnostic.code),
+      ),
+    )
+  }),
+)
+
+it.effect('preserves external Effect success dependencies after temporary receiver release', () =>
+  Effect.gen(function* () {
+    const source = `struct Holder<'data> { value: &'data i32 index: i32 }
+effect fn take<'call, 'data>(self: &'call mut Holder<'data>) -> &'data i32 {
+  self.index = self.index + 1
+  return self.value
+}
+pub fn main() -> i32 {
+  let value = 21
+  let mut holder = Holder { value: &value, index: 0 }
+  let first = run take(&mut holder)
+  let second = run take(&mut holder)
+  drop holder
+  return first.* + second.*
+}`
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const invalid = yield* analyze(source.replace('  drop holder', '  drop value\n  drop holder'))
+    assert.include(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      'OWN0019',
+    )
+  }),
+)
+
+it.effect('rejects Effect outcomes borrowing destroyed local or captured owner storage', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`struct Owner { value: i32 }
+effect fn local<'a>() -> &'a i32 { let value = 1 return &value }
+effect fn captured<'a>(owner: Owner) -> &'a i32 { return &owner.value }
+effect fn failure<'a>() -> i32 ! &'a i32 { let value = 1 fail &value }
+pub fn main() -> i32 { return 0 }`)
+    const diagnostics = Analysis.diagnostics(self)
+    for (const name of ['local', 'captured', 'failure']) {
+      const fn =
+        Analysis.ownershipOf(self, 'slices/Ownership')?.functions.find(
+          (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === name,
+        ) ?? unreachable(name)
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === 'OWN0019' &&
+            diagnostic.span.start >= fn.declaration.syntax.span.start &&
+            diagnostic.span.end <= fn.declaration.syntax.span.end,
+        ),
+        name,
+      )
+    }
+  }),
+)
+
+it.effect('propagates nested borrowed failures through ordinary recovery', () =>
+  Effect.gen(function* () {
+    const source = borrowedFailure
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const invalid = yield* analyze(
+      source.replace('  return result.*', '  drop value\n  return result.*'),
+    )
+    assert.include(
+      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
+      'OWN0019',
+    )
+  }),
+)
 
 it.effect('retains dependent remainder cleanup after a non-suspending incoming failure', () =>
   Effect.gen(function* () {

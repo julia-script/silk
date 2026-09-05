@@ -16,7 +16,6 @@ import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
-import type * as SourceSpan from './SourceSpan.js'
 import * as SilkType from './Type.js'
 
 type Operation = Extract<
@@ -224,109 +223,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       }
       let selected =
         !descriptor && SilkType.isReference(rootSemantic) ? rootSemantic.target : rootSemantic
-      let staticOffset = 0
-      const dynamicOffsets: Array<{
-        readonly local: Mir.LocalId
-        readonly stride: number
-        readonly length: number
-        readonly span: SourceSpan.SourceSpan
-      }> = []
-      for (const selector of operation.selectors) {
-        const selectedLayout = Layout.entry(program.layout, selected)
-        if (selector._tag === 'FieldSelector') {
-          if (selectedLayout?.representation._tag !== 'Aggregate')
-            throw new RangeError('LLVM borrow field lost its aggregate layout')
-          const field = selectedLayout.representation.fields.find((candidate) =>
-            DeclarationFacts.sameFieldId(candidate.id, selector.field),
-          )
-          if (field === undefined) throw new RangeError('LLVM borrow field lost its field layout')
-          staticOffset += field.offset
-          selected = field.type
-          continue
-        }
-        if (
-          selector._tag !== 'ElementSelector' ||
-          selectedLayout?.representation._tag !== 'Repeated'
-        )
-          throw new RangeError('LLVM borrow element lost its repeated layout')
-        if (selector.index._tag === 'Proven') {
-          staticOffset += selector.index.value * selectedLayout.representation.stride
-        } else {
-          dynamicOffsets.push(
-            Object.freeze({
-              local: selector.index.local,
-              stride: selectedLayout.representation.stride,
-              length: selector.length,
-              span: selector.provenance.span,
-            }),
-          )
-        }
-        selected = selectedLayout.representation.element
-      }
-      let dynamicOffset: Value.Input | undefined
-      for (const [ordinal, offset] of dynamicOffsets.entries()) {
-        const index = NativeStorage.readScalar(nativeStorage, offset.local)
-        const length = yield* Constant.integerUnsigned(
-          builder,
-          usizeType ?? i32,
-          BigInt(offset.length),
-        )
-        trapBlock = yield* NativeTermination.trapBlock(
-          context.termination,
-          'index out of bounds',
-          offset.span,
-        )
-        const inBounds = yield* FunctionBody.integerCompare(
-          body,
-          'ult',
-          index,
-          length,
-          `borrow${checkOrdinal}_${ordinal}_in_bounds`,
-        )
-        yield* NativeDebug.locate(debug, offset.span, yield* Value.instruction(body, inBounds))
-        const continuation = yield* LlvmBlock.make(body, `borrow${checkOrdinal}_${ordinal}_ok`)
-        yield* FunctionBody.conditionalBranch(body, inBounds, continuation, trapBlock)
-        yield* LlvmBlock.setInsertionPoint(body, continuation)
-        const scaled = yield* FunctionBody.binary(
-          body,
-          'mul',
-          index,
-          yield* Constant.integerUnsigned(builder, usizeType ?? i32, BigInt(offset.stride)),
-          `borrow${operation.destination.ordinal}_${ordinal}_scaled`,
-        )
-        dynamicOffset =
-          dynamicOffset === undefined
-            ? scaled
-            : yield* FunctionBody.binary(
-                body,
-                'add',
-                dynamicOffset,
-                scaled,
-                `borrow${operation.destination.ordinal}_${ordinal}_offset`,
-              )
-      }
-      if (staticOffset !== 0) {
-        const constant = yield* Constant.integerUnsigned(
-          builder,
-          usizeType ?? i32,
-          BigInt(staticOffset),
-        )
-        dynamicOffset =
-          dynamicOffset === undefined
-            ? constant
-            : yield* FunctionBody.binary(
-                body,
-                'add',
-                dynamicOffset,
-                constant,
-                `borrow${operation.destination.ordinal}_static_offset`,
-              )
-      }
       let rootBase: Value.Input | undefined
       if (!descriptor && SilkType.isReference(rootSemantic)) {
         const address = NativeStorage.readLocal(nativeStorage, operation.root).at(0)
         if (address === undefined)
-          throw new RangeError('LLVM projected borrow lost its reference address')
+          throw new RangeError('LLVM rootBase borrow lost its reference address')
         rootBase = yield* FunctionBody.cast(
           body,
           'inttoptr',
@@ -339,16 +240,120 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         rootBase = nativeStorage.addressStorage.get(operation.root.ordinal)
       }
       if (rootBase === undefined) throw new RangeError('LLVM borrow formation lost its root')
-      const projected =
-        dynamicOffset === undefined
-          ? rootBase
-          : yield* NativeLanePointer.lanePointer(
+      let projected: Value.Input = rootBase
+      for (const [ordinal, selector] of operation.selectors.entries()) {
+        const selectedLayout = Layout.entry(program.layout, selected)
+        const tag = `borrow${operation.destination.ordinal}_${ordinal}`
+        if (selector._tag === 'FieldSelector') {
+          if (selectedLayout?.representation._tag !== 'Aggregate')
+            throw new RangeError('LLVM borrow field lost its aggregate layout')
+          const field = selectedLayout.representation.fields.find((candidate) =>
+            DeclarationFacts.sameFieldId(candidate.id, selector.field),
+          )
+          if (field === undefined) throw new RangeError('LLVM borrow field lost its field layout')
+          projected = yield* NativeLanePointer.lanePointer(
+            lanePointers,
+            body,
+            projected,
+            field.offset,
+            `${tag}_field`,
+          )
+          selected = field.type
+          continue
+        }
+        let index: Value.Input
+        let length: Value.Input
+        let stride: number
+        if (selector._tag === 'SliceElementSelector') {
+          if (selectedLayout?.representation._tag !== 'Slice')
+            throw new RangeError('LLVM borrowed slice field lost its descriptor layout')
+          const descriptorLayout = selectedLayout.representation
+          // Crossing a slice descriptor changes the allocation being addressed. Prefix field
+          // offsets belong to the descriptor; suffix selectors belong to its backing elements.
+          const base: Value.Input = yield* FunctionBody.load(
+            body,
+            pointer,
+            projected,
+            `${tag}_data`,
+          )
+          length = yield* FunctionBody.load(
+            body,
+            usizeType ?? i32,
+            yield* NativeLanePointer.lanePointer(
               lanePointers,
               body,
-              rootBase,
-              dynamicOffset,
-              `borrow${operation.destination.ordinal}_projected`,
+              projected,
+              descriptorLayout.length.offset,
+              `${tag}_length_ptr`,
+            ),
+            `${tag}_length`,
+          )
+          projected = base
+          index = NativeStorage.readScalar(nativeStorage, selector.index)
+          stride = descriptorLayout.stride
+          selected = descriptorLayout.element
+        } else {
+          if (
+            selector._tag !== 'ElementSelector' ||
+            selectedLayout?.representation._tag !== 'Repeated'
+          )
+            throw new RangeError('LLVM borrow element lost its repeated layout')
+          const repeated = selectedLayout.representation
+          selected = repeated.element
+          stride = repeated.stride
+          if (selector.index._tag === 'Proven') {
+            projected = yield* NativeLanePointer.lanePointer(
+              lanePointers,
+              body,
+              projected,
+              selector.index.value * stride,
+              `${tag}_element`,
             )
+            continue
+          }
+          index = NativeStorage.readScalar(nativeStorage, selector.index.local)
+          length = yield* Constant.integerUnsigned(
+            builder,
+            usizeType ?? i32,
+            BigInt(selector.length),
+          )
+        }
+        trapBlock = yield* NativeTermination.trapBlock(
+          context.termination,
+          'index out of bounds',
+          selector.provenance.span,
+        )
+        const inBounds = yield* FunctionBody.integerCompare(
+          body,
+          'ult',
+          index,
+          length,
+          `${tag}_in_bounds`,
+        )
+        yield* NativeDebug.locate(
+          debug,
+          selector.provenance.span,
+          yield* Value.instruction(body, inBounds),
+        )
+        const continuation = yield* LlvmBlock.make(body, `${tag}_ok`)
+        yield* FunctionBody.conditionalBranch(body, inBounds, continuation, trapBlock)
+        yield* LlvmBlock.setInsertionPoint(body, continuation)
+        const offset = yield* FunctionBody.binary(
+          body,
+          'mul',
+          index,
+          yield* Constant.integerUnsigned(builder, usizeType ?? i32, BigInt(stride)),
+          `${tag}_offset`,
+        )
+        projected = yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
+          projected,
+          offset,
+          `${tag}_element`,
+        )
+        checkOrdinal += 1
+      }
       if (operation.type._tag === 'Reference') {
         nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([projected]))
         break

@@ -14,6 +14,7 @@ import * as ResidualOwnership from '../dist/ResidualOwnership.js'
 import * as StaticValue from '../dist/StaticValue.js'
 import * as Target from '../dist/Target.js'
 import * as MovePath from '../dist/MovePath.js'
+import * as MirVerification from '../dist/MirVerification.js'
 import * as NominalVariance from '../dist/NominalVariance.js'
 import * as Ownership from '../dist/Ownership.js'
 import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
@@ -41,6 +42,67 @@ const sumWork = (values) => {
 }
 
 const generators = {
+  effectComposition: (size, invalid = false) => ({
+    dimensions: { compositionDepth: size },
+    invalid,
+    source: `effect fn step0<'a>(value: &'a i32) -> &'a i32 { return value }
+${range(size)
+  .map(
+    (i) => `effect fn step${i + 1}<'a>(value: &'a i32) -> &'a i32 { return run step${i}(value) }`,
+  )
+  .join('\n')}
+pub fn main() -> i32 { let value = 42 let result = run step${size}(&value) ${invalid ? 'drop value' : ''} return result.* }`,
+  }),
+  effectCallbacks: (size, invalid = false) => ({
+    dimensions: { callbackApplications: size, binderWidth: 1 },
+    invalid,
+    source: `import silk.effect { Effect }
+effect fn start<'a>(value: &'a i32) -> &'a i32 { return value }
+fn identity<'a>(value: &'a i32) -> &'a i32 { return value }
+pub fn main() -> i32 { let value = 42 let e0 = start(&value)
+${range(size)
+  .map((i) => `let e${i + 1} = Effect.map(e${i}, identity)`)
+  .join('\n')}
+let result = run e${size} ${invalid ? 'drop value' : ''} return result.* }`,
+  }),
+  effectProviders: (size, invalid = false) => ({
+    dimensions: { forwardingDepth: size, selectedProviders: 1 },
+    invalid,
+    source: `import silk.effect { Effect }
+service Clock { effect fn now() -> i32 ? &Clock }
+struct Fixed { value: i32 }
+impl Clock for Fixed { effect fn now(self: &Self) -> i32 { return self.value } }
+effect fn step0<'a>(value: &'a i32) -> &'a i32 ? &Clock { let tick = run Clock.now() return value }
+${range(size)
+  .map(
+    (i) =>
+      `effect fn step${i + 1}<'a>(value: &'a i32) -> &'a i32 ? &Clock { return run step${i}(value) }`,
+  )
+  .join('\n')}
+pub fn main() -> i32 { let value = 42 let provider = Fixed { value: 0 }
+let pending = Effect.provide(step${size}(&value), &provider) ${invalid ? 'drop provider' : ''}
+let result = run pending return result.* }`,
+  }),
+  partialSuspension: (size, invalid = false) => ({
+    dimensions: { conditionalFields: size, suspensionPoints: 1 },
+    invalid,
+    source: `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Record { ${range(size)
+      .map((i) => `f${i}: Token`)
+      .join(' ')} }
+effect fn delayed(value: i32) -> i32 { return run Intrinsic.suspendEffect(effect { return value }) }
+effect fn body(flag: bool) -> i32 {
+let record = Record { ${range(size)
+      .map((i) => `f${i}: Token { value: ${i} }`)
+      .join(', ')} }
+${range(size)
+  .map((i) => `if flag { let taken${i} = move record.f${i} drop taken${i} }`)
+  .join('\n')}
+let result = run delayed(42) ${invalid ? 'let missing = record.f0.value' : ''} drop record return result }
+pub fn main() -> i32 { return run body(true) }`,
+  }),
+
   exclusiveChains: (size, invalid = false) => ({
     dimensions: { exclusiveReborrowDepth: size, sharedChildCopies: 1 },
     invalid,
@@ -394,12 +456,53 @@ const checkSource = Effect.fnUntraced(
       ),
     )
     const result = observe(project, root, duration)
+    let realization
+    if (process.argv.includes('--verify-codegen')) {
+      const realized = yield* Analysis.ofSourceRealized(
+        root,
+        bytes(input.source),
+        'x86_64-unknown-linux-gnu',
+      )
+      const diagnostics = diagnosticObservations(Analysis.diagnostics(realized))
+      const mir = realized.mir._tag === 'Available' ? realized.mir.value : undefined
+      const profiles = []
+      for (const mode of ['debug', 'release']) {
+        profiles.push(
+          mir === undefined || diagnostics.length > 0
+            ? { mode, accepted: false, diagnostics }
+            : yield* Analysis.codegen(realized, { mode }).pipe(
+                Effect.match({
+                  onFailure: (error) => ({ mode, accepted: false, error: String(error) }),
+                  onSuccess: () => ({ mode, accepted: true }),
+                }),
+              ),
+        )
+      }
+      realization = {
+        instances: realized.instances.instances.length,
+        phases: realized.report,
+        mirViolations: mir === undefined ? [] : MirVerification.verify(mir),
+        frameSlots: mir?.functions
+          .flatMap((fn) => fn.suspension?.frame?.states ?? [])
+          .map((state) => ({
+            slots: state.slots.length,
+            conditionalFlags: state.slots.reduce(
+              (sum, slot) => sum + (slot.initialization?.flags.length ?? 0),
+              0,
+            ),
+            cleanupReleases: state.failure.releases.length,
+          })),
+        profiles,
+        verdictsAgree: profiles.every((profile) => profile.accepted === !input.invalid),
+      }
+    }
     return {
       family,
       size,
       dimensions: input.dimensions,
       sourceBytes: input.source.length,
       expectedInvalid: input.invalid ?? false,
+      realization,
       expectationMatched: result.diagnostics?.length > 0 === (input.invalid ?? false),
       ...result,
     }
@@ -407,13 +510,13 @@ const checkSource = Effect.fnUntraced(
 )
 
 const editWorkload = Effect.fnUntraced(
-  /** @param {number} size */ function* (size) {
-    const initialLeaf = `pub fn borrow<'a>(value: &'a i32) -> &'a i32 { return value }\nfn privateValue() -> i32 { return 1 }`
+  /** @param {number} size @param {boolean} effectful */ function* (size, effectful = false) {
+    const initialLeaf = `pub ${effectful ? 'effect ' : ''}fn borrow<'a>(value: &'a i32) -> &'a i32 { return value }\nfn privateValue() -> i32 { return 1 }`
     const roots = range(size).map((index) =>
       SourceFile.make(
         `growth/Client${index}`,
         bytes(
-          `import growth.Leaf\npub fn read<'a>(value: &'a i32) -> &'a i32 { return Leaf.borrow(value) }`,
+          `import growth.Leaf\npub ${effectful ? 'effect ' : ''}fn read<'a>(value: &'a i32) -> &'a i32 { return ${effectful ? 'run ' : ''}Leaf.borrow(value) }`,
         ),
       ),
     )
@@ -440,7 +543,7 @@ const editWorkload = Effect.fnUntraced(
             ? SourceFile.make(
                 root.id,
                 bytes(
-                  `import growth.Leaf\npub fn read<'a>(value: &'a i32) -> &'a i32 { return Leaf.borrow(value) }\nfn additional<'a>(value: &'a i32) -> &'a i32 { return Leaf.borrow(value) }`,
+                  `import growth.Leaf\npub ${effectful ? 'effect ' : ''}fn read<'a>(value: &'a i32) -> &'a i32 { return ${effectful ? 'run ' : ''}Leaf.borrow(value) }\n${effectful ? 'effect ' : ''}fn additional<'a>(value: &'a i32) -> &'a i32 { return ${effectful ? 'run ' : ''}Leaf.borrow(value) }`,
                 ),
               )
             : root,
@@ -467,7 +570,7 @@ const editWorkload = Effect.fnUntraced(
       if (stable === undefined) stable = project
       previous = project
       samples.push({
-        family: 'moduleFanout',
+        family: effectful ? 'effectModuleFanout' : 'moduleFanout',
         size,
         dimensions: { importingModules: size, revision },
         ...observe(project, currentRoots[0]?.id ?? '', duration),
@@ -738,10 +841,15 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
   if (sizes.some((size) => !Number.isSafeInteger(size) || size < 2 || size > 128))
     return yield* new BenchmarkError({ message: 'sizes must be integers from 2 through 128' })
   const residualOnly = process.argv.includes('--residual-only')
-  const families = process.argv
-    .find((argument) => argument.startsWith('--families='))
-    ?.slice('--families='.length)
-    .split(',')
+  const effectOutcomes = process.argv.includes('--effect-outcomes')
+  const families =
+    process.argv
+      .find((argument) => argument.startsWith('--families='))
+      ?.slice('--families='.length)
+      .split(',') ??
+    (effectOutcomes
+      ? ['effectComposition', 'effectCallbacks', 'effectProviders', 'partialSuspension']
+      : undefined)
   if (families?.some((family) => !(family in generators)))
     return yield* new BenchmarkError({ message: 'families must name source workload generators' })
   const results = []
@@ -754,12 +862,21 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
     for (const [family, generate] of Object.entries(generators))
       if (families === undefined || families.includes(family))
         results.push(yield* checkSource(family, size, generate(size)))
-    for (const family of ['loans', 'joins', 'exclusiveChains', 'exclusiveReplacements'])
+    for (const family of [
+      'loans',
+      'joins',
+      'exclusiveChains',
+      'exclusiveReplacements',
+      'effectComposition',
+      'effectCallbacks',
+      'effectProviders',
+      'partialSuspension',
+    ])
       if (families === undefined || families.includes(family))
         results.push(yield* checkSource(`${family}-invalid`, size, generators[family](size, true)))
-    if (families === undefined) {
+    if (families === undefined || effectOutcomes) {
       results.push(binderWorkload(size))
-      results.push(...(yield* editWorkload(size)))
+      results.push(...(yield* editWorkload(size, effectOutcomes)))
     }
   }
   const memory = yield* Effect.try({
@@ -770,15 +887,19 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
     catch: (cause) =>
       new BenchmarkError({ message: 'cannot read process resource observation', cause }),
   })
+  let pipeline = 'target-neutral frontend; no backend emission or optimizer'
+  if (residualOnly)
+    pipeline =
+      'frontend then target-selected residual queries; no MIR, backend emission or optimizer'
+  else if (process.argv.includes('--verify-codegen'))
+    pipeline = 'frontend, realized MIR, debug and release LLVM emission'
   yield* Console.log(
     yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown, { space: 2 }))({
       environment: {
         node: process.version,
         platform: process.platform,
         arch: process.arch,
-        pipeline: residualOnly
-          ? 'frontend then target-selected residual queries; no MIR, backend emission or optimizer'
-          : 'target-neutral frontend; no backend emission or optimizer',
+        pipeline,
         ...(residualOnly ? { target: Target.x8664UnknownLinuxGnu.id } : {}),
         memoryUnits: { heapUsed: 'bytes', processMaxRss: 'host resourceUsage maxRSS units' },
         ...memory,
@@ -790,12 +911,12 @@ const main = Effect.fn('LifetimeBenchmark.main')(function* () {
         comparisons:
           'Final source-body comparison contexts; anonymous preliminary analysis is not included.',
         conditionalPaths:
-          'Required conditional state paths; MIR flag construction is not executed in this frontend workload.',
+          'Required conditional state paths; --verify-codegen additionally reports realized frame flags and cleanup releases.',
         resolution:
           'Actual reachable-index name/path/associated/conformance discovery and explicitly observed selected-call provider loops, keyed by their initiating request. Intermediate discarded declaration indexes and unobserved standalone provider oracles are outside this report. Lifetime actors receive no resolver.',
         residualOwnership: residualOnly
           ? 'Actual source-proof hits, cache hits and checker executions; executedWork sums only new checks. Frontend elapsed time is separate. Ownership observations group exact declaration, reason and branch.'
-          : 'Not requested by this frontend-only workload.',
+          : 'With --verify-codegen, realization phases report actual residual body and ownership query work.',
       },
       resolutionExamples: resolutionExamples(results),
       results: results.map((result) =>

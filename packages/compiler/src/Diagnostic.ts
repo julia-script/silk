@@ -169,7 +169,6 @@ export const mutableEffectRecipeCode = 'SEM0068' as const
 /** Stable code for a non-concrete or non-nominal capability in a requirement row. */
 export const invalidRequirementTypeCode = 'SEM0070' as const
 export const unhandledEffectRequirementsCode = 'SEM0071' as const
-export const providerBackedFailureCode = 'SEM0073' as const
 export const invalidEffectProvisionCode = 'SEM0074' as const
 export const nonCallableApplicationCode = 'SEM0075' as const
 export const incompatibleCallableSignatureCode = 'SEM0076' as const
@@ -434,8 +433,7 @@ export const ambiguousLifetimeElisionCode = 'SEM0210' as const
 export const invalidLifetimeBinderCode = 'SEM0211' as const
 export const unsatisfiedLifetimeBoundCode = 'SEM0212' as const
 export const unsatisfiedTypeOutlivesCode = 'SEM0213' as const
-/** Stable code for lifetime storage requiring an unavailable ownership capability. */
-export const unsupportedLifetimeFeatureCode = 'SEM0214' as const
+/** A borrowed value is used beyond the validity of its referent. */
 export const expiredLifetimeCode = 'OWN0019' as const
 /** An owner cannot be preserved by the suspension frame at this run boundary. */
 export const invalidSuspensionOwnershipCode = 'OWN0020' as const
@@ -476,7 +474,6 @@ export type Code =
   | typeof invalidLifetimeBinderCode
   | typeof unsatisfiedLifetimeBoundCode
   | typeof unsatisfiedTypeOutlivesCode
-  | typeof unsupportedLifetimeFeatureCode
   | typeof expiredLifetimeCode
   | typeof invalidSuspensionOwnershipCode
   | typeof unsupportedBytesCode
@@ -566,7 +563,6 @@ export type Code =
   | typeof mutableEffectRecipeCode
   | typeof invalidRequirementTypeCode
   | typeof unhandledEffectRequirementsCode
-  | typeof providerBackedFailureCode
   | typeof invalidEffectProvisionCode
   | typeof nonCallableApplicationCode
   | typeof incompatibleCallableSignatureCode
@@ -847,10 +843,6 @@ export type Reason =
   | { readonly _tag: 'UnsatisfiedLifetimeBound'; readonly longer: string; readonly shorter: string }
   | { readonly _tag: 'UnsatisfiedTypeOutlives'; readonly type: string; readonly lifetime: string }
   | {
-      readonly _tag: 'UnsupportedLifetimeFeature'
-      readonly feature: 'EffectOutcome'
-    }
-  | {
       readonly _tag: 'IntegerOutOfRange'
       readonly spelling: string
       readonly maximum: 2147483647
@@ -1018,7 +1010,6 @@ export type Reason =
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
   | { readonly _tag: 'UnhandledEffectRequirements'; readonly requirements: ReadonlyArray<string> }
-  | { readonly _tag: 'ProviderBackedFailure'; readonly type: string }
   | { readonly _tag: 'InvalidEffectProvision'; readonly detail: string }
   | {
       readonly _tag: 'WordLiteralOutOfRange'
@@ -3526,17 +3517,6 @@ export const unhandledEffectRequirements = (
     span,
   })
 
-export const providerBackedFailure = (type: string, span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: providerBackedFailureCode,
-    severity: 'error',
-    message: `Failure ${type} is not detached because it contains a lexical borrow`,
-    reason: Object.freeze({ _tag: 'ProviderBackedFailure', type }),
-    span,
-  })
-
 export const invalidEffectProvision = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
@@ -5710,22 +5690,6 @@ export const unsatisfiedTypeOutlives = (
     reason: Object.freeze({ _tag: 'UnsatisfiedTypeOutlives', type, lifetime }),
     span,
   })
-
-/** Rejects lifetime-bearing storage whose required ownership semantics are not yet available. */
-export const unsupportedLifetimeFeature = (
-  feature: 'EffectOutcome',
-  span: SourceSpan.SourceSpan,
-): Diagnostic => {
-  return Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: unsupportedLifetimeFeatureCode,
-    severity: 'error',
-    message: 'Effect success and failure values cannot yet retain non-static borrowed storage',
-    reason: Object.freeze({ _tag: 'UnsupportedLifetimeFeature', feature }),
-    span,
-  })
-}
 
 /** Locates a value use outside the finite validity of its borrowed storage. */
 export const expiredLifetime = (

@@ -1220,8 +1220,7 @@ export const laneOffset = (
       for (let slot = 0; slot <= selector.slot; slot += 1) {
         const type = shape.tree.payloadTypes.at(slot)
         if (type === undefined) return undefined
-        const scalar = entry(self, type)
-        if (scalar === undefined) return undefined
+        const scalar = scalarEntry(self.target, type)
         payloadOffset = alignUp(payloadOffset, scalar.alignment)
         if (slot === selector.slot) {
           return offset + candidate.representation.payloadOffset + payloadOffset
@@ -1245,8 +1244,7 @@ export const laneOffset = (
       for (let slot = 0; slot <= selector.slot; slot += 1) {
         const type = shape.tree.payloadTypes.at(slot)
         if (type === undefined) return undefined
-        const scalar = entry(self, type)
-        if (scalar === undefined) return undefined
+        const scalar = scalarEntry(self.target, type)
         payloadOffset = alignUp(payloadOffset, scalar.alignment)
         if (slot === selector.slot) {
           return offset + candidate.representation.payloadOffset + payloadOffset

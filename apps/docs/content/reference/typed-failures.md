@@ -52,18 +52,18 @@ lexical owner retains that owner's loan and is not detached merely because the v
 The complete ownership rules are defined under
 [ownership and borrowing](ownership-and-borrowing.md).
 
-## FAIL-001 — Any concrete detached value may be a typed failure
+## FAIL-001 — Any concrete lifetime-valid value may be a typed failure
 
 **Status:** Confirmed
 
 A failure payload does not need to conform to `Report`, `Error`, or any other marker interface. Its
 type does not need to be nominal. Built-in values, named structs, and other concrete value types may
-appear as an Effect's failure type when the particular payload is detached and can be transferred
-by value. An affine payload transfers ownership; a Copy payload copies its complete valid value.
+appear as an Effect's failure type when the particular payload remains valid through propagation,
+recovery and cleanup and can be transferred by value. An affine payload transfers ownership; a Copy payload copies its complete valid value.
 
 A generic value-kind parameter may stand for that ordinary failure type while its declaration is
 checked. If an inferred `effect {}` block executes `fail move problem` for `problem: E`, its failure
-channel retains symbolic `E`; each reachable specialization substitutes one concrete detached
+channel retains symbolic `E`; each reachable specialization substitutes one concrete lifetime-valid
 value type. The compiler does not discard the failure merely because it is not nominal yet.
 
 ```silk
@@ -87,22 +87,19 @@ The `Error` suffix follows the
 [language naming convention](style-guide.md#style-001--nominal-error-types-use-the-error-suffix).
 Neither the suffix nor the struct declarations opt the values into a special error system.
 
-**Boundary:** A borrowed value is not a valid failure payload because it is tied to a lexical
-lifetime that failure propagation may leave.
+**Boundary:** A failure may borrow external storage when its declared lifetime relationships keep
+that storage valid through propagation, recovery and cleanup. Nested fields and generic payloads
+retain those relationships. A failure cannot borrow a local or consumed capture destroyed before
+the payload's eventual use.
 
-```silk,ignore
-effect fn invalid(message: &string) -> i32 ! &string {
+```silk
+effect fn borrowed<'data>(message: &'data string) -> i32 ! &'data string {
   fail message
 }
 ```
 
-A value containing a borrow or provider-dependent storage is invalid for the same reason, even when
-its outer type is a named struct.
-
-**Diagnostics:** A failure type that is unresolved when executable code must be specialized
-receives a type diagnostic at the invalid failure channel and identifies the unresolved type. A
-payload that is not detached receives `SEM0073` at the failure origin or invalid contract and
-identifies the borrow or provider dependency that would escape.
+**Diagnostics:** An unresolved failure type receives the ordinary type diagnostic. Violated
+lifetime bounds report `SEM0212`; expired payload storage reports `OWN0019`.
 
 After a generic failure specializes successfully, an ordinary `run` that does not propagate or
 recover that concrete failure reports `SEM0066`, just as it does for a directly written nominal
@@ -110,9 +107,9 @@ failure.
 
 Using a non-nominal concrete type is valid and produces no diagnostic.
 
-**Current compiler:** Aligned. Failure channels accept detached ordinary types, including primitive
-types, type parameters, and structural unions, while `SEM0073` rejects payloads that would carry a
-lexical borrow out of scope.
+**Current compiler:** Failure channels preserve ordinary ownership and nested lifetimes through
+generic propagation and recovery. Detachment is checked separately at independent execution
+boundaries.
 
 **Evidence:** [confirmed stabilization decision](index.md),
 [current row validation](../../../../packages/compiler/test/DeclarationIndex.test.ts),

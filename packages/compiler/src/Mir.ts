@@ -1434,11 +1434,13 @@ export interface CoroutineFrameSlot {
   readonly local: LocalId
   readonly type: Type
   readonly access: CoroutineFrameAccess
+  readonly initialization?: DropOperation['initialization']
 }
 
 export interface CoroutineFrameRelease {
   readonly local: LocalId
   readonly cleanup: CleanupPlan.CleanupPlan
+  readonly initialization?: DropOperation['initialization']
 }
 
 export interface CoroutineFramePathPlan {
@@ -1480,6 +1482,7 @@ export interface CoroutineFramePayloadField {
   readonly local: LocalId
   readonly type: Type
   readonly access: CoroutineFrameAccess
+  readonly initialization?: DropOperation['initialization']
   readonly offset: number
   readonly size: number
   readonly alignment: number
@@ -1522,6 +1525,10 @@ export type RunSuspendableEffectRegion = Extract<
 >
 
 export interface MirFunction {
+  readonly initializationFlags?: ReadonlyArray<{
+    readonly root: LocalId
+    readonly flags: NonNullable<DropOperation['initialization']>['flags']
+  }>
   readonly _tag: 'MirFunction'
   readonly id: DeclarationFacts.CanonicalId
   readonly instance: Instances.InstanceKey

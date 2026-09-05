@@ -757,7 +757,41 @@ const dropFrames = Effect.fnUntraced(function* (
       Mir.matchesInstanceKey(fn, generated.layout.point.owner),
     )
     if (owner === undefined) throw new RangeError('LLVM execution frame cleanup lost its owner')
-    for (const field of CoroutineFrame.cleanupReleases(owner, generated.layout)) {
+    const releases = CoroutineFrame.cleanupReleases(owner, generated.layout)
+    const flags = new Set(
+      releases.flatMap(
+        (field) => field.initialization?.flags.map((flag) => flag.local.ordinal) ?? [],
+      ),
+    )
+    for (const ordinal of flags) {
+      const field = generated.layout.payload.find((field) => field.local.ordinal === ordinal)
+      if (field === undefined || field.type._tag !== 'bool')
+        throw new RangeError('LLVM cancellation lost a retained initialization flag')
+      const lanes = NativeType.packLanes(
+        program.layout.target,
+        NativeType.lanesFor(context.types, field.type),
+        field.offset,
+      )
+      const values = yield* Effect.forEach(
+        lanes.entries,
+        Effect.fnUntraced(function* (lane) {
+          return yield* FunctionBody.load(
+            body,
+            NativeType.laneType(context.types, lane.lane),
+            yield* NativeLanePointer.lanePointer(
+              lanePointers,
+              body,
+              head,
+              lane.offset,
+              `${tag}_flag${ordinal}_ptr`,
+            ),
+            `${tag}_flag${ordinal}`,
+          )
+        }),
+      )
+      context.storage.locals.set(ordinal, values)
+    }
+    for (const field of releases) {
       const values: Array<Value.Input> = []
       const packed = NativeType.packLanes(
         program.layout.target,
@@ -784,6 +818,8 @@ const dropFrames = Effect.fnUntraced(function* (
         field.access.cleanup,
         Object.freeze(values),
         `${tag}_frame_${ordinal}_slot${field.slot}`,
+        undefined,
+        field.initialization,
       )
     }
     yield* FunctionBody.branch(body, released)

@@ -106,7 +106,7 @@ MUST be rejected because it would leave borrowed storage partially initialized.
 
 ### Requirement: Ordinary functions return declared lifetime-bearing values
 
-An ordinary function SHALL return a shared or exclusive reference, slice, or shared borrowed aggregate when its declared lifetime relationships are satisfied by its body and concrete callers. Explicit relationships SHALL support multiple possible sources and independently named stored lifetimes; shared results SHALL derive only shared permission and exclusive results SHALL require exclusive permission. Structural callable and interface operation contracts SHALL carry those same relationships without requiring an exact implementation body at application. Effect success and failure borrows SHALL remain gated until outcome checking is admitted. References into invalid locals, expired temporaries, or by-value inline parameter storage SHALL be rejected; forwarding external data retained by a by-value wrapper SHALL remain valid.
+An ordinary function SHALL return a shared or exclusive reference, slice, or shared borrowed aggregate when its declared lifetime relationships are satisfied by its body and concrete callers. Explicit relationships SHALL support multiple possible sources and independently named stored lifetimes; shared results SHALL derive only shared permission and exclusive results SHALL require exclusive permission. Structural callable and interface operation contracts SHALL carry those same relationships without requiring an exact implementation body at application. Effect success and failure borrows SHALL retain the same declared lifetime relationships. References into invalid locals, expired temporaries, or by-value inline parameter storage SHALL be rejected; forwarding external data retained by a by-value wrapper SHALL remain valid.
 
 #### Scenario: Return a shared subview
 
@@ -160,7 +160,7 @@ An ordinary function SHALL return a shared or exclusive reference, slice, or sha
 
 ### Requirement: Returned views preserve validity through ordinary storage
 
-A returned view SHALL be usable in local bindings, compatible reborrows, shared borrowed aggregate storage, generic payloads, and valid callable or Effect captures. Every nested lifetime SHALL remain visible to compatibility, ownership, and escape checking. Retained uses MUST NOT exceed referent validity. Exclusive stored borrows SHALL preserve affine authority and dependent user Drop SHALL retain every observable payload lifetime through cleanup. Borrowed Effect success or failure values SHALL remain explicitly gated until their outcome proofs are implemented.
+A returned view SHALL be usable in local bindings, compatible reborrows, shared borrowed aggregate storage, generic payloads, and valid callable or Effect captures. Every nested lifetime SHALL remain visible to compatibility, ownership, and escape checking. Retained uses MUST NOT exceed referent validity. Exclusive stored borrows SHALL preserve affine authority and dependent user Drop SHALL retain every observable payload lifetime through cleanup. Borrowed Effect success and failure values SHALL preserve source validity through run, propagation, recovery and cleanup.
 
 #### Scenario: Use and release a returned local view
 

@@ -9234,7 +9234,10 @@ export function analyzeExpression(
       declaration.functionKind === 'Effect' ? declaration.failureRow.failures : Object.freeze([])
     const unhandled =
       (effect === undefined ? [] : Type.failureMembers(effect)).filter(
-        (failure) => !allowed.some((candidate) => Type.equals(candidate, failure)),
+        (failure) =>
+          !allowed.some((candidate) =>
+            typesCompatible(failure, candidate, resolution?.lifetimeCompatibility),
+          ),
       ) ?? []
     const symbolicFailuresUnhandled =
       effect !== undefined &&

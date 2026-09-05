@@ -1811,7 +1811,8 @@ the holder's own inline storage is invalid.
 **Boundary:** [Header elision](lifetimes.md) supplies omitted output lifetimes from an outer borrowed
 receiver, otherwise one top-level borrowed input. Two independent inputs without such a default
 require explicit output relationships. Bodies never choose a public relationship. Shared access
-cannot strengthen into exclusive access, and dependent Effect outcomes remain unsupported.
+cannot strengthen into exclusive access. Effect successes and failures obey these same declared
+relationships, including when a short receiver borrow returns a longer externally backed view.
 
 **Diagnostics:** Ambiguous output elision reports `SEM0210`. A violated declared lifetime bound
 reports `SEM0212`; a result retaining expired local or temporary storage reports `OWN0019`.

@@ -2339,43 +2339,6 @@ service Work { effect<'static> fn tick() -> i32 }`
   }),
 )
 
-it.effect('gates later lifetime storage features after resolving aliases and generic fields', () =>
-  Effect.gen(function* () {
-    const cases = [
-      [
-        "fn inspect<'a>(value: &'a i32) -> i32 { let pending = effect { return value } return 0 }",
-        'EffectOutcome',
-      ],
-      ["effect fn borrowed<'a>(value: &'a i32) -> &'a i32 { return value }", 'EffectOutcome'],
-      ["effect fn borrowed<'a>(value: string<'a>) -> string<'a> { return value }", 'EffectOutcome'],
-      [
-        "struct Problem<'a> { message: string<'a> }\neffect fn failBorrowed<'a>(problem: Problem<'a>) -> i32 ! Problem<'a> { fail move problem }",
-        'EffectOutcome',
-      ],
-    ] as const
-    for (const [source, feature] of cases) {
-      const snapshot = yield* Analysis.ofSource('admission', ascii(source))
-      const gated = Analysis.diagnostics(snapshot).filter(
-        (diagnostic) => diagnostic.code === 'SEM0214',
-      )
-      assert.isTrue(
-        gated.some(
-          (diagnostic) =>
-            diagnostic.reason?._tag === 'UnsupportedLifetimeFeature' &&
-            diagnostic.reason.feature === feature,
-        ),
-        source,
-      )
-      assert.isTrue(
-        gated.every(
-          (diagnostic) =>
-            diagnostic.span.sourceId === 'admission' && diagnostic.span.start < diagnostic.span.end,
-        ),
-      )
-    }
-  }),
-)
-
 it.effect(
   'keeps ordinary exclusive access, abstract Drop storage, and callable invocation outcomes admitted',
   () =>
@@ -2389,12 +2352,5 @@ fn invoke<'env>(callback: for<'a> fn<'env>(&'a i32) -> &'a i32) -> i32 { return 
 effect fn staticText() -> string<'static> { return "ready" }`
       const snapshot = yield* Analysis.ofSource('admission-valid', ascii(source))
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
-      const retained = [...snapshot.results.values()]
-        .flatMap((module) => module.functions)
-        .find(
-          (fn) =>
-            fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'retain',
-        )
-      assert.isTrue((retained?.lifetimeAdmission?.length ?? 0) > 0)
     }),
 )

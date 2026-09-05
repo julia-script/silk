@@ -231,7 +231,8 @@ export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
     operation.operator !== 'LessOrEqual' &&
     operation.operator !== 'GreaterThan' &&
     operation.operator !== 'GreaterOrEqual') ||
-  ((operation._tag === 'ReadPlace' ||
+  ((operation._tag === 'BeginLoan' ||
+    operation._tag === 'ReadPlace' ||
     operation._tag === 'CheckPlace' ||
     operation._tag === 'WritePlace') &&
     operation.selectors.some(

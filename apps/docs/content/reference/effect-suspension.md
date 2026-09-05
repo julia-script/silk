@@ -334,9 +334,12 @@ the referent nor permits overlapping mutation.
 
 **Boundary:** Suspension introduces no public `Pin` type or permission to move a borrowed referent.
 The compiler's private representation must adapt to source-valid borrows, not invalidate them.
-The current lifetime-bearing-values layer rejects suspension while an owner is partial, and
-rejects borrowed Effect outcomes. Environment annotations alone do not prove suspended remainder
-cleanup or cancellation; these are explicit unsupported boundaries.
+A suspended partial owner retains definite, missing and conditional component state. Conditional
+cleanup flags remain in the frame through resumption and cancellation. A moved child belongs to
+its destination; cancellation cleans only the former owner’s initialized remainder. Reinitialization
+commits installation and ownership state without an intervening suspension. Outcome lifetimes
+remain independent of the temporary receiver and environment, and every borrowed referent must
+survive its uses and cleanup.
 
 **Diagnostics:** Invalid duplication, movement, overlapping access, or escaping loans report the
 ordinary ownership and borrowing diagnostics at the responsible source operation.

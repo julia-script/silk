@@ -374,18 +374,15 @@ fn main() -> i32 {
     }),
 )
 
-it('rejects failure payloads that retain lexical borrows', () => {
+it('accepts failure payloads that retain declared lexical borrows', () => {
   const result = analyzeText(
     'effect://borrowed-failure',
-    `struct BorrowedError { message: &[i32] }
-effect fn risky(error: BorrowedError) -> i32 ! BorrowedError {
+    `struct BorrowedError<'a> { message: &'a [i32] }
+effect fn risky<'a>(error: BorrowedError<'a>) -> i32 ! BorrowedError<'a> {
   fail move error
 }`,
   )
-  assert.include(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0073',
-  )
+  assert.deepEqual(result.diagnostics, [])
 })
 
 it('accepts detached owned failure payloads', () => {
@@ -397,36 +394,27 @@ effect fn risky(error: OwnedError) -> i32 ! OwnedError {
   fail move error
 }`,
   )
-  assert.notInclude(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0073',
-  )
+  assert.deepEqual(result.diagnostics, [])
 })
 
 it('checks lexical borrows through nominal union failure payloads', () => {
   const dynamic = analyzeText(
     'effect://borrowed-union-failure',
-    `union BorrowedError { Value { message: string } }
-effect fn risky(message: string) -> never ! BorrowedError {
+    `union BorrowedError<'a> { Value { message: string<'a> } }
+effect fn risky<'a>(message: string<'a>) -> never ! BorrowedError<'a> {
   fail BorrowedError.Value { message: message }
 }`,
   )
-  assert.include(
-    dynamic.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0073',
-  )
+  assert.deepEqual(dynamic.diagnostics, [])
 
   const staticText = analyzeText(
     'effect://static-union-failure',
-    `union BorrowedError { Value { message: string } }
-effect fn risky() -> never ! BorrowedError {
+    `union BorrowedError<'a> { Value { message: string<'a> } }
+effect fn risky() -> never ! BorrowedError<'static> {
   fail BorrowedError.Value { message: "program lifetime" }
 }`,
   )
-  assert.notInclude(
-    staticText.diagnostics.map((diagnostic) => diagnostic.code),
-    'SEM0073',
-  )
+  assert.deepEqual(staticText.diagnostics, [])
 })
 
 it('subtracts a provided capability role from an Effect contract', () => {

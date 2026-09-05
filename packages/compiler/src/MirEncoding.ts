@@ -385,12 +385,12 @@ const suspensionLines = (fn: MirFunction): ReadonlyArray<string> => {
               `    descriptor outcome=${SilkType.encode(descriptor.outcome)} resume-success=${suspensionPointText(descriptor.success.resume.point)}:${descriptor.success.resume.path.toLowerCase()} resume-failure=${suspensionPointText(descriptor.failure.resume.point)}:${descriptor.failure.resume.path.toLowerCase()}`,
               ...descriptor.slots.map((slot) => {
                 if (slot.access._tag === 'Copy') {
-                  return `    slot ${slot.ordinal} ${localText(slot.local)} copy ${typeText(slot.type)}`
+                  return `    slot ${slot.ordinal} ${localText(slot.local)} copy ${typeText(slot.type)}${slot.initialization === undefined ? '' : ` initialized=${MovePath.encodeState(slot.initialization.state)} flags=${slot.initialization.flags.map((flag) => `${MovePath.key(flag.path)}:${localText(flag.local)}`).join(',')}`}`
                 }
                 if (slot.access._tag === 'BorrowedDependency') {
-                  return `    slot ${slot.ordinal} ${localText(slot.local)} borrow:${slot.access.access.toLowerCase()} root=${localText(slot.access.root)} ${typeText(slot.type)}`
+                  return `    slot ${slot.ordinal} ${localText(slot.local)} borrow:${slot.access.access.toLowerCase()} root=${localText(slot.access.root)} ${typeText(slot.type)}${slot.initialization === undefined ? '' : ` initialized=${MovePath.encodeState(slot.initialization.state)} flags=${slot.initialization.flags.map((flag) => `${MovePath.key(flag.path)}:${localText(flag.local)}`).join(',')}`}`
                 }
-                return `    slot ${slot.ordinal} ${localText(slot.local)} move:${slot.access.cleanup._tag} ${typeText(slot.type)}`
+                return `    slot ${slot.ordinal} ${localText(slot.local)} move:${slot.access.cleanup._tag} ${typeText(slot.type)}${slot.initialization === undefined ? '' : ` initialized=${MovePath.encodeState(slot.initialization.state)} flags=${slot.initialization.flags.map((flag) => `${MovePath.key(flag.path)}:${localText(flag.local)}`).join(',')}`}`
               }),
               continuationPathText('success', descriptor.success),
               continuationPathText('failure', descriptor.failure),

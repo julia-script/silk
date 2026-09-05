@@ -476,7 +476,7 @@ Every available reference or slice borrow SHALL create a compiler-only loan atta
 
 ### Requirement: Borrowed-view loans remain lexical and non-escaping
 
-Borrow requirements SHALL follow actual uses, transfer, copies, capture, and cleanup within a finite local control-flow domain. A returned view SHALL retain its source loans beyond its originating call whenever needed. Shared and exclusive references and slices SHALL be admitted in ordinary structs, unions, fixed arrays, generic wrappers, named tuples, and synthesized aggregates while preserving every nested semantic lifetime. Moving a holder SHALL transfer obligations and Copy SHALL duplicate dependents without detachment. Exclusive stored references SHALL remain affine, and dependent user Drop SHALL retain all observable payload lifetimes through cleanup. Borrowed Effect outcomes and suspension with partial owners SHALL remain rejected until their outcome and frame proofs are admitted. Lexically valid callable and Effect captures SHALL retain environment bounds immediately. No borrow SHALL outlive its referent or lose reborrow ancestry through abstraction.
+Borrow requirements SHALL follow actual uses, transfer, copies, capture, and cleanup within a finite local control-flow domain. A returned view SHALL retain its source loans beyond its originating call whenever needed. Shared and exclusive references and slices SHALL be admitted in ordinary structs, unions, fixed arrays, generic wrappers, named tuples, and synthesized aggregates while preserving every nested semantic lifetime. Moving a holder SHALL transfer obligations and Copy SHALL duplicate dependents without detachment. Exclusive stored references SHALL remain affine, and dependent user Drop SHALL retain all observable payload lifetimes through cleanup. Borrowed Effect outcomes SHALL preserve their complete lifetimes, and suspended partial owners SHALL preserve initialized state and exact remainder cleanup. Lexically valid callable and Effect captures SHALL retain environment bounds immediately. No borrow SHALL outlive its referent or lose reborrow ancestry through abstraction.
 
 #### Scenario: End a temporary loan after an ordinary call
 
@@ -601,8 +601,7 @@ handler. Cleanup SHALL occur exactly once for values in every region actually ex
 
 Every value admitted as an Effect failure type SHALL use its ordinary Copy, move, Drop, union-tag,
 and cleanup behavior. `fail`, propagation, selective recovery, whole-channel recovery, and re-fail
-SHALL transfer one ordinary payload without a row wrapper. A failure payload SHALL be detached and
-owned; a lexical or provider borrow that could escape SHALL be rejected by ordinary ownership.
+SHALL transfer one ordinary payload without a row wrapper. A failure payload SHALL preserve its complete lifetime-bearing type and ordinary ownership. Borrowed payloads SHALL be admitted only when their referents survive propagation, handlers, retry, unwind and cleanup. References to destroyed locals or consumed environment-owned storage SHALL be rejected.
 
 #### Scenario: Propagate an affine ordinary failure once
 
@@ -611,13 +610,18 @@ owned; a lexical or provider borrow that could escape SHALL be rejected by ordin
 
 #### Scenario: Reject an escaping borrowed failure
 
-- **WHEN** `fail` attempts to publish a lexical borrow as the Effect failure value
+- **WHEN** `fail` publishes a reference to an owner destroyed before the handler or later payload use
 - **THEN** the ordinary borrow-escape diagnostic rejects it before executable lowering
 
 #### Scenario: Recover a structural failure union
 
 - **WHEN** a handler receives one selected alternative from an ordinary failure union
 - **THEN** its pattern narrowing, moves, and cleanup use the same ownership rules as that union in any other value position
+
+#### Scenario: Forward external borrowed failures
+
+- **WHEN** a nested generic failure retains an external source valid through propagation and recovery
+- **THEN** the payload is admitted and its source loan remains live after the temporary computation ends
 
 ### Requirement: Ownership unifies Effect captures allocation and Drop
 
@@ -754,8 +758,23 @@ owned by both the running state and suspended state.
 
 #### Scenario: Reject an unverified partial suspension
 
+- **WHEN** a partial owner would cross suspension without a verified frame initialization, stable-placement or remainder-cleanup plan
+- **THEN** analysis rejects the suspension before executable lowering
+
+#### Scenario: Preserve partial suspension
+
 - **WHEN** a partial owner would remain live across a potentially suspending child call
-- **THEN** analysis rejects the suspension until frame initialization flags and remainder cleanup are supported; lifetime-bearing complete values retain their existing stable-location requirements
+- **THEN** the frame preserves definite, missing and conditional component state with live flag storage; resume cannot read missing components and cancellation cleans only the initialized remainder in established order
+
+#### Scenario: Cancel before restoration
+
+- **WHEN** a field moves to a destination before suspension and cancellation occurs before restoration
+- **THEN** the destination retains the transferred child and the frame cleans only its live remainder, retaining every referent through cleanup
+
+#### Scenario: Complete installation atomically
+
+- **WHEN** a moved component is reinitialized or replaced
+- **THEN** cleanup, installation and ownership-state update commit without suspension between them
 
 ### Requirement: Continuation cleanup preserves structured-exit semantics
 
