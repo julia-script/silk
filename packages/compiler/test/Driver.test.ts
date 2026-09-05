@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -362,79 +362,76 @@ it.effect('stops unsupported targets before MIR or native tools', () =>
   }),
 )
 
-it.effect('serves identical bitcode from the artifact cache without invoking the toolchain', () =>
+it.effect('reuses backend emission while denying native final-cache reads and writes', () =>
   Effect.gen(function* () {
-    const cacheDirectory = mkdtempSync(join(tmpdir(), 'silk-artifact-cache-'))
-    const cachingToolchain: NativeToolchain.Toolchain = Object.freeze({
-      _tag: 'Toolchain',
-      clang,
-      llvmAr: 'llvm-ar',
-      runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
-      artifactCache: NativeToolchain.makeDiskArtifactCache(cacheDirectory),
-    })
-    const source = 'pub fn main() -> i32 { return 42 }'
-    const first = yield* compileSource('cache-first', source, {
-      toolchain: cachingToolchain,
-      cache: true,
-    })
-    const second = yield* compileSource('cache-second', source, {
-      toolchain: cachingToolchain,
-      cache: true,
-    })
-    rmSync(cacheDirectory, { recursive: true, force: true })
-    assert.strictEqual(first._tag, 'Compiled')
-    assert.strictEqual(second._tag, 'Compiled')
-    if (first._tag !== 'Compiled' || second._tag !== 'Compiled') return
-    assert.strictEqual(
-      first.report.some((entry) => entry.phase === 'link'),
-      true,
+    const initial = yield* compileSource(
+      'old-native-cache-entry',
+      'pub fn main() -> i32 { return 42 }',
     )
-    assert.strictEqual(
-      second.report.some((entry) => entry.phase === 'artifact-cache'),
-      true,
-    )
-    assert.strictEqual(
-      second.report.some((entry) => entry.phase === 'object'),
-      false,
-    )
-    const run = spawnSync(second.path, [], { encoding: 'utf8' })
-    assert.strictEqual(run.status, 42)
-  }),
-)
-
-it.effect('treats a corrupted finalized-artifact cache entry as a miss', () =>
-  Effect.gen(function* () {
+    assert.strictEqual(initial._tag, 'Compiled')
+    if (initial._tag !== 'Compiled') return
+    const oldBytes = readFileSync(initial.path)
+    const entries = new Map<string, Uint8Array>()
+    const reads: Array<string> = []
     const writes: Array<string> = []
     const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
       _tag: 'ArtifactCache',
-      get: () => Effect.succeed(Uint8Array.from([0x7f, 0x45, 0x4c, 0x46])),
-      set: (key: string) =>
+      get: Effect.fnUntraced(function* (key: string) {
+        reads.push(key)
+        if (key.startsWith('backend-')) return entries.get(key)
+        // Supply a fully authenticated old entry for the requested incomplete key. Encoding
+        // through the real cache writer avoids mistaking envelope rejection for admission.
+        yield* NativeToolchain.writeArtifactCache(
+          {
+            _tag: 'ArtifactCache',
+            get: (seedKey: string) => Effect.sync(() => entries.get(seedKey)),
+            set: (seedKey: string, bytes: Uint8Array) =>
+              Effect.sync(() => {
+                entries.set(seedKey, bytes)
+              }),
+          },
+          key,
+          oldBytes,
+        )
+        return entries.get(key)
+      }),
+      set: (key: string, bytes: Uint8Array) =>
         Effect.sync(() => {
           writes.push(key)
+          entries.set(key, bytes)
         }),
     })
-    const outcome = yield* compileSource(
-      'corrupted-artifact-cache',
-      'pub fn main() -> i32 { return 42 }',
-      {
-        toolchain: Object.freeze({ ...toolchain, artifactCache }),
+    const cachingToolchain = Object.freeze({ ...toolchain, artifactCache })
+    const source = 'pub fn main() -> i32 { return 42 }'
+    for (const name of ['admission-first', 'admission-second']) {
+      const outcome = yield* compileSource(name, source, {
+        toolchain: cachingToolchain,
         cache: true,
-      },
+      })
+      assert.strictEqual(outcome._tag, 'Compiled')
+      if (outcome._tag !== 'Compiled') return
+      const phases = outcome.report.map((entry) => entry.phase)
+      assert.include(phases, 'link')
+      assert.notInclude(phases, 'artifact-cache')
+      if (name === 'admission-second') assert.include(phases, 'backend-cache')
+    }
+    const failed = yield* Effect.result(
+      compileSource('admission-missing-library', source, {
+        toolchain: cachingToolchain,
+        cache: true,
+        nativeLinkInputs: [NativeLinkInput.library('silk_missing_admission_fixture', 'Dynamic')],
+      }),
     )
-    assert.strictEqual(outcome._tag, 'Compiled')
-    if (outcome._tag !== 'Compiled') return
-    assert.strictEqual(
-      outcome.report.some((entry) => entry.phase === 'artifact-cache'),
-      false,
-    )
-    assert.strictEqual(
-      outcome.report.some((entry) => entry.phase === 'link'),
-      true,
-    )
-    assert.strictEqual(
-      writes.some((key) => key.endsWith('.bin')),
-      true,
-    )
+    assert.strictEqual(failed._tag, 'Failure')
+    if (failed._tag !== 'Failure') return
+    assert.strictEqual(failed.failure._tag, 'ToolchainError')
+    if (failed.failure._tag !== 'ToolchainError') return
+    assert.strictEqual(failed.failure.stage, 'link')
+    assert.strictEqual(failed.failure.reason._tag, 'LinkFailed')
+    assert.isNotEmpty(reads)
+    assert.isNotEmpty(writes)
+    assert.isTrue(reads.every((key) => key.startsWith('backend-')))
+    assert.isTrue(writes.every((key) => key.startsWith('backend-')))
   }),
 )
 
@@ -462,63 +459,6 @@ it.effect('reports a missing request-supplied object as linker input even when c
     assert.strictEqual(result.failure.reason.output, `missing linker input: ${missing}`)
     const args = result.failure.reason.planned.arguments
     assert.deepEqual(args.slice(args.indexOf(missing)), [missing, '-lc', '-lm', '-o', destination])
-  }),
-)
-
-it.effect('keys the artifact cache on request-supplied object bytes', () =>
-  Effect.gen(function* () {
-    const target = yield* NativeToolchain.hostTarget()
-    const cacheDirectory = mkdtempSync(join(tmpdir(), 'silk-native-object-cache-'))
-    const cachingToolchain: NativeToolchain.Toolchain = Object.freeze({
-      _tag: 'Toolchain',
-      clang,
-      llvmAr: 'llvm-ar',
-      runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
-      artifactCache: NativeToolchain.makeDiskArtifactCache(cacheDirectory),
-    })
-    const objectFor = (name: string, value: number) =>
-      NativeToolchain.withBuildScope(name, (scope) =>
-        Effect.gen(function* () {
-          const object = yield* NativeToolchain.compileCObject(
-            cachingToolchain,
-            scope,
-            target,
-            name,
-            `int silk_test_extra(void) { return ${value}; }\n`,
-          )
-          const path = join(destinationRoot, `${name}.o`)
-          writeFileSync(path, readFileSync(object.artifact.path))
-          return path
-        }),
-      )
-    const first = yield* objectFor('extra-one', 1)
-    const second = yield* objectFor('extra-two', 2)
-    const source = 'pub fn main() -> i32 { return 42 }'
-    const outcomes = []
-    for (const [name, object] of [
-      ['object-cache-first', first],
-      ['object-cache-again', first],
-      ['object-cache-changed', second],
-    ] as const) {
-      outcomes.push(
-        yield* compileSource(name, source, {
-          toolchain: cachingToolchain,
-          cache: true,
-          nativeLinkInputs: [NativeLinkInput.object(object)],
-        }),
-      )
-    }
-    rmSync(cacheDirectory, { recursive: true, force: true })
-    const phases = outcomes.map((outcome) => {
-      if (outcome._tag !== 'Compiled') return outcome._tag
-      return outcome.report.some((entry) => entry.phase === 'artifact-cache')
-        ? 'artifact-cache'
-        : 'link'
-    })
-    assert.deepEqual(phases, ['link', 'artifact-cache', 'link'])
-    const changed = outcomes[2]
-    if (changed?._tag !== 'Compiled') return
-    assert.strictEqual(spawnSync(changed.path, [], { encoding: 'utf8' }).status, 42)
   }),
 )
 
@@ -603,12 +543,12 @@ it.effect('selects the durable disk cache from SILK_NATIVE_CACHE_DIR by default'
           true,
         )
         assert.strictEqual(
-          second.report.some((entry) => entry.phase === 'artifact-cache'),
+          second.report.some((entry) => entry.phase === 'backend-cache'),
           true,
         )
         assert.strictEqual(
-          second.report.some((entry) => entry.phase === 'object'),
-          false,
+          second.report.some((entry) => entry.phase === 'link'),
+          true,
         )
         assert.deepEqual(readFileSync(second.path), readFileSync(first.path))
         const run = spawnSync(second.path, [], { encoding: 'utf8' })

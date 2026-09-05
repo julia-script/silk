@@ -16,6 +16,7 @@ import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Analysis from '../src/Analysis.js'
 import * as CoroutineRuntime from '../src/CoroutineRuntime.js'
+import * as OsRuntime from '../src/OsRuntime.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as LlvmWasmRuntime from '../src/LlvmWasmRuntime.js'
@@ -41,6 +42,132 @@ const toolchain: NativeToolchain.Toolchain = Object.freeze({
 const testRoot = mkdtempSync(join(tmpdir(), 'silk-native-boundary-test-'))
 afterAll(() => {
   rmSync(testRoot, { recursive: true, force: true })
+})
+
+it('releases acquired startup pipes and preserves errors through close-on-exec failure', () => {
+  const source = `#define _GNU_SOURCE 1
+#define _DARWIN_C_SOURCE 1
+#define _POSIX_C_SOURCE 200809L
+#define pipe silk_test_pipe
+#define fcntl silk_test_fcntl
+#define close silk_test_close
+#define fork silk_test_fork
+#define read silk_test_read
+#define poll silk_test_poll
+#define waitpid silk_test_waitpid
+${OsRuntime.source(['silk_os_process_execute_v1'])}
+#include <stdio.h>
+#include <stdarg.h>
+
+static int scenario;
+static int pipe_calls, fcntl_calls, fork_calls, unexpected;
+static int closed[6];
+
+int silk_test_pipe(int descriptors[2]) {
+  int ordinal = pipe_calls++;
+  if (ordinal == 2 && scenario == 1) { errno = EMFILE; return -1; }
+  descriptors[0] = 90 + 2 * ordinal;
+  descriptors[1] = 91 + 2 * ordinal;
+  return 0;
+}
+int silk_test_fcntl(int fd, int command, ...) {
+  va_list args;
+  va_start(args, command);
+  int flags = va_arg(args, int);
+  va_end(args);
+  fcntl_calls += 1;
+  if (fd != 95 || command != F_SETFD || flags != FD_CLOEXEC) unexpected += 1;
+  if (scenario == 0) { errno = EACCES; return -1; }
+  return 0;
+}
+int silk_test_close(int fd) {
+  if (fd >= 90 && fd < 96) closed[fd - 90] += 1;
+  else unexpected += 1;
+  errno = EINTR;
+  return -1;
+}
+pid_t silk_test_fork(void) {
+  fork_calls += 1;
+  return 123;
+}
+ssize_t silk_test_read(int fd, void *output, size_t length) {
+  (void)output; (void)length;
+  if (fd != 90 && fd != 92 && fd != 94) unexpected += 1;
+  return 0;
+}
+int silk_test_poll(struct pollfd *fds, nfds_t count, int timeout) {
+  (void)timeout;
+  for (nfds_t index = 0; index < count; index += 1) fds[index].revents = POLLHUP;
+  return (int)count;
+}
+pid_t silk_test_waitpid(pid_t child, int *status, int options) {
+  if (child != 123 || options != 0) unexpected += 1;
+  *status = 42 << 8;
+  return child;
+}
+int main(void) {
+  for (scenario = 0; scenario < 3; scenario += 1) {
+    pipe_calls = 0; fcntl_calls = 0; fork_calls = 0; unexpected = 0;
+    memset(closed, 0, sizeof(closed));
+    int status = -1, code = -1, reason = -1;
+    uint32_t native_code = 0;
+    size_t output_length = 0, error_length = 0;
+    const unsigned char empty[] = "";
+    int result = silk_os_process_execute_v1((const unsigned char *)"fixture", 7,
+      empty, 0, empty, 0, empty, 0, &status, &code, &output_length, &error_length,
+      &reason, &native_code);
+    uint32_t expected_error = scenario == 0 ? EACCES : scenario == 1 ? EMFILE : 0;
+    printf("%d %d %d %d %d %d %d", result, reason, native_code == expected_error,
+      pipe_calls, fcntl_calls, fork_calls, unexpected);
+    for (int index = 0; index < 6; index += 1) printf(" %d", closed[index]);
+    printf(" %d %d %d\\n", status, code, output_length == 0 && error_length == 0);
+  }
+  return 0;
+}
+`
+  const sourcePath = join(testRoot, 'startup-pipe-cleanup.c')
+  const executable = join(testRoot, 'startup-pipe-cleanup')
+  writeFileSync(sourcePath, source)
+  const built = spawnSync(
+    clang,
+    [
+      '-std=c11',
+      '-Wall',
+      '-Wextra',
+      '-Werror',
+      '-Wno-unused-function',
+      sourcePath,
+      '-o',
+      executable,
+    ],
+    { encoding: 'utf8' },
+  )
+  assert.strictEqual(built.status, 0, built.stderr)
+  const run = spawnSync(executable, [], { encoding: 'utf8' })
+  assert.strictEqual(run.status, 0, run.stderr)
+  const outcomes = run.stdout
+    .trim()
+    .split('\n')
+    .map((line) => line.split(' ').map(Number))
+  // result, reason, preserved errno, pipe/fcntl/fork calls, unexpected calls, six closes,
+  // child status/code, empty captures. Each row exercises the same emitted operation.
+  assert.deepStrictEqual(outcomes, [
+    [0, 2, 1, 3, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1],
+    [0, 10, 1, 3, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1],
+    [1, 0, 1, 3, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 42, 1],
+  ])
+})
+
+it('denies native final-cache admission without complete tool and implicit-input identities', () => {
+  for (const kind of ['NativeExecutable', 'NativeSharedLibrary', 'NativeStaticLibrary'] as const) {
+    assert.deepStrictEqual(NativeToolchain.finalArtifactCacheAdmission(kind), {
+      _tag: 'Ineligible',
+      reason: 'IncompleteNativeInputAccounting',
+    })
+  }
+  assert.deepStrictEqual(NativeToolchain.finalArtifactCacheAdmission('WebAssemblyModule'), {
+    _tag: 'ExistingWebAssemblyPolicy',
+  })
 })
 
 const termination = (...identities: ReadonlyArray<string>): Termination.Contract =>
