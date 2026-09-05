@@ -34,6 +34,11 @@ Define the smallest explicit process-output service needed to observe real Silk 
 Native execution SHALL connect an explicit provider to process destinations and preserve bytes,
 ordering, destinations, and typed failures.
 
+#### Scenario: Write to the selected native process destination
+
+- **WHEN** a native program supplies a `StandardStreams` provider and writes bytes to stdout or stderr
+- **THEN** the selected process destination receives the supplied bytes in call order, or the operation returns its typed stream failure
+
 ### Requirement: Logging remains separate
 
 This capability SHALL NOT define `Effect.log` as stdout writing. A separate Logger SHALL receive
