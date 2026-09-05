@@ -302,10 +302,10 @@ export const complete = (
         diagnostics.push(...foreignFunctionPointerAdmission(resolved.fact))
         return Object.freeze({ ...member, target: resolved.fact })
       }
-      if (member._tag === 'ConstantDeclaration' || member._tag === 'ForeignStaticDeclaration') {
+      if ((member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration') || member._tag === 'ForeignStaticDeclaration') {
         const resolved = resolveDeclaredType(module.module, member.declaredType, resolvers, headers)
         diagnostics.push(...resolved.diagnostics)
-        if (member._tag === 'ConstantDeclaration') {
+        if ((member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration')) {
           diagnostics.push(...foreignFunctionPointerAdmission(resolved.fact))
           return Object.freeze({ ...member, declaredType: resolved.fact })
         }
@@ -1002,7 +1002,7 @@ export const complete = (
       ),
       constants: Object.freeze(
         closedMembers.filter(
-          (member): member is ConstantFact => member._tag === 'ConstantDeclaration',
+          (member): member is ConstantFact => (member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration'),
         ),
       ),
       conformances: Object.freeze(conformances),
@@ -1153,7 +1153,7 @@ export const complete = (
         members.filter((member): member is InterfaceFact => member._tag === 'InterfaceDeclaration'),
       ),
       constants: Object.freeze(
-        members.filter((member): member is ConstantFact => member._tag === 'ConstantDeclaration'),
+        members.filter((member): member is ConstantFact => (member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration')),
       ),
       conformances,
     })
@@ -1820,7 +1820,7 @@ export const complete = (
       if (member.visibility !== 'Public') return member
       // The alias resolver attached exposure when it erased the target.
       if (member._tag === 'AliasDeclaration') return member
-      if (member._tag === 'ConstantDeclaration') {
+      if ((member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration')) {
         return Object.freeze({
           ...member,
           declaredType: attachExposure(member.declaredType, modules, diagnostics),
@@ -1923,7 +1923,7 @@ export const complete = (
         members.filter((member): member is InterfaceFact => member._tag === 'InterfaceDeclaration'),
       ),
       constants: Object.freeze(
-        members.filter((member): member is ConstantFact => member._tag === 'ConstantDeclaration'),
+        members.filter((member): member is ConstantFact => (member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration')),
       ),
     })
   })
@@ -2038,7 +2038,7 @@ export const complete = (
         members.filter((member): member is InterfaceFact => member._tag === 'InterfaceDeclaration'),
       ),
       constants: Object.freeze(
-        members.filter((member): member is ConstantFact => member._tag === 'ConstantDeclaration'),
+        members.filter((member): member is ConstantFact => (member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration')),
       ),
       diagnostics: Diagnostic.merge(moduleDiagnostics),
     })

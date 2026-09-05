@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "clang": "22.1.8",
+  "llvmReadobj": "22.1.8",
+  "sourceSha256": "56f523db20be90c7b714e3a86d9466bf1b724d4dc792235094cc7bd3cfd2ab81",
+  "headers": [],
+  "targets": [
+    {
+      "target": "aarch64-apple-darwin",
+      "flags": [
+        "--no-default-config",
+        "--target=aarch64-apple-darwin",
+        "-ffreestanding",
+        "-nostdinc",
+        "-std=c11"
+      ],
+      "dataLayout": "target datalayout = \"e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32\""
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "flags": [
+        "--no-default-config",
+        "--target=aarch64-unknown-linux-gnu",
+        "-ffreestanding",
+        "-nostdinc",
+        "-std=c11"
+      ],
+      "dataLayout": "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128-Fn32\""
+    },
+    {
+      "target": "wasm32-unknown-unknown",
+      "flags": [
+        "--no-default-config",
+        "--target=wasm32-unknown-unknown",
+        "-ffreestanding",
+        "-nostdinc",
+        "-std=c11"
+      ],
+      "dataLayout": "target datalayout = \"e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-i128:128-n32:64-S128-ni:1:10:20\""
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "flags": [
+        "--no-default-config",
+        "--target=x86_64-unknown-linux-gnu",
+        "-ffreestanding",
+        "-nostdinc",
+        "-std=c11"
+      ],
+      "dataLayout": "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\""
+    }
+  ]
+}

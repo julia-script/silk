@@ -445,6 +445,22 @@
     "./WorkspaceInventory": {
       "types": "./dist/WorkspaceInventory.d.ts",
       "import": "./dist/WorkspaceInventory.js"
+    },
+    "./CompilationProfile": {
+      "types": "./dist/CompilationProfile.d.ts",
+      "import": "./dist/CompilationProfile.js"
+    },
+    "./ConfigurationError": {
+      "types": "./dist/ConfigurationError.d.ts",
+      "import": "./dist/ConfigurationError.js"
+    },
+    "./ConfigurationOrigin": {
+      "types": "./dist/ConfigurationOrigin.d.ts",
+      "import": "./dist/ConfigurationOrigin.js"
+    },
+    "./ConfigurationValue": {
+      "types": "./dist/ConfigurationValue.d.ts",
+      "import": "./dist/ConfigurationValue.js"
     }
   },
   "publishConfig": {

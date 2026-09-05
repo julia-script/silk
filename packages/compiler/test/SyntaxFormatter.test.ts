@@ -1423,3 +1423,24 @@ impl Counter {}
     assert.strictEqual(second.changed, false)
   }),
 )
+
+it.effect('formats package defaults and predicates while preserving syntax and comments', () =>
+  Effect.gen(function* () {
+    const source = `/// A package choice.
+pub param workers:u32=choose() where workers>0
+pub param enabled:bool
+param message:string="fixed" where message=="fixed"
+static fn choose()->u32{return 1}`
+    const original = parse('config', source)
+    assert.deepEqual(original.parserDiagnostics, [])
+    const first = yield* SyntaxFormatter.format(original)
+    const text = formattedText(first)
+    assert.include(text, 'pub param workers: u32 = choose() where workers > 0')
+    assert.include(text, 'pub param enabled: bool')
+    const reparsed = parse('config', text)
+    assert.deepEqual(reparsed.parserDiagnostics, [])
+    assert.deepEqual(normalized(reparsed, reparsed.root), normalized(original, original.root))
+    assert.deepEqual(comments(reparsed), comments(original))
+    assert.strictEqual(formattedText(yield* SyntaxFormatter.format(reparsed)), text)
+  }),
+)

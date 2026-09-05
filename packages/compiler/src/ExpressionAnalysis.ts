@@ -786,7 +786,7 @@ export const analyzeConstantReference = (
           spelling(source, second),
           second,
         )
-  if (lookup._tag !== 'Resolved' || lookup.declaration._tag !== 'ConstantDeclaration')
+  if (lookup._tag !== 'Resolved' || (lookup.declaration._tag !== 'ConstantDeclaration' && lookup.declaration._tag !== 'PackageParameterDeclaration'))
     return undefined
   const result = analyzeConstant(lookup.declaration, second ?? first, node, false)
   if (

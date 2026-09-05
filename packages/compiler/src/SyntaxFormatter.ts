@@ -669,7 +669,9 @@ const printConstantDeclaration = (
   prefix: FormatDocument.Document,
 ): FormatDocument.Document => {
   const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
-  const value = directNodes(node).at(-1) ?? nodeOf(node, 'IntegerLiteralExpression')
+  const validation = directNodes(node).find((child) => child.kind === 'PackageParameterValidation')
+  const value = directNodes(node).filter((child) => child !== validation).at(1)
+  const equals = directTokens(node).find((token) => token.kind === 'Equals')
   const type = directNodes(node).at(0) ?? nodeOf(node, 'TypePath')
   return FormatDocument.concat(
     ...(publicKeyword === undefined
@@ -677,14 +679,17 @@ const printConstantDeclaration = (
       : [printToken(context, publicKeyword, prefix), FormatDocument.text(' ')]),
     printToken(
       context,
-      tokenOf(node, 'ConstKeyword'),
+      tokenOf(node, node.kind === 'PackageParameterDeclaration' ? 'ParamKeyword' : 'ConstKeyword'),
       publicKeyword === undefined ? prefix : FormatDocument.empty,
     ),
     printToken(context, tokenOf(node, 'Identifier'), FormatDocument.text(' ')),
     printToken(context, tokenOf(node, 'Colon')),
     printNode(context, type, FormatDocument.text(' ')),
-    printToken(context, tokenOf(node, 'Equals'), FormatDocument.text(' ')),
-    printNode(context, value, FormatDocument.text(' ')),
+    ...(equals === undefined || value === undefined ? [] : [
+      printToken(context, equals, FormatDocument.text(' ')),
+      printNode(context, value, FormatDocument.text(' ')),
+    ]),
+    ...(validation === undefined ? [] : [printNode(context, validation, FormatDocument.text(' '))]),
   )
 }
 
@@ -1093,8 +1098,14 @@ const printNode = (
       )
     case 'TypeAliasDeclaration':
       return printTypeAliasDeclaration(context, node, prefix)
+    case 'PackageParameterDeclaration':
     case 'ConstantDeclaration':
       return printConstantDeclaration(context, node, prefix)
+    case 'PackageParameterValidation':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix),
+        ...directNodes(node).map((child) => printNode(context, child, FormatDocument.text(' '))),
+      )
     case 'ForeignStaticDeclaration':
     case 'ExportStaticDeclaration':
       return printForeignStaticDeclaration(context, node, prefix)

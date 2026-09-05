@@ -4413,3 +4413,18 @@ fn main() -> i32 { return 42 }`
   assert.strictEqual(mainDeclarations.length, 1)
   assert.deepEqual(Array.from(reconstructedBytes(bindersResult)), bindersResult.source.bytes)
 })
+
+it('parses package schemas with optional defaults and ordinary validation expressions', () => {
+  const source = `pub param enabled: bool = choose()
+pub param workers: u32 where workers > 0
+param internal: string = "fixed" where internal == "fixed"
+static fn choose() -> bool { return true }`
+  const syntax = parseText('config', source)
+  assert.deepEqual(syntax.parserDiagnostics, [])
+  const parameters = syntax.root.children.filter(
+    (node): node is SyntaxTree.Node => SyntaxTree.isNode(node) && node.kind === 'PackageParameterDeclaration',
+  )
+  assert.strictEqual(parameters.length, 3)
+  assert.deepEqual(parameters.map((node) => SyntaxTree.directToken(node, 'Equals') !== undefined), [true, false, true])
+  assert.deepEqual(parameters.map((node) => SyntaxTree.directNode(node, 'PackageParameterValidation') !== undefined), [false, true, true])
+})

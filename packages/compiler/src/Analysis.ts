@@ -647,7 +647,7 @@ const presentationOfIdentity = (
         Presentation.aliasDeclaration(declaration),
         declaredType(declaration.target),
       )
-    if (declaration?._tag === 'ConstantDeclaration')
+    if ((declaration?._tag === 'ConstantDeclaration' || declaration?._tag === 'PackageParameterDeclaration'))
       return hoverPresentation(
         Presentation.constantDeclaration(declaration),
         declaredType(declaration.declaredType),
@@ -1042,7 +1042,7 @@ export const fixedArrayTypesOf = (
         if (operation.returnType._tag === 'Resolved') add(operation.returnType.type)
       }
     } else if (
-      (member._tag === 'ConstantDeclaration' || member._tag === 'ForeignStaticDeclaration') &&
+      ((member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration') || member._tag === 'ForeignStaticDeclaration') &&
       member.declaredType._tag === 'Resolved'
     ) {
       add(member.declaredType.type)

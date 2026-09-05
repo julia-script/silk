@@ -2010,7 +2010,7 @@ export const catalog = (
           if (operation.returnType._tag === 'Resolved') addReferenced(operation.returnType.type)
         }
       } else if (
-        (member._tag === 'ConstantDeclaration' || member._tag === 'ForeignStaticDeclaration') &&
+        ((member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration') || member._tag === 'ForeignStaticDeclaration') &&
         member.declaredType._tag === 'Resolved'
       ) {
         addReferenced(member.declaredType.type)

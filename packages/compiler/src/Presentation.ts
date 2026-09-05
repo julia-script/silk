@@ -465,7 +465,7 @@ export const constantDeclaration = (self: DeclarationFacts.ConstantFact): Presen
   return Object.freeze({
     _tag: 'ConstantPresentation',
     name,
-    text: `${visibility}const ${name}: ${declaredType(self.declaredType)}`,
+    text: `${visibility}${self._tag === 'PackageParameterDeclaration' ? 'param' : 'const'} ${name}: ${declaredType(self.declaredType)}`,
   })
 }
 

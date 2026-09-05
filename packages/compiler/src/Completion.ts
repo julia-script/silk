@@ -102,6 +102,7 @@ const declarationKind = (
   switch (declaration._tag) {
     case 'FunctionDeclaration':
       return 'Function'
+    case 'PackageParameterDeclaration':
     case 'ConstantDeclaration':
     case 'ForeignStaticDeclaration':
       return 'Constant'
@@ -121,6 +122,7 @@ const declarationDetail = (declaration: DeclarationFacts.MemberFact): Presentati
   switch (declaration._tag) {
     case 'FunctionDeclaration':
       return PresentationRenderer.functionDeclaration(declaration)
+    case 'PackageParameterDeclaration':
     case 'ConstantDeclaration':
       return PresentationRenderer.constantDeclaration(declaration)
     case 'ForeignStaticDeclaration':
