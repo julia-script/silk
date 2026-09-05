@@ -534,6 +534,31 @@ const toolVersionOf = Effect.fnUntraced(function* (
   return version
 })
 
+/** The final-cache policy selected before either lookup or publication. */
+export type FinalArtifactCacheAdmission =
+  | { readonly _tag: 'ExistingWebAssemblyPolicy' }
+  | {
+      readonly _tag: 'Ineligible'
+      readonly reason: 'IncompleteNativeInputAccounting'
+    }
+
+/**
+ * Requires complete native link-input accounting before final-artifact reuse.
+ *
+ * The current Toolchain carries command names, not content identities for the selected tools,
+ * and does not describe their implicit platform inputs or resolved library closure. No native
+ * request can therefore establish completeness, even with no extra inputs or only explicit
+ * objects. A digest from artifactCacheKey alone is not admission evidence. WebAssembly keeps
+ * its independently existing policy; this decision makes no new completeness claim for it.
+ */
+export const finalArtifactCacheAdmission = (
+  kind: FinalArtifact['kind'],
+): FinalArtifactCacheAdmission =>
+  kind === 'WebAssemblyModule'
+    ? Object.freeze({ _tag: 'ExistingWebAssemblyPolicy' })
+    : Object.freeze({ _tag: 'Ineligible', reason: 'IncompleteNativeInputAccounting' })
+
+/** Computes input identity; callers must separately establish final-cache admission. */
 export const artifactCacheKey = Effect.fn('NativeToolchain.artifactCacheKey')(function* (
   toolchain: Toolchain,
   kind: FinalArtifact['kind'],

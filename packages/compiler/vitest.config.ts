@@ -27,7 +27,7 @@ export default defineSilkConfig({
      */
     maxWorkers: wholeMachineWorkers,
     env: {
-      // Shared across worktrees: identical bitcode + Clang version → cached executable.
+      // Shared across worktrees for backend emission and independently eligible cache entries.
       SILK_NATIVE_CACHE_DIR: nativeCacheDirectory,
     },
   },

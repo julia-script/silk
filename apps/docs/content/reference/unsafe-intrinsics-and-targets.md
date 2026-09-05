@@ -1300,9 +1300,11 @@ and C type.
 
 A successful native shared- or static-library build writes `<package>.h` and
 `<package>.abi.json` beside the platform library and reports all three durable paths. Executables
-and WebAssembly modules write neither companion. A cache hit regenerates both files from the
-verified backend inventory, so the result is byte-identical to an uncached build and cannot retain
-stale package-specific names.
+and WebAssembly modules write neither companion. Reusing cached backend emission regenerates both
+files from the verified backend inventory, so the companions are byte-identical to an uncached
+build and cannot retain stale package-specific names. Native final-artifact reuse requires complete
+link-input accounting; the current toolchain model cannot establish that eligibility and therefore
+performs the requested native link or archive operation on every build.
 
 The header includes `<stdint.h>`, a package-derived include guard, and C++ `extern "C"` guards.
 Integer classes use `intN_t` or `uintN_t`, floats use `float` or `double`, and no-argument functions
