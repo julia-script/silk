@@ -71,25 +71,12 @@ const targetForCallable = (
         fn === candidate.fn &&
         candidate.fn.id.module === declaration.module &&
         candidate.fn.id.name === declaration.name &&
-        MirMatches(candidate.fn.instance.typeArguments, typeArguments),
+        Mir.runtimeArgumentsEqual(candidate.fn.instance.typeArguments, typeArguments),
     ),
   )
   if (target === undefined) throw new RangeError('LLVM execution callback target is unavailable')
   return Object.freeze({ type, target })
 }
-
-const MirMatches = (
-  left: ReadonlyArray<SilkType.GenericArgument>,
-  right: ReadonlyArray<SilkType.GenericArgument>,
-): boolean =>
-  left.length === right.length &&
-  left.every((argument, ordinal) => {
-    const candidate = right.at(ordinal)
-    if (candidate === undefined) throw new RangeError('missing generic argument')
-    return (
-      SilkType.runtimeGenericArgumentKey(argument) === SilkType.runtimeGenericArgumentKey(candidate)
-    )
-  })
 
 const applyCallable = Effect.fnUntraced(function* (
   context: Context,
@@ -325,7 +312,10 @@ const exactEffect = (context: Context, package_: ExecutionPackage.Plan) => {
             candidate.fn.id.module === environment.instance.declaration.module &&
             candidate.fn.id.name ===
               Hir.effectRunnerId(environment.instance.declaration, environment.site).name &&
-            MirMatches(candidate.fn.instance.typeArguments, environment.instance.typeArguments),
+            Mir.runtimeArgumentsEqual(
+              candidate.fn.instance.typeArguments,
+              environment.instance.typeArguments,
+            ),
         )
   if (environment === undefined || target === undefined)
     throw new RangeError('LLVM execution drive lost its exact body runner')
@@ -408,7 +398,7 @@ const notifyReady = Effect.fnUntraced(function* (
           (candidate) =>
             candidate.fn.id.module === targetIdentity.declaration.module &&
             candidate.fn.id.name === targetIdentity.declaration.name &&
-            MirMatches(candidate.fn.instance.typeArguments, targetArguments),
+            Mir.runtimeArgumentsEqual(candidate.fn.instance.typeArguments, targetArguments),
         )
       : undefined
   const callbackLayout = Layout.entry(context.program.layout, package_.specialization.callback)

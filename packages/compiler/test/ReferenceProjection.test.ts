@@ -5,6 +5,7 @@ import * as Hir from '../src/Hir.js'
 import type * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Residualization from '../src/Residualization.js'
+import * as Type from '../src/Type.js'
 import type * as StaticValue from '../src/StaticValue.js'
 import { referenceProjectionAcceptance } from './support/corpus.js'
 
@@ -146,7 +147,9 @@ pub fn main() -> i32 { return 0 }`),
       ),
       Object.freeze({
         declaration: function_.canonical.id,
-        typeArguments: Object.freeze([]),
+        typeArguments: function_.typeParameters.map((parameter) =>
+          Type.parameterArgument(parameter.type),
+        ),
         evidence: Object.freeze([]),
         contractRow: Object.freeze([]),
         staticArguments: Object.freeze([descriptor]),
@@ -209,7 +212,9 @@ pub fn main() -> i32 { return 0 }`),
       ),
       Object.freeze({
         declaration: function_.canonical.id,
-        typeArguments: Object.freeze([]),
+        typeArguments: function_.typeParameters.map((parameter) =>
+          Type.parameterArgument(parameter.type),
+        ),
         evidence: Object.freeze([]),
         contractRow: Object.freeze([]),
         staticArguments: Object.freeze([
@@ -288,20 +293,27 @@ fn invalid(owner: &mut Box, static field: Intrinsic.Field<Box, i32>) -> &i32 {
       'SEM0012',
     )
 
-    const escaping = yield* Analysis.ofSource(
-      'reference-projection/escaping-descriptor-projection',
-      ascii(`struct Box { value: i32 }
+    const escapingSource = `struct Box { value: i32 }
 fn invalid(
   source: &Box,
   static field: Intrinsic.Field<Box, i32>,
 ) -> &i32 {
   let local = Box { value: 0 }
   return Intrinsic.borrowField<Box, i32>(&local, field)
-}`),
+}`
+    const escaping = yield* Analysis.ofSource(
+      'reference-projection/escaping-descriptor-projection',
+      ascii(escapingSource),
     )
-    assert.include(
-      Analysis.diagnostics(escaping).map((diagnostic) => diagnostic.code),
-      'SEM0092',
+    assert.deepEqual(
+      Analysis.diagnostics(escaping).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: escapingSource.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0019', span: 'Intrinsic.borrowField<Box, i32>(&local, field)' },
+        { code: 'SEM0212', span: '&local' },
+      ],
     )
   }),
 )

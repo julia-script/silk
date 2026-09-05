@@ -1,6 +1,7 @@
 import * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Hir from './Hir.js'
+import * as Lifetime from './Lifetime.js'
 import type * as Instances from './Instances.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as SuspensionMode from './SuspensionMode.js'
@@ -341,27 +342,32 @@ type EnvironmentCaptures =
 const sameArguments = (
   left: ReadonlyArray<Type.GenericArgument>,
   right: ReadonlyArray<Type.GenericArgument>,
-): boolean =>
-  left.length === right.length &&
-  left.every((argument, ordinal) => {
-    const candidate = right.at(ordinal)
-    if (candidate === undefined) return false
-    if (Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate))
-      return true
-    if (!Type.isEffectIdentityArgument(argument) || !Type.isEffectIdentityArgument(candidate))
-      return false
-    const retained = argument.owner === undefined ? candidate : argument
-    const discovered = argument.owner === undefined ? argument : candidate
-    const owner = retained.owner
-    if (owner === undefined || !retained.identity.startsWith('effect:')) return false
-    const ownerPrefix = `${owner.declaration.module}\u0000${owner.declaration.name}\u0000${Type.runtimeArgumentKeys(
-      owner.typeArguments,
-    ).join('\u0000')}\u0002`
-    return (
-      discovered.identity.startsWith(ownerPrefix) &&
-      discovered.identity.endsWith(`\u0004${retained.identity.slice('effect:'.length)}`)
-    )
-  })
+): boolean => {
+  const physicalLeft = left.filter((argument) => !Lifetime.isLifetime(argument))
+  const physicalRight = right.filter((argument) => !Lifetime.isLifetime(argument))
+  return (
+    physicalLeft.length === physicalRight.length &&
+    physicalLeft.every((argument, ordinal) => {
+      const candidate = physicalRight.at(ordinal)
+      if (candidate === undefined) return false
+      if (Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate))
+        return true
+      if (!Type.isEffectIdentityArgument(argument) || !Type.isEffectIdentityArgument(candidate))
+        return false
+      const retained = argument.owner === undefined ? candidate : argument
+      const discovered = argument.owner === undefined ? argument : candidate
+      const owner = retained.owner
+      if (owner === undefined || !retained.identity.startsWith('effect:')) return false
+      const ownerPrefix = `${owner.declaration.module}\u0000${owner.declaration.name}\u0000${Type.runtimeArgumentKeys(
+        owner.typeArguments,
+      ).join('\u0000')}\u0002`
+      return (
+        discovered.identity.startsWith(ownerPrefix) &&
+        discovered.identity.endsWith(`\u0004${retained.identity.slice('effect:'.length)}`)
+      )
+    })
+  )
+}
 
 export const matchesIdentity = (
   identity: Type.CallableIdentityArgument,

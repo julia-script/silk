@@ -205,18 +205,36 @@ fn opaqueProducer() -> some<F: Effect<'static; HiddenResult>> F {
 effect fn nested(value: i32) -> i32 {
   return run Effect.suspend(effect { return value })
 }
+fn update(value: &mut Box, delta: i32) -> () { value.value = delta return () }
+fn invoke<F: once fn(&mut Box) -> () + Intrinsic.NonParking>(callback: F, value: &mut Box) -> () {
+  callback(move value)
+  return ()
+}
+fn apply<'a>(value: &'a mut Box) -> () { invoke(update(42), move value) return () }
+fn updateFirst(value: &mut Box) -> () { apply(move value) return () }
+fn updateSecond(value: &mut Box) -> () { apply(move value) return () }
 pub fn main() -> i32 {
-  let box = Box { value: 40 }
+  let mut box = Box { value: 40 }
   let first = borrowed(&box)
   let second = copied(41)
   let opaque = opaqueProducer()
   drop first
   drop second
   drop opaque
+  updateFirst(&mut box)
+  updateSecond(&mut box)
   return run nested(42)
 }`)
 
       assert.deepEqual(Analysis.diagnostics(self), [])
+      assert.strictEqual(
+        self.instances.callables.filter(
+          (callable) =>
+            callable.target._tag === 'DeclarationCallableTarget' &&
+            callable.target.declaration.name === 'update',
+        ).length,
+        1,
+      )
       const facts = Analysis.executablePropertiesOf(self).filter(
         (fact) => fact.subject._tag === 'Effect',
       )

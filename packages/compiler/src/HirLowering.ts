@@ -243,7 +243,6 @@ export interface LowerStatementOptions {
   readonly resultRepresentation?: SemanticType
   readonly functionId?: DeclarationId
   readonly eraseIntrinsicSections?: boolean
-  readonly borrowBindingInitializers?: boolean
 }
 
 export const lowerStatements = (
@@ -276,21 +275,6 @@ export const lowerStatements = (
         if (statement._tag === 'BindStatement') {
           const binding = statement.binding
           const initializer = (): Hir.Expression => {
-            if (
-              options.borrowBindingInitializers &&
-              binding.initializer._tag === 'Borrow' &&
-              options.functionId !== undefined
-            )
-              return hirExpression(
-                binding.initializer,
-                Object.freeze({
-                  _tag: 'BorrowId',
-                  function: options.functionId,
-                  callSpan: binding.initializer.syntax.span,
-                  ordinal: 0,
-                }),
-                options,
-              )
             // A declared union is the binding's type: the initializer injects at the boundary.
             if (
               binding.declaredType?._tag === 'Resolved' &&
@@ -359,6 +343,25 @@ export const lowerStatements = (
               region: statement.region,
               span: statement.syntax.span,
             })
+          let valueOptions = options
+          if (statement.lifetimeProof.length > 0) {
+            const lifetimeAssumptions = Lifetime.assumptions([
+              ...(options.lifetimeCompatibility?.assumptions.bounds ??
+                options.lifetimeAssumptions?.bounds ??
+                []),
+              ...statement.lifetimeProof,
+            ])
+            // These are accepted conversion proofs for this RHS, not region edges active in
+            // surrounding statements. The lifetime solver retains their installation points.
+            valueOptions = {
+              ...options,
+              lifetimeAssumptions,
+              lifetimeCompatibility: TypeCompatibility.context({
+                ...options.lifetimeCompatibility,
+                assumptions: lifetimeAssumptions,
+              }),
+            }
+          }
           return Object.freeze({
             _tag: 'Write',
             place,
@@ -368,7 +371,7 @@ export const lowerStatements = (
               'Assignment',
               place.span,
               undefined,
-              options,
+              valueOptions,
             ),
             region: statement.region,
             span: statement.syntax.span,
@@ -408,14 +411,7 @@ export const lowerStatements = (
                     options.resultType,
                     'Return',
                     statement.syntax.span,
-                    statement.expression._tag === 'Borrow' && options.functionId !== undefined
-                      ? Object.freeze({
-                          _tag: 'BorrowId',
-                          function: options.functionId,
-                          callSpan: statement.expression.syntax.span,
-                          ordinal: 0,
-                        })
-                      : undefined,
+                    undefined,
                     options,
                   ),
               options.resultRepresentation,
@@ -753,7 +749,10 @@ export const hirExpression = (
     return Object.freeze({
       _tag: 'EffectBlock',
       site: fact.site,
-      statements: lowerStatements(fact.statements, { resultType: fact.type.type.success }),
+      statements: lowerStatements(fact.statements, {
+        ...options,
+        resultType: fact.type.type.success,
+      }),
       captures: Object.freeze(
         fact.captures.map((capture) =>
           Object.freeze({
@@ -1166,6 +1165,17 @@ export const hirExpression = (
     })
   }
   if (fact._tag === 'Borrow') {
+    // Direct arguments retain their call-owned identity. Nested storage and assignment borrows
+    // use the standalone identity already published by source ownership analysis.
+    borrow ??=
+      options.functionId === undefined
+        ? undefined
+        : Object.freeze({
+            _tag: 'BorrowId',
+            function: options.functionId,
+            callSpan: fact.syntax.span,
+            ordinal: 0,
+          })
     if (
       borrow === undefined ||
       fact.formation._tag === 'Unavailable' ||

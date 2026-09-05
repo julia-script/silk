@@ -1634,7 +1634,38 @@ export const applyOperands = <T>(
  */
 export const acceptsRuntimeOperand = (actual: SilkType.Type, expected: SilkType.Type): boolean =>
   SilkType.runtimeKey(actual) === SilkType.runtimeKey(expected) ||
-  TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected))
+  TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected)) ||
+  (SilkType.isEffect(actual) &&
+    SilkType.isEffect(expected) &&
+    SilkType.compareAccess(expected.access, actual.access) &&
+    SilkType.runtimeKey({ ...actual, access: expected.access }) ===
+      SilkType.runtimeKey(expected)) ||
+  // A selected function item retains its declaration schema for specialization. A plain callback
+  // parameter carries only the applied signature; its checked schema is not a runtime operand.
+  (SilkType.isCallable(actual) &&
+    SilkType.isCallable(expected) &&
+    expected.schema === undefined &&
+    (!actual.unsafe || expected.unsafe) &&
+    SilkType.compareAccess(expected.mode, actual.mode) &&
+    actual.parameters.length === expected.parameters.length &&
+    actual.parameters.every((parameter, ordinal) => {
+      const compared = expected.parameters.at(ordinal)
+      return compared !== undefined && acceptsRuntimeOperand(compared, parameter)
+    }) &&
+    acceptsRuntimeOperand(actual.result, expected.result))
+
+/** Compares emitted generic arguments after erasing lifetime-only parameter positions. */
+export const runtimeArgumentsEqual = (
+  left: ReadonlyArray<SilkType.GenericArgument>,
+  right: ReadonlyArray<SilkType.GenericArgument>,
+): boolean => {
+  const actual = SilkType.runtimeArgumentKeys(left)
+  const expected = SilkType.runtimeArgumentKeys(right)
+  return (
+    actual.length === expected.length &&
+    actual.every((key, ordinal) => key === expected.at(ordinal))
+  )
+}
 
 /** Tests whether a MIR function realizes one concrete call target. */
 export const matchesInstance = (
@@ -1645,14 +1676,7 @@ export const matchesInstance = (
 ): boolean =>
   fn.id.module === declaration.module &&
   fn.id.name === declaration.name &&
-  fn.instance.typeArguments.length === typeArguments.length &&
-  fn.instance.typeArguments.every((argument, index) => {
-    const expected = typeArguments.at(index)
-    return (
-      expected !== undefined &&
-      SilkType.runtimeGenericArgumentKey(argument) === SilkType.runtimeGenericArgumentKey(expected)
-    )
-  }) &&
+  runtimeArgumentsEqual(fn.instance.typeArguments, typeArguments) &&
   fn.instance.staticArguments.length === staticArguments.length &&
   fn.instance.staticArguments.every((argument, index) => {
     const expected = staticArguments.at(index)

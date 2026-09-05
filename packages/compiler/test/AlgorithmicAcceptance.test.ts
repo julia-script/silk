@@ -6,6 +6,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Projections from './support/projections.js'
@@ -43,6 +44,7 @@ it.effect('accepts the compiler-shaped fold through every static compiler phase'
     assert.strictEqual(Analysis.layoutOf(self)._tag, 'Available')
     const lowered = Analysis.loweredMir(self)
     assert.isAbove(lowered.functions.length, 0)
+    assert.deepEqual(MirVerification.verify(lowered), [])
     assert.strictEqual(
       Analysis.instancesOf(self).instances.filter(
         (instance) => instance.key.declaration.name === 'fold',

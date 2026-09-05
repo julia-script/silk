@@ -1904,10 +1904,24 @@ const selectedPatternMember = (
   written: SemanticType | undefined,
   expected: SemanticType | undefined,
   resolution: ResolutionContext,
+  inferNominalArguments = false,
 ): SemanticType | undefined => {
   if (written === undefined || expected === undefined) return written
+  const members = Type.isUnion(expected) ? expected.members : [expected]
+  // A bare variant names its declaration, leaving its arguments to the scrutinee.
+  // Its declaration binders are inference positions, not lifetime requirements.
+  if (inferNominalArguments && Type.isNominal(written))
+    return (
+      members.find(
+        (member) =>
+          Type.isNominal(member) &&
+          member.module === written.module &&
+          member.name === written.name &&
+          member.arguments.length === written.arguments.length,
+      ) ?? written
+    )
   return (
-    (Type.isUnion(expected) ? expected.members : [expected]).find(
+    members.find(
       (member) =>
         Type.runtimeKey(member) === Type.runtimeKey(written) &&
         typesCompatible(member, written, resolution.lifetimeCompatibility),
@@ -2184,6 +2198,7 @@ export const analyzePattern = (
     target.fact._tag === 'Resolved' ? target.fact.type : undefined,
     expected,
     resolution,
+    bareUnionPatternTarget !== undefined,
   )
   const nominal =
     selectedType !== undefined && Type.isNominal(selectedType) ? selectedType : undefined

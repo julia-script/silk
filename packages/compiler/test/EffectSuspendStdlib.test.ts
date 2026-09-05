@@ -41,7 +41,7 @@ it.effect('ships Effect.suspend as an ordinary Silk wrapper with exact channels'
       occurrence === undefined
         ? ''
         : (Analysis.occurrencePresentation(snapshot, module, occurrence)?.text ?? ''),
-      'pub effect fn suspend<A, E, ?R>',
+      "pub effect<'env> fn suspend<'env, A, E, ?R>(deferred: once Effect<'env; A ! E ? R>) -> A ! E ? R",
     )
 
     const analyzed = Projections.syntaxOf(snapshot, 'silk/effect')?.source

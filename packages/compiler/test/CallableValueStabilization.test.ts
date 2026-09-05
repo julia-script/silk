@@ -6,7 +6,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const codesOf = (name: string, source: string) =>
-  Effect.map(Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown'), (snapshot) =>
+  Effect.map(Analysis.ofSource(name, ascii(source)), (snapshot) =>
     Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
   )
 
@@ -71,13 +71,13 @@ it.effect('rejects a returned section whose borrow is rooted in a local', () =>
       yield* codesOf(
         'callable-stabilization/escape-local-root',
         `fn read(value: i32, values: &mut [i32]) -> i32 { return value + values[0] }
-fn make() -> mut fn(i32) -> i32 {
+fn make() -> mut fn<'static>(i32) -> i32 {
   let mut values = [0]
   return read(&mut values)
 }
 pub fn main() -> i32 { let mut f = make() return f(1) }`,
       ),
-      ['OWN0018'],
+      ['OWN0019', 'OWN0018', 'SEM0212'],
     )
   }),
 )

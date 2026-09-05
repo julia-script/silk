@@ -164,9 +164,14 @@ impl Ordered for Cell {
 
 pub fn main() -> i32 { return 0 }`,
     )
-    assert.deepEqual(messages(snapshot), [
-      'Invalid conformance: Cell.cellLess is incompatible with Ordered.lessThan: witness returns i32 but the interface promises bool',
-    ])
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start,
+        diagnostic.span.end,
+      ]),
+      [['SEM0083', 213, 239]],
+    )
   }),
 )
 

@@ -136,16 +136,31 @@ export const lifetimeContract = (
   // A mapped declaration has not yet formed a function value. Its specialized free predicates
   // must be established by the conformance before structural comparison may assume them.
   const formation = Type.executableFormationRequirements(actual)
+  // The applied operation already promises its own free predicates, including ordinary
+  // generic bounds such as T: 'static. Only the witness may add an unpromised demand.
+  const promisedFormation = Type.executableFormationRequirements(expected)
+  const promisedContext: TypeCompatibility.Context = Object.freeze({
+    ...context,
+    assumptions: Lifetime.assumptions([
+      ...context.assumptions.bounds,
+      ...promisedFormation.lifetimeBounds,
+    ]),
+    typeBounds: [...context.typeBounds, ...promisedFormation.typeOutlives],
+  })
   if (
     !formation.lifetimeBounds.every((bound) =>
       TypeCompatibility.isCompatible(
-        TypeCompatibility.check(Type.string(bound.longer), Type.string(bound.shorter), context),
+        TypeCompatibility.check(
+          Type.string(bound.longer),
+          Type.string(bound.shorter),
+          promisedContext,
+        ),
       ),
     ) ||
-    !formation.typeOutlives.every((bound) => TypeCompatibility.typeOutlives(context, bound))
+    !formation.typeOutlives.every((bound) => TypeCompatibility.typeOutlives(promisedContext, bound))
   )
     return incompatible(Object.freeze({ _tag: 'LifetimeContract' }))
-  return TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected, context))
+  return TypeCompatibility.isCompatible(TypeCompatibility.check(actual, expected, promisedContext))
     ? Object.freeze({ _tag: 'Compatible' })
     : incompatible(Object.freeze({ _tag: 'LifetimeContract' }))
 }

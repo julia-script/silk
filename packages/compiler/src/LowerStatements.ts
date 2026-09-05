@@ -137,7 +137,9 @@ export const lowerPatternSelection = (
   const selectedAfter = selection.universal
     ? emptyCoverage
     : Object.freeze(
-        members.filter((candidate) => member === undefined || !Match.selects(member, candidate)),
+        members.filter(
+          (candidate) => member === undefined || !Match.selects(member, candidate, 'Runtime'),
+        ),
       )
   const ownedArm = ownership?.arms.find(
     (candidate) => candidate.id.ordinal === selection.arm.ordinal,
@@ -232,7 +234,7 @@ export const lowerPatternSelection = (
           let candidates: ReadonlyArray<Match.ArmId>
           if (selection.universal) {
             candidates = [selection.arm]
-          } else if (member === undefined || !Match.selects(member, candidate)) {
+          } else if (member === undefined || !Match.selects(member, candidate, 'Runtime')) {
             candidates = [fallbackId]
           } else {
             candidates = needsFallback ? [selection.arm, fallbackId] : [selection.arm]

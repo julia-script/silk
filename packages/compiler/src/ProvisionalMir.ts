@@ -25,7 +25,10 @@ export type ExecutionKey =
       readonly identity: string
     }
   | {
-      readonly _tag: 'EffectRunnerExecution' | 'WitnessEffectRunnerExecution'
+      readonly _tag:
+        | 'EffectRunnerExecution'
+        | 'WitnessEffectRunnerExecution'
+        | 'BuiltinEffectRunnerExecution'
       readonly owner: Instances.InstanceKey
       readonly site: Hir.EffectSiteId
       readonly identity: string
@@ -118,6 +121,9 @@ const executionInstance = (key: ExecutionKey): Instances.InstanceKey => {
   }
   let cached = executionInstanceCache.get(key)
   if (cached === undefined) {
+    let siteKind = 'effect-site'
+    if (key._tag === 'WitnessEffectRunnerExecution') siteKind = 'witness-effect-site'
+    else if (key._tag === 'BuiltinEffectRunnerExecution') siteKind = 'builtin-effect-site'
     cached = Object.freeze({
       _tag: 'InstanceKey',
       declaration: key.runner,
@@ -126,7 +132,7 @@ const executionInstance = (key: ExecutionKey): Instances.InstanceKey => {
       staticArguments: key.owner.staticArguments,
       contractRow: Object.freeze([
         ...key.owner.contractRow,
-        `${key._tag === 'WitnessEffectRunnerExecution' ? 'witness-effect-site' : 'effect-site'}:${Hir.executableSiteKey(key.site)}`,
+        `${siteKind}:${Hir.executableSiteKey(key.site)}`,
         ...(key._tag === 'ProvidedEffectRunnerExecution'
           ? key.providers.map(providedContractEntry)
           : []),
@@ -204,7 +210,8 @@ const executionForInstance = (
     const executionKey = executionInstance(execution.key)
     return (
       (execution.key._tag === 'EffectRunnerExecution' ||
-        execution.key._tag === 'WitnessEffectRunnerExecution') &&
+        execution.key._tag === 'WitnessEffectRunnerExecution' ||
+        execution.key._tag === 'BuiltinEffectRunnerExecution') &&
       Instances.keyText(Object.freeze({ ...executionKey, declaration: instance.declaration })) ===
         Instances.keyText(openInstance)
     )
@@ -430,6 +437,24 @@ const effectIdentityOf = (
     expression.witnessEffectSite !== undefined
   )
     return Instances.effectIdentity(context.instance.key, expression.witnessEffectSite)
+  if (
+    expression._tag === 'BuiltinCall' &&
+    Type.isEffect(
+      Type.substitute(
+        expression.type,
+        context.instance.substitution,
+        context.instance.specialization.compatibility,
+      ),
+    )
+  )
+    return Instances.effectIdentity(
+      context.instance.key,
+      Hir.builtinEffectSite(
+        context.instance.function.declaration.id,
+        context.instance.key.declaration,
+        expression.span,
+      ),
+    )
   if (expression._tag === 'EffectBlock')
     return Instances.effectIdentity(context.instance.key, expression.site)
   if (expression._tag === 'EffectCatch')
@@ -538,6 +563,27 @@ const witnessExpressionAt = (
         Hir.sameExecutableSite(expression.witnessEffectSite, site),
     )
 
+const builtinExpressionAt = (
+  instance: Instances.Instance,
+  site: Hir.EffectSiteId,
+): Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }> | undefined =>
+  instance.function.statements
+    .flatMap(Hir.statementExpressions)
+    .flatMap(Hir.expressionTree)
+    .find(
+      (expression): expression is Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }> =>
+        expression._tag === 'BuiltinCall' &&
+        expression.witnessEffectSite === undefined &&
+        Hir.sameExecutableSite(
+          Hir.builtinEffectSite(
+            instance.function.declaration.id,
+            instance.key.declaration,
+            expression.span,
+          ),
+          site,
+        ),
+    )
+
 const runnerOf = (
   expression: Hir.Expression,
   context: BuildContext,
@@ -612,8 +658,18 @@ const runnerOf = (
     environmentOwner === undefined
       ? undefined
       : witnessExpressionAt(environmentOwner, environment.site)
+  let executionKind:
+    | 'EffectRunnerExecution'
+    | 'WitnessEffectRunnerExecution'
+    | 'BuiltinEffectRunnerExecution' = 'EffectRunnerExecution'
+  if (witness !== undefined) executionKind = 'WitnessEffectRunnerExecution'
+  else if (
+    environmentOwner !== undefined &&
+    builtinExpressionAt(environmentOwner, environment.site) !== undefined
+  )
+    executionKind = 'BuiltinEffectRunnerExecution'
   const baseExecution: ExecutionKey = Object.freeze({
-    _tag: witness === undefined ? 'EffectRunnerExecution' : 'WitnessEffectRunnerExecution',
+    _tag: executionKind,
     owner: stored?.runnerInstance ?? environment.instance,
     site: stored?.site ?? environment.site,
     identity,
@@ -1025,8 +1081,8 @@ const controlsOfCatch = (
   return Object.freeze(regions)
 }
 
-const controlsOf = (
-  statements: ReadonlyArray<Hir.Statement>,
+const controlsOfExpressions = (
+  expressions: ReadonlyArray<Hir.Expression>,
   execution: ExecutionKey,
   executionClassification: Classification,
   context: BuildContext,
@@ -1035,11 +1091,9 @@ const controlsOf = (
   let ordinal = 0
   const maySpecializeProviders =
     execution._tag === 'ProvidedEffectRunnerExecution' ||
-    statements.some((statement) =>
-      Hir.statementExpressions(statement)
-        .flatMap(Hir.expressionTree)
-        .some((candidate) => candidate._tag === 'EffectBindRequirement'),
-    )
+    expressions
+      .flatMap(Hir.expressionTree)
+      .some((candidate) => candidate._tag === 'EffectBindRequirement')
   const visit = (expression: Hir.Expression): void => {
     if (expression._tag === 'EffectBlock') return
     if (expression._tag === 'Run') {
@@ -1129,9 +1183,66 @@ const controlsOf = (
     }
     for (const child of Hir.expressionChildren(expression)) visit(child)
   }
-  for (const statement of statements)
-    for (const expression of Hir.statementExpressions(statement)) visit(expression)
+  for (const expression of expressions) visit(expression)
   return Object.freeze(regions)
+}
+
+const controlsOf = (
+  statements: ReadonlyArray<Hir.Statement>,
+  execution: ExecutionKey,
+  classification: Classification,
+  context: BuildContext,
+): ReadonlyArray<Region> =>
+  controlsOfExpressions(
+    statements.flatMap(Hir.statementExpressions),
+    execution,
+    classification,
+    context,
+  )
+
+const builtinExecution = (
+  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+  context: BuildContext,
+): Execution | undefined => {
+  const effect = Type.substitute(
+    expression.type,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
+  if (!Type.isEffect(effect)) return undefined
+  const site = Hir.builtinEffectSite(
+    context.instance.function.declaration.id,
+    context.instance.key.declaration,
+    expression.span,
+  )
+  const identity = Instances.effectIdentity(context.instance.key, site)
+  const key: ExecutionKey = Object.freeze({
+    _tag: 'BuiltinEffectRunnerExecution',
+    owner: context.instance.key,
+    site,
+    identity,
+    runner: Hir.effectRunnerId(context.instance.key.declaration, site),
+  })
+  const classification = classificationOfEffect(context.discovery, identity)
+  const regions = controlsOfExpressions(
+    [
+      Object.freeze({
+        _tag: 'Run',
+        subject: expression,
+        type: effect.success,
+        span: expression.span,
+      }),
+    ],
+    key,
+    classification,
+    context,
+  )
+  return Object.freeze({
+    _tag: 'ProvisionalExecution',
+    key,
+    classification: classificationWithRegions(classification, regions),
+    regions,
+  })
 }
 
 const providedRunnersOf = (
@@ -1320,14 +1431,30 @@ export const build = (
           regions: instanceRegions,
         }),
       )
-      for (const expression of instance.function.statements
+      const expressions = instance.function.statements
         .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)) {
+        .flatMap(Hir.expressionTree)
+      // A directly run intrinsic is executed in its caller. Only first-class builtin
+      // values acquire the separate generated runner and its own control authority.
+      const directlyRunBuiltins = new Set(
+        expressions.flatMap((expression) =>
+          expression._tag === 'Run' && expression.subject._tag === 'BuiltinCall'
+            ? [expression.subject]
+            : [],
+        ),
+      )
+      for (const expression of expressions) {
         if (
           (expression._tag === 'InterfaceOperationCall' || expression._tag === 'BuiltinCall') &&
           expression.witnessEffectSite !== undefined
         ) {
           const execution = witnessExecution(expression, context)
+          if (execution !== undefined) executions.push(execution)
+          continue
+        }
+        if (expression._tag === 'BuiltinCall') {
+          if (directlyRunBuiltins.has(expression)) continue
+          const execution = builtinExecution(expression, context)
           if (execution !== undefined) executions.push(execution)
           continue
         }

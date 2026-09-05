@@ -3,6 +3,7 @@ import * as Lifetime from './Lifetime.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
+import * as TypeCompatibility from './TypeCompatibility.js'
 
 /** The lexical way a match observes or takes its scrutinee. */
 export type Access = 'Copy' | 'Move' | 'Place' | 'Shared' | 'Exclusive'
@@ -77,15 +78,25 @@ export const nominalUnionVariant = (
 ): CoverageIdentity =>
   Object.freeze({ _tag: 'NominalUnionVariant', root, type, variant, variantOrdinal })
 
-/** Tests canonical coverage identity without erasing enum members to types or integers. */
-export const identityEquals = (self: CoverageIdentity, other: CoverageIdentity): boolean => {
+/** Semantic matching retains lifetime identity; runtime matching uses already-checked erased types. */
+export type IdentityPhase = 'Semantic' | 'Runtime'
+
+const sameType = (left: Type.Type, right: Type.Type, phase: IdentityPhase): boolean =>
+  phase === 'Runtime' ? Type.runtimeKey(left) === Type.runtimeKey(right) : Type.equals(left, right)
+
+/** Tests coverage identity without erasing enum members to types or integers. */
+export const identityEquals = (
+  self: CoverageIdentity,
+  other: CoverageIdentity,
+  phase: IdentityPhase = 'Semantic',
+): boolean => {
   if (self._tag === 'StructuralTypeMember')
-    return other._tag === 'StructuralTypeMember' && Type.equals(self.type, other.type)
+    return other._tag === 'StructuralTypeMember' && sameType(self.type, other.type, phase)
   if (self._tag === 'NominalUnionVariant')
     return (
       other._tag === 'NominalUnionVariant' &&
-      Type.equals(self.root, other.root) &&
-      Type.equals(self.type, other.type) &&
+      sameType(self.root, other.root, phase) &&
+      sameType(self.type, other.type, phase) &&
       self.variant.union.module === other.variant.union.module &&
       self.variant.union.name === other.variant.union.name &&
       self.variant.name === other.variant.name &&
@@ -133,15 +144,22 @@ export interface Coverage {
   readonly exhaustive: boolean
 }
 
-const contains = (members: ReadonlyArray<CoverageIdentity>, member: CoverageIdentity): boolean =>
-  members.some((candidate) => selects(member, candidate))
+const contains = (
+  members: ReadonlyArray<CoverageIdentity>,
+  member: CoverageIdentity,
+  phase: IdentityPhase,
+): boolean => members.some((candidate) => selects(member, candidate, phase))
 
 /** Tests whether one authored pattern identity selects one canonical coverage leaf. */
-export const selects = (pattern: CoverageIdentity, candidate: CoverageIdentity): boolean =>
-  identityEquals(pattern, candidate) ||
+export const selects = (
+  pattern: CoverageIdentity,
+  candidate: CoverageIdentity,
+  phase: IdentityPhase = 'Semantic',
+): boolean =>
+  identityEquals(pattern, candidate, phase) ||
   (pattern._tag === 'StructuralTypeMember' &&
     candidate._tag === 'NominalUnionVariant' &&
-    Type.equals(pattern.type, candidate.root))
+    sameType(pattern.type, candidate.root, phase))
 
 /** Returns the canonical structural exact-member set observed by a pattern decision. */
 export const membersOf = (type: Type.Type): ReadonlyArray<CoverageIdentity> => {
@@ -167,6 +185,7 @@ export const enumMembersOf = (
 export const cover = (
   initial: ReadonlyArray<CoverageIdentity>,
   decisions: ReadonlyArray<Decision>,
+  phase: IdentityPhase = 'Semantic',
 ): Coverage => {
   let remaining = Object.freeze([...initial])
   const transitions: Array<CoverageTransition> = []
@@ -175,14 +194,15 @@ export const cover = (
     const reachable = decision.universal
       ? before.length > 0
       : decision.member !== undefined &&
-        contains(initial, decision.member) &&
-        contains(before, decision.member)
+        contains(initial, decision.member, phase) &&
+        contains(before, decision.member, phase)
     if (reachable && !decision.guarded) {
       remaining = decision.universal
         ? Object.freeze([])
         : Object.freeze(
             before.filter(
-              (candidate) => decision.member === undefined || !selects(decision.member, candidate),
+              (candidate) =>
+                decision.member === undefined || !selects(decision.member, candidate, phase),
             ),
           )
     }
@@ -210,6 +230,24 @@ export const join = (
   if (first === undefined) return Object.freeze({ _tag: 'Joined', type: 'never' })
   if (contributing.every((type) => Type.equals(type, first))) {
     return Object.freeze({ _tag: 'Joined', type: first })
+  }
+  if (
+    contributing.every(
+      (type) => Type.isString(type) || Type.isReference(type) || Type.isSlice(type),
+    ) &&
+    contributing.every((type) => Type.runtimeKey(type) === Type.runtimeKey(first))
+  ) {
+    // A shorter view already present in an arm subsumes a longer one. Probe only existing
+    // facts: selecting a candidate must never install constraints for rejected alternatives.
+    const context = TypeCompatibility.context({
+      assumptions: Lifetime.assumptions(lifetimes?.lifetimeBounds ?? []),
+    })
+    const common = contributing.find((candidate) =>
+      contributing.every((type) =>
+        TypeCompatibility.isCompatible(TypeCompatibility.check(type, candidate, context)),
+      ),
+    )
+    if (common !== undefined) return Object.freeze({ _tag: 'Joined', type: common })
   }
   const effects = contributing.flatMap((type) => {
     const contract = Type.isRepresented(type) ? type.contract : type

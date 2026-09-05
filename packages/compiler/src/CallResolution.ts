@@ -2835,7 +2835,9 @@ export const executableSpecializationOwner = (
     ? undefined
     : Object.freeze({
         declaration: Object.freeze({ module: owner.module, name: owner.name }),
-        typeArguments: Object.freeze(declaration.typeParameters.map((parameter) => parameter.type)),
+        typeArguments: Object.freeze(
+          declaration.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
+        ),
       })
 }
 

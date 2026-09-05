@@ -3,40 +3,36 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as Instances from '../src/Instances.js'
-import * as Layout from '../src/Layout.js'
 import * as LayoutEncode from '../src/LayoutEncode.js'
-import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
-import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import * as Target from '../src/Target.js'
+import * as Type from '../src/Type.js'
+import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
+const lowerAnalyzed = (frontend: Analysis.SingleRootFrontendSnapshot) => {
+  const snapshot = Analysis.realize(frontend, Target.wasm32UnknownUnknown.id, {
+    normalizeMir: false,
+  })
+  assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  const layout =
+    snapshot.layout._tag === 'Available' ? snapshot.layout.value : unreachable('expected layout')
+  return { module: Analysis.loweredMir(snapshot), layout }
+}
+
 const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
-  const snapshot = yield* Analysis.ofSourceRealized(
-    name,
-    ascii(source),
-    Target.wasm32UnknownUnknown.id,
-  )
-  const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
-  const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
-  const module = Lower.lowerProgram(
-    snapshot.instances,
-    layout,
-    snapshot.index,
-    OpaqueRealization.catalogOf(snapshot),
-  )
-  return { module, layout }
+  return lowerAnalyzed(yield* Analysis.ofSource(name, ascii(source)))
 })
 
 it.effect(
   'carries one stored callable fact from construction through projection and invocation',
   () =>
     Effect.gen(function* () {
-      const source = `struct Parser<F: fn(i32) -> i32> { parse: F }
+      const source = `struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
 fn decode(value: i32) -> i32 { return value + 1 }
 pub fn main() -> i32 {
   let parser = Parser { parse: decode }
@@ -85,7 +81,7 @@ pub fn main() -> i32 {
 it.effect('resolves stored owned-capture cleanup before MIR', () =>
   Effect.gen(function* () {
     const source = `struct Token { value: i32 }
-struct Holder<F: once fn(i32) -> i32> { step: F }
+struct Holder<F: once fn<'static>(i32) -> i32> { step: F }
 fn read(value: i32, token: Token) -> i32 { return value }
 pub fn main() -> i32 {
   let token = Token { value: 1 }
@@ -116,9 +112,9 @@ pub fn main() -> i32 {
 it.effect('keeps nested layouts, instance keys, symbols, and MIR text deterministic', () =>
   Effect.gen(function* () {
     const source = `import silk.i32 as i32
-struct Parser<F: fn(i32) -> i32> { parse: F }
-struct Boxed<F: fn(i32) -> i32> { inner: Parser<F> }
-fn box<F: fn(i32) -> i32>(inner: Parser<F>) -> Boxed<F> {
+struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
+struct Boxed<F: fn<'static>(i32) -> i32> { inner: Parser<F> }
+fn box<F: fn<'static>(i32) -> i32>(inner: Parser<F>) -> Boxed<F> {
   return Boxed<F> { inner: move inner }
 }
 pub fn main() -> i32 {
@@ -126,8 +122,9 @@ pub fn main() -> i32 {
   let boxed = box(move parser)
   return boxed.inner.parse(2)
 }`
-    const first = yield* lowerStored('stored-callable-mir/determinism', source)
-    const second = yield* lowerStored('stored-callable-mir/determinism', source)
+    const frontend = yield* Analysis.ofSource('stored-callable-mir/determinism', ascii(source))
+    const first = lowerAnalyzed(frontend)
+    const second = lowerAnalyzed(frontend)
     const facts = (snapshot: typeof first) => ({
       layout: LayoutEncode.encode(snapshot.layout),
       instances: snapshot.module.functions.map((fn) => Instances.keyText(fn.instance)),
@@ -139,7 +136,18 @@ pub fn main() -> i32 {
     const encoded = facts(first)
 
     assert.deepEqual(encoded, facts(second))
-    assert.include(encoded.instances.join('\n'), 'target=declaration:silk/i32.add')
+    assert.isTrue(
+      first.module.functions.some((fn) =>
+        fn.instance.typeArguments.some(
+          (argument) =>
+            Type.isExactRepresentationArgument(argument) &&
+            Type.isCallableIdentityArgument(argument.identity) &&
+            argument.identity.target._tag === 'Declaration' &&
+            argument.identity.target.module === 'silk/i32' &&
+            argument.identity.target.name === 'add',
+        ),
+      ),
+    )
     assert.include(encoded.symbols.join('\n'), 'silk_stored_callable_mir_determinism_box__')
     assert.include(encoded.mir, 'stored=silk/i32.add')
     assert.include(encoded.mir, 'read-place %5.#0.#0')

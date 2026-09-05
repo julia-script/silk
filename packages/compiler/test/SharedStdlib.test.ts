@@ -1,6 +1,5 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as ExecutionAffinity from '../src/ExecutionAffinity.js'
 import * as Intrinsic from '../src/Intrinsic.js'
@@ -61,18 +60,19 @@ pub fn main() -> i32 { return 0 }`
 
 const renamedMultiCallbackBoundary = `struct Other<T> { core: Intrinsic.SharedCore<T> }
 struct Box { value: i32 }
-fn ignored(value: &mut Box) -> Effect<i32> { return effect { return 0 } }
-fn escaping(value: &mut Box) -> Effect<i32> { return effect { return value.value } }
-fn conflict() -> Effect<i32> { return effect { return 0 } }
+fn ignored(value: &mut Box) -> i32 { return 0 }
+effect fn read(value: &mut Box) -> i32 { return value.value }
+fn escaping(value: &mut Box) -> i32 { return run read(move value) }
+fn conflict() -> i32 { return 0 }
 fn access(
   self: &Other<Box>,
-  unused: once fn(&mut Box) -> Effect<i32>,
-  use: once fn(&mut Box) -> Effect<i32>,
-) -> Effect<i32> {
+  unused: once fn(&mut Box) -> i32,
+  use: once fn(&mut Box) -> i32,
+) -> i32 {
   drop unused
-  return Intrinsic.sharedWithMut<Box, Effect<i32>>(&self.core, move use, conflict)
+  return Intrinsic.sharedWithMut<Box, i32>(&self.core, move use, conflict)
 }
-fn probe(self: &Other<Box>) -> Effect<i32> {
+fn probe(self: &Other<Box>) -> i32 {
   return access(self, ignored, escaping)
 }
 pub fn main() -> i32 { return 0 }`
@@ -82,7 +82,7 @@ import silk.shared { Shared }
 struct Pair { first: i32 second: i32 }
 struct Box<A> { value: A }
 fn direct(value: &Pair) -> &Pair { return value }
-fn directMut(value: &mut Pair) -> &mut Pair { return value }
+fn directMut(value: &mut Pair) -> &mut Pair { return move value }
 fn narrowedMut(value: &mut Pair) -> &Pair { return move value }
 fn generic<A>(value: A) -> A { return move value }
 fn viaGeneric(value: &Pair) -> &Pair { return generic<&Pair>(move value) }
@@ -105,9 +105,9 @@ fn storedMut(value: &mut Pair) -> once fn(i32) -> i32 { return readStored(move v
 effect fn read(value: &Pair) -> i32 { return value.first }
 effect fn readMut(value: &mut Pair) -> i32 { return value.first }
 fn suspended(value: &Pair) -> i32 { return run read(value) }
-fn suspendedMut(value: &mut Pair) -> i32 { return run readMut(value) }
+fn suspendedMut(value: &mut Pair) -> i32 { return run readMut(move value) }
 unsafe fn sharedDirect(self: &Shared<Pair>) -> &Pair {
-  return Shared.with(self, direct)
+  return Shared.with<Pair, &Pair>(self, direct)
 }
 unsafe fn mutDirect(self: &Shared<Pair>) -> &mut Pair {
   return Shared.withMut(self, directMut)
@@ -226,6 +226,13 @@ it.effect('propagates the sealed access edge through a renamed multi-callback wr
     const diagnostics = Analysis.diagnostics(snapshot).filter(
       (diagnostic) => diagnostic.code === 'OWN0016',
     )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: renamedMultiCallbackBoundary.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [{ code: 'OWN0016', span: 'run read(move value)' }],
+    )
     assert.strictEqual(diagnostics.length, 1)
     assert.strictEqual(diagnostics.at(0)?.span.sourceId, 'shared-stdlib/renamed-multi-callback')
     assert.strictEqual(diagnostics.at(0)?.relatedSpans?.length, 1)
@@ -237,7 +244,7 @@ it.effect('propagates the sealed access edge through a renamed multi-callback wr
 )
 
 it.effect(
-  'rejects recursive and suspended borrow escape through both public access operations',
+  'rejects dependent callback results and suspended borrows through both public access operations',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSourceRealized(
@@ -248,16 +255,40 @@ it.effect(
       const diagnostics = Analysis.diagnostics(snapshot).filter(
         (diagnostic) => diagnostic.code === 'OWN0016',
       )
-      assert.strictEqual(
-        diagnostics.length,
-        15,
-        Json.stringify(
-          Analysis.diagnostics(snapshot).map((diagnostic) => ({
-            code: diagnostic.code,
-            reason: diagnostic.reason._tag,
-            start: diagnostic.span.start,
-          })),
-        ),
+      // The callback's universally quantified input cannot determine the caller's result
+      // lifetime. Those signatures reject before access analysis; suspension still reaches it.
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => [
+          diagnostic.code,
+          publicEscapeMatrix.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+        ]),
+        [
+          ['SEM0214', 'Box<&mut Pair>'],
+          ['SEM0214', 'Box<&mut Pair> { value: move value }'],
+          ['SEM0214', 'Result<i32, &mut Pair>'],
+          ['SEM0214', 'Result.failResult<i32, &mut Pair>(move value)'],
+          ['SEM0214', 'Result.failResult<i32, &mut Pair>(move value)'],
+          ['OWN0016', 'run read(value)'],
+          ['OWN0016', 'run readMut(move value)'],
+          ['SEM0076', 'direct'],
+          ['SEM0052', 'Shared.withMut(self, directMut)'],
+          ['SEM0052', 'Shared.withMut(self, narrowedMut)'],
+          ['SEM0052', 'Shared.with(self, viaGeneric)'],
+          ['SEM0052', 'Shared.withMut(self, viaGenericMut)'],
+          ['SEM0052', 'Shared.with(self, aggregate)'],
+          ['SEM0214', 'Box<&mut Pair>'],
+          ['SEM0052', 'Shared.withMut(self, aggregateMut)'],
+          ['SEM0214', 'aggregateMut'],
+          ['SEM0052', 'Shared.with(self, failed)'],
+          ['SEM0214', 'Result<i32, &mut Pair>'],
+          ['SEM0052', 'Shared.withMut(self, failedMut)'],
+          ['SEM0214', 'failedMut'],
+          ['SEM0214', 'failedMut'],
+          ['SEM0052', 'Shared.with(self, delayed)'],
+          ['SEM0052', 'Shared.withMut(self, delayedMut)'],
+          ['SEM0052', 'Shared.with(self, stored)'],
+          ['SEM0052', 'Shared.withMut(self, storedMut)'],
+        ],
       )
       assert.deepEqual(
         diagnostics.map((diagnostic) =>
@@ -265,23 +296,7 @@ it.effect(
             ? diagnostic.reason.kind
             : diagnostic.reason._tag,
         ),
-        [
-          'Result',
-          'Result',
-          'Result',
-          'Result',
-          'Result',
-          'Result',
-          'Result',
-          'Result',
-          'Result',
-          'Result',
-          'Result',
-          'Result',
-          'Result',
-          'Suspension',
-          'Suspension',
-        ],
+        ['Suspension', 'Suspension'],
       )
       for (const diagnostic of diagnostics) {
         assert.strictEqual(diagnostic.span.sourceId, 'shared-stdlib/public-escape')
@@ -291,7 +306,7 @@ it.effect(
           'shared-stdlib/public-escape',
         )
       }
-      assert.isUndefined(Analysis.loweredMir(snapshot).coroutineFrames)
+      assert.strictEqual(snapshot.mir._tag, 'Unavailable')
     }),
 )
 

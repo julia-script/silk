@@ -3093,18 +3093,31 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
     // because a conditional requirement may name any binder the header declares — including the
     // one it bounds — and only the completed environment can resolve those occurrences.
     const requirements = collected.facts.flatMap(
-      (parameter): ReadonlyArray<ConformanceRequirementFact> =>
-        parameter.duplicateOf !== undefined
-          ? []
-          : parameter.bounds.map((bound) =>
-              Object.freeze({
-                _tag: 'ConformanceRequirement' as const,
-                parameter: parameter.type,
-                spelling: bound.spelling,
-                capability: analyzeDeclaredType(source, bound.path.syntax, environment).fact,
-                syntax: bound.path.syntax,
-              }),
-            ),
+      (parameter): ReadonlyArray<ConformanceRequirementFact> => {
+        if (parameter.duplicateOf !== undefined) return []
+        const bounds: ReadonlyArray<ConformanceRequirementFact> = parameter.bounds.map((bound) =>
+          Object.freeze({
+            _tag: 'ConformanceRequirement' as const,
+            parameter: parameter.type,
+            spelling: bound.spelling,
+            capability: analyzeDeclaredType(source, bound.path.syntax, environment).fact,
+            syntax: bound.path.syntax,
+          }),
+        )
+        if (SyntaxTree.isAvailableSyntax(parameter.syntax)) return bounds
+        // Recovery can retain a binder while its missing bound has no identifier to collect.
+        // Keep that damaged header as an unavailable obligation, never as an unbounded witness.
+        return [
+          ...bounds,
+          Object.freeze({
+            _tag: 'ConformanceRequirement' as const,
+            parameter: parameter.type,
+            spelling: Type.encode(parameter.type),
+            capability: Object.freeze({ _tag: 'Unavailable' as const, syntax: parameter.syntax }),
+            syntax: parameter.syntax,
+          }),
+        ]
+      },
     )
     const mappedOperations = SyntaxTree.directNodes(node, 'ImplOperation').map((operation) => {
       const name = presentName(source, operation)

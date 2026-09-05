@@ -34,11 +34,7 @@ const parseAs = Effect.fnUntraced(function* (id: string, name: string) {
 })
 const analyze = Effect.fnUntraced(function* (name: string) {
   const source = yield* fixture(name)
-  return yield* Analysis.ofSourceRealized(
-    `conditional-conformance/${name}`,
-    source,
-    'wasm32-unknown-unknown',
-  )
+  return yield* Analysis.ofSource(`conditional-conformance/${name}`, source)
 })
 
 layer(NodeServices.layer)('conditional conformance fixtures', (it) => {
@@ -132,8 +128,11 @@ impl<S: Decoder> Decoder for Wrapper<S> {
       const syntax = yield* parse('damaged')
       assert.isAbove(syntax.parserDiagnostics.length, 0)
       const snapshot = yield* analyze('damaged')
-      const conformance = Analysis.declarationIndex(snapshot).modules.at(0)?.conformances.at(0)
+      const conformance = Analysis.declarationIndex(snapshot)
+        .modules.find((module) => module.module === 'conditional-conformance/damaged')
+        ?.conformances.at(0)
       assert.strictEqual(conformance?.termination._tag, 'UnavailableTermination')
+      assert.strictEqual(conformance?.requirements.at(0)?.capability._tag, 'Unavailable')
       const provider = Type.nominal('conditional-conformance/damaged', 'Wrapper', [
         Type.nominal('conditional-conformance/damaged', 'Schema'),
       ])

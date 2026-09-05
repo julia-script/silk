@@ -25,9 +25,6 @@ const analyze = (text: string, target?: string) =>
 const codes = (self: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(self).map((diagnostic) => diagnostic.code)
 
-const messages = (self: Analysis.Snapshot): ReadonlyArray<string> =>
-  Analysis.diagnostics(self).map((diagnostic) => diagnostic.message)
-
 const failureMembers = (row: Type.FailureRow): ReadonlyArray<string> => {
   const concrete = RowAlgebra.concretize(Type.failureRowPolicy(), row)
   return concrete._tag === 'Concrete' ? concrete.row.members.map(Type.encode) : []
@@ -253,16 +250,20 @@ pub fn main() -> i32 { return 0 }`)
  */
 it.effect('regression: narrowing a two-member row by contract still reports the mismatch', () =>
   Effect.gen(function* () {
-    const self = yield* analyze(`import silk.effect { Effect }
+    const source = `import silk.effect { Effect }
 ${preamble}
 effect fn handleA(self: once Effect<i32 ! A>) -> i32 {
   return run Effect.catchAll(move self, recoverA)
 }
-pub fn main() -> i32 { return run handleA(risky(true)) }`)
-    assert.deepEqual(codes(self), ['SEM0012'])
-    assert.deepEqual(messages(self), [
-      'Expected once Effect<i32 ! root.A> but received Effect<i32 ! root.A | root.B>',
-    ])
+pub fn main() -> i32 { return run handleA(risky(true)) }`
+    const self = yield* Analysis.ofSource('root', ascii(source))
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => ({
+        code: diagnostic.code,
+        source: source.slice(diagnostic.span.start, diagnostic.span.end),
+      })),
+      [{ code: 'SEM0052', source: ' handleA(risky(true))' }],
+    )
   }),
 )
 

@@ -336,16 +336,27 @@ pub fn main() -> i32 { return 0 }`)
 })
 
 it('uses returned-view and ordinary argument diagnostics for reference failures', () => {
-  const invalidReturns = analyze(`struct Counter { value: i32 }
+  const returnSource = `struct Counter { value: i32 }
 fn ambiguous(left: &Counter, right: &Counter) -> &Counter { return left }
 fn strengthen(counter: &Counter) -> &mut Counter { return &mut counter }
 fn local(counter: &Counter) -> &Counter {
   let owned = Counter { value: 0 }
   return &owned
 }
-pub fn main() -> i32 { return 0 }`)
-  const returnCodes = invalidReturns.diagnostics.map((diagnostic) => diagnostic.code)
-  assert.deepEqual(returnCodes, ['SEM0210', 'SEM0056', 'OWN0019'])
+pub fn main() -> i32 { return 0 }`
+  const invalidReturns = analyze(returnSource)
+  assert.deepEqual(
+    invalidReturns.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      span: returnSource.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+    })),
+    [
+      { code: 'SEM0210', span: '&Counter' },
+      { code: 'SEM0056', span: 'counter' },
+      { code: 'OWN0019', span: '&owned' },
+      { code: 'SEM0212', span: '&owned' },
+    ],
+  )
 
   const ownedArguments = analyze(`struct Counter { value: i32 }
 fn take(counter: Counter) -> i32 { return counter.value }
@@ -391,15 +402,22 @@ pub fn main() -> i32 { return 0 }`)
 })
 
 it('rejects a returned view whose body does not preserve the declared source', () => {
-  const result = analyze(`fn invalid(values: &[i32]) -> &[i32] {
+  const source = `fn invalid(values: &[i32]) -> &[i32] {
   let local = [1, 2]
   return &local
 }
-pub fn main() -> i32 { return 0 }`)
+pub fn main() -> i32 { return 0 }`
+  const result = analyze(source)
 
   assert.deepEqual(
-    result.diagnostics.map((diagnostic) => diagnostic.code),
-    ['OWN0019'],
+    result.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+    })),
+    [
+      { code: 'OWN0019', span: '&local' },
+      { code: 'SEM0212', span: '&local' },
+    ],
   )
 })
 

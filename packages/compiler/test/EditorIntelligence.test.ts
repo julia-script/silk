@@ -18,7 +18,7 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
 const documentationText = (
-  snapshot: Analysis.Snapshot,
+  snapshot: Analysis.FrontendSnapshot,
   block: ReturnType<typeof Analysis.documentationAt>,
 ) => {
   if (block === undefined) return undefined
@@ -517,7 +517,7 @@ pub fn main() -> i32 {
   drop scheduler
   return 42
 }`
-    return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+    return Analysis.ofSource('main', encoder.encode(source)).pipe(
       Effect.map((snapshot) => {
         assert.deepEqual(Analysis.diagnostics(snapshot), [])
 

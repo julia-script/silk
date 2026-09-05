@@ -47,7 +47,7 @@ effect fn read() -> i32 ? &Counter { return run Counter.get() }`
 
 /** The outer execution is itself provided; the inner Effect still needs its own provider. */
 const provideEachLayer = `${counter}
-effect fn outer() -> Effect<i32 ? &Counter> ? &Counter {
+effect fn outer() -> Effect<'static; i32 ? &Counter> ? &Counter {
   return read()
 }
 pub fn main() -> i32 {
@@ -59,7 +59,7 @@ pub fn main() -> i32 {
 
 /** Providing the outer layer does not close the inner Effect's requirement row. */
 const innerNotClosed = `${counter}
-effect fn outer() -> Effect<i32 ? &Counter> ? &Counter {
+effect fn outer() -> Effect<'static; i32 ? &Counter> ? &Counter {
   return read()
 }
 pub fn main() -> i32 {
@@ -70,10 +70,9 @@ pub fn main() -> i32 {
 
 it.effect('reports SEM0071 when only the outer layer is provided', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* Analysis.ofSource(
       'effect-typing/inner-not-closed',
       ascii(innerNotClosed),
-      'wasm32-unknown-unknown',
     )
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),

@@ -1241,6 +1241,7 @@ export const analyzeStatements = (
       }
       context.diagnostics.push(...destination.diagnostics)
       const root = assignmentRoot(destination.fact)
+      const activatedStart = context.resolution.bodyLifetimes?.activatedConstraints.length ?? 0
       const writeCompatibility =
         context.resolution.bodyLifetimes === undefined ||
         context.resolution.lifetimeCompatibility === undefined
@@ -1361,6 +1362,14 @@ export const analyzeStatements = (
           ...(root === undefined ? {} : { root }),
           value: value.fact,
           compatible,
+          lifetimeProof: Lifetime.assumptions(
+            compatible
+              ? (context.resolution.bodyLifetimes?.activatedConstraints
+                  .slice(activatedStart)
+                  .filter(({ installed }) => installed === element)
+                  .map(({ bound }) => bound) ?? [])
+              : [],
+          ).bounds,
           region,
           syntax: element,
         }),

@@ -5,10 +5,9 @@ import * as Analysis from '../src/Analysis.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const snapshotOf = (name: string, source: string) =>
-  Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
+const snapshotOf = (name: string, source: string) => Analysis.ofSource(name, ascii(source))
 
-const codesOf = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
+const codesOf = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
 
 // EFF-007: an `effect {}` block whose only terminal is `fail` has success type `never`, and that
@@ -18,7 +17,7 @@ it.effect('rejects a fail-only effect block whose failure exceeds the declared c
     const snapshot = yield* snapshotOf(
       'effect-typing/fail-only-undeclared',
       `struct ProblemError {}
-fn f() -> Effect<i32> {
+fn f() -> Effect<'static; i32> {
   return effect { fail ProblemError {} }
 }
 pub fn main() -> i32 { return run f() }`,
@@ -75,8 +74,8 @@ it.effect('fences a struct that stores a bare Effect field at its construction',
         'effect-typing/bare-effect-field-once',
         `import silk.effect { Effect }
 struct Payload { value: i32 }
-struct Holder { e: once Effect<Payload> }
-fn prepare(payload: Payload) -> once Effect<Payload> { return effect { return move payload } }
+struct Holder { e: once Effect<'static; Payload> }
+fn prepare(payload: Payload) -> once Effect<'static; Payload> { return effect { return move payload } }
 pub fn main() -> i32 {
   let h = Holder { e: prepare(Payload { value: 30 }) }
   return 1
@@ -85,7 +84,7 @@ pub fn main() -> i32 {
       [
         'effect-typing/bare-effect-field-shared',
         `import silk.effect { Effect }
-struct Holder { e: Effect<i32> }
+struct Holder { e: Effect<'static; i32> }
 effect fn base() -> i32 { return 42 }
 fn run_it(h: &Holder) -> i32 { return run h.e }
 pub fn main() -> i32 {
@@ -94,7 +93,7 @@ pub fn main() -> i32 {
 }`,
       ],
     ] as const) {
-      const snapshot = yield* snapshotOf(name, source)
+      const snapshot = Analysis.realize(yield* snapshotOf(name, source), 'wasm32-unknown-unknown')
       assert.deepEqual(codesOf(snapshot), ['SEM0103'], name)
       assert.strictEqual(snapshot.mir._tag, 'Unavailable', name)
     }

@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CAbi from '../src/CAbi.js'
+import * as Lifetime from '../src/Lifetime.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -12,6 +13,33 @@ import * as MirSamples from './support/mirSamples.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+it('preserves access, safety, and outcome contracts when adapting physical operands', () => {
+  const owner = { module: 'mir/operands', name: 'adapt' }
+  const first = { environment: Lifetime.bound(owner, 0, 'a'), lifetimeBinders: [] }
+  const second = { environment: Lifetime.bound(owner, 1, 'b'), lifetimeBinders: [] }
+  const shared = Type.effect('i32', [], first)
+  const taken = Type.effect('i32', [], second, 'Take')
+  assert.isTrue(Mir.acceptsRuntimeOperand(shared, taken))
+  assert.isFalse(Mir.acceptsRuntimeOperand(taken, shared))
+  assert.isFalse(Mir.acceptsRuntimeOperand(shared, Type.effect('bool', [], second, 'Take')))
+  assert.isFalse(Mir.acceptsRuntimeOperand(shared, Type.effect('i32', ['bool'], second, 'Take')))
+
+  const callback = Type.callable(['i32'], shared, first)
+  const parameter = Type.callable(['i32'], taken, second, 'Take')
+  assert.isTrue(Mir.acceptsRuntimeOperand(callback, parameter))
+  assert.isFalse(Mir.acceptsRuntimeOperand(parameter, callback))
+  assert.isFalse(Mir.acceptsRuntimeOperand({ ...callback, unsafe: true }, parameter))
+  assert.isFalse(Mir.acceptsRuntimeOperand(callback, { ...parameter, parameters: ['bool'] }))
+})
+
+it('erases lifetime argument positions without erasing runtime specialization arguments', () => {
+  const lifetime = Lifetime.bound({ module: 'mir/arguments', name: 'select' }, 0, 'a')
+  assert.isTrue(Mir.runtimeArgumentsEqual([lifetime], []))
+  assert.isTrue(Mir.runtimeArgumentsEqual([lifetime, 'i32'], ['i32', Lifetime.staticLifetime]))
+  assert.isFalse(Mir.runtimeArgumentsEqual([lifetime, 'i32'], []))
+  assert.isFalse(Mir.runtimeArgumentsEqual([lifetime, 'i32'], ['bool']))
+})
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')

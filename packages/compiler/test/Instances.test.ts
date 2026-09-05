@@ -778,7 +778,7 @@ pub fn main() -> i32 {
   }
 }`
 
-it.effect('lowers bindings and ownership violations with generated cleanup or traps', () =>
+it.effect('lowers binding cleanup and rejects ownership violations during analysis', () =>
   Effect.gen(function* () {
     const bindings = Analysis.loweredMir(yield* snapshot(bindingSource))
     const bindingFunction = bindings.functions.at(0)
@@ -791,15 +791,16 @@ it.effect('lowers bindings and ownership violations with generated cleanup or tr
       ['Literal', 'Call', 'Move', 'Literal', 'Move', 'Move', 'Drop', 'Drop'],
     )
 
-    const violated = Analysis.loweredMir(
-      yield* snapshot(`pub fn choose(left: i32, right: i32) -> i32 { return right }
-pub fn main() -> i32 { let value = 42 return choose(move value, value) }`),
+    const source = `pub fn choose(left: i32, right: i32) -> i32 { return right }
+pub fn main() -> i32 { let value = 42 return choose(move value, value) }`
+    const violated = yield* Analysis.ofSource('ownership/violated-call', ascii(source))
+    assert.deepEqual(
+      Analysis.diagnostics(violated).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [{ code: 'OWN0001', span: 'value' }],
     )
-    const violatedFunction = violated.functions.at(0)
-    const outcome =
-      violatedFunction === undefined ? undefined : MirVerification.outcomes(violatedFunction).at(0)
-    assert.strictEqual(outcome?._tag, 'Trap')
-    assert.strictEqual(outcome?._tag === 'Trap' ? outcome.reason : '', 'ownership violation')
   }),
 )
 

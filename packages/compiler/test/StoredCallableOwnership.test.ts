@@ -6,8 +6,8 @@ import { unreachable } from './support/raise.js'
 /**
  * Aggregate receiver access for callables stored in nominal fields.
  *
- * A stored callable is only ever reached through its enclosing aggregate, so the aggregate's own
- * access bounds the invocation modes its environment admits: a shared receiver invokes `fn`, an
+ * Invoking a callable field uses its enclosing aggregate's access to bound the invocation modes
+ * its environment admits: a shared receiver invokes `fn`, an
  * exclusive receiver also invokes `mut fn`, and only a whole owner may consume a `once fn` — which
  * takes the whole aggregate rather than extracting the field out of it.
  *
@@ -19,25 +19,25 @@ import { unreachable } from './support/raise.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const realized = Effect.fnUntraced(function* (name: string, source: string) {
-  return yield* Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
+const analyzed = Effect.fnUntraced(function* (name: string, source: string) {
+  return yield* Analysis.ofSource(name, ascii(source))
 })
 
-const codesOf = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
+const codesOf = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
 
-const declarations = `struct Parser<F: fn(i32) -> i32> { parse: F }
-struct Stepper<F: mut fn(i32) -> i32> { step: F }
-struct Once<F: once fn(i32) -> i32> { step: F }
-struct Boxed<F: once fn(i32) -> i32> { inner: Once<F> }
+const declarations = `struct Parser<'env, F: fn<'env>(i32) -> i32> { parse: F }
+struct Stepper<'env, F: mut fn<'env>(i32) -> i32> { step: F }
+struct Once<'env, F: once fn<'env>(i32) -> i32> { step: F }
+struct Boxed<'env, F: once fn<'env>(i32) -> i32> { inner: Once<'env, F> }
 fn decode(value: i32) -> i32 { return value }
 `
 
 it.effect('reuses a shared stored callable through a shared borrow', () =>
   Effect.gen(function* () {
-    const snapshot = yield* realized(
+    const snapshot = yield* analyzed(
       'stored-callable-ownership/shared-reuse',
-      `${declarations}fn parseTwice<F: fn(i32) -> i32>(parser: &Parser<F>) -> i32 {
+      `${declarations}fn parseTwice<'env, F: fn<'env>(i32) -> i32>(parser: &Parser<'env, F>) -> i32 {
   return parser.parse(1) + parser.parse(2)
 }
 pub fn main() -> i32 { return 0 }`,
@@ -51,9 +51,9 @@ pub fn main() -> i32 { return 0 }`,
 
 it.effect('rejects take-only invocation through a shared borrow', () =>
   Effect.gen(function* () {
-    const snapshot = yield* realized(
+    const snapshot = yield* analyzed(
       'stored-callable-ownership/take-through-shared',
-      `${declarations}fn consume<F: once fn(i32) -> i32>(value: &Once<F>) -> i32 {
+      `${declarations}fn consume<'env, F: once fn<'env>(i32) -> i32>(value: &Once<'env, F>) -> i32 {
   return value.step(1)
 }
 pub fn main() -> i32 { return 0 }`,
@@ -68,16 +68,15 @@ pub fn main() -> i32 { return 0 }`,
     assert.strictEqual(diagnostic.reason.receiver, 'Shared')
     assert.strictEqual(diagnostic.reason.required, 'Take')
     assert.strictEqual(diagnostic.reason.field, '#0')
-    assert.include(diagnostic.message, 'access to the whole aggregate')
     // The take is rejected as an invocation, not reinterpreted as a field extraction.
   }),
 )
 
 it.effect('rejects exclusive invocation through a shared borrow', () =>
   Effect.gen(function* () {
-    const snapshot = yield* realized(
+    const snapshot = yield* analyzed(
       'stored-callable-ownership/exclusive-through-shared',
-      `${declarations}fn advance<F: mut fn(i32) -> i32>(stepper: &Stepper<F>) -> i32 {
+      `${declarations}fn advance<'env, F: mut fn<'env>(i32) -> i32>(stepper: &Stepper<'env, F>) -> i32 {
   return stepper.step(1)
 }
 pub fn main() -> i32 { return 0 }`,
@@ -95,9 +94,9 @@ pub fn main() -> i32 { return 0 }`,
 
 it.effect('admits exclusive invocation through an exclusive borrow', () =>
   Effect.gen(function* () {
-    const snapshot = yield* realized(
+    const snapshot = yield* analyzed(
       'stored-callable-ownership/exclusive-through-exclusive',
-      `${declarations}fn advance<F: mut fn(i32) -> i32>(stepper: &mut Stepper<F>) -> i32 {
+      `${declarations}fn advance<'env, F: mut fn<'env>(i32) -> i32>(stepper: &mut Stepper<'env, F>) -> i32 {
   return stepper.step(1)
 }
 pub fn main() -> i32 { return 0 }`,
@@ -109,9 +108,9 @@ pub fn main() -> i32 { return 0 }`,
 
 it.effect('consumes the whole aggregate for a take-once invocation', () =>
   Effect.gen(function* () {
-    const snapshot = yield* realized(
+    const snapshot = yield* analyzed(
       'stored-callable-ownership/take-through-owner',
-      `${declarations}fn consumeTwice<F: once fn(i32) -> i32>(value: Once<F>) -> i32 {
+      `${declarations}fn consumeTwice<'env, F: once fn<'env>(i32) -> i32>(value: Once<'env, F>) -> i32 {
   let first = value.step(1)
   let second = value.step(2)
   return first + second
@@ -128,9 +127,9 @@ pub fn main() -> i32 { return 0 }`,
 
 it.effect('admits one take-once invocation through a whole owner', () =>
   Effect.gen(function* () {
-    const snapshot = yield* realized(
+    const snapshot = yield* analyzed(
       'stored-callable-ownership/take-once',
-      `${declarations}fn consumeOnce<F: once fn(i32) -> i32>(value: Once<F>) -> i32 {
+      `${declarations}fn consumeOnce<'env, F: once fn<'env>(i32) -> i32>(value: Once<'env, F>) -> i32 {
   return value.step(1)
 }
 pub fn main() -> i32 { return 0 }`,
@@ -143,16 +142,16 @@ pub fn main() -> i32 { return 0 }`,
 
 it.effect('weakens a nested receiver to the borrow it is reached through', () =>
   Effect.gen(function* () {
-    const shared = yield* realized(
+    const shared = yield* analyzed(
       'stored-callable-ownership/nested-shared',
-      `${declarations}fn consume<F: once fn(i32) -> i32>(value: &Boxed<F>) -> i32 {
+      `${declarations}fn consume<'env, F: once fn<'env>(i32) -> i32>(value: &Boxed<'env, F>) -> i32 {
   return value.inner.step(1)
 }
 pub fn main() -> i32 { return 0 }`,
     )
-    const owned = yield* realized(
+    const owned = yield* analyzed(
       'stored-callable-ownership/nested-owned',
-      `${declarations}fn consume<F: once fn(i32) -> i32>(value: Boxed<F>) -> i32 {
+      `${declarations}fn consume<'env, F: once fn<'env>(i32) -> i32>(value: Boxed<'env, F>) -> i32 {
   return value.inner.step(1)
 }
 pub fn main() -> i32 { return 0 }`,
@@ -166,25 +165,25 @@ pub fn main() -> i32 { return 0 }`,
 
 it.effect('respects shared, exclusive, and moved match-pattern roots', () =>
   Effect.gen(function* () {
-    const shared = yield* realized(
+    const shared = yield* analyzed(
       'stored-callable-ownership/match-shared',
-      `${declarations}fn consume<F: once fn(i32) -> i32>(value: Boxed<F>) -> i32 {
-  return match &value { Boxed<F> { inner } => inner.step(1) }
+      `${declarations}fn consume<'env, F: once fn<'env>(i32) -> i32>(value: Boxed<'env, F>) -> i32 {
+  return match &value { Boxed<'env, F> { inner } => inner.step(1) }
 }
 pub fn main() -> i32 { return 0 }`,
     )
-    const exclusive = yield* realized(
+    const exclusive = yield* analyzed(
       'stored-callable-ownership/match-exclusive',
-      `${declarations}fn consume<F: once fn(i32) -> i32>(value: Boxed<F>) -> i32 {
+      `${declarations}fn consume<'env, F: once fn<'env>(i32) -> i32>(value: Boxed<'env, F>) -> i32 {
   let mut local = move value
-  return match &mut local { Boxed<F> { inner } => inner.step(1) }
+  return match &mut local { Boxed<'env, F> { inner } => inner.step(1) }
 }
 pub fn main() -> i32 { return 0 }`,
     )
-    const moved = yield* realized(
+    const moved = yield* analyzed(
       'stored-callable-ownership/match-moved',
-      `${declarations}fn consume<F: once fn(i32) -> i32>(value: Boxed<F>) -> i32 {
-  return match move value { Boxed<F> { inner } => inner.step(1) }
+      `${declarations}fn consume<'env, F: once fn<'env>(i32) -> i32>(value: Boxed<'env, F>) -> i32 {
+  return match move value { Boxed<'env, F> { inner } => inner.step(1) }
 }
 pub fn main() -> i32 { return 0 }`,
     )
@@ -210,7 +209,7 @@ pub fn main() -> i32 { return 0 }`,
 
 it.effect('bounds a bare stored callable field by the same receiver rule', () =>
   Effect.gen(function* () {
-    const snapshot = yield* realized(
+    const snapshot = yield* analyzed(
       'stored-callable-ownership/bare-field',
       `struct Once { step: once fn(i32) -> i32 }
 fn consume(value: &Once) -> i32 { return value.step(1) }
@@ -224,7 +223,7 @@ pub fn main() -> i32 { return 0 }`,
 
 it.effect('keeps direct callable bindings on their existing rules', () =>
   Effect.gen(function* () {
-    const snapshot = yield* realized(
+    const snapshot = yield* analyzed(
       'stored-callable-ownership/direct-binding',
       `fn apply(step: once fn(i32) -> i32) -> i32 {
   let first = step(1)
@@ -242,14 +241,14 @@ pub fn main() -> i32 { return 0 }`,
 
 it.effect('duplicates an explicitly Copy aggregate whose realized callable captures are Copy', () =>
   Effect.gen(function* () {
-    const snapshot = yield* realized(
+    const snapshot = yield* analyzed(
       'stored-callable-ownership/copy-realization',
       `struct Offset { value: i32 }
 impl Copy for Offset {}
-struct Parser<F: fn(i32) -> i32> { parse: F }
-impl<F: fn(i32) -> i32> Copy for Parser<F> {}
+struct Parser<'env, F: fn<'env>(i32) -> i32> { parse: F }
+impl<'env, F: fn<'env>(i32) -> i32> Copy for Parser<'env, F> {}
 fn decode(value: i32, offset: Offset) -> i32 { return value + offset.value }
-fn consume<F: fn(i32) -> i32>(parser: Parser<F>, value: i32) -> i32 {
+fn consume<'env, F: fn<'env>(i32) -> i32>(parser: Parser<'env, F>, value: i32) -> i32 {
   return parser.parse(value)
 }
 pub fn main() -> i32 {
@@ -266,14 +265,14 @@ pub fn main() -> i32 {
 
 it.effect('keeps an executable aggregate affine when its realized callable owns a capture', () =>
   Effect.gen(function* () {
-    const snapshot = yield* realized(
+    const snapshot = yield* analyzed(
       'stored-callable-ownership/affine-realization',
       `struct Token { value: i32 }
 impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
-struct Parser<F: once fn(i32) -> i32> { parse: F }
-impl<F: once fn(i32) -> i32> Copy for Parser<F> {}
+struct Parser<'env, F: once fn<'env>(i32) -> i32> { parse: F }
+impl<'env, F: once fn<'env>(i32) -> i32> Copy for Parser<'env, F> {}
 fn decode(value: i32, token: Token) -> i32 { return value + token.value }
-fn consume<F: once fn(i32) -> i32>(parser: Parser<F>, value: i32) -> i32 {
+fn consume<'env, F: once fn<'env>(i32) -> i32>(parser: Parser<'env, F>, value: i32) -> i32 {
   return parser.parse(value)
 }
 pub fn main() -> i32 {

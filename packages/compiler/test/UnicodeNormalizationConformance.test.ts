@@ -5,7 +5,6 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import * as Analysis from '../src/Analysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Driver from './support/TestDriver.js'
@@ -227,6 +226,16 @@ const failuresIn = (name: string, cases: ReadonlyArray<Case>) =>
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, name.replaceAll('/', '-')),
     }).pipe(Effect.provide(SourceResolver.empty))
+    if ('diagnostics' in compiled)
+      assert.deepEqual(
+        compiled.diagnostics.map((diagnostic) => ({
+          code: diagnostic.code,
+          span: diagnostic.span,
+        })),
+        [],
+      )
+    if (compiled._tag === 'BackendFailed' && compiled.error.reason._tag === 'InvalidMir')
+      assert.deepEqual(compiled.error.reason.violations, [])
     assert.strictEqual(compiled._tag, 'Compiled', `${name} did not compile`)
     if (compiled._tag !== 'Compiled') return Number.NaN
     const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
@@ -246,17 +255,6 @@ it.effect(
     Effect.gen(function* () {
       const cases = parse()
       assert.isAbove(cases.length, 19_000, 'the conformance corpus was read')
-
-      const snapshot = yield* Analysis.ofSourceRealized(
-        'unicode-conformance/corpus',
-        ascii(program(cases)),
-      )
-      assert.deepEqual(
-        Analysis.diagnostics(snapshot).map(
-          (diagnostic) => `${diagnostic.code} ${diagnostic.message}`,
-        ),
-        [],
-      )
 
       const failures = yield* failuresIn('unicode-conformance/corpus', cases)
       if (failures === 0) return

@@ -30,16 +30,20 @@ pub fn main() -> i32 {
 it.effect('unions the requirement rows of both arms before provisioning', () =>
   Effect.gen(function* () {
     const module = 'if-then-else/requirements'
-    const snapshot = yield* Analysis.ofSourceRealized(
-      module,
-      ascii(requirements),
-      'wasm32-unknown-unknown',
-    )
+    const snapshot = yield* Analysis.ofSource(module, ascii(requirements))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const available = Analysis.expressionsOf(snapshot, module).flatMap((expression) =>
-      expression.type._tag === 'Available' ? [Type.encode(expression.type.type)] : [],
-    )
-    assert.include(available, `Effect<i32 ? &${module}.Alpha | &${module}.Beta>`)
+    const inferredRequirements = Analysis.expressionsOf(snapshot, module).flatMap((expression) => {
+      if (expression.type._tag !== 'Available' || !Type.isEffect(expression.type.type)) return []
+      const type = expression.type.type
+      return type.success === 'i32'
+        ? [
+            Type.requirementMembers(type).map(
+              (entry) => `${entry.access}:${Type.encode(entry.capability)}`,
+            ),
+          ]
+        : []
+    })
+    assert.deepInclude(inferredRequirements, [`Shared:${module}.Alpha`, `Shared:${module}.Beta`])
   }),
 )
 
@@ -68,11 +72,7 @@ pub fn main() -> i32 {
   let clock = Clock { value: 9 }
   return run Effect.ifThenElse(false, hold(move clock), plain)
 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'if-then-else/capturing-arm',
-      ascii(source),
-      'wasm32-unknown-unknown',
-    )
+    const snapshot = yield* Analysis.ofSource('if-then-else/capturing-arm', ascii(source))
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       ['SEM0052'],

@@ -65,6 +65,7 @@ pub fn main() -> i32 {
   return 0
 }`)
     assert.deepEqual(Analysis.diagnostics(monotonic), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(monotonic)), [])
     const monotonicCalls = Analysis.loweredMir(monotonic)
       .functions.flatMap(MirVerification.operations)
       .filter((operation) => operation._tag === 'OsCall')

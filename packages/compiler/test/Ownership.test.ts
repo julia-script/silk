@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
 import * as MovePath from '../src/MovePath.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -73,6 +74,17 @@ fn branches<'a>(x: &'a i32, flag: bool) -> &'a i32 {
             diagnostic.span.end < source.indexOf('fn stopped'),
         ),
       )
+      const stopped =
+        Analysis.rootAnalysis(snapshot).hir.functions.find(
+          (fn) =>
+            fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'stopped',
+        ) ?? unreachable('expected stopped function')
+      assert.isFalse(
+        stopped.statements
+          .flatMap(Hir.statementExpressions)
+          .flatMap(Hir.expressionTree)
+          .some((expression) => expression._tag === 'Unavailable'),
+      )
     }),
 )
 
@@ -141,6 +153,25 @@ fn sibling() -> i32 {
               (end === undefined || diagnostic.span.end < source.indexOf(end)),
           ),
         )
+      for (const name of ['valid', 'replacedAgain']) {
+        const fn =
+          Analysis.rootAnalysis(snapshot).hir.functions.find(
+            (candidate) =>
+              candidate.declaration.name._tag === 'Present' &&
+              candidate.declaration.name.spelling === name,
+          ) ?? unreachable('expected valid replacement function')
+        assert.isFalse(
+          fn.statements
+            .flatMap(Hir.statementExpressions)
+            .flatMap(Hir.expressionTree)
+            .some((expression) => expression._tag === 'Unavailable'),
+          Hir.encode({
+            _tag: 'HirModule',
+            module: 'ownership/installed-reference',
+            functions: [fn],
+          }),
+        )
+      }
     }),
 )
 
@@ -176,19 +207,40 @@ fn conditionalVariant(flag: bool) -> i32 {
   match place choice { Choice.Hold { value } => { if flag { value = &second } } Choice.Empty {} => {} }
   first = [3]
   return readChoice(move choice)
+}
+fn explicitStaticPattern() -> i32 {
+  let first = [1] let choice = Choice.Hold { value: &first }
+  return match move choice { Choice<'static>.Hold { value } => value[0] Choice<'static>.Empty {} => 0 }
 }`
     const snapshot = yield* Analysis.ofSource('ownership/complete-carrier-reset', ascii(source))
     const diagnostics = Analysis.diagnostics(snapshot)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0011', span: 'first' },
+        { code: 'OWN0019', span: 'move values' },
+        { code: 'OWN0019', span: 'move values' },
+        { code: 'OWN0019', span: 'values' },
+        { code: 'OWN0019', span: 'values' },
+        { code: 'OWN0011', span: 'first' },
+        { code: 'OWN0019', span: 'move choice' },
+        { code: 'OWN0019', span: 'choice' },
+        { code: 'SEM0212', span: '&first' },
+      ],
+    )
     assert.isTrue(
-      diagnostics.every(
-        (diagnostic) =>
-          (diagnostic.code === 'OWN0011' || diagnostic.code === 'OWN0019') &&
-          diagnostic.span.start >= source.indexOf('fn partialArray'),
-      ),
+      diagnostics.every((diagnostic) => diagnostic.span.start >= source.indexOf('fn partialArray')),
+    )
+    assert.strictEqual(
+      diagnostics.find((diagnostic) => diagnostic.code === 'SEM0212')?.span.start,
+      source.lastIndexOf(' &first'),
     )
     for (const [start, end] of [
       ['fn partialArray', 'fn conditionalVariant'],
-      ['fn conditionalVariant', undefined],
+      ['fn conditionalVariant', 'fn explicitStaticPattern'],
     ])
       assert.isTrue(
         diagnostics.some(
@@ -203,7 +255,7 @@ fn conditionalVariant(flag: bool) -> i32 {
 it.effect('reborrows returned exclusive views while keeping sibling loans exclusive', () =>
   Effect.gen(function* () {
     const source = `struct Entry { value: i32 }
-fn view<'a>(value: &'a mut Entry) -> &'a mut Entry { return value }
+fn view<'a>(value: &'a mut Entry) -> &'a mut Entry { return move value }
 fn use(value: &mut i32) { value.* = 2 }
 fn valid() -> i32 {
   let mut entry = Entry { value: 1 }
@@ -227,7 +279,10 @@ fn invalidParent() -> i32 {
   let observed = held.value
   use(move first)
   return observed
-}`
+}
+fn implicitSlice<T>(anchor: &mut [T]) -> &mut [T] { return anchor }
+fn explicitSlice<T>(anchor: &mut [T]) -> &mut [T] { return move anchor }
+fn sharedSlice<T>(anchor: &[T]) -> &[T] { return anchor }`
     const snapshot = yield* Analysis.ofSource(
       'ownership/returned-exclusive-reborrow',
       ascii(source),
@@ -237,6 +292,22 @@ fn invalidParent() -> i32 {
       diagnostics.every((diagnostic) => diagnostic.span.start >= source.indexOf('fn invalid')),
     )
     assert.isTrue(diagnostics.some((diagnostic) => diagnostic.code === 'OWN0010'))
+    assert.deepEqual(
+      diagnostics
+        .filter((diagnostic) => diagnostic.span.start >= source.indexOf('fn implicitSlice'))
+        .map((diagnostic) => ({
+          code: diagnostic.code,
+          start: diagnostic.span.start,
+          span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+        })),
+      [
+        {
+          code: 'OWN0003',
+          start: source.indexOf(' anchor }', source.indexOf('fn implicitSlice')),
+          span: 'anchor',
+        },
+      ],
+    )
     assert.isTrue(
       diagnostics.some(
         (diagnostic) =>
@@ -432,7 +503,7 @@ fn choose(flag: bool, pair: Pair) -> i32 {
 })
 
 it.effect(
-  'lowers conditional field cleanup through lazy flags and consuming owned place reads',
+  'lowers conditional field cleanup and recreates guarded match bindings and results across loops',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* Analysis.ofSourceRealized(
@@ -446,7 +517,19 @@ fn choose(flag: bool) -> i32 {
   if flag { let first = move pair.left }
   return pair.right.value
 }
-pub fn main() -> i32 { return choose(true) }
+fn repeat() -> i32 {
+  let mut index = 0
+  while index < 2 {
+    let pair = Pair { left: Token { value: index }, right: Token { value: 0 } }
+    let token = match move pair {
+      Pair { left } if left.value < 1 => Token { value: 1 }
+      Pair { left } => Token { value: 2 }
+    }
+    index = index + token.value
+  }
+  return index
+}
+pub fn main() -> i32 { return choose(true) + repeat() }
 `),
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])

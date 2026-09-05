@@ -197,10 +197,14 @@ fn build(value: i32) -> i32 {
   const pending = result.functions.at(0)?.bindings.at(1)?.initializer
   assert.strictEqual(pending?._tag, 'EffectBlock')
   if (pending?._tag !== 'EffectBlock' || pending.type._tag !== 'Available') return
-  assert.strictEqual(
-    Type.encode(pending.type.type),
-    'mut Effect<i32 ! effect://block-captures.Problem>',
-  )
+  assert.isTrue(Type.isEffect(pending.type.type))
+  if (!Type.isEffect(pending.type.type)) return
+  assert.strictEqual(pending.type.type.access, 'Exclusive')
+  assert.strictEqual(pending.type.type.success, 'i32')
+  assert.deepEqual(Type.failureMembers(pending.type.type).map(Type.encode), [
+    'effect://block-captures.Problem',
+  ])
+  assert.strictEqual(pending.type.type.environment._tag, 'LocalLifetime')
   assert.deepEqual(
     pending.captures.map((capture) => [capture.reference.id.ordinal, capture.access]),
     [[0, 'Exclusive']],
@@ -210,7 +214,7 @@ fn build(value: i32) -> i32 {
 it('allows an ordinary function to return a hidden effect instance', () => {
   const result = analyzeText(
     'effect://returned-block',
-    `fn delayed(value: i32) -> Effect<i32> {
+    `fn delayed(value: i32) -> Effect<'static; i32> {
   return effect { return value }
 }
 fn main() -> i32 {
@@ -236,7 +240,7 @@ it('retains finite representations when a join merges distinct Effect constructi
     'effect://identity-erasure',
     `struct First {}
 struct Second {}
-fn choose(input: First | Second) -> Effect<i32> {
+fn choose(input: First | Second) -> Effect<'static; i32> {
   return match move input {
     First {} => effect { return 1 }
     Second {} => effect { return 2 }
@@ -252,7 +256,7 @@ it('rejects heterogeneous callable joins and unknown-sized owned callable return
     'callable://identity-erasure',
     `struct First {}
 struct Second {}
-fn choose(input: First | Second) -> fn(i32) -> i32 {
+fn choose(input: First | Second) -> fn<'static>(i32) -> i32 {
   return match move input {
     First {} => Intrinsic.i32Add(1)
     Second {} => Intrinsic.i32Add(2)
@@ -261,7 +265,7 @@ fn choose(input: First | Second) -> fn(i32) -> i32 {
   )
   const erased = analyzeText(
     'callable://unknown-owned-return',
-    `fn passthrough(callback: once fn(i32) -> i32) -> once fn(i32) -> i32 {
+    `fn passthrough<'env>(callback: once fn<'env>(i32) -> i32) -> once fn<'env>(i32) -> i32 {
   return move callback
 }
 fn main() -> i32 { return 0 }`,
@@ -270,8 +274,8 @@ fn main() -> i32 { return 0 }`,
     'callable://concrete-owned-return',
     `struct Token { value: i32 }
 fn consume(value: i32, token: Token) -> i32 { return value }
-fn make(token: Token) -> once fn(i32) -> i32 { return consume(move token) }
-fn relay(token: Token) -> once fn(i32) -> i32 {
+fn make(token: Token) -> once fn<'static>(i32) -> i32 { return consume(move token) }
+fn relay(token: Token) -> once fn<'static>(i32) -> i32 {
   let callback = make(move token)
   return move callback
 }
@@ -581,7 +585,7 @@ it('takes a moved affine provider into a take-once owned-binding wrapper', () =>
   const result = analyzeText(
     'effect://moved-affine-provider',
     `service Clock {}
-struct Token { action: once fn() -> i32 }
+struct Token { action: once fn<'static>() -> i32 }
 struct FixedClock { token: Token }
 impl Clock for FixedClock {}
 fn tick() -> i32 { return 1 }
@@ -650,7 +654,7 @@ import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.layout { Layout }
-fn allocate(layout: Layout) -> once Effect<Allocation ! OutOfMemoryError ? &mut Allocator> {
+fn allocate(layout: Layout) -> once Effect<'static; Allocation ! OutOfMemoryError ? &mut Allocator> {
   return Allocator.allocate(move layout)
 }
 fn main() -> i32 {
@@ -1185,11 +1189,11 @@ it('forms every non-empty trailing section and diagnoses only over-application',
   const tooFew = analyzeText('fixture://too-few.silk', tooFewArgumentsSource)
   const deeper = analyzeText(
     'fixture://deeper-section.silk',
-    'fn combine(a: i32, b: i32, c: i32) -> i32 { return a } fn section() -> fn(i32, i32) -> i32 { return combine(3) }',
+    "fn combine(a: i32, b: i32, c: i32) -> i32 { return a } fn section() -> fn<'static>(i32, i32) -> i32 { return combine(3) }",
   )
   const staged = analyzeText(
     'fixture://staged-section.silk',
-    'fn combine(a: i32, b: i32, c: i32) -> i32 { return a } fn section() -> fn(i32) -> i32 { return combine(3)(2) }',
+    "fn combine(a: i32, b: i32, c: i32) -> i32 { return a } fn section() -> fn<'static>(i32) -> i32 { return combine(3)(2) }",
   )
   const tooMany = analyzeText('fixture://too-many.silk', tooManyArgumentsSource)
   const fewSection = functionAt(tooFew, 1).returnedExpression
@@ -1204,7 +1208,7 @@ it('forms every non-empty trailing section and diagnoses only over-application',
   assert.strictEqual(fewSection.captures.length, 1)
   assert.strictEqual(
     fewSection.type._tag === 'Available' ? Type.encode(fewSection.type.type) : undefined,
-    'fn(i32) -> i32',
+    "fn<'static>(i32) -> i32",
   )
   assert.strictEqual(deeperSection._tag, 'CallableSection')
   if (deeperSection._tag === 'CallableSection') {
@@ -1215,7 +1219,7 @@ it('forms every non-empty trailing section and diagnoses only over-application',
     )
     assert.strictEqual(
       deeperSection.type._tag === 'Available' ? Type.encode(deeperSection.type.type) : undefined,
-      'fn(i32, i32) -> i32',
+      "fn<'static>(i32, i32) -> i32",
     )
   }
   assert.strictEqual(stagedSection._tag, 'CallableSection')
@@ -1227,7 +1231,7 @@ it('forms every non-empty trailing section and diagnoses only over-application',
     )
     assert.strictEqual(
       stagedSection.type._tag === 'Available' ? Type.encode(stagedSection.type.type) : undefined,
-      'fn(i32) -> i32',
+      "fn<'static>(i32) -> i32",
     )
   }
   assert.deepEqual(manyCall.contract, {
@@ -1759,7 +1763,7 @@ fn mismatch() -> i32 { return true }
 fn missing() -> i32 { let value = 42 }
 effect fn inner() -> i32 { return 42 }
 effect fn nestedMismatch() -> i32 { return inner() }
-effect fn nestedValue() -> Effect<i32> { return inner() }`,
+effect fn nestedValue() -> Effect<'static; i32> { return inner() }`,
   )
 
   assert.deepEqual(
@@ -1790,7 +1794,7 @@ effect fn nestedValue() -> Effect<i32> { return inner() }`,
       { code: 'SEM0130', reason: { _tag: 'MissingReturn', expected: 'i32' } },
       {
         code: 'SEM0129',
-        reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: 'Effect<i32>' },
+        reason: { _tag: 'ReturnTypeMismatch', expected: 'i32', actual: "Effect<'static; i32>" },
       },
     ],
   )
@@ -2099,7 +2103,7 @@ fn main() -> i32 {
   assert.deepEqual(section?.typeArguments, [])
   assert.strictEqual(
     section?.type._tag === 'Available' ? Type.encode(section.type.type) : undefined,
-    'fn(T) -> T',
+    "fn<'static>(T) -> T",
   )
   assert.deepEqual(main.returnedExpression.type, { _tag: 'Available', type: 'i32' })
   assert.deepEqual(result.diagnostics, [])
@@ -2174,7 +2178,7 @@ fn main() -> i32 { return (run work()) |> Intrinsic.i32Add(1) }`,
     const nested = analyzeText(
       'fixture://nested-run-callable.silk',
       `effect fn inner() -> i32 { return 1 }
-effect fn outer() -> Effect<i32> { return inner() }
+effect fn outer() -> Effect<'static; i32> { return inner() }
 fn main() -> i32 { return run run outer() }`,
     )
     const ungroupedRun = functionAt(ungrouped, 1).returnedExpression
@@ -2204,7 +2208,7 @@ it('diagnoses invalid callable applications while accepting deeper sections', ()
     'fixture://incompatible-callable.silk',
     `struct Token {}
 fn consume(value: i32, token: Token) -> i32 { return value }
-fn accept(callback: fn(i32) -> i32) -> i32 { return 0 }
+fn accept(callback: fn<'static>(i32) -> i32) -> i32 { return 0 }
 fn main() -> i32 { let token = Token {} let callback = consume(move token) return accept(callback) }`,
   )
   const exclusive = analyzeText(
@@ -2334,13 +2338,13 @@ fn main() -> i32 { let addTwo = unsafe add(2) return 0 }`,
   const safeToUnsafe = analyzeText(
     'fixture://safe-to-unsafe-callable.silk',
     `fn safe(value: i32) -> i32 { return value }
-fn accepts(callback: unsafe fn(i32) -> i32) -> i32 { return unsafe callback(1) }
+fn accepts(callback: unsafe fn<'static>(i32) -> i32) -> i32 { return unsafe callback(1) }
 fn main() -> i32 { return accepts(safe) }`,
   )
   const unsafeToSafe = analyzeText(
     'fixture://unsafe-to-safe-callable.silk',
     `unsafe fn risky(value: i32) -> i32 { return value }
-fn accepts(callback: fn(i32) -> i32) -> i32 { return callback(1) }
+fn accepts(callback: fn<'static>(i32) -> i32) -> i32 { return callback(1) }
 fn main() -> i32 { return accepts(risky) }`,
   )
 

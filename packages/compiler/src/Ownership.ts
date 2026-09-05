@@ -4135,12 +4135,7 @@ const checkFunction = (
       if (statement._tag === 'UnavailableStatement') {
         continue
       }
-      const returnsBorrow =
-        statement._tag === 'Return' &&
-        fn.contract._tag === 'Contract' &&
-        Type.containsViewBorrow(fn.contract.result)
-      if (!evaluate(statement.expression, !returnsBorrow))
-        return Object.freeze({ returned: true, live })
+      if (!evaluate(statement.expression, true)) return Object.freeze({ returned: true, live })
       exits.push(
         Object.freeze({
           kind: 'Return' as const,

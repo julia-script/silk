@@ -176,7 +176,7 @@ it('preserves unsafe declaration and section contracts in typed HIR', () => {
   const result = elaborate(
     'hir://unsafe-callable.silk',
     `unsafe fn combine(left: i32, right: i32) -> i32 { return left + right }
-fn staged() -> unsafe fn(i32) -> i32 { return combine(2) }
+fn staged() -> unsafe fn<'static>(i32) -> i32 { return combine(2) }
 pub fn main() -> i32 { let callback = staged() return unsafe callback(40) }`,
   )
   const combine = result.hir.functions.at(0)
@@ -554,7 +554,7 @@ it('preserves stored and cross-call owned callable environments', () => {
     'hir://owned-callable-return.silk',
     `struct Token { value: i32 }
 fn consume(value: i32, token: Token) -> i32 { return value }
-fn make(token: Token) -> once fn(i32) -> i32 { return consume(move token) }
+fn make(token: Token) -> once fn<'static>(i32) -> i32 { return consume(move token) }
 pub fn main() -> i32 {
   let token = Token { value: 42 }
   let callback = make(move token)
@@ -599,7 +599,10 @@ pub fn main() -> i32 {
     assert.strictEqual(risky?.contract._tag, 'Contract')
     if (risky?.contract._tag === 'Contract') {
       assert.isUndefined(risky.contract.functionKind)
-      assert.strictEqual(Type.encode(risky.contract.result), 'Effect<i32 ! hir/effect.Problem>')
+      assert.strictEqual(
+        Type.encode(risky.contract.result),
+        "Effect<'static; i32 ! hir/effect.Problem>",
+      )
     }
     assert.strictEqual(risky?.statements.at(0)?._tag, 'Return')
     const riskyBody = risky?.statements.at(0)

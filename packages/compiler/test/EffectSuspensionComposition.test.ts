@@ -50,7 +50,7 @@ pub fn main() -> i32 {
 it.effect('keeps nested Effect success nested until explicitly run again', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`import silk.effect { Effect }
-effect fn nested() -> Effect<i32> {
+effect fn nested() -> Effect<'static; i32> {
   return run Effect.suspend(effect {
     return effect { return 42 }
   })
@@ -60,9 +60,12 @@ pub fn main() -> i32 { return 0 }`)
     const expressionTypes = Analysis.expressionsOf(
       self,
       'effect-suspension-composition/main',
-    ).flatMap((expression) =>
-      expression.type._tag === 'Available' ? [Type.encode(expression.type.type)] : [],
+    ).flatMap((expression) => (expression.type._tag === 'Available' ? [expression.type.type] : []))
+    assert.isTrue(
+      expressionTypes.some(
+        (type) =>
+          Type.isEffect(type) && Type.isEffect(type.success) && type.success.success === 'i32',
+      ),
     )
-    assert.isTrue(expressionTypes.some((type) => type.startsWith('Effect<Effect<i32>')))
   }),
 )

@@ -650,7 +650,7 @@ pub fn main() -> i32 { let outer = make() return outer.pair.left }`),
       if (catalog._tag !== 'Available' || plan._tag !== 'Available') return
 
       assert.deepEqual(
-        catalog.value.entries.map((candidate) => Type.encode(candidate.type)),
+        catalog.value.entries.map((candidate) => Type.encode(candidate.type)).sort(),
         [
           'layout/catalog.Empty',
           'layout/catalog.Outer',

@@ -233,7 +233,7 @@ pub effect fn main() -> i32 {
   `struct CatalogProblem {}
 effect fn catalogRisky() -> i32 ! CatalogProblem { fail CatalogProblem {} }
 effect fn catalogRecover(error: CatalogProblem) -> i32 { return 1 }
-fn inspectCatch() -> once Effect<i32> {
+fn inspectCatch() -> once Effect<'static; i32> {
   return Intrinsic.catchFailure<CatalogProblem>(catalogRisky(), catalogRecover)
 }
 pub fn main() -> i32 { return 42 }`,

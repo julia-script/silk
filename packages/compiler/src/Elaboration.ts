@@ -1345,6 +1345,8 @@ export type StatementFact =
       readonly root?: AssignmentRootFact
       readonly value: ExpressionFact
       readonly compatible: boolean
+      /** Checked conversion bounds for this value; installation still controls region validity. */
+      readonly lifetimeProof: ReadonlyArray<Lifetime.Outlives>
       readonly region: Hir.RegionId
       readonly syntax: SyntaxTree.Node
     }
@@ -2252,7 +2254,6 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
         resultType: fact.declaration.returnType.type,
         functionId: fact.declaration.id,
         eraseIntrinsicSections: true,
-        borrowBindingInitializers: true,
       }),
       captures: Object.freeze(
         captures.map((capture) =>
@@ -2314,7 +2315,6 @@ const runtimeHirFunction = (fact: FunctionFact, index: DeclarationIndex.Index): 
         : { resultRepresentation: fact.resultRepresentation }),
       functionId: fact.declaration.id,
       eraseIntrinsicSections: true,
-      borrowBindingInitializers: true,
     }),
   })
 }

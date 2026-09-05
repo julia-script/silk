@@ -455,6 +455,16 @@ struct Cell<'a> { value: &'a i32 }
 fn decodeTyped<T: 'static>(value: T) -> i32 { drop value return 0 }
 impl<'a> Decoder<&'a i32> for Cell<'a> { decode: Cell.decodeTyped }
 impl<'a: 'static> StaticDecoder<&'a i32> for Cell<'a> { decode: Cell.decodeTyped }
+struct Pending<T> { value: T }
+service Scheduler {
+  effect fn prepare<T: 'static>(child: once Effect<'static; T>) -> Pending<T> ? &mut Scheduler
+}
+struct Provider {}
+effect fn prepare<T: 'static>(self: &mut Provider, child: once Effect<'static; T>) -> Pending<T> {
+  let value = run move child
+  return Pending { value: move value }
+}
+impl Scheduler for Provider { prepare: Provider.prepare }
 pub fn main() -> i32 { return 0 }`
     const snapshot = yield* Analysis.ofSource(
       'conditional-conformance/type-lifetime-bounds',

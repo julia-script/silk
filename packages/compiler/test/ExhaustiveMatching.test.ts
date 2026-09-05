@@ -388,14 +388,14 @@ it('selects exact non-nominal members with whole-value bindings', () => {
   const match = returnedMatch(result)
 
   assert.deepEqual(result.diagnostics, [])
-  assert.deepEqual(match.members.map(Match.encodeIdentity), ['i32', 'string'])
+  assert.deepEqual(match.members.map(Match.encodeIdentity), ['i32', "string<'life0>"])
   assert.deepEqual(
     match.arms.map((arm) =>
       arm.pattern._tag === 'TypePattern' && arm.pattern.member !== undefined
         ? Type.encode(arm.pattern.member)
         : '_',
     ),
-    ['i32', 'string'],
+    ['i32', "string<'life0>"],
   )
   assert.deepEqual(
     match.arms.map((arm) =>
@@ -403,7 +403,7 @@ it('selects exact non-nominal members with whole-value bindings', () => {
         ? Type.encode(arm.bindings[0].type.type)
         : 'unavailable',
     ),
-    ['i32', 'string'],
+    ['i32', "string<'life0>"],
   )
 })
 
@@ -695,7 +695,10 @@ fn invalidBorrow(values: &[i32], value: Choice) -> &[i32] { return match value {
     ]),
     [
       ['SEM0129', source.indexOf('true') - 1, source.indexOf('true') + 4],
-      ['SEM0092', source.indexOf('&local') - 1, source.indexOf('&local') + 6],
+      ['OWN0019', source.lastIndexOf('match value') - 1, source.lastIndexOf('} }') + 1],
+      ['OWN0019', source.indexOf('&local') - 1, source.indexOf('&local') + 6],
+      ['SEM0212', source.indexOf('&local') - 1, source.indexOf('&local') + 6],
+      ['OWN0019', source.lastIndexOf('values') - 1, source.lastIndexOf('values') + 6],
     ],
   )
   const operand =
@@ -800,7 +803,7 @@ fn argument(value: Choice) -> i32 {
 }
 struct DeferredValue { value: i32 }
 struct DeferredEmpty {}
-fn deferred(input: DeferredValue | DeferredEmpty) -> Effect<i32> {
+fn deferred(input: DeferredValue | DeferredEmpty) -> Effect<'static; i32> {
   match &input {
     DeferredValue { value } => { return effect { return run effect { return value } } }
     DeferredEmpty {} => { return effect { match move (DeferredValue { value: 8 }) { DeferredValue { value } => { return value } } } }

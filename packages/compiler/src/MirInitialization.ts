@@ -15,6 +15,8 @@ export interface State {
 export interface Semantics {
   readonly initial: ReadonlySet<State>
   readonly before: (operation: Mir.Operation, states: ReadonlySet<State>) => ReadonlySet<State>
+  readonly after: (operation: Mir.Operation, states: ReadonlySet<State>) => ReadonlySet<State>
+  readonly enterArm: (arm: Mir.MatchArm, states: ReadonlySet<State>) => ReadonlySet<State>
   readonly select: (
     operation: Mir.MatchOperation,
     member: Match.CoverageIdentity,
@@ -325,13 +327,33 @@ export const analyze = (
         for (const local of localsOf(operation))
           if (local.ordinal !== destination?.ordinal) read(state, local, [], operation.provenance)
       }
-      if (destination !== undefined) roots.delete(destination.ordinal)
       return intern(roots, flags)
     })
   const semantics: Semantics = {
     initial: new Set([intern(new Map(), new Set())]),
     merge,
     repeat: (states) => states,
+    after: (operation, states) => {
+      const destination = 'destination' in operation ? operation.destination : undefined
+      if (destination === undefined) return states
+      // Structured results are assigned only after a continuing child completes. In particular,
+      // loop backedges must not carry the previous iteration's cleanup into this fresh value.
+      return map(states, (state) => {
+        const roots = new Map(state.roots)
+        roots.delete(destination.ordinal)
+        return intern(roots, state.flags)
+      })
+    },
+    enterArm: (arm, states) => {
+      // Candidate payloads are materialized before their guard, including cleanup-only fields.
+      // Other candidates' bindings retain their own state until those candidates are entered.
+      return map(states, (state) => {
+        const roots = new Map(state.roots)
+        for (const binding of [...arm.bindings, ...arm.cleanupBindings])
+          roots.delete(binding.destination.ordinal)
+        return intern(roots, state.flags)
+      })
+    },
     terminal: (states, outcome) => {
       if (outcome?._tag === 'Return')
         for (const state of states) read(state, outcome.value, [], outcome.provenance)

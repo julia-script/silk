@@ -11,7 +11,7 @@ const snapshot = (source: string) => Analysis.ofSource('string/ownership', encod
 
 it.effect('retains a runtime string backing loan through its last use', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.u8 as u8
+    const source = `import silk.u8 as u8
 fn conflict() -> usize {
   let mut bytes = [u8.toU8(104), u8.toU8(195), u8.toU8(169)]
   unsafe {
@@ -31,11 +31,18 @@ fn restored() -> usize {
   }
   return 0
 }
-pub fn main() -> i32 { return 0 }`)
+pub fn main() -> i32 { return 0 }`
+    const self = yield* snapshot(source)
 
     assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['OWN0011'],
+      Analysis.diagnostics(self).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0011', span: 'bytes[0]' },
+        { code: 'OWN0019', span: 'text' },
+      ],
     )
     const conflict = Analysis.ownershipOf(self, 'string/ownership')?.functions.at(0)
     const restored = Analysis.ownershipOf(self, 'string/ownership')?.functions.at(1)
@@ -73,7 +80,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('propagates string loans through returned views and ordinary calls', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.u8 as u8
+    const source = `import silk.u8 as u8
 fn view(bytes: &[u8]) -> string {
   unsafe { return Intrinsic.stringFromUtf8Unchecked(bytes) }
 }
@@ -91,11 +98,18 @@ fn restored() -> usize {
   bytes[0] = u8.toU8(72)
   return result
 }
-pub fn main() -> i32 { return 0 }`)
+pub fn main() -> i32 { return 0 }`
+    const self = yield* snapshot(source)
 
     assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['OWN0011'],
+      Analysis.diagnostics(self).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0011', span: 'bytes[0]' },
+        { code: 'OWN0019', span: 'text' },
+      ],
     )
     const conflict = Analysis.ownershipOf(self, 'string/ownership')?.functions.at(2)
     const restored = Analysis.ownershipOf(self, 'string/ownership')?.functions.at(3)
@@ -106,7 +120,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('preserves loans nested inside generic result data', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.u8 as u8
+    const source = `import silk.u8 as u8
 import silk.result { Result }
 struct InvalidUtf8 { offset: usize }
 fn validate(bytes: &[u8], accepted: bool) -> Result<string, InvalidUtf8> {
@@ -151,11 +165,22 @@ fn dropped() -> usize {
   drop bytes
   return observe(move result)
 }
-pub fn main() -> i32 { return 0 }`)
+pub fn main() -> i32 { return 0 }`
+    const self = yield* snapshot(source)
 
     assert.deepEqual(
-      Analysis.diagnostics(self).map((diagnostic) => diagnostic.code),
-      ['OWN0011', 'OWN0011'],
+      Analysis.diagnostics(self).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0011', span: 'bytes[0]' },
+        { code: 'OWN0019', span: 'move result' },
+        { code: 'OWN0019', span: 'result' },
+        { code: 'OWN0011', span: 'bytes' },
+        { code: 'OWN0019', span: 'move result' },
+        { code: 'OWN0019', span: 'result' },
+      ],
     )
     const functions = Analysis.ownershipOf(self, 'string/ownership')?.functions
     const conflict = functions?.at(3)

@@ -7,7 +7,7 @@ import * as Type from '../src/Type.js'
  * The frontend/MIR contract at a stored callable (#184).
  *
  * A direct callable value works because the compiler still holds its hidden concrete identity;
- * a struct field declared `fn(i32) -> i32` carries only the signature, so nominal layout planning
+ * a struct field declared `fn<'static>(i32) -> i32` carries only the signature, so nominal layout planning
  * cannot size the callable's environment. Until nominal values can carry that identity, a
  * reachable construction that stores a bare callable is rejected with SEM0103 at the source site
  * instead of passing a clean frontend and dying in MIR validation as `InvalidMir`.
@@ -34,11 +34,16 @@ const diagnosticView = (snapshot: Analysis.FrontendSnapshot) =>
     end: diagnostic.span.end,
   }))
 
+const sourceSpanText = (
+  source: string,
+  span: { readonly start: number; readonly end: number },
+): string => source.slice(span.start, span.end).trim()
+
 const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
 
 const accepted = `import silk.i32 as i32
-struct Parser { decode: fn(i32) -> i32 }
+struct Parser { decode: fn<'static>(i32) -> i32 }
 struct Nested { parser: Parser }
 fn size(self: &Parser) -> i32 { return 1 }
 fn unreachableConstruction() -> i32 {
@@ -62,14 +67,14 @@ it.effect('keeps declaration-only and unreachable callable fields out of realiza
 /** The minimal reproducer from #184, repaired so declaration and semantic analysis accept it. */
 const reproducer = `import silk.i32 as i32
 struct Parser<A> {
-  decode: fn(i32) -> A
+  decode: fn<'static>(i32) -> A
 }
 
 struct Nested<A> {
   parser: Parser<A>
 }
 
-fn make<A>(decoder: fn(i32) -> A) -> Parser<A> {
+fn make<A>(decoder: fn<'static>(i32) -> A) -> Parser<A> {
   return Parser<A> { decode: decoder }
 }
 
@@ -97,10 +102,11 @@ it.effect('rejects the #184 reproducer at both construction sites', () =>
     const snapshot = yield* analyzed('stored-callable/reproducer', reproducer)
     assert.deepEqual(codes(snapshot), ['SEM0103', 'SEM0103'], messages(snapshot).join('\n'))
     // The direct field and the nested aggregate each name the exact stored position.
-    assert.deepEqual(messages(snapshot), [
-      'Cannot construct stored-callable/reproducer.Parser<i32>: field decode would store the callable fn(i32) -> i32, whose environment layout depends on a hidden concrete identity that stored-callable/reproducer.Parser<i32> does not carry',
-      'Cannot construct stored-callable/reproducer.Nested<i32>: field parser.decode would store the callable fn(i32) -> i32, whose environment layout depends on a hidden concrete identity that stored-callable/reproducer.Nested<i32> does not carry',
-    ])
+    const constructions = Analysis.diagnostics(snapshot)
+    assert.deepEqual(
+      constructions.map((diagnostic) => sourceSpanText(reproducer, diagnostic.span)),
+      ['Parser<A> { decode: decoder }', 'Nested<A> { parser: move parser }'],
+    )
   }),
 )
 
@@ -120,7 +126,7 @@ it.effect('fences realization: SEM0103 leaves layout and MIR unavailable, not In
 it.effect('rejects a monomorphic construction that stores a partial application', () =>
   Effect.gen(function* () {
     const source = `import silk.i32 as i32
-struct Parser { decode: fn(i32) -> i32 }
+struct Parser { decode: fn<'static>(i32) -> i32 }
 pub fn main() -> i32 {
   let parser = Parser { decode: i32.add(1) }
   return parser.decode(41)
@@ -165,7 +171,7 @@ pub fn main() -> i32 {
 it.effect('rejects a callable stored through an array field and a bare array literal', () =>
   Effect.gen(function* () {
     const throughField = `import silk.i32 as i32
-struct Parser { decode: [fn(i32) -> i32; 2] }
+struct Parser { decode: [fn<'static>(i32) -> i32; 2] }
 pub fn main() -> i32 {
   let parser = Parser { decode: [i32.add(1), i32.add(2)] }
   return 42
@@ -191,7 +197,7 @@ pub fn main() -> i32 {
 it.effect('rejects a capturing closure stored in a nominal field', () =>
   Effect.gen(function* () {
     const source = `import silk.i32 as i32
-struct Parser { decode: fn(i32) -> i32 }
+struct Parser { decode: fn<'static>(i32) -> i32 }
 pub fn main() -> i32 {
   let offset = 1
   let parser = Parser { decode: i32.add(offset) }
@@ -205,8 +211,8 @@ pub fn main() -> i32 {
 it.effect('keeps nested structural callable captures fenced before layout and MIR', () =>
   Effect.gen(function* () {
     const source = `import silk.i32 as i32
-struct Parser<F: fn(i32) -> i32> { decode: F }
-fn apply(value: i32, transform: fn(i32) -> i32) -> i32 { return transform(value) }
+struct Parser<F: fn<'static>(i32) -> i32> { decode: F }
+fn apply(value: i32, transform: fn<'static>(i32) -> i32) -> i32 { return transform(value) }
 pub fn main() -> i32 {
   let parser = Parser { decode: apply(i32.add(1)) }
   return parser.decode(41)
@@ -222,7 +228,7 @@ pub fn main() -> i32 {
 it.effect('reports the stored callable alongside ownership findings for a once field', () =>
   Effect.gen(function* () {
     const source = `import silk.i32 as i32
-struct Parser { decode: once fn(i32) -> i32 }
+struct Parser { decode: once fn<'static>(i32) -> i32 }
 pub fn main() -> i32 {
   let parser = Parser { decode: i32.add(1) }
   return parser.decode(41)
@@ -300,16 +306,16 @@ pub fn main() -> i32 {
     const modeCallable = 'fn() -> i32 { return consume(move token) }'
     assert.deepEqual(diagnosticView(resultMismatch), [
       {
-        code: 'SEM0076',
-        start: resultSource.indexOf(resultCallable),
-        end: resultSource.indexOf(resultCallable) + resultCallable.length,
+        code: 'SEM0052',
+        start: resultSource.lastIndexOf('accept(') - 1,
+        end: resultSource.indexOf(resultCallable) + resultCallable.length + 1,
       },
     ])
     assert.deepEqual(diagnosticView(consumingMismatch), [
       {
-        code: 'SEM0076',
-        start: modeSource.indexOf(modeCallable),
-        end: modeSource.indexOf(modeCallable) + modeCallable.length,
+        code: 'SEM0052',
+        start: modeSource.lastIndexOf('reusable(') - 1,
+        end: modeSource.indexOf(modeCallable) + modeCallable.length + 1,
       },
     ])
   }),
@@ -342,7 +348,7 @@ pub fn main() -> i32 {
 
 it.effect('rejects an escaped local capture and a second once-effect invocation', () =>
   Effect.gen(function* () {
-    const borrowSource = `fn leak() -> mut fn() -> i32 {
+    const borrowSource = `fn leak() -> mut fn<'static>() -> i32 {
   let mut cell = 40
   return fn() -> i32 {
     cell = cell + 1
@@ -374,8 +380,15 @@ pub fn main() -> i32 {
     const capturedExpression = borrowSource.indexOf('\n    cell', borrowSource.indexOf('return fn'))
     const firstInvocation = effectSource.indexOf('deferred()')
     const secondInvocation = effectSource.indexOf('deferred()', firstInvocation + 1)
+    const returnedClosure = borrowSource.indexOf('fn() -> i32', borrowSource.indexOf('return fn'))
     assert.deepEqual(diagnosticView(borrowed), [
+      {
+        code: 'OWN0019',
+        start: returnedClosure - 1,
+        end: borrowSource.indexOf('\n  }', returnedClosure) + 4,
+      },
       { code: 'OWN0018', start: capturedExpression, end: capturedCell + 'cell'.length },
+      { code: 'SEM0212', start: capturedExpression, end: capturedCell + 'cell'.length },
     ])
     assert.deepEqual(diagnosticView(repeated), [
       {

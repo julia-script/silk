@@ -23,6 +23,7 @@ import type {
   LocalId,
   LoopId,
   LoopRegion,
+  MatchArm,
   MatchOperation,
   MirFunction,
   Module,
@@ -71,6 +72,8 @@ type LoanPathState = 'Dormant' | 'Live' | 'Ended'
 interface StructuredCfgPathSemantics<State> {
   readonly initial: ReadonlySet<State>
   readonly before?: (operation: Operation, incoming: ReadonlySet<State>) => ReadonlySet<State>
+  readonly after?: (operation: Operation, incoming: ReadonlySet<State>) => ReadonlySet<State>
+  readonly enterArm?: (arm: MatchArm, incoming: ReadonlySet<State>) => ReadonlySet<State>
   readonly select?: (
     operation: MatchOperation,
     member: Match.CoverageIdentity,
@@ -99,7 +102,10 @@ const structuredCfgPathsValid = <State>(
     incoming: ReadonlySet<State>,
   ): ReadonlySet<State> => {
     let states = incoming
-    for (const operation of operations) states = transfer(operation, states)
+    for (const operation of operations) {
+      states = transfer(operation, states)
+      states = semantics.after?.(operation, states) ?? states
+    }
     return states
   }
   const execution = (value: Execution, initial: ReadonlySet<State>): ReadonlySet<State> => {
@@ -181,7 +187,8 @@ const structuredCfgPathsValid = <State>(
       valid = false
       return new Set()
     }
-    const guarded = arm.guard === undefined ? incoming : execution(arm.guard.execution, incoming)
+    const bound = semantics.enterArm?.(arm, incoming) ?? incoming
+    const guarded = arm.guard === undefined ? bound : execution(arm.guard.execution, bound)
     const selected = execution(arm.selected.execution, guarded)
     return arm.guard === undefined
       ? selected
@@ -1369,7 +1376,7 @@ const sameCoverage = (
   left.length === right.length &&
   left.every((member, ordinal) => {
     const candidate = right.at(ordinal)
-    return candidate !== undefined && Match.identityEquals(member, candidate)
+    return candidate !== undefined && Match.identityEquals(member, candidate, 'Runtime')
   })
 
 const enumRepresentationMatches = (
@@ -1437,11 +1444,7 @@ const callArgumentCompatible = (actual: Type, expected: Type): boolean => {
     (SilkType.isCallable(expectedSemantic.contract) || SilkType.isEffect(expectedSemantic.contract))
       ? expectedSemantic.contract
       : expectedSemantic
-  if (
-    sameRuntimeType(actualContract, expectedContract) ||
-    TypeCompatibility.isCompatible(TypeCompatibility.check(actualContract, expectedContract))
-  )
-    return true
+  if (acceptsRuntimeOperand(actualContract, expectedContract)) return true
   if (
     actual._tag !== 'EffectValue' ||
     expected._tag !== 'EffectValue' ||
@@ -4218,7 +4221,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             parameters.every((expected, ordinal) => {
               const argument = operation.arguments.at(ordinal)
               const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
-              return actual !== undefined && SilkType.equals(semanticType(actual), expected)
+              return actual !== undefined && sameRuntimeType(semanticType(actual), expected)
             })
           if (
             catalog?.unsafe !== true ||
@@ -4391,14 +4394,14 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             rule.parameters.every((expected, ordinal) => {
               const argument = operation.arguments.at(ordinal)
               const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
-              return actual !== undefined && SilkType.equals(semanticType(actual), expected)
+              return actual !== undefined && sameRuntimeType(semanticType(actual), expected)
             })
           if (
             catalog?.unsafe !== true ||
             expectedResult === undefined ||
             destination === undefined ||
-            !SilkType.equals(semanticType(destination), expectedResult) ||
-            !SilkType.equals(semanticType(operation.type), expectedResult) ||
+            !sameRuntimeType(semanticType(destination), expectedResult) ||
+            !sameRuntimeType(semanticType(operation.type), expectedResult) ||
             !argumentsValid
           ) {
             violations.push(
@@ -5389,6 +5392,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               universal: arm.universal,
               guarded: arm.guard !== undefined,
             })),
+            'Runtime',
           )
           const enumRepresentation =
             operation.scrutineeType._tag === 'Enum'
@@ -5421,11 +5425,11 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                   arm.universal ||
                   (arm.member !== undefined &&
                     member !== undefined &&
-                    Match.selects(arm.member, member)),
+                    Match.selects(arm.member, member, 'Runtime')),
               )
               return (
                 member !== undefined &&
-                Match.identityEquals(decision.member, member) &&
+                Match.identityEquals(decision.member, member, 'Runtime') &&
                 decision.candidates.length === expected.length &&
                 decision.candidates.every(
                   (candidate, candidateOrdinal) =>
@@ -6205,9 +6209,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               return (
                 actual !== undefined &&
                 expected !== undefined &&
-                TypeCompatibility.isCompatible(
-                  TypeCompatibility.check(semanticType(actual), expected),
-                )
+                acceptsRuntimeOperand(semanticType(actual), expected)
               )
             })
           const environmentForm =

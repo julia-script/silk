@@ -4,12 +4,10 @@ import * as Analysis from '../src/Analysis.js'
 import type * as CleanupPlan from '../src/CleanupPlan.js'
 import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Layout from '../src/Layout.js'
-import * as Lower from '../src/Lower.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirNormalization from '../src/MirNormalization.js'
 import * as MirVerification from '../src/MirVerification.js'
-import * as OpaqueRealization from '../src/OpaqueRealization.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -28,18 +26,16 @@ const lowerStored = Effect.fnUntraced(function* (
   source: string,
   imports: ReadonlyMap<string, Uint8Array> = new Map(),
 ) {
-  const snapshot = yield* Analysis.makeRealized({
+  const frontend = yield* Analysis.make({
     root: SourceFile.make(name, ascii(source)),
     target: Target.wasm32UnknownUnknown.id,
   }).pipe(Effect.provide(SourceResolver.memory(imports)))
-  const catalog = Layout.catalog(Target.wasm32UnknownUnknown, snapshot.index, snapshot.instances)
-  const layout = Layout.plan(catalog, snapshot.instances, snapshot.index)
-  const module = Lower.lowerProgram(
-    snapshot.instances,
-    layout,
-    snapshot.index,
-    OpaqueRealization.catalogOf(snapshot),
-  )
+  const snapshot = Analysis.realize(frontend, Target.wasm32UnknownUnknown.id, {
+    normalizeMir: false,
+  })
+  const layout =
+    snapshot.layout._tag === 'Available' ? snapshot.layout.value : unreachable('expected layout')
+  const module = Analysis.loweredMir(snapshot)
   return Object.freeze({ snapshot, layout, module })
 })
 
@@ -135,7 +131,7 @@ it.effect('carries lazy construction and exact stored Effect execution through M
     const name = 'stored-effect-mir/lifecycle'
     const { snapshot, module } = yield* lowerStored(
       name,
-      `struct Deferred<F: Effect<i32>> { operation: F }
+      `struct Deferred<F: Effect<'static; i32>> { operation: F }
 pub fn main() -> i32 {
   let other = effect { return 0 }
   let ignored = run other
@@ -317,7 +313,7 @@ it.effect(
       const { snapshot, module } = yield* lowerStored(
         'stored-effect-mir/nested-intrinsic-effect',
         `import silk.effect { Effect }
-effect fn pass<A, E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
+effect<'env> fn pass<'env, A, E, ?R>(self: once Effect<'env; A ! E ? R>) -> A ! E ? R {
   return run move self
 }
 pub fn main() -> i32 {
@@ -325,6 +321,17 @@ pub fn main() -> i32 {
 }`,
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const layout =
+        snapshot.layout._tag === 'Available'
+          ? snapshot.layout.value
+          : unreachable('expected layout')
+      const provisional = ProvisionalMir.build(snapshot.instances, layout, snapshot.index)
+      const intrinsic =
+        provisional.executions.find(
+          (execution) => execution.key._tag === 'BuiltinEffectRunnerExecution',
+        ) ?? unreachable('expected intrinsic runner execution')
+      assert.strictEqual(intrinsic.classification, 'Suspendable')
+      assert.isTrue(intrinsic.regions.some((region) => region.outcome._tag === 'SuspendEffect'))
       assert.deepEqual(MirVerification.verify(module), [])
     }),
 )
@@ -334,7 +341,7 @@ it.effect('resolves unrun stored Effect cleanup before MIR', () =>
     const { module } = yield* lowerStored(
       'stored-effect-mir/unrun-cleanup',
       `struct Token { value: i32 }
-struct Deferred<F: once Effect<i32>> { operation: F }
+struct Deferred<F: once Effect<'static; i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
 pub fn main() -> i32 {
   let token = Token { value: 1 }
@@ -427,7 +434,7 @@ it.effect('retains stored runners across suspension and resume planning', () =>
     const lowered = yield* lowerStored(
       'stored-effect-mir/suspending',
       `import silk.effect { Effect }
-struct Deferred<F: Effect<i32>> { operation: F }
+struct Deferred<F: Effect<'static; i32>> { operation: F }
 effect fn delayed() -> i32 {
   return run Effect.suspend(effect { return 42 })
 }
@@ -489,7 +496,7 @@ import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
 import silk.layout { Layout }
 struct Token { value: i32 }
-struct Deferred<F: once Effect<i32>> { operation: F }
+struct Deferred<F: once Effect<'static; i32>> { operation: F }
 fn consume(token: Token) -> i32 { return token.value }
 effect fn build() -> i32 ! OutOfMemoryError {
   let token = Token { value: 1 }

@@ -487,6 +487,7 @@ const factOfExact = (
   self: Instances.Discovery,
   exact: Type.ExactRepresentationArgument,
   facts: ReadonlyArray<Fact>,
+  property: Type.SealedStaticProperty,
 ): Fact | undefined => {
   if (exact.identity._tag === 'EffectIdentityArgument') {
     const effectIdentity = exact.identity
@@ -512,8 +513,12 @@ const factOfExact = (
     const environment = identity.environment
     return (
       environment !== undefined &&
-      Type.callableEnvironmentKey(Instances.callableEnvironmentIdentity(candidate)) ===
-        Type.callableEnvironmentKey(environment)
+      (property === 'Intrinsic.NonParking'
+        ? Type.runtimeCallableEnvironmentIdentityKey(
+            Instances.callableEnvironmentIdentity(candidate),
+          ) === Type.runtimeCallableEnvironmentIdentityKey(environment)
+        : Type.callableEnvironmentKey(Instances.callableEnvironmentIdentity(candidate)) ===
+          Type.callableEnvironmentKey(environment))
     )
   })
   if (callable !== undefined) {
@@ -609,8 +614,12 @@ export const violationDiagnostics = (
     const alternatives = exactAlternatives(argument)
     const ordinary = Type.isTypeArgument(argument) ? argument : undefined
     if (alternatives.length === 0 && ordinary === undefined) return []
-    const exactFacts = alternatives.map((alternative) => factOfExact(self, alternative, facts))
     return parameter.staticProperties.flatMap((property) => {
+      // NonParking follows executable control flow shared by lifetime-erased specializations.
+      // Detached must retain the selected semantic environment rather than borrow that proof.
+      const exactFacts = alternatives.map((alternative) =>
+        factOfExact(self, alternative, facts, property),
+      )
       let ordinaryVerdict: Verdict | undefined
       if (ordinary === undefined) {
         ordinaryVerdict = undefined

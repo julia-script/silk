@@ -349,40 +349,56 @@ pub fn main() -> i32 { let pair = make() return pair.left }`),
   }),
 )
 
-it.effect('keeps invalid construction, projection, and partial moves phase-owned', () =>
-  Effect.gen(function* () {
-    const invalid = yield* Analysis.ofSourceRealized(
-      'struct-values/invalid',
-      ascii(`struct Pair { left: i32 right: i32 }
+it.effect(
+  'keeps construction and borrowed extraction errors phase-owned while admitting owned field moves',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct Pair { left: i32 right: i32 }
 struct Outer { pair: Pair }
 fn missing() -> Pair { return Pair { left: 1 } }
 fn duplicate() -> Pair { return Pair { left: 1, left: 2, right: 3 } }
 fn unknown() -> Pair { return Pair { left: 1, right: 2, extra: 3 } }
 fn mistyped() -> Pair { return Pair { left: true, right: 2 } }
 fn partial(value: Outer) -> Pair { return move value.pair }
-pub fn main() -> i32 { return 0 }`),
-    )
+fn borrowed(value: &Outer) -> Pair { return move value.pair }
+pub fn main() -> i32 { return 0 }`
+      const invalid = yield* Analysis.ofSource('struct-values/invalid', ascii(source))
 
-    assert.deepEqual(
-      Analysis.diagnostics(invalid).map((diagnostic) => diagnostic.code),
-      ['SEM0024', 'SEM0023', 'SEM0022', 'SEM0025', 'OWN0002'],
-    )
-    const functions = Analysis.rootAnalysis(invalid).functions
-    for (const ordinal of [0, 1, 2, 3]) {
-      assert.strictEqual(functions.at(ordinal)?.returnedExpression.type._tag, 'Unavailable')
-    }
-    const partial = Analysis.rootAnalysis(invalid).hir.functions.find(
-      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'partial',
-    )
-    const partialExpression = partial === undefined ? undefined : Hir.returned(partial)
-    assert.strictEqual(partialExpression?._tag, 'Move')
-    if (partialExpression?._tag === 'Move') {
-      assert.strictEqual(partialExpression.subject._tag, 'Project')
-      if (partialExpression.subject._tag === 'Project') {
-        assert.strictEqual(partialExpression.subject.access, 'ConsumeRequested')
+      assert.deepEqual(
+        Analysis.diagnostics(invalid).map((diagnostic) => ({
+          code: diagnostic.code,
+          span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+        })),
+        [
+          { code: 'SEM0024', span: 'Pair { left: 1 }' },
+          { code: 'SEM0023', span: 'left' },
+          { code: 'SEM0022', span: 'extra' },
+          { code: 'SEM0025', span: 'true' },
+          { code: 'OWN0002', span: 'move value.pair' },
+        ],
+      )
+      assert.strictEqual(
+        Analysis.diagnostics(invalid).find((diagnostic) => diagnostic.code === 'OWN0002')?.span
+          .start,
+        source.lastIndexOf(' move value.pair'),
+      )
+      const functions = Analysis.rootAnalysis(invalid).functions
+      for (const ordinal of [0, 1, 2, 3]) {
+        assert.strictEqual(functions.at(ordinal)?.returnedExpression.type._tag, 'Unavailable')
       }
-    }
-  }),
+      const partial = Analysis.rootAnalysis(invalid).hir.functions.find(
+        (fn) =>
+          fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'partial',
+      )
+      const partialExpression = partial === undefined ? undefined : Hir.returned(partial)
+      assert.strictEqual(partialExpression?._tag, 'Move')
+      if (partialExpression?._tag === 'Move') {
+        assert.strictEqual(partialExpression.subject._tag, 'Project')
+        if (partialExpression.subject._tag === 'Project') {
+          assert.strictEqual(partialExpression.subject.access, 'ConsumeRequested')
+        }
+      }
+    }),
 )
 
 it.effect('rejects conflicting and absent ordinary struct inference evidence', () =>

@@ -506,7 +506,7 @@ impl Copy for LocalWrap<i32> {}
 fn moveCore<T>(value: Intrinsic.SharedCore<T>) -> Intrinsic.SharedCore<T> { return move value }
 fn duplicate(value: Intrinsic.SharedCore<i32>) -> Intrinsic.SharedCore<i32> { return value }
 fn select(value: i32, core: Intrinsic.SharedCore<i32>) -> i32 { return value }
-fn capture(core: Intrinsic.SharedCore<i32>) -> once fn(i32) -> i32 { return select(move core) }
+fn capture(core: Intrinsic.SharedCore<i32>) -> once fn<'static>(i32) -> i32 { return select(move core) }
 fn moveCapture(core: Intrinsic.SharedCore<i32>) -> i32 {
   let first = select(move core)
   let second = move first

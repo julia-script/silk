@@ -1315,13 +1315,18 @@ export const make = (operations: Operations) => {
       )
         continue
       const witness = ConformanceProof.witness(context.index, provider, requirement.capability)
-      if (witness?._tag === 'SourceConformanceWitness')
+      if (witness?._tag === 'SourceConformanceWitness') {
+        const result = Type.substitute(target.contract.result, targetSubstitution)
+        if (!Type.isEffect(result)) continue
         return targetKeyOfServiceCall(
           service.expression,
           witness,
           service.context,
-          providerParameter,
+          constraint.mode === 'Take'
+            ? Type.reference(service.expression.access, provider, result.environment)
+            : providerParameter,
         )
+      }
     }
     return undefined
   }
@@ -1366,13 +1371,13 @@ export const make = (operations: Operations) => {
       service.expression,
       witness,
       service.context,
-      binding.provider.selectionAccess === 'Take'
-        ? witness.provider
-        : Type.reference(
-            binding.provider.selectionAccess,
-            witness.provider,
-            Type.substituteLifetime(binding.type.environment, targetSubstitution),
-          ),
+      Type.reference(
+        binding.provider.selectionAccess === 'Take'
+          ? service.expression.access
+          : binding.provider.selectionAccess,
+        witness.provider,
+        Type.substituteLifetime(binding.type.environment, targetSubstitution),
+      ),
     )
   }
 
@@ -1416,13 +1421,13 @@ export const make = (operations: Operations) => {
       service.expression,
       witness,
       service.context,
-      binding.provider.selectionAccess === 'Take'
-        ? witness.provider
-        : Type.reference(
-            binding.provider.selectionAccess,
-            witness.provider,
-            Type.substituteLifetime(binding.type.environment, targetSubstitution),
-          ),
+      Type.reference(
+        binding.provider.selectionAccess === 'Take'
+          ? service.expression.access
+          : binding.provider.selectionAccess,
+        witness.provider,
+        Type.substituteLifetime(binding.type.environment, targetSubstitution),
+      ),
     )
   }
 
@@ -2196,8 +2201,16 @@ export const make = (operations: Operations) => {
     if (declaration === undefined) return Object.freeze([])
     const fn = targetFunction(results, declaration)
     if (fn === undefined) return undefined
+    const invocationBinders = new Set(
+      DeclarationFacts.executableLifetimes(fn.declaration).lifetimeBinders.map(Lifetime.key),
+    )
     const arguments_ = fn.declaration.typeParameters.flatMap((parameter) => {
-      const type = substitution.get(Type.key(parameter.type))
+      const declared = Type.parameterArgument(parameter.type)
+      const type =
+        substitution.get(Type.key(parameter.type)) ??
+        (Lifetime.isLifetime(declared) && invocationBinders.has(Lifetime.key(declared))
+          ? declared
+          : undefined)
       return type === undefined ? [] : [type]
     })
     return arguments_.length === fn.declaration.typeParameters.length
@@ -3238,6 +3251,8 @@ export const make = (operations: Operations) => {
             const identity = effectIdentity(instance.key, site)
             const execution = effectNode(identity)
             effectIdentities.add(identity)
+            if (expression.operation === 'EffectSuspend') nestedRoots.add(execution)
+            else if (expression.operation === 'ExecutionPark') externalRoots.add(execution)
             for (const argument of expression.arguments)
               for (const target of executionTargets(argument))
                 if (target !== execution) addDependency(execution, target)
@@ -3453,14 +3468,13 @@ export const make = (operations: Operations) => {
                 selected,
                 witness,
                 providerAccess: expression.provider.selectionAccess,
-                receiver:
+                receiver: Type.reference(
                   expression.provider.selectionAccess === 'Take'
-                    ? witness.provider
-                    : Type.reference(
-                        expression.provider.selectionAccess,
-                        witness.provider,
-                        Type.substituteLifetime(expression.type.environment, instance.substitution),
-                      ),
+                    ? 'Exclusive'
+                    : expression.provider.selectionAccess,
+                  witness.provider,
+                  Type.substituteLifetime(expression.type.environment, instance.substitution),
+                ),
               }),
             )
         } else if (expression._tag === 'Call') {

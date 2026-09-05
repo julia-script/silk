@@ -405,7 +405,7 @@ pub fn main() -> i32 {
 }`
 
 /** A namespace named only inside a static literal is inert text, not a qualified actor. */
-const quoted = `pub fn label() -> string {
+const quoted = `pub fn label() -> string<'static> {
   return "Result.succeed"
 }
 
@@ -436,7 +436,7 @@ it.effect('never injects a namespace named only inside a comment', () =>
 
 it.effect('never injects a namespace named only inside a static literal', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized('stdlib/quoted', ascii(quoted))
+    const snapshot = yield* Analysis.ofSource('stdlib/quoted', ascii(quoted))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.notInclude(
       Analysis.modules(snapshot).map((module) => module.name),

@@ -2060,7 +2060,7 @@ function lowerMatchExpression(
           specializedMembers.filter(
             (member, ordinal) =>
               specializedMembers.findIndex((candidate) =>
-                Match.identityEquals(candidate, member),
+                Match.identityEquals(candidate, member, 'Runtime'),
               ) === ordinal,
           ),
         )
@@ -2074,6 +2074,7 @@ function lowerMatchExpression(
         guarded: arm.guard !== undefined,
       }),
     ),
+    'Runtime',
   )
   const arms: Array<Mir.MatchArm> = []
   const armStates = new Map<number, DelayedEffectState>()
@@ -2085,7 +2086,8 @@ function lowerMatchExpression(
     restoreDelayedEffectState(fn, branchState)
     const member = arm.member === undefined ? undefined : specializeMember(arm.member)
     const selectedMembers = pendingMembers.filter(
-      (candidate) => arm.universal || (member !== undefined && Match.selects(member, candidate)),
+      (candidate) =>
+        arm.universal || (member !== undefined && Match.selects(member, candidate, 'Runtime')),
     )
     const executes = selectedMembers.length > 0
     const before = transition.before
@@ -2248,6 +2250,13 @@ function lowerMatchExpression(
   )
     ? fn.alloc(resultType)
     : undefined
+  // Contextual typing can retain an expected result even when every selected arm transfers.
+  // MIR records the actual join: a transferring match has no result storage or calling lanes.
+  const joinType: Mir.Type =
+    destination === undefined ? Object.freeze({ _tag: 'Bottom', type: 'never' }) : resultType
+  const joinShape =
+    destination === undefined ? Layout.callingShape(fn.layout, 'never') : resultShape
+  if (joinShape === undefined) return undefined
   const decisions = members.map((member) =>
     Object.freeze({
       member,
@@ -2255,7 +2264,8 @@ function lowerMatchExpression(
         arms
           .filter(
             (arm) =>
-              arm.universal || (arm.member !== undefined && Match.selects(arm.member, member)),
+              arm.universal ||
+              (arm.member !== undefined && Match.selects(arm.member, member, 'Runtime')),
           )
           .map((arm) => arm.id),
       ),
@@ -2296,8 +2306,8 @@ function lowerMatchExpression(
       members: Object.freeze(members),
       decisions: Object.freeze(mirDecisions),
       arms: Object.freeze(arms),
-      type: resultType,
-      resultShape,
+      type: joinType,
+      resultShape: joinShape,
       provenance: authored(expression.span),
     }),
   )
