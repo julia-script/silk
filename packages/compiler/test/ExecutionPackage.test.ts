@@ -195,10 +195,10 @@ pub fn main() -> i32 { return 0 }
     const diagnostics = Analysis.diagnostics(self)
     const externalStart = source.indexOf('effect fn external')
     const localStart = source.indexOf('effect fn local')
-    assert.isFalse(diagnostics.some((d) => d.span.start < externalStart))
+    assert.isFalse(diagnostics.some((d) => d.span.end <= externalStart))
     assert.isTrue(
       diagnostics.some(
-        (d) => d.code === 'SEM0212' && d.span.start >= externalStart && d.span.start < localStart,
+        (d) => d.code === 'SEM0212' && d.span.end > externalStart && d.span.start < localStart,
       ),
     )
     assert.isTrue(

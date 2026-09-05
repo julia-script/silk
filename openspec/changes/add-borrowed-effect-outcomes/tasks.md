@@ -20,5 +20,5 @@
 
 ## 4. Reconciliation and milestone verification
 
-- [ ] 4.1 Reconcile prescriptive Effect/failure, callable, ownership, suspension and independent-execution reference, diagnostics, main specs and fixtures; verify strict OpenSpec validation, diagnostic generation and affected documentation examples.
+- [x] 4.1 Reconcile prescriptive Effect/failure, callable, ownership, suspension and independent-execution reference, diagnostics, main specs and fixtures; verify strict OpenSpec validation, diagnostic generation and affected documentation examples.
 - [ ] 4.2 At the final implementation milestone run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test and pnpm check, plus pnpm release:candidate when package contents/exports change; record exact outcomes and distinguish pre-existing failures. During iteration use localized tests; do not repeatedly run the full suite.
