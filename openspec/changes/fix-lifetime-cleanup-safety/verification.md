@@ -1,9 +1,25 @@
 # Critical lifetime cleanup fixes
 
-Validated implementation commit: `1d230105` on `julia/lifetimes-critical-fixes`.
+Validated merged source commit: `5307ad8e` on `julia/lifetimes-critical-fixes`.
 Implementation base: `3ca10d4d09f666ff5161f14554f905986bfb486b`.
 
-## Successful retry — 2026-09-05
+## Merge validation — 2026-09-05
+
+Merged main at `8b4024a8` into the branch. The sole conflict was `ToolchainIntegrity.generated.ts`; the normal generator recomputed its digest from the combined source tree. Both branches' source changes were preserved without a manual semantic resolution.
+
+Every local gate passed on the merged tree: `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, `pnpm test`, `pnpm check`, and `pnpm release:candidate`. Strict validation of this OpenSpec change also passed.
+
+- Fresh compiler suite: 2,276 tests across 211 files, including all 83 ownership tests.
+- Fresh native acceptance: 317 tests, all passing.
+- Standard-library doctests: 60 passed.
+- Workspace tests: 22 successful tasks, 11 cached; 26m15s overall.
+- `pnpm check`: passed, reusing successful build/typecheck/test tasks and running formatting, lint, and all 17 script checks.
+- Release candidate: 10 tests passed in 35 seconds, with cached prerequisite builds.
+- GitHub CI also passed every check on merge commit `5307ad8e`.
+
+The conflict is resolved. No implementation edits followed this validation.
+
+## Earlier successful retry — 2026-09-05
 
 After disk space was freed, every required local gate passed:
 
@@ -14,7 +30,7 @@ After disk space was freed, every required local gate passed:
 - `pnpm check`: passed, reusing build/typecheck/test results and freshly running formatting, lint, and script checks.
 - `pnpm release:candidate`: passed all 10 tests in 27 seconds; prerequisite build tasks were cache hits.
 
-No implementation code changed during this retry. Task 3.1 is complete. The later conflict with main is limited to the generated toolchain fingerprint and does not change which implementation commit these results validate.
+No implementation code changed during this retry. Task 3.1 is complete. This earlier run validated implementation commit `1d230105`; the merge validation above covers the combined source tree.
 
 ## Regression evidence
 
