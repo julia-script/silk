@@ -6,6 +6,7 @@ import {
   generated,
   emitReleases,
   emitInitializationTransition,
+  initializeBinding,
   matchCleanupKey,
   ownerFields,
   lowerBorrowSelectors,
@@ -2160,6 +2161,10 @@ function lowerMatchExpression(
       if (destination === undefined) return undefined
       cleanup.push(Object.freeze({ destination, path: release.path, cleanup: plan }))
     }
+    const [, initialization] = fn.capture(() => {
+      for (const binding of bindings)
+        initializeBinding(fn, { _tag: 'Pattern', binding: binding.id }, arm.span)
+    })
     const guardExpression = arm.guard
     const guardExecution =
       guardExpression === undefined
@@ -2181,6 +2186,7 @@ function lowerMatchExpression(
       execution = lowerExecution(fn, body.span, () => 'Transferred')
     else if (body._tag === 'Expression')
       execution = lowerExecution(fn, body.span, () => {
+        for (const operation of initialization) fn.emit(operation)
         const lowered = lowerExpression(fn, body.expression, availableRequirements)
         if (lowered === 'Transferred') return lowered
         if (lowered === undefined) return lowered
@@ -2195,7 +2201,7 @@ function lowerMatchExpression(
     else
       execution = fn.captureExecution(() => {
         const finish = body.completion.fallsThrough ? fn.reserve() : undefined
-        const entry = lowerSequence(
+        const bodyEntry = lowerSequence(
           fn,
           body.statements,
           fn.exits,
@@ -2214,7 +2220,16 @@ function lowerMatchExpression(
           undefined,
           armExit,
         )
-        if (entry === undefined) return undefined
+        if (bodyEntry === undefined) return undefined
+        const entry = initialization.length === 0 ? bodyEntry : fn.reserve()
+        if (initialization.length > 0)
+          fn.publish({
+            _tag: 'OperationRegion',
+            id: entry,
+            ...ownerFields(fn.ownerLoop),
+            operations: initialization,
+            outcome: { _tag: 'Forward', target: bodyEntry, provenance: generated(arm.span) },
+          })
         if (finish === undefined) return Object.freeze({ entry })
         const [unit, operations] = fn.capture(() =>
           lowerUnitLiteralExpression(fn, {
