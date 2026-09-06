@@ -18,6 +18,7 @@ import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
 import * as SourceFile from '../dist/SourceFile.js'
 import * as SourceResolver from '../dist/SourceResolver.js'
 import * as Stdlib from '../dist/Stdlib.js'
+import * as Target from '../dist/Target.js'
 
 const logError = (...values) => Effect.runSync(Console.error(...values))
 
@@ -57,11 +58,16 @@ const stdlibTree = async () => {
     )
     roots.push(SourceFile.make(module.module, bytes))
   }
-  const analysis = await Effect.runPromise(
-    ProjectAnalysis.make(roots).pipe(Effect.provide(SourceResolver.empty)),
-  )
-  const project = DocumentationProject.fromProjectAnalysis(analysis)
-  const rendered = DocumentationReference.make(Stdlib.manifest, project)
+  const projects = []
+  for (const target of Target.all) {
+    const analysis = await Effect.runPromise(
+      ProjectAnalysis.make(roots, { configuration: { profile: { target: target.id } } }).pipe(
+        Effect.provide(SourceResolver.empty),
+      ),
+    )
+    projects.push({ name: target.id, project: DocumentationProject.fromProjectAnalysis(analysis) })
+  }
+  const rendered = DocumentationReference.makeProfiles(Stdlib.manifest, projects)
   if (rendered._tag === 'Failure') {
     for (const error of rendered.errors) logError('Stdlib reference generation failed:', error)
     process.exit(1)

@@ -2787,6 +2787,36 @@ const semanticTokenAt = (
   return decoded.find((token) => token.line === line && token.character === character)
 }
 
+it.effect('marks compiler-selected inactive tokens without exposing inactive symbols', () =>
+  Effect.gen(function* () {
+    const source =
+      'static if Intrinsic.targetOperatingSystem() == "darwin" { pub fn active() -> i32 { return 1 } } else { pub fn inactive() -> i32 { return 2 } }'
+    const bytes = encoder.encode(source)
+    const project = yield* ProjectAnalysis.make([SourceFile.make('main', bytes)], {
+      configuration: { profile: { target: 'aarch64-apple-darwin' } },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    const snapshot = ProjectAnalysis.view(project, 'main')
+    assert.ok(snapshot)
+    const document = Document.make({
+      uri: 'file:///project/main.silk',
+      version: 1,
+      workspace: 'project',
+      module: 'main',
+      sourceRoot: '/project',
+      bytes,
+    })
+    const tokens = Document.semanticTokens(document, snapshot)
+    const decoded = decodeSemanticTokens(tokens)
+    const inactive = decoded.findIndex((token) => token.character === source.indexOf('inactive()'))
+    const active = decoded.findIndex((token) => token.character === source.indexOf('active()'))
+    assert.isAtLeast(inactive, 0)
+    assert.isAtLeast(active, 0)
+    assert.strictEqual(tokens.data[inactive * 5 + 4], 1)
+    assert.strictEqual(tokens.data[active * 5 + 4], 0)
+    assert.strictEqual(Analysis.memberByName(snapshot, 'main', 'inactive')._tag, 'Missing')
+  }),
+)
+
 it.effect('serves shared-pattern bindings through completion hover navigation and tokens', () =>
   Effect.gen(function* () {
     const source = `struct Full { value: i32 }

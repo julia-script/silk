@@ -49,7 +49,7 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     assert.strictEqual(initialized.capabilities.foldingRangeProvider, true)
     assert.strictEqual(initialized.capabilities.callHierarchyProvider, true)
     assert.deepEqual(initialized.capabilities.semanticTokensProvider, {
-      legend: { tokenTypes: [...Document.semanticTokenTypes], tokenModifiers: [] },
+      legend: { tokenTypes: [...Document.semanticTokenTypes], tokenModifiers: ['inactive'] },
       full: true,
     })
     client.send({ method: 'initialized', params: {} })

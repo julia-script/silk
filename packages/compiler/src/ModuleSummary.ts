@@ -1,4 +1,7 @@
 import * as Option from 'effect/Option'
+import * as DeclarationFacts from './DeclarationFacts.js'
+import type * as DeclarationIndex from './DeclarationIndex.js'
+import type * as ModuleClosure from './ModuleClosure.js'
 import * as ImportPath from './ImportPath.js'
 import * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -17,6 +20,8 @@ export type DeclarationKind =
   | 'Service'
   | 'Interface'
   | 'Alias'
+  | 'Enum'
+  | 'Role'
 
 /** One compact public declaration header retained for exact-name candidate lookup. */
 export interface PublicDeclaration {
@@ -51,6 +56,10 @@ const declarationKind = (
       return { declarationKind: 'Struct', namespace: 'ValueAndType' }
     case 'UnionDeclaration':
       return { declarationKind: 'Union', namespace: 'ValueAndType' }
+    case 'EnumDeclaration':
+      return { declarationKind: 'Enum', namespace: 'ValueAndType' }
+    case 'RoleDeclaration':
+      return { declarationKind: 'Role', namespace: 'ValueAndType' }
     case 'ServiceDeclaration':
       return { declarationKind: 'Service', namespace: 'Type' }
     case 'InterfaceDeclaration':
@@ -152,3 +161,47 @@ export const make = (syntax: SyntaxFile.SyntaxFile): ModuleSummary => {
 /** Tests whether a summary describes the exact same immutable source bytes and provenance. */
 export const matchesSource = (self: ModuleSummary, source: SourceFile.SourceFile): boolean =>
   SourceFile.equals(self.source, source)
+
+/** Projects importable declarations from a completed selected index, including public aliases. */
+export const selected = (
+  module: ModuleClosure.ProjectClosure['modules'][number],
+  index: DeclarationIndex.Index,
+): ModuleSummary => {
+  const headers = index.modules.find((candidate) => candidate.module === module.name)
+  const names = new Set([
+    ...(headers?.members.flatMap((member) =>
+      member.name._tag === 'Present' ? [member.name.spelling] : [],
+    ) ?? []),
+    ...(headers?.publications.map((publication) => publication.spelling) ?? []),
+  ])
+  const publicDeclarations: Array<PublicDeclaration> = []
+  for (const name of names) {
+    const found = DeclarationFacts.publishedMember(index, module.name, name)
+    if (found._tag !== 'Resolved') continue
+    const member = found.declaration
+    if (member.visibility !== 'Public' || member.name._tag !== 'Present') continue
+    if (member._tag === 'FunctionDeclaration' && member.associatedMember !== undefined) continue
+    const kind = declarationKind(member.syntax.kind)
+    if (kind === undefined) continue
+    publicDeclarations.push(
+      Object.freeze({
+        _tag: 'ModuleSummaryPublicDeclaration',
+        spelling: name,
+        ...kind,
+        ordinal: member.id.ordinal,
+        selectionSpan: member.name.token.span,
+      }),
+    )
+  }
+  return Object.freeze({
+    _tag: 'ModuleSummary',
+    module: module.name,
+    source: module.syntax.source,
+    imports: Object.freeze(
+      module.imports.flatMap((imported) =>
+        imported.canonicalTarget === undefined ? [] : [imported.canonicalTarget],
+      ),
+    ),
+    publicDeclarations: Object.freeze(publicDeclarations),
+  })
+}

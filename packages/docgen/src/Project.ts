@@ -1,5 +1,5 @@
 import * as Analysis from '@silklang/compiler/Analysis'
-import type * as DeclarationFacts from '@silklang/compiler/DeclarationFacts'
+import * as DeclarationFacts from '@silklang/compiler/DeclarationFacts'
 import * as Presentation from '@silklang/compiler/Presentation'
 import * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
 import type * as SourceFile from '@silklang/compiler/SourceFile'
@@ -52,6 +52,7 @@ export interface Module {
 export interface Project {
   readonly schema: 'silk-documentation'
   readonly experimental: true
+  readonly profile?: { readonly identity: string; readonly target: string }
   readonly modules: ReadonlyArray<Module>
 }
 
@@ -619,7 +620,14 @@ const moduleModel = (
 ): Module | undefined => {
   const syntax = Analysis.moduleAnalysis(snapshot, headers.module)?.syntax
   if (syntax === undefined) return undefined
-  const raw = Analysis.moduleDocumentation(snapshot, headers.module)
+  // A profile with no selected declarations has no module API examples to execute.
+  const raw =
+    snapshot.profile !== undefined &&
+    headers.members.length === 0 &&
+    headers.publications.length === 0 &&
+    headers.conformances.length === 0
+      ? undefined
+      : Analysis.moduleDocumentation(snapshot, headers.module)
   const documentation = resolveDocumentation(
     snapshot,
     headers.module,
@@ -646,6 +654,33 @@ const moduleModel = (
     .map((member) =>
       memberItem(snapshot, headers.module, syntax.source, member, options, associatedOf(member)),
     )
+  const publications: Array<Item> = []
+  const published = new Set(members.map((member) => member.name))
+  for (const publication of headers.publications) {
+    if (published.has(publication.spelling)) continue
+    const found = DeclarationFacts.publishedMember(
+      Analysis.declarationIndex(snapshot),
+      headers.module,
+      publication.spelling,
+    )
+    if (found._tag !== 'Resolved' || found.declaration.visibility !== 'Public') continue
+    published.add(publication.spelling)
+    const alias =
+      publication.original === publication.spelling
+        ? publication.original
+        : `${publication.original} as ${publication.spelling}`
+    publications.push(
+      Object.freeze({
+        id: `${headers.module}::${publication.spelling}`,
+        kind: 'Alias',
+        name: publication.spelling,
+        visibility: 'Public',
+        signature: { text: `pub import ${publication.module.replaceAll('/', '.')} { ${alias} }` },
+        source: rangeOf(publication.syntax),
+        children: Object.freeze([]),
+      }),
+    )
+  }
   const conformances = headers.conformances.map((conformance) =>
     conformanceItem(snapshot, headers.module, syntax.source, conformance),
   )
@@ -653,7 +688,7 @@ const moduleModel = (
     name: headers.module,
     sourceId: syntax.source.id,
     ...(documentation === undefined ? {} : { documentation }),
-    items: Object.freeze([...members, ...conformances]),
+    items: Object.freeze([...members, ...publications, ...conformances]),
   })
 }
 
@@ -662,6 +697,14 @@ export const make = (snapshot: Analysis.FrontendSnapshot, options: Options = {})
   Object.freeze({
     schema: 'silk-documentation',
     experimental: true,
+    ...(snapshot.profile === undefined
+      ? {}
+      : {
+          profile: {
+            identity: snapshot.profile.identity,
+            target: snapshot.profile.target.id,
+          },
+        }),
     modules: Object.freeze(
       Analysis.declarationIndex(snapshot).modules.flatMap((headers) => {
         const module = moduleModel(snapshot, headers, options)

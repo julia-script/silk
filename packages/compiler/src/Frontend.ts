@@ -485,13 +485,20 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
   )
 })
 
-/** Constructs one complete compiler frontend for the union closure of project roots. */
-export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
+/** Selected module closure and headers shared by compilation and source catalogs. */
+export interface SelectedProject {
+  readonly closure: ModuleClosure.ProjectClosure
+  readonly profile?: CompilationProfile.CompilationProfile
+  readonly selection?: ModuleSelection.ModuleSelection
+  readonly headers: HeaderFacts
+}
+
+/** Runs canonical profile/bootstrap/selection without elaborating unrelated executable bodies. */
+export const selectProject = Effect.fn('Frontend.selectProject')(function* (
   request: ModuleClosure.ProjectRequest,
+  report: Array<PhaseReport.PhaseReport> = [],
   options: Options = {},
-  previous?: IncrementalReuse.ProjectReuseBasis,
-): Effect.fn.Return<ProjectFrontend, never, SourceResolver.SourceResolver> {
-  const report: Array<PhaseReport.PhaseReport> = []
+): Effect.fn.Return<SelectedProject, never, SourceResolver.SourceResolver> {
   let closure = yield* PhaseReport.measureEffectInto(
     report,
     'closure',
@@ -550,13 +557,29 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       })
     }
   }
+  const headers = bootstrapHeaders ?? (yield* analyzeHeaders(closure, report, options))
+  return Object.freeze({
+    closure,
+    headers,
+    ...(profile === undefined ? {} : { profile }),
+    ...(selection === undefined ? {} : { selection }),
+  })
+})
+
+/** Constructs one complete compiler frontend for the union closure of project roots. */
+export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
+  request: ModuleClosure.ProjectRequest,
+  options: Options = {},
+  previous?: IncrementalReuse.ProjectReuseBasis,
+): Effect.fn.Return<ProjectFrontend, never, SourceResolver.SourceResolver> {
+  const report: Array<PhaseReport.PhaseReport> = []
+  const { closure, profile, selection, headers } = yield* selectProject(request, report, options)
   const semanticEnvironment = Canonical.record('SelectedFrontend', [
     SemanticInvalidation.environment,
     profile?.identity ?? '',
     selection?.dependencies ?? '',
   ])
   const compatiblePrevious = previous?.environment === semanticEnvironment ? previous : undefined
-  const headers = bootstrapHeaders ?? (yield* analyzeHeaders(closure, report, options))
   const bodyQueries = BodyQuery.make(
     headers.index,
     [...(compatiblePrevious?.semantics.values() ?? [])].map((module) => module.elaboration),

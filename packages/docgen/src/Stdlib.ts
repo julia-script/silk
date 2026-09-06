@@ -23,11 +23,9 @@ export const sources: Sources.Lookup = (sourceId) => CompilerStdlib.sources.get(
  * Private declarations are documented here because a doctest cares about whether an example
  * compiles, not about whether its declaration is part of the published surface.
  */
-export const documentation = Effect.fn('Stdlib.documentation')(function* (): Effect.fn.Return<
-  DocumentationProject.Project,
-  never,
-  never
-> {
+export const documentation = Effect.fn('Stdlib.documentation')(function* (
+  target: string,
+): Effect.fn.Return<DocumentationProject.Project, never, never> {
   const roots: Array<SourceFile.SourceFile> = []
   for (const entry of CompilerStdlib.manifest) {
     const bytes = CompilerStdlib.sources.get(entry.module)
@@ -36,6 +34,8 @@ export const documentation = Effect.fn('Stdlib.documentation')(function* (): Eff
     roots.push(SourceFile.make(entry.module, bytes))
   }
   if (roots.length === 0) return yield* Effect.die('The stdlib manifest is empty')
-  const analysis = yield* ProjectAnalysis.make(roots).pipe(Effect.provide(SourceResolver.empty))
+  const analysis = yield* ProjectAnalysis.make(roots, {
+    configuration: { profile: { target } },
+  }).pipe(Effect.provide(SourceResolver.empty))
   return DocumentationProject.fromProjectAnalysis(analysis, { includePrivate: true })
 })

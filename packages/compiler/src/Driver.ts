@@ -416,15 +416,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
     report,
     'toolchain-target',
     program.intrinsics.length,
-    () =>
-      ToolchainIntegrity.validateTarget(
-        distribution,
-        target,
-        program.intrinsics,
-        closure.sources.keys(),
-      ),
-    (result) =>
-      result._tag === 'Matched' ? result.providers.length + result.runtimeSupport.length : 0,
+    () => ToolchainIntegrity.validateTarget(distribution, target, program.intrinsics),
+    (result) => (result._tag === 'Matched' ? result.runtimeSupport.length : 0),
     (result) => (result._tag === 'Invalid' ? result.failures.length : 0),
     { heapBytes },
   )

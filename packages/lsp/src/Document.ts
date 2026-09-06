@@ -1700,7 +1700,10 @@ export const completion = (
       case 'Struct':
         return CompletionItemKind.Struct
       case 'Union':
+      case 'Enum':
         return CompletionItemKind.Enum
+      case 'Role':
+        return CompletionItemKind.Constant
       case 'Service':
       case 'Interface':
         return CompletionItemKind.Interface
@@ -1715,6 +1718,7 @@ export const completion = (
       : Stdlib.manifest.flatMap((entry, ordinal): ReadonlyArray<CompletionItem> => {
           if (
             entry.namespace === undefined ||
+            (inventory.toolchain.get(entry.module)?.publicDeclarations.length ?? 0) === 0 ||
             entry.module === self.module ||
             partial.length === 0 ||
             !entry.namespace.startsWith(partial) ||
@@ -2031,7 +2035,7 @@ export const semanticTokenTypes: ReadonlyArray<string> = Object.freeze([
 /** The legend one client negotiates once and then decodes every token reply against. */
 export const semanticTokensLegend: SemanticTokensLegend = Object.freeze({
   tokenTypes: [...semanticTokenTypes],
-  tokenModifiers: [],
+  tokenModifiers: ['inactive'],
 })
 
 const typeIndexes = new Map(semanticTokenTypes.map((name, index) => [name, index] as const))
@@ -2179,9 +2183,13 @@ export const semanticTokens = (
     }),
   )
   const data: Array<number> = []
+  const inactiveRanges = snapshot.selection?.inactiveRanges.get(self.module) ?? []
   let previousLine = 0
   let previousCharacter = 0
   for (const token of SyntaxTree.tokens(syntax.root)) {
+    const inactive = inactiveRanges.some(
+      (range) => token.span.start >= range.start && token.span.end <= range.end,
+    )
     const occurrence = byStart.get(token.span.start)
     let type: string | undefined
     if (importPathSegmentStarts.has(token.span.start)) {
@@ -2191,6 +2199,8 @@ export const semanticTokens = (
     } else {
       type = lexicalTokenType(token.kind)
     }
+    if (inactive && type === undefined && token.kind === 'Identifier')
+      type = SemanticTokenTypes.variable
     if (type === undefined) continue
     const index = typeIndexes.get(type)
     if (index === undefined) continue
@@ -2205,7 +2215,7 @@ export const semanticTokens = (
       deltaLine === 0 ? start.character - previousCharacter : start.character,
       length,
       index,
-      0,
+      inactive ? 1 : 0,
     )
     previousLine = start.line
     previousCharacter = start.character

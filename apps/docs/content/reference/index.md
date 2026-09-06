@@ -136,3 +136,5 @@ Tutorials, task-oriented guides, design rationale, compiler architecture, and st
 documentation remain separate from this reference.
 
 - [Compilation profiles and package configuration](compilation-profiles.md)
+
+- [Selected source and profile tooling](selected-source-tooling.md): source availability, profile catalogs, editor selection and platform provenance.

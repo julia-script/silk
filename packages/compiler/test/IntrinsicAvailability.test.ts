@@ -100,7 +100,6 @@ it('rejects static-only intrinsic leakage at runtime availability and integrity 
       ToolchainIntegrity.installed(),
       target,
       calls,
-      [],
     )
     assert.strictEqual(integrity._tag, 'UnsupportedTarget')
     if (integrity._tag === 'UnsupportedTarget')
@@ -133,7 +132,7 @@ it.effect('does not admit targetPointerBits into runtime HIR', () =>
 it.effect('checks native-only intrinsics after reachability for LLVM-to-Wasm', () =>
   Effect.gen(function* () {
     const unused = yield* snapshot(
-      `import silk.os_monotonic_clock { OsMonotonicClock }
+      `import silk.os_monotonic_clock
 pub fn main() -> i32 { return 42 }`,
       'wasm32-unknown-unknown',
     )
@@ -143,7 +142,6 @@ pub fn main() -> i32 { return 42 }`,
         ToolchainIntegrity.installed(),
         Target.wasm32UnknownUnknown,
         unused.instances.intrinsics,
-        unused.closure.sources.keys(),
       )._tag,
       'Matched',
     )
@@ -162,16 +160,11 @@ pub fn main() -> i32 {
 }`,
       'wasm32-unknown-unknown',
     )
-    assert.deepEqual(Analysis.diagnostics(reachable), [])
-    const unavailable = yield* Effect.flip(Analysis.codegen(reachable, { mode: 'release' }))
-    assert.strictEqual(unavailable._tag, 'CodegenUnavailable')
-    if (unavailable._tag !== 'CodegenUnavailable') return
-    const diagnostic = unavailable.diagnostics.find((candidate) => candidate.code === 'SEM0093')
-    assert.strictEqual(diagnostic?.reason._tag, 'IntrinsicTargetUnavailable')
-    if (diagnostic?.reason._tag === 'IntrinsicTargetUnavailable') {
-      assert.strictEqual(diagnostic.reason.operation, 'Intrinsic.osMonotonicClockResolution')
-      assert.strictEqual(diagnostic.reason.target, 'wasm32-unknown-unknown')
-    }
+    assert.isTrue(
+      Analysis.diagnostics(reachable).some(
+        (diagnostic) => diagnostic.reason._tag === 'UnknownImportedMember',
+      ),
+    )
 
     const standardOutput = yield* snapshot(
       `import silk.effect { Effect }
@@ -204,7 +197,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('validates only reachable runtime support and selected provider identities', () =>
+it.effect('validates only reachable runtime implementation identities', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(source.replace('return 0', 'return nativeWrapper()'))
     const installed = ToolchainIntegrity.installed()
@@ -218,7 +211,6 @@ it.effect('validates only reachable runtime support and selected provider identi
         withoutUnrelatedRuntime,
         Target.aarch64AppleDarwin,
         self.instances.intrinsics,
-        [],
       )._tag,
       'Matched',
     )
@@ -232,7 +224,6 @@ it.effect('validates only reachable runtime support and selected provider identi
       withoutRequiredRuntime,
       Target.aarch64AppleDarwin,
       self.instances.intrinsics,
-      [],
     )
     assert.strictEqual(missingRuntime._tag, 'Invalid')
     if (missingRuntime._tag === 'Invalid')
@@ -243,22 +234,6 @@ it.effect('validates only reachable runtime support and selected provider identi
             failure.reason.id === 'runtime/aarch64-apple-darwin/Intrinsic.i32Add',
         ),
       )
-
-    const withoutProvider = ToolchainIntegrity.make(
-      installed.components.filter((component) => component.id !== 'provider/silk/os_filesystem'),
-    )
-    const osOperation = Intrinsic.findOperation('Intrinsic', 'osPathInspect')
-    const osSpan = SourceSpan.fromOffsets('availability/os-provider', 0, 1)
-    assert.isDefined(osOperation)
-    assert.isDefined(osSpan)
-    if (osOperation === undefined || osSpan === undefined) return
-    const missingProvider = ToolchainIntegrity.validateTarget(
-      withoutProvider,
-      Target.aarch64AppleDarwin,
-      [{ _tag: 'ReachableIntrinsicCall', operation: osOperation.id, span: osSpan }],
-      ['silk/os_filesystem'],
-    )
-    assert.strictEqual(missingProvider._tag, 'Invalid')
   }),
 )
 

@@ -276,6 +276,49 @@ it.effect('supersedes a pending request and commits only the newest accepted sou
   }),
 )
 
+it.effect('supersedes an old-profile analysis and its pending query without a source edit', () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    let target = 'aarch64-apple-darwin'
+    const observed: Array<unknown> = []
+    const engine = yield* WorkspaceEngine.make({
+      discover: (entry) =>
+        Effect.succeed(Document.make({ ...document(entry), configuration: { target } })),
+      workerFactory: factory(
+        Effect.fnUntraced(function* (documents, previous) {
+          observed.push(documents[0]?.configuration)
+          if (observed.length === 1) {
+            yield* Deferred.succeed(started, undefined)
+            yield* Deferred.await(release)
+          }
+          return yield* analyzed(documents, previous)
+        }),
+      ),
+      policy: { debounce: 10, queryDeadline: 100, diagnosticDeadline: 100 },
+    })
+    engine.accept(open(1, 'pub fn main() -> i32 { return 42 }'))
+    yield* Effect.yieldNow
+    yield* TestClock.adjust(10)
+    yield* Deferred.await(started)
+    const pending = yield* Effect.forkChild(
+      engine.request({ _tag: 'Diagnostics', uri, parameters: {} }),
+      { startImmediately: true },
+    )
+    target = 'wasm32-unknown-unknown'
+    engine.accept(SourceEvent.invalidate([], true))
+    assert.strictEqual((yield* Fiber.join(pending))._tag, 'Superseded')
+    yield* Effect.yieldNow
+    yield* TestClock.adjust(10)
+    yield* nextEvent(engine, 'Committed')
+    assert.deepEqual(observed, [
+      { target: 'aarch64-apple-darwin' },
+      { target: 'wasm32-unknown-unknown' },
+    ])
+    yield* engine.shutdown
+  }),
+)
+
 it.effect('binds an immediate semantic request to the just-accepted document version', () =>
   Effect.gen(function* () {
     const engine = yield* makeEngine()
@@ -461,6 +504,45 @@ it.effect('coalesces cold discovery and terminally settles provisional requests'
         symbols.value.map((item) => item.name),
         ['newest'],
       )
+    yield* engine.shutdown
+  }),
+)
+
+it.effect('discards discovery captured before a profile change at the same source version', () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    let target = 'aarch64-apple-darwin'
+    let discoveries = 0
+    const observed: Array<unknown> = []
+    const engine = yield* WorkspaceEngine.make({
+      discover: Effect.fnUntraced(function* (entry) {
+        const configuration = { target }
+        discoveries += 1
+        if (discoveries === 1) {
+          yield* Deferred.succeed(started, undefined)
+          yield* Deferred.await(release)
+        }
+        return Document.make({ ...document(entry), configuration })
+      }),
+      workerFactory: factory(
+        Effect.fnUntraced(function* (documents, previous) {
+          observed.push(documents[0]?.configuration)
+          return yield* analyzed(documents, previous)
+        }),
+      ),
+      policy: { debounce: 10, queryDeadline: 100, diagnosticDeadline: 100 },
+    })
+    engine.accept(open(1, 'pub fn main() -> i32 { return 42 }'))
+    yield* Deferred.await(started)
+    target = 'wasm32-unknown-unknown'
+    engine.accept(SourceEvent.invalidate([], true))
+    yield* Deferred.succeed(release, undefined)
+    yield* Effect.yieldNow
+    yield* TestClock.adjust(10)
+    yield* nextEvent(engine, 'Committed')
+    assert.deepEqual(observed, [{ target: 'wasm32-unknown-unknown' }])
+    assert.strictEqual(discoveries, 2)
     yield* engine.shutdown
   }),
 )

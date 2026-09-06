@@ -99,9 +99,10 @@ const program = Effect.gen(function* () {
     })
     sources.push({ manifest, bytes, root: SourceFile.make(manifest.module, bytes) })
   }
-  const analysis = yield* ProjectAnalysis.make(sources.map((entry) => entry.root)).pipe(
-    Effect.provide(SourceResolver.empty),
-  )
+  const analysis = yield* ProjectAnalysis.make(
+    sources.map((entry) => entry.root),
+    { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
+  ).pipe(Effect.provide(SourceResolver.empty))
   const project = DocumentationProject.fromProjectAnalysis(analysis)
   const modules = []
   for (const source of sources) {

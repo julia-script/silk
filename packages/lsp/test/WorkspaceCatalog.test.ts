@@ -1,3 +1,4 @@
+import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -34,6 +35,7 @@ it.effect(
         bytes: encoder.encode('pub fn bufferedValue() -> i32 { return 3 }'),
       })
       const inventory = yield* WorkspaceCatalog.refresh({
+        configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
         sourceRoot: root,
         documents: [util],
         invalidation: { dirtyPaths: [], rediscover: true },
@@ -51,13 +53,14 @@ it.effect(
       assert.strictEqual(inventory.project.get('nested/Util')?.source.origin._tag, 'Memory')
       assert.strictEqual(inventory.integrity._tag, 'Matched')
       assert.strictEqual(inventory.distribution.digest.length, 64)
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide([SourceResolver.empty, NodeServices.layer])),
 )
 
 it.effect('revises exact dirty files, removes deletions, and reuses unrelated summaries', () =>
   Effect.gen(function* () {
     const root = fixture()
     const initial = yield* WorkspaceCatalog.refresh({
+      configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
       sourceRoot: root,
       documents: [],
       invalidation: { dirtyPaths: [], rediscover: true },
@@ -66,6 +69,7 @@ it.effect('revises exact dirty files, removes deletions, and reuses unrelated su
     const util = initial.project.get('nested/Util')
     writeFileSync(join(root, 'Main.silk'), 'pub fn revised() -> i32 { return 4 }')
     const revised = yield* WorkspaceCatalog.refresh({
+      configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
       sourceRoot: root,
       documents: [],
       previous: initial,
@@ -81,6 +85,7 @@ it.effect('revises exact dirty files, removes deletions, and reuses unrelated su
 
     rmSync(join(root, 'nested', 'Util.silk'))
     const removed = yield* WorkspaceCatalog.refresh({
+      configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
       sourceRoot: root,
       documents: [],
       previous: revised,
@@ -91,6 +96,7 @@ it.effect('revises exact dirty files, removes deletions, and reuses unrelated su
 
     renameSync(join(root, 'Main.silk'), join(root, 'Renamed.silk'))
     const renamed = yield* WorkspaceCatalog.refresh({
+      configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
       sourceRoot: root,
       documents: [],
       previous: removed,
@@ -100,5 +106,5 @@ it.effect('revises exact dirty files, removes deletions, and reuses unrelated su
       },
     })
     assert.deepEqual([...renamed.project.keys()], ['Renamed'])
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide([SourceResolver.empty, NodeServices.layer])),
 )

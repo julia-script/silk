@@ -227,16 +227,17 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
   )
   const previousProject = previous.values().next().value?.project
   const previousInventory = previous.values().next().value?.inventory
+  const selectedConfiguration = yield* configuration(first)
   const inventory = yield* WorkspaceCatalog.refresh({
     sourceRoot: first.sourceRoot,
     documents,
+    configuration: selectedConfiguration,
     ...(previousInventory === undefined ? {} : { previous: previousInventory }),
     invalidation: {
       dirtyPaths: invalidation.dirtyPaths,
       rediscover: invalidation.rediscover,
     },
-  })
-  const selectedConfiguration = yield* configuration(first)
+  }).pipe(Effect.provide(resolver(first.sourceRoot, overlays)))
   const project = yield* (
     previousProject === undefined
       ? ProjectAnalysis.make(roots, selectedConfiguration)

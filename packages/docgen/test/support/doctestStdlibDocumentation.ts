@@ -15,5 +15,5 @@ import * as Stdlib from '../../src/Stdlib.js'
 let pending: Promise<Project.Project> | undefined
 
 export const documentation: Effect.Effect<Project.Project> = Effect.promise(
-  () => (pending ??= Effect.runPromise(Stdlib.documentation())),
+  () => (pending ??= Effect.runPromise(Stdlib.documentation('aarch64-apple-darwin'))),
 )

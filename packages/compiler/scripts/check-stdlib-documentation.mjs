@@ -40,9 +40,10 @@ const program = Effect.gen(function* () {
     })
     analyzed.push({ manifest, bytes, root: SourceFile.make(manifest.module, bytes) })
   }
-  const analysis = yield* ProjectAnalysis.make(analyzed.map((entry) => entry.root)).pipe(
-    Effect.provide(SourceResolver.empty),
-  )
+  const analysis = yield* ProjectAnalysis.make(
+    analyzed.map((entry) => entry.root),
+    { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
+  ).pipe(Effect.provide(SourceResolver.empty))
   const project = DocumentationProject.fromProjectAnalysis(analysis)
   const checked = []
   for (const entry of analyzed) {

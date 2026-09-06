@@ -282,6 +282,7 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
     } else scheduleProject(project)
   }
 
+  let discoveryRevision = 0
   const applyAccepted = (acceptance: SourceLedger.Acceptance): void => {
     if (acceptance._tag === 'Ignored') return
     const event = acceptance.event
@@ -320,6 +321,7 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
         detach(event.uri, QueryOutcome.closed)
         break
       case 'Invalidate':
+        if (event.rediscover) discoveryRevision += 1
         for (const project of projects.values()) {
           for (const path of event.paths)
             if (path.startsWith(project.sourceRoot)) project.dirtyPaths.add(path)
@@ -616,6 +618,7 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
   })
 
   const processDiscovery = Effect.fnUntraced(function* () {
+    const revision = discoveryRevision
     const requested = [...discovery]
     discovery.clear()
     const discovered: Array<Document.Document> = []
@@ -624,11 +627,15 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
       if (entry === undefined) continue
       const document = yield* options.discover(entry)
       const current = SourceLedger.get(ledger, uri)
-      if (current?.version.value !== entry.version.value) {
+      if (current?.version.value !== entry.version.value || revision !== discoveryRevision) {
         if (current !== undefined) discovery.add(uri)
         continue
       }
       discovered.push(document)
+    }
+    if (revision !== discoveryRevision) {
+      for (const document of discovered) discovery.add(document.uri)
+      return
     }
     const touched = new Set<ProjectContext>()
     for (const document of discovered) {
