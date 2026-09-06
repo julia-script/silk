@@ -64,13 +64,17 @@ const compileSource = (
     readonly packageName?: string
     readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
     readonly cache?: boolean
+    readonly artifactCache?: NativeToolchain.ArtifactCache
   } = {},
 ): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed | NativeToolchain.ToolchainError> =>
   Driver.compile({
     compilation: {
       root: SourceFile.make('memory/driver', ascii(text)),
     },
-    toolchain,
+    toolchain:
+      options.artifactCache === undefined
+        ? toolchain
+        : { ...toolchain, artifactCache: options.artifactCache },
     optimization: 'release',
     artifactKind: options.artifactKind ?? 'NativeExecutable',
     packageName: options.packageName ?? 'compiler-test',
@@ -181,6 +185,7 @@ it.effect('relinks named archives after content and search-resolution changes', 
 pub fn main() -> i32 { return unsafe silk_cache_selected() }`
       const options = {
         cache: true,
+        artifactCache: NativeToolchain.defaultArtifactCache(join(scope.root, 'cache')),
         nativeLinkInputs: [
           NativeLinkInput.searchPath(earlier),
           NativeLinkInput.searchPath(later),

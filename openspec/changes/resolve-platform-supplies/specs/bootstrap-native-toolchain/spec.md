@@ -68,10 +68,11 @@ input closure, frozen environment, compatibility validation, and selected linker
 
 When the `SILK_NATIVE_CACHE_DIR` environment variable names a directory, the default artifact
 cache SHALL store each finalized native and WebAssembly artifact in a versioned, checksummed
-envelope and key it by artifact kind, target triple,
-optimization profile, selected tool identities, runtime source, input bitcode, the bytes of every
-path-backed link input, the canonical ordered encoding of every other structured link input, and
-any destination-derived identity embedded in the artifact. Native reuse and storage SHALL require complete resolved physical input accounting under the permanent cache-admission rule; named inputs and transitive references SHALL be hashed by selected bytes, not spelling alone. A matching entry SHALL be reused only
+envelope and key native outputs by artifact kind, target triple, resolved entry policy, selected
+final tool bytes, emitted program/runtime object bytes, the complete ordered resolved input
+closure, and any destination-derived identity embedded in the artifact. Optimization and runtime
+source participate through the actual emitted objects; physical supply paths SHALL NOT leak back
+into logical semantic or object identity. Native reuse and storage SHALL require complete resolved physical input accounting under the permanent cache-admission rule; named inputs and transitive references SHALL be hashed by selected bytes, not spelling alone. A matching entry SHALL be reused only
 after its container, artifact kind, and target validate without invoking final linking. A
 corrupted, unauthenticated, or missing entry SHALL cause recompilation, never an incorrect build.
 
