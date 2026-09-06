@@ -1709,6 +1709,7 @@ export type ConformanceValidity =
 
 /** One source-retained capability conformance witness. */
 export interface ConformanceFact {
+  readonly lifetimeElaboration?: DeclarationLifetime.Context
   readonly _tag: 'ConformanceDeclaration'
   readonly module: string
   readonly ordinal: number

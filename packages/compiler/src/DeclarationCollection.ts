@@ -3314,6 +3314,7 @@ const collectModule = (
           })()
     return Object.freeze({
       _tag: 'ConformanceDeclaration',
+      lifetimeElaboration: collected.lifetimeContext,
       module: source.id,
       ordinal,
       self: selfType,
@@ -4558,23 +4559,36 @@ export const collect = (closure: ModuleClosure.Facts): DeclarationIndex.Index =>
 
 /** Replays header elision after nominal declarations have published their lifetime arity. */
 export const finalizeLifetimeHeader = (
-  member: DeclarationFact | ServiceOperationFact | StructFact | UnionFact | InherentImplFact,
+  member:
+    | DeclarationFact
+    | ServiceOperationFact
+    | StructFact
+    | UnionFact
+    | InherentImplFact
+    | ConformanceFact,
   nominalParameters: (path: TypePathFact) => ReadonlyArray<Type.Parameter> | undefined,
-  inherentHead?: InherentImplFact,
-): DeclarationFact | ServiceOperationFact | StructFact | UnionFact | InherentImplFact => {
+  implHead?: InherentImplFact | ConformanceFact,
+):
+  | DeclarationFact
+  | ServiceOperationFact
+  | StructFact
+  | UnionFact
+  | InherentImplFact
+  | ConformanceFact => {
   const prior = member.lifetimeElaboration
   if (prior === undefined) return member
   // Owner lifetimes stay lexical while the member elaborates its own input/result relationship.
-  // Only Self retains these otherwise unmentioned binders in the callable's generic contract.
-  const ambient =
-    inherentHead?.typeParameters.filter((parameter) => parameter.implicitLifetime) ?? []
+  // Inherent members retain otherwise unmentioned owner binders only through Self. Conformance
+  // witnesses retain the entire head contract because selection supplies all its binders.
+  const ambient = implHead?.typeParameters.filter((parameter) => parameter.implicitLifetime) ?? []
   const environment = new Map(prior.parameters)
   for (const parameter of ambient) environment.set(parameter.type.name, parameter.type)
   const retainsOwner =
     ambient.length > 0 &&
-    SyntaxTree.tokens(prior.syntax).some(
-      (token) => token.kind === 'Identifier' && spelling(prior.source, token) === 'Self',
-    )
+    (implHead?._tag === 'ConformanceDeclaration' ||
+      SyntaxTree.tokens(prior.syntax).some(
+        (token) => token.kind === 'Identifier' && spelling(prior.source, token) === 'Self',
+      ))
   const context = DeclarationLifetime.forHeader(
     prior.source,
     prior.owner,
@@ -4632,6 +4646,19 @@ export const finalizeLifetimeHeader = (
         Object.freeze({ ...field, declaredType: declared(field.declaredType) }),
       ),
     )
+  if (member._tag === 'ConformanceDeclaration')
+    return Object.freeze({
+      ...member,
+      typeParameters,
+      lifetimeElaboration: context,
+      capability: declared(member.capability),
+      provider: declared(member.provider),
+      requirements: Object.freeze(
+        member.requirements.map((requirement) =>
+          Object.freeze({ ...requirement, capability: declared(requirement.capability) }),
+        ),
+      ),
+    })
   if (member._tag === 'InherentImplDeclaration')
     return Object.freeze({
       ...member,

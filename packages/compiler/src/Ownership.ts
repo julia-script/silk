@@ -1846,7 +1846,14 @@ const analyzeLoans = (
     if (right === undefined) return left
     return left.span.end >= right.span.end ? left : right
   }
-  const scanRunEnds = (expression: Elaboration.ExpressionFact, region: Hir.RegionId): void => {
+  // A descriptor passed inside a larger expression is used through that expression's completion,
+  // not merely while evaluating its identifier. Otherwise a hidden backing owner can be dropped
+  // between constructing a call argument and invoking the callee that reads it.
+  const scanRunEnds = (
+    expression: Elaboration.ExpressionFact,
+    region: Hir.RegionId,
+    useSpan: SourceSpan.SourceSpan = expression.syntax.span,
+  ): void => {
     switch (expression._tag) {
       case 'Run': {
         const site = directSite(expression.subject)?.site
@@ -1860,54 +1867,57 @@ const analyzeLoans = (
             runEnds.set(binding, { region, span: expression.syntax.span })
           }
         }
-        scanRunEnds(expression.subject, region)
+        scanRunEnds(expression.subject, region, useSpan)
         return
       }
       case 'Move':
-        scanRunEnds(expression.subject, region)
+        scanRunEnds(expression.subject, region, useSpan)
         return
       case 'ReferentProjection':
-        scanRunEnds(expression.subject, region)
+        scanRunEnds(expression.subject, region, useSpan)
         return
       case 'Grouped':
-        scanRunEnds(expression.expression, region)
+        scanRunEnds(expression.expression, region, useSpan)
         return
       case 'Borrow':
       case 'FieldProjection':
-        scanRunEnds(expression.subject, region)
+        scanRunEnds(expression.subject, region, useSpan)
         return
       case 'IndexProjection':
-        scanRunEnds(expression.subject, region)
-        scanRunEnds(expression.index, region)
+        scanRunEnds(expression.subject, region, useSpan)
+        scanRunEnds(expression.index, region, useSpan)
         return
       case 'StructLiteral':
       case 'UnionVariant':
         for (const initializer of expression.initializers)
-          scanRunEnds(initializer.expression, region)
+          scanRunEnds(initializer.expression, region, useSpan)
         return
       case 'ArrayLiteral':
-        for (const element of expression.elements) scanRunEnds(element.expression, region)
+        for (const element of expression.elements) scanRunEnds(element.expression, region, useSpan)
         return
       case 'Match':
-        scanRunEnds(expression.scrutinee, region)
+        scanRunEnds(expression.scrutinee, region, useSpan)
         for (const arm of expression.arms) {
-          if (arm.guard !== undefined) scanRunEnds(arm.guard, region)
-          if (arm.body._tag === 'Expression') scanRunEnds(arm.body.expression, region)
+          if (arm.guard !== undefined) scanRunEnds(arm.guard, region, useSpan)
+          if (arm.body._tag === 'Expression') scanRunEnds(arm.body.expression, region, useSpan)
           else scanStatementRunEnds(arm.body.statements)
         }
         return
       case 'Operator':
       case 'ShortCircuit':
       case 'Call':
-        for (const argument of expression.arguments) scanRunEnds(argument.expression, region)
+        for (const argument of expression.arguments)
+          scanRunEnds(argument.expression, region, useSpan)
         return
       case 'CallableApply':
         if (expression.provenance._tag === 'PipelineCallableApplication') {
-          for (const argument of expression.arguments) scanRunEnds(argument.expression, region)
-          scanRunEnds(expression.callee, region)
+          for (const argument of expression.arguments)
+            scanRunEnds(argument.expression, region, useSpan)
+          scanRunEnds(expression.callee, region, useSpan)
         } else {
-          scanRunEnds(expression.callee, region)
-          for (const argument of expression.arguments) scanRunEnds(argument.expression, region)
+          scanRunEnds(expression.callee, region, useSpan)
+          for (const argument of expression.arguments)
+            scanRunEnds(argument.expression, region, useSpan)
         }
         {
           const site = directSite(expression.callee)?.site
@@ -1923,24 +1933,24 @@ const analyzeLoans = (
         }
         return
       case 'CallableSection':
-        for (const capture of expression.captures) scanRunEnds(capture.expression, region)
+        for (const capture of expression.captures) scanRunEnds(capture.expression, region, useSpan)
         return
       case 'PlaceReplace':
-        scanRunEnds(expression.destination, region)
-        scanRunEnds(expression.value, region)
+        scanRunEnds(expression.destination, region, useSpan)
+        scanRunEnds(expression.value, region, useSpan)
         return
       case 'EnumValue':
-        scanRunEnds(expression.argument, region)
+        scanRunEnds(expression.argument, region, useSpan)
         return
       case 'CompileError':
-        scanRunEnds(expression.message, region)
+        scanRunEnds(expression.message, region, useSpan)
         return
       case 'EffectCatch':
-        scanRunEnds(expression.protected, region)
-        scanRunEnds(expression.handler, region)
+        scanRunEnds(expression.protected, region, useSpan)
+        scanRunEnds(expression.handler, region, useSpan)
         return
       case 'EffectBindRequirement':
-        scanRunEnds(expression.protected, region)
+        scanRunEnds(expression.protected, region, useSpan)
         return
       case 'EffectBlock':
       case 'FunctionItem':
@@ -1980,11 +1990,11 @@ const analyzeLoans = (
         if (
           site?._tag === 'Let' &&
           expression.type._tag === 'Available' &&
-          Type.containsViewBorrow(expression.type.type)
+          Type.storageLifetimes(expression.type.type).length > 0
         ) {
           const previous = viewEnds.get(site.binding.ordinal)
-          if (previous === undefined || previous.span.end < expression.syntax.span.end) {
-            viewEnds.set(site.binding.ordinal, { region, span: expression.syntax.span })
+          if (previous === undefined || previous.span.end < useSpan.end) {
+            viewEnds.set(site.binding.ordinal, { region, span: useSpan })
           }
         }
         return
@@ -2310,10 +2320,12 @@ const analyzeLoans = (
       continue
     const sources = sourceReferents(binding.initializer)
     if (sources.length > 0) viewRoots.set(binding.id.ordinal, sources)
-    const aliases = returnedSources(binding.initializer).flatMap((source) => {
-      const direct = directSite(source)?.site
-      return direct?._tag === 'Let' ? [direct.binding.ordinal] : []
-    })
+    const aliases = [binding.initializer, ...returnedSources(binding.initializer)].flatMap(
+      (source) => {
+        const direct = physicalPlace(source)?.root
+        return direct?._tag === 'Let' ? [direct.binding.ordinal] : []
+      },
+    )
     if (aliases.length > 0) viewAliases.set(binding.id.ordinal, aliases)
     if (
       binding.initializer._tag === 'CallableApply' &&
@@ -2350,8 +2362,12 @@ const analyzeLoans = (
   const expressionsBySpan = new Map<string, Elaboration.ExpressionFact>()
   const expressionSpanKey = (span: SourceSpan.SourceSpan): string => `${span.start}:${span.end}`
   Elaboration.visitStatementFacts(fn.statements, {
-    expression: (expression) =>
-      expressionsBySpan.set(expressionSpanKey(expression.syntax.span), expression),
+    expression: (expression) => {
+      const key = expressionSpanKey(expression.syntax.span)
+      // An implicit receiver borrow shares its syntax with its subject. Preserve the borrow's
+      // storage provenance instead of replacing it with the subject's retained payload loans.
+      if (expressionsBySpan.get(key)?._tag !== 'Borrow') expressionsBySpan.set(key, expression)
+    },
   })
   const referentsAt = (
     root: BindingSite,
@@ -3179,7 +3195,7 @@ const analyzeLoans = (
             bindingEnd = slotEnds.get(statement.binding.id.ordinal) ?? fallbackEnd
           else if (
             initializerType._tag === 'Available' &&
-            Type.containsViewBorrow(initializerType.type)
+            Type.storageLifetimes(initializerType.type).length > 0
           )
             bindingEnd =
               viewEnds.get(statement.binding.id.ordinal) ??

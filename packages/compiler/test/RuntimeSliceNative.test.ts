@@ -39,3 +39,31 @@ it.effect(
       assert.deepEqual(first.bitcode, second.bitcode)
     }),
 )
+
+it.effect('loads a projected slice descriptor and checks its runtime bound before indexing', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'runtime-slice-native/projected',
+      ascii(`struct Pair { left: i32 right: i32 }
+struct Holder { padding: i32 values: &[Pair] }
+fn read(holder: &Holder, index: usize) -> i32 {
+  return holder.values[index].right
+}
+pub fn main() -> i32 {
+  let values = [Pair { left: 1, right: 2 }, Pair { left: 3, right: 4 }]
+  let holder = Holder { padding: 9, values: &values }
+  let holders = [Holder { padding: 7, values: &values }]
+  let index: usize = 0
+  let views = &holders
+  return read(&holder, 1) + holder.values[0].left + holders[index].values[0].right + views[0].values[1].right
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const artifact = yield* Analysis.codegen(self, { mode: 'debug' })
+    assert.match(artifact.ir, /slice[0-9]+_in_bounds = icmp ult i64/)
+    assert.match(artifact.ir, /br i1 .*slice[0-9]+_in_bounds/)
+    assert.match(artifact.ir, /slice[0-9]+_element_offset = mul i64 .*, 8/)
+    assert.match(artifact.ir, /slice[0-9]+_0_offset = add i64 .*element_offset, 4/)
+  }),
+)

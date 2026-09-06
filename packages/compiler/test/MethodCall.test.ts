@@ -253,3 +253,68 @@ pub fn main() -> i32 {
     )
   }),
 )
+
+const analyzeFrontend = Effect.fnUntraced(function* (text: string) {
+  return yield* Analysis.make({ root: SourceFile.make('main', ascii(text)) }).pipe(
+    Effect.provide(SourceResolver.memory(new Map())),
+  )
+})
+
+const borrowedHolder = `struct Holder {
+  slice: &[i32]
+  index: usize
+}
+impl Holder {
+  fn next(self: &mut Self) -> i32 {
+    let slice = self.slice
+    let index = self.index
+    self.index = index + 1
+    return slice[index]
+  }
+}
+`
+
+it.effect('keeps repeated receiver loans on a holder separate from its stored shared slice', () =>
+  Effect.gen(function* () {
+    for (const call of ['holder.next()', 'Holder.next(&mut holder)']) {
+      const snapshot = yield* analyzeFrontend(`${borrowedHolder}
+pub fn main() -> i32 {
+  let values: [i32; 2] = [20, 22]
+  let mut holder = Holder { slice: &values, index: 0 }
+  let first = ${call}
+  return first + ${call}
+}`)
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    }
+  }),
+)
+
+it.effect('retains real wrapper and backing-owner conflicts for receiver calls', () =>
+  Effect.gen(function* () {
+    for (const [before, after, expectedCodes, rejected] of [
+      ['let loan = &holder', 'if loan.index == 0 { return 1 } return 0', ['OWN0010'], 'holder'],
+      ['values[0] = 9', 'return 0', ['OWN0011', 'OWN0019'], 'values[0]'],
+    ] as const) {
+      const source = `${borrowedHolder}
+pub fn main() -> i32 {
+  let mut values: [i32; 2] = [20, 22]
+  let mut holder = Holder { slice: &values, index: 0 }
+  ${before}
+  let first = holder.next()
+  ${after}
+}`
+      const snapshot = yield* analyzeFrontend(source)
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [...expectedCodes],
+      )
+      const diagnostic = Analysis.diagnostics(snapshot).at(0)
+      assert.strictEqual(
+        diagnostic === undefined
+          ? undefined
+          : source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+        rejected,
+      )
+    }
+  }),
+)

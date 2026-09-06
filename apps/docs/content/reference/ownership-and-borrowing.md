@@ -603,10 +603,20 @@ fn useTemporary() -> i32 {
 }
 ```
 
-This has the same ownership behavior as borrowing a named local. The hidden owner remains in the
-enclosing function until `view` and every derived loan end. The view cannot escape that function by
-being returned, stored in an owned value, or captured unless another rule explicitly transfers a
-compatible owner and provenance with it.
+This has the same ownership behavior as borrowing a named local. A borrowed array evaluated in a
+binding initializer receives a hidden local owner in the originating block, selected branch, or
+loop iteration. Its producer runs exactly once at its original evaluation point, preserving earlier
+argument effects and ordinary element inference. An uncontextualized `[1, 2]` still has `i32`
+elements.
+
+The owner remains live through dependent views and lifetime-bearing aggregates, including a holder
+returned by `SliceStream.make(&[1, 2])`. It survives suspension while a dependent value remains live.
+Ordinary cleanup ends the dependent loans before cleaning the backing storage, including affine
+elements, on normal completion, early structured exits and interruption. Each loop iteration owns
+and cleans its own storage. Fatal traps retain their existing no-unwind behavior.
+
+Storage in an aggregate or capture by an Effect does not detach the view. Returning any such value
+from the function is rejected when it retains the function-local hidden storage.
 
 **Diagnostics:** Forming an exclusive borrow from an immutable existing root reports `SEM0057`.
 Passing a fixed array directly where a slice is expected reports `SEM0059` and requires an explicit
