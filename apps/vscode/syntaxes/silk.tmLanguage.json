@@ -4,6 +4,10 @@
   "fileTypes": ["silk"],
   "patterns": [
     {
+      "name": "entity.name.type.lifetime.silk",
+      "match": "'[A-Za-z_][A-Za-z0-9_]*(?![A-Za-z0-9_'\\\\])"
+    },
+    {
       "name": "string.quoted.triple.byte.silk",
       "begin": "(b)(\"\"\")",
       "end": "(?<!\\\\)(?:\\\\\\\\)*(\"\"\")",
@@ -353,7 +357,7 @@
     },
     {
       "name": "punctuation.definition.type-arguments.begin.silk",
-      "match": "<(?=\\s*[A-Za-z_][A-Za-z0-9_]*(?:\\s*[,><]))"
+      "match": "<(?=\\s*'?[A-Za-z_][A-Za-z0-9_]*(?:\\s*[,><;:]))"
     },
     {
       "name": "punctuation.definition.type-arguments.end.silk",

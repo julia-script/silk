@@ -19,7 +19,7 @@ import * as Effect from 'effect/Effect'
 const log = (...values) => Effect.runSync(Console.log(...values))
 const logError = (...values) => Effect.runSync(Console.error(...values))
 
-const EXTENSION_DIR_NAME = 'silk-effect.silk-language-0.0.0'
+const EXTENSION_DIR_NAME = 'silklang.silk-language-0.0.0'
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repoRoot = resolve(packageRoot, '../..')
 

@@ -8,7 +8,7 @@
     "Programming Languages"
   ],
   "license": "MIT",
-  "publisher": "silk-effect",
+  "publisher": "silklang",
   "main": "./dist/extension.js",
   "scripts": {
     "build": "pnpm clean && tsc -p tsconfig.json",

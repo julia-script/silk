@@ -32,7 +32,7 @@ it.effect('reports asynchronous spawn failure through the typed boundary', () =>
     const result = yield* Effect.exit(
       ServerProcess.make({
         module: new URL('./fixtures/process-exits.mjs', import.meta.url).pathname,
-        cwd: '/silk-effect-path-that-does-not-exist',
+        cwd: '/silklang-path-that-does-not-exist',
       }),
     )
     assert.isTrue(Exit.isFailure(result))

@@ -68,7 +68,7 @@ Set `type` and the three scripts in `package.json` so it contains:
 
 Build and pack the local package, then copy this project into a clean temporary directory. Delete
 the `@silklang/llvm` entry from the temporary `package.json` before running
-`pnpm add /absolute/path/to/silk-effect-llvm-0.0.0.tgz --save-exact`. Removing the npm declaration
+`pnpm add /absolute/path/to/silklang-llvm-0.0.0.tgz --save-exact`. Removing the npm declaration
 first prevents pnpm from resolving the unpublished package before it considers the tarball. The
 tutorial's learner path remains the npm commands above; this substitution only verifies that the
 unpublished package exposes the same public surface.

@@ -8,14 +8,14 @@
     "syntax-highlighting",
     "textmate"
   ],
-  "homepage": "https://github.com/julia-script/silk-effect#readme",
+  "homepage": "https://github.com/julia-script/silk#readme",
   "bugs": {
-    "url": "https://github.com/julia-script/silk-effect/issues"
+    "url": "https://github.com/julia-script/silk/issues"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/julia-script/silk-effect.git",
+    "url": "git+https://github.com/julia-script/silk.git",
     "directory": "packages/editor-support"
   },
   "files": [

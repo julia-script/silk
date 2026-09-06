@@ -107,7 +107,7 @@ const inlayHints = async (document) => {
 module.exports.run = async () => {
   const workspace = vscode.workspace.workspaceFolders?.[0]
   if (workspace === undefined) throw new Error('LSP acceptance workspace was not opened')
-  const extension = vscode.extensions.getExtension('silk-effect.silk-language')
+  const extension = vscode.extensions.getExtension('silklang.silk-language')
   if (extension === undefined) throw new Error('Silk development extension is unavailable')
   await extension.activate()
 

@@ -140,6 +140,12 @@ export const grammar: Grammar = {
   scopeName: 'source.silk',
   fileTypes: ['silk'],
   patterns: [
+    {
+      // Match the lexer's apostrophe disambiguation before the character-literal rule. The
+      // boundary prevents backtracking into a shorter lifetime inside `'data'` or `'a\\n'`.
+      name: 'entity.name.type.lifetime.silk',
+      match: "'[A-Za-z_][A-Za-z0-9_]*(?![A-Za-z0-9_'\\\\])",
+    },
     ...literalPatterns,
     {
       name: 'comment.block.documentation.silk',
@@ -252,7 +258,7 @@ export const grammar: Grammar = {
     { name: 'constant.numeric.integer.silk', match: '\\b[0-9]+\\b' },
     {
       name: 'punctuation.definition.type-arguments.begin.silk',
-      match: '<(?=\\s*[A-Za-z_][A-Za-z0-9_]*(?:\\s*[,><]))',
+      match: "<(?=\\s*'?[A-Za-z_][A-Za-z0-9_]*(?:\\s*[,><;:]))",
     },
     {
       name: 'punctuation.definition.type-arguments.end.silk',

@@ -52,7 +52,7 @@ pnpm --filter silk-language install:code
 Both: `pnpm --filter silk-language exec node scripts/install-local.mjs --vscode`.
 
 Then reload the editor (`Developer: Reload Window`) and open a `.silk` file. The symlink lives at
-`~/.cursor/extensions/silk-effect.silk-language-0.0.0` (or `~/.vscode/extensions/...`) and always
+`~/.cursor/extensions/silklang.silk-language-0.0.0` (or `~/.vscode/extensions/...`) and always
 points at the checkout where you ran the command — re-run it after switching git worktrees.
 
 The extension resolves `@silklang/lsp` through the workspace `node_modules`, so the checkout

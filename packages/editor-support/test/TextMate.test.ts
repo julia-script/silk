@@ -4,8 +4,8 @@ import * as Analysis from '@silklang/compiler/Analysis'
 import * as Lexer from '@silklang/compiler/Lexer'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as Document from '@silklang/lsp/Document'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
-import { assert, it } from 'vitest'
 import * as TextMate from '../src/TextMate.js'
 
 const keywordScopeNames = new Set([
@@ -203,6 +203,20 @@ it('assigns keyword, numeric, and comment scopes via a TextMate tokenizer', asyn
   assert.include(scopesAt(generic, '<'), 'punctuation.definition.type-arguments.begin.silk')
   assert.include(scopesAt(generic, '>'), 'punctuation.definition.type-arguments.end.silk')
   assert.include(scopesAt(generic, 'Box'), 'entity.name.type.silk')
+  const borrowed = "pub struct SliceStream<'data, A> { slice: &'data [A] }"
+  assert.include(scopesAt(borrowed, "'data"), 'entity.name.type.lifetime.silk')
+  assert.notInclude(scopesAt(borrowed, 'A'), 'string.quoted.single.silk')
+  assert.include(scopesAt(borrowed, '<'), 'punctuation.definition.type-arguments.begin.silk')
+  for (const lifetime of ["'a", "'_", "'static", "'data_2"]) {
+    assert.deepStrictEqual(lexKinds(lifetime), ['Lifetime'])
+    assert.include(scopesAt(lifetime, lifetime), 'entity.name.type.lifetime.silk')
+  }
+  for (const character of ["'a'", "'data'", "'a\\n'", "'é'", "'🦋'"]) {
+    // A closing quote or escape keeps even malformed multi-character literals on the char path.
+    assert.notInclude(lexKinds(character), 'Lifetime')
+    assert.include(scopesAt(character, "'"), 'string.quoted.single.silk')
+    assert.notInclude(scopesAt(character, "'"), 'entity.name.type.lifetime.silk')
+  }
   const nested = 'fn keep<value>(input: Box<Box<i32>>) -> Box<Box<i32>> { return input }'
   assert.include(scopesAt(nested, '<'), 'punctuation.definition.type-arguments.begin.silk')
   assert.include(scopesAt(nested, '>'), 'punctuation.definition.type-arguments.end.silk')
