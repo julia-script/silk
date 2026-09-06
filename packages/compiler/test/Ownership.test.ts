@@ -2324,3 +2324,117 @@ fn bad() -> i32 { let value = 42 return choose(move value, value) }`
       )
     }),
 )
+
+const installedDropPrelude = `struct Source { value: i32 }
+impl Drop for Source { fn drop(self: &mut Source) -> () { self.value = 99 return () } }
+struct Guard<'a> { value: &'a Source }
+impl<'a> Drop for Guard<'a> {
+  fn drop(self: &mut Guard<'a>) -> () { let observed = self.value.value return () }
+}
+`
+
+for (const [name, body, valid] of [
+  [
+    'later',
+    `let first = Source { value: 1 }
+    let mut guard = Guard { value: &first }
+    let second = Source { value: 2 }
+    guard.value = &second`,
+    false,
+  ],
+  [
+    'nested',
+    `let first = Source { value: 1 }
+    let mut guard = Guard { value: &first }
+    if true { let second = Source { value: 2 } guard.value = &second }`,
+    false,
+  ],
+  [
+    'earlier',
+    `let first = Source { value: 1 }
+    let second = Source { value: 2 }
+    let mut guard = Guard { value: &first }
+    guard.value = &second`,
+    true,
+  ],
+] as const) {
+  it.effect(`checks installed dependent Drop referents at cleanup: ${name}`, () =>
+    Effect.gen(function* () {
+      const source = `${installedDropPrelude}fn check() -> i32 { ${body} return 0 }`
+      const snapshot = yield* Analysis.ofSource(`ownership/installed-drop-${name}`, ascii(source))
+      const diagnostics = Analysis.diagnostics(snapshot)
+      if (valid) assert.deepEqual(diagnostics, [])
+      else {
+        const diagnostic =
+          diagnostics.find((diagnostic) => diagnostic.code === 'OWN0019') ??
+          unreachable('expected expired installed lifetime')
+        assert.isTrue(
+          diagnostic.relatedSpans?.some(
+            ({ span }) =>
+              span.start === source.indexOf(' &second') &&
+              span.end === source.indexOf(' &second') + ' &second'.length,
+          ),
+        )
+      }
+    }),
+  )
+}
+
+for (const [name, acquisition] of [
+  ['match', 'match move input { Envelope { pair } => { if i == 0 { drop pair.a } } }'],
+  [
+    'statement',
+    `let Envelope { pair } = move input
+ if i == 0 { drop pair.a }`,
+  ],
+] as const) {
+  it.effect(`resets reacquired ${name} owners inside selected execution`, () =>
+    Effect.gen(function* () {
+      const source = `struct Token { value: i32 }
+impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
+struct Pair { a: Token b: Token }
+struct Envelope { pair: Pair }
+pub fn main() -> i32 {
+  let mut i = 0
+  while i < 2 {
+    let input = Envelope { pair: Pair { a: Token { value: 1 }, b: Token { value: 2 } } }
+    ${acquisition}
+    i = i + 1
+  }
+  return 0
+}`
+      const front = yield* Analysis.ofSource(`ownership/reacquired-${name}`, ascii(source))
+      assert.deepEqual(Analysis.diagnostics(front), [])
+      const snapshot = yield* Analysis.realize(front, 'wasm32-unknown-unknown', {
+        normalizeMir: false,
+      })
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const program = Analysis.loweredMir(snapshot)
+      assert.deepEqual(MirVerification.verify(program), [])
+      const fn =
+        program.functions.find((fn) => fn.id.name === 'main') ?? unreachable('expected main')
+      const operations = MirVerification.operations(fn)
+      const clear = operations.find((op) => op._tag === 'SetInitialized' && !op.initialized)
+      if (clear?._tag !== 'SetInitialized') return unreachable('expected conditional field flag')
+      const match = operations.find(
+        (op) => op._tag === 'Match' && op.arms.some((arm) => arm.bindings.length > 0),
+      )
+      if (match?._tag !== 'Match') return unreachable('expected acquiring match')
+      const arm =
+        match.arms.find((arm) => arm.bindings.length > 0) ?? unreachable('expected selected arm')
+      const entry = arm.selected.execution.regions.find(
+        (region) => region.id.ordinal === arm.selected.execution.entry.ordinal,
+      )
+      if (entry?._tag !== 'OperationRegion')
+        return unreachable('expected selected entry operations')
+      assert.isTrue(
+        entry.operations.some(
+          (op) =>
+            op._tag === 'SetInitialized' &&
+            op.flag.ordinal === clear.flag.ordinal &&
+            op.initialized,
+        ),
+      )
+    }),
+  )
+}
