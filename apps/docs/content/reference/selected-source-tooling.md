@@ -49,3 +49,5 @@ their executed result; planned fixtures do not imply successful conformance.
 These records neither choose provider availability nor replace Silk library ABI import/export
 manifests. Each consuming catalog subset chooses its production method, physical supplies and
 conformance fixtures. Validating the shared record shape alone does not verify any platform ABI.
+
+Live `<silk-snippet>` examples select their target through the `target` attribute, defaulting to `wasm32-unknown-unknown`. Native examples state their native target explicitly. Changing the attribute discards the prior session and reanalyzes the same source under the new target.

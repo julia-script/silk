@@ -13,4 +13,5 @@
 ## 3. Integration
 
 - [x] 3.1 Update all affected sources, callers, examples, tests and generated artifacts; audit deletion of obsolete provider metadata and selection paths.
-- [ ] 3.2 Run typecheck, format:check, lint, test, check and release:candidate in required order; record exact results and submit the reviewed JUL-122 stack branch.
+- [x] 3.2 Run typecheck, format:check, lint, test, check and release:candidate in required order; record exact results.
+- [ ] 3.3 Submit the reviewed JUL-122 branch as part of the requested stack.

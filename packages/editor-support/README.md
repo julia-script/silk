@@ -43,3 +43,5 @@ The VS Code extension files are generated from `TextMate` with:
 ```sh
 pnpm --filter @silklang/editor-support sync:vscode
 ```
+
+A `<silk-snippet target="aarch64-apple-darwin" diagnostics>` selects that target for semantic tooling. The default is `wasm32-unknown-unknown`. Changing the target reselects the source and refreshes its diagnostics, hover and hints.

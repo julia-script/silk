@@ -6,7 +6,8 @@
  * the real observer.
  */
 
-import { afterEach, assert, beforeEach, describe, it, vi } from 'vitest'
+import { assert, it } from '@effect/vitest'
+import { afterEach, beforeEach, describe, vi } from 'vitest'
 import * as Effect from 'effect/Effect'
 import { define, type SilkSnippetElement } from '../src/Element.js'
 
@@ -124,6 +125,22 @@ describe('silk-snippet', () => {
     assert.include(hints[0]?.textContent ?? '', 'SystemAllocator')
     assert.strictEqual(element.source, hinted)
   })
+
+  it.effect('reselects the same snippet when its explicit target changes', () =>
+    Effect.gen(function* () {
+      const element = snippet(
+        'static if Intrinsic.targetOperatingSystem() == "darwin" { fn selected() -> i32 { return 42 } }\npub fn main() -> i32 { return selected() }',
+        ['diagnostics'],
+      )
+      revealAll()
+      yield* Effect.sleep(0)
+      assert.isAbove(lintMarks(element), 0)
+      element.setAttribute('target', 'aarch64-apple-darwin')
+      revealAll()
+      yield* Effect.sleep(0)
+      assert.strictEqual(lintMarks(element), 0)
+    }),
+  )
 
   it('is read-only by default and editable by attribute', () => {
     const readOnly = snippet(passing)

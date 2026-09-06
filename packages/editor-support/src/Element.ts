@@ -109,7 +109,7 @@ const styles = `
 `
 
 export class SilkSnippetElement extends HTMLElement {
-  static observedAttributes = ['diagnostics', 'hover', 'inlay-hints', 'editable']
+  static observedAttributes = ['diagnostics', 'hover', 'inlay-hints', 'target', 'editable']
 
   #source: string | undefined
   #handle: Editor.Handle | undefined
@@ -142,7 +142,9 @@ export class SilkSnippetElement extends HTMLElement {
     if (handle === undefined) return
     this.#compiled = true
     const bytes = encoder.encode(handle.value())
-    const snapshot = Effect.runSync(Analysis.ofSourceRealized(this.#module, bytes, defaultTarget))
+    const snapshot = Effect.runSync(
+      Analysis.ofSourceRealized(this.#module, bytes, this.getAttribute('target') ?? defaultTarget),
+    )
     handle.setSession(Editor.session(this.#module, bytes, snapshot))
   }
 
