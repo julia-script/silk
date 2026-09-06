@@ -484,7 +484,8 @@ const effectIdentityOf = (
         call.target.declaration.name === target.name &&
         call.span.sourceId === expression.span.sourceId &&
         call.span.start === expression.span.start &&
-        call.span.end === expression.span.end,
+        call.span.end === expression.span.end &&
+        Instances.callMatchesProviders(call, context.ambientProviders),
     )?.resultEffect
   }
   if (expression._tag === 'Call' || expression._tag === 'EffectConstruct') {
@@ -493,7 +494,8 @@ const effectIdentityOf = (
         Instances.keyText(call.owner) === Instances.keyText(context.instance.key) &&
         call.span.sourceId === expression.span.sourceId &&
         call.span.start === expression.span.start &&
-        call.span.end === expression.span.end,
+        call.span.end === expression.span.end &&
+        Instances.callMatchesProviders(call, context.ambientProviders),
     )?.resultEffect
   }
   if (expression._tag === 'ServiceEffectConstruct')
@@ -1706,14 +1708,14 @@ export const classificationOfRun = (
     selected = control.outcome.runner.classification
   } else if (execution === undefined) {
     selected = 'Unknown'
-  } else if (execution.classification === 'Unknown') {
-    selected = 'Unknown'
   } else if (
     execution.classification === 'Synchronous' &&
     providedClassification(self, instance) === 'Suspendable'
   ) {
     selected = 'Suspendable'
   } else {
+    // Control construction records every unknown or suspendable run in this execution.
+    // An unknown sibling can widen the execution summary without changing this run.
     selected = 'Synchronous'
   }
   return selected

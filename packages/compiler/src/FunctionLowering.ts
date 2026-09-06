@@ -252,13 +252,15 @@ export class FunctionLowering {
     implementation?: DeclarationFacts.CanonicalId,
     typeArguments?: ReadonlyArray<Type.GenericArgument>,
     staticArguments?: ReadonlyArray<StaticValue.Value>,
+    providers: ReadonlyArray<ProvidedRequirement> = this.providedRequirements,
   ): Instances.CallInstance | undefined {
     const exact = this.calls.filter(
       (call) =>
         Instances.keyText(call.owner) === Instances.keyText(this.owner.key) &&
         call.span.sourceId === span.sourceId &&
         call.span.start === span.start &&
-        call.span.end === span.end,
+        call.span.end === span.end &&
+        Instances.callMatchesProviders(call, providers),
     )
     const selected =
       implementation === undefined

@@ -29,12 +29,8 @@ export interface SuspensionGraph {
   readonly effectIdentities: ReadonlySet<string>
   readonly permitted: ReadonlyMap<string, ReadonlySet<SuspensionMode.Mode>>
   readonly unavailable: ReadonlySet<string>
-  /** Exact provider operation specializations discovered through bound service dispatch. */
-  readonly providedTargets: ReadonlyArray<{
-    readonly owner: InstanceKey
-    readonly target: InstanceKey
-    readonly span: Hir.Expression['span']
-  }>
+  /** Exact operations and constructor specializations selected by lexical service providers. */
+  readonly providedTargets: ReadonlyArray<Omit<Instances.CallInstance, '_tag' | 'resultEffect'>>
 }
 
 export interface CallTarget {
@@ -3058,12 +3054,14 @@ export const make = (operations: Operations) => {
     const effectIdentities = new Set<string>()
     const permitted = new Map<string, Set<SuspensionMode.Mode>>()
     const unavailable = new Set<string>()
-    const providedTargets = new Map<
+    const providedTargets = new Map<string, SuspensionGraph['providedTargets'][number]>()
+    // A constructor carrying service Effects has no concrete argument identity until traversal
+    // reaches it with a lexical provider. Keep that dependency so discovery can revisit the call.
+    const deferredCalls = new Map<
       string,
       {
-        readonly owner: InstanceKey
-        readonly target: InstanceKey
-        readonly span: Hir.Expression['span']
+        readonly expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>
+        readonly context: EffectOriginContext
       }
     >()
     const serviceCalls = new Map<
@@ -3174,6 +3172,13 @@ export const make = (operations: Operations) => {
         resolveEffectIdentity,
         successOfIdentity,
         serviceRecipesOfIdentity,
+      }
+      const deferredCallNode = (
+        expression: Extract<Hir.Expression, { readonly _tag: 'Call' | 'EffectConstruct' }>,
+      ): string => {
+        const node = `call\0${keyText(instance.key)}\0${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
+        deferredCalls.set(node, { expression, context })
+        return node
       }
       const bindings = callableBindings(instance.function)
 
@@ -3312,9 +3317,7 @@ export const make = (operations: Operations) => {
           if (identity !== undefined) {
             return Object.freeze([effectNode(identity)])
           }
-          if (target === undefined) {
-            return []
-          }
+          if (target === undefined) return Object.freeze([deferredCallNode(expression)])
           return Object.freeze([instanceNode(target)])
         }
         if (expression._tag === 'ServiceEffectConstruct') {
@@ -3521,11 +3524,17 @@ export const make = (operations: Operations) => {
             )
         } else if (expression._tag === 'Call') {
           const target = targetKeyOfCall(expression, context)
-          if (target !== undefined) addDependency(execution, instanceNode(target))
+          addDependency(
+            execution,
+            target === undefined ? deferredCallNode(expression) : instanceNode(target),
+          )
           recordForwardedServiceTargets(expression, execution)
         } else if (expression._tag === 'EffectConstruct') {
           const target = targetKeyOfCall(expression, context)
-          if (target !== undefined) addDependency(execution, instanceNode(target))
+          addDependency(
+            execution,
+            target === undefined ? deferredCallNode(expression) : instanceNode(target),
+          )
           recordForwardedServiceTargets(expression, execution)
         } else if (
           (expression._tag === 'InterfaceOperationCall' || expression._tag === 'BuiltinCall') &&
@@ -3587,6 +3596,70 @@ export const make = (operations: Operations) => {
         current.environment.some((binding) => binding.node === entered.node)
           ? current.environment
           : Object.freeze([...current.environment, entered])
+      const deferredCall = deferredCalls.get(current.node)
+      if (deferredCall !== undefined) {
+        const selectedBindings = new Map<string, ProviderBinding>()
+        const context: EffectOriginContext = {
+          ...deferredCall.context,
+          resolveServiceEffectIdentity: (expression) => {
+            const service = Type.substitute(
+              expression.service,
+              deferredCall.context.substitution,
+              deferredCall.context.compatibility,
+            )
+            const binding = environment.findLast(
+              (candidate) =>
+                Type.equals(service, candidate.selected.capability) &&
+                expression.role === candidate.selected.role &&
+                (expression.access === 'Shared' ||
+                  candidate.providerAccess === 'Exclusive' ||
+                  candidate.providerAccess === 'Take'),
+            )
+            if (binding?.witness._tag !== 'SourceConformanceWitness') return undefined
+            selectedBindings.set(binding.node, binding)
+            const target = targetKeyOfServiceCall(
+              expression,
+              binding.witness,
+              deferredCall.context,
+              binding.receiver,
+            )
+            const fn =
+              target === undefined ? undefined : targetFunction(results, target.declaration)
+            return target === undefined || fn === undefined
+              ? undefined
+              : resultEffectIdentity(fn, target, results, index)
+          },
+        }
+        const target = targetKeyOfCall(deferredCall.expression, context)
+        if (target !== undefined) {
+          const span = deferredCall.expression.span
+          providedTargets.set(
+            `${keyText(context.owner)}\0${keyText(target)}\0${span.sourceId}:${span.start}:${span.end}`,
+            Object.freeze({
+              owner: context.owner,
+              target,
+              span,
+              ...(deferredCall.expression.staticArgumentOrigins === undefined
+                ? {}
+                : { staticArgumentOrigins: deferredCall.expression.staticArgumentOrigins }),
+              providers: Object.freeze(
+                [...selectedBindings.values()].map((binding) =>
+                  Object.freeze({
+                    capability: binding.witness.capability,
+                    providerType: binding.witness.provider,
+                    role: binding.selected.role,
+                  }),
+                ),
+              ),
+            }),
+          )
+          const targetNode = executionNodeForKey(target)
+          // Keep provider-selected suspension on its lexical invocation, not the shared open call.
+          for (const binding of selectedBindings.values())
+            selectedEdges.push(Object.freeze([binding.execution, targetNode]))
+          pendingProviders.push(Object.freeze({ node: targetNode, environment }))
+        }
+      }
       const serviceCall = serviceCalls.get(current.node)
       if (serviceCall !== undefined) {
         const binding = environment.findLast(

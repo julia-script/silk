@@ -4577,6 +4577,31 @@ effect fn recover(error: OutOfMemoryError) -> i32 { return -1 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     expected: { _tag: 'Completes', result: 42 },
   },
+  {
+    name: 'composed-mutable-provider-identities',
+    source: `import silk.effect { Effect }
+service Input { effect fn count() -> i32 ? &mut Input }
+struct First { value: i32 }
+struct Second { value: i32 }
+effect fn firstCount(self: &mut First) -> i32 { return self.value + 1 }
+effect fn secondCount(self: &mut Second) -> i32 {
+  return run Effect.suspend(effect { return self.value * 2 })
+}
+impl Input for First { count: First.firstCount }
+impl Input for Second { count: Second.secondCount }
+effect fn composed() -> i32 ? &mut Input {
+  let pair = run Effect.zip(Input.count(), Input.count())
+  return pair.first + pair.second
+}
+pub fn main() -> i32 {
+  let mut first = First { value: 4 }
+  let mut second = Second { value: 8 }
+  let left = run Effect.provideMut(composed(), &mut first)
+  let right = run Effect.provideMut(composed(), &mut second)
+  return left + right
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // folded from EffectRuntime.test.ts: every supported pipeline spelling must preserve the same
   // provision and mapping order. Each result is checked independently before the process exits.
   {
