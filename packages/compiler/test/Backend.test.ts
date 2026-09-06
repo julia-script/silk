@@ -1,3 +1,4 @@
+import * as ForeignContract from '../src/ForeignContract.js'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
@@ -326,7 +327,7 @@ it.effect('publishes native branch provenance back to canonical loop regions', (
   }),
 )
 
-it.effect('declares each reachable foreign symbol once and calls it directly', () =>
+it.effect('declares each reachable foreign symbol once and calls through its unwind guard', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
       'backend/foreign-native',
@@ -353,19 +354,33 @@ pub fn main() -> i32 {
       lines.filter((line) => line.startsWith('declare') && line.includes('@silk_test_add')),
       ['declare i32 @silk_test_add(i32, i32)'],
     )
-    assert.strictEqual(lines.filter((line) => /call i32 @silk_test_add\(/.test(line)).length, 2)
+    assert.strictEqual(lines.filter((line) => /invoke i32 @silk_test_add\(/.test(line)).length, 1)
+    assert.strictEqual(
+      lines.filter((line) => /call i32 @__silk_foreign_guard\.1\(/.test(line)).length,
+      2,
+    )
     assert.deepEqual(
       lines.filter((line) => line.startsWith('declare') && line.includes('@silk_test_scale')),
       ['declare i64 @silk_test_scale(i64)'],
     )
     assert.strictEqual(
-      lines.filter((line) => /call i64 @silk_test_scale\(i64 /.test(line)).length,
+      lines.filter((line) => /invoke i64 @silk_test_scale\(i64 /.test(line)).length,
       1,
     )
     assert.deepEqual(artifact.foreignImports, [
-      { symbol: 'abs', parameters: ['i32'], result: 'i32' },
-      { symbol: 'silk_test_add', parameters: ['i32', 'i32'], result: 'i32' },
-      { symbol: 'silk_test_scale', parameters: ['u64'], result: 'u64' },
+      { symbol: 'abs', parameters: ['i32'], result: 'i32', contract: ForeignContract.conservative },
+      {
+        symbol: 'silk_test_add',
+        parameters: ['i32', 'i32'],
+        result: 'i32',
+        contract: ForeignContract.conservative,
+      },
+      {
+        symbol: 'silk_test_scale',
+        parameters: ['u64'],
+        result: 'u64',
+        contract: ForeignContract.conservative,
+      },
     ])
 
     const plain = yield* emit(nestedSource, { mode: 'release' })
@@ -429,7 +444,12 @@ pub fn main() -> i32 { return 0 }`),
     assert.isFalse((calls.at(0) ?? '').includes('@silk_test_double_v1('))
     assert.strictEqual(body.filter((line) => /^\s*ret /.test(line)).length, 1, body.join('\n'))
     assert.deepEqual(first.foreignExports, [
-      { symbol: 'silk_test_double_v1', parameters: ['i32'], result: 'i32' },
+      {
+        symbol: 'silk_test_double_v1',
+        parameters: ['i32'],
+        result: 'i32',
+        contract: ForeignContract.conservative,
+      },
     ])
     const plain = yield* emit(nestedSource, { mode: 'release' })
     assert.deepEqual(plain.foreignExports, [])
@@ -456,7 +476,7 @@ pub fn main() -> i32 {
     if (artifact._tag !== 'LlvmBitcodeArtifact') return
     const lines = artifact.ir.split('\n')
     assert.include(lines, 'declare void @touch(ptr)')
-    const call = lines.findIndex((line) => /call void @touch\(ptr %/.test(line))
+    const call = lines.findIndex((line) => /call void @__silk_foreign_guard\.0\(ptr %/.test(line))
     assert.notStrictEqual(call, -1, artifact.ir)
     const reload = lines.findIndex(
       (line, index) =>
@@ -470,6 +490,7 @@ pub fn main() -> i32 {
           'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>',
         ],
         result: 'void',
+        contract: ForeignContract.conservative,
       },
     ])
   }),
@@ -496,10 +517,11 @@ pub fn main() -> i32 {
     assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
     if (artifact._tag !== 'LlvmBitcodeArtifact') return
     assert.include(artifact.ir.split('\n'), 'declare ptr @malloc(i64)')
-    assert.match(artifact.ir, /call ptr @malloc\(i64 %/)
+    assert.match(artifact.ir, /invoke ptr @malloc\(i64 %/)
     assert.deepEqual(artifact.foreignImports, [
       {
         symbol: 'malloc',
+        contract: ForeignContract.conservative,
         parameters: ['u64'],
         result:
           'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',

@@ -27,7 +27,9 @@ const build = Effect.fn('stdlibDocumentation.build')(function* (): Effect.fn.Ret
     roots.push(SourceFile.make(entry.module, bytes))
   }
   if (roots.length === 0) return yield* Effect.die('The stdlib manifest is empty')
-  const analysis = yield* ProjectAnalysis.make(roots).pipe(Effect.provide(SourceResolver.empty))
+  const analysis = yield* ProjectAnalysis.make(roots, {
+    configuration: { profile: { target: 'aarch64-apple-darwin' } },
+  }).pipe(Effect.provide(SourceResolver.empty))
   return Json.encode(DocumentationProject.fromProjectAnalysis(analysis, { includePrivate: false }))
 })
 

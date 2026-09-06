@@ -704,7 +704,9 @@ const printForeignStaticDeclaration = (
 ): FormatDocument.Document => {
   const tokens = directTokens(node)
   const type = directNodes(node).at(0) ?? nodeOf(node, 'TypePath')
-  const initializer = directNodes(node).at(1)
+  const initializer = directNodes(node)
+    .filter((child) => child.kind !== 'FunctionPropertyClause')
+    .at(1)
   const asIndex = tokens.findIndex((token) => token.kind === 'AsKeyword')
   const equals = tokens.find((token) => token.kind === 'Equals')
   return FormatDocument.concat(
@@ -730,6 +732,9 @@ const printForeignStaticDeclaration = (
             FormatDocument.text(' '),
           ),
         ]),
+    ...directNodes(node)
+      .filter((child) => child.kind === 'FunctionPropertyClause')
+      .map((clause) => printNode(context, clause, FormatDocument.text(' '))),
     ...(equals === undefined || initializer === undefined
       ? []
       : [
@@ -762,6 +767,7 @@ const printFunctionDeclaration = (
   const requirementRow = nodes.find((child) => child.kind === 'RequirementRow')
   const whereClause = nodes.find((child) => child.kind === 'WhereClause')
   const body = nodes.find((child) => child.kind === 'Block')
+  const properties = nodes.filter((child) => child.kind === 'FunctionPropertyClause')
   return FormatDocument.concat(
     ...head.flatMap((token, index) => [
       printToken(context, token, index === 0 ? prefix : FormatDocument.text(' ')),
@@ -794,6 +800,7 @@ const printFunctionDeclaration = (
           printToken(context, asKeyword, FormatDocument.text(' ')),
           printToken(context, symbol, FormatDocument.text(' ')),
         ]),
+    ...properties.map((property) => printNode(context, property, FormatDocument.text(' '))),
     ...(body === undefined ? [] : [printNode(context, body, FormatDocument.text(' '))]),
   )
 }
@@ -1425,6 +1432,35 @@ const printNode = (
         commaTokens(node),
         tokenOf(node, 'RightParenthesis'),
         prefix,
+      )
+    case 'ModulePropertyDeclaration':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix),
+        ...directNodes(node).map((clause) => printNode(context, clause, FormatDocument.text(' '))),
+      )
+    case 'FunctionPropertyClause': {
+      const names = directTokens(node).filter((token) => token.kind === 'Identifier')
+      return FormatDocument.concat(
+        ...names.flatMap((token, index) =>
+          index === 2
+            ? [printToken(context, tokenOf(node, 'Dot')), printToken(context, token)]
+            : [printToken(context, token, index === 0 ? prefix : FormatDocument.text(' '))],
+        ),
+        printDelimited(
+          context,
+          tokenOf(node, 'LeftParenthesis'),
+          directNodes(node),
+          commaTokens(node),
+          tokenOf(node, 'RightParenthesis'),
+          FormatDocument.empty,
+        ),
+      )
+    }
+    case 'FunctionProperty':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix),
+        printToken(context, tokenOf(node, 'Colon')),
+        ...directNodes(node).map((value) => printNode(context, value, FormatDocument.text(' '))),
       )
     case 'ParameterDeclaration': {
       const modifier = directTokens(node).find(

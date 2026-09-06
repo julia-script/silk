@@ -1,11 +1,15 @@
+import * as NativeRequirementBinding from './NativeRequirementBinding.js'
+import * as ArtifactPlan from './ArtifactPlan.js'
 import * as Config from 'effect/Config'
+import * as Result from 'effect/Result'
+import * as ForeignContract from './ForeignContract.js'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as ArtifactKind from './ArtifactKind.js'
 import * as AbiManifest from './AbiManifest.js'
 import * as Backend from './Backend.js'
 import * as CHeader from './CHeader.js'
-import type * as Diagnostic from './Diagnostic.js'
+import * as Diagnostic from './Diagnostic.js'
 import * as Frontend from './Frontend.js'
 import * as HeapObservation from './HeapObservation.js'
 import type * as Instances from './Instances.js'
@@ -51,9 +55,11 @@ const backendEmissionCacheKey = (
   distributionDigest: string,
   backendId: string,
   profileIdentity: string,
+  planIdentity: string,
   artifactKind: ArtifactKind.ArtifactKind,
   mode: string,
   sources: ReadonlyMap<string, SourceFile.SourceFile>,
+  interfaces: ReadonlyArray<SourceFile.SourceFile>,
 ): string => {
   const modules = [...sources]
     .map(
@@ -63,20 +69,27 @@ const backendEmissionCacheKey = (
     .sort()
   const digest = ToolchainIntegrity.contentDigest(
     [
-      'backend-emission-v3',
+      'backend-emission-v5',
       distributionDigest,
       backendId,
       profileIdentity,
+      planIdentity,
       artifactKind,
       mode,
       ...modules,
+      ...interfaces
+        .map(
+          (source) =>
+            `interface:${source.id}:${ToolchainIntegrity.contentDigest(SourceFile.toUint8Array(source))}`,
+        )
+        .sort(),
     ].join('\u0000'),
   )
   return `backend-${digest}.blob`
 }
 
 interface CachedEmissionHeader {
-  readonly schema: 4
+  readonly schema: 5
   readonly module: string
   readonly report: Backend.Termination['report']
   readonly symbols: Backend.LlvmBitcodeArtifact['symbols']
@@ -90,7 +103,7 @@ interface CachedEmissionHeader {
 const encodeCachedEmission = (artifact: Backend.LlvmBitcodeArtifact): Uint8Array | undefined => {
   try {
     const header: CachedEmissionHeader = {
-      schema: 4,
+      schema: 5,
       module: artifact.module,
       report: artifact.termination.report,
       symbols: artifact.symbols,
@@ -124,10 +137,16 @@ const decodeCachedEmission = (
     const header: CachedEmissionHeader = JSON.parse(
       new TextDecoder().decode(bytes.subarray(4, 4 + jsonLength)),
     )
-    if (header.schema !== 4) return undefined
+    if (header.schema !== 5) return undefined
+    if (
+      ![...header.foreignImports, ...header.foreignExports].every(
+        (entry) =>
+          ForeignContract.inspect(entry.contract, entry.parameters, entry.result) !== undefined,
+      )
+    )
+      return undefined
     const bitcode = bytes.slice(4 + jsonLength)
-    // `control` and `ir` are never read on the driver path; the cast records that this artifact
-    // stays internal to the driver rather than flowing back out through Backend.emit.
+    // The driver cache does not expose IR or control-flow inspection to callers.
     return Object.freeze({
       _tag: 'LlvmBitcodeArtifact',
       backend: 'llvm',
@@ -143,7 +162,7 @@ const decodeCachedEmission = (
       control: Object.freeze([]),
       bitcode,
       ir: '',
-    }) as Backend.LlvmBitcodeArtifact
+    })
   } catch {
     return undefined
   }
@@ -151,6 +170,8 @@ const decodeCachedEmission = (
 
 /** One driver request. */
 export interface CompileRequest {
+  readonly nativeBindings?: ReadonlyArray<NativeRequirementBinding.NativeRequirementBinding>
+  readonly stage?: ArtifactPlan.Stage
   readonly compilation: ModuleClosure.CompilationRequest
   readonly toolchain: NativeToolchain.Toolchain
   readonly optimization?: ToolchainPlan.OptimizationProfile
@@ -158,6 +179,8 @@ export interface CompileRequest {
   /** Validated project package name used for durable artifact identities. */
   readonly packageName: string
   readonly destination: string
+  /** Supplied behavioral ABI JSON snapshots, validated against visible contracts before cache reuse. */
+  readonly foreignInterfaces?: ReadonlyArray<SourceFile.SourceFile>
   /** Ordered, structured native inputs passed after compiler-generated objects. */
   readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
   readonly scopeName?: string
@@ -170,6 +193,9 @@ export interface CompileRequest {
 
 /** A completed compilation with its durable artifact identity and report. */
 export interface Compiled {
+  readonly stage?: ArtifactPlan.Stage
+  readonly artifactPlan?: ArtifactPlan.ArtifactPlan
+  readonly nativeBindings?: NativeRequirementBinding.Resolved
   readonly _tag: 'Compiled'
   readonly backend: Backend.Id
   readonly artifactKind: NativeToolchain.FinalArtifact['kind']
@@ -412,19 +438,56 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
   const { diagnostics, program, target } = preparation
+  const stage = request.stage ?? 'final'
+  const plannedArtifact = yield* Effect.result(
+    ArtifactPlan.make(
+      frontend,
+      preparation.profile,
+      preparation.composition,
+      program,
+      stage,
+      distribution.digest,
+    ),
+  )
+  if (Result.isFailure(plannedArtifact)) {
+    const span = closure.modules.find((module) => module.name === closure.rootModule)?.syntax.root
+      .span
+    if (span === undefined) throw new RangeError('Artifact plan lost application source')
+    return Object.freeze({
+      _tag: 'Rejected',
+      sources: closure.sources,
+      diagnostics: Diagnostic.merge(diagnostics, [
+        Diagnostic.invalidConfiguration(plannedArtifact.failure, span),
+      ]),
+      report: Object.freeze([...report]),
+    })
+  }
+  const artifactPlan = plannedArtifact.success
+
+  const importedInterfaces: Array<AbiManifest.Imported> = []
+  const interfaceDiagnostics: Array<Diagnostic.Diagnostic> = []
+  for (const source of request.foreignInterfaces ?? []) {
+    const decoded = yield* AbiManifest.decode(source).pipe(Effect.result)
+    if (Result.isFailure(decoded)) interfaceDiagnostics.push(decoded.failure)
+    else importedInterfaces.push(decoded.success)
+  }
+  interfaceDiagnostics.push(...AbiManifest.check(importedInterfaces, program))
+  if (interfaceDiagnostics.length > 0)
+    return Object.freeze({
+      _tag: 'Rejected',
+      sources: new Map([
+        ...closure.sources,
+        ...(request.foreignInterfaces ?? []).map((source) => [source.id, source] as const),
+      ]),
+      diagnostics: Object.freeze([...diagnostics, ...interfaceDiagnostics]),
+      report: Object.freeze([...report]),
+    })
   const targetIntegrity = PhaseReport.measureInto(
     report,
     'toolchain-target',
     program.intrinsics.length,
-    () =>
-      ToolchainIntegrity.validateTarget(
-        distribution,
-        target,
-        program.intrinsics,
-        closure.sources.keys(),
-      ),
-    (result) =>
-      result._tag === 'Matched' ? result.providers.length + result.runtimeSupport.length : 0,
+    () => ToolchainIntegrity.validateTarget(distribution, target, program.intrinsics),
+    (result) => (result._tag === 'Matched' ? result.runtimeSupport.length : 0),
     (result) => (result._tag === 'Invalid' ? result.failures.length : 0),
     { heapBytes },
   )
@@ -456,9 +519,11 @@ export const compile = Effect.fn('Driver.compile')(function* (
           distribution.digest,
           backend.id,
           preparation.profile.identity,
+          artifactPlan.identity,
           request.artifactKind,
           mode,
           closure.sources,
+          request.foreignInterfaces ?? [],
         )
   const cachedEmission =
     emissionCache !== undefined && emissionCacheKey !== undefined
@@ -522,9 +587,65 @@ export const compile = Effect.fn('Driver.compile')(function* (
       yield* NativeToolchain.writeArtifactCache(emissionCache, emissionCacheKey, encoded)
   }
 
+  if (stage !== 'final') {
+    const path = yield* NativeToolchain.withBuildScope(
+      request.scopeName ?? 'representation',
+      Effect.fnUntraced(function* (scope: NativeToolchain.BuildScope) {
+        return yield* NativeToolchain.emitRepresentation(
+          request.toolchain,
+          scope,
+          artifact,
+          preparation.profile,
+          stage,
+          request.destination,
+        )
+      }),
+      { saveTemps: request.saveTemps ?? false },
+    )
+    return Object.freeze({
+      _tag: 'Compiled',
+      backend: artifact.backend,
+      artifactKind: request.artifactKind,
+      stage,
+      artifactPlan,
+      path,
+      target,
+      symbols: artifact.symbols,
+      foreignImports: artifact.foreignImports,
+      foreignExports: artifact.foreignExports,
+      foreignStatics: artifact.foreignStatics,
+      diagnostics,
+      report: Object.freeze([...report]),
+      toolchainIdentity: distribution.digest,
+    })
+  }
+  const bound = yield* Effect.result(
+    NativeRequirementBinding.resolve(
+      artifactPlan.requirements,
+      request.nativeBindings ?? [],
+      artifactPlan.form,
+    ),
+  )
+  if (Result.isFailure(bound)) {
+    const span = closure.modules.find((module) => module.name === closure.rootModule)?.syntax.root
+      .span
+    if (span === undefined)
+      throw new RangeError('Native requirement binding lost application source')
+    return Object.freeze({
+      _tag: 'Rejected',
+      sources: closure.sources,
+      diagnostics: Diagnostic.merge(diagnostics, [
+        Diagnostic.invalidConfiguration(bound.failure, span),
+      ]),
+      report: Object.freeze([...report]),
+    })
+  }
   const cacheKind = request.artifactKind
   const scopeName = request.scopeName ?? 'driver'
-  const requestedNativeInputs = request.nativeLinkInputs ?? Object.freeze([])
+  const requestedNativeInputs = Object.freeze([
+    ...(request.nativeLinkInputs ?? []),
+    ...bound.success.inputs,
+  ])
   // Float remainder lowers to LLVM `frem`, which becomes an fmod/fmodf libcall on
   // targets whose libm is separate from libc (Linux); macOS folds it into libSystem.
   const nativeLinkInputs =
@@ -553,6 +674,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     cacheKind,
     artifact.termination,
     artifact.nativeRuntimeSymbols,
+    program.entry._tag !== 'NoInvocation',
   )
   const cacheKey =
     artifactCache !== undefined && artifact._tag === 'LlvmBitcodeArtifact'
@@ -582,21 +704,25 @@ export const compile = Effect.fn('Driver.compile')(function* (
         () => 0,
         { heapBytes },
       )
-      const libraryInterface = ArtifactKind.isLibrary(cacheKind)
-        ? yield* PhaseReport.measureEffectInto(
-            report,
-            'library-interface',
-            artifact.foreignImports.length +
-              artifact.foreignExports.length +
-              artifact.foreignStatics.length,
-            commitLibraryInterface(request, committed.path, artifact, target),
-            () => 2,
-            () => 0,
-            { heapBytes },
-          )
-        : undefined
+      const libraryInterface =
+        ArtifactKind.isLibrary(cacheKind) || cacheKind === 'NativeObject'
+          ? yield* PhaseReport.measureEffectInto(
+              report,
+              'library-interface',
+              artifact.foreignImports.length +
+                artifact.foreignExports.length +
+                artifact.foreignStatics.length,
+              commitLibraryInterface(request, committed.path, artifact, target),
+              () => 2,
+              () => 0,
+              { heapBytes },
+            )
+          : undefined
       return Object.freeze({
         _tag: 'Compiled',
+        stage,
+        artifactPlan,
+        nativeBindings: bound.success,
         backend: artifact.backend,
         artifactKind: committed.kind,
         path: committed.path,
@@ -639,6 +765,9 @@ export const compile = Effect.fn('Driver.compile')(function* (
           }
           return Object.freeze({
             _tag: 'Compiled',
+            stage,
+            artifactPlan,
+            nativeBindings: bound.success,
             backend: artifact.backend,
             artifactKind: finalized.kind,
             path: finalized.path,
@@ -671,28 +800,61 @@ export const compile = Effect.fn('Driver.compile')(function* (
           () => 0,
           { heapBytes },
         )
-        const runtime = yield* PhaseReport.measureEffectInto(
-          report,
-          'runtime',
-          1,
-          cacheKind === 'NativeExecutable'
-            ? NativeToolchain.compileExecutableRuntime(
-                request.toolchain,
-                scope,
-                target,
-                artifact.termination,
-                artifact.nativeRuntimeSymbols,
-              )
-            : NativeToolchain.compileRuntime(
-                request.toolchain,
-                scope,
-                target,
-                artifact.nativeRuntimeSymbols,
-              ),
-          () => 1,
-          () => 0,
-          { heapBytes },
-        )
+        const generatedObjects: Array<NativeToolchain.PathArtifact> = [object.artifact]
+        if (program.entry._tag !== 'NoInvocation' || artifact.nativeRuntimeSymbols.length > 0) {
+          const runtime = yield* PhaseReport.measureEffectInto(
+            report,
+            'runtime',
+            1,
+            program.entry._tag !== 'NoInvocation'
+              ? NativeToolchain.compileExecutableRuntime(
+                  request.toolchain,
+                  scope,
+                  target,
+                  artifact.termination,
+                  artifact.nativeRuntimeSymbols,
+                )
+              : NativeToolchain.compileRuntime(
+                  request.toolchain,
+                  scope,
+                  target,
+                  artifact.nativeRuntimeSymbols,
+                ),
+            () => 1,
+            () => 0,
+            { heapBytes },
+          )
+          generatedObjects.push(runtime.artifact)
+        }
+        if (
+          cacheKind === 'NativeObject' &&
+          generatedObjects.length === 1 &&
+          nativeLinkInputs.length === 0
+        ) {
+          const path = yield* NativeToolchain.commitPathRepresentation(
+            object.artifact,
+            request.destination,
+          )
+          const libraryInterface = yield* commitLibraryInterface(request, path, artifact, target)
+          return Object.freeze({
+            _tag: 'Compiled',
+            backend: artifact.backend,
+            artifactKind: cacheKind,
+            stage,
+            artifactPlan,
+            nativeBindings: bound.success,
+            path,
+            target,
+            symbols: artifact.symbols,
+            foreignImports: artifact.foreignImports,
+            foreignExports: artifact.foreignExports,
+            foreignStatics: artifact.foreignStatics,
+            libraryInterface,
+            diagnostics,
+            report: Object.freeze([...report]),
+            toolchainIdentity: distribution.digest,
+          })
+        }
         const linked = yield* PhaseReport.measureEffectInto(
           report,
           'link',
@@ -702,9 +864,10 @@ export const compile = Effect.fn('Driver.compile')(function* (
             scope,
             cacheKind,
             target,
-            [object.artifact, runtime.artifact],
+            generatedObjects,
             nativeLinkInputs,
             request.destination,
+            artifactPlan.composition.loader.resolved,
           ),
           () => 1,
           () => 0,
@@ -713,21 +876,25 @@ export const compile = Effect.fn('Driver.compile')(function* (
         if (artifactCache !== undefined && cacheKey !== undefined) {
           yield* NativeToolchain.writeArtifactCache(artifactCache, cacheKey, linked.bytes)
         }
-        const libraryInterface = ArtifactKind.isLibrary(cacheKind)
-          ? yield* PhaseReport.measureEffectInto(
-              report,
-              'library-interface',
-              artifact.foreignImports.length +
-                artifact.foreignExports.length +
-                artifact.foreignStatics.length,
-              commitLibraryInterface(request, linked.path, artifact, target),
-              () => 2,
-              () => 0,
-              { heapBytes },
-            )
-          : undefined
+        const libraryInterface =
+          ArtifactKind.isLibrary(cacheKind) || cacheKind === 'NativeObject'
+            ? yield* PhaseReport.measureEffectInto(
+                report,
+                'library-interface',
+                artifact.foreignImports.length +
+                  artifact.foreignExports.length +
+                  artifact.foreignStatics.length,
+                commitLibraryInterface(request, linked.path, artifact, target),
+                () => 2,
+                () => 0,
+                { heapBytes },
+              )
+            : undefined
         return Object.freeze({
           _tag: 'Compiled',
+          stage,
+          artifactPlan,
+          nativeBindings: bound.success,
           backend: artifact.backend,
           artifactKind: linked.kind,
           path: linked.path,

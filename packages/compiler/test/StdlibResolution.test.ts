@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as SourceCatalog from '../src/SourceCatalog.js'
+import * as Target from '../src/Target.js'
+import * as PlatformCatalog from '../src/PlatformCatalog.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Lexer from '../src/Lexer.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
@@ -19,6 +22,79 @@ const ascii = (value: string): Uint8Array =>
 
 const targetSourceUrl = new URL('../stdlib/silk/target.silk', import.meta.url)
 const targetSource = new Uint8Array(readFileSync(targetSourceUrl))
+
+it.effect('validates descriptive catalog provenance without claiming planned fixtures ran', () =>
+  Effect.gen(function* () {
+    const record = {
+      identity: 'fixture/scalar-catalog',
+      production: 'HandAuthored',
+      authorities: [{ identity: 'fixture-spec', version: '1' }],
+      headers: [{ identity: 'fixture.h', version: 'sha256:fixture-source-v1' }],
+      scope: [
+        { target: 'aarch64-apple-darwin', minimumDeployment: '11.0', maximumDeployment: '15.5' },
+      ],
+      declarations: [
+        {
+          identity: 'fixture_value',
+          targets: ['aarch64-apple-darwin'],
+          evidence: [
+            {
+              claim: 'Signature',
+              authority: 'fixture-spec',
+              reference: 'section 1',
+              fixture: 'scalar-fixture',
+              status: 'Planned',
+            },
+          ],
+        },
+      ],
+      fixtures: [
+        {
+          identity: 'scalar-fixture',
+          version: '1',
+          tools: [{ identity: 'clang', version: '22.1.8' }],
+        },
+      ],
+      generationInputs: [],
+      review: {
+        identity: 'record-shape-test',
+        revision: '1',
+        updateProcedure: 'Review fixture declaration edits',
+        driftCheck: 'Compare independent signature fixture',
+      },
+    }
+    const valid = yield* PlatformCatalog.decode(record)
+    assert.strictEqual(valid.declarations[0]?.evidence[0]?.status, 'Planned')
+    for (const [input, field] of [
+      [{ ...record, authorities: [] }, 'authorities'],
+      [{ ...record, production: 'Generated' }, 'generationInputs'],
+      [{ ...record, scope: [{ ...record.scope[0], minimumDeployment: '16' }] }, 'scope'],
+      [
+        {
+          ...record,
+          declarations: [{ ...record.declarations[0], targets: ['x86_64-unknown-linux-gnu'] }],
+        },
+        'declarations.fixture_value.targets',
+      ],
+      [
+        {
+          ...record,
+          declarations: [
+            {
+              ...record.declarations[0],
+              evidence: [{ ...record.declarations[0]?.evidence[0], status: 'Verified' }],
+            },
+          ],
+        },
+        'declarations.fixture_value.evidence',
+      ],
+      [{ ...record, providerTargets: ['aarch64-apple-darwin'] }, 'record'],
+    ] as const) {
+      const error = yield* Effect.flip(PlatformCatalog.decode(input))
+      assert.strictEqual(error.field, field)
+    }
+  }),
+)
 
 const importing = `import silk.vector { Vector }
 
@@ -48,7 +124,6 @@ it('keeps the ordinary target actor manifest entry, syntax, and intrinsic phase 
   ) as ReadonlyArray<{
     readonly module: string
     readonly path: string
-    readonly layer: string
     readonly namespace?: string
     readonly aliases?: ReadonlyArray<string>
   }>
@@ -56,7 +131,6 @@ it('keeps the ordinary target actor manifest entry, syntax, and intrinsic phase 
   assert.deepEqual(entry, {
     module: 'silk/target',
     path: 'silk/target.silk',
-    layer: 'portable',
     namespace: 'Target',
     aliases: ['Arch'],
   })
@@ -176,7 +250,6 @@ it.effect(
 )
 
 it('derives deterministic catalog metadata and enforces portable dependency direction', () => {
-  const byModule = new Map(Stdlib.manifest.map((entry) => [entry.module, entry] as const))
   for (const entry of Stdlib.manifest) {
     const source = new TextDecoder().decode(entry.bytes)
     const intrinsicInventory = [
@@ -206,13 +279,6 @@ it('derives deterministic catalog metadata and enforces portable dependency dire
           ),
       ),
     )
-    if (entry.layer === 'portable') assert.isUndefined(entry.providerTargets)
-    else assert.isAbove(entry.providerTargets?.length ?? 0, 0)
-
-    for (const imported of source.matchAll(/\bimport\s+([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)/g)) {
-      const dependency = byModule.get(imported[1]?.replaceAll('.', '/') ?? '')
-      if (entry.layer === 'portable') assert.notStrictEqual(dependency?.layer, 'target-provider')
-    }
   }
 })
 
@@ -350,9 +416,7 @@ it.effect('resolves the complete InsecureRandom surface to canonical portable Si
 
     const entry = Stdlib.find('silk/insecure_random')
     assert.isDefined(entry)
-    assert.strictEqual(entry?.layer, 'portable')
     assert.deepEqual(entry?.runtimeInventory, [])
-    assert.isUndefined(entry?.providerTargets)
     assert.isTrue(entry?.sourceUrl.pathname.endsWith('/stdlib/silk/insecure_random.silk') ?? false)
 
     const module = Analysis.declarationIndex(snapshot).modules.find(
@@ -396,9 +460,7 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     for (const moduleName of ['silk/random', 'silk/insecure_seed']) {
       const entry = Stdlib.find(moduleName)
-      assert.strictEqual(entry?.layer, 'portable')
       assert.deepEqual(entry?.runtimeInventory, [])
-      assert.isUndefined(entry?.providerTargets)
     }
     const modules = Analysis.declarationIndex(snapshot).modules
     const names = (moduleName: string): Array<string> => {
@@ -724,4 +786,55 @@ it.effect('reaches a shadowed standard-library module through an ordinary import
       'app/main',
     )
   }),
+)
+
+it.effect(
+  'selects every ordinary native provider and its facade imports for each admitted profile',
+  () =>
+    Effect.gen(function* () {
+      const providers = [
+        'child_process',
+        'filesystem',
+        'host_input',
+        'monotonic_clock',
+        'random',
+        'standard_input',
+        'system_clock',
+      ]
+      const root = SourceFile.make(
+        'project/providers',
+        ascii(
+          providers.map((name, index) => `import silk.os_${name} as provider${index}`).join('\n'),
+        ),
+      )
+      const facade = SourceFile.make(
+        'project/facade',
+        ascii(`
+      static if Intrinsic.targetOperatingSystem() == "darwin" {
+        pub import silk.os_filesystem { OsFileSystem }
+      }
+    `),
+      )
+      for (const target of Target.all) {
+        const selection = yield* SourceCatalog.analyze({
+          roots: [root, facade],
+          configuration: { profile: { target: target.id } },
+        }).pipe(Effect.provide(SourceResolver.empty))
+        assert.deepEqual(selection.closure.resolutionFailures, [])
+        assert.deepEqual(selection.closure.diagnostics, [])
+        for (const name of providers) {
+          const summary = selection.catalog?.modules.get(`silk/os_${name}`)
+          assert.isDefined(summary, name)
+          assert.strictEqual(
+            (summary?.publicDeclarations.length ?? 0) > 0,
+            target.kind === 'Native',
+            `${target.id}: ${name}`,
+          )
+        }
+        assert.strictEqual(
+          (selection.catalog?.modules.get('project/facade')?.publicDeclarations.length ?? 0) > 0,
+          target.operatingSystem === 'darwin',
+        )
+      }
+    }),
 )

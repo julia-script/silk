@@ -1,3 +1,5 @@
+import type * as ConfigurationOrigin from './ConfigurationOrigin.js'
+import type * as ArtifactComposition from './ArtifactComposition.js'
 import type * as CompilationProfile from './CompilationProfile.js'
 import type * as PackageConfiguration from './PackageConfiguration.js'
 import * as Effect from 'effect/Effect'
@@ -21,6 +23,8 @@ export interface CompilationRequest {
   readonly root: SourceFile.SourceFile
   readonly target?: string
   readonly configuration?: {
+    readonly composition?: ArtifactComposition.Input
+    readonly compositionOrigin?: ConfigurationOrigin.ConfigurationOrigin
     readonly package?: string
     readonly profile: CompilationProfile.Input
     readonly bindings?: ReadonlyArray<PackageConfiguration.Binding>
@@ -30,6 +34,7 @@ export interface CompilationRequest {
 
 /** One project frontend request with one or more independently queryable roots. */
 export interface ProjectRequest {
+  readonly application?: string
   readonly configuration?: CompilationRequest['configuration']
   readonly roots: ReadonlyArray<SourceFile.SourceFile>
   readonly previous?: ProjectClosure
@@ -174,6 +179,7 @@ const parseModule = (
   source: SourceResolver.ResolvedSource,
   previous?: Module,
   selection: ReadonlyMap<number, boolean> = new Map(),
+  application?: string,
 ): ParsedModule => {
   const currentSource = SourceFile.make(name, source.bytes, source.origin)
   const syntax =
@@ -188,7 +194,10 @@ const parseModule = (
       return [Object.freeze({ syntax: element, path: path ?? element })]
     }
     const sourceSpelling = ImportPath.spelling(syntax.source, path)
-    const canonicalTarget = ImportPath.canonicalTarget(syntax.source, path)
+    const canonicalTarget =
+      sourceSpelling === 'Intrinsic.application' && application !== undefined
+        ? application
+        : ImportPath.canonicalTarget(syntax.source, path)
     if (sourceSpelling === undefined || canonicalTarget === undefined) {
       return [Object.freeze({ syntax: element, path })]
     }
@@ -411,7 +420,13 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
     const resolution = resolutions.get(name) ?? (yield* resolve(name))
     if (resolution?._tag !== 'Found') continue
     const analysis = yield* analyzeModule(
-      parseModule(name, resolution.source, previousModules.get(name), request.selection?.get(name)),
+      parseModule(
+        name,
+        resolution.source,
+        previousModules.get(name),
+        request.selection?.get(name),
+        request.application,
+      ),
       resolve,
     )
     loaded.set(name, analysis.module)
@@ -461,8 +476,12 @@ export const view = (self: ProjectClosure, rootModule: string): Closure | undefi
 /** Discovers the unconditional bootstrap closure of one compilation request. Use Analysis.make for profile-selected frontend facts. */
 export const load = Effect.fn('ModuleClosure.load')(function* (
   request: CompilationRequest,
+  additionalRoots: ReadonlyArray<SourceFile.SourceFile> = [],
 ): Effect.fn.Return<Closure, never, SourceResolver.SourceResolver> {
-  const project = yield* loadProject({ roots: [request.root] })
+  const project = yield* loadProject({
+    roots: [request.root, ...additionalRoots],
+    application: request.root.id,
+  })
   const closure = view(project, request.root.id)
   if (closure === undefined) throw new RangeError(`Project closure lost root ${request.root.id}`)
   return closure

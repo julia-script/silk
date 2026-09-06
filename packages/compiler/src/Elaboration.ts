@@ -1,3 +1,4 @@
+import type * as NativeAssembly from './NativeAssembly.js'
 import * as BodyQuery from './BodyQuery.js'
 import { dual } from 'effect/Function'
 import * as Option from 'effect/Option'
@@ -203,6 +204,7 @@ export type CallReferenceFact =
     }
   | {
       readonly _tag: 'ResolvedBuiltin'
+      readonly assembly?: NativeAssembly.NativeAssembly
       readonly spelling: string
       readonly token: Token.Token
       readonly actor: string

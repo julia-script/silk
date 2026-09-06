@@ -14,33 +14,35 @@
 //! service contract. GNU/Linux requires glibc 2.25 and Linux 3.17 or later. WebAssembly and Windows
 //! do not provide this implementation.
 
-import silk.random { Random }
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.random { Random }
 
-/// A stateless Unix-family provider of fresh cryptographically secure bytes.
-pub struct OsRandom {}
+  /// A stateless Unix-family provider of fresh cryptographically secure bytes.
+  pub struct OsRandom {}
 
-impl OsRandom {
-  effect fn fillBytes(self: &mut Self, output: &mut [u8]) -> () {
-    if output.length == 0 { return () }
-    if run rawFill(move output) { return () }
-    let invalid = 1 / 0
-    return ()
+  impl OsRandom {
+    effect fn fillBytes(self: &mut Self, output: &mut [u8]) -> () {
+      if output.length == 0 { return () }
+      if run rawFill(move output) { return () }
+      let invalid = 1 / 0
+      return ()
+    }
   }
-}
 
-impl OsRandom {
-  /// Creates a native random provider without reading randomness or installing an ambient default.
-  pub fn make() -> OsRandom {
-    return OsRandom {}
+  impl OsRandom {
+    /// Creates a native random provider without reading randomness or installing an ambient default.
+    pub fn make() -> OsRandom {
+      return OsRandom {}
+    }
   }
-}
 
-effect fn rawFill(output: &mut [u8]) -> bool {
-  if output.length == 0 { return true }
-  unsafe { return run Intrinsic.osRandomFill(move output) }
-  return false
-}
+  effect fn rawFill(output: &mut [u8]) -> bool {
+    if output.length == 0 { return true }
+    unsafe { return run Intrinsic.osRandomFill(move output) }
+    return false
+  }
 
-impl Random for OsRandom {
-  fillBytes: OsRandom.fillBytes
+  impl Random for OsRandom {
+    fillBytes: OsRandom.fillBytes
+  }
 }

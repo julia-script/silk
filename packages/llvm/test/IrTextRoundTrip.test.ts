@@ -227,3 +227,52 @@ it.effect('renders both required DIFile fields when neither operand is present',
     )
   }),
 )
+
+it.effect(
+  'round-trips invoke, a cleanup landing pad, and a personality through both serializers',
+  () =>
+    Effect.gen(function* () {
+      const builder = yield* Builder.make({ sourceFilename: 'unwind.ll' })
+      const i32 = yield* Type.integer(builder, 32)
+      const signature = yield* Type.functionType(builder, i32, [])
+      const personality = yield* FunctionActor.declare(builder, 'personality', signature)
+      const callee = yield* FunctionActor.declare(builder, 'foreign', signature)
+      const fn = yield* FunctionActor.declare(builder, 'guard', signature, {
+        personality: yield* Constant.fromGlobal(
+          builder,
+          yield* FunctionActor.global(builder, personality),
+        ),
+      })
+      yield* FunctionActor.buildBody(
+        builder,
+        fn,
+        Effect.fnUntraced(function* (body) {
+          const entry = yield* Block.make(body, 'entry')
+          const normal = yield* Block.make(body, 'normal')
+          const unwind = yield* Block.make(body, 'unwind')
+          yield* Block.setInsertionPoint(body, entry)
+          const result = required(
+            yield* FunctionBody.invoke(
+              body,
+              signature,
+              yield* Constant.fromGlobal(builder, yield* FunctionActor.global(builder, callee)),
+              [],
+              normal,
+              unwind,
+              'result',
+            ),
+            'invoke result',
+          )
+          yield* Block.setInsertionPoint(body, normal)
+          yield* FunctionBody.returnValue(body, result)
+          yield* Block.setInsertionPoint(body, unwind)
+          yield* FunctionBody.cleanupLandingPad(body)
+          yield* FunctionBody.unreachable(body)
+        }),
+      )
+      assert.deepEqual(
+        assemble('unwind', yield* IrText.render(builder)),
+        canonical('unwind-bitcode', yield* Bitcode.encode(builder)),
+      )
+    }),
+)

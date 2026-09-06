@@ -1,3 +1,5 @@
+import * as ByteString from '@silklang/llvm/ByteString'
+import * as NativeForeignGuard from './NativeForeignGuard.js'
 import * as NativeCAbi from './NativeCAbi.js'
 import * as Bitcode from '@silklang/llvm/Bitcode'
 import * as Builder from '@silklang/llvm/Builder'
@@ -74,22 +76,13 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   )
   const frameRuntimeEnabled = suspensionEnabled || needsFrameCleanup
   const runtimeFeatures = new Set<RuntimeFeature>()
-  const i32Layout = Layout.entry(program.layout, 'i32')
-  if (i32Layout === undefined || i32Layout.representation._tag !== 'SignedInteger') {
-    return yield* new BackendError({
-      operation: 'Backend.emit',
-      backend: 'LLVM',
-      message: 'LLVM requires the planned i32 representation',
-      reason: { _tag: 'InvalidMir', violations: MirVerification.verify(program) },
-    })
-  }
-  const scalarBits = i32Layout.representation.bits
   const builder = yield* Builder.make({
     sourceFilename: program.module,
     targetTriple: program.layout.target.id,
     strip: request.mode !== 'debug',
   })
-  const i32 = yield* LlvmType.integer(builder, scalarBits)
+  // Internal control/ABI values use i32 even when the selected source has no i32 declarations.
+  const i32 = yield* LlvmType.integer(builder, 32)
   const usesScalar = (spelling: Scalar.Spelling): boolean =>
     program.layout.callingShapes.some((shape) => shape.lanes.some((lane) => lane.type === spelling))
   // LLVM assigns type-table identities in creation order, so preserve byte-for-byte output for
@@ -354,6 +347,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         return pointer
     }
   }
+  const foreignGuard =
+    program.foreignCalls.length === 0 ? undefined : yield* NativeForeignGuard.make(builder)
   for (const call of program.foreignCalls) {
     if (foreignFunctions.has(call.symbol)) continue
     const parameters = call.signature.parameters.map(cType)
@@ -380,7 +375,15 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
           }),
       ),
     )
-    foreignFunctions.set(call.symbol, Object.freeze({ handle, signature: call.signature }))
+    if (foreignGuard === undefined) throw new RangeError('LLVM foreign guard was not initialized')
+    const guarded = yield* NativeForeignGuard.wrap(
+      foreignGuard,
+      builder,
+      handle,
+      foreignFunctions.size,
+      call.signature.parameters.length,
+    )
+    foreignFunctions.set(call.symbol, Object.freeze({ handle: guarded, signature: call.signature }))
   }
   for (const record of program.foreignStatics) {
     const classified = CAbi.classify(record.type, program.layout.target, 'Parameter')
@@ -428,6 +431,32 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     Object.freeze({ builder, program, i32, pointer, lanesFor, laneType }),
   )
   const declared = functionDeclarations.declared
+  const retained: Array<Constant.Constant> = []
+  for (const root of program.retainedRoots ?? []) {
+    const declaration = declared.find((candidate) => Mir.matchesInstanceKey(candidate.fn, root))
+    if (declaration === undefined)
+      return yield* new BackendError({
+        operation: 'Backend.emit',
+        backend: 'LLVM',
+        message: 'Retained root has no emitted definition',
+        reason: { _tag: 'InvalidMir', violations: MirVerification.verify(program) },
+      })
+    retained.push(
+      yield* Constant.fromGlobal(
+        builder,
+        yield* FunctionActor.global(builder, declaration.driver ?? declaration.handle),
+      ),
+    )
+  }
+  if (retained.length > 0) {
+    const array = yield* LlvmType.array(builder, yield* LlvmType.pointer(builder), retained.length)
+    yield* Variable.make(builder, 'llvm.used', array, {
+      initializer: yield* Constant.aggregate(builder, array, retained),
+      linkage: 'appending',
+      section: ByteString.fromString('llvm.metadata'),
+    })
+  }
+
   if (functionDeclarations.voidType !== undefined) voidType = functionDeclarations.voidType
   const executionRelease = yield* NativeExecutionOperation.declareReleaseHelper(
     builder,
@@ -665,6 +694,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
             symbol,
             parameters: Object.freeze(foreign.signature.parameters.map(CAbi.typeText)),
             result: CAbi.typeText(foreign.signature.result),
+            contract: foreign.signature.contract,
           }),
         ),
     ),
@@ -676,6 +706,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
             symbol: record.symbol,
             parameters: Object.freeze(record.signature.parameters.map(CAbi.typeText)),
             result: CAbi.typeText(record.signature.result),
+            contract: record.signature.contract,
           }),
         ),
     ),

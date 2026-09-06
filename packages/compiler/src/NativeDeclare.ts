@@ -1,3 +1,4 @@
+import * as Attribute from '@silklang/llvm/Attribute'
 import * as NativeCAbi from './NativeCAbi.js'
 import * as LlvmBlock from '@silklang/llvm/Block'
 import type * as Builder from '@silklang/llvm/Builder'
@@ -36,7 +37,7 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
   let voidType: LlvmType.Type | undefined
   const declared: Array<NativeLoweringContext.DeclaredFunction> = []
   const machineEntry =
-    context.program.entry._tag === 'LibraryEntry' ? undefined : Mir.machineEntry(context.program)
+    context.program.entry._tag === 'NoInvocation' ? undefined : Mir.machineEntry(context.program)
   for (const fn of context.program.functions) {
     const resultLanes = context.lanesFor(fn.result)
     const resultLaneCount = resultLanes.length
@@ -60,7 +61,22 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
             .flatMap((type) => context.lanesFor(type).map(context.laneType))
     const suspendable =
       fn.suspension !== undefined && fn.suspension.classification !== 'Synchronous'
-    const publicSymbol = symbolFor(fn, machineEntry)
+    const machineExport =
+      fn.machine === undefined
+        ? undefined
+        : context.program.foreignExports.find((record) => Mir.matchesInstanceKey(fn, record.key))
+    const publicSymbol = machineExport?.symbol ?? symbolFor(fn, machineEntry)
+    const machineAttributes =
+      fn.machine === undefined
+        ? undefined
+        : yield* Attribute.functionSet(context.builder, {
+            functionAttributes: yield* Attribute.set(
+              context.builder,
+              yield* Effect.forEach(['naked', 'noinline', 'noreturn'], (name) =>
+                Attribute.flag(context.builder, name),
+              ),
+            ),
+          })
     const emittedResultType = suspendable
       ? yield* LlvmType.structure(context.builder, [
           context.i32,
@@ -91,7 +107,8 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
         symbol,
         publicSymbol,
         handle: yield* FunctionActor.declare(context.builder, symbol, signature, {
-          visibility: 'hidden',
+          visibility: machineExport === undefined ? 'hidden' : 'default',
+          ...(machineAttributes === undefined ? {} : { attributes: machineAttributes }),
         }),
         resultType,
         emittedResultType,
@@ -136,6 +153,10 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
       throw new RangeError(`LLVM export ${record.symbol} lost its implementation`)
     if (implementation.suspendable)
       throw new RangeError(`LLVM export ${record.symbol} forwards to a suspendable implementation`)
+    if (implementation.fn.machine !== undefined) {
+      thunks.set(record.symbol, implementation.handle)
+      continue
+    }
     const parameters = record.signature.parameters.map(context.cType)
     if (parameters.some((type) => type === undefined))
       throw new RangeError(`LLVM export ${record.symbol} has a void parameter`)

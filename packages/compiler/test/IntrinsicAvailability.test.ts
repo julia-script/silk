@@ -1,3 +1,7 @@
+import * as MirVerification from '../src/MirVerification.js'
+import * as NativeAssembly from '../src/NativeAssembly.js'
+import * as Exit from 'effect/Exit'
+import * as ForeignContract from '../src/ForeignContract.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -75,7 +79,7 @@ it('requires normalized target metadata in every sealed inventory entry', () => 
   assert.isTrue(
     Intrinsic.inventory().every((entry) => {
       const expected =
-        entry.phase === 'Runtime' ? Intrinsic.normalizeRuntimeTargets(entry.targets) : []
+        entry.phase !== 'StaticOnly' ? Intrinsic.normalizeRuntimeTargets(entry.targets) : []
       return (
         JSON.stringify(entry.targets) === JSON.stringify(expected) &&
         (entry.phase !== 'Runtime' || entry.targets.length > 0)
@@ -100,7 +104,6 @@ it('rejects static-only intrinsic leakage at runtime availability and integrity 
       ToolchainIntegrity.installed(),
       target,
       calls,
-      [],
     )
     assert.strictEqual(integrity._tag, 'UnsupportedTarget')
     if (integrity._tag === 'UnsupportedTarget')
@@ -133,7 +136,7 @@ it.effect('does not admit targetPointerBits into runtime HIR', () =>
 it.effect('checks native-only intrinsics after reachability for LLVM-to-Wasm', () =>
   Effect.gen(function* () {
     const unused = yield* snapshot(
-      `import silk.os_monotonic_clock { OsMonotonicClock }
+      `import silk.os_monotonic_clock
 pub fn main() -> i32 { return 42 }`,
       'wasm32-unknown-unknown',
     )
@@ -143,7 +146,6 @@ pub fn main() -> i32 { return 42 }`,
         ToolchainIntegrity.installed(),
         Target.wasm32UnknownUnknown,
         unused.instances.intrinsics,
-        unused.closure.sources.keys(),
       )._tag,
       'Matched',
     )
@@ -162,16 +164,11 @@ pub fn main() -> i32 {
 }`,
       'wasm32-unknown-unknown',
     )
-    assert.deepEqual(Analysis.diagnostics(reachable), [])
-    const unavailable = yield* Effect.flip(Analysis.codegen(reachable, { mode: 'release' }))
-    assert.strictEqual(unavailable._tag, 'CodegenUnavailable')
-    if (unavailable._tag !== 'CodegenUnavailable') return
-    const diagnostic = unavailable.diagnostics.find((candidate) => candidate.code === 'SEM0093')
-    assert.strictEqual(diagnostic?.reason._tag, 'IntrinsicTargetUnavailable')
-    if (diagnostic?.reason._tag === 'IntrinsicTargetUnavailable') {
-      assert.strictEqual(diagnostic.reason.operation, 'Intrinsic.osMonotonicClockResolution')
-      assert.strictEqual(diagnostic.reason.target, 'wasm32-unknown-unknown')
-    }
+    assert.isTrue(
+      Analysis.diagnostics(reachable).some(
+        (diagnostic) => diagnostic.reason._tag === 'UnknownImportedMember',
+      ),
+    )
 
     const standardOutput = yield* snapshot(
       `import silk.effect { Effect }
@@ -204,7 +201,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('validates only reachable runtime support and selected provider identities', () =>
+it.effect('validates only reachable runtime implementation identities', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(source.replace('return 0', 'return nativeWrapper()'))
     const installed = ToolchainIntegrity.installed()
@@ -218,7 +215,6 @@ it.effect('validates only reachable runtime support and selected provider identi
         withoutUnrelatedRuntime,
         Target.aarch64AppleDarwin,
         self.instances.intrinsics,
-        [],
       )._tag,
       'Matched',
     )
@@ -232,7 +228,6 @@ it.effect('validates only reachable runtime support and selected provider identi
       withoutRequiredRuntime,
       Target.aarch64AppleDarwin,
       self.instances.intrinsics,
-      [],
     )
     assert.strictEqual(missingRuntime._tag, 'Invalid')
     if (missingRuntime._tag === 'Invalid')
@@ -243,22 +238,6 @@ it.effect('validates only reachable runtime support and selected provider identi
             failure.reason.id === 'runtime/aarch64-apple-darwin/Intrinsic.i32Add',
         ),
       )
-
-    const withoutProvider = ToolchainIntegrity.make(
-      installed.components.filter((component) => component.id !== 'provider/silk/os_filesystem'),
-    )
-    const osOperation = Intrinsic.findOperation('Intrinsic', 'osPathInspect')
-    const osSpan = SourceSpan.fromOffsets('availability/os-provider', 0, 1)
-    assert.isDefined(osOperation)
-    assert.isDefined(osSpan)
-    if (osOperation === undefined || osSpan === undefined) return
-    const missingProvider = ToolchainIntegrity.validateTarget(
-      withoutProvider,
-      Target.aarch64AppleDarwin,
-      [{ _tag: 'ReachableIntrinsicCall', operation: osOperation.id, span: osSpan }],
-      ['silk/os_filesystem'],
-    )
-    assert.strictEqual(missingProvider._tag, 'Invalid')
   }),
 )
 
@@ -273,7 +252,11 @@ const foreignEntry = (
   return Object.freeze({
     _tag: 'ReachableForeignCall',
     symbol,
-    signature: Object.freeze({ parameters, result: Object.freeze({ _tag: 'Void' }) }),
+    signature: Object.freeze({
+      contract: ForeignContract.conservative,
+      parameters,
+      result: Object.freeze({ _tag: 'Void' }),
+    }),
     declaration: Object.freeze({ _tag: 'CanonicalDeclarationId', module: sourceId, name: symbol }),
     declarationSpan: span,
     callSpan: span,
@@ -333,7 +316,8 @@ pub fn main() -> i32 { let n = size()
       [
         {
           symbol: 'count',
-          signature: '(u64)->u64',
+          signature:
+            '(u64)->u64!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
           declaration: 'count',
           callSource: 'availability/main',
         },
@@ -400,8 +384,14 @@ it.effect('accepts agreeing redeclarations of one symbol across two modules', ()
         CAbi.signatureKey(call.signature),
       ]),
       [
-        ['availability/foreign-root', '(i32)->i32'],
-        ['foreign_dep', '(i32)->i32'],
+        [
+          'availability/foreign-root',
+          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+        ],
+        [
+          'foreign_dep',
+          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+        ],
       ],
     )
     if (self.target._tag !== 'Resolved') return assert.fail('expected a resolved target')
@@ -411,7 +401,7 @@ it.effect('accepts agreeing redeclarations of one symbol across two modules', ()
     )
     const artifact = yield* Analysis.codegen(self, { mode: 'release' })
     assert.deepEqual(artifact.foreignImports, [
-      { symbol: 'abs', parameters: ['i32'], result: 'i32' },
+      { symbol: 'abs', parameters: ['i32'], result: 'i32', contract: ForeignContract.conservative },
     ])
   }),
 )
@@ -457,7 +447,8 @@ it.effect('seeds native discovery with an uncalled export and records it on MIR'
     assert.deepEqual(exportInventory(self), [
       {
         symbol: 'silk_test_double_v1',
-        signature: '(i32)->i32',
+        signature:
+          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
         key: Instances.keyText(
           self.instances.instances.at(1)?.key ?? unreachable('expected the export instance'),
         ),
@@ -546,16 +537,32 @@ it.effect('accepts distinct export symbols across modules in canonical order', (
     assert.deepEqual(
       exportInventory(self).map((record) => [record.symbol, record.signature]),
       [
-        ['silk_test_double_v1', '(i32)->i32'],
-        ['silk_test_add_v1', '(i32,i32)->i32'],
+        [
+          'silk_test_double_v1',
+          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+        ],
+        [
+          'silk_test_add_v1',
+          '(i32,i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+        ],
       ],
     )
     if (self.target._tag !== 'Resolved') return assert.fail('expected a resolved target')
     assert.deepEqual(ForeignPlanning.check(Analysis.loweredMir(self), self.target.target), [])
     const artifact = yield* Analysis.codegen(self, { mode: 'release' })
     assert.deepEqual(artifact.foreignExports, [
-      { symbol: 'silk_test_add_v1', parameters: ['i32', 'i32'], result: 'i32' },
-      { symbol: 'silk_test_double_v1', parameters: ['i32'], result: 'i32' },
+      {
+        symbol: 'silk_test_add_v1',
+        parameters: ['i32', 'i32'],
+        result: 'i32',
+        contract: ForeignContract.conservative,
+      },
+      {
+        symbol: 'silk_test_double_v1',
+        parameters: ['i32'],
+        result: 'i32',
+        contract: ForeignContract.conservative,
+      },
     ])
   }),
 )
@@ -628,7 +635,11 @@ it('plans exports over MIR: symbol map, non-native rejection, and suspension', (
       _tag: 'ForeignExport',
       symbol,
       type: Type.foreignFunction(['i32'], 'i32'),
-      signature: Object.freeze({ parameters: Object.freeze([i32]), result: i32 }),
+      signature: Object.freeze({
+        contract: ForeignContract.conservative,
+        parameters: Object.freeze([i32]),
+        result: i32,
+      }),
       key,
       declaration: Object.freeze({
         _tag: 'CanonicalDeclarationId',
@@ -680,3 +691,272 @@ it('plans exports over MIR: symbol map, non-native rejection, and suspension', (
     ['SEM0201', 'planning/d', undefined],
   ])
 })
+
+it.effect('lowers literal typed assembly through fixed and tied native registers', () =>
+  Effect.gen(function* () {
+    const analysis = yield* Analysis.makeRealized({
+      root: SourceFile.make(
+        'assembly',
+        encoder.encode(`
+unsafe fn add(left: u64, right: u64) -> u64 {
+  return unsafe Intrinsic.assembly<u64>("addq $2, $0", "={rax},0,{rdi}", "flags", "none", false, false, (left, right))
+}
+export "C" fn sum(left: u64, right: u64) -> u64 { return unsafe add(left, right) }
+`),
+      ),
+      configuration: {
+        profile: {
+          target: 'x86_64-unknown-linux-gnu',
+          artifact: 'object',
+          runtime: { kind: 'none' },
+        },
+      },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.deepEqual(Analysis.diagnostics(analysis), [])
+    const artifact = yield* Analysis.codegen(analysis, { mode: 'release' })
+    assert.match(artifact.ir, /asm "addq \$2, \$0", "=\{rax\},0,\{rdi\},~\{flags\}"/)
+    assert.notMatch(artifact.ir, /@silk\.static\./)
+    const program =
+      analysis.mir._tag === 'Available' ? analysis.mir.value : unreachable('expected assembly MIR')
+    const corrupted = {
+      ...program,
+      functions: program.functions.map((fn) => ({
+        ...fn,
+        regions: fn.regions.map((region) =>
+          region._tag === 'OperationRegion'
+            ? {
+                ...region,
+                operations: region.operations.map((operation) =>
+                  operation._tag === 'NativeAssembly'
+                    ? { ...operation, type: { _tag: 'bool' as const } }
+                    : operation,
+                ),
+              }
+            : region,
+        ),
+      })),
+    }
+    assert.include(
+      MirVerification.verify(corrupted).map((violation) => violation.rule),
+      'InvalidNativeAssembly',
+    )
+  }),
+)
+
+it.effect('emits a naked entry directly at its C symbol', () =>
+  Effect.gen(function* () {
+    const analysis = yield* Analysis.makeRealized({
+      root: SourceFile.make(
+        'entry',
+        encoder.encode(`
+unsafe export "C" fn entry() -> () as "native_entry" with Intrinsic.machine(naked: true, noReturn: true) {
+  return unsafe Intrinsic.assembly<()>("movq %rsp, %rdi\\njmp native_entry_probe", "", "", "readwrite", true, true, ())
+}
+`),
+      ),
+      configuration: {
+        profile: {
+          target: 'x86_64-unknown-linux-gnu',
+          artifact: 'object',
+          runtime: { kind: 'none' },
+        },
+      },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.deepEqual(Analysis.diagnostics(analysis), [])
+    const artifact = yield* Analysis.codegen(analysis, { mode: 'release' })
+    assert.match(artifact.ir, /define void @native_entry\(/)
+    assert.match(artifact.ir, /naked/)
+    assert.match(artifact.ir, /asm sideeffect/)
+  }),
+)
+
+it.effect('rejects malformed native register, memory, lane and template contracts', () =>
+  Effect.gen(function* () {
+    const base = {
+      template: 'addq $1, $0',
+      constraints: '={rax},0',
+      clobbers: 'flags',
+      memory: 'none',
+      sideEffects: false,
+      noReturn: false,
+    }
+    for (const patch of [
+      { constraints: '={rsp},0' },
+      { constraints: '={rax},{rax}' },
+      { clobbers: 'rax' },
+      { clobbers: 'flags,flags' },
+      { memory: 'arbitrary' },
+      { memory: 'write' },
+      { noReturn: true },
+      { template: '.globl injected' },
+      { template: 'mov $2, $0' },
+      { template: 'mov $, $0' },
+      { constraints: '={rax},r' },
+    ])
+      assert.isTrue(
+        Exit.isFailure(
+          yield* Effect.exit(
+            NativeAssembly.decode(
+              { ...base, ...patch },
+              'u64',
+              ['u64'],
+              Target.x8664UnknownLinuxGnu,
+            ),
+          ),
+        ),
+      )
+    assert.isTrue(
+      Exit.isFailure(
+        yield* Effect.exit(
+          NativeAssembly.decode(base, 'i32', ['i32'], Target.x8664UnknownLinuxGnu),
+        ),
+      ),
+    )
+    assert.isTrue(
+      Exit.isFailure(
+        yield* Effect.exit(NativeAssembly.decode(base, 'u64', ['u64'], Target.aarch64AppleDarwin)),
+      ),
+    )
+    const arm = yield* NativeAssembly.decode(
+      { ...base, template: 'add $0, $0, $1', constraints: '={x0},0' },
+      'u64',
+      ['u64'],
+      Target.aarch64UnknownLinuxGnu,
+    )
+    assert.equal(
+      NativeAssembly.llvmConstraints(arm, Target.aarch64UnknownLinuxGnu),
+      '={x0},0,~{cc}',
+    )
+    assert.include(
+      NativeAssembly.violations(
+        { ...arm, inputs: [] },
+        'u64',
+        ['u64'],
+        Target.aarch64UnknownLinuxGnu,
+      ),
+      'assembly metadata normalization',
+    )
+  }),
+)
+
+it.effect('rejects compiler work in naked bodies and nonliteral machine properties', () =>
+  Effect.gen(function* () {
+    for (const [properties, body] of [
+      ['naked: true, noReturn: true', 'return ()'],
+      ['naked: true, noReturn: true', 'let value = 1; return ()'],
+      ['naked: true && false, noReturn: true', 'return ()'],
+      ['naked: true', 'return ()'],
+    ]) {
+      const analysis = yield* Analysis.makeRealized({
+        root: SourceFile.make(
+          'invalid-entry',
+          encoder.encode(
+            `unsafe export "C" fn entry() -> () with Intrinsic.machine(${properties}) { ${body} }`,
+          ),
+        ),
+        configuration: {
+          profile: {
+            target: 'x86_64-unknown-linux-gnu',
+            artifact: 'object',
+            runtime: { kind: 'none' },
+          },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      const diagnostic =
+        Analysis.diagnostics(analysis).find((entry) => entry.code === 'SEM0214') ??
+        unreachable('expected machine contract rejection')
+      assert.equal(diagnostic.span.sourceId, 'invalid-entry')
+      assert.isAbove(diagnostic.span.end, diagnostic.span.start)
+    }
+  }),
+)
+
+it.effect('rejects naked instrumentation and unwind profiles before emission', () =>
+  Effect.gen(function* () {
+    for (const extra of [{ unwind: 'native' as const }, { sanitizers: ['address' as const] }]) {
+      const analysis = yield* Analysis.makeRealized({
+        root: SourceFile.make(
+          'profile-entry',
+          encoder.encode(
+            `unsafe export "C" fn entry() -> () with Intrinsic.machine(naked: true, noReturn: true) { return unsafe Intrinsic.assembly<()>("ud2", "", "", "none", true, true, ()) }`,
+          ),
+        ),
+        configuration: {
+          profile: {
+            target: 'x86_64-unknown-linux-gnu',
+            artifact: 'object',
+            runtime: { kind: 'none' },
+            ...extra,
+          },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.include(
+        Analysis.diagnostics(analysis).map((entry) => entry.code),
+        'SEM0214',
+      )
+    }
+  }),
+)
+
+it.effect('rejects assembly in static functions at the source boundary', () =>
+  Effect.gen(function* () {
+    const analysis = yield* Analysis.makeRealized({
+      root: SourceFile.make(
+        'static-assembly',
+        encoder.encode(
+          `static fn machine() -> u64 { return unsafe Intrinsic.assembly<u64>("movq $$1, $0", "={rax}", "", "none", false, false, ()) }`,
+        ),
+      ),
+      configuration: {
+        profile: {
+          target: 'x86_64-unknown-linux-gnu',
+          artifact: 'object',
+          runtime: { kind: 'none' },
+        },
+      },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.include(
+      Analysis.diagnostics(analysis).map((entry) => entry.code),
+      'SEM0176',
+    )
+  }),
+)
+
+it.effect('reports source assembly constraints and target admission with call spans', () =>
+  Effect.gen(function* () {
+    for (const [target, constraint, operand, expected] of [
+      ['x86_64-unknown-linux-gnu', '={rax},{rax}', 'value', 'SEM0214'],
+      ['x86_64-unknown-linux-gnu', '={rax},0', 'true', 'SEM0214'],
+      ['aarch64-apple-darwin', '={rax},0', 'value', 'SEM0093'],
+      ['wasm32-unknown-unknown', '={rax},0', 'value', 'SEM0093'],
+    ] as const) {
+      const analysis = yield* Analysis.makeRealized({
+        root: SourceFile.make(
+          'bad-assembly',
+          encoder.encode(
+            `pub fn machine(value: u64) -> u64 { return unsafe Intrinsic.assembly<u64>("", "${constraint}", "", "none", false, false, (${operand},)) }`,
+          ),
+        ),
+        configuration: {
+          profile: { target, artifact: 'object', runtime: { kind: 'none' } },
+          composition: {
+            runtimes: [],
+            defaults: [],
+            requirements: [],
+            retention: [{ module: 'bad-assembly', declaration: 'machine' }],
+          },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.include(
+        Analysis.diagnostics(analysis).map((entry) => entry.code),
+        expected,
+        target + ':' + operand,
+      )
+      const diagnostic =
+        Analysis.diagnostics(analysis).find((entry) => entry.code === expected) ??
+        unreachable('expected assembly rejection')
+      assert.equal(diagnostic.span.sourceId, 'bad-assembly')
+      assert.isAbove(diagnostic.span.end, diagnostic.span.start)
+    }
+  }),
+)

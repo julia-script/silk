@@ -93,7 +93,7 @@ it('explains a missing entry in terms of the declaration the user must add', () 
   }
   assert.strictEqual(
     Report.outcome(outcome, source('pub fn other() -> i32 { return 1 }'), 'main.silk'),
-    'No entry point: the root module declares no `main`',
+    'No entry point: the selected invocation declaration is missing',
   )
 })
 
@@ -106,7 +106,7 @@ it('identifies private main visibility instead of blaming its resolved result', 
   }
   assert.strictEqual(
     Report.outcome(outcome, source('fn main() -> () { return () }'), 'main.silk'),
-    'No entry point: `main` must be public',
+    'No entry point: the selected invocation must be public',
   )
 })
 

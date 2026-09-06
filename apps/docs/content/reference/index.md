@@ -59,6 +59,7 @@ not belong in a language rule unless a program can observe them.
 
 ## Contents
 
+- [Artifact roots and native requirements](artifact-roots-and-requirements.md)
 - [Lexical form](lexical-form.md) — identifiers, the closed keyword vocabulary, comments, numeric
   and duration spellings, text and byte forms, character literals, and longest tokenization.
 - [Program entry](program-entry.md) — ordinary and effectful `main`, automatic Effect execution,
@@ -136,3 +137,9 @@ Tutorials, task-oriented guides, design rationale, compiler architecture, and st
 documentation remain separate from this reference.
 
 - [Compilation profiles and package configuration](compilation-profiles.md)
+
+- [Selected source and profile tooling](selected-source-tooling.md): source availability, profile catalogs, editor selection and platform provenance.
+
+- [Foreign-call contracts](foreign-call-contracts.md): explicit immediate C-call behavior, call-only references and fatal foreign-unwind boundaries.
+
+- [Native assembly and entry fragments](native-assembly.md)

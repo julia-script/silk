@@ -87,10 +87,12 @@ const compatible = (
   type: number,
   callingConvention: number,
   attributes: number | undefined,
+  personality: number | undefined,
 ): boolean =>
   description.type === type &&
   description.callingConvention === callingConvention &&
-  description.attributes === attributes
+  description.attributes === attributes &&
+  description.personality === personality
 
 /**
  * Declares a function with a function type and canonical module-global name.
@@ -150,6 +152,23 @@ export const declare = Effect.fnUntraced(function* (
               'FunctionAttributeSet',
               'Function.declare',
             )
+      const personality = yield* optionalConstant(
+        builder,
+        owner,
+        options.personality,
+        'Function.declare',
+      )
+      if (personality !== undefined) {
+        const type = state.constants.descriptions[personality]?.type
+        if (type === undefined || state.types.descriptions[type]?._tag !== 'Pointer')
+          return yield* Result.fail(
+            invalidInput({
+              operation: 'Function.declare',
+              message: 'A personality must have pointer type',
+              input: options.personality,
+            }),
+          )
+      }
       if (globalName.bytes.length > 0) {
         const occupied = state.globals.entries.keys.get(CanonicalKey.bytes(globalName))
         if (occupied !== undefined) {
@@ -161,7 +180,7 @@ export const declare = Effect.fnUntraced(function* (
             const existing = state.globals.functions.descriptions[global.actorIndex]
             if (
               existing !== undefined &&
-              compatible(existing, typeIndex, callingConvention, attributes)
+              compatible(existing, typeIndex, callingConvention, attributes, personality)
             ) {
               return yield* handleAt(state, global.actorIndex, 'Function.declare')
             }
@@ -196,12 +215,7 @@ export const declare = Effect.fnUntraced(function* (
           garbageCollector: ByteString.coerceOrEmpty(options.garbageCollector),
           prefix: yield* optionalConstant(builder, owner, options.prefix, 'Function.declare'),
           prologue: yield* optionalConstant(builder, owner, options.prologue, 'Function.declare'),
-          personality: yield* optionalConstant(
-            builder,
-            owner,
-            options.personality,
-            'Function.declare',
-          ),
+          personality,
           addressSpace: options.addressSpace ?? AddrSpace.defaultAddrSpace,
           body: undefined,
         }),

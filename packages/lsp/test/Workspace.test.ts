@@ -202,7 +202,18 @@ it.effect('shares one project frontend across overlapping open roots', () =>
         'import Shared\nfn local() -> i32 { return 2 }\npub fn utility() -> i32 { return Shared.answer() + local() }',
       ),
     })
-    const analyzed = yield* Workspace.analyzeProject([util, main])
+    const phases: Array<string> = []
+    const analyzed = yield* Workspace.analyzeProject(
+      [util, main],
+      undefined,
+      undefined,
+      Effect.fnUntraced(function* (phase: string) {
+        yield* Effect.sync(() => {
+          phases.push(phase)
+        })
+      }),
+    )
+    assert.deepEqual(phases, ['ConfigurationSelected', 'CatalogSelected', 'ProjectAnalyzed'])
     const mainSession = analyzed.get(main.uri)
     const utilSession = analyzed.get(util.uri)
 
@@ -399,7 +410,7 @@ it.effect(
     Effect.gen(function* () {
       const root = project()
       const bytes = encoder.encode(
-        'pub param enabled: bool = false\npub fn main() -> i32 { if enabled { return 42 } return 7 }',
+        'pub param enabled: bool = false\nstatic if enabled { pub fn enabledChoice() -> i32 { return 42 } } else { pub fn disabledChoice() -> i32 { return 7 } }\npub fn main() -> i32 { if enabled { return 42 } return 7 }',
       )
       const makeDocument = (enabled: boolean) =>
         Workspace.open({
@@ -425,6 +436,22 @@ it.effect(
       const right = yield* makeDocument(true)
       const first = yield* Workspace.analyzeProject([left])
       const next = yield* Workspace.analyzeProject([right], first)
+      const firstInventory = first.get(left.uri)?.inventory
+      const nextInventory = next.get(right.uri)?.inventory
+      assert.ok(firstInventory)
+      assert.ok(nextInventory)
+      assert.lengthOf(WorkspaceInventory.candidates(firstInventory, 'disabledChoice'), 1)
+      assert.lengthOf(WorkspaceInventory.candidates(firstInventory, 'enabledChoice'), 0)
+      assert.lengthOf(WorkspaceInventory.candidates(nextInventory, 'enabledChoice'), 1)
+      assert.lengthOf(WorkspaceInventory.candidates(nextInventory, 'disabledChoice'), 0)
+      assert.lengthOf(WorkspaceInventory.candidates(nextInventory, 'OsMonotonicClock'), 0)
+      assert.notStrictEqual(firstInventory.identity, nextInventory.identity)
+      const repeated = yield* Workspace.analyzeProject([right], next)
+      assert.strictEqual(repeated.get(right.uri)?.inventory.identity, nextInventory.identity)
+      assert.strictEqual(
+        repeated.get(right.uri)?.inventory.project.get('Main'),
+        nextInventory.project.get('Main'),
+      )
       const before = first.get(left.uri)?.snapshot.profile
       const after = next.get(right.uri)?.snapshot.profile
       assert.deepStrictEqual(first.get(left.uri)?.snapshot.diagnostics, [])

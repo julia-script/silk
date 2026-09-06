@@ -58,6 +58,44 @@
         "scopeName": "source.silk",
         "path": "./syntaxes/silk.tmLanguage.json"
       }
+    ],
+    "configuration": {
+      "title": "Silk",
+      "properties": {
+        "silk.analysis": {
+          "type": "object",
+          "default": {},
+          "description": "Analysis profile selection: profile name, target triple, or a complete profileInput override. Empty uses the project default and then host target.",
+          "additionalProperties": false,
+          "properties": {
+            "profile": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string"
+            },
+            "profileInput": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "semanticTokenModifiers": [
+      {
+        "id": "inactive",
+        "description": "Source excluded by the selected compilation profile"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "silk",
+        "scopes": {
+          "*.inactive": [
+            "comment.block.silk"
+          ]
+        }
+      }
     ]
   },
   "activationEvents": [

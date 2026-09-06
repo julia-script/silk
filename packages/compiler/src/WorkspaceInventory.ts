@@ -29,6 +29,8 @@ export interface Observation {
 /** Immutable project/toolchain module partitions and an exact-name candidate index. */
 export interface WorkspaceInventory {
   readonly _tag: 'WorkspaceInventory'
+  readonly profile?: string
+  readonly identity?: string
   readonly project: ReadonlyMap<string, ModuleSummary.ModuleSummary>
   readonly toolchain: ReadonlyMap<string, ModuleSummary.ModuleSummary>
   readonly byName: ReadonlyMap<string, ReadonlyArray<Candidate>>
@@ -39,6 +41,8 @@ export interface WorkspaceInventory {
 }
 
 export interface Input {
+  readonly profile?: string
+  readonly identity?: string
   readonly project?: Iterable<readonly [string, ModuleSummary.ModuleSummary]>
   readonly toolchain?: Iterable<readonly [string, ModuleSummary.ModuleSummary]>
   readonly observation?: Partial<
@@ -67,6 +71,7 @@ const build = (
   toolchain: ReadonlyMap<string, ModuleSummary.ModuleSummary>,
   input: Input['observation'] = {},
   distribution: ToolchainIntegrity.Graph = ToolchainIntegrity.installed(),
+  selection: Pick<Input, 'profile' | 'identity'> = {},
 ): WorkspaceInventory => {
   const byName = new Map<string, Array<Candidate>>()
   const add = (tier: Tier, summaries: ReadonlyMap<string, ModuleSummary.ModuleSummary>): void => {
@@ -108,6 +113,7 @@ const build = (
   })
   return Object.freeze({
     _tag: 'WorkspaceInventory',
+    ...selection,
     project,
     toolchain,
     byName: exact,
@@ -124,6 +130,10 @@ export const make = (input: Input = {}): WorkspaceInventory =>
     sortedModules(input.toolchain ?? []),
     input.observation,
     input.distribution,
+    {
+      ...(input.profile === undefined ? {} : { profile: input.profile }),
+      ...(input.identity === undefined ? {} : { identity: input.identity }),
+    },
   )
 
 export interface Revision {
@@ -145,7 +155,7 @@ const reviseTier = (
   if (replacements !== undefined)
     for (const [module, summary] of replacements) {
       const prior = previous.get(module)
-      next.set(module, prior?.source === summary.source ? prior : summary)
+      next.set(module, prior === summary ? prior : summary)
     }
   const sorted = sortedModules(next)
   if (
@@ -166,7 +176,12 @@ export const revise = (self: WorkspaceInventory, revision: Revision): WorkspaceI
     revision.observation === undefined
   )
     return self
-  return build(project, toolchain, revision.observation, self.distribution)
+  return build(project, toolchain, revision.observation, self.distribution, {
+    ...(self.profile === undefined ? {} : { profile: self.profile }),
+    ...(self.identity === undefined || project !== self.project || toolchain !== self.toolchain
+      ? {}
+      : { identity: self.identity }),
+  })
 }
 
 /** Returns candidates for one exact, case-sensitive spelling in deterministic order. */

@@ -90,7 +90,9 @@ export const run = Effect.fn('DoctestCommand.run')(function* (
   const loaded = yield* Effect.result(
     Effect.gen(function* () {
       if (options.stdlib === true) {
-        const documentation: unknown = yield* Stdlib.documentation()
+        const documentation: unknown = yield* Stdlib.documentation(
+          options.target ?? Doctest.defaultTarget,
+        )
         return { documentation, lookup: Stdlib.sources } as const
       }
       if (options.input === undefined)

@@ -1,3 +1,6 @@
+import type * as MachineFunction from './MachineFunction.js'
+import type * as NativeRequirement from './NativeRequirement.js'
+import type * as ForeignContract from './ForeignContract.js'
 import type * as DeclarationLifetime from './DeclarationLifetime.js'
 import * as Lifetime from './Lifetime.js'
 import type * as AggregateIdentity from './AggregateIdentity.js'
@@ -21,6 +24,7 @@ import * as Type from './Type.js'
 /** One function declaration header and its syntax-owned semantic facts. */
 export interface DeclarationFact {
   readonly _tag: 'FunctionDeclaration'
+  readonly machine?: MachineFunction.MachineFunction
   readonly lifetimeElaboration?: DeclarationLifetime.Context
   readonly id: DeclarationId
   readonly canonical: CanonicalState
@@ -29,9 +33,17 @@ export interface DeclarationFact {
   readonly functionKind: 'Ordinary' | 'Effect'
   readonly unsafe: boolean
   /** Present when native code supplies the body: the ABI and the logical native symbol. */
-  readonly foreign?: { readonly abi: 'C'; readonly symbol: string }
+  readonly foreign?: {
+    readonly abi: 'C'
+    readonly symbol: string
+    readonly contract: ForeignContract.ForeignContract
+  }
   /** Native export facts for an `export "C"` function: its ABI and the C-callable symbol. */
-  readonly foreignExport?: { readonly abi: 'C'; readonly symbol: string }
+  readonly foreignExport?: {
+    readonly abi: 'C'
+    readonly symbol: string
+    readonly contract: ForeignContract.ForeignContract
+  }
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly parameterCount: number
   readonly parameters: ReadonlyArray<ParameterFact>
@@ -1897,6 +1909,7 @@ export interface Publication {
 
 /** One module's collected headers with their header-level diagnostics. */
 export interface ModuleHeaders {
+  readonly nativeRequirements?: ReadonlyArray<NativeRequirement.NativeRequirement>
   readonly _tag: 'ModuleHeaders'
   readonly module: string
   readonly publications: ReadonlyArray<Publication>

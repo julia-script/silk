@@ -1,3 +1,4 @@
+import * as ForeignContract from './ForeignContract.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Elaboration from './Elaboration.js'
 import type * as Intrinsic from './Intrinsic.js'
@@ -209,6 +210,15 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
   const native = nativeMarker(self)
   const kind = `${phase}${self.unsafe ? 'unsafe ' : ''}${native?.marker ?? ''}${self.functionKind === 'Effect' ? `effect<${Lifetime.display(DeclarationFacts.executableLifetimes(self).environment)}> fn` : 'fn'}`
   const symbol = native === undefined ? '' : ` as "${native.symbol}"`
+  const behavior =
+    self.foreign === undefined
+      ? ''
+      : ForeignContract.source(
+          self.foreign.contract,
+          self.parameters.map((parameter) =>
+            parameter.name._tag === 'Present' ? parameter.name.spelling : '_',
+          ),
+        )
   const parameterNames = executableParameterNames(self)
   const typeParameters = parameterNames.length === 0 ? '' : `<${parameterNames.join(', ')}>`
   const parameters = self.parameters
@@ -223,7 +233,7 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
     _tag: 'FunctionPresentation',
     name,
     functionKind: self.functionKind,
-    text: `${visibility}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}${symbol}`,
+    text: `${visibility}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}${symbol}${behavior}`,
   })
 }
 

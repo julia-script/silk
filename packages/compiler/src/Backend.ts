@@ -1,3 +1,4 @@
+import type * as ForeignContract from './ForeignContract.js'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import type * as DeclarationFacts from './DeclarationFacts.js'
@@ -56,6 +57,7 @@ export type RuntimeFeature =
  * its classified C signature spelled as C class names (`i32`, `u64`, `f64`, `void`, ...).
  */
 export interface ForeignImport {
+  readonly contract: ForeignContract.ForeignContract
   readonly symbol: string
   readonly parameters: ReadonlyArray<CAbi.TypeText>
   readonly result: CAbi.TypeText
@@ -63,6 +65,7 @@ export interface ForeignImport {
 
 /** One exported C-callable symbol and the C class spellings of its thunk signature. */
 export interface ForeignExport {
+  readonly contract: ForeignContract.ForeignContract
   readonly symbol: string
   readonly parameters: ReadonlyArray<CAbi.TypeText>
   readonly result: CAbi.TypeText
@@ -233,7 +236,7 @@ export const terminationOf = (
   return Object.freeze({
     _tag: 'EntryTermination',
     success:
-      program.entry._tag !== 'LibraryEntry' &&
+      program.entry._tag !== 'NoInvocation' &&
       program.entry._tag === 'OrdinaryEntry' &&
       program.entry.machine.declaration.name !== '$unit-entry'
         ? 'ReturnedStatus'

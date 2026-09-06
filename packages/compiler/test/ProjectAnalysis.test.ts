@@ -6,6 +6,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Elaboration from '../src/Elaboration.js'
 import * as FrontendTooling from '../src/FrontendTooling.js'
 import * as ProjectAnalysis from '../src/ProjectAnalysis.js'
+import * as SourceCatalog from '../src/SourceCatalog.js'
 import * as Ownership from '../src/Ownership.js'
 import * as ResidualOwnership from '../src/ResidualOwnership.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -71,11 +72,26 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
         if (member._tag === 'Resolved' && member.declaration.canonical._tag === 'Canonical')
           assert.strictEqual(member.declaration.canonical.id.module, expected)
         assert.deepEqual([...view.closure.sources.keys()], [expected, 'selected'])
+        const catalog = SourceCatalog.fromProject(project) ?? raise('selected catalog')
+        const published =
+          catalog.modules
+            .get('selected')
+            ?.publicDeclarations.find((declaration) => declaration.spelling === 'selected') ??
+          raise('published catalog entry')
+        assert.strictEqual(published.selectionSpan.sourceId, expected)
       }
       assert.strictEqual(linux.syntaxRevisions.get('selected')?._tag, 'Reused')
       assert.notStrictEqual(linux.semantics.get('selected'), darwin.semantics.get('selected'))
       assert.strictEqual(same.semantics.get('selected'), darwin.semantics.get('selected'))
       assert.strictEqual(same.profile?.identity, darwin.profile?.identity)
+      assert.strictEqual(
+        SourceCatalog.fromProject(same)?.identity,
+        SourceCatalog.fromProject(darwin)?.identity,
+      )
+      assert.notStrictEqual(
+        SourceCatalog.fromProject(linux)?.identity,
+        SourceCatalog.fromProject(darwin)?.identity,
+      )
     }),
 )
 
@@ -913,4 +929,33 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
       assert.strictEqual(counters.checked, 1)
       assert.strictEqual(counters.ownershipChecked, 2)
     }),
+)
+
+it.effect('loads a configured application independently of open document roots', () =>
+  Effect.gen(function* () {
+    const project = yield* ProjectAnalysis.make(
+      [
+        SourceFile.make(
+          'Main',
+          ascii('import Util\npub fn main() -> i32 { return Util.answer() }'),
+        ),
+      ],
+      { application: 'Entry', configuration: { profile: { target: 'aarch64-apple-darwin' } } },
+    ).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            ['Entry', ascii('pub fn entry() -> i32 { return 0 }')],
+            ['Util', ascii('pub fn other() -> i32 { return 11 }')],
+          ]),
+        ),
+      ),
+    )
+    const view = ProjectAnalysis.view(project, 'Main') ?? raise('open document view')
+    assert.include(
+      Analysis.diagnostics(view).map((entry) => entry.code),
+      'SEM0014',
+    )
+    assert.isTrue(project.closure.sources.has('Entry'))
+  }),
 )

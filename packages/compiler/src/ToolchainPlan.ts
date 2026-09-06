@@ -86,6 +86,7 @@ export interface UnsupportedNativePlan {
   readonly input: NativeLinkInput.NativeLinkInput
   readonly reason:
     | 'FrameworkTarget'
+    | 'LinkerScriptTarget'
     | 'StaticLibraryTarget'
     | 'StaticArchiveInput'
     | 'PathNotAbsolute'
@@ -110,6 +111,10 @@ const clangInputArguments = (
     case 'Object':
     case 'StaticArchive':
       return [input.path]
+    case 'LinkerScript':
+      return target.operatingSystem === 'linux'
+        ? ['-Xlinker', '-T', '-Xlinker', input.path]
+        : unsupported(artifactKind, target, input, 'LinkerScriptTarget')
     case 'SearchPath':
       return [`-L${input.path}`]
     case 'Framework':
@@ -134,10 +139,32 @@ export const nativeCommand = (
   generatedObjects: ReadonlyArray<string>,
   inputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>,
   destination: string,
+  entry: CompilationProfile.Selection = { kind: 'default' },
 ): NativePlan => {
   for (const input of inputs) {
     if (!NativeLinkInput.hasAbsolutePath(input))
       return unsupported(artifactKind, target, input, 'PathNotAbsolute')
+  }
+  if (artifactKind === 'NativeObject') {
+    for (const input of inputs)
+      if (input._tag !== 'Object' && input._tag !== 'StaticArchive')
+        return unsupported(artifactKind, target, input, 'StaticArchiveInput')
+    return Object.freeze({
+      _tag: 'PlannedCommand',
+      target,
+      command: tools.clang,
+      arguments: Object.freeze([
+        `--target=${target.id}`,
+        '-r',
+        '-nostdlib',
+        ...generatedObjects,
+        ...inputs.flatMap((input) =>
+          input._tag === 'Object' || input._tag === 'StaticArchive' ? [input.path] : [],
+        ),
+        '-o',
+        destination,
+      ]),
+    })
   }
   if (artifactKind === 'NativeStaticLibrary') {
     const members = [...generatedObjects]
@@ -159,9 +186,15 @@ export const nativeCommand = (
       target.id === 'aarch64-apple-darwin'
         ? ['-dynamiclib', `-Wl,-install_name,@rpath/${fileName(destination)}`]
         : ['-shared']
+  let entryArguments: ReadonlyArray<string> = []
+  if (artifactKind === 'NativeExecutable' && entry.kind === 'named')
+    entryArguments = ['-nostartfiles', '-Xlinker', '-e', '-Xlinker', entry.name]
+  else if (artifactKind === 'NativeExecutable' && entry.kind === 'none')
+    entryArguments = ['-nostartfiles', '-Wl,-e,0']
   const arguments_: Array<string> = [
     `--target=${target.id}`,
     ...sharedArguments,
+    ...entryArguments,
     ...generatedObjects,
   ]
   for (const input of inputs) {

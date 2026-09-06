@@ -2640,7 +2640,8 @@ fn bad(value: *const i32) -> *const u8 {
 it.effect('keeps output initialization and extraction explicit in ordinary ownership', () =>
   Effect.gen(function* () {
     const source = `import silk.output { Uninitialized, Initialized }
-unsafe extern "C" fn fill(value: *mut i32) -> ()
+unsafe extern "C" fn fill(value: *mut i32) -> () with Intrinsic.foreign(memory: "write", locality: "arguments", noCapture: ("value",))
+unsafe extern "C" fn inspect(value: &i32) -> i32 with Intrinsic.foreign(borrow: ("value",))
 fn readBeforeInitialization(value: Uninitialized<i32>) -> i32 {
   return Initialized.into<i32>(move value)
 }
@@ -2649,6 +2650,10 @@ fn foreignDoesNotInitialize(value: Uninitialized<i32>) -> i32 {
   let address = Uninitialized.address<i32>(&mut output)
   unsafe fill(address)
   return Initialized.into<i32>(move output)
+}
+fn borrowedBeforeInitialization(value: &mut Uninitialized<i32>) -> i32 {
+  let address = Uninitialized.address<i32>(move value)
+  return unsafe inspect(address)
 }
 fn unchecked(value: Uninitialized<i32>) -> Initialized<i32> {
   return Uninitialized.assumeInitialized<i32>(move value)
@@ -2666,6 +2671,7 @@ fn twice(value: Initialized<i32>) -> i32 {
       [
         ['SEM0012', 'move value'],
         ['SEM0012', 'move output'],
+        ['SEM0052', ' inspect(address)'],
         ['SEM0082', ' Uninitialized.assumeInitialized<i32>(move value)'],
         ['OWN0001', 'move value'],
       ],

@@ -86,7 +86,14 @@ const initialize = (worker: ProjectWorker.ProjectWorker) =>
 
 it.effect('owns one compiler snapshot and answers the complete editor query catalog', () =>
   Effect.gen(function* () {
-    const worker = yield* ProjectWorker.makeInProcess({ epoch: WorkerEpoch.initial, analyze })
+    const worker = yield* ProjectWorker.makeInProcess({
+      epoch: WorkerEpoch.initial,
+      analyze: Effect.fnUntraced(function* (documents, previous, _invalidation, onProgress) {
+        const snapshots = yield* analyze(documents, previous)
+        yield* onProgress('ProjectAnalyzed')
+        return snapshots
+      }),
+    })
     yield* initialize(worker)
     assert.strictEqual((yield* take(worker, 'Ready'))._tag, 'Ready')
     const generation = ProjectGeneration.next(ProjectGeneration.initial)
@@ -101,6 +108,14 @@ pub fn main() -> i32 {
       ),
     )
     assert.strictEqual((yield* take(worker, 'Progress'))._tag, 'Progress')
+    const progress = yield* worker.take
+    assert.deepEqual(progress, {
+      protocolVersion: WorkerProtocol.version,
+      _tag: 'Progress',
+      epoch: WorkerEpoch.initial,
+      generation,
+      phase: 'ProjectAnalyzed',
+    })
     const commit = yield* take(worker, 'Commit')
     assert.strictEqual(commit._tag, 'Commit')
 

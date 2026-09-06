@@ -243,6 +243,7 @@ it.effect(
       const snapshot = yield* Analysis.ofSourceRealized(
         'temporary-directory/native',
         ascii(nativeSource),
+        'aarch64-apple-darwin',
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const compiled = yield* Driver.compile({
@@ -285,6 +286,7 @@ it.effect(
       const snapshot = yield* Analysis.ofSourceRealized(
         'temporary-directory/native-tree',
         ascii(nativeTreeSource),
+        'aarch64-apple-darwin',
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const compiled = yield* Driver.compile({
@@ -317,6 +319,7 @@ it.effect(
       const snapshot = yield* Analysis.ofSourceRealized(
         'temporary-directory/native-many',
         ascii(nativeManySource),
+        'aarch64-apple-darwin',
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const compiled = yield* Driver.compile({

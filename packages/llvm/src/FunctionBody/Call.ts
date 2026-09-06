@@ -1,5 +1,6 @@
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
+import type * as Block from '../Block.js'
 import type * as Attribute from '../Attribute.js'
 import * as ByteString from '../ByteString.js'
 import * as Constant from '../Constant.js'
@@ -47,6 +48,7 @@ const callInternal = Effect.fnUntraced(function* (
   args: ReadonlyArray<Value.Input>,
   name: ByteString.ByteString | Uint8Array | string | undefined,
   options: CallOptions,
+  destinations?: { readonly normal: Block.Block; readonly unwind: Block.Block },
 ): Effect.fn.Return<Value.Value | undefined, LlvmError> {
   return yield* FunctionBodyState.mutateModule(self, 'FunctionBody.call', (draft, module) =>
     Result.gen(function* () {
@@ -202,44 +204,69 @@ const callInternal = Effect.fnUntraced(function* (
           }),
         )
       }
+      const normal =
+        destinations === undefined
+          ? undefined
+          : yield* FunctionBodyState.resolveBlock(draft, destinations.normal, 'FunctionBody.invoke')
+      const unwind =
+        destinations === undefined
+          ? undefined
+          : yield* FunctionBodyState.resolveBlock(draft, destinations.unwind, 'FunctionBody.invoke')
+      if (
+        destinations !== undefined &&
+        (options.tail !== undefined ||
+          inlineAssembly ||
+          signature.variadic ||
+          FastMathActor.toBitcode(callFastMath) !== 0)
+      ) {
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'FunctionBody.invoke',
+            message:
+              'Invoke requires a fixed signature without tail markers, inline assembly, or fast-math flags',
+            input: options,
+          }),
+        )
+      }
+      const makeInstruction = (
+        result: number | undefined,
+        finalName: ByteString.ByteString,
+      ): FunctionBodyDescription.Instruction => {
+        const fields = {
+          functionType: functionTypeIndex,
+          callee: calleeValue.operand,
+          arguments: Object.freeze(argumentsResolved),
+          callingConvention,
+          attributes,
+          fastMath: callFastMath,
+          operandBundles: Object.freeze(bundles),
+          result,
+          name: finalName,
+        }
+        return normal === undefined || unwind === undefined
+          ? Object.freeze({ ...fields, _tag: 'Call', tail: options.tail ?? 'none' })
+          : Object.freeze({ ...fields, _tag: 'Invoke', normal, unwind })
+      }
+      const predecessor = draft.cursor
+      let value: Value.Value | undefined
       if (returnType._tag === 'Simple' && returnType.tag === 'Void') {
         yield* FunctionBodyState.appendInstruction(
           draft,
-          Object.freeze({
-            _tag: 'Call',
-            functionType: functionTypeIndex,
-            callee: calleeValue.operand,
-            arguments: Object.freeze(argumentsResolved),
-            callingConvention,
-            attributes,
-            tail: options.tail ?? 'none',
-            fastMath: callFastMath,
-            operandBundles: Object.freeze(bundles),
-            result: undefined,
-            name: ByteString.empty,
-          }),
+          makeInstruction(undefined, ByteString.empty),
         )
-        return undefined
+      } else {
+        value = (yield* FunctionBodyState.appendResult(
+          draft,
+          signature.returnType,
+          name,
+          makeInstruction,
+        )).value
       }
-      return (yield* FunctionBodyState.appendResult(
-        draft,
-        signature.returnType,
-        name,
-        (result, finalName) =>
-          Object.freeze({
-            _tag: 'Call',
-            functionType: functionTypeIndex,
-            callee: calleeValue.operand,
-            arguments: Object.freeze(argumentsResolved),
-            callingConvention,
-            attributes,
-            tail: options.tail ?? 'none',
-            fastMath: callFastMath,
-            operandBundles: Object.freeze(bundles),
-            result,
-            name: finalName,
-          }),
-      )).value
+      if (normal !== undefined && unwind !== undefined && predecessor !== undefined) {
+        yield* FunctionBodyState.addPredecessor(draft, normal, predecessor)
+        yield* FunctionBodyState.addPredecessor(draft, unwind, predecessor)
+      }
+      return value
     }),
   )
 })
@@ -311,4 +338,26 @@ export const callDirect = Effect.fnUntraced(function* (
     callingConvention: options.callingConvention ?? properties.callingConvention,
     ...(attributes === undefined ? {} : { attributes }),
   })
+})
+
+/**
+ * Calls a fixed-signature callee and terminates the block with normal and unwind successors.
+ *
+ * The unwind successor must start with a cleanup landing pad and the function must have a
+ * personality. The result is available only along the normal edge.
+ *
+ * @category instructions
+ * @since 0.0.0
+ */
+export const invoke = Effect.fn('FunctionBody.invoke')(function* (
+  self: FunctionBody,
+  functionType: Type.Type,
+  callee: Value.Input,
+  args: ReadonlyArray<Value.Input>,
+  normal: Block.Block,
+  unwind: Block.Block,
+  name?: ByteString.ByteString | Uint8Array | string,
+  options: Omit<CallOptions, 'tail' | 'fastMath'> = {},
+): Effect.fn.Return<Value.Value | undefined, LlvmError> {
+  return yield* callInternal(self, functionType, callee, args, name, options, { normal, unwind })
 })

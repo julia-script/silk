@@ -27,6 +27,7 @@ const decodeHtml = (source: string): string =>
   })
 
 interface LiveSnippet {
+  readonly target: string
   readonly expectedDiagnosticCodes: ReadonlyArray<string>
   readonly source: string
 }
@@ -42,6 +43,7 @@ const liveSnippets: ReadonlyArray<LiveSnippet> = Array.from(
   return [
     {
       expectedDiagnosticCodes: expected === '' ? [] : expected.split(/\s+/),
+      target: attributes.match(/target="([^"]*)"/)?.[1] ?? 'wasm32-unknown-unknown',
       source: decodeHtml(source).replace(/^\r?\n/, ''),
     },
   ]
@@ -53,7 +55,7 @@ it.effect('keeps every live landing-page example diagnostics-correct', () =>
       const snapshot = yield* Analysis.ofSourceRealized(
         `landing-page/${index + 1}`,
         new TextEncoder().encode(snippet.source),
-        'wasm32-unknown-unknown',
+        snippet.target,
       )
       assert.deepStrictEqual(
         Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),

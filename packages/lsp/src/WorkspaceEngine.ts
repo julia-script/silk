@@ -26,6 +26,8 @@ export interface Policy {
   readonly diagnosticDeadline: Duration.Input
   readonly supersededLease: Duration.Input
   readonly noProgressLease: Duration.Input
+  /** Bounds cold worker loading and the Ready handshake independently of teardown. */
+  readonly startupDeadline: Duration.Input
   readonly retirementDeadline: Duration.Input
   readonly failureLimit: number
 }
@@ -36,6 +38,7 @@ export const defaultPolicy: Policy = Object.freeze({
   diagnosticDeadline: 5_000,
   supersededLease: 500,
   noProgressLease: 10_000,
+  startupDeadline: 10_000,
   retirementDeadline: 2_000,
   failureLimit: 3,
 })
@@ -282,6 +285,7 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
     } else scheduleProject(project)
   }
 
+  let discoveryRevision = 0
   const applyAccepted = (acceptance: SourceLedger.Acceptance): void => {
     if (acceptance._tag === 'Ignored') return
     const event = acceptance.event
@@ -320,6 +324,7 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
         detach(event.uri, QueryOutcome.closed)
         break
       case 'Invalidate':
+        if (event.rediscover) discoveryRevision += 1
         for (const project of projects.values()) {
           for (const path of event.paths)
             if (path.startsWith(project.sourceRoot)) project.dirtyPaths.add(path)
@@ -556,7 +561,7 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
       return undefined
     }
     const readiness = yield* Effect.result(
-      Deferred.await(ready).pipe(Effect.timeout(policy.retirementDeadline)),
+      Deferred.await(ready).pipe(Effect.timeout(policy.startupDeadline)),
     )
     if (Result.isFailure(readiness)) {
       nextIncident = IncidentId.next(nextIncident)
@@ -616,6 +621,7 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
   })
 
   const processDiscovery = Effect.fnUntraced(function* () {
+    const revision = discoveryRevision
     const requested = [...discovery]
     discovery.clear()
     const discovered: Array<Document.Document> = []
@@ -624,11 +630,15 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
       if (entry === undefined) continue
       const document = yield* options.discover(entry)
       const current = SourceLedger.get(ledger, uri)
-      if (current?.version.value !== entry.version.value) {
+      if (current?.version.value !== entry.version.value || revision !== discoveryRevision) {
         if (current !== undefined) discovery.add(uri)
         continue
       }
       discovered.push(document)
+    }
+    if (revision !== discoveryRevision) {
+      for (const document of discovered) discovery.add(document.uri)
+      return
     }
     const touched = new Set<ProjectContext>()
     for (const document of discovered) {

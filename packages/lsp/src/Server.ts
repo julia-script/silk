@@ -182,7 +182,16 @@ export const start = (options: Options = {}): void => {
       })
 
       connection.onDidChangeConfiguration((event) => {
-        profileSettings = event.settings
+        const settings: unknown = event.settings
+        profileSettings =
+          typeof settings === 'object' &&
+          settings !== null &&
+          'silk' in settings &&
+          typeof settings.silk === 'object' &&
+          settings.silk !== null &&
+          'analysis' in settings.silk
+            ? settings.silk.analysis
+            : settings
         accept(SourceEvent.invalidate([], true))
       })
 

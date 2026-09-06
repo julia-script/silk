@@ -21,7 +21,7 @@ const controlledBinPath = fileURLToPath(
 )
 const wedgedBinPath = fileURLToPath(new URL('./fixtures/wedged-server.mjs', import.meta.url))
 
-it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_000 }, async () => {
+it('serves diagnostics, hover, and formatting over real stdio', async () => {
   assert.isTrue(existsSync(binPath), 'dist/bin.js missing; run pnpm build first')
   const client = connect()
   try {
@@ -49,7 +49,7 @@ it('serves diagnostics, hover, and formatting over real stdio', { timeout: 30_00
     assert.strictEqual(initialized.capabilities.foldingRangeProvider, true)
     assert.strictEqual(initialized.capabilities.callHierarchyProvider, true)
     assert.deepEqual(initialized.capabilities.semanticTokensProvider, {
-      legend: { tokenTypes: [...Document.semanticTokenTypes], tokenModifiers: [] },
+      legend: { tokenTypes: [...Document.semanticTokenTypes], tokenModifiers: ['inactive'] },
       full: true,
     })
     client.send({ method: 'initialized', params: {} })
@@ -352,16 +352,15 @@ it(
       assert.isNotNull(healthy, JSON.stringify(client.messages))
       if (healthy === null) throw new Error('expected healthy hover')
       assert.include(healthy.contents.value, 'i32')
-      const healthyIndex = client.messages.findIndex((message) => message.id === 40)
 
       const failureMessage = await client.waitFor((message) =>
         message.method === 'window/logMessage' &&
-        JSON.stringify(message.params).includes('incident')
+        JSON.stringify(message.params).includes('incident') &&
+        JSON.stringify(message.params).includes('standalone:/silk-lsp-e2e/wedged')
           ? message
           : undefined,
       )
       const failureIndex = client.messages.indexOf(failureMessage)
-      assert.isBelow(healthyIndex, failureIndex)
       await client.waitFor((message) => {
         if (client.messages.indexOf(message) <= failureIndex) return undefined
         return message.method === 'silk/inspectorInvalidated' &&

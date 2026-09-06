@@ -284,6 +284,19 @@ export type Instruction =
       readonly fastMath: FastMath
       readonly operandBundles: ReadonlyArray<OperandBundle>
     })
+  | (ResultInstruction & { readonly _tag: 'LandingPad'; readonly type: number })
+  | ({ readonly result: number | undefined; readonly name: ByteString.ByteString } & {
+      readonly _tag: 'Invoke'
+      readonly functionType: number
+      readonly callee: Operand
+      readonly arguments: ReadonlyArray<Operand>
+      readonly callingConvention: number
+      readonly attributes: number | undefined
+      readonly fastMath: FastMath
+      readonly operandBundles: ReadonlyArray<OperandBundle>
+      readonly normal: number
+      readonly unwind: number
+    })
 
 export interface Value {
   readonly type: number
@@ -311,6 +324,7 @@ export interface Snapshot {
 
 /** @internal */
 export const isTerminator = (instruction: Instruction): boolean =>
+  instruction._tag === 'Invoke' ||
   instruction._tag === 'Branch' ||
   instruction._tag === 'ConditionalBranch' ||
   instruction._tag === 'Switch' ||

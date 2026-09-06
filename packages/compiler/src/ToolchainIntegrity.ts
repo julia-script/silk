@@ -12,7 +12,6 @@ export type ComponentKind =
   | 'Catalog'
   | 'Source'
   | 'IntrinsicInventory'
-  | 'Provider'
   | 'RuntimeSupport'
 
 /** One content-addressed component and the identities it was generated against. */
@@ -67,7 +66,6 @@ export type Validation =
 export type TargetValidation =
   | {
       readonly _tag: 'Matched'
-      readonly providers: ReadonlyArray<Component>
       readonly runtimeSupport: ReadonlyArray<Component>
     }
   | {
@@ -204,8 +202,6 @@ const catalogDigest = (): string =>
         [
           entry.module,
           entry.digest,
-          entry.layer,
-          ...(entry.providerTargets ?? []),
           ...entry.staticInventory,
           ...entry.runtimeInventory,
           entry.namespace ?? '',
@@ -220,7 +216,6 @@ const catalogDigest = (): string =>
 const inventoryDigest = (): string => contentDigest(JSON.stringify(Intrinsic.inventory()))
 
 const sourceId = (module: string): string => `source/${module}`
-const providerId = (module: string): string => `provider/${module}`
 const runtimeId = (target: Target.Id, operation: string): string => `runtime/${target}/${operation}`
 
 const installedComponents = (): ReadonlyArray<Component> => {
@@ -250,30 +245,8 @@ const installedComponents = (): ReadonlyArray<Component> => {
       dependencies: Object.freeze([catalog.id]),
     }),
   )
-  const providers = Stdlib.manifest.flatMap<Component>((entry) =>
-    entry.layer === 'portable'
-      ? []
-      : [
-          Object.freeze({
-            kind: 'Provider',
-            id: providerId(entry.module),
-            digest: contentDigest(
-              [
-                entry.module,
-                entry.digest,
-                ...(entry.providerTargets ?? []),
-                ...entry.staticInventory,
-                ...entry.runtimeInventory,
-              ]
-                .map(field)
-                .join(''),
-            ),
-            dependencies: Object.freeze([sourceId(entry.module), intrinsic.id]),
-          }),
-        ],
-  )
   const runtime = Intrinsic.inventory().flatMap<Component>((entry) =>
-    entry.phase !== 'Runtime'
+    entry.phase === 'StaticOnly' || entry.targets.length === 0
       ? []
       : entry.targets.map((target) =>
           Object.freeze({
@@ -293,7 +266,7 @@ const installedComponents = (): ReadonlyArray<Component> => {
           }),
         ),
   )
-  return Object.freeze([compiler, catalog, intrinsic, ...sources, ...providers, ...runtime])
+  return Object.freeze([compiler, catalog, intrinsic, ...sources, ...runtime])
 }
 
 const installedGraph = make(installedComponents())
@@ -466,40 +439,23 @@ export const validateFrontend = (
     : Object.freeze({ _tag: 'Invalid', failures: Object.freeze(failures) })
 }
 
-/** Validates only providers and runtime implementations reached by one prepared program. */
+/** Validates runtime implementations reached by one prepared program. */
 export const validateTarget = (
   candidate: Graph,
   target: Target.Target,
   calls: ReadonlyArray<Instances.IntrinsicCall>,
-  loadedModules: Iterable<string>,
 ): TargetValidation => {
   const unsupported = [
     ...new Set(
       calls.flatMap((call) => {
         const operation = Intrinsic.findOperationById(call.operation)
         return operation === undefined ||
-          (operation.phase === 'Runtime' && operation.targets.includes(target.id))
+          (operation.phase !== 'StaticOnly' && operation.targets.includes(target.id))
           ? []
           : [Intrinsic.operationText(call.operation)]
       }),
     ),
   ].sort()
-  const reachableOperations = new Set(
-    calls.map((call) => Intrinsic.operationText(call.operation).replace(/^Intrinsic\./, '')),
-  )
-  const providerModules = [...new Set(loadedModules)]
-    .filter((module) => {
-      const entry = Stdlib.find(module)
-      return (
-        entry?.layer === 'target-provider' &&
-        entry.runtimeInventory.some((operation) => reachableOperations.has(operation))
-      )
-    })
-    .sort()
-  for (const module of providerModules) {
-    const entry = Stdlib.find(module)
-    if (entry !== undefined && !entry.providerTargets?.includes(target.id)) unsupported.push(module)
-  }
   if (unsupported.length > 0)
     return Object.freeze({
       _tag: 'UnsupportedTarget',
@@ -507,26 +463,17 @@ export const validateTarget = (
       operations: Object.freeze([...new Set(unsupported)].sort()),
     })
 
-  const selectedIds = new Set([
-    ...providerModules.map(providerId),
-    ...calls.map((call) => runtimeId(target.id, Intrinsic.operationText(call.operation))),
-  ])
+  const selectedIds = new Set(
+    calls.map((call) => runtimeId(target.id, Intrinsic.operationText(call.operation))),
+  )
   const expected = new Map(
     installedGraph.components
-      .filter(
-        (component) =>
-          (component.kind === 'Provider' || component.kind === 'RuntimeSupport') &&
-          selectedIds.has(component.id),
-      )
+      .filter((component) => component.kind === 'RuntimeSupport' && selectedIds.has(component.id))
       .map((component) => [componentKey(component), component] as const),
   )
   const observed = new Map(
     candidate.components
-      .filter(
-        (component) =>
-          (component.kind === 'Provider' || component.kind === 'RuntimeSupport') &&
-          selectedIds.has(component.id),
-      )
+      .filter((component) => component.kind === 'RuntimeSupport' && selectedIds.has(component.id))
       .map((component) => [componentKey(component), component] as const),
   )
   const failures: IntegrityFailure[] = [...validateShape(candidate, 'Target')]
@@ -561,7 +508,6 @@ export const validateTarget = (
     return Object.freeze({ _tag: 'Invalid', failures: Object.freeze(failures) })
   return Object.freeze({
     _tag: 'Matched',
-    providers: Object.freeze([...expected.values()].filter((entry) => entry.kind === 'Provider')),
     runtimeSupport: Object.freeze(
       [...expected.values()].filter((entry) => entry.kind === 'RuntimeSupport'),
     ),

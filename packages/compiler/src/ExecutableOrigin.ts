@@ -105,7 +105,11 @@ export const reachableIntrinsics = (
           }
           if (operation === undefined) continue
           const intrinsic = Intrinsic.findOperationById(operation)
-          if (intrinsic?.phase !== 'Runtime')
+          if (
+            intrinsic === undefined ||
+            intrinsic.phase === 'StaticOnly' ||
+            intrinsic.targets.length === 0
+          )
             throw new RangeError(
               `Runtime HIR retained non-runtime intrinsic ${Intrinsic.operationText(operation)}`,
             )
@@ -144,6 +148,7 @@ export const foreignSignature = (
     fact.parameters.map((parameter) => declared(parameter.declaredType)),
     declared(fact.returnType),
     target,
+    fact.foreign?.contract,
   )
 }
 

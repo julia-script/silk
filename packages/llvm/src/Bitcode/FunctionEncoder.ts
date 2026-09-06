@@ -394,6 +394,26 @@ const writeFunctionInstruction = (
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.phi, values)
       break
     }
+    case 'LandingPad':
+      Bitstream.writeUnabbreviatedRecord(block, 47, [instruction.type, 1, 0])
+      break
+    case 'Invoke': {
+      for (const bundle of instruction.operandBundles) {
+        const tag = operandBundleTags.get(CanonicalKey.bytes(bundle.tag))
+        if (tag === undefined) throw new Error('operand bundle tag is missing')
+        Bitstream.writeUnabbreviatedRecord(block, 55, [tag, ...bundle.operands.map(relative)])
+      }
+      Bitstream.writeUnabbreviatedRecord(block, 13, [
+        instruction.attributes === undefined ? 0 : instruction.attributes + 1,
+        instruction.callingConvention | (1 << 13),
+        instruction.normal,
+        instruction.unwind,
+        instruction.functionType,
+        relative(instruction.callee),
+        ...instruction.arguments.map(relative),
+      ])
+      break
+    }
     case 'Call': {
       for (const bundle of instruction.operandBundles) {
         const tag = operandBundleTags.get(CanonicalKey.bytes(bundle.tag))
@@ -495,7 +515,7 @@ export const writeOperandBundleTags = (
     const body = state.functions[global.actorIndex]?.body
     if (body === undefined) continue
     for (const instruction of body.instructions) {
-      if (instruction._tag !== 'Call') continue
+      if (instruction._tag !== 'Call' && instruction._tag !== 'Invoke') continue
       for (const bundle of instruction.operandBundles) {
         const key = CanonicalKey.bytes(bundle.tag)
         if (!tags.has(key)) tags.set(key, { index: tags.size, value: bundle.tag })

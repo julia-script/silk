@@ -420,7 +420,7 @@ export const exportSuspendsCode = 'SEM0201' as const
 export const ambiguousSuppliedOperationCode = 'SEM0202' as const
 /** Stable code for naming a conformance-supplied receiver operation as a value instead of calling it. */
 export const suppliedOperationValueCode = 'SEM0203' as const
-/** Stable code for a root `main` whose declaration shape is not a valid program entry. */
+/** Stable code for a selected invocation whose declaration shape is not a valid program entry. */
 export const invalidEntryShapeCode = 'SEM0204' as const
 /** Stable code for a C-layout record that declares type parameters. */
 export const genericCLayoutRecordCode = 'SEM0205' as const
@@ -2636,7 +2636,7 @@ export const conflictingForeignSignature = (
     phase: 'semantic',
     code: conflictingForeignSignatureCode,
     severity: 'error',
-    message: `Foreign symbol ${symbol} is declared with a conflicting C signature`,
+    message: `Foreign symbol ${symbol} is declared with a conflicting C signature or behavioral contract`,
     reason: Object.freeze({ _tag: 'ConflictingForeignSignature', symbol, otherSpan }),
     span,
     relatedSpans: Object.freeze([
@@ -2875,7 +2875,7 @@ export const invalidEntryShape = (detail: string, span: SourceSpan.SourceSpan): 
     phase: 'semantic',
     code: invalidEntryShapeCode,
     severity: 'error',
-    message: `Entry \`main\` ${detail}`,
+    message: `Selected invocation ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidEntryShape', detail }),
     span,
   })

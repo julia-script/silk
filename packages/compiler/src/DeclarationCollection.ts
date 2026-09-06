@@ -1,3 +1,7 @@
+import * as MachineFunction from './MachineFunction.js'
+import * as DeclarationProperty from './DeclarationProperty.js'
+import * as NativeRequirement from './NativeRequirement.js'
+import * as ForeignContract from './ForeignContract.js'
 import * as Option from 'effect/Option'
 import * as AggregateIdentity from './AggregateIdentity.js'
 import type {
@@ -3002,6 +3006,7 @@ const collectForeign = (
   node: SyntaxTree.Node,
   name: DeclaredName,
   direction: 'Foreign' | 'Export',
+  parameters: ReadonlyArray<ParameterFact>,
 ): {
   readonly fact: NonNullable<DeclarationFact['foreign']>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -3020,7 +3025,14 @@ const collectForeign = (
   for (const child of node.children) {
     const kind = SyntaxTree.isMissingToken(child) ? undefined : child.kind
     const restriction = foreignRestrictions[direction].find(([expected]) => expected === kind)?.[1]
-    if (restriction !== undefined)
+    if (
+      restriction !== undefined &&
+      !(
+        direction === 'Export' &&
+        kind === 'UnsafeKeyword' &&
+        MachineFunction.analyze(source, node).properties !== undefined
+      )
+    )
       diagnostics.push(Diagnostic.foreignDeclarationRestriction(restriction, child.span))
   }
   const asIndex = node.children.findIndex(
@@ -3040,8 +3052,24 @@ const collectForeign = (
     diagnostics.push(Diagnostic.invalidForeignSymbol(symbol, symbolSpan))
   else if (ForeignSymbol.isReserved(symbol))
     diagnostics.push(Diagnostic.reservedForeignSymbol(symbol, symbolSpan))
+  const behavior =
+    direction === 'Foreign'
+      ? ForeignContract.analyze(
+          source,
+          DeclarationProperty.clauses(node).find(
+            (clause) => DeclarationProperty.owner(source, clause) !== 'Intrinsic.native',
+          ),
+          parameters.map((parameter) => ({
+            name: parameter.name._tag === 'Present' ? parameter.name.spelling : '',
+            type: undefined,
+            span: parameter.syntax.span,
+          })),
+          undefined,
+        )
+      : { contract: ForeignContract.conservative, diagnostics: [] }
+  diagnostics.push(...behavior.diagnostics)
   return Object.freeze({
-    fact: Object.freeze({ abi: 'C' as const, symbol }),
+    fact: Object.freeze({ abi: 'C' as const, symbol, contract: behavior.contract }),
     diagnostics: Object.freeze(diagnostics),
   })
 }
@@ -3089,6 +3117,7 @@ const collectForeignStatic = (
 const collectModule = (
   syntax: SyntaxFile.SyntaxFile,
   declarations: ReadonlyArray<SyntaxTree.Node>,
+  imports: ModuleClosure.Module['imports'],
 ): ModuleHeaders => {
   const source = syntax.source
   const nodes = declarations.filter(
@@ -3874,13 +3903,43 @@ const collectModule = (
     )
     const foreign =
       node.kind === 'ForeignFunctionDeclaration'
-        ? collectForeign(source, node, name, 'Foreign')
+        ? collectForeign(source, node, name, 'Foreign', facts)
         : undefined
     const foreignExport =
       node.kind === 'FunctionDeclaration' &&
       SyntaxTree.directToken(node, 'ExportKeyword') !== undefined
-        ? collectForeign(source, node, name, 'Export')
+        ? collectForeign(source, node, name, 'Export', facts)
         : undefined
+    const machine = MachineFunction.analyze(source, node)
+    diagnostics.push(...machine.diagnostics)
+    if (foreign !== undefined && machine.properties !== undefined)
+      diagnostics.push(
+        Diagnostic.foreignDeclarationRestriction(
+          'machine property on a foreign import',
+          machine.properties.span,
+        ),
+      )
+    const properties = DeclarationProperty.clauses(node)
+    const behavior = properties.filter(
+      (clause) =>
+        DeclarationProperty.owner(source, clause) !== 'Intrinsic.native' &&
+        DeclarationProperty.owner(source, clause) !== 'Intrinsic.machine',
+    )
+    for (const property of behavior.slice(1))
+      diagnostics.push(
+        Diagnostic.foreignDeclarationRestriction('duplicate foreign contract', property.span),
+      )
+    for (const property of properties)
+      if (
+        foreign === undefined &&
+        DeclarationProperty.owner(source, property) !== 'Intrinsic.machine'
+      )
+        diagnostics.push(
+          Diagnostic.foreignDeclarationRestriction(
+            'foreign contract on a non-foreign function',
+            property.span,
+          ),
+        )
     const native = foreign ?? foreignExport
     if (native === undefined && functionKind === 'Ordinary' && failureRow.fact.syntax !== undefined)
       diagnostics.push(Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span))
@@ -3895,6 +3954,7 @@ const collectModule = (
       phase: foreign === undefined && staticFunction ? 'Static' : 'Runtime',
       functionKind: foreign === undefined ? functionKind : 'Ordinary',
       unsafe: SyntaxTree.directToken(node, 'UnsafeKeyword') !== undefined,
+      ...(machine.properties === undefined ? {} : { machine: machine.properties }),
       ...(foreign === undefined ? {} : { foreign: foreign.fact }),
       // A rejected export publishes no symbol, so discovery never roots it.
       ...(foreignExport === undefined || foreignExport.diagnostics.length > 0
@@ -4435,6 +4495,34 @@ const collectModule = (
       }),
     ]
   })
+  const nativeRequirements: Array<NativeRequirement.NativeRequirement> = []
+  for (const declaration of declarations) {
+    for (const clause of DeclarationProperty.clauses(declaration)) {
+      const moduleClause = declaration.kind === 'ModulePropertyDeclaration'
+      if (!moduleClause && DeclarationProperty.owner(source, clause) !== 'Intrinsic.native')
+        continue
+      if (
+        !moduleClause &&
+        declaration.kind !== 'ForeignFunctionDeclaration' &&
+        declaration.kind !== 'ForeignStaticDeclaration'
+      )
+        continue
+      const token = SyntaxTree.directToken(declaration, 'Identifier')
+      const member = ownMembers.find((entry) => entry.syntax === declaration)
+      const canonical =
+        member?.canonical._tag === 'Canonical' ? member.canonical.id.name : undefined
+      const scope: NativeRequirement.Scope = moduleClause
+        ? { kind: 'module', module: source.id }
+        : {
+            kind: 'declaration',
+            module: source.id,
+            declaration: canonical ?? (token === undefined ? '' : spelling(source, token)),
+          }
+      const analyzed = NativeRequirement.analyze(source, clause, scope)
+      diagnostics.push(...analyzed.diagnostics)
+      if (analyzed.requirement !== undefined) nativeRequirements.push(analyzed.requirement)
+    }
+  }
   const members: ReadonlyArray<MemberFact> = [
     ...ownMembers,
     ...inlineMembers,
@@ -4444,6 +4532,7 @@ const collectModule = (
   return Object.freeze({
     _tag: 'ModuleHeaders',
     module: source.id,
+    nativeRequirements: Object.freeze(nativeRequirements),
     publications: Object.freeze(
       declarations.flatMap((declaration): ModuleHeaders['publications'] => {
         if (
@@ -4453,7 +4542,11 @@ const collectModule = (
           return []
         const path = SyntaxTree.directNode(declaration, 'ImportPath')
         const list = SyntaxTree.directNode(declaration, 'ImportMemberList')
-        const module = path === undefined ? undefined : ImportPath.canonicalTarget(source, path)
+        const module =
+          path === undefined
+            ? undefined
+            : (imports.find((imported) => imported.syntax === declaration)?.canonicalTarget ??
+              ImportPath.canonicalTarget(source, path))
         if (module === undefined || list === undefined) return []
         return SyntaxTree.directNodes(list, 'ImportMember').flatMap((member) => {
           const original = SyntaxTree.directToken(member, 'Identifier')
@@ -4539,7 +4632,9 @@ const declaredTypeNamesOwner = (
 /** Collects identities and raw type paths for the complete closure before scope resolution. */
 export const collect = (closure: ModuleClosure.Facts): DeclarationIndex.Index => {
   const modules = Object.freeze(
-    closure.modules.map((module) => collectModule(module.syntax, module.declarations)),
+    closure.modules.map((module) =>
+      collectModule(module.syntax, module.declarations, module.imports),
+    ),
   )
   return DeclarationIndex.make(
     'Collected',

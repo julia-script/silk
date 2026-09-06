@@ -15,8 +15,8 @@
 //! `&mut ChildProcess` requirement and supplies an allocator for owned captures.
 //!
 //! # Gotchas
-//! Reachable OS process operations are native-only. LLVM-to-WebAssembly compilation rejects them
-//! instead of inventing a process host import.
+//! This module publishes its provider only for the supported native profiles.
+//! WebAssembly selection leaves the module empty.
 //!
 //! # Examples
 //! ## Construct the native provider without starting a process
@@ -31,174 +31,176 @@
 //! }
 //! ```
 
-import silk.bool as bool
-import silk.bytes { Bytes }
-import silk.child_process { ChildProcess, ProcessError, ProcessOperation, ProcessOutcome, ProcessReason, ProcessRequest }
-import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
-import silk.i32 as i32
-import silk.u32 as u32
-import silk.u8 as u8
-import silk.usize as usize
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.bool as bool
+  import silk.bytes { Bytes }
+  import silk.child_process { ChildProcess, ProcessError, ProcessOperation, ProcessOutcome, ProcessReason, ProcessRequest }
+  import silk.allocator { Allocator }
+  import silk.allocator { OutOfMemoryError }
+  import silk.i32 as i32
+  import silk.u32 as u32
+  import silk.u8 as u8
+  import silk.usize as usize
 
-/// A stateless native [`ChildProcess`] provider with blocking execution and complete capture.
-///
-/// # Details
-///
-/// The provider borrows the request and transfers each completed capture into independent [`Bytes`]
-/// storage. The returned [`ProcessOutcome`] owns that storage.
-pub struct OsChildProcess {}
-
-impl OsChildProcess {
-  /// Runs one request to completion and owns everything the child wrote.
-  ///
-  /// The boundary reports termination as a status selector plus a code, which becomes `Exited` or
-  /// `Signaled` here. A nonzero exit code is neither: it is data inside `Exited`.
-  effect fn execute(
-    self: &mut Self,
-    request: &ProcessRequest
-  ) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut Allocator {
-    let mut status = 0
-    let mut code = 0
-    let mut outputLength = usize.ZERO
-    let mut errorLength = usize.ZERO
-    let mut lowReason = 0
-    let mut nativeCode = u32.toU32(0)
-    let started = run rawExecute(
-      ChildProcess.program(request),
-      ChildProcess.arguments(request),
-      ChildProcess.environment(request),
-      ChildProcess.workingDirectory(request),
-      &mut status,
-      &mut code,
-      &mut outputLength,
-      &mut errorLength,
-      &mut lowReason,
-      &mut nativeCode
-    )
-    if started == false { return run raise(ChildProcess.spawnOperation(), lowReason, nativeCode) }
-    let output = run drain(0, outputLength)
-    let errors = run drain(1, errorLength)
-    if status == 0 { return ChildProcess.exited(code, move output, move errors) }
-    return ChildProcess.signaled(code, move output, move errors)
-  }
-}
-
-impl OsChildProcess {
-  /// Creates a stateless provider for the native process boundary.
-  ///
-  /// # When to use
-  ///
-  /// Use this function at a native application edge. Provide the result as `&mut ChildProcess` to
-  /// portable code that calls `ChildProcess.execute` or `silk.child_process.submit`.
+  /// A stateless native [`ChildProcess`] provider with blocking execution and complete capture.
   ///
   /// # Details
   ///
-  /// Construction starts no process and allocates no storage. Each execution translates native
-  /// failures into [`ProcessError`] and requires an allocator for owned output captures.
-  pub fn make() -> OsChildProcess {
-    return OsChildProcess {}
-  }
-}
+  /// The provider borrows the request and transfers each completed capture into independent [`Bytes`]
+  /// storage. The returned [`ProcessOutcome`] owns that storage.
+  pub struct OsChildProcess {}
 
-fn reason(value: i32) -> ProcessReason {
-  if value == 0 { return ChildProcess.notFound() }
-  if value == 2 { return ChildProcess.permissionDenied() }
-  if value == 3 { return ChildProcess.invalidRequest() }
-  if value == 4 { return ChildProcess.invalidRequest() }
-  if value == 6 { return ChildProcess.noSpace() }
-  if value == 9 { return ChildProcess.unsupported() }
-  return ChildProcess.other()
-}
-
-effect fn raise(
-  operation: ProcessOperation,
-  lowReason: i32,
-  nativeCode: u32
-) -> never ! ProcessError {
-  fail ChildProcess.failureWithCode(move operation, reason(lowReason), u32.toI32(nativeCode))
-}
-
-effect fn rawExecute(
-  program: &[u8],
-  arguments: &[u8],
-  environment: &[u8],
-  workingDirectory: &[u8],
-  status: &mut i32,
-  code: &mut i32,
-  outputLength: &mut usize,
-  errorLength: &mut usize,
-  lowReason: &mut i32,
-  nativeCode: &mut u32
-) -> bool {
-  unsafe {
-    return run Intrinsic.osProcessExecute(
-      program,
-      arguments,
-      environment,
-      workingDirectory,
-      status,
-      code,
-      outputLength,
-      errorLength,
-      lowReason,
-      nativeCode
-    )
-  }
-  return false
-}
-
-effect fn rawCapture(
-  stream: i32,
-  offset: usize,
-  output: &mut [u8],
-  count: &mut usize,
-  lowReason: &mut i32,
-  nativeCode: &mut u32
-) -> bool {
-  unsafe {
-    return run Intrinsic.osProcessCapture(stream, offset, output, count, lowReason, nativeCode)
-  }
-  return false
-}
-
-/// Copies one completed capture out of the boundary into independently owned bytes.
-///
-/// The preceding execute reported the exact length, so the outcome owns every captured byte or the
-/// capture stage fails; a short transfer that never advances is a capture failure rather than a
-/// silently truncated result.
-effect fn drain(stream: i32, length: usize) -> Bytes ! ProcessError | OutOfMemoryError ? &mut Allocator {
-  let mut result = Bytes.make()
-  if length == usize.ZERO { return move result }
-  let mut buffer = run Bytes.zeroed(length)
-  let mut offset = usize.ZERO
-  while offset < length {
-    let mut lowReason = 0
-    let mut nativeCode = u32.toU32(0)
-    let mut output = Bytes.asMutSlice(&mut buffer)
-    let mut received = usize.ZERO
-    let transferred = run rawCapture(
-      stream,
-      offset,
-      move output,
-      &mut received,
-      &mut lowReason,
-      &mut nativeCode
-    )
-    if transferred == false { return run raise(ChildProcess.captureOperation(), lowReason, nativeCode) }
-    if received == usize.ZERO { return run raise(ChildProcess.captureOperation(), 10, u32.toU32(0)) }
-    let view = Bytes.asSlice(&buffer)
-    let mut index = usize.ZERO
-    while index < received {
-      let one = [view[index]]
-      let appended = run Bytes.append(&mut result, &one)
-      index = index + usize.ONE
+  impl OsChildProcess {
+    /// Runs one request to completion and owns everything the child wrote.
+    ///
+    /// The boundary reports termination as a status selector plus a code, which becomes `Exited` or
+    /// `Signaled` here. A nonzero exit code is neither: it is data inside `Exited`.
+    effect fn execute(
+      self: &mut Self,
+      request: &ProcessRequest
+    ) -> ProcessOutcome ! ProcessError | OutOfMemoryError ? &mut Allocator {
+      let mut status = 0
+      let mut code = 0
+      let mut outputLength = usize.ZERO
+      let mut errorLength = usize.ZERO
+      let mut lowReason = 0
+      let mut nativeCode = u32.toU32(0)
+      let started = run rawExecute(
+        ChildProcess.program(request),
+        ChildProcess.arguments(request),
+        ChildProcess.environment(request),
+        ChildProcess.workingDirectory(request),
+        &mut status,
+        &mut code,
+        &mut outputLength,
+        &mut errorLength,
+        &mut lowReason,
+        &mut nativeCode
+      )
+      if started == false { return run raise(ChildProcess.spawnOperation(), lowReason, nativeCode) }
+      let output = run drain(0, outputLength)
+      let errors = run drain(1, errorLength)
+      if status == 0 { return ChildProcess.exited(code, move output, move errors) }
+      return ChildProcess.signaled(code, move output, move errors)
     }
-    offset = offset + received
   }
-  return move result
-}
 
-impl ChildProcess for OsChildProcess {
-  execute: OsChildProcess.execute
+  impl OsChildProcess {
+    /// Creates a stateless provider for the native process boundary.
+    ///
+    /// # When to use
+    ///
+    /// Use this function at a native application edge. Provide the result as `&mut ChildProcess` to
+    /// portable code that calls `ChildProcess.execute` or `silk.child_process.submit`.
+    ///
+    /// # Details
+    ///
+    /// Construction starts no process and allocates no storage. Each execution translates native
+    /// failures into [`ProcessError`] and requires an allocator for owned output captures.
+    pub fn make() -> OsChildProcess {
+      return OsChildProcess {}
+    }
+  }
+
+  fn reason(value: i32) -> ProcessReason {
+    if value == 0 { return ChildProcess.notFound() }
+    if value == 2 { return ChildProcess.permissionDenied() }
+    if value == 3 { return ChildProcess.invalidRequest() }
+    if value == 4 { return ChildProcess.invalidRequest() }
+    if value == 6 { return ChildProcess.noSpace() }
+    if value == 9 { return ChildProcess.unsupported() }
+    return ChildProcess.other()
+  }
+
+  effect fn raise(
+    operation: ProcessOperation,
+    lowReason: i32,
+    nativeCode: u32
+  ) -> never ! ProcessError {
+    fail ChildProcess.failureWithCode(move operation, reason(lowReason), u32.toI32(nativeCode))
+  }
+
+  effect fn rawExecute(
+    program: &[u8],
+    arguments: &[u8],
+    environment: &[u8],
+    workingDirectory: &[u8],
+    status: &mut i32,
+    code: &mut i32,
+    outputLength: &mut usize,
+    errorLength: &mut usize,
+    lowReason: &mut i32,
+    nativeCode: &mut u32
+  ) -> bool {
+    unsafe {
+      return run Intrinsic.osProcessExecute(
+        program,
+        arguments,
+        environment,
+        workingDirectory,
+        status,
+        code,
+        outputLength,
+        errorLength,
+        lowReason,
+        nativeCode
+      )
+    }
+    return false
+  }
+
+  effect fn rawCapture(
+    stream: i32,
+    offset: usize,
+    output: &mut [u8],
+    count: &mut usize,
+    lowReason: &mut i32,
+    nativeCode: &mut u32
+  ) -> bool {
+    unsafe {
+      return run Intrinsic.osProcessCapture(stream, offset, output, count, lowReason, nativeCode)
+    }
+    return false
+  }
+
+  /// Copies one completed capture out of the boundary into independently owned bytes.
+  ///
+  /// The preceding execute reported the exact length, so the outcome owns every captured byte or the
+  /// capture stage fails; a short transfer that never advances is a capture failure rather than a
+  /// silently truncated result.
+  effect fn drain(stream: i32, length: usize) -> Bytes ! ProcessError | OutOfMemoryError ? &mut Allocator {
+    let mut result = Bytes.make()
+    if length == usize.ZERO { return move result }
+    let mut buffer = run Bytes.zeroed(length)
+    let mut offset = usize.ZERO
+    while offset < length {
+      let mut lowReason = 0
+      let mut nativeCode = u32.toU32(0)
+      let mut output = Bytes.asMutSlice(&mut buffer)
+      let mut received = usize.ZERO
+      let transferred = run rawCapture(
+        stream,
+        offset,
+        move output,
+        &mut received,
+        &mut lowReason,
+        &mut nativeCode
+      )
+      if transferred == false { return run raise(ChildProcess.captureOperation(), lowReason, nativeCode) }
+      if received == usize.ZERO { return run raise(ChildProcess.captureOperation(), 10, u32.toU32(0)) }
+      let view = Bytes.asSlice(&buffer)
+      let mut index = usize.ZERO
+      while index < received {
+        let one = [view[index]]
+        let appended = run Bytes.append(&mut result, &one)
+        index = index + usize.ONE
+      }
+      offset = offset + received
+    }
+    return move result
+  }
+
+  impl ChildProcess for OsChildProcess {
+    execute: OsChildProcess.execute
+  }
 }

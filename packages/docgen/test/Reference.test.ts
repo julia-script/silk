@@ -1,10 +1,83 @@
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
+import * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
+import * as SourceFile from '@silklang/compiler/SourceFile'
+import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as Effect from 'effect/Effect'
 import * as Project from '../src/Project.js'
 import * as Reference from '../src/Reference.js'
 
 const encoder = new TextEncoder()
+
+it.effect(
+  'separates incompatible selected documentation while sharing identical profile pages',
+  () =>
+    Effect.gen(function* () {
+      const roots = [
+        SourceFile.make(
+          'platform',
+          encoder.encode(`
+static if Intrinsic.targetOperatingSystem() == "darwin" {
+  /// The Darwin declaration.
+  pub fn nativeOnly() -> i32 { return 1 }
+} else {
+  /// The other declaration.
+  pub fn otherOnly() -> i32 { return 2 }
+}`),
+        ),
+      ]
+      roots.push(
+        SourceFile.make(
+          'facade',
+          encoder.encode(`
+static if Intrinsic.targetOperatingSystem() == "darwin" {
+  pub import platform { nativeOnly as selected }
+} else {
+  pub import platform { otherOnly as selected }
+}`),
+        ),
+      )
+      const projects = []
+      for (const target of [
+        'aarch64-apple-darwin',
+        'x86_64-unknown-linux-gnu',
+        'wasm32-unknown-unknown',
+      ]) {
+        const analysis = yield* ProjectAnalysis.make(roots, {
+          configuration: { profile: { target } },
+        }).pipe(Effect.provide(SourceResolver.empty))
+        const project = Project.fromProjectAnalysis(analysis)
+        const alias = project.modules.find((module) => module.name === 'facade')?.items[0]
+        assert.strictEqual(alias?.name, 'selected')
+        assert.strictEqual(
+          alias?.signature.text,
+          `pub import platform { ${target === 'aarch64-apple-darwin' ? 'nativeOnly' : 'otherOnly'} as selected }`,
+        )
+        projects.push({ name: target, project })
+      }
+      const result = Reference.makeProfiles(
+        [{ module: 'platform', namespace: 'Platform' }],
+        projects,
+      )
+      assert.strictEqual(result._tag, 'Success')
+      if (result._tag !== 'Success') return
+      assert.lengthOf(result.reference.files, 3)
+      const native =
+        result.reference.files.find((file) => file.path === 'platform.md')?.contents ?? ''
+      const other =
+        result.reference.files.find((file) => file.path === 'platform.profile-2.md')?.contents ?? ''
+      assert.include(native, 'nativeOnly')
+      assert.notInclude(native, 'otherOnly')
+      assert.include(other, 'otherOnly')
+      assert.notInclude(other, 'nativeOnly')
+      assert.include(other, 'x86_64-unknown-linux-gnu')
+      assert.include(other, 'wasm32-unknown-unknown')
+      assert.deepEqual(
+        Reference.makeProfiles([{ module: 'platform', namespace: 'Platform' }], projects),
+        result,
+      )
+    }),
+)
 
 const source = `//! Coordinates recoverable work.
 //!
@@ -253,3 +326,29 @@ it('rejects deterministic module-path and declaration-anchor collisions', () => 
     result.errors.some((error) => error._tag === 'Collision' && error.kind === 'DeclarationAnchor'),
   )
 })
+
+it.effect('omits API examples from a module whose entire surface is inactive', () =>
+  Effect.gen(function* () {
+    const analysis = yield* ProjectAnalysis.make(
+      [
+        SourceFile.make(
+          'empty/platform',
+          encoder.encode(`//! Native API example.
+//! \`\`\`silk
+//! import empty.platform { nativeOnly }
+//! pub fn main() -> i32 { return nativeOnly() }
+//! \`\`\`
+static if Intrinsic.targetOperatingSystem() == "darwin" {
+  pub fn nativeOnly() -> i32 { return 1 }
+}`),
+        ),
+      ],
+      { configuration: { profile: { target: 'wasm32-unknown-unknown' } } },
+    ).pipe(Effect.provide(SourceResolver.empty))
+    const module = Project.fromProjectAnalysis(analysis).modules.find(
+      (module) => module.name === 'empty/platform',
+    )
+    assert.deepEqual(module?.items, [])
+    assert.isUndefined(module?.documentation)
+  }),
+)

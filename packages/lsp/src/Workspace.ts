@@ -168,14 +168,31 @@ const configuration = Effect.fnUntraced(function* (
         host._tag === 'Resolved' ? host.target.id : undefined,
       )
       return {
-        package: project === undefined ? 'standalone@0.0.0' : `${project.name}@${project.version}`,
-        profile: selected.input,
-        bindings: selected.bindings,
+        application: project?.entry.module,
+        configuration: {
+          ...(project?.build.composition === undefined
+            ? {}
+            : {
+                composition: project.build.composition,
+                compositionOrigin: ConfigurationOrigin.literal(
+                  `${project.manifestPath}:build.composition`,
+                ),
+              }),
+          package:
+            project === undefined ? 'standalone@0.0.0' : `${project.name}@${project.version}`,
+          profile: selected.input,
+          bindings: selected.bindings,
+        },
       }
     }),
   )
   return Result.isSuccess(attempt)
-    ? { configuration: attempt.success }
+    ? {
+        configuration: attempt.success.configuration,
+        ...(attempt.success.application === undefined
+          ? {}
+          : { application: attempt.success.application }),
+      }
     : { configurationError: attempt.failure }
 })
 
@@ -200,7 +217,10 @@ export const analyze = Effect.fn('Workspace.analyze')(function* (
   return view
 })
 
-/** Analyzes all synchronized project roots through one shared immutable compiler frontend. */
+/**
+ * Analyzes all synchronized project roots through one shared immutable compiler frontend.
+ * Reports completed stages so the worker watchdog can recognize forward progress during cold analysis.
+ */
 export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
   documents: ReadonlyArray<Document.Document>,
   previous: ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot> = new Map(),
@@ -208,6 +228,7 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
     dirtyPaths: Object.freeze([]),
     rediscover: false,
   }),
+  onProgress?: (phase: string) => Effect.Effect<void>,
 ): Effect.fn.Return<
   ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot>,
   never,
@@ -227,21 +248,25 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
   )
   const previousProject = previous.values().next().value?.project
   const previousInventory = previous.values().next().value?.inventory
+  const selectedConfiguration = yield* configuration(first)
+  yield* onProgress?.('ConfigurationSelected') ?? Effect.void
   const inventory = yield* WorkspaceCatalog.refresh({
     sourceRoot: first.sourceRoot,
     documents,
+    configuration: selectedConfiguration,
     ...(previousInventory === undefined ? {} : { previous: previousInventory }),
     invalidation: {
       dirtyPaths: invalidation.dirtyPaths,
       rediscover: invalidation.rediscover,
     },
-  })
-  const selectedConfiguration = yield* configuration(first)
+  }).pipe(Effect.provide(resolver(first.sourceRoot, overlays)))
+  yield* onProgress?.('CatalogSelected') ?? Effect.void
   const project = yield* (
     previousProject === undefined
       ? ProjectAnalysis.make(roots, selectedConfiguration)
       : ProjectAnalysis.revise(previousProject, roots, selectedConfiguration)
   ).pipe(Effect.provide(resolver(first.sourceRoot, overlays)))
+  yield* onProgress?.('ProjectAnalyzed') ?? Effect.void
   const moduleUris = new Map<string, string>()
   for (const module of project.closure.modules) {
     const source = project.closure.sources.get(module.name)

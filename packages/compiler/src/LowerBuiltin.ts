@@ -1,3 +1,4 @@
+import { lowerExpression } from './LowerExpression.js'
 import {
   authored,
   callableLocalCleanup,
@@ -40,6 +41,30 @@ export const lowerBuiltinExpression = (
   fn: FunctionLowering,
   expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
 ): LoweredExpression | undefined => {
+  if (expression.operation === 'NativeAssembly') {
+    const assembly = expression.assembly
+    const tuple = expression.arguments[6]
+    const type = fn.type(expression.type)
+    if (assembly === undefined || tuple === undefined || type === undefined) return undefined
+    const operands = tuple._tag === 'Construct' ? tuple.fields.map((field) => field.value) : []
+    if (tuple._tag !== 'Construct' && tuple._tag !== 'UnitLiteral') return undefined
+    const arguments_: Array<Mir.LocalId> = []
+    for (const operand of operands) {
+      const lowered = lowerExpression(fn, operand)
+      if (lowered === undefined || lowered === 'Transferred') return lowered
+      arguments_.push(lowered.result)
+    }
+    const destination = fn.alloc(type)
+    fn.emit({
+      _tag: 'NativeAssembly',
+      assembly,
+      destination,
+      arguments: Object.freeze(arguments_),
+      type,
+      provenance: authored(expression.span),
+    })
+    return assembly.noReturn ? 'Transferred' : { result: destination }
+  }
   if (expression.witnessEffectSite !== undefined) return lowerWitnessEffect(fn, expression)
   const intrinsic = Intrinsic.findOperationById(expression.intrinsic)
   if (intrinsic === undefined || !Intrinsic.isBuiltinOperation(intrinsic)) return undefined
@@ -1000,7 +1025,8 @@ const lowerBuiltinOperation = (
   }
   if (expression.operation === 'ExecutionDrive' || expression.operation === 'ExecutionPark')
     return undefined
-  if (expression.operation === 'StringEqualsExact') return undefined
+  if (expression.operation === 'StringEqualsExact' || expression.operation === 'NativeAssembly')
+    return undefined
   const conversionTarget = Scalar.conversionTarget(expression.operation)
   if (Scalar.isCheckedOperation(expression.operation)) {
     const arity = expression.operation.startsWith('CheckedConvertTo') ? 1 : 2

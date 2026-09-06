@@ -1,6 +1,7 @@
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as Effect from 'effect/Effect'
 import * as Example from './Example.js'
+import * as Model from './Model.js'
 import * as Sources from './Sources.js'
 
 /**
@@ -95,7 +96,9 @@ export const run = Effect.fn('Doctest.run')(function* (
   options: Options,
 ): Effect.fn.Return<Report, never, never> {
   const lookup = options.sources ?? Sources.empty
-  const target = options.target ?? defaultTarget
+  const decoded = Model.decode(options.documentation)
+  const profile = decoded._tag === 'Decoded' ? decoded.documentation.profile : undefined
+  const target = options.target ?? profile?.target ?? defaultTarget
   const examples = Example.collect(options.documentation)
   const results: Array<Result> = []
   for (const example of examples) {

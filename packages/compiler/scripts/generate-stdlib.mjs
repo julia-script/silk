@@ -10,13 +10,6 @@ const outputPath = join(packageRoot, 'src', 'Stdlib.generated.ts')
 
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
 const canonicalModule = /^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/
-const layers = new Set(['portable', 'target-provider'])
-const executionTargets = [
-  'aarch64-apple-darwin',
-  'aarch64-unknown-linux-gnu',
-  'wasm32-unknown-unknown',
-  'x86_64-unknown-linux-gnu',
-]
 const staticIntrinsics = new Set([
   'targetArchitecture',
   'targetOperatingSystem',
@@ -49,14 +42,7 @@ for (const [index, entry] of manifest.entries()) {
   if (
     typeof entry?.module !== 'string' ||
     typeof entry?.path !== 'string' ||
-    !layers.has(entry.layer) ||
-    (entry.layer === 'portable' && entry.providerTargets !== undefined) ||
-    (entry.layer === 'target-provider' &&
-      (!Array.isArray(entry.providerTargets) ||
-        entry.providerTargets.length === 0 ||
-        entry.providerTargets.some((target) => !executionTargets.includes(target)) ||
-        executionTargets.filter((target) => entry.providerTargets.includes(target)).join() !==
-          entry.providerTargets.join())) ||
+    Object.keys(entry).some((key) => !['module', 'path', 'namespace', 'aliases'].includes(key)) ||
     (entry.namespace !== undefined && typeof entry.namespace !== 'string') ||
     (entry.namespace !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.namespace)) ||
     (entry.aliases !== undefined &&
@@ -73,9 +59,6 @@ for (const [index, entry] of manifest.entries()) {
     throw new Error('Standard-library manifest must be strictly ordered by canonical module')
   }
   const source = await readFile(join(stdlibRoot, entry.path), 'utf8')
-  const imports = [...source.matchAll(/\bimport\s+([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)/g)].map(
-    (match) => match[1].replaceAll('.', '/'),
-  )
   const intrinsicInventory = [
     ...new Set(
       [...source.matchAll(/\bIntrinsic\.([A-Za-z_][A-Za-z0-9_]*)/g)].map((match) => match[1]),
@@ -90,22 +73,10 @@ for (const [index, entry] of manifest.entries()) {
     sourceIdentity: entry.module,
     digest: createHash('sha256').update(source).digest('hex'),
     documentation: entry.path,
-    imports,
     staticInventory,
     runtimeInventory,
     source,
   })
-}
-
-const byModule = new Map(modules.map((entry) => [entry.module, entry]))
-for (const entry of modules) {
-  for (const imported of entry.imports) {
-    const dependency = byModule.get(imported)
-    if (entry.layer === 'portable' && dependency?.layer === 'target-provider')
-      throw new Error(
-        `Portable standard-library module ${entry.module} imports target provider ${imported}`,
-      )
-  }
 }
 
 const entries = modules
@@ -116,8 +87,7 @@ const entries = modules
     sourceIdentity: '${entry.sourceIdentity}',
     digest: '${entry.digest}',
     documentation: '${entry.documentation}',
-    layer: '${entry.layer}',
-    ${entry.providerTargets === undefined ? '' : `providerTargets: ${aliasesLiteral(entry.providerTargets)},\n    `}staticInventory: ${aliasesLiteral(entry.staticInventory)},
+    staticInventory: ${aliasesLiteral(entry.staticInventory)},
     runtimeInventory: ${aliasesLiteral(entry.runtimeInventory)},
     ${entry.namespace === undefined ? '' : `namespace: '${entry.namespace}',\n    `}${entry.aliases === undefined ? '' : `aliases: ${aliasesLiteral(entry.aliases)},\n    `}source:
       ${sourceLiteral(entry.source)},

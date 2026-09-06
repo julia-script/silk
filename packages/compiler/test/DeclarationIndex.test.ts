@@ -1,3 +1,4 @@
+import * as ForeignContract from '../src/ForeignContract.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -1795,7 +1796,11 @@ unsafe extern "C" fn bare(value: u8)`,
     const [abs, renamed, every, bare] = index.modules.at(0)?.declarations ?? []
 
     assert.deepEqual(index.diagnostics, [])
-    assert.deepEqual(abs?.foreign, { abi: 'C', symbol: 'abs' })
+    assert.deepEqual(abs?.foreign, {
+      abi: 'C',
+      symbol: 'abs',
+      contract: ForeignContract.conservative,
+    })
     assert.strictEqual(abs?.unsafe, true)
     assert.strictEqual(abs?.visibility, 'Public')
     assert.strictEqual(abs?.phase, 'Runtime')
@@ -1810,7 +1815,11 @@ unsafe extern "C" fn bare(value: u8)`,
       abs === undefined ? undefined : DeclarationFacts.callableContract(abs).unsafe,
       true,
     )
-    assert.deepEqual(renamed?.foreign, { abi: 'C', symbol: 'abs' })
+    assert.deepEqual(renamed?.foreign, {
+      abi: 'C',
+      symbol: 'abs',
+      contract: ForeignContract.conservative,
+    })
     assert.strictEqual(renamed?.visibility, 'Private')
     const spelling = (declaration: DeclarationFacts.DeclarationFact): string | undefined =>
       declaration.name._tag === 'Present' ? declaration.name.spelling : undefined
@@ -1896,7 +1905,11 @@ pub fn plain(value: i32) -> i32 { return value }`,
     const [named, renamed, plain] = index.modules.at(0)?.declarations ?? []
 
     assert.deepEqual(index.diagnostics, [])
-    assert.deepEqual(named?.foreignExport, { abi: 'C', symbol: 'double' })
+    assert.deepEqual(named?.foreignExport, {
+      abi: 'C',
+      symbol: 'double',
+      contract: ForeignContract.conservative,
+    })
     assert.strictEqual(named?.foreign, undefined)
     assert.strictEqual(named?.visibility, 'Private')
     assert.strictEqual(named?.unsafe, false)
@@ -1908,7 +1921,11 @@ pub fn plain(value: i32) -> i32 { return value }`,
       named === undefined ? undefined : DeclarationFacts.callableContract(named).unsafe,
       false,
     )
-    assert.deepEqual(renamed?.foreignExport, { abi: 'C', symbol: 'silk_test_double_v1' })
+    assert.deepEqual(renamed?.foreignExport, {
+      abi: 'C',
+      symbol: 'silk_test_double_v1',
+      contract: ForeignContract.conservative,
+    })
     assert.strictEqual(renamed?.visibility, 'Public')
     assert.strictEqual(plain?.foreignExport, undefined)
     assert.strictEqual(plain?.visibility, 'Public')

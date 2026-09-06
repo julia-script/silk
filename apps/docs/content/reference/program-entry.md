@@ -1,14 +1,19 @@
 # Program entry
 
-A Silk executable starts from one public function named `main` in the root module. The entry may be
-an ordinary function or an effect function. A private function named `main` is an ordinary
-module-local function, not an executable entry point.
+The default application runtime selects the public `main` function in the application module as
+its invocation root. A build may select another public invocation declaration, a source runtime
+with its own exported entry, or no runtime. Artifact retention, exports and loader entry are
+independent, as specified in [artifact roots and native requirements](artifact-roots-and-requirements.md).
 
-## ENTRY-001 — `main` must be public
+This chapter specifies the existing invocation adapter and illustrates its default `main` selection.
+The selected invocation may be ordinary or effectful; the same signature and visibility rules apply
+when a runtime descriptor names another declaration. A private function is not an invocation root.
+
+## ENTRY-001 — The selected invocation must be public
 
 **Status:** Confirmed
 
-The executable entry must be declared with `pub`. The supported shapes are a zero-argument ordinary
+The selected invocation must be declared with `pub`. The supported shapes are a zero-argument ordinary
 `main` explicitly returning `()` or `i32`, or a zero-argument effect `main` succeeding with `()` and
 carrying no unresolved requirements. Only the effect entry may omit its unit result annotation.
 
@@ -44,7 +49,7 @@ ordinary missing-result diagnostic rather than entry-specific unit inference. No
 code is currently assigned.
 
 **Implementation:** Entry discovery retains private visibility as its own reason, and the CLI
-reports `No entry point: \`main\` must be public`.
+reports `No entry point: the selected invocation must be public`.
 
 **Evidence:** [entry-instance requirements](../../../../openspec/specs/bootstrap-instances/spec.md),
 [entry selection](../../../../packages/compiler/src/Instances.ts),
@@ -72,9 +77,8 @@ pub effect fn main() {
 }
 ```
 
-All three forms take no parameters and declare no generic parameters. The compiler recognizes an
-`effect fn main`, constructs its Effect, and executes it exactly once through the generated program
-entry boundary. Source does not call `run main()`. An omitted result annotation on the effect entry
+All three forms take no parameters and declare no generic parameters. The compiler constructs the selected effect invocation and executes it exactly once through the
+generated invocation boundary. Source does not call `run main()`. An omitted result annotation on the effect entry
 means `()`, so the explicit spelling `pub effect fn main() -> ()` is equivalent but unnecessary.
 
 **Boundary:** Entry kind follows the declaration, not its return type. An ordinary `fn main` must

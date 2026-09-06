@@ -1,3 +1,4 @@
+import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -67,6 +68,7 @@ it.effect(
       const changedPath = join(sourceRoot, 'Module137.silk')
       writeFileSync(changedPath, 'pub fn revised137() -> i32 { return 137 }')
       const revised = yield* WorkspaceCatalog.refresh({
+        configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
         sourceRoot,
         documents: [document],
         previous: session.inventory,
@@ -101,5 +103,5 @@ it.effect(
             queryElapsedMs,
           })}\n`,
         )
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide([SourceResolver.empty, NodeServices.layer])),
 )

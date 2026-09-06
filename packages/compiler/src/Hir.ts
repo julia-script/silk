@@ -1,3 +1,4 @@
+import type * as NativeAssembly from './NativeAssembly.js'
 import * as Lifetime from './Lifetime.js'
 import * as Constraint from './Constraint.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
@@ -868,6 +869,7 @@ export type Expression =
     }
   | {
       readonly _tag: 'BuiltinCall'
+      readonly assembly?: NativeAssembly.NativeAssembly
       readonly operation: BuiltinOperation
       readonly intrinsic: Intrinsic.OperationId
       /**
@@ -1163,6 +1165,15 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
 export const expressionTree = (expression: Expression): ReadonlyArray<Expression> => {
   const children = expressionChildren(expression)
   return Object.freeze([expression, ...children.flatMap(expressionTree)])
+}
+
+/** Runtime-bearing expression children; sealed assembly metadata never acquires data storage. */
+export const runtimeExpressionTree = (expression: Expression): ReadonlyArray<Expression> => {
+  const children =
+    expression._tag === 'BuiltinCall' && expression.operation === 'NativeAssembly'
+      ? expression.arguments.slice(6)
+      : expressionChildren(expression)
+  return Object.freeze([expression, ...children.flatMap(runtimeExpressionTree)])
 }
 
 /** Reachable return operands in this execution boundary, including eager ordinary arms. */

@@ -1,3 +1,5 @@
+import type * as MachineFunction from './MachineFunction.js'
+import type * as NativeAssembly from './NativeAssembly.js'
 import type * as CAbi from './CAbi.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
@@ -301,6 +303,14 @@ export type PlaceSelector =
     }
 
 export type Operation =
+  | {
+      readonly _tag: 'NativeAssembly'
+      readonly assembly: NativeAssembly.NativeAssembly
+      readonly destination: LocalId
+      readonly arguments: ReadonlyArray<LocalId>
+      readonly type: Type
+      readonly provenance: Provenance
+    }
   | {
       /** Updates a compiler-owned Boolean presence flag without reading an owned value. */
       readonly _tag: 'SetInitialized'
@@ -1536,6 +1546,7 @@ export type RunSuspendableEffectRegion = Extract<
 >
 
 export interface MirFunction {
+  readonly machine?: MachineFunction.MachineFunction
   readonly initializationFlags?: ReadonlyArray<{
     readonly root: LocalId
     readonly flags: NonNullable<DropOperation['initialization']>['flags']
@@ -1576,7 +1587,7 @@ export type Entry =
       readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
     }
   | {
-      readonly _tag: 'LibraryEntry'
+      readonly _tag: 'NoInvocation'
     }
   | {
       readonly _tag: 'OrdinaryEntry'
@@ -1596,6 +1607,8 @@ export type Entry =
     }
 
 export interface Module {
+  /** Explicit artifact roots preserved through optimization without creating foreign exports. */
+  readonly retainedRoots?: ReadonlyArray<Instances.InstanceKey>
   readonly _tag: 'MirModule'
   readonly module: string
   readonly entry: Entry
@@ -1624,7 +1637,7 @@ export interface Module {
 
 /** The concrete zero-parameter `i32` function exported as the machine entry. */
 export const machineEntry = (self: Module): Instances.InstanceKey => {
-  if (self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'LibraryEntry') {
+  if (self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'NoInvocation') {
     throw new RangeError(
       self.entry._tag === 'UnavailableEntry'
         ? `MIR has no machine entry: ${self.entry.reason}`
@@ -1886,6 +1899,8 @@ export interface Violation {
     | 'InvalidOsOperation'
     | 'InvalidForeignCall'
     | 'InvalidForeignOperation'
+    | 'InvalidNativeAssembly'
+    | 'InvalidMachineFunction'
     | 'InvalidRawStorageOperation'
     | 'InvalidPointerOperation'
     | 'InvalidLocalSharedOperation'

@@ -387,6 +387,7 @@ export const lowerInstance = (
     _tag: 'MirFunction',
     id: instance.key.declaration,
     instance: instance.key,
+    ...(fn.declaration.machine === undefined ? {} : { machine: fn.declaration.machine }),
     parameterCount: runtimeParameterCount(fn),
     localTypes: Object.freeze([...lowering.localTypes]),
     initializationFlags: initializationFlagsOf(lowering),

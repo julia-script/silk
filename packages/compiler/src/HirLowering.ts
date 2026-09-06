@@ -1549,6 +1549,7 @@ export const hirExpression = (
     }
     return Object.freeze({
       _tag: 'BuiltinCall',
+      ...(fact.reference.assembly === undefined ? {} : { assembly: fact.reference.assembly }),
       operation: fact.reference.operation,
       intrinsic: fact.reference.intrinsic,
       ...(fact._tag === 'Operator' && fact.interfaceOperation !== undefined

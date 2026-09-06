@@ -152,6 +152,7 @@ export const schemaName = 'silk-documentation'
 export interface Documentation {
   readonly schema: typeof schemaName
   readonly experimental: true
+  readonly profile?: { readonly identity: string; readonly target: string }
   readonly modules: ReadonlyArray<Module>
 }
 
@@ -534,11 +535,26 @@ export const decode = (value: unknown): Decoded => {
       _tag: 'NotDocumentation',
       message: `expected a "${schemaName}" schema marker, found ${JSON.stringify(value.schema) ?? 'nothing'}`,
     })
-  if (!hasOnlyKeys(value, ['schema', 'experimental', 'modules']) || value.experimental !== true)
+  if (
+    !hasOnlyKeys(value, ['schema', 'experimental', 'modules', 'profile']) ||
+    value.experimental !== true
+  )
     return Object.freeze({
       _tag: 'NotDocumentation',
       message: 'documentation JSON does not match the current schema',
     })
+  const suppliedProfile = value.profile
+  let profile: Documentation['profile']
+  if (suppliedProfile !== undefined) {
+    if (
+      !isRecord(suppliedProfile) ||
+      !hasOnlyKeys(suppliedProfile, ['identity', 'target']) ||
+      typeof suppliedProfile.identity !== 'string' ||
+      typeof suppliedProfile.target !== 'string'
+    )
+      return Object.freeze({ _tag: 'NotDocumentation', message: 'Invalid documentation profile' })
+    profile = { identity: suppliedProfile.identity, target: suppliedProfile.target }
+  }
   const modules = arrayOf(value.modules, moduleOf)
   return modules === undefined
     ? Object.freeze({
@@ -550,6 +566,9 @@ export const decode = (value: unknown): Decoded => {
         documentation: Object.freeze({
           schema: schemaName,
           experimental: true,
+          ...(profile === undefined
+            ? {}
+            : { profile: { identity: profile.identity, target: profile.target } }),
           modules,
         }),
       })

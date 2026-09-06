@@ -243,9 +243,10 @@ export const parseForeignStaticDeclaration = (initial: State): NodeResult => {
   const type = parseType(colon.state, ['AsKeyword', 'Equals', ...topLevelFollowing])
   const symbol = parseSymbolTail(type.state, ['Equals', ...topLevelFollowing])
   if (imported) {
+    const properties = parseFunctionPropertyList(symbol.state)
     return Object.freeze({
-      state: symbol.state,
-      node: syntaxNode(symbol.state, 'ForeignStaticDeclaration', [
+      state: properties.state,
+      node: syntaxNode(properties.state, 'ForeignStaticDeclaration', [
         ...unsafeKeyword.elements,
         ...marker.elements,
         ...abi.elements,
@@ -254,6 +255,7 @@ export const parseForeignStaticDeclaration = (initial: State): NodeResult => {
         ...colon.elements,
         type.node,
         ...symbol.elements,
+        ...properties.elements,
       ]),
     })
   }
@@ -1067,6 +1069,18 @@ const parseStaticConditionalDeclaration = (initial: State): NodeResult => {
 }
 
 export const parseTopLevelDeclaration = (state: State): NodeResult => {
+  if (hasContextualSpelling(state, 'module')) {
+    const keyword = expect(state, 'Identifier', ['Identifier'])
+    const property = parseFunctionProperties(keyword.state)
+    if (property !== undefined)
+      return {
+        state: property.state,
+        node: syntaxNode(property.state, 'ModulePropertyDeclaration', [
+          ...keyword.elements,
+          property.node,
+        ]),
+      }
+  }
   const kind = nextSignificantKind(state)
   const following = kind === 'PubKeyword' ? peek(state, 1) : undefined
   if (kind === 'StaticKeyword' && peek(state, 1) === 'IfKeyword')
@@ -1233,26 +1247,34 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
   ])
 
   if (marker === undefined) {
-    const block = parseBlock(contract.state, !unitResult, unitResult)
+    const properties = parseFunctionPropertyList(contract.state)
+    const block = parseBlock(properties.state, !unitResult, unitResult)
     return Object.freeze({
       state: block.state,
-      node: syntaxNode(block.state, 'FunctionDeclaration', [...header, block.node]),
+      node: syntaxNode(block.state, 'FunctionDeclaration', [
+        ...header,
+        ...properties.elements,
+        block.node,
+      ]),
     })
   }
 
   const symbol = parseSymbolTail(contract.state)
+  const properties = parseFunctionPropertyList(symbol.state)
+  const afterProperties = properties.state
   if (markerKind === 'ExportKeyword') {
     // An exported function requires a body; without one the declaration closes on an empty block
     // so the next top-level declaration parses intact.
     const block =
-      nextSignificantKind(symbol.state) === 'LeftBrace'
-        ? parseBlock(symbol.state, !unitResult, unitResult)
-        : parseMissingBlock(symbol.state)
+      nextSignificantKind(afterProperties) === 'LeftBrace'
+        ? parseBlock(afterProperties, !unitResult, unitResult)
+        : parseMissingBlock(afterProperties)
     return Object.freeze({
       state: block.state,
       node: syntaxNode(block.state, 'FunctionDeclaration', [
         ...header,
         ...symbol.elements,
+        ...properties.elements,
         block.node,
       ]),
     })
@@ -1261,18 +1283,71 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
   // A foreign header has no body; `static`, `effect`, rows, and a block are retained for semantic
   // rejection so their diagnostics stay navigable.
   const body =
-    nextSignificantKind(symbol.state) === 'LeftBrace'
-      ? parseBlock(symbol.state, !unitResult, unitResult)
+    nextSignificantKind(afterProperties) === 'LeftBrace'
+      ? parseBlock(afterProperties, !unitResult, unitResult)
       : undefined
-  const state = body?.state ?? symbol.state
+  const state = body?.state ?? afterProperties
   return Object.freeze({
     state,
     node: syntaxNode(state, 'ForeignFunctionDeclaration', [
       ...header,
       ...symbol.elements,
+      ...properties.elements,
       ...(body === undefined ? [] : [body.node]),
     ]),
   })
+}
+
+const parseFunctionPropertyList = (initial: State): ElementsResult => {
+  let state = initial
+  const elements: Array<SyntaxTree.Element> = []
+  while (hasContextualSpelling(state, 'with')) {
+    const property = parseFunctionProperties(state)
+    if (property === undefined) break
+    elements.push(property.node)
+    state = property.state
+  }
+  return { state, elements: Object.freeze(elements) }
+}
+
+/** Retains sealed declaration properties as syntax; completion validates their owner and literals. */
+const parseFunctionProperties = (initial: State): NodeResult | undefined => {
+  if (!hasContextualSpelling(initial, 'with')) return undefined
+  const withToken = expect(initial, 'Identifier', ['Identifier'])
+  const namespace = expect(withToken.state, 'Identifier', ['Dot'])
+  const dot = expect(namespace.state, 'Dot', ['Identifier'])
+  const operation = expect(dot.state, 'Identifier', ['LeftParenthesis'])
+  const left = expect(operation.state, 'LeftParenthesis', ['Identifier', 'RightParenthesis'])
+  const children: Array<SyntaxTree.Element> = [
+    ...withToken.elements,
+    ...namespace.elements,
+    ...dot.elements,
+    ...operation.elements,
+    ...left.elements,
+  ]
+  let state = left.state
+  while (nextSignificantKind(state) === 'Identifier') {
+    const name = expect(state, 'Identifier', ['Colon'])
+    const colon = expect(name.state, 'Colon', expressionStarts)
+    const value = parseExpression(colon.state, 1, 'Identifier', false)
+    children.push(
+      syntaxNode(value.state, 'FunctionProperty', [
+        ...name.elements,
+        ...colon.elements,
+        value.node,
+      ]),
+    )
+    state = value.state
+    if (nextSignificantKind(state) !== 'Comma') break
+    const comma = expect(state, 'Comma', ['Identifier', 'RightParenthesis'])
+    children.push(...comma.elements)
+    state = comma.state
+  }
+  const right = expect(state, 'RightParenthesis', ['LeftBrace', ...topLevelFollowing])
+  return {
+    state: right.state,
+    node: syntaxNode(right.state, 'FunctionPropertyClause', [...children, ...right.elements]),
+  }
 }
 
 /** The optional `as <symbol>` tail shared by foreign and exported function headers. */

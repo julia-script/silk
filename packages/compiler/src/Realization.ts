@@ -1,3 +1,7 @@
+import * as NativeAssemblyPlanning from './NativeAssemblyPlanning.js'
+import * as ArtifactPlan from './ArtifactPlan.js'
+import * as ToolchainIntegrity from './ToolchainIntegrity.js'
+import * as ArtifactComposition from './ArtifactComposition.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as ModuleSelection from './ModuleSelection.js'
 import * as Effect from 'effect/Effect'
@@ -53,9 +57,12 @@ const entryShapeDiagnostics = (
   discovery: Instances.Discovery,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   if (discovery.entry._tag !== 'Unavailable') return Object.freeze([])
-  const root = self.results.get(discovery.rootModule)
+  const root = self.results.get(self.composition?.invocation?.module ?? discovery.rootModule)
   if (root === undefined) return Object.freeze([])
-  const lookup = Elaboration.declarationByName(root, 'main')
+  const lookup = Elaboration.declarationByName(
+    root,
+    self.composition?.invocation?.declaration ?? 'main',
+  )
   if (lookup._tag === 'Missing') return Object.freeze([])
   const declarations = lookup._tag === 'Resolved' ? [lookup.declaration] : lookup.declarations
   const detail = entryShapeDetail(discovery.entry)
@@ -90,7 +97,6 @@ const entryShapeDetail = (
     case 'MissingEntry':
     case 'UntypedEntry':
     case 'UnavailableEntryBody':
-    case 'MissingLibraryExport':
     case 'InvalidSource':
       return undefined
   }
@@ -180,6 +186,7 @@ function discoverAndLower(
     () =>
       targetSelection._tag === 'Unavailable' ||
       completion === undefined ||
+      self.composition === undefined ||
       (!prepareForEmission && specializationInvalid)
         ? Instances.invalid(self.closure.rootModule)
         : Instances.discover(
@@ -188,10 +195,7 @@ function discoverAndLower(
             self.index,
             completion,
             self.resolution,
-            completion.profile.target.kind === 'Native' &&
-              completion.profile.artifact !== 'executable'
-              ? 'Library'
-              : 'Executable',
+            self.composition,
           ),
     (value) => value.instances.length,
     (value) => value.violations.length,
@@ -373,6 +377,7 @@ function discoverAndLower(
               ),
               ProvisionalMir.build(instances, targetLayout.layout, self.index),
               self.index,
+              completion?.profile,
               options,
             ),
           (value) => value.program?.functions.length ?? 0,
@@ -390,7 +395,12 @@ function discoverAndLower(
         diagnostics: finalizedDiagnostics,
         report: Object.freeze(report),
       })
-    if (targetLayout._tag !== 'Available' || program === undefined || completion === undefined)
+    if (
+      targetLayout._tag !== 'Available' ||
+      program === undefined ||
+      completion === undefined ||
+      self.composition === undefined
+    )
       throw new RangeError('Driver lowering reached an unavailable target after its gates')
     const planning = ForeignPlanning.check(program, targetLayout.target)
     if (planning.length > 0)
@@ -401,6 +411,7 @@ function discoverAndLower(
       })
     return Object.freeze({
       _tag: 'Prepared',
+      composition: self.composition,
       profile: completion.profile,
       target: targetLayout.target,
       program,
@@ -415,6 +426,7 @@ function discoverAndLower(
       : undefined
   return Object.freeze({
     instances,
+    ...(self.composition === undefined ? {} : { composition: self.composition }),
     ...(completion === undefined ? {} : { profile: completion.profile }),
     target: targetLayout.selection,
     layoutCatalog:
@@ -542,11 +554,37 @@ export const configure = Effect.fn('Realization.configure')(function* (
         'ConflictingBindings',
         'profile differs from selected frontend',
       )
-    return completion
+    const catalog = yield* ArtifactComposition.decode(
+      configuration?.composition ??
+        ArtifactComposition.defaults(self.closure.rootModule, completion.profile),
+      configuration?.compositionOrigin,
+    )
+    const composition = yield* ArtifactComposition.resolve(
+      catalog,
+      self.closure.rootModule,
+      completion.profile,
+    )
+    const missing = composition.modules.filter((name) => !self.closure.sources.has(name))
+    if (missing.length > 0)
+      return yield* ConfigurationError.make(
+        'Realization.bootstrap',
+        'MissingParameter',
+        'artifact roots require a new frontend analysis',
+        [catalog.origin],
+        missing,
+      )
+    return { completion, composition }
   })
   const result = yield* Effect.result(operation)
   if (Result.isSuccess(result))
-    return { frontend: self, completion: result.success, targetId: selectedTarget }
+    return {
+      frontend: OpaqueRealization.withCatalog(
+        { ...self, composition: result.success.composition },
+        OpaqueRealization.catalogOf(self),
+      ),
+      completion: result.success.completion,
+      targetId: selectedTarget,
+    }
   const availability =
     result.failure.staticFailure === undefined
       ? []
@@ -600,7 +638,41 @@ export const realize = Effect.fn('Realization.realize')(function* (
     undefined,
     typeof targetId === 'object' ? targetId : undefined,
   )
-  return discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
+  const realized = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
+  if (
+    realized.mir._tag !== 'Available' ||
+    realized.profile === undefined ||
+    ready.frontend.composition === undefined
+  )
+    return realized
+  const plan = yield* Effect.result(
+    ArtifactPlan.make(
+      ready.frontend,
+      realized.profile,
+      ready.frontend.composition,
+      realized.mir.value,
+      'llvm-bitcode',
+      ToolchainIntegrity.installed().digest,
+    ),
+  )
+  if (Result.isSuccess(plan)) return Object.freeze({ ...realized, artifactPlan: plan.success })
+  const span = ready.frontend.closure.modules.find(
+    (module) => module.name === ready.frontend.closure.rootModule,
+  )?.syntax.root.span
+  if (span === undefined) throw new RangeError('Artifact planning lost application span')
+  return Object.freeze({
+    ...realized,
+    diagnostics: Diagnostic.merge(realized.diagnostics, [
+      Diagnostic.invalidConfiguration(plan.failure, span),
+    ]),
+    mir: Object.freeze({
+      _tag: 'Unavailable',
+      error: new AnalysisUnavailable({
+        operation: 'Analysis.realize',
+        message: 'Native requirements are incompatible',
+      }),
+    }),
+  })
 })
 
 /** Prepares valid runtime facts for Driver while stopping at each artifact-production gate. */
@@ -613,7 +685,30 @@ export const prepare = Effect.fn('Realization.prepare')(function* (
   } = {},
 ): Effect.fn.Return<Preparation> {
   const ready = yield* configure(self, targetId, options.artifactKind, options.optimization)
-  return discoverAndLower(ready.frontend, ready.targetId, ready.completion, options, true)
+  const prepared = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options, true)
+  if (prepared._tag !== 'Prepared') return prepared
+  const plan = yield* Effect.result(
+    ArtifactPlan.make(
+      ready.frontend,
+      prepared.profile,
+      prepared.composition,
+      prepared.program,
+      'llvm-bitcode',
+      ToolchainIntegrity.installed().digest,
+    ),
+  )
+  if (Result.isSuccess(plan)) return Object.freeze({ ...prepared, artifactPlan: plan.success })
+  const span = ready.frontend.closure.modules.find(
+    (module) => module.name === ready.frontend.closure.rootModule,
+  )?.syntax.root.span
+  if (span === undefined) throw new RangeError('Artifact planning lost application span')
+  return Object.freeze({
+    _tag: 'Rejected',
+    diagnostics: Diagnostic.merge(prepared.diagnostics, [
+      Diagnostic.invalidConfiguration(plan.failure, span),
+    ]),
+    report: prepared.report,
+  })
 })
 
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
@@ -653,6 +748,7 @@ const finalizeMir = (
   program: Mir.Module,
   provisional: ProvisionalMir.Module,
   index: DeclarationIndex.Index,
+  profile: CompilationProfile.CompilationProfile | undefined,
   options: Options,
 ): {
   readonly program: Mir.Module | undefined
@@ -660,9 +756,12 @@ const finalizeMir = (
 } => {
   const normalized = normalizeMir(program, provisional, options)
   const ownership = SuspensionOwnership.plan(normalized, provisional, index)
-  const diagnostics = ownership.violations.map((violation) =>
-    Diagnostic.invalidSuspensionOwnership(violation.detail, violation.span),
-  )
+  const diagnostics = [
+    ...ownership.violations.map((violation) =>
+      Diagnostic.invalidSuspensionOwnership(violation.detail, violation.span),
+    ),
+    ...NativeAssemblyPlanning.diagnostics(normalized, profile),
+  ]
   if (diagnostics.length > 0) return { program: undefined, diagnostics }
   if (options.normalizeMir === false) return { program: normalized, diagnostics }
   return {
@@ -683,6 +782,8 @@ export type Targeted<A> =
 
 /** Immutable target/runtime facts derived from exactly one Frontend value. */
 export interface Realization {
+  readonly composition?: ArtifactComposition.Resolved
+  readonly artifactPlan?: ArtifactPlan.ArtifactPlan
   readonly profile?: CompilationProfile.CompilationProfile
   readonly instances: Instances.Discovery
   readonly target: Target.Selection
@@ -715,6 +816,8 @@ export type Preparation =
     }
   | {
       readonly _tag: 'Prepared'
+      readonly composition: ArtifactComposition.Resolved
+      readonly artifactPlan?: ArtifactPlan.ArtifactPlan
       readonly profile: CompilationProfile.CompilationProfile
       readonly target: Target.Target
       readonly program: Mir.Module

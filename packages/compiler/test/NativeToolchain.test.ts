@@ -583,6 +583,7 @@ it.effect(
         'WebAssemblyModule',
         termination(),
         [],
+        true,
       )
       assert.strictEqual(runtimeSource, LlvmWasmRuntime.source)
       const keyFor = (runtimeSource: string) =>
@@ -1370,3 +1371,37 @@ it.effect(
     }),
   15_000,
 )
+
+it('keeps relocatable form, exact loader symbols and ordered scripts distinct', () => {
+  const tools = { clang, llvmAr: 'llvm-ar' }
+  const target = Target.x8664UnknownLinuxGnu
+  const object = ToolchainPlan.nativeCommand(
+    tools,
+    'NativeObject',
+    target,
+    ['/program.o'],
+    [{ _tag: 'Object', path: '/support.o' }],
+    '/result.o',
+  )
+  assert.strictEqual(object._tag, 'PlannedCommand')
+  if (object._tag === 'PlannedCommand') {
+    assert.include(object.arguments, '-r')
+    assert.include(object.arguments, '-nostdlib')
+    assert.isBelow(object.arguments.indexOf('/program.o'), object.arguments.indexOf('/support.o'))
+  }
+  const entry = ToolchainPlan.nativeCommand(
+    tools,
+    'NativeExecutable',
+    target,
+    ['/program.o'],
+    [{ _tag: 'LinkerScript', path: '/layout.ld' }],
+    '/program',
+    { kind: 'named', name: 'machine_start' },
+  )
+  assert.strictEqual(entry._tag, 'PlannedCommand')
+  if (entry._tag === 'PlannedCommand') {
+    assert.include(entry.arguments, '-nostartfiles')
+    assert.include(entry.arguments, 'machine_start')
+    assert.include(entry.arguments, '/layout.ld')
+  }
+})

@@ -1,13 +1,7 @@
+import * as CAbi from './CAbi.js'
 import type * as Backend from './Backend.js'
 
-type CType =
-  | { readonly _tag: 'Scalar'; readonly spelling: string }
-  | { readonly _tag: 'Pointer'; readonly mutable: boolean }
-  | {
-      readonly _tag: 'FunctionPointer'
-      readonly parameters: ReadonlyArray<CType>
-      readonly result: CType
-    }
+type CType = CAbi.TextShape
 
 /** The verified export inventory rendered into one C consumer header. */
 export interface CHeader {
@@ -52,61 +46,6 @@ const scalar = (type: string): string | undefined => {
   }
 }
 
-const splitParameters = (text: string): ReadonlyArray<string> | undefined => {
-  if (text.length === 0) return Object.freeze([])
-  const parameters: Array<string> = []
-  let depth = 0
-  let start = 0
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index]
-    if (character === '(') depth += 1
-    else if (character === ')') depth -= 1
-    else if (character === ',' && depth === 0) {
-      parameters.push(text.slice(start, index))
-      start = index + 1
-    }
-    if (depth < 0) return undefined
-  }
-  if (depth !== 0) return undefined
-  parameters.push(text.slice(start))
-  return Object.freeze(parameters)
-}
-
-const decode = (type: string): CType | undefined => {
-  const scalarSpelling = scalar(type)
-  if (scalarSpelling !== undefined)
-    return Object.freeze({ _tag: 'Scalar', spelling: scalarSpelling })
-  const pointer = /^pointer<(mut|const);(?:[A-Za-z0-9_.~-]|%[0-9A-F]{2})+>$/.exec(type)
-  if (pointer !== null) return Object.freeze({ _tag: 'Pointer', mutable: pointer[1] === 'mut' })
-  const prefix = 'extern "C" fn('
-  if (!type.startsWith(prefix)) return undefined
-  let depth = 1
-  let close = -1
-  for (let index = prefix.length; index < type.length; index += 1) {
-    const character = type[index]
-    if (character === '(') depth += 1
-    else if (character === ')') depth -= 1
-    if (depth === 0) {
-      close = index
-      break
-    }
-  }
-  if (close < 0 || type.slice(close, close + 3) !== ')->') return undefined
-  const parameterTexts = splitParameters(type.slice(prefix.length, close))
-  if (parameterTexts === undefined) return undefined
-  const parameters = parameterTexts.map(decode)
-  const result = decode(type.slice(close + 3))
-  if (parameters.some((parameter) => parameter === undefined) || result === undefined)
-    return undefined
-  return Object.freeze({
-    _tag: 'FunctionPointer',
-    parameters: Object.freeze(
-      parameters.flatMap((parameter) => (parameter === undefined ? [] : [parameter])),
-    ),
-    result,
-  })
-}
-
 const parameterList = (parameters: ReadonlyArray<CType>): string =>
   parameters.length === 0
     ? 'void'
@@ -115,7 +54,7 @@ const parameterList = (parameters: ReadonlyArray<CType>): string =>
 const declarator = (type: CType, name: string): string => {
   switch (type._tag) {
     case 'Scalar':
-      return `${type.spelling} ${name}`
+      return `${scalar(type.type)} ${name}`
     case 'Pointer':
       return `${type.mutable ? 'void' : 'const void'} *${name}`
     case 'FunctionPointer':
@@ -134,7 +73,7 @@ const immutableDataDeclarator = (type: CType, name: string): string => {
 }
 
 const requireType = (type: string): CType => {
-  const decoded = decode(type)
+  const decoded = CAbi.inspectText(type)
   if (decoded === undefined) throw new RangeError(`Compiler produced unknown C ABI class ${type}`)
   return decoded
 }

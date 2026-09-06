@@ -1,3 +1,4 @@
+import * as ForeignContract from '../../src/ForeignContract.js'
 import type * as DeclarationFacts from '../../src/DeclarationFacts.js'
 import type * as Instances from '../../src/Instances.js'
 import * as Layout from '../../src/Layout.js'
@@ -168,6 +169,7 @@ export const foreignCallSample = (
   const provenance = (start: number, end: number): Provenance =>
     Object.freeze({ span: sampleSpan(source, start, end), generated: false })
   const signature = Object.freeze({
+    contract: ForeignContract.conservative,
     parameters: Object.freeze([
       Object.freeze({
         _tag: 'Integer' as const,

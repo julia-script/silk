@@ -1,3 +1,4 @@
+import { raise } from './support/raise.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Block from '../src/Block.js'
@@ -172,5 +173,63 @@ it.effect('says nothing about a module with no function bodies', () =>
     const type = yield* Type.functionType(builder, i32, [])
     yield* FunctionActor.declare(builder, 'external', type)
     assert.deepEqual(yield* Verify.verify(builder), [])
+  }),
+)
+
+it.effect('rejects use of an invoke result on the unwind edge and missing personalities', () =>
+  Effect.gen(function* () {
+    for (const fault of ['result-on-unwind', 'missing-personality', 'normal-bypass'] as const) {
+      const builder = yield* Builder.make()
+      const i32 = yield* Type.integer(builder, 32)
+      const signature = yield* Type.functionType(builder, i32, [])
+      const callee = yield* FunctionActor.declare(builder, 'foreign', signature)
+      const address = yield* Constant.fromGlobal(
+        builder,
+        yield* FunctionActor.global(builder, callee),
+      )
+      const fn = yield* FunctionActor.declare(
+        builder,
+        fault,
+        yield* Type.functionType(builder, i32, [yield* Type.integer(builder, 1)]),
+        fault === 'missing-personality' ? {} : { personality: address },
+      )
+      yield* FunctionActor.buildBody(
+        builder,
+        fn,
+        Effect.fnUntraced(function* (body) {
+          const entry = yield* Block.make(body, 'entry')
+          const normal = yield* Block.make(body, 'normal')
+          const unwind = yield* Block.make(body, 'unwind')
+          yield* Block.setInsertionPoint(body, entry)
+          if (fault === 'normal-bypass') {
+            const invoking = yield* Block.make(body, 'invoking')
+            yield* FunctionBody.conditionalBranch(
+              body,
+              yield* Value.argument(body, 0),
+              invoking,
+              normal,
+            )
+            yield* Block.setInsertionPoint(body, invoking)
+          }
+          const result =
+            (yield* FunctionBody.invoke(body, signature, address, [], normal, unwind)) ??
+            raise('expected invoke result')
+          yield* Block.setInsertionPoint(body, normal)
+          yield* FunctionBody.returnValue(body, result)
+          yield* Block.setInsertionPoint(body, unwind)
+          yield* FunctionBody.cleanupLandingPad(body)
+          if (fault === 'result-on-unwind') yield* FunctionBody.returnValue(body, result)
+          else yield* FunctionBody.unreachable(body)
+        }),
+      )
+      assert.deepEqual(
+        (yield* Verify.verify(builder)).map((violation) => violation.message),
+        [
+          fault === 'missing-personality'
+            ? 'Landing pad requires a personality function!'
+            : 'Instruction does not dominate all uses!',
+        ],
+      )
+    }
   }),
 )

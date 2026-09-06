@@ -150,6 +150,10 @@
       "types": "./dist/FloatingPoint.d.ts",
       "import": "./dist/FloatingPoint.js"
     },
+    "./ForeignContract": {
+      "types": "./dist/ForeignContract.d.ts",
+      "import": "./dist/ForeignContract.js"
+    },
     "./FormattedDocument": {
       "types": "./dist/FormattedDocument.d.ts",
       "import": "./dist/FormattedDocument.js"
@@ -330,6 +334,10 @@
       "types": "./dist/PhaseReport.d.ts",
       "import": "./dist/PhaseReport.js"
     },
+    "./PlatformCatalog": {
+      "types": "./dist/PlatformCatalog.d.ts",
+      "import": "./dist/PlatformCatalog.js"
+    },
     "./Presentation": {
       "types": "./dist/Presentation.d.ts",
       "import": "./dist/Presentation.js"
@@ -385,6 +393,10 @@
     "./SourceAction": {
       "types": "./dist/SourceAction.d.ts",
       "import": "./dist/SourceAction.js"
+    },
+    "./SourceCatalog": {
+      "types": "./dist/SourceCatalog.d.ts",
+      "import": "./dist/SourceCatalog.js"
     },
     "./SourceEntry": {
       "types": "./dist/SourceEntry.d.ts",
@@ -481,6 +493,30 @@
     "./WorkspaceInventory": {
       "types": "./dist/WorkspaceInventory.d.ts",
       "import": "./dist/WorkspaceInventory.js"
+    },
+    "./ArtifactComposition": {
+      "types": "./dist/ArtifactComposition.d.ts",
+      "default": "./dist/ArtifactComposition.js"
+    },
+    "./ArtifactPlan": {
+      "types": "./dist/ArtifactPlan.d.ts",
+      "default": "./dist/ArtifactPlan.js"
+    },
+    "./NativeRequirement": {
+      "types": "./dist/NativeRequirement.d.ts",
+      "default": "./dist/NativeRequirement.js"
+    },
+    "./NativeRequirementBinding": {
+      "types": "./dist/NativeRequirementBinding.d.ts",
+      "default": "./dist/NativeRequirementBinding.js"
+    },
+    "./NativeAssembly": {
+      "types": "./dist/NativeAssembly.d.ts",
+      "default": "./dist/NativeAssembly.js"
+    },
+    "./MachineFunction": {
+      "types": "./dist/MachineFunction.d.ts",
+      "default": "./dist/MachineFunction.js"
     }
   },
   "publishConfig": {
@@ -510,6 +546,7 @@
     "documentation:examples": "pnpm --filter @silklang/cli doctest:stdlib",
     "documentation:inventory": "node scripts/inventory-stdlib-documentation.mjs",
     "documentation:policy": "node scripts/check-stdlib-documentation.mjs",
+    "test:foreign-contracts": "node conformance/foreign-contracts/run.mjs",
     "test:native-boundary": "node conformance/native-boundary/run.mjs"
   },
   "dependencies": {

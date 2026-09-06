@@ -1,3 +1,4 @@
+import * as NativeAssembly from './NativeAssembly.js'
 import * as MirInitialization from './MirInitialization.js'
 import * as MovePath from './MovePath.js'
 import * as Lifetime from './Lifetime.js'
@@ -1045,6 +1046,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         operation.failure,
       ]
     case 'OsCall':
+    case 'NativeAssembly':
     case 'ForeignCall':
       return [operation.destination, ...operation.arguments]
     case 'RawBufferFrom':
@@ -1962,6 +1964,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'Allocate':
     case 'HostWrite':
     case 'OsCall':
+    case 'NativeAssembly':
     case 'ForeignCall':
     case 'Project':
     case 'ReadPlace':
@@ -2254,6 +2257,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'OsOpen':
       return [...operation.arguments, operation.success, operation.failure]
     case 'OsCall':
+    case 'NativeAssembly':
     case 'ForeignCall':
       return operation.arguments
     case 'RawBufferFrom':
@@ -3015,13 +3019,90 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
     }),
   )
   violations.push(...coroutineFrameLayoutViolations(self))
-  for (const record of [...self.foreignCalls, ...self.foreignExports]) {
-    if (
-      !CAbi.isCanonical(record.signature.result, self.layout.target) ||
-      !record.signature.parameters.every(
-        (type) => type._tag !== 'Void' && CAbi.isCanonical(type, self.layout.target),
+  for (const fn of self.functions) {
+    const operations = fn.regions.flatMap(operationsOf).flatMap(operationTree)
+    for (const operation of operations) {
+      if (operation._tag !== 'NativeAssembly') continue
+      const destination = fn.localTypes[operation.destination.ordinal]
+      if (
+        destination === undefined ||
+        !SilkType.equals(semanticType(destination), semanticType(operation.type))
       )
-    )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidNativeAssembly',
+          function: fn.id,
+          detail: 'assembly destination must have the declared result type',
+        })
+      const operands = operation.arguments.flatMap((argument) => {
+        const type = fn.localTypes[argument.ordinal]
+        return type === undefined ? [] : [semanticType(type)]
+      })
+      for (const detail of NativeAssembly.violations(
+        operation.assembly,
+        semanticType(operation.type),
+        operands,
+        self.layout.target,
+      ))
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidNativeAssembly',
+          function: fn.id,
+          detail,
+        })
+      const owner = fn.regions.find((region) => operationsOf(region).includes(operation))
+      if (
+        operation.assembly.noReturn &&
+        (owner?._tag !== 'OperationRegion' ||
+          owner.outcome._tag !== 'Trap' ||
+          owner.operations.at(-1) !== operation)
+      )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidNativeAssembly',
+          function: fn.id,
+          detail: 'terminal assembly must end its region without a continuation',
+        })
+    }
+    if (fn.machine !== undefined) {
+      const assembly = operations[0]
+      if (
+        !NativeAssembly.available(self.layout.target) ||
+        fn.parameterCount !== 0 ||
+        !SilkType.equals(semanticType(fn.result), SilkType.unit) ||
+        operations.length !== 1 ||
+        assembly?._tag !== 'NativeAssembly' ||
+        !assembly.assembly.noReturn ||
+        !assembly.assembly.sideEffects ||
+        assembly.arguments.length !== 0 ||
+        fn.regions.some(
+          (region) => region._tag !== 'OperationRegion' || region.outcome._tag !== 'Trap',
+        )
+      )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidMachineFunction',
+          function: fn.id,
+          detail: 'naked function requires exactly one operand-free terminal assembly operation',
+        })
+    }
+  }
+
+  const retained = new Set<string>()
+  for (const root of self.retainedRoots ?? []) {
+    const key = Instances.keyText(root)
+    if (retained.has(key) || !self.functions.some((fn) => matchesInstanceKey(fn, root)))
+      violations.push(
+        Object.freeze({
+          _tag: 'Violation',
+          rule: 'InvalidEntry',
+          detail: 'Retained roots must uniquely identify emitted function instances',
+        }),
+      )
+    retained.add(key)
+  }
+  for (const record of [...self.foreignCalls, ...self.foreignExports]) {
+    if (!CAbi.isCanonicalSignature(record.signature, self.layout.target))
       violations.push(
         Object.freeze({
           _tag: 'Violation',
@@ -3246,7 +3327,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
       }),
     )
   const availableEntry =
-    self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'LibraryEntry'
+    self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'NoInvocation'
       ? undefined
       : self.entry
   const target = self.functions.find(
@@ -3270,7 +3351,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
       .flatMap(operationTree)
       .filter((operation) => operation._tag === 'Call') ?? []
   const entryValid =
-    self.entry._tag === 'LibraryEntry'
+    self.entry._tag === 'NoInvocation'
       ? self.foreignExports.length > 0 &&
         self.foreignExports.every((export_) =>
           self.functions.some((fn) => matchesInstanceKey(fn, export_.key)),
@@ -4486,6 +4567,17 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               if (parameter._tag === 'Pointer') {
                 // Argument conversion may only weaken qualifiers; the pointee remains invariant.
                 const semantic = actual === undefined ? undefined : semanticType(actual)
+                if (
+                  semantic !== undefined &&
+                  SilkType.isReference(semantic) &&
+                  operation.signature.contract.borrow.includes(ordinal)
+                )
+                  return (
+                    parameter.type.extent === 'Single' &&
+                    !parameter.type.nullable &&
+                    parameter.type.mutable === (semantic.access === 'Exclusive') &&
+                    SilkType.key(semantic.target) === SilkType.key(parameter.type.pointee)
+                  )
                 return (
                   semantic !== undefined &&
                   SilkType.isPointer(semantic) &&
@@ -4496,6 +4588,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               return classKey(actual, 'Parameter') === CAbi.typeText(parameter)
             })
           if (
+            !CAbi.isCanonicalSignature(operation.signature, target) ||
             !argumentsValid ||
             classKey(fn.localTypes.at(operation.destination.ordinal), 'Result') !== resultKey ||
             classKey(operation.type, 'Result') !== resultKey

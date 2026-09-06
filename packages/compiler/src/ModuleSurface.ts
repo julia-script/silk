@@ -1,3 +1,4 @@
+import * as ForeignContract from './ForeignContract.js'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Fn from 'effect/Function'
@@ -1988,9 +1989,21 @@ const declaration = (
     executableLifetimeSignature(DeclarationFacts.executableLifetimes(value)),
     boolean(value.unsafe),
     optional(
+      value.machine === undefined
+        ? undefined
+        : record('MachineFunction', [
+            boolean(value.machine.naked),
+            boolean(value.machine.noReturn),
+          ]),
+    ),
+    optional(
       value.foreign === undefined
         ? undefined
-        : record('Foreign', [value.foreign.abi, value.foreign.symbol]),
+        : record('Foreign', [
+            value.foreign.abi,
+            value.foreign.symbol,
+            ForeignContract.key(value.foreign.contract),
+          ]),
     ),
     array(value.typeParameters.map(typeParameter)),
     number(value.parameterCount),

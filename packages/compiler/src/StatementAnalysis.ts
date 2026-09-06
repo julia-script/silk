@@ -1,3 +1,4 @@
+import * as MachineFunction from './MachineFunction.js'
 import * as Lifetime from './Lifetime.js'
 import * as BodyLifetime from './BodyLifetime.js'
 import * as LifetimeFlow from './LifetimeFlow.js'
@@ -1902,6 +1903,7 @@ export const analyzeFunctionBody = (
     ...(staticContext === undefined ? {} : { staticContext }),
     ...(returnType === undefined ? {} : { returnType }),
   }
+  context.diagnostics.push(...MachineFunction.bodyDiagnostics(source, declaration))
   if (declaration.phase === 'Runtime') {
     const target = staticContext?.environment.target ?? 'unselected-target'
     for (const parameter of declaration.parameters) {

@@ -1,5 +1,4 @@
 import { modules } from './Stdlib.generated.js'
-import type * as Target from './Target.js'
 
 /** The reserved namespace prefix. User resolvers are never consulted for these identities. */
 export const namespacePrefix = 'silk/'
@@ -15,8 +14,6 @@ export interface Module {
   readonly sourceIdentity: string
   readonly digest: string
   readonly documentation: string
-  readonly layer: 'portable' | 'target-provider'
-  readonly providerTargets?: ReadonlyArray<Target.Id>
   readonly staticInventory: ReadonlyArray<string>
   readonly runtimeInventory: ReadonlyArray<string>
   readonly namespace?: string
@@ -39,8 +36,6 @@ export const manifest: ReadonlyArray<Module> = Object.freeze(
       sourceIdentity: entry.sourceIdentity,
       digest: entry.digest,
       documentation: entry.documentation,
-      layer: entry.layer,
-      ...('providerTargets' in entry ? { providerTargets: entry.providerTargets } : {}),
       staticInventory: staticInventory(entry),
       runtimeInventory: entry.runtimeInventory,
       ...('namespace' in entry ? { namespace: entry.namespace } : {}),

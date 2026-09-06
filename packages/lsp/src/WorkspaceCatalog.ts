@@ -1,6 +1,8 @@
 import * as Lexer from '@silklang/compiler/Lexer'
 import * as ModuleSummary from '@silklang/compiler/ModuleSummary'
 import * as Parser from '@silklang/compiler/Parser'
+import * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
+import * as SourceCatalog from '@silklang/compiler/SourceCatalog'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as SourceOrigin from '@silklang/compiler/SourceOrigin'
 import * as SourceResolver from '@silklang/compiler/SourceResolver'
@@ -24,6 +26,7 @@ export interface Request {
   readonly documents: ReadonlyArray<Document.Document>
   readonly previous?: WorkspaceInventory.WorkspaceInventory
   readonly invalidation: Invalidation
+  readonly configuration: ProjectAnalysis.Options
 }
 
 interface Counters {
@@ -33,6 +36,8 @@ interface Counters {
   removed: number
   summaryElapsedMs: number
 }
+
+const analyses = new WeakMap<WorkspaceInventory.WorkspaceInventory, SourceCatalog.Selection>()
 
 const isWithin = (root: string, candidate: string, path: Path.Path): boolean => {
   const relative = path.relative(root, candidate)
@@ -136,7 +141,7 @@ export const refresh = Effect.fn('WorkspaceCatalog.refresh')(function* (
 ): Effect.fn.Return<
   WorkspaceInventory.WorkspaceInventory,
   never,
-  FileSystem.FileSystem | Path.Path
+  FileSystem.FileSystem | Path.Path | SourceResolver.SourceResolver
 > {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -190,12 +195,36 @@ export const refresh = Effect.fn('WorkspaceCatalog.refresh')(function* (
   }
 
   const discoveryElapsedMs = performance.now() - discoveryStartedAt
-  return WorkspaceInventory.make({
-    project,
-    toolchain: toolchain(request.previous, counters),
+  const bundled = toolchain(request.previous, counters)
+  const roots = [...project.values(), ...bundled.values()].map((summary) => summary.source)
+  const priorAnalysis = request.previous === undefined ? undefined : analyses.get(request.previous)
+  const analysis = yield* SourceCatalog.analyze(
+    {
+      roots,
+      ...(request.configuration.application === undefined
+        ? {}
+        : { application: request.configuration.application }),
+      ...(request.configuration.configuration === undefined
+        ? {}
+        : { configuration: request.configuration.configuration }),
+      ...(priorAnalysis === undefined ? {} : { previous: priorAnalysis.closure }),
+    },
+    priorAnalysis?.catalog,
+  )
+  const catalog =
+    request.configuration.configurationError === undefined ? analysis.catalog : undefined
+  const selected = catalog?.modules ?? new Map<string, ModuleSummary.ModuleSummary>()
+  const inventory = WorkspaceInventory.make({
+    project: [...selected].filter(([name]) => !Stdlib.isReserved(name)),
+    toolchain: [...selected].filter(([name]) => Stdlib.isReserved(name)),
+    ...(catalog === undefined
+      ? {}
+      : { profile: catalog.profile.identity, identity: catalog.identity }),
     observation: {
       ...counters,
       discoveryElapsedMs,
     },
   })
+  analyses.set(inventory, analysis)
+  return inventory
 })

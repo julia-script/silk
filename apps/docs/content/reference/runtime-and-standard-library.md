@@ -71,8 +71,9 @@ availability before lowering. Missing support required by a matched toolchain is
 integrity error, not a source-level missing import or typed failure.
 
 **Current compiler:** Aligned. Canonical standard-library files compile through the ordinary
-pipeline, the generated catalog classifies portable and target-provider modules, source scope is
-explicit, and intrinsic support is reachable-only.
+pipeline, source conditions determine availability, the generated catalog describes exact source
+content, and intrinsic support is reachable-only. Portable and provider describe source roles, not
+manifest policy categories.
 
 **Evidence:** [bootstrap library source specification](../../../../openspec/specs/bootstrap-silk-stdlib/spec.md),
 [unsafe and intrinsic boundary](unsafe-intrinsics-and-targets.md),
@@ -240,16 +241,16 @@ provider, but documentation does not add a dependency or default. If no honest c
 exists, the lower-level capability remains explicitly target-specific rather than weakening the
 portable API to expose native details.
 
-**Diagnostics and audit:** Importing a target-provider module from a module declared portable is a
-distribution-policy violation identifying both modules and the dependency edge. A provider may
-import its portable contract. Catalog verification rejects a dependency cycle that makes the
-portable closure depend transitively on target-provider source.
+**Diagnostics and audit:** A selected façade can import its active platform implementation through
+ordinary imports. Neither the manifest nor integrity validation prohibits that source dependency.
+Service contracts remain independent where their API promises platform-neutral substitution.
+Missing selected declarations receive ordinary resolution diagnostics; inactive imports contribute
+no source or executable dependency.
 
-**Current standard library:** Partially aligned. The manifest now classifies every module as
-`portable` or `target-provider`, and filesystem, standard input, host input, and child-process
-contracts are separate from their OS providers. Allocation (`silk.allocator`) and standard streams
-(`silk.writer`) are still classified as portable while also containing their
-process-backed providers, so those two module boundaries remain to be reconciled with this rule.
+**Current standard library:** Filesystem, standard input, host input, child-process, clock and random
+contracts are separate from their selected OS providers. Allocation and standard streams retain
+existing process-backed implementations until their assigned operation migrations. No manifest
+category is an availability rule. See [selected source tooling](selected-source-tooling.md).
 
 **Evidence:** [portable/provider separation](../../../../openspec/specs/bootstrap-silk-stdlib/spec.md),
 [requirements and services](requirements-and-services.md),
@@ -340,15 +341,16 @@ A target provider is an ordinary source module whose operations implement one or
 services through sealed target-restricted intrinsics. It follows ordinary imports, visibility,
 conformance, ownership, Effect, unsafe, specialization, and cleanup rules.
 
-Importing and type-checking a target-provider module is valid on every target. Compatibility is
-checked only when a provider operation and its restricted intrinsic enter the selected executable
-closure. Provider names, module paths, and conformances do not create module-level target semantics.
+Ordinary module static selection determines which provider declarations exist for the profile.
+The seven maintained native providers expose no native declarations on LLVM-to-Wasm. An empty
+module import is harmless, while a selected member import of an unavailable actor diagnoses.
+Generic intrinsic restrictions still apply to executable calls independently of provider spelling.
 
 ```silk,ignore
-import silk.os_filesystem { OsFileSystem }
+import silk.os_filesystem
 
 pub fn main() -> i32 {
-  // Importing the provider actor is valid even when this target cannot execute its OS calls.
+  // This module can have an empty selected surface; no unavailable actor is imported.
   return 0
 }
 ```

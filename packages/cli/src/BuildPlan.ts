@@ -1,3 +1,6 @@
+import type * as ModuleClosure from '@silklang/compiler/ModuleClosure'
+import * as ConfigurationOrigin from '@silklang/compiler/ConfigurationOrigin'
+import type * as ArtifactPlan from '@silklang/compiler/ArtifactPlan'
 import type * as ProjectProfile from '@silklang/compiler/ProjectProfile'
 import { join } from 'node:path'
 import * as ArtifactKind from '@silklang/compiler/ArtifactKind'
@@ -16,6 +19,7 @@ export interface BuildPlan {
   readonly project: Project.Project
   readonly target: Target.Target
   readonly artifactKind: ArtifactKind.ArtifactKind
+  readonly stage?: ArtifactPlan.Stage
   readonly configuration?: ProjectProfile.Profile
   readonly optimization: ToolchainPlan.OptimizationProfile
   readonly destination: string
@@ -76,22 +80,16 @@ export const make = (
     : ArtifactKind.webAssemblyModule
   const logicalArtifact = options.configuration?.input.artifact
   if (logicalArtifact !== undefined) {
-    if (logicalArtifact === 'object')
-      return Result.fail(
-        new BuildPlanError({
-          operation: 'BuildPlan.make',
-          message: 'Object-only profiles require the compiler object-emission API',
-          reason: { _tag: 'UnsupportedProfileArtifact', artifact: logicalArtifact },
-        }),
-      )
     if (Target.isNative(options.target)) {
       if (logicalArtifact === 'executable') artifactKind = 'NativeExecutable'
       else if (logicalArtifact === 'static-archive') artifactKind = 'NativeStaticLibrary'
+      else if (logicalArtifact === 'object') artifactKind = 'NativeObject'
       else artifactKind = 'NativeSharedLibrary'
     }
   }
+  const stage = project.build.stage ?? 'final'
   if (options.purpose === 'run') {
-    if (artifactKind !== 'NativeExecutable') {
+    if (artifactKind !== 'NativeExecutable' || stage !== 'final') {
       return Result.fail(
         new BuildPlanError({
           operation: 'BuildPlan.make',
@@ -159,7 +157,9 @@ export const make = (
     'llvm',
     options.target.id,
     options.optimization,
-    ArtifactKind.fileName(artifactKind, project.name, options.target),
+    stage === 'final'
+      ? ArtifactKind.fileName(artifactKind, project.name, options.target)
+      : `${project.name}.${{ 'llvm-ir': 'll', 'llvm-bitcode': 'bc', assembly: 's', object: 'o' }[stage]}`,
   )
   const toolchain = Object.freeze({
     _tag: 'Toolchain' as const,
@@ -191,6 +191,7 @@ export const make = (
       project,
       target: options.target,
       artifactKind,
+      stage,
       optimization: options.optimization,
       ...(options.configuration === undefined ? {} : { configuration: options.configuration }),
       destination,
@@ -201,3 +202,28 @@ export const make = (
     }),
   )
 }
+
+/** Builds the complete logical request shared by project checking, building and running. */
+export const compilationConfiguration = (
+  self: BuildPlan,
+): NonNullable<ModuleClosure.CompilationRequest['configuration']> =>
+  Object.freeze({
+    package: `${self.project.name}@${self.project.version}`,
+    profile:
+      self.configuration?.input ??
+      Object.freeze({
+        target: self.target.id,
+        artifact: ArtifactKind.profileArtifact(self.artifactKind),
+        optimization: self.optimization === 'debug' ? 'none' : 'speed',
+        debug: self.optimization !== 'release',
+      }),
+    bindings: self.configuration?.bindings ?? Object.freeze([]),
+    ...(self.project.build.composition === undefined
+      ? {}
+      : {
+          composition: self.project.build.composition,
+          compositionOrigin: ConfigurationOrigin.literal(
+            `${self.project.manifestPath}:build.composition`,
+          ),
+        }),
+  })

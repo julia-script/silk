@@ -3,7 +3,7 @@ import * as ConfigurationOrigin from './ConfigurationOrigin.js'
 import type * as PackageConfiguration from './PackageConfiguration.js'
 import * as CompilationProfile from './CompilationProfile.js'
 import * as Result from 'effect/Result'
-import type * as ConfigurationError from './ConfigurationError.js'
+import * as ConfigurationError from './ConfigurationError.js'
 import * as Effect from 'effect/Effect'
 import * as BodyQuery from './BodyQuery.js'
 import * as DeclarationCollection from './DeclarationCollection.js'
@@ -25,7 +25,11 @@ import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Ownership from './Ownership.js'
 import * as PhaseReport from './PhaseReport.js'
 import * as SemanticInvalidation from './SemanticInvalidation.js'
-import type * as SourceResolver from './SourceResolver.js'
+import * as SourceResolver from './SourceResolver.js'
+import * as SourceFile from './SourceFile.js'
+import * as Stdlib from './Stdlib.js'
+import * as Option from 'effect/Option'
+import * as ArtifactComposition from './ArtifactComposition.js'
 
 /** Optional environment-specific observations attached to compiler phase reports. */
 export interface Options {
@@ -49,6 +53,7 @@ interface FrontendFacts {
 
 /** Immutable compiler frontend facts shared by Analysis and Driver. */
 export interface Frontend extends FrontendFacts {
+  readonly composition?: ArtifactComposition.Resolved
   readonly closure: ModuleClosure.Closure
   readonly initialProfile?: CompilationProfile.Initial
   readonly configurationError?: ConfigurationError.ConfigurationError
@@ -413,16 +418,70 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
           }),
     })
   }
+  const composition =
+    initial !== undefined && Result.isSuccess(initial)
+      ? yield* Effect.result(
+          Effect.gen(function* () {
+            const catalog = yield* ArtifactComposition.decode(
+              configuration?.composition ??
+                ArtifactComposition.defaults(request.root.id, initial.success),
+              configuration?.compositionOrigin,
+            )
+            return yield* ArtifactComposition.resolve(catalog, request.root.id, initial.success)
+          }),
+        )
+      : undefined
+  const additionalRoots: Array<SourceFile.SourceFile> = []
+  const rootFailures: Array<SourceResolver.SourceResolverError> = []
+  let rootError: ConfigurationError.ConfigurationError | undefined
+  if (composition !== undefined && Result.isSuccess(composition)) {
+    const missing: Array<string> = []
+    for (const module of composition.success.modules) {
+      if (module === request.root.id) continue
+      const resolved = yield* Effect.result(
+        Stdlib.isReserved(module)
+          ? SourceResolver.resolveStandardLibrary(module)
+          : SourceResolver.resolve(module),
+      )
+      if (Result.isFailure(resolved)) rootFailures.push(resolved.failure)
+      else if (Option.isNone(resolved.success)) missing.push(module)
+      else
+        additionalRoots.push(
+          SourceFile.make(module, resolved.success.value.bytes, resolved.success.value.origin),
+        )
+    }
+    if (missing.length > 0)
+      rootError = ConfigurationError.make(
+        'ArtifactComposition.roots',
+        'MissingParameter',
+        'artifact source roots',
+        [
+          composition.success.runtime?.origin ??
+            ConfigurationOrigin.literal('artifact composition'),
+          ...composition.success.retention
+            .filter((root) => missing.includes(root.module))
+            .map((root) => root.origin),
+        ],
+        missing,
+      )
+  }
   const report: Array<PhaseReport.PhaseReport> = []
-  const closure = yield* PhaseReport.measureEffectInto(
+  const loadedClosure = yield* PhaseReport.measureEffectInto(
     report,
     'closure',
     1,
-    ModuleClosure.load(request),
+    ModuleClosure.load(request, additionalRoots),
     (value) => value.modules.length,
     (value) => value.diagnostics.length,
     options,
   )
+  const closure =
+    rootFailures.length === 0
+      ? loadedClosure
+      : Object.freeze({
+          ...loadedClosure,
+          resolutionFailures: Object.freeze([...loadedClosure.resolutionFailures, ...rootFailures]),
+        })
   yield* Effect.yieldNow
   const facts = yield* ModuleSelection.required(closure)
     ? bootstrapFacts(closure, report, options)
@@ -432,11 +491,18 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
     initialFacts = Result.isSuccess(initial)
       ? { initialProfile: initial.success }
       : { configurationError: initial.failure }
+  let compositionFacts: Pick<Frontend, 'composition' | 'configurationError'> = {}
+  if (composition !== undefined)
+    compositionFacts = Result.isSuccess(composition)
+      ? { composition: composition.success }
+      : { configurationError: composition.failure }
   const unselected: Frontend = OpaqueRealization.withCatalog(
     Object.freeze({
       closure,
       ...facts,
       ...initialFacts,
+      ...compositionFacts,
+      ...(rootError === undefined ? {} : { configurationError: rootError }),
       ...(configuration === undefined ? {} : { configuration }),
       ...(Result.isFailure(bindingSnapshot) ? { configurationError: bindingSnapshot.failure } : {}),
       ...(request.target === undefined ? {} : { requestedTarget: request.target }),
@@ -466,11 +532,21 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
         )
   }
   const selected = yield* ModuleSelection.select(
-    { roots: [request.root] },
-    { ...closure, _tag: 'ProjectModuleClosure', rootModules: [closure.rootModule] },
+    { roots: [request.root, ...additionalRoots], application: request.root.id },
+    {
+      ...closure,
+      _tag: 'ProjectModuleClosure',
+      rootModules: [request.root.id, ...additionalRoots.map((root) => root.id)],
+    },
     configured.completion,
   )
-  const selectedClosure = ModuleClosure.view(selected.closure, closure.rootModule)
+  const selectedClosure = ModuleClosure.view(
+    {
+      ...selected.closure,
+      resolutionFailures: Object.freeze([...selected.closure.resolutionFailures, ...rootFailures]),
+    },
+    closure.rootModule,
+  )
   if (selectedClosure === undefined) throw new RangeError('Module selection lost its root')
   const selectedFacts = yield* analyzeFrontend(selectedClosure, report, options)
   return OpaqueRealization.withCatalog(
@@ -485,28 +561,76 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
   )
 })
 
-/** Constructs one complete compiler frontend for the union closure of project roots. */
-export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
+/** Selected module closure and headers shared by compilation and source catalogs. */
+export interface SelectedProject {
+  readonly closure: ModuleClosure.ProjectClosure
+  readonly profile?: CompilationProfile.CompilationProfile
+  readonly selection?: ModuleSelection.ModuleSelection
+  readonly headers: HeaderFacts
+}
+
+/** Runs canonical profile/bootstrap/selection without elaborating unrelated executable bodies. */
+export const selectProject = Effect.fn('Frontend.selectProject')(function* (
   request: ModuleClosure.ProjectRequest,
+  report: Array<PhaseReport.PhaseReport> = [],
   options: Options = {},
-  previous?: IncrementalReuse.ProjectReuseBasis,
-): Effect.fn.Return<ProjectFrontend, never, SourceResolver.SourceResolver> {
-  const report: Array<PhaseReport.PhaseReport> = []
+): Effect.fn.Return<SelectedProject, never, SourceResolver.SourceResolver> {
+  const roots = [...request.roots]
+  const application = request.application ?? roots[0]?.id
+  const requestedModules = new Set(application === undefined ? [] : [application])
+  const failures: Array<SourceResolver.SourceResolverError> = []
+  const missing: Array<string> = []
+  if (request.configuration?.composition !== undefined && application !== undefined) {
+    const selectedRoots = yield* Effect.result(
+      Effect.gen(function* () {
+        const profile = yield* CompilationProfile.decode(request.configuration?.profile)
+        const catalog = yield* ArtifactComposition.decode(
+          request.configuration?.composition,
+          request.configuration?.compositionOrigin,
+        )
+        return yield* ArtifactComposition.resolve(catalog, application, profile)
+      }),
+    )
+    if (Result.isSuccess(selectedRoots))
+      for (const module of selectedRoots.success.modules) requestedModules.add(module)
+  }
+  for (const module of requestedModules) {
+    if (roots.some((root) => root.id === module)) continue
+    const resolved = yield* Effect.result(
+      Stdlib.isReserved(module)
+        ? SourceResolver.resolveStandardLibrary(module)
+        : SourceResolver.resolve(module),
+    )
+    if (Result.isFailure(resolved)) failures.push(resolved.failure)
+    else if (Option.isNone(resolved.success)) missing.push(module)
+    else
+      roots.push(
+        SourceFile.make(module, resolved.success.value.bytes, resolved.success.value.origin),
+      )
+  }
+  const expanded = { ...request, roots }
   let closure = yield* PhaseReport.measureEffectInto(
     report,
     'closure',
     request.roots.length,
-    ModuleClosure.loadProject(request),
+    ModuleClosure.loadProject(expanded),
     (value) => value.modules.length,
     (value) => value.diagnostics.length,
     options,
   )
+  closure = Object.freeze({
+    ...closure,
+    resolutionFailures: Object.freeze([...closure.resolutionFailures, ...failures]),
+  })
   yield* Effect.yieldNow
   let selection: ModuleSelection.ModuleSelection | undefined
   let profile: CompilationProfile.CompilationProfile | undefined
   let bootstrapHeaders: HeaderFacts | undefined
   if (request.configuration !== undefined || ModuleSelection.required(closure)) {
-    const first = closure.rootModules[0]
+    const first =
+      application !== undefined && closure.sources.has(application)
+        ? application
+        : closure.rootModules[0]
     const view = first === undefined ? undefined : ModuleClosure.view(closure, first)
     if (view === undefined) throw new RangeError('Project selection lost its root')
     const base = yield* bootstrapFacts(closure, report, options)
@@ -524,7 +648,7 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
     )
     profile = configured.completion?.profile
     if (configured.completion !== undefined && ModuleSelection.required(closure)) {
-      const selected = yield* ModuleSelection.select(request, closure, configured.completion)
+      const selected = yield* ModuleSelection.select(expanded, closure, configured.completion)
       closure = selected.closure
       selection = selected.selection
     } else if (configured.completion === undefined) {
@@ -550,13 +674,53 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       })
     }
   }
+  const headers = bootstrapHeaders ?? (yield* analyzeHeaders(closure, report, options))
+  const span =
+    roots[0] === undefined
+      ? undefined
+      : closure.modules.find((module) => module.name === roots[0]?.id)?.syntax.root.span
+  if (missing.length > 0 && span !== undefined)
+    closure = {
+      ...closure,
+      diagnostics: Diagnostic.merge(closure.diagnostics, [
+        Diagnostic.invalidConfiguration(
+          ConfigurationError.make(
+            'Frontend.selectProject',
+            'MissingParameter',
+            'artifact source roots',
+            [
+              request.configuration?.compositionOrigin ??
+                ConfigurationOrigin.literal('application'),
+            ],
+            missing,
+          ),
+          span,
+        ),
+      ]),
+    }
+
+  return Object.freeze({
+    closure,
+    headers,
+    ...(profile === undefined ? {} : { profile }),
+    ...(selection === undefined ? {} : { selection }),
+  })
+})
+
+/** Constructs one complete compiler frontend for the union closure of project roots. */
+export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
+  request: ModuleClosure.ProjectRequest,
+  options: Options = {},
+  previous?: IncrementalReuse.ProjectReuseBasis,
+): Effect.fn.Return<ProjectFrontend, never, SourceResolver.SourceResolver> {
+  const report: Array<PhaseReport.PhaseReport> = []
+  const { closure, profile, selection, headers } = yield* selectProject(request, report, options)
   const semanticEnvironment = Canonical.record('SelectedFrontend', [
     SemanticInvalidation.environment,
     profile?.identity ?? '',
     selection?.dependencies ?? '',
   ])
   const compatiblePrevious = previous?.environment === semanticEnvironment ? previous : undefined
-  const headers = bootstrapHeaders ?? (yield* analyzeHeaders(closure, report, options))
   const bodyQueries = BodyQuery.make(
     headers.index,
     [...(compatiblePrevious?.semantics.values() ?? [])].map((module) => module.elaboration),

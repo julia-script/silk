@@ -26,6 +26,8 @@ export const make = (options: {
     }),
     {
       documentSelector: [{ language: 'silk' }],
+      initializationOptions: () => vscode.workspace.getConfiguration('silk').get('analysis'),
+      synchronize: { configurationSection: 'silk.analysis' },
     },
   )
   const diagnostics = EditorDiagnostics.make({ client, gate: options.gate })

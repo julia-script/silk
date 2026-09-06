@@ -290,6 +290,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'PointerReadUnaligned',
   'PointerWriteUnaligned',
   'PointerRequalify',
+  'NativeAssembly',
   'SlotAddress',
   'SlotWrite',
   'SlotTake',
