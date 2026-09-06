@@ -1,3 +1,5 @@
+import type * as ArtifactPlan from './ArtifactPlan.js'
+import type * as ArtifactComposition from './ArtifactComposition.js'
 import type * as ConfigurationError from './ConfigurationError.js'
 import type * as CompilationProfile from './CompilationProfile.js'
 import * as Data from 'effect/Data'
@@ -71,6 +73,7 @@ export type Targeted<A> =
 
 /** One immutable frontend analysis snapshot of one compilation request. */
 export interface FrontendSnapshot {
+  readonly composition?: ArtifactComposition.Resolved
   readonly selection?: ModuleSelection.ModuleSelection
   readonly _tag: 'AnalysisSnapshot' | 'ProjectAnalysisView'
   readonly realization: 'SingleRoot' | 'ProjectView'
@@ -102,6 +105,7 @@ export interface SingleRootFrontendSnapshot extends FrontendSnapshot {
 
 /** One immutable runtime realization derived from a completed frontend snapshot. */
 export interface Snapshot extends SingleRootFrontendSnapshot {
+  readonly artifactPlan?: ArtifactPlan.ArtifactPlan
   readonly profile?: CompilationProfile.CompilationProfile
   readonly instances: Instances.Discovery
   readonly target: Target.Selection

@@ -1,3 +1,7 @@
+import * as NativeRequirementBinding from './NativeRequirementBinding.js'
+import * as NativeRequirement from './NativeRequirement.js'
+import * as ArtifactComposition from './ArtifactComposition.js'
+import type * as ArtifactPlan from './ArtifactPlan.js'
 import * as ProjectProfile from './ProjectProfile.js'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
 import type * as ConfigurationError from './ConfigurationError.js'
@@ -28,6 +32,9 @@ export interface Project {
 
 /** Materialized project build defaults, including an absolute manifest-relative output root. */
 export interface BuildConfiguration {
+  readonly nativeBindings?: ReadonlyArray<NativeRequirementBinding.NativeRequirementBinding>
+  readonly stage?: ArtifactPlan.Stage
+  readonly composition?: ArtifactComposition.Input
   readonly targets: ReadonlyArray<TargetSelector.TargetSelector>
   readonly outputDirectory: string
   readonly artifact: Exclude<ArtifactKind.ArtifactKind, 'WebAssemblyModule'>
@@ -105,12 +112,17 @@ const buildKeys = Object.freeze([
   'output-dir',
   'artifact',
   'native-link-inputs',
+  'native-bindings',
+  'stage',
+  'composition',
   'profile',
   'bindings',
 ])
 
 const decodeNativeLinkInput = (value: TomlValue): NativeLinkInput.NativeLinkInput | undefined => {
   if (!isTable(value)) return undefined
+  if (hasExactKeys(value, ['linker-script']) && isSafeRelativePath(value['linker-script']))
+    return NativeLinkInput.linkerScript(value['linker-script'])
   if (hasExactKeys(value, ['object']) && isSafeRelativePath(value.object))
     return NativeLinkInput.object(value.object)
   if (hasExactKeys(value, ['static-archive']) && isSafeRelativePath(value['static-archive']))
@@ -134,6 +146,8 @@ const resolveNativeLinkInput = (
   resolvePath: (...paths: ReadonlyArray<string>) => string,
 ): NativeLinkInput.NativeLinkInput => {
   switch (input._tag) {
+    case 'LinkerScript':
+      return NativeLinkInput.linkerScript(resolvePath(directory, input.path))
     case 'Object':
       return NativeLinkInput.object(resolvePath(directory, input.path))
     case 'StaticArchive':
@@ -201,6 +215,34 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
       manifestPath,
       `build.${unsupportedBuildKey} is not a supported field`,
     )
+  const stages: ReadonlyArray<ArtifactPlan.Stage> = [
+    'final',
+    'llvm-ir',
+    'llvm-bitcode',
+    'assembly',
+    'object',
+  ]
+  const stage = stages.find((candidate) => candidate === (buildTable?.stage ?? 'final'))
+  if (stage === undefined)
+    return yield* invalidManifest(manifestPath, 'build.stage is not an admitted emission stage')
+  const composition =
+    buildTable?.composition === undefined
+      ? undefined
+      : yield* ArtifactComposition.decode(
+          buildTable.composition,
+          ConfigurationOrigin.literal(`${manifestPath}:build.composition`),
+        ).pipe(
+          Effect.map(ArtifactComposition.input),
+          Effect.mapError(
+            (error) =>
+              new ProjectError({
+                operation: 'Project.load',
+                manifestPath,
+                message: error.message,
+                reason: { _tag: 'InvalidProfile', error },
+              }),
+          ),
+        )
   const defaultTargets: ReadonlyArray<TargetSelector.TargetSelector> = ['host']
   const profiles = yield* ProjectProfile.catalog(
     document.profiles,
@@ -260,7 +302,55 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
   if (artifact === undefined || artifact === 'WebAssemblyModule') {
     return yield* invalidManifest(
       manifestPath,
-      'build.artifact must be executable, shared-library, or static-library',
+      'build.artifact must be executable, shared-library, static-library, or object',
+    )
+  }
+  const bindingInputs = buildTable?.['native-bindings'] ?? []
+  if (!Array.isArray(bindingInputs))
+    return yield* invalidManifest(manifestPath, 'build.native-bindings must be an array')
+  const nativeBindings: Array<NativeRequirementBinding.NativeRequirementBinding> = []
+  for (const [ordinal, candidate] of bindingInputs.entries()) {
+    if (
+      !isTable(candidate) ||
+      !hasExactKeys(candidate, ['kind', 'name', 'alternative', 'inputs']) ||
+      typeof candidate.alternative !== 'string' ||
+      !NativeRequirement.isIdentity(candidate.alternative) ||
+      !Array.isArray(candidate.inputs)
+    )
+      return yield* invalidManifest(
+        manifestPath,
+        'native binding requires kind, name, alternative and typed inputs',
+      )
+    const origin = ConfigurationOrigin.literal(`${manifestPath}:build.native-bindings[${ordinal}]`)
+    const requirement = yield* NativeRequirement.decode(
+      { kind: candidate.kind, name: candidate.name },
+      { kind: 'artifact' },
+      origin,
+    ).pipe(
+      Effect.mapError(
+        (error) =>
+          new ProjectError({
+            operation: 'Project.load',
+            manifestPath,
+            message: error.message,
+            reason: { _tag: 'InvalidProfile', error },
+          }),
+      ),
+    )
+    const inputs = candidate.inputs.map(decodeNativeLinkInput)
+    if (inputs.length === 0 || inputs.some((input) => input === undefined))
+      return yield* invalidManifest(
+        manifestPath,
+        'native binding inputs must be a nonempty typed input list',
+      )
+    nativeBindings.push(
+      Object.freeze({
+        kind: requirement.kind,
+        name: requirement.name,
+        alternative: candidate.alternative,
+        inputs: Object.freeze(inputs.flatMap((input) => (input === undefined ? [] : [input]))),
+        origin,
+      }),
     )
   }
   const nativeLinkInputsValue = buildTable?.['native-link-inputs'] ?? []
@@ -282,6 +372,9 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
     targets: Object.freeze([...targetsValue]) as ReadonlyArray<TargetSelector.TargetSelector>,
     outputDirectory,
     artifact,
+    stage,
+    ...(composition === undefined ? {} : { composition }),
+    nativeBindings: Object.freeze(nativeBindings),
     nativeLinkInputs: Object.freeze(
       nativeLinkInputs.flatMap((input) => (input === undefined ? [] : [input])),
     ),
@@ -377,6 +470,18 @@ export const load = Effect.fn('Project.load')(function* (
       targets: manifest.targets,
       outputDirectory: path.resolve(directory, manifest.outputDirectory),
       artifact: manifest.artifact,
+      stage: manifest.stage,
+      ...(manifest.composition === undefined ? {} : { composition: manifest.composition }),
+      nativeBindings: Object.freeze(
+        manifest.nativeBindings.map((binding) =>
+          Object.freeze({
+            ...binding,
+            inputs: Object.freeze(
+              binding.inputs.map((input) => resolveNativeLinkInput(directory, input, path.resolve)),
+            ),
+          }),
+        ),
+      ),
       nativeLinkInputs: Object.freeze(
         manifest.nativeLinkInputs.map((input) =>
           resolveNativeLinkInput(directory, input, path.resolve),

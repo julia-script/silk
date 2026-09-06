@@ -36,7 +36,7 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
   let voidType: LlvmType.Type | undefined
   const declared: Array<NativeLoweringContext.DeclaredFunction> = []
   const machineEntry =
-    context.program.entry._tag === 'LibraryEntry' ? undefined : Mir.machineEntry(context.program)
+    context.program.entry._tag === 'NoInvocation' ? undefined : Mir.machineEntry(context.program)
   for (const fn of context.program.functions) {
     const resultLanes = context.lanesFor(fn.result)
     const resultLaneCount = resultLanes.length

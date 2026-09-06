@@ -117,6 +117,12 @@ const inspect = (
       (input.maximumDeployment !== undefined && maximumDeployment === undefined)
     )
       return yield* Result.fail(invalid('native requirement deployment'))
+    if (
+      minimumDeployment !== undefined &&
+      maximumDeployment !== undefined &&
+      compareDeployment(minimumDeployment, maximumDeployment) > 0
+    )
+      return yield* Result.fail(invalid('native requirement deployment interval'))
     let alternatives: ReadonlyArray<string> | undefined
     if (input.alternatives !== undefined) {
       if (!Array.isArray(input.alternatives) || input.alternatives.length === 0)

@@ -201,6 +201,9 @@ export const refresh = Effect.fn('WorkspaceCatalog.refresh')(function* (
   const analysis = yield* SourceCatalog.analyze(
     {
       roots,
+      ...(request.configuration.application === undefined
+        ? {}
+        : { application: request.configuration.application }),
       ...(request.configuration.configuration === undefined
         ? {}
         : { configuration: request.configuration.configuration }),

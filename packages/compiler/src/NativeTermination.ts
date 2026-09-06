@@ -122,7 +122,7 @@ export const make = (
     builder,
     program,
     i32,
-    enabled: program.layout.target.kind === 'Native' && program.entry._tag !== 'LibraryEntry',
+    enabled: program.layout.target.kind === 'Native' && program.entry._tag !== 'NoInvocation',
     frames,
     frameLabels: frames.map(({ frame }) => labelOf(partial, frame.function, frame.provenance)),
     failureSites: [],

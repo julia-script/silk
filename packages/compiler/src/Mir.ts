@@ -1576,7 +1576,7 @@ export type Entry =
       readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
     }
   | {
-      readonly _tag: 'LibraryEntry'
+      readonly _tag: 'NoInvocation'
     }
   | {
       readonly _tag: 'OrdinaryEntry'
@@ -1596,6 +1596,8 @@ export type Entry =
     }
 
 export interface Module {
+  /** Explicit artifact roots preserved through optimization without creating foreign exports. */
+  readonly retainedRoots?: ReadonlyArray<Instances.InstanceKey>
   readonly _tag: 'MirModule'
   readonly module: string
   readonly entry: Entry
@@ -1624,7 +1626,7 @@ export interface Module {
 
 /** The concrete zero-parameter `i32` function exported as the machine entry. */
 export const machineEntry = (self: Module): Instances.InstanceKey => {
-  if (self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'LibraryEntry') {
+  if (self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'NoInvocation') {
     throw new RangeError(
       self.entry._tag === 'UnavailableEntry'
         ? `MIR has no machine entry: ${self.entry.reason}`

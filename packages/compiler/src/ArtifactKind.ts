@@ -6,14 +6,16 @@ export type ArtifactKind =
   | 'NativeExecutable'
   | 'NativeSharedLibrary'
   | 'NativeStaticLibrary'
+  | 'NativeObject'
   | 'WebAssemblyModule'
 
 /** Manifest spellings for artifacts selected by a project build. */
-export type ManifestSpelling = 'executable' | 'shared-library' | 'static-library'
+export type ManifestSpelling = 'executable' | 'shared-library' | 'static-library' | 'object'
 
 export const nativeExecutable: ArtifactKind = 'NativeExecutable'
 export const nativeSharedLibrary: ArtifactKind = 'NativeSharedLibrary'
 export const nativeStaticLibrary: ArtifactKind = 'NativeStaticLibrary'
+export const nativeObject: ArtifactKind = 'NativeObject'
 export const webAssemblyModule: ArtifactKind = 'WebAssemblyModule'
 
 /** Decodes one exact project-manifest artifact spelling. */
@@ -25,6 +27,8 @@ export const fromManifest = (value: string): ArtifactKind | undefined => {
       return nativeSharedLibrary
     case 'static-library':
       return nativeStaticLibrary
+    case 'object':
+      return nativeObject
     default:
       return undefined
   }
@@ -39,6 +43,8 @@ export const manifestSpelling = (self: ArtifactKind): ManifestSpelling | undefin
       return 'shared-library'
     case 'NativeStaticLibrary':
       return 'static-library'
+    case 'NativeObject':
+      return 'object'
     case 'WebAssemblyModule':
       return undefined
   }
@@ -69,6 +75,8 @@ export const fileName = (
         : `lib${packageName}.so`
     case 'NativeStaticLibrary':
       return `lib${packageName}.a`
+    case 'NativeObject':
+      return `${packageName}.o`
     case 'WebAssemblyModule':
       return `${packageName}.wasm`
   }
@@ -79,6 +87,7 @@ export const encode = (self: ArtifactKind): string => self
 
 /** Maps a durable artifact request into the corresponding logical profile fact. */
 export const profileArtifact = (self: ArtifactKind): CompilationProfile.Artifact => {
+  if (self === 'NativeObject') return 'object'
   if (self === 'NativeStaticLibrary') return 'static-archive'
   if (self === 'NativeExecutable') return 'executable'
   return 'loadable-module'

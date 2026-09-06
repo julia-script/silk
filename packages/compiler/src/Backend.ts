@@ -236,7 +236,7 @@ export const terminationOf = (
   return Object.freeze({
     _tag: 'EntryTermination',
     success:
-      program.entry._tag !== 'LibraryEntry' &&
+      program.entry._tag !== 'NoInvocation' &&
       program.entry._tag === 'OrdinaryEntry' &&
       program.entry.machine.declaration.name !== '$unit-entry'
         ? 'ReturnedStatus'

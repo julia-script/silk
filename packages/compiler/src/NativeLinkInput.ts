@@ -4,12 +4,16 @@ export type LibraryMode = 'Static' | 'Dynamic'
 /** One ordered, structured native tool input. Raw linker arguments are intentionally absent. */
 export type NativeLinkInput =
   | { readonly _tag: 'Object'; readonly path: string }
+  | { readonly _tag: 'LinkerScript'; readonly path: string }
   | { readonly _tag: 'StaticArchive'; readonly path: string }
   | { readonly _tag: 'Library'; readonly name: string; readonly mode: LibraryMode }
   | { readonly _tag: 'SearchPath'; readonly path: string }
   | { readonly _tag: 'Framework'; readonly name: string }
 
 export const object = (path: string): NativeLinkInput => Object.freeze({ _tag: 'Object', path })
+
+export const linkerScript = (path: string): NativeLinkInput =>
+  Object.freeze({ _tag: 'LinkerScript', path })
 
 export const staticArchive = (path: string): NativeLinkInput =>
   Object.freeze({ _tag: 'StaticArchive', path })
@@ -33,13 +37,17 @@ export const hasAbsolutePath = (self: NativeLinkInput): boolean => {
 
 /** Reads the filesystem path carried by a path-backed input. */
 export const path = (self: NativeLinkInput): string | undefined =>
-  self._tag === 'Object' || self._tag === 'StaticArchive' ? self.path : undefined
+  self._tag === 'Object' || self._tag === 'StaticArchive' || self._tag === 'LinkerScript'
+    ? self.path
+    : undefined
 
 const part = (value: string): string => `${new TextEncoder().encode(value).length}:${value}`
 
 /** Injective deterministic encoding for cache identities and inspection. */
 export const encode = (self: NativeLinkInput): string => {
   switch (self._tag) {
+    case 'LinkerScript':
+      return `linker-script:${part(self.path)}`
     case 'Object':
       return `object:${part(self.path)}`
     case 'StaticArchive':

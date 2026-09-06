@@ -243,9 +243,10 @@ export const parseForeignStaticDeclaration = (initial: State): NodeResult => {
   const type = parseType(colon.state, ['AsKeyword', 'Equals', ...topLevelFollowing])
   const symbol = parseSymbolTail(type.state, ['Equals', ...topLevelFollowing])
   if (imported) {
+    const properties = parseFunctionPropertyList(symbol.state)
     return Object.freeze({
-      state: symbol.state,
-      node: syntaxNode(symbol.state, 'ForeignStaticDeclaration', [
+      state: properties.state,
+      node: syntaxNode(properties.state, 'ForeignStaticDeclaration', [
         ...unsafeKeyword.elements,
         ...marker.elements,
         ...abi.elements,
@@ -254,6 +255,7 @@ export const parseForeignStaticDeclaration = (initial: State): NodeResult => {
         ...colon.elements,
         type.node,
         ...symbol.elements,
+        ...properties.elements,
       ]),
     })
   }

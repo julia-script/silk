@@ -43,10 +43,10 @@ The hosted adapter's source migration belongs to JUL-130.
 
 ```silk
 import Intrinsic.application as app
-export "C" fn answer() -> i32 as "answer" { app.answer() }
+export "C" fn answer() -> i32 as "answer" { return app.answer() }
 ```
 
-The application can expose `pub fn answer() -> i32 { 42 }` without defining `main`.
+The application can expose `pub fn answer() -> i32 { return 42 }` without defining `main`.
 
 **Boundary:** A private application member is not accessible through this import. An active binding
 outside an artifact request with an application root is unavailable. Self/cyclic imports follow the
@@ -68,7 +68,7 @@ does not retain a function. The selected runtime/module graph is analyzed before
 resolved. No-runtime compositions may be empty.
 
 **Example:** Retaining `{ module = "support", declaration = "capability" }` keeps a private
-`fn capability() -> i32 { 7 }`, while an unrelated public function in that module can disappear.
+`fn capability() -> i32 { return 7 }`, while an unrelated public function in that module can disappear.
 
 **Boundary:** Static/generic declarations and ambiguous overload names are not retention roots.
 Duplicate active foreign exports are invalid. An archive keeps its retained definitions, but a
@@ -180,3 +180,50 @@ Physical input order cannot be sorted or deduplicated as if it were a logical se
 before a successful plan is published.
 
 **Evidence:** D-013/D-015; artifact-root-planning specification and native conformance requirements.
+
+## Build configuration
+
+`build.stage` accepts `final` (default), `llvm-ir`, `llvm-bitcode`, `assembly` or `object`.
+`build.artifact` additionally accepts `object`. Intermediate destinations use `.ll`, `.bc`, `.s`
+or `.o`; `silk run` requires a final executable. A build can select an ordinary source runtime and
+retain private support code:
+
+```toml
+[build]
+artifact = "object"
+stage = "final"
+composition = { runtimes = [{ name = "custom", module = "runtime" }], defaults = ["custom"], retention = [{ module = "support", declaration = "keep" }], requirements = [] }
+```
+
+Profile `runtime = { kind = "none" }` overrides default candidates by explicitly selecting no
+runtime. A named runtime descriptor's optional `invoke` names a public monomorphic zero-argument
+ordinary function returning `i32` or unit, or an Effect function returning unit. Omitting `invoke`
+retains no implicit application function. Foreign exports in the selected source remain roots.
+
+Native requirements are resolved by explicit build bindings, preserving their listed input order:
+
+```toml
+[build]
+artifact = "shared-library"
+composition = { requirements = [{ kind = "library", name = "values", linkage = "dynamic", alternatives = ["system"] }] }
+native-bindings = [{ kind = "library", name = "values", alternative = "system", inputs = [{ search-path = "native/lib" }, { library = "values", mode = "dynamic" }] }]
+```
+
+Binding input paths resolve relative to the manifest. Library bindings admit library inputs and
+static archives according to hard linkage; framework, script, object and archive requirements admit
+the corresponding typed payload. Scripts use `{ linker-script = "relative/script.ld" }` and are
+admitted only by GNU/Linux final tool plans. No raw linker options are accepted. Object/archive
+forms preserve unresolved link requirements in the logical plan; final executables/modules require
+every active requirement to have an admitted binding. Explicit flat `native-link-inputs` retain
+their existing ordered build semantics and do not override source requirements.
+
+Named loader entries are exact linker symbols, including any target-specific spelling. Final
+library/object forms reject named entries. GNU/Linux executable `entry = { kind = "none" }` uses
+an absent entry and omits default startup files; Darwin executable absence is unsupported. A named
+executable entry also omits default startup files. Intermediate stages preserve these requests
+without performing a final link.
+
+`Analysis.Snapshot.artifactPlan`, `Realization.Prepared.artifactPlan` and `Driver.Compiled.artifactPlan`
+expose the logical plan. The compiler inspector's **Instances** view includes its identity, runtime
+and loader selections, roots, exports and requirement constraints with every source/configuration
+origin. `Driver.Compiled.nativeBindings` exposes the chosen physical alternatives separately.

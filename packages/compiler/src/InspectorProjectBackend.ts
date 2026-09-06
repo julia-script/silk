@@ -1,3 +1,5 @@
+import type * as ArtifactPlan from './ArtifactPlan.js'
+import * as NativeRequirement from './NativeRequirement.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 /**
@@ -533,7 +535,7 @@ export const instanceRows = (discovery: Instances.Discovery): ReadonlyArray<RowM
   let entryDetail: string
   if (discovery.entry._tag === 'Resolved')
     entryDetail = `${discovery.entry.key.declaration.module}.${discovery.entry.key.declaration.name}`
-  else if (discovery.entry._tag === 'Library')
+  else if (discovery.entry._tag === 'None')
     entryDetail = `library · ${discovery.foreignExports.length} exports`
   else entryDetail = `unavailable · ${discovery.entry.reason}`
   const rows: Array<RowModel> = [
@@ -1486,3 +1488,74 @@ export const toolchainRows = (
     detail: 'scope exit removes the directory after success or failure alike',
   },
 ]
+
+/** Projects the logical artifact and every active requirement origin without physical path inference. */
+export const artifactPlanRows = (
+  plan: ArtifactPlan.ArtifactPlan | undefined,
+): ReadonlyArray<RowModel> => {
+  if (plan === undefined)
+    return [{ key: 'artifact-plan', label: 'artifact plan', detail: 'unavailable' }]
+  const rows: Array<RowModel> = [
+    {
+      key: 'artifact-plan',
+      label: 'artifact plan',
+      detail: `${plan.form} · ${plan.stage}`,
+      head: true,
+    },
+    { key: 'artifact-identity', label: 'identity', detail: plan.identity, depth: 1 },
+    {
+      key: 'artifact-application',
+      label: 'application',
+      detail: plan.composition.application,
+      depth: 1,
+    },
+    {
+      key: 'artifact-runtime',
+      label: 'runtime',
+      detail: JSON.stringify({
+        request: plan.composition.request,
+        resolved: plan.composition.runtime,
+      }),
+      depth: 1,
+    },
+    {
+      key: 'artifact-loader',
+      label: 'loader entry',
+      detail: JSON.stringify(plan.composition.loader),
+      depth: 1,
+    },
+  ]
+  for (const [index, root] of plan.roots.entries())
+    rows.push({
+      key: `artifact-root-${index}`,
+      label: 'root',
+      detail: `${root.declaration.module}.${root.declaration.name}`,
+      depth: 1,
+    })
+  for (const [index, entry] of plan.exports.entries())
+    rows.push({
+      key: `artifact-export-${index}`,
+      label: entry.symbol,
+      detail: entry.signature,
+      depth: 1,
+    })
+  for (const [index, requirement] of plan.requirements.entries()) {
+    rows.push({
+      key: `artifact-requirement-${index}`,
+      label: `${requirement.kind} ${requirement.name}`,
+      detail: NativeRequirement.encode(requirement),
+      depth: 1,
+    })
+    for (const [ordinal, contribution] of requirement.contributions.entries())
+      rows.push({
+        key: `artifact-requirement-${index}-${ordinal}`,
+        label: NativeRequirement.scopeKey(contribution.scope),
+        detail: contribution.origin.source,
+        depth: 2,
+        ...(contribution.origin.span === undefined
+          ? {}
+          : { span: asSpan(contribution.origin.span) }),
+      })
+  }
+  return rows
+}

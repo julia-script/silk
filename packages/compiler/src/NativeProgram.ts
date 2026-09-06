@@ -1,3 +1,4 @@
+import * as ByteString from '@silklang/llvm/ByteString'
 import * as NativeForeignGuard from './NativeForeignGuard.js'
 import * as NativeCAbi from './NativeCAbi.js'
 import * as Bitcode from '@silklang/llvm/Bitcode'
@@ -439,6 +440,32 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     Object.freeze({ builder, program, i32, pointer, lanesFor, laneType }),
   )
   const declared = functionDeclarations.declared
+  const retained: Array<Constant.Constant> = []
+  for (const root of program.retainedRoots ?? []) {
+    const declaration = declared.find((candidate) => Mir.matchesInstanceKey(candidate.fn, root))
+    if (declaration === undefined)
+      return yield* new BackendError({
+        operation: 'Backend.emit',
+        backend: 'LLVM',
+        message: 'Retained root has no emitted definition',
+        reason: { _tag: 'InvalidMir', violations: MirVerification.verify(program) },
+      })
+    retained.push(
+      yield* Constant.fromGlobal(
+        builder,
+        yield* FunctionActor.global(builder, declaration.driver ?? declaration.handle),
+      ),
+    )
+  }
+  if (retained.length > 0) {
+    const array = yield* LlvmType.array(builder, yield* LlvmType.pointer(builder), retained.length)
+    yield* Variable.make(builder, 'llvm.used', array, {
+      initializer: yield* Constant.aggregate(builder, array, retained),
+      linkage: 'appending',
+      section: ByteString.fromString('llvm.metadata'),
+    })
+  }
+
   if (functionDeclarations.voidType !== undefined) voidType = functionDeclarations.voidType
   const executionRelease = yield* NativeExecutionOperation.declareReleaseHelper(
     builder,

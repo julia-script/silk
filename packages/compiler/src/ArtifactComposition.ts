@@ -71,13 +71,19 @@ const exact = (input: Record<string, unknown>, fields: ReadonlyArray<string>): b
   Object.keys(input).every((key) => fields.includes(key))
 
 /** The existing hosted application policy, explicitly supplied by build/analysis entry points. */
-export const defaults = (application: string, artifact: CompilationProfile.Artifact): Input =>
+export const defaults = (
+  application: string,
+  profile: Pick<CompilationProfile.Facts, 'artifact' | 'target'>,
+): Input =>
   Object.freeze({
     runtimes:
-      artifact === 'executable'
+      profile.artifact === 'executable' || profile.target.kind === 'WebAssembly'
         ? Object.freeze([{ name: 'application', module: application, invoke: 'main' }])
         : Object.freeze([]),
-    defaults: artifact === 'executable' ? Object.freeze(['application']) : Object.freeze([]),
+    defaults:
+      profile.artifact === 'executable' || profile.target.kind === 'WebAssembly'
+        ? Object.freeze(['application'])
+        : Object.freeze([]),
     retention: Object.freeze([]),
     requirements: Object.freeze([]),
   })
@@ -237,8 +243,9 @@ export const resolve = Effect.fn('ArtifactComposition.resolve')(function* (
       [self.origin],
     )
   const request = profile.runtime
-  const candidates =
-    request.kind === 'default' ? self.defaults : request.kind === 'named' ? [request.name] : []
+  let candidates: ReadonlyArray<string> = []
+  if (request.kind === 'default') candidates = self.defaults
+  else if (request.kind === 'named') candidates = [request.name]
   const selected = self.runtimes.filter((runtime) => candidates.includes(runtime.name))
   if (selected.length !== candidates.length)
     return yield* ConfigurationError.make(
@@ -318,3 +325,21 @@ export const resolve = Effect.fn('ArtifactComposition.resolve')(function* (
     identity,
   })
 })
+
+/** Projects a validated catalog into portable build fields without diagnostic metadata. */
+export const input = (self: ArtifactComposition): Input =>
+  Object.freeze({
+    runtimes: Object.freeze(
+      self.runtimes.map(({ origin: _origin, ...runtime }) => Object.freeze(runtime)),
+    ),
+    defaults: self.defaults,
+    retention: Object.freeze(
+      self.retention.map(({ origin: _origin, ...root }) => Object.freeze(root)),
+    ),
+    requirements: Object.freeze(
+      self.requirements.map(({ origin: _origin, scope: _scope, ...requirement }) =>
+        Object.freeze(requirement),
+      ),
+    ),
+    entry: self.entry,
+  })

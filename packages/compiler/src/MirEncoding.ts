@@ -1,3 +1,4 @@
+import * as Instances from './Instances.js'
 import * as CAbi from './CAbi.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
@@ -432,8 +433,8 @@ export const encode = (self: Module): string => {
     case 'UnavailableEntry':
       entry = `entry unavailable reason=${self.entry.reason}`
       break
-    case 'LibraryEntry':
-      entry = `entry library exports=${self.foreignExports.map((export_) => export_.symbol).join(',')}`
+    case 'NoInvocation':
+      entry = `entry none exports=${self.foreignExports.map((export_) => export_.symbol).join(',')}`
       break
     case 'OrdinaryEntry':
       entry = `entry ordinary target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)}`
@@ -445,6 +446,7 @@ export const encode = (self: Module): string => {
   return [
     `mir-module ${self.module}`,
     entry,
+    ...(self.retainedRoots ?? []).map((root) => `retain ${Instances.keyText(root)}`),
     ...self.foreignExports.map(
       (record) =>
         `foreign-export ${record.symbol} type=${SilkType.encode(record.type)} signature=${CAbi.signatureKey(record.signature)} implementation=${instanceText(record.key)} declaration=${targetText(record.declaration)} ${spanText(record.declarationSpan)}`,

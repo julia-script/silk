@@ -704,7 +704,9 @@ const printForeignStaticDeclaration = (
 ): FormatDocument.Document => {
   const tokens = directTokens(node)
   const type = directNodes(node).at(0) ?? nodeOf(node, 'TypePath')
-  const initializer = directNodes(node).at(1)
+  const initializer = directNodes(node)
+    .filter((child) => child.kind !== 'FunctionPropertyClause')
+    .at(1)
   const asIndex = tokens.findIndex((token) => token.kind === 'AsKeyword')
   const equals = tokens.find((token) => token.kind === 'Equals')
   return FormatDocument.concat(
@@ -730,6 +732,9 @@ const printForeignStaticDeclaration = (
             FormatDocument.text(' '),
           ),
         ]),
+    ...directNodes(node)
+      .filter((child) => child.kind === 'FunctionPropertyClause')
+      .map((clause) => printNode(context, clause, FormatDocument.text(' '))),
     ...(equals === undefined || initializer === undefined
       ? []
       : [

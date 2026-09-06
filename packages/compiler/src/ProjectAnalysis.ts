@@ -44,6 +44,7 @@ export interface View extends Analysis.FrontendSnapshot {
 
 /** One immutable multi-root compiler frontend and its structurally shared root views. */
 export interface Options {
+  readonly application?: string
   readonly configuration?: ModuleClosure.CompilationRequest['configuration']
   readonly configurationError?: ConfigurationError.ConfigurationError
 }
@@ -77,6 +78,7 @@ const analyze = Effect.fnUntraced(function* (
   const unconfigured = yield* Frontend.frontendProject(
     {
       roots,
+      ...(options.application === undefined ? {} : { application: options.application }),
       ...(options.configuration === undefined ? {} : { configuration: options.configuration }),
       ...(previous === undefined ? {} : { previous: previous.closure }),
     },

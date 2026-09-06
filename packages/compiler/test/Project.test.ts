@@ -39,6 +39,8 @@ it.effect('loads the minimal manifest and defaults the source root to the entry 
       targets: ['host'],
       outputDirectory: `${root}/build`,
       artifact: 'NativeExecutable',
+      stage: 'final',
+      nativeBindings: [],
       nativeLinkInputs: [],
     })
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -148,6 +150,8 @@ it.effect('materializes explicit build configuration and WebAssembly target sele
       targets: ['host', 'wasm32-unknown-unknown'],
       outputDirectory: `${root}/artifacts`,
       artifact: 'NativeSharedLibrary',
+      stage: 'final',
+      nativeBindings: [],
       nativeLinkInputs: [
         { _tag: 'SearchPath', path: `${root}/native/lib` },
         { _tag: 'Library', name: 'c', mode: 'Dynamic' },
@@ -283,4 +287,36 @@ it.effect(
         'PRIVATE_MARKER',
       )
     }),
+)
+
+it.effect(
+  'materializes independent object stages, source composition and typed requirement supplies',
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const root = yield* fs.makeTempDirectoryScoped()
+      yield* writeFile(`${root}/Main.silk`, source)
+      yield* writeFile(
+        `${root}/silk.toml`,
+        `[package]
+name = "roots"
+version = "1.0.0"
+root = "Main.silk"
+[build]
+artifact = "object"
+stage = "llvm-ir"
+composition = { runtimes = [{ name = "custom", module = "runtime" }], defaults = ["custom"], retention = [{ module = "support", declaration = "keep" }], requirements = [{ kind = "prebuilt-object", name = "support" }] }
+native-bindings = [{ kind = "prebuilt-object", name = "support", alternative = "provided", inputs = [{ object = "native/support.o" }] }]
+`,
+      )
+      const project = yield* Project.load({ workingDirectory: root })
+      assert.strictEqual(project.build.artifact, 'NativeObject')
+      assert.strictEqual(project.build.stage, 'llvm-ir')
+      assert.deepEqual(project.build.composition?.retention, [
+        { module: 'support', declaration: 'keep' },
+      ])
+      assert.deepEqual(project.build.nativeBindings?.[0]?.inputs, [
+        { _tag: 'Object', path: `${root}/native/support.o` },
+      ])
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )

@@ -1,3 +1,5 @@
+import type * as NativeRequirementBinding from '@silklang/compiler/NativeRequirementBinding'
+import type * as ArtifactPlan from '@silklang/compiler/ArtifactPlan'
 import type * as ModuleClosure from '@silklang/compiler/ModuleClosure'
 import * as Analysis from '@silklang/compiler/Analysis'
 import type * as ArtifactKind from '@silklang/compiler/ArtifactKind'
@@ -24,7 +26,7 @@ import * as Result from 'effect/Result'
 import * as Stream from 'effect/Stream'
 import type { ChildProcessSpawner } from 'effect/unstable/process'
 import * as BuildBatch from './BuildBatch.js'
-import type * as BuildPlan from './BuildPlan.js'
+import * as BuildPlan from './BuildPlan.js'
 import * as Program from './Program.js'
 import type * as ProjectOptions from './ProjectOptions.js'
 import * as Report from './Report.js'
@@ -50,6 +52,8 @@ export interface ProjectSelection extends ProjectOptions.ProjectOptions {
 }
 
 export interface CompileOptions {
+  readonly nativeBindings?: ReadonlyArray<NativeRequirementBinding.NativeRequirementBinding>
+  readonly stage?: ArtifactPlan.Stage
   readonly entry: SourceEntry.SourceEntry
   readonly target?: string
   readonly configuration?: ModuleClosure.CompilationRequest['configuration']
@@ -143,6 +147,8 @@ export const compile = Effect.fn('Workflow.compile')(function* (
       },
       toolchain: options.toolchain,
       artifactKind: options.artifactKind,
+      ...(options.nativeBindings === undefined ? {} : { nativeBindings: options.nativeBindings }),
+      ...(options.stage === undefined ? {} : { stage: options.stage }),
       packageName: options.packageName,
       ...(options.nativeLinkInputs === undefined
         ? {}
@@ -217,15 +223,7 @@ const checkTarget = Effect.fnUntraced(function* (
   const resolver = FileSourceResolver.make(project.entry.sourceRoot)
   const analysis = yield* Analysis.makeRealized({
     root: SourceFile.make(project.entry.module, project.entry.bytes),
-    ...(plan.configuration === undefined
-      ? { target: target.id }
-      : {
-          configuration: {
-            package: `${project.name}@${project.version}`,
-            profile: plan.configuration.input,
-            bindings: plan.configuration.bindings,
-          },
-        }),
+    configuration: BuildPlan.compilationConfiguration(plan),
   }).pipe(Effect.provide(FileSourceResolver.layer(resolver)))
   const catalog = Report.catalog(resolver, Analysis.sources(analysis), path)
   const renderedDiagnostics = Report.diagnostics(Analysis.diagnostics(analysis), catalog)
@@ -294,20 +292,16 @@ export const buildProject = Effect.fn('Workflow.buildProject')(function* (
       compile({
         entry: plan.project.entry,
         target: plan.target.id,
-        ...(plan.configuration === undefined
-          ? { optimization: plan.optimization }
-          : {
-              configuration: {
-                package: `${project.name}@${project.version}`,
-                profile: plan.configuration.input,
-                bindings: plan.configuration.bindings,
-              },
-            }),
+        configuration: BuildPlan.compilationConfiguration(plan),
+        ...(plan.stage === undefined ? {} : { stage: plan.stage }),
         artifactKind: plan.artifactKind,
         packageName: plan.project.name,
         destination: plan.destination,
         toolchain: plan.toolchain,
         nativeLinkInputs: plan.nativeLinkInputs,
+        ...(plan.project.build.nativeBindings === undefined
+          ? {}
+          : { nativeBindings: plan.project.build.nativeBindings }),
         scopeName: `${plan.project.name}-llvm-${plan.target.id}`,
       }),
     { concurrency: 1 },
@@ -592,20 +586,16 @@ export const run = Effect.fn('Workflow.run')(function* (
   const attempted = yield* compile({
     entry: plan.project.entry,
     target: plan.target.id,
-    ...(plan.configuration === undefined
-      ? { optimization: plan.optimization }
-      : {
-          configuration: {
-            package: `${plan.project.name}@${plan.project.version}`,
-            profile: plan.configuration.input,
-            bindings: plan.configuration.bindings,
-          },
-        }),
+    configuration: BuildPlan.compilationConfiguration(plan),
+    ...(plan.stage === undefined ? {} : { stage: plan.stage }),
     artifactKind: plan.artifactKind,
     packageName: plan.project.name,
     destination: plan.destination,
     toolchain: plan.toolchain,
     nativeLinkInputs: plan.nativeLinkInputs,
+    ...(plan.project.build.nativeBindings === undefined
+      ? {}
+      : { nativeBindings: plan.project.build.nativeBindings }),
     scopeName: plan.project.name,
   })
   if (attempted._tag === 'NotBuilt') return attempted.status

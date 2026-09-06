@@ -15,6 +15,7 @@ import * as Hir from './Hir.js'
 import { projectDataFlow } from './InspectorFlowModel.js'
 import { backendEmission, toolchainCommands } from './InspectorPanels.js'
 import {
+  artifactPlanRows,
   arrayValueRows,
   backendControlRows,
   backendTextRows,
@@ -321,7 +322,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
     project: ({ snapshot }) => {
       const discovery = Analysis.instancesOf(snapshot)
       return {
-        rows: instanceRows(discovery),
+        rows: [...instanceRows(discovery), ...artifactPlanRows(snapshot.artifactPlan)],
         meta: `${discovery.instances.length} inst`,
       }
     },
@@ -542,7 +543,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
           outputs: (() => {
             if (discovery.entry._tag === 'Resolved')
               return `${discovery.instances.length} instances`
-            if (discovery.entry._tag === 'Library')
+            if (discovery.entry._tag === 'None')
               return `${discovery.instances.length} library instances`
             return `entry unavailable · ${discovery.entry.reason}`
           })(),

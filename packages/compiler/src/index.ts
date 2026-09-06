@@ -112,3 +112,9 @@ export * as ProfileBootstrap from './ProfileBootstrap.js'
 export * as ProjectProfile from './ProjectProfile.js'
 
 export * as ForeignContract from './ForeignContract.js'
+
+export * as ArtifactComposition from './ArtifactComposition.js'
+export * as ArtifactPlan from './ArtifactPlan.js'
+export * as NativeRequirement from './NativeRequirement.js'
+
+export * as NativeRequirementBinding from './NativeRequirementBinding.js'

@@ -177,10 +177,8 @@ export const backendError = (self: Backend.BackendError, sources: SourceCatalog)
 /** Explains why the root module offered no usable `main`, in terms a caller can act on. */
 const entryReason = (entry: Driver.NoEntry): string => {
   switch (entry.reason) {
-    case 'MissingLibraryExport':
-      return 'the root module declares no exported C function'
     case 'MissingEntry':
-      return 'the root module declares no `main`'
+      return 'the selected invocation declaration is missing'
     case 'AmbiguousEntry':
       return 'the root module declares more than one `main`'
     case 'StaticEntry':

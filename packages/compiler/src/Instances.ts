@@ -1,3 +1,6 @@
+import type * as ArtifactComposition from './ArtifactComposition.js'
+import * as ConfigurationError from './ConfigurationError.js'
+import * as ConfigurationOrigin from './ConfigurationOrigin.js'
 import type * as ProfileBootstrap from './ProfileBootstrap.js'
 import type * as CAbi from './CAbi.js'
 import * as CleanupPlan from './CleanupPlan.js'
@@ -210,7 +213,7 @@ export type Entry =
       readonly requirements: ReadonlyArray<Type.Requirement>
     }
   | {
-      readonly _tag: 'Library'
+      readonly _tag: 'None'
     }
   | {
       readonly _tag: 'Unavailable'
@@ -226,7 +229,6 @@ export type Entry =
         | 'InvalidEffectEntryResult'
         | 'EffectEntryRequirements'
         | 'UnavailableEntryBody'
-        | 'MissingLibraryExport'
         | 'InvalidSource'
       readonly requirements?: ReadonlyArray<Type.Requirement>
     }
@@ -240,6 +242,7 @@ export interface Counters {
 
 /** The deterministic discovery result and work actually performed to obtain it. */
 export interface Discovery {
+  readonly retention: ReadonlyArray<InstanceKey>
   readonly _tag: 'InstanceDiscovery'
   readonly rootModule: string
   readonly entry: Entry
@@ -345,6 +348,7 @@ const forwardedRequirementBinding = (
 export const invalid = (rootModule: string): Discovery =>
   Object.freeze({
     _tag: 'InstanceDiscovery',
+    retention: Object.freeze([]),
     rootModule,
     entry: Object.freeze({ _tag: 'Unavailable', reason: 'InvalidSource' }),
     instances: Object.freeze([]),
@@ -687,8 +691,8 @@ export const matchingSpecialization = (
 export const effectIdentity = (owner: InstanceKey, site: Hir.EffectSiteId): string =>
   `${keyText(owner)}\u0004${Hir.executableSiteKey(site)}`
 
-const resolveEntry = (root: Elaboration.Result): Entry => {
-  const lookup = Elaboration.declarationByName(root, 'main')
+const resolveEntry = (root: Elaboration.Result, name: string): Entry => {
+  const lookup = Elaboration.declarationByName(root, name)
   if (lookup._tag === 'Missing')
     return Object.freeze({ _tag: 'Unavailable', reason: 'MissingEntry' })
   if (lookup._tag === 'Ambiguous') {
@@ -1064,7 +1068,7 @@ export const discover = (
   index: DeclarationIndex.Index,
   completion: ProfileBootstrap.Completion,
   resolution: NameResolution.Resolution,
-  rootPolicy: 'Executable' | 'Library' = 'Executable',
+  composition: ArtifactComposition.Resolved,
 ): Discovery => {
   const target = completion.profile.target
   const root = results.get(rootModule)
@@ -1072,11 +1076,63 @@ export const discover = (
     throw new RangeError(`Instance discovery lost its root module ${rootModule}`)
   }
   const foreignExports = exportRoots(index, target)
-  let entry: Entry
-  if (rootPolicy === 'Executable') entry = resolveEntry(root)
-  else if (foreignExports.length === 0)
-    entry = Object.freeze({ _tag: 'Unavailable', reason: 'MissingLibraryExport' })
-  else entry = Object.freeze({ _tag: 'Library' })
+  const invoked =
+    composition.invocation === undefined ? undefined : results.get(composition.invocation.module)
+  let entry: Entry = Object.freeze({ _tag: 'None' })
+  if (composition.invocation !== undefined)
+    entry =
+      invoked === undefined
+        ? Object.freeze({ _tag: 'Unavailable', reason: 'MissingEntry' })
+        : resolveEntry(invoked, composition.invocation.declaration)
+  const retention: Array<InstanceKey> = []
+  const rootDiagnostics: Array<Diagnostic.Diagnostic> = []
+  for (const selector of composition.retention) {
+    const module = results.get(selector.module)
+    const lookup =
+      module === undefined ? undefined : Elaboration.declarationByName(module, selector.declaration)
+    const declaration = lookup?._tag === 'Resolved' ? lookup.declaration : undefined
+    if (
+      declaration === undefined ||
+      declaration.canonical._tag !== 'Canonical' ||
+      declaration.phase === 'Static' ||
+      declaration.typeParameters.length > 0 ||
+      declaration.foreign !== undefined ||
+      declaration.returnType._tag !== 'Resolved' ||
+      !declaration.failureRow.available ||
+      !declaration.requirementRow.available
+    ) {
+      let related: ReadonlyArray<DeclarationFacts.DeclarationFact> =
+        declaration === undefined ? [] : [declaration]
+      if (lookup?._tag === 'Ambiguous') related = lookup.declarations
+      const origins = [
+        selector.origin,
+        ...related.map((candidate) =>
+          ConfigurationOrigin.snapshot({
+            source: selector.module,
+            provenance: 'literal',
+            span: candidate.syntax.span,
+          }),
+        ),
+      ]
+      rootDiagnostics.push(
+        Diagnostic.invalidConfiguration(
+          ConfigurationError.make(
+            'ArtifactComposition.retention',
+            'InvalidInput',
+            'retention root must name one monomorphic runtime definition',
+            origins,
+          ),
+          selector.origin.span ?? related[0]?.syntax.span ?? root.syntax.root.span,
+        ),
+      )
+    } else retention.push(keyOf(declaration.canonical.id, Hir.contractOf(declaration)))
+  }
+  if (rootDiagnostics.length > 0)
+    return Object.freeze({
+      ...invalid(rootModule),
+      foreignExports,
+      residualizationDiagnostics: Object.freeze(rootDiagnostics),
+    })
   if (entry._tag === 'Unavailable') {
     return Object.freeze({ ...invalid(rootModule), entry, foreignExports })
   }
@@ -1207,7 +1263,10 @@ export const discover = (
       ancestors: new Map([[declarationText(key), Object.freeze({ key })]]),
       cleanupReachable: false,
     })
-  const pending: Array<WorkItem> = entry._tag === 'Resolved' ? [rootItem(entry.key)] : []
+  const pending: Array<WorkItem> = [
+    ...(entry._tag === 'Resolved' ? [rootItem(entry.key)] : []),
+    ...retention.map(rootItem),
+  ]
   // The export inventory is recorded for every target so planning can reject it off native;
   // only a native target seeds the executable worklist with its implementation body.
   if (target.kind === 'Native')
@@ -1656,6 +1715,7 @@ export const discover = (
   const callInstances = Object.freeze([...recordedCalls.values(), ...providerCalls.values()])
   return Object.freeze({
     _tag: 'InstanceDiscovery',
+    retention: Object.freeze(retention),
     rootModule,
     entry,
     instances,

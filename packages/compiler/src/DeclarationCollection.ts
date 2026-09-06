@@ -3109,6 +3109,7 @@ const collectForeignStatic = (
 const collectModule = (
   syntax: SyntaxFile.SyntaxFile,
   declarations: ReadonlyArray<SyntaxTree.Node>,
+  imports: ModuleClosure.Module['imports'],
 ): ModuleHeaders => {
   const source = syntax.source
   const nodes = declarations.filter(
@@ -4477,14 +4478,22 @@ const collectModule = (
       const moduleClause = declaration.kind === 'ModulePropertyDeclaration'
       if (!moduleClause && DeclarationProperty.owner(source, clause) !== 'Intrinsic.native')
         continue
-      if (!moduleClause && declaration.kind !== 'ForeignFunctionDeclaration') continue
+      if (
+        !moduleClause &&
+        declaration.kind !== 'ForeignFunctionDeclaration' &&
+        declaration.kind !== 'ForeignStaticDeclaration'
+      )
+        continue
       const token = SyntaxTree.directToken(declaration, 'Identifier')
+      const member = ownMembers.find((entry) => entry.syntax === declaration)
+      const canonical =
+        member?.canonical._tag === 'Canonical' ? member.canonical.id.name : undefined
       const scope: NativeRequirement.Scope = moduleClause
         ? { kind: 'module', module: source.id }
         : {
             kind: 'declaration',
             module: source.id,
-            declaration: token === undefined ? '' : spelling(source, token),
+            declaration: canonical ?? (token === undefined ? '' : spelling(source, token)),
           }
       const analyzed = NativeRequirement.analyze(source, clause, scope)
       diagnostics.push(...analyzed.diagnostics)
@@ -4510,7 +4519,11 @@ const collectModule = (
           return []
         const path = SyntaxTree.directNode(declaration, 'ImportPath')
         const list = SyntaxTree.directNode(declaration, 'ImportMemberList')
-        const module = path === undefined ? undefined : ImportPath.canonicalTarget(source, path)
+        const module =
+          path === undefined
+            ? undefined
+            : (imports.find((imported) => imported.syntax === declaration)?.canonicalTarget ??
+              ImportPath.canonicalTarget(source, path))
         if (module === undefined || list === undefined) return []
         return SyntaxTree.directNodes(list, 'ImportMember').flatMap((member) => {
           const original = SyntaxTree.directToken(member, 'Identifier')
@@ -4596,7 +4609,9 @@ const declaredTypeNamesOwner = (
 /** Collects identities and raw type paths for the complete closure before scope resolution. */
 export const collect = (closure: ModuleClosure.Facts): DeclarationIndex.Index => {
   const modules = Object.freeze(
-    closure.modules.map((module) => collectModule(module.syntax, module.declarations)),
+    closure.modules.map((module) =>
+      collectModule(module.syntax, module.declarations, module.imports),
+    ),
   )
   return DeclarationIndex.make(
     'Collected',

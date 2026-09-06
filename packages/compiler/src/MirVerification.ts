@@ -3015,6 +3015,19 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
     }),
   )
   violations.push(...coroutineFrameLayoutViolations(self))
+  const retained = new Set<string>()
+  for (const root of self.retainedRoots ?? []) {
+    const key = Instances.keyText(root)
+    if (retained.has(key) || !self.functions.some((fn) => matchesInstanceKey(fn, root)))
+      violations.push(
+        Object.freeze({
+          _tag: 'Violation',
+          rule: 'InvalidEntry',
+          detail: 'Retained roots must uniquely identify emitted function instances',
+        }),
+      )
+    retained.add(key)
+  }
   for (const record of [...self.foreignCalls, ...self.foreignExports]) {
     if (!CAbi.isCanonicalSignature(record.signature, self.layout.target))
       violations.push(
@@ -3241,7 +3254,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
       }),
     )
   const availableEntry =
-    self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'LibraryEntry'
+    self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'NoInvocation'
       ? undefined
       : self.entry
   const target = self.functions.find(
@@ -3265,7 +3278,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
       .flatMap(operationTree)
       .filter((operation) => operation._tag === 'Call') ?? []
   const entryValid =
-    self.entry._tag === 'LibraryEntry'
+    self.entry._tag === 'NoInvocation'
       ? self.foreignExports.length > 0 &&
         self.foreignExports.every((export_) =>
           self.functions.some((fn) => matchesInstanceKey(fn, export_.key)),

@@ -1,3 +1,4 @@
+import type * as ArtifactPlan from './ArtifactPlan.js'
 import type * as CompilationProfile from './CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -75,11 +76,12 @@ export const artifactRuntimeSource = (
   kind: FinalArtifact['kind'],
   termination: Backend.Termination,
   nativeRuntimeSymbols: ReadonlyArray<string>,
+  invokesApplication: boolean,
 ): string => {
-  if (kind === 'NativeExecutable')
+  if (kind === 'NativeExecutable' && invokesApplication)
     return ToolchainPlan.executableSource(termination, nativeRuntimeSymbols)
   if (kind === 'WebAssemblyModule') return LlvmWasmRuntime.source
-  if (ArtifactKind.isLibrary(kind)) return ToolchainPlan.runtimeSource(nativeRuntimeSymbols)
+  if (nativeRuntimeSymbols.length > 0) return ToolchainPlan.runtimeSource(nativeRuntimeSymbols)
   return ''
 }
 
@@ -499,6 +501,7 @@ const artifactExtension = (kind: FinalArtifact['kind'], target: Target.Target): 
   if (kind === 'NativeExecutable') return 'bin'
   if (kind === 'NativeSharedLibrary') return target.id === 'aarch64-apple-darwin' ? 'dylib' : 'so'
   if (kind === 'NativeStaticLibrary') return 'a'
+  if (kind === 'NativeObject') return 'o'
   return 'wasm'
 }
 
@@ -899,6 +902,7 @@ export const requireLinkInputs = Effect.fnUntraced(function* (
   generatedObjects: ReadonlyArray<PathArtifact>,
   nativeLinkInputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>,
   outputPath: string,
+  entry: CompilationProfile.Selection = { kind: 'default' },
 ): Effect.fn.Return<ToolchainPlan.PlannedCommand, ToolchainError> {
   const plan = ToolchainPlan.nativeCommand(
     toolchain,
@@ -907,6 +911,7 @@ export const requireLinkInputs = Effect.fnUntraced(function* (
     generatedObjects.map((object) => object.path),
     nativeLinkInputs,
     outputPath,
+    entry,
   )
   if (plan._tag === 'UnsupportedNativePlan') return yield* unsupportedPlanError(plan)
   for (const object of generatedObjects) {
@@ -944,6 +949,7 @@ export const NativeFinalizer = Object.freeze({
     generatedObjects: ReadonlyArray<PathArtifact>,
     nativeLinkInputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>,
     destination: string,
+    entry: CompilationProfile.Selection = { kind: 'default' },
   ): Effect.fn.Return<FinalArtifact, ToolchainError> {
     let outputName = 'archive.a'
     if (artifactKind === 'NativeExecutable') outputName = 'linked-program'
@@ -956,6 +962,7 @@ export const NativeFinalizer = Object.freeze({
       generatedObjects,
       nativeLinkInputs,
       outputPath,
+      entry,
     )
     const result = yield* Effect.try({
       try: () => spawnSync(planned.command, [...planned.arguments], { encoding: 'utf8' }),
@@ -1121,6 +1128,13 @@ export const isCachedArtifact = (
   if (kind === 'WebAssemblyModule')
     return target.id === 'wasm32-unknown-unknown' && hasWasmHeader(bytes)
   if (kind === 'NativeStaticLibrary') return isStaticArchiveForTarget(bytes, target)
+  if (kind === 'NativeObject') {
+    if (!isNativeObjectForTarget(bytes, 0, target)) return false
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    return target.operatingSystem === 'darwin'
+      ? view.getUint32(12, true) === 1
+      : view.getUint16(16, true) === 1
+  }
   return isNativeImageForKind(bytes, kind, target)
 }
 
@@ -1204,4 +1218,65 @@ export const commitCachedArtifact = Effect.fn('NativeToolchain.commitCachedArtif
     stage: 'artifact-commit',
   })
   return Object.freeze({ _tag: 'FinalArtifact', kind, path, bytes: copy, target })
+})
+
+/** Commits an emitted representation independently of its semantic artifact form. */
+export const commitRepresentation = Effect.fn('NativeToolchain.commitRepresentation')(function* (
+  bytes: Uint8Array,
+  destination: string,
+): Effect.fn.Return<string, ToolchainError> {
+  return yield* atomicCommit(destination, Uint8Array.from(bytes), { stage: 'artifact-commit' })
+})
+
+/** Reads and commits a scoped native output without leaking temporary paths. */
+export const commitPathRepresentation = Effect.fn('NativeToolchain.commitPathRepresentation')(
+  function* (
+    artifact: PathArtifact,
+    destination: string,
+  ): Effect.fn.Return<string, ToolchainError> {
+    const bytes = yield* Effect.try({
+      try: () => readFileSync(artifact.path),
+      catch: (cause) =>
+        storageError(
+          'NativeToolchain.commitPathRepresentation',
+          'artifact-commit',
+          artifact.path,
+          cause,
+        ),
+    })
+    return yield* commitRepresentation(bytes, destination)
+  },
+)
+
+/** Emits a requested intermediate representation without constructing runtime or link inputs. */
+export const emitRepresentation = Effect.fn('NativeToolchain.emitRepresentation')(function* (
+  toolchain: Toolchain,
+  scope: BuildScope,
+  artifact: Backend.LlvmBitcodeArtifact,
+  profile: CompilationProfile.CompilationProfile,
+  stage: Exclude<ArtifactPlan.Stage, 'final'>,
+  destination: string,
+): Effect.fn.Return<string, ToolchainError> {
+  if (stage === 'llvm-bitcode') return yield* commitRepresentation(artifact.bitcode, destination)
+  if (stage === 'llvm-ir')
+    return yield* commitRepresentation(new TextEncoder().encode(artifact.ir), destination)
+  if (stage === 'object') {
+    const object = yield* emitObject(toolchain, scope, artifact, profile)
+    return yield* commitPathRepresentation(object.artifact, destination)
+  }
+  const bitcode = yield* writeArtifact(scope, profile.target, 'program.bc', artifact.bitcode)
+  const assemblyPath = join(scope.root, 'program.s')
+  const object = ToolchainPlan.objectCommand(toolchain.clang, profile, bitcode.path, assemblyPath)
+  const planned = Object.freeze({
+    ...object,
+    arguments: Object.freeze(
+      object.arguments.map((argument) => (argument === '-c' ? '-S' : argument)),
+    ),
+  })
+  yield* runPlanned('NativeToolchain.emitRepresentation', 'object', planned)
+  yield* requirePath('NativeToolchain.emitRepresentation', 'object', assemblyPath)
+  return yield* commitPathRepresentation(
+    { _tag: 'PathArtifact', scope: scope.name, path: assemblyPath, target: profile.target },
+    destination,
+  )
 })

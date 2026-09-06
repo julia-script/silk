@@ -1,3 +1,11 @@
+import * as ArtifactComposition from '../src/ArtifactComposition.js'
+import * as ArtifactPlan from '../src/ArtifactPlan.js'
+import * as CompilationProfile from '../src/CompilationProfile.js'
+import * as ConfigurationOrigin from '../src/ConfigurationOrigin.js'
+import * as NativeRequirement from '../src/NativeRequirement.js'
+import * as NativeRequirementBinding from '../src/NativeRequirementBinding.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -66,7 +74,7 @@ pub fn main() -> i32 { return 0 }`),
     })
     assert.strictEqual(prepared._tag, 'Prepared')
     if (prepared._tag !== 'Prepared') return
-    assert.strictEqual(prepared.program.entry._tag, 'LibraryEntry')
+    assert.strictEqual(prepared.program.entry._tag, 'NoInvocation')
     assert.deepStrictEqual(
       {
         functions: prepared.program.functions.map((fn) => fn.id.name),
@@ -86,7 +94,7 @@ pub fn main() -> i32 { return 0 }`),
   }),
 )
 
-it.effect('rejects a native library with no C export root', () =>
+it.effect('emits an empty native library without retaining unrelated public functions', () =>
   Effect.gen(function* () {
     const frontend = yield* Analysis.ofSource(
       'library/Empty',
@@ -95,8 +103,8 @@ it.effect('rejects a native library with no C export root', () =>
     const prepared = yield* Realization.prepare(frontend, 'aarch64-apple-darwin', {
       artifactKind: 'NativeStaticLibrary',
     })
-    assert.strictEqual(prepared._tag, 'NoEntry')
-    if (prepared._tag === 'NoEntry') assert.strictEqual(prepared.reason, 'MissingLibraryExport')
+    assert.strictEqual(prepared._tag, 'Prepared')
+    if (prepared._tag === 'Prepared') assert.deepEqual(prepared.program.functions, [])
   }),
 )
 
@@ -1105,4 +1113,369 @@ pub fn main() -> i32 {
     }
     assert.strictEqual(Backend.symbolFor(fn, undefined), Backend.symbolFor(alternate, undefined))
   }),
+)
+
+it.effect('activates native requirements by declaration, selected module and artifact scope', () =>
+  Effect.gen(function* () {
+    const source = SourceFile.make(
+      'requirements',
+      ascii(`
+module with Intrinsic.native(kind: "startup-object", name: "module")
+unsafe extern "C" fn used() -> i32 as "used"
+  with Intrinsic.foreign(memory: "none")
+  with Intrinsic.native(kind: "library", name: "needed", linkage: "dynamic")
+unsafe extern "C" fn unused() -> i32 as "unused"
+  with Intrinsic.native(kind: "library", name: "unused")
+unsafe extern "C" static data: i32 with Intrinsic.native(kind: "library", name: "data")
+unsafe extern "C" static unusedData: i32 with Intrinsic.native(kind: "library", name: "unusedData")
+static if false {
+  module with Intrinsic.native(kind: "library", name: "inactive")
+  import missing
+}
+export "C" fn value() -> i32 { unsafe { return used() + data } }
+`),
+    )
+    const analysis = yield* Analysis.makeRealized({
+      root: source,
+      configuration: {
+        profile: {
+          target: 'x86_64-unknown-linux-gnu',
+          artifact: 'object',
+          runtime: { kind: 'none' },
+        },
+        composition: {
+          runtimes: [],
+          defaults: [],
+          retention: [],
+          requirements: [{ kind: 'prebuilt-object', name: 'artifact' }],
+        },
+      },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.deepEqual(Analysis.diagnostics(analysis), [])
+    const plan = analysis.artifactPlan ?? unreachable('expected artifact plan')
+    assert.deepEqual(plan.requirements.map((entry) => entry.name).sort(), [
+      'artifact',
+      'data',
+      'module',
+      'needed',
+    ])
+    assert.deepEqual(
+      plan.requirements
+        .flatMap((entry) => entry.contributions.map((fact) => fact.scope.kind))
+        .sort(),
+      ['artifact', 'declaration', 'declaration', 'module'],
+    )
+    assert.strictEqual(plan.sources.length, 1)
+  }),
+)
+
+it.effect(
+  'composes a selected source runtime with the application and private retention roots',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.makeRealized({
+        root: SourceFile.make(
+          'application',
+          ascii('pub fn answer() -> i32 { return 42 } pub fn unused() -> i32 { return 9 }'),
+        ),
+        configuration: {
+          profile: {
+            target: 'aarch64-apple-darwin',
+            artifact: 'static-archive',
+            runtime: { kind: 'named', name: 'custom' },
+            entry: { kind: 'none' },
+          },
+          composition: {
+            defaults: [],
+            runtimes: [
+              { name: 'custom', module: 'runtime' },
+              { name: 'unselected', module: 'missing' },
+            ],
+            retention: [{ module: 'capability', declaration: 'keep' }],
+            requirements: [],
+          },
+        },
+      }).pipe(
+        Effect.provide(
+          SourceResolver.memory(
+            new Map([
+              [
+                'runtime',
+                ascii(
+                  'import Intrinsic.application as app\nexport "C" fn proxy() -> i32 as "proxy" { return app.answer() }',
+                ),
+              ],
+              [
+                'capability',
+                ascii('fn keep() -> i32 { return 7 } pub fn unused() -> i32 { return 0 }'),
+              ],
+            ]),
+          ),
+        ),
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.deepEqual(
+        Analysis.modules(snapshot).map((module) => module.name),
+        ['application', 'capability', 'runtime'],
+      )
+      const discovery = Analysis.instancesOf(snapshot)
+      assert.strictEqual(discovery.entry._tag, 'None')
+      assert.deepEqual(
+        discovery.instances.map((instance) => instance.key.declaration.name).sort(),
+        ['answer', 'keep', 'proxy'],
+      )
+      const program = Analysis.loweredMir(snapshot)
+      assert.deepEqual(MirVerification.verify(program), [])
+      assert.deepEqual(
+        program.retainedRoots?.map((root) => root.declaration.name),
+        ['keep'],
+      )
+      const artifact = yield* LlvmBackend.LlvmBackend.emit(program, { mode: 'release' })
+      assert.match(artifact.ir, /@llvm.used = appending global \[1 x ptr\]/)
+      assert.match(artifact.ir, /section "llvm.metadata"/)
+      assert.deepEqual(
+        artifact.foreignExports.map((entry) => entry.symbol),
+        ['proxy'],
+      )
+      assert.notMatch(artifact.ir, /silk_main/)
+    }),
+)
+
+it.effect('merges logical diamonds and reports all hard requirement origins', () =>
+  Effect.gen(function* () {
+    const profile = yield* CompilationProfile.decode({
+      target: 'x86_64-unknown-linux-gnu',
+      deployment: '12',
+    })
+    const a = yield* NativeRequirement.decode(
+      {
+        kind: 'library',
+        name: 'dependency',
+        minimumDeployment: '10',
+        alternatives: ['first', 'second'],
+      },
+      { kind: 'module', module: 'a' },
+      ConfigurationOrigin.literal('a'),
+    )
+    const b = yield* NativeRequirement.decode(
+      {
+        kind: 'library',
+        name: 'dependency',
+        maximumDeployment: '14',
+        alternatives: ['second', 'third'],
+      },
+      { kind: 'module', module: 'b' },
+      ConfigurationOrigin.literal('b'),
+    )
+    const merged = yield* NativeRequirement.merge([a, b, a], profile)
+    assert.strictEqual(merged.length, 1)
+    const requirement = merged[0] ?? unreachable('expected merged requirement')
+    assert.deepEqual(requirement.alternatives, ['second'])
+    assert.strictEqual(requirement.minimumDeployment, '10.0.0')
+    assert.strictEqual(requirement.maximumDeployment, '14.0.0')
+    assert.strictEqual(requirement.contributions.length, 2)
+    const conflict = yield* Effect.flip(
+      NativeRequirement.merge(
+        [
+          { ...a, linkage: 'static' },
+          { ...b, linkage: 'dynamic' },
+        ],
+        profile,
+      ),
+    )
+    assert.strictEqual(conflict.code, 'ConflictingBindings')
+    assert.deepEqual(conflict.origins.map((origin) => origin.source).sort(), ['a', 'b'])
+    const interval = yield* Effect.flip(
+      NativeRequirement.merge([{ ...a, minimumDeployment: '15.0.0' }, b], profile),
+    )
+    assert.deepEqual(interval.origins.map((origin) => origin.source).sort(), ['a', 'b'])
+    const rejected = yield* Effect.flip(
+      NativeRequirementBinding.resolve(
+        merged,
+        [
+          {
+            kind: 'library',
+            name: 'dependency',
+            alternative: 'first',
+            inputs: [{ _tag: 'Library', name: 'dependency', mode: 'Dynamic' }],
+            origin: ConfigurationOrigin.literal('build'),
+          },
+        ],
+        'loadable-module',
+      ),
+    )
+    assert.deepEqual(rejected.origins.map((origin) => origin.source).sort(), ['a', 'b', 'build'])
+    const unresolved = yield* NativeRequirementBinding.resolve(merged, [], 'object')
+    assert.deepEqual(unresolved.inputs, [])
+    const missing = yield* Effect.flip(
+      NativeRequirementBinding.resolve(merged, [], 'loadable-module'),
+    )
+    assert.deepEqual(missing.origins.map((origin) => origin.source).sort(), ['a', 'b'])
+  }),
+)
+
+it.effect('distinguishes runtime selection rules and loader policies without physical paths', () =>
+  Effect.gen(function* () {
+    const composition = yield* ArtifactComposition.decode({
+      runtimes: [{ name: 'chosen', module: 'runtime' }],
+      defaults: ['chosen'],
+    })
+    const base = yield* CompilationProfile.decode({
+      target: 'x86_64-unknown-linux-gnu',
+      artifact: 'object',
+    })
+    const defaultRoot = yield* ArtifactComposition.resolve(composition, 'app', base)
+    const namedRoot = yield* ArtifactComposition.resolve(composition, 'app', {
+      ...base,
+      runtime: { kind: 'named', name: 'chosen' },
+    })
+    const noRoot = yield* ArtifactComposition.resolve(composition, 'app', {
+      ...base,
+      runtime: { kind: 'none' },
+    })
+    assert.strictEqual(defaultRoot.runtime?.module, namedRoot.runtime?.module)
+    assert.strictEqual(new Set([defaultRoot.identity, namedRoot.identity, noRoot.identity]).size, 3)
+    const identities = new Set<string>()
+    for (const entry of [
+      { kind: 'default' },
+      { kind: 'none' },
+      { kind: 'named', name: 'first' },
+      { kind: 'named', name: 'second' },
+    ] satisfies ReadonlyArray<CompilationProfile.Selection>) {
+      identities.add(
+        (yield* ArtifactComposition.resolve(composition, 'app', { ...base, entry })).identity,
+      )
+    }
+    assert.strictEqual(identities.size, 4)
+    const ambiguous = yield* ArtifactComposition.decode({
+      runtimes: [
+        { name: 'first', module: 'one' },
+        { name: 'second', module: 'two' },
+      ],
+      defaults: ['first', 'second'],
+    })
+    assert.strictEqual(
+      (yield* Effect.flip(ArtifactComposition.resolve(ambiguous, 'app', base))).code,
+      'ConflictingBindings',
+    )
+    const conflicting = yield* ArtifactComposition.decode({ entry: { kind: 'none' } })
+    assert.strictEqual(
+      (yield* Effect.flip(
+        ArtifactComposition.resolve(conflicting, 'app', {
+          ...base,
+          entry: { kind: 'named', name: 'entry' },
+        }),
+      )).code,
+      'ConflictingBindings',
+    )
+  }),
+)
+
+it.effect(
+  'publishes stable artifact identity with stage, compiler and ordered supply distinctions',
+  () =>
+    Effect.gen(function* () {
+      const analysis = yield* Analysis.makeRealized({
+        root: SourceFile.make('identity', ascii('export "C" fn value() -> i32 { return 42 }')),
+        configuration: {
+          profile: {
+            target: 'x86_64-unknown-linux-gnu',
+            artifact: 'object',
+            runtime: { kind: 'none' },
+          },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      const plan = analysis.artifactPlan ?? unreachable('expected logical plan')
+      const remade = yield* ArtifactPlan.make(
+        analysis,
+        plan.profile,
+        plan.composition,
+        Analysis.loweredMir(analysis),
+        plan.stage,
+        plan.compiler,
+      )
+      assert.deepEqual(remade, plan)
+      const object = yield* ArtifactPlan.make(
+        analysis,
+        plan.profile,
+        plan.composition,
+        Analysis.loweredMir(analysis),
+        'object',
+        plan.compiler,
+      )
+      const compiler = yield* ArtifactPlan.make(
+        analysis,
+        plan.profile,
+        plan.composition,
+        Analysis.loweredMir(analysis),
+        plan.stage,
+        'another compiler',
+      )
+      assert.strictEqual(new Set([plan.identity, object.identity, compiler.identity]).size, 3)
+      const a = { _tag: 'Object', path: '/one.o' } as const
+      const b = { _tag: 'Object', path: '/two.o' } as const
+      assert.notStrictEqual(
+        ArtifactPlan.physicalIdentity(plan, [a, b]),
+        ArtifactPlan.physicalIdentity(plan, [b, a]),
+      )
+      assert.strictEqual(plan.identity, remade.identity)
+    }),
+)
+
+it.effect(
+  'rejects invalid retention roles and unsupported final loader entries before emission',
+  () =>
+    Effect.gen(function* () {
+      for (const text of [
+        'pub static fn selected() -> i32 { return 1 }',
+        'pub fn selected<T>(value: T) -> T { return value }',
+      ]) {
+        const analysis = yield* Analysis.makeRealized({
+          root: SourceFile.make('roles', ascii(text)),
+          configuration: {
+            profile: {
+              target: 'x86_64-unknown-linux-gnu',
+              artifact: 'object',
+              runtime: { kind: 'none' },
+            },
+            composition: {
+              runtimes: [],
+              defaults: [],
+              requirements: [],
+              retention: [{ module: 'roles', declaration: 'selected' }],
+            },
+          },
+        }).pipe(Effect.provide(SourceResolver.empty))
+        const diagnostics = Analysis.diagnostics(analysis)
+        assert.include(
+          diagnostics.map((entry) => entry.code),
+          'SEM0214',
+        )
+        assert.isTrue(diagnostics.every((entry) => entry.span.sourceId === 'roles'))
+      }
+      const analysis = yield* Analysis.makeRealized({
+        root: SourceFile.make('loader', ascii('export "C" fn value() -> i32 { return 42 }')),
+        configuration: {
+          profile: {
+            target: 'x86_64-unknown-linux-gnu',
+            artifact: 'object',
+            runtime: { kind: 'none' },
+            entry: { kind: 'named', name: 'start' },
+          },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.deepEqual(Analysis.diagnostics(analysis), [])
+      const plan = analysis.artifactPlan ?? unreachable('expected intermediate plan')
+      const rejected = yield* Effect.flip(
+        ArtifactPlan.make(
+          analysis,
+          plan.profile,
+          plan.composition,
+          Analysis.loweredMir(analysis),
+          'final',
+          plan.compiler,
+        ),
+      )
+      assert.strictEqual(rejected.code, 'UnsupportedCombination')
+    }),
 )

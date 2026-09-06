@@ -592,6 +592,7 @@ export const lowerProgram = (
       intrinsics: discovery.intrinsics,
       foreignCalls: discovery.foreignCalls,
       foreignExports: discovery.foreignExports,
+      retainedRoots: discovery.retention,
       foreignStatics,
       entry: Object.freeze({ _tag: 'UnavailableEntry', reason }),
       layout: finalizedLayout,
@@ -604,15 +605,16 @@ export const lowerProgram = (
       functions: withLocalSharedDropPlans(layout, functions),
     })
   if (discovery.entry._tag !== 'Resolved') {
-    if (discovery.entry._tag === 'Library') {
+    if (discovery.entry._tag === 'None') {
       return Object.freeze({
         _tag: 'MirModule',
         module: discovery.rootModule,
         intrinsics: discovery.intrinsics,
         foreignCalls: discovery.foreignCalls,
         foreignExports: discovery.foreignExports,
+        retainedRoots: discovery.retention,
         foreignStatics,
-        entry: Object.freeze({ _tag: 'LibraryEntry' }),
+        entry: Object.freeze({ _tag: 'NoInvocation' }),
         layout: finalizedLayout,
         staticData,
         executionTransitions: Object.freeze(
@@ -804,6 +806,7 @@ export const lowerProgram = (
     intrinsics: discovery.intrinsics,
     foreignCalls: discovery.foreignCalls,
     foreignExports: discovery.foreignExports,
+    retainedRoots: discovery.retention,
     foreignStatics,
     entry,
     layout: finalizedLayout,

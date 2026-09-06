@@ -168,14 +168,31 @@ const configuration = Effect.fnUntraced(function* (
         host._tag === 'Resolved' ? host.target.id : undefined,
       )
       return {
-        package: project === undefined ? 'standalone@0.0.0' : `${project.name}@${project.version}`,
-        profile: selected.input,
-        bindings: selected.bindings,
+        application: project?.entry.module,
+        configuration: {
+          ...(project?.build.composition === undefined
+            ? {}
+            : {
+                composition: project.build.composition,
+                compositionOrigin: ConfigurationOrigin.literal(
+                  `${project.manifestPath}:build.composition`,
+                ),
+              }),
+          package:
+            project === undefined ? 'standalone@0.0.0' : `${project.name}@${project.version}`,
+          profile: selected.input,
+          bindings: selected.bindings,
+        },
       }
     }),
   )
   return Result.isSuccess(attempt)
-    ? { configuration: attempt.success }
+    ? {
+        configuration: attempt.success.configuration,
+        ...(attempt.success.application === undefined
+          ? {}
+          : { application: attempt.success.application }),
+      }
     : { configurationError: attempt.failure }
 })
 

@@ -493,6 +493,22 @@
     "./WorkspaceInventory": {
       "types": "./dist/WorkspaceInventory.d.ts",
       "import": "./dist/WorkspaceInventory.js"
+    },
+    "./ArtifactComposition": {
+      "types": "./dist/ArtifactComposition.d.ts",
+      "default": "./dist/ArtifactComposition.js"
+    },
+    "./ArtifactPlan": {
+      "types": "./dist/ArtifactPlan.d.ts",
+      "default": "./dist/ArtifactPlan.js"
+    },
+    "./NativeRequirement": {
+      "types": "./dist/NativeRequirement.d.ts",
+      "default": "./dist/NativeRequirement.js"
+    },
+    "./NativeRequirementBinding": {
+      "types": "./dist/NativeRequirementBinding.d.ts",
+      "default": "./dist/NativeRequirementBinding.js"
     }
   },
   "publishConfig": {
