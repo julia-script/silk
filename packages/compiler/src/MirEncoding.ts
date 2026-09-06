@@ -142,10 +142,12 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = pointer-null : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PointerIsNull':
       return `${localText(operation.destination)} = pointer-is-null ${localText(operation.pointer)} : bool ${provenanceText(operation.provenance)}`
-    case 'PointerFromReference':
-      return `${localText(operation.destination)} = pointer-from-reference ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'PointerOffset':
-      return `${localText(operation.destination)} = pointer-offset ${localText(operation.pointer)} count=${localText(operation.count)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PointerRequalify':
+      return `${localText(operation.destination)} = pointer-requalify ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PointerFromStorage':
+      return `${localText(operation.destination)} = pointer-from-storage ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PointerAt':
+      return `${localText(operation.destination)} = pointer-at ${localText(operation.pointer)} count=${localText(operation.count)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PointerRead':
       return `${localText(operation.destination)} = pointer-read ${localText(operation.pointer)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PointerWrite':

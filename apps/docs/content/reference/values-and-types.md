@@ -1201,11 +1201,13 @@ uses `SEM0058`; implicit array decay uses `SEM0059`.
 
 **Status:** Confirmed
 
-`*const T` and `*mut T` are types for any concrete pointee `T`, including a struct with no fields
-used as an opaque handle. Pointer identity includes the canonical pointee and the mutability, so
-`*const u8`, `*mut u8`, and `*mut i8` are three distinct types. A raw pointer is Copy, may be
-null, owns nothing, holds no loan, and carries no guarantee that its address is valid, aligned,
-initialized, or still allocated. It is exactly the value a C API means by a pointer.
+`*const T` and `*mut T` are non-null single-object pointers. `[*]const T` and `[*]mut T`
+carry many-element extent without a length. Prefix either form with `?` to admit foreign null.
+Each pointer preserves its invariant pointee, mutability, nullability, extent, minimum alignment,
+and address space, including at nested levels. All forms are Copy addresses that own nothing and
+hold no loan. Non-nullness does not establish live or initialized storage. Optional `align(N)`
+sets a power-of-two minimum alignment; omission means the pointee's semantic natural alignment.
+Only `addrspace(0)` is admitted. See [the native boundary](native-pointer-boundary.md).
 
 ```silk
 struct Opaque {}
@@ -1225,22 +1227,23 @@ Reading `handle.raw` twice is an ordinary Copy read: nothing moves and the bindi
 cleanup. `*mut T` converts to `*const T` at an immediate expected-type boundary, such as an
 argument for a `*const T` parameter; the reverse direction is an ordinary type mismatch.
 
-**Boundary:** No other conversion exists. A pointer cannot be cast to or from an integer, compared
-with anything except null through `Pointer.isNull`, used in arithmetic, or converted to a reference
-or slice. Pointing at an ordinary Silk struct is allowed as an opaque handle, but only a valid
-C-layout record grants native code the right to interpret the pointee's fields. Function pointers
-are a separate proposal.
+**Boundary:** Implicit conversions may remove mutation capability, add nullability, or weaken
+alignment. They preserve extent and the invariant pointee. Unsafe qualifier conversion preserves
+pointee and address space and requires proof of each strengthened guarantee. A slice remains a
+distinct value. Pointer arithmetic is expressed through many-pointer indexing; no pointer-to-integer
+or pointer-to-reference conversion is admitted. Only a valid C-layout record permits native field
+interpretation. C function pointers have their own distinct type.
 
 **Diagnostics:** Passing `*const T` where `*mut T` is expected reports the ordinary type mismatch.
 A `*` in type position not followed by `const` or `mut` is a parser diagnostic that recovers at the
 pointee.
 
 **Current compiler:** Aligned. `Type.Pointer` is one variant whose canonical key carries the
-pointee and mutability; the Copy proof and the layout entry mark it Copy the way builtin scalars
+pointee and every qualifier; the Copy proof and the layout entry mark it Copy the way builtin scalars
 are, and instance keys treat it as an ordinary concrete runtime type that does not reach the
 pointee's instances.
 
-**Evidence:** [raw pointer specification](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-raw-pointers/spec.md),
+**Evidence:** [raw pointer specification](../../../../openspec/changes/add-native-pointer-boundary/specs/bootstrap-raw-pointers/spec.md),
 [pointer type variant](../../../../packages/compiler/src/Type.ts),
 [pointer layout](../../../../packages/compiler/src/Layout.ts),
 [C ABI classification](../../../../packages/compiler/src/CAbi.ts).
@@ -1252,23 +1255,26 @@ pointee's instances.
 The compiler exposes the pointer primitives through the sealed `Intrinsic` namespace, and the
 module `silk/pointer` exposes them as the ordinary `Pointer` API:
 
-| Operation                                   | Safety | Result     |
-| ------------------------------------------- | ------ | ---------- |
-| `null<T>()`                                 | safe   | `*mut T`   |
-| `isNull(pointer: *const T)`                 | safe   | `bool`     |
-| `fromRef(value: &T)`                        | safe   | `*const T` |
-| `fromMutRef(value: &mut T)`                 | safe   | `*mut T`   |
-| `fromSlice(values: &[T])`                   | safe   | `*const T` |
-| `fromMutSlice(values: &mut [T])`            | safe   | `*mut T`   |
-| `offset(pointer: *const T, count: usize)`   | unsafe | `*const T` |
-| `offsetMut(pointer: *mut T, count: usize)`  | unsafe | `*mut T`   |
-| `read<T: Copy>(pointer: *const T)`          | unsafe | `T`        |
-| `write<T: Copy>(pointer: *mut T, value: T)` | unsafe | `()`       |
+| Operation                                                          | Safety | Result                                         |
+| ------------------------------------------------------------------ | ------ | ---------------------------------------------- |
+| `null<T>()`                                                        | safe   | `?*mut T`                                      |
+| `isNull`, `isNullMany`                                             | safe   | `bool`                                         |
+| `nonNull`, `nonNullMut`, `nonNullMany`, `nonNullManyMut`           | safe   | `Option` of the corresponding non-null pointer |
+| `fromRef(value: &T)`                                               | safe   | `*const T`                                     |
+| `fromMutRef(value: &mut T)`                                        | safe   | `*mut T`                                       |
+| `fromSlice(values: &[T])`                                          | safe   | `?[*]const T`                                  |
+| `fromMutSlice(values: &mut [T])`                                   | safe   | `?[*]mut T`                                    |
+| `at(pointer: [*]const T, index: usize)`                            | unsafe | `*const T`                                     |
+| `atMut(pointer: [*]mut T, index: usize)`                           | unsafe | `*mut T`                                       |
+| `read<T: Copy>(pointer: *const T)`                                 | unsafe | `T`                                            |
+| `write<T: Copy>(pointer: *mut T, value: T)`                        | unsafe | `()`                                           |
+| `readUnaligned`, `writeUnaligned`                                  | unsafe | `T` or `()`; accepts `align(1)`                |
+| `assumeAligned`, `assumeAlignedMut`, `assumeMany`, `assumeManyMut` | unsafe | Pointer with the asserted qualifier            |
 
-Forming a pointer is safe because taking an address has no memory effect. `offset` and `offsetMut`
-advance by `count` elements of `T` and are unsafe because the result must stay inside one
-allocation. `read` and `write` are unsafe because the address must be valid, aligned, initialized
-for a read, and writable for a write.
+Formation takes an address without reading its pointee. `at` and `atMut` use the semantic element
+stride and require the selected element to lie within one live allocation. Reads require an
+initialized live value; writes require live writable storage. Aligned operations require natural
+alignment. Unaligned operations emit no stronger LLVM alignment than the source guarantee.
 
 ```silk
 import silk.pointer as Pointer
@@ -1288,12 +1294,12 @@ The `Pointer` source API bounds `read` and `write` to a Copy pointee, so `Pointe
 applies the same Copy rule to every pointer read and write operation as the backstop for direct
 intrinsic use. Every primitive is available through LLVM on native and WebAssembly targets.
 
-**Boundary:** A pointer cannot move a value through raw memory; a slot protocol over pointers is a
-later change. Null is a value, not a failure: reading through it is an unsafe-contract violation,
-not a typed error. The intrinsic catalog cannot express a Copy bound, which is why the bound lives
-in the source wrapper and the verifier rather than in the primitive's signature.
+**Boundary:** A pointer cannot move a non-Copy value through raw memory. `silk/output` provides
+ordinary Copy output-state owners over raw storage. `Slot.address` consumes a raw slot selection
+without reading or initializing it. A foreign call does not change the owner's initialization state;
+`Uninitialized.assumeInitialized` requires an unsafe proof of a complete valid value.
 
-**Diagnostics:** Calling `read`, `write`, `offset`, or `offsetMut` outside an unsafe boundary
+**Diagnostics:** Calling `read`, `write`, `at`, or `atMut` outside an unsafe boundary
 reports the existing unsafe-acknowledgement diagnostic. A move-only pointee at `read` or `write`
 reports the ordinary bound failure naming the Copy requirement. A pointer read or write whose
 pointee is not Copy in constructed MIR is a structural verification violation and emits no artifact.
@@ -1302,7 +1308,7 @@ pointee is not Copy in constructed MIR is a structural verification violation an
 primitive, each unsafe one with its caller invariant; `silk/pointer.silk` wraps them with the
 documented bounds.
 
-**Evidence:** [raw pointer specification](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-raw-pointers/spec.md),
+**Evidence:** [raw pointer specification](../../../../openspec/changes/add-native-pointer-boundary/specs/bootstrap-raw-pointers/spec.md),
 [pointer intrinsics](../../../../packages/compiler/src/Intrinsic.ts),
 [pointer source API](../../../../packages/compiler/stdlib/silk/pointer.silk),
 [unsafe boundaries](unsafe-intrinsics-and-targets.md#unsafe-003--unsafe-call-marks-one-invocation-unsafe---marks-a-statement-region).
@@ -1347,7 +1353,7 @@ backend already materializes every borrowed root in memory and reloads every add
 each synchronous and foreign call, so a Silk callee writing through a `*mut` parameter is observed
 by its caller.
 
-**Evidence:** [raw pointer specification](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-raw-pointers/spec.md),
+**Evidence:** [raw pointer specification](../../../../openspec/changes/add-native-pointer-boundary/specs/bootstrap-raw-pointers/spec.md),
 [pointer ownership](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-ownership/spec.md),
 [backend reload rule](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-backend/spec.md),
 [borrow rules](ownership-and-borrowing.md#borrow-003--a-borrow-preserves-the-original-owner).

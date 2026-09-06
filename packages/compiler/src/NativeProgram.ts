@@ -1,3 +1,4 @@
+import * as NativeCAbi from './NativeCAbi.js'
 import * as Bitcode from '@silklang/llvm/Bitcode'
 import * as Builder from '@silklang/llvm/Builder'
 import * as Constant from '@silklang/llvm/Constant'
@@ -358,6 +359,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     const parameters = call.signature.parameters.map(cType)
     if (parameters.some((type) => type === undefined))
       throw new RangeError(`LLVM foreign function ${call.symbol} has a void parameter`)
+    const attributes = yield* NativeCAbi.attributes(builder, call.signature)
     const handle = yield* FunctionActor.declare(
       builder,
       call.symbol,
@@ -366,6 +368,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         cType(call.signature.result) ?? voidType ?? (yield* LlvmType.voidType(builder)),
         parameters.flatMap((type) => (type === undefined ? [] : [type])),
       ),
+      attributes === undefined ? {} : { attributes },
     ).pipe(
       Effect.mapError(
         (cause) =>

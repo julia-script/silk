@@ -351,6 +351,10 @@ export type DeclaredTypeFact =
   | {
       readonly _tag: 'Pointer'
       readonly mutable: boolean
+      readonly nullable: boolean
+      readonly extent: Type.Pointer['extent']
+      readonly alignment: Type.Pointer['alignment']
+      readonly addressSpace: Type.Pointer['addressSpace']
       readonly pointee: DeclaredTypeFact
       readonly spelling: string
       readonly token: Token.Token
@@ -1881,10 +1885,20 @@ export type FieldLookup =
       readonly fields: ReadonlyArray<FieldFact>
     }
 
+/** One explicitly published import alias with its original module/name and source provenance. */
+export interface Publication {
+  readonly module: string
+  readonly original: string
+  readonly spelling: string
+  readonly syntax: SyntaxTree.Node
+  readonly token: Token.Token
+}
+
 /** One module's collected headers with their header-level diagnostics. */
 export interface ModuleHeaders {
   readonly _tag: 'ModuleHeaders'
   readonly module: string
+  readonly publications: ReadonlyArray<Publication>
   readonly members: ReadonlyArray<MemberFact>
   readonly declarations: ReadonlyArray<DeclarationFact>
   readonly structs: ReadonlyArray<StructFact>
@@ -2122,6 +2136,35 @@ export const member = (self: Index, module: string, name: string): MemberLookup 
     self.modules.find((candidate) => candidate.module === module)?.members ?? Object.freeze([]),
     name,
   )
+
+/** Looks through explicit selective publication while preserving the original declaration identity. */
+export const publishedMember = (
+  self: Index,
+  module: string,
+  name: string,
+  visiting: ReadonlySet<string> = new Set(),
+): MemberLookup => {
+  const key = `${module}\u0000${name}`
+  if (visiting.has(key)) return { _tag: 'Missing', spelling: name }
+  const next = new Set([...visiting, key])
+  const local = member(self, module, name)
+  const candidates: Array<MemberFact> = []
+  if (local._tag === 'Resolved') candidates.push(local.declaration)
+  if (local._tag === 'Ambiguous') candidates.push(...local.declarations)
+  for (const publication of self.modules.find((headers) => headers.module === module)
+    ?.publications ?? []) {
+    if (publication.spelling !== name) continue
+    const original = publishedMember(self, publication.module, publication.original, next)
+    if (original._tag === 'Resolved') candidates.push(original.declaration)
+    if (original._tag === 'Ambiguous') candidates.push(...original.declarations)
+  }
+  const unique = [...new Set(candidates)]
+  const first = unique[0]
+  if (first === undefined) return Object.freeze({ _tag: 'Missing', spelling: name })
+  return unique.length === 1
+    ? Object.freeze({ _tag: 'Resolved', spelling: name, declaration: first })
+    : Object.freeze({ _tag: 'Ambiguous', spelling: name, declarations: Object.freeze(unique) })
+}
 
 export const enumByName = (self: Index, module: string, name: string): EnumLookup => {
   const result = member(self, module, name)

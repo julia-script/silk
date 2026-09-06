@@ -908,12 +908,21 @@ const printNode = (
     case 'SourceFile':
       return printSourceFile(context, node, prefix)
     case 'ImportDeclaration': {
+      const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
       const keyword = tokenOf(node, 'ImportKeyword')
       const path = nodeOf(node, 'ImportPath')
       const alias = directNodes(node).find((child) => child.kind === 'ImportAlias')
       const members = directNodes(node).find((child) => child.kind === 'ImportMemberList')
       return FormatDocument.concat(
-        printToken(context, keyword, prefix, preserveBlank),
+        ...(publicKeyword === undefined
+          ? []
+          : [printToken(context, publicKeyword, prefix, preserveBlank)]),
+        printToken(
+          context,
+          keyword,
+          publicKeyword === undefined ? prefix : FormatDocument.text(' '),
+          preserveBlank,
+        ),
         printNode(context, path, FormatDocument.text(' ')),
         ...(alias === undefined ? [] : [printNode(context, alias, FormatDocument.text(' '))]),
         ...(members === undefined ? [] : [printNode(context, members, FormatDocument.text(' '))]),
@@ -1257,15 +1266,25 @@ const printNode = (
         ...(role === undefined ? [] : [printToken(context, role)]),
       )
     }
+    case 'PointerQualifier':
+      return FormatDocument.concat(...directTokens(node).map((token) => printToken(context, token)))
     case 'PointerType': {
-      const mutability = directTokens(node).find(
-        (token) => token.kind === 'ConstKeyword' || token.kind === 'MutKeyword',
-      )
+      const tokens = directTokens(node)
+      const children = directNodes(node)
       return FormatDocument.concat(
-        printToken(context, tokenOf(node, 'Star'), prefix, preserveBlank),
-        ...(mutability === undefined ? [] : [printToken(context, mutability)]),
+        ...tokens.map((token, ordinal) =>
+          ordinal === 0
+            ? printToken(context, token, prefix, preserveBlank)
+            : printToken(context, token),
+        ),
         FormatDocument.text(' '),
-        printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
+        ...children
+          .filter((child) => child.kind === 'PointerQualifier')
+          .flatMap((child) => [printNode(context, child), FormatDocument.text(' ')]),
+        printNode(
+          context,
+          children.find((child) => child.kind !== 'PointerQualifier') ?? nodeOf(node, 'TypePath'),
+        ),
       )
     }
     case 'CallableType':
@@ -1527,6 +1546,7 @@ const printNode = (
       )
     }
     case 'Block':
+    case 'DeclarationGroup':
       return printBlock(context, node, prefix)
     case 'UnsafeStatement':
       return FormatDocument.concat(
@@ -1610,6 +1630,7 @@ const printNode = (
             ]),
       )
     }
+    case 'StaticConditionalDeclaration':
     case 'StaticConditionalStatement': {
       const nodes = directNodes(node)
       const elseKeyword = directTokens(node).find((token) => token.kind === 'ElseKeyword')

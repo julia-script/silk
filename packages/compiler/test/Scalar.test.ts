@@ -1,3 +1,4 @@
+import * as Target from '../src/Target.js'
 import { assert, it } from '@effect/vitest'
 import * as Intrinsic from '../src/Intrinsic.js'
 import * as Scalar from '../src/Scalar.js'
@@ -46,7 +47,7 @@ it('owns the current scalar vocabulary in stable presentation order', () => {
 it('resolves fixed and target-width scalar facts without phase-specific cases', () => {
   assert.strictEqual(Scalar.bits(Scalar.defaultInteger, 64), 32)
   assert.strictEqual(Scalar.bits(Scalar.pointerInteger, 64), 64)
-  assert.deepEqual(Scalar.resolveLayout(Scalar.pointerInteger, 8, 8), {
+  assert.deepEqual(Scalar.resolveLayout(Scalar.pointerInteger, Target.aarch64AppleDarwin), {
     size: 8,
     alignment: 8,
   })
@@ -124,7 +125,10 @@ it('resolves fixed and target-width scalar facts without phase-specific cases', 
     ],
   )
   assert.deepEqual(Scalar.character.width, { _tag: 'FixedWidth', bits: 32 })
-  assert.deepEqual(Scalar.resolveLayout(Scalar.character, 8, 8), { size: 4, alignment: 4 })
+  assert.deepEqual(Scalar.resolveLayout(Scalar.character, Target.aarch64AppleDarwin), {
+    size: 4,
+    alignment: 4,
+  })
   const intrinsic = Intrinsic.findActor('Intrinsic')
   assert.notStrictEqual(intrinsic, undefined)
   for (const scalar of Scalar.all()) {

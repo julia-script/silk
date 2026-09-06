@@ -1442,6 +1442,31 @@ const staticCompositionCorpus: ReadonlyArray<CorpusProgram> = [
 ]
 
 /** A Silk callee stores through a `*mut i32` parameter; the caller reloads the place afterwards. */
+export const outputStorageSource = `import silk.output { Uninitialized, Initialized }
+import silk.pointer { Pointer }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+
+effect fn exercise() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let safe = run Uninitialized.make<i32>()
+  let written = Uninitialized.initialize<i32>(move safe, 20)
+  let first = Initialized.into<i32>(move written)
+  let mut foreign = run Uninitialized.make<i32>()
+  let address = Uninitialized.address<i32>(&mut foreign)
+  unsafe {
+    Pointer.writeUnaligned<i32>(address, 22)
+    let initialized = Uninitialized.assumeInitialized<i32>(move foreign)
+    let second = Initialized.into<i32>(move initialized)
+    return first + second
+  }
+}
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
+pub fn main() -> i32 {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let exercise = exercise() |> Effect.provideMut<Allocator>(&mut allocator)
+  return run Effect.catchAll(move exercise, recover)
+}`
+
 const pointerParameterWrite = `import silk.pointer { Pointer }
 fn store(target: *mut i32, value: i32) -> () {
   unsafe { Pointer.write(target, value) }
@@ -5232,13 +5257,20 @@ pub fn main() -> i32 {
 pub fn main() -> i32 {
   let mut values = [1, 2, 3, 4]
   let pointer = Pointer.fromMutSlice(&mut values)
+  if Pointer.isNullMany(pointer) { return 0 }
   unsafe {
-    let third = Pointer.offsetMut(pointer, 2)
+    let many = Intrinsic.pointerRequalify<?[*]mut i32, [*]mut i32>(pointer)
+    let third = Pointer.atMut(many, 2)
     Pointer.write(third, 40)
     if Pointer.read(third) != 40 { return 1 }
   }
   return values[2] + values[3] - 2
 }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'owned-output-storage',
+    source: outputStorageSource,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -5759,7 +5791,7 @@ pub fn main() -> i32 {
 export const foreignPointerFillNative = `import silk.i32 as i32
 import silk.u8 as u8
 import silk.pointer { Pointer }
-unsafe extern "C" fn silk_test_fill(buffer: *mut u8, length: usize, byte: u8) -> ()
+unsafe extern "C" fn silk_test_fill(buffer: ?[*]mut u8, length: usize, byte: u8) -> ()
 fn fill(bytes: &mut [u8], byte: u8) -> () {
   unsafe silk_test_fill(Pointer.fromMutSlice(&mut bytes), bytes.length, byte)
 }
@@ -5813,20 +5845,21 @@ export const foreignLibcRoundtripNative = `import silk.i32 as i32
 import silk.isize as isize
 import silk.usize as usize
 import silk.pointer { Pointer }
-unsafe extern "C" fn malloc(size: usize) -> *mut u8
-unsafe extern "C" fn free(pointer: *mut u8) -> ()
-unsafe extern "C" fn memcpy(destination: *mut u8, source: *const u8, length: usize) -> *mut u8
-unsafe extern "C" fn memcmp(left: *const u8, right: *const u8, length: usize) -> i32
-unsafe extern "C" fn strlen(text: *const u8) -> usize
-unsafe extern "C" fn write(descriptor: i32, data: *const u8, length: usize) -> isize
+unsafe extern "C" fn malloc(size: usize) -> ?[*]mut u8
+unsafe extern "C" fn free(pointer: ?[*]mut u8) -> ()
+unsafe extern "C" fn memcpy(destination: [*]mut u8, source: ?[*]const u8, length: usize) -> [*]mut u8
+unsafe extern "C" fn memcmp(left: [*]const u8, right: ?[*]const u8, length: usize) -> i32
+unsafe extern "C" fn strlen(text: [*]const u8) -> usize
+unsafe extern "C" fn write(descriptor: i32, data: [*]const u8, length: usize) -> isize
 pub fn main() -> i32 {
   let bytes = b"hello\\n"
   let length = bytes.length
-  let buffer = unsafe malloc(length + 1)
-  if Pointer.isNull(buffer) { return 1 }
+  let allocated = unsafe malloc(length + 1)
+  if Pointer.isNullMany(allocated) { return 1 }
   unsafe {
+    let buffer = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(allocated)
     let copied = memcpy(buffer, Pointer.fromSlice(bytes), length)
-    Pointer.write(Pointer.offsetMut(buffer, length), i32.toU8(0))
+    Pointer.write(Pointer.atMut(buffer, length), i32.toU8(0))
     if memcmp(buffer, Pointer.fromSlice(bytes), length) != 0 { return 2 }
     if strlen(buffer) != length { return 3 }
     if isize.toI32(write(1, buffer, length)) != usize.toI32(length) { return 4 }
@@ -7761,7 +7794,7 @@ pub fn main() -> i32 { return unsafe abs(-42) }`,
     name: 'foreign-libc-qsort-callback',
     source: 'pub fn main() -> i32 { return 42 }',
     nativeSource: `import silk.pointer { Pointer }
-unsafe extern "C" fn qsort(base: *mut i32, count: usize, size: usize, compare: extern "C" fn(*const i32, *const i32) -> i32) -> ()
+unsafe extern "C" fn qsort(base: ?[*]mut i32, count: usize, size: usize, compare: extern "C" fn(*const i32, *const i32) -> i32) -> ()
 export "C" fn compare(left: *const i32, right: *const i32) -> i32 {
   let leftValue = unsafe Pointer.read(left)
   let rightValue = unsafe Pointer.read(right)

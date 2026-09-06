@@ -3,19 +3,24 @@
  * signatures. Admission is judged on type spelling alone so a foreign header is accepted or
  * rejected once per module; classification resolves pointer-width integers for one target.
  */
-import type * as Target from './Target.js'
+import * as Target from './Target.js'
 import * as Type from './Type.js'
 
 /** One C-classified scalar exchanged by value across a foreign call. */
 export type CAbiType =
   | { readonly _tag: 'Void' }
-  | { readonly _tag: 'Integer'; readonly bits: 8 | 16 | 32 | 64; readonly signed: boolean }
+  | {
+      readonly _tag: 'Integer'
+      readonly bits: 8 | 16 | 32 | 64
+      readonly signed: boolean
+      readonly extension: 'None' | 'Sign' | 'Zero'
+    }
   | { readonly _tag: 'Float'; readonly bits: 32 | 64 }
   /**
    * The C pointer class. Admission never examines the pointee (opaque pointers are admitted); it
    * is carried so a call site can be checked against the declared pointee.
    */
-  | { readonly _tag: 'Pointer'; readonly mutable: boolean; readonly pointee: Type.Type }
+  | { readonly _tag: 'Pointer'; readonly type: Type.Pointer }
   | {
       readonly _tag: 'FunctionPointer'
       readonly parameters: ReadonlyArray<CAbiType>
@@ -41,8 +46,7 @@ export type TypeText =
   | 'u64'
   | 'f32'
   | 'f64'
-  | '*const'
-  | '*mut'
+  | `pointer<${string}>`
   | `extern "C" fn(${string})->${string}`
 
 export type Position = 'Parameter' | 'Result'
@@ -53,38 +57,64 @@ export type Admission =
 
 const void_: CAbiType = Object.freeze({ _tag: 'Void' })
 
-const integer = (bits: 8 | 16 | 32 | 64, signed: boolean): CAbiType =>
-  Object.freeze({ _tag: 'Integer', bits, signed })
+const integer = (bits: 8 | 16 | 32 | 64, signed: boolean, target: Target.Target): CAbiType => {
+  // Apple ARM64 and System V x86-64 extend narrow C integers to 32 bits. AAPCS64 does not.
+  // The pinned authorities and independent Clang fixtures live in native-boundary conformance.
+  const extended =
+    bits < 32 && (target.id === 'aarch64-apple-darwin' || target.id === 'x86_64-unknown-linux-gnu')
+  const extension = signed ? 'Sign' : 'Zero'
+  return Object.freeze({
+    _tag: 'Integer',
+    bits,
+    signed,
+    extension: extended ? extension : 'None',
+  })
+}
 
 const float = (bits: 32 | 64): CAbiType => Object.freeze({ _tag: 'Float', bits })
 
 /** The closed scalar switch; `bool` and `char` are deliberately outside the C subset. */
-const scalar = (spelling: Type.Builtin, pointerBits: 32 | 64): CAbiType | undefined => {
+const physicalBits = (primitive: Target.Primitive): 8 | 16 | 32 | 64 => {
+  switch (primitive.size) {
+    case 1:
+      return 8
+    case 2:
+      return 16
+    case 4:
+      return 32
+    case 8:
+      return 64
+    default:
+      throw new RangeError('Unsupported audited scalar width')
+  }
+}
+
+const scalar = (spelling: Type.Builtin, target: Target.Target): CAbiType | undefined => {
   switch (spelling) {
     case 'i8':
-      return integer(8, true)
+      return integer(physicalBits(target.primitives.i8), true, target)
     case 'u8':
-      return integer(8, false)
+      return integer(physicalBits(target.primitives.i8), false, target)
     case 'i16':
-      return integer(16, true)
+      return integer(physicalBits(target.primitives.i16), true, target)
     case 'u16':
-      return integer(16, false)
+      return integer(physicalBits(target.primitives.i16), false, target)
     case 'i32':
-      return integer(32, true)
+      return integer(physicalBits(target.primitives.i32), true, target)
     case 'u32':
-      return integer(32, false)
+      return integer(physicalBits(target.primitives.i32), false, target)
     case 'i64':
-      return integer(64, true)
+      return integer(physicalBits(target.primitives.i64), true, target)
     case 'u64':
-      return integer(64, false)
+      return integer(physicalBits(target.primitives.i64), false, target)
     case 'isize':
-      return integer(pointerBits, true)
+      return integer(pointerBits(target), true, target)
     case 'usize':
-      return integer(pointerBits, false)
+      return integer(pointerBits(target), false, target)
     case 'f32':
-      return float(32)
+      return float(target.primitives.f32.size === 4 ? 32 : 64)
     case 'f64':
-      return float(64)
+      return float(target.primitives.f64.size === 4 ? 32 : 64)
     case 'bool':
     case 'char':
       return undefined
@@ -94,16 +124,16 @@ const scalar = (spelling: Type.Builtin, pointerBits: 32 | 64): CAbiType | undefi
 const classifyOrUndefined = (
   type: Type.Type,
   position: Position,
-  pointerBits: 32 | 64,
+  target: Target.Target,
 ): CAbiType | undefined => {
-  if (Type.isBuiltin(type)) return scalar(type, pointerBits)
+  if (Type.isBuiltin(type)) return scalar(type, target)
   if (Type.isPointer(type))
-    return Object.freeze({ _tag: 'Pointer', mutable: type.mutable, pointee: type.pointee })
+    return admittedType(type, position) ? Object.freeze({ _tag: 'Pointer', type }) : undefined
   if (Type.isForeignFunction(type)) {
     const parameters = type.parameters.map((parameter) =>
-      classifyOrUndefined(parameter, 'Parameter', pointerBits),
+      classifyOrUndefined(parameter, 'Parameter', target),
     )
-    const result = classifyOrUndefined(type.result, 'Result', pointerBits)
+    const result = classifyOrUndefined(type.result, 'Result', target)
     if (parameters.some((parameter) => parameter === undefined) || result === undefined)
       return undefined
     return Object.freeze({
@@ -118,17 +148,34 @@ const classifyOrUndefined = (
   return undefined
 }
 
-/** Target-independent admission of one parameter or result type into the V1 C subset. */
+const admittedType = (type: Type.Type, position: Position): boolean => {
+  if (Type.isBuiltin(type)) return type !== 'bool' && type !== 'char'
+  if (Type.isPointer(type))
+    return (
+      type.addressSpace === 0 &&
+      (type.alignment === 'Natural' || Type.isPointerAlignment(type.alignment))
+    )
+  if (Type.isForeignFunction(type))
+    return (
+      type.parameters.every((parameter) => admittedType(parameter, 'Parameter')) &&
+      admittedType(type.result, 'Result')
+    )
+  return position === 'Result' && Type.equals(type, Type.unit)
+}
+
+/** Target-independent admission of a parameter or result into the scalar C subset. */
 export const admit = (type: Type.Type, position: Position): Admission =>
-  classifyOrUndefined(type, position, 64) === undefined
-    ? Object.freeze({ _tag: 'NotAdmitted', type, position })
-    : Object.freeze({ _tag: 'Admitted', type })
+  admittedType(type, position)
+    ? Object.freeze({ _tag: 'Admitted', type })
+    : Object.freeze({ _tag: 'NotAdmitted', type, position })
 
 const pointerBits = (target: Target.Target): 32 | 64 => (target.pointerSize === 4 ? 32 : 64)
 
 /** Classifies one admitted type for the selected target. Throws on a type `admit` rejects. */
 export const classify = (type: Type.Type, target: Target.Target, position: Position): CAbiType => {
-  const classified = classifyOrUndefined(type, position, pointerBits(target))
+  if (!Target.isCanonical(target))
+    throw new RangeError('C ABI classification requires an audited target description')
+  const classified = classifyOrUndefined(type, position, target)
   if (classified === undefined)
     throw new RangeError(`${Type.encode(type)} is not admitted by the C ABI as a ${position}`)
   return classified
@@ -154,9 +201,31 @@ export const typeText = (self: CAbiType): TypeText => {
     case 'Float':
       return `f${self.bits}`
     case 'Pointer':
-      return self.mutable ? '*mut' : '*const'
+      return `pointer<${self.type.mutable ? 'mut' : 'const'};${encodeURIComponent(Type.runtimeKey(self.type)).replaceAll(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}>`
     case 'FunctionPointer':
       return `extern "C" fn(${self.parameters.map(typeText).join(',')})->${typeText(self.result)}`
+  }
+}
+
+/** Verifies target-dependent facts carried by a classified C value before native lowering. */
+export const isCanonical = (self: CAbiType, target: Target.Target): boolean => {
+  if (!Target.isCanonical(target)) return false
+  switch (self._tag) {
+    case 'Void':
+      return true
+    case 'Pointer':
+      return admittedType(self.type, 'Parameter')
+    case 'Float':
+      return self.bits === 32 || self.bits === 64
+    case 'Integer': {
+      const expected = integer(self.bits, self.signed, target)
+      return expected._tag === 'Integer' && self.extension === expected.extension
+    }
+    case 'FunctionPointer':
+      return (
+        self.parameters.every((type) => type._tag !== 'Void' && isCanonical(type, target)) &&
+        isCanonical(self.result, target)
+      )
   }
 }
 

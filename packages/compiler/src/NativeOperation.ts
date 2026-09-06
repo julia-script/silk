@@ -140,8 +140,9 @@ export const emit = Effect.fnUntraced(function* (
       return yield* NativeForeignOperation.emit(context.call, operation)
     case 'PointerNull':
     case 'PointerIsNull':
-    case 'PointerFromReference':
-    case 'PointerOffset':
+    case 'PointerRequalify':
+    case 'PointerFromStorage':
+    case 'PointerAt':
     case 'PointerRead':
     case 'PointerWrite':
       return yield* NativePointerOperation.emit(context.memory, operation)

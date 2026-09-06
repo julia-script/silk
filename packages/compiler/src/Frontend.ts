@@ -14,6 +14,9 @@ import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as IncrementalReuse from './IncrementalReuse.js'
 import * as ModuleClosure from './ModuleClosure.js'
+import * as ModuleSelection from './ModuleSelection.js'
+import * as Canonical from './internal/Canonical.js'
+import * as Realization from './Realization.js'
 import * as ModuleSemantics from './ModuleSemantics.js'
 import * as ModuleSurface from './ModuleSurface.js'
 import * as NameResolution from './NameResolution.js'
@@ -21,7 +24,7 @@ import * as ResolutionWork from './ResolutionWork.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Ownership from './Ownership.js'
 import * as PhaseReport from './PhaseReport.js'
-import type * as SemanticInvalidation from './SemanticInvalidation.js'
+import * as SemanticInvalidation from './SemanticInvalidation.js'
 import type * as SourceResolver from './SourceResolver.js'
 
 /** Optional environment-specific observations attached to compiler phase reports. */
@@ -32,6 +35,8 @@ export interface Options {
 }
 
 interface FrontendFacts {
+  readonly profile?: CompilationProfile.CompilationProfile
+  readonly selection?: ModuleSelection.ModuleSelection
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
@@ -53,6 +58,7 @@ export interface Frontend extends FrontendFacts {
 
 /** Immutable multi-root frontend facts computed once for one project revision. */
 export interface ProjectFrontend extends FrontendFacts {
+  readonly semanticEnvironment: string
   readonly closure: ModuleClosure.ProjectClosure
   readonly semanticInvalidation: SemanticInvalidation.SemanticInvalidation
 }
@@ -323,6 +329,48 @@ const analyzeFrontend = Effect.fnUntraced(function* (
   )
 })
 
+/** Supplies lazy static helpers with headers and source, without checking executable bodies. */
+const bootstrapFacts = Effect.fnUntraced(function* (
+  closure: ModuleClosure.Facts,
+  report: Array<PhaseReport.PhaseReport>,
+  options: Options,
+): Effect.fn.Return<FrontendFacts> {
+  const headers = yield* analyzeHeaders(closure, report, options)
+  const results = new Map<string, Elaboration.Result>()
+  for (const module of closure.modules) {
+    const moduleHeaders = headers.index.modules.find(
+      (candidate) => candidate.module === module.name,
+    )
+    const scope = NameResolution.scopeOf(headers.resolution, module.name)
+    if (moduleHeaders === undefined || scope === undefined)
+      throw new RangeError('Bootstrap lost module headers')
+    results.set(
+      module.name,
+      Elaboration.elaborateModule({
+        syntax: module.syntax,
+        headers: { ...moduleHeaders, declarations: [], constants: [] },
+        scope,
+        index: headers.index,
+      }),
+    )
+  }
+  return OpaqueRealization.withCatalog(
+    Object.freeze({
+      ...headers,
+      results,
+      semantics: new Map<string, ModuleSemantics.ModuleSemantics>(),
+      ownership: new Map<string, Ownership.ModuleOwnership>(),
+      diagnostics: Diagnostic.merge(
+        closure.diagnostics,
+        ...closure.modules.map((module) => module.syntax.lexicalDiagnostics),
+        ...closure.modules.map((module) => module.syntax.parserDiagnostics),
+      ),
+      report: Object.freeze([...report]),
+    }),
+    OpaqueRealization.analyze(results),
+  )
+})
+
 /** Constructs the complete recoverable compiler frontend for one compilation request. */
 export const frontend = Effect.fn('Frontend.frontend')(function* (
   request: ModuleClosure.CompilationRequest,
@@ -376,13 +424,15 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
     options,
   )
   yield* Effect.yieldNow
-  const facts = yield* analyzeFrontend(closure, report, options)
+  const facts = yield* ModuleSelection.required(closure)
+    ? bootstrapFacts(closure, report, options)
+    : analyzeFrontend(closure, report, options)
   let initialFacts: Pick<Frontend, 'initialProfile' | 'configurationError'> = {}
   if (initial !== undefined)
     initialFacts = Result.isSuccess(initial)
       ? { initialProfile: initial.success }
       : { configurationError: initial.failure }
-  return OpaqueRealization.withCatalog(
+  const unselected: Frontend = OpaqueRealization.withCatalog(
     Object.freeze({
       closure,
       ...facts,
@@ -393,6 +443,46 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
     }),
     OpaqueRealization.catalogOf(facts),
   )
+  if (!ModuleSelection.required(closure)) return unselected
+  const configured = yield* Realization.configure(unselected, request.target)
+  if (configured.completion === undefined) {
+    const span = closure.modules.find((module) => module.name === closure.rootModule)?.syntax.root
+      .span
+    return span === undefined
+      ? configured.frontend
+      : OpaqueRealization.withCatalog(
+          {
+            ...configured.frontend,
+            diagnostics: Diagnostic.merge(configured.frontend.diagnostics, [
+              Diagnostic.staticPhaseViolation(
+                'ModuleSelection.profile',
+                request.target ?? '<unavailable>',
+                [],
+                span,
+              ),
+            ]),
+          },
+          OpaqueRealization.catalogOf(configured.frontend),
+        )
+  }
+  const selected = yield* ModuleSelection.select(
+    { roots: [request.root] },
+    { ...closure, _tag: 'ProjectModuleClosure', rootModules: [closure.rootModule] },
+    configured.completion,
+  )
+  const selectedClosure = ModuleClosure.view(selected.closure, closure.rootModule)
+  if (selectedClosure === undefined) throw new RangeError('Module selection lost its root')
+  const selectedFacts = yield* analyzeFrontend(selectedClosure, report, options)
+  return OpaqueRealization.withCatalog(
+    Object.freeze({
+      ...unselected,
+      ...selectedFacts,
+      closure: selectedClosure,
+      selection: selected.selection,
+      profile: selected.selection.profile,
+    }),
+    OpaqueRealization.catalogOf(selectedFacts),
+  )
 })
 
 /** Constructs one complete compiler frontend for the union closure of project roots. */
@@ -402,7 +492,7 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
   previous?: IncrementalReuse.ProjectReuseBasis,
 ): Effect.fn.Return<ProjectFrontend, never, SourceResolver.SourceResolver> {
   const report: Array<PhaseReport.PhaseReport> = []
-  const closure = yield* PhaseReport.measureEffectInto(
+  let closure = yield* PhaseReport.measureEffectInto(
     report,
     'closure',
     request.roots.length,
@@ -412,10 +502,64 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
     options,
   )
   yield* Effect.yieldNow
-  const headers = yield* analyzeHeaders(closure, report, options)
+  let selection: ModuleSelection.ModuleSelection | undefined
+  let profile: CompilationProfile.CompilationProfile | undefined
+  let bootstrapHeaders: HeaderFacts | undefined
+  if (request.configuration !== undefined || ModuleSelection.required(closure)) {
+    const first = closure.rootModules[0]
+    const view = first === undefined ? undefined : ModuleClosure.view(closure, first)
+    if (view === undefined) throw new RangeError('Project selection lost its root')
+    const base = yield* bootstrapFacts(closure, report, options)
+    if (!ModuleSelection.required(closure)) bootstrapHeaders = base
+    const configured = yield* Realization.configure(
+      OpaqueRealization.withCatalog(
+        {
+          ...base,
+          closure: view,
+          ...(request.configuration === undefined ? {} : { configuration: request.configuration }),
+        },
+        OpaqueRealization.catalogOf(base),
+      ),
+      undefined,
+    )
+    profile = configured.completion?.profile
+    if (configured.completion !== undefined && ModuleSelection.required(closure)) {
+      const selected = yield* ModuleSelection.select(request, closure, configured.completion)
+      closure = selected.closure
+      selection = selected.selection
+    } else if (configured.completion === undefined) {
+      const span = closure.modules.find((module) => module.name === first)?.syntax.root.span
+      closure = Object.freeze({
+        ...closure,
+        diagnostics: Diagnostic.merge(
+          closure.diagnostics,
+          configured.frontend.diagnostics.filter(
+            (diagnostic) => diagnostic.code === Diagnostic.invalidConfigurationCode,
+          ),
+          span === undefined || !ModuleSelection.required(closure)
+            ? []
+            : [
+                Diagnostic.staticPhaseViolation(
+                  'ModuleSelection.profile',
+                  '<unavailable>',
+                  [],
+                  span,
+                ),
+              ],
+        ),
+      })
+    }
+  }
+  const semanticEnvironment = Canonical.record('SelectedFrontend', [
+    SemanticInvalidation.environment,
+    profile?.identity ?? '',
+    selection?.dependencies ?? '',
+  ])
+  const compatiblePrevious = previous?.environment === semanticEnvironment ? previous : undefined
+  const headers = bootstrapHeaders ?? (yield* analyzeHeaders(closure, report, options))
   const bodyQueries = BodyQuery.make(
     headers.index,
-    [...(previous?.semantics.values() ?? [])].map((module) => module.elaboration),
+    [...(compatiblePrevious?.semantics.values() ?? [])].map((module) => module.elaboration),
   )
   const currentElaboration = yield* PhaseReport.measureEffectInto(
     report,
@@ -437,6 +581,7 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
     () =>
       IncrementalReuse.invalidate({
         closure,
+        environment: semanticEnvironment,
         surfaces: headers.surfaces,
         opaqueRealizations: currentOpaqueRealizations,
         ...(previous === undefined ? {} : { previous }),
@@ -491,6 +636,9 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       ...headers,
       ...semantics,
       semanticInvalidation: invalidation.value,
+      semanticEnvironment,
+      ...(selection === undefined ? {} : { selection }),
+      ...(profile === undefined ? {} : { profile }),
       report: Object.freeze([...report]),
     }),
     OpaqueRealization.catalogOf(semantics),

@@ -48,7 +48,7 @@ export type Compatibility =
       readonly target: Type.Reference
     }
   | {
-      readonly _tag: 'PointerMutability'
+      readonly _tag: 'PointerWeakening'
       readonly source: Type.Pointer
       readonly target: Type.Pointer
     }
@@ -445,11 +445,10 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
   if (
     Type.isPointer(source) &&
     Type.isPointer(target) &&
-    source.mutable &&
-    !target.mutable &&
+    Type.pointerQualifiersWeaken(source, target) &&
     equivalent(source.pointee, target.pointee, self)
   )
-    return Object.freeze({ _tag: 'PointerMutability', source, target })
+    return Object.freeze({ _tag: 'PointerWeakening', source, target })
   if (
     Type.isCallable(source) &&
     Type.isCallable(target) &&

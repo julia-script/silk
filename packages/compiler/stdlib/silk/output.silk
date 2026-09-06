@@ -1,0 +1,81 @@
+//! Owned output storage with separate uninitialized and initialized states.
+//!
+//! # When to use
+//!
+//! Use this module when a foreign function writes one `Copy` result through a pointer.
+//!
+//! # Details
+//!
+//! Each state owns one allocation. Initialization consumes the uninitialized state.
+//! Extraction consumes the initialized state and releases the allocation.
+//! An unused state releases its allocation without reading its contents.
+//!
+//! # Gotchas
+//!
+//! An address does not initialize storage or keep it alive. Foreign code must not retain the address.
+//! Arbitrary foreign writes require an unsafe assertion that the complete value is valid.
+
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.layout { Layout }
+import silk.raw_buffer { RawBuffer }
+import silk.slot { Slot }
+
+/// Owns storage for one `Copy` value that has not been declared initialized.
+pub struct Uninitialized<T: Copy> {
+  buffer: RawBuffer<T>
+}
+
+/// Owns storage for one initialized `Copy` value that can be extracted once.
+pub struct Initialized<T: Copy> {
+  buffer: RawBuffer<T>
+}
+
+impl<T> Uninitialized<T> {
+  /// Allocates storage without constructing or reading a value.
+  ///
+  /// # Details
+  ///
+  /// Allocation failure returns `OutOfMemoryError` without an output state.
+  pub effect fn make<T: Copy>() -> Uninitialized<T> ! OutOfMemoryError ? &mut Allocator {
+    let allocation = run Allocator.allocate(Layout.of<T>())
+    let buffer = RawBuffer.from<T>(move allocation, 1)
+    return Uninitialized<T> { buffer: move buffer }
+  }
+
+  /// Returns the output address without reading or initializing the storage.
+  ///
+  /// # Gotchas
+  ///
+  /// The address keeps no storage alive. Foreign code must finish its access before the owner is consumed or dropped.
+  pub fn address<T: Copy>(self: &mut Self) -> *mut T {
+    let selected = RawBuffer.slot<T>(&mut self.buffer, 0)
+    return Slot.address<T>(move selected)
+  }
+
+  /// Writes a value and transfers the allocation into the initialized state.
+  pub fn initialize<T: Copy>(self: Self, value: T) -> Initialized<T> {
+    let mut buffer = move self.buffer
+    let selected = RawBuffer.slot<T>(&mut buffer, 0)
+    Slot.write<T>(move selected, move value)
+    return Initialized<T> { buffer: move buffer }
+  }
+
+  /// Transfers the allocation after the caller proves that foreign code initialized the complete value.
+  ///
+  /// # Gotchas
+  ///
+  /// The storage must contain a valid `T`. Partial writes, untouched bytes that belong to the value,
+  /// and invalid scalar or pointer representations do not satisfy this requirement.
+  pub unsafe fn assumeInitialized<T: Copy>(self: Self) -> Initialized<T> {
+    return Initialized<T> { buffer: move self.buffer }
+  }
+}
+
+impl<T> Initialized<T> {
+  /// Extracts the initialized value once and releases its allocation.
+  pub fn into<T: Copy>(self: Self) -> T {
+    let mut buffer = move self.buffer
+    let selected = RawBuffer.slot<T>(&mut buffer, 0)
+    return Slot.take<T>(move selected)
+  }
+}

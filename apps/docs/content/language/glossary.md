@@ -538,7 +538,7 @@ _Avoid_: FFI export, public symbol, entry point
 
 **Raw pointer**:
 A `*const T` or `*mut T` value holding one machine address with no ownership, loan, or validity
-guarantee. It is Copy and may be null; forming one from a reference or slice is safe and ends no
+guarantee. It is Copy; a `?` prefix explicitly permits null. Forming one from a reference or slice is safe and ends no
 loan, while offsetting and dereferencing through `silk/pointer` require an unsafe boundary. It is
 admitted by the C ABI for any pointee, so it is the value a foreign signature means by a pointer.
 _Avoid_: reference, unsafe reference, handle, `RawBuffer`

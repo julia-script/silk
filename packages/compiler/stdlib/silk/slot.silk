@@ -63,6 +63,16 @@
 pub struct Slot {}
 
 impl Slot {
+  /// Forms a non-null writable address without reading or initializing the selected storage.
+  ///
+  /// # Gotchas
+  ///
+  /// This operation consumes the slot selection. The pointer holds no loan and keeps no storage alive.
+  /// A later memory access must prove its own lifetime, initialization, and access requirements.
+  pub fn address<'storage, T>(slot: Slot<'storage, T>) -> *mut T {
+    return Intrinsic.slotAddress<T>(move slot)
+  }
+
   /// Moves one value into a selected uninitialized raw slot.
   ///
   /// # Gotchas

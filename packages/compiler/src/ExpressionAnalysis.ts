@@ -5297,6 +5297,34 @@ export function analyzeBuiltinCall(
         )
   const instantiatedResult =
     signature === undefined ? undefined : Type.substitute(signature.result, substitution)
+  const pointerSourceType = instantiatedParameters.at(0)
+  let qualifierDiagnostic: Diagnostic.Diagnostic | undefined
+  if (
+    signature?.operation === 'PointerIsNull' &&
+    !(pointerSourceType !== undefined && Type.isPointer(pointerSourceType))
+  ) {
+    qualifierDiagnostic = Diagnostic.invalidPointerQualifier(
+      'null test',
+      'operand must be a data pointer',
+      call.span,
+    )
+  } else if (
+    signature?.operation === 'PointerRequalify' &&
+    !(
+      pointerSourceType !== undefined &&
+      Type.isPointer(pointerSourceType) &&
+      instantiatedResult !== undefined &&
+      Type.isPointer(instantiatedResult) &&
+      pointerSourceType.addressSpace === instantiatedResult.addressSpace &&
+      Type.equals(pointerSourceType.pointee, instantiatedResult.pointee)
+    )
+  ) {
+    qualifierDiagnostic = Diagnostic.invalidPointerQualifier(
+      'conversion',
+      'source and result must be pointers to the same invariant pointee in the same address space',
+      call.span,
+    )
+  }
   const unsafeDiagnostic =
     signature === undefined
       ? undefined
@@ -5367,7 +5395,8 @@ export function analyzeBuiltinCall(
     reference._tag === 'ResolvedBuiltin' &&
     specializationDiagnostic === undefined &&
     inferenceDiagnostic === undefined &&
-    unsafeDiagnostic === undefined
+    unsafeDiagnostic === undefined &&
+    qualifierDiagnostic === undefined
       ? availableExpressionType(reference.result)
       : unavailableExpressionType
 
@@ -5388,6 +5417,7 @@ export function analyzeBuiltinCall(
       ...(specializationDiagnostic === undefined ? [] : [specializationDiagnostic]),
       ...(inferenceDiagnostic === undefined ? [] : [inferenceDiagnostic]),
       ...(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
+      ...(qualifierDiagnostic === undefined ? [] : [qualifierDiagnostic]),
       ...argumentsResult.diagnostics,
       ...typeArguments.diagnostics,
       ...callContract.diagnostics,

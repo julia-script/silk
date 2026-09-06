@@ -1,3 +1,4 @@
+import type * as Target from './Target.js'
 /** The closed lowercase integer vocabulary admitted by the bootstrap compiler. */
 export type IntegerSpelling =
   | 'u8'
@@ -28,15 +29,6 @@ export type ByteWidth = 1 | 2 | 4 | 8
 export type Width =
   | { readonly _tag: 'FixedWidth'; readonly bits: FixedBits }
   | { readonly _tag: 'PointerWidth' }
-
-/** How a scalar occupies storage before a concrete target is selected. */
-export type Layout =
-  | {
-      readonly _tag: 'FixedLayout'
-      readonly size: ByteWidth
-      readonly alignment: ByteWidth
-    }
-  | { readonly _tag: 'PointerLayout' }
 
 /** The backend-neutral operation code used by scalar intrinsic contracts. */
 export type OperationCode =
@@ -131,7 +123,6 @@ export interface IntegerScalar {
   readonly category: 'Integer'
   readonly width: Width
   readonly signedness: 'Signed' | 'Unsigned'
-  readonly layout: Layout
   readonly operations: ReadonlyArray<Operation>
 }
 
@@ -146,7 +137,6 @@ export interface BooleanScalar {
   readonly category: 'Boolean'
   readonly width: Extract<Width, { readonly _tag: 'FixedWidth' }>
   readonly signedness: undefined
-  readonly layout: Extract<Layout, { readonly _tag: 'FixedLayout' }>
   readonly operations: ReadonlyArray<Operation>
 }
 
@@ -155,7 +145,6 @@ export interface FloatScalar {
   readonly category: 'Floating'
   readonly width: Extract<Width, { readonly _tag: 'FixedWidth' }>
   readonly signedness: undefined
-  readonly layout: Extract<Layout, { readonly _tag: 'FixedLayout' }>
   readonly operations: ReadonlyArray<Operation>
 }
 
@@ -172,7 +161,6 @@ export interface CharacterScalar {
   readonly category: 'Character'
   readonly width: Extract<Width, { readonly _tag: 'FixedWidth' }>
   readonly signedness: undefined
-  readonly layout: Extract<Layout, { readonly _tag: 'FixedLayout' }>
   readonly operations: ReadonlyArray<Operation>
 }
 
@@ -184,13 +172,6 @@ const fixedWidth = (bits: FixedBits): Extract<Width, { readonly _tag: 'FixedWidt
 
 const pointerWidth: Extract<Width, { readonly _tag: 'PointerWidth' }> = Object.freeze({
   _tag: 'PointerWidth',
-})
-
-const fixedLayout = (size: ByteWidth): Extract<Layout, { readonly _tag: 'FixedLayout' }> =>
-  Object.freeze({ _tag: 'FixedLayout', size, alignment: size })
-
-const pointerLayout: Extract<Layout, { readonly _tag: 'PointerLayout' }> = Object.freeze({
-  _tag: 'PointerLayout',
 })
 
 const operation = (
@@ -311,14 +292,12 @@ const integer = <const S extends IntegerSpelling>(
   spelling: S,
   signedness: IntegerScalar['signedness'],
   width: Width,
-  layout: Layout,
 ): IntegerScalar & { readonly spelling: S } =>
   Object.freeze({
     spelling,
     category: 'Integer',
     width,
     signedness,
-    layout,
     operations:
       signedness === 'Signed'
         ? Object.freeze([
@@ -336,22 +315,22 @@ const integer = <const S extends IntegerSpelling>(
           ]),
   })
 
-const u8 = integer('u8', 'Unsigned', fixedWidth(8), fixedLayout(1))
-const u16 = integer('u16', 'Unsigned', fixedWidth(16), fixedLayout(2))
-const u32 = integer('u32', 'Unsigned', fixedWidth(32), fixedLayout(4))
-const u64 = integer('u64', 'Unsigned', fixedWidth(64), fixedLayout(8))
+const u8 = integer('u8', 'Unsigned', fixedWidth(8))
+const u16 = integer('u16', 'Unsigned', fixedWidth(16))
+const u32 = integer('u32', 'Unsigned', fixedWidth(32))
+const u64 = integer('u64', 'Unsigned', fixedWidth(64))
 
 /** The target-sized unsigned integer used by addresses and allocation contracts. */
-export const pointerInteger = integer('usize', 'Unsigned', pointerWidth, pointerLayout)
+export const pointerInteger = integer('usize', 'Unsigned', pointerWidth)
 
-const i8 = integer('i8', 'Signed', fixedWidth(8), fixedLayout(1))
-const i16 = integer('i16', 'Signed', fixedWidth(16), fixedLayout(2))
+const i8 = integer('i8', 'Signed', fixedWidth(8))
+const i16 = integer('i16', 'Signed', fixedWidth(16))
 
 /** The default integer selected for an unconstrained integer expression. */
-export const defaultInteger = integer('i32', 'Signed', fixedWidth(32), fixedLayout(4))
+export const defaultInteger = integer('i32', 'Signed', fixedWidth(32))
 
-const i64 = integer('i64', 'Signed', fixedWidth(64), fixedLayout(8))
-const isize = integer('isize', 'Signed', pointerWidth, pointerLayout)
+const i64 = integer('i64', 'Signed', fixedWidth(64))
+const isize = integer('isize', 'Signed', pointerWidth)
 
 const enumRepresentationCatalog: ReadonlyArray<EnumRepresentation> = Object.freeze([
   u8,
@@ -420,7 +399,7 @@ const floating = <const S extends FloatSpelling>(
     category: 'Floating',
     width: fixedWidth(bits),
     signedness: undefined,
-    layout: fixedLayout(bits === 32 ? 4 : 8),
+
     operations: floatOperations(spelling, bitsType),
   })
 
@@ -434,7 +413,7 @@ export const boolean: BooleanScalar = Object.freeze({
   category: 'Boolean',
   width: fixedWidth(32),
   signedness: undefined,
-  layout: fixedLayout(4),
+
   operations: Object.freeze([...equalityOperations, operation('not', 'Not', 1, 'Self')]),
 })
 
@@ -455,7 +434,7 @@ export const character: CharacterScalar = Object.freeze({
   category: 'Character',
   width: fixedWidth(32),
   signedness: undefined,
-  layout: fixedLayout(4),
+
   operations: Object.freeze([
     operation('fromU32', 'CheckedConvertToChar', 1, 'OptionTarget', Object.freeze(['u32'])),
     operation('toU32', 'ConvertToU32', 1, 'u32'),
@@ -553,15 +532,25 @@ export const isUnicodeScalarValue = (value: bigint): boolean =>
 export const bits = (self: Scalar, pointerBits: 32 | 64): FixedBits =>
   self.width._tag === 'PointerWidth' ? pointerBits : self.width.bits
 
-/** Resolves the scalar's size and alignment for one target pointer layout. */
-export const resolveLayout = (
-  self: Scalar,
-  pointerSize: 4 | 8,
-  pointerAlignment: 4 | 8,
-): { readonly size: ByteWidth; readonly alignment: ByteWidth } =>
-  self.layout._tag === 'PointerLayout'
-    ? Object.freeze({ size: pointerSize, alignment: pointerAlignment })
-    : Object.freeze({ size: self.layout.size, alignment: self.layout.alignment })
+/** Resolves physical storage exclusively from one audited target description. */
+export const resolveLayout = (self: Scalar, target: Target.Target): Target.Primitive => {
+  if (self.category === 'Boolean') return target.primitives.bool
+  if (self.category === 'Character') return target.primitives.i32
+  if (self.width._tag === 'PointerWidth')
+    return Object.freeze({ size: target.pointerSize, alignment: target.pointerAlignment })
+  if (self.category === 'Floating')
+    return self.width.bits === 32 ? target.primitives.f32 : target.primitives.f64
+  switch (self.width.bits) {
+    case 8:
+      return target.primitives.i8
+    case 16:
+      return target.primitives.i16
+    case 32:
+      return target.primitives.i32
+    case 64:
+      return target.primitives.i64
+  }
+}
 
 /** Returns the inclusive exact range of one integer for a selected target. */
 export const range = (

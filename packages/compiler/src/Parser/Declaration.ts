@@ -80,7 +80,8 @@ const beginsForeignStatic = (state: State): boolean => {
 
 export const beginsTopLevelDeclaration = (state: State): boolean => {
   const kind = nextSignificantKind(state)
-  if (kind === 'StaticKeyword') return staticBeginsFunction(state, 1)
+  if (kind === 'StaticKeyword')
+    return peek(state, 1) === 'IfKeyword' || staticBeginsFunction(state, 1)
   if (
     kind === 'ImportKeyword' ||
     kind === 'ConstKeyword' ||
@@ -103,6 +104,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
   if (kind !== 'PubKeyword') return false
   const following = peek(state, 1)
   return (
+    following === 'ImportKeyword' ||
     (following === 'StaticKeyword' && staticBeginsFunction(state, 2)) ||
     following === 'FnKeyword' ||
     following === 'EffectKeyword' ||
@@ -1005,16 +1007,78 @@ export const parseImplDeclaration = (initial: State): NodeResult => {
   })
 }
 
+const parseDeclarationGroup = (initial: State): NodeResult => {
+  const left = expect(initial, 'LeftBrace', [...topLevelFollowing, 'RightBrace'])
+  let state = left.state
+  const children: Array<SyntaxTree.Element> = [...left.elements]
+  while (
+    nextSignificantKind(state) !== undefined &&
+    nextSignificantKind(state) !== 'EndOfFile' &&
+    nextSignificantKind(state) !== 'RightBrace' &&
+    nextSignificantKind(state) !== 'ElseKeyword'
+  ) {
+    const declaration = parseTopLevelDeclaration(state)
+    children.push(declaration.node)
+    if (declaration.state.index === state.index) break
+    state = declaration.state
+    if (declaration.node.kind === 'PackageParameterDeclaration')
+      state = addDiagnostic(
+        state,
+        Diagnostic.unexpectedTokens(
+          ['ParamKeyword'],
+          'syntax',
+          ['unconditional package parameter declaration'],
+          declaration.node.span,
+        ),
+      )
+  }
+  const right = expect(state, 'RightBrace', ['ElseKeyword', ...topLevelFollowing])
+  return Object.freeze({
+    state: right.state,
+    node: syntaxNode(right.state, 'DeclarationGroup', [...children, ...right.elements]),
+  })
+}
+
+const parseStaticConditionalDeclaration = (initial: State): NodeResult => {
+  const staticKeyword = expect(initial, 'StaticKeyword', ['IfKeyword'])
+  const keyword = expect(staticKeyword.state, 'IfKeyword', expressionStarts)
+  const condition = parseExpression(keyword.state, 0, 'Identifier', false, ExpressionNesting.root)
+  const taken = parseDeclarationGroup(condition.state)
+  let state = taken.state
+  const children: Array<SyntaxTree.Element> = [
+    ...staticKeyword.elements,
+    ...keyword.elements,
+    condition.node,
+    taken.node,
+  ]
+  if (nextSignificantKind(state) === 'ElseKeyword') {
+    const otherwiseKeyword = expect(state, 'ElseKeyword', ['LeftBrace', 'StaticKeyword'])
+    const otherwise =
+      nextSignificantKind(otherwiseKeyword.state) === 'StaticKeyword'
+        ? parseStaticConditionalDeclaration(otherwiseKeyword.state)
+        : parseDeclarationGroup(otherwiseKeyword.state)
+    children.push(...otherwiseKeyword.elements, otherwise.node)
+    state = otherwise.state
+  }
+  return Object.freeze({
+    state,
+    node: syntaxNode(state, 'StaticConditionalDeclaration', children),
+  })
+}
+
 export const parseTopLevelDeclaration = (state: State): NodeResult => {
   const kind = nextSignificantKind(state)
   const following = kind === 'PubKeyword' ? peek(state, 1) : undefined
+  if (kind === 'StaticKeyword' && peek(state, 1) === 'IfKeyword')
+    return parseStaticConditionalDeclaration(state)
   if (beginsForeignStatic(state)) return parseForeignStaticDeclaration(state)
   if (
     (kind === 'StaticKeyword' && !staticBeginsFunction(state, 1)) ||
     (kind === 'PubKeyword' && following === 'StaticKeyword' && !staticBeginsFunction(state, 2))
   )
     return parseInvalidStaticDeclaration(state)
-  if (kind === 'ImportKeyword') return parseImportDeclaration(state)
+  if (kind === 'ImportKeyword' || following === 'ImportKeyword')
+    return parseImportDeclaration(state)
   if (kind === 'ConstKeyword' || following === 'ConstKeyword')
     return parseConstantDeclaration(state)
   if (kind === 'ParamKeyword' || following === 'ParamKeyword')

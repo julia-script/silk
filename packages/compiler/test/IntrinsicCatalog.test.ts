@@ -191,15 +191,19 @@ pub fn main() -> i32 {
   `struct Opaque {}
 fn pointers(value: &mut i32, values: &mut [u8], shared: &i32, view: &[u8]) -> i32 {
   let empty = Intrinsic.pointerNull<Opaque>()
-  let missing = Intrinsic.pointerIsNull<Opaque>(empty)
+  let missing = Intrinsic.pointerIsNull<?*mut Opaque>(empty)
   let constant = Intrinsic.pointerFromRef<i32>(shared)
   let mutable = Intrinsic.pointerFromMutRef<i32>(value)
   let first = Intrinsic.pointerFromSlice<u8>(view)
   let firstMut = Intrinsic.pointerFromMutSlice<u8>(values)
   unsafe {
-    let second = Intrinsic.pointerOffset<u8>(first, 1)
-    let secondMut = Intrinsic.pointerOffsetMut<u8>(firstMut, 1)
+    let many = Intrinsic.pointerRequalify<?[*]const u8, [*]const u8>(first)
+    let manyMut = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(firstMut)
+    let second = Intrinsic.pointerAt<u8>(many, 1)
+    let secondMut = Intrinsic.pointerAtMut<u8>(manyMut, 1)
     Intrinsic.pointerWrite<i32>(mutable, 7)
+    Intrinsic.pointerWriteUnaligned<i32>(mutable, 8)
+    let unaligned = Intrinsic.pointerReadUnaligned<i32>(constant)
     return Intrinsic.pointerRead<i32>(constant)
   }
   return 0
@@ -504,14 +508,17 @@ it('admits the Pointer actor with one invariant per unsafe primitive', () => {
   assert.deepEqual(
     pointer.map((entry) => [entry.operation, entry.unsafe, entry.invariant !== undefined]),
     [
+      ['Intrinsic.pointerRequalify', true, true],
+      ['Intrinsic.pointerReadUnaligned', true, true],
+      ['Intrinsic.pointerWriteUnaligned', true, true],
       ['Intrinsic.pointerNull', false, false],
       ['Intrinsic.pointerIsNull', false, false],
       ['Intrinsic.pointerFromRef', false, false],
       ['Intrinsic.pointerFromMutRef', false, false],
       ['Intrinsic.pointerFromSlice', false, false],
       ['Intrinsic.pointerFromMutSlice', false, false],
-      ['Intrinsic.pointerOffset', true, true],
-      ['Intrinsic.pointerOffsetMut', true, true],
+      ['Intrinsic.pointerAt', true, true],
+      ['Intrinsic.pointerAtMut', true, true],
       ['Intrinsic.pointerRead', true, true],
       ['Intrinsic.pointerWrite', true, true],
     ],
@@ -524,7 +531,7 @@ it('admits the Pointer actor with one invariant per unsafe primitive', () => {
   )
   assert.strictEqual(
     pointer.find((entry) => entry.operation === 'Intrinsic.pointerFromMutSlice')?.signature,
-    'fn Intrinsic.pointerFromMutSlice<T>(values: &mut [T]) -> *mut T',
+    'fn Intrinsic.pointerFromMutSlice<T>(values: &mut [T]) -> ?[*]mut T',
   )
 })
 

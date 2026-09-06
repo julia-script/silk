@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import type * as CompilationProfile from './CompilationProfile.js'
 import * as Lifetime from './Lifetime.js'
@@ -90,6 +91,8 @@ const emptyCounters = (): MutableCounters => ({
 export const noWork: Counters = Object.freeze(emptyCounters())
 
 interface State {
+  conditionDiagnostics?: Array<Diagnostic.Diagnostic>
+  conditionExpression?: Elaboration.ExpressionFact
   readonly target: Target.Target
   readonly dependencies: Map<string, string>
   readonly parameters: ReadonlyMap<string, StaticValue.Value>
@@ -626,6 +629,7 @@ const evaluateStaticFunction = (
         Object.freeze({ scope: input.scope, index: self[stateSymbol].index }),
         staticContext,
       )
+      self[stateSymbol].conditionDiagnostics?.push(...analyzed.diagnostics)
       let nestedStaticFailure: StaticEvaluation.StaticFailure | undefined
       Elaboration.visitStatementFacts(analyzed.fact.statements, {
         expression: (expression) => {
@@ -826,6 +830,10 @@ function evaluateConstantValue(
         Object.freeze({ scope: input.scope, index: self[stateSymbol].index, staticContext }),
         expected,
       )
+      if (analyzed !== undefined)
+        self[stateSymbol].conditionDiagnostics?.push(...analyzed.diagnostics)
+      if (analyzed !== undefined && declaration.syntax.kind === 'StaticConditionalDeclaration')
+        self[stateSymbol].conditionExpression = analyzed.fact
       let nestedFailure: StaticEvaluation.StaticFailure | undefined
       if (analyzed !== undefined)
         Elaboration.visitExpressionFacts(analyzed.fact, {
@@ -882,6 +890,74 @@ export const evaluateConstant = (
   declaration: DeclarationFacts.ConstantFact,
 ): StaticEvaluation.Outcome<StaticValue.Value> =>
   evaluateConstantValue(self, declaration, declaration.initializer.span, Object.freeze([]))
+
+/** Checks and evaluates a module condition through ordinary static expression and helper semantics. */
+export const evaluateModuleCondition = Effect.fn('Residualization.evaluateModuleCondition')(
+  (
+    self: Coordinator,
+    syntax: SyntaxTree.Node,
+  ): Effect.Effect<{
+    readonly outcome: StaticEvaluation.Outcome<StaticValue.Value>
+    readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
+    readonly expression?: Elaboration.ExpressionFact
+  }> =>
+    Effect.sync(() => {
+      const expression = syntax.children.find(SyntaxTree.isNode)
+      const token = SyntaxTree.directToken(syntax, 'StaticKeyword')
+      if (expression === undefined || token === undefined)
+        return {
+          outcome: StaticEvaluation.failed(
+            StaticEvaluation.phaseViolation(
+              'ModuleSelection.condition',
+              'condition syntax is unavailable',
+              syntax.span,
+              [],
+            ),
+          ),
+          diagnostics: Object.freeze([]),
+        }
+      const name = `#module-condition:${syntax.span.start}`
+      const canonical: DeclarationFacts.CanonicalId = {
+        _tag: 'CanonicalDeclarationId',
+        module: syntax.span.sourceId,
+        name,
+      }
+      const declaration: DeclarationFacts.ConstantDeclaration = {
+        _tag: 'ConstantDeclaration',
+        id: { _tag: 'DeclarationId', sourceId: syntax.span.sourceId, ordinal: syntax.span.start },
+        canonical: { _tag: 'Canonical', id: canonical },
+        visibility: 'Private',
+        typeParameters: [],
+        name: { _tag: 'Present', spelling: name, token },
+        declaredType: {
+          _tag: 'Resolved',
+          type: 'bool',
+          spelling: 'bool',
+          token,
+          syntax: expression,
+        },
+        initializerTemplate: {
+          _tag: 'StaticExpressionTemplate',
+          syntax: expression,
+          canonical: name,
+        },
+        literal: { _tag: 'Unavailable', syntax: expression },
+        initializer: expression,
+        syntax,
+      }
+      const diagnostics: Array<Diagnostic.Diagnostic> = []
+      self[stateSymbol].conditionDiagnostics = diagnostics
+      const outcome = evaluateConstant(self, declaration)
+      const expressionFact = self[stateSymbol].conditionExpression
+      delete self[stateSymbol].conditionDiagnostics
+      delete self[stateSymbol].conditionExpression
+      return Object.freeze({
+        outcome,
+        diagnostics: Object.freeze(diagnostics),
+        ...(expressionFact === undefined ? {} : { expression: expressionFact }),
+      })
+    }),
+)
 
 /** Evaluates a package predicate through the same calls and final-value environment as defaults. */
 export const evaluateParameterPredicate = (
