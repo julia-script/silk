@@ -573,6 +573,7 @@ export type Operation =
   | {
       /** Calls one foreign (`extern "C"`) symbol directly under its classified C signature. */
       readonly _tag: 'ForeignCall'
+      readonly variadicArguments: ReadonlyArray<CAbi.VariadicArgument>
       readonly destination: LocalId
       readonly symbol: string
       readonly abi: 'C'

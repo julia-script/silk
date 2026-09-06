@@ -221,7 +221,7 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
         )
   const parameterNames = executableParameterNames(self)
   const typeParameters = parameterNames.length === 0 ? '' : `<${parameterNames.join(', ')}>`
-  const parameters = self.parameters
+  const fixedParameters = self.parameters
     .map((parameter) => {
       const parameterName = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
       const phase = parameter.phase === 'Static' ? 'static ' : ''
@@ -229,6 +229,7 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
       return `${phase}${mutability}${parameterName}: ${declaredType(parameter.declaredType)}`
     })
     .join(', ')
+  const parameters = self.foreign?.variadic === true ? `${fixedParameters}, ...` : fixedParameters
   return Object.freeze({
     _tag: 'FunctionPresentation',
     name,

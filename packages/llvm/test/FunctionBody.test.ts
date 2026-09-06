@@ -456,7 +456,7 @@ it.effect('validates vararg calls and preserves call settings', () =>
 
     assert.include(
       yield* IrText.render(builder),
-      '%result = tail call i32 @variadic(i32 %v0, i32 1) nounwind',
+      '%result = tail call i32 (i32, ...) @variadic(i32 %v0, i32 1) nounwind',
     )
   }),
 )

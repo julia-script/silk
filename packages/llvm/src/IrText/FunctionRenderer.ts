@@ -272,7 +272,7 @@ export const renderCall = (
     instruction.callingConvention === 0 ? '' : `cc ${instruction.callingConvention} `
   const result =
     instruction.result === undefined ? '' : `${localIdentifier(body, instruction.result)} = `
-  return `${result}${tail}${instruction._tag === 'Invoke' ? 'invoke' : 'call'} ${fastMathFlags(instruction.fastMath)}${convention}${returnAttributes === '' ? '' : `${returnAttributes} `}${renderType(state, signature.returnType)} ${renderOperand(state, body, instruction.callee)}(${args.join(', ')})${functionAttributes === '' ? '' : ` ${functionAttributes}`}${bundles.length === 0 ? '' : ` [ ${bundles.join(', ')} ]`}${instruction._tag === 'Invoke' ? ` to label ${blockIdentifier(body, instruction.normal)} unwind label ${blockIdentifier(body, instruction.unwind)}` : ''}`
+  return `${result}${tail}${instruction._tag === 'Invoke' ? 'invoke' : 'call'} ${fastMathFlags(instruction.fastMath)}${convention}${returnAttributes === '' ? '' : `${returnAttributes} `}${renderType(state, signature.variadic ? instruction.functionType : signature.returnType)} ${renderOperand(state, body, instruction.callee)}(${args.join(', ')})${functionAttributes === '' ? '' : ` ${functionAttributes}`}${bundles.length === 0 ? '' : ` [ ${bundles.join(', ')} ]`}${instruction._tag === 'Invoke' ? ` to label ${blockIdentifier(body, instruction.normal)} unwind label ${blockIdentifier(body, instruction.unwind)}` : ''}`
 }
 
 /** @internal */

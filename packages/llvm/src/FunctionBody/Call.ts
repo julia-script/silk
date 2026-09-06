@@ -216,14 +216,12 @@ const callInternal = Effect.fnUntraced(function* (
         destinations !== undefined &&
         (options.tail !== undefined ||
           inlineAssembly ||
-          signature.variadic ||
           FastMathActor.toBitcode(callFastMath) !== 0)
       ) {
         return yield* Result.fail(
           invalidInput({
             operation: 'FunctionBody.invoke',
-            message:
-              'Invoke requires a fixed signature without tail markers, inline assembly, or fast-math flags',
+            message: 'Invoke does not admit tail markers, inline assembly, or fast-math flags',
             input: options,
           }),
         )

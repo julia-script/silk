@@ -4579,9 +4579,28 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               ? CAbi.typeText(CAbi.classify(semantic, target, position))
               : undefined
           }
+          const variadicArguments =
+            operation._tag === 'ForeignCall' ? operation.variadicArguments : []
           const resultKey = CAbi.typeText(operation.signature.result)
           const argumentsValid =
-            operation.signature.parameters.length === operation.arguments.length &&
+            operation.signature.parameters.length + variadicArguments.length ===
+              operation.arguments.length &&
+            (operation.signature.variadic || variadicArguments.length === 0) &&
+            variadicArguments.every((argument, ordinal) => {
+              const local = operation.arguments.at(operation.signature.parameters.length + ordinal)
+              const actual = local === undefined ? undefined : fn.localTypes.at(local.ordinal)
+              const expected =
+                actual === undefined
+                  ? undefined
+                  : CAbi.promoteVariadic(semanticType(actual), target)
+              return (
+                expected !== undefined &&
+                CAbi.isCanonical(argument.source, target) &&
+                CAbi.isCanonical(argument.promoted, target) &&
+                CAbi.typeText(expected.source) === CAbi.typeText(argument.source) &&
+                CAbi.typeText(expected.promoted) === CAbi.typeText(argument.promoted)
+              )
+            }) &&
             operation.signature.parameters.every((parameter, ordinal) => {
               const argument = operation.arguments.at(ordinal)
               const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)

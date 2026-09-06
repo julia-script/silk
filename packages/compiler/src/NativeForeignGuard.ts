@@ -71,7 +71,8 @@ export const wrap = Effect.fn('NativeForeignGuard.wrap')(function* (
   builder: Builder.Builder,
   target: FunctionActor.Function,
   ordinal: number,
-  parameterCount: number,
+  parameterTypes: ReadonlyArray<Type.Type>,
+  resultType: Type.Type,
 ): Effect.fn.Return<FunctionActor.Function, LlvmError> {
   const properties = yield* FunctionActor.properties(builder, target)
   const groups =
@@ -91,7 +92,7 @@ export const wrap = Effect.fn('NativeForeignGuard.wrap')(function* (
   const guard = yield* FunctionActor.declare(
     builder,
     `__silk_foreign_guard.${ordinal}`,
-    properties.type,
+    yield* Type.functionType(builder, resultType, parameterTypes),
     { linkage: 'internal', personality: self.personality, attributes },
   )
   const callee = yield* Constant.fromGlobal(builder, yield* FunctionActor.global(builder, target))
@@ -103,7 +104,7 @@ export const wrap = Effect.fn('NativeForeignGuard.wrap')(function* (
       const normal = yield* Block.make(body, 'returned')
       const unwind = yield* Block.make(body, 'foreign_unwind')
       const args: Array<Value.Input> = []
-      for (let index = 0; index < parameterCount; index += 1)
+      for (let index = 0; index < parameterTypes.length; index += 1)
         args.push(yield* Value.argument(body, index))
       const result = yield* FunctionBody.invoke(
         body,

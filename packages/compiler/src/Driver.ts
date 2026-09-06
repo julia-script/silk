@@ -90,7 +90,7 @@ const backendEmissionCacheKey = (
 }
 
 interface CachedEmissionHeader {
-  readonly schema: 5
+  readonly schema: 6
   readonly module: string
   readonly report: Backend.Termination['report']
   readonly symbols: Backend.LlvmBitcodeArtifact['symbols']
@@ -104,7 +104,7 @@ interface CachedEmissionHeader {
 const encodeCachedEmission = (artifact: Backend.LlvmBitcodeArtifact): Uint8Array | undefined => {
   try {
     const header: CachedEmissionHeader = {
-      schema: 5,
+      schema: 6,
       module: artifact.module,
       report: artifact.termination.report,
       symbols: artifact.symbols,
@@ -138,14 +138,17 @@ const decodeCachedEmission = (
     const header: CachedEmissionHeader = JSON.parse(
       new TextDecoder().decode(bytes.subarray(4, 4 + jsonLength)),
     )
-    if (header.schema !== 5) return undefined
+    if (header.schema !== 6) return undefined
     if (
       ![...header.foreignImports, ...header.foreignExports].every(
         (entry) =>
+          typeof entry.variadic === 'boolean' &&
+          (!entry.variadic || entry.parameters.length > 0) &&
           ForeignContract.inspect(entry.contract, entry.parameters, entry.result) !== undefined,
       )
     )
       return undefined
+    if (header.foreignExports.some((entry) => entry.variadic)) return undefined
     const bitcode = bytes.slice(4 + jsonLength)
     // The driver cache does not expose IR or control-flow inspection to callers.
     return Object.freeze({

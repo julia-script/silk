@@ -1313,7 +1313,7 @@ The UTF-8 manifest ends with one newline and has this versioned shape:
 
 ```json
 {
-  "silkForeignAbi": 3,
+  "silkForeignAbi": 4,
   "target": "aarch64-apple-darwin",
   "exports": [],
   "imports": []
@@ -1321,7 +1321,7 @@ The UTF-8 manifest ends with one newline and has this versioned shape:
 ```
 
 Each entry has `kind`, `symbol`, `abi`, and lowercase `direction`. Function entries additionally
-carry `parameters`, `result`, and a normalized `contract` containing memory, locality, noCapture/borrow/callbacks ordinals, optional returned ordinal, noReturn and forbidden unwind; data entries carry `type`. Obsolete schemas and unknown contract fields are rejected. Function-pointer type entries preserve nonnullness and normalized behavior; headers erase these non-C facts. Each direction array is sorted by
+carry a required `variadic` boolean and fixed `parameters`, `result`, and a normalized `contract` containing memory, locality, noCapture/borrow/callbacks ordinals, optional returned ordinal, noReturn and forbidden unwind; data entries carry `type`. Obsolete schemas 1/2/3, missing variadic status, and unknown contract fields are rejected. Function-pointer type entries preserve nonnullness and normalized behavior; headers erase these non-C facts. Each direction array is sorted by
 symbol and then kind, and target-sized integers have already been resolved to a fixed-width ABI
 class before serialization.
 
@@ -1360,3 +1360,6 @@ runtime names, and generated C functions have been deleted.
 **Evidence:** [clock-service specification](../../../../openspec/specs/bootstrap-clock-services/spec.md),
 [system-clock source](../../../../packages/compiler/stdlib/silk/os_system_clock.silk),
 [clock integration tests](../../../../packages/compiler/test/Clock.test.ts).
+
+See [Integer C variadics](./integer-c-variadics) for true ellipsis declarations, integer promotions,
+and the fixed versus unnamed parameter boundary on the admitted native targets.

@@ -290,12 +290,15 @@ jobs:
       - name: Required real supply conformance
         env:
           SILK_SUPPLY_TARGET: ${{ matrix.target }}
-        run: node packages/compiler/conformance/platform-supplies/run.mjs
+        run: |
+          node packages/compiler/conformance/platform-supplies/run.mjs
+          node packages/compiler/conformance/integer-variadics/run.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: platform-supply-${{ matrix.target }}
           path: |
             .scratch/platform-supplies
+            .scratch/integer-variadics
             .scratch/gnu-packages.txt
           if-no-files-found: error

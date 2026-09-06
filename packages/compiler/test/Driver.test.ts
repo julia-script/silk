@@ -558,6 +558,7 @@ it.effect('rejects a supplied foreign contract before backend-cache or native-to
           Target.aarch64AppleDarwin,
           [
             {
+              variadic: false,
               symbol: 'foreign_operation',
               parameters: [],
               result: 'i32',

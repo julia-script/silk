@@ -12,6 +12,7 @@ import * as CAbi from './CAbi.js'
 import * as Target from './Target.js'
 
 export interface FunctionEntry {
+  readonly variadic: boolean
   readonly contract: ForeignContract.ForeignContract
   readonly kind: 'function'
   readonly symbol: string
@@ -33,7 +34,7 @@ export type Entry = FunctionEntry | DataEntry
 
 /** The stable behavioral machine-readable ABI surface of one native library. */
 export interface AbiManifest {
-  readonly silkForeignAbi: 3
+  readonly silkForeignAbi: 4
   readonly target: Target.Id
   readonly exports: ReadonlyArray<Entry>
   readonly imports: ReadonlyArray<Entry>
@@ -60,6 +61,7 @@ const functionEntry = (
     parameters: Object.freeze([...fn.parameters]),
     result: fn.result,
     contract: fn.contract,
+    variadic: fn.variadic,
   })
 
 const dataEntry = (data: Backend.ForeignStatic): DataEntry =>
@@ -89,7 +91,7 @@ export const make = (
   exports.sort(compareEntries)
   imports.sort(compareEntries)
   return Object.freeze({
-    silkForeignAbi: 3,
+    silkForeignAbi: 4,
     target: target.id,
     exports: Object.freeze(exports),
     imports: Object.freeze(imports),
@@ -133,8 +135,19 @@ const inspectEntry = (input: unknown, direction: 'import' | 'export'): Entry | u
     return Object.freeze({ ...common, kind: 'data', type: input.type })
   if (
     input.kind !== 'function' ||
-    !exact(input, ['kind', 'symbol', 'abi', 'direction', 'parameters', 'result', 'contract']) ||
+    !exact(input, [
+      'kind',
+      'symbol',
+      'abi',
+      'direction',
+      'parameters',
+      'result',
+      'contract',
+      'variadic',
+    ]) ||
+    typeof input.variadic !== 'boolean' ||
     !Array.isArray(input.parameters) ||
+    (input.variadic && (input.parameters.length === 0 || direction === 'export')) ||
     !CAbi.isTypeText(input.result)
   )
     return undefined
@@ -160,6 +173,7 @@ const inspectEntry = (input: unknown, direction: 'import' | 'export'): Entry | u
     : Object.freeze({
         ...common,
         kind: 'function',
+        variadic: input.variadic,
         parameters: Object.freeze(parameters),
         result: input.result,
         contract,
@@ -183,7 +197,7 @@ export const decode = Effect.fn('AbiManifest.decode')(function* (
   if (
     !record(input) ||
     !exact(input, ['silkForeignAbi', 'target', 'exports', 'imports']) ||
-    input.silkForeignAbi !== 3 ||
+    input.silkForeignAbi !== 4 ||
     typeof input.target !== 'string' ||
     !Array.isArray(input.exports) ||
     !Array.isArray(input.imports)
@@ -208,7 +222,7 @@ export const decode = Effect.fn('AbiManifest.decode')(function* (
   }
   return Object.freeze({
     manifest: Object.freeze({
-      silkForeignAbi: 3,
+      silkForeignAbi: 4,
       target: selected.target.id,
       exports: Object.freeze(exports),
       imports: Object.freeze(imports),
@@ -219,7 +233,7 @@ export const decode = Effect.fn('AbiManifest.decode')(function* (
 
 const entryKey = (self: Entry): string =>
   self.kind === 'function'
-    ? `function:(${self.parameters.join(',')})->${self.result}!${ForeignContract.key(self.contract)}`
+    ? `function:(${self.parameters.join(',')}${self.variadic ? ',...' : ''})->${self.result}!${ForeignContract.key(self.contract)}`
     : `data:${self.type}`
 
 /** Compares only visible contracts, preserving both source/interface origins on a disagreement. */

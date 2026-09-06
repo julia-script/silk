@@ -1797,6 +1797,7 @@ unsafe extern "C" fn bare(value: u8)`,
 
     assert.deepEqual(index.diagnostics, [])
     assert.deepEqual(abs?.foreign, {
+      variadic: false,
       abi: 'C',
       symbol: 'abs',
       contract: ForeignContract.conservative,
@@ -1816,6 +1817,7 @@ unsafe extern "C" fn bare(value: u8)`,
       true,
     )
     assert.deepEqual(renamed?.foreign, {
+      variadic: false,
       abi: 'C',
       symbol: 'abs',
       contract: ForeignContract.conservative,
@@ -1906,6 +1908,7 @@ pub fn plain(value: i32) -> i32 { return value }`,
 
     assert.deepEqual(index.diagnostics, [])
     assert.deepEqual(named?.foreignExport, {
+      variadic: false,
       abi: 'C',
       symbol: 'double',
       contract: ForeignContract.conservative,
@@ -1922,6 +1925,7 @@ pub fn plain(value: i32) -> i32 { return value }`,
       false,
     )
     assert.deepEqual(renamed?.foreignExport, {
+      variadic: false,
       abi: 'C',
       symbol: 'silk_test_double_v1',
       contract: ForeignContract.conservative,

@@ -238,9 +238,11 @@ const printDelimited = (
   close: Token.Token,
   prefix: FormatDocument.Document,
   forceTrailingComma = false,
+  terminal?: Token.Token,
 ): FormatDocument.Document => {
   const openDocument = printToken(context, open, prefix)
-  if (items.length === 0) return FormatDocument.concat(openDocument, printToken(context, close))
+  if (items.length === 0 && terminal === undefined)
+    return FormatDocument.concat(openDocument, printToken(context, close))
 
   const breakLine = FormatDocument.ifBreak(FormatDocument.hardLine)
   const itemDocuments = items.map((item, index) => {
@@ -259,9 +261,25 @@ const printDelimited = (
       ),
     )
   })
+  if (terminal !== undefined) {
+    const separator = commas.at(items.length - 1)
+    itemDocuments.push(
+      printToken(
+        context,
+        terminal,
+        items.length === 0
+          ? breakLine
+          : FormatDocument.concat(
+              separator === undefined ? FormatDocument.text(',') : printToken(context, separator),
+              FormatDocument.softLine,
+            ),
+      ),
+    )
+  }
   const originalTrailingComma = commas.at(items.length - 1)
   let trailing: FormatDocument.Document
-  if (!forceTrailingComma) trailing = trailingComma(context, originalTrailingComma)
+  if (terminal !== undefined) trailing = FormatDocument.text('')
+  else if (!forceTrailingComma) trailing = trailingComma(context, originalTrailingComma)
   else if (originalTrailingComma === undefined) trailing = FormatDocument.text(',')
   else trailing = printToken(context, originalTrailingComma)
   return FormatDocument.group(
@@ -1438,6 +1456,8 @@ const printNode = (
         commaTokens(node),
         tokenOf(node, 'RightParenthesis'),
         prefix,
+        false,
+        directTokens(node).find((token) => token.kind === 'Ellipsis'),
       )
     case 'ModulePropertyDeclaration':
       return FormatDocument.concat(
