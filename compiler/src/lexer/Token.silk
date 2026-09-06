@@ -1,0 +1,223 @@
+import lexer.LexicalDiagnostic {LexicalDiagnostic}
+
+import lexer.LexicalDiagnostic as Diagnostic
+
+import lexer.Span {Span}
+
+import silk.format {Format}
+
+import silk.writer {Writer, WriterError}
+
+/// One lossless lexical item. Every variant carries its half-open byte span.
+pub union Token {
+  Whitespace {pub span: Span},
+  LineComment {pub span: Span},
+  DocComment {pub span: Span},
+  ModuleDocComment {pub span: Span},
+  Identifier {pub span: Span},
+  Lifetime {pub span: Span},
+  DecimalInteger {pub span: Span},
+  DecimalFloat {pub span: Span},
+  DurationLiteral {pub span: Span},
+  InvalidDurationLiteral {pub span: Span, pub diagnostic: LexicalDiagnostic},
+  TextLiteral {pub span: Span},
+  ByteStringLiteral {pub span: Span},
+  CharLiteral {pub span: Span},
+  InvalidStaticLiteral {pub span: Span, pub diagnostic: LexicalDiagnostic},
+  StaticKeyword {pub span: Span},
+  CompileErrorKeyword {pub span: Span},
+  PubKeyword {pub span: Span},
+  StructKeyword {pub span: Span},
+  TupleKeyword {pub span: Span},
+  EnumKeyword {pub span: Span},
+  UnionKeyword {pub span: Span},
+  TypeKeyword {pub span: Span},
+  ServiceKeyword {pub span: Span},
+  InterfaceKeyword {pub span: Span},
+  RoleKeyword {pub span: Span},
+  EffectKeyword {pub span: Span},
+  FnKeyword {pub span: Span},
+  RunKeyword {pub span: Span},
+  FailKeyword {pub span: Span},
+  DropKeyword {pub span: Span},
+  UnsafeKeyword {pub span: Span},
+  ExternKeyword {pub span: Span},
+  ExportKeyword {pub span: Span},
+  ImplKeyword {pub span: Span},
+  ForKeyword {pub span: Span},
+  ReturnKeyword {pub span: Span},
+  ImportKeyword {pub span: Span},
+  AsKeyword {pub span: Span},
+  LetKeyword {pub span: Span},
+  ConstKeyword {pub span: Span},
+  ParamKeyword {pub span: Span},
+  MutKeyword {pub span: Span},
+  OnceKeyword {pub span: Span},
+  MoveKeyword {pub span: Span},
+  MatchKeyword {pub span: Span},
+  IfKeyword {pub span: Span},
+  ElseKeyword {pub span: Span},
+  WhileKeyword {pub span: Span},
+  BreakKeyword {pub span: Span},
+  ContinueKeyword {pub span: Span},
+  TrueKeyword {pub span: Span},
+  FalseKeyword {pub span: Span},
+  LeftParenthesis {pub span: Span},
+  RightParenthesis {pub span: Span},
+  LeftBrace {pub span: Span},
+  RightBrace {pub span: Span},
+  LeftBracket {pub span: Span},
+  RightBracket {pub span: Span},
+  Colon {pub span: Span},
+  Semicolon {pub span: Span},
+  Comma {pub span: Span},
+  Equals {pub span: Span},
+  EqualEqual {pub span: Span},
+  FatArrow {pub span: Span},
+  Minus {pub span: Span},
+  Plus {pub span: Span},
+  Star {pub span: Span},
+  Slash {pub span: Span},
+  Percent {pub span: Span},
+  Bang {pub span: Span},
+  BangEqual {pub span: Span},
+  Question {pub span: Span},
+  At {pub span: Span},
+  Less {pub span: Span},
+  LessEqual {pub span: Span},
+  Greater {pub span: Span},
+  GreaterEqual {pub span: Span},
+  Pipe {pub span: Span},
+  PipeGreater {pub span: Span},
+  PipePipe {pub span: Span},
+  Ampersand {pub span: Span},
+  AmpersandAmpersand {pub span: Span},
+  Caret {pub span: Span},
+  Tilde {pub span: Span},
+  Dot {pub span: Span},
+  DotDot {pub span: Span},
+  Ellipsis {pub span: Span},
+  Arrow {pub span: Span},
+  Invalid {pub span: Span, pub diagnostic: LexicalDiagnostic},
+  EndOfFile {pub span: Span},
+}
+
+effect fn writeLine(name: string, span: Span) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString(name)
+  run Writer.writeString(" ")
+  run Format.display(&span.start)
+  run Writer.writeString("..")
+  run Format.display(&span.end)
+  return run Writer.writeString("\n")
+}
+
+effect fn writeInvalid(name: string, span: Span, diagnostic: LexicalDiagnostic) -> ()
+! WriterError
+? &mut Writer {
+  run writeLine(name, span)
+  return run Diagnostic.write(move diagnostic)
+}
+
+/// Writes one token and any diagnostic carried by an invalid variant.
+pub effect fn write(token: Token) -> () ! WriterError ? &mut Writer {
+  return match move token {
+    Token.Whitespace {span} => run writeLine("Whitespace", span)
+    Token.LineComment {span} => run writeLine("LineComment", span)
+    Token.DocComment {span} => run writeLine("DocComment", span)
+    Token.ModuleDocComment {span} => run writeLine("ModuleDocComment", span)
+    Token.Identifier {span} => run writeLine("Identifier", span)
+    Token.Lifetime {span} => run writeLine("Lifetime", span)
+    Token.DecimalInteger {span} => run writeLine("DecimalInteger", span)
+    Token.DecimalFloat {span} => run writeLine("DecimalFloat", span)
+    Token.DurationLiteral {span} => run writeLine("DurationLiteral", span)
+    Token.InvalidDurationLiteral {span, diagnostic} => run writeInvalid(
+      "InvalidDurationLiteral",
+      span,
+      move diagnostic,
+    )
+    Token.TextLiteral {span} => run writeLine("TextLiteral", span)
+    Token.ByteStringLiteral {span} => run writeLine("ByteStringLiteral", span)
+    Token.CharLiteral {span} => run writeLine("CharLiteral", span)
+    Token.InvalidStaticLiteral {span, diagnostic} => run writeInvalid(
+      "InvalidStaticLiteral",
+      span,
+      move diagnostic,
+    )
+    Token.StaticKeyword {span} => run writeLine("StaticKeyword", span)
+    Token.CompileErrorKeyword {span} => run writeLine("CompileErrorKeyword", span)
+    Token.PubKeyword {span} => run writeLine("PubKeyword", span)
+    Token.StructKeyword {span} => run writeLine("StructKeyword", span)
+    Token.TupleKeyword {span} => run writeLine("TupleKeyword", span)
+    Token.EnumKeyword {span} => run writeLine("EnumKeyword", span)
+    Token.UnionKeyword {span} => run writeLine("UnionKeyword", span)
+    Token.TypeKeyword {span} => run writeLine("TypeKeyword", span)
+    Token.ServiceKeyword {span} => run writeLine("ServiceKeyword", span)
+    Token.InterfaceKeyword {span} => run writeLine("InterfaceKeyword", span)
+    Token.RoleKeyword {span} => run writeLine("RoleKeyword", span)
+    Token.EffectKeyword {span} => run writeLine("EffectKeyword", span)
+    Token.FnKeyword {span} => run writeLine("FnKeyword", span)
+    Token.RunKeyword {span} => run writeLine("RunKeyword", span)
+    Token.FailKeyword {span} => run writeLine("FailKeyword", span)
+    Token.DropKeyword {span} => run writeLine("DropKeyword", span)
+    Token.UnsafeKeyword {span} => run writeLine("UnsafeKeyword", span)
+    Token.ExternKeyword {span} => run writeLine("ExternKeyword", span)
+    Token.ExportKeyword {span} => run writeLine("ExportKeyword", span)
+    Token.ImplKeyword {span} => run writeLine("ImplKeyword", span)
+    Token.ForKeyword {span} => run writeLine("ForKeyword", span)
+    Token.ReturnKeyword {span} => run writeLine("ReturnKeyword", span)
+    Token.ImportKeyword {span} => run writeLine("ImportKeyword", span)
+    Token.AsKeyword {span} => run writeLine("AsKeyword", span)
+    Token.LetKeyword {span} => run writeLine("LetKeyword", span)
+    Token.ConstKeyword {span} => run writeLine("ConstKeyword", span)
+    Token.ParamKeyword {span} => run writeLine("ParamKeyword", span)
+    Token.MutKeyword {span} => run writeLine("MutKeyword", span)
+    Token.OnceKeyword {span} => run writeLine("OnceKeyword", span)
+    Token.MoveKeyword {span} => run writeLine("MoveKeyword", span)
+    Token.MatchKeyword {span} => run writeLine("MatchKeyword", span)
+    Token.IfKeyword {span} => run writeLine("IfKeyword", span)
+    Token.ElseKeyword {span} => run writeLine("ElseKeyword", span)
+    Token.WhileKeyword {span} => run writeLine("WhileKeyword", span)
+    Token.BreakKeyword {span} => run writeLine("BreakKeyword", span)
+    Token.ContinueKeyword {span} => run writeLine("ContinueKeyword", span)
+    Token.TrueKeyword {span} => run writeLine("TrueKeyword", span)
+    Token.FalseKeyword {span} => run writeLine("FalseKeyword", span)
+    Token.LeftParenthesis {span} => run writeLine("LeftParenthesis", span)
+    Token.RightParenthesis {span} => run writeLine("RightParenthesis", span)
+    Token.LeftBrace {span} => run writeLine("LeftBrace", span)
+    Token.RightBrace {span} => run writeLine("RightBrace", span)
+    Token.LeftBracket {span} => run writeLine("LeftBracket", span)
+    Token.RightBracket {span} => run writeLine("RightBracket", span)
+    Token.Colon {span} => run writeLine("Colon", span)
+    Token.Semicolon {span} => run writeLine("Semicolon", span)
+    Token.Comma {span} => run writeLine("Comma", span)
+    Token.Equals {span} => run writeLine("Equals", span)
+    Token.EqualEqual {span} => run writeLine("EqualEqual", span)
+    Token.FatArrow {span} => run writeLine("FatArrow", span)
+    Token.Minus {span} => run writeLine("Minus", span)
+    Token.Plus {span} => run writeLine("Plus", span)
+    Token.Star {span} => run writeLine("Star", span)
+    Token.Slash {span} => run writeLine("Slash", span)
+    Token.Percent {span} => run writeLine("Percent", span)
+    Token.Bang {span} => run writeLine("Bang", span)
+    Token.BangEqual {span} => run writeLine("BangEqual", span)
+    Token.Question {span} => run writeLine("Question", span)
+    Token.At {span} => run writeLine("At", span)
+    Token.Less {span} => run writeLine("Less", span)
+    Token.LessEqual {span} => run writeLine("LessEqual", span)
+    Token.Greater {span} => run writeLine("Greater", span)
+    Token.GreaterEqual {span} => run writeLine("GreaterEqual", span)
+    Token.Pipe {span} => run writeLine("Pipe", span)
+    Token.PipeGreater {span} => run writeLine("PipeGreater", span)
+    Token.PipePipe {span} => run writeLine("PipePipe", span)
+    Token.Ampersand {span} => run writeLine("Ampersand", span)
+    Token.AmpersandAmpersand {span} => run writeLine("AmpersandAmpersand", span)
+    Token.Caret {span} => run writeLine("Caret", span)
+    Token.Tilde {span} => run writeLine("Tilde", span)
+    Token.Dot {span} => run writeLine("Dot", span)
+    Token.DotDot {span} => run writeLine("DotDot", span)
+    Token.Ellipsis {span} => run writeLine("Ellipsis", span)
+    Token.Arrow {span} => run writeLine("Arrow", span)
+    Token.Invalid {span, diagnostic} => run writeInvalid("Invalid", span, move diagnostic)
+    Token.EndOfFile {span} => run writeLine("EndOfFile", span)
+  }
+}
