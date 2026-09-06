@@ -6212,7 +6212,8 @@ void silk_record_event(int32_t value) { printf("%d,", value); }
 int32_t silk_finish_events(void) { puts(""); return 42; }
 `,
     },
-    nativeStdout: '90,11,12,21,1,2,90,13,23,3,90,14,24,4,90,15,95,5,90,16,26,6,\n',
+    nativeStdout:
+      '90,11,12,21,1,2,90,13,23,3,90,14,24,4,20,90,17,27,27,47,7,10,20,90,17,47,7,10,90,18,28,48,8,90,18,48,8,90,19,29,49,9,90,15,95,5,90,16,26,6,\n',
     expected: { _tag: 'Completes', result: 42 },
   },
   ...[

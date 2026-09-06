@@ -12,6 +12,6 @@
 ## 3. Integration and handoff
 
 - [x] 3.1 Add a consumed shared native corpus witness using all four fixes and reconcile the prescriptive reference; verify the original full reproducer and strict OpenSpec validation.
-- [x] 3.2 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, pnpm check and pnpm release:candidate; record exact results.
-- [x] 3.3 Obtain independent code and dedicated test-economics approval of the exact committed base-to-head diff, including focused base/head timings; resolve findings and rerun affected checks.
-- [x] 3.4 Publish the issue-only draft PR, read back its base/head/draft state, and hand JUL-151 to In Review with exact committed implementation baseline and verification evidence.
+- [ ] 3.2 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, pnpm check and pnpm release:candidate; record exact results.
+- [ ] 3.3 Obtain independent code and dedicated test-economics approval of the exact committed base-to-head diff, including focused base/head timings; resolve findings and rerun affected checks.
+- [ ] 3.4 Publish the issue-only draft PR, read back its base/head/draft state, and hand JUL-151 to In Review with exact committed implementation baseline and verification evidence.

@@ -14,8 +14,10 @@ import {
   initializeBinding,
   lowerWriteSelectors,
   lowerOwnershipPath,
+  loanEndOperations,
   ownershipLocal,
   ownerFields,
+  orderedCleanup,
   prepareInitialization,
   specializedCleanup,
   transitionAt,
@@ -1030,8 +1032,12 @@ const lowerStatement = (
             : []
         }),
       )
-    const takenEndings = branchEndings(takenState, otherwiseState)
-    const otherwiseEndings = branchEndings(otherwiseState, takenState)
+    const takenEndings = branchEndings(takenState, otherwiseState).flatMap((ending) =>
+      loanEndOperations(fn, ending),
+    )
+    const otherwiseEndings = branchEndings(otherwiseState, takenState).flatMap((ending) =>
+      loanEndOperations(fn, ending),
+    )
     for (const key of branchState.loanLocals.keys()) {
       if (!takenState.loanLocals.has(key) || !otherwiseState.loanLocals.has(key))
         fn.loanLocals.delete(key)
@@ -1125,11 +1131,20 @@ const lowerStatement = (
     if (loweredBody === undefined) return undefined
     const bodyState = delayedEffectState(fn)
     const delayedLoanKeys = new Set(
-      [...entryState.loanLocals.keys()].filter(
-        (key) => !loopState.loanLocals.has(key) || !bodyState.loanLocals.has(key),
-      ),
+      [...entryState.loanLocals.keys()].filter((key) => {
+        const loan = fn.ownership?.loans.find((candidate) => borrowKey(candidate.id) === key)
+        // A terminal body path does not end a destructor's loan on the condition-false path.
+        if (loan?.cleanupOnly && loan.endSpan.end > statement.span.end) return false
+        return !loopState.loanLocals.has(key) || !bodyState.loanLocals.has(key)
+      }),
     )
     const delayedLoans = delayedLoopLoans(fn, delayedLoanKeys, entryState)
+    const delayedOwners = new Set(
+      [...delayedLoanKeys].flatMap((key) => {
+        const owner = fn.temporaryBorrowOwners.get(key)
+        return owner === undefined ? [] : [owner.local.ordinal]
+      }),
+    )
     if (delayedLoanKeys.size > 0) {
       const loopFamily = new Set<number>([loop.ordinal])
       let changed = true
@@ -1152,28 +1167,32 @@ const lowerStatement = (
         if (region._tag === 'OperationRegion') {
           const operations = withDelayedFailureLoanEndings(
             fn,
-            withoutLoanEndings(region.operations, delayedLoanKeys),
+            withoutLoanEndings(region.operations, delayedLoanKeys, delayedOwners),
             delayedLoans,
           )
           const terminalEndings =
             region.outcome._tag === 'Return' || region.outcome._tag === 'Trap'
-              ? terminalLoopLoanEndings(delayedLoans, region.outcome)
+              ? terminalLoopLoanEndings(fn, delayedLoans, region.outcome)
               : []
           fn.regions[region.id.ordinal] = Object.freeze({
             ...region,
             operations: Object.freeze([...operations, ...terminalEndings]),
           })
         } else if (region._tag === 'CleanupRegion') {
-          const releases = withoutLoanEndings(region.releases, delayedLoanKeys).flatMap(
-            (release) => (release._tag === 'Drop' || release._tag === 'EndLoan' ? [release] : []),
+          const releases = withoutLoanEndings(
+            region.releases,
+            delayedLoanKeys,
+            delayedOwners,
+          ).flatMap((release) =>
+            release._tag === 'Drop' || release._tag === 'EndLoan' ? [release] : [],
           )
           const terminalEndings =
             region.outcome._tag === 'Return' || region.outcome._tag === 'Trap'
-              ? terminalLoopLoanEndings(delayedLoans, region.outcome)
+              ? terminalLoopLoanEndings(fn, delayedLoans, region.outcome)
               : []
           fn.regions[region.id.ordinal] = Object.freeze({
             ...region,
-            releases: Object.freeze([...terminalEndings, ...releases]),
+            releases: Object.freeze(orderedCleanup(fn, [...terminalEndings, ...releases])),
           })
         }
       }

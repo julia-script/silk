@@ -1069,6 +1069,7 @@ export const dropOwnedProvider = (
 
 export const endReturnedViewLoans = (fn: FunctionLowering, span: SourceSpan.SourceSpan): void => {
   for (const loan of fn.ownership?.loans ?? []) {
+    if (loan.cleanupOnly) continue
     if (loan.origin !== 'ReturnedView' && loan.origin !== 'ReturnedCallableCapture') continue
     if (
       loan.endSpan.sourceId !== span.sourceId ||

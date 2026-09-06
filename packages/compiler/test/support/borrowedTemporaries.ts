@@ -1,5 +1,8 @@
 /** One ordinary-source stream exercises all four JUL-151 spelling and storage gaps. */
 export const borrowedTemporaryStream = `import silk.option { Option }
+import silk.effect { Effect }
+import silk.monotonic_clock { MonotonicClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
 interface Stream<A, E, ?R> { effect fn take(self: &mut Self) -> Option<A> ! E ? R }
 pub struct SliceStream<A> { slice: &[A] index: usize }
 impl<A> SliceStream<A> {
@@ -13,19 +16,25 @@ impl<A: Copy> Stream<A, never ? never> for SliceStream<A> {
     return Option.some(self.slice[i])
   }
 }
-effect fn delayed() -> () { return run Intrinsic.suspendEffect(effect { return () }) }
-effect fn consume() -> i32 {
+effect fn consume() -> i32 ? &mut MonotonicClock {
   let mut stream = SliceStream.make(&[10, 20, 12])
-  let first = run stream.take()
-  run delayed()
-  let second = run stream.take()
-  run delayed()
-  let third = run stream.take()
-  let end = run stream.take()
-  if Option.unwrapOr<i32>(move end, 99) != 99 { return 0 }
-  return Option.unwrapOr<i32>(move first, 0) + Option.unwrapOr<i32>(move second, 0) + Option.unwrapOr<i32>(move third, 0)
+  let mut result = 0
+  let mut count = 0
+  while true {
+    run Effect.sleep(1ns)
+    let taken = run stream.take()
+    if let Option.Some { value } = move taken {
+      result = result + value
+      count = count + 1
+    } else { break }
+  }
+  if count != 3 { return 0 }
+  return result
 }
-pub fn main() -> i32 { return run consume() }`
+pub fn main() -> i32 {
+  let mut clock = OsMonotonicClock.make()
+  return run consume() |> Effect.provideMut(&mut clock)
+}`
 
 /** Backing owners share ordinary local evaluation, cleanup, and cancellation paths. */
 export const borrowedTemporaryLifecycle = `import silk.allocator { Allocator, OutOfMemoryError }
@@ -66,6 +75,53 @@ fn repeated() -> () {
   }
   return ()
 }
+struct ObservingHolder<'a> { slice: &'a [Token] }
+impl<'a> Drop for ObservingHolder<'a> {
+  fn drop(self: &mut ObservingHolder<'a>) -> () {
+    let slice = self.slice
+    unsafe { silk_record_event(slice[0].value + 40) }
+    return ()
+  }
+}
+fn watching(prefix: i32, slice: &[Token]) -> ObservingHolder {
+  return ObservingHolder { slice: slice }
+}
+fn loopNormal(limit: i32) -> () {
+  let older = make(10)
+  let holder = watching(before(), &[make(7)])
+  let mut i = 0
+  while i < limit {
+    let slice = holder.slice
+    unsafe { silk_record_event(slice[0].value + 20) }
+    i = i + 1
+    if i == 1 { continue }
+    break
+  }
+  return ()
+}
+fn loopReturn(entered: bool) -> () {
+  return run effect {
+    let holder = watching(before(), &[make(8)])
+    while entered {
+      let slice = holder.slice
+      unsafe { silk_record_event(slice[0].value + 20) }
+      return ()
+    }
+    return ()
+  }
+}
+struct Failed {}
+effect fn failure() -> () ! Failed { fail Failed {} }
+effect fn loopFailure() -> () ! Failed {
+  let holder = watching(before(), &[make(9)])
+  while true {
+    let slice = holder.slice
+    unsafe { silk_record_event(slice[0].value + 20) }
+    run failure()
+  }
+  return ()
+}
+effect fn recoverLoop(error: Failed) -> () { return () }
 struct Endpoint {}
 fn ready(endpoint: &Endpoint) -> () { return () }
 struct Guard { wake: Intrinsic.Wake }
@@ -105,6 +161,11 @@ effect fn resumed() -> i32 {
 effect fn program() -> i32 ! OutOfMemoryError {
   branch(true)
   repeated()
+  loopNormal(2)
+  loopNormal(0)
+  loopReturn(true)
+  loopReturn(false)
+  run Effect.catchAll(loopFailure(), recoverLoop)
   run cancel()
   let result = run resumed()
   if result != 42 { return 0 }

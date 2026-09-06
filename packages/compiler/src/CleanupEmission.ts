@@ -414,6 +414,74 @@ export const cleanupForLocal = (
   })
 }
 
+/** Materializes hidden-owner cleanup at the final loan ending, including rewritten exits. */
+export const loanEndOperations = (
+  fn: FunctionLowering,
+  ending: Mir.EndLoanOperation,
+): ReadonlyArray<Mir.EndLoanOperation | Mir.DropOperation> => {
+  const temporary = fn.temporaryBorrowOwners.get(borrowKey(ending.borrow))
+  const localType = temporary === undefined ? undefined : fn.localTypes.at(temporary.local.ordinal)
+  if (temporary === undefined || localType === undefined) return [ending]
+  return [
+    ending,
+    {
+      _tag: 'Drop',
+      local: temporary.local,
+      cleanup: cleanupForLocal(fn, temporary.cleanup, localType),
+      provenance: generated(temporary.span),
+    },
+  ]
+}
+
+/** Orders hidden storage immediately before its defining binding in acquisition order. */
+export const orderedCleanup = (
+  fn: FunctionLowering,
+  operations: ReadonlyArray<Mir.EndLoanOperation | Mir.DropOperation>,
+): ReadonlyArray<Mir.EndLoanOperation | Mir.DropOperation> => {
+  const drops = operations.filter((operation) => operation._tag === 'Drop')
+  const acquisitions = drops.map((drop) => {
+    const temporary = [...fn.temporaryBorrowOwners.values()].find(
+      (owner) => owner.local.ordinal === drop.local.ordinal,
+    )
+    const binding =
+      temporary === undefined
+        ? Ownership.allBindings(fn.ownership).find(
+            (binding) => ownershipLocal(fn, binding.site)?.ordinal === drop.local.ordinal,
+          )
+        : Ownership.allBindings(fn.ownership).find(
+            (binding) =>
+              binding.liveFrom.sourceId === temporary.span.sourceId &&
+              binding.liveFrom.start <= temporary.span.start &&
+              binding.liveFrom.end >= temporary.span.end,
+          )
+    const release = fn.ownership?.exits
+      .flatMap((exit) => exit.temporaries)
+      .find(
+        (release) =>
+          release.span.sourceId === drop.provenance.span.sourceId &&
+          release.span.start === drop.provenance.span.start &&
+          release.span.end === drop.provenance.span.end,
+      )
+    return { drop, ordinal: binding?.ordinal ?? release?.ordinal, temporary }
+  })
+  // Keep generated releases without a source acquisition in their established relative order.
+  const ordered = acquisitions
+    .filter((entry) => entry.ordinal !== undefined)
+    .sort(
+      (left, right) =>
+        (right.ordinal ?? 0) - (left.ordinal ?? 0) ||
+        Number(left.temporary !== undefined) - Number(right.temporary !== undefined) ||
+        (right.temporary?.span.start ?? 0) - (left.temporary?.span.start ?? 0),
+    )
+  let next = 0
+  return [
+    ...operations.filter((operation) => operation._tag === 'EndLoan'),
+    ...acquisitions.map((entry) =>
+      entry.ordinal === undefined ? entry.drop : (ordered[next++]?.drop ?? entry.drop),
+    ),
+  ]
+}
+
 /**
  * The Drop operations a propagating failure must execute before it leaves this function:
  * every owner the ownership phase saw live at the run site, plus generated temporary
@@ -432,7 +500,8 @@ export const propagationReleases = (
   )
   const releases = exit === undefined ? [] : [...exitDrops(fn, exit)]
   const retained = new Set(releases.map((release) => release.local.ordinal))
-  for (const temporary of [...fn.temporaryBorrowOwners.values()].reverse()) {
+  for (const [key, temporary] of [...fn.temporaryBorrowOwners.entries()].reverse()) {
+    if (!fn.loanLocals.has(key)) continue
     if (retained.has(temporary.local.ordinal)) continue
     const localType = fn.localTypes.at(temporary.local.ordinal)
     if (localType === undefined) continue
@@ -444,7 +513,11 @@ export const propagationReleases = (
     })
     retained.add(temporary.local.ordinal)
   }
-  return Object.freeze(releases.filter((release) => release.cleanup._tag !== 'NoCleanup'))
+  return Object.freeze(
+    orderedCleanup(fn, releases).flatMap((release) =>
+      release._tag === 'Drop' && release.cleanup._tag !== 'NoCleanup' ? [release] : [],
+    ),
+  )
 }
 
 /**
@@ -521,36 +594,41 @@ export const callableLocalCleanup = (
 }
 
 export const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined): void => {
-  for (const borrow of exit?.loanEnds ?? []) {
-    const slice = fn.loanLocals.get(borrowKey(borrow))
-    if (slice === undefined) continue
-    fn.emit(
-      Object.freeze({
-        _tag: 'EndLoan',
-        borrow,
-        slice,
-        provenance: generated(exit?.span ?? borrow.callSpan),
-      }),
-    )
-    fn.loanLocals.delete(borrowKey(borrow))
-  }
-  if (exit?.kind === 'Return') {
-    endLoans(
-      fn,
-      [...fn.loanLocals.keys()].flatMap((key) => {
-        const borrow = fn.loanIds.get(key)
-        return borrow === undefined ? [] : [borrow]
-      }),
-      exit.span,
-    )
-  }
-  for (const release of exit?.releases ?? []) {
-    if (release.binding.site._tag !== 'Let') continue
-    const ordinal = release.binding.site.binding.ordinal
-    endLoans(fn, fn.effectLoanEnds.get(ordinal) ?? [], exit?.span ?? release.binding.liveTo)
-    fn.effectLoanEnds.delete(ordinal)
-  }
-  for (const release of exitDrops(fn, exit)) fn.emit(release)
+  const [, endings] = fn.capture(() => {
+    for (const borrow of exit?.loanEnds ?? []) {
+      const slice = fn.loanLocals.get(borrowKey(borrow))
+      if (slice === undefined) continue
+      fn.emit(
+        Object.freeze({
+          _tag: 'EndLoan',
+          borrow,
+          slice,
+          provenance: generated(exit?.span ?? borrow.callSpan),
+        }),
+      )
+      fn.loanLocals.delete(borrowKey(borrow))
+    }
+    if (exit?.kind === 'Return') {
+      endLoans(
+        fn,
+        [...fn.loanLocals.keys()].flatMap((key) => {
+          const borrow = fn.loanIds.get(key)
+          return borrow === undefined ? [] : [borrow]
+        }),
+        exit.span,
+      )
+    }
+    for (const release of exit?.releases ?? []) {
+      if (release.binding.site._tag !== 'Let') continue
+      const ordinal = release.binding.site.binding.ordinal
+      endLoans(fn, fn.effectLoanEnds.get(ordinal) ?? [], exit?.span ?? release.binding.liveTo)
+      fn.effectLoanEnds.delete(ordinal)
+    }
+  })
+  const cleanup = endings.flatMap((operation) =>
+    operation._tag === 'Drop' || operation._tag === 'EndLoan' ? [operation] : [],
+  )
+  fn.appendCaptured(orderedCleanup(fn, [...cleanup, ...exitDrops(fn, exit)]))
 }
 
 /** Resolves every live acquisition category through one reverse acquisition order. */
@@ -862,19 +940,21 @@ export const lowerBorrowedWriteSelectors = (
 export const withoutLoanEndings = (
   operations: ReadonlyArray<Mir.Operation>,
   loans: ReadonlySet<string>,
+  owners: ReadonlySet<number>,
 ): ReadonlyArray<Mir.Operation> =>
   Object.freeze(
     operations.flatMap((operation): ReadonlyArray<Mir.Operation> => {
       if (operation._tag === 'EndLoan' && loans.has(borrowKey(operation.borrow))) return []
+      if (operation._tag === 'Drop' && owners.has(operation.local.ordinal)) return []
       if (operation._tag === 'Conditional')
         return [
           Object.freeze({
             ...operation,
             taken: Mir.mapExecutionOperations(operation.taken, (operations) =>
-              withoutLoanEndings(operations, loans),
+              withoutLoanEndings(operations, loans, owners),
             ),
             otherwise: Mir.mapExecutionOperations(operation.otherwise, (operations) =>
-              withoutLoanEndings(operations, loans),
+              withoutLoanEndings(operations, loans, owners),
             ),
           }),
         ]
@@ -883,7 +963,7 @@ export const withoutLoanEndings = (
           Object.freeze({
             ...operation,
             right: Mir.mapExecutionOperations(operation.right, (operations) =>
-              withoutLoanEndings(operations, loans),
+              withoutLoanEndings(operations, loans, owners),
             ),
           }),
         ]
@@ -901,14 +981,14 @@ export const withoutLoanEndings = (
                         guard: Object.freeze({
                           ...arm.guard,
                           execution: Mir.mapExecutionOperations(arm.guard.execution, (operations) =>
-                            withoutLoanEndings(operations, loans),
+                            withoutLoanEndings(operations, loans, owners),
                           ),
                         }),
                       }),
                   selected: Object.freeze({
                     ...arm.selected,
                     execution: Mir.mapExecutionOperations(arm.selected.execution, (operations) =>
-                      withoutLoanEndings(operations, loans),
+                      withoutLoanEndings(operations, loans, owners),
                     ),
                   }),
                 }),
@@ -943,18 +1023,20 @@ export const delayedLoopLoans = (
 }
 
 export const terminalLoopLoanEndings = (
+  fn: FunctionLowering,
   loans: ReadonlyArray<DelayedLoopLoan>,
   outcome: Extract<Mir.Outcome, { readonly _tag: 'Return' | 'Trap' }>,
-): ReadonlyArray<Extract<Mir.Operation, { readonly _tag: 'EndLoan' }>> =>
+): ReadonlyArray<Mir.EndLoanOperation | Mir.DropOperation> =>
   Object.freeze(
-    loans.map((loan) =>
-      Object.freeze({
-        _tag: 'EndLoan' as const,
+    loans.flatMap((loan) => {
+      const ending: Mir.EndLoanOperation = Object.freeze({
+        _tag: 'EndLoan',
         borrow: loan.borrow,
         slice: loan.slice,
         provenance: generated(outcome.provenance.span),
-      }),
-    ),
+      })
+      return outcome._tag === 'Trap' ? [ending] : loanEndOperations(fn, ending)
+    }),
   )
 
 /** Adds loop-entry loans to failure exits after their authored success endings move past the loop. */
@@ -1031,7 +1113,27 @@ export const withDelayedFailureLoanEndings = (
               }),
             ],
       )
-      return appended.length === 0
+      const releases = [...(operation.releases ?? [])]
+      const retained = new Set(releases.map((release) => release.local.ordinal))
+      for (const loan of loans) {
+        const ending: Mir.EndLoanOperation = {
+          _tag: 'EndLoan',
+          borrow: loan.borrow,
+          slice: loan.slice,
+          provenance: generated(operation.provenance.span),
+        }
+        for (const release of loanEndOperations(fn, ending)) {
+          if (
+            release._tag !== 'Drop' ||
+            release.cleanup._tag === 'NoCleanup' ||
+            retained.has(release.local.ordinal)
+          )
+            continue
+          releases.push(release)
+          retained.add(release.local.ordinal)
+        }
+      }
+      return appended.length === 0 && releases.length === (operation.releases?.length ?? 0)
         ? operation
         : Object.freeze({
             ...operation,
@@ -1039,6 +1141,11 @@ export const withDelayedFailureLoanEndings = (
               ...(operation.failureLoanEnds ?? []),
               ...appended,
             ]),
+            releases: Object.freeze(
+              orderedCleanup(fn, releases).flatMap((operation) =>
+                operation._tag === 'Drop' ? [operation] : [],
+              ),
+            ),
           })
     }),
   )
