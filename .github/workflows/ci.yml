@@ -157,6 +157,23 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: .scratch/llvm-22.1.8
+          key: native-supply-llvm-macOS-ARM64-f260f4f7c0d430828a81ae8a3826a1d63fc0963ec2459489308cc23b1f7eab4f
+      - name: Select the complete LLVM tool installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .scratch/llvm-22.1.8
+          if [ ! -x .scratch/llvm-22.1.8/bin/llvm-ar ]; then
+            curl --fail --location --retry 3 https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-macOS-ARM64.tar.xz -o .scratch/llvm.tar.xz
+            echo "f260f4f7c0d430828a81ae8a3826a1d63fc0963ec2459489308cc23b1f7eab4f  .scratch/llvm.tar.xz" | shasum -a 256 -c -
+            tar -xf .scratch/llvm.tar.xz --strip-components=1 -C .scratch/llvm-22.1.8
+          fi
+          echo "$PWD/.scratch/llvm-22.1.8/bin" >> "$GITHUB_PATH"
+          echo "SILK_TEST_CLANG=$PWD/.scratch/llvm-22.1.8/bin/clang" >> "$GITHUB_ENV"
+          echo "SILK_TEST_LLVM_AR=$PWD/.scratch/llvm-22.1.8/bin/llvm-ar" >> "$GITHUB_ENV"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @silklang/compiler... run build
       - run: >
