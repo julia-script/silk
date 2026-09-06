@@ -522,6 +522,7 @@
     "documentation:examples": "pnpm --filter @silklang/cli doctest:stdlib",
     "documentation:inventory": "node scripts/inventory-stdlib-documentation.mjs",
     "documentation:policy": "node scripts/check-stdlib-documentation.mjs",
+    "test:foreign-contracts": "node conformance/foreign-contracts/run.mjs",
     "test:native-boundary": "node conformance/native-boundary/run.mjs"
   },
   "dependencies": {

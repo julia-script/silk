@@ -207,10 +207,9 @@ interface Definition {
  * @internal
  */
 const dominators = (
-  body: FunctionBodyDescription.Snapshot,
   successors: ReadonlyArray<ReadonlyArray<number>>,
 ): ReadonlyArray<number | undefined> => {
-  const count = body.blocks.length
+  const count = successors.length
   const postorder: Array<number> = []
   const visited = Array.from({ length: count }, () => false)
   const stack: Array<{ block: number; edge: number }> = []
@@ -373,10 +372,10 @@ const verifyFunction = (
     )
     const first = entries.find((instruction) => instruction._tag !== 'Phi')
     const landingPads = entries.filter((instruction) => instruction._tag === 'LandingPad')
-    const predecessors = successors.flatMap((destinations, index) =>
-      destinations.includes(block) ? [index] : [],
-    )
     if (landingPads.length > 0) {
+      const predecessors = successors.flatMap((destinations, index) =>
+        destinations.includes(block) ? [index] : [],
+      )
       if (personality === undefined)
         report('Landing pad requires a personality function!', [blockIdentifier(body, block)])
       if (first?._tag !== 'LandingPad' || landingPads.length !== 1)
@@ -404,7 +403,21 @@ const verifyFunction = (
         report('Invoke unwind destination requires a landing pad!', [blockIdentifier(body, block)])
     }
   }
-  const immediate = dominators(body, successors)
+  // An invoke defines its result on the normal edge, not in either endpoint block. Split that
+  // edge for dominance so a second predecessor cannot manufacture an available result.
+  const dominanceGraph = [...successors]
+  const invokeEdges = new Map<number, number>()
+  for (let block = 0; block < body.blocks.length; block += 1) {
+    const index = body.blocks[block]?.instructions.at(-1)
+    const instruction = index === undefined ? undefined : body.instructions[index]
+    if (index === undefined || instruction?._tag !== 'Invoke' || instruction.result === undefined)
+      continue
+    const edge = dominanceGraph.length
+    invokeEdges.set(index, edge)
+    dominanceGraph[block] = [edge, instruction.unwind]
+    dominanceGraph.push([instruction.normal])
+  }
+  const immediate = dominators(dominanceGraph)
   const intervals = dominatorIntervals(immediate)
 
   /** The block and position defining a local value, or `undefined` for an argument. */
@@ -462,7 +475,7 @@ const verifyFunction = (
           const available =
             defining?._tag === 'Invoke'
               ? (definition.block === entry.block && defining.normal === block) ||
-                dominates(intervals, defining.normal, entry.block)
+                dominates(intervals, invokeEdges.get(definingIndex ?? -1) ?? -1, entry.block)
               : dominates(intervals, definition.block, entry.block)
           if (!available) {
             report('Instruction does not dominate all uses!', [
@@ -488,12 +501,11 @@ const verifyFunction = (
         }
         const definingIndex = body.blocks[definition.block]?.instructions[definition.position]
         const defining = definingIndex === undefined ? undefined : body.instructions[definingIndex]
-        const dominated =
-          defining?._tag === 'Invoke'
-            ? dominates(intervals, defining.normal, block)
-            : definition.block === block
-              ? definition.position < position
-              : dominates(intervals, definition.block, block)
+        let dominated: boolean
+        if (defining?._tag === 'Invoke')
+          dominated = dominates(intervals, invokeEdges.get(definingIndex ?? -1) ?? -1, block)
+        else if (definition.block === block) dominated = definition.position < position
+        else dominated = dominates(intervals, definition.block, block)
         if (!dominated) {
           report('Instruction does not dominate all uses!', [
             `  ${localIdentifier(body, operand.value)} defined in ${blockIdentifier(body, definition.block)}`,

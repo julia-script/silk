@@ -178,7 +178,7 @@ it.effect('says nothing about a module with no function bodies', () =>
 
 it.effect('rejects use of an invoke result on the unwind edge and missing personalities', () =>
   Effect.gen(function* () {
-    for (const fault of ['result-on-unwind', 'missing-personality'] as const) {
+    for (const fault of ['result-on-unwind', 'missing-personality', 'normal-bypass'] as const) {
       const builder = yield* Builder.make()
       const i32 = yield* Type.integer(builder, 32)
       const signature = yield* Type.functionType(builder, i32, [])
@@ -190,7 +190,7 @@ it.effect('rejects use of an invoke result on the unwind edge and missing person
       const fn = yield* FunctionActor.declare(
         builder,
         fault,
-        signature,
+        yield* Type.functionType(builder, i32, [yield* Type.integer(builder, 1)]),
         fault === 'missing-personality' ? {} : { personality: address },
       )
       yield* FunctionActor.buildBody(
@@ -201,6 +201,16 @@ it.effect('rejects use of an invoke result on the unwind edge and missing person
           const normal = yield* Block.make(body, 'normal')
           const unwind = yield* Block.make(body, 'unwind')
           yield* Block.setInsertionPoint(body, entry)
+          if (fault === 'normal-bypass') {
+            const invoking = yield* Block.make(body, 'invoking')
+            yield* FunctionBody.conditionalBranch(
+              body,
+              yield* Value.argument(body, 0),
+              invoking,
+              normal,
+            )
+            yield* Block.setInsertionPoint(body, invoking)
+          }
           const result =
             (yield* FunctionBody.invoke(body, signature, address, [], normal, unwind)) ??
             raise('expected invoke result')

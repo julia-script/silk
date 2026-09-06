@@ -2,6 +2,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as MirVerification from '../src/MirVerification.js'
 import { unreachable } from './support/raise.js'
 import * as Effect from 'effect/Effect'
+import * as Schema from 'effect/Schema'
 import * as Analysis from '../src/Analysis.js'
 import * as ForeignContract from '../src/ForeignContract.js'
 import * as Presentation from '../src/Presentation.js'
@@ -645,7 +646,9 @@ pub fn main() -> i32 {
     ]) {
       const rejectedSource = SourceFile.make(
         'interfaces/rejected.json',
-        new TextEncoder().encode(JSON.stringify(rejected)),
+        new TextEncoder().encode(
+          yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(rejected),
+        ),
       )
       const error = yield* Effect.flip(AbiManifest.decode(rejectedSource))
       assert.strictEqual(error.code, 'SEM0188')
@@ -661,6 +664,44 @@ it.effect('rejects capture-capable references and incompatible complete-call loa
   Effect.gen(function* () {
     for (const [name, source, code] of [
       ['capture', 'unsafe extern "C" fn capture(p: &i32) -> ()', 'SEM0187'],
+      ['owner', 'unsafe extern "C" fn f() -> () with Other.foreign(memory: "none")', 'SEM0188'],
+      [
+        'duplicate',
+        'unsafe extern "C" fn f() -> () with Intrinsic.foreign(memory: "none", memory: "read")',
+        'SEM0188',
+      ],
+      [
+        'parameter',
+        'unsafe extern "C" fn f(p: *mut i32) -> () with Intrinsic.foreign(noCapture: ("missing",))',
+        'SEM0188',
+      ],
+      [
+        'scalar',
+        'unsafe extern "C" fn f(p: i32) -> () with Intrinsic.foreign(noCapture: ("p",))',
+        'SEM0188',
+      ],
+      [
+        'raw-borrow',
+        'unsafe extern "C" fn f(p: *mut i32) -> () with Intrinsic.foreign(borrow: ("p",))',
+        'SEM0188',
+      ],
+      [
+        'reference-result',
+        'unsafe extern "C" fn f(p: &i32) -> &i32 with Intrinsic.foreign(borrow: ("p",))',
+        'SEM0187',
+      ],
+      [
+        'noreturn',
+        'unsafe extern "C" fn f() -> i32 with Intrinsic.foreign(noReturn: true)',
+        'SEM0188',
+      ],
+      [
+        'retained',
+        'unsafe extern "C" fn f() -> () with Intrinsic.foreign(retained: true)',
+        'SEM0188',
+      ],
+      ['nonforeign', 'fn f() -> () with Intrinsic.foreign(memory: "none") {}', 'SEM0188'],
+
       [
         'alias',
         'unsafe extern "C" fn alias(p: *mut i32) -> *mut i32 with Intrinsic.foreign(noCapture: ("p",), returned: "p")',

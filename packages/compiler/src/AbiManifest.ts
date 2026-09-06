@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect'
+import * as Schema from 'effect/Schema'
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
 import * as ForeignSymbol from './ForeignSymbol.js'
@@ -161,11 +162,13 @@ export const decode = Effect.fn('AbiManifest.decode')(function* (
   const span = Option.getOrThrow(SourceSpan.make(source, 0, source.bytes.length))
   const invalid = () =>
     Diagnostic.foreignDeclarationRestriction('invalid behavioral foreign interface', span)
-  const input: unknown = yield* Effect.try({
-    try: () =>
-      JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(SourceFile.toUint8Array(source))),
+  const text = yield* Effect.try({
+    try: () => new TextDecoder('utf-8', { fatal: true }).decode(SourceFile.toUint8Array(source)),
     catch: invalid,
   })
+  const input = yield* Schema.decodeEffect(Schema.UnknownFromJsonString)(text).pipe(
+    Effect.mapError(invalid),
+  )
   if (
     !record(input) ||
     !exact(input, ['silkForeignAbi', 'target', 'exports', 'imports']) ||

@@ -44,7 +44,11 @@ const program = Effect.gen(function* () {
   )
   const output = resolve(directory, '../../../../.scratch/foreign-contracts')
   yield* fs.makeDirectory(output, { recursive: true })
-  const run = Effect.fnUntraced(function* (command, args, expected = 0) {
+  const run = Effect.fnUntraced(function* (
+    /** @type {string} */ command,
+    /** @type {readonly string[]} */ args,
+    expected = 0,
+  ) {
     return yield* Effect.scoped(
       Effect.gen(function* () {
         const child = yield* spawner.spawn(
@@ -66,7 +70,7 @@ const program = Effect.gen(function* () {
       }),
     )
   })
-  const hash = Effect.fnUntraced(function* (bytes) {
+  const hash = Effect.fnUntraced(function* (/** @type {string | Uint8Array} */ bytes) {
     return yield* Effect.try({
       try: () => createHash('sha256').update(bytes).digest('hex'),
       catch: (cause) => new ConformanceError({ message: 'Cannot hash fixture', cause }),
@@ -138,7 +142,7 @@ const program = Effect.gen(function* () {
       `--target=${target}`,
       ...(architecture === undefined ? ['-isysroot', sdk, '-mmacosx-version-min=11.0.0'] : []),
     ]
-    const docker = Effect.fnUntraced(function* (args) {
+    const docker = Effect.fnUntraced(function* (/** @type {readonly string[]} */ args) {
       return yield* run('docker', [
         'run',
         '--rm',
