@@ -150,6 +150,7 @@ import silk.os_filesystem { OsFileSystem }
 pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
   return run OsFileSystem.make(root)
 }`),
+      'aarch64-apple-darwin',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
   }),
@@ -180,6 +181,7 @@ pub effect fn main() -> () ! FileError | OutOfMemoryError {
   drop entries
   return ()
 }`),
+        'aarch64-apple-darwin',
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       yield* Analysis.codegen(snapshot, { mode: 'release' })
@@ -276,7 +278,11 @@ pub fn main() -> i32 {
   }
   return 42
 }`
-    const snapshot = yield* Analysis.ofSourceRealized('os-filesystem/navigation', ascii(source))
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'os-filesystem/navigation',
+      ascii(source),
+      'aarch64-apple-darwin',
+    )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const providerOccurrence = Analysis.semanticOccurrenceAt(
       snapshot,
