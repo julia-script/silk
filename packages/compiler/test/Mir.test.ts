@@ -568,7 +568,8 @@ pub fn main() -> i32 { return unsafe abs(-42) }`),
         {
           symbol: 'abs',
           abi: 'C',
-          signature: '(i32)->i32',
+          signature:
+            '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
           arguments: ['i32'],
           destination: 'i32',
         },
@@ -578,9 +579,12 @@ pub fn main() -> i32 { return unsafe abs(-42) }`),
     const encoded = MirEncoding.encode(program)
     assert.include(
       encoded,
-      'foreign abs abi=C signature=(i32)->i32 declaration=mir/foreign-call.abs',
+      'foreign abs abi=C signature=(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden declaration=mir/foreign-call.abs',
     )
-    assert.include(encoded, '= foreign-call abs abi=C signature=(i32)->i32(')
+    assert.include(
+      encoded,
+      '= foreign-call abs abi=C signature=(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden(',
+    )
     assert.strictEqual(MirEncoding.encode(program), encoded)
   }),
 )

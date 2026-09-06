@@ -647,7 +647,7 @@ pub fn main() -> i32 {
       const rejectedSource = SourceFile.make(
         'interfaces/rejected.json',
         new TextEncoder().encode(
-          yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(rejected),
+          yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(rejected),
         ),
       )
       const error = yield* Effect.flip(AbiManifest.decode(rejectedSource))

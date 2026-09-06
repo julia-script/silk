@@ -166,7 +166,7 @@ export const decode = Effect.fn('AbiManifest.decode')(function* (
     try: () => new TextDecoder('utf-8', { fatal: true }).decode(SourceFile.toUint8Array(source)),
     catch: invalid,
   })
-  const input = yield* Schema.decodeEffect(Schema.UnknownFromJsonString)(text).pipe(
+  const input = yield* Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(text).pipe(
     Effect.mapError(invalid),
   )
   if (
