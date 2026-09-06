@@ -61,6 +61,8 @@ export type NodeKind =
   | 'UnionType'
   | 'FunctionDeclaration'
   | 'ForeignFunctionDeclaration'
+  | 'FunctionPropertyClause'
+  | 'FunctionProperty'
   | 'ForeignStaticDeclaration'
   | 'ExportStaticDeclaration'
   | 'FailureRow'

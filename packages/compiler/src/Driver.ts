@@ -1,4 +1,6 @@
 import * as Config from 'effect/Config'
+import * as Result from 'effect/Result'
+import * as ForeignContract from './ForeignContract.js'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as ArtifactKind from './ArtifactKind.js'
@@ -54,6 +56,7 @@ const backendEmissionCacheKey = (
   artifactKind: ArtifactKind.ArtifactKind,
   mode: string,
   sources: ReadonlyMap<string, SourceFile.SourceFile>,
+  interfaces: ReadonlyArray<SourceFile.SourceFile>,
 ): string => {
   const modules = [...sources]
     .map(
@@ -63,20 +66,26 @@ const backendEmissionCacheKey = (
     .sort()
   const digest = ToolchainIntegrity.contentDigest(
     [
-      'backend-emission-v3',
+      'backend-emission-v4',
       distributionDigest,
       backendId,
       profileIdentity,
       artifactKind,
       mode,
       ...modules,
+      ...interfaces
+        .map(
+          (source) =>
+            `interface:${source.id}:${ToolchainIntegrity.contentDigest(SourceFile.toUint8Array(source))}`,
+        )
+        .sort(),
     ].join('\u0000'),
   )
   return `backend-${digest}.blob`
 }
 
 interface CachedEmissionHeader {
-  readonly schema: 4
+  readonly schema: 5
   readonly module: string
   readonly report: Backend.Termination['report']
   readonly symbols: Backend.LlvmBitcodeArtifact['symbols']
@@ -90,7 +99,7 @@ interface CachedEmissionHeader {
 const encodeCachedEmission = (artifact: Backend.LlvmBitcodeArtifact): Uint8Array | undefined => {
   try {
     const header: CachedEmissionHeader = {
-      schema: 4,
+      schema: 5,
       module: artifact.module,
       report: artifact.termination.report,
       symbols: artifact.symbols,
@@ -124,10 +133,16 @@ const decodeCachedEmission = (
     const header: CachedEmissionHeader = JSON.parse(
       new TextDecoder().decode(bytes.subarray(4, 4 + jsonLength)),
     )
-    if (header.schema !== 4) return undefined
+    if (header.schema !== 5) return undefined
+    if (
+      ![...header.foreignImports, ...header.foreignExports].every(
+        (entry) =>
+          ForeignContract.inspect(entry.contract, entry.parameters, entry.result) !== undefined,
+      )
+    )
+      return undefined
     const bitcode = bytes.slice(4 + jsonLength)
-    // `control` and `ir` are never read on the driver path; the cast records that this artifact
-    // stays internal to the driver rather than flowing back out through Backend.emit.
+    // The driver cache does not expose IR or control-flow inspection to callers.
     return Object.freeze({
       _tag: 'LlvmBitcodeArtifact',
       backend: 'llvm',
@@ -143,7 +158,7 @@ const decodeCachedEmission = (
       control: Object.freeze([]),
       bitcode,
       ir: '',
-    }) as Backend.LlvmBitcodeArtifact
+    })
   } catch {
     return undefined
   }
@@ -158,6 +173,8 @@ export interface CompileRequest {
   /** Validated project package name used for durable artifact identities. */
   readonly packageName: string
   readonly destination: string
+  /** Supplied behavioral ABI JSON snapshots, validated against visible contracts before cache reuse. */
+  readonly foreignInterfaces?: ReadonlyArray<SourceFile.SourceFile>
   /** Ordered, structured native inputs passed after compiler-generated objects. */
   readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
   readonly scopeName?: string
@@ -412,6 +429,24 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
   const { diagnostics, program, target } = preparation
+  const importedInterfaces: Array<AbiManifest.Imported> = []
+  const interfaceDiagnostics: Array<Diagnostic.Diagnostic> = []
+  for (const source of request.foreignInterfaces ?? []) {
+    const decoded = yield* AbiManifest.decode(source).pipe(Effect.result)
+    if (Result.isFailure(decoded)) interfaceDiagnostics.push(decoded.failure)
+    else importedInterfaces.push(decoded.success)
+  }
+  interfaceDiagnostics.push(...AbiManifest.check(importedInterfaces, program))
+  if (interfaceDiagnostics.length > 0)
+    return Object.freeze({
+      _tag: 'Rejected',
+      sources: new Map([
+        ...closure.sources,
+        ...(request.foreignInterfaces ?? []).map((source) => [source.id, source] as const),
+      ]),
+      diagnostics: Object.freeze([...diagnostics, ...interfaceDiagnostics]),
+      report: Object.freeze([...report]),
+    })
   const targetIntegrity = PhaseReport.measureInto(
     report,
     'toolchain-target',
@@ -452,6 +487,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
           request.artifactKind,
           mode,
           closure.sources,
+          request.foreignInterfaces ?? [],
         )
   const cachedEmission =
     emissionCache !== undefined && emissionCacheKey !== undefined

@@ -1,3 +1,4 @@
+import * as ForeignContract from './ForeignContract.js'
 import * as CAbi from './CAbi.js'
 import * as CLayout from './CLayout.js'
 import * as ConformanceHead from './ConformanceHead.js'
@@ -129,10 +130,17 @@ const isContractOwnedInlineProvider = (provider: Type.Type): boolean =>
 const foreignAdmission = (
   parameters: ReadonlyArray<ParameterFact>,
   result: ReturnTypeFact,
+  contract: ForeignContract.ForeignContract = ForeignContract.conservative,
 ): ReadonlyArray<Diagnostic.Diagnostic> =>
   [...parameters.map((parameter) => parameter.declaredType), result].flatMap(
     (declared, ordinal) => {
       if (declared._tag !== 'Resolved') return []
+      if (
+        ordinal < parameters.length &&
+        contract.borrow.includes(ordinal) &&
+        Type.isReference(declared.type)
+      )
+        return []
       const admission = CAbi.admit(
         declared.type,
         ordinal < parameters.length ? 'Parameter' : 'Result',
@@ -462,7 +470,7 @@ export const complete = (
         const admission =
           member.foreign === undefined && member.foreignExport === undefined
             ? []
-            : foreignAdmission(parameters, result.fact)
+            : foreignAdmission(parameters, result.fact, member.foreign?.contract)
         const pointerAdmission =
           member.foreign === undefined && member.foreignExport === undefined
             ? [
@@ -472,7 +480,23 @@ export const complete = (
                 ...foreignFunctionPointerAdmission(result.fact),
               ]
             : []
-        diagnostics.push(...admission, ...pointerAdmission)
+        const behaviorDiagnostics =
+          member.foreign === undefined
+            ? []
+            : ForeignContract.validate(
+                member.foreign.contract,
+                parameters.map((parameter) => ({
+                  name: parameter.name._tag === 'Present' ? parameter.name.spelling : '',
+                  type:
+                    parameter.declaredType._tag === 'Resolved'
+                      ? parameter.declaredType.type
+                      : undefined,
+                  span: parameter.syntax.span,
+                })),
+                result.fact._tag === 'Resolved' ? result.fact.type : undefined,
+                result.fact.syntax.span,
+              )
+        diagnostics.push(...admission, ...behaviorDiagnostics, ...pointerAdmission)
         const { foreignExport, ...retained } = member
         return Object.freeze({
           ...retained,
@@ -483,7 +507,7 @@ export const complete = (
           // A foreign or exported header outside the C subset withholds its result so no callable
           // is published.
           returnType:
-            admission.length === 0
+            admission.length === 0 && behaviorDiagnostics.length === 0
               ? result.fact
               : Object.freeze({ _tag: 'Unavailable' as const, syntax: result.fact.syntax }),
           ...(result.opaqueResult === undefined ? {} : { opaqueResult: result.opaqueResult }),

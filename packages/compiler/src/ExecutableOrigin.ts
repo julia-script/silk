@@ -144,6 +144,7 @@ export const foreignSignature = (
     fact.parameters.map((parameter) => declared(parameter.declaredType)),
     declared(fact.returnType),
     target,
+    fact.foreign?.contract,
   )
 }
 

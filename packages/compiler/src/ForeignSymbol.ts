@@ -6,6 +6,7 @@ import * as OsRuntime from './OsRuntime.js'
 export const reservedSymbols: ReadonlyArray<string> = Object.freeze([
   'main',
   'silk_main',
+  '__silk_foreign_personality',
   ...OsRuntime.symbols,
   ...CoroutineRuntime.symbols,
   'silk_standard_stream_write_v1',

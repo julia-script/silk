@@ -69,7 +69,7 @@ export const module = (typeWidth: number): ModuleSchema => {
       fixed(2),
       literal(0),
       literal(0),
-      literal(0),
+      vbr(6),
       fixed(2),
       fixed(24),
     ],

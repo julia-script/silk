@@ -1,3 +1,4 @@
+import * as ForeignContract from './ForeignContract.js'
 import * as Option from 'effect/Option'
 import * as AggregateIdentity from './AggregateIdentity.js'
 import type {
@@ -3002,6 +3003,7 @@ const collectForeign = (
   node: SyntaxTree.Node,
   name: DeclaredName,
   direction: 'Foreign' | 'Export',
+  parameters: ReadonlyArray<ParameterFact>,
 ): {
   readonly fact: NonNullable<DeclarationFact['foreign']>
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -3040,8 +3042,22 @@ const collectForeign = (
     diagnostics.push(Diagnostic.invalidForeignSymbol(symbol, symbolSpan))
   else if (ForeignSymbol.isReserved(symbol))
     diagnostics.push(Diagnostic.reservedForeignSymbol(symbol, symbolSpan))
+  const behavior =
+    direction === 'Foreign'
+      ? ForeignContract.analyze(
+          source,
+          SyntaxTree.directNode(node, 'FunctionPropertyClause'),
+          parameters.map((parameter) => ({
+            name: parameter.name._tag === 'Present' ? parameter.name.spelling : '',
+            type: undefined,
+            span: parameter.syntax.span,
+          })),
+          undefined,
+        )
+      : { contract: ForeignContract.conservative, diagnostics: [] }
+  diagnostics.push(...behavior.diagnostics)
   return Object.freeze({
-    fact: Object.freeze({ abi: 'C' as const, symbol }),
+    fact: Object.freeze({ abi: 'C' as const, symbol, contract: behavior.contract }),
     diagnostics: Object.freeze(diagnostics),
   })
 }
@@ -3874,13 +3890,21 @@ const collectModule = (
     )
     const foreign =
       node.kind === 'ForeignFunctionDeclaration'
-        ? collectForeign(source, node, name, 'Foreign')
+        ? collectForeign(source, node, name, 'Foreign', facts)
         : undefined
     const foreignExport =
       node.kind === 'FunctionDeclaration' &&
       SyntaxTree.directToken(node, 'ExportKeyword') !== undefined
-        ? collectForeign(source, node, name, 'Export')
+        ? collectForeign(source, node, name, 'Export', facts)
         : undefined
+    const property = SyntaxTree.directNode(node, 'FunctionPropertyClause')
+    if (foreign === undefined && property !== undefined)
+      diagnostics.push(
+        Diagnostic.foreignDeclarationRestriction(
+          'foreign contract on a non-foreign function',
+          property.span,
+        ),
+      )
     const native = foreign ?? foreignExport
     if (native === undefined && functionKind === 'Ordinary' && failureRow.fact.syntax !== undefined)
       diagnostics.push(Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span))

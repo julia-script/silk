@@ -1,3 +1,4 @@
+import * as ForeignContract from '../src/ForeignContract.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -248,7 +249,11 @@ const foreignEntry = (
   return Object.freeze({
     _tag: 'ReachableForeignCall',
     symbol,
-    signature: Object.freeze({ parameters, result: Object.freeze({ _tag: 'Void' }) }),
+    signature: Object.freeze({
+      contract: ForeignContract.conservative,
+      parameters,
+      result: Object.freeze({ _tag: 'Void' }),
+    }),
     declaration: Object.freeze({ _tag: 'CanonicalDeclarationId', module: sourceId, name: symbol }),
     declarationSpan: span,
     callSpan: span,
@@ -308,7 +313,8 @@ pub fn main() -> i32 { let n = size()
       [
         {
           symbol: 'count',
-          signature: '(u64)->u64',
+          signature:
+            '(u64)->u64!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
           declaration: 'count',
           callSource: 'availability/main',
         },
@@ -375,8 +381,14 @@ it.effect('accepts agreeing redeclarations of one symbol across two modules', ()
         CAbi.signatureKey(call.signature),
       ]),
       [
-        ['availability/foreign-root', '(i32)->i32'],
-        ['foreign_dep', '(i32)->i32'],
+        [
+          'availability/foreign-root',
+          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+        ],
+        [
+          'foreign_dep',
+          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+        ],
       ],
     )
     if (self.target._tag !== 'Resolved') return assert.fail('expected a resolved target')
@@ -386,7 +398,7 @@ it.effect('accepts agreeing redeclarations of one symbol across two modules', ()
     )
     const artifact = yield* Analysis.codegen(self, { mode: 'release' })
     assert.deepEqual(artifact.foreignImports, [
-      { symbol: 'abs', parameters: ['i32'], result: 'i32' },
+      { symbol: 'abs', parameters: ['i32'], result: 'i32', contract: ForeignContract.conservative },
     ])
   }),
 )
@@ -432,7 +444,8 @@ it.effect('seeds native discovery with an uncalled export and records it on MIR'
     assert.deepEqual(exportInventory(self), [
       {
         symbol: 'silk_test_double_v1',
-        signature: '(i32)->i32',
+        signature:
+          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
         key: Instances.keyText(
           self.instances.instances.at(1)?.key ?? unreachable('expected the export instance'),
         ),
@@ -521,16 +534,32 @@ it.effect('accepts distinct export symbols across modules in canonical order', (
     assert.deepEqual(
       exportInventory(self).map((record) => [record.symbol, record.signature]),
       [
-        ['silk_test_double_v1', '(i32)->i32'],
-        ['silk_test_add_v1', '(i32,i32)->i32'],
+        [
+          'silk_test_double_v1',
+          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+        ],
+        [
+          'silk_test_add_v1',
+          '(i32,i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+        ],
       ],
     )
     if (self.target._tag !== 'Resolved') return assert.fail('expected a resolved target')
     assert.deepEqual(ForeignPlanning.check(Analysis.loweredMir(self), self.target.target), [])
     const artifact = yield* Analysis.codegen(self, { mode: 'release' })
     assert.deepEqual(artifact.foreignExports, [
-      { symbol: 'silk_test_add_v1', parameters: ['i32', 'i32'], result: 'i32' },
-      { symbol: 'silk_test_double_v1', parameters: ['i32'], result: 'i32' },
+      {
+        symbol: 'silk_test_add_v1',
+        parameters: ['i32', 'i32'],
+        result: 'i32',
+        contract: ForeignContract.conservative,
+      },
+      {
+        symbol: 'silk_test_double_v1',
+        parameters: ['i32'],
+        result: 'i32',
+        contract: ForeignContract.conservative,
+      },
     ])
   }),
 )
@@ -603,7 +632,11 @@ it('plans exports over MIR: symbol map, non-native rejection, and suspension', (
       _tag: 'ForeignExport',
       symbol,
       type: Type.foreignFunction(['i32'], 'i32'),
-      signature: Object.freeze({ parameters: Object.freeze([i32]), result: i32 }),
+      signature: Object.freeze({
+        contract: ForeignContract.conservative,
+        parameters: Object.freeze([i32]),
+        result: i32,
+      }),
       key,
       declaration: Object.freeze({
         _tag: 'CanonicalDeclarationId',

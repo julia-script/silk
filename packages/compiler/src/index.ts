@@ -110,3 +110,5 @@ export * as PackageParameter from './PackageParameter.js'
 export * as PackageConfiguration from './PackageConfiguration.js'
 export * as ProfileBootstrap from './ProfileBootstrap.js'
 export * as ProjectProfile from './ProjectProfile.js'
+
+export * as ForeignContract from './ForeignContract.js'

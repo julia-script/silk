@@ -150,6 +150,10 @@
       "types": "./dist/FloatingPoint.d.ts",
       "import": "./dist/FloatingPoint.js"
     },
+    "./ForeignContract": {
+      "types": "./dist/ForeignContract.d.ts",
+      "import": "./dist/ForeignContract.js"
+    },
     "./FormattedDocument": {
       "types": "./dist/FormattedDocument.d.ts",
       "import": "./dist/FormattedDocument.js"

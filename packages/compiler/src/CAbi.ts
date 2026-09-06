@@ -1,3 +1,4 @@
+import * as ForeignContract from './ForeignContract.js'
 /**
  * The V1 C ABI admission relation and target-aware classification for foreign function
  * signatures. Admission is judged on type spelling alone so a foreign header is accepted or
@@ -29,6 +30,7 @@ export type CAbiType =
 
 /** The classified C signature that identifies one foreign symbol within an executable. */
 export interface CAbiSignature {
+  readonly contract: ForeignContract.ForeignContract
   readonly parameters: ReadonlyArray<CAbiType>
   readonly result: CAbiType
 }
@@ -185,9 +187,28 @@ export const signature = (
   parameters: ReadonlyArray<Type.Type>,
   result: Type.Type,
   target: Target.Target,
+  contract: ForeignContract.ForeignContract = ForeignContract.conservative,
 ): CAbiSignature =>
   Object.freeze({
-    parameters: Object.freeze(parameters.map((type) => classify(type, target, 'Parameter'))),
+    contract,
+    parameters: Object.freeze(
+      parameters.map((type, ordinal) =>
+        classify(
+          contract.borrow.includes(ordinal) && Type.isReference(type)
+            ? Type.pointer({
+                mutable: type.access === 'Exclusive',
+                pointee: type.target,
+                nullable: false,
+                extent: 'Single',
+                alignment: 'Natural',
+                addressSpace: 0,
+              })
+            : type,
+          target,
+          'Parameter',
+        ),
+      ),
+    ),
     result: classify(result, target, 'Result'),
   })
 
@@ -231,4 +252,82 @@ export const isCanonical = (self: CAbiType, target: Target.Target): boolean => {
 
 /** The canonical identity two declarations of one symbol must share, e.g. `(i32,u64)->f64`. */
 export const signatureKey = (self: CAbiSignature): string =>
-  `(${self.parameters.map(typeText).join(',')})->${typeText(self.result)}`
+  `(${self.parameters.map(typeText).join(',')})->${typeText(self.result)}!${ForeignContract.key(self.contract)}`
+
+/** Decoded public ABI type spelling; pointer identity remains opaque but participates in equality. */
+export type TextShape =
+  | { readonly _tag: 'Scalar'; readonly type: TypeText }
+  | { readonly _tag: 'Pointer'; readonly mutable: boolean }
+  | {
+      readonly _tag: 'FunctionPointer'
+      readonly parameters: ReadonlyArray<TextShape>
+      readonly result: TextShape
+    }
+
+/** Inspects the finite ABI spelling grammar without evaluating source or accepting C syntax. */
+export const inspectText = (text: string, depth = 0): TextShape | undefined => {
+  if (depth > 64) return undefined
+  switch (text) {
+    case 'void':
+    case 'i8':
+    case 'u8':
+    case 'i16':
+    case 'u16':
+    case 'i32':
+    case 'u32':
+    case 'i64':
+    case 'u64':
+    case 'f32':
+    case 'f64':
+      return Object.freeze({ _tag: 'Scalar', type: text })
+  }
+  const pointer = /^pointer<(mut|const);(?:[A-Za-z0-9_.~-]|%[0-9A-F]{2})+>$/.exec(text)
+  if (pointer !== null) return Object.freeze({ _tag: 'Pointer', mutable: pointer[1] === 'mut' })
+  const prefix = 'extern "C" fn('
+  if (!text.startsWith(prefix)) return undefined
+  const parameters: Array<TextShape> = []
+  let nesting = 1
+  let start = prefix.length
+  for (let index = start; index < text.length; index += 1) {
+    if (text[index] === '(') nesting += 1
+    if (text[index] === ')') nesting -= 1
+    if (nesting === 0 || (nesting === 1 && text[index] === ',')) {
+      if (start !== index || nesting !== 0 || parameters.length > 0) {
+        const parameter = inspectText(text.slice(start, index), depth + 1)
+        if (parameter === undefined || (parameter._tag === 'Scalar' && parameter.type === 'void'))
+          return undefined
+        parameters.push(parameter)
+      }
+      start = index + 1
+    }
+    if (nesting === 0) {
+      if (text.slice(index, index + 3) !== ')->') return undefined
+      const result = inspectText(text.slice(index + 3), depth + 1)
+      return result === undefined
+        ? undefined
+        : Object.freeze({ _tag: 'FunctionPointer', parameters: Object.freeze(parameters), result })
+    }
+  }
+  return undefined
+}
+
+/** Narrows external data only after the canonical ABI type grammar accepts it. */
+export const isTypeText = (input: unknown): input is TypeText =>
+  typeof input === 'string' && inspectText(input) !== undefined
+
+/** Checks both target machine facts and canonical behavior before trusting a transported signature. */
+export const isCanonicalSignature = (self: CAbiSignature, target: Target.Target): boolean =>
+  isCanonical(self.result, target) &&
+  self.parameters.every((type) => type._tag !== 'Void' && isCanonical(type, target)) &&
+  ForeignContract.inspect(self.contract, self.parameters.map(typeText), typeText(self.result)) !==
+    undefined &&
+  self.contract.borrow.every((ordinal) => {
+    const parameter = self.parameters[ordinal]
+    return (
+      parameter?._tag === 'Pointer' &&
+      parameter.type.extent === 'Single' &&
+      !parameter.type.nullable &&
+      parameter.type.alignment === 'Natural' &&
+      parameter.type.addressSpace === 0
+    )
+  })

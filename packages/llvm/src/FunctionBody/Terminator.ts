@@ -6,6 +6,8 @@ import type * as Constant from '../Constant.js'
 import * as FunctionBodyState from '../internal/FunctionBodyState.js'
 import type * as Handle from '../internal/Handle.js'
 import { invalidInput, invalidState, type LlvmError } from '../LlvmError.js'
+import * as Type from '../Type.js'
+import * as HandleActor from '../internal/Handle.js'
 import type * as Value from '../Value.js'
 import type { FunctionBody, Instruction } from './_internal.js'
 import { setBranchWeights, setUnpredictable } from './Metadata.js'
@@ -546,5 +548,40 @@ export const unreachable = Effect.fnUntraced(function* (
         name: ByteString.empty,
       }),
     ),
+  )
+})
+
+/**
+ * Begins a cleanup-only Itanium exception handler with the canonical `{ ptr, i32 }` result.
+ *
+ * The enclosing function needs a personality and this must be its block's first non-PHI
+ * instruction. Cleanup handlers must terminate or resume unwinding; this operation does not
+ * implement language-level catches.
+ *
+ * @category instructions
+ * @since 0.0.0
+ */
+export const cleanupLandingPad = Effect.fn('FunctionBody.cleanupLandingPad')(function* (
+  self: FunctionBody,
+  name?: ByteString.ByteString | Uint8Array | string,
+): Effect.fn.Return<Value.Value, LlvmError> {
+  const builder = yield* FunctionBodyState.builder(self)
+  const type = yield* Type.structure(builder, [
+    yield* Type.pointer(builder),
+    yield* Type.integer(builder, 32),
+  ])
+  return yield* FunctionBodyState.mutate(self, 'FunctionBody.cleanupLandingPad', (draft) =>
+    Result.gen(function* () {
+      const typeIndex = yield* HandleActor.resolve(
+        draft.builder,
+        draft.moduleOwner,
+        type,
+        'Type',
+        'FunctionBody.cleanupLandingPad',
+      )
+      return (yield* FunctionBodyState.appendResult(draft, typeIndex, name, (result, finalName) =>
+        Object.freeze({ _tag: 'LandingPad', result, name: finalName, type: typeIndex }),
+      )).value
+    }),
   )
 })

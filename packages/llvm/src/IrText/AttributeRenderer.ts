@@ -22,6 +22,7 @@ export const renderAttribute = (state: BuilderState.Snapshot, index: number): st
     case 'Flag':
       return name
     case 'Integer':
+      if (name === 'captures' && description.value === 0n) return 'captures(none)'
       if (name === 'align') return `align ${description.value}`
       if (name === 'memory') {
         const effects = ['none', 'read', 'write', 'readwrite']

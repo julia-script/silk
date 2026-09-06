@@ -1,3 +1,4 @@
+import type * as ForeignContract from './ForeignContract.js'
 import type * as DeclarationLifetime from './DeclarationLifetime.js'
 import * as Lifetime from './Lifetime.js'
 import type * as AggregateIdentity from './AggregateIdentity.js'
@@ -29,9 +30,17 @@ export interface DeclarationFact {
   readonly functionKind: 'Ordinary' | 'Effect'
   readonly unsafe: boolean
   /** Present when native code supplies the body: the ABI and the logical native symbol. */
-  readonly foreign?: { readonly abi: 'C'; readonly symbol: string }
+  readonly foreign?: {
+    readonly abi: 'C'
+    readonly symbol: string
+    readonly contract: ForeignContract.ForeignContract
+  }
   /** Native export facts for an `export "C"` function: its ABI and the C-callable symbol. */
-  readonly foreignExport?: { readonly abi: 'C'; readonly symbol: string }
+  readonly foreignExport?: {
+    readonly abi: 'C'
+    readonly symbol: string
+    readonly contract: ForeignContract.ForeignContract
+  }
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly parameterCount: number
   readonly parameters: ReadonlyArray<ParameterFact>

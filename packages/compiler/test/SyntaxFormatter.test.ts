@@ -395,7 +395,7 @@ it.effect('formats foreign function declarations canonically and idempotently', 
   Effect.gen(function* () {
     const source = `// native absolute value
 pub   unsafe extern "C"  fn cAbs( value : i32 )->i32 as "abs"
-unsafe  extern "C" fn tick( )`
+unsafe  extern "C" fn tick( ) with Intrinsic.foreign( memory : "none",noReturn:true )`
     const first = yield* SyntaxFormatter.format(parse('memory://foreign-format.silk', source))
     const text = formattedText(first)
     assert.strictEqual(
@@ -403,7 +403,7 @@ unsafe  extern "C" fn tick( )`
       `// native absolute value
 pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
 
-unsafe extern "C" fn tick()
+unsafe extern "C" fn tick() with Intrinsic.foreign(memory: "none", noReturn: true)
 `,
     )
     const second = yield* SyntaxFormatter.format(parse('memory://foreign-format.silk', text))

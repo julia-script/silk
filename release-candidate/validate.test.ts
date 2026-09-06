@@ -525,6 +525,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './FileSourceResolver',
       './FiniteRow',
       './FloatingPoint',
+      './ForeignContract',
       './FormattedDocument',
       './HeapObservation',
       './Hir',

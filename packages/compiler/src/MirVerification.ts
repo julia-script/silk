@@ -3016,12 +3016,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
   )
   violations.push(...coroutineFrameLayoutViolations(self))
   for (const record of [...self.foreignCalls, ...self.foreignExports]) {
-    if (
-      !CAbi.isCanonical(record.signature.result, self.layout.target) ||
-      !record.signature.parameters.every(
-        (type) => type._tag !== 'Void' && CAbi.isCanonical(type, self.layout.target),
-      )
-    )
+    if (!CAbi.isCanonicalSignature(record.signature, self.layout.target))
       violations.push(
         Object.freeze({
           _tag: 'Violation',
@@ -4486,6 +4481,17 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               if (parameter._tag === 'Pointer') {
                 // Argument conversion may only weaken qualifiers; the pointee remains invariant.
                 const semantic = actual === undefined ? undefined : semanticType(actual)
+                if (
+                  semantic !== undefined &&
+                  SilkType.isReference(semantic) &&
+                  operation.signature.contract.borrow.includes(ordinal)
+                )
+                  return (
+                    parameter.type.extent === 'Single' &&
+                    !parameter.type.nullable &&
+                    parameter.type.mutable === (semantic.access === 'Exclusive') &&
+                    SilkType.key(semantic.target) === SilkType.key(parameter.type.pointee)
+                  )
                 return (
                   semantic !== undefined &&
                   SilkType.isPointer(semantic) &&
@@ -4496,6 +4502,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               return classKey(actual, 'Parameter') === CAbi.typeText(parameter)
             })
           if (
+            !CAbi.isCanonicalSignature(operation.signature, target) ||
             !argumentsValid ||
             classKey(fn.localTypes.at(operation.destination.ordinal), 'Result') !== resultKey ||
             classKey(operation.type, 'Result') !== resultKey

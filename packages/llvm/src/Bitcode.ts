@@ -256,6 +256,7 @@ const writeGlobals = (
         visibilityCode[global.visibility],
         unnamedCode[global.unnamedAddress],
         dllCode[global.dllStorage],
+        fn.personality === undefined ? 0 : constants.valueIndex(fn.personality) + 1,
         global.preemption === 'dso_local' ? 1 : 0,
         global.addressSpace.value,
       ])

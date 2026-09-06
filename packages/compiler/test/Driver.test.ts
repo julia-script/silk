@@ -1,3 +1,6 @@
+import * as AbiManifest from '../src/AbiManifest.js'
+import * as ForeignContract from '../src/ForeignContract.js'
+import * as Target from '../src/Target.js'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -561,4 +564,57 @@ it.effect('selects the durable disk cache from SILK_NATIVE_CACHE_DIR by default'
       ),
     (cacheDirectory) => Effect.sync(() => rmSync(cacheDirectory, { recursive: true, force: true })),
   ),
+)
+
+it.effect('rejects a supplied foreign contract before backend-cache or native-tool access', () =>
+  Effect.gen(function* () {
+    const text =
+      'unsafe extern "C" fn foreign_operation() -> i32\npub fn main() -> i32 { return unsafe foreign_operation() }'
+    const root = SourceFile.make('memory/driver', ascii(text))
+    const supplied = SourceFile.make(
+      'interfaces/vendor.abi.json',
+      AbiManifest.encode(
+        AbiManifest.make(
+          Target.aarch64AppleDarwin,
+          [
+            {
+              symbol: 'foreign_operation',
+              parameters: [],
+              result: 'i32',
+              contract: { ...ForeignContract.conservative, memory: 'none' },
+            },
+          ],
+          [],
+          [],
+        ),
+      ),
+    )
+    let cacheReads = 0
+    const outcome = yield* compileSource('rejected-interface', text, {
+      compilation: { root, target: 'aarch64-apple-darwin' },
+      foreignInterfaces: [supplied],
+      cache: true,
+      toolchain: {
+        ...toolchain,
+        clang: 'must-not-invoke-clang',
+        artifactCache: {
+          _tag: 'ArtifactCache',
+          get: () =>
+            Effect.sync(() => {
+              cacheReads += 1
+              return undefined
+            }),
+          set: () => Effect.void,
+        },
+      },
+    })
+    assert.strictEqual(outcome._tag, 'Rejected')
+    if (outcome._tag !== 'Rejected') return
+    const mismatch = outcome.diagnostics.find((diagnostic) => diagnostic.code === 'SEM0192')
+    assert.strictEqual(mismatch?.span.sourceId, supplied.id)
+    assert.strictEqual(mismatch?.relatedSpans?.at(0)?.span.sourceId, root.id)
+    assert.isTrue(outcome.sources.has(supplied.id))
+    assert.strictEqual(cacheReads, 0)
+    assert.isFalse(existsSync(join(destinationRoot, 'rejected-interface')))
+  }),
 )

@@ -1233,26 +1233,34 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
   ])
 
   if (marker === undefined) {
-    const block = parseBlock(contract.state, !unitResult, unitResult)
+    const properties = parseFunctionProperties(contract.state)
+    const block = parseBlock(properties?.state ?? contract.state, !unitResult, unitResult)
     return Object.freeze({
       state: block.state,
-      node: syntaxNode(block.state, 'FunctionDeclaration', [...header, block.node]),
+      node: syntaxNode(block.state, 'FunctionDeclaration', [
+        ...header,
+        ...(properties === undefined ? [] : [properties.node]),
+        block.node,
+      ]),
     })
   }
 
   const symbol = parseSymbolTail(contract.state)
+  const properties = parseFunctionProperties(symbol.state)
+  const afterProperties = properties?.state ?? symbol.state
   if (markerKind === 'ExportKeyword') {
     // An exported function requires a body; without one the declaration closes on an empty block
     // so the next top-level declaration parses intact.
     const block =
-      nextSignificantKind(symbol.state) === 'LeftBrace'
-        ? parseBlock(symbol.state, !unitResult, unitResult)
-        : parseMissingBlock(symbol.state)
+      nextSignificantKind(afterProperties) === 'LeftBrace'
+        ? parseBlock(afterProperties, !unitResult, unitResult)
+        : parseMissingBlock(afterProperties)
     return Object.freeze({
       state: block.state,
       node: syntaxNode(block.state, 'FunctionDeclaration', [
         ...header,
         ...symbol.elements,
+        ...(properties === undefined ? [] : [properties.node]),
         block.node,
       ]),
     })
@@ -1261,18 +1269,59 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
   // A foreign header has no body; `static`, `effect`, rows, and a block are retained for semantic
   // rejection so their diagnostics stay navigable.
   const body =
-    nextSignificantKind(symbol.state) === 'LeftBrace'
-      ? parseBlock(symbol.state, !unitResult, unitResult)
+    nextSignificantKind(afterProperties) === 'LeftBrace'
+      ? parseBlock(afterProperties, !unitResult, unitResult)
       : undefined
-  const state = body?.state ?? symbol.state
+  const state = body?.state ?? afterProperties
   return Object.freeze({
     state,
     node: syntaxNode(state, 'ForeignFunctionDeclaration', [
       ...header,
       ...symbol.elements,
+      ...(properties === undefined ? [] : [properties.node]),
       ...(body === undefined ? [] : [body.node]),
     ]),
   })
+}
+
+/** Retains sealed declaration properties as syntax; completion validates their owner and literals. */
+const parseFunctionProperties = (initial: State): NodeResult | undefined => {
+  if (!hasContextualSpelling(initial, 'with')) return undefined
+  const withToken = expect(initial, 'Identifier', ['Identifier'])
+  const namespace = expect(withToken.state, 'Identifier', ['Dot'])
+  const dot = expect(namespace.state, 'Dot', ['Identifier'])
+  const operation = expect(dot.state, 'Identifier', ['LeftParenthesis'])
+  const left = expect(operation.state, 'LeftParenthesis', ['Identifier', 'RightParenthesis'])
+  const children: Array<SyntaxTree.Element> = [
+    ...withToken.elements,
+    ...namespace.elements,
+    ...dot.elements,
+    ...operation.elements,
+    ...left.elements,
+  ]
+  let state = left.state
+  while (nextSignificantKind(state) === 'Identifier') {
+    const name = expect(state, 'Identifier', ['Colon'])
+    const colon = expect(name.state, 'Colon', expressionStarts)
+    const value = parseExpression(colon.state, 1, 'Identifier', false)
+    children.push(
+      syntaxNode(value.state, 'FunctionProperty', [
+        ...name.elements,
+        ...colon.elements,
+        value.node,
+      ]),
+    )
+    state = value.state
+    if (nextSignificantKind(state) !== 'Comma') break
+    const comma = expect(state, 'Comma', ['Identifier', 'RightParenthesis'])
+    children.push(...comma.elements)
+    state = comma.state
+  }
+  const right = expect(state, 'RightParenthesis', ['LeftBrace', ...topLevelFollowing])
+  return {
+    state: right.state,
+    node: syntaxNode(right.state, 'FunctionPropertyClause', [...children, ...right.elements]),
+  }
 }
 
 /** The optional `as <symbol>` tail shared by foreign and exported function headers. */

@@ -96,7 +96,7 @@ export const freezeInstruction = (
       weights: Object.freeze([...instruction.weights]),
     })
   }
-  if (instruction._tag === 'Call') {
+  if (instruction._tag === 'Call' || instruction._tag === 'Invoke') {
     return Object.freeze({
       ...instruction,
       arguments: Object.freeze([...instruction.arguments]),
@@ -212,6 +212,7 @@ const validateInstructionOperands = (
       case 'Phi':
         operands.push(...instruction.incoming.map((entry) => entry.value))
         break
+      case 'Invoke':
       case 'Call':
         operands.push(
           instruction.callee,
@@ -219,6 +220,7 @@ const validateInstructionOperands = (
           ...instruction.operandBundles.flatMap((bundle) => bundle.operands),
         )
         break
+      case 'LandingPad':
       case 'Branch':
       case 'Fence':
       case 'ReturnVoid':

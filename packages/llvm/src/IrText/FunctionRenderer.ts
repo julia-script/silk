@@ -243,7 +243,7 @@ export const renderAtomic = (access: FunctionBodyDescription.MemoryInfo): string
 export const renderCall = (
   state: BuilderState.Snapshot,
   body: FunctionBodyDescription.Snapshot,
-  instruction: Extract<FunctionBodyDescription.Instruction, { readonly _tag: 'Call' }>,
+  instruction: Extract<FunctionBodyDescription.Instruction, { readonly _tag: 'Call' | 'Invoke' }>,
 ): string => {
   const signature = typeAt(state, instruction.functionType)
   if (signature._tag !== 'Function') throw new Error('call has non-function type')
@@ -266,12 +266,13 @@ export const renderCall = (
     (bundle) =>
       `${quoted(bundle.tag)}(${bundle.operands.map((operand) => renderTypedOperand(state, body, operand)).join(', ')})`,
   )
-  const tail = instruction.tail === 'none' ? '' : `${instruction.tail} `
+  const tail =
+    instruction._tag === 'Invoke' || instruction.tail === 'none' ? '' : `${instruction.tail} `
   const convention =
     instruction.callingConvention === 0 ? '' : `cc ${instruction.callingConvention} `
   const result =
     instruction.result === undefined ? '' : `${localIdentifier(body, instruction.result)} = `
-  return `${result}${tail}call ${fastMathFlags(instruction.fastMath)}${convention}${returnAttributes === '' ? '' : `${returnAttributes} `}${renderType(state, signature.returnType)} ${renderOperand(state, body, instruction.callee)}(${args.join(', ')})${functionAttributes === '' ? '' : ` ${functionAttributes}`}${bundles.length === 0 ? '' : ` [ ${bundles.join(', ')} ]`}`
+  return `${result}${tail}${instruction._tag === 'Invoke' ? 'invoke' : 'call'} ${fastMathFlags(instruction.fastMath)}${convention}${returnAttributes === '' ? '' : `${returnAttributes} `}${renderType(state, signature.returnType)} ${renderOperand(state, body, instruction.callee)}(${args.join(', ')})${functionAttributes === '' ? '' : ` ${functionAttributes}`}${bundles.length === 0 ? '' : ` [ ${bundles.join(', ')} ]`}${instruction._tag === 'Invoke' ? ` to label ${blockIdentifier(body, instruction.normal)} unwind label ${blockIdentifier(body, instruction.unwind)}` : ''}`
 }
 
 /** @internal */
@@ -376,6 +377,9 @@ export const renderInstruction = (
             `[ ${renderOperand(state, body, entry.value)}, ${blockIdentifier(body, entry.block)} ]`,
         )
         .join(', ')}`
+    case 'LandingPad':
+      return `${result}landingpad ${renderType(state, instruction.type)} cleanup`
+    case 'Invoke':
     case 'Call':
       return renderCall(state, body, instruction)
   }
@@ -447,7 +451,7 @@ export const renderFunction = (
     context,
     state.globalMetadata[globalIndex] ?? [],
   )
-  const header = `${body === undefined ? 'declare' : 'define'} ${globalPrefix(global)}${callingConvention}${returnAttributes === '' ? '' : `${returnAttributes} `}${renderType(state, type.returnType)} ${identifier('@', global.name)}(${parameters.join(', ')})${functionAttributes === '' ? '' : ` ${functionAttributes}`}${garbageCollector}${functionSuffix(global)}${metadata === '' ? '' : ` ${metadata}`}`
+  const header = `${body === undefined ? 'declare' : 'define'} ${globalPrefix(global)}${callingConvention}${returnAttributes === '' ? '' : `${returnAttributes} `}${renderType(state, type.returnType)} ${identifier('@', global.name)}(${parameters.join(', ')})${functionAttributes === '' ? '' : ` ${functionAttributes}`}${garbageCollector}${fn.personality === undefined ? '' : ` personality ${renderTypedConstant(state, fn.personality)}`}${functionSuffix(global)}${metadata === '' ? '' : ` ${metadata}`}`
   if (body === undefined) return header
   return `${header} {\n${renderBody(state, body, context)}\n}`
 }

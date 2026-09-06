@@ -858,7 +858,8 @@ distinct from Silk type compatibility. The admitted subset is:
 - Qualified single/many and nullable/non-null pointers for any pointee `T` as the C pointer class, without requiring the
   pointee itself to be admitted; and
 - `extern "C" fn(P...) -> R` as one C function-pointer class when every parameter and result is
-  admitted recursively.
+  admitted recursively; and
+- Single-value reference parameters explicitly named by `borrow` in the sealed [foreign contract](foreign-call-contracts.md), lowered to one C pointer while retaining the full ordinary loan.
 
 ```silk,ignore
 struct Opaque {}
@@ -869,10 +870,9 @@ unsafe extern "C" fn use(handle: *mut Opaque) -> i32
 ```
 
 Parameters are passed by value. Every other type is rejected: `bool`, `char`, `string`,
-references, slices, fixed arrays, structs, unions, enums, Silk callable types, and type parameters.
+unasserted references, slices, fixed arrays, structs, unions, enums, Silk callable types, and type parameters.
 
-Admission is judged on the type spelling alone, so a foreign header is admitted or rejected once
-per module, independent of the target. The C classification of `isize`, `usize`, and pointers
+Admission checks the source types and explicit complete-call borrow assertions once per selected module. The C classification of `isize`, `usize`, and pointers
 takes the selected target's pointer width when the executable is realized for that target.
 
 **Boundary:** A type being representable in C does not admit it. `bool` has a C-compatible
@@ -943,10 +943,10 @@ declaration.
 
 A symbol the compiler owns is reserved: the process entry `main`, the Silk entry `silk_main`, the
 `silk_os_*_v1` and coroutine runtime symbols, the host-argument and standard-stream symbols, and
-the generated shapes `silk_suspend_*` and `silk_<module>_<name>__<instance>`.
+the foreign personality `__silk_foreign_personality`, and the generated shapes `silk_suspend_*` and `silk_<module>_<name>__<instance>`.
 
 Within one executable closure, two reachable foreign declarations of one symbol are accepted when
-their classified C signatures are equal and rejected when they differ. The executable declares
+their classified C signatures and normalized behavioral contracts are equal and rejected when either differs. The executable declares
 the symbol once.
 
 ```silk,ignore
@@ -955,8 +955,7 @@ unsafe extern "C" fn g() -> i32 as "silk_main"
 ```
 
 **Boundary:** Agreement is judged on the classified C signature, not the Silk spelling. `isize` on
-a 64-bit target and `i64` classify to the same C type and therefore agree. Two unreachable
-declarations never conflict, because neither enters the closure.
+a 64-bit target and `i64` classify to the same C type and therefore agree. Unreachable source declarations do not enter executable identity. Supplied behavioral interfaces are checked against one another and against the executable inventory, with both origins retained.
 
 **Diagnostics:** An invalid spelling reports `SEM0190` at the `as` string or, without `as`, at the
 declaration. A reserved symbol reports `SEM0191` at the same position. A conflicting redeclaration
@@ -971,17 +970,13 @@ agreement is checked when the executable origin collects reachable foreign calls
 [symbol spelling and reservation](../../../../packages/compiler/src/ForeignSymbol.ts),
 [C ABI signature identity](../../../../packages/compiler/src/CAbi.ts).
 
-### FFI-006 — Foreign calls are direct linked calls
+### FFI-006 — Foreign calls use linked symbols and enforced unwind boundaries
 
 **Status:** Confirmed
 
-A call to a foreign function lowers to one direct native call under the target's C calling
-convention with the classified signature. The artifact contains the symbol as an undefined
-external reference that the system linker resolves from the program's link inputs. The compiler
-introduces no runtime symbol lookup, cache, indirection, or compiler-owned adapter. A raw pointer
-crosses the boundary as one address lane, and every place a pointer was formed from is reloaded
-after the call, so a native write through the pointer is observed by later Silk reads under
-[PTR-003](values-and-types.md#ptr-003--formation-ends-no-loan-and-validity-is-the-callers-obligation).
+A foreign call retains its ordinary externally linked C symbol and classified signature. The backend emits one internal, non-inlined guard per symbol. The guard invokes the actual external function with a normal-return edge and a cleanup landing pad, and has a target-native Itanium/DWARF personality that traps in either unwind phase. A foreign exception therefore terminates at this boundary, including when an enclosing C++ caller has a catch handler. The original callee receives no inferred `nounwind` promise; the guard's `nounwind` describes its enforced termination path. No runtime symbol lookup occurs.
+
+Unannotated calls access externally reachable memory conservatively. Only the explicit sealed [foreign contract](foreign-call-contracts.md) supplies narrower memory, capture, alias or no-return assertions. Raw pointers cross as address lanes; address-taken Silk roots are still reloaded after each call. Ordinary foreign data/error-state reads stay ordinary loads, with no recognized accessor names, global volatility or hardware fences.
 
 Link inputs are compiler-generated objects followed by the ordered structured inputs the project
 manifest names. The optional `[build]` table's `native-link-inputs` array accepts object paths,
@@ -1000,7 +995,7 @@ native-link-inputs = [
 ```
 
 **Boundary:** The compiler does not verify that a link input defines the symbol or that its real
-C signature matches the declaration. A wrong declaration is undefined behavior at the call under
+C signature matches the declaration. Supplied `Driver.CompileRequest.foreignInterfaces` JSON snapshots are validated before backend/cache use; detectable signature or behavioral mismatches report both origins. Other unsafe contract violations are undefined behavior under
 [SAFETY-001](#safety-001--only-violating-an-explicit-unsafe-contract-permits-undefined-behavior).
 This rule does not stabilize the compiler's own runtime symbols; see
 [RUNTIME-003](runtime-and-standard-library.md#runtime-003--toolchain-runtime-support-guarantees-contracts-not-implementation-abi).
@@ -1010,8 +1005,7 @@ retains the linker output and produces no executable. It is toolchain data, not 
 diagnostic.
 
 **Current compiler:** Aligned. The LLVM backend declares each reachable symbol once with the C
-calling convention and external linkage, emits the call the way an OS intrinsic call is emitted,
-and records the reachable symbols with their C signatures on the artifact.
+calling convention and external linkage, emits the fatal unwind guard, and records each symbol with its machine and behavioral contract.
 
 **Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
 [C ABI signature](../../../../packages/compiler/src/CAbi.ts).
@@ -1317,7 +1311,7 @@ The UTF-8 manifest ends with one newline and has this versioned shape:
 
 ```json
 {
-  "silkForeignAbi": 1,
+  "silkForeignAbi": 2,
   "target": "aarch64-apple-darwin",
   "exports": [],
   "imports": []
@@ -1325,7 +1319,7 @@ The UTF-8 manifest ends with one newline and has this versioned shape:
 ```
 
 Each entry has `kind`, `symbol`, `abi`, and lowercase `direction`. Function entries additionally
-carry `parameters` and `result`; data entries carry `type`. Each direction array is sorted by
+carry `parameters`, `result`, and a normalized `contract` containing memory, locality, noCapture/borrow ordinals, optional returned ordinal, noReturn and forbidden unwind; data entries carry `type`. Obsolete type-only schema 1 and unknown contract fields are rejected. Each direction array is sorted by
 symbol and then kind, and target-sized integers have already been resolved to a fixed-width ABI
 class before serialization.
 

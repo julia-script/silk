@@ -1,3 +1,4 @@
+import * as ForeignContract from './ForeignContract.js'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Fn from 'effect/Function'
@@ -1990,7 +1991,11 @@ const declaration = (
     optional(
       value.foreign === undefined
         ? undefined
-        : record('Foreign', [value.foreign.abi, value.foreign.symbol]),
+        : record('Foreign', [
+            value.foreign.abi,
+            value.foreign.symbol,
+            ForeignContract.key(value.foreign.contract),
+          ]),
     ),
     array(value.typeParameters.map(typeParameter)),
     number(value.parameterCount),

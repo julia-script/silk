@@ -2636,7 +2636,7 @@ export const conflictingForeignSignature = (
     phase: 'semantic',
     code: conflictingForeignSignatureCode,
     severity: 'error',
-    message: `Foreign symbol ${symbol} is declared with a conflicting C signature`,
+    message: `Foreign symbol ${symbol} is declared with a conflicting C signature or behavioral contract`,
     reason: Object.freeze({ _tag: 'ConflictingForeignSignature', symbol, otherSpan }),
     span,
     relatedSpans: Object.freeze([

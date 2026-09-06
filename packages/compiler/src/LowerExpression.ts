@@ -2680,10 +2680,11 @@ function lowerCallExpression(
   }
   // A foreign header has no instance: the call names a native symbol under its C signature.
   const foreign = ExecutableOrigin.foreignFact(fn.index, expression.target)
+  let destination: Mir.LocalId
   if (foreign?.foreign !== undefined) {
     const type = fn.type(expression.type)
     if (type === undefined) return undefined
-    const destination = fn.alloc(type)
+    destination = fn.alloc(type)
     fn.emit(
       Object.freeze({
         _tag: 'ForeignCall',
@@ -2696,46 +2697,46 @@ function lowerCallExpression(
         provenance: Object.freeze({ span: expression.span, generated: false }),
       }),
     )
-    return Object.freeze({ result: destination })
-  }
-  const authoredTypeArguments = expression.typeArguments.map((argument) =>
-    fn.semanticArgument(argument),
-  )
-  const call = fn.call(
-    expression.span,
-    undefined,
-    authoredTypeArguments,
-    expression.staticArguments,
-  )
-  const typeArguments = Object.freeze(call?.target.typeArguments ?? authoredTypeArguments)
-  const staticArguments = call?.target.staticArguments ?? expression.staticArguments
-  const type =
-    (call?.resultEffect === undefined
-      ? undefined
-      : effectValueByIdentity(fn.layout, call.resultEffect)) ??
-    fn.effectResults.get(instanceText(expression.target, typeArguments)) ??
-    fn.type(expression.type) ??
-    resultCallableValueType(
-      fn.layout,
-      fn.instances,
-      expression.target,
-      typeArguments,
-      fn.semantic(expression.type),
+  } else {
+    const authoredTypeArguments = expression.typeArguments.map((argument) =>
+      fn.semanticArgument(argument),
     )
-  if (type === undefined) return undefined
-  const destination = fn.alloc(type)
-  fn.emit(
-    Object.freeze({
-      _tag: 'Call',
-      destination,
-      target: expression.target,
-      typeArguments,
-      ...(staticArguments.length === 0 ? {} : { staticArguments }),
-      arguments: Object.freeze(argumentLocals),
-      type,
-      provenance: Object.freeze({ span: expression.span, generated: false }),
-    }),
-  )
+    const call = fn.call(
+      expression.span,
+      undefined,
+      authoredTypeArguments,
+      expression.staticArguments,
+    )
+    const typeArguments = Object.freeze(call?.target.typeArguments ?? authoredTypeArguments)
+    const staticArguments = call?.target.staticArguments ?? expression.staticArguments
+    const type =
+      (call?.resultEffect === undefined
+        ? undefined
+        : effectValueByIdentity(fn.layout, call.resultEffect)) ??
+      fn.effectResults.get(instanceText(expression.target, typeArguments)) ??
+      fn.type(expression.type) ??
+      resultCallableValueType(
+        fn.layout,
+        fn.instances,
+        expression.target,
+        typeArguments,
+        fn.semantic(expression.type),
+      )
+    if (type === undefined) return undefined
+    destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'Call',
+        destination,
+        target: expression.target,
+        typeArguments,
+        ...(staticArguments.length === 0 ? {} : { staticArguments }),
+        arguments: Object.freeze(argumentLocals),
+        type,
+        provenance: Object.freeze({ span: expression.span, generated: false }),
+      }),
+    )
+  }
   for (const authored of expression.loanEnds) {
     const borrow = fn.recipeBorrow(authored)
     const slice = fn.loanLocals.get(borrowKey(borrow))

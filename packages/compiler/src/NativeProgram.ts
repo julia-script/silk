@@ -1,3 +1,4 @@
+import * as NativeForeignGuard from './NativeForeignGuard.js'
 import * as NativeCAbi from './NativeCAbi.js'
 import * as Bitcode from '@silklang/llvm/Bitcode'
 import * as Builder from '@silklang/llvm/Builder'
@@ -354,6 +355,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         return pointer
     }
   }
+  const foreignGuard =
+    program.foreignCalls.length === 0 ? undefined : yield* NativeForeignGuard.make(builder)
   for (const call of program.foreignCalls) {
     if (foreignFunctions.has(call.symbol)) continue
     const parameters = call.signature.parameters.map(cType)
@@ -380,7 +383,15 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
           }),
       ),
     )
-    foreignFunctions.set(call.symbol, Object.freeze({ handle, signature: call.signature }))
+    if (foreignGuard === undefined) throw new RangeError('LLVM foreign guard was not initialized')
+    const guarded = yield* NativeForeignGuard.wrap(
+      foreignGuard,
+      builder,
+      handle,
+      foreignFunctions.size,
+      call.signature.parameters.length,
+    )
+    foreignFunctions.set(call.symbol, Object.freeze({ handle: guarded, signature: call.signature }))
   }
   for (const record of program.foreignStatics) {
     const classified = CAbi.classify(record.type, program.layout.target, 'Parameter')
@@ -665,6 +676,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
             symbol,
             parameters: Object.freeze(foreign.signature.parameters.map(CAbi.typeText)),
             result: CAbi.typeText(foreign.signature.result),
+            contract: foreign.signature.contract,
           }),
         ),
     ),
@@ -676,6 +688,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
             symbol: record.symbol,
             parameters: Object.freeze(record.signature.parameters.map(CAbi.typeText)),
             result: CAbi.typeText(record.signature.result),
+            contract: record.signature.contract,
           }),
         ),
     ),

@@ -762,6 +762,7 @@ const printFunctionDeclaration = (
   const requirementRow = nodes.find((child) => child.kind === 'RequirementRow')
   const whereClause = nodes.find((child) => child.kind === 'WhereClause')
   const body = nodes.find((child) => child.kind === 'Block')
+  const properties = nodes.find((child) => child.kind === 'FunctionPropertyClause')
   return FormatDocument.concat(
     ...head.flatMap((token, index) => [
       printToken(context, token, index === 0 ? prefix : FormatDocument.text(' ')),
@@ -794,6 +795,7 @@ const printFunctionDeclaration = (
           printToken(context, asKeyword, FormatDocument.text(' ')),
           printToken(context, symbol, FormatDocument.text(' ')),
         ]),
+    ...(properties === undefined ? [] : [printNode(context, properties, FormatDocument.text(' '))]),
     ...(body === undefined ? [] : [printNode(context, body, FormatDocument.text(' '))]),
   )
 }
@@ -1425,6 +1427,30 @@ const printNode = (
         commaTokens(node),
         tokenOf(node, 'RightParenthesis'),
         prefix,
+      )
+    case 'FunctionPropertyClause': {
+      const names = directTokens(node).filter((token) => token.kind === 'Identifier')
+      return FormatDocument.concat(
+        ...names.flatMap((token, index) =>
+          index === 2
+            ? [printToken(context, tokenOf(node, 'Dot')), printToken(context, token)]
+            : [printToken(context, token, index === 0 ? prefix : FormatDocument.text(' '))],
+        ),
+        printDelimited(
+          context,
+          tokenOf(node, 'LeftParenthesis'),
+          directNodes(node),
+          commaTokens(node),
+          tokenOf(node, 'RightParenthesis'),
+          FormatDocument.empty,
+        ),
+      )
+    }
+    case 'FunctionProperty':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix),
+        printToken(context, tokenOf(node, 'Colon')),
+        ...directNodes(node).map((value) => printNode(context, value, FormatDocument.text(' '))),
       )
     case 'ParameterDeclaration': {
       const modifier = directTokens(node).find(
