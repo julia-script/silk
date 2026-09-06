@@ -1480,6 +1480,24 @@ it.effect(
           const swapped = yield* plan([b, a])
           assert.strictEqual(first.identity, moved.identity)
           assert.notStrictEqual(first.identity, swapped.identity)
+          const wrongTarget =
+            target.operatingSystem === 'darwin'
+              ? Target.x8664UnknownLinuxGnu
+              : Target.aarch64AppleDarwin
+          const wrongObject = yield* NativeToolchain.writeArtifact(
+            scope,
+            target,
+            'wrong.o',
+            nativeObjectFor(wrongTarget),
+          )
+          const incompatible = yield* Effect.result(plan([wrongObject]))
+          assert.strictEqual(incompatible._tag, 'Failure')
+          if (incompatible._tag === 'Failure') {
+            assert.strictEqual(incompatible.failure.reason._tag, 'SupplyFailed')
+            if (incompatible.failure.reason._tag === 'SupplyFailed')
+              assert.strictEqual(incompatible.failure.reason.failure.code, 'TargetMismatch')
+          }
+
           assert.deepEqual(
             NativeToolchain.finalArtifactCacheAdmission('NativeStaticLibrary', first),
             { _tag: 'CompleteNativePlan', identity: first.identity },

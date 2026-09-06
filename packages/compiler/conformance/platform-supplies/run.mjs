@@ -259,6 +259,68 @@ pub fn main() -> i32 { let rooted = unsafe supply_archive_root()
             )
         const failures = []
         if (optimization === 'none') {
+          if (target.includes('linux')) {
+            const missingRoot = path.join(scope.root, 'missing-crt-sysroot')
+            yield* fs.makeDirectory(missingRoot)
+            const incomplete = yield* NativeToolchain.resolveToolchain(
+              {
+                _tag: 'Toolchain',
+                clang,
+                llvmAr,
+                platform: {
+                  kind: 'explicit',
+                  target: profile.target.id,
+                  root: missingRoot,
+                  linker,
+                  origin: 'missing CRT fixture',
+                },
+              },
+              profile,
+            )
+            const rejected = yield* Effect.result(
+              NativeToolchain.planNativeLink(
+                incomplete,
+                scope,
+                'NativeExecutable',
+                profile,
+                [consumer.artifact],
+                [],
+                path.join(scope.root, 'missing-crt'),
+                entry,
+              ),
+            )
+            if (
+              !Result.isFailure(rejected) ||
+              rejected.failure.reason._tag !== 'SupplyFailed' ||
+              !rejected.failure.reason.failure.subject.includes('crt')
+            )
+              return yield* new ConformanceError({
+                message: 'An empty explicit GNU sysroot did not reject missing CRT inputs',
+              })
+            failures.push({ name: 'missing-crt', reason: rejected.failure.reason })
+          }
+          const missing = yield* Effect.result(
+            NativeToolchain.planNativeLink(
+              tools,
+              scope,
+              'NativeExecutable',
+              profile,
+              [consumer.artifact],
+              [
+                target.includes('apple')
+                  ? NativeLinkInput.framework('SilkMissingFramework')
+                  : NativeLinkInput.library('silk_missing_library', 'Dynamic'),
+              ],
+              path.join(scope.root, 'missing-library'),
+              entry,
+            ),
+          )
+          if (!Result.isFailure(missing) || missing.failure.reason._tag !== 'SupplyFailed')
+            return yield* new ConformanceError({ message: 'Missing platform library was accepted' })
+          failures.push({
+            name: target.includes('apple') ? 'missing-framework' : 'missing-library',
+            reason: missing.failure.reason,
+          })
           // Ask the actual selected linker to resolve symbols, including its archive rules.
           for (const { name, objects } of [
             { name: 'missing', objects: [consumer.artifact] },
