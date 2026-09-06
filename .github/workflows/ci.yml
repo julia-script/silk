@@ -36,6 +36,11 @@ jobs:
           path: ~/.cache/silk-effect/native
           key: silk-native-${{ runner.os }}-${{ github.sha }}
           restore-keys: silk-native-${{ runner.os }}-
+      # CLI integration tests also resolve complete native tool installations.
+      - name: Install LLVM archiver
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes llvm
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: node scripts/turbo.mjs run build
