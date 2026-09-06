@@ -15,5 +15,5 @@
 - [x] 3.1 Add cheap analysis/MIR/LLVM assertions for accepted and rejected contracts.
 - [x] 3.2 Run pinned x86-64/ARM64 debug/optimized object/disassembly and independent machine fixtures.
 - [x] 3.3 Update reference, inventories, generated docs, examples and public package contents together.
-- [ ] 3.4 Run typecheck, format:check, lint, test, check and release:candidate; record exact results.
-- [ ] 3.5 Submit the JUL-135 branch through gh stack without merging.
+- [x] 3.4 Run typecheck, format:check, lint, test, check and release:candidate; record exact results.
+- [x] 3.5 Submit the JUL-135 branch through gh stack without merging.

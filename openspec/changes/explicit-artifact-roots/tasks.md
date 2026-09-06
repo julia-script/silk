@@ -16,5 +16,5 @@
 - [x] 3.1 Add cheap analysis coverage for roots, selection, three activation scopes, diamond/conflict origins, plan identity and rejected LTO.
 - [x] 3.2 Run pinned debug/optimized object/archive/module/custom-runtime conformance and independent C consumers across the three native targets; record actual evidence.
 - [x] 3.3 Update public interfaces, docs, generated catalogs, examples and package export validation; delete replaced root-policy assumptions.
-- [ ] 3.4 Run typecheck, format:check, lint, test, check and release:candidate; record exact results and baseline status.
-- [ ] 3.5 Submit the JUL-125 branch using gh stack.
+- [x] 3.4 Run typecheck, format:check, lint, test, check and release:candidate; record exact results and baseline status.
+- [x] 3.5 Submit the JUL-125 branch using gh stack.

@@ -16,4 +16,4 @@
 - [x] 3.2 Migrate declarations, consumers, diagnostics, interface fixtures, docs and generated artifacts; remove obsolete type-only function behavior records and audit unsupported unwind/retention/LTO requests.
 - [x] 3.3 Run typecheck, format:check, lint, test, check and release:candidate, record failures and baseline status.
 
-- [ ] 3.4 Submit the JUL-124 branch using gh stack.
+- [x] 3.4 Submit the JUL-124 branch using gh stack.

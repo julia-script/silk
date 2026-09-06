@@ -9,8 +9,12 @@ and shared module, and independently compiles/executes a C consumer against each
 `results.json`. LTO is explicitly rejected. This does not claim downstream archive extraction of
 an unreferenced member, physical supply discovery, or replacement of hosted startup policy.
 
-Repository typecheck, format and lint passed. All 2,336 compiler tests passed; the shared native
-acceptance and aggregate check/release sequence is still in progress.
+Before rebasing, repository typecheck, format, lint, all 2,336 compiler tests and all 321 shared
+native acceptance cases passed. After integration with JUL-135 on origin/main `0ee2ed40`, the entire
+stack passed typecheck, format:check, lint, test, check and release:candidate in order. This final
+integrated run covers JUL-125; no standalone JUL-125 check/release run is claimed. The final compiler
+suite contains 2,343 tests, and all 321 native acceptance cases actually executed. All twelve
+artifact-root conformance lanes passed again with results identical to the committed record.
 
 The first full run exposed a language-server timeout after a manifest switched to an application
 that was not open. Selection attempted to publish the new application before loading it. A minimal
@@ -26,3 +30,10 @@ changed to avoid an unrelated ownership error before the configured-role check.
 Focused compiler tests prove custom application binding, private retention, all three requirement
 scopes including foreign data imports, duplicate collapse, all-origin conflicts, admitted binding
 choices, runtime/loader request identity, compiler/stage identity and ordered physical inputs.
+
+Final integrated verification on source head `a1bc63f3` (above origin/main `0ee2ed40`) passed all six
+required repository gates. The final stack includes 2,343 compiler tests, 321 actually executed
+native acceptance cases, 159 LSP tests, 89 CLI tests, 17 repository policy checks and 10 packed
+release-candidate checks. See `../native-assembly-entry-contracts/verification.md` for integration
+fixes, logs and the two unrelated baseline OpenSpec delta-validation failures. Submitted through
+`gh stack` as draft PR #364; no merge is claimed.
