@@ -13,5 +13,5 @@
 ## 3. Conformance and delivery
 
 - [x] 3.1 Add required pinned Darwin ARM64/GNU x86-64/ARM64 debug/optimized conformance with real objects, independent C execution, closure inspection and explicit LTO rejection; retain exact results and fail missing/skipped lanes.
-- [ ] 3.2 Update public exports, packed-surface expectations, consumers and generated inventories; verify absence of superseded helper selection and browser-safe root imports.
-- [ ] 3.3 Run typecheck, format:check, lint, test, check and release:candidate; record exact outcomes and publish the implementation through gh stack.
+- [x] 3.2 Update public exports, packed-surface expectations, consumers and generated inventories; verify absence of superseded helper selection and browser-safe root imports.
+- [x] 3.3 Run typecheck, format:check, lint, test, check and release:candidate; record exact outcomes and publish the implementation through gh stack.
