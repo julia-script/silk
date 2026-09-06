@@ -141,3 +141,5 @@ documentation remain separate from this reference.
 - [Selected source and profile tooling](selected-source-tooling.md): source availability, profile catalogs, editor selection and platform provenance.
 
 - [Foreign-call contracts](foreign-call-contracts.md): explicit immediate C-call behavior, call-only references and fatal foreign-unwind boundaries.
+
+- [Native assembly and entry fragments](native-assembly.md)
