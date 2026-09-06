@@ -908,6 +908,17 @@ export interface CallableSectionExpressionFact {
   }
 }
 
+/** One complete unsafe invocation through a native C function address. */
+export interface ForeignApplyExpressionFact {
+  readonly _tag: 'ForeignApply'
+  readonly evaluation: 'CalleeThenArguments' | 'LeftThenCallable'
+  readonly callee: ExpressionFact
+  readonly arguments: ReadonlyArray<ArgumentFact>
+  readonly contract: Type.ForeignFunction
+  readonly type: ExpressionTypeFact
+  readonly syntax: SyntaxTree.Node
+}
+
 /** One ordinary invocation through a first-class callable expression. */
 export interface CallableApplyExpressionFact {
   readonly _tag: 'CallableApply'
@@ -1048,6 +1059,7 @@ export type ExpressionFact =
   | ShortCircuitExpressionFact
   | FunctionItemExpressionFact
   | CallableSectionExpressionFact
+  | ForeignApplyExpressionFact
   | CallableApplyExpressionFact
   | EffectExpressionFact
   | {

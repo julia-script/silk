@@ -761,6 +761,16 @@ export type Expression =
       readonly span: SourceSpan.SourceSpan
     }
   | {
+      readonly _tag: 'ForeignApply'
+      readonly evaluation: 'CalleeThenArguments' | 'LeftThenCallable'
+      readonly callee: Expression
+      readonly arguments: ReadonlyArray<Expression>
+      readonly contract: Type.ForeignFunction
+      readonly loanEnds: ReadonlyArray<BorrowId>
+      readonly type: DeclarationFacts.SemanticType
+      readonly span: SourceSpan.SourceSpan
+    }
+  | {
       readonly _tag: 'CallableApply'
       readonly callee: Expression
       readonly arguments: ReadonlyArray<Expression>
@@ -1134,6 +1144,7 @@ export const expressionChildren = (expression: Expression): ReadonlyArray<Expres
         return expression.arguments
       case 'CallableSection':
         return expression.captures.map((capture) => capture.value)
+      case 'ForeignApply':
       case 'CallableApply':
         return expression.evaluation === 'LeftThenCallable'
           ? [...expression.arguments, expression.callee]
@@ -1311,6 +1322,7 @@ export const firstUnavailable = (
         }
         return undefined
       }
+      case 'ForeignApply':
       case 'CallableApply': {
         const callee = walk(expression.callee)
         if (callee !== undefined) return callee
@@ -1560,7 +1572,8 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
       expression._tag === 'Call' ||
       expression._tag === 'BuiltinCall' ||
       expression._tag === 'InterfaceOperationCall' ||
-      expression._tag === 'CallableApply'
+      expression._tag === 'CallableApply' ||
+      expression._tag === 'ForeignApply'
     ) {
       const begins = expression.arguments
         .flatMap(expressionTree)
@@ -1575,7 +1588,9 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
         .map((candidate) => borrowText(candidate.borrow))
       const authoredEnds = [
         ...expression.loanEnds,
-        ...(expression._tag === 'InterfaceOperationCall' ? [] : expression.heldLoans),
+        ...(expression._tag === 'InterfaceOperationCall' || expression._tag === 'ForeignApply'
+          ? []
+          : expression.heldLoans),
       ]
       const ends = authoredEnds
         .filter(
@@ -2020,6 +2035,12 @@ const encodeExpression = (expression: Expression, depth: number): string => {
           (capture) =>
             `${indent}  capture #${capture.ordinal}->p${capture.parameterOrdinal} ${capture.access.toLowerCase()}\n${encodeExpression(capture.value, depth + 2)}`,
         ),
+      ].join('\n')
+    case 'ForeignApply':
+      return [
+        `${indent}foreign-apply ${Type.encode(expression.contract)} ${spanText(expression.span)}`,
+        encodeExpression(expression.callee, depth + 1),
+        ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'CallableApply':
       return [

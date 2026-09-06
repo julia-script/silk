@@ -257,7 +257,12 @@ export const resolveDeclaredType = (
               undefined,
               fact.unsafe,
             )
-          : Type.foreignFunction(resolvedParameters, result.fact.type)
+          : Type.foreignFunction(
+              resolvedParameters,
+              result.fact.type,
+              fact.contract,
+              fact.lifetimes,
+            )
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',

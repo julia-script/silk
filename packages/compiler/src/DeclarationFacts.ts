@@ -387,6 +387,8 @@ export type DeclaredTypeFact =
     }
   | {
       readonly _tag: 'ForeignFunction'
+      readonly lifetimes: Type.ExecutableLifetimes
+      readonly contract: ForeignContract.ForeignContract
       readonly parameters: ReadonlyArray<DeclaredTypeFact>
       readonly result: DeclaredTypeFact
       readonly spelling: string

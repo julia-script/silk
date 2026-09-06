@@ -1297,7 +1297,10 @@ const printNode = (
     case 'CallableType':
     case 'ForeignFunctionType': {
       const nodes = directNodes(node).filter(
-        (child) => child.kind !== 'LifetimeBinderList' && child.kind !== 'CallableEnvironment',
+        (child) =>
+          child.kind !== 'LifetimeBinderList' &&
+          child.kind !== 'CallableEnvironment' &&
+          child.kind !== 'FunctionPropertyClause',
       )
       const environment = directNodes(node).find((child) => child.kind === 'CallableEnvironment')
       const binders = directNodes(node).filter((child) => child.kind === 'LifetimeBinderList')
@@ -1374,6 +1377,9 @@ const printNode = (
         ),
         printToken(context, tokenOf(node, 'Arrow'), FormatDocument.text(' ')),
         printNode(context, result, FormatDocument.text(' ')),
+        ...directNodes(node)
+          .filter((child) => child.kind === 'FunctionPropertyClause')
+          .map((child) => printNode(context, child, FormatDocument.text(' '))),
       )
     }
     case 'OpaqueResultType': {

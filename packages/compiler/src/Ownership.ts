@@ -1497,6 +1497,21 @@ const checkExpressionOperation = (
       }
       return true
     }
+    case 'ForeignApply':
+      if (
+        expression.evaluation === 'CalleeThenArguments' &&
+        !checkExpression(state, live, expression.callee, false, guard, escaping)
+      )
+        return false
+      for (const argument of expression.arguments)
+        if (!checkExpression(state, live, argument, argumentConsumes(argument), guard, escaping))
+          return false
+      if (
+        expression.evaluation === 'LeftThenCallable' &&
+        !checkExpression(state, live, expression.callee, false, guard, escaping)
+      )
+        return false
+      return true
     case 'Call': {
       for (const argument of expression.arguments)
         if (!checkExpression(state, live, argument, argumentConsumes(argument), guard, escaping))
@@ -1824,7 +1839,7 @@ const analyzeLoans = (
       return Object.freeze(
         expression.arguments.flatMap((argument) => movedExecutableBindings(argument.expression)),
       )
-    if (expression._tag === 'CallableApply')
+    if (expression._tag === 'CallableApply' || expression._tag === 'ForeignApply')
       return Object.freeze([
         ...movedExecutableBindings(expression.callee),
         ...expression.arguments.flatMap((argument) => movedExecutableBindings(argument.expression)),
@@ -1908,6 +1923,14 @@ const analyzeLoans = (
       case 'Call':
         for (const argument of expression.arguments)
           scanRunEnds(argument.expression, region, useSpan)
+        return
+      case 'ForeignApply':
+        if (expression.evaluation === 'CalleeThenArguments')
+          scanRunEnds(expression.callee, region, useSpan)
+        for (const argument of expression.arguments)
+          scanRunEnds(argument.expression, region, useSpan)
+        if (expression.evaluation === 'LeftThenCallable')
+          scanRunEnds(expression.callee, region, useSpan)
         return
       case 'CallableApply':
         if (expression.provenance._tag === 'PipelineCallableApplication') {
@@ -2986,9 +3009,13 @@ const analyzeLoans = (
         }
         return
       }
+      case 'ForeignApply':
       case 'Call': {
+        if (expression._tag === 'ForeignApply' && expression.evaluation === 'CalleeThenArguments')
+          inspect(expression.callee, region, active, 'Read')
         const callActive: Array<LoanFact> = [...active, ...delayedLoansAt(expression.syntax.span)]
         const consumesSlot =
+          expression._tag === 'Call' &&
           expression.reference._tag === 'ResolvedBuiltin' &&
           (expression.reference.operation === 'SlotWrite' ||
             expression.reference.operation === 'SlotTake' ||
@@ -3057,6 +3084,8 @@ const analyzeLoans = (
           loans.push(loan)
           callActive.push(loan)
         }
+        if (expression._tag === 'ForeignApply' && expression.evaluation === 'LeftThenCallable')
+          inspect(expression.callee, region, callActive, 'Read')
         return
       }
       case 'EffectBlock': {

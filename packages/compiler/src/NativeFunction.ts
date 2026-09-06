@@ -202,6 +202,7 @@ export interface EmissionContext {
       readonly symbol: string
     }
   >
+  readonly foreignIndirects: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly foreignFunctions: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly foreignStatics: ReadonlyMap<string, NativeForeignOperation.StaticDeclaration>
   readonly foreignCallbacks: ReadonlyMap<string, Constant.Constant>
@@ -266,6 +267,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
     memcmp,
     standardWrite,
     osRuntimes,
+    foreignIndirects,
     foreignFunctions,
     foreignStatics,
     foreignCallbacks,
@@ -857,6 +859,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           ...(memcmp === undefined ? {} : { memcmp }),
           ...(standardWrite === undefined ? {} : { standardWrite }),
           osRuntimes,
+          foreignIndirects,
           foreignFunctions,
           foreignStatics,
           foreignCallbacks,

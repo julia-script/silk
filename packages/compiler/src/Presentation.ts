@@ -211,10 +211,10 @@ export const functionDeclaration = (self: DeclarationFacts.DeclarationFact): Pre
   const kind = `${phase}${self.unsafe ? 'unsafe ' : ''}${native?.marker ?? ''}${self.functionKind === 'Effect' ? `effect<${Lifetime.display(DeclarationFacts.executableLifetimes(self).environment)}> fn` : 'fn'}`
   const symbol = native === undefined ? '' : ` as "${native.symbol}"`
   const behavior =
-    self.foreign === undefined
+    self.foreign === undefined && self.foreignExport === undefined
       ? ''
       : ForeignContract.source(
-          self.foreign.contract,
+          (self.foreign ?? self.foreignExport)?.contract ?? ForeignContract.conservative,
           self.parameters.map((parameter) =>
             parameter.name._tag === 'Present' ? parameter.name.spelling : '_',
           ),

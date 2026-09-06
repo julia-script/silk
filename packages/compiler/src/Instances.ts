@@ -6,7 +6,7 @@ import type * as CAbi from './CAbi.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
@@ -1047,9 +1047,19 @@ const exportRoots = (
             Object.freeze({
               _tag: 'ForeignExport',
               symbol: fact.foreignExport.symbol,
-              type: Type.foreignFunction(parameters, fact.returnType.type),
+              type: Type.foreignFunction(
+                parameters,
+                fact.returnType.type,
+                fact.foreignExport.contract,
+                DeclarationFacts.executableLifetimes(fact),
+              ),
               signature: ExecutableOrigin.foreignSignature(fact, target),
-              key: keyOf(fact.canonical.id, Hir.contractOf(fact)),
+              key: keyOf(
+                fact.canonical.id,
+                Hir.contractOf(fact),
+                fact.typeParameters.map((parameter) => parameter.type),
+                fact.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
+              ),
               declaration: fact.canonical.id,
               declarationSpan: fact.name.token.span,
             }),

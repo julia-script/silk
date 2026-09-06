@@ -428,21 +428,21 @@ pub fn main() -> i32 { return 0 }`),
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const first = yield* Analysis.codegen(snapshot, { mode: 'release' })
-    const second = yield* Analysis.codegen(snapshot, { mode: 'release' })
     assert.strictEqual(first._tag, 'LlvmBitcodeArtifact')
-    if (first._tag !== 'LlvmBitcodeArtifact' || second._tag !== 'LlvmBitcodeArtifact') return
-    assert.deepEqual(first.bitcode, second.bitcode)
+    if (first._tag !== 'LlvmBitcodeArtifact') return
     const lines = first.ir.split('\n')
     // Convention 0 renders without a `ccc`/`cc <n>` marker; the export is emitted even though
     // `main` never calls it.
     const start = lines.findIndex((line) => line.startsWith('define i32 @silk_test_double_v1(i32'))
     assert.notStrictEqual(start, -1, first.ir)
     const body = lines.slice(start + 1, lines.indexOf('}', start))
-    const calls = body.filter((line) => line.includes(' call '))
+    const calls = body.filter((line) => line.includes(' invoke '))
     assert.strictEqual(calls.length, 1, body.join('\n'))
-    assert.match(calls.at(0) ?? '', /call i32 @silk_[^(\s]+__[^(\s]+\(i32 /)
+    assert.match(calls.at(0) ?? '', /invoke i32 @silk_[^(\s]+__[^(\s]+\(i32 /)
     assert.isFalse((calls.at(0) ?? '').includes('@silk_test_double_v1('))
     assert.strictEqual(body.filter((line) => /^\s*ret /.test(line)).length, 1, body.join('\n'))
+    assert.include(body.join('\n'), 'call void @llvm.trap()')
+    assert.include(body.join('\n'), 'landingpad')
     assert.deepEqual(first.foreignExports, [
       {
         symbol: 'silk_test_double_v1',

@@ -161,9 +161,12 @@ export const forHeader = (
       if (token !== undefined) resolve(node, token, scope)
       return
     }
-    if (node.kind === 'CallableType') {
+    if (node.kind === 'CallableType' || node.kind === 'ForeignFunctionType') {
       const annotation = SyntaxTree.directNode(node, 'CallableEnvironment')
-      const environment = region(annotation ?? node, scope, output, defaultOutput, allocate)
+      const environment =
+        node.kind === 'ForeignFunctionType'
+          ? Lifetime.staticLifetime
+          : region(annotation ?? node, scope, output, defaultOutput, allocate)
       if (environment !== undefined) regions.set(node, environment)
       const binderPath = [callableOrdinal++]
       const scopeBindings = new Map(scope)
@@ -228,7 +231,8 @@ export const forHeader = (
         (child): child is SyntaxTree.Node =>
           SyntaxTree.isNode(child) &&
           child.kind !== 'LifetimeBinderList' &&
-          child.kind !== 'CallableEnvironment',
+          child.kind !== 'CallableEnvironment' &&
+          child.kind !== 'FunctionPropertyClause',
       )
       const inputs = types.slice(0, -1)
       for (const input of inputs)

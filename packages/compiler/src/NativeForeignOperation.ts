@@ -3,7 +3,7 @@ import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as Constant from '@silklang/llvm/Constant'
 import type * as LlvmType from '@silklang/llvm/Type'
 import * as Effect from 'effect/Effect'
-import type * as CAbi from './CAbi.js'
+import * as CAbi from './CAbi.js'
 import type { LinearOperation } from './MirLinearization.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
@@ -22,7 +22,13 @@ export interface StaticDeclaration {
 
 type Operation = Extract<
   LinearOperation,
-  { readonly _tag: 'ForeignCall' | 'ForeignStaticLoad' | 'ForeignFunctionAddress' }
+  {
+    readonly _tag:
+      | 'ForeignIndirectCall'
+      | 'ForeignCall'
+      | 'ForeignStaticLoad'
+      | 'ForeignFunctionAddress'
+  }
 >
 
 /** Emits one direct call to a declared foreign symbol; scalars are single lanes on both sides. */
@@ -48,12 +54,19 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     return
   }
   const { body, foreignFunctions, storage } = context
-  const foreign = foreignFunctions.get(operation.symbol)
-  if (foreign === undefined)
-    throw new RangeError(`LLVM foreign function ${operation.symbol} was not declared`)
+  const foreign =
+    operation._tag === 'ForeignIndirectCall'
+      ? context.foreignIndirects.get(CAbi.signatureKey(operation.signature))
+      : foreignFunctions.get(operation.symbol)
+  if (foreign === undefined) throw new RangeError('LLVM foreign call was not declared')
   const arguments_ = operation.arguments.flatMap((argument) => [
     ...NativeStorage.readLocal(storage, argument),
   ])
+  if (operation._tag === 'ForeignIndirectCall') {
+    const callee = NativeStorage.readLocal(storage, operation.callee)
+    if (callee.length !== 1) throw new RangeError('Native function pointer lost its address lane')
+    arguments_.push(...callee)
+  }
   const result = yield* FunctionBody.callDirect(
     body,
     foreign.handle,

@@ -110,6 +110,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = os-call ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'NativeAssembly':
       return `${localText(operation.destination)} = assembly ${NativeAssembly.encode(operation.assembly)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'ForeignIndirectCall':
+      return `${localText(operation.destination)} = foreign-indirect-call ${localText(operation.callee)} signature=${CAbi.signatureKey(operation.signature)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ForeignCall':
       return `${localText(operation.destination)} = foreign-call ${operation.symbol} abi=${operation.abi} signature=${CAbi.signatureKey(operation.signature)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferFrom':

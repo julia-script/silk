@@ -22,6 +22,7 @@ export "C" fn silk_scalars(a: i8, b: u8, c: i16, d: u16, e: i32, f: u32, g: i64,
 }
 
 unsafe extern "C" fn c_invoke(callback: extern "C" fn(*const i32) -> i32, value: *const i32) -> i32
+  with Intrinsic.foreign(callbacks: ("callback",))
 export "C" fn silk_invoke(value: *const i32) -> i32 {
   return unsafe c_invoke(silk_callback, value)
 }

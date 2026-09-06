@@ -1064,6 +1064,7 @@ const collectExpression = (
       for (const capture of expression.captures)
         collectExpression(capture.expression, index, scope, pending)
       return
+    case 'ForeignApply':
     case 'CallableApply':
       collectExpression(expression.callee, index, scope, pending)
       for (const argument of expression.arguments)

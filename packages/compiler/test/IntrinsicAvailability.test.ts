@@ -317,7 +317,7 @@ pub fn main() -> i32 { let n = size()
         {
           symbol: 'count',
           signature:
-            '(u64)->u64!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+            '(u64)->u64!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
           declaration: 'count',
           callSource: 'availability/main',
         },
@@ -332,7 +332,7 @@ it.effect('keeps unreachable foreign declarations out of LLVM-to-Wasm planning',
   Effect.gen(function* () {
     const self = yield* snapshot(
       `unsafe extern "C" fn abs(value: i32) -> i32
-unsafe extern "C" fn install(callback: extern "C" fn(i32) -> i32) -> ()
+unsafe extern "C" fn install(callback: extern "C" fn(i32) -> i32) -> () with Intrinsic.foreign(callbacks: ("callback",))
 unsafe extern "C" static environment: *mut *mut u8 as "environ"
 pub fn main() -> i32 { return 42 }`,
       'wasm32-unknown-unknown',
@@ -386,11 +386,11 @@ it.effect('accepts agreeing redeclarations of one symbol across two modules', ()
       [
         [
           'availability/foreign-root',
-          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+          '(i32)->i32!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
         ],
         [
           'foreign_dep',
-          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+          '(i32)->i32!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
         ],
       ],
     )
@@ -448,7 +448,7 @@ it.effect('seeds native discovery with an uncalled export and records it on MIR'
       {
         symbol: 'silk_test_double_v1',
         signature:
-          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+          '(i32)->i32!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
         key: Instances.keyText(
           self.instances.instances.at(1)?.key ?? unreachable('expected the export instance'),
         ),
@@ -539,11 +539,11 @@ it.effect('accepts distinct export symbols across modules in canonical order', (
       [
         [
           'silk_test_double_v1',
-          '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+          '(i32)->i32!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
         ],
         [
           'silk_test_add_v1',
-          '(i32,i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+          '(i32,i32)->i32!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
         ],
       ],
     )
@@ -596,7 +596,7 @@ pub fn main() -> i32 { return 0 }`)
 it.effect('rejects a suspending export at its C callback conversion site', () =>
   Effect.gen(function* () {
     const callbackSource = `import silk.effect { Effect }
-unsafe extern "C" fn install(callback: extern "C" fn() -> i32) -> ()
+unsafe extern "C" fn install(callback: extern "C" fn() -> i32) -> () with Intrinsic.foreign(callbacks: ("callback",))
 export "C" fn silk_test_wait_v1() -> i32 { return run Effect.suspend(effect { return 2 }) }
 pub fn main() -> i32 { unsafe install(silk_test_wait_v1) return 0 }`
     const self = yield* snapshot(callbackSource)

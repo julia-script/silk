@@ -1,3 +1,4 @@
+import * as ForeignContract from './ForeignContract.js'
 import type * as CallableContract from './CallableContract.js'
 import type * as Constraint from './Constraint.js'
 import * as Lifetime from './Lifetime.js'
@@ -173,8 +174,12 @@ export interface Callable extends ExecutableLifetimes {
 }
 
 /** A non-capturing synchronous function pointer with one native calling convention. */
-export interface ForeignFunction {
+export interface ForeignFunction extends ExecutableLifetimes {
+  readonly lifetimeBounds: ReadonlyArray<Lifetime.Outlives>
+  readonly typeOutlives: ReadonlyArray<TypeOutlives>
   readonly _tag: 'ForeignFunctionType'
+  readonly nullable: false
+  readonly contract: ForeignContract.ForeignContract
   readonly abi: 'C'
   readonly parameters: ReadonlyArray<Type>
   readonly result: Type
@@ -950,9 +955,20 @@ export const callable = (
   })
 
 /** Constructs one immutable C ABI function-pointer type. */
-export const foreignFunction = (parameters_: ReadonlyArray<Type>, result: Type): ForeignFunction =>
+export const foreignFunction = (
+  parameters_: ReadonlyArray<Type>,
+  result: Type,
+  contract: ForeignContract.ForeignContract = ForeignContract.conservative,
+  lifetimes: ExecutableLifetimes = { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+): ForeignFunction =>
   Object.freeze({
     _tag: 'ForeignFunctionType',
+    environment: lifetimes.environment,
+    lifetimeBinders: Object.freeze([...lifetimes.lifetimeBinders]),
+    lifetimeBounds: Lifetime.assumptions(lifetimes.lifetimeBounds ?? []).bounds,
+    typeOutlives: normalizeTypeOutlives(lifetimes.typeOutlives ?? []),
+    nullable: false,
+    contract,
     abi: 'C',
     parameters: Object.freeze(Array.from(parameters_)),
     result,
@@ -1972,7 +1988,7 @@ const computeKey = (self: Type): string => {
     return `${executableLifetimeKey(self)}callable:${self.unsafe ? 'unsafe:' : 'safe:'}${self.mode}<(${self.parameters.map(key).join(',')})->${key(self.result)}>${schemaKey}`
   }
   if (isForeignFunction(self))
-    return `foreign:C<(${self.parameters.map(key).join(',')})->${key(self.result)}>`
+    return `foreign:${executableLifetimeKey(self)}C:nonnull:${ForeignContract.key(self.contract)}<(${self.parameters.map(key).join(',')})->${key(self.result)}>`
   if (isEffect(self))
     return `${executableLifetimeKey(self)}effect:${self.access}<${key(self.success)}!${RowAlgebra.key(
       failureRowPolicy(),
@@ -2236,6 +2252,7 @@ export const haveSameRepresentationShape = (left: Type, right: Type): boolean =>
     return (
       isForeignFunction(left) &&
       isForeignFunction(right) &&
+      ForeignContract.key(left.contract) === ForeignContract.key(right.contract) &&
       left.parameters.length === right.parameters.length &&
       left.parameters.every((parameter, ordinal) => {
         const compared = right.parameters.at(ordinal)
@@ -2553,8 +2570,19 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
       visitType(type.target)
     } else if (isPointer(type)) visitType(type.pointee)
     else if (isForeignFunction(type)) {
+      for (const binder of type.lifetimeBinders)
+        binderScope.set(Lifetime.key(binder), (binderScope.get(Lifetime.key(binder)) ?? 0) + 1)
       for (const parameter_ of type.parameters) visitType(parameter_)
       visitType(type.result)
+      for (const bound of type.lifetimeBounds) {
+        visitArgument(bound.longer)
+        visitArgument(bound.shorter)
+      }
+      for (const binder of type.lifetimeBinders) {
+        const count = binderScope.get(Lifetime.key(binder)) ?? 0
+        if (count <= 1) binderScope.delete(Lifetime.key(binder))
+        else binderScope.set(Lifetime.key(binder), count - 1)
+      }
     } else if (isCallable(type)) {
       visitArgument(type.environment)
       for (const binder of type.lifetimeBinders)
@@ -2694,7 +2722,21 @@ export const encode = (self: Type): string => {
     return `${quantified}${self.unsafe ? 'unsafe ' : ''}${mode}fn<${Lifetime.display(self.environment)}>(${self.parameters.map(encode).join(', ')}) -> ${encode(self.result)}`
   }
   if (isForeignFunction(self))
-    return `extern "C" fn(${self.parameters.map(encode).join(', ')}) -> ${encode(self.result)}`
+    return `${
+      self.lifetimeBinders.length === 0
+        ? ''
+        : `for<${self.lifetimeBinders
+            .map((binder) => {
+              const bounds = self.lifetimeBounds
+                .filter((bound) => Lifetime.equals(bound.longer, binder))
+                .map((bound) => Lifetime.display(bound.shorter))
+              return `${Lifetime.display(binder)}${bounds.length === 0 ? '' : `: ${bounds.join(' + ')}`}`
+            })
+            .join(', ')}> `
+    }extern "C" fn(${self.parameters.map(encode).join(', ')}) -> ${encode(self.result)}${ForeignContract.source(
+      self.contract,
+      self.parameters.map((_, ordinal) => String(ordinal)),
+    )}`
   if (isEffect(self)) {
     const access = executableAccessPrefix(self.access)
     const failureMembers = RowAlgebra.encode(
@@ -3197,7 +3239,10 @@ export const substitute = (
   substitution: Substitution,
   compatibility?: TypeCompatibility.Context,
 ): Type => {
-  if ((isCallable(self) || isEffect(self)) && self.lifetimeBinders.length > 0) {
+  if (
+    (isCallable(self) || isEffect(self) || isForeignFunction(self)) &&
+    self.lifetimeBinders.length > 0
+  ) {
     const bound = new Set(self.lifetimeBinders.map(Lifetime.key))
     substitution = new Map([...substitution].filter(([identity]) => !bound.has(identity)))
   }
@@ -3236,6 +3281,8 @@ export const substitute = (
     return foreignFunction(
       self.parameters.map((parameter_) => substitute(parameter_, substitution, compatibility)),
       substitute(self.result, substitution, compatibility),
+      self.contract,
+      substituteExecutableLifetimes(self, substitution, compatibility),
     )
   if (isCallable(self))
     return callable(
@@ -3502,7 +3549,12 @@ export const specializeExecutableOwner = (
     if (isReference(type)) return reference(type.access, specializeType(type.target), type.lifetime)
     if (isPointer(type)) return pointer({ ...type, pointee: specializeType(type.pointee) })
     if (isForeignFunction(type))
-      return foreignFunction(type.parameters.map(specializeType), specializeType(type.result))
+      return foreignFunction(
+        type.parameters.map(specializeType),
+        specializeType(type.result),
+        type.contract,
+        type,
+      )
     if (isCallable(type))
       return callable(
         type.parameters.map(specializeType),
@@ -4014,6 +4066,8 @@ export const runtimeKey = (self: Type): string => {
   if (isForeignFunction(self))
     return Canonical.record('ForeignFunction', [
       self.abi,
+      'nonnull',
+      ForeignContract.key(self.contract),
       Canonical.array(self.parameters.map(runtimeKey)),
       runtimeKey(self.result),
     ])

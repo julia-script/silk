@@ -19,8 +19,6 @@ export const check = (
   program: Mir.Module,
   target: Target.Target,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
-  if (program.foreignExports.length === 0 && program.foreignStatics.length === 0)
-    return Object.freeze([])
   const surface = target.id
   const claimed = new Map<string, SourceSpan.SourceSpan>(
     program.foreignCalls.map((call) => [call.symbol, call.declarationSpan]),
@@ -31,6 +29,17 @@ export const check = (
     ),
   )
   const diagnostics: Array<Diagnostic.Diagnostic> = []
+  if (target.kind !== 'Native')
+    for (const fn of program.functions)
+      for (const operation of MirVerification.operations(fn))
+        if (operation._tag === 'ForeignIndirectCall')
+          diagnostics.push(
+            Diagnostic.foreignFunctionTargetUnavailable(
+              'indirect C address',
+              surface,
+              operation.provenance.span,
+            ),
+          )
   for (const record of program.foreignExports) {
     const other = claimed.get(record.symbol)
     if (other === undefined) claimed.set(record.symbol, record.declarationSpan)

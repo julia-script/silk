@@ -226,6 +226,8 @@ const hirExpressionLabel = (expression: Hir.Expression): string => {
       return `function ${expression.target._tag === 'DeclarationCallableTarget' ? expression.target.declaration.name : `${expression.target.actor}.${expression.target.operation}`}`
     case 'CallableSection':
       return `section ${expression.target._tag === 'DeclarationCallableTarget' ? expression.target.declaration.name : `${expression.target.actor}.${expression.target.operation}`} · ${expression.mode.toLowerCase()} · ${expression.captures.length} capture${expression.captures.length === 1 ? '' : 's'}`
+    case 'ForeignApply':
+      return 'apply native C address'
     case 'CallableApply':
       return `apply callable · ${expression.access.toLowerCase()} · ${expression.evaluation.toLowerCase()}`
     case 'EffectConstruct':
@@ -276,7 +278,7 @@ export const hirRows = (hir: Hir.Module): ReadonlyArray<RowModel> => {
         expression(capture.value, depth + 1, `${path}.capture${capture.ordinal}`)
       })
     }
-    if (node._tag === 'CallableApply') {
+    if (node._tag === 'CallableApply' || node._tag === 'ForeignApply') {
       expression(node.callee, depth + 1, `${path}.callee`)
       node.arguments.forEach((argument, index) => {
         expression(argument, depth + 1, `${path}.argument${index}`)

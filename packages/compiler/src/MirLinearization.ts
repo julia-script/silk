@@ -159,6 +159,7 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'HostWrite':
     case 'OsCall':
     case 'NativeAssembly':
+    case 'ForeignIndirectCall':
     case 'ForeignCall':
     case 'RawBufferFrom':
     case 'SharedFromAllocation':

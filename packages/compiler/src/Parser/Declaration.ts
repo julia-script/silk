@@ -1298,7 +1298,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
   })
 }
 
-const parseFunctionPropertyList = (initial: State): ElementsResult => {
+export const parseFunctionPropertyList = (initial: State): ElementsResult => {
   let state = initial
   const elements: Array<SyntaxTree.Element> = []
   while (hasContextualSpelling(state, 'with')) {

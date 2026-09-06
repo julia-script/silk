@@ -1210,7 +1210,7 @@ module.
 `extern "C" fn(P...) -> R` is a distinct Copy type represented by one native address. It is not a
 Silk `fn(P...) -> R` value: it has no environment, dynamic dispatch record, or ownership-bearing
 capture. A named `export "C" fn` item contextually converts to the C function-pointer type only
-when its parameter and result types match exactly and its body is nongeneric and synchronous.
+when its signature and declared behavior match exactly and its body is synchronous with no type or value generics. Per-call lifetime binders are permitted.
 
 ```silk,ignore
 import silk.pointer { Pointer }
@@ -1219,10 +1219,12 @@ unsafe extern "C" fn qsort(
   base: ?[*]mut i32,
   count: usize,
   size: usize,
-  compare: extern "C" fn(*const i32, *const i32) -> i32,
-) -> ()
+  compare: extern "C" fn(*const i32, *const i32) -> i32
+    with Intrinsic.foreign(memory: "read", locality: "arguments"),
+) -> () with Intrinsic.foreign(callbacks: ("compare",))
 
-export "C" fn compare(left: *const i32, right: *const i32) -> i32 {
+unsafe export "C" fn compare(left: *const i32, right: *const i32) -> i32
+  with Intrinsic.foreign(memory: "read", locality: "arguments") {
   let a = unsafe Pointer.read(left)
   let b = unsafe Pointer.read(right)
   if a < b { return -1 }
@@ -1232,8 +1234,8 @@ export "C" fn compare(left: *const i32, right: *const i32) -> i32 {
 ```
 
 The native backend supplies the address of the same C-ABI thunk published for external callers.
-The address passes unchanged through the foreign call. Ordinary functions, generic functions,
-effect or suspending functions, and anonymous or capturing callables never acquire a C address.
+The address passes unchanged through the foreign call. Calling a runtime native pointer requires `unsafe` and uses a distinct guarded C-ABI indirect call. Ordinary functions, generic functions,
+effect or suspending functions, naked machine functions, and anonymous or capturing callables never acquire a C callback address.
 
 **Boundary:** Callback conversion is contextual; naming `compare` where a Silk callable is expected
 still produces its ordinary Silk callable value. Imported foreign functions remain callable-only.
@@ -1247,7 +1249,7 @@ non-native execution surface reports `SEM0193` with the foreign symbol and surfa
 
 **Current compiler:** Aligned. Semantic analysis records the contextual address conversion, MIR
 retains a dedicated foreign-address operation, and native lowering resolves it to the generated
-export thunk. The native corpus calls libc `qsort` through a Silk comparator.
+export thunk. The native corpus calls libc `qsort` through a Silk comparator. The [synchronous callback contract](./synchronous-native-callbacks.md) defines invocation extent, reentrancy and boundary termination.
 
 **Evidence:** [callback specification](../../../../openspec/specs/bootstrap-foreign-functions/spec.md),
 [call resolution](../../../../packages/compiler/src/CallResolution.ts),
@@ -1311,7 +1313,7 @@ The UTF-8 manifest ends with one newline and has this versioned shape:
 
 ```json
 {
-  "silkForeignAbi": 2,
+  "silkForeignAbi": 3,
   "target": "aarch64-apple-darwin",
   "exports": [],
   "imports": []
@@ -1319,7 +1321,7 @@ The UTF-8 manifest ends with one newline and has this versioned shape:
 ```
 
 Each entry has `kind`, `symbol`, `abi`, and lowercase `direction`. Function entries additionally
-carry `parameters`, `result`, and a normalized `contract` containing memory, locality, noCapture/borrow ordinals, optional returned ordinal, noReturn and forbidden unwind; data entries carry `type`. Obsolete type-only schema 1 and unknown contract fields are rejected. Each direction array is sorted by
+carry `parameters`, `result`, and a normalized `contract` containing memory, locality, noCapture/borrow/callbacks ordinals, optional returned ordinal, noReturn and forbidden unwind; data entries carry `type`. Obsolete schemas and unknown contract fields are rejected. Function-pointer type entries preserve nonnullness and normalized behavior; headers erase these non-C facts. Each direction array is sorted by
 symbol and then kind, and target-sized integers have already been resolved to a fixed-width ABI
 class before serialization.
 

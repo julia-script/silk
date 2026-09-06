@@ -115,8 +115,8 @@ A successful native shared- or static-library build also writes `hello.h` and
 `hello.abi.json` beside the platform library and reports all three paths. The header includes
 `<stdint.h>`, C++ linkage guards, exact-width scalar types, opaque `const void *` / `void *`
 pointers, and recursively valid C function-pointer declarators. The JSON document has schema
-marker `"silkForeignAbi": 2`, the canonical target, and symbol-sorted `exports` and `imports`
-arrays whose entries distinguish functions from data. Function records include their normalized memory, capture, complete-call borrow, returned-alias, no-return and forbidden-unwind contract. Both files are regenerated from the
+marker `"silkForeignAbi": 3`, the canonical target, and symbol-sorted `exports` and `imports`
+arrays whose entries distinguish functions from data. Function records include their normalized memory, capture, complete-call borrow, synchronous callback invocation, returned-alias, no-return and forbidden-unwind contract. Native function-pointer entries retain nonnullness and access behavior in the manifest; C headers erase those non-C facts. Both files are regenerated from the
 verified backend inventory on cache hits, so cached and uncached builds produce identical bytes.
 Executables and WebAssembly modules do not produce either companion.
 

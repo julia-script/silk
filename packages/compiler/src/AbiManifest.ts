@@ -33,7 +33,7 @@ export type Entry = FunctionEntry | DataEntry
 
 /** The stable behavioral machine-readable ABI surface of one native library. */
 export interface AbiManifest {
-  readonly silkForeignAbi: 2
+  readonly silkForeignAbi: 3
   readonly target: Target.Id
   readonly exports: ReadonlyArray<Entry>
   readonly imports: ReadonlyArray<Entry>
@@ -89,7 +89,7 @@ export const make = (
   exports.sort(compareEntries)
   imports.sort(compareEntries)
   return Object.freeze({
-    silkForeignAbi: 2,
+    silkForeignAbi: 3,
     target: target.id,
     exports: Object.freeze(exports),
     imports: Object.freeze(imports),
@@ -144,6 +144,17 @@ const inspectEntry = (input: unknown, direction: 'import' | 'export'): Entry | u
     parameters.push(parameter)
   }
   const contract = ForeignContract.inspect(input.contract, parameters, input.result)
+  if (
+    contract !== undefined &&
+    parameters.some((text) => {
+      const shape = CAbi.inspectText(text)
+      return (
+        shape?._tag === 'FunctionPointer' &&
+        !ForeignContract.callbackAccessAdmitted(contract, shape.contract)
+      )
+    })
+  )
+    return undefined
   return contract === undefined
     ? undefined
     : Object.freeze({
@@ -172,7 +183,7 @@ export const decode = Effect.fn('AbiManifest.decode')(function* (
   if (
     !record(input) ||
     !exact(input, ['silkForeignAbi', 'target', 'exports', 'imports']) ||
-    input.silkForeignAbi !== 2 ||
+    input.silkForeignAbi !== 3 ||
     typeof input.target !== 'string' ||
     !Array.isArray(input.exports) ||
     !Array.isArray(input.imports)
@@ -197,7 +208,7 @@ export const decode = Effect.fn('AbiManifest.decode')(function* (
   }
   return Object.freeze({
     manifest: Object.freeze({
-      silkForeignAbi: 2,
+      silkForeignAbi: 3,
       target: selected.target.id,
       exports: Object.freeze(exports),
       imports: Object.freeze(imports),

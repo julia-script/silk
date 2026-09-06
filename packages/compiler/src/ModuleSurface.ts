@@ -950,6 +950,9 @@ function encodeTypeNode(value: Type.Type): unknown {
   if (Type.isForeignFunction(value))
     return {
       tag: 'ForeignFunction',
+      ...encodeExecutableLifetimes(value),
+      nullable: false,
+      contract: value.contract,
       parameters: value.parameters.map(encodeTypeNode),
       result: encodeTypeNode(value.result),
     }
@@ -1228,11 +1231,29 @@ function decodeTypeNode(value: unknown): Type.Type {
         serializedBoolean(encoded.unsafe, 'callable unsafe qualifier'),
       )
     }
-    case 'ForeignFunction':
-      return Type.foreignFunction(
-        serializedArray(encoded.parameters, 'foreign function parameters').map(decodeTypeNode),
-        decodeTypeNode(encoded.result),
+    case 'ForeignFunction': {
+      const parameters = serializedArray(encoded.parameters, 'foreign function parameters').map(
+        decodeTypeNode,
       )
+      const result = decodeTypeNode(encoded.result)
+      const contractType = (type: Type.Type): string => {
+        if (Type.isForeignFunction(type)) return 'extern "C" fn()'
+        if (Type.isPointer(type) || Type.isReference(type)) return `pointer<${Type.key(type)}>`
+        return Type.equals(type, Type.unit) ? 'void' : Type.encode(type)
+      }
+      const contract = ForeignContract.inspect(
+        encoded.contract,
+        parameters.map(contractType),
+        contractType(result),
+      )
+      if (
+        encoded.nullable !== false ||
+        contract === undefined ||
+        !ForeignContract.acceptsTypes(contract, parameters, result)
+      )
+        throw new InvalidModuleSurfaceEncoding('invalid native function pointer contract')
+      return Type.foreignFunction(parameters, result, contract, decodeExecutableLifetimes(encoded))
+    }
     case 'Effect': {
       const access = serializedString(encoded.access, 'effect access')
       if (access !== 'Shared' && access !== 'Exclusive' && access !== 'Take')
@@ -1749,6 +1770,8 @@ const declaredType = (value: DeclarationFacts.DeclaredTypeFact): string => {
       ])
     case 'ForeignFunction':
       return record('ForeignFunctionType', [
+        executableLifetimeSignature(value.lifetimes),
+        ForeignContract.key(value.contract),
         array(value.parameters.map(declaredType)),
         declaredType(value.result),
         boolean(value.cause !== undefined),
@@ -2003,6 +2026,15 @@ const declaration = (
             value.foreign.abi,
             value.foreign.symbol,
             ForeignContract.key(value.foreign.contract),
+          ]),
+    ),
+    optional(
+      value.foreignExport === undefined
+        ? undefined
+        : record('ForeignExport', [
+            value.foreignExport.abi,
+            value.foreignExport.symbol,
+            ForeignContract.key(value.foreignExport.contract),
           ]),
     ),
     array(value.typeParameters.map(typeParameter)),

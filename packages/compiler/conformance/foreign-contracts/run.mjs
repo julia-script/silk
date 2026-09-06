@@ -42,6 +42,21 @@ const program = Effect.gen(function* () {
       ),
     ),
   )
+  const callbackSupplies = yield* Schema.decodeEffect(
+    Schema.fromJsonString(
+      Schema.Struct({
+        darwin: Schema.Struct({ headers: Schema.Record(Schema.String, Schema.String) }),
+        gnu: Schema.Struct({ headers: Schema.Record(Schema.String, Schema.String) }),
+      }),
+    ),
+  )(
+    yield* fs.readFileString(
+      join(
+        directory,
+        '../../../../openspec/changes/synchronous-native-callback-contracts/supplies.json',
+      ),
+    ),
+  )
   const output = resolve(directory, '../../../../.scratch/foreign-contracts')
   yield* fs.makeDirectory(output, { recursive: true })
   const run = Effect.fnUntraced(function* (
@@ -85,10 +100,9 @@ const program = Effect.gen(function* () {
   if (!version.includes('clang version 22.1.8'))
     return yield* new ConformanceError({ message: 'LLVM 22.1.8 is required' })
   for (const [header, digest] of [
-    ...Object.entries(supplies.darwin.headers).map(([header, digest]) => [
-      join(sdk, header),
-      digest,
-    ]),
+    ...Object.entries({ ...supplies.darwin.headers, ...callbackSupplies.darwin.headers }).map(
+      ([header, digest]) => [join(sdk, header), digest],
+    ),
     ...Object.entries(supplies.darwin.cxxHeaders),
   ]) {
     if ((yield* hash(yield* fs.readFile(header))) !== digest)
@@ -103,6 +117,7 @@ const program = Effect.gen(function* () {
     compiler: version,
     source: yield* hash(source),
     fixture: yield* hash(fixture),
+    callbacks: yield* hash(yield* fs.readFile(join(directory, 'callbacks.c'))),
     lto: 'rejected',
     lanes: [],
   }
@@ -160,7 +175,10 @@ const program = Effect.gen(function* () {
         if (actual !== version)
           return yield* new ConformanceError({ message: `Unpinned GNU package ${name}: ${actual}` })
       }
-      for (const [header, digest] of Object.entries(supplies.gnu.headers)) {
+      for (const [header, digest] of Object.entries({
+        ...supplies.gnu.headers,
+        ...callbackSupplies.gnu.headers,
+      })) {
         if (!(yield* docker(['sha256sum', header])).stdout.startsWith(digest))
           return yield* new ConformanceError({ message: `Unpinned GNU header ${header}` })
       }
@@ -192,6 +210,7 @@ const program = Effect.gen(function* () {
       yield* fs.writeFile(join(lane, 'silk.bc'), artifact.bitcode)
       yield* fs.writeFileString(join(lane, 'silk.ll'), artifact.ir)
       yield* fs.copyFile(join(directory, 'contracts.cpp'), join(lane, 'contracts.cpp'))
+      yield* fs.copyFile(join(directory, 'callbacks.c'), join(lane, 'callbacks.c'))
       yield* run(opt, ['-passes=verify', '-disable-output', join(lane, 'silk.bc')])
       yield* run(opt, ['-passes=verify', '-disable-output', join(lane, 'silk.ll')])
       const optimization = mode === 'debug' ? '-O0' : '-O2'
@@ -215,9 +234,23 @@ const program = Effect.gen(function* () {
         })
       yield* fs.writeFileString(join(lane, 'object.txt'), sections + disassembly)
       let success
+      let indirectThrowing
       let throwing
       let stopped
       if (architecture === undefined) {
+        yield* run(clang, [
+          ...flags,
+          optimization,
+          '-std=c11',
+          '-Wall',
+          '-Wextra',
+          '-Werror',
+          '-pthread',
+          '-c',
+          join(lane, 'callbacks.c'),
+          '-o',
+          join(lane, 'callbacks.o'),
+        ])
         yield* run(clang, [
           ...flags,
           optimization,
@@ -227,6 +260,8 @@ const program = Effect.gen(function* () {
           '-Werror',
           join(lane, 'contracts.cpp'),
           join(lane, 'silk.o'),
+          join(lane, 'callbacks.o'),
+          '-pthread',
           '-lc++',
           `--ld-path=${linker}`,
           '-o',
@@ -243,6 +278,19 @@ const program = Effect.gen(function* () {
       } else {
         const base = `/fixtures/${name}`
         yield* docker([
+          'gcc',
+          optimization,
+          '-std=c11',
+          '-Wall',
+          '-Wextra',
+          '-Werror',
+          '-pthread',
+          '-c',
+          `${base}/callbacks.c`,
+          '-o',
+          `${base}/callbacks.o`,
+        ])
+        yield* docker([
           'g++',
           optimization,
           '-std=c++17',
@@ -251,6 +299,8 @@ const program = Effect.gen(function* () {
           '-Werror',
           `${base}/contracts.cpp`,
           `${base}/silk.o`,
+          `${base}/callbacks.o`,
+          '-pthread',
           '-o',
           `${base}/contracts`,
         ])
@@ -270,8 +320,26 @@ const program = Effect.gen(function* () {
           `${base}/contracts`,
         ])
       }
+      const indirectArgs = [
+        '/bin/sh',
+        '-c',
+        '"$1" indirect; code=$?; printf "exit=%s\\n" "$code"; test "$code" = 132 -o "$code" = 133',
+        'fixture',
+        architecture === undefined ? join(lane, 'contracts') : `/fixtures/${name}/contracts`,
+      ]
+      indirectThrowing =
+        architecture === undefined
+          ? yield* run(indirectArgs[0], indirectArgs.slice(1))
+          : yield* docker(indirectArgs)
       if (
-        !success.stdout.includes('contracts-ok') ||
+        indirectThrowing.stdout.includes('escaped-to-catch') ||
+        indirectThrowing.stdout.includes('unexpected-return')
+      )
+        return yield* new ConformanceError({ message: `Indirect foreign boundary failed: ${name}` })
+      if (
+        !success.stdout.includes(
+          'contracts-ok callbacks-ok same-thread dynamic-extent nested-storage',
+        ) ||
         throwing.stdout.includes('escaped-to-catch') ||
         throwing.stdout.includes('unexpected-return')
       )
@@ -282,6 +350,7 @@ const program = Effect.gen(function* () {
         image: imageId,
         success,
         throwing,
+        indirectThrowing,
         stopped,
         bitcode: yield* hash(artifact.bitcode),
         object: yield* hash(yield* fs.readFile(join(lane, 'silk.o'))),

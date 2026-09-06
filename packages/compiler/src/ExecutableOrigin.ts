@@ -148,7 +148,7 @@ export const foreignSignature = (
     fact.parameters.map((parameter) => declared(parameter.declaredType)),
     declared(fact.returnType),
     target,
-    fact.foreign?.contract,
+    fact.foreign?.contract ?? fact.foreignExport?.contract,
   )
 }
 
@@ -470,7 +470,7 @@ export const make = (operations: Operations) => {
         callTargets(capture.value, index, substitution),
       )
     }
-    if (expression._tag === 'CallableApply') {
+    if (expression._tag === 'CallableApply' || expression._tag === 'ForeignApply') {
       return [
         ...callTargets(expression.callee, index, substitution),
         ...expression.arguments.flatMap((argument) => callTargets(argument, index, substitution)),
@@ -1228,6 +1228,10 @@ export const make = (operations: Operations) => {
         expression.captures.flatMap((capture) =>
           serviceEffectRecipes(capture.value, context, resolving),
         ),
+      )
+    if (expression._tag === 'ForeignApply')
+      return Hir.expressionChildren(expression).flatMap((child) =>
+        serviceEffectRecipes(child, context, resolving),
       )
     if (expression._tag === 'CallableApply') {
       const children =
