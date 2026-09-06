@@ -44,6 +44,9 @@ Focused tests passed for type identity/substitution/weakening, nested pointer in
 qualifier parsing and spans, serialization, scalar/layout facts, C ABI extensions, intrinsic
 inventory, output ownership and MIR pointer formation. One analysis snapshot rejects implicit
 nullability, access, alignment, extent and slice conversions with SEM0129 and exact spans.
+Every public output operation explicitly refines its type parameter with `T: Copy`, as existing
+container operations do; a nominal bound alone does not establish this call-site restriction. A
+regression snapshot rejects move-only values at all five operations with SEM0083 and exact spans.
 Output analysis distinguishes pre-initialization reads, unchanged state after foreign calls,
 missing unsafe acknowledgement, and extraction after move. MIR checks establish that Slot.address
 forms an address without reading or writing the output value. The shared native corpus includes
@@ -57,7 +60,7 @@ standard-library source, catalog, toolchain integrity and documentation artifact
 - `pnpm typecheck`: passed, 18 tasks.
 - `pnpm format:check`: passed.
 - `pnpm lint`: passed after replacing the new conformance runner's raw Node boundaries with Effect services.
-- `pnpm test`: running.
+- `pnpm test`: the corrected 2,314-test compiler run passed; its serial native sweep was stopped after the final Copy-bound review found the missing operation constraints. The complete run is restarting with that regression fixed.
 - `pnpm check`: pending the full test run.
 - `pnpm release:candidate`: pending the full workspace gates.
 

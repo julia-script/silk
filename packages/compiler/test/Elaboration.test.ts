@@ -2694,3 +2694,40 @@ fn slice(value: &[i32]) -> [*]const i32 { return value }`
     )
   }),
 )
+
+it.effect('rejects move-only values at every public output-storage operation', () =>
+  Effect.gen(function* () {
+    const source = `import silk.output { Uninitialized, Initialized }
+import silk.vector { Vector }
+import silk.allocator { Allocator, OutOfMemoryError }
+effect fn make() -> Uninitialized<Vector<i32>> ! OutOfMemoryError ? &mut Allocator {
+  return run Uninitialized.make<Vector<i32>>()
+}
+fn address(value: &mut Uninitialized<Vector<i32>>) -> *mut Vector<i32> {
+  return Uninitialized.address<Vector<i32>>(move value)
+}
+fn initialize(value: Uninitialized<Vector<i32>>, item: Vector<i32>) -> Initialized<Vector<i32>> {
+  return Uninitialized.initialize<Vector<i32>>(move value, move item)
+}
+unsafe fn assume(value: Uninitialized<Vector<i32>>) -> Initialized<Vector<i32>> {
+  return unsafe Uninitialized.assumeInitialized<Vector<i32>>(move value)
+}
+fn into(value: Initialized<Vector<i32>>) -> Vector<i32> {
+  return Initialized.into<Vector<i32>>(move value)
+}`
+    const snapshot = yield* Analysis.ofSource('pointer/output-copy-operation-bounds', ascii(source))
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => [
+        diagnostic.code,
+        source.slice(diagnostic.span.start, diagnostic.span.end),
+      ]),
+      [
+        ' Uninitialized.make<Vector<i32>>()',
+        ' Uninitialized.address<Vector<i32>>(move value)',
+        ' Uninitialized.initialize<Vector<i32>>(move value, move item)',
+        ' Uninitialized.assumeInitialized<Vector<i32>>(move value)',
+        ' Initialized.into<Vector<i32>>(move value)',
+      ].map((call) => ['SEM0083', call]),
+    )
+  }),
+)
