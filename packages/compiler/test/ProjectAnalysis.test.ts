@@ -930,3 +930,32 @@ unsafe fn probe(core: &Intrinsic.SharedCore<i32>) -> i32 { return 1 }`
       assert.strictEqual(counters.ownershipChecked, 2)
     }),
 )
+
+it.effect('loads a configured application independently of open document roots', () =>
+  Effect.gen(function* () {
+    const project = yield* ProjectAnalysis.make(
+      [
+        SourceFile.make(
+          'Main',
+          ascii('import Util\npub fn main() -> i32 { return Util.answer() }'),
+        ),
+      ],
+      { application: 'Entry', configuration: { profile: { target: 'aarch64-apple-darwin' } } },
+    ).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            ['Entry', ascii('pub fn entry() -> i32 { return 0 }')],
+            ['Util', ascii('pub fn other() -> i32 { return 11 }')],
+          ]),
+        ),
+      ),
+    )
+    const view = ProjectAnalysis.view(project, 'Main') ?? raise('open document view')
+    assert.include(
+      Analysis.diagnostics(view).map((entry) => entry.code),
+      'SEM0014',
+    )
+    assert.isTrue(project.closure.sources.has('Entry'))
+  }),
+)

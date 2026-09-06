@@ -174,31 +174,31 @@ export const backendError = (self: Backend.BackendError, sources: SourceCatalog)
   }
 }
 
-/** Explains why the root module offered no usable `main`, in terms a caller can act on. */
+/** Explains why the selected invocation declaration is unavailable, in terms a caller can act on. */
 const entryReason = (entry: Driver.NoEntry): string => {
   switch (entry.reason) {
     case 'MissingEntry':
       return 'the selected invocation declaration is missing'
     case 'AmbiguousEntry':
-      return 'the root module declares more than one `main`'
+      return 'the invocation name resolves to more than one declaration'
     case 'StaticEntry':
-      return '`main` must be a runtime function'
+      return 'the selected invocation must be a runtime function'
     case 'GenericEntry':
-      return '`main` must not declare type parameters'
+      return 'the selected invocation must not declare type parameters'
     case 'ParameterizedEntry':
-      return '`main` must take no parameters'
+      return 'the selected invocation must take no parameters'
     case 'PrivateEntry':
-      return '`main` must be public'
+      return 'the selected invocation must be public'
     case 'UntypedEntry':
-      return '`main` must declare a resolved return type'
+      return 'the selected invocation must declare a resolved return type'
     case 'InvalidOrdinaryEntryResult':
-      return 'ordinary `main` must return `()` or `i32`'
+      return 'the selected ordinary invocation must return `()` or `i32`'
     case 'InvalidEffectEntryResult':
-      return 'effectful `main` must succeed with `()`'
+      return 'the selected effect invocation must succeed with `()`'
     case 'EffectEntryRequirements':
-      return `effectful \`main\` has unresolved dependencies: ${entry.requirements?.map((requirement) => Type.encodeRequirement(requirement)).join(', ') ?? 'unknown'}`
+      return `the selected effect invocation has unresolved dependencies: ${entry.requirements?.map((requirement) => Type.encodeRequirement(requirement)).join(', ') ?? 'unknown'}`
     case 'UnavailableEntryBody':
-      return 'source diagnostics prevented lowering the body of `main`'
+      return 'source diagnostics prevented lowering the body of the selected invocation'
     case 'InvalidSource':
       return 'source diagnostics prevented entry discovery'
   }

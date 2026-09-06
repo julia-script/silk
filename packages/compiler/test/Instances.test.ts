@@ -104,7 +104,11 @@ it.effect('emits an empty native library without retaining unrelated public func
       artifactKind: 'NativeStaticLibrary',
     })
     assert.strictEqual(prepared._tag, 'Prepared')
-    if (prepared._tag === 'Prepared') assert.deepEqual(prepared.program.functions, [])
+    if (prepared._tag === 'Prepared') {
+      assert.deepEqual(prepared.program.functions, [])
+      const artifact = yield* LlvmBackend.LlvmBackend.emit(prepared.program, { mode: 'release' })
+      assert.deepEqual(artifact.foreignExports, [])
+    }
   }),
 )
 
@@ -1428,7 +1432,7 @@ it.effect(
     Effect.gen(function* () {
       for (const text of [
         'pub static fn selected() -> i32 { return 1 }',
-        'pub fn selected<T>(value: T) -> T { return value }',
+        'pub fn selected<T>() -> i32 { return 1 }',
       ]) {
         const analysis = yield* Analysis.makeRealized({
           root: SourceFile.make('roles', ascii(text)),

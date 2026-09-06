@@ -76,22 +76,13 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   )
   const frameRuntimeEnabled = suspensionEnabled || needsFrameCleanup
   const runtimeFeatures = new Set<RuntimeFeature>()
-  const i32Layout = Layout.entry(program.layout, 'i32')
-  if (i32Layout === undefined || i32Layout.representation._tag !== 'SignedInteger') {
-    return yield* new BackendError({
-      operation: 'Backend.emit',
-      backend: 'LLVM',
-      message: 'LLVM requires the planned i32 representation',
-      reason: { _tag: 'InvalidMir', violations: MirVerification.verify(program) },
-    })
-  }
-  const scalarBits = i32Layout.representation.bits
   const builder = yield* Builder.make({
     sourceFilename: program.module,
     targetTriple: program.layout.target.id,
     strip: request.mode !== 'debug',
   })
-  const i32 = yield* LlvmType.integer(builder, scalarBits)
+  // Internal control/ABI values use i32 even when the selected source has no i32 declarations.
+  const i32 = yield* LlvmType.integer(builder, 32)
   const usesScalar = (spelling: Scalar.Spelling): boolean =>
     program.layout.callingShapes.some((shape) => shape.lanes.some((lane) => lane.type === spelling))
   // LLVM assigns type-table identities in creation order, so preserve byte-for-byte output for

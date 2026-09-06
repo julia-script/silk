@@ -577,6 +577,9 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
 ): Effect.fn.Return<SelectedProject, never, SourceResolver.SourceResolver> {
   const roots = [...request.roots]
   const application = request.application ?? roots[0]?.id
+  const requestedModules = new Set(application === undefined ? [] : [application])
+  const failures: Array<SourceResolver.SourceResolverError> = []
+  const missing: Array<string> = []
   if (request.configuration?.composition !== undefined && application !== undefined) {
     const selectedRoots = yield* Effect.result(
       Effect.gen(function* () {
@@ -588,20 +591,22 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
         return yield* ArtifactComposition.resolve(catalog, application, profile)
       }),
     )
-    if (Result.isSuccess(selectedRoots)) {
-      for (const module of selectedRoots.success.modules) {
-        if (roots.some((root) => root.id === module)) continue
-        const resolved = yield* Effect.result(
-          Stdlib.isReserved(module)
-            ? SourceResolver.resolveStandardLibrary(module)
-            : SourceResolver.resolve(module),
-        )
-        if (Result.isSuccess(resolved) && Option.isSome(resolved.success))
-          roots.push(
-            SourceFile.make(module, resolved.success.value.bytes, resolved.success.value.origin),
-          )
-      }
-    }
+    if (Result.isSuccess(selectedRoots))
+      for (const module of selectedRoots.success.modules) requestedModules.add(module)
+  }
+  for (const module of requestedModules) {
+    if (roots.some((root) => root.id === module)) continue
+    const resolved = yield* Effect.result(
+      Stdlib.isReserved(module)
+        ? SourceResolver.resolveStandardLibrary(module)
+        : SourceResolver.resolve(module),
+    )
+    if (Result.isFailure(resolved)) failures.push(resolved.failure)
+    else if (Option.isNone(resolved.success)) missing.push(module)
+    else
+      roots.push(
+        SourceFile.make(module, resolved.success.value.bytes, resolved.success.value.origin),
+      )
   }
   const expanded = { ...request, roots }
   let closure = yield* PhaseReport.measureEffectInto(
@@ -613,12 +618,19 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
     (value) => value.diagnostics.length,
     options,
   )
+  closure = Object.freeze({
+    ...closure,
+    resolutionFailures: Object.freeze([...closure.resolutionFailures, ...failures]),
+  })
   yield* Effect.yieldNow
   let selection: ModuleSelection.ModuleSelection | undefined
   let profile: CompilationProfile.CompilationProfile | undefined
   let bootstrapHeaders: HeaderFacts | undefined
   if (request.configuration !== undefined || ModuleSelection.required(closure)) {
-    const first = request.application ?? closure.rootModules[0]
+    const first =
+      application !== undefined && closure.sources.has(application)
+        ? application
+        : closure.rootModules[0]
     const view = first === undefined ? undefined : ModuleClosure.view(closure, first)
     if (view === undefined) throw new RangeError('Project selection lost its root')
     const base = yield* bootstrapFacts(closure, report, options)
@@ -663,6 +675,30 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
     }
   }
   const headers = bootstrapHeaders ?? (yield* analyzeHeaders(closure, report, options))
+  const span =
+    roots[0] === undefined
+      ? undefined
+      : closure.modules.find((module) => module.name === roots[0]?.id)?.syntax.root.span
+  if (missing.length > 0 && span !== undefined)
+    closure = {
+      ...closure,
+      diagnostics: Diagnostic.merge(closure.diagnostics, [
+        Diagnostic.invalidConfiguration(
+          ConfigurationError.make(
+            'Frontend.selectProject',
+            'MissingParameter',
+            'artifact source roots',
+            [
+              request.configuration?.compositionOrigin ??
+                ConfigurationOrigin.literal('application'),
+            ],
+            missing,
+          ),
+          span,
+        ),
+      ]),
+    }
+
   return Object.freeze({
     closure,
     headers,

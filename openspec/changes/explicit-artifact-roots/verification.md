@@ -9,9 +9,19 @@ and shared module, and independently compiles/executes a C consumer against each
 `results.json`. LTO is explicitly rejected. This does not claim downstream archive extraction of
 an unreferenced member, physical supply discovery, or replacement of hosted startup policy.
 
-Repository typecheck and format checks passed. The lint pass found four unnecessary JavaScript
-quote escapes in the new conformance runner; these were corrected. The full test/check/release
-sequence is in progress and is not yet claimed complete.
+Repository typecheck, format and lint passed. All 2,336 compiler tests passed; the shared native
+acceptance and aggregate check/release sequence is still in progress.
+
+The first full run exposed a language-server timeout after a manifest switched to an application
+that was not open. Selection attempted to publish the new application before loading it. A minimal
+ProjectAnalysis regression reproduced the lost-root defect; selection now loads the explicit
+application independently of open document roots. The regression and original stdio navigation test
+both pass. The CLI diagnostic expectation was updated for the generalized invocation contract.
+
+A u64-only/empty-library backend probe exposed an assumption that selected source always includes
+i32. LLVM now constructs its internal control ABI type independently of source layout. The existing
+empty-library test now proves actual LLVM emission. The invalid generic retention fixture was
+changed to avoid an unrelated ownership error before the configured-role check.
 
 Focused compiler tests prove custom application binding, private retention, all three requirement
 scopes including foreign data imports, duplicate collapse, all-origin conflicts, admitted binding
