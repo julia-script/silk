@@ -93,6 +93,8 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'CallTypeArgumentList',
   'ConditionalStatement',
   'StaticConditionalStatement',
+  'StaticConditionalDeclaration',
+  'DeclarationGroup',
   'StaticForStatement',
   'PatternConditionalStatement',
   'ContinueStatement',
@@ -138,6 +140,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ParenthesizedType',
   'PipelineExpression',
   'PointerType',
+  'PointerQualifier',
   'CallableType',
   'ForeignFunctionType',
   'ExactRepresentationType',
@@ -1270,6 +1273,7 @@ y"""[0]
 it.effect('prints and reparses the complete current grammar surface', () =>
   Effect.gen(function* () {
     const source = `import Core.Math as Math { add as plus, subtract }
+static if true { pub import first { original as selected } } else static if false { import second } else { pub const selected: i32 = 1 }
 pub const limit:i32=2
 pub const timeout:u64=01h05m00s
 pub struct Pair {
@@ -1321,7 +1325,7 @@ fn scan(values: &[i32], output: &mut [i32]) -> i32 {
   return helper(usize.toI32(values.length), output[0])
 }
 fn readReferent(value: &i32) -> i32 { return value.* }
-fn pointers(cursor: *mut *const u8, count: *const i32) -> *const u8 { return cursor }
+fn pointers(cursor: ?[*]mut ?*const align(1) addrspace(0) u8, count: *const i32) -> ?*const u8 { return cursor }
 fn callbacks(shared: fn(i32, bool) -> i32, exclusive: mut fn(i32) -> bool, consuming: once fn() -> i32) -> i32 {
   return shared(1, true)
 }

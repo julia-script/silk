@@ -45,8 +45,8 @@ A static function has no runtime function item, callable representation, paramet
 symbol, or backend body.
 
 **Boundary:** `static` cannot combine with `unsafe`, `effect`, an implementation operation, or a
-service or interface operation. Nested static function declarations and conditional declarations
-are unavailable. A static function cannot be captured or passed as a runtime callable.
+service or interface operation. Nested static function declarations within executable bodies are
+unavailable. Module declaration groups may select static functions. A static function cannot be captured or passed as a runtime callable.
 
 **Diagnostics:** An unsupported modifier combination or declaration position reports a syntax
 diagnostic at the conflicting modifier or declaration. A use requiring a runtime callable reports
@@ -92,7 +92,7 @@ and identifies the static boundary that required the value.
 
 ## Static selection and compile errors
 
-### STATIC-003 — `static if` is a statement that selects one semantic arm
+### STATIC-003 — `static if` selects one semantic arm
 
 **Status:** Confirmed
 
@@ -114,8 +114,11 @@ The selected arm may contain ordinary runtime operations and values. Those opera
 in the residual program; static evaluation does not execute them. A false `static if` without an
 `else` contributes no residual operation.
 
-**Boundary:** `static if` is not an expression and cannot conditionally introduce a top-level or
-block declaration. An ordinary runtime `if`, loop, or `return` cannot decide whether later static
+At module scope, `static if` selects a declaration group according to
+[module static selection](./module-static-selection.md). Within executable bodies it remains a
+statement and cannot introduce local declarations.
+
+**Boundary:** `static if` is not an expression. An ordinary runtime `if`, loop, or `return` cannot decide whether later static
 source is elaborated. Source that must be excluded during compilation belongs in an unselected
 `static if` arm.
 

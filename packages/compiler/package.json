@@ -270,6 +270,10 @@
       "types": "./dist/ModuleClosure.d.ts",
       "import": "./dist/ModuleClosure.js"
     },
+    "./ModuleSelection": {
+      "types": "./dist/ModuleSelection.d.ts",
+      "import": "./dist/ModuleSelection.js"
+    },
     "./ModuleSemantics": {
       "types": "./dist/ModuleSemantics.d.ts",
       "import": "./dist/ModuleSemantics.js"
@@ -505,7 +509,8 @@
     "documentation:check": "node scripts/generate-documentation.mjs --check",
     "documentation:examples": "pnpm --filter @silklang/cli doctest:stdlib",
     "documentation:inventory": "node scripts/inventory-stdlib-documentation.mjs",
-    "documentation:policy": "node scripts/check-stdlib-documentation.mjs"
+    "documentation:policy": "node scripts/check-stdlib-documentation.mjs",
+    "test:native-boundary": "node conformance/native-boundary/run.mjs"
   },
   "dependencies": {
     "@silklang/llvm": "workspace:*",

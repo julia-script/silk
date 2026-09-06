@@ -1,6 +1,6 @@
 import * as Elaboration from '../../src/Elaboration.js'
 import type * as DeclarationIndex from '../../src/DeclarationIndex.js'
-import type * as ModuleClosure from '../../src/ModuleClosure.js'
+import * as ModuleClosure from '../../src/ModuleClosure.js'
 import * as NameResolution from '../../src/NameResolution.js'
 import * as Ownership from '../../src/Ownership.js'
 import type * as SyntaxFile from '../../src/SyntaxFile.js'
@@ -12,6 +12,7 @@ export const elaborate = (syntax: SyntaxFile.SyntaxFile): Elaboration.Result => 
     _tag: 'Module' as const,
     name: syntax.source.id,
     syntax,
+    declarations: ModuleClosure.selectedDeclarations(syntax.root, new Map()),
     imports: Object.freeze([]),
   })
   const closure: ModuleClosure.Closure = Object.freeze({

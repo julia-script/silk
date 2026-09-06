@@ -305,6 +305,8 @@ it('declares one discoverable namespace for every standard-library module', () =
     Stdlib.manifest.filter((entry) => entry.namespace === undefined).map((entry) => entry.module),
     [],
   )
+  assert.strictEqual(Stdlib.findNamespace('Uninitialized')?.module, 'silk/output')
+  assert.deepEqual(Stdlib.find('silk/output')?.aliases, ['Initialized'])
   assert.strictEqual(Stdlib.findNamespace('Option')?.module, 'silk/option')
   assert.strictEqual(Stdlib.findNamespace('Result')?.module, 'silk/result')
   assert.strictEqual(Stdlib.findNamespace('Vector')?.module, 'silk/vector')

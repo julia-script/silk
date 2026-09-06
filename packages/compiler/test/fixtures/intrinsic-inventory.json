@@ -5360,8 +5360,43 @@
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
     {
+      "operation": "Intrinsic.pointerRequalify",
+      "signature": "unsafe fn Intrinsic.pointerRequalify<From, To>(pointer: From) -> To",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.requalify",
+      "identity": "PointerRequalify",
+      "invariant": "caller proves every strengthened pointer qualifier, including alignment, nullness, extent and write access"
+    },
+    {
+      "operation": "Intrinsic.slotAddress",
+      "signature": "fn Intrinsic.slotAddress<T>(slot: Slot<T>) -> *mut T",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/slot.address",
+      "identity": "SlotAddress"
+    },
+    {
+      "operation": "Intrinsic.pointerReadUnaligned",
+      "signature": "unsafe fn Intrinsic.pointerReadUnaligned<T>(pointer: *const align(1) T) -> T",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.readUnaligned",
+      "identity": "PointerReadUnaligned",
+      "invariant": "caller proves live readable storage containing an initialized Copy T"
+    },
+    {
+      "operation": "Intrinsic.pointerWriteUnaligned",
+      "signature": "unsafe fn Intrinsic.pointerWriteUnaligned<T>(pointer: *mut align(1) T, value: T) -> ()",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.writeUnaligned",
+      "identity": "PointerWriteUnaligned",
+      "invariant": "caller proves live writable storage for a Copy T"
+    },
+    {
       "operation": "Intrinsic.pointerNull",
-      "signature": "fn Intrinsic.pointerNull<T>() -> *mut T",
+      "signature": "fn Intrinsic.pointerNull<T>() -> ?*mut T",
       "unsafe": false,
       "admission": "Ownership",
       "consumer": "silk/pointer.null",
@@ -5369,7 +5404,7 @@
     },
     {
       "operation": "Intrinsic.pointerIsNull",
-      "signature": "fn Intrinsic.pointerIsNull<T>(pointer: *const T) -> bool",
+      "signature": "fn Intrinsic.pointerIsNull<P>(pointer: P) -> bool",
       "unsafe": false,
       "admission": "Ownership",
       "consumer": "silk/pointer.isNull",
@@ -5393,7 +5428,7 @@
     },
     {
       "operation": "Intrinsic.pointerFromSlice",
-      "signature": "fn Intrinsic.pointerFromSlice<T>(values: &[T]) -> *const T",
+      "signature": "fn Intrinsic.pointerFromSlice<T>(values: &[T]) -> ?[*]const T",
       "unsafe": false,
       "admission": "Ownership",
       "consumer": "silk/pointer.fromSlice",
@@ -5401,28 +5436,28 @@
     },
     {
       "operation": "Intrinsic.pointerFromMutSlice",
-      "signature": "fn Intrinsic.pointerFromMutSlice<T>(values: &mut [T]) -> *mut T",
+      "signature": "fn Intrinsic.pointerFromMutSlice<T>(values: &mut [T]) -> ?[*]mut T",
       "unsafe": false,
       "admission": "Ownership",
       "consumer": "silk/pointer.fromMutSlice",
       "identity": "PointerFromMutSlice"
     },
     {
-      "operation": "Intrinsic.pointerOffset",
-      "signature": "unsafe fn Intrinsic.pointerOffset<T>(pointer: *const T, count: usize) -> *const T",
+      "operation": "Intrinsic.pointerAt",
+      "signature": "unsafe fn Intrinsic.pointerAt<T>(pointer: [*]const T, count: usize) -> *const T",
       "unsafe": true,
       "admission": "Ownership",
-      "consumer": "silk/pointer.offset",
-      "identity": "PointerOffset",
+      "consumer": "silk/pointer.at",
+      "identity": "PointerAt",
       "invariant": "caller proves the pointer and the offset result address elements of one live allocation"
     },
     {
-      "operation": "Intrinsic.pointerOffsetMut",
-      "signature": "unsafe fn Intrinsic.pointerOffsetMut<T>(pointer: *mut T, count: usize) -> *mut T",
+      "operation": "Intrinsic.pointerAtMut",
+      "signature": "unsafe fn Intrinsic.pointerAtMut<T>(pointer: [*]mut T, count: usize) -> *mut T",
       "unsafe": true,
       "admission": "Ownership",
-      "consumer": "silk/pointer.offsetMut",
-      "identity": "PointerOffsetMut",
+      "consumer": "silk/pointer.atMut",
+      "identity": "PointerAtMut",
       "invariant": "caller proves the pointer and the offset result address elements of one live allocation"
     },
     {

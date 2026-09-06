@@ -1191,47 +1191,172 @@ it('keeps a free parameter open when a nested callable schema binds the same par
   assert.strictEqual(Type.isConcrete(wrapped), false)
 })
 
-it('keys raw pointers by mutability and pointee and widens only *mut to *const at a boundary', () => {
-  const constI32 = Type.pointer(false, 'i32')
-  const mutI32 = Type.pointer(true, 'i32')
-  const constU32 = Type.pointer(false, 'u32')
+it('retains pointer qualifiers through identity, inference and safe weakening', () => {
+  const constI32 = Type.pointer({
+    mutable: false,
+    pointee: 'i32',
+    nullable: false,
+    extent: 'Single',
+    alignment: 'Natural',
+    addressSpace: 0,
+  })
+  const mutI32 = Type.pointer({
+    mutable: true,
+    pointee: 'i32',
+    nullable: false,
+    extent: 'Single',
+    alignment: 'Natural',
+    addressSpace: 0,
+  })
+  const constU32 = Type.pointer({
+    mutable: false,
+    pointee: 'u32',
+    nullable: false,
+    extent: 'Single',
+    alignment: 'Natural',
+    addressSpace: 0,
+  })
 
   assert.deepEqual([constI32, mutI32, constU32].map(Type.key), [
-    'pointer:const<builtin:i32>',
-    'pointer:mut<builtin:i32>',
-    'pointer:const<builtin:u32>',
+    'pointer:Single:const:nonnull:Natural:0<builtin:i32>',
+    'pointer:Single:mut:nonnull:Natural:0<builtin:i32>',
+    'pointer:Single:const:nonnull:Natural:0<builtin:u32>',
   ])
   assert.deepEqual([constI32, mutI32, constU32].map(Type.encode), [
     '*const i32',
     '*mut i32',
     '*const u32',
   ])
+  const nullable = Type.pointer({ ...constI32, nullable: true })
+  const many = Type.pointer({ ...constI32, extent: 'Many' })
+  const unaligned = Type.pointer({ ...constI32, alignment: 1 })
+  assert.strictEqual(new Set([constI32, nullable, many, unaligned].map(Type.key)).size, 4)
+  assert.strictEqual(new Set([constI32, nullable, many, unaligned].map(Type.runtimeKey)).size, 4)
+  assert.strictEqual(TypeCompatibility.check(constI32, nullable)._tag, 'PointerWeakening')
+  assert.strictEqual(TypeCompatibility.check(nullable, constI32)._tag, 'Incompatible')
+  assert.strictEqual(TypeCompatibility.check(constI32, many)._tag, 'Incompatible')
+  assert.strictEqual(TypeCompatibility.check(many, constI32)._tag, 'Incompatible')
+  assert.strictEqual(TypeCompatibility.check(constI32, unaligned)._tag, 'PointerWeakening')
+  assert.strictEqual(TypeCompatibility.check(unaligned, constI32)._tag, 'Incompatible')
   assert.strictEqual(Type.isViewBorrow(mutI32), false)
   assert.strictEqual(Type.containsBorrow(mutI32), false)
   assert.strictEqual(Type.containsBorrowWrapper(mutI32), false)
 
-  const mutU8 = Type.pointer(true, 'u8')
-  const constU8 = Type.pointer(false, 'u8')
-  assert.strictEqual(TypeCompatibility.check(mutU8, constU8)._tag, 'PointerMutability')
+  const mutU8 = Type.pointer({
+    mutable: true,
+    pointee: 'u8',
+    nullable: false,
+    extent: 'Single',
+    alignment: 'Natural',
+    addressSpace: 0,
+  })
+  const constU8 = Type.pointer({
+    mutable: false,
+    pointee: 'u8',
+    nullable: false,
+    extent: 'Single',
+    alignment: 'Natural',
+    addressSpace: 0,
+  })
+  assert.strictEqual(TypeCompatibility.check(mutU8, constU8)._tag, 'PointerWeakening')
   assert.strictEqual(TypeCompatibility.check(constU8, mutU8)._tag, 'Incompatible')
   assert.strictEqual(
-    TypeCompatibility.check(Type.pointer(true, mutU8), Type.pointer(true, constU8))._tag,
+    TypeCompatibility.check(
+      Type.pointer({
+        mutable: true,
+        pointee: mutU8,
+        nullable: false,
+        extent: 'Single',
+        alignment: 'Natural',
+        addressSpace: 0,
+      }),
+      Type.pointer({
+        mutable: true,
+        pointee: constU8,
+        nullable: false,
+        extent: 'Single',
+        alignment: 'Natural',
+        addressSpace: 0,
+      }),
+    )._tag,
     'Incompatible',
   )
 
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.pointer({ ...constI32, pointee: nullable }),
+      Type.pointer({ ...constI32, pointee: constI32 }),
+      new Map(),
+    ),
+    false,
+  )
+  const aligned = Type.pointer({ ...constI32, alignment: 16 })
+  assert.strictEqual(
+    TypeCompatibility.check(aligned, Type.pointer({ ...aligned, alignment: 4 }))._tag,
+    'PointerWeakening',
+  )
+  assert.strictEqual(TypeCompatibility.check(unaligned, aligned)._tag, 'Incompatible')
+
   const parameter = Type.parameter({ module: 'test', name: 'identity' }, 0, 'T')
   const inferred = new Map<string, Type.GenericArgument>()
-  assert.strictEqual(TypeInference.infer(Type.pointer(false, parameter), mutI32, inferred), true)
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.pointer({
+        mutable: false,
+        pointee: parameter,
+        nullable: false,
+        extent: 'Single',
+        alignment: 'Natural',
+        addressSpace: 0,
+      }),
+      mutI32,
+      inferred,
+    ),
+    true,
+  )
   assert.strictEqual(
     Type.genericArgumentKey(inferred.get(Type.key(parameter)) ?? 'never'),
     'builtin:i32',
   )
-  assert.strictEqual(TypeInference.infer(Type.pointer(true, parameter), constI32, new Map()), false)
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.pointer({
+        mutable: true,
+        pointee: parameter,
+        nullable: false,
+        extent: 'Single',
+        alignment: 'Natural',
+        addressSpace: 0,
+      }),
+      constI32,
+      new Map(),
+    ),
+    false,
+  )
   assert.strictEqual(
     Type.key(
-      Type.substitute(Type.pointer(true, parameter), new Map([[Type.key(parameter), 'u32']])),
+      Type.substitute(
+        Type.pointer({
+          mutable: true,
+          pointee: parameter,
+          nullable: false,
+          extent: 'Single',
+          alignment: 'Natural',
+          addressSpace: 0,
+        }),
+        new Map([[Type.key(parameter), 'u32']]),
+      ),
     ),
-    Type.key(Type.pointer(true, 'u32')),
+    Type.key(
+      Type.pointer({
+        mutable: true,
+        pointee: 'u32',
+        nullable: false,
+        extent: 'Single',
+        alignment: 'Natural',
+        addressSpace: 0,
+      }),
+    ),
   )
 })
 

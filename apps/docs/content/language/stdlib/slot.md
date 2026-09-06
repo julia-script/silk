@@ -82,6 +82,21 @@ This struct carries no data and is never constructed by the library. Every opera
 inherent member declared in `impl Slot`, so `import silk.slot { Slot }` is the one import that
 reaches `Slot.write(...)` and the rest. It is unrelated to the builtin `Slot<'storage, T>` place type.
 
+<a id="declaration-73696c6b2f736c6f743a3a536c6f742e61646472657373"></a>
+
+### Associated function `Slot.address`
+
+```silk
+pub fn address<'storage, T>(slot: silk/core.Slot<'storage, T>) -> *mut T
+```
+
+Forms a non-null writable address without reading or initializing the selected storage.
+
+#### Gotchas
+
+This operation consumes the slot selection. The pointer holds no loan and keeps no storage alive.
+A later memory access must prove its own lifetime, initialization, and access requirements.
+
 <a id="declaration-73696c6b2f736c6f743a3a536c6f742e7772697465"></a>
 
 ### Associated function `Slot.write`

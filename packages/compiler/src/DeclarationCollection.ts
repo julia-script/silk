@@ -64,6 +64,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as DurationLiteral from './internal/DurationLiteral.js'
 import * as ForeignSymbol from './ForeignSymbol.js'
+import * as ImportPath from './ImportPath.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import type * as ModuleClosure from './ModuleClosure.js'
@@ -830,6 +831,37 @@ export const analyzeDeclaredType = (
       })
     }
     const mutable = SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined
+    const nullable = SyntaxTree.directToken(syntax, 'Question') !== undefined
+    const extent: Type.Pointer['extent'] =
+      SyntaxTree.directToken(syntax, 'LeftBracket') === undefined ? 'Single' : 'Many'
+    let alignment: Type.Pointer['alignment'] = 'Natural'
+    const seen = new Set<string>()
+    const qualifierDiagnostics: Array<Diagnostic.Diagnostic> = []
+    for (const qualifier of SyntaxTree.directNodes(syntax, 'PointerQualifier')) {
+      const nameToken = SyntaxTree.directToken(qualifier, 'Identifier')
+      const valueToken = SyntaxTree.directToken(qualifier, 'DecimalInteger')
+      if (nameToken === undefined || valueToken === undefined) continue
+      const name = Option.getOrElse(SourceFile.spelling(source, nameToken.span), () => '')
+      const spelling = Option.getOrElse(SourceFile.spelling(source, valueToken.span), () => '')
+      const value = Number(spelling.replaceAll('_', ''))
+      let detail: string | undefined
+      if (seen.has(name)) detail = 'qualifier is repeated'
+      else if (name === 'align') {
+        if (Type.isPointerAlignment(value)) alignment = value
+        else detail = 'alignment must be a positive power of two no greater than 536870912'
+      } else if (name === 'addrspace' && value !== 0)
+        detail = 'only ordinary data address space zero is admitted'
+      seen.add(name)
+      if (detail !== undefined)
+        qualifierDiagnostics.push(Diagnostic.invalidPointerQualifier(name, detail, valueToken.span))
+    }
+    const qualifiers = { mutable, nullable, extent, alignment, addressSpace: 0 as const }
+    const invalid = qualifierDiagnostics[0]
+    if (invalid !== undefined)
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax, cause: Diagnostic.identity(invalid) }),
+        diagnostics: Object.freeze(qualifierDiagnostics),
+      })
     const pointee = analyzeDeclaredType(
       source,
       pointeeSyntax,
@@ -838,7 +870,7 @@ export const analyzeDeclaredType = (
       lifetimeContext,
     )
     if (pointee.fact._tag === 'Resolved') {
-      const type = Type.pointer(mutable, pointee.fact.type)
+      const type = Type.pointer({ ...qualifiers, pointee: pointee.fact.type })
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
@@ -854,7 +886,7 @@ export const analyzeDeclaredType = (
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Pointer',
-        mutable,
+        ...qualifiers,
         pointee: pointee.fact,
         spelling: `${mutable ? '*mut ' : '*const '}unavailable`,
         token,
@@ -3054,9 +3086,12 @@ const collectForeignStatic = (
   })
 }
 
-const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
+const collectModule = (
+  syntax: SyntaxFile.SyntaxFile,
+  declarations: ReadonlyArray<SyntaxTree.Node>,
+): ModuleHeaders => {
   const source = syntax.source
-  const nodes = syntax.root.children.filter(
+  const nodes = declarations.filter(
     (element): element is SyntaxTree.Node =>
       SyntaxTree.isNode(element) &&
       (element.kind === 'FunctionDeclaration' ||
@@ -3076,7 +3111,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   )
   const first = new Map<string, { readonly id: CanonicalId; readonly token: Token.Token }>()
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const implNodes = syntax.root.children.filter(
+  const implNodes = declarations.filter(
     (element): element is SyntaxTree.Node =>
       SyntaxTree.isNode(element) && element.kind === 'ImplDeclaration',
   )
@@ -4409,6 +4444,36 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   return Object.freeze({
     _tag: 'ModuleHeaders',
     module: source.id,
+    publications: Object.freeze(
+      declarations.flatMap((declaration): ModuleHeaders['publications'] => {
+        if (
+          declaration.kind !== 'ImportDeclaration' ||
+          SyntaxTree.directToken(declaration, 'PubKeyword') === undefined
+        )
+          return []
+        const path = SyntaxTree.directNode(declaration, 'ImportPath')
+        const list = SyntaxTree.directNode(declaration, 'ImportMemberList')
+        const module = path === undefined ? undefined : ImportPath.canonicalTarget(source, path)
+        if (module === undefined || list === undefined) return []
+        return SyntaxTree.directNodes(list, 'ImportMember').flatMap((member) => {
+          const original = SyntaxTree.directToken(member, 'Identifier')
+          if (original === undefined || !SyntaxTree.isAvailableSyntax(member)) return []
+          const alias = SyntaxTree.directNode(member, 'ImportAlias')
+          const token =
+            (alias === undefined ? undefined : SyntaxTree.directToken(alias, 'Identifier')) ??
+            original
+          return [
+            Object.freeze({
+              module,
+              original: spelling(source, original),
+              spelling: spelling(source, token),
+              syntax: member,
+              token,
+            }),
+          ]
+        })
+      }),
+    ),
     members: Object.freeze(members),
     declarations: Object.freeze(
       members.filter((member): member is DeclarationFact => member._tag === 'FunctionDeclaration'),
@@ -4473,7 +4538,9 @@ const declaredTypeNamesOwner = (
 
 /** Collects identities and raw type paths for the complete closure before scope resolution. */
 export const collect = (closure: ModuleClosure.Facts): DeclarationIndex.Index => {
-  const modules = Object.freeze(closure.modules.map((module) => collectModule(module.syntax)))
+  const modules = Object.freeze(
+    closure.modules.map((module) => collectModule(module.syntax, module.declarations)),
+  )
   return DeclarationIndex.make(
     'Collected',
     modules,

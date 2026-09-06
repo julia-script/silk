@@ -533,7 +533,7 @@ export interface Violation {
 export const scalarEntry = (target: Target.Target, type: Type.Builtin): Entry => {
   const scalar = Scalar.find(type)
   if (scalar === undefined) throw new RangeError(`Layout lost scalar catalog entry for ${type}`)
-  const layout = Scalar.resolveLayout(scalar, target.pointerSize, target.pointerAlignment)
+  const layout = Scalar.resolveLayout(scalar, target)
   const bits = Scalar.bits(scalar, target.pointerSize === 4 ? 32 : 64)
   let representation: Representation
   if (scalar.category === 'Boolean') {
@@ -768,7 +768,7 @@ export const scalarEnumEntry = (
   )
     return undefined
   const scalar = declaration.representation.scalar
-  const layout = Scalar.resolveLayout(scalar, target.pointerSize, target.pointerAlignment)
+  const layout = Scalar.resolveLayout(scalar, target)
   const members = declaration.members.flatMap((member) =>
     member.canonical._tag === 'Canonical' && member.discriminant._tag === 'Available'
       ? [

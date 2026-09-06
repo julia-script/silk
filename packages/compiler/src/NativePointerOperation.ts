@@ -1,3 +1,5 @@
+import * as Alignment from '@silklang/llvm/Alignment'
+import * as Type from './Type.js'
 import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import * as LlvmType from '@silklang/llvm/Type'
@@ -19,12 +21,23 @@ type Operation = Extract<
     readonly _tag:
       | 'PointerNull'
       | 'PointerIsNull'
-      | 'PointerFromReference'
-      | 'PointerOffset'
+      | 'PointerRequalify'
+      | 'PointerFromStorage'
+      | 'PointerAt'
       | 'PointerRead'
       | 'PointerWrite'
   }
 >
+
+const accessAlignment = (context: Context, local: Mir.LocalId, offset: number): number => {
+  const pointer = context.storage.fn.localTypes.at(local.ordinal)
+  if (pointer?._tag !== 'Pointer') throw new RangeError('Pointer access lost its qualified type')
+  const layout = Layout.entry(context.program.layout, pointer.type.pointee)
+  if (layout === undefined) throw new RangeError('Pointer access lost its pointee layout')
+  let alignment = pointer.type.alignment === 'Natural' ? layout.alignment : pointer.type.alignment
+  while (offset % alignment !== 0) alignment /= 2
+  return alignment
+}
 
 /**
  * Lowers raw pointers as one LLVM pointer lane: the lane a borrow already carries, so formation
@@ -62,15 +75,27 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       return
     }
-    case 'PointerFromReference': {
+    case 'PointerRequalify':
+    case 'PointerFromStorage': {
       // A reference is its address lane; a slice is address then length.
       const address = NativeStorage.readLocal(storage, operation.source).at(0)
       if (address === undefined)
         throw new RangeError('LLVM pointer formation lost its address lane')
-      storage.locals.set(destination, Object.freeze([address]))
+      const sourceType = storage.fn.localTypes.at(operation.source.ordinal)
+      const pointerAddress =
+        sourceType !== undefined && Type.isSlot(Mir.semanticType(sourceType))
+          ? yield* FunctionBody.cast(
+              body,
+              'inttoptr',
+              address,
+              pointer,
+              `slot_address${destination}`,
+            )
+          : address
+      storage.locals.set(destination, Object.freeze([pointerAddress]))
       return
     }
-    case 'PointerOffset': {
+    case 'PointerAt': {
       const pointee = Layout.entry(program.layout, operation.type.type.pointee)
       const countType = storage.fn.localTypes.at(operation.count.ordinal)
       if (pointee === undefined || countType === undefined)
@@ -122,6 +147,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               `ptr_read${destination}_${ordinal}_ptr`,
             ),
             `ptr_read${destination}_${ordinal}`,
+            {
+              alignment: yield* Alignment.fromByteUnits(
+                accessAlignment(context, operation.pointer, offset),
+              ),
+            },
           ),
         )
       }
@@ -149,6 +179,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             offset,
             `ptr_write${destination}_${ordinal}_ptr`,
           ),
+          {
+            alignment: yield* Alignment.fromByteUnits(
+              accessAlignment(context, operation.pointer, offset),
+            ),
+          },
         )
       }
       storage.locals.set(destination, Object.freeze([]))

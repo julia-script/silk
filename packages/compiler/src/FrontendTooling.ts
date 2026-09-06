@@ -2,6 +2,7 @@ import * as Effect from 'effect/Effect'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import * as ModuleTooling from './ModuleTooling.js'
+import type * as ModuleSelection from './ModuleSelection.js'
 import type * as NameResolution from './NameResolution.js'
 import * as PhaseReport from './PhaseReport.js'
 import * as SemanticOccurrence from './SemanticOccurrence.js'
@@ -20,6 +21,7 @@ export interface FrontendTooling {
 /** Builds compiler-owned editor indexes, reusing modules backed by exact shared semantics. */
 export const make = Effect.fn('FrontendTooling.make')(function* (
   frontend: {
+    readonly selection?: ModuleSelection.ModuleSelection
     readonly semantics: ReadonlyMap<string, ModuleSemantics.ModuleSemantics>
     readonly index: DeclarationIndex.Index
     readonly resolution: NameResolution.Resolution
@@ -45,7 +47,12 @@ export const make = Effect.fn('FrontendTooling.make')(function* (
       'semantic-occurrences',
       1,
       Effect.sync(() =>
-        ModuleTooling.semanticOccurrenceIndex(semantics, frontend.index, frontend.resolution),
+        ModuleTooling.semanticOccurrenceIndex(
+          semantics,
+          frontend.index,
+          frontend.resolution,
+          frontend.selection?.conditions.get(module),
+        ),
       ),
       () => 1,
     )

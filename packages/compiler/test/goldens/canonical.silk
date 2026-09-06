@@ -1,5 +1,13 @@
 import Core.Math as Math {add as plus, subtract}
 
+static if true {
+  pub import first {original as selected}
+} else static if false {
+  import second
+} else {
+  pub const selected: i32 = 1
+}
+
 pub const limit: i32 = 2
 
 pub const timeout: u64 = 01h05m00s
@@ -117,7 +125,7 @@ fn readReferent(value: &i32) -> i32 {
   return value.*
 }
 
-fn pointers(cursor: *mut *const u8, count: *const i32) -> *const u8 {
+fn pointers(cursor: ?[*]mut ?*const align(1) addrspace(0) u8, count: *const i32) -> ?*const u8 {
   return cursor
 }
 

@@ -281,8 +281,18 @@ const foreignEntry = (
 }
 
 it('rejects foreign calls off native LLVM and conflicting signatures per pair', () => {
-  const i32 = Object.freeze({ _tag: 'Integer' as const, bits: 32 as const, signed: true })
-  const i64 = Object.freeze({ _tag: 'Integer' as const, bits: 64 as const, signed: true })
+  const i32 = Object.freeze({
+    _tag: 'Integer' as const,
+    bits: 32 as const,
+    signed: true,
+    extension: 'None' as const,
+  })
+  const i64 = Object.freeze({
+    _tag: 'Integer' as const,
+    bits: 64 as const,
+    signed: true,
+    extension: 'None' as const,
+  })
   const exit = foreignEntry('exit', [i32], 'availability/a', 40)
   const calls = [
     foreignEntry('abs', [i32], 'availability/a', 0),
@@ -607,7 +617,12 @@ pub fn main() -> i32 { unsafe install(silk_test_wait_v1) return 0 }`
 it('plans exports over MIR: symbol map, non-native rejection, and suspension', () => {
   const sample = MirSamples.foreignCallSample(Target.aarch64AppleDarwin)
   const key = Mir.machineEntry(sample)
-  const i32 = Object.freeze({ _tag: 'Integer' as const, bits: 32 as const, signed: true })
+  const i32 = Object.freeze({
+    _tag: 'Integer' as const,
+    bits: 32 as const,
+    signed: true,
+    extension: 'None' as const,
+  })
   const record = (symbol: string, sourceId: string, start: number): Instances.ForeignExport =>
     Object.freeze({
       _tag: 'ForeignExport',

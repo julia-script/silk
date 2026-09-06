@@ -162,10 +162,18 @@ export const parseImportMemberList = (initial: State): NodeResult => {
 }
 
 export const parseImportDeclaration = (initial: State): NodeResult => {
-  const keyword = expect(initial, 'ImportKeyword', ['Identifier', ...topLevelFollowing])
+  const publicKeyword =
+    nextSignificantKind(initial) === 'PubKeyword'
+      ? expect(initial, 'PubKeyword', ['ImportKeyword'])
+      : { state: initial, elements: [] }
+  const keyword = expect(publicKeyword.state, 'ImportKeyword', ['Identifier', ...topLevelFollowing])
   const path = parseImportPath(keyword.state)
   let state = path.state
-  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([...keyword.elements, path.node])
+  let children: ReadonlyArray<SyntaxTree.Element> = Object.freeze([
+    ...publicKeyword.elements,
+    ...keyword.elements,
+    path.node,
+  ])
   let hasAlias = false
   let hasMembers = false
   if (nextSignificantKind(state) === 'AsKeyword') {
@@ -181,6 +189,11 @@ export const parseImportDeclaration = (initial: State): NodeResult => {
     hasMembers = true
   }
   const finalSegment = ImportPath.segments(path.node).at(-1)
+  if (publicKeyword.elements.length > 0 && !hasMembers) {
+    const missing = missingToken(state, 'LeftBrace')
+    state = addDiagnostic(state, Diagnostic.missingToken('LeftBrace', missing.span))
+    children = Object.freeze([...children, missing])
+  }
   if (
     finalSegment !== undefined &&
     ImportPath.isReservedSegment(finalSegment) &&

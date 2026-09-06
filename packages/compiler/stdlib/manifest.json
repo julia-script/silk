@@ -315,6 +315,13 @@
     "namespace": "OsSystemClock"
   },
   {
+    "module": "silk/output",
+    "path": "silk/output.silk",
+    "layer": "portable",
+    "namespace": "Uninitialized",
+    "aliases": ["Initialized"]
+  },
+  {
     "module": "silk/pointer",
     "path": "silk/pointer.silk",
     "layer": "portable",

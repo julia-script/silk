@@ -98,10 +98,12 @@ export const valueLanesFor = (
 export const laneType = (context: LoweringContext, lane: Layout.CallingLane): LlvmType.Type => {
   if (typeof lane.type !== 'string') return context.pointer
   const scalar = Scalar.find(lane.type)
-  if (scalar === undefined) return context.i32
-  if (scalar.category === 'Floating') return scalar.spelling === 'f32' ? context.f32 : context.f64
-  const bits = Scalar.bits(scalar, context.program.layout.target.pointerSize === 4 ? 32 : 64)
-  return context.integerTypes.get(bits) ?? context.i32
+  if (scalar === undefined) throw new RangeError('LLVM calling lane has no semantic scalar')
+  const physical = Scalar.resolveLayout(scalar, context.program.layout.target)
+  if (scalar.category === 'Floating') return physical.size === 4 ? context.f32 : context.f64
+  const type = context.integerTypes.get(physical.size * 8)
+  if (type === undefined) throw new RangeError('LLVM calling lane lost its planned integer type')
+  return type
 }
 
 export const laneStorage = (
@@ -111,9 +113,8 @@ export const laneStorage = (
   if (typeof lane.type !== 'string')
     return Object.freeze({ size: target.pointerSize, alignment: target.pointerAlignment })
   const scalar = Scalar.find(lane.type)
-  const bits = Scalar.bits(scalar ?? Scalar.defaultInteger, target.pointerSize === 4 ? 32 : 64)
-  const size = bits / 8
-  return Object.freeze({ size, alignment: Math.min(size, 8) })
+  if (scalar === undefined) throw new RangeError('LLVM lane storage has no semantic scalar')
+  return Scalar.resolveLayout(scalar, target)
 }
 
 /** Packs native calling lanes using their target ABI storage. */

@@ -1,3 +1,4 @@
+import * as Target from './Target.js'
 import * as ConfigurationValue from './ConfigurationValue.js'
 import * as Effect from 'effect/Effect'
 import * as CompilationProfile from './CompilationProfile.js'
@@ -50,6 +51,11 @@ export const complete = Effect.fn('ProfileBootstrap.complete')(function* (
   source: Source,
   bindings: ReadonlyArray<PackageConfiguration.Binding> = [],
 ): Effect.fn.Return<Completion, ConfigurationError.ConfigurationError> {
+  yield* Target.validateDescription(initial.target).pipe(
+    Effect.mapError(() =>
+      ConfigurationError.make('ProfileBootstrap.complete', 'InvalidInput', 'target description'),
+    ),
+  )
   const parameters = yield* PackageConfiguration.prepare(
     source.index,
     initial.target,

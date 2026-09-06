@@ -25,6 +25,17 @@ const admitted: ReadonlyArray<readonly [Type.Builtin, string]> = [
 ]
 
 const rejected: ReadonlyArray<readonly [string, Type.Type]> = [
+  [
+    'invalid pointer alignment',
+    Type.pointer({
+      mutable: false,
+      pointee: 'i32',
+      nullable: false,
+      extent: 'Single',
+      alignment: 3,
+      addressSpace: 0,
+    }),
+  ],
   ['bool', 'bool'],
   ['char', 'char'],
   ['string', Type.string(Lifetime.staticLifetime)],
@@ -38,8 +49,22 @@ it('admits exactly the non-nominal C-layout field vocabulary', () => {
   const resolveNothing: CLayout.ResolveStruct = () => undefined
   const acceptedFields: ReadonlyArray<Type.Type> = [
     ...admitted.map(([type]) => type),
-    Type.pointer(false, Type.string(Lifetime.staticLifetime)),
-    Type.pointer(true, Type.nominal('app/main', 'Opaque')),
+    Type.pointer({
+      mutable: false,
+      pointee: Type.string(Lifetime.staticLifetime),
+      nullable: false,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
+    }),
+    Type.pointer({
+      mutable: true,
+      pointee: Type.nominal('app/main', 'Opaque'),
+      nullable: false,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
+    }),
     Type.fixedArray('u16', 3),
     Type.fixedArray(Type.fixedArray('f64', 2), 4),
   ]
@@ -99,11 +124,13 @@ it('classifies pointer-width integers by the selected target', () => {
     _tag: 'Integer',
     bits: 32,
     signed: false,
+    extension: 'None',
   })
   assert.deepEqual(CAbi.classify('isize', Target.aarch64AppleDarwin, 'Parameter'), {
     _tag: 'Integer',
     bits: 64,
     signed: true,
+    extension: 'None',
   })
 })
 
@@ -125,10 +152,50 @@ it('produces a stable canonical signature key', () => {
 })
 
 const pointers: ReadonlyArray<readonly [string, Type.Pointer]> = [
-  ['*const u8', Type.pointer(false, 'u8')],
-  ['*mut u8', Type.pointer(true, 'u8')],
-  ['*mut Opaque', Type.pointer(true, Type.nominal('app/main', 'Opaque'))],
-  ['*const Vector<i32>', Type.pointer(false, Type.nominal('silk/vector', 'Vector', ['i32']))],
+  [
+    '*const u8',
+    Type.pointer({
+      mutable: false,
+      pointee: 'u8',
+      nullable: false,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
+    }),
+  ],
+  [
+    '*mut u8',
+    Type.pointer({
+      mutable: true,
+      pointee: 'u8',
+      nullable: false,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
+    }),
+  ],
+  [
+    '*mut Opaque',
+    Type.pointer({
+      mutable: true,
+      pointee: Type.nominal('app/main', 'Opaque'),
+      nullable: false,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
+    }),
+  ],
+  [
+    '*const Vector<i32>',
+    Type.pointer({
+      mutable: false,
+      pointee: Type.nominal('silk/vector', 'Vector', ['i32']),
+      nullable: false,
+      extent: 'Single',
+      alignment: 'Natural',
+      addressSpace: 0,
+    }),
+  ],
 ]
 
 it('admits a pointer of any pointee in both positions without examining the pointee', () => {
@@ -137,63 +204,163 @@ it('admits a pointer of any pointee in both positions without examining the poin
     assert.strictEqual(CAbi.admit(type, 'Result')._tag, 'Admitted', spelling)
     assert.deepEqual(
       CAbi.classify(type, Target.aarch64AppleDarwin, 'Result'),
-      { _tag: 'Pointer', mutable: type.mutable, pointee: type.pointee },
+      { _tag: 'Pointer', type },
       spelling,
     )
     assert.strictEqual(
       CAbi.typeText(CAbi.classify(type, Target.wasm32UnknownUnknown, 'Parameter')),
-      type.mutable ? '*mut' : '*const',
+      `pointer<${type.mutable ? 'mut' : 'const'};${encodeURIComponent(Type.runtimeKey(type))}>`,
       spelling,
     )
   }
   // The pointee stays unexamined: a pointer to a rejected pointee is still admitted.
   for (const [label, type] of rejected) {
-    assert.strictEqual(CAbi.admit(Type.pointer(false, type), 'Parameter')._tag, 'Admitted', label)
+    assert.strictEqual(
+      CAbi.admit(
+        Type.pointer({
+          mutable: false,
+          pointee: type,
+          nullable: false,
+          extent: 'Single',
+          alignment: 'Natural',
+          addressSpace: 0,
+        }),
+        'Parameter',
+      )._tag,
+      'Admitted',
+      label,
+    )
   }
 })
 
 it('keys pointer mutability so `*const u8` and `*mut u8` name different signatures', () => {
   const constKey = CAbi.signatureKey(
-    CAbi.signature([Type.pointer(false, 'u8'), 'usize'], 'i32', Target.aarch64AppleDarwin),
+    CAbi.signature(
+      [
+        Type.pointer({
+          mutable: false,
+          pointee: 'u8',
+          nullable: false,
+          extent: 'Single',
+          alignment: 'Natural',
+          addressSpace: 0,
+        }),
+        'usize',
+      ],
+      'i32',
+      Target.aarch64AppleDarwin,
+    ),
   )
   const mutKey = CAbi.signatureKey(
-    CAbi.signature([Type.pointer(true, 'u8'), 'usize'], 'i32', Target.aarch64AppleDarwin),
+    CAbi.signature(
+      [
+        Type.pointer({
+          mutable: true,
+          pointee: 'u8',
+          nullable: false,
+          extent: 'Single',
+          alignment: 'Natural',
+          addressSpace: 0,
+        }),
+        'usize',
+      ],
+      'i32',
+      Target.aarch64AppleDarwin,
+    ),
   )
-  assert.strictEqual(constKey, '(*const,u64)->i32')
-  assert.strictEqual(mutKey, '(*mut,u64)->i32')
+  assert.strictEqual(
+    constKey,
+    '(pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>,u64)->i32',
+  )
+  assert.strictEqual(
+    mutKey,
+    '(pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>,u64)->i32',
+  )
   assert.notStrictEqual(constKey, mutKey)
   assert.strictEqual(
     CAbi.signatureKey(
-      CAbi.signature(['usize'], Type.pointer(true, 'u8'), Target.x8664UnknownLinuxGnu),
+      CAbi.signature(
+        ['usize'],
+        Type.pointer({
+          mutable: true,
+          pointee: 'u8',
+          nullable: false,
+          extent: 'Single',
+          alignment: 'Natural',
+          addressSpace: 0,
+        }),
+        Target.x8664UnknownLinuxGnu,
+      ),
     ),
-    '(u64)->*mut',
+    '(u64)->pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
   )
-  // Pointee spelling does not reach the key: two opaque pointees classify identically.
-  assert.strictEqual(
+  // Physical pointer lanes agree, while source pointee identities remain distinct contracts.
+  assert.notStrictEqual(
     CAbi.signatureKey(
       CAbi.signature(
-        [Type.pointer(true, Type.nominal('app/main', 'Opaque'))],
+        [
+          Type.pointer({
+            mutable: true,
+            pointee: Type.nominal('app/main', 'Opaque'),
+            nullable: false,
+            extent: 'Single',
+            alignment: 'Natural',
+            addressSpace: 0,
+          }),
+        ],
         Type.unit,
         Target.aarch64AppleDarwin,
       ),
     ),
-    '(*mut)->void',
+    CAbi.signatureKey(
+      CAbi.signature(
+        [
+          Type.pointer({
+            mutable: true,
+            pointee: 'u8',
+            nullable: false,
+            extent: 'Single',
+            alignment: 'Natural',
+            addressSpace: 0,
+          }),
+        ],
+        Type.unit,
+        Target.aarch64AppleDarwin,
+      ),
+    ),
   )
 })
 
 it('admits recursively C-compatible function pointers and keys their full signature', () => {
   const compare = Type.foreignFunction(
-    [Type.pointer(false, 'i32'), Type.pointer(false, 'i32')],
+    [
+      Type.pointer({
+        mutable: false,
+        pointee: 'i32',
+        nullable: false,
+        extent: 'Single',
+        alignment: 'Natural',
+        addressSpace: 0,
+      }),
+      Type.pointer({
+        mutable: false,
+        pointee: 'i32',
+        nullable: false,
+        extent: 'Single',
+        alignment: 'Natural',
+        addressSpace: 0,
+      }),
+    ],
     'i32',
   )
   assert.strictEqual(CAbi.admit(compare, 'Parameter')._tag, 'Admitted')
   assert.strictEqual(
     CAbi.typeText(CAbi.classify(compare, Target.aarch64AppleDarwin, 'Parameter')),
-    'extern "C" fn(*const,*const)->i32',
+    'extern "C" fn(pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>,pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>)->i32',
   )
   assert.strictEqual(
     CAbi.signatureKey(CAbi.signature([compare, 'usize'], Type.unit, Target.aarch64AppleDarwin)),
-    '(extern "C" fn(*const,*const)->i32,u64)->void',
+    '(extern "C" fn(pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>,pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>)->i32,u64)->void',
   )
 
   const invalidParameter = Type.foreignFunction([Type.unit], 'i32')
@@ -206,16 +373,28 @@ it('renders one exact canonical header for scalars, pointers, nested callbacks, 
   const functions: ReadonlyArray<Backend.ForeignExport> = [
     {
       symbol: 'visit',
-      parameters: ['*const', '*mut', 'extern "C" fn(i32,*const)->u8'],
+      parameters: [
+        'pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
+        'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
+        'extern "C" fn(i32,pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>)->u8',
+      ],
       result: 'extern "C" fn(u64)->i32',
     },
     { symbol: 'answer', parameters: [], result: 'i32' },
   ]
   const data: ReadonlyArray<Backend.ForeignStatic> = [
     { symbol: 'callback_slot', type: 'extern "C" fn(i16)->u16', direction: 'Export' },
-    { symbol: 'mutable_state', type: '*mut', direction: 'Export' },
+    {
+      symbol: 'mutable_state',
+      type: 'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
+      direction: 'Export',
+    },
     { symbol: 'silk_abi_version', type: 'u32', direction: 'Export' },
-    { symbol: 'host_state', type: '*mut', direction: 'Import' },
+    {
+      symbol: 'host_state',
+      type: 'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
+      direction: 'Import',
+    },
   ]
   const header = CHeader.make('answer-kit', functions, data)
   const expected = [
@@ -251,12 +430,23 @@ it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
   ]
   const data: ReadonlyArray<Backend.ForeignStatic> = [
     { symbol: 'silk_abi_version', type: 'u32', direction: 'Export' },
-    { symbol: 'host_state', type: '*mut', direction: 'Import' },
+    {
+      symbol: 'host_state',
+      type: 'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
+      direction: 'Import',
+    },
   ]
   for (const target of [Target.aarch64AppleDarwin, Target.x8664UnknownLinuxGnu]) {
     const pointerWidth = CAbi.typeText(CAbi.classify('usize', target, 'Parameter'))
     const imports: ReadonlyArray<Backend.ForeignImport> = [
-      { symbol: 'host_log', parameters: ['*const', pointerWidth], result: 'void' },
+      {
+        symbol: 'host_log',
+        parameters: [
+          'pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
+          pointerWidth,
+        ],
+        result: 'void',
+      },
     ]
     const manifest = AbiManifest.make(target, imports, exports, data)
     const expected = `${JSON.stringify(
@@ -286,7 +476,10 @@ it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
             symbol: 'host_log',
             abi: 'C',
             direction: 'import',
-            parameters: ['*const', pointerWidth],
+            parameters: [
+              'pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
+              pointerWidth,
+            ],
             result: 'void',
           },
           {
@@ -294,7 +487,7 @@ it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
             symbol: 'host_state',
             abi: 'C',
             direction: 'import',
-            type: '*mut',
+            type: 'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
           },
         ],
       },
@@ -333,4 +526,32 @@ it('reserves the entry point, runtime symbols, and generated symbol shapes', () 
     assert.isFalse(ForeignSymbol.isReserved(symbol), symbol)
   }
   assert.isTrue(ForeignSymbol.reservedSymbols.every(ForeignSymbol.isReserved))
+})
+
+it('classifies and verifies narrow integer extensions from the selected C ABI', () => {
+  for (const target of Target.native) {
+    const sign = CAbi.classify('i8', target, 'Parameter')
+    const zero = CAbi.classify('u16', target, 'Result')
+    const extended = target.id !== 'aarch64-unknown-linux-gnu'
+    assert.deepEqual(sign, {
+      _tag: 'Integer',
+      bits: 8,
+      signed: true,
+      extension: extended ? 'Sign' : 'None',
+    })
+    assert.deepEqual(zero, {
+      _tag: 'Integer',
+      bits: 16,
+      signed: false,
+      extension: extended ? 'Zero' : 'None',
+    })
+    assert.strictEqual(CAbi.isCanonical(sign, target), true)
+    assert.strictEqual(
+      CAbi.isCanonical(
+        { _tag: 'Integer', bits: 8, signed: true, extension: extended ? 'None' : 'Sign' },
+        target,
+      ),
+      false,
+    )
+  }
 })

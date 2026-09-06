@@ -306,7 +306,7 @@ it.effect('keeps string distinct from an immutable byte view in module surfaces'
     // Pins the canonical surface encoding byte-for-byte; an encoding change must be deliberate.
     assert.strictEqual(
       text.canonical,
-      '13:ModuleSurface12:surface/Main1136:5:Array1124:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public7:Runtime8:Ordinary131:19:ExecutableLifetimes6:static80:5:Array70:13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:07:5:Array7:5:Array7:5:False6:4:None155:5:Array144:13:TypeParameter79:4:Type70:13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:017:14:LifetimeBinder7:5:Array6:4:None7:5:Array11:6:Number1:1187:5:Array176:9:Parameter11:6:Number1:021:11:PresentName5:value7:Runtime114:12:ResolvedType87:4:Type78:string<13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:0>7:5:False24:11:PresentName8:identity114:12:ResolvedType87:4:Type78:string<13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:0>7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array6:4:None6:4:None7:5:Array7:5:Array',
+      '13:ModuleSurface12:surface/Main7:5:Array1136:5:Array1124:19:FunctionDeclaration35:18:DeclarationOrdinal11:6:Number1:053:9:Canonical39:11:CanonicalId12:surface/Main8:identity6:Public7:Runtime8:Ordinary131:19:ExecutableLifetimes6:static80:5:Array70:13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:07:5:Array7:5:Array7:5:False6:4:None155:5:Array144:13:TypeParameter79:4:Type70:13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:017:14:LifetimeBinder7:5:Array6:4:None7:5:Array11:6:Number1:1187:5:Array176:9:Parameter11:6:Number1:021:11:PresentName5:value7:Runtime114:12:ResolvedType87:4:Type78:string<13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:0>7:5:False24:11:PresentName8:identity114:12:ResolvedType87:4:Type78:string<13:BoundLifetime39:11:Declaration12:surface/Main8:identity7:5:Array1:0>7:5:False6:4:None133:10:FailureRow6:4:True7:5:Array7:5:Array7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array137:14:RequirementRow6:4:True7:5:Array21:18:EmptyRowExpression58:10:RowAlgebra33:8:Concrete20:9:FiniteRow7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array7:5:Array6:4:None6:4:None7:5:Array7:5:Array',
     )
   }),
 )
@@ -1586,12 +1586,26 @@ impl Counter { pub fn zero() -> Self { return Counter { value: 0 } } }`,
 
 it.effect('round-trips raw pointer types and keys public pointer signatures by mutability', () =>
   Effect.gen(function* () {
-    const pointer = Type.pointer(true, Type.pointer(false, Type.nominal('surface/Main', 'Opaque')))
+    const pointer = Type.pointer({
+      mutable: true,
+      pointee: Type.pointer({
+        mutable: false,
+        pointee: Type.nominal('surface/Main', 'Opaque'),
+        nullable: true,
+        extent: 'Single',
+        alignment: 1,
+        addressSpace: 0,
+      }),
+      nullable: true,
+      extent: 'Many',
+      alignment: 'Natural',
+      addressSpace: 0,
+    })
     const decoded = yield* ModuleSurface.decodeSemanticType(
       ModuleSurface.encodeSemanticType(pointer),
     )
     assert.strictEqual(Type.key(decoded), Type.key(pointer))
-    assert.strictEqual(Type.encode(decoded), '*mut *const surface/Main.Opaque')
+    assert.strictEqual(Type.encode(decoded), '?[*]mut ?*const align(1) surface/Main.Opaque')
 
     const mutable = yield* surface(
       'pub struct Opaque {}\npub fn take(handle: *mut Opaque) -> *mut Opaque { return handle }',
@@ -1604,14 +1618,26 @@ it.effect('round-trips raw pointer types and keys public pointer signatures by m
     )
     assert.strictEqual(ModuleSurface.equals(mutable, repeated), true)
     assert.strictEqual(ModuleSurface.equals(mutable, constant), false)
-    assert.include(mutable.canonical, 'pointer:mut<')
-    assert.include(constant.canonical, 'pointer:const<')
+    assert.include(mutable.canonical, 'pointer:Single:mut:nonnull:Natural:0<')
+    assert.include(constant.canonical, 'pointer:Single:const:nonnull:Natural:0<')
   }),
 )
 
 it.effect('round-trips C function pointers and data-symbol declarations in module surfaces', () =>
   Effect.gen(function* () {
-    const callback = Type.foreignFunction([Type.pointer(false, 'i32')], 'i32')
+    const callback = Type.foreignFunction(
+      [
+        Type.pointer({
+          mutable: false,
+          pointee: 'i32',
+          nullable: false,
+          extent: 'Single',
+          alignment: 'Natural',
+          addressSpace: 0,
+        }),
+      ],
+      'i32',
+    )
     const decoded = yield* ModuleSurface.decodeSemanticType(
       ModuleSurface.encodeSemanticType(callback),
     )

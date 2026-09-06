@@ -931,18 +931,26 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
 
 it.effect('plans a raw pointer as one Copy address-width lane on every target', () =>
   Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'layout/pointer',
+      ascii(`struct Opaque {}
+struct Handle { raw: *mut Opaque }
+struct Qualified { raw: ?[*]const align(1) Opaque }
+pub fn main() -> i32 { return 42 }`),
+    )
     for (const [target, size, bits] of [
       [Target.aarch64AppleDarwin, 8, 64],
       [Target.wasm32UnknownUnknown, 4, 32],
     ] as const) {
-      const snapshot = yield* Analysis.ofSourceRealized(
-        'layout/pointer',
-        ascii(`struct Opaque {}
-struct Handle { raw: *mut Opaque }
-pub fn main() -> i32 { return 42 }`),
-      )
       const catalog = Layout.catalog(target, Analysis.declarationIndex(snapshot))
-      const pointer = Type.pointer(true, Type.nominal('layout/pointer', 'Opaque'))
+      const pointer = Type.pointer({
+        mutable: true,
+        pointee: Type.nominal('layout/pointer', 'Opaque'),
+        nullable: false,
+        extent: 'Single',
+        alignment: 'Natural',
+        addressSpace: 0,
+      })
       const entry = Layout.catalogEntry(catalog, pointer)
       assert.strictEqual(entry?._tag, 'LayoutEntry')
       if (entry?._tag !== 'LayoutEntry') return
@@ -956,6 +964,28 @@ pub fn main() -> i32 { return 42 }`),
           type: { _tag: 'Address', element: Type.nominal('layout/pointer', 'Opaque'), bits },
         },
       ])
+      const qualified = Type.pointer({
+        ...pointer,
+        mutable: false,
+        nullable: true,
+        extent: 'Many',
+        alignment: 1,
+      })
+      const qualifiedEntry = Layout.catalogEntry(catalog, qualified)
+      assert.strictEqual(qualifiedEntry?._tag, 'LayoutEntry')
+      if (qualifiedEntry?._tag !== 'LayoutEntry') return
+      assert.deepEqual(
+        [qualifiedEntry.copy, qualifiedEntry.size, qualifiedEntry.alignment],
+        [true, size, size],
+      )
+      assert.deepEqual(Layout.callingShapes(target, [qualifiedEntry]).at(0)?.lanes, shape?.lanes)
+      const malformed = { ...qualifiedEntry, type: Type.pointer({ ...qualified, alignment: 3 }) }
+      assert.include(
+        LayoutVerify.verifyCatalog({ ...catalog, entries: [malformed] }, snapshot.index).map(
+          (violation) => violation.rule,
+        ),
+        'InvalidScalar',
+      )
       const handle = Layout.catalogEntry(catalog, Type.nominal('layout/pointer', 'Handle'))
       assert.strictEqual(handle?._tag, 'LayoutEntry')
       if (handle?._tag !== 'LayoutEntry') return

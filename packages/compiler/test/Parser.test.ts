@@ -3857,9 +3857,9 @@ it('rejects unsupported static modifier combinations and compileError arities', 
   }
 })
 
-it('keeps rejected top-level static control bounded before following declarations', () => {
+it('keeps rejected top-level static iteration bounded before following declarations', () => {
   const fixtures = [
-    `static if true {
+    `pub static if true {
   fn hidden() -> () {}
 }`,
     `static for field in fields {
@@ -3888,6 +3888,44 @@ fn kept() -> i32 { return 1 }`
           (element.kind === 'StaticConditionalStatement' || element.kind === 'StaticForStatement'),
       ),
     )
+    assertOriginalTokenTraversal(result)
+    assert.deepEqual(reconstructedBytes(result), ascii(source))
+  }
+})
+
+it('parses module selection groups and selective publication without losing inactive syntax', () => {
+  const source = `static if choose() {
+  pub import platform.first { original as selected }
+  static if true { pub const answer: i32 = 42 }
+} else static if false {
+  pub extern "C" fn selected() -> i32
+} else {
+  import missing.module
+  pub fn selected() -> i32 { return 7 }
+}
+fn kept() -> () {}`
+  const result = parseText('selection', source)
+  assert.deepEqual(result.parserDiagnostics, [])
+  assert.strictEqual(SyntaxTree.directNodes(result.root, 'StaticConditionalDeclaration').length, 1)
+  assert.strictEqual(
+    descendants(result.root).filter(
+      (node) => SyntaxTree.isNode(node) && node.kind === 'DeclarationGroup',
+    ).length,
+    4,
+  )
+  assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
+  assertOriginalTokenTraversal(result)
+  assert.deepEqual(reconstructedBytes(result), ascii(source))
+})
+
+it('retains malformed declarations in both module selection arms and rejects public namespaces', () => {
+  for (const source of [
+    'static if true { const broken: = 1 } else { fn good() -> () {} }',
+    'static if false { fn good() -> () {} } else { const broken: = 1 }',
+    'pub import platform',
+  ]) {
+    const result = parseText('selection_recovery', source)
+    assert.isTrue(result.parserDiagnostics.length > 0)
     assertOriginalTokenTraversal(result)
     assert.deepEqual(reconstructedBytes(result), ascii(source))
   }

@@ -149,7 +149,7 @@ const canonicalDeclaration = (
   module: string,
   spelling: string,
 ): CanonicalMember | undefined => {
-  const result = DeclarationFacts.member(index, module, spelling)
+  const result = DeclarationFacts.publishedMember(index, module, spelling)
   return result._tag === 'Resolved' && isCanonicalMember(result.declaration)
     ? result.declaration
     : undefined

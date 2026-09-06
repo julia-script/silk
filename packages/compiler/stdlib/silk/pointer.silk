@@ -1,146 +1,208 @@
-//! Raw pointers: un-owned machine addresses for foreign interfaces and hand-written storage.
+//! Raw data pointers with explicit nullability, element extent, and minimum alignment.
 //!
 //! # When to use
-//! Use these operations to pass the address of a Silk value or slice to a foreign function, or to
-//! read and write memory that native code owns. Application code should prefer references, which
-//! the compiler checks; a pointer carries no ownership, no loan, and no validity guarantee.
+//!
+//! Use these operations for foreign calls and storage that native code owns.
 //!
 //! # Details
-//! `*const T` and `*mut T` are `Copy` and may be null. Forming a pointer is safe because taking an
-//! address has no memory effect: the borrow's loan ends where it would anyway, and the pointer
-//! keeps nothing alive. [`offset`] and [`offsetMut`] advance by whole elements of `T`. [`read`]
-//! and [`write`] are bounded to a `Copy` pointee so a value can never be moved through raw memory.
+//!
+//! A pointer is `Copy`. It holds no ownership or loan and keeps no storage alive.
+//! `*const T` and `*mut T` are non-null single-element pointers. `[*]` denotes many elements.
+//! A `?` prefix permits null. A many-element pointer carries no length.
 //!
 //! # Gotchas
-//! Dereferencing a null pointer, a misaligned pointer, or a pointer whose storage has ended is an
-//! unsafe-contract violation, not a diagnostic. Ownership records no conflict when the root is
-//! moved or dropped after a pointer to it
-//! is formed, so the caller must prove the address is still live at every dereference.
 //!
-//! # Examples
-//! ## Write and read one element through a slice pointer
-//! ```silk
-//! import silk.pointer {Pointer}
-//!
-//! pub fn main() -> i32 {
-//!   let mut values = [1, 2, 3]
-//!   let pointer = Pointer.fromMutSlice(&mut values)
-//!   unsafe {
-//!     let third = Pointer.offsetMut(pointer, 2)
-//!     Pointer.write(third, 9)
-//!     if Pointer.read(third) != values[2] {
-//!       return 1
-//!     }
-//!   }
-//!   return 0
-//! }
-//! ```
+//! A non-null address does not prove that storage is live or initialized.
+//! Each unsafe memory operation requires the caller to prove its storage contract.
 
-import silk.usize as usize
+import silk.option { Option }
 
-/// The importable name of the `silk.pointer` module scope.
-///
-/// # Details
-///
-/// This struct carries no data and is never constructed by the library. Every operation is an
-/// inherent member declared in `impl Pointer`, so `import silk.pointer { Pointer }` is the one
-/// import that reaches `Pointer.fromRef(...)` and the rest. It is unrelated to the `*const T` and
-/// `*mut T` types.
+/// The operations for data pointers, which hold no ownership or loan.
 pub struct Pointer {}
 
 impl Pointer {
-  /// Returns the null `*mut T` address.
-  ///
-  /// # Details
-  ///
-  /// Null is a value, not a failure. Test for it with [`isNull`] before dereferencing a pointer
-  /// that native code may have left unset.
-  pub fn null<T>() -> *mut T {
+  /// Returns a null single-element pointer.
+  pub fn null<T>() -> ?*mut T {
     return Intrinsic.pointerNull<T>()
   }
 
-  /// Reports whether a pointer is null.
-  pub fn isNull<T>(pointer: *const T) -> bool {
-    return Intrinsic.pointerIsNull<T>(pointer)
+  /// Reports whether a nullable single-element pointer is null.
+  pub fn isNull<T>(pointer: ?*const T) -> bool {
+    return Intrinsic.pointerIsNull<?*const T>(pointer)
   }
 
-  /// Forms a `*const T` from a shared reference.
+  /// Reports whether a nullable many-element pointer is null.
+  pub fn isNullMany<T>(pointer: ?[*]const T) -> bool {
+    return Intrinsic.pointerIsNull<?[*]const T>(pointer)
+  }
+
+  /// Returns a non-null shared pointer when the address is not zero.
   ///
-  /// # Details
+  /// # Gotchas
   ///
-  /// The reference's loan ends as it would without the call; the pointer holds no loan on the
-  /// referent and does not keep it alive.
+  /// A present result does not prove that the addressed storage is live or initialized.
+  pub fn nonNull<T>(pointer: ?*const T) -> Option<*const T> {
+    if Pointer.isNull<T>(pointer) { return Option.none<*const T>() }
+    unsafe { return Option.some<*const T>(Intrinsic.pointerRequalify<?*const T, *const T>(pointer)) }
+  }
+
+  /// Returns a non-null writable pointer when the address is not zero.
+  ///
+  /// # Gotchas
+  ///
+  /// A present result does not prove that the addressed storage is live or initialized.
+  pub fn nonNullMut<T>(pointer: ?*mut T) -> Option<*mut T> {
+    if Pointer.isNull<T>(pointer) { return Option.none<*mut T>() }
+    unsafe { return Option.some<*mut T>(Intrinsic.pointerRequalify<?*mut T, *mut T>(pointer)) }
+  }
+
+  /// Returns a non-null shared many-element pointer when the address is not zero.
+  ///
+  /// # Gotchas
+  ///
+  /// The result carries no length and proves no storage validity.
+  pub fn nonNullMany<T>(pointer: ?[*]const T) -> Option<[*]const T> {
+    if Pointer.isNullMany<T>(pointer) { return Option.none<[*]const T>() }
+    unsafe { return Option.some<[*]const T>(Intrinsic.pointerRequalify<?[*]const T, [*]const T>(pointer)) }
+  }
+
+  /// Returns a non-null writable many-element pointer when the address is not zero.
+  ///
+  /// # Gotchas
+  ///
+  /// The result carries no length and proves no storage validity.
+  pub fn nonNullManyMut<T>(pointer: ?[*]mut T) -> Option<[*]mut T> {
+    if Pointer.isNullMany<T>(pointer) { return Option.none<[*]mut T>() }
+    unsafe { return Option.some<[*]mut T>(Intrinsic.pointerRequalify<?[*]mut T, [*]mut T>(pointer)) }
+  }
+
+  /// Forms a non-null shared pointer without extending the reference's loan.
+  ///
+  /// # Gotchas
+  ///
+  /// The pointer keeps no storage alive. A later access must prove that the storage remains live.
   pub fn fromRef<T>(value: &T) -> *const T {
     return Intrinsic.pointerFromRef<T>(value)
   }
 
-  /// Forms a `*mut T` from an exclusive reference.
+  /// Forms a non-null writable pointer without extending the reference's loan.
   ///
-  /// # Details
+  /// # Gotchas
   ///
-  /// The reference's loan ends as it would without the call; the pointer holds no loan on the
-  /// referent and does not keep it alive.
+  /// The pointer keeps no storage alive. A later access must prove that the storage remains live.
   pub fn fromMutRef<T>(value: &mut T) -> *mut T {
     return Intrinsic.pointerFromMutRef<T>(value)
   }
 
-  /// Forms a `*const T` addressing the first element of a shared slice.
+  /// Forms a nullable shared many-element pointer from a slice address.
   ///
-  /// # Details
+  /// # Gotchas
   ///
-  /// The pointer carries no length. Pass the slice's length separately to native code that fills
-  /// or reads a buffer.
-  pub fn fromSlice<T>(values: &[T]) -> *const T {
+  /// The pointer carries no length or loan. Pass the length separately and keep the storage live.
+  pub fn fromSlice<T>(values: &[T]) -> ?[*]const T {
     return Intrinsic.pointerFromSlice<T>(values)
   }
 
-  /// Forms a `*mut T` addressing the first element of an exclusive slice.
+  /// Forms a nullable writable many-element pointer from a slice address.
   ///
-  /// # Details
+  /// # Gotchas
   ///
-  /// The pointer carries no length. Pass the slice's length separately to native code that fills
-  /// or reads a buffer.
-  pub fn fromMutSlice<T>(values: &mut [T]) -> *mut T {
+  /// The pointer carries no length or loan. Pass the length separately and keep the storage live.
+  pub fn fromMutSlice<T>(values: &mut [T]) -> ?[*]mut T {
     return Intrinsic.pointerFromMutSlice<T>(values)
   }
 
-  /// Advances a `*const T` by `count` elements of `T`.
+  /// Returns a shared pointer to one element of a many-element pointer.
   ///
   /// # Gotchas
   ///
-  /// The caller must prove that the pointer and the result address elements of one live
-  /// allocation.
-  pub unsafe fn offset<T>(pointer: *const T, count: usize) -> *const T {
-    unsafe { return Intrinsic.pointerOffset<T>(pointer, count) }
+  /// The caller must prove that `index` selects an element within the same live allocation.
+  pub unsafe fn at<T>(pointer: [*]const T, index: usize) -> *const T {
+    unsafe { return Intrinsic.pointerAt<T>(pointer, index) }
   }
 
-  /// Advances a `*mut T` by `count` elements of `T`.
+  /// Returns a writable pointer to one element of a many-element pointer.
   ///
   /// # Gotchas
   ///
-  /// The caller must prove that the pointer and the result address elements of one live
-  /// allocation.
-  pub unsafe fn offsetMut<T>(pointer: *mut T, count: usize) -> *mut T {
-    unsafe { return Intrinsic.pointerOffsetMut<T>(pointer, count) }
+  /// The caller must prove that `index` selects an element within the same live writable allocation.
+  pub unsafe fn atMut<T>(pointer: [*]mut T, index: usize) -> *mut T {
+    unsafe { return Intrinsic.pointerAtMut<T>(pointer, index) }
   }
 
-  /// Copies the `T` stored at a pointer.
+  /// Copies one initialized value from naturally aligned storage.
   ///
   /// # Gotchas
   ///
-  /// The caller must prove that the pointer is non-null, aligned for `T`, and addresses an
-  /// initialized `T` whose storage is still live.
+  /// The caller must prove that the pointer addresses a live, readable, initialized `T`.
   pub unsafe fn read<T: Copy>(pointer: *const T) -> T {
     unsafe { return Intrinsic.pointerRead<T>(pointer) }
   }
 
-  /// Stores a `Copy` value at a pointer.
+  /// Writes one value into naturally aligned storage.
   ///
   /// # Gotchas
   ///
-  /// The caller must prove that the pointer is non-null, aligned for `T`, and addresses writable
-  /// storage for `T` that is still live.
+  /// The caller must prove that the pointer addresses live writable storage for `T`.
   pub unsafe fn write<T: Copy>(pointer: *mut T, value: T) -> () {
     unsafe { return Intrinsic.pointerWrite<T>(pointer, value) }
   }
+
+  /// Copies one initialized value from storage with byte alignment.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the pointer addresses a live, readable, initialized `T`.
+  pub unsafe fn readUnaligned<T: Copy>(pointer: *const align(1) T) -> T {
+    unsafe { return Intrinsic.pointerReadUnaligned<T>(pointer) }
+  }
+
+  /// Writes one value into storage with byte alignment.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the pointer addresses live writable storage for `T`.
+  pub unsafe fn writeUnaligned<T: Copy>(pointer: *mut align(1) T, value: T) -> () {
+    unsafe { return Intrinsic.pointerWriteUnaligned<T>(pointer, value) }
+  }
+  /// Returns a pointer with the natural alignment of its pointee.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the address satisfies the target alignment of `T`.
+  /// The result holds no loan and keeps no storage alive.
+  pub unsafe fn assumeAligned<T>(pointer: *const align(1) T) -> *const T {
+    unsafe { return Intrinsic.pointerRequalify<*const align(1) T, *const T>(pointer) }
+  }
+
+  /// Returns a many-element pointer without a length.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove the element range separately before each indexed access.
+  /// The result holds no loan and keeps no storage alive.
+  pub unsafe fn assumeMany<T>(pointer: *const T) -> [*]const T {
+    unsafe { return Intrinsic.pointerRequalify<*const T, [*]const T>(pointer) }
+  }
+
+  /// Returns a pointer with the natural alignment of its pointee.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove that the address satisfies the target alignment of `T`.
+  /// The result holds no loan and keeps no storage alive.
+  pub unsafe fn assumeAlignedMut<T>(pointer: *mut align(1) T) -> *mut T {
+    unsafe { return Intrinsic.pointerRequalify<*mut align(1) T, *mut T>(pointer) }
+  }
+
+  /// Returns a many-element pointer without a length.
+  ///
+  /// # Gotchas
+  ///
+  /// The caller must prove the element range separately before each indexed access.
+  /// The result holds no loan and keeps no storage alive.
+  pub unsafe fn assumeManyMut<T>(pointer: *mut T) -> [*]mut T {
+    unsafe { return Intrinsic.pointerRequalify<*mut T, [*]mut T>(pointer) }
+  }
+
 }

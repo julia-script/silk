@@ -321,10 +321,7 @@ const verifyEntry = (
   if (Type.isNominal(candidate.type) && candidate.representation._tag === 'ScalarEnum') {
     const representation = candidate.representation
     const scalar = Scalar.enumRepresentation(representation.scalar)
-    const canonical =
-      scalar === undefined
-        ? undefined
-        : Scalar.resolveLayout(scalar, target.pointerSize, target.pointerAlignment)
+    const canonical = scalar === undefined ? undefined : Scalar.resolveLayout(scalar, target)
     const range =
       scalar === undefined ? undefined : Scalar.range(scalar, target.pointerSize === 4 ? 32 : 64)
     const metadataValid =
@@ -454,7 +451,10 @@ const verifyEntry = (
   }
   if (Type.isPointer(candidate.type)) {
     const expected = pointerEntry(target, candidate.type)
-    return candidate.size === expected.size &&
+    return candidate.type.addressSpace === 0 &&
+      (candidate.type.alignment === 'Natural' ||
+        Type.isPointerAlignment(candidate.type.alignment)) &&
+      candidate.size === expected.size &&
       candidate.alignment === expected.alignment &&
       candidate.copy === expected.copy &&
       representationEquals(candidate.representation, expected.representation)
