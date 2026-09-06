@@ -762,7 +762,7 @@ const printFunctionDeclaration = (
   const requirementRow = nodes.find((child) => child.kind === 'RequirementRow')
   const whereClause = nodes.find((child) => child.kind === 'WhereClause')
   const body = nodes.find((child) => child.kind === 'Block')
-  const properties = nodes.find((child) => child.kind === 'FunctionPropertyClause')
+  const properties = nodes.filter((child) => child.kind === 'FunctionPropertyClause')
   return FormatDocument.concat(
     ...head.flatMap((token, index) => [
       printToken(context, token, index === 0 ? prefix : FormatDocument.text(' ')),
@@ -795,7 +795,7 @@ const printFunctionDeclaration = (
           printToken(context, asKeyword, FormatDocument.text(' ')),
           printToken(context, symbol, FormatDocument.text(' ')),
         ]),
-    ...(properties === undefined ? [] : [printNode(context, properties, FormatDocument.text(' '))]),
+    ...properties.map((property) => printNode(context, property, FormatDocument.text(' '))),
     ...(body === undefined ? [] : [printNode(context, body, FormatDocument.text(' '))]),
   )
 }
@@ -1427,6 +1427,11 @@ const printNode = (
         commaTokens(node),
         tokenOf(node, 'RightParenthesis'),
         prefix,
+      )
+    case 'ModulePropertyDeclaration':
+      return FormatDocument.concat(
+        printToken(context, tokenOf(node, 'Identifier'), prefix),
+        ...directNodes(node).map((clause) => printNode(context, clause, FormatDocument.text(' '))),
       )
     case 'FunctionPropertyClause': {
       const names = directTokens(node).filter((token) => token.kind === 'Identifier')

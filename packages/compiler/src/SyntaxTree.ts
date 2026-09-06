@@ -61,6 +61,7 @@ export type NodeKind =
   | 'UnionType'
   | 'FunctionDeclaration'
   | 'ForeignFunctionDeclaration'
+  | 'ModulePropertyDeclaration'
   | 'FunctionPropertyClause'
   | 'FunctionProperty'
   | 'ForeignStaticDeclaration'

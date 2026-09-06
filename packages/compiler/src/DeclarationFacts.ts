@@ -1,3 +1,4 @@
+import type * as NativeRequirement from './NativeRequirement.js'
 import type * as ForeignContract from './ForeignContract.js'
 import type * as DeclarationLifetime from './DeclarationLifetime.js'
 import * as Lifetime from './Lifetime.js'
@@ -1906,6 +1907,7 @@ export interface Publication {
 
 /** One module's collected headers with their header-level diagnostics. */
 export interface ModuleHeaders {
+  readonly nativeRequirements?: ReadonlyArray<NativeRequirement.NativeRequirement>
   readonly _tag: 'ModuleHeaders'
   readonly module: string
   readonly publications: ReadonlyArray<Publication>

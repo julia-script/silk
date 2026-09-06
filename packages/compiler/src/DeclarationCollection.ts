@@ -1,3 +1,5 @@
+import * as DeclarationProperty from './DeclarationProperty.js'
+import * as NativeRequirement from './NativeRequirement.js'
 import * as ForeignContract from './ForeignContract.js'
 import * as Option from 'effect/Option'
 import * as AggregateIdentity from './AggregateIdentity.js'
@@ -3046,7 +3048,9 @@ const collectForeign = (
     direction === 'Foreign'
       ? ForeignContract.analyze(
           source,
-          SyntaxTree.directNode(node, 'FunctionPropertyClause'),
+          DeclarationProperty.clauses(node).find(
+            (clause) => DeclarationProperty.owner(source, clause) !== 'Intrinsic.native',
+          ),
           parameters.map((parameter) => ({
             name: parameter.name._tag === 'Present' ? parameter.name.spelling : '',
             type: undefined,
@@ -3897,14 +3901,22 @@ const collectModule = (
       SyntaxTree.directToken(node, 'ExportKeyword') !== undefined
         ? collectForeign(source, node, name, 'Export', facts)
         : undefined
-    const property = SyntaxTree.directNode(node, 'FunctionPropertyClause')
-    if (foreign === undefined && property !== undefined)
+    const properties = DeclarationProperty.clauses(node)
+    const behavior = properties.filter(
+      (clause) => DeclarationProperty.owner(source, clause) !== 'Intrinsic.native',
+    )
+    for (const property of behavior.slice(1))
       diagnostics.push(
-        Diagnostic.foreignDeclarationRestriction(
-          'foreign contract on a non-foreign function',
-          property.span,
-        ),
+        Diagnostic.foreignDeclarationRestriction('duplicate foreign contract', property.span),
       )
+    for (const property of properties)
+      if (foreign === undefined)
+        diagnostics.push(
+          Diagnostic.foreignDeclarationRestriction(
+            'foreign contract on a non-foreign function',
+            property.span,
+          ),
+        )
     const native = foreign ?? foreignExport
     if (native === undefined && functionKind === 'Ordinary' && failureRow.fact.syntax !== undefined)
       diagnostics.push(Diagnostic.failureChannelOnOrdinary(failureRow.fact.syntax.span))
@@ -4459,6 +4471,26 @@ const collectModule = (
       }),
     ]
   })
+  const nativeRequirements: Array<NativeRequirement.NativeRequirement> = []
+  for (const declaration of declarations) {
+    for (const clause of DeclarationProperty.clauses(declaration)) {
+      const moduleClause = declaration.kind === 'ModulePropertyDeclaration'
+      if (!moduleClause && DeclarationProperty.owner(source, clause) !== 'Intrinsic.native')
+        continue
+      if (!moduleClause && declaration.kind !== 'ForeignFunctionDeclaration') continue
+      const token = SyntaxTree.directToken(declaration, 'Identifier')
+      const scope: NativeRequirement.Scope = moduleClause
+        ? { kind: 'module', module: source.id }
+        : {
+            kind: 'declaration',
+            module: source.id,
+            declaration: token === undefined ? '' : spelling(source, token),
+          }
+      const analyzed = NativeRequirement.analyze(source, clause, scope)
+      diagnostics.push(...analyzed.diagnostics)
+      if (analyzed.requirement !== undefined) nativeRequirements.push(analyzed.requirement)
+    }
+  }
   const members: ReadonlyArray<MemberFact> = [
     ...ownMembers,
     ...inlineMembers,
@@ -4468,6 +4500,7 @@ const collectModule = (
   return Object.freeze({
     _tag: 'ModuleHeaders',
     module: source.id,
+    nativeRequirements: Object.freeze(nativeRequirements),
     publications: Object.freeze(
       declarations.flatMap((declaration): ModuleHeaders['publications'] => {
         if (

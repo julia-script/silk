@@ -1067,6 +1067,18 @@ const parseStaticConditionalDeclaration = (initial: State): NodeResult => {
 }
 
 export const parseTopLevelDeclaration = (state: State): NodeResult => {
+  if (hasContextualSpelling(state, 'module')) {
+    const keyword = expect(state, 'Identifier', ['Identifier'])
+    const property = parseFunctionProperties(keyword.state)
+    if (property !== undefined)
+      return {
+        state: property.state,
+        node: syntaxNode(property.state, 'ModulePropertyDeclaration', [
+          ...keyword.elements,
+          property.node,
+        ]),
+      }
+  }
   const kind = nextSignificantKind(state)
   const following = kind === 'PubKeyword' ? peek(state, 1) : undefined
   if (kind === 'StaticKeyword' && peek(state, 1) === 'IfKeyword')
@@ -1233,21 +1245,21 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
   ])
 
   if (marker === undefined) {
-    const properties = parseFunctionProperties(contract.state)
-    const block = parseBlock(properties?.state ?? contract.state, !unitResult, unitResult)
+    const properties = parseFunctionPropertyList(contract.state)
+    const block = parseBlock(properties.state, !unitResult, unitResult)
     return Object.freeze({
       state: block.state,
       node: syntaxNode(block.state, 'FunctionDeclaration', [
         ...header,
-        ...(properties === undefined ? [] : [properties.node]),
+        ...properties.elements,
         block.node,
       ]),
     })
   }
 
   const symbol = parseSymbolTail(contract.state)
-  const properties = parseFunctionProperties(symbol.state)
-  const afterProperties = properties?.state ?? symbol.state
+  const properties = parseFunctionPropertyList(symbol.state)
+  const afterProperties = properties.state
   if (markerKind === 'ExportKeyword') {
     // An exported function requires a body; without one the declaration closes on an empty block
     // so the next top-level declaration parses intact.
@@ -1260,7 +1272,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
       node: syntaxNode(block.state, 'FunctionDeclaration', [
         ...header,
         ...symbol.elements,
-        ...(properties === undefined ? [] : [properties.node]),
+        ...properties.elements,
         block.node,
       ]),
     })
@@ -1278,10 +1290,22 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     node: syntaxNode(state, 'ForeignFunctionDeclaration', [
       ...header,
       ...symbol.elements,
-      ...(properties === undefined ? [] : [properties.node]),
+      ...properties.elements,
       ...(body === undefined ? [] : [body.node]),
     ]),
   })
+}
+
+const parseFunctionPropertyList = (initial: State): ElementsResult => {
+  let state = initial
+  const elements: Array<SyntaxTree.Element> = []
+  while (hasContextualSpelling(state, 'with')) {
+    const property = parseFunctionProperties(state)
+    if (property === undefined) break
+    elements.push(property.node)
+    state = property.state
+  }
+  return { state, elements: Object.freeze(elements) }
 }
 
 /** Retains sealed declaration properties as syntax; completion validates their owner and literals. */

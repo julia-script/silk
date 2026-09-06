@@ -38,7 +38,7 @@ Semantic native forms SHALL be executable image, loadable module, static archive
 
 ### Requirement: Collect typed requirements by activation scope
 
-Foreign-declaration `with Intrinsic.native(...)` clauses SHALL activate only for reachable foreign declarations. Standalone module clauses SHALL activate with their selected module, including modules with no reachable function. Artifact configuration requirements SHALL always activate for the artifact. Inactive branches and unselected modules SHALL contribute none. Requirements SHALL contain logical kind/name identities and admitted linkage, deployment and alternative constraints, never source filesystem paths or raw commands. No foreign-symbol or library-actor spelling SHALL imply a requirement.
+Foreign-declaration `with Intrinsic.native(...)` clauses SHALL activate only for reachable foreign declarations. Standalone `module with Intrinsic.native(...)` clauses SHALL activate with their selected module, including modules with no reachable function. Artifact configuration requirements SHALL always activate for the artifact. Inactive branches and unselected modules SHALL contribute none. Requirements SHALL contain logical kind/name identities and admitted linkage, deployment and alternative constraints, never source filesystem paths or raw commands. No foreign-symbol or library-actor spelling SHALL imply a requirement.
 
 #### Scenario: Distinguish three owners
 

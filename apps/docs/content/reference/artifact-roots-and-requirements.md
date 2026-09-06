@@ -104,7 +104,7 @@ configuration origins. Missing physical symbols remain final-link failures.
 **Status:** Candidate.
 
 **Rule:** `with Intrinsic.native(...)` on a foreign declaration activates with that declaration's
-reachability. A standalone module clause activates when its selected module belongs to the closure,
+reachability. A standalone `module with Intrinsic.native(...)` clause activates when its selected module belongs to the closure,
 even if no function in it is reachable. Artifact configuration requirements always activate for the
 artifact. Multiple sealed function clauses compose; native requirements do not change foreign
 behavioral contracts. Module clauses may occur inside module-level static selection.
@@ -112,7 +112,7 @@ behavioral contracts. Module clauses may occur inside module-level static select
 **Example:**
 
 ```silk
-with Intrinsic.native(kind: "startup-object", name: "startup")
+module with Intrinsic.native(kind: "startup-object", name: "startup")
 
 unsafe extern "C" fn readValue() -> i32 as "read_value"
   with Intrinsic.foreign(memory: "read")
