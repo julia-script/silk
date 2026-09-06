@@ -307,7 +307,7 @@ it.effect(
       )
       assert.include(
         cachedShared.report.map((entry) => entry.phase),
-        'link',
+        'artifact-cache',
       )
       assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.h')), firstHeader)
       assert.deepStrictEqual(readFileSync(join(destinationRoot, 'answer.abi.json')), firstManifest)
