@@ -62,6 +62,10 @@
       "types": "./dist/CTranslationUnit.d.ts",
       "import": "./dist/CTranslationUnit.js"
     },
+    "./CTranslationUnitResolver": {
+      "types": "./dist/CTranslationUnitResolver.d.ts",
+      "import": "./dist/CTranslationUnitResolver.js"
+    },
     "./CallableContract": {
       "types": "./dist/CallableContract.d.ts",
       "import": "./dist/CallableContract.js"

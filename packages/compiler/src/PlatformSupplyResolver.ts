@@ -248,6 +248,7 @@ const tool = Effect.fnUntraced(function* (
   role: 'compiler' | 'linker' | 'archiver',
   environment: Readonly<Record<string, string>>,
   queries: Array<PlatformSupply.Query>,
+  darwin = false,
 ): Effect.fn.Return<PlatformSupply.Tool, PlatformSupply.SupplyError, Services> {
   const path = yield* executable(self, command)
   const identity = yield* file(path, role, 'selected tool')
@@ -255,7 +256,7 @@ const tool = Effect.fnUntraced(function* (
   const version = yield* query(
     environment,
     path,
-    role === 'linker' && path === '/usr/bin/ld' ? ['-v'] : ['--version'],
+    role === 'linker' && darwin && path.endsWith('/ld') ? ['-v'] : ['--version'],
     'tool version',
   )
   queries.push(version)
@@ -514,7 +515,14 @@ export const resolveSupply = Effect.fn('PlatformSupplyResolver.resolveSupply')(f
     queries.push(found)
     linkerPath = found.stdout.trim()
   }
-  const linker = yield* tool(self, linkerPath, 'linker', environment, queries)
+  const linker = yield* tool(
+    self,
+    linkerPath,
+    'linker',
+    environment,
+    queries,
+    profile.target.operatingSystem === 'darwin',
+  )
   return Object.freeze({
     _tag: 'PlatformSupply',
     target: profile.target,

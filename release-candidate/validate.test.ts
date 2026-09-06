@@ -503,6 +503,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './AutoImport',
       './Backend',
       './CTranslationUnit',
+      './CTranslationUnitResolver',
       './CallableContract',
       './CleanupPlan',
       './CompilationProfile',

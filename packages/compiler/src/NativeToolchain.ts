@@ -33,7 +33,8 @@ import * as PlatformSupply from './PlatformSupply.js'
 import * as PlatformSupplyResolver from './PlatformSupplyResolver.js'
 import * as NativeLinkResolver from './NativeLinkResolver.js'
 import type * as NativeLinkPlan from './NativeLinkPlan.js'
-import * as CTranslationUnit from './CTranslationUnit.js'
+import * as CTranslationUnitResolver from './CTranslationUnitResolver.js'
+import type * as CTranslationUnit from './CTranslationUnit.js'
 
 export interface Toolchain {
   readonly _tag: 'Toolchain'
@@ -898,7 +899,7 @@ export const compileCObject = Effect.fn('NativeToolchain.compileCObject')(functi
   let cacheKey: string
   let translation: CTranslationUnit.CTranslationUnit | undefined
   if (selected.supply !== undefined) {
-    translation = yield* CTranslationUnit.resolve(
+    translation = yield* CTranslationUnitResolver.resolve(
       selected.supply,
       source.path,
       join(scope.root, `${name}.d`),
