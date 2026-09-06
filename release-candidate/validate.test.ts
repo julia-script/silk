@@ -502,7 +502,11 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './Backend',
       './CallableContract',
       './CleanupPlan',
+      './CompilationProfile',
       './Completion',
+      './ConfigurationError',
+      './ConfigurationOrigin',
+      './ConfigurationValue',
       './ConformanceGoal',
       './ConformanceHead',
       './Constraint',
@@ -561,11 +565,15 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './NodeHeapObservation',
       './Operator',
       './Ownership',
+      './PackageConfiguration',
+      './PackageParameter',
       './Parser',
       './PhaseReport',
       './Presentation',
+      './ProfileBootstrap',
       './Project',
       './ProjectAnalysis',
+      './ProjectProfile',
       './ProviderSelection',
       './RepresentationField',
       './RequirementRow',
@@ -624,6 +632,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/effect.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/logger.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/numeric.silk'))).toBe(true)
+    expect(existsSync(resolve(packedRoot, 'stdlib/silk/compilation.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/os_filesystem.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/option.silk'))).toBe(true)
     expect(existsSync(resolve(packedRoot, 'stdlib/silk/result.silk'))).toBe(true)

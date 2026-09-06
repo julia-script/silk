@@ -90,7 +90,7 @@ it.effect(
           root: SourceFile.make('effect-typing/provide-each-layer', ascii(provideEachLayer)),
         },
         toolchain,
-        profile: 'release',
+        optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'provide-each-layer'),
       }).pipe(Effect.provide(SourceResolver.empty))

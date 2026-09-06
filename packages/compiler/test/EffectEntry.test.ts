@@ -30,7 +30,7 @@ it.effect('reports an unhandled effect entry through the native runtime', () =>
         root: SourceFile.make('effect-entry/native', ascii(failureSource)),
       },
       toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
-      profile: 'release',
+      optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'native-failure'),
     }).pipe(Effect.provide(SourceResolver.empty))
@@ -51,7 +51,7 @@ it.effect('reports an unhandled effect entry through the native runtime', () =>
         root: SourceFile.make('effect-entry/native-success', ascii(successSource)),
       },
       toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
-      profile: 'release',
+      optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'native-success'),
     }).pipe(Effect.provide(SourceResolver.empty))

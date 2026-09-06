@@ -17,7 +17,18 @@ const executionTargets = [
   'wasm32-unknown-unknown',
   'x86_64-unknown-linux-gnu',
 ]
-const staticIntrinsics = new Set(['targetProfile'])
+const staticIntrinsics = new Set([
+  'targetArchitecture',
+  'targetOperatingSystem',
+  'targetAbi',
+  'targetObjectFormat',
+  'targetEndianness',
+  'targetPointerBits',
+  'targetPointerAlignment',
+  'profileText',
+  'profileFlag',
+  'profileContains',
+])
 const modules = []
 
 const sourceLiteral = (source) => {

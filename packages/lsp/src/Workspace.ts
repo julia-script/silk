@@ -1,3 +1,7 @@
+import * as ConfigurationError from '@silklang/compiler/ConfigurationError'
+import * as ConfigurationOrigin from '@silklang/compiler/ConfigurationOrigin'
+import * as ProjectProfile from '@silklang/compiler/ProjectProfile'
+import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as FileSourceResolver from '@silklang/compiler/FileSourceResolver'
 import * as Project from '@silklang/compiler/Project'
@@ -79,6 +83,7 @@ export const open = Effect.fn('Workspace.open')(function* (options: {
   readonly uri: string
   readonly version: number
   readonly bytes: Uint8Array
+  readonly configuration?: unknown
 }): Effect.fn.Return<Document.Document, never, FileSystem.FileSystem | Path.Path> {
   const path = yield* Path.Path
   const parsedUrl = yield* Effect.try(() => new URL(options.uri)).pipe(Effect.option)
@@ -94,6 +99,7 @@ export const open = Effect.fn('Workspace.open')(function* (options: {
       module: virtualModule(options.uri),
       sourceRoot: options.uri,
       bytes: options.bytes,
+      configuration: options.configuration,
     })
   }
   const identity = yield* identityOf(documentPath.value)
@@ -105,6 +111,7 @@ export const open = Effect.fn('Workspace.open')(function* (options: {
     module,
     sourceRoot: identity.sourceRoot,
     bytes: options.bytes,
+    configuration: options.configuration,
   })
 })
 
@@ -129,6 +136,49 @@ export const resolver = (
     }),
   ).pipe(Layer.provide(FileSourceResolver.layer(FileSourceResolver.make(sourceRoot))))
 
+/** Resolves editor selection with the same catalog and logical normalization as the CLI. */
+const configuration = Effect.fnUntraced(function* (
+  document: Document.Document,
+): Effect.fn.Return<ProjectAnalysis.Options, never, FileSystem.FileSystem | Path.Path> {
+  const attempt = yield* Effect.result(
+    Effect.gen(function* () {
+      const loaded = yield* Effect.result(Project.load({ workingDirectory: document.sourceRoot }))
+      const origin = ConfigurationOrigin.literal(document.uri)
+      if (Result.isFailure(loaded) && loaded.failure.reason._tag !== 'ManifestNotFound') {
+        if (loaded.failure.reason._tag === 'InvalidProfile')
+          return yield* loaded.failure.reason.error
+        return yield* ConfigurationError.make(
+          'Workspace.configuration',
+          'InvalidInput',
+          'project manifest',
+          [origin],
+        )
+      }
+      const project = Result.isSuccess(loaded) ? loaded.success : undefined
+      const catalog: ProjectProfile.Catalog = project?.profiles ?? {
+        profiles: new Map(),
+        bindings: [],
+        origin,
+      }
+      const request = yield* ProjectProfile.selection(document.configuration, origin)
+      const host = NativeToolchain.hostSelection()
+      const selected = yield* ProjectProfile.select(
+        catalog,
+        request,
+        host._tag === 'Resolved' ? host.target.id : undefined,
+      )
+      return {
+        package: project === undefined ? 'standalone@0.0.0' : `${project.name}@${project.version}`,
+        profile: selected.input,
+        bindings: selected.bindings,
+      }
+    }),
+  )
+  return Result.isSuccess(attempt)
+    ? { configuration: attempt.success }
+    : { configurationError: attempt.failure }
+})
+
 /** Analyzes one document as its compilation root, seeing sibling open documents. */
 export const analyze = Effect.fn('Workspace.analyze')(function* (
   document: Document.Document,
@@ -140,9 +190,14 @@ export const analyze = Effect.fn('Workspace.analyze')(function* (
       overlays.set(open.module, SourceResolver.resolved(open.bytes, SourceOrigin.memory(open.uri)))
     }
   }
-  return yield* Analysis.make({
-    root: SourceFile.make(document.module, document.bytes, SourceOrigin.memory(document.uri)),
-  }).pipe(Effect.provide(resolver(document.sourceRoot, overlays)))
+  const selected = yield* configuration(document)
+  const project = yield* ProjectAnalysis.make(
+    [SourceFile.make(document.module, document.bytes, SourceOrigin.memory(document.uri))],
+    selected,
+  ).pipe(Effect.provide(resolver(document.sourceRoot, overlays)))
+  const view = ProjectAnalysis.view(project, document.module)
+  if (view === undefined) throw new RangeError('Workspace analysis lost its root view')
+  return view
 })
 
 /** Analyzes all synchronized project roots through one shared immutable compiler frontend. */
@@ -181,10 +236,11 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
       rediscover: invalidation.rediscover,
     },
   })
+  const selectedConfiguration = yield* configuration(first)
   const project = yield* (
     previousProject === undefined
-      ? ProjectAnalysis.make(roots)
-      : ProjectAnalysis.revise(previousProject, roots)
+      ? ProjectAnalysis.make(roots, selectedConfiguration)
+      : ProjectAnalysis.revise(previousProject, roots, selectedConfiguration)
   ).pipe(Effect.provide(resolver(first.sourceRoot, overlays)))
   const moduleUris = new Map<string, string>()
   for (const module of project.closure.modules) {

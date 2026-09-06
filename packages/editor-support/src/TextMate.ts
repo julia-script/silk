@@ -35,6 +35,7 @@ export const keywords: Record<KeywordKind, string> = {
   AsKeyword: 'as',
   LetKeyword: 'let',
   ConstKeyword: 'const',
+  ParamKeyword: 'param',
   MutKeyword: 'mut',
   OnceKeyword: 'once',
   MoveKeyword: 'move',

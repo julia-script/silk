@@ -1,3 +1,4 @@
+import type * as ConfigurationError from './ConfigurationError.js'
 import type * as ProviderSelection from './ProviderSelection.js'
 import * as SourceSpan from './SourceSpan.js'
 import type * as Target from './Target.js'
@@ -246,6 +247,8 @@ export const invalidDropHookCode = 'SEM0084' as const
 export const invalidStaticLiteralCode = 'SEM0085' as const
 /** Stable code for a typed constant whose type or literal is outside the constant contract. */
 export const invalidConstantCode = 'SEM0086' as const
+/** Stable code for rejected profile inputs, package schemas, defaults, or predicates. */
+export const invalidConfigurationCode = 'SEM0214' as const
 /** Stable code for an expression statement whose result cannot be intentionally ignored. */
 export const expressionStatementResultCode = 'SEM0087' as const
 /** Stable code for using a generic binder in a value, failure-row, or requirement-row position of another kind. */
@@ -605,6 +608,7 @@ export type Code =
   | typeof invalidDropHookCode
   | typeof invalidStaticLiteralCode
   | typeof invalidConstantCode
+  | typeof invalidConfigurationCode
   | typeof expressionStatementResultCode
   | typeof genericParameterKindMismatchCode
   | typeof contractRowInferenceCode
@@ -1007,6 +1011,7 @@ export type Reason =
       readonly context: 'ServiceOperation' | 'InterfaceOperation'
     }
   | { readonly _tag: 'InvalidConstant'; readonly detail: string }
+  | { readonly _tag: 'InvalidConfiguration'; readonly error: ConfigurationError.ConfigurationError }
   | { readonly _tag: 'ExpressionStatementResult'; readonly actual: string }
   | { readonly _tag: 'InvalidRequirementType'; readonly type: string }
   | { readonly _tag: 'UnhandledEffectRequirements'; readonly requirements: ReadonlyArray<string> }
@@ -5726,5 +5731,20 @@ export const invalidSuspensionOwnership = (
     severity: 'error',
     message: `Cannot preserve ownership across suspension: ${detail}`,
     reason: Object.freeze({ _tag: 'InvalidSuspensionOwnership', detail }),
+    span,
+  })
+
+/** Preserves typed configuration origins and dependency failures without interpolating values. */
+export const invalidConfiguration = (
+  error: ConfigurationError.ConfigurationError,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidConfigurationCode,
+    severity: 'error',
+    message: `Invalid compilation configuration: ${error.message}`,
+    reason: Object.freeze({ _tag: 'InvalidConfiguration', error }),
     span,
   })

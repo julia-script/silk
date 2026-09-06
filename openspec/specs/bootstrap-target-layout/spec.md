@@ -9,11 +9,11 @@ all later phases and consumers share for reachable concrete Silk types.
 
 ### Requirement: Compilation selects one canonical bootstrap target
 
-Each compilation SHALL select exactly one canonical target before runtime instance discovery. The
+Each compilation SHALL select exactly one canonical target within one normalized compilation profile before runtime instance discovery. Compiler-core selection SHALL NOT inspect ambient host state. The
 required native-host targets SHALL be `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, and
 `aarch64-unknown-linux-gnu`; the supported non-host emission target SHALL be
-`wasm32-unknown-unknown`. An explicit request SHALL resolve only to one of these four profiles. A
-request without an explicit target SHALL resolve the current native host only when it matches one
+`wasm32-unknown-unknown`. An explicit request SHALL resolve only to one of these four machine descriptions. A
+request without an explicit target SHALL resolve a host explicitly supplied at the application edge only when it matches one
 of the three required hosts. Unsupported or inconsistent requests SHALL produce a closed typed
 compiler outcome before MIR lowering or backend emission.
 

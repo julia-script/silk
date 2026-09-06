@@ -1,76 +1,118 @@
-//! Compile-time nominal facts for the selected compilation target.
+//! Typed compile-time facts for the selected compilation profile.
+//!
+//! # When to use
+//! Use [`arch`] and [`operatingSystem`] to select source behavior for a machine. Use [`pointerBits`]
+//! for pointer-sized arithmetic. Read logical artifact and runtime requests through `silk.compilation`.
 //!
 //! # Details
-//!
-//! [`profile`] identifies
-//! the complete target profile, while [`arch`] groups profiles by instruction-set architecture.
-//! The integer facts are derived from that profile during static evaluation and have no runtime
-//! storage.
+//! These facts are fixed before static evaluation. They have no runtime storage.
 
-/// One complete compilation-target profile with stable profile-code discriminants.
-pub enum(u8) Profile {
-  /// The 64-bit Arm profile for Apple Darwin.
-  Aarch64AppleDarwin = 0,
-  /// The 64-bit Arm profile for GNU/Linux.
-  Aarch64UnknownLinuxGnu = 1,
-  /// The freestanding 32-bit WebAssembly profile.
-  Wasm32UnknownUnknown = 2,
-  /// The 64-bit x86 profile for GNU/Linux.
-  X86_64UnknownLinuxGnu = 3
-}
-
-/// One instruction-set architecture shared by one or more target profiles.
+/// The instruction-set architectures supported by the compiler.
 pub enum Arch {
-  /// The 64-bit Arm architecture.
+  /// The Aarch64 choice.
   Aarch64,
-  /// The 32-bit WebAssembly architecture.
+  /// The Wasm32 choice.
   Wasm32,
-  /// The 64-bit x86 architecture.
+  /// The X86_64 choice.
   X86_64
 }
 
-/// Returns the selected complete target profile during static evaluation.
-pub static fn profile() -> Profile {
-  let code = Intrinsic.targetProfile()
-  if code == 0 { return Profile.Aarch64AppleDarwin }
-  if code == 1 { return Profile.Aarch64UnknownLinuxGnu }
-  if code == 2 { return Profile.Wasm32UnknownUnknown }
-  if code == 3 { return Profile.X86_64UnknownLinuxGnu }
-  compileError("Intrinsic.targetProfile returned an unknown profile code")
-}
-
-/// Returns the selected instruction-set architecture during static evaluation.
+/// Returns the selected Arch during static evaluation.
 pub static fn arch() -> Arch {
-  let selected = profile()
-  if selected == Profile.Aarch64AppleDarwin { return Arch.Aarch64 }
-  if selected == Profile.Aarch64UnknownLinuxGnu { return Arch.Aarch64 }
-  if selected == Profile.Wasm32UnknownUnknown { return Arch.Wasm32 }
-  if selected == Profile.X86_64UnknownLinuxGnu { return Arch.X86_64 }
-  compileError("Target.profile returned an unknown profile")
+  let selected = Intrinsic.targetArchitecture()
+  if selected == "aarch64" { return Arch.Aarch64 }
+  if selected == "wasm32" { return Arch.Wasm32 }
+  if selected == "x86_64" { return Arch.X86_64 }
+  compileError("Unknown Arch fact")
 }
 
-static fn selectedPointerBits() -> u32 {
-  if profile() == Profile.Wasm32UnknownUnknown { return 32 }
-  return 64
+/// The operating systems supported by the compiler.
+pub enum OperatingSystem {
+  /// The Darwin choice.
+  Darwin,
+  /// The Linux choice.
+  Linux,
+  /// The Freestanding choice.
+  Freestanding
+}
+
+/// Returns the selected OperatingSystem during static evaluation.
+pub static fn operatingSystem() -> OperatingSystem {
+  let selected = Intrinsic.targetOperatingSystem()
+  if selected == "darwin" { return OperatingSystem.Darwin }
+  if selected == "linux" { return OperatingSystem.Linux }
+  if selected == "freestanding" { return OperatingSystem.Freestanding }
+  compileError("Unknown OperatingSystem fact")
+}
+
+/// The platform calling conventions supported by the compiler.
+pub enum Abi {
+  /// The Apple choice.
+  Apple,
+  /// The Gnu choice.
+  Gnu,
+  /// The Wasm choice.
+  Wasm
+}
+
+/// Returns the selected Abi during static evaluation.
+pub static fn abi() -> Abi {
+  let selected = Intrinsic.targetAbi()
+  if selected == "apple" { return Abi.Apple }
+  if selected == "gnu" { return Abi.Gnu }
+  if selected == "wasm" { return Abi.Wasm }
+  compileError("Unknown Abi fact")
+}
+
+/// The object-file formats supported by the compiler.
+pub enum ObjectFormat {
+  /// The MachO choice.
+  MachO,
+  /// The Elf choice.
+  Elf,
+  /// The Wasm choice.
+  Wasm
+}
+
+/// Returns the selected ObjectFormat during static evaluation.
+pub static fn objectFormat() -> ObjectFormat {
+  let selected = Intrinsic.targetObjectFormat()
+  if selected == "macho" { return ObjectFormat.MachO }
+  if selected == "elf" { return ObjectFormat.Elf }
+  if selected == "wasm" { return ObjectFormat.Wasm }
+  compileError("Unknown ObjectFormat fact")
+}
+
+/// The byte orders supported by the compiler.
+pub enum Endianness {
+  /// The Little choice.
+  Little
+}
+
+/// Returns the selected Endianness during static evaluation.
+pub static fn endianness() -> Endianness {
+  let selected = Intrinsic.targetEndianness()
+  if selected == "little" { return Endianness.Little }
+  compileError("Unknown Endianness fact")
 }
 
 static fn selectedUsizeMax() -> usize {
-  if profile() == Profile.Wasm32UnknownUnknown { return 4294967295 }
+  if Intrinsic.targetPointerBits() == 32 { return 4294967295 }
   return 18446744073709551615
 }
 
 static fn selectedIsizeMax() -> isize {
-  if profile() == Profile.Wasm32UnknownUnknown { return 2147483647 }
+  if Intrinsic.targetPointerBits() == 32 { return 2147483647 }
   return 9223372036854775807
 }
 
 static fn selectedIsizeMin() -> isize {
-  if profile() == Profile.Wasm32UnknownUnknown { return -2147483648 }
+  if Intrinsic.targetPointerBits() == 32 { return -2147483648 }
   return -9223372036854775808
 }
 
 /// The pointer width of the selected compilation target, in bits.
-pub const pointerBits: u32 = selectedPointerBits()
+pub const pointerBits: u32 = Intrinsic.targetPointerBits()
 
 /// The greatest `usize` value supported by the selected compilation target.
 pub const usizeMax: usize = selectedUsizeMax()
@@ -80,3 +122,16 @@ pub const isizeMax: isize = selectedIsizeMax()
 
 /// The least `isize` value supported by the selected compilation target.
 pub const isizeMin: isize = selectedIsizeMin()
+
+/// The alignment of a data pointer, in bytes.
+pub const pointerAlignment: u32 = Intrinsic.targetPointerAlignment()
+
+/// Returns the logical cpu selection.
+pub static fn cpu() -> string<'static> { return Intrinsic.profileText("cpu") }
+
+/// Returns the logical deployment selection.
+pub static fn deployment() -> string<'static> { return Intrinsic.profileText("deployment") }
+
+
+/// Whether a canonical CPU feature is enabled.
+pub static fn hasCpuFeature(value: string<'static>) -> bool { return Intrinsic.profileContains("cpu-features", value) }

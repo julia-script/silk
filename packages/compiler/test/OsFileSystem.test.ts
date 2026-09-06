@@ -450,7 +450,7 @@ pub fn main() -> i32 {
           root: SourceFile.make('os-filesystem/native-provider', ascii(source)),
         },
         toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
-        profile: 'release',
+        optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-provider'),
       }).pipe(Effect.provide(SourceResolver.empty))

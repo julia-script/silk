@@ -44,6 +44,7 @@ const declarationKind = (
     case 'FunctionDeclaration':
     case 'ForeignFunctionDeclaration':
       return { declarationKind: 'Function', namespace: 'Value' }
+    case 'PackageParameterDeclaration':
     case 'ConstantDeclaration':
       return { declarationKind: 'Constant', namespace: 'Value' }
     case 'StructDeclaration':

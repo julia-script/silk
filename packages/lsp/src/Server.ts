@@ -94,6 +94,7 @@ export const start = (options: Options = {}): void => {
   let supportsInlayHintRefresh = false
   let watcherRegistration: { readonly dispose: () => void } | undefined
   let shuttingDown = false
+  let profileSettings: unknown
 
   const discover =
     options.discover ??
@@ -102,6 +103,7 @@ export const start = (options: Options = {}): void => {
         uri: entry.uri,
         version: entry.version.value,
         bytes: entry.bytes,
+        configuration: profileSettings,
       }))
 
   const bootstrap = WorkspaceEngine.make({
@@ -143,6 +145,7 @@ export const start = (options: Options = {}): void => {
       }
 
       connection.onInitialize((parameters) => {
+        profileSettings = parameters.initializationOptions
         supportsDynamicWatchers =
           parameters.capabilities.workspace?.didChangeWatchedFiles?.dynamicRegistration === true
         supportsDiagnosticRefresh =
@@ -176,6 +179,11 @@ export const start = (options: Options = {}): void => {
             },
           },
         }
+      })
+
+      connection.onDidChangeConfiguration((event) => {
+        profileSettings = event.settings
+        accept(SourceEvent.invalidate([], true))
       })
 
       connection.onInitialized(() => {

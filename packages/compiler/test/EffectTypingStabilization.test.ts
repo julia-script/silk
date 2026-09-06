@@ -93,7 +93,10 @@ pub fn main() -> i32 {
 }`,
       ],
     ] as const) {
-      const snapshot = Analysis.realize(yield* snapshotOf(name, source), 'wasm32-unknown-unknown')
+      const snapshot = yield* Analysis.realize(
+        yield* snapshotOf(name, source),
+        'wasm32-unknown-unknown',
+      )
       assert.deepEqual(codesOf(snapshot), ['SEM0103'], name)
       assert.strictEqual(snapshot.mir._tag, 'Unavailable', name)
     }

@@ -30,7 +30,7 @@ const lowerStored = Effect.fnUntraced(function* (
     root: SourceFile.make(name, ascii(source)),
     target: Target.wasm32UnknownUnknown.id,
   }).pipe(Effect.provide(SourceResolver.memory(imports)))
-  const snapshot = Analysis.realize(frontend, Target.wasm32UnknownUnknown.id, {
+  const snapshot = yield* Analysis.realize(frontend, Target.wasm32UnknownUnknown.id, {
     normalizeMir: false,
   })
   const layout =

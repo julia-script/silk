@@ -5,7 +5,7 @@
  * The value is sized from measurement, not from feel. On an idle 4-core machine the slowest
  * such test in this package (`Cli.test.ts > initializes a project that loads, checks, builds,
  * and runs with defaults`) takes ~474 ms. Issue #147 recorded `Workflow.test.ts > builds to the
- * deterministic target and profile path` taking 13,572 ms on a shared CI runner, against ~238 ms
+ * deterministic target and optimization path` taking 13,572 ms on a shared CI runner, against ~238 ms
  * for the same test locally — an amplification of roughly 57x. Applying that amplification to
  * the slowest test puts the worst case near 27 s, so 60 s leaves a little over 2x headroom.
  *

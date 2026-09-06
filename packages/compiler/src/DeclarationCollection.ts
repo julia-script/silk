@@ -3069,6 +3069,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         element.kind === 'InterfaceDeclaration' ||
         element.kind === 'RoleDeclaration' ||
         element.kind === 'ConstantDeclaration' ||
+        element.kind === 'PackageParameterDeclaration' ||
         element.kind === 'ForeignStaticDeclaration' ||
         element.kind === 'ExportStaticDeclaration' ||
         element.kind === 'TypeAliasDeclaration'),
@@ -3363,16 +3364,19 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         syntax: node,
       })
     }
-    if (node.kind === 'ConstantDeclaration') {
+    if (node.kind === 'ConstantDeclaration' || node.kind === 'PackageParameterDeclaration') {
       const initializer =
         node.children.find(
           (element): element is SyntaxTree.Node =>
-            SyntaxTree.isNode(element) && !isDeclaredTypeNode(element),
+            SyntaxTree.isNode(element) &&
+            element.kind !== 'PackageParameterValidation' &&
+            !isDeclaredTypeNode(element),
         ) ?? node
       const declaredType = analyzeDeclaredType(source, declaredTypeNode(node))
       diagnostics.push(...declaredType.diagnostics)
-      return Object.freeze({
-        _tag: 'ConstantDeclaration',
+      const validation = SyntaxTree.directNode(node, 'PackageParameterValidation')
+      const predicate = validation?.children.find(SyntaxTree.isNode)
+      const base = {
         id,
         canonical,
         visibility,
@@ -3380,10 +3384,23 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
         name,
         declaredType: declaredType.fact,
         initializerTemplate: staticExpressionTemplate(source, initializer),
-        literal: constantLiteral(source, initializer),
+        literal:
+          node.kind === 'PackageParameterDeclaration'
+            ? Object.freeze({ _tag: 'Unavailable' as const, syntax: initializer })
+            : constantLiteral(source, initializer),
         initializer,
         syntax: node,
-      })
+      }
+      return node.kind === 'PackageParameterDeclaration'
+        ? Object.freeze({
+            ...base,
+            _tag: 'PackageParameterDeclaration',
+            hasDefault: SyntaxTree.directToken(node, 'Equals') !== undefined,
+            ...(predicate === undefined
+              ? {}
+              : { predicate, predicateTemplate: staticExpressionTemplate(source, predicate) }),
+          })
+        : Object.freeze({ ...base, _tag: 'ConstantDeclaration' })
     }
     if (node.kind === 'ForeignStaticDeclaration' || node.kind === 'ExportStaticDeclaration') {
       const declaredType = analyzeDeclaredType(source, declaredTypeNode(node))
@@ -4411,7 +4428,10 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
       members.filter((member): member is InterfaceFact => member._tag === 'InterfaceDeclaration'),
     ),
     constants: Object.freeze(
-      members.filter((member): member is ConstantFact => member._tag === 'ConstantDeclaration'),
+      members.filter(
+        (member): member is ConstantFact =>
+          member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration',
+      ),
     ),
     conformances: Object.freeze(conformances),
     inherentImpls: Object.freeze(inherentImpls),

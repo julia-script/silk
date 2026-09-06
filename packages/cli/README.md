@@ -121,16 +121,22 @@ verified backend inventory on cache hits, so cached and uncached builds produce 
 Executables and WebAssembly modules do not produce either companion.
 
 `silk check` analyzes every resolved target in order without Clang, linker, or artifact
-work. Diagnostics and summaries are target-qualified. `silk run` always builds exactly the host
-target; manifest foreign/Wasm targets are ignored for run. A library project is rejected rather
-than overridden. After a successful build, run returns the program's exact exit status.
+work. Diagnostics and summaries are target-qualified. `silk run` uses the selected profile and
+requires an executable matching the host target. After a successful build, run returns the program's exact exit status.
 
 Shared options are:
 
 - `--manifest-path <path>` — select an exact manifest.
 - `--target <host|canonical-target>` — repeatable; replace the manifest targets.
-- `--profile <debug|release|release-with-debug>` — select a fixed profile.
-- `--release` — shorthand for `--profile release`; conflicts with a different explicit profile.
+- `--profile <name>` — select a named project compilation profile.
+- `--profile-input <json>` — select a complete logical profile with typed bindings.
+- `--optimization <debug|release|release-with-debug>` — optimization for target shorthand.
+- `--release` — shorthand for `--optimization release`.
+
+Named and complete profiles conflict with target and optimization flags. With no explicit selector,
+the project default profile wins, followed by manifest targets and explicit host resolution.
+See [compilation profiles](../../apps/docs/content/reference/compilation-profiles.md) for the TOML
+schema, binding provenance, and the matching LSP `profile`, `profileInput`, and `target` settings.
 
 ## Format
 
@@ -197,7 +203,7 @@ silk build-exe main.silk -o ./main
 silk build-exe ./src/app/Main.silk --source-root ./src -o ./main
 ```
 
-It supports `--source-root`, `--output`/`-o`, native `--target`, `--profile`, `--clang`,
+It supports `--source-root`, `--output`/`-o`, native `--target`, `--optimization`, `--profile-input`, `--clang`,
 `--save-temps`, and `--timings`.
 
 ## Exit behavior

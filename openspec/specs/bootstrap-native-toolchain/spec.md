@@ -13,14 +13,15 @@ atomic artifact/cache commits.
 
 Object emission SHALL invoke the caller-pinned external Clang with `-c`, the canonical target from
 the compiler-selected MIR plan, and structured arguments — never a shell command string — over the
-backend's bitcode. Optimization profiles are fixed: debug is `-O0` with debug metadata, release is
-`-O2` without debug metadata, and release-with-debug is `-O2` with line information. There is no
+backend's bitcode. The completed logical profile SHALL supply optimization and debug choices:
+`none` uses `-O0`, `speed` uses `-O2`, and debug information adds `-g`. The application-edge
+debug/release/release-with-debug optimization shorthands SHALL normalize into those fields. There is no
 configurable pass pipeline, and a process failure or bitcode/target mismatch SHALL surface as data
 retaining the exact command, arguments, exit status, and process output rather than throwing.
 
 #### Scenario: Emit a release object
 
-- **WHEN** the nested-call program's bitcode is emitted with the release profile through the pinned Clang
+- **WHEN** the nested-call program's bitcode is emitted with speed optimization and no debug information through the pinned Clang
 - **THEN** a non-empty relocatable object for the compiler-selected target exists at the scope-owned path and the outcome records the exact command and arguments issued
 
 #### Scenario: Surface a failed process as data
@@ -31,7 +32,7 @@ retaining the exact command, arguments, exit status, and process output rather t
 #### Scenario: Plan fixed profile arguments
 
 - **WHEN** the three profiles' commands are planned for the same target-aware input
-- **THEN** every plan names the same canonical target while debug plans `-O0` with `-g`, release plans `-O2` without `-g`, and release-with-debug plans `-O2` with line information — and nothing else varies
+- **THEN** every plan names the same canonical target while debug plans `-O0` with `-g`, release plans `-O2` without `-g`, and release-with-debug plans `-O2` with `-g` when all other logical fields are equal
 
 ### Requirement: Intermediates are build-scope-owned path artifacts
 

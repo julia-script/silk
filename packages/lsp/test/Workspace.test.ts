@@ -1,3 +1,4 @@
+import * as ConfigurationOrigin from '@silklang/compiler/ConfigurationOrigin'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -169,9 +170,10 @@ it.effect('keeps editor analysis on frontend phases only', () =>
         'declaration-index',
         'name-resolution',
         'module-surface',
+        'body-queries',
+        'semantic-invalidation',
         'elaboration',
         'ownership',
-        'opaque-realization',
         'semantic-occurrences',
         'anonymous-expressions',
       ],
@@ -389,4 +391,63 @@ pub fn main() -> i32 { return 42 }`
     assert.isDefined(target)
     assert.include(target === undefined ? '' : (libraryLines[target.line] ?? ''), 'fn suspend')
   }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect(
+  'uses the compiler profile identity and replaces profile values on settings changes',
+  () =>
+    Effect.gen(function* () {
+      const root = project()
+      const bytes = encoder.encode(
+        'pub param enabled: bool = false\npub fn main() -> i32 { if enabled { return 42 } return 7 }',
+      )
+      const makeDocument = (enabled: boolean) =>
+        Workspace.open({
+          uri: pathToFileURL(join(root, 'src', 'Main.silk')).href,
+          version: 1,
+          bytes,
+          configuration: {
+            profileInput: {
+              target: 'wasm32-unknown-unknown',
+              bindings: [
+                {
+                  package: 'demo@0.1.0',
+                  module: 'Main',
+                  parameter: 'enabled',
+                  value: { kind: 'boolean', value: enabled },
+                  origin: { provenance: 'literal', source: 'editor settings' },
+                },
+              ],
+            },
+          },
+        })
+      const left = yield* makeDocument(false)
+      const right = yield* makeDocument(true)
+      const first = yield* Workspace.analyzeProject([left])
+      const next = yield* Workspace.analyzeProject([right], first)
+      const before = first.get(left.uri)?.snapshot.profile
+      const after = next.get(right.uri)?.snapshot.profile
+      assert.deepStrictEqual(first.get(left.uri)?.snapshot.diagnostics, [])
+      assert.ok(before)
+      assert.ok(after)
+      assert.notStrictEqual(before.identity, after.identity)
+      const direct = yield* Analysis.makeRealized({
+        root: SourceFile.make('Main', bytes),
+        configuration: {
+          package: 'demo@0.1.0',
+          profile: { target: 'wasm32-unknown-unknown' },
+          bindings: [
+            {
+              package: 'demo@0.1.0',
+              module: 'Main',
+              parameter: 'enabled',
+              tier: 'profile',
+              value: { kind: 'boolean', value: true },
+              origin: ConfigurationOrigin.literal('direct'),
+            },
+          ],
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(after.identity, direct.profile?.identity)
+    }).pipe(Effect.provide(NodeServices.layer)),
 )

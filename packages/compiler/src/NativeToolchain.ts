@@ -1,3 +1,4 @@
+import type * as CompilationProfile from './CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
@@ -562,13 +563,13 @@ export const finalArtifactCacheAdmission = (
 export const artifactCacheKey = Effect.fn('NativeToolchain.artifactCacheKey')(function* (
   toolchain: Toolchain,
   kind: FinalArtifact['kind'],
-  target: Target.Target,
-  profile: ToolchainPlan.OptimizationProfile,
+  profile: CompilationProfile.CompilationProfile,
   bitcode: Uint8Array | string,
   runtimeSource: string,
   destination: string,
   nativeLinkInputs: ReadonlyArray<NativeLinkInput.NativeLinkInput> = Object.freeze([]),
 ): Effect.fn.Return<string, ToolchainError> {
+  const target = profile.target
   const clangVersion = yield* toolVersionOf(toolchain.clang)
   const archiveCommand = kind === 'NativeStaticLibrary' ? toolchain.llvmAr : ''
   const llvmArVersion = kind === 'NativeStaticLibrary' ? yield* toolVersionOf(archiveCommand) : ''
@@ -596,7 +597,7 @@ export const artifactCacheKey = Effect.fn('NativeToolchain.artifactCacheKey')(fu
       for (const value of [
         kind,
         target.id,
-        profile,
+        profile.identity,
         toolchain.clang,
         clangVersion,
         archiveCommand,
@@ -779,19 +780,13 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
   toolchain: Toolchain,
   scope: BuildScope,
   artifact: Backend.LlvmBitcodeArtifact,
-  target: Target.Target,
-  profile: ToolchainPlan.OptimizationProfile,
+  profile: CompilationProfile.CompilationProfile,
   baseName = 'program',
 ): Effect.fn.Return<ObjectArtifact, ToolchainError> {
+  const target = profile.target
   const bitcodePath = join(scope.root, `${baseName}.bc`)
   const objectPath = join(scope.root, `${baseName}.o`)
-  const planned = ToolchainPlan.objectCommand(
-    toolchain.clang,
-    target,
-    profile,
-    bitcodePath,
-    objectPath,
-  )
+  const planned = ToolchainPlan.objectCommand(toolchain.clang, profile, bitcodePath, objectPath)
   if (artifact.target.id !== target.id) {
     return yield* processError(
       'NativeToolchain.emitObject',
@@ -1133,10 +1128,10 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
   toolchain: Toolchain,
   scope: BuildScope,
   artifact: Backend.LlvmBitcodeArtifact,
-  target: Target.Target,
-  profile: ToolchainPlan.OptimizationProfile,
+  profile: CompilationProfile.CompilationProfile,
   destination: string,
 ): Effect.fn.Return<FinalArtifact, ToolchainError> {
+  const target = profile.target
   const bitcode = yield* writeArtifact(scope, target, 'program.bc', artifact.bitcode)
   const runtime = yield* compileCObject(
     toolchain,
@@ -1148,7 +1143,6 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
   const outputPath = join(scope.root, 'program.wasm')
   const planned = ToolchainPlan.wasmCommand(
     toolchain.clang,
-    target,
     profile,
     bitcode.path,
     runtime.artifact.path,

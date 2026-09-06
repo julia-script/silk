@@ -487,8 +487,8 @@ pub fn main() -> i32 {
       Analysis.sources(moved).get(module)?.origin,
       SourceOrigin.projectFile('/relocated/project/Main.silk'),
     )
-    const firstRealized = Analysis.realize(first, 'wasm32-unknown-unknown')
-    const movedRealized = Analysis.realize(moved, 'wasm32-unknown-unknown')
+    const firstRealized = yield* Analysis.realize(first, 'wasm32-unknown-unknown')
+    const movedRealized = yield* Analysis.realize(moved, 'wasm32-unknown-unknown')
     assert.deepEqual(
       Analysis.diagnostics(firstRealized).map((diagnostic) => diagnostic.code),
       [],

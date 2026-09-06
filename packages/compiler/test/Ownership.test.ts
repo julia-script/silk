@@ -2405,7 +2405,9 @@ pub fn main() -> i32 {
 }`
       const front = yield* Analysis.ofSource(`ownership/reacquired-${name}`, ascii(source))
       assert.deepEqual(Analysis.diagnostics(front), [])
-      const snapshot = Analysis.realize(front, 'wasm32-unknown-unknown', { normalizeMir: false })
+      const snapshot = yield* Analysis.realize(front, 'wasm32-unknown-unknown', {
+        normalizeMir: false,
+      })
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const program = Analysis.loweredMir(snapshot)
       assert.deepEqual(MirVerification.verify(program), [])

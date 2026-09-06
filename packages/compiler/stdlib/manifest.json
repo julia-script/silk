@@ -46,6 +46,13 @@
     ]
   },
   {
+    "module": "silk/compilation",
+    "path": "silk/compilation.silk",
+    "layer": "portable",
+    "namespace": "Compilation",
+    "aliases": []
+  },
+  {
     "module": "silk/effect",
     "path": "silk/effect.silk",
     "layer": "portable",
@@ -394,7 +401,7 @@
     "path": "silk/target.silk",
     "layer": "portable",
     "namespace": "Target",
-    "aliases": ["Arch", "Profile"]
+    "aliases": ["Arch"]
   },
   {
     "module": "silk/u16",

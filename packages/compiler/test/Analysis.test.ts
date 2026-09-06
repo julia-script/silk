@@ -743,8 +743,8 @@ pub fn main() -> i32 { return 0 }`
 it.effect('realizes immutable target snapshots from the same frontend facts', () =>
   Effect.gen(function* () {
     const frontend = yield* Analysis.ofSource('main', ascii('pub fn main() -> i32 { return 42 }'))
-    const native = Analysis.realize(frontend)
-    const wasm = Analysis.realize(frontend, 'wasm32-unknown-unknown')
+    const native = yield* Analysis.realize(frontend)
+    const wasm = yield* Analysis.realize(frontend, 'wasm32-unknown-unknown')
 
     assert.strictEqual(native.results, frontend.results)
     assert.strictEqual(wasm.results, frontend.results)

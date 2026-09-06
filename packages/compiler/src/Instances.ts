@@ -1,3 +1,4 @@
+import type * as ProfileBootstrap from './ProfileBootstrap.js'
 import type * as CAbi from './CAbi.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
@@ -1061,10 +1062,11 @@ export const discover = (
   rootModule: string,
   results: ReadonlyMap<string, Elaboration.Result>,
   index: DeclarationIndex.Index,
-  target: Target.Target,
+  completion: ProfileBootstrap.Completion,
   resolution: NameResolution.Resolution,
   rootPolicy: 'Executable' | 'Library' = 'Executable',
 ): Discovery => {
+  const target = completion.profile.target
   const root = results.get(rootModule)
   if (root === undefined) {
     throw new RangeError(`Instance discovery lost its root module ${rootModule}`)
@@ -1079,7 +1081,14 @@ export const discover = (
     return Object.freeze({ ...invalid(rootModule), entry, foreignExports })
   }
 
-  const residualization = Residualization.make(target, results, resolution, index)
+  const residualization = Residualization.make(
+    completion.profile,
+    results,
+    resolution,
+    index,
+    undefined,
+    completion.values,
+  )
   const residualOwnership = ResidualOwnership.make()
   const accessBoundaryPlan = Ownership.localSharedAccessBoundaryPlan(results)
   interface PreparedInstance {

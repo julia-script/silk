@@ -1,3 +1,9 @@
+import type * as ModuleClosure from './ModuleClosure.js'
+import * as Effect from 'effect/Effect'
+import * as Result from 'effect/Result'
+import * as CompilationProfile from './CompilationProfile.js'
+import * as ConfigurationError from './ConfigurationError.js'
+import * as ProfileBootstrap from './ProfileBootstrap.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 
 /**
@@ -122,18 +128,30 @@ const foreignStaticTargetDiagnostics = (
 function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
-  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind },
+  completion: ProfileBootstrap.Completion | undefined,
+  options: Options & {
+    readonly artifactKind?: ArtifactKind.ArtifactKind
+    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
+  },
 ): Realization
 function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
-  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind },
+  completion: ProfileBootstrap.Completion | undefined,
+  options: Options & {
+    readonly artifactKind?: ArtifactKind.ArtifactKind
+    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
+  },
   prepareForEmission: true,
 ): Preparation
 function discoverAndLower(
   self: Frontend,
   targetId: string | undefined,
-  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind },
+  completion: ProfileBootstrap.Completion | undefined,
+  options: Options & {
+    readonly artifactKind?: ArtifactKind.ArtifactKind
+    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
+  },
   prepareForEmission = false,
 ): Realization | Preparation {
   const report = [...self.report]
@@ -159,13 +177,15 @@ function discoverAndLower(
     'instance-discovery',
     self.results.size,
     () =>
-      targetSelection._tag === 'Unavailable' || (!prepareForEmission && specializationInvalid)
+      targetSelection._tag === 'Unavailable' ||
+      completion === undefined ||
+      (!prepareForEmission && specializationInvalid)
         ? Instances.invalid(self.closure.rootModule)
         : Instances.discover(
             self.closure.rootModule,
             self.results,
             self.index,
-            targetSelection.target,
+            completion,
             self.resolution,
             ArtifactKind.isLibrary(options.artifactKind ?? ArtifactKind.nativeExecutable)
               ? 'Library'
@@ -368,7 +388,7 @@ function discoverAndLower(
         diagnostics: finalizedDiagnostics,
         report: Object.freeze(report),
       })
-    if (targetLayout._tag !== 'Available' || program === undefined)
+    if (targetLayout._tag !== 'Available' || program === undefined || completion === undefined)
       throw new RangeError('Driver lowering reached an unavailable target after its gates')
     const planning = ForeignPlanning.check(program, targetLayout.target)
     if (planning.length > 0)
@@ -379,6 +399,7 @@ function discoverAndLower(
       })
     return Object.freeze({
       _tag: 'Prepared',
+      profile: completion.profile,
       target: targetLayout.target,
       program,
       diagnostics: finalizedDiagnostics,
@@ -392,6 +413,7 @@ function discoverAndLower(
       : undefined
   return Object.freeze({
     instances,
+    ...(completion === undefined ? {} : { profile: completion.profile }),
     target: targetLayout.selection,
     layoutCatalog:
       targetLayout._tag === 'Available'
@@ -420,19 +442,141 @@ function discoverAndLower(
   })
 }
 
-/** Derives immutable target/runtime facts from one completed frontend. */
-export const realize = (
+/** Completes configuration without performing runtime specialization, shared with project tooling. */
+export const configure = Effect.fn('Realization.configure')(function* (
   self: Frontend,
-  targetId: string | undefined = self.requestedTarget,
+  targetId: string | undefined,
+  artifactKind?: ArtifactKind.ArtifactKind,
+  optimization?: 'debug' | 'release' | 'release-with-debug',
+  override?: ModuleClosure.CompilationRequest['configuration'],
+): Effect.fn.Return<{
+  readonly frontend: Frontend
+  readonly completion?: ProfileBootstrap.Completion
+  readonly targetId: string | undefined
+}> {
+  const configuration = override ?? self.configuration
+  const selectedTarget = configuration?.profile.target ?? targetId
+  if (Target.select(selectedTarget)._tag === 'Unavailable' || selectedTarget === undefined)
+    return { frontend: self, targetId: selectedTarget }
+  const operation = Effect.gen(function* () {
+    if (
+      configuration !== undefined &&
+      ((override === undefined && self.requestedTarget !== undefined) || optimization !== undefined)
+    )
+      return yield* ConfigurationError.make(
+        'Realization.bootstrap',
+        'ConflictingBindings',
+        'target and complete profile selection',
+      )
+    const artifact =
+      artifactKind === undefined ? undefined : ArtifactKind.profileArtifact(artifactKind)
+    if (override === undefined && self.configurationError !== undefined)
+      return yield* self.configurationError
+    const initial =
+      override === undefined &&
+      self.initialProfile !== undefined &&
+      self.initialProfile.target.id === selectedTarget &&
+      artifactKind === undefined &&
+      optimization === undefined
+        ? self.initialProfile
+        : yield* CompilationProfile.normalize(
+            configuration?.profile ?? {
+              target: selectedTarget,
+              ...(artifact === undefined ? {} : { artifact }),
+              ...(optimization === undefined
+                ? {}
+                : {
+                    optimization: optimization === 'debug' ? 'none' : 'speed',
+                    debug: optimization !== 'release',
+                  }),
+            },
+          )
+    if (artifact !== undefined && initial.artifact !== artifact)
+      return yield* ConfigurationError.make(
+        'Realization.bootstrap',
+        'UnsupportedCombination',
+        'profile artifact and output request',
+      )
+    const explicitModules = configuration?.modules ?? []
+    for (const owner of explicitModules) {
+      if (!self.closure.modules.some((module) => module.name === owner.canonical))
+        return yield* ConfigurationError.make(
+          'Realization.bootstrap',
+          'PackageIdentityConflict',
+          'unknown module ownership',
+        )
+    }
+    const modules = self.closure.modules.flatMap((module) => {
+      const owners = explicitModules.filter((candidate) => candidate.canonical === module.name)
+      if (owners.length > 0)
+        return owners.map((owner) => ({
+          ...owner,
+          bytes: module.syntax.source.bytes,
+        }))
+      const packageName =
+        module.syntax.source.origin._tag === 'ToolchainFile' ? 'silk@0.0.0' : configuration?.package
+      return packageName === undefined
+        ? []
+        : [
+            {
+              canonical: module.name,
+              package: packageName,
+              module: module.name,
+              bytes: module.syntax.source.bytes,
+            },
+          ]
+    })
+    return yield* ProfileBootstrap.complete(initial, { ...self, modules }, configuration?.bindings)
+  })
+  const result = yield* Effect.result(operation)
+  if (Result.isSuccess(result))
+    return { frontend: self, completion: result.success, targetId: selectedTarget }
+  const span =
+    result.failure.origins.find((origin) => origin.span !== undefined)?.span ??
+    self.closure.modules.find((module) => module.name === self.closure.rootModule)?.syntax.root.span
+  if (span === undefined) throw new RangeError('Profile bootstrap lost root source span')
+  return {
+    frontend: OpaqueRealization.withCatalog(
+      {
+        ...self,
+        diagnostics: Diagnostic.merge(self.diagnostics, [
+          Diagnostic.invalidConfiguration(result.failure, span),
+        ]),
+      },
+      OpaqueRealization.catalogOf(self),
+    ),
+    targetId: selectedTarget,
+  }
+})
+
+/** Derives immutable target/runtime facts after source configuration completes. */
+export const realize = Effect.fn('Realization.realize')(function* (
+  self: Frontend,
+  targetId: string | ModuleClosure.CompilationRequest['configuration'] = self.requestedTarget,
   options: Options = {},
-): Realization => discoverAndLower(self, targetId, options)
+): Effect.fn.Return<Realization> {
+  const ready = yield* configure(
+    self,
+    typeof targetId === 'string' ? targetId : undefined,
+    undefined,
+    undefined,
+    typeof targetId === 'object' ? targetId : undefined,
+  )
+  return discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
+})
 
 /** Prepares valid runtime facts for Driver while stopping at each artifact-production gate. */
-export const prepare = (
+export const prepare = Effect.fn('Realization.prepare')(function* (
   self: Frontend,
   targetId: string | undefined = self.requestedTarget,
-  options: Options & { readonly artifactKind?: ArtifactKind.ArtifactKind } = {},
-): Preparation => discoverAndLower(self, targetId, options, true)
+  options: Options & {
+    readonly artifactKind?: ArtifactKind.ArtifactKind
+    readonly optimization?: 'debug' | 'release' | 'release-with-debug'
+  } = {},
+): Effect.fn.Return<Preparation> {
+  const ready = yield* configure(self, targetId, options.artifactKind, options.optimization)
+  return discoverAndLower(ready.frontend, ready.targetId, ready.completion, options, true)
+})
 
 import { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as ArtifactKind from './ArtifactKind.js'
@@ -501,6 +645,7 @@ export type Targeted<A> =
 
 /** Immutable target/runtime facts derived from exactly one Frontend value. */
 export interface Realization {
+  readonly profile?: CompilationProfile.CompilationProfile
   readonly instances: Instances.Discovery
   readonly target: Target.Selection
   readonly layoutCatalog: Targeted<Layout.Catalog>
@@ -532,6 +677,7 @@ export type Preparation =
     }
   | {
       readonly _tag: 'Prepared'
+      readonly profile: CompilationProfile.CompilationProfile
       readonly target: Target.Target
       readonly program: Mir.Module
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>

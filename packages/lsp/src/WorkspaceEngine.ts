@@ -92,6 +92,7 @@ interface Association {
   readonly workspace: string
   readonly sourceRoot: string
   readonly module: string
+  readonly configuration?: unknown
 }
 
 interface Waiter {
@@ -306,6 +307,7 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
             workspace: association.workspace,
             sourceRoot: association.sourceRoot,
             module: association.module,
+            configuration: association.configuration,
           }),
         )
         if (project.documents.size > 1) project.refreshDiagnostics = true
@@ -635,6 +637,7 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
         workspace: document.workspace,
         sourceRoot: document.sourceRoot,
         module: document.module,
+        configuration: document.configuration,
       })
       const reassigned =
         prior !== undefined &&
@@ -681,6 +684,7 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
           sourceRoot: document.sourceRoot,
           module: document.module,
           bytes: document.bytes,
+          configuration: document.configuration,
         })),
         invalidation: {
           dirtyPaths: [...project.dirtyPaths].sort(),

@@ -1,3 +1,5 @@
+import * as ToolchainIntegrity from './ToolchainIntegrity.js'
+import type * as CompilationProfile from './CompilationProfile.js'
 import * as Lifetime from './Lifetime.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
@@ -89,6 +91,8 @@ export const noWork: Counters = Object.freeze(emptyCounters())
 
 interface State {
   readonly target: Target.Target
+  readonly dependencies: Map<string, string>
+  readonly parameters: ReadonlyMap<string, StaticValue.Value>
   readonly environment: StaticEvaluation.TargetEnvironment
   readonly results: ReadonlyMap<string, Elaboration.Result>
   readonly resolution: NameResolution.Resolution
@@ -103,42 +107,105 @@ interface State {
 
 const stateSymbol: unique symbol = Symbol('Residualization.state')
 
-/** One target-scoped residualization coordinator. */
-export interface Coordinator {
-  readonly _tag: 'ResidualizationCoordinator'
+interface EvaluationCoordinator {
+  readonly _tag: 'ResidualizationCoordinator' | 'ProfileBootstrapCoordinator'
   readonly [stateSymbol]: State
 }
 
-export const make = (
-  target: Target.Target,
+/** An ordinary specialization coordinator, constructible only from a completed profile. */
+export interface Coordinator extends EvaluationCoordinator {
+  readonly _tag: 'ResidualizationCoordinator'
+}
+
+/** A private-bootstrap evaluator that cannot enter runtime residualization. */
+export interface BootstrapCoordinator extends EvaluationCoordinator {
+  readonly _tag: 'ProfileBootstrapCoordinator'
+}
+
+const makeState = (
+  compilation: CompilationProfile.Initial | CompilationProfile.CompilationProfile,
   results: ReadonlyMap<string, Elaboration.Result>,
   resolution: NameResolution.Resolution,
   index: DeclarationIndex.Index,
   limits: StaticEvaluation.Limits = StaticEvaluation.defaultLimits,
+  parameters: ReadonlyMap<string, StaticValue.Value> = new Map(),
+): State => {
+  const sourceIdentity = ToolchainIntegrity.contentDigest(
+    Canonical.array(
+      [...results]
+        .toSorted(([a], [b]) => Canonical.compare(a, b))
+        .map(([module, result]) =>
+          Canonical.record(module, [
+            ToolchainIntegrity.contentDigest(Uint8Array.from(result.syntax.source.bytes)),
+          ]),
+        ),
+    ),
+  )
+  return {
+    target: compilation.target,
+    parameters: new Map(parameters),
+    dependencies: new Map(),
+    environment: StaticEvaluation.targetEnvironment(compilation, sourceIdentity),
+    results,
+    resolution,
+    index,
+    evaluation: StaticEvaluation.make<StaticValue.Value>(compilation, limits, sourceIdentity),
+    residuals: StaticEvaluation.make<ResidualBody>(compilation, limits, sourceIdentity),
+    staticResultOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
+    counters: emptyCounters(),
+    observations: new Map(),
+    selectionReasons: new Map(),
+  }
+}
+
+/** Starts ordinary specialization for one complete logical configuration and source graph. */
+export const make = (
+  compilation: CompilationProfile.CompilationProfile,
+  results: ReadonlyMap<string, Elaboration.Result>,
+  resolution: NameResolution.Resolution,
+  index: DeclarationIndex.Index,
+  limits: StaticEvaluation.Limits = StaticEvaluation.defaultLimits,
+  parameters: ReadonlyMap<string, StaticValue.Value> = new Map(),
 ): Coordinator =>
   Object.freeze({
     _tag: 'ResidualizationCoordinator',
-    [stateSymbol]: {
-      target,
-      environment: StaticEvaluation.targetEnvironment(target),
+    [stateSymbol]: makeState(compilation, results, resolution, index, limits, parameters),
+  })
+
+/** Starts default/predicate evaluation without granting runtime-specialization admission. */
+export const makeBootstrap = (
+  compilation: CompilationProfile.Initial,
+  results: ReadonlyMap<string, Elaboration.Result>,
+  resolution: NameResolution.Resolution,
+  index: DeclarationIndex.Index,
+  parameters: ReadonlyMap<string, StaticValue.Value>,
+): BootstrapCoordinator =>
+  Object.freeze({
+    _tag: 'ProfileBootstrapCoordinator',
+    [stateSymbol]: makeState(
+      compilation,
       results,
       resolution,
       index,
-      evaluation: StaticEvaluation.make<StaticValue.Value>(target, limits),
-      residuals: StaticEvaluation.make<ResidualBody>(target, limits),
-      staticResultOrigins: new Map<string, StaticEvaluation.TextOrigin>(),
-      counters: emptyCounters(),
-      observations: new Map(),
-      selectionReasons: new Map(),
-    },
+      StaticEvaluation.defaultLimits,
+      parameters,
+    ),
   })
 
+/** Returns canonical source bodies actually demanded during this evaluation session. */
+export const dependencies = (self: EvaluationCoordinator): string =>
+  Canonical.array(
+    [...self[stateSymbol].dependencies]
+      .toSorted(([a], [b]) => Canonical.compare(a, b))
+      .map(([key, value]) => Canonical.record(key, [value])),
+  )
+
 /** Snapshots work performed by this target-scoped coordinator. */
-export const counters = (self: Coordinator): Counters =>
+export const counters = (self: EvaluationCoordinator): Counters =>
   Object.freeze({ ...self[stateSymbol].counters })
 
 /** Snapshots declaration/reason attribution without counting retained proof work as execution. */
-export const observations = (self: Coordinator): ReadonlyArray<Observation> =>
+export const observations = (self: EvaluationCoordinator): ReadonlyArray<Observation> =>
   Object.freeze(
     [...self[stateSymbol].observations.entries()]
       .toSorted(([left], [right]) => {
@@ -151,7 +218,7 @@ export const observations = (self: Coordinator): ReadonlyArray<Observation> =>
   )
 
 const record = (
-  self: Coordinator,
+  self: EvaluationCoordinator,
   declaration: DeclarationFacts.CanonicalId,
   reason: Observation['reason'],
   outcome: 'sourceReused' | 'checked' | 'cacheReused' | 'rejected',
@@ -172,7 +239,7 @@ const record = (
 }
 
 const reflectAggregate = (
-  self: Coordinator,
+  self: EvaluationCoordinator,
   authorization: DeclarationFacts.DeclarationFact,
   owner: Type.Type,
   kind: 'Type' | 'Fields',
@@ -269,7 +336,7 @@ const reflectAggregate = (
 }
 
 const declarationOf = (
-  self: Coordinator,
+  self: EvaluationCoordinator,
   identity: DeclarationFacts.CanonicalId,
 ): DeclarationFacts.DeclarationFact | undefined => {
   const declaration = DeclarationFacts.byCanonical(self[stateSymbol].index, identity)
@@ -285,7 +352,7 @@ const declarationOf = (
 }
 
 const moduleInput = (
-  self: Coordinator,
+  self: EvaluationCoordinator,
   declaration: { readonly id: DeclarationFacts.DeclarationId },
 ):
   | {
@@ -449,7 +516,7 @@ const resolveTextSpan = (
   origin?._tag === 'SourceTextOrigin' ? origin.span : arguments_.at(origin?.ordinal ?? -1)
 
 const evaluateStaticFunction = (
-  self: Coordinator,
+  self: EvaluationCoordinator,
   declaration: DeclarationFacts.DeclarationFact,
   arguments_: ReadonlyArray<StaticValue.Value>,
   argumentSpans: ReadonlyArray<SourceSpan.SourceSpan | undefined>,
@@ -469,6 +536,10 @@ const evaluateStaticFunction = (
         ),
       ),
     })
+  self[stateSymbol].dependencies.set(
+    Canonical.record('helper', [declaration.canonical.id.module, declaration.canonical.id.name]),
+    declaration.bodyTemplate?.canonical ?? '',
+  )
   const application: StaticEvaluation.Application = Object.freeze({
     declaration: declaration.canonical.id,
     typeArguments: Object.freeze(identity.typeArguments.map(Type.genericArgumentKey)),
@@ -630,10 +701,11 @@ const staticValueType = (value: StaticValue.Value): Type.Type | undefined => {
 }
 
 function evaluateConstantValue(
-  self: Coordinator,
+  self: EvaluationCoordinator,
   declaration: DeclarationFacts.ConstantFact,
   span: SourceSpan.SourceSpan,
   parentTrace: StaticEvaluation.Trace,
+  predicate?: SyntaxTree.Node,
 ): StaticEvaluation.Outcome<StaticValue.Value> {
   if (declaration.canonical._tag !== 'Canonical')
     return StaticEvaluation.failed(
@@ -644,8 +716,41 @@ function evaluateConstantValue(
         parentTrace,
       ),
     )
+  const initializer = predicate ?? declaration.initializer
+  const expected =
+    predicate === undefined && declaration.declaredType._tag === 'Resolved'
+      ? declaration.declaredType.type
+      : 'bool'
+  if (predicate === undefined && declaration._tag === 'PackageParameterDeclaration') {
+    const bound = self[stateSymbol].parameters.get(
+      Canonical.record('PackageParameter', [
+        declaration.canonical.id.module,
+        declaration.canonical.id.name,
+      ]),
+    )
+    if (bound !== undefined) return StaticEvaluation.complete(bound)
+  }
+  let dependencyTemplate = declaration.initializerTemplate?.canonical ?? ''
+  if (predicate !== undefined)
+    dependencyTemplate =
+      declaration._tag === 'PackageParameterDeclaration'
+        ? (declaration.predicateTemplate?.canonical ?? '')
+        : ''
+  self[stateSymbol].dependencies.set(
+    Canonical.record(predicate === undefined ? 'default' : 'predicate', [
+      declaration.canonical.id.module,
+      declaration.canonical.id.name,
+    ]),
+    dependencyTemplate,
+  )
   const application: StaticEvaluation.Application = Object.freeze({
-    declaration: declaration.canonical.id,
+    declaration:
+      predicate === undefined
+        ? declaration.canonical.id
+        : Object.freeze({
+            ...declaration.canonical.id,
+            name: `${declaration.canonical.id.name}#validation`,
+          }),
     typeArguments: Object.freeze([]),
     evidence: Object.freeze([]),
     contractRow: Object.freeze([]),
@@ -663,7 +768,7 @@ function evaluateConstantValue(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             'constant declaration is unavailable',
-            declaration.initializer.span,
+            initializer.span,
             evaluation.trace,
           ),
         )
@@ -710,7 +815,7 @@ function evaluateConstantValue(
       })
       const analyzed = analyzeExpression(
         input.result.syntax.source,
-        declaration.initializer,
+        initializer,
         input.declarations,
         constantHost(declaration),
         Object.freeze({
@@ -719,15 +824,28 @@ function evaluateConstantValue(
           patternBindings: Object.freeze([]),
         }),
         Object.freeze({ scope: input.scope, index: self[stateSymbol].index, staticContext }),
-        declaration.declaredType.type,
+        expected,
       )
+      let nestedFailure: StaticEvaluation.StaticFailure | undefined
+      if (analyzed !== undefined)
+        Elaboration.visitExpressionFacts(analyzed.fact, {
+          expression: (expression) => {
+            if (
+              nestedFailure === undefined &&
+              expression._tag === 'Call' &&
+              expression.staticFailure !== undefined
+            )
+              nestedFailure = expression.staticFailure
+          },
+        })
+      if (nestedFailure !== undefined) return StaticEvaluation.failed(nestedFailure)
       const firstError = analyzed?.diagnostics.find((diagnostic) => diagnostic.severity === 'error')
       if (analyzed === undefined || firstError !== undefined)
         return StaticEvaluation.failed(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             firstError?.message ?? 'constant initializer cannot be analyzed',
-            firstError?.span ?? declaration.initializer.span,
+            firstError?.span ?? initializer.span,
             evaluation.trace,
           ),
         )
@@ -737,12 +855,15 @@ function evaluateConstantValue(
       })
       if (value._tag === 'Failed') return value
       const actual = staticValueType(value.value)
-      if (actual === undefined || !Type.equals(actual, declaration.declaredType.type))
+      if (
+        (predicate !== undefined || declaration._tag !== 'PackageParameterDeclaration') &&
+        (actual === undefined || !Type.equals(actual, expected))
+      )
         return StaticEvaluation.failed(
           StaticEvaluation.phaseViolation(
             'StaticEvaluation.constant',
             `initializer produced ${actual === undefined ? 'an unsupported aggregate' : Type.display(actual)} instead of ${Type.display(declaration.declaredType.type)}`,
-            declaration.initializer.span,
+            initializer.span,
             evaluation.trace,
           ),
         )
@@ -757,10 +878,25 @@ function evaluateConstantValue(
 
 /** Evaluates one explicitly typed primitive constant for this coordinator's selected target. */
 export const evaluateConstant = (
-  self: Coordinator,
+  self: EvaluationCoordinator,
   declaration: DeclarationFacts.ConstantFact,
 ): StaticEvaluation.Outcome<StaticValue.Value> =>
   evaluateConstantValue(self, declaration, declaration.initializer.span, Object.freeze([]))
+
+/** Evaluates a package predicate through the same calls and final-value environment as defaults. */
+export const evaluateParameterPredicate = (
+  self: EvaluationCoordinator,
+  declaration: DeclarationFacts.PackageParameterFact,
+): StaticEvaluation.Outcome<StaticValue.Value> =>
+  declaration.predicate === undefined
+    ? StaticEvaluation.complete(StaticValue.boolean(true))
+    : evaluateConstantValue(
+        self,
+        declaration,
+        declaration.predicate.span,
+        Object.freeze([]),
+        declaration.predicate,
+      )
 
 const containsSyntaxKind = (node: SyntaxTree.Node, kind: SyntaxTree.NodeKind): boolean =>
   node.kind === kind ||
@@ -768,7 +904,7 @@ const containsSyntaxKind = (node: SyntaxTree.Node, kind: SyntaxTree.NodeKind): b
 
 /** Explains static selection without re-walking one declaration for each ordinary specialization. */
 export const selectionReason = (
-  self: Coordinator,
+  self: EvaluationCoordinator,
   key: ApplicationKey,
 ): SelectionReason | undefined => {
   if (key.staticArguments.length > 0) return 'StaticArguments'

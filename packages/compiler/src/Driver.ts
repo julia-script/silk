@@ -50,7 +50,7 @@ const phaseWithHeap = (entry: PhaseReport.PhaseReport): DriverPhaseReport => {
 const backendEmissionCacheKey = (
   distributionDigest: string,
   backendId: string,
-  targetId: string,
+  profileIdentity: string,
   artifactKind: ArtifactKind.ArtifactKind,
   mode: string,
   sources: ReadonlyMap<string, SourceFile.SourceFile>,
@@ -63,10 +63,10 @@ const backendEmissionCacheKey = (
     .sort()
   const digest = ToolchainIntegrity.contentDigest(
     [
-      'backend-emission-v2',
+      'backend-emission-v3',
       distributionDigest,
       backendId,
-      targetId,
+      profileIdentity,
       artifactKind,
       mode,
       ...modules,
@@ -153,7 +153,7 @@ const decodeCachedEmission = (
 export interface CompileRequest {
   readonly compilation: ModuleClosure.CompilationRequest
   readonly toolchain: NativeToolchain.Toolchain
-  readonly profile: ToolchainPlan.OptimizationProfile
+  readonly optimization?: ToolchainPlan.OptimizationProfile
   readonly artifactKind: ArtifactKind.ArtifactKind
   /** Validated project package name used for durable artifact identities. */
   readonly packageName: string
@@ -317,7 +317,40 @@ export const compile = Effect.fn('Driver.compile')(function* (
       report: Object.freeze([...report]),
     })
 
-  const frontend = yield* Frontend.frontend(request.compilation, { heapBytes })
+  const hostSelection =
+    request.compilation.target === undefined && request.compilation.configuration === undefined
+      ? NativeToolchain.hostSelection()
+      : undefined
+  if (hostSelection?._tag === 'Unavailable')
+    return Object.freeze({
+      _tag: 'TargetFailed',
+      error: hostSelection.error,
+      diagnostics: [],
+      report: Object.freeze([...report]),
+    })
+  const targetId =
+    request.compilation.configuration?.profile.target ??
+    request.compilation.target ??
+    (hostSelection?._tag === 'Resolved' ? hostSelection.target.id : undefined)
+  const compilation: ModuleClosure.CompilationRequest =
+    request.compilation.configuration !== undefined || targetId === undefined
+      ? request.compilation
+      : {
+          root: request.compilation.root,
+          configuration: {
+            package: `${request.packageName}@0.0.0`,
+            profile: {
+              target: targetId,
+              artifact: ArtifactKind.profileArtifact(request.artifactKind),
+              optimization:
+                request.optimization === undefined || request.optimization === 'debug'
+                  ? 'none'
+                  : 'speed',
+              debug: request.optimization !== 'release',
+            },
+          },
+        }
+  const frontend = yield* Frontend.frontend(compilation, { heapBytes })
   report.push(...frontend.report.map(phaseWithHeap))
   const closure = frontend.closure
   if (closure.resolutionFailures.length > 0) {
@@ -331,18 +364,6 @@ export const compile = Effect.fn('Driver.compile')(function* (
     })
   }
   const backend = LlvmBackend.LlvmBackend
-  const hostSelection =
-    request.compilation.target === undefined ? NativeToolchain.hostSelection() : undefined
-  if (hostSelection?._tag === 'Unavailable')
-    return Object.freeze({
-      _tag: 'TargetFailed',
-      error: hostSelection.error,
-      diagnostics: frontend.diagnostics,
-      report: Object.freeze([...report]),
-    })
-  const targetId =
-    request.compilation.target ??
-    (hostSelection?._tag === 'Resolved' ? hostSelection.target.id : undefined)
   const artifactTarget = Target.select(targetId)
   if (
     artifactTarget._tag === 'Resolved' &&
@@ -354,9 +375,12 @@ export const compile = Effect.fn('Driver.compile')(function* (
       diagnostics: frontend.diagnostics,
       report: Object.freeze([...report]),
     })
-  const preparation = Realization.prepare(frontend, targetId, {
+  const preparation = yield* Realization.prepare(frontend, targetId, {
     heapBytes,
     artifactKind: request.artifactKind,
+    ...(request.compilation.configuration === undefined || request.optimization === undefined
+      ? {}
+      : { optimization: request.optimization }),
   })
   const integrityReport = report.at(0)
   report.splice(
@@ -419,7 +443,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       failures: targetIntegrity.failures,
       report: Object.freeze([...report]),
     })
-  const mode = request.profile === 'release' ? 'release' : 'debug'
+  const mode = preparation.profile.debug ? 'debug' : 'release'
   const emissionCache =
     request.cache !== false
       ? (request.toolchain.artifactCache ??
@@ -431,7 +455,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       : backendEmissionCacheKey(
           distribution.digest,
           backend.id,
-          target.id,
+          preparation.profile.identity,
           request.artifactKind,
           mode,
           closure.sources,
@@ -535,8 +559,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       ? yield* NativeToolchain.artifactCacheKey(
           request.toolchain,
           cacheKind,
-          target,
-          request.profile,
+          preparation.profile,
           artifact.bitcode,
           runtimeSource,
           request.destination,
@@ -604,8 +627,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
               request.toolchain,
               scope,
               artifact,
-              target,
-              request.profile,
+              preparation.profile,
               request.destination,
             ),
             () => 1,
@@ -644,7 +666,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
           report,
           'object',
           1,
-          NativeToolchain.emitObject(request.toolchain, scope, artifact, target, request.profile),
+          NativeToolchain.emitObject(request.toolchain, scope, artifact, preparation.profile),
           () => 1,
           () => 0,
           { heapBytes },

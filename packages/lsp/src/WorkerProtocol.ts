@@ -23,6 +23,7 @@ const source = Schema.Struct({
   sourceRoot: Schema.String,
   module: Schema.String,
   bytes: Schema.Uint8Array,
+  configuration: Schema.optionalKey(Schema.Unknown),
 })
 
 const invalidation = Schema.Struct({

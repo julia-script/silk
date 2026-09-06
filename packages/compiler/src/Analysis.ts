@@ -1,3 +1,5 @@
+import type * as ConfigurationError from './ConfigurationError.js'
+import type * as CompilationProfile from './CompilationProfile.js'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as DeclarationFacts from './DeclarationFacts.js'
@@ -70,6 +72,8 @@ export type Targeted<A> =
 export interface FrontendSnapshot {
   readonly _tag: 'AnalysisSnapshot' | 'ProjectAnalysisView'
   readonly realization: 'SingleRoot' | 'ProjectView'
+  readonly profile?: CompilationProfile.CompilationProfile
+  readonly configuration?: ModuleClosure.CompilationRequest['configuration']
   readonly closure: ModuleClosure.Closure
   readonly index: DeclarationIndex.Index
   readonly resolution: NameResolution.Resolution
@@ -83,6 +87,8 @@ export interface FrontendSnapshot {
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<PhaseReport.PhaseReport>
   readonly semanticInvalidation?: SemanticInvalidation.SemanticInvalidation
+  readonly initialProfile?: CompilationProfile.Initial
+  readonly configurationError?: ConfigurationError.ConfigurationError
   readonly requestedTarget?: string
 }
 
@@ -94,6 +100,7 @@ export interface SingleRootFrontendSnapshot extends FrontendSnapshot {
 
 /** One immutable runtime realization derived from a completed frontend snapshot. */
 export interface Snapshot extends SingleRootFrontendSnapshot {
+  readonly profile?: CompilationProfile.CompilationProfile
   readonly instances: Instances.Discovery
   readonly target: Target.Selection
   readonly layoutCatalog: Targeted<Layout.Catalog>
@@ -150,12 +157,13 @@ export const make = Effect.fn('Analysis.make')(function* (
 })
 
 /** Explicitly derives one immutable runtime snapshot from completed frontend facts. */
-export const realize = (
+export const realize = Effect.fn('Analysis.realize')(function* (
   self: SingleRootFrontendSnapshot,
-  target: string | undefined = self.requestedTarget ?? Target.x8664UnknownLinuxGnu.id,
+  target: string | ModuleClosure.CompilationRequest['configuration'] = self.requestedTarget ??
+    Target.x8664UnknownLinuxGnu.id,
   options: Frontend.Options = {},
-): Snapshot => {
-  const realization = Realization.realize(self, target, options)
+): Effect.fn.Return<Snapshot> {
+  const realization = yield* Realization.realize(self, target, options)
   return OpaqueRealization.withCatalog(
     Object.freeze({
       ...self,
@@ -165,13 +173,13 @@ export const realize = (
     }),
     OpaqueRealization.catalogOf(self),
   )
-}
+})
 
 /** Builds and explicitly realizes one compilation request in a single effect. */
 export const makeRealized = Effect.fn('Analysis.makeRealized')(function* (
   request: ModuleClosure.CompilationRequest,
 ): Effect.fn.Return<Snapshot, never, SourceResolver.SourceResolver> {
-  return realize(yield* make(request))
+  return yield* realize(yield* make(request))
 })
 
 /** Builds the snapshot of one single-module source. */
@@ -194,7 +202,7 @@ export const ofSourceRealized = (
   target?: string,
   options: Frontend.Options = {},
 ): Effect.Effect<Snapshot> =>
-  Effect.map(ofSource(sourceId, bytes, target), (self) => realize(self, target, options))
+  Effect.flatMap(ofSource(sourceId, bytes, target), (self) => realize(self, target, options))
 
 /** Returns every loaded module of the snapshot in canonical identity order. */
 export const modules = (self: FrontendSnapshot): ReadonlyArray<ModuleClosure.Module> =>
@@ -647,7 +655,10 @@ const presentationOfIdentity = (
         Presentation.aliasDeclaration(declaration),
         declaredType(declaration.target),
       )
-    if (declaration?._tag === 'ConstantDeclaration')
+    if (
+      declaration?._tag === 'ConstantDeclaration' ||
+      declaration?._tag === 'PackageParameterDeclaration'
+    )
       return hoverPresentation(
         Presentation.constantDeclaration(declaration),
         declaredType(declaration.declaredType),
@@ -1042,7 +1053,9 @@ export const fixedArrayTypesOf = (
         if (operation.returnType._tag === 'Resolved') add(operation.returnType.type)
       }
     } else if (
-      (member._tag === 'ConstantDeclaration' || member._tag === 'ForeignStaticDeclaration') &&
+      (member._tag === 'ConstantDeclaration' ||
+        member._tag === 'PackageParameterDeclaration' ||
+        member._tag === 'ForeignStaticDeclaration') &&
       member.declaredType._tag === 'Resolved'
     ) {
       add(member.declaredType.type)

@@ -477,6 +477,7 @@ const memberPresentation = (member: DeclarationFacts.MemberFact) => {
       return Presentation.serviceDeclaration(member)
     case 'RoleDeclaration':
       return Presentation.roleDeclaration(member)
+    case 'PackageParameterDeclaration':
     case 'ConstantDeclaration':
       return Presentation.constantDeclaration(member)
     case 'ForeignStaticDeclaration':

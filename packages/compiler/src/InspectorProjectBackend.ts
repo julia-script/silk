@@ -111,8 +111,8 @@ const memberSignature = (member: DeclarationFacts.MemberFact): string => {
         : (member.representation.spelling ?? 'unavailable')
     return `enum(${representation}) · ${member.members.length} member${member.members.length === 1 ? '' : 's'} · ${member.validity._tag.toLowerCase()}`
   }
-  if (member._tag === 'ConstantDeclaration')
-    return `${member.visibility === 'Public' ? 'pub ' : ''}const · ${declaredTypeText(member.declaredType)}`
+  if (member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration')
+    return `${member.visibility === 'Public' ? 'pub ' : ''}${member._tag === 'PackageParameterDeclaration' ? 'param' : 'const'} · ${declaredTypeText(member.declaredType)}`
   if (member._tag === 'ForeignStaticDeclaration')
     return `${member.direction === 'Import' ? 'extern' : 'export'} static · ${declaredTypeText(member.declaredType)} · ${member.foreign.symbol}`
   if (member._tag === 'AliasDeclaration')

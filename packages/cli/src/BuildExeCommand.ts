@@ -1,3 +1,6 @@
+import * as ProjectProfile from '@silklang/compiler/ProjectProfile'
+import * as ConfigurationOrigin from '@silklang/compiler/ConfigurationOrigin'
+import * as Schema from 'effect/Schema'
 import type * as HeapObservation from '@silklang/compiler/HeapObservation'
 import * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import * as SourceEntry from '@silklang/compiler/SourceEntry'
@@ -36,9 +39,14 @@ const target = Flag.choice('target', targetIds).pipe(
   Flag.optional,
 )
 
-const profile = Flag.choice('profile', profiles).pipe(
-  Flag.withDescription('Optimization profile.'),
-  Flag.withDefault('debug' as const),
+const optimization = Flag.choice('optimization', profiles).pipe(
+  Flag.withDescription('Optimization mode.'),
+  Flag.optional,
+)
+
+const profileInput = Flag.string('profile-input').pipe(
+  Flag.withDescription('Complete logical profile as JSON.'),
+  Flag.optional,
 )
 
 const clang = Flag.string('clang').pipe(
@@ -61,7 +69,8 @@ export interface Options {
   readonly sourceRoot: string | undefined
   readonly output: string
   readonly target: string | undefined
-  readonly profile: ToolchainPlan.OptimizationProfile
+  readonly profileInput?: string
+  readonly optimization?: ToolchainPlan.OptimizationProfile | undefined
   readonly clang: string
   readonly saveTemps: boolean
   readonly timings: boolean
@@ -75,8 +84,32 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
   never,
   FileSystem.FileSystem | HeapObservation.HeapObservation | Path.Path
 > {
+  let configuration: ProjectProfile.Profile | undefined
+  if (options.profileInput !== undefined) {
+    if (options.target !== undefined || options.optimization !== undefined) {
+      yield* Console.error('--profile-input conflicts with --target and --optimization')
+      return 2
+    }
+    const decoded = yield* Effect.result(
+      Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(options.profileInput).pipe(
+        Effect.flatMap((value) =>
+          ProjectProfile.decode(value, ConfigurationOrigin.literal('build-exe')),
+        ),
+      ),
+    )
+    if (Result.isFailure(decoded)) {
+      yield* Console.error('Invalid complete compilation profile')
+      return 2
+    }
+    configuration = decoded.success
+    if (configuration.input.artifact !== 'executable') {
+      yield* Console.error('build-exe requires an executable profile')
+      return 2
+    }
+  }
+  const selectedTarget = configuration?.input.target ?? options.target
   const selected =
-    options.target === undefined ? NativeToolchain.hostSelection() : Target.select(options.target)
+    selectedTarget === undefined ? NativeToolchain.hostSelection() : Target.select(selectedTarget)
   if (selected._tag === 'Unavailable' || !Target.isNative(selected.target)) {
     yield* Console.error(
       selected._tag === 'Unavailable'
@@ -93,7 +126,16 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
   const attempted = yield* Workflow.compile({
     entry: loaded.success,
     ...(options.target === undefined ? {} : { target: options.target }),
-    profile: options.profile,
+    ...(options.optimization === undefined ? {} : { optimization: options.optimization }),
+    ...(configuration === undefined
+      ? {}
+      : {
+          configuration: {
+            package: 'silk-build-exe@0.0.0',
+            profile: configuration.input,
+            bindings: configuration.bindings,
+          },
+        }),
     artifactKind: 'NativeExecutable',
     packageName: 'silk-build-exe',
     destination: options.output,
@@ -107,14 +149,18 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
 
 export const command = Command.make(
   'build-exe',
-  { source, sourceRoot, output, target, profile, clang, saveTemps, timings },
+  { source, sourceRoot, output, target, optimization, profileInput, clang, saveTemps, timings },
   Effect.fnUntraced(function* (config) {
     const status = yield* run({
       source: config.source,
       sourceRoot: Option.getOrUndefined(config.sourceRoot),
       output: config.output,
       target: Option.getOrUndefined(config.target),
-      profile: config.profile,
+      optimization: Option.getOrUndefined(config.optimization),
+      ...Option.match(config.profileInput, {
+        onNone: () => ({}),
+        onSome: (value) => ({ profileInput: value }),
+      }),
       clang: config.clang,
       saveTemps: config.saveTemps,
       timings: config.timings,

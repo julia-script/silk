@@ -33,14 +33,14 @@ const project = (
     }),
   })
 
-it('plans deterministic backend/target/profile/package destinations', () => {
+it('plans deterministic backend/target/optimization/package destinations', () => {
   const first = BuildPlan.make(project(), {
     target: Target.aarch64AppleDarwin,
-    profile: 'debug',
+    optimization: 'debug',
   })
   const second = BuildPlan.make(project(), {
     target: Target.aarch64AppleDarwin,
-    profile: 'debug',
+    optimization: 'debug',
   })
   assert.deepStrictEqual(first, second)
   assert.strictEqual(Result.isSuccess(first), true)
@@ -55,11 +55,11 @@ it('plans deterministic backend/target/profile/package destinations', () => {
 it('uses platform library filenames and rejects library plans for wasm or run', () => {
   const shared = BuildPlan.make(project('answer', '/workspace/build', 'NativeSharedLibrary'), {
     target: Target.aarch64AppleDarwin,
-    profile: 'release',
+    optimization: 'release',
   })
   const archive = BuildPlan.make(project('answer', '/workspace/build', 'NativeStaticLibrary'), {
     target: Target.x8664UnknownLinuxGnu,
-    profile: 'release',
+    optimization: 'release',
   })
   assert.strictEqual(Result.isSuccess(shared), true)
   assert.strictEqual(Result.isSuccess(archive), true)
@@ -68,7 +68,7 @@ it('uses platform library filenames and rejects library plans for wasm or run', 
 
   const wasm = BuildPlan.make(project('answer', '/workspace/build', 'NativeSharedLibrary'), {
     target: Target.wasm32UnknownUnknown,
-    profile: 'release',
+    optimization: 'release',
   })
   assert.strictEqual(Result.isFailure(wasm), true)
   if (Result.isFailure(wasm))
@@ -79,7 +79,7 @@ it('uses platform library filenames and rejects library plans for wasm or run', 
   if (Result.isFailure(host)) return
   const run = BuildPlan.make(project('answer', '/workspace/build', 'NativeStaticLibrary'), {
     target: host.success,
-    profile: 'release',
+    optimization: 'release',
     purpose: 'run',
   })
   assert.strictEqual(Result.isFailure(run), true)
@@ -92,7 +92,7 @@ it('keeps run host-only', () => {
   if (Result.isFailure(host)) return
   const accepted = BuildPlan.make(project(), {
     target: host.success,
-    profile: 'debug',
+    optimization: 'debug',
     purpose: 'run',
   })
   assert.strictEqual(Result.isSuccess(accepted), true)
@@ -101,7 +101,7 @@ it('keeps run host-only', () => {
 it('guards the plan against a non-portable project value', () => {
   const planned = BuildPlan.make(project('Not Portable'), {
     target: Target.aarch64AppleDarwin,
-    profile: 'debug',
+    optimization: 'debug',
   })
   assert.strictEqual(Result.isFailure(planned), true)
   if (Result.isFailure(planned))

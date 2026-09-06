@@ -1,3 +1,4 @@
+import { unreachable } from './support/raise.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -140,7 +141,7 @@ pub fn main() -> i32 { return 0 }`),
     })
     const residual = Residualization.residualize(
       Residualization.make(
-        snapshot.target.target,
+        snapshot.profile ?? unreachable('expected completed profile'),
         snapshot.results,
         snapshot.resolution,
         snapshot.index,
@@ -205,7 +206,7 @@ pub fn main() -> i32 { return 0 }`),
 
     const unauthorized = Residualization.residualize(
       Residualization.make(
-        snapshot.target.target,
+        snapshot.profile ?? unreachable('expected completed profile'),
         snapshot.results,
         snapshot.resolution,
         snapshot.index,

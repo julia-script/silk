@@ -665,8 +665,8 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
   )
 })
 
-it('classifies targetProfile as a static-only u8 intrinsic with no runtime identity', () => {
-  const operation = Intrinsic.findOperation('Intrinsic', 'targetProfile')
+it('classifies targetPointerBits as a static-only u32 intrinsic with no runtime identity', () => {
+  const operation = Intrinsic.findOperation('Intrinsic', 'targetPointerBits')
   assert.isDefined(operation)
   if (operation === undefined) return
   assert.deepEqual(
@@ -680,10 +680,10 @@ it('classifies targetProfile as a static-only u8 intrinsic with no runtime ident
       rule: operation.rule,
     },
     {
-      signature: 'fn Intrinsic.targetProfile() -> u8',
+      signature: 'fn Intrinsic.targetPointerBits() -> u32',
       phase: 'StaticOnly',
       parameters: [],
-      result: 'u8',
+      result: 'u32',
       unsafe: false,
       targets: [],
       rule: {
@@ -697,7 +697,7 @@ it('classifies targetProfile as a static-only u8 intrinsic with no runtime ident
           typeOutlives: [],
           binders: [],
           parameters: [],
-          result: 'u8',
+          result: 'u32',
           constraints: [],
           captures: [],
         },
@@ -705,15 +705,15 @@ it('classifies targetProfile as a static-only u8 intrinsic with no runtime ident
     },
   )
   const entry = Intrinsic.inventory().find(
-    (candidate) => candidate.operation === 'Intrinsic.targetProfile',
+    (candidate) => candidate.operation === 'Intrinsic.targetPointerBits',
   )
   assert.deepEqual(entry, {
-    operation: 'Intrinsic.targetProfile',
-    signature: 'fn Intrinsic.targetProfile() -> u8',
+    operation: 'Intrinsic.targetPointerBits',
+    signature: 'fn Intrinsic.targetPointerBits() -> u32',
     unsafe: false,
     phase: 'StaticOnly',
     admission: 'Language',
-    consumer: 'silk/target.profile',
+    consumer: 'silk/target.targetPointerBits',
     targets: [],
   })
 })

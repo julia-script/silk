@@ -2206,7 +2206,7 @@ const constantLiteral = (value: DeclarationFacts.ConstantLiteralFact): string =>
 }
 
 const constant = (value: DeclarationFacts.ConstantFact): string =>
-  record('ConstantDeclaration', [
+  record(value._tag, [
     declarationIdOrdinal(value.id),
     canonicalState(value.canonical),
     value.visibility,
@@ -2215,6 +2215,9 @@ const constant = (value: DeclarationFacts.ConstantFact): string =>
     declaredType(value.declaredType),
     record('StaticExpressionTemplate', [value.initializerTemplate.canonical]),
     constantLiteral(value.literal),
+    ...(value._tag === 'PackageParameterDeclaration'
+      ? [String(value.hasDefault), optional(value.predicateTemplate?.canonical)]
+      : []),
   ])
 
 const foreignStatic = (value: DeclarationFacts.ForeignStaticFact): string =>
@@ -2243,6 +2246,7 @@ const member = (value: DeclarationFacts.MemberFact): string => {
       return service(value)
     case 'InterfaceDeclaration':
       return service(value)
+    case 'PackageParameterDeclaration':
     case 'ConstantDeclaration':
       return constant(value)
     case 'ForeignStaticDeclaration':

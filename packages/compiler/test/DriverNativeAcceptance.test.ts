@@ -70,7 +70,7 @@ const compileSource = (
       root: SourceFile.make('memory/driver', ascii(text)),
     },
     toolchain,
-    profile: 'release',
+    optimization: 'release',
     artifactKind: options.artifactKind ?? 'NativeExecutable',
     packageName: options.packageName ?? 'compiler-test',
     destination: join(destinationRoot, name),

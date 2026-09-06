@@ -156,10 +156,10 @@ control flow MUST NOT decide whether `compileError` executes.
 
 ### Requirement: Static evaluation is reachable, finite, and reproducible
 
-Static functions and mixed bodies SHALL be evaluated for one concrete target and complete static
+Static functions and mixed bodies SHALL be evaluated for one complete normalized compilation profile and complete static
 application when demanded by a constant initializer or the executable-specialization worklist.
 Merely loading or indexing an uncalled declaration MUST NOT execute its static body. Equal source,
-target, generic arguments, evidence, and static argument values SHALL produce the same static result,
+normalized profile, generic arguments, evidence, and static argument values SHALL produce the same static result,
 diagnostics, residual program, and specialization identity across fresh processes.
 
 `StaticEvaluation` SHALL enforce deterministic recursion, work, retained-value, and residual-growth
@@ -202,13 +202,9 @@ NOT expose compiler addresses, cache identities, host stack frames, or backend d
 
 ### Requirement: Target information is static and closed
 
-The selected compilation target SHALL contribute one closed profile value to the static environment
-before any reachable specialization is evaluated. Ordinary source in the standard library SHALL
-map that profile through zero-argument static functions to nominal scalar enums and SHALL derive
-primitive target facts as statically evaluated constants. Source target checks SHALL compare those
-enum values rather than string spellings. Target information MUST NOT be readable at runtime,
-changed by source, inferred from the host when an explicit target was selected, or recomputed by an
-execution engine.
+The selected compilation SHALL publish one immutable normalized profile before ordinary reachable specialization. Initial immutable target/artifact inputs SHALL be available during package-default bootstrap, without exposing an incomplete profile. The completed profile SHALL contain resolved validated package parameters. Static-only sealed Intrinsic queries SHALL expose individual stable logical facts. Ordinary Silk wrappers SHALL own nominal domain enums and ergonomic APIs. The whole-target Profile enum and Intrinsic.targetProfile ordinal operation SHALL not exist.
+
+Target facts MUST NOT be readable at runtime, changed by source, inferred from the host when an explicit selection exists, or recomputed by an execution engine. Static cache identity SHALL include canonical profile identity alongside source and static application identity.
 
 #### Scenario: Select code by target architecture
 
@@ -219,3 +215,8 @@ execution engine.
 
 - **WHEN** runtime code is emitted from a target-specialized function
 - **THEN** the artifact contains the selected residual operations but no target-profile parameter, runtime target probe, or static target query
+
+#### Scenario: Isolate same-target package configuration
+
+- **WHEN** one process evaluates the same ordinary static helper under same-target profiles whose package boolean differs
+- **THEN** each evaluation returns its own configured value and repeated applications cannot reuse the other profile

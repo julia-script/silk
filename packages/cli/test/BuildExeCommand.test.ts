@@ -28,7 +28,7 @@ const run = (source: string, overrides: Partial<BuildExeCommand.Options> = {}) =
     sourceRoot: undefined,
     output: join(root, 'out'),
     target: undefined,
-    profile: 'debug',
+    optimization: 'debug',
     clang,
     saveTemps: false,
     timings: false,

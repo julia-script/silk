@@ -64,7 +64,7 @@ normalization accepted kind=FoldedConstructor function=silk/effect.Effect.logErr
 normalization accepted kind=DirectStaticRun function=silk/effect.Effect.logError$effect$-1$provided$24 region=r0 local=%5 guards=DirectTarget,SingleRegion,SingleUse,Synchronous,CopyOrShared [6301, 6343)
 normalization accepted kind=FoldedConstructor function=silk/effect.Effect.logAt$effect$-1$provided$25 region=r0 local=%3 guards=DirectTarget,SingleRegion,Synchronous [5133, 5165)
 normalization rejected reason=AffineCapture function=silk/effect.Effect.logAt$effect$-1$provided$25 region=r0 local=%3 [5133, 5165)
-target aarch64-apple-darwin kind=Native pointer=8/8 endian=little
+target 17:TargetDescription1:120:aarch64-apple-darwin6:Native7:aarch646:darwin5:apple5:macho1:81:86:little2:161:06:darwin7:generic16:5:Array7:generic41:5:Array3:crc6:crypto8:fp-armv83:lse4:neon137:5:Array12:4:bool1:41:413:5:cBool1:11:113:5:cLong1:81:811:3:f321:41:411:3:f641:81:811:3:i161:21:211:3:i321:41:411:3:i641:81:810:2:i81:11:1
 layout Array<i32, 64> size=256 align=4 repr=repeated element=i32 length=64 stride=4
   elements i32 count=64 stride=4
 layout Array<usize, 8> size=64 align=8 repr=repeated element=usize length=8 stride=8

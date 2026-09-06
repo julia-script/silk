@@ -50,109 +50,33 @@
       "types": "./dist/Backend.d.ts",
       "import": "./dist/Backend.js"
     },
-    "./LlvmBackend": {
-      "types": "./dist/LlvmBackend.d.ts",
-      "import": "./dist/LlvmBackend.js"
-    },
-    "./FieldRealization": {
-      "types": "./dist/FieldRealization.d.ts",
-      "import": "./dist/FieldRealization.js"
-    },
     "./CallableContract": {
       "types": "./dist/CallableContract.d.ts",
       "import": "./dist/CallableContract.js"
-    },
-    "./Completion": {
-      "types": "./dist/Completion.d.ts",
-      "import": "./dist/Completion.js"
     },
     "./CleanupPlan": {
       "types": "./dist/CleanupPlan.d.ts",
       "import": "./dist/CleanupPlan.js"
     },
-    "./PhaseReport": {
-      "types": "./dist/PhaseReport.d.ts",
-      "import": "./dist/PhaseReport.js"
+    "./CompilationProfile": {
+      "types": "./dist/CompilationProfile.d.ts",
+      "import": "./dist/CompilationProfile.js"
     },
-    "./ProjectAnalysis": {
-      "types": "./dist/ProjectAnalysis.d.ts",
-      "import": "./dist/ProjectAnalysis.js"
+    "./Completion": {
+      "types": "./dist/Completion.d.ts",
+      "import": "./dist/Completion.js"
     },
-    "./ProviderSelection": {
-      "types": "./dist/ProviderSelection.d.ts",
-      "import": "./dist/ProviderSelection.js"
+    "./ConfigurationError": {
+      "types": "./dist/ConfigurationError.d.ts",
+      "import": "./dist/ConfigurationError.js"
     },
-    "./RequirementRow": {
-      "types": "./dist/RequirementRow.d.ts",
-      "import": "./dist/RequirementRow.js"
+    "./ConfigurationOrigin": {
+      "types": "./dist/ConfigurationOrigin.d.ts",
+      "import": "./dist/ConfigurationOrigin.js"
     },
-    "./RowAlgebra": {
-      "types": "./dist/RowAlgebra.d.ts",
-      "import": "./dist/RowAlgebra.js"
-    },
-    "./RepresentationField": {
-      "types": "./dist/RepresentationField.d.ts",
-      "import": "./dist/RepresentationField.js"
-    },
-    "./NativeToolchain": {
-      "types": "./dist/NativeToolchain.d.ts",
-      "import": "./dist/NativeToolchain.js"
-    },
-    "./NativeLinkInput": {
-      "types": "./dist/NativeLinkInput.d.ts",
-      "import": "./dist/NativeLinkInput.js"
-    },
-    "./SourceFile": {
-      "types": "./dist/SourceFile.d.ts",
-      "import": "./dist/SourceFile.js"
-    },
-    "./Termination": {
-      "types": "./dist/Termination.d.ts",
-      "import": "./dist/Termination.js"
-    },
-    "./LifetimeElision": {
-      "types": "./dist/LifetimeElision.d.ts",
-      "import": "./dist/LifetimeElision.js"
-    },
-    "./SourceAction": {
-      "types": "./dist/SourceAction.d.ts",
-      "import": "./dist/SourceAction.js"
-    },
-    "./ImportUsage": {
-      "types": "./dist/ImportUsage.d.ts",
-      "import": "./dist/ImportUsage.js"
-    },
-    "./SourceOrigin": {
-      "types": "./dist/SourceOrigin.d.ts",
-      "import": "./dist/SourceOrigin.js"
-    },
-    "./SourceResolver": {
-      "types": "./dist/SourceResolver.d.ts",
-      "import": "./dist/SourceResolver.js"
-    },
-    "./Stdlib": {
-      "types": "./dist/Stdlib.d.ts",
-      "import": "./dist/Stdlib.js"
-    },
-    "./SuspensionMode": {
-      "types": "./dist/SuspensionMode.d.ts",
-      "import": "./dist/SuspensionMode.js"
-    },
-    "./HeapObservation": {
-      "types": "./dist/HeapObservation.d.ts",
-      "import": "./dist/HeapObservation.js"
-    },
-    "./NodeHeapObservation": {
-      "types": "./dist/NodeHeapObservation.d.ts",
-      "import": "./dist/NodeHeapObservation.js"
-    },
-    "./SourceSpan": {
-      "types": "./dist/SourceSpan.d.ts",
-      "import": "./dist/SourceSpan.js"
-    },
-    "./Token": {
-      "types": "./dist/Token.d.ts",
-      "import": "./dist/Token.js"
+    "./ConfigurationValue": {
+      "types": "./dist/ConfigurationValue.d.ts",
+      "import": "./dist/ConfigurationValue.js"
     },
     "./ConformanceGoal": {
       "types": "./dist/ConformanceGoal.d.ts",
@@ -174,10 +98,6 @@
       "types": "./dist/DeclarationIndex.d.ts",
       "import": "./dist/DeclarationIndex.js"
     },
-    "./Driver": {
-      "types": "./dist/Driver.d.ts",
-      "import": "./dist/Driver.js"
-    },
     "./Diagnostic": {
       "types": "./dist/Diagnostic.d.ts",
       "import": "./dist/Diagnostic.js"
@@ -186,9 +106,105 @@
       "types": "./dist/DocBlock.d.ts",
       "import": "./dist/DocBlock.js"
     },
+    "./Driver": {
+      "types": "./dist/Driver.d.ts",
+      "import": "./dist/Driver.js"
+    },
+    "./Elaboration": {
+      "types": "./dist/Elaboration.d.ts",
+      "import": "./dist/Elaboration.js"
+    },
+    "./ExecutableProperty": {
+      "types": "./dist/ExecutableProperty.d.ts",
+      "import": "./dist/ExecutableProperty.js"
+    },
+    "./ExecutionAffinity": {
+      "types": "./dist/ExecutionAffinity.d.ts",
+      "import": "./dist/ExecutionAffinity.js"
+    },
+    "./ExecutionBoundary": {
+      "types": "./dist/ExecutionBoundary.d.ts",
+      "import": "./dist/ExecutionBoundary.js"
+    },
+    "./ExecutionLifecycle": {
+      "types": "./dist/ExecutionLifecycle.d.ts",
+      "import": "./dist/ExecutionLifecycle.js"
+    },
+    "./ExecutionPackage": {
+      "types": "./dist/ExecutionPackage.d.ts",
+      "import": "./dist/ExecutionPackage.js"
+    },
+    "./FieldRealization": {
+      "types": "./dist/FieldRealization.d.ts",
+      "import": "./dist/FieldRealization.js"
+    },
+    "./FileSourceResolver": {
+      "types": "./dist/FileSourceResolver.d.ts",
+      "import": "./dist/FileSourceResolver.js"
+    },
+    "./FiniteRow": {
+      "types": "./dist/FiniteRow.d.ts",
+      "import": "./dist/FiniteRow.js"
+    },
+    "./FloatingPoint": {
+      "types": "./dist/FloatingPoint.d.ts",
+      "import": "./dist/FloatingPoint.js"
+    },
+    "./FormattedDocument": {
+      "types": "./dist/FormattedDocument.d.ts",
+      "import": "./dist/FormattedDocument.js"
+    },
+    "./HeapObservation": {
+      "types": "./dist/HeapObservation.d.ts",
+      "import": "./dist/HeapObservation.js"
+    },
+    "./Hir": {
+      "types": "./dist/Hir.d.ts",
+      "import": "./dist/Hir.js"
+    },
+    "./ImportPath": {
+      "types": "./dist/ImportPath.d.ts",
+      "import": "./dist/ImportPath.js"
+    },
+    "./ImportPlan": {
+      "types": "./dist/ImportPlan.d.ts",
+      "import": "./dist/ImportPlan.js"
+    },
+    "./ImportUsage": {
+      "types": "./dist/ImportUsage.d.ts",
+      "import": "./dist/ImportUsage.js"
+    },
+    "./InspectorFlowModel": {
+      "types": "./dist/InspectorFlowModel.d.ts",
+      "import": "./dist/InspectorFlowModel.js"
+    },
+    "./InspectorPanels": {
+      "types": "./dist/InspectorPanels.d.ts",
+      "import": "./dist/InspectorPanels.js"
+    },
+    "./InspectorProjectBackend": {
+      "types": "./dist/InspectorProjectBackend.d.ts",
+      "import": "./dist/InspectorProjectBackend.js"
+    },
+    "./InspectorProjectSyntax": {
+      "types": "./dist/InspectorProjectSyntax.d.ts",
+      "import": "./dist/InspectorProjectSyntax.js"
+    },
+    "./InspectorRegistry": {
+      "types": "./dist/InspectorRegistry.d.ts",
+      "import": "./dist/InspectorRegistry.js"
+    },
+    "./InspectorRow": {
+      "types": "./dist/InspectorRow.d.ts",
+      "import": "./dist/InspectorRow.js"
+    },
     "./Instances": {
       "types": "./dist/Instances.d.ts",
       "import": "./dist/Instances.js"
+    },
+    "./InterfaceWitnessCompatibility": {
+      "types": "./dist/InterfaceWitnessCompatibility.d.ts",
+      "import": "./dist/InterfaceWitnessCompatibility.js"
     },
     "./Intrinsic": {
       "types": "./dist/Intrinsic.d.ts",
@@ -197,22 +213,6 @@
     "./IntrinsicAvailability": {
       "types": "./dist/IntrinsicAvailability.d.ts",
       "import": "./dist/IntrinsicAvailability.js"
-    },
-    "./FiniteRow": {
-      "types": "./dist/FiniteRow.d.ts",
-      "import": "./dist/FiniteRow.js"
-    },
-    "./InterfaceWitnessCompatibility": {
-      "types": "./dist/InterfaceWitnessCompatibility.d.ts",
-      "import": "./dist/InterfaceWitnessCompatibility.js"
-    },
-    "./ImportPlan": {
-      "types": "./dist/ImportPlan.d.ts",
-      "import": "./dist/ImportPlan.js"
-    },
-    "./ImportPath": {
-      "types": "./dist/ImportPath.d.ts",
-      "import": "./dist/ImportPath.js"
     },
     "./Layout": {
       "types": "./dist/Layout.d.ts",
@@ -230,9 +230,17 @@
       "types": "./dist/Lexer.d.ts",
       "import": "./dist/Lexer.js"
     },
+    "./LifetimeElision": {
+      "types": "./dist/LifetimeElision.d.ts",
+      "import": "./dist/LifetimeElision.js"
+    },
     "./LiteralForm": {
       "types": "./dist/LiteralForm.d.ts",
       "import": "./dist/LiteralForm.js"
+    },
+    "./LlvmBackend": {
+      "types": "./dist/LlvmBackend.d.ts",
+      "import": "./dist/LlvmBackend.js"
     },
     "./LocalSharedOwnership": {
       "types": "./dist/LocalSharedOwnership.d.ts",
@@ -262,6 +270,10 @@
       "types": "./dist/ModuleClosure.d.ts",
       "import": "./dist/ModuleClosure.js"
     },
+    "./ModuleSemantics": {
+      "types": "./dist/ModuleSemantics.d.ts",
+      "import": "./dist/ModuleSemantics.js"
+    },
     "./ModuleSummary": {
       "types": "./dist/ModuleSummary.d.ts",
       "import": "./dist/ModuleSummary.js"
@@ -269,10 +281,6 @@
     "./ModuleSurface": {
       "types": "./dist/ModuleSurface.d.ts",
       "import": "./dist/ModuleSurface.js"
-    },
-    "./ModuleSemantics": {
-      "types": "./dist/ModuleSemantics.d.ts",
-      "import": "./dist/ModuleSemantics.js"
     },
     "./ModuleTooling": {
       "types": "./dist/ModuleTooling.d.ts",
@@ -282,117 +290,117 @@
       "types": "./dist/NameResolution.d.ts",
       "import": "./dist/NameResolution.js"
     },
-    "./SyntaxFile": {
-      "types": "./dist/SyntaxFile.d.ts",
-      "import": "./dist/SyntaxFile.js"
+    "./NativeLinkInput": {
+      "types": "./dist/NativeLinkInput.d.ts",
+      "import": "./dist/NativeLinkInput.js"
     },
-    "./SyntaxCorrespondence": {
-      "types": "./dist/SyntaxCorrespondence.d.ts",
-      "import": "./dist/SyntaxCorrespondence.js"
+    "./NativeToolchain": {
+      "types": "./dist/NativeToolchain.d.ts",
+      "import": "./dist/NativeToolchain.js"
     },
-    "./SyntaxTree": {
-      "types": "./dist/SyntaxTree.d.ts",
-      "import": "./dist/SyntaxTree.js"
-    },
-    "./Ownership": {
-      "types": "./dist/Ownership.d.ts",
-      "import": "./dist/Ownership.js"
+    "./NodeHeapObservation": {
+      "types": "./dist/NodeHeapObservation.d.ts",
+      "import": "./dist/NodeHeapObservation.js"
     },
     "./Operator": {
       "types": "./dist/Operator.d.ts",
       "import": "./dist/Operator.js"
     },
+    "./Ownership": {
+      "types": "./dist/Ownership.d.ts",
+      "import": "./dist/Ownership.js"
+    },
+    "./PackageConfiguration": {
+      "types": "./dist/PackageConfiguration.d.ts",
+      "import": "./dist/PackageConfiguration.js"
+    },
+    "./PackageParameter": {
+      "types": "./dist/PackageParameter.d.ts",
+      "import": "./dist/PackageParameter.js"
+    },
     "./Parser": {
       "types": "./dist/Parser.d.ts",
       "import": "./dist/Parser.js"
+    },
+    "./PhaseReport": {
+      "types": "./dist/PhaseReport.d.ts",
+      "import": "./dist/PhaseReport.js"
     },
     "./Presentation": {
       "types": "./dist/Presentation.d.ts",
       "import": "./dist/Presentation.js"
     },
+    "./ProfileBootstrap": {
+      "types": "./dist/ProfileBootstrap.d.ts",
+      "import": "./dist/ProfileBootstrap.js"
+    },
+    "./Project": {
+      "types": "./dist/Project.d.ts",
+      "import": "./dist/Project.js"
+    },
+    "./ProjectAnalysis": {
+      "types": "./dist/ProjectAnalysis.d.ts",
+      "import": "./dist/ProjectAnalysis.js"
+    },
+    "./ProjectProfile": {
+      "types": "./dist/ProjectProfile.d.ts",
+      "import": "./dist/ProjectProfile.js"
+    },
+    "./ProviderSelection": {
+      "types": "./dist/ProviderSelection.d.ts",
+      "import": "./dist/ProviderSelection.js"
+    },
+    "./RepresentationField": {
+      "types": "./dist/RepresentationField.d.ts",
+      "import": "./dist/RepresentationField.js"
+    },
+    "./RequirementRow": {
+      "types": "./dist/RequirementRow.d.ts",
+      "import": "./dist/RequirementRow.js"
+    },
+    "./Residualization": {
+      "types": "./dist/Residualization.d.ts",
+      "import": "./dist/Residualization.js"
+    },
+    "./RowAlgebra": {
+      "types": "./dist/RowAlgebra.d.ts",
+      "import": "./dist/RowAlgebra.js"
+    },
     "./Scalar": {
       "types": "./dist/Scalar.d.ts",
       "import": "./dist/Scalar.js"
-    },
-    "./SemanticOccurrence": {
-      "types": "./dist/SemanticOccurrence.d.ts",
-      "import": "./dist/SemanticOccurrence.js"
     },
     "./SemanticInvalidation": {
       "types": "./dist/SemanticInvalidation.d.ts",
       "import": "./dist/SemanticInvalidation.js"
     },
-    "./Elaboration": {
-      "types": "./dist/Elaboration.d.ts",
-      "import": "./dist/Elaboration.js"
+    "./SemanticOccurrence": {
+      "types": "./dist/SemanticOccurrence.d.ts",
+      "import": "./dist/SemanticOccurrence.js"
     },
-    "./ExecutableProperty": {
-      "types": "./dist/ExecutableProperty.d.ts",
-      "import": "./dist/ExecutableProperty.js"
+    "./SourceAction": {
+      "types": "./dist/SourceAction.d.ts",
+      "import": "./dist/SourceAction.js"
     },
-    "./ExecutionAffinity": {
-      "types": "./dist/ExecutionAffinity.d.ts",
-      "import": "./dist/ExecutionAffinity.js"
+    "./SourceEntry": {
+      "types": "./dist/SourceEntry.d.ts",
+      "import": "./dist/SourceEntry.js"
     },
-    "./ExecutionBoundary": {
-      "types": "./dist/ExecutionBoundary.d.ts",
-      "import": "./dist/ExecutionBoundary.js"
+    "./SourceFile": {
+      "types": "./dist/SourceFile.d.ts",
+      "import": "./dist/SourceFile.js"
     },
-    "./ExecutionLifecycle": {
-      "types": "./dist/ExecutionLifecycle.d.ts",
-      "import": "./dist/ExecutionLifecycle.js"
+    "./SourceOrigin": {
+      "types": "./dist/SourceOrigin.d.ts",
+      "import": "./dist/SourceOrigin.js"
     },
-    "./ExecutionPackage": {
-      "types": "./dist/ExecutionPackage.d.ts",
-      "import": "./dist/ExecutionPackage.js"
+    "./SourceResolver": {
+      "types": "./dist/SourceResolver.d.ts",
+      "import": "./dist/SourceResolver.js"
     },
-    "./FormattedDocument": {
-      "types": "./dist/FormattedDocument.d.ts",
-      "import": "./dist/FormattedDocument.js"
-    },
-    "./SyntaxFormatter": {
-      "types": "./dist/SyntaxFormatter.d.ts",
-      "import": "./dist/SyntaxFormatter.js"
-    },
-    "./FloatingPoint": {
-      "types": "./dist/FloatingPoint.d.ts",
-      "import": "./dist/FloatingPoint.js"
-    },
-    "./Transcendental": {
-      "types": "./dist/Transcendental.d.ts",
-      "import": "./dist/Transcendental.js"
-    },
-    "./Hir": {
-      "types": "./dist/Hir.d.ts",
-      "import": "./dist/Hir.js"
-    },
-    "./ToolchainPlan": {
-      "types": "./dist/ToolchainPlan.d.ts",
-      "import": "./dist/ToolchainPlan.js"
-    },
-    "./ToolchainIntegrity": {
-      "types": "./dist/ToolchainIntegrity.d.ts",
-      "import": "./dist/ToolchainIntegrity.js"
-    },
-    "./Type": {
-      "types": "./dist/Type.d.ts",
-      "import": "./dist/Type.js"
-    },
-    "./TypeHint": {
-      "types": "./dist/TypeHint.d.ts",
-      "import": "./dist/TypeHint.js"
-    },
-    "./TypeCompatibility": {
-      "types": "./dist/TypeCompatibility.d.ts",
-      "import": "./dist/TypeCompatibility.js"
-    },
-    "./Target": {
-      "types": "./dist/Target.d.ts",
-      "import": "./dist/Target.js"
-    },
-    "./Residualization": {
-      "types": "./dist/Residualization.d.ts",
-      "import": "./dist/Residualization.js"
+    "./SourceSpan": {
+      "types": "./dist/SourceSpan.d.ts",
+      "import": "./dist/SourceSpan.js"
     },
     "./StaticEvaluation": {
       "types": "./dist/StaticEvaluation.d.ts",
@@ -402,45 +410,69 @@
       "types": "./dist/StaticValue.d.ts",
       "import": "./dist/StaticValue.js"
     },
-    "./FileSourceResolver": {
-      "types": "./dist/FileSourceResolver.d.ts",
-      "import": "./dist/FileSourceResolver.js"
+    "./Stdlib": {
+      "types": "./dist/Stdlib.d.ts",
+      "import": "./dist/Stdlib.js"
     },
-    "./InspectorFlowModel": {
-      "types": "./dist/InspectorFlowModel.d.ts",
-      "import": "./dist/InspectorFlowModel.js"
+    "./SuspensionMode": {
+      "types": "./dist/SuspensionMode.d.ts",
+      "import": "./dist/SuspensionMode.js"
     },
-    "./InspectorPanels": {
-      "types": "./dist/InspectorPanels.d.ts",
-      "import": "./dist/InspectorPanels.js"
+    "./SyntaxCorrespondence": {
+      "types": "./dist/SyntaxCorrespondence.d.ts",
+      "import": "./dist/SyntaxCorrespondence.js"
     },
-    "./InspectorProjectBackend": {
-      "types": "./dist/InspectorProjectBackend.d.ts",
-      "import": "./dist/InspectorProjectBackend.js"
+    "./SyntaxFile": {
+      "types": "./dist/SyntaxFile.d.ts",
+      "import": "./dist/SyntaxFile.js"
     },
-    "./InspectorProjectSyntax": {
-      "types": "./dist/InspectorProjectSyntax.d.ts",
-      "import": "./dist/InspectorProjectSyntax.js"
+    "./SyntaxFormatter": {
+      "types": "./dist/SyntaxFormatter.d.ts",
+      "import": "./dist/SyntaxFormatter.js"
     },
-    "./InspectorRegistry": {
-      "types": "./dist/InspectorRegistry.d.ts",
-      "import": "./dist/InspectorRegistry.js"
+    "./SyntaxTree": {
+      "types": "./dist/SyntaxTree.d.ts",
+      "import": "./dist/SyntaxTree.js"
     },
-    "./InspectorRow": {
-      "types": "./dist/InspectorRow.d.ts",
-      "import": "./dist/InspectorRow.js"
-    },
-    "./Project": {
-      "types": "./dist/Project.d.ts",
-      "import": "./dist/Project.js"
-    },
-    "./SourceEntry": {
-      "types": "./dist/SourceEntry.d.ts",
-      "import": "./dist/SourceEntry.js"
+    "./Target": {
+      "types": "./dist/Target.d.ts",
+      "import": "./dist/Target.js"
     },
     "./TargetSelector": {
       "types": "./dist/TargetSelector.d.ts",
       "import": "./dist/TargetSelector.js"
+    },
+    "./Termination": {
+      "types": "./dist/Termination.d.ts",
+      "import": "./dist/Termination.js"
+    },
+    "./Token": {
+      "types": "./dist/Token.d.ts",
+      "import": "./dist/Token.js"
+    },
+    "./ToolchainIntegrity": {
+      "types": "./dist/ToolchainIntegrity.d.ts",
+      "import": "./dist/ToolchainIntegrity.js"
+    },
+    "./ToolchainPlan": {
+      "types": "./dist/ToolchainPlan.d.ts",
+      "import": "./dist/ToolchainPlan.js"
+    },
+    "./Transcendental": {
+      "types": "./dist/Transcendental.d.ts",
+      "import": "./dist/Transcendental.js"
+    },
+    "./Type": {
+      "types": "./dist/Type.d.ts",
+      "import": "./dist/Type.js"
+    },
+    "./TypeCompatibility": {
+      "types": "./dist/TypeCompatibility.d.ts",
+      "import": "./dist/TypeCompatibility.js"
+    },
+    "./TypeHint": {
+      "types": "./dist/TypeHint.d.ts",
+      "import": "./dist/TypeHint.js"
     },
     "./WorkspaceInventory": {
       "types": "./dist/WorkspaceInventory.d.ts",

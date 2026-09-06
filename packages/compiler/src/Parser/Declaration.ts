@@ -84,6 +84,7 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
   if (
     kind === 'ImportKeyword' ||
     kind === 'ConstKeyword' ||
+    kind === 'ParamKeyword' ||
     kind === 'FnKeyword' ||
     kind === 'EffectKeyword' ||
     kind === 'UnsafeKeyword' ||
@@ -118,7 +119,8 @@ export const beginsTopLevelDeclaration = (state: State): boolean => {
     following === 'ServiceKeyword' ||
     following === 'InterfaceKeyword' ||
     following === 'RoleKeyword' ||
-    following === 'ConstKeyword'
+    following === 'ConstKeyword' ||
+    following === 'ParamKeyword'
   )
 }
 
@@ -187,6 +189,41 @@ export const parseConstantDeclaration = (initial: State): NodeResult => {
       initializer.node,
     ]),
   })
+}
+
+/** An unconditional package-owned static parameter with optional default and validation. */
+export const parsePackageParameterDeclaration = (initial: State): NodeResult => {
+  const pubKeyword =
+    nextSignificantKind(initial) === 'PubKeyword'
+      ? expect(initial, 'PubKeyword', ['ParamKeyword', ...topLevelFollowing])
+      : Object.freeze({ state: initial, elements: Object.freeze([]) })
+  const keyword = expect(pubKeyword.state, 'ParamKeyword', ['Identifier', ...topLevelFollowing])
+  const name = expect(keyword.state, 'Identifier', ['Colon', ...topLevelFollowing])
+  const colon = expect(name.state, 'Colon', [...typeStarts, ...topLevelFollowing])
+  const type = parseType(colon.state, ['Equals', ...topLevelFollowing])
+  let state = type.state
+  const children: Array<SyntaxTree.Element> = [
+    ...pubKeyword.elements,
+    ...keyword.elements,
+    ...name.elements,
+    ...colon.elements,
+    type.node,
+  ]
+  if (nextSignificantKind(state) === 'Equals') {
+    const equals = expect(state, 'Equals', expressionStarts)
+    const initializer = parseExpression(equals.state, 0, 'Integer', false, ExpressionNesting.root)
+    state = initializer.state
+    children.push(...equals.elements, initializer.node)
+  }
+  if (hasContextualSpelling(state, 'where')) {
+    const where = expect(state, 'Identifier', expressionStarts)
+    const predicate = parseExpression(where.state, 0, 'Integer', false, ExpressionNesting.root)
+    state = predicate.state
+    children.push(
+      syntaxNode(state, 'PackageParameterValidation', [...where.elements, predicate.node]),
+    )
+  }
+  return Object.freeze({ state, node: syntaxNode(state, 'PackageParameterDeclaration', children) })
 }
 
 /** Parses an imported or exported C data symbol. Both forms are immutable Silk bindings. */
@@ -980,6 +1017,8 @@ export const parseTopLevelDeclaration = (state: State): NodeResult => {
   if (kind === 'ImportKeyword') return parseImportDeclaration(state)
   if (kind === 'ConstKeyword' || following === 'ConstKeyword')
     return parseConstantDeclaration(state)
+  if (kind === 'ParamKeyword' || following === 'ParamKeyword')
+    return parsePackageParameterDeclaration(state)
   if (kind === 'RoleKeyword' || following === 'RoleKeyword') return parseRoleDeclaration(state)
   if (kind === 'ImplKeyword') return parseImplDeclaration(state)
   if (kind === 'InterfaceKeyword' || following === 'InterfaceKeyword')
@@ -1020,6 +1059,7 @@ export const parseFunctionDeclaration = (initial: State, allowDropName = false):
     lookaheadToken.kind !== 'InterfaceKeyword' &&
     lookaheadToken.kind !== 'RoleKeyword' &&
     lookaheadToken.kind !== 'ConstKeyword' &&
+    lookaheadToken.kind !== 'ParamKeyword' &&
     lookaheadToken.kind !== 'EndOfFile'
   ) {
     if (lookaheadToken.kind === 'PubKeyword') {

@@ -12,7 +12,7 @@ export const command = Command.make(
     yield* CommandExit.complete(
       yield* Workflow.clean({
         ...(Option.isNone(config.manifestPath) ? {} : { manifestPath: config.manifestPath.value }),
-        profile: 'debug',
+        optimization: 'debug',
       }),
     )
   }),

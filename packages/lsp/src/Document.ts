@@ -61,6 +61,7 @@ export interface Document {
   readonly workspace: string
   readonly module: string
   readonly sourceRoot: string
+  readonly configuration?: unknown
   readonly bytes: Uint8Array
   readonly index: LineIndex.LineIndex
 }
@@ -72,6 +73,7 @@ export const make = (options: {
   readonly workspace: string
   readonly module: string
   readonly sourceRoot: string
+  readonly configuration?: unknown
   readonly bytes: Uint8Array
 }): Document =>
   Object.freeze({
@@ -81,6 +83,7 @@ export const make = (options: {
     workspace: options.workspace,
     module: options.module,
     sourceRoot: options.sourceRoot,
+    configuration: options.configuration,
     bytes: Uint8Array.from(options.bytes),
     index: LineIndex.make(options.bytes),
   })
@@ -1851,7 +1854,7 @@ export const symbols = (
         },
       ]
     }
-    if (member._tag === 'ConstantDeclaration') {
+    if (member._tag === 'ConstantDeclaration' || member._tag === 'PackageParameterDeclaration') {
       return [
         {
           name: member.name.spelling,
@@ -2113,7 +2116,11 @@ const occurrenceTokenType = (
     case 'DeclarationIdentity': {
       const declaration = Analysis.declarationForIdentity(snapshot, identity)
       if (declaration?._tag === 'FunctionDeclaration') return SemanticTokenTypes.function
-      if (declaration?._tag === 'ConstantDeclaration') return SemanticTokenTypes.variable
+      if (
+        declaration?._tag === 'ConstantDeclaration' ||
+        declaration?._tag === 'PackageParameterDeclaration'
+      )
+        return SemanticTokenTypes.variable
       return SemanticTokenTypes.type
     }
     default:

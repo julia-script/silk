@@ -87,7 +87,7 @@ const makeProject = Effect.fnUntraced(function* (root: string, program = source)
 
 const options = (workingDirectory: string): Workflow.ProjectSelection => ({
   workingDirectory,
-  profile: 'debug',
+  optimization: 'debug',
 })
 
 const silentWatchLayer = (fileSystem: FileSystem.FileSystem) =>
@@ -417,7 +417,7 @@ it.effect('returns source and toolchain failure classes without leaving executab
     const destination = `${root}/broken-toolchain`
     const attempted = yield* Workflow.compile({
       entry: project.entry,
-      profile: 'debug',
+      optimization: 'debug',
       artifactKind: 'NativeExecutable',
       packageName: 'broken-toolchain',
       destination,

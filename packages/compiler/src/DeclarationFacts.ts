@@ -582,9 +582,8 @@ export type ConstantLiteralFact =
   | { readonly _tag: 'Malformed'; readonly detail: string; readonly syntax: SyntaxTree.Element }
   | { readonly _tag: 'Unavailable'; readonly syntax: SyntaxTree.Element }
 
-/** One explicitly typed, compile-time scalar or static-text declaration. */
-export interface ConstantFact {
-  readonly _tag: 'ConstantDeclaration'
+/** Common source and type facts of an immutable static module binding. */
+interface StaticBindingHeader {
   readonly id: DeclarationId
   readonly canonical: CanonicalState
   readonly visibility: 'Public' | 'Private'
@@ -596,6 +595,22 @@ export interface ConstantFact {
   readonly initializer: SyntaxTree.Node
   readonly syntax: SyntaxTree.Node
 }
+
+/** One ordinary source constant. */
+export interface ConstantDeclaration extends StaticBindingHeader {
+  readonly _tag: 'ConstantDeclaration'
+}
+
+/** An unconditional package-owned schema entry, sharing ordinary static expression semantics. */
+export interface PackageParameterFact extends StaticBindingHeader {
+  readonly _tag: 'PackageParameterDeclaration'
+  readonly hasDefault: boolean
+  readonly predicate?: SyntaxTree.Node
+  readonly predicateTemplate?: StaticExpressionTemplate
+}
+
+/** A static module value, supplied by an initializer or package configuration. */
+export type ConstantFact = ConstantDeclaration | PackageParameterFact
 
 /** One immutable Silk binding backed by an imported or exported C data symbol. */
 export interface ForeignStaticFact {

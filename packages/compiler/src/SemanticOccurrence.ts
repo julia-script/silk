@@ -1320,7 +1320,11 @@ const collectMember = (
       collectConstraint(constraint, index, scope, pending)
     return
   }
-  if (member._tag === 'ConstantDeclaration' || member._tag === 'ForeignStaticDeclaration') {
+  if (
+    member._tag === 'ConstantDeclaration' ||
+    member._tag === 'PackageParameterDeclaration' ||
+    member._tag === 'ForeignStaticDeclaration'
+  ) {
     collectDeclaredType(member.declaredType, index, scope, pending)
     return
   }
