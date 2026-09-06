@@ -23,6 +23,7 @@ export interface PlannedCommand {
   readonly target: Target.Target
   readonly command: string
   readonly arguments: ReadonlyArray<string>
+  readonly environment?: Readonly<Record<string, string>>
 }
 
 /** The codegen mode a profile's bitcode is emitted with. */
@@ -47,8 +48,8 @@ export const compilationArguments = (
     ...(profile.target.kind === 'Native' && profile.codeModel === 'large'
       ? ['-mcmodel=large']
       : []),
-    ...(profile.target.operatingSystem === 'darwin' && profile.deployment !== undefined
-      ? [`-mmacosx-version-min=${profile.deployment}`]
+    ...(profile.target.operatingSystem === 'darwin'
+      ? [`-mmacosx-version-min=${profile.deployment ?? '11.0.0'}`]
       : []),
   ])
 

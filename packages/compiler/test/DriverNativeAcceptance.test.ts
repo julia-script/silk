@@ -1,3 +1,4 @@
+import * as CompilationProfile from '../src/CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { platform, tmpdir } from 'node:os'
@@ -158,12 +159,21 @@ it.effect('relinks named archives after content and search-resolution changes', 
           `int silk_cache_selected(void) { return ${value}; }`,
         )
         yield* NativeToolchain.NativeFinalizer.finalize(
-          toolchain,
-          scope,
+          yield* NativeToolchain.planNativeLink(
+            toolchain,
+            scope,
+            'NativeStaticLibrary',
+            yield* CompilationProfile.normalize({ target: target.id }),
+            [object.artifact],
+            [],
+            join(directory, 'libsilk_cache_selected.a'),
+            {
+              request: { kind: 'default' },
+              composition: { kind: 'default' },
+              resolved: { kind: 'default' },
+            },
+          ),
           'NativeStaticLibrary',
-          target,
-          [object.artifact],
-          [],
           join(directory, 'libsilk_cache_selected.a'),
         )
       })

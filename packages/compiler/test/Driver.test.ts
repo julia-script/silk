@@ -311,11 +311,11 @@ it.effect('names the failing native stage with command provenance', () =>
     if (outcome._tag !== 'Failure') return
     assert.strictEqual(outcome.failure._tag, 'ToolchainError')
     if (outcome.failure._tag !== 'ToolchainError') return
-    assert.strictEqual(outcome.failure.stage, 'object')
-    assert.strictEqual(outcome.failure.reason._tag, 'SpawnFailed')
-    if (outcome.failure.reason._tag !== 'SpawnFailed') return
-    assert.strictEqual(outcome.failure.reason.planned.command, '/nonexistent/clang')
-    assert.instanceOf(outcome.failure.reason.cause, Error)
+    assert.strictEqual(outcome.failure.stage, 'supply')
+    assert.strictEqual(outcome.failure.reason._tag, 'SupplyFailed')
+    if (outcome.failure.reason._tag !== 'SupplyFailed') return
+    assert.strictEqual(outcome.failure.reason.failure.subject, '/nonexistent/clang')
+    assert.strictEqual(outcome.failure.reason.failure.code, 'MissingCapability')
   }),
 )
 
@@ -365,77 +365,57 @@ it.effect('stops unsupported targets before MIR or native tools', () =>
   }),
 )
 
-it.effect('reuses backend emission while denying native final-cache reads and writes', () =>
-  Effect.gen(function* () {
-    const initial = yield* compileSource(
-      'old-native-cache-entry',
-      'pub fn main() -> i32 { return 42 }',
-    )
-    assert.strictEqual(initial._tag, 'Compiled')
-    if (initial._tag !== 'Compiled') return
-    const oldBytes = readFileSync(initial.path)
-    const entries = new Map<string, Uint8Array>()
-    const reads: Array<string> = []
-    const writes: Array<string> = []
-    const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
-      _tag: 'ArtifactCache',
-      get: Effect.fnUntraced(function* (key: string) {
-        reads.push(key)
-        if (key.startsWith('backend-')) return entries.get(key)
-        // Supply a fully authenticated old entry for the requested incomplete key. Encoding
-        // through the real cache writer avoids mistaking envelope rejection for admission.
-        yield* NativeToolchain.writeArtifactCache(
-          {
-            _tag: 'ArtifactCache',
-            get: (seedKey: string) => Effect.sync(() => entries.get(seedKey)),
-            set: (seedKey: string, bytes: Uint8Array) =>
-              Effect.sync(() => {
-                entries.set(seedKey, bytes)
-              }),
-          },
-          key,
-          oldBytes,
-        )
-        return entries.get(key)
-      }),
-      set: (key: string, bytes: Uint8Array) =>
-        Effect.sync(() => {
-          writes.push(key)
-          entries.set(key, bytes)
-        }),
-    })
-    const cachingToolchain = Object.freeze({ ...toolchain, artifactCache })
-    const source = 'pub fn main() -> i32 { return 42 }'
-    for (const name of ['admission-first', 'admission-second']) {
-      const outcome = yield* compileSource(name, source, {
-        toolchain: cachingToolchain,
-        cache: true,
+it.effect(
+  'admits native final caching only after complete resolution and retains backend reuse',
+  () =>
+    Effect.gen(function* () {
+      const entries = new Map<string, Uint8Array>()
+      const reads: Array<string> = [],
+        writes: Array<string> = []
+      const artifactCache: NativeToolchain.ArtifactCache = Object.freeze({
+        _tag: 'ArtifactCache',
+        get: (key: string) =>
+          Effect.sync(() => {
+            reads.push(key)
+            return entries.get(key)
+          }),
+        set: (key: string, bytes: Uint8Array) =>
+          Effect.sync(() => {
+            writes.push(key)
+            entries.set(key, bytes)
+          }),
       })
-      assert.strictEqual(outcome._tag, 'Compiled')
-      if (outcome._tag !== 'Compiled') return
-      const phases = outcome.report.map((entry) => entry.phase)
-      assert.include(phases, 'link')
-      assert.notInclude(phases, 'artifact-cache')
-      if (name === 'admission-second') assert.include(phases, 'backend-cache')
-    }
-    const failed = yield* Effect.result(
-      compileSource('admission-missing-library', source, {
-        toolchain: cachingToolchain,
-        cache: true,
-        nativeLinkInputs: [NativeLinkInput.library('silk_missing_admission_fixture', 'Dynamic')],
-      }),
-    )
-    assert.strictEqual(failed._tag, 'Failure')
-    if (failed._tag !== 'Failure') return
-    assert.strictEqual(failed.failure._tag, 'ToolchainError')
-    if (failed.failure._tag !== 'ToolchainError') return
-    assert.strictEqual(failed.failure.stage, 'link')
-    assert.strictEqual(failed.failure.reason._tag, 'LinkFailed')
-    assert.isNotEmpty(reads)
-    assert.isNotEmpty(writes)
-    assert.isTrue(reads.every((key) => key.startsWith('backend-')))
-    assert.isTrue(writes.every((key) => key.startsWith('backend-')))
-  }),
+      const cachingToolchain = Object.freeze({ ...toolchain, artifactCache })
+      const source = 'pub fn main() -> i32 { return 42 }'
+      for (const name of ['admission-first', 'admission-second']) {
+        const outcome = yield* compileSource(name, source, {
+          toolchain: cachingToolchain,
+          cache: true,
+        })
+        assert.strictEqual(outcome._tag, 'Compiled')
+        if (outcome._tag !== 'Compiled') return
+        const phases = outcome.report.map((entry) => entry.phase)
+        assert.include(phases, name === 'admission-first' ? 'link' : 'artifact-cache')
+        assert.isDefined(outcome.linkPlan)
+        if (name === 'admission-second') assert.include(phases, 'backend-cache')
+      }
+      const nativeReads = reads.filter((key) => key.startsWith('native-')).length
+      const failed = yield* Effect.result(
+        compileSource('admission-missing-library', source, {
+          toolchain: cachingToolchain,
+          cache: true,
+          nativeLinkInputs: [NativeLinkInput.library('silk_missing_admission_fixture', 'Dynamic')],
+        }),
+      )
+      assert.strictEqual(failed._tag, 'Failure')
+      if (failed._tag !== 'Failure' || failed.failure._tag !== 'ToolchainError')
+        return assert.fail('expected toolchain failure')
+      assert.strictEqual(failed.failure.reason._tag, 'SupplyFailed')
+      if (failed.failure.reason._tag === 'SupplyFailed')
+        assert.strictEqual(failed.failure.reason.failure.code, 'MissingCapability')
+      assert.strictEqual(reads.filter((key) => key.startsWith('native-')).length, nativeReads)
+      assert.strictEqual(writes.filter((key) => key.startsWith('native-')).length, 1)
+    }),
 )
 
 it.effect('reports a missing request-supplied object as linker input even when cached', () =>
@@ -550,7 +530,7 @@ it.effect('selects the durable disk cache from SILK_NATIVE_CACHE_DIR by default'
           true,
         )
         assert.strictEqual(
-          second.report.some((entry) => entry.phase === 'link'),
+          second.report.some((entry) => entry.phase === 'artifact-cache'),
           true,
         )
         assert.deepEqual(readFileSync(second.path), readFileSync(first.path))

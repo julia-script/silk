@@ -1,3 +1,4 @@
+import * as CompilationProfile from '../src/CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { assert, it } from '@effect/vitest'
@@ -1082,12 +1083,21 @@ int main(void) {
 `,
         )
         const executable = yield* NativeToolchain.NativeFinalizer.finalize(
-          cLayoutOracleToolchain,
-          scope,
+          yield* NativeToolchain.planNativeLink(
+            cLayoutOracleToolchain,
+            scope,
+            'NativeExecutable',
+            yield* CompilationProfile.normalize({ target: host.id }),
+            [object.artifact],
+            [],
+            join(scope.root, 'record-layout-oracle'),
+            {
+              request: { kind: 'default' },
+              composition: { kind: 'default' },
+              resolved: { kind: 'default' },
+            },
+          ),
           'NativeExecutable',
-          host,
-          [object.artifact],
-          [],
           join(scope.root, 'record-layout-oracle'),
         )
         const ran = yield* Effect.try({

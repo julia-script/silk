@@ -1,0 +1,311 @@
+{
+  "schema": 1,
+  "executedAt": "2026-09-06",
+  "llvm": "22.1.8",
+  "targets": [
+    {
+      "target": "aarch64-apple-darwin",
+      "lto": "rejected",
+      "lanes": [
+        {
+          "optimization": "none",
+          "platformVersion": "15.5",
+          "deployment": "11.0.0",
+          "interpreter": null,
+          "identity": "771e4c504101714fd9746125c09e4b3d4bac818ca05c63ea34d979c519ca4708",
+          "compiler": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/clang-22",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/clang",
+            "root": "/",
+            "role": "compiler",
+            "origin": "selected tool",
+            "digest": "adc60242d6106c7fc26cf8352205664e77e340f4ec94ee01ba99c3e1b9a2f9f7",
+            "command": "/opt/homebrew/opt/llvm/bin/clang",
+            "version": "Homebrew clang version 22.1.8\nTarget: arm64-apple-darwin24.5.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/22.1.8/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/22.1.8/etc/clang/arm64-apple-darwin24.cfg\n"
+          },
+          "linker": {
+            "path": "/opt/homebrew/Cellar/lld/22.1.8/bin/lld",
+            "selectedPath": "/opt/homebrew/bin/ld64.lld",
+            "root": "/",
+            "role": "linker",
+            "origin": "selected tool",
+            "digest": "9d75dff771f74b4229bb9c38840456f58b0b21c922f9ef95f431d002aada159b",
+            "command": "/opt/homebrew/bin/ld64.lld",
+            "version": "Homebrew LLD 22.1.8\n"
+          },
+          "archiver": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/llvm-ar",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "root": "/",
+            "role": "archiver",
+            "origin": "selected tool",
+            "digest": "eb0623d6a8b9f8621728da76f446105159a1a68a1674000a441dd6926e0e157f",
+            "command": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "version": "Homebrew LLVM version 22.1.8\n  Optimized build.\n"
+          },
+          "silkExit": 42,
+          "cExit": 42,
+          "inspectionCommand": [
+            "--file-header",
+            "--program-headers",
+            "--needed-libs",
+            "--symbols",
+            "/Users/juliaortiz/.codex/worktrees/f566/silk/.scratch/platform-supplies/aarch64-apple-darwin-none"
+          ],
+          "rejectedSymbols": ["missing", "duplicate"]
+        },
+        {
+          "optimization": "speed",
+          "platformVersion": "15.5",
+          "deployment": "11.0.0",
+          "interpreter": null,
+          "identity": "3ff8ab543a13d43c97d262667840aeaa16b476130c0ff030af6649fea52886dc",
+          "compiler": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/clang-22",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/clang",
+            "root": "/",
+            "role": "compiler",
+            "origin": "selected tool",
+            "digest": "adc60242d6106c7fc26cf8352205664e77e340f4ec94ee01ba99c3e1b9a2f9f7",
+            "command": "/opt/homebrew/opt/llvm/bin/clang",
+            "version": "Homebrew clang version 22.1.8\nTarget: arm64-apple-darwin24.5.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/22.1.8/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/22.1.8/etc/clang/arm64-apple-darwin24.cfg\n"
+          },
+          "linker": {
+            "path": "/opt/homebrew/Cellar/lld/22.1.8/bin/lld",
+            "selectedPath": "/opt/homebrew/bin/ld64.lld",
+            "root": "/",
+            "role": "linker",
+            "origin": "selected tool",
+            "digest": "9d75dff771f74b4229bb9c38840456f58b0b21c922f9ef95f431d002aada159b",
+            "command": "/opt/homebrew/bin/ld64.lld",
+            "version": "Homebrew LLD 22.1.8\n"
+          },
+          "archiver": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/llvm-ar",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "root": "/",
+            "role": "archiver",
+            "origin": "selected tool",
+            "digest": "eb0623d6a8b9f8621728da76f446105159a1a68a1674000a441dd6926e0e157f",
+            "command": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "version": "Homebrew LLVM version 22.1.8\n  Optimized build.\n"
+          },
+          "silkExit": 42,
+          "cExit": 42,
+          "inspectionCommand": [
+            "--file-header",
+            "--program-headers",
+            "--needed-libs",
+            "--symbols",
+            "/Users/juliaortiz/.codex/worktrees/f566/silk/.scratch/platform-supplies/aarch64-apple-darwin-speed"
+          ],
+          "rejectedSymbols": []
+        }
+      ]
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "lto": "rejected",
+      "lanes": [
+        {
+          "optimization": "none",
+          "platformVersion": "2.36",
+          "deployment": null,
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "identity": "c22764c64f2d2babb34269f0b1292d9dea87cc5f66eefe318518525b48ce8d30",
+          "compiler": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/clang-22",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/clang",
+            "root": "/",
+            "role": "compiler",
+            "origin": "selected tool",
+            "digest": "adc60242d6106c7fc26cf8352205664e77e340f4ec94ee01ba99c3e1b9a2f9f7",
+            "command": "/opt/homebrew/opt/llvm/bin/clang",
+            "version": "Homebrew clang version 22.1.8\nTarget: arm64-apple-darwin24.5.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/22.1.8/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/22.1.8/etc/clang/arm64-apple-darwin24.cfg\n"
+          },
+          "linker": {
+            "path": "/opt/homebrew/Cellar/lld/22.1.8/bin/lld",
+            "selectedPath": "/opt/homebrew/bin/ld.lld",
+            "root": "/",
+            "role": "linker",
+            "origin": "selected tool",
+            "digest": "9d75dff771f74b4229bb9c38840456f58b0b21c922f9ef95f431d002aada159b",
+            "command": "/opt/homebrew/bin/ld.lld",
+            "version": "Homebrew LLD 22.1.8 (compatible with GNU linkers)\n"
+          },
+          "archiver": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/llvm-ar",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "root": "/",
+            "role": "archiver",
+            "origin": "selected tool",
+            "digest": "eb0623d6a8b9f8621728da76f446105159a1a68a1674000a441dd6926e0e157f",
+            "command": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "version": "Homebrew LLVM version 22.1.8\n  Optimized build.\n"
+          },
+          "silkExit": 42,
+          "cExit": 42,
+          "inspectionCommand": [
+            "--file-header",
+            "--program-headers",
+            "--needed-libs",
+            "--symbols",
+            "--string-dump=.interp",
+            "/Users/juliaortiz/.codex/worktrees/f566/silk/.scratch/platform-supplies/aarch64-unknown-linux-gnu-none"
+          ],
+          "rejectedSymbols": ["missing", "duplicate"]
+        },
+        {
+          "optimization": "speed",
+          "platformVersion": "2.36",
+          "deployment": null,
+          "interpreter": "/lib/ld-linux-aarch64.so.1",
+          "identity": "a4930f81cab0f1a4fd6e0bf0788086fa2423284c4cf84fee2de29d4b8a66e598",
+          "compiler": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/clang-22",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/clang",
+            "root": "/",
+            "role": "compiler",
+            "origin": "selected tool",
+            "digest": "adc60242d6106c7fc26cf8352205664e77e340f4ec94ee01ba99c3e1b9a2f9f7",
+            "command": "/opt/homebrew/opt/llvm/bin/clang",
+            "version": "Homebrew clang version 22.1.8\nTarget: arm64-apple-darwin24.5.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/22.1.8/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/22.1.8/etc/clang/arm64-apple-darwin24.cfg\n"
+          },
+          "linker": {
+            "path": "/opt/homebrew/Cellar/lld/22.1.8/bin/lld",
+            "selectedPath": "/opt/homebrew/bin/ld.lld",
+            "root": "/",
+            "role": "linker",
+            "origin": "selected tool",
+            "digest": "9d75dff771f74b4229bb9c38840456f58b0b21c922f9ef95f431d002aada159b",
+            "command": "/opt/homebrew/bin/ld.lld",
+            "version": "Homebrew LLD 22.1.8 (compatible with GNU linkers)\n"
+          },
+          "archiver": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/llvm-ar",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "root": "/",
+            "role": "archiver",
+            "origin": "selected tool",
+            "digest": "eb0623d6a8b9f8621728da76f446105159a1a68a1674000a441dd6926e0e157f",
+            "command": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "version": "Homebrew LLVM version 22.1.8\n  Optimized build.\n"
+          },
+          "silkExit": 42,
+          "cExit": 42,
+          "inspectionCommand": [
+            "--file-header",
+            "--program-headers",
+            "--needed-libs",
+            "--symbols",
+            "--string-dump=.interp",
+            "/Users/juliaortiz/.codex/worktrees/f566/silk/.scratch/platform-supplies/aarch64-unknown-linux-gnu-speed"
+          ],
+          "rejectedSymbols": []
+        }
+      ]
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "lto": "rejected",
+      "lanes": [
+        {
+          "optimization": "none",
+          "platformVersion": "2.36",
+          "deployment": null,
+          "interpreter": "/lib64/ld-linux-x86-64.so.2",
+          "identity": "775b393db25291b415f8f1e40e5dd78c45ef7d67e76435aeb7153f038f4711f0",
+          "compiler": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/clang-22",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/clang",
+            "root": "/",
+            "role": "compiler",
+            "origin": "selected tool",
+            "digest": "adc60242d6106c7fc26cf8352205664e77e340f4ec94ee01ba99c3e1b9a2f9f7",
+            "command": "/opt/homebrew/opt/llvm/bin/clang",
+            "version": "Homebrew clang version 22.1.8\nTarget: arm64-apple-darwin24.5.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/22.1.8/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/22.1.8/etc/clang/arm64-apple-darwin24.cfg\n"
+          },
+          "linker": {
+            "path": "/opt/homebrew/Cellar/lld/22.1.8/bin/lld",
+            "selectedPath": "/opt/homebrew/bin/ld.lld",
+            "root": "/",
+            "role": "linker",
+            "origin": "selected tool",
+            "digest": "9d75dff771f74b4229bb9c38840456f58b0b21c922f9ef95f431d002aada159b",
+            "command": "/opt/homebrew/bin/ld.lld",
+            "version": "Homebrew LLD 22.1.8 (compatible with GNU linkers)\n"
+          },
+          "archiver": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/llvm-ar",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "root": "/",
+            "role": "archiver",
+            "origin": "selected tool",
+            "digest": "eb0623d6a8b9f8621728da76f446105159a1a68a1674000a441dd6926e0e157f",
+            "command": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "version": "Homebrew LLVM version 22.1.8\n  Optimized build.\n"
+          },
+          "silkExit": 42,
+          "cExit": 42,
+          "inspectionCommand": [
+            "--file-header",
+            "--program-headers",
+            "--needed-libs",
+            "--symbols",
+            "--string-dump=.interp",
+            "/Users/juliaortiz/.codex/worktrees/f566/silk/.scratch/platform-supplies/x86_64-unknown-linux-gnu-none"
+          ],
+          "rejectedSymbols": ["missing", "duplicate"]
+        },
+        {
+          "optimization": "speed",
+          "platformVersion": "2.36",
+          "deployment": null,
+          "interpreter": "/lib64/ld-linux-x86-64.so.2",
+          "identity": "6bd541f95412e5bb531a56c01e801bae9afbf07e078790f1cb6af12fbadae42e",
+          "compiler": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/clang-22",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/clang",
+            "root": "/",
+            "role": "compiler",
+            "origin": "selected tool",
+            "digest": "adc60242d6106c7fc26cf8352205664e77e340f4ec94ee01ba99c3e1b9a2f9f7",
+            "command": "/opt/homebrew/opt/llvm/bin/clang",
+            "version": "Homebrew clang version 22.1.8\nTarget: arm64-apple-darwin24.5.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/22.1.8/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/22.1.8/etc/clang/arm64-apple-darwin24.cfg\n"
+          },
+          "linker": {
+            "path": "/opt/homebrew/Cellar/lld/22.1.8/bin/lld",
+            "selectedPath": "/opt/homebrew/bin/ld.lld",
+            "root": "/",
+            "role": "linker",
+            "origin": "selected tool",
+            "digest": "9d75dff771f74b4229bb9c38840456f58b0b21c922f9ef95f431d002aada159b",
+            "command": "/opt/homebrew/bin/ld.lld",
+            "version": "Homebrew LLD 22.1.8 (compatible with GNU linkers)\n"
+          },
+          "archiver": {
+            "path": "/opt/homebrew/Cellar/llvm/22.1.8/bin/llvm-ar",
+            "selectedPath": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "root": "/",
+            "role": "archiver",
+            "origin": "selected tool",
+            "digest": "eb0623d6a8b9f8621728da76f446105159a1a68a1674000a441dd6926e0e157f",
+            "command": "/opt/homebrew/opt/llvm/bin/llvm-ar",
+            "version": "Homebrew LLVM version 22.1.8\n  Optimized build.\n"
+          },
+          "silkExit": 42,
+          "cExit": 42,
+          "inspectionCommand": [
+            "--file-header",
+            "--program-headers",
+            "--needed-libs",
+            "--symbols",
+            "--string-dump=.interp",
+            "/Users/juliaortiz/.codex/worktrees/f566/silk/.scratch/platform-supplies/x86_64-unknown-linux-gnu-speed"
+          ],
+          "rejectedSymbols": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import * as PlatformSupply from '@silklang/compiler/PlatformSupply'
 import * as ProjectProfile from '@silklang/compiler/ProjectProfile'
 import * as ConfigurationOrigin from '@silklang/compiler/ConfigurationOrigin'
 import * as Schema from 'effect/Schema'
@@ -49,6 +50,11 @@ const profileInput = Flag.string('profile-input').pipe(
   Flag.optional,
 )
 
+const platformSupply = Flag.string('platform-supply').pipe(
+  Flag.withDescription('Physical platform supply request as JSON.'),
+  Flag.optional,
+)
+
 const clang = Flag.string('clang').pipe(
   Flag.withDescription('Path to the Clang executable used for object emission and linking.'),
   Flag.withDefault('clang'),
@@ -70,6 +76,7 @@ export interface Options {
   readonly output: string
   readonly target: string | undefined
   readonly profileInput?: string
+  readonly platformSupply?: string
   readonly optimization?: ToolchainPlan.OptimizationProfile | undefined
   readonly clang: string
   readonly saveTemps: boolean
@@ -118,6 +125,19 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
     )
     return 2
   }
+  let supplyRequest: PlatformSupply.Request | undefined
+  if (options.platformSupply !== undefined) {
+    const decoded = yield* Effect.result(
+      Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown))(options.platformSupply).pipe(
+        Effect.flatMap((value) => PlatformSupply.decode(value, 'build-exe --platform-supply')),
+      ),
+    )
+    if (Result.isFailure(decoded)) {
+      yield* Console.error('Invalid physical platform supply request')
+      return 2
+    }
+    supplyRequest = decoded.success
+  }
   const loaded = yield* Effect.result(SourceEntry.read(options.source, options.sourceRoot))
   if (Result.isFailure(loaded)) {
     yield* Console.error(loaded.failure.message)
@@ -139,7 +159,12 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
     artifactKind: 'NativeExecutable',
     packageName: 'silk-build-exe',
     destination: options.output,
-    toolchain: { _tag: 'Toolchain', clang: options.clang, llvmAr: 'llvm-ar' },
+    toolchain: {
+      _tag: 'Toolchain',
+      clang: options.clang,
+      llvmAr: 'llvm-ar',
+      ...(supplyRequest === undefined ? {} : { platform: supplyRequest }),
+    },
     scopeName: 'silk-build-exe',
     saveTemps: options.saveTemps,
     timings: options.timings,
@@ -149,7 +174,18 @@ export const run = Effect.fn('BuildExeCommand.run')(function* (
 
 export const command = Command.make(
   'build-exe',
-  { source, sourceRoot, output, target, optimization, profileInput, clang, saveTemps, timings },
+  {
+    source,
+    sourceRoot,
+    output,
+    target,
+    optimization,
+    profileInput,
+    platformSupply,
+    clang,
+    saveTemps,
+    timings,
+  },
   Effect.fnUntraced(function* (config) {
     const status = yield* run({
       source: config.source,
@@ -160,6 +196,10 @@ export const command = Command.make(
       ...Option.match(config.profileInput, {
         onNone: () => ({}),
         onSome: (value) => ({ profileInput: value }),
+      }),
+      ...Option.match(config.platformSupply, {
+        onNone: () => ({}),
+        onSome: (value) => ({ platformSupply: value }),
       }),
       clang: config.clang,
       saveTemps: config.saveTemps,

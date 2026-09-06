@@ -196,6 +196,7 @@ export const compile = Effect.fn('Workflow.compile')(function* (
   }
 
   if (outcome._tag === 'Compiled') {
+    if (outcome.linkPlanPath !== undefined) yield* Console.log(`Link plan: ${outcome.linkPlanPath}`)
     return {
       _tag: 'Built',
       status: 0,

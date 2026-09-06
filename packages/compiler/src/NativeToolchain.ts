@@ -1,5 +1,8 @@
+import * as Config from 'effect/Config'
+import * as Schema from 'effect/Schema'
+import { NodeServices } from '@effect/platform-node'
 import type * as ArtifactPlan from './ArtifactPlan.js'
-import type * as CompilationProfile from './CompilationProfile.js'
+import * as CompilationProfile from './CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
@@ -15,6 +18,7 @@ import {
 import { arch, platform, tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import * as Data from 'effect/Data'
+import * as FileSystem from 'effect/FileSystem'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Result from 'effect/Result'
@@ -25,11 +29,20 @@ import * as NativeLinkInput from './NativeLinkInput.js'
 import * as Project from './Project.js'
 import * as Target from './Target.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
+import * as PlatformSupply from './PlatformSupply.js'
+import * as PlatformSupplyResolver from './PlatformSupplyResolver.js'
+import * as NativeLinkResolver from './NativeLinkResolver.js'
+import type * as NativeLinkPlan from './NativeLinkPlan.js'
+import * as CTranslationUnit from './CTranslationUnit.js'
 
 export interface Toolchain {
   readonly _tag: 'Toolchain'
   readonly clang: string
   readonly llvmAr: string
+  readonly platform?: PlatformSupply.Request
+  readonly artifactSupply?: PlatformSupply.Pin
+  readonly projectSupply?: PlatformSupply.Pin
+  readonly supply?: PlatformSupply.PlatformSupply
   readonly runtimeObjectCache?: RuntimeObjectCache
   readonly artifactCache?: ArtifactCache
 }
@@ -86,6 +99,7 @@ export const artifactRuntimeSource = (
 }
 
 export type Stage =
+  | 'supply'
   | 'host-target'
   | 'cache-key'
   | 'cache-read'
@@ -101,6 +115,7 @@ export type Stage =
   | 'artifact-cleanup'
 
 export type ToolchainErrorReason =
+  | { readonly _tag: 'SupplyFailed'; readonly failure: PlatformSupply.SupplyError }
   | {
       readonly _tag: 'SpawnFailed'
       readonly planned: ToolchainPlan.PlannedCommand
@@ -115,6 +130,7 @@ export type ToolchainErrorReason =
     }
   | {
       readonly _tag: 'LinkFailed'
+      readonly inputs?: ReadonlyArray<PlatformSupply.File>
       readonly planned: ToolchainPlan.PlannedCommand
       readonly status: number | null
       readonly output: string
@@ -133,6 +149,72 @@ export class ToolchainError extends Data.TaggedError('ToolchainError')<{
   readonly message: string
   readonly reason: ToolchainErrorReason
 }> {}
+
+const supplyError = (failure: PlatformSupply.SupplyError): ToolchainError =>
+  new ToolchainError({
+    operation: failure.operation,
+    stage: 'supply',
+    message: failure.message,
+    reason: { _tag: 'SupplyFailed', failure },
+  })
+
+/** Resolves a physical provider once for a native build; all subsequent consumers share it. */
+export const resolveToolchain = Effect.fn('NativeToolchain.resolveToolchain')(function* (
+  toolchain: Toolchain,
+  profile: CompilationProfile.Facts,
+): Effect.fn.Return<Toolchain, ToolchainError> {
+  if (toolchain.supply !== undefined) {
+    if (toolchain.supply.target.id !== profile.target.id || toolchain.supply.libc !== profile.libc)
+      return yield* supplyError(
+        PlatformSupply.failure(
+          'TargetMismatch',
+          profile.target.id,
+          'resolved toolchain',
+          'Resolve a supply for this profile.',
+        ),
+      )
+    const deployment =
+      profile.deployment ??
+      (profile.target.operatingSystem === 'darwin' && profile.libc !== 'none'
+        ? '11.0.0'
+        : undefined)
+    if (toolchain.supply.deployment !== deployment)
+      return yield* supplyError(
+        PlatformSupply.failure(
+          'DeploymentMismatch',
+          deployment ?? 'unspecified',
+          'resolved toolchain',
+          'Resolve a supply for this deployment profile.',
+        ),
+      )
+    yield* PlatformSupplyResolver.validateFiles([
+      toolchain.supply.compiler,
+      toolchain.supply.linker,
+      toolchain.supply.archiver,
+      ...toolchain.supply.files,
+    ]).pipe(Effect.mapError(supplyError), Effect.provide(NodeServices.layer))
+    return toolchain
+  }
+  const host = hostSelection()
+  const supply = yield* PlatformSupplyResolver.resolveSupply(
+    PlatformSupplyResolver.make(process.env),
+    {
+      profile,
+      host: host._tag === 'Resolved' ? host.target.id : undefined,
+      clang: toolchain.clang,
+      llvmAr: toolchain.llvmAr,
+      ...(toolchain.platform === undefined ? {} : { request: toolchain.platform }),
+      ...(toolchain.artifactSupply === undefined ? {} : { artifact: toolchain.artifactSupply }),
+      ...(toolchain.projectSupply === undefined ? {} : { project: toolchain.projectSupply }),
+    },
+  ).pipe(Effect.mapError(supplyError), Effect.provide(NodeServices.layer))
+  return Object.freeze({
+    ...toolchain,
+    clang: supply.compiler.command,
+    llvmAr: supply.archiver.command,
+    supply,
+  })
+})
 
 const storageError = (
   operation: string,
@@ -173,6 +255,7 @@ const linkError = (
   status: number | null,
   output: string,
   cause?: unknown,
+  inputs?: ReadonlyArray<PlatformSupply.File>,
 ): ToolchainError =>
   new ToolchainError({
     operation: 'NativeToolchain.NativeFinalizer.finalize',
@@ -180,6 +263,7 @@ const linkError = (
     message: `NativeToolchain.NativeFinalizer.finalize failed: ${output}`,
     reason: {
       _tag: 'LinkFailed',
+      ...(inputs === undefined ? {} : { inputs }),
       planned,
       status,
       output,
@@ -497,14 +581,6 @@ export const defaultArtifactCache = (directory = ''): ArtifactCache => {
   })
 }
 
-const artifactExtension = (kind: FinalArtifact['kind'], target: Target.Target): string => {
-  if (kind === 'NativeExecutable') return 'bin'
-  if (kind === 'NativeSharedLibrary') return target.id === 'aarch64-apple-darwin' ? 'dylib' : 'so'
-  if (kind === 'NativeStaticLibrary') return 'a'
-  if (kind === 'NativeObject') return 'o'
-  return 'wasm'
-}
-
 const toolVersions = new Map<string, string>()
 
 const toolVersionOf = Effect.fnUntraced(function* (
@@ -541,93 +617,48 @@ const toolVersionOf = Effect.fnUntraced(function* (
 /** The final-cache policy selected before either lookup or publication. */
 export type FinalArtifactCacheAdmission =
   | { readonly _tag: 'ExistingWebAssemblyPolicy' }
+  | { readonly _tag: 'CompleteNativePlan'; readonly identity: string }
   | {
       readonly _tag: 'Ineligible'
       readonly reason: 'IncompleteNativeInputAccounting'
     }
 
-/**
- * Requires complete native link-input accounting before final-artifact reuse.
- *
- * The current Toolchain carries command names, not content identities for the selected tools,
- * and does not describe their implicit platform inputs or resolved library closure. No native
- * request can therefore establish completeness, even with no extra inputs or only explicit
- * objects. A digest from artifactCacheKey alone is not admission evidence. WebAssembly keeps
- * its independently existing policy; this decision makes no new completeness claim for it.
- */
+/** Requires complete physical accounting before native final-artifact reuse or publication. */
 export const finalArtifactCacheAdmission = (
   kind: FinalArtifact['kind'],
-): FinalArtifactCacheAdmission =>
-  kind === 'WebAssemblyModule'
-    ? Object.freeze({ _tag: 'ExistingWebAssemblyPolicy' })
-    : Object.freeze({ _tag: 'Ineligible', reason: 'IncompleteNativeInputAccounting' })
+  plan?: NativeLinkPlan.NativeLinkPlan,
+): FinalArtifactCacheAdmission => {
+  if (kind === 'WebAssemblyModule') return Object.freeze({ _tag: 'ExistingWebAssemblyPolicy' })
+  if (plan === undefined || plan.kind !== kind)
+    return Object.freeze({ _tag: 'Ineligible', reason: 'IncompleteNativeInputAccounting' })
+  return Object.freeze({ _tag: 'CompleteNativePlan', identity: plan.identity })
+}
 
-/** Computes input identity; callers must separately establish final-cache admission. */
-export const artifactCacheKey = Effect.fn('NativeToolchain.artifactCacheKey')(function* (
+/** Computes the independently existing freestanding WebAssembly final-cache identity. */
+export const wasmArtifactCacheKey = Effect.fn('NativeToolchain.wasmArtifactCacheKey')(function* (
   toolchain: Toolchain,
-  kind: FinalArtifact['kind'],
   profile: CompilationProfile.CompilationProfile,
   bitcode: Uint8Array | string,
   runtimeSource: string,
-  destination: string,
-  nativeLinkInputs: ReadonlyArray<NativeLinkInput.NativeLinkInput> = Object.freeze([]),
 ): Effect.fn.Return<string, ToolchainError> {
-  const target = profile.target
-  const clangVersion = yield* toolVersionOf(toolchain.clang)
-  const archiveCommand = kind === 'NativeStaticLibrary' ? toolchain.llvmAr : ''
-  const llvmArVersion = kind === 'NativeStaticLibrary' ? yield* toolVersionOf(archiveCommand) : ''
-  const embeddedArtifactName =
-    kind === 'NativeSharedLibrary' && target.id === 'aarch64-apple-darwin'
-      ? basename(destination)
-      : ''
-  const inputBytes = new Map<number, Uint8Array>()
-  for (const [index, input] of nativeLinkInputs.entries()) {
-    const path = NativeLinkInput.path(input)
-    if (path !== undefined) {
-      inputBytes.set(
-        index,
-        yield* Effect.try({
-          try: () => readFileSync(path),
-          catch: (cause) =>
-            storageError('NativeToolchain.artifactCacheKey', 'cache-key', path, cause),
-        }),
-      )
-    }
-  }
-  return yield* Effect.try({
-    try: () => {
-      const digest = createHash('sha256')
-      for (const value of [
-        kind,
-        target.id,
-        profile.identity,
-        toolchain.clang,
-        clangVersion,
-        archiveCommand,
-        llvmArVersion,
-        runtimeSource,
-        embeddedArtifactName,
-      ]) {
-        digest.update(value)
-        digest.update('\0')
-      }
-      digest.update(bitcode)
-      for (const [index, input] of nativeLinkInputs.entries()) {
-        digest.update(`\0input:${NativeLinkInput.encode(input)}\0`)
-        const bytes = inputBytes.get(index)
-        if (bytes !== undefined) {
-          digest.update(`bytes:${bytes.length}\0`)
-          digest.update(bytes)
-        }
-      }
-      return `${digest.digest('hex')}.${artifactExtension(kind, target)}`
-    },
-    catch: (cause) =>
-      storageError('NativeToolchain.artifactCacheKey', 'cache-key', toolchain.clang, cause),
-  })
+  const version = yield* toolVersionOf(toolchain.clang)
+  const digest = createHash('sha256')
+  digest.update(
+    yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+      'wasm-artifact-v1',
+      profile.identity,
+      toolchain.clang,
+      version,
+      runtimeSource,
+    ]).pipe(Effect.orDie),
+  )
+  digest.update(bitcode)
+  return `${digest.digest('hex')}.wasm`
 })
 
 export interface PathArtifact {
+  readonly translation?: CTranslationUnit.CTranslationUnit
+
   readonly _tag: 'PathArtifact'
   readonly scope: string
   readonly path: string
@@ -653,6 +684,7 @@ export interface FinalArtifact {
   readonly bytes: Uint8Array
   readonly target: Target.Target
   readonly planned?: ToolchainPlan.PlannedCommand
+  readonly linkPlan?: NativeLinkPlan.NativeLinkPlan
 }
 
 /** Durable C-consumer companions committed beside one native library. */
@@ -757,7 +789,11 @@ const runPlanned = Effect.fnUntraced(function* (
   planned: ToolchainPlan.PlannedCommand,
 ): Effect.fn.Return<void, ToolchainError> {
   const result = yield* Effect.try({
-    try: () => spawnSync(planned.command, [...planned.arguments], { encoding: 'utf8' }),
+    try: () =>
+      spawnSync(planned.command, [...planned.arguments], {
+        encoding: 'utf8',
+        ...(planned.environment === undefined ? {} : { env: { ...planned.environment } }),
+      }),
     catch: (cause) => processError(operation, stage, planned, null, '', cause),
   })
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}${result.error?.message ?? ''}`
@@ -789,7 +825,18 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
   const target = profile.target
   const bitcodePath = join(scope.root, `${baseName}.bc`)
   const objectPath = join(scope.root, `${baseName}.o`)
-  const planned = ToolchainPlan.objectCommand(toolchain.clang, profile, bitcodePath, objectPath)
+  const base = ToolchainPlan.objectCommand(toolchain.clang, profile, bitcodePath, objectPath)
+  const planned = Object.freeze({
+    ...base,
+    arguments: Object.freeze(['--no-default-config', ...base.arguments]),
+    environment:
+      toolchain.supply?.environment ??
+      Object.freeze({
+        PATH: yield* Config.string('PATH').pipe(Config.withDefault(''), Effect.orDie),
+        LC_ALL: 'C',
+        LANG: 'C',
+      }),
+  })
   if (artifact.target.id !== target.id) {
     return yield* processError(
       'NativeToolchain.emitObject',
@@ -816,7 +863,7 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
 
 /**
  * Compiles one C translation unit to `<scope>/<name>.o` through the pinned Clang `-c -x c`
- * command, reusing the runtime-object cache keyed by Clang, target, and source text.
+ * command, reusing native runtime objects by compiler content and frozen C translation identity.
  */
 export const compileCObject = Effect.fn('NativeToolchain.compileCObject')(function* (
   toolchain: Toolchain,
@@ -825,10 +872,60 @@ export const compileCObject = Effect.fn('NativeToolchain.compileCObject')(functi
   name: string,
   sourceText: string,
 ): Effect.fn.Return<ObjectArtifact, ToolchainError> {
-  const cacheKey = `${toolchain.clang}\u0000${target.id}\u0000${sourceText}`
+  let selected = toolchain
+  if (target.kind === 'Native' && selected.supply === undefined) {
+    const profile = yield* CompilationProfile.normalize({ target: target.id }).pipe(
+      Effect.mapError((error) =>
+        supplyError(
+          PlatformSupply.failure('InvalidConfiguration', target.id, 'C compilation', error.message),
+        ),
+      ),
+    )
+    selected = yield* resolveToolchain(toolchain, profile)
+  }
+  if (selected.supply !== undefined && selected.supply.target.id !== target.id)
+    return yield* supplyError(
+      PlatformSupply.failure(
+        'TargetMismatch',
+        target.id,
+        'C compilation',
+        'Resolve a supply for the C target.',
+      ),
+    )
   const objectPath = join(scope.root, `${name}.o`)
   const source = yield* writeArtifact(scope, target, `${name}.c`, sourceText)
-  const planned = ToolchainPlan.cObjectCommand(toolchain.clang, target, source.path, objectPath)
+  let planned = ToolchainPlan.cObjectCommand(selected.clang, target, source.path, objectPath)
+  let cacheKey: string
+  let translation: CTranslationUnit.CTranslationUnit | undefined
+  if (selected.supply !== undefined) {
+    translation = yield* CTranslationUnit.resolve(
+      selected.supply,
+      source.path,
+      join(scope.root, `${name}.d`),
+      scope.root,
+    ).pipe(Effect.mapError(supplyError), Effect.provide(NodeServices.layer))
+    const frozen = yield* writeArtifact(scope, target, `${name}.i`, translation.source)
+    cacheKey = translation.identity
+    planned = Object.freeze({
+      ...planned,
+      arguments: Object.freeze([
+        ...selected.supply.compilationArguments,
+        '-c',
+        '-x',
+        'cpp-output',
+        frozen.path,
+        '-O2',
+        '-fPIC',
+        '-fvisibility=hidden',
+        '-o',
+        objectPath,
+      ]),
+      environment: selected.supply.environment,
+    })
+  } else {
+    // Freestanding Wasm C uses no platform headers; its source remains under the Wasm cache policy.
+    cacheKey = `${selected.clang}\u0000${target.id}\u0000${sourceText}`
+  }
   const cached =
     toolchain.runtimeObjectCache === undefined
       ? undefined
@@ -850,6 +947,7 @@ export const compileCObject = Effect.fn('NativeToolchain.compileCObject')(functi
     _tag: 'ObjectArtifact',
     artifact: Object.freeze({
       _tag: 'PathArtifact',
+      ...(translation === undefined ? {} : { translation }),
       scope: scope.name,
       path: objectPath,
       target,
@@ -940,44 +1038,125 @@ export const requireLinkInputs = Effect.fnUntraced(function* (
   return plan
 })
 
+/** Resolves a complete final plan without executing final linking. */
+export const planNativeLink = Effect.fn('NativeToolchain.planNativeLink')(function* (
+  toolchain: Toolchain,
+  scope: BuildScope,
+  kind: ToolchainPlan.NativeArtifactKind,
+  profile: CompilationProfile.Facts,
+  generatedObjects: ReadonlyArray<PathArtifact>,
+  nativeLinkInputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>,
+  destination: string,
+  entry: NativeLinkPlan.NativeLinkPlan['entry'],
+): Effect.fn.Return<NativeLinkPlan.NativeLinkPlan, ToolchainError> {
+  let outputName = 'linked-program'
+  if (kind === 'NativeStaticLibrary') outputName = 'archive.a'
+  else if (kind === 'NativeSharedLibrary') outputName = basename(destination)
+  const output = join(scope.root, outputName)
+  yield* requireLinkInputs(
+    toolchain,
+    kind,
+    profile.target,
+    generatedObjects,
+    nativeLinkInputs,
+    output,
+    entry.resolved,
+  )
+  const selected = yield* resolveToolchain(toolchain, profile)
+  const supply = selected.supply
+  if (supply === undefined)
+    return yield* supplyError(
+      PlatformSupply.failure(
+        'MissingCapability',
+        profile.target.id,
+        'link planning',
+        'Resolve a native supply.',
+      ),
+    )
+  return yield* NativeLinkResolver.resolvePlan(supply, {
+    kind,
+    profile,
+    objects: generatedObjects.map((object) => object.path),
+    inputs: nativeLinkInputs,
+    translations: generatedObjects.flatMap((object) =>
+      object.translation === undefined ? [] : [object.translation],
+    ),
+    output,
+    scope: scope.root,
+    entry,
+  }).pipe(Effect.mapError(supplyError), Effect.provide(NodeServices.layer))
+})
+
+/** Verifies a published plan's selected contents before a cache hit or final link consumes it. */
+export const validateLinkPlan = Effect.fn('NativeToolchain.validateLinkPlan')(function* (
+  plan: NativeLinkPlan.NativeLinkPlan,
+): Effect.fn.Return<void, ToolchainError> {
+  yield* PlatformSupplyResolver.validateFiles([
+    plan.supply.compiler,
+    plan.supply.linker,
+    plan.supply.archiver,
+    ...plan.supply.files,
+    ...plan.inputs,
+  ]).pipe(Effect.mapError(supplyError), Effect.provide(NodeServices.layer))
+})
+
 export const NativeFinalizer = Object.freeze({
   finalize: Effect.fn('NativeToolchain.NativeFinalizer.finalize')(function* (
-    toolchain: Toolchain,
-    scope: BuildScope,
+    plan: NativeLinkPlan.NativeLinkPlan,
     artifactKind: ToolchainPlan.NativeArtifactKind,
-    target: Target.Target,
-    generatedObjects: ReadonlyArray<PathArtifact>,
-    nativeLinkInputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>,
     destination: string,
-    entry: CompilationProfile.Selection = { kind: 'default' },
   ): Effect.fn.Return<FinalArtifact, ToolchainError> {
-    let outputName = 'archive.a'
-    if (artifactKind === 'NativeExecutable') outputName = 'linked-program'
-    else if (artifactKind === 'NativeSharedLibrary') outputName = basename(destination)
-    const outputPath = join(scope.root, outputName)
-    const planned = yield* requireLinkInputs(
-      toolchain,
-      artifactKind,
-      target,
-      generatedObjects,
-      nativeLinkInputs,
-      outputPath,
-      entry,
+    if (plan.kind !== artifactKind)
+      return yield* supplyError(
+        PlatformSupply.failure(
+          'InvalidConfiguration',
+          artifactKind,
+          'native link plan',
+          'Use the artifact kind for which this link plan was resolved.',
+        ),
+      )
+    yield* validateLinkPlan(plan)
+    for (const script of plan.scripts)
+      yield* Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        yield* fs
+          .writeFileString(script.path, script.source)
+          .pipe(
+            Effect.mapError((cause) =>
+              storageError('NativeToolchain.NativeFinalizer.finalize', 'link', script.path, cause),
+            ),
+          )
+      }).pipe(Effect.provide(NodeServices.layer))
+    const planned = Object.freeze({ ...plan.command, environment: plan.supply.environment })
+    const result = yield* PlatformSupplyResolver.query(
+      planned.environment,
+      planned.command,
+      planned.arguments,
+      'final linking',
+    ).pipe(
+      Effect.mapError((failure) =>
+        linkError(
+          planned,
+          failure.query?.status ?? null,
+          `${failure.query?.stdout ?? ''}${failure.query?.stderr ?? failure.message}`,
+          failure.cause,
+          plan.inputs,
+        ),
+      ),
+      Effect.provide(NodeServices.layer),
     )
-    const result = yield* Effect.try({
-      try: () => spawnSync(planned.command, [...planned.arguments], { encoding: 'utf8' }),
-      catch: (cause) => linkError(planned, null, '', cause),
-    })
-    const output = `${result.stdout ?? ''}${result.stderr ?? ''}${result.error?.message ?? ''}`
-    if (result.error !== undefined || result.status !== 0) {
-      return yield* linkError(planned, result.status, output, result.error)
-    }
-    yield* requirePath('NativeToolchain.NativeFinalizer.finalize', 'link', outputPath)
+    yield* requirePath('NativeToolchain.NativeFinalizer.finalize', 'link', plan.output)
     const bytes = yield* Effect.try({
-      try: () => readFileSync(outputPath),
+      try: () => readFileSync(plan.output),
       catch: (cause) =>
-        storageError('NativeToolchain.NativeFinalizer.finalize', 'link', outputPath, cause),
+        storageError('NativeToolchain.NativeFinalizer.finalize', 'link', plan.output, cause),
     })
+    if (!isCachedArtifact(bytes, artifactKind, plan.supply.target))
+      return yield* linkError(
+        planned,
+        result.status,
+        'Linked output does not match its requested artifact kind and target.',
+      )
     const path = yield* atomicCommit(destination, bytes, {
       ...(artifactKind === 'NativeExecutable' ? { mode: 0o755 } : {}),
       stage: 'artifact-commit',
@@ -987,8 +1166,9 @@ export const NativeFinalizer = Object.freeze({
       kind: artifactKind,
       path,
       bytes,
-      target,
+      target: plan.supply.target,
       planned,
+      linkPlan: plan,
     })
   }),
 })
@@ -1278,5 +1458,19 @@ export const emitRepresentation = Effect.fn('NativeToolchain.emitRepresentation'
   return yield* commitPathRepresentation(
     { _tag: 'PathArtifact', scope: scope.name, path: assemblyPath, target: profile.target },
     destination,
+  )
+})
+
+/** Publishes the physical plan beside an artifact for build/CLI inspection. */
+export const commitLinkPlan = Effect.fn('NativeToolchain.commitLinkPlan')(function* (
+  plan: NativeLinkPlan.NativeLinkPlan,
+  destination: string,
+): Effect.fn.Return<string, ToolchainError> {
+  return yield* atomicCommit(
+    destination,
+    new TextEncoder().encode(
+      (yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(plan).pipe(Effect.orDie)) +
+        '\n',
+    ),
   )
 })

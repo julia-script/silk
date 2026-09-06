@@ -1,0 +1,89 @@
+import * as Schema from 'effect/Schema'
+import * as Effect from 'effect/Effect'
+import * as PlatformSupply from './PlatformSupply.js'
+import * as PlatformSupplyResolver from './PlatformSupplyResolver.js'
+import * as NativeLinkResolver from './NativeLinkResolver.js'
+import * as Result from 'effect/Result'
+
+/** Frozen preprocessed input and the exact header subset consumed to produce it. */
+export interface CTranslationUnit {
+  readonly _tag: 'CTranslationUnit'
+  readonly source: string
+  readonly headers: ReadonlyArray<PlatformSupply.File>
+  readonly identity: string
+  readonly query: PlatformSupply.Query
+}
+
+/** Captures preprocessing once so object compilation cannot rediscover different header contents. */
+export const resolve = Effect.fn('CTranslationUnit.resolve')(function* (
+  supply: Pick<
+    PlatformSupply.PlatformSupply,
+    'compiler' | 'environment' | 'compilationArguments' | 'root'
+  >,
+  source: string,
+  dependencies: string,
+  scope: string,
+): Effect.fn.Return<CTranslationUnit, PlatformSupply.SupplyError, PlatformSupplyResolver.Services> {
+  yield* PlatformSupplyResolver.validateFiles([supply.compiler])
+  const arguments_ = [
+    ...supply.compilationArguments,
+    '-E',
+    '-P',
+    '-x',
+    'c',
+    '-O2',
+    '-fPIC',
+    `-fmacro-prefix-map=${scope}=/silk/runtime`,
+    ...(supply.root === '/' ? [] : [`-fmacro-prefix-map=${supply.root}=/silk/platform`]),
+    '-MD',
+    '-MF',
+    dependencies,
+    '-MT',
+    'translation-unit',
+    source,
+  ]
+  const query = yield* PlatformSupplyResolver.query(
+    supply.environment,
+    supply.compiler.command,
+    arguments_,
+    'C preprocessing',
+  )
+  const dependencyText = new TextDecoder().decode(
+    yield* PlatformSupplyResolver.read(dependencies, 'C header dependencies'),
+  )
+  const parsed = NativeLinkResolver.argumentsOf(
+    dependencyText.replace(/\\\r?\n/g, ' ').replace(/^translation-unit:\s*/, ''),
+  )
+  if (Result.isFailure(parsed))
+    return yield* PlatformSupply.failure(
+      'UnsupportedInput',
+      dependencies,
+      'C preprocessing',
+      parsed.failure,
+    )
+  const headers: Array<PlatformSupply.File> = []
+  for (const path of parsed.success)
+    if (path !== source)
+      headers.push(yield* PlatformSupplyResolver.file(path, 'header', 'C preprocessing'))
+  const identity = PlatformSupplyResolver.digest(
+    yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
+      'c-translation-unit-v1',
+      supply.compiler.digest,
+      query.stdout,
+      headers.map((header) => header.digest),
+      supply.compilationArguments.filter(
+        (value) =>
+          !value.startsWith('--sysroot=') &&
+          !value.startsWith('--gcc-install-dir=') &&
+          value !== supply.root,
+      ),
+    ]).pipe(Effect.orDie),
+  )
+  return Object.freeze({
+    _tag: 'CTranslationUnit',
+    source: query.stdout,
+    headers: Object.freeze(headers),
+    identity,
+    query,
+  })
+})

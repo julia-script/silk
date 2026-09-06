@@ -17,6 +17,7 @@ import * as LlvmBackend from './LlvmBackend.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
 import * as NativeToolchain from './NativeToolchain.js'
+import type * as NativeLinkPlan from './NativeLinkPlan.js'
 import * as PhaseReport from './PhaseReport.js'
 import * as Realization from './Realization.js'
 import * as SourceFile from './SourceFile.js'
@@ -197,6 +198,8 @@ export interface Compiled {
   readonly artifactPlan?: ArtifactPlan.ArtifactPlan
   readonly nativeBindings?: NativeRequirementBinding.Resolved
   readonly _tag: 'Compiled'
+  readonly linkPlan?: NativeLinkPlan.NativeLinkPlan
+  readonly linkPlanPath?: string
   readonly backend: Backend.Id
   readonly artifactKind: NativeToolchain.FinalArtifact['kind']
   readonly path: string
@@ -649,7 +652,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
   // Float remainder lowers to LLVM `frem`, which becomes an fmod/fmodf libcall on
   // targets whose libm is separate from libc (Linux); macOS folds it into libSystem.
   const nativeLinkInputs =
-    cacheKind === 'NativeExecutable' || cacheKind === 'NativeSharedLibrary'
+    (cacheKind === 'NativeExecutable' || cacheKind === 'NativeSharedLibrary') &&
+    preparation.profile.libc !== 'none'
       ? Object.freeze([...requestedNativeInputs, NativeLinkInput.library('m', 'Dynamic')])
       : requestedNativeInputs
   // A missing request input is linker data, not a cache-key storage failure.
@@ -678,14 +682,11 @@ export const compile = Effect.fn('Driver.compile')(function* (
   )
   const cacheKey =
     artifactCache !== undefined && artifact._tag === 'LlvmBitcodeArtifact'
-      ? yield* NativeToolchain.artifactCacheKey(
+      ? yield* NativeToolchain.wasmArtifactCacheKey(
           request.toolchain,
-          cacheKind,
           preparation.profile,
           artifact.bitcode,
           runtimeSource,
-          request.destination,
-          nativeLinkInputs,
         )
       : undefined
   if (
@@ -791,11 +792,15 @@ export const compile = Effect.fn('Driver.compile')(function* (
             report: Object.freeze([...report]),
           })
 
+        const toolchain = yield* NativeToolchain.resolveToolchain(
+          request.toolchain,
+          preparation.profile,
+        )
         const object = yield* PhaseReport.measureEffectInto(
           report,
           'object',
           1,
-          NativeToolchain.emitObject(request.toolchain, scope, artifact, preparation.profile),
+          NativeToolchain.emitObject(toolchain, scope, artifact, preparation.profile),
           () => 1,
           () => 0,
           { heapBytes },
@@ -808,14 +813,14 @@ export const compile = Effect.fn('Driver.compile')(function* (
             1,
             program.entry._tag !== 'NoInvocation'
               ? NativeToolchain.compileExecutableRuntime(
-                  request.toolchain,
+                  toolchain,
                   scope,
                   target,
                   artifact.termination,
                   artifact.nativeRuntimeSymbols,
                 )
               : NativeToolchain.compileRuntime(
-                  request.toolchain,
+                  toolchain,
                   scope,
                   target,
                   artifact.nativeRuntimeSymbols,
@@ -855,27 +860,47 @@ export const compile = Effect.fn('Driver.compile')(function* (
             toolchainIdentity: distribution.digest,
           })
         }
+        const linkPlan = yield* NativeToolchain.planNativeLink(
+          toolchain,
+          scope,
+          cacheKind,
+          preparation.profile,
+          generatedObjects,
+          nativeLinkInputs,
+          request.destination,
+          artifactPlan.composition.loader,
+        )
+        const nativeAdmission = NativeToolchain.finalArtifactCacheAdmission(cacheKind, linkPlan)
+        const nativeCache =
+          request.cache === false || nativeAdmission._tag !== 'CompleteNativePlan'
+            ? undefined
+            : (toolchain.artifactCache ??
+              NativeToolchain.defaultArtifactCache(nativeCacheDirectory))
+        const nativeKey = `native-${linkPlan.identity}.blob`
+        yield* NativeToolchain.validateLinkPlan(linkPlan)
+        const cached =
+          nativeCache === undefined
+            ? undefined
+            : yield* NativeToolchain.readArtifactCache(nativeCache, nativeKey)
+        const reusable =
+          cached !== undefined && NativeToolchain.isCachedArtifact(cached, cacheKind, target)
         const linked = yield* PhaseReport.measureEffectInto(
           report,
-          'link',
+          reusable ? 'artifact-cache' : 'link',
           2,
-          NativeToolchain.NativeFinalizer.finalize(
-            request.toolchain,
-            scope,
-            cacheKind,
-            target,
-            generatedObjects,
-            nativeLinkInputs,
-            request.destination,
-            artifactPlan.composition.loader.resolved,
-          ),
+          reusable
+            ? NativeToolchain.commitCachedArtifact(cached, cacheKind, target, request.destination)
+            : NativeToolchain.NativeFinalizer.finalize(linkPlan, cacheKind, request.destination),
           () => 1,
           () => 0,
           { heapBytes },
         )
-        if (artifactCache !== undefined && cacheKey !== undefined) {
-          yield* NativeToolchain.writeArtifactCache(artifactCache, cacheKey, linked.bytes)
-        }
+        if (!reusable && nativeCache !== undefined)
+          yield* NativeToolchain.writeArtifactCache(nativeCache, nativeKey, linked.bytes)
+        const linkPlanPath = yield* NativeToolchain.commitLinkPlan(
+          linkPlan,
+          `${request.destination}.link.json`,
+        )
         const libraryInterface =
           ArtifactKind.isLibrary(cacheKind) || cacheKind === 'NativeObject'
             ? yield* PhaseReport.measureEffectInto(
@@ -892,6 +917,8 @@ export const compile = Effect.fn('Driver.compile')(function* (
             : undefined
         return Object.freeze({
           _tag: 'Compiled',
+          linkPlan,
+          linkPlanPath,
           stage,
           artifactPlan,
           nativeBindings: bound.success,

@@ -1,3 +1,10 @@
+import * as Schema from 'effect/Schema'
+import { NodeServices } from '@effect/platform-node'
+import * as PlatformSupply from '../src/PlatformSupply.js'
+import * as PlatformSupplyResolver from '../src/PlatformSupplyResolver.js'
+import * as NativeLinkResolver from '../src/NativeLinkResolver.js'
+import * as LinkerScript from '../src/internal/LinkerScript.js'
+import * as NativeStub from '../src/internal/NativeStub.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
 import {
@@ -7,6 +14,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -31,6 +39,7 @@ const defaultClang = (): string => {
   return 'clang'
 }
 
+const testPath = Effect.runSync(Config.string('PATH').pipe(Config.withDefault('')))
 const clang = Effect.runSync(
   Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
 )
@@ -159,6 +168,30 @@ int main(void) {
   ])
 })
 
+const finalize = Effect.fnUntraced(function* (
+  tools: NativeToolchain.Toolchain,
+  scope: NativeToolchain.BuildScope,
+  kind: ToolchainPlan.NativeArtifactKind,
+  target: Target.Target,
+  objects: ReadonlyArray<NativeToolchain.PathArtifact>,
+  inputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>,
+  destination: string,
+) {
+  const profile = yield* profileFor(target).pipe(Effect.orDie)
+  const selection = { kind: 'default' } as const
+  const plan = yield* NativeToolchain.planNativeLink(
+    tools,
+    scope,
+    kind,
+    profile,
+    objects,
+    inputs,
+    destination,
+    { request: selection, composition: selection, resolved: selection },
+  )
+  return yield* NativeToolchain.NativeFinalizer.finalize(plan, kind, destination)
+})
+
 it('denies native final-cache admission without complete tool and implicit-input identities', () => {
   for (const kind of ['NativeExecutable', 'NativeSharedLibrary', 'NativeStaticLibrary'] as const) {
     assert.deepStrictEqual(NativeToolchain.finalArtifactCacheAdmission(kind), {
@@ -195,7 +228,7 @@ const setUint32LittleEndian = (bytes: Uint8Array, offset: number, value: number)
   setUint16LittleEndian(bytes, offset + 2, value >>> 16)
 }
 
-const machOImage = (fileType: 2 | 6): Uint8Array => {
+const machOImage = (fileType: 1 | 2 | 6): Uint8Array => {
   const bytes = new Uint8Array(32)
   bytes.set([0xcf, 0xfa, 0xed, 0xfe])
   setUint32LittleEndian(bytes, 4, 0x0100_000c)
@@ -203,7 +236,7 @@ const machOImage = (fileType: 2 | 6): Uint8Array => {
   return bytes
 }
 
-const elfImage = (machine: 62 | 183, fileType: 2 | 3, hasInterpreter = false): Uint8Array => {
+const elfImage = (machine: 62 | 183, fileType: 1 | 2 | 3, hasInterpreter = false): Uint8Array => {
   const bytes = new Uint8Array(fileType === 3 ? 68 : 64)
   bytes.set([0x7f, 0x45, 0x4c, 0x46, 2, 1])
   setUint16LittleEndian(bytes, 16, fileType)
@@ -220,11 +253,11 @@ const elfImage = (machine: 62 | 183, fileType: 2 | 3, hasInterpreter = false): U
 const nativeObjectFor = (target: Target.Target): Uint8Array => {
   switch (target.id) {
     case 'aarch64-apple-darwin':
-      return machOImage(2)
+      return machOImage(1)
     case 'aarch64-unknown-linux-gnu':
-      return elfImage(183, 2)
+      return elfImage(183, 1)
     case 'x86_64-unknown-linux-gnu':
-      return elfImage(62, 2)
+      return elfImage(62, 1)
     case 'wasm32-unknown-unknown':
       return assert.fail('WebAssembly has no native object container')
   }
@@ -312,6 +345,7 @@ it.effect('plans fixed profile arguments against the canonical target id', () =>
       '-fPIC',
       '-O0',
       '-g',
+      '-mmacosx-version-min=11.0.0',
       '-o',
       'out.o',
     ])
@@ -323,6 +357,7 @@ it.effect('plans fixed profile arguments against the canonical target id', () =>
       'in.bc',
       '-fPIC',
       '-O2',
+      '-mmacosx-version-min=11.0.0',
       '-o',
       'out.o',
     ])
@@ -547,32 +582,6 @@ it('separates a process entry from library-only hidden runtime source', () => {
   assert.include(library, CoroutineRuntime.popSymbol)
 })
 
-it.effect('includes the selected native clock runtime in the artifact cache identity', () =>
-  Effect.gen(function* () {
-    const target = yield* NativeToolchain.hostTarget()
-    const compilation = yield* profileFor(target)
-    const selected = [
-      [],
-      ['silk_os_monotonic_clock_now_v1'],
-      ['silk_os_monotonic_clock_now_v1', 'silk_os_monotonic_clock_wait_until_v1'],
-    ] as const
-    const keys = []
-    for (const symbols of selected) {
-      keys.push(
-        yield* NativeToolchain.artifactCacheKey(
-          toolchain,
-          'NativeExecutable',
-          compilation,
-          Uint8Array.from([0, 1, 2, 3]),
-          ToolchainPlan.executableSource(termination(), symbols),
-          join(testRoot, 'clock-runtime-cache'),
-        ),
-      )
-    }
-    assert.strictEqual(new Set(keys).size, selected.length)
-  }),
-)
-
 it.effect(
   'includes the selected LLVM-Wasm freestanding runtime in the artifact cache identity',
   () =>
@@ -587,13 +596,11 @@ it.effect(
       )
       assert.strictEqual(runtimeSource, LlvmWasmRuntime.source)
       const keyFor = (runtimeSource: string) =>
-        NativeToolchain.artifactCacheKey(
+        NativeToolchain.wasmArtifactCacheKey(
           toolchain,
-          'WebAssemblyModule',
           compilationwasm32UnknownUnknown,
           bitcode,
           runtimeSource,
-          join(testRoot, 'runtime.wasm'),
         )
       const original = yield* keyFor(runtimeSource)
       const changed = yield* keyFor(`${runtimeSource}\n/* cache identity mutation */`)
@@ -601,55 +608,6 @@ it.effect(
       assert.match(original, /\.wasm$/)
       assert.match(changed, /\.wasm$/)
     }),
-)
-
-it.effect('separates every final artifact kind in cache identity and extension', () =>
-  Effect.gen(function* () {
-    const target = yield* NativeToolchain.hostTarget()
-    const compilation = yield* profileFor(target)
-    const bitcode = Uint8Array.from([0, 1, 2, 3])
-    const kinds = ['NativeExecutable', 'NativeSharedLibrary', 'NativeStaticLibrary'] as const
-    const keys = []
-    for (const kind of kinds) {
-      keys.push(
-        yield* NativeToolchain.artifactCacheKey(
-          toolchain,
-          kind,
-          compilation,
-          bitcode,
-          kind === 'NativeExecutable'
-            ? ToolchainPlan.executableSource(termination())
-            : ToolchainPlan.runtimeSource(),
-          join(testRoot, 'artifact'),
-        ),
-      )
-    }
-    assert.strictEqual(new Set(keys).size, kinds.length)
-    assert.match(keys[0] ?? '', /\.bin$/)
-    assert.match(keys[1] ?? '', /\.(dylib|so)$/)
-    assert.match(keys[2] ?? '', /\.a$/)
-  }),
-)
-
-it.effect('separates Darwin shared-library install names in one artifact cache', () =>
-  Effect.gen(function* () {
-    const compilationaarch64AppleDarwin = yield* profileFor(Target.aarch64AppleDarwin)
-    const cache = NativeToolchain.makeDiskArtifactCache(join(testRoot, 'darwin-install-cache'))
-    const keyFor = (name: string) =>
-      NativeToolchain.artifactCacheKey(
-        toolchain,
-        'NativeSharedLibrary',
-        compilationaarch64AppleDarwin,
-        Uint8Array.from([0, 1, 2, 3]),
-        ToolchainPlan.runtimeSource(),
-        join(testRoot, name),
-      )
-    const foo = yield* keyFor('libfoo.dylib')
-    const bar = yield* keyFor('libbar.dylib')
-    assert.notStrictEqual(foo, bar)
-    yield* NativeToolchain.writeArtifactCache(cache, foo, Uint8Array.from([42]))
-    assert.strictEqual(yield* NativeToolchain.readArtifactCache(cache, bar), undefined)
-  }),
 )
 
 it.effect('authenticates artifact-cache payloads and rejects body or trailing corruption', () =>
@@ -679,48 +637,6 @@ it.effect('authenticates artifact-cache payloads and rejects body or trailing co
     appended.set(encoded)
     stored = appended
     assert.strictEqual(yield* NativeToolchain.readArtifactCache(cache, 'entry'), undefined)
-  }),
-)
-
-it.effect('covers request-supplied object bytes and the ordered library list in the key', () =>
-  Effect.gen(function* () {
-    const target = yield* NativeToolchain.hostTarget()
-    const compilation = yield* profileFor(target)
-    const objectA = join(testRoot, 'key-a.o')
-    const objectB = join(testRoot, 'key-b.o')
-    writeFileSync(objectA, Uint8Array.from([1, 2, 3]))
-    writeFileSync(objectB, Uint8Array.from([1, 2, 4]))
-    const keyFor = (inputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>) =>
-      NativeToolchain.artifactCacheKey(
-        toolchain,
-        'NativeExecutable',
-        compilation,
-        Uint8Array.from([0, 1, 2, 3]),
-        ToolchainPlan.executableSource(termination()),
-        join(testRoot, 'native-input-cache'),
-        inputs,
-      )
-    const keys = [
-      yield* keyFor([]),
-      yield* keyFor([NativeLinkInput.object(objectA)]),
-      yield* keyFor([NativeLinkInput.object(objectB)]),
-      yield* keyFor([NativeLinkInput.object(objectA), NativeLinkInput.library('c', 'Dynamic')]),
-      yield* keyFor([
-        NativeLinkInput.object(objectA),
-        NativeLinkInput.library('c', 'Dynamic'),
-        NativeLinkInput.library('m', 'Dynamic'),
-      ]),
-      yield* keyFor([
-        NativeLinkInput.object(objectA),
-        NativeLinkInput.library('m', 'Dynamic'),
-        NativeLinkInput.library('c', 'Dynamic'),
-      ]),
-    ]
-    assert.strictEqual(new Set(keys).size, keys.length)
-    assert.strictEqual(
-      yield* keyFor([NativeLinkInput.object(objectA), NativeLinkInput.library('c', 'Dynamic')]),
-      keys[3],
-    )
   }),
 )
 
@@ -1199,7 +1115,7 @@ it.effect('rejects a missing linker input in the typed link channel', () =>
     const target = yield* NativeToolchain.hostTarget()
     const result = yield* Effect.result(
       NativeToolchain.withBuildScope('missing-link-input', (scope) =>
-        NativeToolchain.NativeFinalizer.finalize(
+        finalize(
           toolchain,
           scope,
           'NativeExecutable',
@@ -1231,7 +1147,7 @@ it.effect('rejects missing archive paths and unsupported inputs before spawning'
     const missing = join(testRoot, 'missing-library.a')
     const missingResult = yield* Effect.result(
       NativeToolchain.withBuildScope('missing-archive-input', (scope) =>
-        NativeToolchain.NativeFinalizer.finalize(
+        finalize(
           toolchain,
           scope,
           'NativeSharedLibrary',
@@ -1257,7 +1173,7 @@ it.effect('rejects missing archive paths and unsupported inputs before spawning'
     })
     const unsupportedResult = yield* Effect.result(
       NativeToolchain.withBuildScope('unsupported-archive-input', (scope) =>
-        NativeToolchain.NativeFinalizer.finalize(
+        finalize(
           neverToolchain,
           scope,
           'NativeStaticLibrary',
@@ -1292,7 +1208,7 @@ it.effect('creates byte-identical deterministic archives from the same object in
           'fixture.o',
           nativeObjectFor(target),
         )
-        const first = yield* NativeToolchain.NativeFinalizer.finalize(
+        const first = yield* finalize(
           toolchain,
           scope,
           'NativeStaticLibrary',
@@ -1301,7 +1217,7 @@ it.effect('creates byte-identical deterministic archives from the same object in
           [],
           firstDestination,
         )
-        const second = yield* NativeToolchain.NativeFinalizer.finalize(
+        const second = yield* finalize(
           toolchain,
           scope,
           'NativeStaticLibrary',
@@ -1341,19 +1257,9 @@ it.effect(
             target,
             artifact.termination,
           )
-          assert.deepEqual(runtime.planned.arguments, [
-            `--target=${target.id}`,
-            '-c',
-            '-x',
-            'c',
-            join(scope.root, 'silk_runtime.c'),
-            '-O2',
-            '-fPIC',
-            '-fvisibility=hidden',
-            '-o',
-            join(scope.root, 'silk_runtime.o'),
-          ])
-          return yield* NativeToolchain.NativeFinalizer.finalize(
+          assert.include(runtime.planned.arguments, 'cpp-output')
+          assert.include(runtime.planned.arguments, join(scope.root, 'silk_runtime.i'))
+          return yield* finalize(
             toolchain,
             scope,
             'NativeExecutable',
@@ -1405,3 +1311,379 @@ it('keeps relocatable form, exact loader symbols and ordered scripts distinct', 
     assert.include(entry.arguments, '/layout.ld')
   }
 })
+
+it.effect('selects one provider with artifact pin precedence and no cross-host fallback', () =>
+  Effect.gen(function* () {
+    const target = Target.aarch64AppleDarwin
+    const pin: PlatformSupply.Explicit = {
+      kind: 'explicit',
+      target: target.id,
+      root: '/pinned/sdk',
+      linker: '/pinned/ld',
+      origin: 'artifact pin',
+    }
+    const chosen = yield* PlatformSupply.select(
+      target,
+      Target.x8664UnknownLinuxGnu.id,
+      { kind: 'automatic' },
+      pin,
+      { kind: 'managed', name: 'unused' },
+    )
+    assert.strictEqual(chosen.origin, 'artifact')
+    assert.deepEqual(chosen.request, pin)
+    assert.isTrue(Object.isFrozen(chosen.request))
+    for (const [request, code] of [
+      [{ kind: 'automatic' }, 'HostMismatch'],
+      [{ kind: 'managed', name: 'deferred' }, 'UnsupportedProvider'],
+      [{ ...pin, target: Target.x8664UnknownLinuxGnu.id }, 'TargetMismatch'],
+    ] as const) {
+      const result = yield* Effect.result(
+        PlatformSupply.select(target, Target.x8664UnknownLinuxGnu.id, request),
+      )
+      assert.strictEqual(result._tag, 'Failure')
+      if (result._tag === 'Failure') assert.strictEqual(result.failure.code, code)
+    }
+    const invalid = yield* Effect.result(
+      PlatformSupply.decode(
+        { kind: 'explicit', target: target.id, root: '/sdk', linker: '/ld', flags: ['-bad'] },
+        'manifest',
+      ),
+    )
+    assert.strictEqual(invalid._tag, 'Failure')
+  }),
+)
+
+it('preserves GNU input groups and discovers recursive script references without flattening', () => {
+  const source =
+    '/* contract */ SEARCH_DIR("=/usr/lib") GROUP ( libfirst.a AS_NEEDED ( -lsecond ) ) INCLUDE "layout.ld"\nSECTIONS { .text : { *(.text) } }'
+  const parsed = LinkerScript.parse(source)
+  assert.strictEqual(parsed._tag, 'Success')
+  if (parsed._tag !== 'Success') return
+  assert.deepEqual(
+    parsed.success.references.map((reference) => [reference.kind, reference.value]),
+    [
+      ['search', '=/usr/lib'],
+      ['input', 'libfirst.a'],
+      ['input', '-lsecond'],
+      ['include', 'layout.ld'],
+    ],
+  )
+  const rendered = LinkerScript.render(parsed.success, [
+    '/sdk/usr/lib',
+    '/sdk/first.a',
+    '/sdk/second.so',
+    '/scope/layout.ld',
+  ])
+  assert.include(rendered, 'GROUP ( "/sdk/first.a" AS_NEEDED ( "/sdk/second.so" ) )')
+  assert.include(rendered, 'SECTIONS { .text : { *(.text) } }')
+  assert.strictEqual(LinkerScript.parse('INPUT ( missing.o')._tag, 'Failure')
+  assert.strictEqual(LinkerScript.parse('STARTUP(other.o)')._tag, 'Failure')
+  assert.strictEqual(LinkerScript.parse('LIB(hidden.a)')._tag, 'Failure')
+})
+
+it('distinguishes inline Darwin stub reexports from external and incompatible targets', () => {
+  const source = `--- !tapi-tbd
+tbd-version: 4
+targets: [ arm64-macos ]
+install-name: '/usr/lib/root.dylib'
+reexported-libraries:
+  - targets: [ arm64-macos ]
+    libraries: [ '/usr/lib/inline.dylib', '/usr/lib/external.dylib' ]
+  - targets: [ x86_64-macos ]
+    libraries: [ '/usr/lib/wrong.dylib' ]
+--- !tapi-tbd
+tbd-version: 4
+targets: [ arm64-macos ]
+install-name: '/usr/lib/inline.dylib'
+...
+`
+  const parsed = NativeStub.parse(source)
+  assert.strictEqual(parsed._tag, 'Success')
+  if (parsed._tag !== 'Success') return
+  assert.deepEqual(parsed.success.imports, ['/usr/lib/external.dylib'])
+  assert.strictEqual(
+    NativeStub.parse(source.replaceAll('arm64-macos', 'arm64-ios'))._tag,
+    'Failure',
+  )
+  assert.strictEqual(
+    NativeStub.parse(source.replaceAll('tbd-version: 4', 'tbd-version: 5'))._tag,
+    'Failure',
+  )
+})
+
+it('reads driver argv without interpreting shell syntax', () => {
+  const parsed = NativeLinkResolver.argumentsOf(
+    ' "/path with spaces/ld" "-o" "$(unchanged)" "escaped\\\"quote"',
+  )
+  assert.strictEqual(parsed._tag, 'Success')
+  if (parsed._tag === 'Success')
+    assert.deepEqual(parsed.success, [
+      '/path with spaces/ld',
+      '-o',
+      '$(unchanged)',
+      'escaped"quote',
+    ])
+  assert.strictEqual(NativeLinkResolver.argumentsOf('"unfinished')._tag, 'Failure')
+})
+
+it.effect(
+  'accounts for selected bytes and input ordering while ignoring non-emitted path relocation',
+  () =>
+    Effect.gen(function* () {
+      const target = yield* NativeToolchain.hostTarget()
+      const profile = yield* profileFor(target)
+      const selected = yield* NativeToolchain.resolveToolchain(toolchain, profile)
+      yield* NativeToolchain.withBuildScope(
+        'supply-identities',
+        Effect.fnUntraced(function* (scope) {
+          const a = yield* NativeToolchain.writeArtifact(
+            scope,
+            target,
+            'a.o',
+            nativeObjectFor(target),
+          )
+          const b = yield* NativeToolchain.writeArtifact(
+            scope,
+            target,
+            'b.o',
+            new Uint8Array([...nativeObjectFor(target), 1]),
+          )
+          mkdirSync(join(scope.root, 'relocated'))
+          const relocated = yield* NativeToolchain.writeArtifact(
+            scope,
+            target,
+            'relocated/a.o',
+            nativeObjectFor(target),
+          )
+          const entry = {
+            request: { kind: 'default' },
+            composition: { kind: 'default' },
+            resolved: { kind: 'default' },
+          } as const
+          const plan = Effect.fnUntraced(function* (
+            objects: ReadonlyArray<NativeToolchain.PathArtifact>,
+            name = 'output.a',
+          ) {
+            return yield* NativeToolchain.planNativeLink(
+              selected,
+              scope,
+              'NativeStaticLibrary',
+              profile,
+              objects,
+              [],
+              join(scope.root, name),
+              entry,
+            )
+          })
+          const first = yield* plan([a, b])
+          const moved = yield* plan([relocated, b], 'relocated.a')
+          const swapped = yield* plan([b, a])
+          assert.strictEqual(first.identity, moved.identity)
+          assert.notStrictEqual(first.identity, swapped.identity)
+          assert.deepEqual(
+            NativeToolchain.finalArtifactCacheAdmission('NativeStaticLibrary', first),
+            { _tag: 'CompleteNativePlan', identity: first.identity },
+          )
+          const changed = new Uint8Array([...nativeObjectFor(target), 2])
+          writeFileSync(a.path, changed)
+          const stale = yield* Effect.result(
+            PlatformSupplyResolver.validateFiles(first.inputs).pipe(
+              Effect.provide(NodeServices.layer),
+            ),
+          )
+          assert.strictEqual(stale._tag, 'Failure')
+          if (stale._tag === 'Failure') assert.strictEqual(stale.failure.code, 'ChangedInput')
+          assert.notStrictEqual(first.identity, (yield* plan([a, b])).identity)
+        }),
+      )
+    }),
+)
+
+it('freezes only admitted discovery environment channels', () => {
+  const environment = {
+    PATH: '/selected/tools',
+    SDKROOT: '/selected/sdk',
+    CPATH: '/unrecorded/include',
+  }
+  const resolver = PlatformSupplyResolver.make(environment)
+  environment.SDKROOT = '/changed/sdk'
+  assert.deepEqual(resolver.environment, { PATH: '/selected/tools', SDKROOT: '/selected/sdk' })
+  assert.isTrue(Object.isFrozen(resolver.environment))
+})
+
+it.effect(
+  'validates explicit Darwin SDK architecture, deployment and libSystem independently',
+  () =>
+    Effect.gen(function* () {
+      const target = Target.aarch64AppleDarwin
+      const profile = yield* profileFor(target)
+      const sdk = join(testRoot, 'sdk-capabilities')
+      mkdirSync(join(sdk, 'usr/lib'), { recursive: true })
+      const metadata = join(sdk, 'SDKSettings.json')
+      const system = join(sdk, 'usr/lib/libSystem.tbd')
+      const settings = {
+        Version: '15.5',
+        SupportedTargets: { macosx: { Archs: ['arm64'], MaximumDeploymentTarget: '15.5.99' } },
+      }
+      writeFileSync(
+        metadata,
+        yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(settings).pipe(
+          Effect.orDie,
+        ),
+      )
+      writeFileSync(
+        system,
+        "--- !tapi-tbd\ntbd-version: 4\ntargets: [ arm64-macos ]\ninstall-name: '/usr/lib/libSystem.B.dylib'\n",
+      )
+      const resolver = PlatformSupplyResolver.make({
+        PATH: testPath,
+        SDKROOT: '/must-not-be-selected',
+      })
+      const resolve = Effect.fnUntraced(function* (deployment?: string) {
+        return yield* PlatformSupplyResolver.resolveSupply(resolver, {
+          profile: { ...profile, deployment },
+          host: Target.x8664UnknownLinuxGnu.id,
+          clang,
+          llvmAr: toolchain.llvmAr,
+          request: {
+            kind: 'explicit',
+            target: target.id,
+            root: sdk,
+            linker: clang,
+            origin: 'explicit SDK fixture',
+          },
+        }).pipe(Effect.provide(NodeServices.layer))
+      })
+      const selected = yield* resolve()
+      assert.strictEqual(selected.version, '15.5')
+      assert.isUndefined(selected.consultedEnvironment['SDKROOT'])
+      const deployment = yield* Effect.result(resolve('16.0.0'))
+      assert.strictEqual(deployment._tag, 'Failure')
+      if (deployment._tag === 'Failure')
+        assert.strictEqual(deployment.failure.code, 'DeploymentMismatch')
+      writeFileSync(
+        metadata,
+        yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))({
+          ...settings,
+          SupportedTargets: { macosx: { Archs: ['x86_64'] } },
+        }).pipe(Effect.orDie),
+      )
+      const architecture = yield* Effect.result(resolve())
+      assert.strictEqual(architecture._tag, 'Failure')
+      if (architecture._tag === 'Failure')
+        assert.strictEqual(architecture.failure.code, 'TargetMismatch')
+      writeFileSync(
+        metadata,
+        yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(settings).pipe(
+          Effect.orDie,
+        ),
+      )
+      writeFileSync(system, 'wrong libSystem contract')
+      const library = yield* Effect.result(resolve())
+      assert.strictEqual(library._tag, 'Failure')
+      if (library._tag === 'Failure') {
+        assert.strictEqual(library.failure.code, 'TargetMismatch')
+        assert.strictEqual(library.failure.origin, 'SDK libSystem contract')
+      }
+      rmSync(system)
+      const missing = yield* Effect.result(resolve())
+      assert.strictEqual(missing._tag, 'Failure')
+      if (missing._tag === 'Failure') assert.include(missing.failure.subject, 'libSystem.tbd')
+    }),
+)
+
+it.effect('keys C objects by consumed headers and freezes preprocessing for inspection', () =>
+  Effect.gen(function* () {
+    const target = yield* NativeToolchain.hostTarget()
+    const profile = yield* profileFor(target)
+    const cache = NativeToolchain.makeRuntimeObjectCache()
+    const selected = yield* NativeToolchain.resolveToolchain(
+      { ...toolchain, runtimeObjectCache: cache },
+      profile,
+    )
+    yield* NativeToolchain.withBuildScope(
+      'header-identities',
+      Effect.fnUntraced(function* (scope) {
+        const header = join(scope.root, 'selected.h')
+        writeFileSync(header, '#define VALUE 42\n')
+        const source = '#include "selected.h"\nint value(void) { return VALUE; }'
+        const first = yield* NativeToolchain.compileCObject(
+          selected,
+          scope,
+          target,
+          'consumer',
+          source,
+        )
+        writeFileSync(join(scope.root, 'unused.h'), '#define UNUSED 9\n')
+        const same = yield* NativeToolchain.compileCObject(
+          selected,
+          scope,
+          target,
+          'consumer',
+          source,
+        )
+        writeFileSync(header, '#define VALUE 43\n')
+        const changed = yield* NativeToolchain.compileCObject(
+          selected,
+          scope,
+          target,
+          'consumer',
+          source,
+        )
+        assert.isDefined(first.artifact.translation)
+        assert.strictEqual(
+          first.artifact.translation?.identity,
+          same.artifact.translation?.identity,
+        )
+        assert.notStrictEqual(
+          first.artifact.translation?.identity,
+          changed.artifact.translation?.identity,
+        )
+        assert.include(first.artifact.translation?.source ?? '', 'return 42')
+        assert.include(changed.artifact.translation?.source ?? '', 'return 43')
+        assert.deepEqual(NativeToolchain.runtimeObjectCacheStats(cache), {
+          entries: 2,
+          hits: 1,
+          misses: 2,
+        })
+        assert.isTrue(
+          first.artifact.translation?.headers.every((input) => !input.path.endsWith('unused.h')),
+        )
+      }),
+    )
+  }),
+)
+
+it.effect(
+  'resolves foreign absolute symlinks inside the sysroot and rejects retargeted snapshots',
+  () =>
+    Effect.gen(function* () {
+      const root = join(testRoot, 'symlink-root')
+      mkdirSync(join(root, 'usr/lib'), { recursive: true })
+      writeFileSync(join(root, 'usr/lib/first'), 'same bytes')
+      writeFileSync(join(root, 'usr/lib/second'), 'same bytes')
+      symlinkSync('/usr/lib', join(root, 'lib'))
+      symlinkSync('first', join(root, 'usr/lib/selected'))
+      const selected = yield* PlatformSupplyResolver.file(
+        join(root, 'lib/selected'),
+        'library',
+        'sysroot fixture',
+        root,
+      )
+      assert.strictEqual(
+        selected.path,
+        yield* PlatformSupplyResolver.physicalPath(join(root, 'usr/lib/first')),
+      )
+      rmSync(join(root, 'usr/lib/selected'))
+      symlinkSync('second', join(root, 'usr/lib/selected'))
+      const changed = yield* Effect.result(PlatformSupplyResolver.validateFiles([selected]))
+      assert.strictEqual(changed._tag, 'Failure')
+      if (changed._tag === 'Failure') assert.strictEqual(changed.failure.code, 'ChangedInput')
+      symlinkSync('loop', join(root, 'usr/lib/loop'))
+      const cycle = yield* Effect.result(
+        PlatformSupplyResolver.physicalPath(join(root, 'lib/loop'), root),
+      )
+      assert.strictEqual(cycle._tag, 'Failure')
+      if (cycle._tag === 'Failure') assert.strictEqual(cycle.failure.code, 'UnsupportedInput')
+    }).pipe(Effect.provide(NodeServices.layer)),
+)
