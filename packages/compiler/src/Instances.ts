@@ -143,6 +143,13 @@ export interface SuspensionFact {
   readonly summary: SuspensionMode.Summary
 }
 
+/** A lexical provider needed to select one concrete call at a shared source span. */
+export interface CallProvider {
+  readonly capability: Type.Nominal
+  readonly providerType: Type.Nominal
+  readonly role: string
+}
+
 /** One monomorphic ordinary/effect constructor call with hidden Effect identities resolved. */
 export interface CallInstance {
   readonly _tag: 'CallInstance'
@@ -152,7 +159,22 @@ export interface CallInstance {
   /** Caller-authored metadata aligned with target static arguments, outside instance identity. */
   readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
   readonly resultEffect?: string
+  /** Lexical selections used to resolve the hidden argument identities at this call. */
+  readonly providers?: ReadonlyArray<CallProvider>
 }
+
+/** Tests whether a call's provider-dependent identities belong to the current lexical context. */
+export const callMatchesProviders = (
+  call: CallInstance,
+  providers: ReadonlyArray<CallProvider>,
+): boolean =>
+  (call.providers ?? []).every((expected) => {
+    const actual = providers.findLast(
+      (candidate) =>
+        expected.role === candidate.role && Type.equals(expected.capability, candidate.capability),
+    )
+    return actual !== undefined && Type.equals(expected.providerType, actual.providerType)
+  })
 
 /** One exact sealed intrinsic call retained by executable instance closure. */
 export interface IntrinsicCall {
@@ -1619,6 +1641,10 @@ export const discover = (
           owner: provided.owner,
           span: provided.span,
           target: provided.target,
+          ...(provided.providers === undefined ? {} : { providers: provided.providers }),
+          ...(provided.staticArgumentOrigins === undefined
+            ? {}
+            : { staticArgumentOrigins: provided.staticArgumentOrigins }),
           ...(resultEffect === undefined ? {} : { resultEffect }),
         }),
       )

@@ -484,7 +484,8 @@ const effectIdentityOf = (
         call.target.declaration.name === target.name &&
         call.span.sourceId === expression.span.sourceId &&
         call.span.start === expression.span.start &&
-        call.span.end === expression.span.end,
+        call.span.end === expression.span.end &&
+        Instances.callMatchesProviders(call, context.ambientProviders),
     )?.resultEffect
   }
   if (expression._tag === 'Call' || expression._tag === 'EffectConstruct') {
@@ -493,7 +494,8 @@ const effectIdentityOf = (
         Instances.keyText(call.owner) === Instances.keyText(context.instance.key) &&
         call.span.sourceId === expression.span.sourceId &&
         call.span.start === expression.span.start &&
-        call.span.end === expression.span.end,
+        call.span.end === expression.span.end &&
+        Instances.callMatchesProviders(call, context.ambientProviders),
     )?.resultEffect
   }
   if (expression._tag === 'ServiceEffectConstruct')

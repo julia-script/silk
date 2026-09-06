@@ -1238,6 +1238,7 @@ function lowerEffectConstructExpression(
     undefined,
     authoredTypeArguments,
     expression.staticArguments,
+    availableRequirements,
   )
   const typeArguments = call?.target.typeArguments ?? authoredTypeArguments
   const staticArguments = call?.target.staticArguments ?? expression.staticArguments
@@ -2748,6 +2749,7 @@ function lowerCallExpression(
       undefined,
       authoredTypeArguments,
       expression.staticArguments,
+      availableRequirements,
     )
     const typeArguments = Object.freeze(call?.target.typeArguments ?? authoredTypeArguments)
     const staticArguments = call?.target.staticArguments ?? expression.staticArguments

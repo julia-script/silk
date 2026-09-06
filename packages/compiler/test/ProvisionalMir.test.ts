@@ -379,12 +379,13 @@ pub fn main() -> i32 {
     }),
 )
 
-for (const variant of ['composed', 'sequential', 'suspending'] as const)
+for (const variant of ['composed', 'sequential', 'suspending', 'multiple'] as const)
   it.effect(`preserves per-run control after ${variant} mutable service effects`, () =>
     Effect.gen(function* () {
       const source = `import silk.effect { Effect }
 service Input { effect fn count() -> i32 ? &mut Input }
 struct Fixed {}
+${variant === 'multiple' ? 'struct Other {}\neffect fn otherCount(self: &mut Other) -> i32 { return run Effect.suspend(effect { return 1 }) }\nimpl Input for Other { count: Other.otherCount }' : ''}
 struct Problem {}
 effect fn count(self: &mut Fixed) -> i32 {
   return ${variant === 'suspending' ? 'run Effect.suspend(effect { return 0 })' : '0'}
@@ -404,7 +405,7 @@ effect fn program() -> i32 ! Problem ? &mut Input {
 effect fn finish(error: Problem) -> i32 { return 0 }
 pub fn main() -> i32 {
   let mut provider = Fixed {}
-  return run Effect.catchAll(Effect.provideMut(program(), &mut provider), finish)
+  ${variant === 'multiple' ? 'let first = run Effect.catchAll(Effect.provideMut(program(), &mut provider), finish)\n  let mut other = Other {}\n  return first + run Effect.catchAll(Effect.provideMut(program(), &mut other), finish)' : 'return run Effect.catchAll(Effect.provideMut(program(), &mut provider), finish)'}
 }`
       const self = yield* snapshot(source)
       assert.deepEqual(
@@ -429,12 +430,7 @@ pub fn main() -> i32 {
       const provisional = available(self)
       assert.deepEqual(ProvisionalMir.verify(provisional), [])
       const program = Analysis.loweredMir(self)
-      // JUL-156 independently retains an unavailable zip constructor specialization.
-      // Name the outstanding rule explicitly and reject any additional verifier failure.
-      assert.deepEqual(
-        MirVerification.verify(program).map((violation) => violation.rule),
-        variant === 'sequential' ? [] : ['InvalidCallShape'],
-      )
+      assert.deepEqual(MirVerification.verify(program), [])
       const ownership = Projections.suspensionOwnershipOf(self)
       assert.strictEqual(ownership._tag, 'Available')
       if (ownership._tag === 'Available') {
