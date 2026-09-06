@@ -21,6 +21,26 @@ import silk.option { Option }
 pub struct Pointer {}
 
 impl Pointer {
+  /// Returns the unsigned numeric address of a raw data pointer.
+  ///
+  /// # Details
+  ///
+  /// Null has address zero. Observation does not read memory or keep storage alive.
+  /// The result has the selected target's pointer width and cannot reconstruct a pointer.
+  pub fn address<T>(pointer: ?*const T) -> usize {
+    return Intrinsic.pointerAddress<?*const T>(pointer)
+  }
+
+  /// Returns the unsigned numeric address of a many-element data pointer.
+  ///
+  /// # Details
+  ///
+  /// Null has address zero. Observation does not read memory or keep storage alive.
+  /// The result has the selected target's pointer width and cannot reconstruct a pointer.
+  pub fn addressMany<T>(pointer: ?[*]const T) -> usize {
+    return Intrinsic.pointerAddress<?[*]const T>(pointer)
+  }
+
   /// Returns a null single-element pointer.
   pub fn null<T>() -> ?*mut T {
     return Intrinsic.pointerNull<T>()

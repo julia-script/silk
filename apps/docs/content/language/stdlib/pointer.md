@@ -35,6 +35,36 @@ pub struct Pointer
 
 The operations for data pointers, which hold no ownership or loan.
 
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e61646472657373"></a>
+
+### Associated function `Pointer.address`
+
+```silk
+pub fn address<T>(pointer: ?*const T) -> usize
+```
+
+Returns the unsigned numeric address of a raw data pointer.
+
+#### Details
+
+Null has address zero. Observation does not read memory or keep storage alive.
+The result has the selected target's pointer width and cannot reconstruct a pointer.
+
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e616464726573734d616e79"></a>
+
+### Associated function `Pointer.addressMany`
+
+```silk
+pub fn addressMany<T>(pointer: ?[*]const T) -> usize
+```
+
+Returns the unsigned numeric address of a many-element data pointer.
+
+#### Details
+
+Null has address zero. Observation does not read memory or keep storage alive.
+The result has the selected target's pointer width and cannot reconstruct a pointer.
+
 <a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e6e756c6c"></a>
 
 ### Associated function `Pointer.null`

@@ -148,6 +148,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = pointer-null : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PointerIsNull':
       return `${localText(operation.destination)} = pointer-is-null ${localText(operation.pointer)} : bool ${provenanceText(operation.provenance)}`
+    case 'PointerAddress':
+      return `${localText(operation.destination)} = pointer-address ${localText(operation.pointer)} : usize ${provenanceText(operation.provenance)}`
     case 'PointerRequalify':
       return `${localText(operation.destination)} = pointer-requalify ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PointerFromStorage':

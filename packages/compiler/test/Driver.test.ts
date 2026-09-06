@@ -397,6 +397,11 @@ it.effect(
         const phases = outcome.report.map((entry) => entry.phase)
         assert.include(phases, name === 'admission-first' ? 'link' : 'artifact-cache')
         assert.isDefined(outcome.linkPlan)
+        assert.deepEqual(
+          outcome.linkPlan?.helpers?.flatMap((entry) => entry.requirements),
+          [],
+        )
+        assert.isFalse(outcome.linkPlan?.command.arguments.includes('-lm') ?? true)
         if (name === 'admission-second') assert.include(phases, 'backend-cache')
       }
       const nativeReads = reads.filter((key) => key.startsWith('native-')).length
@@ -441,7 +446,7 @@ it.effect('reports a missing request-supplied object as linker input even when c
     assert.strictEqual(result.failure.reason.status, null)
     assert.strictEqual(result.failure.reason.output, `missing linker input: ${missing}`)
     const args = result.failure.reason.planned.arguments
-    assert.deepEqual(args.slice(args.indexOf(missing)), [missing, '-lc', '-lm', '-o', destination])
+    assert.deepEqual(args.slice(args.indexOf(missing)), [missing, '-lc', '-o', destination])
   }),
 )
 

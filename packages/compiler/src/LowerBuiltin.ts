@@ -763,6 +763,20 @@ const lowerBuiltinOperation = (
     )
     return finishBuiltin(destination)
   }
+  if (expression.operation === 'PointerAddress') {
+    const [pointer] = argumentLocals
+    if (pointer === undefined) return undefined
+    const destination = fn.alloc(Object.freeze({ _tag: 'usize' as const }))
+    fn.emit(
+      Object.freeze({
+        _tag: 'PointerAddress' as const,
+        destination,
+        pointer,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
   if (
     expression.operation === 'PointerRequalify' ||
     expression.operation === 'SlotAddress' ||

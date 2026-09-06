@@ -43,7 +43,7 @@ pub fn main() -> i32 {
         ['clock_getres', 'clock_gettime'],
       )
       const systemArtifact = yield* Analysis.codegen(system, { mode: 'release' })
-      assert.deepEqual(systemArtifact.nativeRuntimeSymbols, [])
+      assert.deepEqual(systemArtifact.nativeRuntimeSymbols, ['silk_trap_report_v1'])
       assert.deepEqual(
         systemArtifact.foreignImports.map((entry) => entry.symbol),
         ['clock_getres', 'clock_gettime'],
@@ -80,6 +80,7 @@ pub fn main() -> i32 {
       'silk_os_monotonic_clock_now_v1',
       'silk_os_monotonic_clock_resolution_v1',
       'silk_os_monotonic_clock_wait_until_v1',
+      'silk_trap_report_v1',
     ])
   }),
 )

@@ -309,6 +309,30 @@
     "aliases": ["InvalidUtf8", "ScalarCursor", "ScalarStep"]
   },
   {
+    "module": "silk/support/bcmp",
+    "path": "silk/support/bcmp.silk"
+  },
+  {
+    "module": "silk/support/bzero",
+    "path": "silk/support/bzero.silk"
+  },
+  {
+    "module": "silk/support/memcmp",
+    "path": "silk/support/memcmp.silk"
+  },
+  {
+    "module": "silk/support/memcpy",
+    "path": "silk/support/memcpy.silk"
+  },
+  {
+    "module": "silk/support/memmove",
+    "path": "silk/support/memmove.silk"
+  },
+  {
+    "module": "silk/support/memset",
+    "path": "silk/support/memset.silk"
+  },
+  {
     "module": "silk/system_clock",
     "path": "silk/system_clock.silk",
     "namespace": "SystemClock",

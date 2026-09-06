@@ -2191,6 +2191,17 @@ const intrinsicOperations = Object.freeze([
     }),
     builtin({
       actor: 'Pointer',
+      name: 'address',
+      operation: 'PointerAddress',
+      typeParameters: Object.freeze(['P']),
+      semanticTypeParameters: Object.freeze([pointerSource]),
+      parameters: Object.freeze([valueParameter('pointer', 'P')]),
+      semanticParameters: Object.freeze([pointerSource]),
+      result: 'usize',
+      semanticResult: 'usize',
+    }),
+    builtin({
+      actor: 'Pointer',
       name: 'fromRef',
       operation: 'PointerFromRef',
       typeParameters: Object.freeze(['T']),

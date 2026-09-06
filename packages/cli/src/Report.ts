@@ -117,6 +117,9 @@ export const toolchainError = (failure: NativeToolchain.ToolchainError): string 
     const supply = failure.reason.failure
     return `${supply.message}\n${supply.correction}${supply.query === undefined ? '' : `\n${supply.query.stderr}`}`
   }
+  if (failure.reason._tag === 'HelperFailed') {
+    return `${failure.stage} stage failed: ${failure.message}`
+  }
   if (failure.reason._tag === 'StorageFailed') {
     return `${failure.stage} stage failed: ${failure.message}`
   }

@@ -1114,6 +1114,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       ]
     case 'PointerNull':
       return [operation.destination]
+    case 'PointerAddress':
     case 'PointerIsNull':
     case 'PointerRead':
       return [operation.destination, operation.pointer]
@@ -2075,6 +2076,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'PointerAt':
     case 'PointerRead':
       return [semanticType(operation.type)]
+    case 'PointerAddress':
     case 'PointerIsNull':
     case 'PointerWrite':
       return []
@@ -2297,6 +2299,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.buffer, operation.offset, operation.length, operation.value]
     case 'PointerNull':
       return []
+    case 'PointerAddress':
     case 'PointerIsNull':
     case 'PointerRead':
       return [operation.pointer]
@@ -2903,6 +2906,7 @@ const pointerOperationViolation = (
       readonly _tag:
         | 'PointerNull'
         | 'PointerIsNull'
+        | 'PointerAddress'
         | 'PointerRequalify'
         | 'PointerFromStorage'
         | 'PointerAt'
@@ -2923,6 +2927,10 @@ const pointerOperationViolation = (
         SilkType.equals(destination.type, operation.type.type)
         ? undefined
         : 'Pointer null lost its nullable destination'
+    case 'PointerAddress':
+      return pointerAt(operation.pointer) !== undefined && destination?._tag === 'usize'
+        ? undefined
+        : 'Pointer address lost its pointer operand or usize destination'
     case 'PointerIsNull':
       return pointerAt(operation.pointer) !== undefined && destination?._tag === 'bool'
         ? undefined
@@ -5289,6 +5297,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         if (
           operation._tag === 'PointerNull' ||
           operation._tag === 'PointerIsNull' ||
+          operation._tag === 'PointerAddress' ||
           operation._tag === 'PointerRequalify' ||
           operation._tag === 'PointerFromStorage' ||
           operation._tag === 'PointerAt' ||

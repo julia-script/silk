@@ -805,6 +805,13 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Observes a raw data address as unsigned target-width `usize` without accessing storage. */
+      readonly _tag: 'PointerAddress'
+      readonly destination: LocalId
+      readonly pointer: LocalId
+      readonly provenance: Provenance
+    }
+  | {
       /**
        * Forms a pointer from the address lane of a reference or slice local. Formation is an
        * ordinary read of the borrow: the result holds no loan and keeps nothing alive.

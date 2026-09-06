@@ -1,0 +1,23 @@
+//! Byte-wise compiler support with explicit C linkage and no runtime services.
+
+import silk.pointer { Pointer }
+import silk.i32 as i32
+
+/// Writes the low eight bits of `value` to `count` bytes and returns the destination.
+///
+/// # Gotchas
+///
+/// The caller must provide a live writable destination range of `count` bytes.
+export "C" fn memset(destination: ?[*]mut u8, value: i32, count: usize) -> ?[*]mut u8 {
+  if count == 0 { return destination }
+  unsafe {
+    let output = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(destination)
+    let byte = i32.toU8(value & 255)
+    let mut index: usize = 0
+    while index < count {
+      Pointer.write<u8>(Pointer.atMut<u8>(output, index), byte)
+      index = index + 1
+    }
+    return destination
+  }
+}

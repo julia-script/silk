@@ -143,6 +143,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'ForeignFunctionAddress':
       return yield* NativeForeignOperation.emit(context.call, operation)
     case 'PointerNull':
+    case 'PointerAddress':
     case 'PointerIsNull':
     case 'PointerRequalify':
     case 'PointerFromStorage':

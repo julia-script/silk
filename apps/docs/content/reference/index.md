@@ -60,6 +60,7 @@ not belong in a language rule unless a program can observe them.
 ## Contents
 
 - [Artifact roots and native requirements](artifact-roots-and-requirements.md)
+- [LLVM helper capabilities](llvm-helper-capabilities.md)
 - [Lexical form](lexical-form.md) — identifiers, the closed keyword vocabulary, comments, numeric
   and duration spellings, text and byte forms, character literals, and longest tokenization.
 - [Program entry](program-entry.md) — ordinary and effectful `main`, automatic Effect execution,

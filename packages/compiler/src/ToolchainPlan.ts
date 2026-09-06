@@ -241,7 +241,7 @@ export const cObjectCommand = (
 export const wasmCommand = (
   clang: string,
   profile: CompilationProfile.CompilationProfile,
-  bitcodePath: string,
+  objectPath: string,
   runtimeObjectPath: string,
   destination: string,
 ): PlannedCommand =>
@@ -252,11 +252,7 @@ export const wasmCommand = (
     arguments: Object.freeze([
       `--target=${profile.target.id}`,
       '-nostdlib',
-      '-x',
-      'ir',
-      bitcodePath,
-      '-x',
-      'none',
+      objectPath,
       runtimeObjectPath,
       ...compilationArguments(profile),
       '-Wl,--no-entry',

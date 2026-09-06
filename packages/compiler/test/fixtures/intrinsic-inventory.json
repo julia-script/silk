@@ -5411,6 +5411,14 @@
       "identity": "PointerIsNull"
     },
     {
+      "operation": "Intrinsic.pointerAddress",
+      "signature": "fn Intrinsic.pointerAddress<P>(pointer: P) -> usize",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.address",
+      "identity": "PointerAddress"
+    },
+    {
       "operation": "Intrinsic.pointerFromRef",
       "signature": "fn Intrinsic.pointerFromRef<T>(value: &T) -> *const T",
       "unsafe": false,

@@ -21,6 +21,7 @@ type Operation = Extract<
     readonly _tag:
       | 'PointerNull'
       | 'PointerIsNull'
+      | 'PointerAddress'
       | 'PointerRequalify'
       | 'PointerFromStorage'
       | 'PointerAt'
@@ -49,6 +50,18 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   switch (operation._tag) {
     case 'PointerNull': {
       storage.locals.set(destination, Object.freeze([yield* Constant.nullValue(builder, pointer)]))
+      return
+    }
+    case 'PointerAddress': {
+      const addressType = yield* LlvmType.integer(builder, program.layout.target.pointerSize * 8)
+      const address = yield* FunctionBody.cast(
+        body,
+        'ptrtoint',
+        NativeStorage.readScalar(storage, operation.pointer),
+        addressType,
+        `ptr_address${destination}`,
+      )
+      storage.locals.set(destination, Object.freeze([address]))
       return
     }
     case 'PointerIsNull': {

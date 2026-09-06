@@ -315,7 +315,9 @@ export const decode = Effect.fn('CompilationProfile.decode')(function* (
   const unwind = yield* choice(input, 'unwind', ['none', 'native'], 'none', origin)
   const runtime = yield* selection(get(input, 'runtime'), 'runtime', origin)
   if (
-    (target.operatingSystem === 'darwin' && libc !== 'system') ||
+    (target.operatingSystem === 'darwin' &&
+      (libc === 'gnu' ||
+        (libc === 'none' && artifact !== 'object' && artifact !== 'static-archive'))) ||
     (target.operatingSystem === 'linux' && libc === 'system') ||
     (target.kind === 'WebAssembly' && libc !== 'none')
   )

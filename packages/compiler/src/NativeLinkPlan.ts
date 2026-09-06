@@ -1,3 +1,4 @@
+import type * as HelperCapability from './HelperCapability.js'
 import type * as CTranslationUnit from './CTranslationUnit.js'
 import type * as ArtifactPlan from './ArtifactPlan.js'
 import type * as PlatformSupply from './PlatformSupply.js'
@@ -11,6 +12,7 @@ export interface Script {
 
 /** Complete physical accounting consumed by the permanent native final-cache admission rule. */
 export interface NativeLinkPlan {
+  readonly helpers?: ReadonlyArray<HelperCapability.Report>
   readonly kind: ToolchainPlan.NativeArtifactKind
   readonly translations: ReadonlyArray<CTranslationUnit.CTranslationUnit>
   readonly _tag: 'NativeLinkPlan'

@@ -192,6 +192,7 @@ pub fn main() -> i32 {
 fn pointers(value: &mut i32, values: &mut [u8], shared: &i32, view: &[u8]) -> i32 {
   let empty = Intrinsic.pointerNull<Opaque>()
   let missing = Intrinsic.pointerIsNull<?*mut Opaque>(empty)
+  let address = Intrinsic.pointerAddress<?*mut Opaque>(empty)
   let constant = Intrinsic.pointerFromRef<i32>(shared)
   let mutable = Intrinsic.pointerFromMutRef<i32>(value)
   let first = Intrinsic.pointerFromSlice<u8>(view)
@@ -513,6 +514,7 @@ it('admits the Pointer actor with one invariant per unsafe primitive', () => {
       ['Intrinsic.pointerWriteUnaligned', true, true],
       ['Intrinsic.pointerNull', false, false],
       ['Intrinsic.pointerIsNull', false, false],
+      ['Intrinsic.pointerAddress', false, false],
       ['Intrinsic.pointerFromRef', false, false],
       ['Intrinsic.pointerFromMutRef', false, false],
       ['Intrinsic.pointerFromSlice', false, false],
@@ -816,4 +818,18 @@ it.effect(
         assert.strictEqual(occurrence.resolution.identity._tag, 'DeclarationIdentity')
       assert.strictEqual(occurrence?.declaration?.module, 'silk/i32')
     }),
+)
+
+it.effect('rejects numeric operands to raw pointer address observation at the call span', () =>
+  Effect.gen(function* () {
+    const source = 'pub fn main() -> i32 { let a = Intrinsic.pointerAddress<i32>(1) return 0 }'
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'pointer/address-invalid',
+      encoder.encode(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((entry) => [entry.code, entry.span.start, entry.span.end]),
+      [['SEM0215', 30, 63]],
+    )
+  }),
 )

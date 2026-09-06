@@ -355,10 +355,30 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     .flatMap((fn) => MirVerification.operations(fn))
     .filter((operation) => operation._tag === 'ForeignCall')
   const declaredForeign = new Map<string, CAbi.CAbiSignature>()
+  if (
+    request.support &&
+    (program.entry._tag !== 'NoInvocation' ||
+      needsAllocation ||
+      frameRuntimeEnabled ||
+      needsHostWrite ||
+      osRuntimes.size !== 0 ||
+      program.foreignCalls.length !== 0 ||
+      program.foreignStatics.length !== 0 ||
+      indirectCalls.length !== 0 ||
+      program.functions.some((fn) => fn.machine !== undefined))
+  )
+    return yield* new BackendError({
+      operation: 'Backend.emit',
+      backend: 'LLVM',
+      message:
+        'Support objects require source-only, runtime-free bodies without an entry or foreign calls',
+      reason: { _tag: 'UnsupportedMir', detail: 'Invalid support compilation' },
+    })
   const foreignGuard =
-    program.foreignCalls.length === 0 &&
-    program.foreignExports.length === 0 &&
-    indirectCalls.length === 0
+    request.support ||
+    (program.foreignCalls.length === 0 &&
+      program.foreignExports.length === 0 &&
+      indirectCalls.length === 0)
       ? undefined
       : yield* NativeForeignGuard.make(builder)
   for (const operation of indirectCalls) {
@@ -476,7 +496,15 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   }
 
   const functionDeclarations = yield* NativeDeclare.functions(
-    Object.freeze({ builder, program, i32, pointer, lanesFor, laneType }),
+    Object.freeze({
+      builder,
+      program,
+      i32,
+      pointer,
+      lanesFor,
+      laneType,
+      support: request.support === true,
+    }),
   )
   const declared = functionDeclarations.declared
   const retained: Array<Constant.Constant> = []
@@ -513,7 +541,14 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     voidType,
   )
   const exportThunks = yield* NativeDeclare.exportThunks(
-    Object.freeze({ builder, program, declared, cType, foreignGuard }),
+    Object.freeze({
+      builder,
+      program,
+      declared,
+      cType,
+      foreignGuard,
+      support: request.support === true,
+    }),
   )
   const foreignCallbacks = new Map<string, Constant.Constant>()
   for (const [symbol, thunk] of exportThunks)
@@ -729,6 +764,9 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       }),
     ),
     nativeRuntimeSymbols: Object.freeze([
+      ...(termination.state.trapReport === undefined ? [] : [NativeTermination.trapReportSymbol]),
+      ...(malloc === undefined ? [] : ['malloc']),
+      ...(free === undefined ? [] : ['free']),
       ...[...osRuntimes.values()].map((runtime) => runtime.symbol),
       ...(needsHostWrite ? ['silk_standard_stream_write_v1'] : []),
       ...(coroutineFramePush === undefined ? [] : [CoroutineRuntime.pushSymbol]),

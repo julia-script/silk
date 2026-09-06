@@ -66,6 +66,12 @@ Each page describes the selected source API for the listed profiles. Distinct su
 | [`silk/static_sequence`](./static-sequence.md)                 | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   5 |
 | [`silk/static_text`](./static-text.md)                         | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   4 |
 | [`silk/string`](./string.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   4 |
+| [`silk/support/bcmp`](./bcmp.md)                               | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   0 |
+| [`silk/support/bzero`](./bzero.md)                             | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   0 |
+| [`silk/support/memcmp`](./memcmp.md)                           | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   0 |
+| [`silk/support/memcpy`](./memcpy.md)                           | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   0 |
+| [`silk/support/memmove`](./memmove.md)                         | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   0 |
+| [`silk/support/memset`](./memset.md)                           | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   0 |
 | [`silk/system_clock`](./system-clock.md)                       | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   2 |
 | [`silk/target`](./target.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                  18 |
 | [`silk/u16`](./u16.md)                                         | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                  56 |

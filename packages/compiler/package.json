@@ -178,6 +178,14 @@
       "types": "./dist/HeapObservation.d.ts",
       "import": "./dist/HeapObservation.js"
     },
+    "./HelperCapability": {
+      "types": "./dist/HelperCapability.d.ts",
+      "import": "./dist/HelperCapability.js"
+    },
+    "./HelperSource": {
+      "types": "./dist/HelperSource.d.ts",
+      "import": "./dist/HelperSource.js"
+    },
     "./Hir": {
       "types": "./dist/Hir.d.ts",
       "import": "./dist/Hir.js"
@@ -571,7 +579,8 @@
     "documentation:inventory": "node scripts/inventory-stdlib-documentation.mjs",
     "documentation:policy": "node scripts/check-stdlib-documentation.mjs",
     "test:foreign-contracts": "node conformance/foreign-contracts/run.mjs",
-    "test:native-boundary": "node conformance/native-boundary/run.mjs"
+    "test:native-boundary": "node conformance/native-boundary/run.mjs",
+    "test:llvm-helpers": "node conformance/llvm-helpers/run.mjs"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.112",

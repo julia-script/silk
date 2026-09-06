@@ -1,3 +1,4 @@
+import * as HelperCapability from './HelperCapability.js'
 import * as NativeRequirementBinding from './NativeRequirementBinding.js'
 import * as ArtifactPlan from './ArtifactPlan.js'
 import * as Config from 'effect/Config'
@@ -201,6 +202,7 @@ export interface Compiled {
   readonly artifactPlan?: ArtifactPlan.ArtifactPlan
   readonly nativeBindings?: NativeRequirementBinding.Resolved
   readonly _tag: 'Compiled'
+  readonly helpers?: ReadonlyArray<HelperCapability.Report>
   readonly linkPlan?: NativeLinkPlan.NativeLinkPlan
   readonly linkPlanPath?: string
   readonly backend: Backend.Id
@@ -652,13 +654,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
     ...(request.nativeLinkInputs ?? []),
     ...bound.success.inputs,
   ])
-  // Float remainder lowers to LLVM `frem`, which becomes an fmod/fmodf libcall on
-  // targets whose libm is separate from libc (Linux); macOS folds it into libSystem.
-  const nativeLinkInputs =
-    (cacheKind === 'NativeExecutable' || cacheKind === 'NativeSharedLibrary') &&
-    preparation.profile.libc !== 'none'
-      ? Object.freeze([...requestedNativeInputs, NativeLinkInput.library('m', 'Dynamic')])
-      : requestedNativeInputs
+  const nativeLinkInputs = requestedNativeInputs
   // A missing request input is linker data, not a cache-key storage failure.
   if (cacheKind !== 'WebAssemblyModule' && nativeLinkInputs.length > 0)
     yield* NativeToolchain.requireLinkInputs(
@@ -774,6 +770,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
             nativeBindings: bound.success,
             backend: artifact.backend,
             artifactKind: finalized.kind,
+            ...(finalized.helpers === undefined ? {} : { helpers: [finalized.helpers] }),
             path: finalized.path,
             target: finalized.target,
             symbols: artifact.symbols,
@@ -809,6 +806,24 @@ export const compile = Effect.fn('Driver.compile')(function* (
           { heapBytes },
         )
         const generatedObjects: Array<NativeToolchain.PathArtifact> = [object.artifact]
+        const helpers = object.helpers === undefined ? [] : [object.helpers]
+        const final = cacheKind === 'NativeExecutable' || cacheKind === 'NativeSharedLibrary'
+        if (final && object.helpers !== undefined) {
+          const support = yield* NativeToolchain.compileHelpers(
+            toolchain,
+            scope,
+            preparation.profile,
+            object.helpers,
+          )
+          generatedObjects.push(...support.map((entry) => entry.artifact))
+          helpers.push(
+            ...support.flatMap((entry) => (entry.helpers === undefined ? [] : [entry.helpers])),
+          )
+        }
+        const selectedNativeInputs = final
+          ? [...nativeLinkInputs, ...HelperCapability.linkInputs(helpers)]
+          : nativeLinkInputs
+
         if (program.entry._tag !== 'NoInvocation' || artifact.nativeRuntimeSymbols.length > 0) {
           const runtime = yield* PhaseReport.measureEffectInto(
             report,
@@ -851,6 +866,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
             stage,
             artifactPlan,
             nativeBindings: bound.success,
+            helpers,
             path,
             target,
             symbols: artifact.symbols,
@@ -869,9 +885,10 @@ export const compile = Effect.fn('Driver.compile')(function* (
           cacheKind,
           preparation.profile,
           generatedObjects,
-          nativeLinkInputs,
+          selectedNativeInputs,
           request.destination,
           artifactPlan.composition.loader,
+          helpers,
         )
         const nativeAdmission = NativeToolchain.finalArtifactCacheAdmission(cacheKind, linkPlan)
         const nativeCache =
@@ -921,6 +938,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
         return Object.freeze({
           _tag: 'Compiled',
           linkPlan,
+          helpers,
           linkPlanPath,
           stage,
           artifactPlan,

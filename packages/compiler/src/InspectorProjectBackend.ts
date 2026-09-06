@@ -924,6 +924,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = null pointer`
     case 'PointerIsNull':
       return `${localText(operation.destination)} = is null ${localText(operation.pointer)}`
+    case 'PointerAddress':
+      return `${localText(operation.destination)} = address of ${localText(operation.pointer)}`
     case 'PointerRequalify':
     case 'PointerFromStorage':
       return `${localText(operation.destination)} = pointer from ${localText(operation.source)}`

@@ -1,0 +1,34 @@
+//! Byte-wise compiler support with explicit C linkage and no runtime services.
+
+import silk.pointer { Pointer }
+import silk.i32 as i32
+
+/// Copies `count` bytes and returns the original destination address.
+///
+/// # Gotchas
+///
+/// The caller must provide live readable source bytes and writable destination bytes.
+/// The ranges can overlap; each output byte receives its original source value.
+export "C" fn memmove(destination: ?[*]mut u8, source: ?[*]const u8, count: usize) -> ?[*]mut u8 {
+  if count == 0 { return destination }
+  unsafe {
+    let output = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(destination)
+    let input = Intrinsic.pointerRequalify<?[*]const u8, [*]const u8>(source)
+    if Pointer.addressMany<u8>(destination) > Pointer.addressMany<u8>(source) {
+      let mut index = count
+      while index > 0 {
+        index = index - 1
+      let value = Pointer.read<u8>(Pointer.at<u8>(input, index))
+      Pointer.write<u8>(Pointer.atMut<u8>(output, index), value)
+      }
+      return destination
+    }
+    let mut index: usize = 0
+    while index < count {
+      let value = Pointer.read<u8>(Pointer.at<u8>(input, index))
+      Pointer.write<u8>(Pointer.atMut<u8>(output, index), value)
+      index = index + 1
+    }
+    return destination
+  }
+}

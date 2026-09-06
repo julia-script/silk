@@ -18,6 +18,7 @@ import { linearize } from './MirLinearization.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 
 export interface DeclarationContext {
+  readonly support?: boolean
   readonly builder: Builder.Builder
   readonly program: Mir.Module
   readonly i32: LlvmType.Type
@@ -109,7 +110,8 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
         symbol,
         publicSymbol,
         handle: yield* FunctionActor.declare(context.builder, symbol, signature, {
-          visibility: machineExport === undefined ? 'hidden' : 'default',
+          visibility: !context.support && machineExport === undefined ? 'hidden' : 'default',
+          ...(context.support ? { linkage: 'internal' as const } : {}),
           ...(machineAttributes === undefined ? {} : { attributes: machineAttributes }),
         }),
         resultType,
@@ -129,6 +131,7 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
 })
 
 export interface ExportContext {
+  readonly support?: boolean
   readonly foreignGuard: NativeForeignGuard.NativeForeignGuard | undefined
   readonly builder: Builder.Builder
   readonly program: Mir.Module
@@ -167,7 +170,8 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
       context.cType(record.signature.result) ?? (yield* LlvmType.voidType(context.builder))
     const attributes = yield* NativeCAbi.attributes(context.builder, record.signature)
     const guard = context.foreignGuard
-    if (guard === undefined) throw new RangeError('Export thunk lost its fatal unwind guard')
+    if (guard === undefined && !context.support)
+      throw new RangeError('Export thunk lost its fatal unwind guard')
     const groups =
       attributes === undefined
         ? undefined
@@ -192,7 +196,10 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
         resultType,
         parameters.flatMap((type) => (type === undefined ? [] : [type])),
       ),
-      { attributes: guardedAttributes, personality: guard.personality },
+      {
+        attributes: guardedAttributes,
+        ...(guard === undefined ? {} : { personality: guard.personality }),
+      },
     ).pipe(
       Effect.mapError(
         (cause) =>
@@ -212,6 +219,18 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
         const arguments_: Array<Value.Input> = []
         for (let ordinal = 0; ordinal < parameters.length; ordinal += 1)
           arguments_.push(yield* Value.argument(body, ordinal))
+        if (context.support) {
+          const result = yield* FunctionBody.callDirect(
+            body,
+            implementation.handle,
+            arguments_,
+            'forward',
+          )
+          if (record.signature.result._tag === 'Void') return yield* FunctionBody.returnVoid(body)
+          if (result === undefined) throw new RangeError('LLVM support export lost its result')
+          return yield* FunctionBody.returnValue(body, result)
+        }
+        if (guard === undefined) throw new RangeError('Export thunk lost its fatal unwind guard')
         const normal = yield* LlvmBlock.make(body, 'returned')
         const unwind = yield* LlvmBlock.make(body, 'foreign_unwind')
         const implementationProperties = yield* FunctionActor.properties(

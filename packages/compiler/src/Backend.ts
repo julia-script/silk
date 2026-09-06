@@ -18,6 +18,8 @@ import type * as CAbi from './CAbi.js'
 
 export interface CodegenRequest {
   readonly mode: 'debug' | 'release'
+  /** Restricted, runtime-free object compilation; only C exports remain externally visible. */
+  readonly support?: boolean
   readonly sources?: ReadonlyMap<string, Uint8Array>
   readonly privateExecutionStackPages?: number
 }
@@ -99,6 +101,7 @@ interface ArtifactBase {
 
 export interface LlvmBitcodeArtifact extends ArtifactBase {
   readonly _tag: 'LlvmBitcodeArtifact'
+  readonly support?: boolean
   readonly backend: 'llvm'
   readonly bitcode: Uint8Array
   readonly ir: string

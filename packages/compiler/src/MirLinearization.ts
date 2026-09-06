@@ -177,6 +177,7 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'RawBufferCopy':
     case 'RawBufferFill':
     case 'PointerNull':
+    case 'PointerAddress':
     case 'PointerIsNull':
     case 'PointerRequalify':
     case 'PointerFromStorage':

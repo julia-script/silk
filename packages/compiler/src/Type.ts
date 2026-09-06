@@ -284,6 +284,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'RawBufferFill',
   'PointerNull',
   'PointerIsNull',
+  'PointerAddress',
   'PointerFromRef',
   'PointerFromMutRef',
   'PointerFromSlice',
