@@ -33,5 +33,5 @@
 
 ## 6. Integration verification
 
-- [ ] 6.1 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, then pnpm check; record exact failures and whether they predate this change. Verify all required commands pass before marking implementation complete.
-- [ ] 6.2 Run pnpm release:candidate because compiler/stdlib package contents change; verify the package/export checks and generated artifacts pass and review the final diff against every JUL-120 acceptance item.
+- [x] 6.1 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, then pnpm check; record exact failures and whether they predate this change. Verify all required commands pass before marking implementation complete.
+- [x] 6.2 Run pnpm release:candidate because compiler/stdlib package contents change; verify the package/export checks and generated artifacts pass and review the final diff against every JUL-120 acceptance item.
