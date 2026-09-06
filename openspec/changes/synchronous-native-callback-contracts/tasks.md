@@ -20,5 +20,5 @@
 ## 4. Review and delivery
 
 - [x] 4.1 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, pnpm check and pnpm release:candidate in the required order; record exact outcomes and resolve change-related failures.
-- [ ] 4.2 Obtain independent code review and a separate mandatory test-economics approval on the final committed issue diff; verify findings and record timing deltas.
-- [ ] 4.3 Push the approved issue branch, create and confirm a draft PR targeting main, and update JUL-142 with the exact PR-head review baseline and verification evidence; read back draft and In Review states.
+- [x] 4.2 Obtain independent code review and a separate mandatory test-economics approval on the final committed issue diff; verify findings and record timing deltas.
+- [x] 4.3 Push the approved issue branch, create and confirm a draft PR targeting main, and update JUL-142 with the exact PR-head review baseline and verification evidence; read back draft and In Review states.

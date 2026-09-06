@@ -94,3 +94,7 @@ needed regeneration, new expressions needed complete pipeline/lifetime handling,
 needed valid syntax, canonical contract expectations needed migration, three nested ternaries
 violated lint, and the existing export-thunk assertion expected a plain call instead of guarded
 invoke. No required check remains failed or skipped.
+
+Draft [PR #367](https://github.com/julia-script/silk/pull/367) targets `main`. The independent
+test-economics reviewer approved the committed implementation diff. JUL-142 was updated to
+In Review with the exact PR-head baseline, and both remote states were read back.
