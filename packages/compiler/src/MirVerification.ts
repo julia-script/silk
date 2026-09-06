@@ -1045,6 +1045,8 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         operation.success,
         operation.failure,
       ]
+    case 'ForeignIndirectCall':
+      return [operation.destination, operation.callee, ...operation.arguments]
     case 'OsCall':
     case 'NativeAssembly':
     case 'ForeignCall':
@@ -1965,6 +1967,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'HostWrite':
     case 'OsCall':
     case 'NativeAssembly':
+    case 'ForeignIndirectCall':
     case 'ForeignCall':
     case 'Project':
     case 'ReadPlace':
@@ -2256,6 +2259,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.stream, operation.bytes]
     case 'OsOpen':
       return [...operation.arguments, operation.success, operation.failure]
+    case 'ForeignIndirectCall':
+      return [operation.callee, ...operation.arguments]
     case 'OsCall':
     case 'NativeAssembly':
     case 'ForeignCall':
@@ -3152,13 +3157,22 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         : SilkType.foreignFunction(
             implementation.localTypes.slice(0, implementation.parameterCount).map(semanticType),
             semanticType(implementation.result),
+            record.type.contract,
+            record.type,
           )
     const signatureAdmitted =
-      record.type.parameters.every(
-        (parameter) => CAbi.admit(parameter, 'Parameter')._tag === 'Admitted',
+      record.type.parameters.every((parameter, ordinal) =>
+        SilkType.isReference(parameter)
+          ? record.type.contract.borrow.includes(ordinal)
+          : CAbi.admit(parameter, 'Parameter')._tag === 'Admitted',
       ) && CAbi.admit(record.type.result, 'Result')._tag === 'Admitted'
     const signature = signatureAdmitted
-      ? CAbi.signature(record.type.parameters, record.type.result, self.layout.target)
+      ? CAbi.signature(
+          record.type.parameters,
+          record.type.result,
+          self.layout.target,
+          record.type.contract,
+        )
       : undefined
     if (
       !declarationUnique ||
@@ -4511,16 +4525,21 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               : SilkType.foreignFunction(
                   implementationParameters,
                   semanticType(implementation.result),
+                  record?.type.contract,
+                  record?.type,
                 )
           const signatureAdmitted =
-            operation.type.type.parameters.every(
-              (parameter) => CAbi.admit(parameter, 'Parameter')._tag === 'Admitted',
+            operation.type.type.parameters.every((parameter, ordinal) =>
+              SilkType.isReference(parameter)
+                ? operation.type.type.contract.borrow.includes(ordinal)
+                : CAbi.admit(parameter, 'Parameter')._tag === 'Admitted',
             ) && CAbi.admit(operation.type.type.result, 'Result')._tag === 'Admitted'
           const signature = signatureAdmitted
             ? CAbi.signature(
                 operation.type.type.parameters,
                 operation.type.type.result,
                 self.layout.target,
+                operation.type.type.contract,
               )
             : undefined
           if (
@@ -4529,7 +4548,9 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             (self.layout.target.kind === 'Native' &&
               (implementationType === undefined ||
                 !SilkType.equals(implementationType, record.type))) ||
-            !SilkType.equals(operation.type.type, record.type) ||
+            !TypeCompatibility.isCompatible(
+              TypeCompatibility.check(operation.type.type, record.type),
+            ) ||
             signature === undefined ||
             CAbi.signatureKey(record.signature) !== CAbi.signatureKey(signature) ||
             destination?._tag !== 'ForeignFunction' ||
@@ -4546,7 +4567,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             )
           }
         }
-        if (operation._tag === 'ForeignCall') {
+        if (operation._tag === 'ForeignCall' || operation._tag === 'ForeignIndirectCall') {
           const target = self.layout.target
           const classKey = (
             type: Type | undefined,
@@ -4587,7 +4608,23 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               }
               return classKey(actual, 'Parameter') === CAbi.typeText(parameter)
             })
+          const callee =
+            operation._tag === 'ForeignIndirectCall'
+              ? fn.localTypes.at(operation.callee.ordinal)
+              : undefined
+          const calleeValid =
+            operation._tag !== 'ForeignIndirectCall' ||
+            (callee?._tag === 'ForeignFunction' &&
+              CAbi.signatureKey(
+                CAbi.signature(
+                  callee.type.parameters,
+                  callee.type.result,
+                  target,
+                  callee.type.contract,
+                ),
+              ) === CAbi.signatureKey(operation.signature))
           if (
+            !calleeValid ||
             !CAbi.isCanonicalSignature(operation.signature, target) ||
             !argumentsValid ||
             classKey(fn.localTypes.at(operation.destination.ordinal), 'Result') !== resultKey ||
@@ -4599,7 +4636,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 rule: 'InvalidForeignCall',
                 function: fn.id,
                 region: region.id,
-                detail: `Foreign call ${operation.symbol} does not match its classified C signature ${CAbi.signatureKey(operation.signature)}`,
+                detail: `Foreign call ${operation._tag === 'ForeignCall' ? operation.symbol : 'indirect'} does not match its classified C signature ${CAbi.signatureKey(operation.signature)}`,
               }),
             )
           }

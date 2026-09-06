@@ -1,3 +1,4 @@
+import { parseFunctionPropertyList } from './Declaration.js'
 import * as Diagnostic from '../Diagnostic.js'
 import type { ElementsResult, NodeResult, State } from '../internal/ParseState.js'
 import {
@@ -342,21 +343,22 @@ export const parseTypePrimary = (
       'MutKeyword',
       'OnceKeyword',
       'UnsafeKeyword',
+      'ExternKeyword',
       ...following,
     ])
     const binders = syntaxNode(parameters.state, 'LifetimeBinderList', parameters.node.children)
     const callable = parseTypePrimary(parameters.state, following, preserveFieldStart)
     const state =
-      callable.node.kind === 'CallableType'
+      callable.node.kind === 'CallableType' || callable.node.kind === 'ForeignFunctionType'
         ? callable.state
         : addDiagnostic(callable.state, Diagnostic.missingToken('FnKeyword', callable.node.span))
     return Object.freeze({
       state,
-      node: syntaxNode(state, 'CallableType', [
-        ...keyword.elements,
-        binders,
-        ...callable.node.children,
-      ]),
+      node: syntaxNode(
+        state,
+        callable.node.kind === 'ForeignFunctionType' ? 'ForeignFunctionType' : 'CallableType',
+        [...keyword.elements, binders, ...callable.node.children],
+      ),
     })
   }
   if (isRowWithoutStart(initial)) {
@@ -434,9 +436,10 @@ export const parseTypePrimary = (
     const right = expect(state, 'RightParenthesis', ['Arrow', ...following])
     const arrow = expect(right.state, 'Arrow', [...typeStarts, ...following])
     const result = parseType(arrow.state, following)
+    const properties = parseFunctionPropertyList(result.state)
     return Object.freeze({
-      state: result.state,
-      node: syntaxNode(result.state, 'ForeignFunctionType', [
+      state: properties.state,
+      node: syntaxNode(properties.state, 'ForeignFunctionType', [
         ...externKeyword.elements,
         ...abi.elements,
         ...fn.elements,
@@ -445,6 +448,7 @@ export const parseTypePrimary = (
         ...right.elements,
         ...arrow.elements,
         result.node,
+        ...properties.elements,
       ]),
     })
   }

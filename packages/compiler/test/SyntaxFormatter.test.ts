@@ -1384,18 +1384,22 @@ pub fn main() -> i32 { return unsafe unchecked(helper(-1, 2) |> Core.finish()) }
 
 it.effect('formats pointer types canonically and idempotently', () =>
   Effect.gen(function* () {
-    const source = 'fn raw(cursor:* mut   u8,nested:*mut *const u8)->*const u8{return cursor}'
-    const first = yield* SyntaxFormatter.format(parse('memory://pointer-types.silk', source))
+    const source = `fn raw(cursor:* mut   u8,nested:*mut *const u8)->*const u8{return cursor}
+fn call(f:for<'a> extern "C" fn(&'a i32)->i32 with Intrinsic.foreign(borrow:("0",)))->(){}`
+    const original = parse('memory://pointer-types.silk', source)
+    const first = yield* SyntaxFormatter.format(original)
     const text = formattedText(first)
 
-    assert.strictEqual(
+    assert.include(
       text,
       `fn raw(cursor: *mut u8, nested: *mut *const u8) -> *const u8 {
   return cursor
 }
 `,
     )
-    const second = yield* SyntaxFormatter.format(parse('memory://pointer-types.silk', text))
+    const reparsed = parse('memory://pointer-types.silk', text)
+    assert.deepEqual(normalized(reparsed, reparsed.root), normalized(original, original.root))
+    const second = yield* SyntaxFormatter.format(reparsed)
     assert.deepEqual(second.bytes, first.bytes)
   }),
 )

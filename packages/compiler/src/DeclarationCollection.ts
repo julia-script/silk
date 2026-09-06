@@ -589,6 +589,10 @@ export const analyzeDeclaredType = (
     })
   }
   if (syntax.kind === 'ForeignFunctionType') {
+    const lifetimes = lifetimeContext?.callables.get(syntax) ?? {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    }
     const token = SyntaxTree.directToken(syntax, 'FnKeyword')
     const abiToken = SyntaxTree.directToken(syntax, 'TextLiteral')
     const typeNodes = syntax.children.filter(isDeclaredTypeNode)
@@ -604,9 +608,25 @@ export const analyzeDeclaredType = (
     )
     const result = analyzed.at(-1)
     const parameters = analyzed.slice(0, -1)
+    const clauses = DeclarationProperty.clauses(syntax)
+    const behavior = ForeignContract.analyze(
+      source,
+      clauses[0],
+      parameters.map((entry, ordinal) => ({
+        name: String(ordinal),
+        type: entry.fact._tag === 'Resolved' ? entry.fact.type : undefined,
+        span: entry.fact.syntax.span,
+      })),
+      result?.fact._tag === 'Resolved' ? result.fact.type : undefined,
+    )
     const diagnostics: Array<Diagnostic.Diagnostic> = analyzed.flatMap((entry) =>
       Array.from(entry.diagnostics),
     )
+    diagnostics.push(...behavior.diagnostics)
+    for (const clause of clauses.slice(1))
+      diagnostics.push(
+        Diagnostic.foreignDeclarationRestriction('duplicate foreign contract', clause.span),
+      )
     if (abiToken !== undefined) {
       const abi = decodedText(source, abiToken)
       if (abi !== 'C') diagnostics.push(Diagnostic.unsupportedForeignAbi(abi ?? '', abiToken.span))
@@ -619,6 +639,8 @@ export const analyzeDeclaredType = (
       const type = Type.foreignFunction(
         parameters.flatMap((entry) => (entry.fact._tag === 'Resolved' ? [entry.fact.type] : [])),
         result.fact.type,
+        behavior.contract,
+        lifetimes,
       )
       return Object.freeze({
         fact: Object.freeze({
@@ -640,6 +662,8 @@ export const analyzeDeclaredType = (
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'ForeignFunction',
+        lifetimes,
+        contract: behavior.contract,
         parameters: Object.freeze(parameters.map((entry) => entry.fact)),
         result: resultFact,
         spelling: 'extern "C" fn(...)',
@@ -2990,7 +3014,7 @@ const sharedForeignRestrictions: ReadonlyArray<
   ['WhereClause', 'where clause'],
 ]
 
-/** A foreign header has no body; an exported one keeps its body but may not be `unsafe`. */
+/** A foreign header has no body; exports permit unsafe only for explicit boundary promises. */
 const foreignRestrictions: Record<'Foreign' | 'Export', typeof sharedForeignRestrictions> = {
   Foreign: [...sharedForeignRestrictions, ['Block', 'body']],
   Export: [...sharedForeignRestrictions, ['UnsafeKeyword', 'unsafe']],
@@ -3029,8 +3053,19 @@ const collectForeign = (
       restriction !== undefined &&
       !(
         direction === 'Export' &&
+        SyntaxTree.isNode(child) &&
+        child.kind === 'TypeParameterList' &&
+        child.children
+          .filter(SyntaxTree.isNode)
+          .every((parameter) => parameter.kind === 'LifetimeParameter')
+      ) &&
+      !(
+        direction === 'Export' &&
         kind === 'UnsafeKeyword' &&
-        MachineFunction.analyze(source, node).properties !== undefined
+        (MachineFunction.analyze(source, node).properties !== undefined ||
+          DeclarationProperty.clauses(node).some(
+            (clause) => DeclarationProperty.owner(source, clause) === 'Intrinsic.foreign',
+          ))
       )
     )
       diagnostics.push(Diagnostic.foreignDeclarationRestriction(restriction, child.span))
@@ -3052,21 +3087,32 @@ const collectForeign = (
     diagnostics.push(Diagnostic.invalidForeignSymbol(symbol, symbolSpan))
   else if (ForeignSymbol.isReserved(symbol))
     diagnostics.push(Diagnostic.reservedForeignSymbol(symbol, symbolSpan))
-  const behavior =
-    direction === 'Foreign'
-      ? ForeignContract.analyze(
-          source,
-          DeclarationProperty.clauses(node).find(
-            (clause) => DeclarationProperty.owner(source, clause) !== 'Intrinsic.native',
-          ),
-          parameters.map((parameter) => ({
-            name: parameter.name._tag === 'Present' ? parameter.name.spelling : '',
-            type: undefined,
-            span: parameter.syntax.span,
-          })),
-          undefined,
-        )
-      : { contract: ForeignContract.conservative, diagnostics: [] }
+  const behavior = ForeignContract.analyze(
+    source,
+    DeclarationProperty.clauses(node).find(
+      (clause) =>
+        !['Intrinsic.native', 'Intrinsic.machine'].includes(
+          DeclarationProperty.owner(source, clause),
+        ),
+    ),
+    parameters.map((parameter) => ({
+      name: parameter.name._tag === 'Present' ? parameter.name.spelling : '',
+      type: undefined,
+      span: parameter.syntax.span,
+    })),
+    undefined,
+  )
+  if (
+    direction === 'Export' &&
+    ForeignContract.key(behavior.contract) !== ForeignContract.key(ForeignContract.conservative) &&
+    SyntaxTree.directToken(node, 'UnsafeKeyword') === undefined
+  )
+    diagnostics.push(
+      Diagnostic.foreignDeclarationRestriction(
+        'stronger exported foreign contracts require unsafe export',
+        node.span,
+      ),
+    )
   diagnostics.push(...behavior.diagnostics)
   return Object.freeze({
     fact: Object.freeze({ abi: 'C' as const, symbol, contract: behavior.contract }),
@@ -3932,6 +3978,7 @@ const collectModule = (
     for (const property of properties)
       if (
         foreign === undefined &&
+        foreignExport === undefined &&
         DeclarationProperty.owner(source, property) !== 'Intrinsic.machine'
       )
         diagnostics.push(

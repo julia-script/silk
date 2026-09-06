@@ -1,4 +1,6 @@
 import * as Attribute from '@silklang/llvm/Attribute'
+import * as NativeForeignGuard from './NativeForeignGuard.js'
+import * as Constant from '@silklang/llvm/Constant'
 import * as NativeCAbi from './NativeCAbi.js'
 import * as LlvmBlock from '@silklang/llvm/Block'
 import type * as Builder from '@silklang/llvm/Builder'
@@ -127,6 +129,7 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
 })
 
 export interface ExportContext {
+  readonly foreignGuard: NativeForeignGuard.NativeForeignGuard | undefined
   readonly builder: Builder.Builder
   readonly program: Mir.Module
   readonly declared: ReadonlyArray<NativeLoweringContext.DeclaredFunction>
@@ -163,6 +166,24 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
     const resultType =
       context.cType(record.signature.result) ?? (yield* LlvmType.voidType(context.builder))
     const attributes = yield* NativeCAbi.attributes(context.builder, record.signature)
+    const guard = context.foreignGuard
+    if (guard === undefined) throw new RangeError('Export thunk lost its fatal unwind guard')
+    const groups =
+      attributes === undefined
+        ? undefined
+        : yield* Attribute.functionSetEntries(context.builder, attributes)
+    const functions =
+      groups === undefined
+        ? []
+        : yield* Attribute.entries(context.builder, groups.functionAttributes)
+    const guardedAttributes = yield* Attribute.functionSet(context.builder, {
+      ...groups,
+      functionAttributes: yield* Attribute.set(context.builder, [
+        ...functions,
+        yield* Attribute.flag(context.builder, 'noinline'),
+        yield* Attribute.flag(context.builder, 'nounwind'),
+      ]),
+    })
     const thunk = yield* FunctionActor.declare(
       context.builder,
       record.symbol,
@@ -171,7 +192,7 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
         resultType,
         parameters.flatMap((type) => (type === undefined ? [] : [type])),
       ),
-      attributes === undefined ? {} : { attributes },
+      { attributes: guardedAttributes, personality: guard.personality },
     ).pipe(
       Effect.mapError(
         (cause) =>
@@ -191,12 +212,30 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
         const arguments_: Array<Value.Input> = []
         for (let ordinal = 0; ordinal < parameters.length; ordinal += 1)
           arguments_.push(yield* Value.argument(body, ordinal))
-        const result = yield* FunctionBody.callDirect(
-          body,
+        const normal = yield* LlvmBlock.make(body, 'returned')
+        const unwind = yield* LlvmBlock.make(body, 'foreign_unwind')
+        const implementationProperties = yield* FunctionActor.properties(
+          context.builder,
           implementation.handle,
+        )
+        const callee = yield* Constant.fromGlobal(
+          context.builder,
+          yield* FunctionActor.global(context.builder, implementation.handle),
+        )
+        const result = yield* FunctionBody.invoke(
+          body,
+          implementationProperties.type,
+          callee,
           arguments_,
+          normal,
+          unwind,
           'forward',
         )
+        yield* LlvmBlock.setInsertionPoint(body, unwind)
+        yield* FunctionBody.cleanupLandingPad(body, 'exception')
+        yield* FunctionBody.callDirect(body, guard.trap, [])
+        yield* FunctionBody.unreachable(body)
+        yield* LlvmBlock.setInsertionPoint(body, normal)
         if (record.signature.result._tag === 'Void') return yield* FunctionBody.returnVoid(body)
         if (result === undefined) throw new RangeError('LLVM export thunk lost its result')
         return yield* FunctionBody.returnValue(body, result)

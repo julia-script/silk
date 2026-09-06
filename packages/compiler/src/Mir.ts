@@ -561,6 +561,16 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Invokes a runtime native C address under its exact classified signature. */
+      readonly _tag: 'ForeignIndirectCall'
+      readonly destination: LocalId
+      readonly callee: LocalId
+      readonly signature: CAbi.CAbiSignature
+      readonly arguments: ReadonlyArray<LocalId>
+      readonly type: Type
+      readonly provenance: Provenance
+    }
+  | {
       /** Calls one foreign (`extern "C"`) symbol directly under its classified C signature. */
       readonly _tag: 'ForeignCall'
       readonly destination: LocalId

@@ -8370,6 +8370,7 @@ export const effectCaptureFacts = (
       case 'CallableSection':
         for (const capture of fact.captures) expression(capture.expression)
         return
+      case 'ForeignApply':
       case 'CallableApply':
         expression(fact.callee)
         for (const argument of fact.arguments) expression(argument.expression)
@@ -8908,6 +8909,7 @@ export function analyzeExpression(
       // The resolved contract is the one the call was checked against: a bound-typed callee
       // (`F: unsafe fn(i32) -> i32`) keeps its bound's qualifier even when a specialization later
       // selects a safe implementation.
+      if (fact._tag === 'ForeignApply') return true
       if (fact._tag === 'CallableApply') return fact.contract?.unsafe === true
       if (fact._tag !== 'Call') return false
       switch (fact.reference._tag) {

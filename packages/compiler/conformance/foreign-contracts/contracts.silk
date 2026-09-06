@@ -35,3 +35,28 @@ export "C" fn silk_throw() -> () { unsafe { foreignThrow() } }
 
 unsafe extern "C" fn stop() -> () as "fixture_stop" with Intrinsic.foreign(noReturn: true)
 export "C" fn silk_stop() -> i32 { unsafe { stop() } return 99 }
+
+// C supplies these addresses at runtime; no source function specialization can stand in for them.
+unsafe export "C" fn silk_indirect(
+  callback: extern "C" fn(i8, u16, i64, f32, f64, *mut i32) -> i64,
+  value: *mut i32
+) -> i64 with Intrinsic.foreign(callbacks: ("callback",)) {
+  unsafe { return callback(-7, 65000, 1234567890123, 1.25, 2.5, value) }
+}
+
+unsafe export "C" fn silk_indirect_throw(callback: extern "C" fn() -> ()) -> ()
+  with Intrinsic.foreign(callbacks: ("callback",)) {
+  unsafe { callback() }
+}
+
+unsafe extern "C" fn markComparison() -> () as "fixture_mark_comparison"
+export "C" fn silk_compare(left: *const i32, right: *const i32) -> i32 {
+  unsafe {
+    markComparison()
+    let a = Pointer.read(left)
+    let b = Pointer.read(right)
+    if a < b { return -1 }
+    if a > b { return 1 }
+    return 0
+  }
+}

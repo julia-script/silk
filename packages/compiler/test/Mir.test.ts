@@ -569,7 +569,7 @@ pub fn main() -> i32 { return unsafe abs(-42) }`),
           symbol: 'abs',
           abi: 'C',
           signature:
-            '(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+            '(i32)->i32!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
           arguments: ['i32'],
           destination: 'i32',
         },
@@ -579,11 +579,11 @@ pub fn main() -> i32 { return unsafe abs(-42) }`),
     const encoded = MirEncoding.encode(program)
     assert.include(
       encoded,
-      'foreign abs abi=C signature=(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden declaration=mir/foreign-call.abs',
+      'foreign abs abi=C signature=(i32)->i32!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden declaration=mir/foreign-call.abs',
     )
     assert.include(
       encoded,
-      '= foreign-call abs abi=C signature=(i32)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden(',
+      '= foreign-call abs abi=C signature=(i32)->i32!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden(',
     )
     assert.strictEqual(MirEncoding.encode(program), encoded)
   }),
@@ -669,7 +669,7 @@ pub fn main() -> i32 {
 
 it.effect('rejects every Silk callable without one exact exported C address', () =>
   Effect.gen(function* () {
-    const source = `unsafe extern "C" fn install(callback: extern "C" fn(i32) -> i32) -> ()
+    const source = `unsafe extern "C" fn install(callback: extern "C" fn(i32) -> i32) -> () with Intrinsic.foreign(callbacks: ("callback",))
 fn private(value: i32) -> i32 { return value }
 effect fn effectful(value: i32) -> i32 { return value }
 fn generic<T>(value: T) -> T { return move value }

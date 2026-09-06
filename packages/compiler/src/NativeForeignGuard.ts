@@ -126,3 +126,68 @@ export const wrap = Effect.fn('NativeForeignGuard.wrap')(function* (
   )
   return guard
 })
+
+/** Retains a fatal unwind frame around a runtime C address without specializing that address. */
+export const indirect = Effect.fn('NativeForeignGuard.indirect')(function* (
+  self: NativeForeignGuard,
+  builder: Builder.Builder,
+  calleeType: Type.Type,
+  resultType: Type.Type,
+  parameters: ReadonlyArray<Type.Type>,
+  attributes: Attribute.FunctionSet | undefined,
+  ordinal: number,
+): Effect.fn.Return<FunctionActor.Function, LlvmError> {
+  const groups =
+    attributes === undefined ? undefined : yield* Attribute.functionSetEntries(builder, attributes)
+  const functions =
+    groups === undefined ? [] : yield* Attribute.entries(builder, groups.functionAttributes)
+  const guardAttributes = yield* Attribute.functionSet(builder, {
+    ...groups,
+    functionAttributes: yield* Attribute.set(builder, [
+      ...functions,
+      yield* Attribute.flag(builder, 'noinline'),
+      yield* Attribute.flag(builder, 'nounwind'),
+    ]),
+    parameterAttributes: [
+      ...(groups?.parameterAttributes ?? []),
+      yield* Attribute.set(builder, []),
+    ],
+  })
+  const guard = yield* FunctionActor.declare(
+    builder,
+    `__silk_foreign_indirect_guard.${ordinal}`,
+    yield* Type.functionType(builder, resultType, [...parameters, yield* Type.pointer(builder)]),
+    { linkage: 'internal', personality: self.personality, attributes: guardAttributes },
+  )
+  yield* FunctionActor.buildBody(
+    builder,
+    guard,
+    Effect.fnUntraced(function* (body) {
+      yield* Block.make(body, 'entry')
+      const normal = yield* Block.make(body, 'returned')
+      const unwind = yield* Block.make(body, 'foreign_unwind')
+      const arguments_: Array<Value.Input> = []
+      for (let index = 0; index < parameters.length; index++)
+        arguments_.push(yield* Value.argument(body, index))
+      const callee = yield* Value.argument(body, parameters.length)
+      const result = yield* FunctionBody.invoke(
+        body,
+        calleeType,
+        callee,
+        arguments_,
+        normal,
+        unwind,
+        'result',
+        attributes === undefined ? {} : { attributes },
+      )
+      yield* Block.setInsertionPoint(body, normal)
+      if (result === undefined) yield* FunctionBody.returnVoid(body)
+      else yield* FunctionBody.returnValue(body, result)
+      yield* Block.setInsertionPoint(body, unwind)
+      yield* FunctionBody.cleanupLandingPad(body, 'exception')
+      yield* FunctionBody.callDirect(body, self.trap, [])
+      yield* FunctionBody.unreachable(body)
+    }),
+  )
+  return guard
+})

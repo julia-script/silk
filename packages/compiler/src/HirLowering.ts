@@ -1358,6 +1358,21 @@ export const hirExpression = (
       span: fact.syntax.span,
     })
   }
+  if (fact._tag === 'ForeignApply') {
+    if (fact.type._tag !== 'Available') return { _tag: 'Unavailable', span: fact.syntax.span }
+    return {
+      _tag: 'ForeignApply',
+      evaluation: fact.evaluation,
+      callee: hirExpression(fact.callee, undefined, options),
+      arguments: fact.arguments.map((argument, ordinal) =>
+        hirExpression(argument.expression, argumentBorrowId(argument, ordinal), options),
+      ),
+      contract: fact.contract,
+      loanEnds: loanEndsOf(fact.arguments, () => true),
+      type: fact.type.type,
+      span: fact.syntax.span,
+    }
+  }
   if (fact._tag === 'CallableApply') {
     if (fact.type._tag !== 'Available')
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
@@ -2096,6 +2111,7 @@ export const directExpressionChildren = (
       return Object.freeze([expression.protected, expression.handler])
     case 'CallableSection':
       return Object.freeze(expression.captures.map((capture) => capture.expression))
+    case 'ForeignApply':
     case 'CallableApply':
       return Object.freeze([
         expression.callee,

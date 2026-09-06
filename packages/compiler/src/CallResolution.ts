@@ -1,5 +1,6 @@
 import * as BodyLifetime from './BodyLifetime.js'
 import * as Lifetime from './Lifetime.js'
+import * as ForeignContract from './ForeignContract.js'
 import * as CallableContract from './CallableContract.js'
 import * as ConformanceGoal from './ConformanceGoal.js'
 import * as ConformanceProof from './ConformanceProof.js'
@@ -53,6 +54,7 @@ import {
   effectCaptureAccess,
   effectExpressionAccess,
   representationOfExpression,
+  resolveValueName,
   sectionIntrinsicReference,
   strongestEffectAccess,
   unavailableExpression,
@@ -198,6 +200,16 @@ export function analyzeArguments(
           call,
           resolution,
         ).parameters
+    }
+  }
+  if (first !== undefined && second === undefined) {
+    const callee = resolveValueName(scope, spelling(source, first), first)
+    if (callee.type._tag === 'Available' && Type.isForeignFunction(callee.type.type)) {
+      target = undefined
+      const selected = selectedCallLifetimes(call, callee.type.type.lifetimeBinders, resolution)
+      boundParameters = callee.type.type.parameters.map((parameter) =>
+        Type.substitute(parameter, selected.substitution),
+      )
     }
   }
   const declaredTypeParameters =
@@ -2155,18 +2167,30 @@ export const analyzeFunctionItem = (
       detail = 'only a named exported Silk function has a stable native address'
     } else if (declaration.foreignExport === undefined) {
       detail = 'the function must be declared with export "C"'
-    } else if (declaration.typeParameters.length > 0) {
+    } else if (declaration.machine !== undefined) {
+      detail = 'naked machine functions cannot establish the guarded C callback entry'
+    } else if (declaration.typeParameters.some((parameter) => parameter.type.kind !== 'Lifetime')) {
       detail = 'generic functions do not have one monomorphic C address'
     } else if (declaration.functionKind !== 'Ordinary') {
       detail = 'effect functions cannot cross the synchronous C callback boundary'
     } else if (
+      ForeignContract.key(declaration.foreignExport.contract) !==
+      ForeignContract.key(expected.contract)
+    ) {
+      detail = 'the exported behavioral contract must exactly match the native pointer type'
+    } else if (
       unresolvedCallable === undefined ||
-      unresolvedCallable.parameters.length !== expected.parameters.length ||
-      !unresolvedCallable.parameters.every((parameter, ordinal) => {
-        const expectedParameter = expected.parameters.at(ordinal)
-        return expectedParameter !== undefined && Type.equals(parameter, expectedParameter)
-      }) ||
-      !Type.equals(unresolvedCallable.result, expected.result)
+      declaration === undefined ||
+      !typesCompatible(
+        Type.foreignFunction(
+          unresolvedCallable.parameters,
+          unresolvedCallable.result,
+          declaration.foreignExport.contract,
+          DeclarationFacts.executableLifetimes(declaration),
+        ),
+        expected,
+        resolution.lifetimeCompatibility,
+      )
     ) {
       detail = `the exported signature must exactly match ${Type.encode(expected)}`
     }
@@ -2992,6 +3016,84 @@ export const finishCallableApplication = (
   resolution?: ResolutionContext,
   caller?: DeclarationFact,
 ): ExpressionResult => {
+  if (callee.type !== undefined && Type.isForeignFunction(callee.type)) {
+    const contract = callee.type
+    const selected = selectedCallLifetimes(node, contract.lifetimeBinders, resolution)
+    const inferred = new Map(selected.substitution)
+    const diagnostics = [
+      ...callee.diagnostics,
+      ...argumentsResult.diagnostics,
+      ...callTypeArguments.diagnostics,
+    ]
+    const unsafe = unsafeCallDiagnostic(true, Type.encode(contract), node, resolution)
+    if (unsafe !== undefined) diagnostics.push(unsafe)
+    if (callTypeArguments.explicit)
+      diagnostics.push(
+        Diagnostic.typeArgumentArity(
+          'native function pointer',
+          0,
+          callTypeArguments.facts.length,
+          node.span,
+        ),
+      )
+    if (contract.parameters.length !== argumentsResult.facts.length)
+      diagnostics.push(
+        Diagnostic.wrongCallArity(
+          { _tag: 'BuiltinTarget', actor: 'Foreign', operation: 'Apply' },
+          contract.parameters.length,
+          argumentsResult.facts.length,
+          node.span,
+        ),
+      )
+    for (const [ordinal, argument] of argumentsResult.facts.entries()) {
+      const expected = contract.parameters.at(ordinal)
+      if (
+        expected !== undefined &&
+        argument.type._tag === 'Available' &&
+        (!TypeInference.infer(expected, argument.type.type, inferred, selected.inference) ||
+          !typesCompatible(
+            argument.type.type,
+            Type.substitute(expected, inferred),
+            selected.compatibility,
+          ))
+      )
+        diagnostics.push(
+          Diagnostic.argumentTypeMismatch(
+            Type.encode(expected),
+            Type.encode(argument.type.type),
+            argument.syntax.span,
+          ),
+        )
+    }
+    diagnostics.push(
+      ...selectedLifetimeBoundDiagnostics(
+        contract.lifetimeBounds ?? [],
+        inferred,
+        selected.compatibility,
+        node.span,
+        contract.typeOutlives ?? [],
+      ),
+    )
+    const valid =
+      diagnostics.length === 0 &&
+      argumentsResult.facts.every((argument) => argument.type._tag === 'Available')
+    return {
+      fact: {
+        _tag: 'ForeignApply',
+        evaluation:
+          provenance?._tag === 'PipelineCallableApplication'
+            ? 'LeftThenCallable'
+            : 'CalleeThenArguments',
+        callee: callee.fact,
+        arguments: argumentsResult.facts,
+        contract,
+        type: valid ? availableExpressionType(contract.result) : unavailableExpressionType,
+        syntax: node,
+      },
+      diagnostics,
+      type: valid ? contract.result : undefined,
+    }
+  }
   let callable: Type.Callable | undefined
   if (callee.type !== undefined && Type.isCallable(callee.type)) {
     callable = callee.type

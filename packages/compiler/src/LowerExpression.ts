@@ -18,6 +18,7 @@ import {
   specializedCleanup,
   transitionAt,
 } from './CleanupEmission.js'
+import * as CAbi from './CAbi.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
@@ -391,6 +392,36 @@ export function lowerExpressionInner(
       return lowerFunctionItemExpression(fn, expression)
     case 'CallableSection':
       return lowerCallableSectionExpression(fn, expression, availableRequirements)
+    case 'ForeignApply': {
+      const arguments_: Array<Mir.LocalId> = []
+      let callee: Mir.LocalId | undefined
+      for (const child of Hir.expressionChildren(expression)) {
+        const value = lowerExpression(fn, child, availableRequirements)
+        if (value === 'Transferred' || value === undefined) return value
+        if (child === expression.callee) callee = value.result
+        else arguments_.push(value.result)
+      }
+      const type = fn.type(expression.type)
+      if (type === undefined || callee === undefined) return undefined
+      const destination = fn.alloc(type)
+      const contract = expression.contract
+      fn.emit({
+        _tag: 'ForeignIndirectCall',
+        destination,
+        callee,
+        arguments: arguments_,
+        signature: CAbi.signature(
+          contract.parameters.map((parameter) => fn.semantic(parameter)),
+          fn.semantic(contract.result),
+          fn.layout.target,
+          contract.contract,
+        ),
+        type,
+        provenance: authored(expression.span),
+      })
+      endLoans(fn, expression.loanEnds, expression.span)
+      return { result: destination }
+    }
     case 'CallableApply':
       return lowerCallableApplyExpression(fn, expression, availableRequirements)
     case 'EffectConstruct':

@@ -347,8 +347,38 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         return pointer
     }
   }
+  const indirectCalls = program.functions.flatMap((fn) =>
+    MirVerification.operations(fn).filter((operation) => operation._tag === 'ForeignIndirectCall'),
+  )
+  const foreignIndirects = new Map<string, NativeForeignOperation.Declaration>()
   const foreignGuard =
-    program.foreignCalls.length === 0 ? undefined : yield* NativeForeignGuard.make(builder)
+    program.foreignCalls.length === 0 &&
+    program.foreignExports.length === 0 &&
+    indirectCalls.length === 0
+      ? undefined
+      : yield* NativeForeignGuard.make(builder)
+  for (const operation of indirectCalls) {
+    const key = CAbi.signatureKey(operation.signature)
+    if (foreignIndirects.has(key)) continue
+    if (foreignGuard === undefined) throw new RangeError('LLVM foreign guard was not initialized')
+    const parameters = operation.signature.parameters.map(cType)
+    if (parameters.some((type) => type === undefined))
+      throw new RangeError('Native indirect signature has a void parameter')
+    const admitted = parameters.flatMap((type) => (type === undefined ? [] : [type]))
+    const result = cType(operation.signature.result) ?? (yield* LlvmType.voidType(builder))
+    const calleeType = yield* LlvmType.functionType(builder, result, admitted)
+    const attributes = yield* NativeCAbi.attributes(builder, operation.signature)
+    const handle = yield* NativeForeignGuard.indirect(
+      foreignGuard,
+      builder,
+      calleeType,
+      result,
+      admitted,
+      attributes,
+      foreignIndirects.size,
+    )
+    foreignIndirects.set(key, { handle, signature: operation.signature })
+  }
   for (const call of program.foreignCalls) {
     if (foreignFunctions.has(call.symbol)) continue
     const parameters = call.signature.parameters.map(cType)
@@ -465,7 +495,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     voidType,
   )
   const exportThunks = yield* NativeDeclare.exportThunks(
-    Object.freeze({ builder, program, declared, cType }),
+    Object.freeze({ builder, program, declared, cType, foreignGuard }),
   )
   const foreignCallbacks = new Map<string, Constant.Constant>()
   for (const [symbol, thunk] of exportThunks)
@@ -604,6 +634,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       foreignFunctions,
       foreignStatics,
       foreignCallbacks,
+      foreignIndirects,
       declared,
       originThunks,
       resumeThunks,

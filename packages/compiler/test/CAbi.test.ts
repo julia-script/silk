@@ -1,4 +1,5 @@
 import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as MirVerification from '../src/MirVerification.js'
 import { unreachable } from './support/raise.js'
 import * as Effect from 'effect/Effect'
@@ -16,6 +17,7 @@ import * as ForeignSymbol from '../src/ForeignSymbol.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
+import * as ModuleSurface from '../src/ModuleSurface.js'
 
 const admitted: ReadonlyArray<readonly [Type.Builtin, string]> = [
   ['i8', 'i8'],
@@ -146,15 +148,15 @@ it('produces a stable canonical signature key', () => {
   const native = CAbi.signature(['i32', 'usize'], 'f64', Target.aarch64AppleDarwin)
   assert.strictEqual(
     CAbi.signatureKey(native),
-    '(i32,u64)->f64!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+    '(i32,u64)->f64!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
   )
   assert.strictEqual(
     CAbi.signatureKey(CAbi.signature(['i32', 'usize'], 'f64', Target.wasm32UnknownUnknown)),
-    '(i32,u32)->f64!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+    '(i32,u32)->f64!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
   )
   assert.strictEqual(
     CAbi.signatureKey(CAbi.signature([], Type.unit, Target.x8664UnknownLinuxGnu)),
-    '()->void!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+    '()->void!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
   )
   assert.strictEqual(
     CAbi.signatureKey(CAbi.signature(['i32', 'u64'], 'f64', Target.x8664UnknownLinuxGnu)),
@@ -281,11 +283,11 @@ it('keys pointer mutability so `*const u8` and `*mut u8` name different signatur
   )
   assert.strictEqual(
     constKey,
-    '(pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>,u64)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+    '(pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>,u64)->i32!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
   )
   assert.strictEqual(
     mutKey,
-    '(pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>,u64)->i32!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+    '(pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>,u64)->i32!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
   )
   assert.notStrictEqual(constKey, mutKey)
   assert.strictEqual(
@@ -303,7 +305,7 @@ it('keys pointer mutability so `*const u8` and `*mut u8` name different signatur
         Target.x8664UnknownLinuxGnu,
       ),
     ),
-    '(u64)->pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+    '(u64)->pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>!readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
   )
   // Physical pointer lanes agree, while source pointee identities remain distinct contracts.
   assert.notStrictEqual(
@@ -367,11 +369,16 @@ it('admits recursively C-compatible function pointers and keys their full signat
   assert.strictEqual(CAbi.admit(compare, 'Parameter')._tag, 'Admitted')
   assert.strictEqual(
     CAbi.typeText(CAbi.classify(compare, Target.aarch64AppleDarwin, 'Parameter')),
-    'extern "C" fn(pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>,pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>)->i32',
+    'extern "C" fn(pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>,pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>)->i32!nonnull:readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
   )
   assert.strictEqual(
-    CAbi.signatureKey(CAbi.signature([compare, 'usize'], Type.unit, Target.aarch64AppleDarwin)),
-    '(extern "C" fn(pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>,pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>)->i32,u64)->void!readwrite/external/capture:/borrow:/returned:-/noreturn:false/unwind:forbidden',
+    CAbi.signatureKey(
+      CAbi.signature([compare, 'usize'], Type.unit, Target.aarch64AppleDarwin, {
+        ...ForeignContract.conservative,
+        callbacks: [0],
+      }),
+    ),
+    '(extern "C" fn(pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>,pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>)->i32!nonnull:readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden,u64)->void!readwrite/external/capture:/borrow:/callbacks:0/returned:-/noreturn:false/unwind:forbidden',
   )
 
   const invalidParameter = Type.foreignFunction([Type.unit], 'i32')
@@ -387,15 +394,20 @@ it('renders one exact canonical header for scalars, pointers, nested callbacks, 
       parameters: [
         'pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
         'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
-        'extern "C" fn(i32,pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>)->u8',
+        'extern "C" fn(i32,pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>)->u8!nonnull:readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
       ],
-      result: 'extern "C" fn(u64)->i32',
-      contract: ForeignContract.conservative,
+      result:
+        'extern "C" fn(u64)->i32!nonnull:readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
+      contract: { ...ForeignContract.conservative, callbacks: [2] },
     },
     { symbol: 'answer', parameters: [], result: 'i32', contract: ForeignContract.conservative },
   ]
   const data: ReadonlyArray<Backend.ForeignStatic> = [
-    { symbol: 'callback_slot', type: 'extern "C" fn(i16)->u16', direction: 'Export' },
+    {
+      symbol: 'callback_slot',
+      type: 'extern "C" fn(i16)->u16!nonnull:readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
+      direction: 'Export',
+    },
     {
       symbol: 'mutable_state',
       type: 'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
@@ -464,7 +476,7 @@ it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
     const manifest = AbiManifest.make(target, imports, exports, data)
     const expected = `${JSON.stringify(
       {
-        silkForeignAbi: 2,
+        silkForeignAbi: 3,
         target: target.id,
         exports: [
           {
@@ -730,6 +742,203 @@ it.effect('rejects capture-capable references and incompatible complete-call loa
       assert.strictEqual(diagnostic.span.sourceId, `contracts/${name}`)
       assert.isAbove(diagnostic.span.end, diagnostic.span.start)
       assert.isAtMost(diagnostic.span.end, new TextEncoder().encode(source).length)
+    }
+  }),
+)
+
+it.effect('preserves callback behavior through addresses, indirect loans, and interfaces', () =>
+  Effect.gen(function* () {
+    const source = `
+unsafe export "C" fn read<'a>(value: &'a i32) -> i32
+  with Intrinsic.foreign(memory: "read", locality: "arguments", borrow: ("value",)) { return value.* }
+fn invoke(callback: for<'b> extern "C" fn(&'b i32) -> i32 with Intrinsic.foreign(borrow: ("0",), locality: "arguments", memory: "read"), value: &i32) -> i32 {
+  return unsafe callback(value)
+}
+fn independent(callback: extern "C" fn(&mut i32, &i32) -> () with Intrinsic.foreign(borrow: ("0", "1"))) {
+  let mut value = 1
+  let other = 2
+  unsafe callback(&mut value, &other)
+}
+pub fn main() -> i32 { let value = 42 return invoke(read, &value) }
+`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'callbacks/valid',
+      new TextEncoder().encode(source),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const operations = program.functions.flatMap(MirVerification.operations)
+    const indirect = operations.find((operation) => operation._tag === 'ForeignIndirectCall')
+    assert.isDefined(indirect)
+    if (indirect?._tag !== 'ForeignIndirectCall') return
+    assert.deepEqual(indirect.signature.contract.borrow, [0])
+    assert.strictEqual(indirect.signature.contract.locality, 'arguments')
+    const pointer = Type.foreignFunction(
+      [Type.reference('Shared', 'i32', Lifetime.staticLifetime)],
+      'i32',
+      indirect.signature.contract,
+    )
+    const decoded = yield* ModuleSurface.decodeSemanticType(
+      ModuleSurface.encodeSemanticType(pointer),
+    )
+    assert.strictEqual(Type.key(decoded), Type.key(pointer))
+    const changed = Type.foreignFunction(pointer.parameters, pointer.result, {
+      ...pointer.contract,
+      memory: 'readwrite',
+    })
+    assert.strictEqual(Type.equals(pointer, changed), false)
+    for (const invalid of [
+      Type.foreignFunction(
+        [
+          Type.pointer({
+            mutable: false,
+            pointee: 'i32',
+            nullable: false,
+            extent: 'Single',
+            alignment: 'Natural',
+            addressSpace: 0,
+          }),
+        ],
+        'i32',
+        pointer.contract,
+      ),
+      Type.foreignFunction([Type.foreignFunction([], 'i32'), ...pointer.parameters], 'i32', {
+        ...pointer.contract,
+        callbacks: [0],
+        borrow: [1],
+      }),
+    ]) {
+      const error = yield* Effect.flip(
+        ModuleSurface.decodeSemanticType(ModuleSurface.encodeSemanticType(invalid)),
+      )
+      assert.strictEqual(error._tag, 'ModuleSurfaceDecodeError')
+    }
+    const canonical = CAbi.typeText(
+      CAbi.classify(
+        Type.foreignFunction(
+          [
+            Type.pointer({
+              mutable: false,
+              pointee: 'i32',
+              nullable: false,
+              extent: 'Single',
+              alignment: 'Natural',
+              addressSpace: 0,
+            }),
+          ],
+          'i32',
+          {
+            ...ForeignContract.conservative,
+            noCapture: [0],
+          },
+        ),
+        Target.aarch64AppleDarwin,
+        'Parameter',
+      ),
+    )
+    assert.isTrue(CAbi.isTypeText(canonical))
+    assert.isFalse(CAbi.isTypeText(canonical.replace('capture:0/', 'capture:00/')))
+
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    assert.match(artifact.ir, /invoke i32 %[^ (]+\(ptr/)
+    assert.include(artifact.ir, 'foreign_unwind')
+    const manifest = AbiManifest.make(
+      Target.aarch64AppleDarwin,
+      artifact.foreignImports,
+      artifact.foreignExports,
+      [],
+    )
+    const supplied = yield* AbiManifest.decode(
+      SourceFile.make('callbacks/interface.json', AbiManifest.encode(manifest)),
+    )
+    assert.deepEqual(AbiManifest.check([supplied], program), [])
+  }),
+)
+
+it.effect('rejects unadmitted callback promises and conflicting nested reference access', () =>
+  Effect.gen(function* () {
+    const programs = [
+      ['escape', 'unsafe extern "C" fn register(callback: extern "C" fn() -> ()) -> ()', 'SEM0188'],
+      [
+        'thread',
+        'unsafe extern "C" fn f() -> () with Intrinsic.foreign(thread: "other")',
+        'SEM0188',
+      ],
+      [
+        'unwind',
+        'fn f(callback: extern "C" fn() -> () with Intrinsic.foreign(unwind: "permitted")) {}',
+        'SEM0188',
+      ],
+      [
+        'stronger',
+        `export "C" fn read(value: *const i32) -> i32 { return 0 }
+unsafe extern "C" fn visit(callback: extern "C" fn(*const i32) -> i32 with Intrinsic.foreign(memory: "read", locality: "arguments")) -> () with Intrinsic.foreign(callbacks: ("callback",))
+pub fn main() { unsafe visit(read) }`,
+        'SEM0207',
+      ],
+      [
+        'machine',
+        `unsafe export "C" fn entry() -> () with Intrinsic.machine(naked: true, noReturn: true) {
+  return unsafe Intrinsic.assembly<()>("ud2", "", "", "none", true, true, ())
+}
+unsafe extern "C" fn visit(callback: extern "C" fn() -> ()) -> () with Intrinsic.foreign(callbacks: ("callback",))
+pub fn main() { unsafe visit(entry) }`,
+        'SEM0207',
+      ],
+      [
+        'external',
+        'unsafe extern "C" fn visit(value: &mut i32, callback: extern "C" fn() -> ()) -> () with Intrinsic.foreign(borrow: ("value",), callbacks: ("callback",))',
+        'SEM0188',
+      ],
+      [
+        'loan',
+        `fn nested(callback: extern "C" fn(&mut i32, &i32) -> () with Intrinsic.foreign(borrow: ("0", "1"))) {
+  let mut value = 1
+  unsafe callback(&mut value, &value)
+}`,
+        'OWN0010',
+      ],
+      [
+        'unsafe',
+        'fn invoke(callback: extern "C" fn() -> i32) -> i32 { return callback() }',
+        'SEM0082',
+      ],
+    ] as const
+    for (const [name, source, code] of programs) {
+      const snapshot =
+        name === 'machine'
+          ? yield* Analysis.makeRealized({
+              root: SourceFile.make(`callbacks/${name}`, new TextEncoder().encode(source)),
+              configuration: {
+                profile: {
+                  target: 'x86_64-unknown-linux-gnu',
+                  artifact: 'object',
+                  runtime: { kind: 'none' },
+                },
+              },
+            }).pipe(Effect.provide(SourceResolver.empty))
+          : yield* Analysis.ofSourceRealized(
+              `callbacks/${name}`,
+              new TextEncoder().encode(source),
+              'aarch64-apple-darwin',
+            )
+      const diagnostics = Analysis.diagnostics(snapshot)
+      assert.deepEqual([...new Set(diagnostics.map((diagnostic) => diagnostic.code))], [code], name)
+      if (name === 'machine') {
+        assert.deepEqual(
+          diagnostics.map((diagnostic) => diagnostic.code),
+          ['SEM0207'],
+        )
+        const diagnostic = diagnostics.at(0)
+        if (diagnostic !== undefined)
+          assert.strictEqual(source.slice(diagnostic.span.start, diagnostic.span.end), 'entry')
+      }
+      for (const diagnostic of diagnostics) {
+        assert.strictEqual(diagnostic.span.sourceId, `callbacks/${name}`)
+        assert.isAbove(diagnostic.span.end, diagnostic.span.start)
+      }
     }
   }),
 )

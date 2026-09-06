@@ -886,6 +886,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = ${Intrinsic.operationText(operation.operation)}(${operation.arguments.map(localText).join(', ')}) via ${localText(operation.success)}/${localText(operation.failure)}`
     case 'OsCall':
       return `${localText(operation.destination)} = ${Intrinsic.operationText(operation.operation)}(${operation.arguments.map(localText).join(', ')})`
+    case 'ForeignIndirectCall':
+      return `${localText(operation.destination)} = indirect extern C ${localText(operation.callee)}(${operation.arguments.map(localText).join(', ')})`
     case 'ForeignCall':
       return `${localText(operation.destination)} = extern "C" ${operation.symbol}(${operation.arguments.map(localText).join(', ')})`
     case 'SharedFromAllocation':

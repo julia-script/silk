@@ -24,6 +24,8 @@ export type CAbiType =
   | { readonly _tag: 'Pointer'; readonly type: Type.Pointer }
   | {
       readonly _tag: 'FunctionPointer'
+      readonly nullable: false
+      readonly contract: ForeignContract.ForeignContract
       readonly parameters: ReadonlyArray<CAbiType>
       readonly result: CAbiType
     }
@@ -132,19 +134,9 @@ const classifyOrUndefined = (
   if (Type.isPointer(type))
     return admittedType(type, position) ? Object.freeze({ _tag: 'Pointer', type }) : undefined
   if (Type.isForeignFunction(type)) {
-    const parameters = type.parameters.map((parameter) =>
-      classifyOrUndefined(parameter, 'Parameter', target),
-    )
-    const result = classifyOrUndefined(type.result, 'Result', target)
-    if (parameters.some((parameter) => parameter === undefined) || result === undefined)
-      return undefined
-    return Object.freeze({
-      _tag: 'FunctionPointer',
-      parameters: Object.freeze(
-        parameters.flatMap((parameter) => (parameter === undefined ? [] : [parameter])),
-      ),
-      result,
-    })
+    if (!admittedType(type, position)) return undefined
+    const classified = signature(type.parameters, type.result, target, type.contract)
+    return Object.freeze({ _tag: 'FunctionPointer', nullable: false, ...classified })
   }
   if (position === 'Result' && Type.equals(type, Type.unit)) return void_
   return undefined
@@ -159,7 +151,12 @@ const admittedType = (type: Type.Type, position: Position): boolean => {
     )
   if (Type.isForeignFunction(type))
     return (
-      type.parameters.every((parameter) => admittedType(parameter, 'Parameter')) &&
+      type.nullable === false &&
+      type.parameters.every((parameter, ordinal) =>
+        Type.isReference(parameter)
+          ? type.contract.borrow.includes(ordinal)
+          : admittedType(parameter, 'Parameter'),
+      ) &&
       admittedType(type.result, 'Result')
     )
   return position === 'Result' && Type.equals(type, Type.unit)
@@ -224,7 +221,7 @@ export const typeText = (self: CAbiType): TypeText => {
     case 'Pointer':
       return `pointer<${self.type.mutable ? 'mut' : 'const'};${encodeURIComponent(Type.runtimeKey(self.type)).replaceAll(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}>`
     case 'FunctionPointer':
-      return `extern "C" fn(${self.parameters.map(typeText).join(',')})->${typeText(self.result)}`
+      return `extern "C" fn(${self.parameters.map(typeText).join(',')})->${typeText(self.result)}!nonnull:${ForeignContract.key(self.contract).replaceAll(',', '.')}`
   }
 }
 
@@ -243,10 +240,7 @@ export const isCanonical = (self: CAbiType, target: Target.Target): boolean => {
       return expected._tag === 'Integer' && self.extension === expected.extension
     }
     case 'FunctionPointer':
-      return (
-        self.parameters.every((type) => type._tag !== 'Void' && isCanonical(type, target)) &&
-        isCanonical(self.result, target)
-      )
+      return self.nullable === false && isCanonicalSignature(self, target)
   }
 }
 
@@ -260,6 +254,7 @@ export type TextShape =
   | { readonly _tag: 'Pointer'; readonly mutable: boolean }
   | {
       readonly _tag: 'FunctionPointer'
+      readonly contract: ForeignContract.ForeignContract
       readonly parameters: ReadonlyArray<TextShape>
       readonly result: TextShape
     }
@@ -285,7 +280,12 @@ export const inspectText = (text: string, depth = 0): TextShape | undefined => {
   if (pointer !== null) return Object.freeze({ _tag: 'Pointer', mutable: pointer[1] === 'mut' })
   const prefix = 'extern "C" fn('
   if (!text.startsWith(prefix)) return undefined
+  const contractSeparator = text.lastIndexOf('!nonnull:')
+  if (contractSeparator < 0) return undefined
+  const encodedContract = text.slice(contractSeparator + '!nonnull:'.length)
+  text = text.slice(0, contractSeparator)
   const parameters: Array<TextShape> = []
+  const parameterTexts: Array<string> = []
   let nesting = 1
   let start = prefix.length
   for (let index = start; index < text.length; index += 1) {
@@ -297,15 +297,29 @@ export const inspectText = (text: string, depth = 0): TextShape | undefined => {
         if (parameter === undefined || (parameter._tag === 'Scalar' && parameter.type === 'void'))
           return undefined
         parameters.push(parameter)
+        parameterTexts.push(text.slice(start, index))
       }
       start = index + 1
     }
     if (nesting === 0) {
       if (text.slice(index, index + 3) !== ')->') return undefined
-      const result = inspectText(text.slice(index + 3), depth + 1)
-      return result === undefined
+      const resultText = text.slice(index + 3)
+      const result = inspectText(resultText, depth + 1)
+      const contract = ForeignContract.inspectKey(encodedContract, parameterTexts, resultText)
+      return result === undefined ||
+        contract === undefined ||
+        parameters.some(
+          (parameter) =>
+            parameter._tag === 'FunctionPointer' &&
+            !ForeignContract.callbackAccessAdmitted(contract, parameter.contract),
+        )
         ? undefined
-        : Object.freeze({ _tag: 'FunctionPointer', parameters: Object.freeze(parameters), result })
+        : Object.freeze({
+            _tag: 'FunctionPointer',
+            contract,
+            parameters: Object.freeze(parameters),
+            result,
+          })
     }
   }
   return undefined
@@ -321,6 +335,11 @@ export const isCanonicalSignature = (self: CAbiSignature, target: Target.Target)
   self.parameters.every((type) => type._tag !== 'Void' && isCanonical(type, target)) &&
   ForeignContract.inspect(self.contract, self.parameters.map(typeText), typeText(self.result)) !==
     undefined &&
+  self.parameters.every(
+    (parameter) =>
+      parameter._tag !== 'FunctionPointer' ||
+      ForeignContract.callbackAccessAdmitted(self.contract, parameter.contract),
+  ) &&
   self.contract.borrow.every((ordinal) => {
     const parameter = self.parameters[ordinal]
     return (

@@ -57,6 +57,7 @@ export interface Context {
       readonly symbol: string
     }
   >
+  readonly foreignIndirects: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly foreignFunctions: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly foreignStatics: ReadonlyMap<string, NativeForeignOperation.StaticDeclaration>
   readonly foreignCallbacks: ReadonlyMap<string, Constant.Constant>

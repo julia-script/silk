@@ -2219,7 +2219,7 @@ const addExpressionTypes = (
       addExpressionTypes(types, capture.value, substitution)
     }
   }
-  if (expression._tag === 'CallableApply') {
+  if (expression._tag === 'CallableApply' || expression._tag === 'ForeignApply') {
     addExpressionTypes(types, expression.callee, substitution)
     for (const argument of expression.arguments) addExpressionTypes(types, argument, substitution)
   }

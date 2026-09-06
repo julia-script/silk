@@ -156,11 +156,21 @@ const foreignFunctionPointerAdmission = (
   declared: DeclaredTypeFact,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   if (declared._tag !== 'Resolved') return []
-  return Type.foreignFunctions(declared.type).flatMap((type) =>
-    CAbi.admit(type, 'Parameter')._tag === 'Admitted'
+  return Type.foreignFunctions(declared.type).flatMap((type) => [
+    ...(CAbi.admit(type, 'Parameter')._tag === 'Admitted'
       ? []
-      : [Diagnostic.foreignTypeNotAdmitted(Type.encode(type), 'C', tightSpan(declared.syntax))],
-  )
+      : [Diagnostic.foreignTypeNotAdmitted(Type.encode(type), 'C', tightSpan(declared.syntax))]),
+    ...ForeignContract.validate(
+      type.contract,
+      type.parameters.map((parameter, ordinal) => ({
+        name: String(ordinal),
+        type: parameter,
+        span: tightSpan(declared.syntax),
+      })),
+      type.result,
+      tightSpan(declared.syntax),
+    ),
+  ])
 }
 
 export const complete = (
@@ -470,21 +480,22 @@ export const complete = (
         const admission =
           member.foreign === undefined && member.foreignExport === undefined
             ? []
-            : foreignAdmission(parameters, result.fact, member.foreign?.contract)
-        const pointerAdmission =
-          member.foreign === undefined && member.foreignExport === undefined
-            ? [
-                ...parameters.flatMap((parameter) =>
-                  foreignFunctionPointerAdmission(parameter.declaredType),
-                ),
-                ...foreignFunctionPointerAdmission(result.fact),
-              ]
-            : []
+            : foreignAdmission(
+                parameters,
+                result.fact,
+                (member.foreign ?? member.foreignExport)?.contract,
+              )
+        const pointerAdmission = [
+          ...parameters.flatMap((parameter) =>
+            foreignFunctionPointerAdmission(parameter.declaredType),
+          ),
+          ...foreignFunctionPointerAdmission(result.fact),
+        ]
         const behaviorDiagnostics =
-          member.foreign === undefined
+          member.foreign === undefined && member.foreignExport === undefined
             ? []
             : ForeignContract.validate(
-                member.foreign.contract,
+                (member.foreign ?? member.foreignExport)?.contract ?? ForeignContract.conservative,
                 parameters.map((parameter) => ({
                   name: parameter.name._tag === 'Present' ? parameter.name.spelling : '',
                   type:

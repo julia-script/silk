@@ -1,3 +1,4 @@
+import * as ForeignContract from './ForeignContract.js'
 import * as Lifetime from './Lifetime.js'
 import * as Canonical from './internal/Canonical.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -449,6 +450,16 @@ const compareSelected = (source: Type.Type, target: Type.Type, self: Context): C
     equivalent(source.pointee, target.pointee, self)
   )
     return Object.freeze({ _tag: 'PointerWeakening', source, target })
+  if (
+    Type.isForeignFunction(source) &&
+    Type.isForeignFunction(target) &&
+    ForeignContract.key(source.contract) === ForeignContract.key(target.contract)
+  ) {
+    const offered = Type.callable(source.parameters, source.result, source)
+    const expected = Type.callable(target.parameters, target.result, target)
+    if (callableCompatible(offered, expected, self) && callableCompatible(expected, offered, self))
+      return Object.freeze({ _tag: 'Lifetime', source, target })
+  }
   if (
     Type.isCallable(source) &&
     Type.isCallable(target) &&
