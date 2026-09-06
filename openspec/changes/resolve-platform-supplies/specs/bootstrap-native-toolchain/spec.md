@@ -83,7 +83,7 @@ corrupted, unauthenticated, or missing entry SHALL cause recompilation, never an
 
 #### Scenario: A changed input misses the cache
 
-- **WHEN** an artifact kind, input path's bytes, library mode, library name, search path, framework, or embedded shared-library identity differs from a cached request
+- **WHEN** artifact kind, selected input bytes, resolved input ordering or mode, or an embedded library/interpreter identity differs from a cached request
 - **THEN** the finalizer invokes the required tool and stores the artifact under a distinct key
 
 #### Scenario: The variable is unset
