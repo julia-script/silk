@@ -2579,7 +2579,7 @@ it.effect('forms pointers in safe code and requires unsafe to dereference', () =
       `import silk.pointer { Pointer }
 fn form(value: &mut i32, values: &[u8]) -> *mut i32 {
   let first = Pointer.fromSlice(values)
-  let missing = Pointer.isNull(first)
+  let missing = Pointer.isNullMany(first)
   let empty = Pointer.null<i32>()
   return Pointer.fromMutRef(value)
 }`,
@@ -2593,6 +2593,104 @@ fn read(pointer: *const i32) -> i32 { return Pointer.read(pointer) }`,
     assert.deepEqual(
       rejected.diagnostics.map((diagnostic) => diagnostic.code),
       ['SEM0082'],
+    )
+  }),
+)
+
+it.effect('checks nullable pointer refinement, unaligned access, and owned output storage', () =>
+  Effect.gen(function* () {
+    const accepted = yield* Analysis.ofSource(
+      'pointer/qualified-output',
+      ascii(`
+import silk.pointer { Pointer }
+import silk.output { Uninitialized, Initialized }
+import silk.option { Option }
+fn refine(value: ?[*]mut i32) -> Option<[*]mut i32> {
+  return Pointer.nonNullManyMut<i32>(value)
+}
+fn write(value: *mut align(1) i32) -> i32 {
+  unsafe {
+    Pointer.writeUnaligned<i32>(value, 42)
+    return Pointer.readUnaligned<i32>(value)
+  }
+}
+fn initialize(value: Uninitialized<i32>) -> i32 {
+  let initialized = Uninitialized.initialize<i32>(move value, 42)
+  return Initialized.into<i32>(move initialized)
+}
+fn address(value: &mut Uninitialized<i32>) -> *mut i32 {
+  return Uninitialized.address<i32>(move value)
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(accepted), [])
+    const rejected = yield* analyzeWithStdlib(
+      'pointer://invalid-requalification',
+      `
+fn bad(value: *const i32) -> *const u8 {
+  unsafe { return Intrinsic.pointerRequalify<*const i32, *const u8>(value) }
+}`,
+    )
+    assert.deepEqual(
+      rejected.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0215'],
+    )
+  }),
+)
+
+it.effect('keeps output initialization and extraction explicit in ordinary ownership', () =>
+  Effect.gen(function* () {
+    const source = `import silk.output { Uninitialized, Initialized }
+unsafe extern "C" fn fill(value: *mut i32) -> ()
+fn readBeforeInitialization(value: Uninitialized<i32>) -> i32 {
+  return Initialized.into<i32>(move value)
+}
+fn foreignDoesNotInitialize(value: Uninitialized<i32>) -> i32 {
+  let mut output = move value
+  let address = Uninitialized.address<i32>(&mut output)
+  unsafe fill(address)
+  return Initialized.into<i32>(move output)
+}
+fn unchecked(value: Uninitialized<i32>) -> Initialized<i32> {
+  return Uninitialized.assumeInitialized<i32>(move value)
+}
+fn twice(value: Initialized<i32>) -> i32 {
+  let first = Initialized.into<i32>(move value)
+  return first + Initialized.into<i32>(move value)
+}`
+    const snapshot = yield* Analysis.ofSource('pointer/output-ownership', ascii(source))
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => [
+        diagnostic.code,
+        source.slice(diagnostic.span.start, diagnostic.span.end),
+      ]),
+      [
+        ['SEM0012', 'move value'],
+        ['SEM0012', 'move output'],
+        ['SEM0082', ' Uninitialized.assumeInitialized<i32>(move value)'],
+        ['OWN0001', 'move value'],
+      ],
+    )
+  }),
+)
+
+it.effect('diagnoses every unsupported implicit pointer conversion at its returned value', () =>
+  Effect.gen(function* () {
+    const source = `fn nullness(value: ?*const i32) -> *const i32 { return value }
+fn access(value: *const i32) -> *mut i32 { return value }
+fn alignment(value: *const align(1) i32) -> *const i32 { return value }
+fn extent(value: *const i32) -> [*]const i32 { return value }
+fn slice(value: &[i32]) -> [*]const i32 { return value }`
+    const snapshot = yield* Analysis.ofSource('pointer/invalid-conversions', ascii(source))
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start,
+        diagnostic.span.end,
+      ]),
+      ['nullness', 'access', 'alignment', 'extent', 'slice'].map((name) => {
+        const start = source.indexOf(' value }', source.indexOf(`fn ${name}(`))
+        return ['SEM0129', start, start + ' value'.length]
+      }),
     )
   }),
 )

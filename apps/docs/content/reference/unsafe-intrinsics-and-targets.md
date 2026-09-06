@@ -29,8 +29,8 @@ language author; the proposal remains Draft until its whole-language review is a
   native code linked into the artifact under a named symbol.
 - A **native export** is an `export "C" fn` declaration with a body that native code may call
   through a generated thunk under a named symbol.
-- A **raw pointer** is a `*const T` or `*mut T` value holding one machine address with no
-  ownership, loan, or validity guarantee; forming one is safe and dereferencing one is unsafe.
+- A **raw pointer** is a qualified single- or many-element machine address with no
+  ownership or loan; forming one is safe and dereferencing one is unsafe.
 
 ## Safety outcomes
 
@@ -855,7 +855,7 @@ distinct from Silk type compatibility. The admitted subset is:
 - `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64` as exact-width integers;
 - `isize` and `usize` as pointer-width integers of the selected target;
 - `f32` and `f64` as the C `float` and `double` classes; and
-- `*const T` and `*mut T` for any pointee `T` as the C pointer class, without requiring the
+- Qualified single/many and nullable/non-null pointers for any pointee `T` as the C pointer class, without requiring the
   pointee itself to be admitted; and
 - `extern "C" fn(P...) -> R` as one C function-pointer class when every parameter and result is
   admitted recursively.
@@ -863,8 +863,8 @@ distinct from Silk type compatibility. The admitted subset is:
 ```silk,ignore
 struct Opaque {}
 
-unsafe extern "C" fn malloc(size: usize) -> *mut u8
-unsafe extern "C" fn free(pointer: *mut u8) -> ()
+unsafe extern "C" fn malloc(size: usize) -> ?[*]mut u8
+unsafe extern "C" fn free(pointer: ?[*]mut u8) -> ()
 unsafe extern "C" fn use(handle: *mut Opaque) -> i32
 ```
 
@@ -889,8 +889,9 @@ diagnostic per type. A rejected header publishes no callable.
 **Current compiler:** Aligned. `CAbi.admit` judges the spelling and accepts a pointer without
 examining its pointee; C-layout field validation is a separate recursive contract.
 `CAbi.classify` and `CAbi.signature` derive the target-specific C signature used by MIR,
-verification, and the backend, with pointer mutability part of the signature key so `*const u8`
-and `*mut u8` redeclarations disagree.
+verification, and the backend, with every pointer qualifier and invariant pointee in the signature key. Narrow integer
+arguments and results use the target C ABI extension contract: sign/zero extension on Darwin ARM64
+and System V x86-64, and no extension attribute under GNU AAPCS64.
 
 **Evidence:** [foreign function specification](../../../../openspec/changes/add-extern-c-functions/specs/bootstrap-foreign-functions/spec.md),
 [pointer admission](../../../../openspec/changes/add-raw-pointers/specs/bootstrap-foreign-functions/spec.md),
@@ -1221,7 +1222,7 @@ when its parameter and result types match exactly and its body is nongeneric and
 import silk.pointer { Pointer }
 
 unsafe extern "C" fn qsort(
-  base: *mut i32,
+  base: ?[*]mut i32,
   count: usize,
   size: usize,
   compare: extern "C" fn(*const i32, *const i32) -> i32,
@@ -1267,7 +1268,7 @@ An imported data symbol is declared with `unsafe extern "C" static`; an exported
 be assigned, while a pointer stored in it retains the pointee mutability written by its type.
 
 ```silk,ignore
-unsafe extern "C" static environment: *mut *mut u8 as "environ"
+unsafe extern "C" static environment: ?[*]const ?[*]const u8 as "environ"
 export "C" static silk_abi_version: u32 = 1
 ```
 

@@ -912,7 +912,15 @@ function encodeTypeNode(value: Type.Type): unknown {
       lifetime: encodeLifetime(value.lifetime),
     }
   if (Type.isPointer(value))
-    return { tag: 'Pointer', mutable: value.mutable, pointee: encodeTypeNode(value.pointee) }
+    return {
+      tag: 'Pointer',
+      mutable: value.mutable,
+      nullable: value.nullable,
+      extent: value.extent,
+      alignment: value.alignment,
+      addressSpace: value.addressSpace,
+      pointee: encodeTypeNode(value.pointee),
+    }
   if (Type.isCallable(value))
     return {
       tag: 'Callable',
@@ -1171,11 +1179,31 @@ function decodeTypeNode(value: unknown): Type.Type {
         decodeLifetime(encoded.lifetime),
       )
     }
-    case 'Pointer':
-      return Type.pointer(
-        serializedBoolean(encoded.mutable, 'pointer mutability'),
-        decodeTypeNode(encoded.pointee),
+    case 'Pointer': {
+      const extent = serializedString(encoded.extent, 'pointer extent')
+      if (extent !== 'Single' && extent !== 'Many')
+        throw new InvalidModuleSurfaceEncoding('pointer extent must be Single or Many')
+      const alignment =
+        encoded.alignment === 'Natural'
+          ? 'Natural'
+          : serializedNonNegativeInteger(encoded.alignment, 'pointer alignment')
+      if (alignment !== 'Natural' && !Type.isPointerAlignment(alignment))
+        throw new InvalidModuleSurfaceEncoding('invalid pointer alignment')
+      const addressSpace = serializedNonNegativeInteger(
+        encoded.addressSpace,
+        'pointer address space',
       )
+      if (addressSpace !== 0)
+        throw new InvalidModuleSurfaceEncoding('unsupported pointer address space')
+      return Type.pointer({
+        mutable: serializedBoolean(encoded.mutable, 'pointer mutability'),
+        nullable: serializedBoolean(encoded.nullable, 'pointer nullability'),
+        extent,
+        alignment,
+        addressSpace,
+        pointee: decodeTypeNode(encoded.pointee),
+      })
+    }
     case 'Callable': {
       const mode = serializedString(encoded.mode, 'callable mode')
       if (mode !== 'Shared' && mode !== 'Exclusive' && mode !== 'Take')
@@ -1703,6 +1731,10 @@ const declaredType = (value: DeclarationFacts.DeclaredTypeFact): string => {
     case 'Pointer':
       return record('PointerType', [
         boolean(value.mutable),
+        boolean(value.nullable),
+        value.extent,
+        String(value.alignment),
+        String(value.addressSpace),
         declaredType(value.pointee),
         boolean(value.cause !== undefined),
       ])

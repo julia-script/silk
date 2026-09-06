@@ -1266,15 +1266,25 @@ const printNode = (
         ...(role === undefined ? [] : [printToken(context, role)]),
       )
     }
+    case 'PointerQualifier':
+      return FormatDocument.concat(...directTokens(node).map((token) => printToken(context, token)))
     case 'PointerType': {
-      const mutability = directTokens(node).find(
-        (token) => token.kind === 'ConstKeyword' || token.kind === 'MutKeyword',
-      )
+      const tokens = directTokens(node)
+      const children = directNodes(node)
       return FormatDocument.concat(
-        printToken(context, tokenOf(node, 'Star'), prefix, preserveBlank),
-        ...(mutability === undefined ? [] : [printToken(context, mutability)]),
+        ...tokens.map((token, ordinal) =>
+          ordinal === 0
+            ? printToken(context, token, prefix, preserveBlank)
+            : printToken(context, token),
+        ),
         FormatDocument.text(' '),
-        printNode(context, directNodes(node)[0] ?? nodeOf(node, 'TypePath')),
+        ...children
+          .filter((child) => child.kind === 'PointerQualifier')
+          .flatMap((child) => [printNode(context, child), FormatDocument.text(' ')]),
+        printNode(
+          context,
+          children.find((child) => child.kind !== 'PointerQualifier') ?? nodeOf(node, 'TypePath'),
+        ),
       )
     }
     case 'CallableType':

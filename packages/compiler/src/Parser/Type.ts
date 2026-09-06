@@ -9,7 +9,7 @@ import {
   peek,
   syntaxNode,
 } from '../internal/ParseState.js'
-import type * as SyntaxTree from '../SyntaxTree.js'
+import * as SyntaxTree from '../SyntaxTree.js'
 import type * as Token from '../Token.js'
 import {
   hasContextualSpelling,
@@ -18,6 +18,10 @@ import {
   isRowWithoutStart,
 } from './Expression.js'
 import { typeStarts } from './Grammar.js'
+
+const nullablePointerStarts = (state: State): boolean =>
+  nextSignificantKind(state) === 'Question' &&
+  (peek(state, 1) === 'Star' || (peek(state, 1) === 'LeftBracket' && peek(state, 2) === 'Star'))
 
 const argumentStarts: ReadonlyArray<Token.TokenKind> = Object.freeze(['Lifetime', ...typeStarts])
 
@@ -108,8 +112,12 @@ export const parseTypeArgumentList = (
     nextSignificantKind(state) !== 'Greater' &&
     nextSignificantKind(state) !== 'EndOfFile' &&
     !(kind === 'TypeArgumentList' && nextSignificantKind(state) === 'Bang') &&
-    !(kind === 'TypeArgumentList' && nextSignificantKind(state) === 'Question') &&
-    !following.includes(nextSignificantKind(state) ?? 'EndOfFile')
+    !(
+      kind === 'TypeArgumentList' &&
+      nextSignificantKind(state) === 'Question' &&
+      !nullablePointerStarts(state)
+    ) &&
+    (!following.includes(nextSignificantKind(state) ?? 'EndOfFile') || nullablePointerStarts(state))
   ) {
     const argumentFollowing: ReadonlyArray<Token.TokenKind> = [
       'Comma',
@@ -149,7 +157,11 @@ export const parseTypeArgumentList = (
     children = Object.freeze([...children, failure.node])
     state = failure.state
   }
-  if (kind === 'TypeArgumentList' && nextSignificantKind(state) === 'Question') {
+  if (
+    kind === 'TypeArgumentList' &&
+    nextSignificantKind(state) === 'Question' &&
+    !nullablePointerStarts(state)
+  ) {
     const requirements = parseRequirementRow(state, ['Greater', ...following])
     children = Object.freeze([...children, requirements.node])
     state = requirements.state
@@ -181,7 +193,7 @@ export const parseTypeParameterList = (
   while (
     nextSignificantKind(state) !== 'Greater' &&
     nextSignificantKind(state) !== 'EndOfFile' &&
-    !following.includes(nextSignificantKind(state) ?? 'EndOfFile')
+    (!following.includes(nextSignificantKind(state) ?? 'EndOfFile') || nullablePointerStarts(state))
   ) {
     const markerKind = nextSignificantKind(state)
     const marker =
@@ -532,19 +544,66 @@ export const parseTypePrimary = (
       ]),
     })
   }
-  if (nextSignificantKind(initial) === 'Star') {
-    const star = expect(initial, 'Star', ['ConstKeyword', ...typeStarts, ...following])
+  if (
+    nextSignificantKind(initial) === 'Star' ||
+    nullablePointerStarts(initial) ||
+    (nextSignificantKind(initial) === 'LeftBracket' && peek(initial, 1) === 'Star')
+  ) {
+    const nullable =
+      nextSignificantKind(initial) === 'Question'
+        ? expect(initial, 'Question', ['Star', 'LeftBracket'])
+        : undefined
+    const start = nullable?.state ?? initial
+    const left =
+      nextSignificantKind(start) === 'LeftBracket'
+        ? expect(start, 'LeftBracket', ['Star'])
+        : undefined
+    const star = expect(left?.state ?? start, 'Star', [
+      'RightBracket',
+      'ConstKeyword',
+      'MutKeyword',
+      ...following,
+    ])
+    const right =
+      left === undefined
+        ? undefined
+        : expect(star.state, 'RightBracket', ['ConstKeyword', 'MutKeyword'])
+    const accessState = right?.state ?? star.state
     const mutability = expect(
-      star.state,
-      nextSignificantKind(star.state) === 'MutKeyword' ? 'MutKeyword' : 'ConstKeyword',
+      accessState,
+      nextSignificantKind(accessState) === 'MutKeyword' ? 'MutKeyword' : 'ConstKeyword',
       [...typeStarts, ...following],
     )
-    const pointee = parseTypePrimary(mutability.state, following)
+    let state = mutability.state
+    const qualifiers: Array<SyntaxTree.Node> = []
+    while (
+      (hasContextualSpelling(state, 'align') || hasContextualSpelling(state, 'addrspace')) &&
+      peek(state, 1) === 'LeftParenthesis'
+    ) {
+      const name = expect(state, 'Identifier', ['LeftParenthesis'])
+      const open = expect(name.state, 'LeftParenthesis', ['DecimalInteger'])
+      const value = expect(open.state, 'DecimalInteger', ['RightParenthesis'])
+      const close = expect(value.state, 'RightParenthesis', [...typeStarts, ...following])
+      qualifiers.push(
+        syntaxNode(close.state, 'PointerQualifier', [
+          ...name.elements,
+          ...open.elements,
+          ...value.elements,
+          ...close.elements,
+        ]),
+      )
+      state = close.state
+    }
+    const pointee = parseTypePrimary(state, following)
     return Object.freeze({
       state: pointee.state,
       node: syntaxNode(pointee.state, 'PointerType', [
+        ...(nullable?.elements ?? []),
+        ...(left?.elements ?? []),
         ...star.elements,
+        ...(right?.elements ?? []),
         ...mutability.elements,
+        ...qualifiers,
         pointee.node,
       ]),
     })

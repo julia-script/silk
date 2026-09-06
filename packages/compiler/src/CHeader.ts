@@ -76,8 +76,8 @@ const decode = (type: string): CType | undefined => {
   const scalarSpelling = scalar(type)
   if (scalarSpelling !== undefined)
     return Object.freeze({ _tag: 'Scalar', spelling: scalarSpelling })
-  if (type === '*const') return Object.freeze({ _tag: 'Pointer', mutable: false })
-  if (type === '*mut') return Object.freeze({ _tag: 'Pointer', mutable: true })
+  const pointer = /^pointer<(mut|const);(?:[A-Za-z0-9_.~-]|%[0-9A-F]{2})+>$/.exec(type)
+  if (pointer !== null) return Object.freeze({ _tag: 'Pointer', mutable: pointer[1] === 'mut' })
   const prefix = 'extern "C" fn('
   if (!type.startsWith(prefix)) return undefined
   let depth = 1

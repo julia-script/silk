@@ -95,13 +95,17 @@ export interface Reference {
 }
 
 /**
- * A raw machine address of one `pointee` value. Copy, nullable, owning nothing and holding no loan;
- * validity is the unsafe caller's obligation. `mutable` distinguishes `*mut T` from `*const T`.
+ * A qualified raw address. Nullness, extent and minimum alignment describe its representation;
+ * initialization, live storage, ownership and retained-address permission remain separate proofs.
  */
 export interface Pointer {
   readonly _tag: 'PointerType'
   readonly mutable: boolean
   readonly pointee: Type
+  readonly nullable: boolean
+  readonly extent: 'Single' | 'Many'
+  readonly alignment: 'Natural' | number
+  readonly addressSpace: 0
 }
 
 /** How a callable environment may be accessed by one invocation. */
@@ -279,10 +283,14 @@ const nonScalarBuiltinOperations = Object.freeze([
   'PointerFromMutRef',
   'PointerFromSlice',
   'PointerFromMutSlice',
-  'PointerOffset',
-  'PointerOffsetMut',
+  'PointerAt',
+  'PointerAtMut',
   'PointerRead',
   'PointerWrite',
+  'PointerReadUnaligned',
+  'PointerWriteUnaligned',
+  'PointerRequalify',
+  'SlotAddress',
   'SlotWrite',
   'SlotTake',
   'SlotCopy',
@@ -860,8 +868,50 @@ export const reference = (
 ): Reference => Object.freeze({ _tag: 'ReferenceType', access, target, lifetime })
 
 /** Constructs one canonical raw pointer type. */
-export const pointer = (mutable: boolean, pointee: Type): Pointer =>
-  Object.freeze({ _tag: 'PointerType', mutable, pointee })
+export const pointer = ({
+  mutable,
+  pointee,
+  nullable,
+  extent,
+  alignment,
+  addressSpace,
+}: Omit<Pointer, '_tag'>): Pointer =>
+  Object.freeze({
+    _tag: 'PointerType',
+    mutable,
+    pointee,
+    nullable,
+    extent,
+    alignment,
+    addressSpace,
+  })
+
+/** True for the explicit minimum alignments admitted by the native data-pointer contract. */
+export const isPointerAlignment = (value: number): boolean =>
+  Number.isSafeInteger(value) && value > 0 && value <= 536870912 && (value & (value - 1)) === 0
+
+/** Compares the full address contract without conflating it with pointee identity. */
+export const samePointerQualifiers = (self: Pointer, that: Pointer): boolean =>
+  self.mutable === that.mutable &&
+  self.nullable === that.nullable &&
+  self.extent === that.extent &&
+  self.alignment === that.alignment &&
+  self.addressSpace === that.addressSpace
+
+/** A safe immediate weakening; it never changes pointee identity or single/many extent. */
+export const pointerQualifiersWeaken = (self: Pointer, that: Pointer): boolean =>
+  (!that.mutable || self.mutable) &&
+  (!self.nullable || that.nullable) &&
+  self.extent === that.extent &&
+  self.addressSpace === that.addressSpace &&
+  (self.alignment === that.alignment ||
+    that.alignment === 1 ||
+    (typeof self.alignment === 'number' &&
+      typeof that.alignment === 'number' &&
+      self.alignment >= that.alignment))
+
+const pointerQualifierKey = (self: Pointer): string =>
+  `${self.extent}:${self.mutable ? 'mut' : 'const'}:${self.nullable ? 'nullable' : 'nonnull'}:${self.alignment}:${self.addressSpace}`
 
 /** Constructs one immutable canonical callable contract. */
 export const callable = (
@@ -1897,7 +1947,7 @@ const computeKey = (self: Type): string => {
     return `slice:${self.access}<${Lifetime.key(self.lifetime)};${key(self.element)}>`
   if (isReference(self))
     return `reference:${self.access}<${Lifetime.key(self.lifetime)};${key(self.target)}>`
-  if (isPointer(self)) return `pointer:${self.mutable ? 'mut' : 'const'}<${key(self.pointee)}>`
+  if (isPointer(self)) return `pointer:${pointerQualifierKey(self)}<${key(self.pointee)}>`
   if (isCallable(self)) {
     const schema = self.schema
     const schemaKey =
@@ -2178,7 +2228,7 @@ export const haveSameRepresentationShape = (left: Type, right: Type): boolean =>
     return (
       isPointer(left) &&
       isPointer(right) &&
-      left.mutable === right.mutable &&
+      samePointerQualifiers(left, right) &&
       haveSameRepresentationShape(left.pointee, right.pointee)
     )
   if (isForeignFunction(left) || isForeignFunction(right))
@@ -2625,7 +2675,8 @@ export const encode = (self: Type): string => {
     return `&${Lifetime.display(self.lifetime)} ${self.access === 'Exclusive' ? 'mut ' : ''}[${encode(self.element)}]`
   if (isReference(self))
     return `&${Lifetime.display(self.lifetime)} ${self.access === 'Exclusive' ? 'mut ' : ''}${encode(self.target)}`
-  if (isPointer(self)) return `${self.mutable ? '*mut ' : '*const '}${encode(self.pointee)}`
+  if (isPointer(self))
+    return `${self.nullable ? '?' : ''}${self.extent === 'Many' ? '[*]' : '*'}${self.mutable ? 'mut' : 'const'} ${self.alignment === 'Natural' ? '' : `align(${self.alignment}) `}${encode(self.pointee)}`
   if (isCallable(self)) {
     const mode = executableAccessPrefix(self.mode)
     const quantified =
@@ -3179,7 +3230,7 @@ export const substitute = (
       substituteLifetime(self.lifetime, substitution),
     )
   if (isPointer(self))
-    return pointer(self.mutable, substitute(self.pointee, substitution, compatibility))
+    return pointer({ ...self, pointee: substitute(self.pointee, substitution, compatibility) })
   if (isForeignFunction(self))
     return foreignFunction(
       self.parameters.map((parameter_) => substitute(parameter_, substitution, compatibility)),
@@ -3448,7 +3499,7 @@ export const specializeExecutableOwner = (
     if (isFixedArray(type)) return fixedArray(specializeType(type.element), type.length)
     if (isSlice(type)) return slice(type.access, specializeType(type.element), type.lifetime)
     if (isReference(type)) return reference(type.access, specializeType(type.target), type.lifetime)
-    if (isPointer(type)) return pointer(type.mutable, specializeType(type.pointee))
+    if (isPointer(type)) return pointer({ ...type, pointee: specializeType(type.pointee) })
     if (isForeignFunction(type))
       return foreignFunction(type.parameters.map(specializeType), specializeType(type.result))
     if (isCallable(type))
@@ -3958,7 +4009,7 @@ export const runtimeKey = (self: Type): string => {
   if (isReference(self))
     return Canonical.record('Reference', [self.access, runtimeKey(self.target)])
   if (isPointer(self))
-    return Canonical.record('Pointer', [self.mutable ? 'mut' : 'const', runtimeKey(self.pointee)])
+    return Canonical.record('Pointer', [pointerQualifierKey(self), runtimeKey(self.pointee)])
   if (isForeignFunction(self))
     return Canonical.record('ForeignFunction', [
       self.abi,

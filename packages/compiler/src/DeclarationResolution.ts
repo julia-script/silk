@@ -847,7 +847,7 @@ export const resolveDeclaredType = (
   if (fact._tag === 'Pointer') {
     const pointee = resolveDeclaredType(module, fact.pointee, resolvers, modules)
     if (pointee.fact._tag === 'Resolved') {
-      const type = Type.pointer(fact.mutable, pointee.fact.type)
+      const type = Type.pointer({ ...fact, pointee: pointee.fact.type })
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',

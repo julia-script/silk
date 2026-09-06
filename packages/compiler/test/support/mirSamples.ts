@@ -169,9 +169,19 @@ export const foreignCallSample = (
     Object.freeze({ span: sampleSpan(source, start, end), generated: false })
   const signature = Object.freeze({
     parameters: Object.freeze([
-      Object.freeze({ _tag: 'Integer' as const, bits: 32 as const, signed: true }),
+      Object.freeze({
+        _tag: 'Integer' as const,
+        bits: 32 as const,
+        signed: true,
+        extension: 'None' as const,
+      }),
     ]),
-    result: Object.freeze({ _tag: 'Integer' as const, bits: 32 as const, signed: true }),
+    result: Object.freeze({
+      _tag: 'Integer' as const,
+      bits: 32 as const,
+      signed: true,
+      extension: 'None' as const,
+    }),
   })
   return Object.freeze({
     _tag: 'MirModule',

@@ -1113,9 +1113,10 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'PointerIsNull':
     case 'PointerRead':
       return [operation.destination, operation.pointer]
-    case 'PointerFromReference':
+    case 'PointerRequalify':
+    case 'PointerFromStorage':
       return [operation.destination, operation.source]
-    case 'PointerOffset':
+    case 'PointerAt':
       return [operation.destination, operation.pointer, operation.count]
     case 'PointerWrite':
       return [operation.destination, operation.pointer, operation.value]
@@ -2063,8 +2064,9 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'RawBufferFill':
       return [semanticType(operation.type)]
     case 'PointerNull':
-    case 'PointerFromReference':
-    case 'PointerOffset':
+    case 'PointerRequalify':
+    case 'PointerFromStorage':
+    case 'PointerAt':
     case 'PointerRead':
       return [semanticType(operation.type)]
     case 'PointerIsNull':
@@ -2289,9 +2291,10 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'PointerIsNull':
     case 'PointerRead':
       return [operation.pointer]
-    case 'PointerFromReference':
+    case 'PointerRequalify':
+    case 'PointerFromStorage':
       return [operation.source]
-    case 'PointerOffset':
+    case 'PointerAt':
       return [operation.pointer, operation.count]
     case 'PointerWrite':
       return [operation.pointer, operation.value]
@@ -2891,8 +2894,9 @@ const pointerOperationViolation = (
       readonly _tag:
         | 'PointerNull'
         | 'PointerIsNull'
-        | 'PointerFromReference'
-        | 'PointerOffset'
+        | 'PointerRequalify'
+        | 'PointerFromStorage'
+        | 'PointerAt'
         | 'PointerRead'
         | 'PointerWrite'
     }
@@ -2906,15 +2910,25 @@ const pointerOperationViolation = (
   switch (operation._tag) {
     case 'PointerNull':
       return destination?._tag === 'Pointer' &&
-        operation.type.type.mutable &&
+        operation.type.type.nullable &&
         SilkType.equals(destination.type, operation.type.type)
         ? undefined
-        : 'Pointer null lost its *mut destination'
+        : 'Pointer null lost its nullable destination'
     case 'PointerIsNull':
       return pointerAt(operation.pointer) !== undefined && destination?._tag === 'bool'
         ? undefined
         : 'Pointer null test lost its pointer operand or bool destination'
-    case 'PointerFromReference': {
+    case 'PointerRequalify': {
+      const source = pointerAt(operation.source)
+      return source !== undefined &&
+        destination?._tag === 'Pointer' &&
+        SilkType.equals(destination.type, operation.type.type) &&
+        SilkType.equals(source.pointee, destination.type.pointee) &&
+        source.addressSpace === destination.type.addressSpace
+        ? undefined
+        : 'Pointer qualification changed its invariant pointee or address space'
+    }
+    case 'PointerFromStorage': {
       const source = fn.localTypes.at(operation.source.ordinal)
       let borrowed:
         | { readonly pointee: SilkType.Type; readonly access: SilkType.BorrowAccess }
@@ -2923,18 +2937,30 @@ const pointerOperationViolation = (
         borrowed = { pointee: source.type.target, access: source.type.access }
       else if (source?._tag === 'Slice')
         borrowed = { pointee: source.type.element, access: source.type.access }
+      else if (source !== undefined) {
+        const semantic = semanticType(source)
+        const pointee = SilkType.isSlot(semantic) ? SilkType.typeArgumentAt(semantic, 1) : undefined
+        if (pointee !== undefined) borrowed = { pointee, access: 'Exclusive' }
+      }
       return borrowed !== undefined &&
         destination?._tag === 'Pointer' &&
         SilkType.equals(destination.type, operation.type.type) &&
         SilkType.equals(operation.type.type.pointee, borrowed.pointee) &&
-        operation.type.type.mutable === (borrowed.access === 'Exclusive')
+        operation.type.type.mutable === (borrowed.access === 'Exclusive') &&
+        operation.type.type.alignment === 'Natural' &&
+        operation.type.type.addressSpace === 0 &&
+        operation.type.type.nullable === (source?._tag === 'Slice') &&
+        operation.type.type.extent === (source?._tag === 'Slice' ? 'Many' : 'Single')
         ? undefined
         : 'Pointer formation lost its borrowed source, pointee, or mutability agreement'
     }
-    case 'PointerOffset': {
+    case 'PointerAt': {
       const pointer = pointerAt(operation.pointer)
       return pointer !== undefined &&
-        SilkType.equals(pointer, operation.type.type) &&
+        !pointer.nullable &&
+        pointer.extent === 'Many' &&
+        pointer.alignment === 'Natural' &&
+        SilkType.equals(SilkType.pointer({ ...pointer, extent: 'Single' }), operation.type.type) &&
         fn.localTypes.at(operation.count.ordinal)?._tag === 'usize' &&
         destination?._tag === 'Pointer' &&
         SilkType.equals(destination.type, operation.type.type)
@@ -2944,6 +2970,8 @@ const pointerOperationViolation = (
     case 'PointerRead': {
       const pointer = pointerAt(operation.pointer)
       return pointer !== undefined &&
+        !pointer.nullable &&
+        pointer.extent === 'Single' &&
         destination !== undefined &&
         SilkType.equals(semanticType(destination), pointer.pointee) &&
         SilkType.equals(semanticType(operation.type), pointer.pointee) &&
@@ -2956,6 +2984,8 @@ const pointerOperationViolation = (
       const value = fn.localTypes.at(operation.value.ordinal)
       return pointer !== undefined &&
         pointer.mutable &&
+        !pointer.nullable &&
+        pointer.extent === 'Single' &&
         value !== undefined &&
         SilkType.equals(semanticType(value), pointer.pointee) &&
         destination?._tag === 'Nominal' &&
@@ -2985,6 +3015,22 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
     }),
   )
   violations.push(...coroutineFrameLayoutViolations(self))
+  for (const record of [...self.foreignCalls, ...self.foreignExports]) {
+    if (
+      !CAbi.isCanonical(record.signature.result, self.layout.target) ||
+      !record.signature.parameters.every(
+        (type) => type._tag !== 'Void' && CAbi.isCanonical(type, self.layout.target),
+      )
+    )
+      violations.push(
+        Object.freeze({
+          _tag: 'Violation',
+          rule: 'InvalidForeignOperation',
+          detail: `Foreign signature ${record.symbol} has noncanonical target ABI facts`,
+        }),
+      )
+  }
+
   const sameDeclaration = (
     left: DeclarationFacts.CanonicalId,
     right: DeclarationFacts.CanonicalId,
@@ -4438,13 +4484,13 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               const argument = operation.arguments.at(ordinal)
               const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
               if (parameter._tag === 'Pointer') {
-                // `*mut T` widens to `*const T` at an argument boundary; the pointee must agree.
+                // Argument conversion may only weaken qualifiers; the pointee remains invariant.
                 const semantic = actual === undefined ? undefined : semanticType(actual)
                 return (
                   semantic !== undefined &&
                   SilkType.isPointer(semantic) &&
-                  (semantic.mutable || !parameter.mutable) &&
-                  SilkType.key(semantic.pointee) === SilkType.key(parameter.pointee)
+                  SilkType.pointerQualifiersWeaken(semantic, parameter.type) &&
+                  SilkType.key(semantic.pointee) === SilkType.key(parameter.type.pointee)
                 )
               }
               return classKey(actual, 'Parameter') === CAbi.typeText(parameter)
@@ -5094,8 +5140,9 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         if (
           operation._tag === 'PointerNull' ||
           operation._tag === 'PointerIsNull' ||
-          operation._tag === 'PointerFromReference' ||
-          operation._tag === 'PointerOffset' ||
+          operation._tag === 'PointerRequalify' ||
+          operation._tag === 'PointerFromStorage' ||
+          operation._tag === 'PointerAt' ||
           operation._tag === 'PointerRead' ||
           operation._tag === 'PointerWrite'
         ) {

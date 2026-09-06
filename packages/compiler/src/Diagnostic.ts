@@ -249,6 +249,8 @@ export const invalidStaticLiteralCode = 'SEM0085' as const
 export const invalidConstantCode = 'SEM0086' as const
 /** Stable code for rejected profile inputs, package schemas, defaults, or predicates. */
 export const invalidConfigurationCode = 'SEM0214' as const
+/** Stable code for invalid raw-pointer alignment, address space, or qualifier conversion. */
+export const invalidPointerQualifierCode = 'SEM0215' as const
 /** Stable code for an expression statement whose result cannot be intentionally ignored. */
 export const expressionStatementResultCode = 'SEM0087' as const
 /** Stable code for using a generic binder in a value, failure-row, or requirement-row position of another kind. */
@@ -609,6 +611,7 @@ export type Code =
   | typeof invalidStaticLiteralCode
   | typeof invalidConstantCode
   | typeof invalidConfigurationCode
+  | typeof invalidPointerQualifierCode
   | typeof expressionStatementResultCode
   | typeof genericParameterKindMismatchCode
   | typeof contractRowInferenceCode
@@ -739,6 +742,11 @@ export type ParserContext = 'syntax' | 'statement' | 'expression' | 'parameter' 
 
 /** Structured per-code data explaining why the originating phase diagnosed. */
 export type Reason =
+  | {
+      readonly _tag: 'InvalidPointerQualifier'
+      readonly qualifier: string
+      readonly detail: string
+    }
   | { readonly _tag: 'ExpiredLifetime'; readonly lifetime: string }
   | { readonly _tag: 'InvalidSuspensionOwnership'; readonly detail: string }
   | { readonly _tag: 'UnsupportedBytes' }
@@ -5752,4 +5760,20 @@ export const invalidConfiguration = (
         origin.span === undefined ? [] : [{ label: origin.source, span: origin.span }],
       ),
     ),
+  })
+
+/** Reports an invalid minimum alignment or unsupported raw data address space. */
+export const invalidPointerQualifier = (
+  qualifier: string,
+  detail: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidPointerQualifierCode,
+    severity: 'error',
+    message: `Invalid pointer qualifier ${qualifier}: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidPointerQualifier', qualifier, detail }),
+    span,
   })

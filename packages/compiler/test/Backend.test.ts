@@ -464,7 +464,13 @@ pub fn main() -> i32 {
     )
     assert.notStrictEqual(reload, -1, artifact.ir)
     assert.deepEqual(artifact.foreignImports, [
-      { symbol: 'touch', parameters: ['*mut'], result: 'void' },
+      {
+        symbol: 'touch',
+        parameters: [
+          'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>',
+        ],
+        result: 'void',
+      },
     ])
   }),
 )
@@ -492,7 +498,12 @@ pub fn main() -> i32 {
     assert.include(artifact.ir.split('\n'), 'declare ptr @malloc(i64)')
     assert.match(artifact.ir, /call ptr @malloc\(i64 %/)
     assert.deepEqual(artifact.foreignImports, [
-      { symbol: 'malloc', parameters: ['u64'], result: '*mut' },
+      {
+        symbol: 'malloc',
+        parameters: ['u64'],
+        result:
+          'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
+      },
     ])
   }),
 )

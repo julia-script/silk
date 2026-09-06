@@ -831,6 +831,37 @@ export const analyzeDeclaredType = (
       })
     }
     const mutable = SyntaxTree.directToken(syntax, 'MutKeyword') !== undefined
+    const nullable = SyntaxTree.directToken(syntax, 'Question') !== undefined
+    const extent: Type.Pointer['extent'] =
+      SyntaxTree.directToken(syntax, 'LeftBracket') === undefined ? 'Single' : 'Many'
+    let alignment: Type.Pointer['alignment'] = 'Natural'
+    const seen = new Set<string>()
+    const qualifierDiagnostics: Array<Diagnostic.Diagnostic> = []
+    for (const qualifier of SyntaxTree.directNodes(syntax, 'PointerQualifier')) {
+      const nameToken = SyntaxTree.directToken(qualifier, 'Identifier')
+      const valueToken = SyntaxTree.directToken(qualifier, 'DecimalInteger')
+      if (nameToken === undefined || valueToken === undefined) continue
+      const name = Option.getOrElse(SourceFile.spelling(source, nameToken.span), () => '')
+      const spelling = Option.getOrElse(SourceFile.spelling(source, valueToken.span), () => '')
+      const value = Number(spelling.replaceAll('_', ''))
+      let detail: string | undefined
+      if (seen.has(name)) detail = 'qualifier is repeated'
+      else if (name === 'align') {
+        if (Type.isPointerAlignment(value)) alignment = value
+        else detail = 'alignment must be a positive power of two no greater than 536870912'
+      } else if (name === 'addrspace' && value !== 0)
+        detail = 'only ordinary data address space zero is admitted'
+      seen.add(name)
+      if (detail !== undefined)
+        qualifierDiagnostics.push(Diagnostic.invalidPointerQualifier(name, detail, valueToken.span))
+    }
+    const qualifiers = { mutable, nullable, extent, alignment, addressSpace: 0 as const }
+    const invalid = qualifierDiagnostics[0]
+    if (invalid !== undefined)
+      return Object.freeze({
+        fact: Object.freeze({ _tag: 'Unavailable', syntax, cause: Diagnostic.identity(invalid) }),
+        diagnostics: Object.freeze(qualifierDiagnostics),
+      })
     const pointee = analyzeDeclaredType(
       source,
       pointeeSyntax,
@@ -839,7 +870,7 @@ export const analyzeDeclaredType = (
       lifetimeContext,
     )
     if (pointee.fact._tag === 'Resolved') {
-      const type = Type.pointer(mutable, pointee.fact.type)
+      const type = Type.pointer({ ...qualifiers, pointee: pointee.fact.type })
       return Object.freeze({
         fact: Object.freeze({
           _tag: 'Resolved',
@@ -855,7 +886,7 @@ export const analyzeDeclaredType = (
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'Pointer',
-        mutable,
+        ...qualifiers,
         pointee: pointee.fact,
         spelling: `${mutable ? '*mut ' : '*const '}unavailable`,
         token,

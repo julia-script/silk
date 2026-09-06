@@ -788,7 +788,18 @@ export type Operation =
        * Forms a pointer from the address lane of a reference or slice local. Formation is an
        * ordinary read of the borrow: the result holds no loan and keeps nothing alive.
        */
-      readonly _tag: 'PointerFromReference'
+      readonly _tag: 'PointerFromStorage'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Pointer' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /**
+       * Forms a pointer from the address lane of a reference or slice local. Formation is an
+       * ordinary read of the borrow: the result holds no loan and keeps nothing alive.
+       */
+      readonly _tag: 'PointerRequalify'
       readonly destination: LocalId
       readonly source: LocalId
       readonly type: Extract<Type, { readonly _tag: 'Pointer' }>
@@ -796,7 +807,7 @@ export type Operation =
     }
   | {
       /** Advances a pointer by `count` elements of the pointee; validity is the caller's obligation. */
-      readonly _tag: 'PointerOffset'
+      readonly _tag: 'PointerAt'
       readonly destination: LocalId
       readonly pointer: LocalId
       readonly count: LocalId

@@ -1586,12 +1586,26 @@ impl Counter { pub fn zero() -> Self { return Counter { value: 0 } } }`,
 
 it.effect('round-trips raw pointer types and keys public pointer signatures by mutability', () =>
   Effect.gen(function* () {
-    const pointer = Type.pointer(true, Type.pointer(false, Type.nominal('surface/Main', 'Opaque')))
+    const pointer = Type.pointer({
+      mutable: true,
+      pointee: Type.pointer({
+        mutable: false,
+        pointee: Type.nominal('surface/Main', 'Opaque'),
+        nullable: true,
+        extent: 'Single',
+        alignment: 1,
+        addressSpace: 0,
+      }),
+      nullable: true,
+      extent: 'Many',
+      alignment: 'Natural',
+      addressSpace: 0,
+    })
     const decoded = yield* ModuleSurface.decodeSemanticType(
       ModuleSurface.encodeSemanticType(pointer),
     )
     assert.strictEqual(Type.key(decoded), Type.key(pointer))
-    assert.strictEqual(Type.encode(decoded), '*mut *const surface/Main.Opaque')
+    assert.strictEqual(Type.encode(decoded), '?[*]mut ?*const align(1) surface/Main.Opaque')
 
     const mutable = yield* surface(
       'pub struct Opaque {}\npub fn take(handle: *mut Opaque) -> *mut Opaque { return handle }',
@@ -1604,14 +1618,26 @@ it.effect('round-trips raw pointer types and keys public pointer signatures by m
     )
     assert.strictEqual(ModuleSurface.equals(mutable, repeated), true)
     assert.strictEqual(ModuleSurface.equals(mutable, constant), false)
-    assert.include(mutable.canonical, 'pointer:mut<')
-    assert.include(constant.canonical, 'pointer:const<')
+    assert.include(mutable.canonical, 'pointer:Single:mut:nonnull:Natural:0<')
+    assert.include(constant.canonical, 'pointer:Single:const:nonnull:Natural:0<')
   }),
 )
 
 it.effect('round-trips C function pointers and data-symbol declarations in module surfaces', () =>
   Effect.gen(function* () {
-    const callback = Type.foreignFunction([Type.pointer(false, 'i32')], 'i32')
+    const callback = Type.foreignFunction(
+      [
+        Type.pointer({
+          mutable: false,
+          pointee: 'i32',
+          nullable: false,
+          extent: 'Single',
+          alignment: 'Natural',
+          addressSpace: 0,
+        }),
+      ],
+      'i32',
+    )
     const decoded = yield* ModuleSurface.decodeSemanticType(
       ModuleSurface.encodeSemanticType(callback),
     )

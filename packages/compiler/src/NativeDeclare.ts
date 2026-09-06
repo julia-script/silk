@@ -1,3 +1,4 @@
+import * as NativeCAbi from './NativeCAbi.js'
 import * as LlvmBlock from '@silklang/llvm/Block'
 import type * as Builder from '@silklang/llvm/Builder'
 import * as FunctionActor from '@silklang/llvm/Function'
@@ -140,6 +141,7 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
       throw new RangeError(`LLVM export ${record.symbol} has a void parameter`)
     const resultType =
       context.cType(record.signature.result) ?? (yield* LlvmType.voidType(context.builder))
+    const attributes = yield* NativeCAbi.attributes(context.builder, record.signature)
     const thunk = yield* FunctionActor.declare(
       context.builder,
       record.symbol,
@@ -148,6 +150,7 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
         resultType,
         parameters.flatMap((type) => (type === undefined ? [] : [type])),
       ),
+      attributes === undefined ? {} : { attributes },
     ).pipe(
       Effect.mapError(
         (cause) =>

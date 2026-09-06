@@ -2129,6 +2129,13 @@ pub fn main() -> i32 { return 0 }`
       value: { kind: 'boolean', value: true },
       origin,
     }
+    const invalidTarget = yield* Effect.flip(
+      ProfileBootstrap.complete(
+        { ...initial, target: { ...initial.target, pointerAlignment: 4 } },
+        graph,
+      ),
+    )
+    assert.strictEqual(invalidTarget.operation, 'ProfileBootstrap.complete')
     const defaulted = yield* ProfileBootstrap.complete(initial, graph)
     const enabled = yield* ProfileBootstrap.complete(initial, graph, [binding])
     const count = (profile: CompilationProfile.CompilationProfile) =>

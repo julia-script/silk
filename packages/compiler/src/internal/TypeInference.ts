@@ -36,6 +36,8 @@ import {
   isNominal,
   isParameter,
   isPointer,
+  pointerQualifiersWeaken,
+  samePointerQualifiers,
   isReference,
   isRepresentationArgument,
   isRepresentationParameterArgument,
@@ -920,9 +922,11 @@ const inferSelectedType = (
     )
   }
   if (isPointer(pattern) && isPointer(actual)) {
-    // `*mut T` satisfies a `*const T` pattern; the reverse does not.
+    // Inference admits only the same immediate qualifier weakening as ordinary compatibility.
     return (
-      (!pattern.mutable || actual.mutable) &&
+      (context.invariant
+        ? samePointerQualifiers(actual, pattern)
+        : pointerQualifiersWeaken(actual, pattern)) &&
       inferType(pattern.pointee, actual.pointee, inferred, { ...context, invariant: true })
     )
   }

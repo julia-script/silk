@@ -51,6 +51,7 @@ export type NodeKind =
   | 'SliceType'
   | 'ReferenceType'
   | 'PointerType'
+  | 'PointerQualifier'
   | 'CallableType'
   | 'ForeignFunctionType'
   | 'ExactRepresentationType'

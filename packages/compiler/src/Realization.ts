@@ -188,7 +188,8 @@ function discoverAndLower(
             self.index,
             completion,
             self.resolution,
-            ArtifactKind.isLibrary(options.artifactKind ?? ArtifactKind.nativeExecutable)
+            completion.profile.target.kind === 'Native' &&
+              completion.profile.artifact !== 'executable'
               ? 'Library'
               : 'Executable',
           ),

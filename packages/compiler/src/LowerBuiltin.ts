@@ -739,6 +739,8 @@ const lowerBuiltinOperation = (
     return finishBuiltin(destination)
   }
   if (
+    expression.operation === 'PointerRequalify' ||
+    expression.operation === 'SlotAddress' ||
     expression.operation === 'PointerFromRef' ||
     expression.operation === 'PointerFromMutRef' ||
     expression.operation === 'PointerFromSlice' ||
@@ -750,7 +752,10 @@ const lowerBuiltinOperation = (
     const destination = fn.alloc(type)
     fn.emit(
       Object.freeze({
-        _tag: 'PointerFromReference' as const,
+        _tag:
+          expression.operation === 'PointerRequalify'
+            ? ('PointerRequalify' as const)
+            : ('PointerFromStorage' as const),
         destination,
         source,
         type,
@@ -759,14 +764,14 @@ const lowerBuiltinOperation = (
     )
     return finishBuiltin(destination)
   }
-  if (expression.operation === 'PointerOffset' || expression.operation === 'PointerOffsetMut') {
+  if (expression.operation === 'PointerAt' || expression.operation === 'PointerAtMut') {
     const [pointer, count] = argumentLocals
     const type = fn.type(expression.type)
     if (pointer === undefined || count === undefined || type?._tag !== 'Pointer') return undefined
     const destination = fn.alloc(type)
     fn.emit(
       Object.freeze({
-        _tag: 'PointerOffset' as const,
+        _tag: 'PointerAt' as const,
         destination,
         pointer,
         count,
@@ -776,7 +781,7 @@ const lowerBuiltinOperation = (
     )
     return finishBuiltin(destination)
   }
-  if (expression.operation === 'PointerRead') {
+  if (expression.operation === 'PointerRead' || expression.operation === 'PointerReadUnaligned') {
     const [pointer] = argumentLocals
     const type = fn.type(expression.type)
     if (pointer === undefined || type === undefined) return undefined
@@ -792,7 +797,7 @@ const lowerBuiltinOperation = (
     )
     return finishBuiltin(destination)
   }
-  if (expression.operation === 'PointerWrite') {
+  if (expression.operation === 'PointerWrite' || expression.operation === 'PointerWriteUnaligned') {
     const [pointer, value] = argumentLocals
     const type = fn.type(expression.type)
     if (

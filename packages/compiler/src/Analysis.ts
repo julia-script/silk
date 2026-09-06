@@ -181,7 +181,7 @@ export const realize = Effect.fn('Analysis.realize')(function* (
 export const makeRealized = Effect.fn('Analysis.makeRealized')(function* (
   request: ModuleClosure.CompilationRequest,
 ): Effect.fn.Return<Snapshot, never, SourceResolver.SourceResolver> {
-  return yield* realize(yield* make(request))
+  return yield* realize(yield* make(request), request.configuration ?? request.target)
 })
 
 /** Builds the snapshot of one single-module source. */

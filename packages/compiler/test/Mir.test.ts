@@ -1,3 +1,4 @@
+import { outputStorageSource } from './support/corpus.js'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -634,8 +635,14 @@ pub fn main() -> i32 {
                                   parameters: Object.freeze([
                                     Object.freeze({
                                       _tag: 'Pointer' as const,
-                                      mutable: false,
-                                      pointee: 'u8' as const,
+                                      type: Type.pointer({
+                                        mutable: false,
+                                        pointee: 'u8',
+                                        nullable: false,
+                                        extent: 'Single',
+                                        alignment: 'Natural',
+                                        addressSpace: 0,
+                                      }),
                                     }),
                                   ]),
                                 }),
@@ -767,8 +774,10 @@ it.effect('lowers pointer formation, offset, write, and read to explicit pointer
 pub fn main() -> i32 {
   let mut values = [1, 2, 3]
   let pointer = Pointer.fromMutSlice(&mut values)
+  if Pointer.isNullMany(pointer) { return 0 }
   unsafe {
-    let third = Pointer.offsetMut(pointer, 2)
+    let many = Intrinsic.pointerRequalify<?[*]mut i32, [*]mut i32>(pointer)
+    let third = Pointer.atMut(many, 2)
     Pointer.write(third, 9)
     return Pointer.read(third)
   }
@@ -780,11 +789,11 @@ pub fn main() -> i32 {
     assert.deepEqual(MirVerification.verify(program), [])
     const described = program.functions.flatMap((fn) =>
       MirVerification.operations(fn).flatMap((operation) => {
-        if (operation._tag === 'PointerFromReference')
+        if (operation._tag === 'PointerFromStorage')
           return [
             `${operation._tag} ${fn.localTypes.at(operation.source.ordinal)?._tag} -> ${Type.encode(operation.type.type)}`,
           ]
-        if (operation._tag === 'PointerOffset')
+        if (operation._tag === 'PointerAt')
           return [
             `${operation._tag} ${fn.localTypes.at(operation.count.ordinal)?._tag} -> ${Type.encode(operation.type.type)}`,
           ]
@@ -796,14 +805,14 @@ pub fn main() -> i32 {
       }),
     )
     assert.deepEqual(described.sort(), [
-      'PointerFromReference Slice -> *mut i32',
-      'PointerOffset usize -> *mut i32',
+      'PointerAt usize -> *mut i32',
+      'PointerFromStorage Slice -> ?[*]mut i32',
       'PointerRead -> i32',
       'PointerWrite i32',
     ])
     const encoded = MirEncoding.encode(program)
-    assert.include(encoded, '= pointer-from-reference ')
-    assert.include(encoded, '= pointer-offset ')
+    assert.include(encoded, '= pointer-from-storage ')
+    assert.include(encoded, '= pointer-at ')
     assert.include(encoded, '= pointer-write ')
     assert.include(encoded, '= pointer-read ')
     assert.strictEqual(MirEncoding.encode(program), encoded)
@@ -966,5 +975,33 @@ pub fn main() -> i32 { return inspect(Choice.Last) }`),
       }).map((violation) => violation.rule),
       'InvalidMatchJoin',
     )
+  }),
+)
+
+it.effect('forms an output slot address without reading or initializing its value', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/output-storage',
+      ascii(outputStorageSource),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const addressFunctions = program.functions.filter((fn) =>
+      MirVerification.operations(fn).some((operation) => operation._tag === 'PointerFromStorage'),
+    )
+    assert.strictEqual(addressFunctions.length, 1)
+    for (const fn of addressFunctions) {
+      const operations = MirVerification.operations(fn)
+      assert.strictEqual(
+        operations.some(
+          (operation) =>
+            operation._tag === 'SlotTake' ||
+            operation._tag === 'SlotCopy' ||
+            operation._tag === 'SlotWrite',
+        ),
+        false,
+      )
+    }
   }),
 )

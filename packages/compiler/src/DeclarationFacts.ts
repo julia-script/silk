@@ -351,6 +351,10 @@ export type DeclaredTypeFact =
   | {
       readonly _tag: 'Pointer'
       readonly mutable: boolean
+      readonly nullable: boolean
+      readonly extent: Type.Pointer['extent']
+      readonly alignment: Type.Pointer['alignment']
+      readonly addressSpace: Type.Pointer['addressSpace']
       readonly pointee: DeclaredTypeFact
       readonly spelling: string
       readonly token: Token.Token

@@ -23,8 +23,14 @@ it('gives char a fixed 32-bit width and a 4-byte layout on every target', () => 
   assert.strictEqual(found?.category, 'Character')
   assert.strictEqual(Scalar.bits(Scalar.character, 32), 32)
   assert.strictEqual(Scalar.bits(Scalar.character, 64), 32)
-  assert.deepEqual(Scalar.resolveLayout(Scalar.character, 4, 4), { size: 4, alignment: 4 })
-  assert.deepEqual(Scalar.resolveLayout(Scalar.character, 8, 8), { size: 4, alignment: 4 })
+  assert.deepEqual(Scalar.resolveLayout(Scalar.character, Target.wasm32UnknownUnknown), {
+    size: 4,
+    alignment: 4,
+  })
+  assert.deepEqual(Scalar.resolveLayout(Scalar.character, Target.aarch64AppleDarwin), {
+    size: 4,
+    alignment: 4,
+  })
 })
 
 it('gives char a 32-bit unsigned representation on a 64-bit and a 32-bit target', () => {

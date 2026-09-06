@@ -2071,10 +2071,33 @@ fn take(value: *const i32, nested: *mut *const u8, handle: *mut Handle) -> *mut 
     )
     const handle = Type.nominal('pointers', 'Handle')
     assert.strictEqual(ConformanceProof.copyType(index, handle), true)
-    assert.strictEqual(ConformanceProof.copyType(index, Type.pointer(true, handle)), true)
+    assert.strictEqual(
+      ConformanceProof.copyType(
+        index,
+        Type.pointer({
+          mutable: true,
+          pointee: handle,
+          nullable: false,
+          extent: 'Single',
+          alignment: 'Natural',
+          addressSpace: 0,
+        }),
+      ),
+      true,
+    )
     assert.strictEqual(CleanupPlan.cleanupPlan(index, handle)._tag, 'NoCleanup')
     assert.strictEqual(
-      CleanupPlan.cleanupPlan(index, Type.pointer(false, Type.nominal('pointers', 'Opaque')))._tag,
+      CleanupPlan.cleanupPlan(
+        index,
+        Type.pointer({
+          mutable: false,
+          pointee: Type.nominal('pointers', 'Opaque'),
+          nullable: false,
+          extent: 'Single',
+          alignment: 'Natural',
+          addressSpace: 0,
+        }),
+      )._tag,
       'NoCleanup',
     )
   }),
@@ -2353,4 +2376,32 @@ effect fn staticText() -> string<'static> { return "ready" }`
       const snapshot = yield* Analysis.ofSource('admission-valid', ascii(source))
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
     }),
+)
+
+it.effect('retains nested pointer qualifiers and diagnoses invalid qualifier values', () =>
+  Effect.gen(function* () {
+    const valid = yield* collect('qualified', [
+      [
+        'qualified',
+        `
+unsafe extern "C" fn entries() -> ?[*]const ?*mut align(1) addrspace(0) i32
+pub struct Nested<T> { value: ?[*]const ?*mut align(1) T }
+`,
+      ],
+    ])
+    assert.deepEqual(valid.diagnostics, [])
+    const result = valid.modules[0]?.declarations[0]?.returnType
+    assert.strictEqual(result?._tag, 'Resolved')
+    if (result?._tag === 'Resolved')
+      assert.strictEqual(Type.encode(result.type), '?[*]const ?*mut align(1) i32')
+    for (const qualifier of ['align(0)', 'align(3)', 'addrspace(1)', 'align(1) align(2)']) {
+      const invalid = yield* collect('invalid', [
+        ['invalid', `unsafe extern "C" fn value() -> *const ${qualifier} i32`],
+      ])
+      const diagnostics = invalid.diagnostics.filter((diagnostic) => diagnostic.code === 'SEM0215')
+      assert.strictEqual(diagnostics.length, 1)
+      assert.strictEqual(diagnostics[0]?.span.sourceId, 'invalid')
+      assert.isAbove(diagnostics[0]?.span.start ?? 0, 0)
+    }
+  }),
 )

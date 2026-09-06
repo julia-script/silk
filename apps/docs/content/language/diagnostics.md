@@ -16,11 +16,11 @@ $ pnpm --filter @silklang/compiler documentation:generate
 | `LEX`  | Lexical   | 12    |
 | `PAR`  | Parser    | 5     |
 | `MOD`  | Module    | 3     |
-| `SEM`  | Semantic  | 200   |
+| `SEM`  | Semantic  | 201   |
 | `OWN`  | Ownership | 19    |
 | `LAY`  | Layout    | 1     |
 
-There are 240 codes in total.
+There are 241 codes in total.
 
 ## Lexical (`LEX`)
 
@@ -261,6 +261,7 @@ There are 240 codes in total.
 | `SEM0212` |                                                                                                              | `Lifetime <longer> does not outlive <shorter>`                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `SEM0213` |                                                                                                              | `Type <type> does not remain valid for <lifetime>`                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `SEM0214` | Stable code for rejected profile inputs, package schemas, defaults, or predicates.                           | `Invalid compilation configuration: <message>`                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `SEM0215` | Stable code for invalid raw-pointer alignment, address space, or qualifier conversion.                       | `Invalid pointer qualifier <qualifier>: <detail>`                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ## Ownership (`OWN`)
 

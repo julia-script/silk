@@ -140,6 +140,7 @@ const completeNodeKinds: ReadonlyArray<SyntaxTree.NodeKind> = Object.freeze([
   'ParenthesizedType',
   'PipelineExpression',
   'PointerType',
+  'PointerQualifier',
   'CallableType',
   'ForeignFunctionType',
   'ExactRepresentationType',
@@ -1324,7 +1325,7 @@ fn scan(values: &[i32], output: &mut [i32]) -> i32 {
   return helper(usize.toI32(values.length), output[0])
 }
 fn readReferent(value: &i32) -> i32 { return value.* }
-fn pointers(cursor: *mut *const u8, count: *const i32) -> *const u8 { return cursor }
+fn pointers(cursor: ?[*]mut ?*const align(1) addrspace(0) u8, count: *const i32) -> ?*const u8 { return cursor }
 fn callbacks(shared: fn(i32, bool) -> i32, exclusive: mut fn(i32) -> bool, consuming: once fn() -> i32) -> i32 {
   return shared(1, true)
 }
