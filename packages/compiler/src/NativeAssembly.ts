@@ -1,4 +1,3 @@
-import * as Mir from './Mir.js'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import * as ConfigurationError from './ConfigurationError.js'
@@ -246,42 +245,3 @@ export const violations = (
   if (Result.isFailure(checked)) return [checked.failure]
   return encode(self) === encode(checked.success) ? [] : ['assembly metadata normalization']
 }
-
-/** Reports target-specific machine-contract errors before backend construction. */
-export const diagnostics = (program: Mir.Module): ReadonlyArray<Diagnostic.Diagnostic> =>
-  program.functions.flatMap((fn) =>
-    fn.regions
-      .flatMap(Mir.operationsOf)
-      .flatMap(Mir.operationTree)
-      .flatMap((operation) => {
-        if (operation._tag !== 'NativeAssembly') return []
-        if (!available(program.layout.target))
-          return [
-            Diagnostic.intrinsicTargetUnavailable(
-              'Intrinsic.assembly',
-              program.layout.target.id,
-              operation.provenance.span,
-            ),
-          ]
-        const operands = operation.arguments.flatMap((argument) => {
-          const type = fn.localTypes[argument.ordinal]
-          return type === undefined ? [] : [Mir.semanticType(type)]
-        })
-        return violations(
-          operation.assembly,
-          Mir.semanticType(operation.type),
-          operands,
-          program.layout.target,
-        ).map((detail) =>
-          Diagnostic.invalidConfiguration(
-            ConfigurationError.make('NativeAssembly.program', 'InvalidInput', detail, [
-              {
-                ...ConfigurationOrigin.literal(operation.provenance.span.sourceId),
-                span: operation.provenance.span,
-              },
-            ]),
-            operation.provenance.span,
-          ),
-        )
-      }),
-  )

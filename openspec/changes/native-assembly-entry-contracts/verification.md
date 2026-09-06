@@ -27,4 +27,9 @@ unsupported target admission, machine body restrictions and unavailable instrume
 MIR independently validates normalized contracts, terminal region shape and naked bodies.
 Unit type arguments now parse and resolve in call generic lists, enabling the unit result form.
 
-Repository checks are in progress; no full check or release result is claimed yet.
+The first integrated full gate exposed an initialization cycle in CLI builds: source declaration
+validation imported MIR planning, which reached instance-key initialization before declaration
+collection completed. A single-file CLI build reproduced the failure. Source contracts now have
+no MIR runtime dependency; `NativeAssemblyPlanning` owns retained-operation and profile validation.
+The rebuilt compiler passes the original CLI reproducer. Repository checks continue; no full check
+or release result is claimed yet.

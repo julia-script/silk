@@ -1,5 +1,4 @@
-import * as MachineFunction from './MachineFunction.js'
-import * as NativeAssembly from './NativeAssembly.js'
+import * as NativeAssemblyPlanning from './NativeAssemblyPlanning.js'
 import * as ArtifactPlan from './ArtifactPlan.js'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import * as ArtifactComposition from './ArtifactComposition.js'
@@ -761,8 +760,7 @@ const finalizeMir = (
     ...ownership.violations.map((violation) =>
       Diagnostic.invalidSuspensionOwnership(violation.detail, violation.span),
     ),
-    ...NativeAssembly.diagnostics(normalized),
-    ...MachineFunction.diagnostics(normalized, profile),
+    ...NativeAssemblyPlanning.diagnostics(normalized, profile),
   ]
   if (diagnostics.length > 0) return { program: undefined, diagnostics }
   if (options.normalizeMir === false) return { program: normalized, diagnostics }

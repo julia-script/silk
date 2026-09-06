@@ -1,11 +1,8 @@
-import type * as CompilationProfile from './CompilationProfile.js'
 import * as ConfigurationError from './ConfigurationError.js'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
 import * as DeclarationProperty from './DeclarationProperty.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import * as Diagnostic from './Diagnostic.js'
-import * as Mir from './Mir.js'
-import * as NativeAssembly from './NativeAssembly.js'
 import type * as SourceFile from './SourceFile.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SyntaxTree from './SyntaxTree.js'
@@ -135,44 +132,3 @@ export const bodyDiagnostics = (
     return rejected('naked bodies admit only Intrinsic.assembly')
   return []
 }
-
-/** Independently guards the exact naked MIR shape and unavailable instrumentation modes. */
-export const diagnostics = (
-  program: Mir.Module,
-  profile: CompilationProfile.Facts | undefined,
-): ReadonlyArray<Diagnostic.Diagnostic> =>
-  program.functions.flatMap((fn) => {
-    const properties = fn.machine
-    if (properties === undefined) return []
-    const operations = fn.regions.flatMap(Mir.operationsOf)
-    const assembly = operations[0]
-    if (
-      profile === undefined ||
-      !NativeAssembly.available(profile.target) ||
-      profile.sanitizers.length > 0 ||
-      profile.unwind !== 'none'
-    )
-      return [
-        diagnostic('naked function target, unwind or instrumentation profile', properties.span),
-      ]
-    if (
-      fn.parameterCount !== 0 ||
-      !Type.equals(Mir.semanticType(fn.result), Type.unit) ||
-      operations.length !== 1 ||
-      assembly?._tag !== 'NativeAssembly' ||
-      !assembly.assembly.noReturn ||
-      !assembly.assembly.sideEffects ||
-      assembly.arguments.length !== 0 ||
-      !Type.equals(Mir.semanticType(assembly.type), Type.unit) ||
-      fn.regions.some(
-        (region) => region._tag !== 'OperationRegion' || region.outcome._tag !== 'Trap',
-      )
-    )
-      return [
-        diagnostic(
-          'naked MIR requires one terminal operand-free assembly operation',
-          properties.span,
-        ),
-      ]
-    return []
-  })
