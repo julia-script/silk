@@ -1,3 +1,4 @@
+import * as NativeAssemblyOperation from './NativeAssemblyOperation.js'
 import * as Effect from 'effect/Effect'
 import * as CleanupPlan from './CleanupPlan.js'
 import type * as Mir from './Mir.js'
@@ -55,6 +56,8 @@ export const emit = Effect.fnUntraced(function* (
   operation: LinearOperation,
 ) {
   switch (operation._tag) {
+    case 'NativeAssembly':
+      return yield* NativeAssemblyOperation.emit(context.call, operation)
     case 'BindMatch':
     case 'Literal':
     case 'EnumConstant':

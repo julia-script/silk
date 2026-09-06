@@ -1242,6 +1242,49 @@ const staticSequenceOperations = Object.freeze([
   }),
 ])
 
+const assemblyResult = Type.parameter({ module: 'Intrinsic', name: 'assembly' }, 0, 'Result')
+const assemblyInputs = Type.parameter({ module: 'Intrinsic', name: 'assembly' }, 1, 'Inputs')
+const assemblyParameters = Object.freeze([
+  Type.string(Lifetime.staticLifetime),
+  Type.string(Lifetime.staticLifetime),
+  Type.string(Lifetime.staticLifetime),
+  Type.string(Lifetime.staticLifetime),
+  'bool',
+  'bool',
+  assemblyInputs,
+] satisfies ReadonlyArray<Type.Type>)
+const assemblyOperation: BuiltinOperation = Object.freeze({
+  _tag: 'IntrinsicOperation',
+  id: operationId('Intrinsic', 'assembly'),
+  spelling: 'assembly',
+  typeParameters: Object.freeze([typeParameter('Result')]),
+  parameters: Object.freeze([
+    staticValueParameter('template', 'string'),
+    staticValueParameter('constraints', 'string'),
+    staticValueParameter('clobbers', 'string'),
+    staticValueParameter('memory', 'string'),
+    staticValueParameter('sideEffects', 'bool'),
+    staticValueParameter('noReturn', 'bool'),
+    valueParameter('inputs', 'Inputs'),
+  ]),
+  callParameters: assemblyParameters,
+  result: 'Result',
+  unsafe: true,
+  phase: 'Mixed',
+  admission: 'Platform',
+  consumer: 'language:selected-native-machine-code',
+  invariant:
+    'caller proves machine effects, register and stack preservation, pointer validity, and absence of unwinding',
+  targets: normalizeRuntimeTargets(['aarch64-unknown-linux-gnu', 'x86_64-unknown-linux-gnu']),
+  rule: Object.freeze({
+    _tag: 'BuiltinRule',
+    operation: 'NativeAssembly',
+    typeParameters: Object.freeze([assemblyResult]),
+    parameters: assemblyParameters,
+    result: assemblyResult,
+  }),
+})
+
 const enumValueOperation: Operation = Object.freeze({
   _tag: 'IntrinsicOperation',
   id: operationId('Intrinsic', 'enumValue'),
@@ -2469,6 +2512,7 @@ const intrinsicOperations = Object.freeze([
   ...reflectionOperations,
   borrowFieldOperation,
   ...staticSequenceOperations,
+  assemblyOperation,
   enumValueOperation,
   replaceOperation,
 ])
@@ -2548,12 +2592,23 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         throw new RangeError(`Intrinsic ${operation.spelling} is missing admission metadata`)
       if (operation.phase === 'Runtime' && operation.targets.length === 0)
         throw new RangeError(`Runtime intrinsic ${operation.spelling} has no execution target`)
-      if (operation.phase !== 'Runtime' && operation.targets.length !== 0)
+      if (operation.phase === 'StaticOnly' && operation.targets.length !== 0)
         throw new RangeError(`Non-runtime intrinsic ${operation.spelling} has a runtime target`)
       const staticParameters = operation.parameters.flatMap((parameter, ordinal) =>
         parameter.phase === 'Static' ? [ordinal] : [],
       )
-      if (operation.phase === 'Mixed') {
+      if (
+        operation.phase === 'Mixed' &&
+        operation.rule._tag === 'BuiltinRule' &&
+        operation.rule.operation === 'NativeAssembly'
+      ) {
+        if (
+          staticParameters.length !== 6 ||
+          staticParameters.some((ordinal, index) => ordinal !== index) ||
+          operation.parameters.length !== 7
+        )
+          throw new RangeError('Assembly metadata lanes are invalid')
+      } else if (operation.phase === 'Mixed') {
         if (
           operation.rule._tag !== 'MixedFieldProjectionRule' ||
           staticParameters.length !== 1 ||

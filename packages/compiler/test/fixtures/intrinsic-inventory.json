@@ -5737,6 +5737,15 @@
       "consumer": "silk/static_sequence.at"
     },
     {
+      "operation": "Intrinsic.assembly",
+      "signature": "unsafe fn Intrinsic.assembly<Result>(static template: string, static constraints: string, static clobbers: string, static memory: string, static sideEffects: bool, static noReturn: bool, inputs: Inputs) -> Result",
+      "unsafe": true,
+      "admission": "Platform",
+      "consumer": "language:selected-native-machine-code",
+      "identity": "NativeAssembly",
+      "invariant": "caller proves machine effects, register and stack preservation, pointer validity, and absence of unwinding"
+    },
+    {
       "operation": "Intrinsic.enumValue",
       "signature": "fn Intrinsic.enumValue(value: <owning enum>) -> <owning enum representation>",
       "unsafe": false,

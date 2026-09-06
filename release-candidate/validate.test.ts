@@ -530,6 +530,8 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './ArtifactPlan',
       './NativeRequirement',
       './NativeRequirementBinding',
+      './NativeAssembly',
+      './MachineFunction',
       './FormattedDocument',
       './HeapObservation',
       './Hir',

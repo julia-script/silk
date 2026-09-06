@@ -3121,7 +3121,7 @@ const wordLiteralVerdicts = (
   for (const instance of discovery.instances) {
     const expressions = instance.function.statements
       .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Hir.runtimeExpressionTree)
     for (const expression of expressions) {
       if (expression._tag !== 'IntegerLiteral' || expression.constant !== undefined) continue
       const type = Type.substitute(
@@ -3307,7 +3307,7 @@ export const plan = (
   for (const instance of discovery.instances) {
     const expressions = instance.function.statements
       .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)
+      .flatMap(Hir.runtimeExpressionTree)
     for (const expression of expressions) {
       if (expression._tag === 'StaticStringLiteral' || expression._tag === 'StaticByteViewLiteral')
         staticDataById.set(expression.data.id, expression.data)

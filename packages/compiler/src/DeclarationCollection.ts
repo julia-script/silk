@@ -1,3 +1,4 @@
+import * as MachineFunction from './MachineFunction.js'
 import * as DeclarationProperty from './DeclarationProperty.js'
 import * as NativeRequirement from './NativeRequirement.js'
 import * as ForeignContract from './ForeignContract.js'
@@ -3024,7 +3025,14 @@ const collectForeign = (
   for (const child of node.children) {
     const kind = SyntaxTree.isMissingToken(child) ? undefined : child.kind
     const restriction = foreignRestrictions[direction].find(([expected]) => expected === kind)?.[1]
-    if (restriction !== undefined)
+    if (
+      restriction !== undefined &&
+      !(
+        direction === 'Export' &&
+        kind === 'UnsafeKeyword' &&
+        MachineFunction.analyze(source, node).properties !== undefined
+      )
+    )
       diagnostics.push(Diagnostic.foreignDeclarationRestriction(restriction, child.span))
   }
   const asIndex = node.children.findIndex(
@@ -3902,16 +3910,30 @@ const collectModule = (
       SyntaxTree.directToken(node, 'ExportKeyword') !== undefined
         ? collectForeign(source, node, name, 'Export', facts)
         : undefined
+    const machine = MachineFunction.analyze(source, node)
+    diagnostics.push(...machine.diagnostics)
+    if (foreign !== undefined && machine.properties !== undefined)
+      diagnostics.push(
+        Diagnostic.foreignDeclarationRestriction(
+          'machine property on a foreign import',
+          machine.properties.span,
+        ),
+      )
     const properties = DeclarationProperty.clauses(node)
     const behavior = properties.filter(
-      (clause) => DeclarationProperty.owner(source, clause) !== 'Intrinsic.native',
+      (clause) =>
+        DeclarationProperty.owner(source, clause) !== 'Intrinsic.native' &&
+        DeclarationProperty.owner(source, clause) !== 'Intrinsic.machine',
     )
     for (const property of behavior.slice(1))
       diagnostics.push(
         Diagnostic.foreignDeclarationRestriction('duplicate foreign contract', property.span),
       )
     for (const property of properties)
-      if (foreign === undefined)
+      if (
+        foreign === undefined &&
+        DeclarationProperty.owner(source, property) !== 'Intrinsic.machine'
+      )
         diagnostics.push(
           Diagnostic.foreignDeclarationRestriction(
             'foreign contract on a non-foreign function',
@@ -3932,6 +3954,7 @@ const collectModule = (
       phase: foreign === undefined && staticFunction ? 'Static' : 'Runtime',
       functionKind: foreign === undefined ? functionKind : 'Ordinary',
       unsafe: SyntaxTree.directToken(node, 'UnsafeKeyword') !== undefined,
+      ...(machine.properties === undefined ? {} : { machine: machine.properties }),
       ...(foreign === undefined ? {} : { foreign: foreign.fact }),
       // A rejected export publishes no symbol, so discovery never roots it.
       ...(foreignExport === undefined || foreignExport.diagnostics.length > 0

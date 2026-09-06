@@ -1,3 +1,5 @@
+import * as NativeAssembly from '../src/NativeAssembly.js'
+import * as Exit from 'effect/Exit'
 import * as ForeignContract from '../src/ForeignContract.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -76,7 +78,7 @@ it('requires normalized target metadata in every sealed inventory entry', () => 
   assert.isTrue(
     Intrinsic.inventory().every((entry) => {
       const expected =
-        entry.phase === 'Runtime' ? Intrinsic.normalizeRuntimeTargets(entry.targets) : []
+        entry.phase !== 'StaticOnly' ? Intrinsic.normalizeRuntimeTargets(entry.targets) : []
       return (
         JSON.stringify(entry.targets) === JSON.stringify(expected) &&
         (entry.phase !== 'Runtime' || entry.targets.length > 0)
@@ -688,3 +690,248 @@ it('plans exports over MIR: symbol map, non-native rejection, and suspension', (
     ['SEM0201', 'planning/d', undefined],
   ])
 })
+
+it.effect('lowers literal typed assembly through fixed and tied native registers', () =>
+  Effect.gen(function* () {
+    const analysis = yield* Analysis.makeRealized({
+      root: SourceFile.make(
+        'assembly',
+        encoder.encode(`
+unsafe fn add(left: u64, right: u64) -> u64 {
+  return unsafe Intrinsic.assembly<u64>("addq $2, $0", "={rax},0,{rdi}", "flags", "none", false, false, (left, right))
+}
+export "C" fn sum(left: u64, right: u64) -> u64 { return unsafe add(left, right) }
+`),
+      ),
+      configuration: {
+        profile: {
+          target: 'x86_64-unknown-linux-gnu',
+          artifact: 'object',
+          runtime: { kind: 'none' },
+        },
+      },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.deepEqual(Analysis.diagnostics(analysis), [])
+    const artifact = yield* Analysis.codegen(analysis, { mode: 'release' })
+    assert.match(artifact.ir, /asm "addq \$2, \$0", "=\{rax\},0,\{rdi\},~\{flags\}"/)
+    assert.notMatch(artifact.ir, /@silk\.static\./)
+  }),
+)
+
+it.effect('emits a naked entry directly at its C symbol', () =>
+  Effect.gen(function* () {
+    const analysis = yield* Analysis.makeRealized({
+      root: SourceFile.make(
+        'entry',
+        encoder.encode(`
+unsafe export "C" fn entry() -> () as "native_entry" with Intrinsic.machine(naked: true, noReturn: true) {
+  return unsafe Intrinsic.assembly<()>("movq %rsp, %rdi\\njmp native_entry_probe", "", "", "readwrite", true, true, ())
+}
+`),
+      ),
+      configuration: {
+        profile: {
+          target: 'x86_64-unknown-linux-gnu',
+          artifact: 'object',
+          runtime: { kind: 'none' },
+        },
+      },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.deepEqual(Analysis.diagnostics(analysis), [])
+    const artifact = yield* Analysis.codegen(analysis, { mode: 'release' })
+    assert.match(artifact.ir, /define void @native_entry\(/)
+    assert.match(artifact.ir, /naked/)
+    assert.match(artifact.ir, /asm sideeffect/)
+  }),
+)
+
+it.effect('rejects malformed native register, memory, lane and template contracts', () =>
+  Effect.gen(function* () {
+    const base = {
+      template: 'addq $1, $0',
+      constraints: '={rax},0',
+      clobbers: 'flags',
+      memory: 'none',
+      sideEffects: false,
+      noReturn: false,
+    }
+    for (const patch of [
+      { constraints: '={rsp},0' },
+      { constraints: '={rax},{rax}' },
+      { clobbers: 'rax' },
+      { clobbers: 'flags,flags' },
+      { memory: 'arbitrary' },
+      { memory: 'write' },
+      { noReturn: true },
+      { template: '.globl injected' },
+      { template: 'mov $2, $0' },
+      { template: 'mov $, $0' },
+      { constraints: '={rax},r' },
+    ])
+      assert.isTrue(
+        Exit.isFailure(
+          yield* Effect.exit(
+            NativeAssembly.decode(
+              { ...base, ...patch },
+              'u64',
+              ['u64'],
+              Target.x8664UnknownLinuxGnu,
+            ),
+          ),
+        ),
+      )
+    assert.isTrue(
+      Exit.isFailure(
+        yield* Effect.exit(
+          NativeAssembly.decode(base, 'i32', ['i32'], Target.x8664UnknownLinuxGnu),
+        ),
+      ),
+    )
+    assert.isTrue(
+      Exit.isFailure(
+        yield* Effect.exit(NativeAssembly.decode(base, 'u64', ['u64'], Target.aarch64AppleDarwin)),
+      ),
+    )
+    const arm = yield* NativeAssembly.decode(
+      { ...base, template: 'add $0, $0, $1', constraints: '={x0},0' },
+      'u64',
+      ['u64'],
+      Target.aarch64UnknownLinuxGnu,
+    )
+    assert.equal(
+      NativeAssembly.llvmConstraints(arm, Target.aarch64UnknownLinuxGnu),
+      '={x0},0,~{cc}',
+    )
+    assert.include(
+      NativeAssembly.violations(
+        { ...arm, inputs: [] },
+        'u64',
+        ['u64'],
+        Target.aarch64UnknownLinuxGnu,
+      ),
+      'assembly metadata normalization',
+    )
+  }),
+)
+
+it.effect('rejects compiler work in naked bodies and nonliteral machine properties', () =>
+  Effect.gen(function* () {
+    for (const [properties, body] of [
+      ['naked: true, noReturn: true', 'return ()'],
+      ['naked: true, noReturn: true', 'let value = 1; return ()'],
+      ['naked: true && false, noReturn: true', 'return ()'],
+      ['naked: true', 'return ()'],
+    ]) {
+      const analysis = yield* Analysis.makeRealized({
+        root: SourceFile.make(
+          'invalid-entry',
+          encoder.encode(
+            `unsafe export "C" fn entry() -> () with Intrinsic.machine(${properties}) { ${body} }`,
+          ),
+        ),
+        configuration: {
+          profile: {
+            target: 'x86_64-unknown-linux-gnu',
+            artifact: 'object',
+            runtime: { kind: 'none' },
+          },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      const diagnostic =
+        Analysis.diagnostics(analysis).find((entry) => entry.code === 'SEM0214') ??
+        unreachable('expected machine contract rejection')
+      assert.equal(diagnostic.span.sourceId, 'invalid-entry')
+      assert.isAbove(diagnostic.span.end, diagnostic.span.start)
+    }
+  }),
+)
+
+it.effect('rejects naked instrumentation and unwind profiles before emission', () =>
+  Effect.gen(function* () {
+    for (const extra of [{ unwind: 'native' as const }, { sanitizers: ['address' as const] }]) {
+      const analysis = yield* Analysis.makeRealized({
+        root: SourceFile.make(
+          'profile-entry',
+          encoder.encode(
+            `unsafe export "C" fn entry() -> () with Intrinsic.machine(naked: true, noReturn: true) { return unsafe Intrinsic.assembly<()>("ud2", "", "", "none", true, true, ()) }`,
+          ),
+        ),
+        configuration: {
+          profile: {
+            target: 'x86_64-unknown-linux-gnu',
+            artifact: 'object',
+            runtime: { kind: 'none' },
+            ...extra,
+          },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.include(
+        Analysis.diagnostics(analysis).map((entry) => entry.code),
+        'SEM0214',
+      )
+    }
+  }),
+)
+
+it.effect('rejects assembly in static functions at the source boundary', () =>
+  Effect.gen(function* () {
+    const analysis = yield* Analysis.makeRealized({
+      root: SourceFile.make(
+        'static-assembly',
+        encoder.encode(
+          `static fn machine() -> u64 { return unsafe Intrinsic.assembly<u64>("movq $$1, $0", "={rax}", "", "none", false, false, ()) }`,
+        ),
+      ),
+      configuration: {
+        profile: {
+          target: 'x86_64-unknown-linux-gnu',
+          artifact: 'object',
+          runtime: { kind: 'none' },
+        },
+      },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.include(
+      Analysis.diagnostics(analysis).map((entry) => entry.code),
+      'SEM0176',
+    )
+  }),
+)
+
+it.effect('reports source assembly constraints and target admission with call spans', () =>
+  Effect.gen(function* () {
+    for (const [target, constraint, operand, expected] of [
+      ['x86_64-unknown-linux-gnu', '={rax},{rax}', 'value', 'SEM0214'],
+      ['x86_64-unknown-linux-gnu', '={rax},0', 'true', 'SEM0214'],
+      ['aarch64-apple-darwin', '={rax},0', 'value', 'SEM0093'],
+      ['wasm32-unknown-unknown', '={rax},0', 'value', 'SEM0093'],
+    ] as const) {
+      const analysis = yield* Analysis.makeRealized({
+        root: SourceFile.make(
+          'bad-assembly',
+          encoder.encode(
+            `pub fn machine(value: u64) -> u64 { return unsafe Intrinsic.assembly<u64>("", "${constraint}", "", "none", false, false, (${operand},)) }`,
+          ),
+        ),
+        configuration: {
+          profile: { target, artifact: 'object', runtime: { kind: 'none' } },
+          composition: {
+            runtimes: [],
+            defaults: [],
+            requirements: [],
+            retention: [{ module: 'bad-assembly', declaration: 'machine' }],
+          },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.include(
+        Analysis.diagnostics(analysis).map((entry) => entry.code),
+        expected,
+        target + ':' + operand,
+      )
+      const diagnostic =
+        Analysis.diagnostics(analysis).find((entry) => entry.code === expected) ??
+        unreachable('expected assembly rejection')
+      assert.equal(diagnostic.span.sourceId, 'bad-assembly')
+      assert.isAbove(diagnostic.span.end, diagnostic.span.start)
+    }
+  }),
+)

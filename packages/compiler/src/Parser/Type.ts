@@ -117,7 +117,9 @@ export const parseTypeArgumentList = (
       nextSignificantKind(state) === 'Question' &&
       !nullablePointerStarts(state)
     ) &&
-    (!following.includes(nextSignificantKind(state) ?? 'EndOfFile') || nullablePointerStarts(state))
+    (!following.includes(nextSignificantKind(state) ?? 'EndOfFile') ||
+      nullablePointerStarts(state) ||
+      nextSignificantKind(state) === 'LeftParenthesis')
   ) {
     const argumentFollowing: ReadonlyArray<Token.TokenKind> = [
       'Comma',
@@ -193,7 +195,9 @@ export const parseTypeParameterList = (
   while (
     nextSignificantKind(state) !== 'Greater' &&
     nextSignificantKind(state) !== 'EndOfFile' &&
-    (!following.includes(nextSignificantKind(state) ?? 'EndOfFile') || nullablePointerStarts(state))
+    (!following.includes(nextSignificantKind(state) ?? 'EndOfFile') ||
+      nullablePointerStarts(state) ||
+      nextSignificantKind(state) === 'LeftParenthesis')
   ) {
     const markerKind = nextSignificantKind(state)
     const marker =

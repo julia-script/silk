@@ -1,3 +1,5 @@
+import * as MachineFunction from './MachineFunction.js'
+import * as NativeAssembly from './NativeAssembly.js'
 import * as ArtifactPlan from './ArtifactPlan.js'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import * as ArtifactComposition from './ArtifactComposition.js'
@@ -376,6 +378,7 @@ function discoverAndLower(
               ),
               ProvisionalMir.build(instances, targetLayout.layout, self.index),
               self.index,
+              completion?.profile,
               options,
             ),
           (value) => value.program?.functions.length ?? 0,
@@ -746,6 +749,7 @@ const finalizeMir = (
   program: Mir.Module,
   provisional: ProvisionalMir.Module,
   index: DeclarationIndex.Index,
+  profile: CompilationProfile.CompilationProfile | undefined,
   options: Options,
 ): {
   readonly program: Mir.Module | undefined
@@ -753,9 +757,13 @@ const finalizeMir = (
 } => {
   const normalized = normalizeMir(program, provisional, options)
   const ownership = SuspensionOwnership.plan(normalized, provisional, index)
-  const diagnostics = ownership.violations.map((violation) =>
-    Diagnostic.invalidSuspensionOwnership(violation.detail, violation.span),
-  )
+  const diagnostics = [
+    ...ownership.violations.map((violation) =>
+      Diagnostic.invalidSuspensionOwnership(violation.detail, violation.span),
+    ),
+    ...NativeAssembly.diagnostics(normalized),
+    ...MachineFunction.diagnostics(normalized, profile),
+  ]
   if (diagnostics.length > 0) return { program: undefined, diagnostics }
   if (options.normalizeMir === false) return { program: normalized, diagnostics }
   return {

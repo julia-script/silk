@@ -118,3 +118,6 @@ export * as ArtifactPlan from './ArtifactPlan.js'
 export * as NativeRequirement from './NativeRequirement.js'
 
 export * as NativeRequirementBinding from './NativeRequirementBinding.js'
+
+export * as NativeAssembly from './NativeAssembly.js'
+export * as MachineFunction from './MachineFunction.js'

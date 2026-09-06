@@ -327,7 +327,7 @@ export const lowerProgram = (
   for (const instance of discovery.instances) {
     for (const expression of instance.function.statements
       .flatMap(Hir.statementExpressions)
-      .flatMap(Hir.expressionTree)) {
+      .flatMap(Hir.runtimeExpressionTree)) {
       if (expression._tag === 'StaticStringLiteral' || expression._tag === 'StaticByteViewLiteral')
         staticDataById.set(expression.data.id, expression.data)
     }

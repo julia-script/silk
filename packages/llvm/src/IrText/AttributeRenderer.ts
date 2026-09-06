@@ -26,15 +26,21 @@ export const renderAttribute = (state: BuilderState.Snapshot, index: number): st
       if (name === 'align') return `align ${description.value}`
       if (name === 'memory') {
         const effects = ['none', 'read', 'write', 'readwrite']
+        // The bitcode memory attribute uses the legacy arg/inaccessible/other packing.
+        // LLVM upgrades other memory to include errno, but not target-specific state.
+        const other = Number((description.value >> 4n) & 3n)
         const values = [
           ['argmem', Number(description.value & 3n)],
           ['inaccessiblemem', Number((description.value >> 2n) & 3n)],
-          ['other', Number((description.value >> 4n) & 3n)],
+          ['target_mem0', 0],
+          ['target_mem1', 0],
         ] as const
         const rendered = values
-          .filter(([, effect]) => effect !== 0)
+          .filter(([, effect]) => effect !== other)
           .map(([location, effect]) => `${location}: ${effects[effect] ?? 'none'}`)
-        return rendered.length === 0 ? 'memory(none)' : `memory(${rendered.join(', ')})`
+        const entries =
+          other === 0 && rendered.length > 0 ? rendered : [effects[other] ?? 'none', ...rendered]
+        return `memory(${entries.join(', ')})`
       }
       return `${name}(${description.value})`
     case 'Type':

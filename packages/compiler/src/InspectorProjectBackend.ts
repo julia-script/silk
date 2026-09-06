@@ -760,6 +760,8 @@ const placeText = (root: Mir.LocalId, selectors: ReadonlyArray<Mir.PlaceSelector
 
 const operationLabel = (operation: Mir.Operation): string => {
   switch (operation._tag) {
+    case 'NativeAssembly':
+      return `${localText(operation.destination)} = assembly ${operation.assembly.constraints} · ${operation.assembly.memory}${operation.assembly.noReturn ? ' · no return' : ''}`
     case 'SetInitialized':
       return `${localText(operation.flag)} = initialized ${operation.initialized}`
     case 'ForeignStaticLoad':

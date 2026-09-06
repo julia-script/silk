@@ -1,3 +1,4 @@
+import type * as MachineFunction from './MachineFunction.js'
 import type * as NativeRequirement from './NativeRequirement.js'
 import type * as ForeignContract from './ForeignContract.js'
 import type * as DeclarationLifetime from './DeclarationLifetime.js'
@@ -23,6 +24,7 @@ import * as Type from './Type.js'
 /** One function declaration header and its syntax-owned semantic facts. */
 export interface DeclarationFact {
   readonly _tag: 'FunctionDeclaration'
+  readonly machine?: MachineFunction.MachineFunction
   readonly lifetimeElaboration?: DeclarationLifetime.Context
   readonly id: DeclarationId
   readonly canonical: CanonicalState

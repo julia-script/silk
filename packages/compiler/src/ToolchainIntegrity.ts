@@ -246,7 +246,7 @@ const installedComponents = (): ReadonlyArray<Component> => {
     }),
   )
   const runtime = Intrinsic.inventory().flatMap<Component>((entry) =>
-    entry.phase !== 'Runtime'
+    entry.phase === 'StaticOnly' || entry.targets.length === 0
       ? []
       : entry.targets.map((target) =>
           Object.freeze({
@@ -450,7 +450,7 @@ export const validateTarget = (
       calls.flatMap((call) => {
         const operation = Intrinsic.findOperationById(call.operation)
         return operation === undefined ||
-          (operation.phase === 'Runtime' && operation.targets.includes(target.id))
+          (operation.phase !== 'StaticOnly' && operation.targets.includes(target.id))
           ? []
           : [Intrinsic.operationText(call.operation)]
       }),

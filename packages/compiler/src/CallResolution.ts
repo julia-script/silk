@@ -281,7 +281,8 @@ export interface CallTypeArgumentsResult {
 
 const isTypeArgumentNode = (element: SyntaxTree.Element): element is SyntaxTree.Node =>
   SyntaxTree.isNode(element) &&
-  (element.kind === 'LifetimeType' ||
+  (element.kind === 'UnitType' ||
+    element.kind === 'LifetimeType' ||
     element.kind === 'RequirementSelector' ||
     element.kind === 'TypePath' ||
     element.kind === 'AppliedType' ||

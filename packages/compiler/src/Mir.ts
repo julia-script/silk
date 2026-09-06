@@ -1,3 +1,5 @@
+import type * as MachineFunction from './MachineFunction.js'
+import type * as NativeAssembly from './NativeAssembly.js'
 import type * as CAbi from './CAbi.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
@@ -301,6 +303,14 @@ export type PlaceSelector =
     }
 
 export type Operation =
+  | {
+      readonly _tag: 'NativeAssembly'
+      readonly assembly: NativeAssembly.NativeAssembly
+      readonly destination: LocalId
+      readonly arguments: ReadonlyArray<LocalId>
+      readonly type: Type
+      readonly provenance: Provenance
+    }
   | {
       /** Updates a compiler-owned Boolean presence flag without reading an owned value. */
       readonly _tag: 'SetInitialized'
@@ -1536,6 +1546,7 @@ export type RunSuspendableEffectRegion = Extract<
 >
 
 export interface MirFunction {
+  readonly machine?: MachineFunction.MachineFunction
   readonly initializationFlags?: ReadonlyArray<{
     readonly root: LocalId
     readonly flags: NonNullable<DropOperation['initialization']>['flags']
@@ -1888,6 +1899,8 @@ export interface Violation {
     | 'InvalidOsOperation'
     | 'InvalidForeignCall'
     | 'InvalidForeignOperation'
+    | 'InvalidNativeAssembly'
+    | 'InvalidMachineFunction'
     | 'InvalidRawStorageOperation'
     | 'InvalidPointerOperation'
     | 'InvalidLocalSharedOperation'

@@ -1,3 +1,4 @@
+import * as NativeAssembly from './NativeAssembly.js'
 import * as Option from 'effect/Option'
 import * as AggregateIdentity from './AggregateIdentity.js'
 import * as BodyLifetime from './BodyLifetime.js'
@@ -5277,6 +5278,12 @@ export function analyzeBuiltinCall(
         })
     }
   }
+  if (signature?.operation === 'NativeAssembly') {
+    const parameter = signature.parameters[6]
+    const input = argumentsResult.facts[6]?.type
+    if (parameter !== undefined && Type.isParameter(parameter) && input?._tag === 'Available')
+      substitution.set(Type.key(parameter), input.type)
+  }
   const missingInference = declaredTypeParameters.find(
     (parameter) => substitution.get(Type.key(parameter)) === undefined,
   )
@@ -5390,13 +5397,25 @@ export function analyzeBuiltinCall(
     resolution,
     caller,
   )
+  const assembly =
+    signature?.operation === 'NativeAssembly' && instantiatedResult !== undefined
+      ? NativeAssembly.analyze(source, argumentsResult.facts, instantiatedResult, call.span)
+      : undefined
+  if (reference._tag === 'ResolvedBuiltin' && assembly?.assembly !== undefined)
+    reference = { ...reference, assembly: assembly.assembly }
+  const assemblyDiagnostics = [...(assembly?.diagnostics ?? [])]
+  if (signature?.operation === 'NativeAssembly' && caller.phase === 'Static')
+    assemblyDiagnostics.push(
+      Diagnostic.staticPhaseViolation('Intrinsic.assembly', 'static', [], call.span),
+    )
   const expressionType =
     hasAvailableCallSyntax(call) &&
     reference._tag === 'ResolvedBuiltin' &&
     specializationDiagnostic === undefined &&
     inferenceDiagnostic === undefined &&
     unsafeDiagnostic === undefined &&
-    qualifierDiagnostic === undefined
+    qualifierDiagnostic === undefined &&
+    assemblyDiagnostics.length === 0
       ? availableExpressionType(reference.result)
       : unavailableExpressionType
 
@@ -5418,6 +5437,7 @@ export function analyzeBuiltinCall(
       ...(inferenceDiagnostic === undefined ? [] : [inferenceDiagnostic]),
       ...(unsafeDiagnostic === undefined ? [] : [unsafeDiagnostic]),
       ...(qualifierDiagnostic === undefined ? [] : [qualifierDiagnostic]),
+      ...assemblyDiagnostics,
       ...argumentsResult.diagnostics,
       ...typeArguments.diagnostics,
       ...callContract.diagnostics,

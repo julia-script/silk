@@ -1,3 +1,4 @@
+import * as NativeAssembly from './NativeAssembly.js'
 import * as MirInitialization from './MirInitialization.js'
 import * as MovePath from './MovePath.js'
 import * as Lifetime from './Lifetime.js'
@@ -1045,6 +1046,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         operation.failure,
       ]
     case 'OsCall':
+    case 'NativeAssembly':
     case 'ForeignCall':
       return [operation.destination, ...operation.arguments]
     case 'RawBufferFrom':
@@ -1962,6 +1964,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'Allocate':
     case 'HostWrite':
     case 'OsCall':
+    case 'NativeAssembly':
     case 'ForeignCall':
     case 'Project':
     case 'ReadPlace':
@@ -2254,6 +2257,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'OsOpen':
       return [...operation.arguments, operation.success, operation.failure]
     case 'OsCall':
+    case 'NativeAssembly':
     case 'ForeignCall':
       return operation.arguments
     case 'RawBufferFrom':
@@ -3015,6 +3019,64 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
     }),
   )
   violations.push(...coroutineFrameLayoutViolations(self))
+  for (const fn of self.functions) {
+    const operations = fn.regions.flatMap(operationsOf).flatMap(operationTree)
+    for (const operation of operations) {
+      if (operation._tag !== 'NativeAssembly') continue
+      const operands = operation.arguments.flatMap((argument) => {
+        const type = fn.localTypes[argument.ordinal]
+        return type === undefined ? [] : [semanticType(type)]
+      })
+      for (const detail of NativeAssembly.violations(
+        operation.assembly,
+        semanticType(operation.type),
+        operands,
+        self.layout.target,
+      ))
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidNativeAssembly',
+          function: fn.id,
+          detail,
+        })
+      const owner = fn.regions.find((region) => operationsOf(region).includes(operation))
+      if (
+        operation.assembly.noReturn &&
+        (owner?._tag !== 'OperationRegion' ||
+          owner.outcome._tag !== 'Trap' ||
+          owner.operations.at(-1) !== operation)
+      )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidNativeAssembly',
+          function: fn.id,
+          detail: 'terminal assembly must end its region without a continuation',
+        })
+    }
+    if (fn.machine !== undefined) {
+      const assembly = operations[0]
+      if (
+        !NativeAssembly.available(self.layout.target) ||
+        fn.parameterCount !== 0 ||
+        !SilkType.equals(semanticType(fn.result), SilkType.unit) ||
+        operations.length !== 1 ||
+        assembly?._tag !== 'NativeAssembly' ||
+        !assembly.assembly.noReturn ||
+        !assembly.assembly.sideEffects ||
+        assembly.arguments.length !== 0 ||
+        fn.regions.some(
+          (region) => region._tag !== 'OperationRegion' || region.outcome._tag !== 'Trap',
+        )
+      )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidMachineFunction',
+          function: fn.id,
+          detail: 'naked function requires exactly one operand-free terminal assembly operation',
+        })
+    }
+  }
+
   const retained = new Set<string>()
   for (const root of self.retainedRoots ?? []) {
     const key = Instances.keyText(root)

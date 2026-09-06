@@ -509,6 +509,14 @@
     "./NativeRequirementBinding": {
       "types": "./dist/NativeRequirementBinding.d.ts",
       "default": "./dist/NativeRequirementBinding.js"
+    },
+    "./NativeAssembly": {
+      "types": "./dist/NativeAssembly.d.ts",
+      "default": "./dist/NativeAssembly.js"
+    },
+    "./MachineFunction": {
+      "types": "./dist/MachineFunction.d.ts",
+      "default": "./dist/MachineFunction.js"
     }
   },
   "publishConfig": {

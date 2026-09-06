@@ -1,3 +1,4 @@
+import * as NativeAssemblyOperation from './NativeAssemblyOperation.js'
 import * as Alignment from '@silklang/llvm/Alignment'
 import * as LlvmBlock from '@silklang/llvm/Block'
 import type * as Builder from '@silklang/llvm/Builder'
@@ -307,6 +308,13 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
       builder,
       entry.handle,
       Effect.fnUntraced(function* (body) {
+        if (entry.fn.machine !== undefined)
+          return yield* NativeAssemblyOperation.emitNaked(
+            builder,
+            body,
+            entry.fn,
+            program.layout.target,
+          )
         const suspensionRegions = new Map(
           (entry.fn.suspension?.regions ?? []).map((region) => [region.operation, region] as const),
         )
@@ -899,6 +907,11 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
                 `addr${destination.ordinal}_defined`,
               )
             }
+          }
+          const terminalAssembly = block.operations.at(-1)
+          if (terminalAssembly?._tag === 'NativeAssembly' && terminalAssembly.assembly.noReturn) {
+            yield* FunctionBody.unreachable(body)
+            continue
           }
           yield* NativeControl.emit(
             Object.freeze({

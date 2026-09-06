@@ -1,3 +1,4 @@
+import * as NativeAssembly from './NativeAssembly.js'
 import * as Instances from './Instances.js'
 import * as CAbi from './CAbi.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
@@ -107,6 +108,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = os-open ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) success=${localText(operation.success)} failure=${localText(operation.failure)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'OsCall':
       return `${localText(operation.destination)} = os-call ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'NativeAssembly':
+      return `${localText(operation.destination)} = assembly ${NativeAssembly.encode(operation.assembly)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ForeignCall':
       return `${localText(operation.destination)} = foreign-call ${operation.symbol} abi=${operation.abi} signature=${CAbi.signatureKey(operation.signature)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferFrom':
@@ -476,7 +479,7 @@ export const encode = (self: Module): string => {
         fn.instance.typeArguments.length === 0
           ? ''
           : `<${fn.instance.typeArguments.map(SilkType.encodeGenericArgument).join(', ')}>`
-      } params=${fn.parameterCount} locals=${fn.localTypes.length} -> ${typeText(fn.result)} entry=${regionText(fn.entry)}`,
+      } params=${fn.parameterCount} locals=${fn.localTypes.length} -> ${typeText(fn.result)} entry=${regionText(fn.entry)}${fn.machine === undefined ? '' : ' machine=naked,noreturn'}`,
       ...suspensionLines(fn),
       ...topologicalRegions(fn).flatMap(regionLines),
     ]),
