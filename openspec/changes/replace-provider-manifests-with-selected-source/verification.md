@@ -12,7 +12,7 @@ Earlier failures were consequences of this change and were fixed: OS-provider an
 
 The live element's target-switch test verifies that unchanged source loses stale diagnostics when its target changes. The initial complete native acceptance run executed all 321 cases; subsequent integration runs reused Turbo's successful unchanged compiler task.
 
-Final integrated verification on source head `a1bc63f3` (above origin/main `0ee2ed40`) passed all six
+Final integrated verification on source head `a239100e` (above origin/main `0ee2ed40`) passed all six
 required repository gates. The final stack includes 2,343 compiler tests, 321 actually executed
 native acceptance cases, 159 LSP tests, 89 CLI tests, 17 repository policy checks and 10 packed
 release-candidate checks. See `../native-assembly-entry-contracts/verification.md` for integration

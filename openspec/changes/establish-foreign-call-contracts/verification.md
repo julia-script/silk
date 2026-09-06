@@ -72,7 +72,7 @@ edge-based dominance (including a second path into an invoke's normal destinatio
 
 Stack submission is tracked separately in tasks.md; this document does not claim a merged PR.
 
-Final integrated verification on source head `a1bc63f3` (above origin/main `0ee2ed40`) passed all six
+Final integrated verification on source head `a239100e` (above origin/main `0ee2ed40`) passed all six
 required repository gates. The final stack includes 2,343 compiler tests, 321 actually executed
 native acceptance cases, 159 LSP tests, 89 CLI tests, 17 repository policy checks and 10 packed
 release-candidate checks. See `../native-assembly-entry-contracts/verification.md` for integration

@@ -1,6 +1,6 @@
 # Verification
 
-All required gates passed in order on final source head `a1bc63f3`, integrated above origin/main
+All required gates passed in order on final source head `a239100e`, integrated above origin/main
 `0ee2ed40`:
 
 - `pnpm typecheck`: 18 successful tasks.
@@ -78,3 +78,9 @@ requiring healthy compilation to beat a wall-clock deadline.
 
 The first release-candidate run passed nine checks and rejected the expected export inventory's
 ordering. All six added actors were present; their expected paths are now in canonical sorted order.
+
+The next CI run passed the worker-recovery regression and all other LSP assertions, then hit the
+multi-document stdio test's explicit 30-second overall timeout. That override is removed so the
+test inherits the repository's existing 60-second compiler-test budget. All six local gates were
+rerun in order afterward: 159 LSP tests pass, `pnpm check` passes, and all 10 release-candidate
+checks pass. Compiler/native results were reused because their inputs did not change.
