@@ -9998,6 +9998,7 @@ export const finishDeclarationCall = (
 ): ExpressionResult => {
   if (
     reference._tag === 'Resolved' &&
+    reference.declaration.foreign?.variadic !== true &&
     isSectionArity(reference.declaration.parameters.length, argumentsResult.facts.length)
   ) {
     const section = finishCallableSection(

@@ -107,6 +107,7 @@ const tokenCode: Readonly<Record<Token.TokenKind, number>> = Object.freeze({
   ExportKeyword: 86,
   Lifetime: 87,
   ParamKeyword: 88,
+  Ellipsis: 89,
 })
 
 interface ExpectedToken {

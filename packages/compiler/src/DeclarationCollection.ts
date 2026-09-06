@@ -3036,6 +3036,15 @@ const collectForeign = (
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
   const diagnostics: Array<Diagnostic.Diagnostic> = []
+  const list = SyntaxTree.directNode(node, 'ParameterList')
+  const ellipsis = list === undefined ? undefined : SyntaxTree.directToken(list, 'Ellipsis')
+  if (ellipsis !== undefined && (direction !== 'Foreign' || parameters.length === 0))
+    diagnostics.push(
+      Diagnostic.foreignDeclarationRestriction(
+        'ellipsis requires an external C declaration with at least one fixed parameter',
+        ellipsis.span,
+      ),
+    )
   const declarationSpan = name._tag === 'Present' ? name.token.span : node.span
   const spellingOf = name._tag === 'Present' ? name.spelling : '#foreign'
   const abiToken = SyntaxTree.directToken(node, 'TextLiteral')
@@ -3115,7 +3124,12 @@ const collectForeign = (
     )
   diagnostics.push(...behavior.diagnostics)
   return Object.freeze({
-    fact: Object.freeze({ abi: 'C' as const, symbol, contract: behavior.contract }),
+    fact: Object.freeze({
+      abi: 'C' as const,
+      symbol,
+      contract: behavior.contract,
+      variadic: ellipsis !== undefined,
+    }),
     diagnostics: Object.freeze(diagnostics),
   })
 }
@@ -3947,6 +3961,19 @@ const collectModule = (
       ...requirementRow.diagnostics,
       ...constraints.diagnostics,
     )
+    const ellipsis =
+      parameterList === undefined ? undefined : SyntaxTree.directToken(parameterList, 'Ellipsis')
+    if (
+      ellipsis !== undefined &&
+      node.kind !== 'ForeignFunctionDeclaration' &&
+      SyntaxTree.directToken(node, 'ExportKeyword') === undefined
+    )
+      diagnostics.push(
+        Diagnostic.foreignDeclarationRestriction(
+          'variadic definitions are not admitted',
+          ellipsis.span,
+        ),
+      )
     const foreign =
       node.kind === 'ForeignFunctionDeclaration'
         ? collectForeign(source, node, name, 'Foreign', facts)

@@ -1,3 +1,4 @@
+import * as PlatformSupply from './PlatformSupply.js'
 import * as NativeRequirementBinding from './NativeRequirementBinding.js'
 import * as NativeRequirement from './NativeRequirement.js'
 import * as ArtifactComposition from './ArtifactComposition.js'
@@ -32,6 +33,8 @@ export interface Project {
 
 /** Materialized project build defaults, including an absolute manifest-relative output root. */
 export interface BuildConfiguration {
+  readonly platformSupply?: PlatformSupply.Request
+
   readonly nativeBindings?: ReadonlyArray<NativeRequirementBinding.NativeRequirementBinding>
   readonly stage?: ArtifactPlan.Stage
   readonly composition?: ArtifactComposition.Input
@@ -112,6 +115,7 @@ const buildKeys = Object.freeze([
   'output-dir',
   'artifact',
   'native-link-inputs',
+  'platform-supply',
   'native-bindings',
   'stage',
   'composition',
@@ -353,6 +357,14 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
       }),
     )
   }
+  const platformSupplyValue = buildTable?.['platform-supply']
+  const platformSupply =
+    platformSupplyValue === undefined
+      ? undefined
+      : yield* PlatformSupply.decode(
+          platformSupplyValue,
+          `${manifestPath}:build.platform-supply`,
+        ).pipe(Effect.mapError((error) => invalidManifest(manifestPath, error.message)))
   const nativeLinkInputsValue = buildTable?.['native-link-inputs'] ?? []
   if (!Array.isArray(nativeLinkInputsValue))
     return yield* invalidManifest(manifestPath, 'build.native-link-inputs must be an array')
@@ -374,6 +386,7 @@ const decodeManifest = Effect.fnUntraced(function* (manifestPath: string, text: 
     artifact,
     stage,
     ...(composition === undefined ? {} : { composition }),
+    ...(platformSupply === undefined ? {} : { platformSupply }),
     nativeBindings: Object.freeze(nativeBindings),
     nativeLinkInputs: Object.freeze(
       nativeLinkInputs.flatMap((input) => (input === undefined ? [] : [input])),
@@ -470,6 +483,27 @@ export const load = Effect.fn('Project.load')(function* (
       targets: manifest.targets,
       outputDirectory: path.resolve(directory, manifest.outputDirectory),
       artifact: manifest.artifact,
+      ...(manifest.platformSupply === undefined
+        ? {}
+        : {
+            platformSupply:
+              manifest.platformSupply.kind !== 'explicit'
+                ? manifest.platformSupply
+                : Object.freeze({
+                    ...manifest.platformSupply,
+                    root: path.resolve(directory, manifest.platformSupply.root),
+                    linker: path.resolve(directory, manifest.platformSupply.linker),
+                    ...(manifest.platformSupply.support === undefined
+                      ? {}
+                      : {
+                          support: Object.freeze(
+                            manifest.platformSupply.support.map((item) =>
+                              Object.freeze({ ...item, root: path.resolve(directory, item.root) }),
+                            ),
+                          ),
+                        }),
+                  }),
+          }),
       stage: manifest.stage,
       ...(manifest.composition === undefined ? {} : { composition: manifest.composition }),
       nativeBindings: Object.freeze(

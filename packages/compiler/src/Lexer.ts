@@ -67,7 +67,7 @@ const compoundPunctuationKind = (
   if (first === 0x7c && second === 0x3e) return 'PipeGreater'
   if (first === 0x7c && second === 0x7c) return 'PipePipe'
   if (first === 0x26 && second === 0x26) return 'AmpersandAmpersand'
-  if (first === 0x2e && second === 0x2e) return 'DotDot'
+  if (first === 0x2e && second === 0x2e) return bytes[index + 2] === 0x2e ? 'Ellipsis' : 'DotDot'
   return undefined
 }
 
@@ -441,7 +441,7 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
 
     const compound = compoundPunctuationKind(bytes, index)
     if (compound !== undefined) {
-      index += 2
+      index += compound === 'Ellipsis' ? 3 : 2
       pushToken(compound, start, index)
       continue
     }

@@ -121,3 +121,7 @@ export * as NativeRequirementBinding from './NativeRequirementBinding.js'
 
 export * as NativeAssembly from './NativeAssembly.js'
 export * as MachineFunction from './MachineFunction.js'
+
+export * as PlatformSupply from './PlatformSupply.js'
+export * as CTranslationUnit from './CTranslationUnit.js'
+export * as NativeLinkPlan from './NativeLinkPlan.js'

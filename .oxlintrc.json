@@ -45,6 +45,8 @@
       "files": [
         "packages/cli/src/BuildPlan.ts",
         "packages/compiler/src/NativeToolchain.ts",
+        "packages/compiler/src/PlatformSupplyResolver.ts",
+        "packages/compiler/src/NativeLinkResolver.ts",
         "packages/compiler/vitest.config.ts"
       ],
       "rules": {

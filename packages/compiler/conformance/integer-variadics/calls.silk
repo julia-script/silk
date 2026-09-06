@@ -1,0 +1,58 @@
+static if Intrinsic.targetOperatingSystem() == "darwin" {
+    type Mode = u16
+    const createFlags: i32 = 0x0602
+    const currentDirectory: i32 = -2
+} else {
+    type Mode = u32
+    const createFlags: i32 = 0x00c2
+    const currentDirectory: i32 = -100
+}
+unsafe extern "C" fn silk_test_varargs(shape: i32, ...) -> i32
+unsafe extern "C" fn silk_test_path(which: i32) -> *const u8
+unsafe extern "C" fn silk_test_init() -> ()
+unsafe extern "C" fn silk_test_finish() -> i32
+unsafe extern "C" fn open(path: *const u8, flags: i32, ...) -> i32
+unsafe extern "C" fn openat(directory: i32, path: *const u8, flags: i32, ...) -> i32
+unsafe extern "C" fn close(descriptor: i32) -> i32
+
+export "C" fn silk_test_add(value: i32) -> i32 { return value + 1 }
+unsafe extern "C" fn silk_test_varargs_callback(callback: extern "C" fn(i32) -> i32, tag: i32, ...) -> i32
+    with Intrinsic.foreign(callbacks: ("callback",))
+
+pub fn main() -> i32 {
+    let callbackValue: u16 = 41
+    if unsafe silk_test_varargs_callback(silk_test_add, 0, callbackValue) != 42 { return 14 }
+    let a: i8 = -7
+    let b: u8 = 255
+    let c: i16 = -12345
+    let d: u16 = 65535
+    let e: u32 = 4000000000
+    let f: i64 = -4294967297
+    let g: u64 = 4294967298
+    let h: isize = -9223372036854775807
+    let i: usize = 18446744073709551615
+    if unsafe silk_test_varargs(0) != 0 { return 1 }
+    if unsafe silk_test_varargs(1, a, b, c, d, e, f, g, h, i, 10, 11, 12, 13) != 0 { return 2 }
+    if unsafe silk_test_varargs(2, 42) != 0 { return 3 }
+    let narrow: u8 = 42
+    if unsafe silk_test_varargs(2, narrow) != 0 { return 4 }
+    unsafe silk_test_init()
+    let path = unsafe silk_test_path(0)
+    let mode: Mode = 0x0180
+    let descriptor = unsafe open(path, createFlags, mode)
+    if descriptor < 0 { return 5 }
+    if unsafe close(descriptor) != 0 { return 6 }
+    let reopened = unsafe open(path, 0)
+    if reopened < 0 { return 7 }
+    if unsafe close(reopened) != 0 { return 8 }
+    let atPath = unsafe silk_test_path(1)
+    let atMode: Mode = 0x01a0
+    let atDescriptor = unsafe openat(currentDirectory, atPath, createFlags, atMode)
+    if atDescriptor < 0 { return 9 }
+    if unsafe close(atDescriptor) != 0 { return 10 }
+    let atReopened = unsafe openat(currentDirectory, atPath, 0)
+    if atReopened < 0 { return 11 }
+    if unsafe close(atReopened) != 0 { return 12 }
+    if unsafe silk_test_finish() != 0 { return 13 }
+    return 42
+}

@@ -149,6 +149,7 @@ export const foreignSignature = (
     declared(fact.returnType),
     target,
     fact.foreign?.contract ?? fact.foreignExport?.contract,
+    fact.foreign?.variadic ?? false,
   )
 }
 

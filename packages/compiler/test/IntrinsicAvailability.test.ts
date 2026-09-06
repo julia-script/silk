@@ -253,6 +253,7 @@ const foreignEntry = (
     _tag: 'ReachableForeignCall',
     symbol,
     signature: Object.freeze({
+      variadic: false,
       contract: ForeignContract.conservative,
       parameters,
       result: Object.freeze({ _tag: 'Void' }),
@@ -296,6 +297,17 @@ it('rejects foreign calls off native LLVM and conflicting signatures per pair', 
     ['SEM0192', 'availability/a'],
   ])
   assert.deepEqual(ForeignAvailability.select([exit], Target.x8664UnknownLinuxGnu), [])
+  const fixed = foreignEntry('receive', [i32], 'availability/fixed', 0)
+  const marked = foreignEntry('receive', [i32], 'availability/variadic', 10)
+  const variadic = { ...marked, signature: { ...marked.signature, variadic: true } }
+  assert.deepEqual(
+    ForeignAvailability.select([fixed, variadic], Target.aarch64AppleDarwin).map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.span.sourceId,
+      diagnostic.relatedSpans?.at(0)?.span.sourceId,
+    ]),
+    [['SEM0192', 'availability/variadic', 'availability/fixed']],
+  )
 })
 
 it.effect('classifies a reachable foreign call for the selected target', () =>
@@ -401,7 +413,13 @@ it.effect('accepts agreeing redeclarations of one symbol across two modules', ()
     )
     const artifact = yield* Analysis.codegen(self, { mode: 'release' })
     assert.deepEqual(artifact.foreignImports, [
-      { symbol: 'abs', parameters: ['i32'], result: 'i32', contract: ForeignContract.conservative },
+      {
+        variadic: false,
+        symbol: 'abs',
+        parameters: ['i32'],
+        result: 'i32',
+        contract: ForeignContract.conservative,
+      },
     ])
   }),
 )
@@ -552,12 +570,14 @@ it.effect('accepts distinct export symbols across modules in canonical order', (
     const artifact = yield* Analysis.codegen(self, { mode: 'release' })
     assert.deepEqual(artifact.foreignExports, [
       {
+        variadic: false,
         symbol: 'silk_test_add_v1',
         parameters: ['i32', 'i32'],
         result: 'i32',
         contract: ForeignContract.conservative,
       },
       {
+        variadic: false,
         symbol: 'silk_test_double_v1',
         parameters: ['i32'],
         result: 'i32',
@@ -636,6 +656,7 @@ it('plans exports over MIR: symbol map, non-native rejection, and suspension', (
       symbol,
       type: Type.foreignFunction(['i32'], 'i32'),
       signature: Object.freeze({
+        variadic: false,
         contract: ForeignContract.conservative,
         parameters: Object.freeze([i32]),
         result: i32,

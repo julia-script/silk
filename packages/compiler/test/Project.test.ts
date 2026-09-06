@@ -320,3 +320,34 @@ native-bindings = [{ kind = "prebuilt-object", name = "support", alternative = "
       ])
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 )
+
+it.effect('materializes physical supply paths without adding them to the logical profile', () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const root = yield* fs.makeTempDirectoryScoped()
+    yield* writeFile(`${root}/Main.silk`, source)
+    yield* writeFile(
+      `${root}/silk.toml`,
+      `[package]
+name = "supply-example"
+version = "0.1.0"
+root = "Main.silk"
+[build.platform-supply]
+kind = "explicit"
+target = "aarch64-apple-darwin"
+root = "supplies/sdk"
+linker = "tools/ld"
+origin = "pinned project SDK"
+`,
+    )
+    const project = yield* Project.load({ workingDirectory: root })
+    assert.deepEqual(project.build.platformSupply, {
+      kind: 'explicit',
+      target: 'aarch64-apple-darwin',
+      root: `${root}/supplies/sdk`,
+      linker: `${root}/tools/ld`,
+      origin: 'pinned project SDK',
+      support: [],
+    })
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+)

@@ -161,10 +161,18 @@ export const make = (
       ? ArtifactKind.fileName(artifactKind, project.name, options.target)
       : `${project.name}.${{ 'llvm-ir': 'll', 'llvm-bitcode': 'bc', assembly: 's', object: 'o' }[stage]}`,
   )
+  const platformSupply = project.build.platformSupply
+  let supplyOptions: Pick<NativeToolchain.Toolchain, 'platform' | 'projectSupply'> = {}
+  if (platformSupply !== undefined) {
+    if (platformSupply.kind === 'explicit' || platformSupply.kind === 'managed')
+      supplyOptions = { projectSupply: platformSupply }
+    else supplyOptions = { platform: platformSupply }
+  }
   const toolchain = Object.freeze({
     _tag: 'Toolchain' as const,
     clang: options.clang ?? 'clang',
     llvmAr: options.llvmAr ?? 'llvm-ar',
+    ...supplyOptions,
   })
   if (Target.isNative(options.target) && artifactKind !== 'WebAssemblyModule') {
     const nativePlan = ToolchainPlan.nativeCommand(

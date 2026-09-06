@@ -1,3 +1,4 @@
+import * as CAbi from './CAbi.js'
 import * as BodyLifetime from './BodyLifetime.js'
 import * as Lifetime from './Lifetime.js'
 import * as ForeignContract from './ForeignContract.js'
@@ -579,7 +580,11 @@ export const callArityDiagnostic = (
   actualCount: number,
   span: SourceSpan.SourceSpan,
 ): Diagnostic.Diagnostic => {
-  if (expectedCount === 1 && actualCount === 0)
+  if (
+    expectedCount === 1 &&
+    actualCount === 0 &&
+    !(reference._tag === 'Resolved' && reference.declaration.foreign?.variadic === true)
+  )
     return Diagnostic.redundantUnaryEmptyCall(reference.spelling, span)
   let target: Parameters<typeof Diagnostic.wrongCallArity>[0]
   if (reference._tag === 'ResolvedBuiltin') {
@@ -1549,7 +1554,32 @@ export const analyzeCallContract = (
 
   const expectedCount = contract.parameters.length
   const actualCount = argumentsList.length
-  if (expectedCount !== actualCount) {
+  const variadic = reference._tag === 'Resolved' && reference.declaration.foreign?.variadic === true
+  if (variadic) {
+    const invalid = argumentsList
+      .slice(expectedCount)
+      .find(
+        (argument) =>
+          argument.type._tag === 'Available' && !CAbi.admitsVariadic(argument.type.type),
+      )
+    if (invalid !== undefined && invalid.type._tag === 'Available') {
+      const diagnostic = Diagnostic.foreignTypeNotAdmitted(
+        Type.encode(invalid.type.type),
+        'C variadic tail',
+        invalid.syntax.span,
+      )
+      return Object.freeze({
+        mappings,
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          cause: Diagnostic.identity(diagnostic),
+        }),
+        diagnostics: Object.freeze([diagnostic]),
+      })
+    }
+  }
+  if (variadic ? actualCount < expectedCount : expectedCount !== actualCount) {
     return Object.freeze({
       mappings,
       fact: Object.freeze({ _tag: 'ArityMismatch', expectedCount, actualCount }),

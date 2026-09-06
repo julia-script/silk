@@ -38,9 +38,17 @@
       "types": "./dist/Analysis.d.ts",
       "import": "./dist/Analysis.js"
     },
+    "./ArtifactComposition": {
+      "types": "./dist/ArtifactComposition.d.ts",
+      "default": "./dist/ArtifactComposition.js"
+    },
     "./ArtifactKind": {
       "types": "./dist/ArtifactKind.d.ts",
       "import": "./dist/ArtifactKind.js"
+    },
+    "./ArtifactPlan": {
+      "types": "./dist/ArtifactPlan.d.ts",
+      "default": "./dist/ArtifactPlan.js"
     },
     "./AutoImport": {
       "types": "./dist/AutoImport.d.ts",
@@ -49,6 +57,14 @@
     "./Backend": {
       "types": "./dist/Backend.d.ts",
       "import": "./dist/Backend.js"
+    },
+    "./CTranslationUnit": {
+      "types": "./dist/CTranslationUnit.d.ts",
+      "import": "./dist/CTranslationUnit.js"
+    },
+    "./CTranslationUnitResolver": {
+      "types": "./dist/CTranslationUnitResolver.d.ts",
+      "import": "./dist/CTranslationUnitResolver.js"
     },
     "./CallableContract": {
       "types": "./dist/CallableContract.d.ts",
@@ -254,6 +270,10 @@
       "types": "./dist/Lower.d.ts",
       "import": "./dist/Lower.js"
     },
+    "./MachineFunction": {
+      "types": "./dist/MachineFunction.d.ts",
+      "default": "./dist/MachineFunction.js"
+    },
     "./Match": {
       "types": "./dist/Match.d.ts",
       "import": "./dist/Match.js"
@@ -298,9 +318,29 @@
       "types": "./dist/NameResolution.d.ts",
       "import": "./dist/NameResolution.js"
     },
+    "./NativeAssembly": {
+      "types": "./dist/NativeAssembly.d.ts",
+      "default": "./dist/NativeAssembly.js"
+    },
     "./NativeLinkInput": {
       "types": "./dist/NativeLinkInput.d.ts",
       "import": "./dist/NativeLinkInput.js"
+    },
+    "./NativeLinkPlan": {
+      "types": "./dist/NativeLinkPlan.d.ts",
+      "import": "./dist/NativeLinkPlan.js"
+    },
+    "./NativeLinkResolver": {
+      "types": "./dist/NativeLinkResolver.d.ts",
+      "import": "./dist/NativeLinkResolver.js"
+    },
+    "./NativeRequirement": {
+      "types": "./dist/NativeRequirement.d.ts",
+      "default": "./dist/NativeRequirement.js"
+    },
+    "./NativeRequirementBinding": {
+      "types": "./dist/NativeRequirementBinding.d.ts",
+      "default": "./dist/NativeRequirementBinding.js"
     },
     "./NativeToolchain": {
       "types": "./dist/NativeToolchain.d.ts",
@@ -337,6 +377,14 @@
     "./PlatformCatalog": {
       "types": "./dist/PlatformCatalog.d.ts",
       "import": "./dist/PlatformCatalog.js"
+    },
+    "./PlatformSupply": {
+      "types": "./dist/PlatformSupply.d.ts",
+      "import": "./dist/PlatformSupply.js"
+    },
+    "./PlatformSupplyResolver": {
+      "types": "./dist/PlatformSupplyResolver.d.ts",
+      "import": "./dist/PlatformSupplyResolver.js"
     },
     "./Presentation": {
       "types": "./dist/Presentation.d.ts",
@@ -493,30 +541,6 @@
     "./WorkspaceInventory": {
       "types": "./dist/WorkspaceInventory.d.ts",
       "import": "./dist/WorkspaceInventory.js"
-    },
-    "./ArtifactComposition": {
-      "types": "./dist/ArtifactComposition.d.ts",
-      "default": "./dist/ArtifactComposition.js"
-    },
-    "./ArtifactPlan": {
-      "types": "./dist/ArtifactPlan.d.ts",
-      "default": "./dist/ArtifactPlan.js"
-    },
-    "./NativeRequirement": {
-      "types": "./dist/NativeRequirement.d.ts",
-      "default": "./dist/NativeRequirement.js"
-    },
-    "./NativeRequirementBinding": {
-      "types": "./dist/NativeRequirementBinding.d.ts",
-      "default": "./dist/NativeRequirementBinding.js"
-    },
-    "./NativeAssembly": {
-      "types": "./dist/NativeAssembly.d.ts",
-      "default": "./dist/NativeAssembly.js"
-    },
-    "./MachineFunction": {
-      "types": "./dist/MachineFunction.d.ts",
-      "default": "./dist/MachineFunction.js"
     }
   },
   "publishConfig": {
@@ -550,12 +574,12 @@
     "test:native-boundary": "node conformance/native-boundary/run.mjs"
   },
   "dependencies": {
+    "@effect/platform-node": "4.0.0-rc.112",
     "@silklang/llvm": "workspace:*",
     "effect": "catalog:",
     "smol-toml": "^1.7.1"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-rc.112",
     "@effect/vitest": "catalog:",
     "@types/node": "^24.10.1",
     "oxfmt": "0.66.0"

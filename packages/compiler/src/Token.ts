@@ -88,6 +88,7 @@ export type TokenKind =
   | 'Tilde'
   | 'Dot'
   | 'DotDot'
+  | 'Ellipsis'
   | 'Arrow'
   | 'Invalid'
   | 'EndOfFile'
@@ -179,6 +180,7 @@ const descriptions: Readonly<Record<TokenKind, string>> = Object.freeze({
   Tilde: '`~`',
   Dot: '`.`',
   DotDot: '`..`',
+  Ellipsis: '`...`',
   Arrow: '`->`',
   Invalid: 'invalid byte',
   EndOfFile: 'end of file',

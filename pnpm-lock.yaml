@@ -243,6 +243,9 @@ importers:
 
   packages/compiler:
     dependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112(effect@4.0.0-rc.112)(redis@6.2.1)
       '@silklang/llvm':
         specifier: workspace:*
         version: link:../llvm
@@ -253,9 +256,6 @@ importers:
         specifier: ^1.7.1
         version: 1.7.1
     devDependencies:
-      '@effect/platform-node':
-        specifier: 4.0.0-rc.112
-        version: 4.0.0-rc.112(effect@4.0.0-rc.112)(redis@6.2.1)
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-rc.112(effect@4.0.0-rc.112)(vitest@4.1.10)

@@ -36,6 +36,11 @@ jobs:
           path: ~/.cache/silk-effect/native
           key: silk-native-${{ runner.os }}-${{ github.sha }}
           restore-keys: silk-native-${{ runner.os }}-
+      # CLI integration tests also resolve complete native tool installations.
+      - name: Install LLVM archiver
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes llvm
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: node scripts/turbo.mjs run build
@@ -157,6 +162,26 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: .scratch/llvm-22.1.8
+          key: native-supply-llvm-macOS-ARM64-f260f4f7c0d430828a81ae8a3826a1d63fc0963ec2459489308cc23b1f7eab4f
+      - name: Select the complete LLVM tool installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .scratch/llvm-22.1.8
+          if [ ! -x .scratch/llvm-22.1.8/bin/llvm-ar ]; then
+            curl --fail --location --retry 3 https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-macOS-ARM64.tar.xz -o .scratch/llvm.tar.xz
+            echo "f260f4f7c0d430828a81ae8a3826a1d63fc0963ec2459489308cc23b1f7eab4f  .scratch/llvm.tar.xz" | shasum -a 256 -c -
+            tar -xf .scratch/llvm.tar.xz --strip-components=1 -C .scratch/llvm-22.1.8
+          fi
+          echo "$PWD/.scratch/llvm-22.1.8/bin" >> "$GITHUB_PATH"
+          echo "SILK_TEST_CLANG=$PWD/.scratch/llvm-22.1.8/bin/clang" >> "$GITHUB_ENV"
+          echo "SILK_TEST_LLVM_AR=$PWD/.scratch/llvm-22.1.8/bin/llvm-ar" >> "$GITHUB_ENV"
+          SDK=/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk
+          test -f "$SDK/SDKSettings.json"
+          echo "SDKROOT=$SDK" >> "$GITHUB_ENV"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @silklang/compiler... run build
       - run: >
@@ -186,3 +211,94 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @silklang/platform-webcontainer exec playwright install --with-deps chromium
       - run: pnpm --filter @silklang/platform-webcontainer test:browser
+
+  platform-supplies:
+    name: Platform supply / ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            llvm: macOS-ARM64
+            digest: f260f4f7c0d430828a81ae8a3826a1d63fc0963ec2459489308cc23b1f7eab4f
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            llvm: Linux-X64
+            digest: df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            llvm: Linux-ARM64
+            digest: 805efad2bb91cb4967fa569e0881d10c0f69c04461cf671cccbae19f547acc34
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: .scratch/llvm-22.1.8
+          key: native-supply-llvm-${{ matrix.llvm }}-${{ matrix.digest }}
+      - name: Install the exact LLVM release
+        shell: bash
+        env:
+          LLVM_ASSET: LLVM-22.1.8-${{ matrix.llvm }}.tar.xz
+          LLVM_DIGEST: ${{ matrix.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p .scratch/llvm-22.1.8
+          if [ ! -x .scratch/llvm-22.1.8/bin/clang ]; then
+            curl --fail --location --retry 3 "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/$LLVM_ASSET" -o .scratch/llvm.tar.xz
+            echo "$LLVM_DIGEST  .scratch/llvm.tar.xz" | shasum -a 256 -c -
+            tar -xf .scratch/llvm.tar.xz --strip-components=1 -C .scratch/llvm-22.1.8
+          fi
+          echo "SILK_SUPPLY_CLANG=$PWD/.scratch/llvm-22.1.8/bin/clang" >> "$GITHUB_ENV"
+          echo "SILK_SUPPLY_AR=$PWD/.scratch/llvm-22.1.8/bin/llvm-ar" >> "$GITHUB_ENV"
+          echo "SILK_SUPPLY_READOBJ=$PWD/.scratch/llvm-22.1.8/bin/llvm-readobj" >> "$GITHUB_ENV"
+      - name: Select the pinned Darwin SDK
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK=/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk
+          test -f "$SDK/SDKSettings.json"
+          echo "SILK_SUPPLY_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "SILK_SUPPLY_LINKER=$PWD/.scratch/llvm-22.1.8/bin/ld64.lld" >> "$GITHUB_ENV"
+      - name: Build and inspect the pinned GNU installation
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -t silk-platform-conformance packages/compiler/conformance/platform-supplies
+          container=$(docker create silk-platform-conformance)
+          trap 'docker rm "$container" >/dev/null' EXIT
+          mkdir -p .scratch/sysroot
+          docker export "$container" | tar -x -C .scratch/sysroot
+          gccdir=$(docker run --rm silk-platform-conformance gcc -print-file-name=crtbeginS.o)
+          test -f ".scratch/sysroot$gccdir"
+          echo "SILK_SUPPLY_ROOT=$PWD/.scratch/sysroot" >> "$GITHUB_ENV"
+          echo "SILK_SUPPLY_GCC=$PWD/.scratch/sysroot$(dirname "$gccdir")" >> "$GITHUB_ENV"
+          echo "SILK_SUPPLY_IMAGE=silk-platform-conformance" >> "$GITHUB_ENV"
+          echo "SILK_SUPPLY_LINKER=$PWD/.scratch/llvm-22.1.8/bin/ld.lld" >> "$GITHUB_ENV"
+          docker run --rm silk-platform-conformance dpkg-query -W > .scratch/gnu-packages.txt
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @silklang/compiler... build
+      - name: Required real supply conformance
+        env:
+          SILK_SUPPLY_TARGET: ${{ matrix.target }}
+        run: |
+          node packages/compiler/conformance/platform-supplies/run.mjs
+          node packages/compiler/conformance/integer-variadics/run.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: platform-supply-${{ matrix.target }}
+          path: |
+            .scratch/platform-supplies
+            .scratch/integer-variadics
+            .scratch/gnu-packages.txt
+          if-no-files-found: error

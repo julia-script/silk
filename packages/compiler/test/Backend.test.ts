@@ -368,14 +368,22 @@ pub fn main() -> i32 {
       1,
     )
     assert.deepEqual(artifact.foreignImports, [
-      { symbol: 'abs', parameters: ['i32'], result: 'i32', contract: ForeignContract.conservative },
       {
+        variadic: false,
+        symbol: 'abs',
+        parameters: ['i32'],
+        result: 'i32',
+        contract: ForeignContract.conservative,
+      },
+      {
+        variadic: false,
         symbol: 'silk_test_add',
         parameters: ['i32', 'i32'],
         result: 'i32',
         contract: ForeignContract.conservative,
       },
       {
+        variadic: false,
         symbol: 'silk_test_scale',
         parameters: ['u64'],
         result: 'u64',
@@ -445,6 +453,7 @@ pub fn main() -> i32 { return 0 }`),
     assert.include(body.join('\n'), 'landingpad')
     assert.deepEqual(first.foreignExports, [
       {
+        variadic: false,
         symbol: 'silk_test_double_v1',
         parameters: ['i32'],
         result: 'i32',
@@ -485,6 +494,7 @@ pub fn main() -> i32 {
     assert.notStrictEqual(reload, -1, artifact.ir)
     assert.deepEqual(artifact.foreignImports, [
       {
+        variadic: false,
         symbol: 'touch',
         parameters: [
           'pointer<mut;7%3APointer28%3ASingle%3Amut%3Anonnull%3ANatural%3A011%3Abuiltin%3Ai32>',
@@ -520,6 +530,7 @@ pub fn main() -> i32 {
     assert.match(artifact.ir, /invoke ptr @malloc\(i64 %/)
     assert.deepEqual(artifact.foreignImports, [
       {
+        variadic: false,
         symbol: 'malloc',
         contract: ForeignContract.conservative,
         parameters: ['u64'],

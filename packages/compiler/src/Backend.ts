@@ -57,6 +57,7 @@ export type RuntimeFeature =
  * its classified C signature spelled as C class names (`i32`, `u64`, `f64`, `void`, ...).
  */
 export interface ForeignImport {
+  readonly variadic: boolean
   readonly contract: ForeignContract.ForeignContract
   readonly symbol: string
   readonly parameters: ReadonlyArray<CAbi.TypeText>
@@ -65,6 +66,7 @@ export interface ForeignImport {
 
 /** One exported C-callable symbol and the C class spellings of its thunk signature. */
 export interface ForeignExport {
+  readonly variadic: boolean
   readonly contract: ForeignContract.ForeignContract
   readonly symbol: string
   readonly parameters: ReadonlyArray<CAbi.TypeText>

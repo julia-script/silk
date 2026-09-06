@@ -169,6 +169,7 @@ export const foreignCallSample = (
   const provenance = (start: number, end: number): Provenance =>
     Object.freeze({ span: sampleSpan(source, start, end), generated: false })
   const signature = Object.freeze({
+    variadic: false,
     contract: ForeignContract.conservative,
     parameters: Object.freeze([
       Object.freeze({
@@ -222,6 +223,7 @@ export const foreignCallSample = (
               }),
               Object.freeze({
                 _tag: 'ForeignCall' as const,
+                variadicArguments: Object.freeze([]),
                 destination: local(1),
                 symbol: 'abs',
                 abi: 'C' as const,

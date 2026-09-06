@@ -2713,12 +2713,23 @@ function lowerCallExpression(
   const foreign = ExecutableOrigin.foreignFact(fn.index, expression.target)
   let destination: Mir.LocalId
   if (foreign?.foreign !== undefined) {
+    const variadicArguments: Array<CAbi.VariadicArgument> = []
+    for (const argument of argumentLocals.slice(foreign.parameters.length)) {
+      const actual = fn.localTypes.at(argument.ordinal)
+      const promoted =
+        actual === undefined
+          ? undefined
+          : CAbi.promoteVariadic(Mir.semanticType(actual), fn.layout.target)
+      if (promoted === undefined) return undefined
+      variadicArguments.push(promoted)
+    }
     const type = fn.type(expression.type)
     if (type === undefined) return undefined
     destination = fn.alloc(type)
     fn.emit(
       Object.freeze({
         _tag: 'ForeignCall',
+        variadicArguments: Object.freeze(variadicArguments),
         destination,
         symbol: foreign.foreign.symbol,
         abi: 'C',

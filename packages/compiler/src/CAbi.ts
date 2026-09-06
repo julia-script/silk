@@ -32,6 +32,7 @@ export type CAbiType =
 
 /** The classified C signature that identifies one foreign symbol within an executable. */
 export interface CAbiSignature {
+  readonly variadic: boolean
   readonly contract: ForeignContract.ForeignContract
   readonly parameters: ReadonlyArray<CAbiType>
   readonly result: CAbiType
@@ -185,9 +186,11 @@ export const signature = (
   result: Type.Type,
   target: Target.Target,
   contract: ForeignContract.ForeignContract = ForeignContract.conservative,
+  variadic = false,
 ): CAbiSignature =>
   Object.freeze({
     contract,
+    variadic,
     parameters: Object.freeze(
       parameters.map((type, ordinal) =>
         classify(
@@ -240,13 +243,13 @@ export const isCanonical = (self: CAbiType, target: Target.Target): boolean => {
       return expected._tag === 'Integer' && self.extension === expected.extension
     }
     case 'FunctionPointer':
-      return self.nullable === false && isCanonicalSignature(self, target)
+      return self.nullable === false && isCanonicalSignature({ ...self, variadic: false }, target)
   }
 }
 
 /** The canonical identity two declarations of one symbol must share, e.g. `(i32,u64)->f64`. */
 export const signatureKey = (self: CAbiSignature): string =>
-  `(${self.parameters.map(typeText).join(',')})->${typeText(self.result)}!${ForeignContract.key(self.contract)}`
+  `(${self.parameters.map(typeText).join(',')}${self.variadic ? ',...' : ''})->${typeText(self.result)}!${ForeignContract.key(self.contract)}`
 
 /** Decoded public ABI type spelling; pointer identity remains opaque but participates in equality. */
 export type TextShape =
@@ -331,6 +334,8 @@ export const isTypeText = (input: unknown): input is TypeText =>
 
 /** Checks both target machine facts and canonical behavior before trusting a transported signature. */
 export const isCanonicalSignature = (self: CAbiSignature, target: Target.Target): boolean =>
+  typeof self.variadic === 'boolean' &&
+  (!self.variadic || self.parameters.length > 0) &&
   isCanonical(self.result, target) &&
   self.parameters.every((type) => type._tag !== 'Void' && isCanonical(type, target)) &&
   ForeignContract.inspect(self.contract, self.parameters.map(typeText), typeText(self.result)) !==
@@ -350,3 +355,31 @@ export const isCanonicalSignature = (self: CAbiSignature, target: Target.Target)
       parameter.type.addressSpace === 0
     )
   })
+
+/** One unnamed integer operand before and after C default argument promotion. */
+export interface VariadicArgument {
+  readonly source: Extract<CAbiType, { readonly _tag: 'Integer' }>
+  readonly promoted: Extract<CAbiType, { readonly _tag: 'Integer' }>
+}
+
+/** The closed integer-only tail admission relation, independent of any libc symbol name. */
+export const admitsVariadic = (type: Type.Type): boolean =>
+  Type.isBuiltin(type) &&
+  ['i8', 'u8', 'i16', 'u16', 'i32', 'u32', 'i64', 'u64', 'isize', 'usize'].includes(type)
+
+/** Promotes narrow signed and unsigned integers to C int on the admitted native targets. */
+export const promoteVariadic = (
+  type: Type.Type,
+  target: Target.Target,
+): VariadicArgument | undefined => {
+  if (!admitsVariadic(type)) return undefined
+  const source = classify(type, target, 'Parameter')
+  if (source._tag !== 'Integer') return undefined
+  const promoted = source.bits < 32 ? integer(32, true, target) : source
+  if (promoted._tag !== 'Integer') return undefined
+  return Object.freeze({ source, promoted })
+}
+
+/** Identifies the internal guard by its actual promoted operands, leaving the callee unchanged. */
+export const callKey = (symbol: string, tail: ReadonlyArray<VariadicArgument>): string =>
+  `${symbol}(${tail.map((argument) => typeText(argument.promoted)).join(',')})`

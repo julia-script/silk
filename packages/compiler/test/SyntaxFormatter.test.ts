@@ -1452,3 +1452,14 @@ static fn choose()->u32{return 1}`
     assert.strictEqual(formattedText(yield* SyntaxFormatter.format(reparsed)), text)
   }),
 )
+
+it.effect('preserves the C variadic boundary while formatting declarations', () =>
+  Effect.gen(function* () {
+    const source = 'unsafe extern "C" fn open(path:*const u8,flags:i32,...)->i32'
+    const first = yield* SyntaxFormatter.format(parse('memory://variadic.silk', source))
+    const text = formattedText(first)
+    assert.include(text, 'flags: i32, ...')
+    const second = yield* SyntaxFormatter.format(parse('memory://variadic.silk', text))
+    assert.strictEqual(formattedText(second), text)
+  }),
+)

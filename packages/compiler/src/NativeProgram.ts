@@ -351,6 +351,10 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     MirVerification.operations(fn).filter((operation) => operation._tag === 'ForeignIndirectCall'),
   )
   const foreignIndirects = new Map<string, NativeForeignOperation.Declaration>()
+  const foreignCallShapes = program.functions
+    .flatMap((fn) => MirVerification.operations(fn))
+    .filter((operation) => operation._tag === 'ForeignCall')
+  const declaredForeign = new Map<string, CAbi.CAbiSignature>()
   const foreignGuard =
     program.foreignCalls.length === 0 &&
     program.foreignExports.length === 0 &&
@@ -380,7 +384,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     foreignIndirects.set(key, { handle, signature: operation.signature })
   }
   for (const call of program.foreignCalls) {
-    if (foreignFunctions.has(call.symbol)) continue
+    if (declaredForeign.has(call.symbol)) continue
+    declaredForeign.set(call.symbol, call.signature)
     const parameters = call.signature.parameters.map(cType)
     if (parameters.some((type) => type === undefined))
       throw new RangeError(`LLVM foreign function ${call.symbol} has a void parameter`)
@@ -392,6 +397,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         builder,
         cType(call.signature.result) ?? voidType ?? (yield* LlvmType.voidType(builder)),
         parameters.flatMap((type) => (type === undefined ? [] : [type])),
+        { variadic: call.signature.variadic },
       ),
       attributes === undefined ? {} : { attributes },
     ).pipe(
@@ -406,14 +412,26 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ),
     )
     if (foreignGuard === undefined) throw new RangeError('LLVM foreign guard was not initialized')
-    const guarded = yield* NativeForeignGuard.wrap(
-      foreignGuard,
-      builder,
-      handle,
-      foreignFunctions.size,
-      call.signature.parameters.length,
-    )
-    foreignFunctions.set(call.symbol, Object.freeze({ handle: guarded, signature: call.signature }))
+    for (const operation of foreignCallShapes) {
+      if (operation.symbol !== call.symbol) continue
+      const key = CAbi.callKey(call.symbol, operation.variadicArguments)
+      if (foreignFunctions.has(key)) continue
+      const arguments_ = [
+        ...parameters,
+        ...operation.variadicArguments.map((argument) => cType(argument.promoted)),
+      ]
+      if (arguments_.some((type) => type === undefined))
+        throw new RangeError('Invalid variadic guard parameter')
+      const guarded = yield* NativeForeignGuard.wrap(
+        foreignGuard,
+        builder,
+        handle,
+        foreignFunctions.size,
+        arguments_.flatMap((type) => (type === undefined ? [] : [type])),
+        cType(call.signature.result) ?? voidType ?? (yield* LlvmType.voidType(builder)),
+      )
+      foreignFunctions.set(key, Object.freeze({ handle: guarded, signature: call.signature }))
+    }
   }
   for (const record of program.foreignStatics) {
     const classified = CAbi.classify(record.type, program.layout.target, 'Parameter')
@@ -718,14 +736,15 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     ]),
     runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),
     foreignImports: Object.freeze(
-      [...foreignFunctions]
+      [...declaredForeign]
         .sort(([left], [right]) => left.localeCompare(right, 'en'))
         .map(([symbol, foreign]) =>
           Object.freeze({
             symbol,
-            parameters: Object.freeze(foreign.signature.parameters.map(CAbi.typeText)),
-            result: CAbi.typeText(foreign.signature.result),
-            contract: foreign.signature.contract,
+            variadic: foreign.variadic,
+            parameters: Object.freeze(foreign.parameters.map(CAbi.typeText)),
+            result: CAbi.typeText(foreign.result),
+            contract: foreign.contract,
           }),
         ),
     ),
@@ -735,6 +754,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         .map((record) =>
           Object.freeze({
             symbol: record.symbol,
+            variadic: record.signature.variadic,
             parameters: Object.freeze(record.signature.parameters.map(CAbi.typeText)),
             result: CAbi.typeText(record.signature.result),
             contract: record.signature.contract,

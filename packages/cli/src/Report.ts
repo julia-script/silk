@@ -113,6 +113,10 @@ export const phases = (self: ReadonlyArray<Driver.DriverPhaseReport>): string =>
  * waste the only information that makes a linker error debuggable.
  */
 export const toolchainError = (failure: NativeToolchain.ToolchainError): string => {
+  if (failure.reason._tag === 'SupplyFailed') {
+    const supply = failure.reason.failure
+    return `${supply.message}\n${supply.correction}${supply.query === undefined ? '' : `\n${supply.query.stderr}`}`
+  }
   if (failure.reason._tag === 'StorageFailed') {
     return `${failure.stage} stage failed: ${failure.message}`
   }

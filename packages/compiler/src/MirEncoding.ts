@@ -113,7 +113,7 @@ const operationText = (operation: Operation): string => {
     case 'ForeignIndirectCall':
       return `${localText(operation.destination)} = foreign-indirect-call ${localText(operation.callee)} signature=${CAbi.signatureKey(operation.signature)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ForeignCall':
-      return `${localText(operation.destination)} = foreign-call ${operation.symbol} abi=${operation.abi} signature=${CAbi.signatureKey(operation.signature)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+      return `${localText(operation.destination)} = foreign-call ${operation.symbol} abi=${operation.abi} signature=${CAbi.signatureKey(operation.signature)}${operation.variadicArguments.length === 0 ? '' : ` tail=[${operation.variadicArguments.map((argument) => `${CAbi.typeText(argument.source)}->${CAbi.typeText(argument.promoted)}`).join(',')}]`}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferFrom':
       return `${localText(operation.destination)} = raw-buffer-from ${localText(operation.allocation)} count=${localText(operation.count)} element=${SilkType.encode(operation.element)} stride=${operation.stride} align=${operation.elementAlignment} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'SharedFromAllocation':

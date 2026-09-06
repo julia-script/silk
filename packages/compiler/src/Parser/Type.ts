@@ -895,6 +895,7 @@ export const parseWhereClause = (
 
 export const parseParameterList = (initial: State): NodeResult => {
   const leftParenthesis = expect(initial, 'LeftParenthesis', [
+    'Ellipsis',
     'StaticKeyword',
     'MutKeyword',
     'Identifier',
@@ -925,6 +926,12 @@ export const parseParameterList = (initial: State): NodeResult => {
     kind !== 'ImportKeyword' &&
     kind !== 'EndOfFile'
   ) {
+    if (kind === 'Ellipsis') {
+      const marker = expect(state, 'Ellipsis', ['RightParenthesis'])
+      children = Object.freeze([...children, ...marker.elements])
+      state = marker.state
+      break
+    }
     let modifier: ElementsResult = Object.freeze({ state, elements: Object.freeze([]) })
     if (nextSignificantKind(state) === 'StaticKeyword')
       modifier = expect(state, 'StaticKeyword', [
@@ -986,6 +993,7 @@ export const parseParameterList = (initial: State): NodeResult => {
       break
 
     const comma = expect(state, 'Comma', [
+      'Ellipsis',
       'StaticKeyword',
       'MutKeyword',
       'Identifier',

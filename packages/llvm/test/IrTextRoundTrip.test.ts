@@ -229,14 +229,15 @@ it.effect('renders both required DIFile fields when neither operand is present',
 )
 
 it.effect(
-  'round-trips invoke, a cleanup landing pad, and a personality through both serializers',
+  'round-trips variadic invoke, a cleanup landing pad, and a personality through both serializers',
   () =>
     Effect.gen(function* () {
       const builder = yield* Builder.make({ sourceFilename: 'unwind.ll' })
       const i32 = yield* Type.integer(builder, 32)
       const signature = yield* Type.functionType(builder, i32, [])
       const personality = yield* FunctionActor.declare(builder, 'personality', signature)
-      const callee = yield* FunctionActor.declare(builder, 'foreign', signature)
+      const variadic = yield* Type.functionType(builder, i32, [i32], { variadic: true })
+      const callee = yield* FunctionActor.declare(builder, 'foreign', variadic)
       const fn = yield* FunctionActor.declare(builder, 'guard', signature, {
         personality: yield* Constant.fromGlobal(
           builder,
@@ -254,9 +255,17 @@ it.effect(
           const result = required(
             yield* FunctionBody.invoke(
               body,
-              signature,
+              variadic,
               yield* Constant.fromGlobal(builder, yield* FunctionActor.global(builder, callee)),
-              [],
+              [
+                yield* Constant.integerSigned(builder, i32, 1),
+                yield* Constant.integerSigned(builder, i32, 65535),
+                yield* Constant.integerSigned(
+                  builder,
+                  yield* Type.integer(builder, 64),
+                  4294967296n,
+                ),
+              ],
               normal,
               unwind,
               'result',

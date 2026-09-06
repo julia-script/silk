@@ -1,7 +1,7 @@
 import type * as FunctionActor from '@silklang/llvm/Function'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as Constant from '@silklang/llvm/Constant'
-import type * as LlvmType from '@silklang/llvm/Type'
+import * as LlvmType from '@silklang/llvm/Type'
 import * as Effect from 'effect/Effect'
 import * as CAbi from './CAbi.js'
 import type { LinearOperation } from './MirLinearization.js'
@@ -57,7 +57,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   const foreign =
     operation._tag === 'ForeignIndirectCall'
       ? context.foreignIndirects.get(CAbi.signatureKey(operation.signature))
-      : foreignFunctions.get(operation.symbol)
+      : foreignFunctions.get(CAbi.callKey(operation.symbol, operation.variadicArguments))
   if (foreign === undefined) throw new RangeError('LLVM foreign call was not declared')
   const arguments_ = operation.arguments.flatMap((argument) => [
     ...NativeStorage.readLocal(storage, argument),
@@ -66,6 +66,21 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     const callee = NativeStorage.readLocal(storage, operation.callee)
     if (callee.length !== 1) throw new RangeError('Native function pointer lost its address lane')
     arguments_.push(...callee)
+  } else {
+    for (const [ordinal, argument] of operation.variadicArguments.entries()) {
+      if (argument.source.bits === argument.promoted.bits) continue
+      const index = operation.signature.parameters.length + ordinal
+      const value = arguments_[index]
+      if (value === undefined) throw new RangeError('Missing variadic operand')
+      const type = yield* LlvmType.integer(context.builder, argument.promoted.bits)
+      arguments_[index] = yield* FunctionBody.cast(
+        body,
+        argument.source.signed ? 'sext' : 'zext',
+        value,
+        type,
+        `vararg${index}`,
+      )
+    }
   }
   const result = yield* FunctionBody.callDirect(
     body,

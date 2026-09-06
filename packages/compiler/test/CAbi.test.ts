@@ -390,6 +390,7 @@ it('admits recursively C-compatible function pointers and keys their full signat
 it('renders one exact canonical header for scalars, pointers, nested callbacks, and empty arity', () => {
   const functions: ReadonlyArray<Backend.ForeignExport> = [
     {
+      variadic: false,
       symbol: 'visit',
       parameters: [
         'pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
@@ -400,7 +401,13 @@ it('renders one exact canonical header for scalars, pointers, nested callbacks, 
         'extern "C" fn(u64)->i32!nonnull:readwrite/external/capture:/borrow:/callbacks:/returned:-/noreturn:false/unwind:forbidden',
       contract: { ...ForeignContract.conservative, callbacks: [2] },
     },
-    { symbol: 'answer', parameters: [], result: 'i32', contract: ForeignContract.conservative },
+    {
+      variadic: false,
+      symbol: 'answer',
+      parameters: [],
+      result: 'i32',
+      contract: ForeignContract.conservative,
+    },
   ]
   const data: ReadonlyArray<Backend.ForeignStatic> = [
     {
@@ -450,7 +457,13 @@ it('renders one exact canonical header for scalars, pointers, nested callbacks, 
 
 it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
   const exports: ReadonlyArray<Backend.ForeignExport> = [
-    { symbol: 'answer', parameters: [], result: 'i32', contract: ForeignContract.conservative },
+    {
+      variadic: false,
+      symbol: 'answer',
+      parameters: [],
+      result: 'i32',
+      contract: ForeignContract.conservative,
+    },
   ]
   const data: ReadonlyArray<Backend.ForeignStatic> = [
     { symbol: 'silk_abi_version', type: 'u32', direction: 'Export' },
@@ -464,6 +477,7 @@ it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
     const pointerWidth = CAbi.typeText(CAbi.classify('usize', target, 'Parameter'))
     const imports: ReadonlyArray<Backend.ForeignImport> = [
       {
+        variadic: false,
         symbol: 'host_log',
         parameters: [
           'pointer<const;7%3APointer30%3ASingle%3Aconst%3Anonnull%3ANatural%3A010%3Abuiltin%3Au8>',
@@ -476,7 +490,7 @@ it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
     const manifest = AbiManifest.make(target, imports, exports, data)
     const expected = `${JSON.stringify(
       {
-        silkForeignAbi: 3,
+        silkForeignAbi: 4,
         target: target.id,
         exports: [
           {
@@ -487,6 +501,7 @@ it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
             parameters: [],
             result: 'i32',
             contract: ForeignContract.conservative,
+            variadic: false,
           },
           {
             kind: 'data',
@@ -508,6 +523,7 @@ it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
             ],
             result: 'void',
             contract: ForeignContract.conservative,
+            variadic: false,
           },
           {
             kind: 'data',
@@ -940,5 +956,232 @@ pub fn main() { unsafe visit(entry) }`,
         assert.isAbove(diagnostic.span.end, diagnostic.span.start)
       }
     }
+  }),
+)
+
+it.effect('keeps one variadic declaration and promotes integer tails per call', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'variadic/promotions',
+      new TextEncoder().encode(`
+unsafe extern "C" fn receive(tag: i32, ...) -> i32
+pub fn main() -> i32 {
+  let a: i8 = -7
+  let b: u8 = 255
+  let c: u16 = 65535
+  let d: u32 = 4000000000
+  let first = unsafe receive(0)
+  let second = unsafe receive(1, a, b, c, d)
+  return first + second + unsafe receive(2, 42)
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const declarations = Analysis.instancesOf(snapshot).foreignCalls
+    assert.strictEqual(declarations.length, 1)
+    assert.strictEqual(declarations[0]?.signature.variadic, true)
+    assert.strictEqual(declarations[0]?.signature.parameters.length, 1)
+    const program = Analysis.loweredMir(snapshot)
+    const calls = program.functions
+      .flatMap((fn) => MirVerification.operations(fn))
+      .filter((operation) => operation._tag === 'ForeignCall')
+    assert.deepEqual(
+      calls.map((call) =>
+        call.variadicArguments.map((argument) => CAbi.typeText(argument.promoted)),
+      ),
+      [[], ['i32', 'i32', 'i32', 'u32'], ['i32']],
+    )
+    assert.deepEqual(MirVerification.verify(program), [])
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    assert.include(artifact.ir, 'declare i32 @receive(i32, ...)')
+    assert.include(artifact.ir, 'invoke i32 (i32, ...) @receive')
+    assert.strictEqual(artifact.foreignImports.length, 1)
+    assert.strictEqual(artifact.foreignImports[0]?.variadic, true)
+    const corrupted = {
+      ...program,
+      functions: program.functions.map((fn) => ({
+        ...fn,
+        regions: fn.regions.map((region) =>
+          region._tag === 'OperationRegion'
+            ? {
+                ...region,
+                operations: region.operations.map((operation) =>
+                  operation._tag === 'ForeignCall' && operation.variadicArguments.length > 0
+                    ? { ...operation, variadicArguments: [] }
+                    : operation,
+                ),
+              }
+            : region,
+        ),
+      })),
+    }
+    assert.include(
+      MirVerification.verify(corrupted).map((entry) => entry.rule),
+      'InvalidForeignCall',
+    )
+    const manifest = AbiManifest.make(Target.aarch64AppleDarwin, artifact.foreignImports, [], [])
+    const supplied = yield* AbiManifest.decode(
+      SourceFile.make('variadic/valid.json', AbiManifest.encode(manifest)),
+    )
+    assert.deepEqual(AbiManifest.check([supplied], program), [])
+    const fixed = {
+      ...manifest,
+      imports: manifest.imports.map((entry) => ({ ...entry, variadic: false })),
+    }
+    const mismatch = yield* AbiManifest.decode(
+      SourceFile.make('variadic/fixed.json', AbiManifest.encode(fixed)),
+    )
+    assert.deepEqual(
+      AbiManifest.check([mismatch], program).map((entry) => entry.code),
+      ['SEM0192'],
+    )
+    for (const invalid of [
+      { ...manifest, silkForeignAbi: 2 },
+      {
+        ...manifest,
+        imports: manifest.imports.map((entry) => ({ ...entry, variadic: undefined })),
+      },
+      { ...manifest, imports: manifest.imports.map((entry) => ({ ...entry, variadic: 'true' })) },
+      { ...manifest, imports: manifest.imports.map((entry) => ({ ...entry, parameters: [] })) },
+    ]) {
+      const source = SourceFile.make(
+        'variadic/invalid.json',
+        new TextEncoder().encode(
+          yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(invalid),
+        ),
+      )
+      const error = yield* Effect.flip(AbiManifest.decode(source))
+      assert.strictEqual(error.code, 'SEM0188')
+      assert.deepEqual(
+        [error.span.sourceId, error.span.start, error.span.end],
+        [source.id, 0, source.bytes.length],
+      )
+    }
+  }),
+)
+
+it('admits only integer variadic operands and preserves their canonical promotions', () => {
+  for (const target of [
+    Target.aarch64AppleDarwin,
+    Target.x8664UnknownLinuxGnu,
+    Target.aarch64UnknownLinuxGnu,
+  ]) {
+    for (const [source, promoted] of [
+      ['i8', 'i32'],
+      ['u8', 'i32'],
+      ['i16', 'i32'],
+      ['u16', 'i32'],
+      ['i32', 'i32'],
+      ['u32', 'u32'],
+      ['i64', 'i64'],
+      ['u64', 'u64'],
+      ['isize', 'i64'],
+      ['usize', 'u64'],
+    ] as const) {
+      const argument = CAbi.promoteVariadic(source, target) ?? unreachable('integer promotion')
+      assert.strictEqual(CAbi.typeText(argument.promoted), promoted)
+    }
+    for (const type of ['f32', 'f64', ...rejected.map(([, type]) => type), Type.unit] as const) {
+      assert.strictEqual(CAbi.promoteVariadic(type, target), undefined)
+    }
+    const fixed = CAbi.signature(['i32'], 'i32', target)
+    const variadic = CAbi.signature(['i32'], 'i32', target, ForeignContract.conservative, true)
+    assert.notStrictEqual(CAbi.signatureKey(fixed), CAbi.signatureKey(variadic))
+  }
+})
+
+it.effect('diagnoses unsupported variadic definitions, operands and missing fixed arguments', () =>
+  Effect.gen(function* () {
+    for (const [source, expected] of [
+      ['unsafe extern "C" fn bad(...) -> i32', 'SEM0188'],
+      [
+        'unsafe extern "C" fn receive(tag: i32, ...) -> i32\npub fn main() -> i32 { return unsafe receive() }',
+        'SEM0007',
+      ],
+      ['fn bad(tag: i32, ...) -> i32 { return tag }', 'SEM0188'],
+      ['export extern "C" fn bad(tag: i32, ...) -> i32 { return tag }', 'SEM0188'],
+      [
+        'unsafe extern "C" fn receive(tag: i32, ...) -> i32\npub fn main() -> i32 { return unsafe receive(1, true) }',
+        'SEM0187',
+      ],
+      [
+        'unsafe extern "C" fn receive(tag: i32, ...) -> i32\npub fn main() -> i32 { let x: f64 = 1.0 return unsafe receive(1, x) }',
+        'SEM0187',
+      ],
+      [
+        'unsafe extern "C" fn receive(tag: i32, ...) -> i32\npub fn main() -> i32 { let x = 1 return unsafe receive(1, &x) }',
+        'SEM0187',
+      ],
+    ] as const) {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'variadic/rejected',
+        new TextEncoder().encode(source),
+        'aarch64-apple-darwin',
+      )
+      const diagnostic =
+        Analysis.diagnostics(snapshot).find((entry) => entry.code === expected) ??
+        unreachable(
+          `${expected}: ${Analysis.diagnostics(snapshot)
+            .map((entry) => entry.code)
+            .join(',')}`,
+        )
+      assert.strictEqual(diagnostic.span.sourceId, 'variadic/rejected')
+      assert.isAbove(diagnostic.span.end, diagnostic.span.start)
+    }
+  }),
+)
+
+it.effect('selects the variadic boundary before foreign declaration agreement', () =>
+  Effect.gen(function* () {
+    const source = new TextEncoder().encode(`
+static if Intrinsic.targetOperatingSystem() == "darwin" {
+  unsafe extern "C" fn receive(tag: i32, ...) -> i32
+} else {
+  unsafe extern "C" fn receive(tag: i32, value: i32) -> i32
+}
+static if false {
+  unsafe extern "C" fn inactive(tag: i32, ...) -> i32
+  fn dormant() -> i32 { return unsafe inactive(1, true) }
+}
+pub fn main() -> i32 { return unsafe receive(1, 42) }`)
+    for (const target of [
+      'aarch64-apple-darwin',
+      'x86_64-unknown-linux-gnu',
+      'aarch64-unknown-linux-gnu',
+    ] as const) {
+      const snapshot = yield* Analysis.ofSourceRealized('variadic/selected', source, target)
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.deepEqual(
+        Analysis.instancesOf(snapshot).foreignCalls.map((entry) => [
+          entry.symbol,
+          entry.signature.variadic,
+        ]),
+        [['receive', target === 'aarch64-apple-darwin']],
+      )
+    }
+  }),
+)
+
+it.effect('preserves synchronous callback contracts on the fixed side of a variadic call', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'variadic/callback',
+      new TextEncoder().encode(`
+export "C" fn add(value: i32) -> i32 { return value + 1 }
+unsafe extern "C" fn receive(callback: extern "C" fn(i32) -> i32, tag: i32, ...) -> i32
+  with Intrinsic.foreign(callbacks: ("callback",))
+pub fn main() -> i32 { let value: u16 = 41 return unsafe receive(add, 0, value) }
+`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const call = program.foreignCalls.at(0) ?? unreachable('variadic callback declaration')
+    assert.deepEqual(call.signature.contract.callbacks, [0])
+    assert.strictEqual(call.signature.variadic, true)
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    assert.include(artifact.ir, 'invoke i32 (ptr, i32, ...) @receive')
+    assert.strictEqual(artifact.foreignExports.at(0)?.variadic, false)
   }),
 )
