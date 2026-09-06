@@ -12,15 +12,18 @@ Server.start({
     spawn: (epoch) =>
       ProjectWorker.makeInProcess({
         epoch,
-        analyze: Effect.fnUntraced(function* (documents, previous, invalidation) {
+        analyze: Effect.fnUntraced(function* (documents, previous, invalidation, onProgress) {
           yield* Effect.sleep(40)
           if (
             documents.some((document) => decoder.decode(document.bytes).includes('LSP_TEST_DEFECT'))
           )
             return yield* Effect.die(new Error('controlled LSP analysis defect'))
-          return yield* Workspace.analyzeProject(documents, previous, invalidation).pipe(
-            Effect.provide(NodeServices.layer),
-          )
+          return yield* Workspace.analyzeProject(
+            documents,
+            previous,
+            invalidation,
+            onProgress,
+          ).pipe(Effect.provide(NodeServices.layer))
         }),
       }),
   },

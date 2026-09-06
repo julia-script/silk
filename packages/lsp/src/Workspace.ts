@@ -217,7 +217,10 @@ export const analyze = Effect.fn('Workspace.analyze')(function* (
   return view
 })
 
-/** Analyzes all synchronized project roots through one shared immutable compiler frontend. */
+/**
+ * Analyzes all synchronized project roots through one shared immutable compiler frontend.
+ * Reports completed stages so the worker watchdog can recognize forward progress during cold analysis.
+ */
 export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
   documents: ReadonlyArray<Document.Document>,
   previous: ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot> = new Map(),
@@ -225,6 +228,7 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
     dirtyPaths: Object.freeze([]),
     rediscover: false,
   }),
+  onProgress?: (phase: string) => Effect.Effect<void>,
 ): Effect.fn.Return<
   ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot>,
   never,
@@ -245,6 +249,7 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
   const previousProject = previous.values().next().value?.project
   const previousInventory = previous.values().next().value?.inventory
   const selectedConfiguration = yield* configuration(first)
+  yield* onProgress?.('ConfigurationSelected') ?? Effect.void
   const inventory = yield* WorkspaceCatalog.refresh({
     sourceRoot: first.sourceRoot,
     documents,
@@ -255,11 +260,13 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
       rediscover: invalidation.rediscover,
     },
   }).pipe(Effect.provide(resolver(first.sourceRoot, overlays)))
+  yield* onProgress?.('CatalogSelected') ?? Effect.void
   const project = yield* (
     previousProject === undefined
       ? ProjectAnalysis.make(roots, selectedConfiguration)
       : ProjectAnalysis.revise(previousProject, roots, selectedConfiguration)
   ).pipe(Effect.provide(resolver(first.sourceRoot, overlays)))
+  yield* onProgress?.('ProjectAnalyzed') ?? Effect.void
   const moduleUris = new Map<string, string>()
   for (const module of project.closure.modules) {
     const source = project.closure.sources.get(module.name)

@@ -7,7 +7,6 @@ let spawns = 0
 Server.start({
   policy: {
     debounce: 5,
-    noProgressLease: 5_000,
     retirementDeadline: 2_000,
     queryDeadline: 4_000,
     diagnosticDeadline: 4_000,

@@ -202,7 +202,18 @@ it.effect('shares one project frontend across overlapping open roots', () =>
         'import Shared\nfn local() -> i32 { return 2 }\npub fn utility() -> i32 { return Shared.answer() + local() }',
       ),
     })
-    const analyzed = yield* Workspace.analyzeProject([util, main])
+    const phases: Array<string> = []
+    const analyzed = yield* Workspace.analyzeProject(
+      [util, main],
+      undefined,
+      undefined,
+      Effect.fnUntraced(function* (phase: string) {
+        yield* Effect.sync(() => {
+          phases.push(phase)
+        })
+      }),
+    )
+    assert.deepEqual(phases, ['ConfigurationSelected', 'CatalogSelected', 'ProjectAnalyzed'])
     const mainSession = analyzed.get(main.uri)
     const utilSession = analyzed.get(util.uri)
 

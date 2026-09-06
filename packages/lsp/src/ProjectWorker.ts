@@ -54,6 +54,7 @@ export const makeInProcess = Effect.fn('ProjectWorker.makeInProcess')(function* 
       readonly dirtyPaths: ReadonlyArray<string>
       readonly rediscover: boolean
     },
+    onProgress: (phase: string) => Effect.Effect<void>,
   ) => Effect.Effect<ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot>>
   readonly beforeQuery?: (query: import('./EditorQuery.js').EditorQuery) => Effect.Effect<void>
 }): Effect.fn.Return<ProjectWorker> {

@@ -23,6 +23,7 @@ export interface Options<R> {
       readonly dirtyPaths: ReadonlyArray<string>
       readonly rediscover: boolean
     },
+    onProgress: (phase: string) => Effect.Effect<void>,
   ) => Effect.Effect<ReadonlyMap<string, ProjectSnapshot.DocumentSnapshot>, never, R>
   readonly emit: (message: WorkerProtocol.WorkerMessage) => Effect.Effect<void>
   readonly beforeQuery?: (query: EditorQuery.EditorQuery) => Effect.Effect<void, never, R>
@@ -256,7 +257,14 @@ export const make = Effect.fn('ProjectWorkerRuntime.make')(function* <R>(
     const work = Effect.gen(function* () {
       yield* emit({ _tag: 'Progress', generation: message.generation, phase: 'AnalysisStarted' })
       const result = yield* Effect.exit(
-        options.analyze(documents, new Map(committed), message.invalidation),
+        options.analyze(
+          documents,
+          new Map(committed),
+          message.invalidation,
+          Effect.fnUntraced(function* (phase: string) {
+            yield* emit({ _tag: 'Progress', generation: message.generation, phase })
+          }),
+        ),
       )
       if (closed || activeAnalysis?.generation.value !== message.generation.value) return
       activeAnalysis = undefined

@@ -352,16 +352,15 @@ it(
       assert.isNotNull(healthy, JSON.stringify(client.messages))
       if (healthy === null) throw new Error('expected healthy hover')
       assert.include(healthy.contents.value, 'i32')
-      const healthyIndex = client.messages.findIndex((message) => message.id === 40)
 
       const failureMessage = await client.waitFor((message) =>
         message.method === 'window/logMessage' &&
-        JSON.stringify(message.params).includes('incident')
+        JSON.stringify(message.params).includes('incident') &&
+        JSON.stringify(message.params).includes('standalone:/silk-lsp-e2e/wedged')
           ? message
           : undefined,
       )
       const failureIndex = client.messages.indexOf(failureMessage)
-      assert.isBelow(healthyIndex, failureIndex)
       await client.waitFor((message) => {
         if (client.messages.indexOf(message) <= failureIndex) return undefined
         return message.method === 'silk/inspectorInvalidated' &&

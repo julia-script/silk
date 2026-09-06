@@ -593,6 +593,44 @@ it.effect('atomically supersedes pending work when discovery reassigns a project
   }),
 )
 
+it.effect('allows worker startup beyond the independent retirement deadline', () =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    let spawns = 0
+    const engine = yield* WorkspaceEngine.make({
+      discover: (entry) => Effect.succeed(document(entry)),
+      workerFactory: {
+        spawn: Effect.fnUntraced(function* (epoch) {
+          spawns += 1
+          const worker = yield* ProjectWorker.makeInProcess({ epoch, analyze: analyzed })
+          return {
+            ...worker,
+            take: worker.take.pipe(
+              Effect.tap(
+                Effect.fnUntraced(function* (message) {
+                  if (message._tag !== 'Ready') return
+                  yield* Deferred.succeed(entered, undefined)
+                  yield* Deferred.await(release)
+                }),
+              ),
+            ),
+          }
+        }),
+      },
+      policy: { debounce: 10, startupDeadline: 100, retirementDeadline: 10 },
+    })
+    assert.isTrue(Result.isSuccess(engine.accept(open(1, 'pub fn main() -> i32 { return 42 }'))))
+    yield* TestClock.adjust(10)
+    yield* Deferred.await(entered)
+    yield* TestClock.adjust(20)
+    yield* Deferred.succeed(release, undefined)
+    yield* nextEvent(engine, 'Committed')
+    assert.strictEqual(spawns, 1)
+    yield* engine.shutdown
+  }),
+)
+
 it.effect('retires a no-progress worker and reconstructs the newest source on a replacement', () =>
   Effect.gen(function* () {
     let spawns = 0

@@ -26,6 +26,8 @@ export interface Policy {
   readonly diagnosticDeadline: Duration.Input
   readonly supersededLease: Duration.Input
   readonly noProgressLease: Duration.Input
+  /** Bounds cold worker loading and the Ready handshake independently of teardown. */
+  readonly startupDeadline: Duration.Input
   readonly retirementDeadline: Duration.Input
   readonly failureLimit: number
 }
@@ -36,6 +38,7 @@ export const defaultPolicy: Policy = Object.freeze({
   diagnosticDeadline: 5_000,
   supersededLease: 500,
   noProgressLease: 10_000,
+  startupDeadline: 10_000,
   retirementDeadline: 2_000,
   failureLimit: 3,
 })
@@ -558,7 +561,7 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
       return undefined
     }
     const readiness = yield* Effect.result(
-      Deferred.await(ready).pipe(Effect.timeout(policy.retirementDeadline)),
+      Deferred.await(ready).pipe(Effect.timeout(policy.startupDeadline)),
     )
     if (Result.isFailure(readiness)) {
       nextIncident = IncidentId.next(nextIncident)
