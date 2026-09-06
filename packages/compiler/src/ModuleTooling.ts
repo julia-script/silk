@@ -70,8 +70,15 @@ export const semanticOccurrenceIndex = (
   semantics: ModuleSemantics.ModuleSemantics,
   index: DeclarationIndex.Index,
   resolution: NameResolution.Resolution,
+  conditions: ReadonlyArray<Elaboration.ExpressionFact> = [],
 ): SemanticOccurrence.ModuleIndex =>
-  SemanticOccurrence.makeModule(semantics.module, semantics.elaboration, index, resolution)
+  SemanticOccurrence.makeModule(
+    semantics.module,
+    semantics.elaboration,
+    index,
+    resolution,
+    conditions,
+  )
 
 /** Closes already-built module indexes into one reusable tooling artifact. */
 export const fromIndexes = (

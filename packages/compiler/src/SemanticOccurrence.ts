@@ -1653,6 +1653,7 @@ export const makeModule = (
   result: Elaboration.Result,
   index: DeclarationIndex.Index,
   resolution: NameResolution.Resolution,
+  conditions: ReadonlyArray<Elaboration.ExpressionFact> = [],
 ): ModuleIndex => {
   const pending: Array<Pending> = []
   const scope = NameResolution.scopeOf(resolution, module)
@@ -1663,6 +1664,7 @@ export const makeModule = (
     collectConformance(conformance, index, scope, pending)
   for (const fn of Elaboration.executableFunctions(result))
     for (const statement of fn.statements) collectStatement(statement, index, scope, pending)
+  for (const condition of conditions) collectExpression(condition, index, scope, pending)
   collectImports(scope, index, pending)
   const qualifiedStarts = qualifiedOccurrenceStarts(result.syntax.tokens)
   const bindings = new Map<string, NameResolution.Binding>()

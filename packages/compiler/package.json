@@ -270,6 +270,10 @@
       "types": "./dist/ModuleClosure.d.ts",
       "import": "./dist/ModuleClosure.js"
     },
+    "./ModuleSelection": {
+      "types": "./dist/ModuleSelection.d.ts",
+      "import": "./dist/ModuleSelection.js"
+    },
     "./ModuleSemantics": {
       "types": "./dist/ModuleSemantics.d.ts",
       "import": "./dist/ModuleSemantics.js"

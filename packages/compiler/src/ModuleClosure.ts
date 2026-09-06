@@ -30,8 +30,11 @@ export interface CompilationRequest {
 
 /** One project frontend request with one or more independently queryable roots. */
 export interface ProjectRequest {
+  readonly configuration?: CompilationRequest['configuration']
   readonly roots: ReadonlyArray<SourceFile.SourceFile>
   readonly previous?: ProjectClosure
+  /** Completed condition decisions for this discovery pass; absent decisions admit neither arm. */
+  readonly selection?: ReadonlyMap<string, ReadonlyMap<number, boolean>>
 }
 
 /** The resolved, diagnosed, or syntax-unavailable target of one import declaration. */
@@ -80,6 +83,8 @@ export interface Module {
   readonly name: string
   readonly syntax: SyntaxFile.SyntaxFile
   readonly imports: ReadonlyArray<ImportFact>
+  /** Selected module declarations, retaining their identities in the complete parsed syntax. */
+  readonly declarations: ReadonlyArray<SyntaxTree.Node>
 }
 
 /** Immutable facts shared by single-root and multi-root module closures. */
@@ -91,13 +96,13 @@ export interface Facts {
   readonly resolutionFailures: ReadonlyArray<SourceResolver.SourceResolverError>
 }
 
-/** The complete deterministic closure of one compilation request. */
+/** The deterministic closure admitted by one declaration-selection discovery pass. */
 export interface Closure extends Facts {
   readonly _tag: 'ModuleClosure'
   readonly rootModule: string
 }
 
-/** The complete deterministic union closure of one project frontend request. */
+/** The deterministic union closure admitted by one project discovery pass. */
 export interface ProjectClosure extends Facts {
   readonly _tag: 'ProjectModuleClosure'
   readonly rootModules: ReadonlyArray<string>
@@ -149,6 +154,7 @@ const unavailableSyntax = (parent: SyntaxTree.Node): SyntaxTree.Element =>
 interface ParsedModule {
   readonly name: string
   readonly syntax: SyntaxFile.SyntaxFile
+  readonly declarations: ReadonlyArray<SyntaxTree.Node>
   readonly imports: ReadonlyArray<{
     readonly syntax: SyntaxTree.Node
     readonly path: SyntaxTree.Node
@@ -167,13 +173,15 @@ const parseModule = (
   name: string,
   source: SourceResolver.ResolvedSource,
   previous?: Module,
+  selection: ReadonlyMap<number, boolean> = new Map(),
 ): ParsedModule => {
   const currentSource = SourceFile.make(name, source.bytes, source.origin)
   const syntax =
     previous !== undefined && SourceFile.equals(previous.syntax.source, currentSource)
       ? previous.syntax
       : Parser.parse(Lexer.lex(currentSource))
-  const imports = syntax.root.children.flatMap((element): ParsedModule['imports'] => {
+  const declarations = selectedDeclarations(syntax.root, selection)
+  const imports = declarations.flatMap((element): ParsedModule['imports'] => {
     if (!SyntaxTree.isNode(element) || element.kind !== 'ImportDeclaration') return []
     const path = SyntaxTree.directNode(element, 'ImportPath')
     if (path === undefined || !SyntaxTree.isAvailableSyntax(path)) {
@@ -189,7 +197,27 @@ const parseModule = (
     if (token === undefined) throw new RangeError('Available import path lost its first segment')
     return [Object.freeze({ syntax: element, path, sourceSpelling, canonicalTarget, token })]
   })
-  return Object.freeze({ name, syntax, imports: Object.freeze(imports) })
+  return Object.freeze({ name, syntax, declarations, imports: Object.freeze(imports) })
+}
+
+/** Flattens only decided declaration groups without changing the lossless syntax artifact. */
+export const selectedDeclarations = (
+  node: SyntaxTree.Node,
+  selection: ReadonlyMap<number, boolean>,
+): ReadonlyArray<SyntaxTree.Node> => {
+  if (node.kind === 'StaticConditionalDeclaration') {
+    const selected = selection.get(node.span.start)
+    if (selected === undefined) return Object.freeze([])
+    const children = node.children.filter(SyntaxTree.isNode)
+    const arm = children[selected ? 1 : 2]
+    return arm === undefined ? Object.freeze([]) : selectedDeclarations(arm, selection)
+  }
+  if (node.kind !== 'SourceFile' && node.kind !== 'DeclarationGroup') return Object.freeze([node])
+  return Object.freeze(
+    node.children
+      .filter(SyntaxTree.isNode)
+      .flatMap((child) => selectedDeclarations(child, selection)),
+  )
 }
 
 type Resolution =
@@ -288,6 +316,7 @@ const analyzeModule = Effect.fnUntraced(function* (
       _tag: 'Module',
       name: parsed.name,
       syntax: parsed.syntax,
+      declarations: parsed.declarations,
       imports: Object.freeze(imports),
     }),
     diagnostics: Object.freeze(diagnostics),
@@ -317,7 +346,8 @@ const cycleFacts = (modules: ReadonlyArray<Module>): ReadonlyArray<ReadonlyArray
 }
 
 /**
- * Loads the union reachable closure of one project request. Roots, the frontier, and the final
+ * Discovers imports admitted by the supplied declaration decisions. Undecided groups admit neither
+ * arm; Frontend coordinates profile completion and subsequent selection passes. Roots and the final
  * module order are canonically sorted, so neither supply order nor traversal order affects the
  * result.
  */
@@ -381,7 +411,7 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
     const resolution = resolutions.get(name) ?? (yield* resolve(name))
     if (resolution?._tag !== 'Found') continue
     const analysis = yield* analyzeModule(
-      parseModule(name, resolution.source, previousModules.get(name)),
+      parseModule(name, resolution.source, previousModules.get(name), request.selection?.get(name)),
       resolve,
     )
     loaded.set(name, analysis.module)
@@ -428,7 +458,7 @@ export const view = (self: ProjectClosure, rootModule: string): Closure | undefi
       })
     : undefined
 
-/** Loads the complete reachable closure of one compilation request. */
+/** Discovers the unconditional bootstrap closure of one compilation request. Use Analysis.make for profile-selected frontend facts. */
 export const load = Effect.fn('ModuleClosure.load')(function* (
   request: CompilationRequest,
 ): Effect.fn.Return<Closure, never, SourceResolver.SourceResolver> {

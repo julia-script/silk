@@ -145,6 +145,11 @@ export const unused = (
     if (imported._tag !== 'Available' || !SyntaxTree.isAvailableSyntax(imported.import.syntax))
       continue
     for (const binding of imported.bindings) {
+      if (
+        binding._tag === 'ImportedMember' &&
+        SyntaxTree.directToken(imported.import.syntax, 'PubKeyword') !== undefined
+      )
+        continue
       if (conflicted.has(binding) || !effective.has(binding)) continue
       if (binding._tag !== 'ModuleNamespace' && binding._tag !== 'ImportedMember') continue
       const authored =

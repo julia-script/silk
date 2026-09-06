@@ -64,6 +64,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as DigitSeparator from './internal/DigitSeparator.js'
 import * as DurationLiteral from './internal/DurationLiteral.js'
 import * as ForeignSymbol from './ForeignSymbol.js'
+import * as ImportPath from './ImportPath.js'
 import * as IntegerLiteral from './internal/IntegerLiteral.js'
 import * as LiteralForm from './LiteralForm.js'
 import type * as ModuleClosure from './ModuleClosure.js'
@@ -3054,9 +3055,12 @@ const collectForeignStatic = (
   })
 }
 
-const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
+const collectModule = (
+  syntax: SyntaxFile.SyntaxFile,
+  declarations: ReadonlyArray<SyntaxTree.Node>,
+): ModuleHeaders => {
   const source = syntax.source
-  const nodes = syntax.root.children.filter(
+  const nodes = declarations.filter(
     (element): element is SyntaxTree.Node =>
       SyntaxTree.isNode(element) &&
       (element.kind === 'FunctionDeclaration' ||
@@ -3076,7 +3080,7 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   )
   const first = new Map<string, { readonly id: CanonicalId; readonly token: Token.Token }>()
   const diagnostics: Array<Diagnostic.Diagnostic> = []
-  const implNodes = syntax.root.children.filter(
+  const implNodes = declarations.filter(
     (element): element is SyntaxTree.Node =>
       SyntaxTree.isNode(element) && element.kind === 'ImplDeclaration',
   )
@@ -4408,6 +4412,36 @@ const collectModule = (syntax: SyntaxFile.SyntaxFile): ModuleHeaders => {
   return Object.freeze({
     _tag: 'ModuleHeaders',
     module: source.id,
+    publications: Object.freeze(
+      declarations.flatMap((declaration): ModuleHeaders['publications'] => {
+        if (
+          declaration.kind !== 'ImportDeclaration' ||
+          SyntaxTree.directToken(declaration, 'PubKeyword') === undefined
+        )
+          return []
+        const path = SyntaxTree.directNode(declaration, 'ImportPath')
+        const list = SyntaxTree.directNode(declaration, 'ImportMemberList')
+        const module = path === undefined ? undefined : ImportPath.canonicalTarget(source, path)
+        if (module === undefined || list === undefined) return []
+        return SyntaxTree.directNodes(list, 'ImportMember').flatMap((member) => {
+          const original = SyntaxTree.directToken(member, 'Identifier')
+          if (original === undefined || !SyntaxTree.isAvailableSyntax(member)) return []
+          const alias = SyntaxTree.directNode(member, 'ImportAlias')
+          const token =
+            (alias === undefined ? undefined : SyntaxTree.directToken(alias, 'Identifier')) ??
+            original
+          return [
+            Object.freeze({
+              module,
+              original: spelling(source, original),
+              spelling: spelling(source, token),
+              syntax: member,
+              token,
+            }),
+          ]
+        })
+      }),
+    ),
     members: Object.freeze(members),
     declarations: Object.freeze(
       members.filter((member): member is DeclarationFact => member._tag === 'FunctionDeclaration'),
@@ -4472,7 +4506,9 @@ const declaredTypeNamesOwner = (
 
 /** Collects identities and raw type paths for the complete closure before scope resolution. */
 export const collect = (closure: ModuleClosure.Facts): DeclarationIndex.Index => {
-  const modules = Object.freeze(closure.modules.map((module) => collectModule(module.syntax)))
+  const modules = Object.freeze(
+    closure.modules.map((module) => collectModule(module.syntax, module.declarations)),
+  )
   return DeclarationIndex.make(
     'Collected',
     modules,

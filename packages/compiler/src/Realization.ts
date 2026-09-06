@@ -1,4 +1,5 @@
 import type * as ModuleClosure from './ModuleClosure.js'
+import * as ModuleSelection from './ModuleSelection.js'
 import * as Effect from 'effect/Effect'
 import * as Result from 'effect/Result'
 import * as CompilationProfile from './CompilationProfile.js'
@@ -526,13 +527,49 @@ export const configure = Effect.fn('Realization.configure')(function* (
             },
           ]
     })
-    return yield* ProfileBootstrap.complete(initial, { ...self, modules }, configuration?.bindings)
+    const completion = yield* ProfileBootstrap.complete(
+      initial,
+      { ...self, modules },
+      configuration?.bindings,
+    )
+    if (
+      self.selection !== undefined &&
+      completion.profile.identity !== self.selection.profile.identity
+    )
+      return yield* ConfigurationError.make(
+        'Realization.bootstrap',
+        'ConflictingBindings',
+        'profile differs from selected frontend',
+      )
+    return completion
   })
   const result = yield* Effect.result(operation)
   if (Result.isSuccess(result))
     return { frontend: self, completion: result.success, targetId: selectedTarget }
+  const availability =
+    result.failure.staticFailure === undefined
+      ? []
+      : ModuleSelection.availabilityOrigins(self.closure, result.failure.staticFailure.span)
+  const failure =
+    availability.length === 0
+      ? result.failure
+      : ConfigurationError.make(
+          'Realization.bootstrap',
+          'DependencyCycle',
+          result.failure.subject,
+          [
+            ...result.failure.origins,
+            ...availability.map((span) => ({
+              source: span.sourceId,
+              provenance: 'literal' as const,
+              span,
+            })),
+          ],
+          ['default requires conditional declaration availability'],
+          result.failure.staticFailure,
+        )
   const span =
-    result.failure.origins.find((origin) => origin.span !== undefined)?.span ??
+    failure.origins.find((origin) => origin.span !== undefined)?.span ??
     self.closure.modules.find((module) => module.name === self.closure.rootModule)?.syntax.root.span
   if (span === undefined) throw new RangeError('Profile bootstrap lost root source span')
   return {
@@ -540,7 +577,7 @@ export const configure = Effect.fn('Realization.configure')(function* (
       {
         ...self,
         diagnostics: Diagnostic.merge(self.diagnostics, [
-          Diagnostic.invalidConfiguration(result.failure, span),
+          Diagnostic.invalidConfiguration(failure, span),
         ]),
       },
       OpaqueRealization.catalogOf(self),

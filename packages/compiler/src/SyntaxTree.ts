@@ -7,6 +7,8 @@ import type * as Token from './Token.js'
 export type NodeKind =
   | 'SourceFile'
   | 'ImportDeclaration'
+  | 'StaticConditionalDeclaration'
+  | 'DeclarationGroup'
   | 'ImportPath'
   | 'ImportAlias'
   | 'ImportMemberList'

@@ -1,7 +1,6 @@
 import type * as CompilationProfile from './CompilationProfile.js'
 import type * as ConfigurationError from './ConfigurationError.js'
 import * as Diagnostic from './Diagnostic.js'
-import * as Realization from './Realization.js'
 import * as Effect from 'effect/Effect'
 import type * as Analysis from './Analysis.js'
 import * as Frontend from './Frontend.js'
@@ -78,6 +77,7 @@ const analyze = Effect.fnUntraced(function* (
   const unconfigured = yield* Frontend.frontendProject(
     {
       roots,
+      ...(options.configuration === undefined ? {} : { configuration: options.configuration }),
       ...(previous === undefined ? {} : { previous: previous.closure }),
     },
     {},
@@ -93,18 +93,8 @@ const analyze = Effect.fnUntraced(function* (
   )
   const root = unconfigured.closure.rootModules[0]
   const closure = root === undefined ? undefined : ModuleClosure.view(unconfigured.closure, root)
-  const configured =
-    closure === undefined || options.configuration === undefined
-      ? undefined
-      : yield* Realization.configure(
-          OpaqueRealization.withCatalog(
-            { ...unconfigured, closure, configuration: options.configuration },
-            OpaqueRealization.catalogOf(unconfigured),
-          ),
-          undefined,
-        )
   const span = closure?.modules.find((module) => module.name === root)?.syntax.root.span
-  const diagnostics = configured?.frontend.diagnostics ?? unconfigured.diagnostics
+  const diagnostics = unconfigured.diagnostics
   const frontend = {
     ...unconfigured,
     diagnostics:
@@ -113,7 +103,6 @@ const analyze = Effect.fnUntraced(function* (
         : Diagnostic.merge(diagnostics, [
             Diagnostic.invalidConfiguration(options.configurationError, span),
           ]),
-    ...(configured?.completion === undefined ? {} : { profile: configured.completion.profile }),
   }
   yield* Effect.yieldNow
   const tooling = yield* FrontendTooling.make(frontend, previous?.toolingModules)
@@ -187,7 +176,7 @@ const analyze = Effect.fnUntraced(function* (
       surfaces: frontend.surfaces,
       semantics: frontend.semantics,
       toolingModules: tooling.toolingModules,
-      semanticEnvironment: SemanticInvalidation.environment,
+      semanticEnvironment: frontend.semanticEnvironment,
       semanticInvalidation: frontend.semanticInvalidation,
       report,
     }),

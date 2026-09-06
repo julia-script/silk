@@ -5747,4 +5747,9 @@ export const invalidConfiguration = (
     message: `Invalid compilation configuration: ${error.message}`,
     reason: Object.freeze({ _tag: 'InvalidConfiguration', error }),
     span,
+    relatedSpans: Object.freeze(
+      error.origins.flatMap((origin) =>
+        origin.span === undefined ? [] : [{ label: origin.source, span: origin.span }],
+      ),
+    ),
   })

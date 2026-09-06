@@ -56,6 +56,7 @@ export const revisions = (
 
 /** Computes semantic invalidation from the current closure and optional prior revision. */
 export const invalidate = (options: {
+  readonly environment?: string
   readonly closure: ModuleClosure.ProjectClosure
   readonly surfaces: ReadonlyMap<string, ModuleSurface.ModuleSurface>
   readonly opaqueRealizations: OpaqueRealization.Catalog
@@ -66,7 +67,7 @@ export const invalidate = (options: {
       closure: options.closure,
       surfaces: options.surfaces,
       opaqueRealizations: options.opaqueRealizations,
-      environment: SemanticInvalidation.environment,
+      environment: options.environment ?? SemanticInvalidation.environment,
     }),
     revisions: revisions(options.closure, options.previous),
     ...(options.previous === undefined

@@ -11,6 +11,7 @@ import * as ResidualOwnership from '../src/ResidualOwnership.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceOrigin from '../src/SourceOrigin.js'
 import * as SourceResolver from '../src/SourceResolver.js'
+import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import { raise } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -25,6 +26,86 @@ const sources = new Map([['shared/Core', ascii('pub fn answer() -> i32 { return 
 
 const make = (requestedRoots = roots) =>
   ProjectAnalysis.make(requestedRoots).pipe(Effect.provide(SourceResolver.memory(sources)))
+
+it.effect(
+  'isolates selected surfaces by profile while reusing parsed syntax and ignoring unloaded edits',
+  () =>
+    Effect.gen(function* () {
+      const root = SourceFile.make(
+        'selected',
+        ascii(`
+static if Intrinsic.targetOperatingSystem() == "darwin" {
+  pub import darwin { value as selected }
+} else {
+  pub import linux { value as selected }
+}`),
+      )
+      const supply = (unused: string) =>
+        SourceResolver.memory(
+          new Map([
+            ['darwin', ascii('pub fn value() -> i32 { return 1 }')],
+            ['linux', ascii('pub fn value() -> i32 { return 2 }')],
+            ['unloaded', ascii(unused)],
+          ]),
+        )
+      const darwinOptions = { configuration: { profile: { target: 'aarch64-apple-darwin' } } }
+      const linuxOptions = { configuration: { profile: { target: 'x86_64-unknown-linux-gnu' } } }
+      const darwin = yield* ProjectAnalysis.make([root], darwinOptions).pipe(
+        Effect.provide(supply('')),
+      )
+      const linux = yield* ProjectAnalysis.revise(darwin, [root], linuxOptions).pipe(
+        Effect.provide(supply('')),
+      )
+      const same = yield* ProjectAnalysis.revise(darwin, [root], darwinOptions).pipe(
+        Effect.provide(supply('invalid unloaded source')),
+      )
+      for (const [project, expected] of [
+        [darwin, 'darwin'],
+        [linux, 'linux'],
+        [same, 'darwin'],
+      ] as const) {
+        const view = ProjectAnalysis.view(project, 'selected') ?? raise('selected view')
+        assert.deepEqual(view.diagnostics, [])
+        const member = DeclarationFacts.publishedMember(view.index, 'selected', 'selected')
+        assert.strictEqual(member._tag, 'Resolved')
+        if (member._tag === 'Resolved' && member.declaration.canonical._tag === 'Canonical')
+          assert.strictEqual(member.declaration.canonical.id.module, expected)
+        assert.deepEqual([...view.closure.sources.keys()], [expected, 'selected'])
+      }
+      assert.strictEqual(linux.syntaxRevisions.get('selected')?._tag, 'Reused')
+      assert.notStrictEqual(linux.semantics.get('selected'), darwin.semantics.get('selected'))
+      assert.strictEqual(same.semantics.get('selected'), darwin.semantics.get('selected'))
+      assert.strictEqual(same.profile?.identity, darwin.profile?.identity)
+    }),
+)
+
+it.effect('invalidates selection when an imported condition helper body changes', () =>
+  Effect.gen(function* () {
+    const root = SourceFile.make(
+      'selected',
+      ascii(`import policy { enabled }
+static if enabled() { pub const first: i32 = 1 } else { pub const second: i32 = 2 }`),
+    )
+    const options = { configuration: { profile: { target: 'aarch64-apple-darwin' } } }
+    const resolver = (value: boolean) =>
+      SourceResolver.memory(
+        new Map([['policy', ascii(`pub static fn enabled() -> bool { return ${value} }`)]]),
+      )
+    const before = yield* ProjectAnalysis.make([root], options).pipe(Effect.provide(resolver(true)))
+    const after = yield* ProjectAnalysis.revise(before, [root], options).pipe(
+      Effect.provide(resolver(false)),
+    )
+    const beforeView = ProjectAnalysis.view(before, 'selected') ?? raise('before view')
+    const afterView = ProjectAnalysis.view(after, 'selected') ?? raise('after view')
+    assert.deepEqual(beforeView.diagnostics, [])
+    assert.deepEqual(afterView.diagnostics, [])
+    assert.strictEqual(Analysis.memberByName(beforeView, 'selected', 'first')._tag, 'Resolved')
+    assert.strictEqual(Analysis.memberByName(afterView, 'selected', 'first')._tag, 'Missing')
+    assert.strictEqual(Analysis.memberByName(afterView, 'selected', 'second')._tag, 'Resolved')
+    assert.notStrictEqual(before.semantics.get('selected'), after.semantics.get('selected'))
+    assert.strictEqual(after.syntaxRevisions.get('selected')?._tag, 'Reused')
+  }),
+)
 
 const deterministicReport = (self: ProjectAnalysis.ProjectAnalysis) =>
   ProjectAnalysis.phases(self).map(({ phase, inputs, outputs, diagnostics }) => ({

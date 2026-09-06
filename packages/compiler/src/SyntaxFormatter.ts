@@ -908,12 +908,21 @@ const printNode = (
     case 'SourceFile':
       return printSourceFile(context, node, prefix)
     case 'ImportDeclaration': {
+      const publicKeyword = directTokens(node).find((token) => token.kind === 'PubKeyword')
       const keyword = tokenOf(node, 'ImportKeyword')
       const path = nodeOf(node, 'ImportPath')
       const alias = directNodes(node).find((child) => child.kind === 'ImportAlias')
       const members = directNodes(node).find((child) => child.kind === 'ImportMemberList')
       return FormatDocument.concat(
-        printToken(context, keyword, prefix, preserveBlank),
+        ...(publicKeyword === undefined
+          ? []
+          : [printToken(context, publicKeyword, prefix, preserveBlank)]),
+        printToken(
+          context,
+          keyword,
+          publicKeyword === undefined ? prefix : FormatDocument.text(' '),
+          preserveBlank,
+        ),
         printNode(context, path, FormatDocument.text(' ')),
         ...(alias === undefined ? [] : [printNode(context, alias, FormatDocument.text(' '))]),
         ...(members === undefined ? [] : [printNode(context, members, FormatDocument.text(' '))]),
@@ -1527,6 +1536,7 @@ const printNode = (
       )
     }
     case 'Block':
+    case 'DeclarationGroup':
       return printBlock(context, node, prefix)
     case 'UnsafeStatement':
       return FormatDocument.concat(
@@ -1610,6 +1620,7 @@ const printNode = (
             ]),
       )
     }
+    case 'StaticConditionalDeclaration':
     case 'StaticConditionalStatement': {
       const nodes = directNodes(node)
       const elseKeyword = directTokens(node).find((token) => token.kind === 'ElseKeyword')

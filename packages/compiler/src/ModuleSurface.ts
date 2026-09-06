@@ -2382,6 +2382,11 @@ export const make = (headers: DeclarationFacts.ModuleHeaders): ModuleSurface =>
     module: headers.module,
     canonical: record('ModuleSurface', [
       headers.module,
+      array(
+        headers.publications.map((publication) =>
+          record('Publication', [publication.module, publication.original, publication.spelling]),
+        ),
+      ),
       array(headers.members.map(member)),
       array(headers.conformances.map(conformance)),
       array(headers.inherentImpls.map(inherentImpl)),
@@ -2393,7 +2398,32 @@ export const fromIndex = (index: DeclarationIndex.Index): ReadonlyMap<string, Mo
   new Map(
     [...index.modules]
       .sort((left, right) => compareText(left.module, right.module))
-      .map((headers) => [headers.module, make(headers)]),
+      .map((headers) => {
+        const surface = make(headers)
+        if (headers.publications.length === 0) return [headers.module, surface]
+        return [
+          headers.module,
+          Object.freeze({
+            ...surface,
+            canonical: record('PublishedSurface', [
+              surface.canonical,
+              array(
+                headers.publications.map((publication) => {
+                  const result = DeclarationFacts.publishedMember(
+                    index,
+                    headers.module,
+                    publication.spelling,
+                  )
+                  return record(publication.spelling, [
+                    result._tag,
+                    result._tag === 'Resolved' ? member(result.declaration) : '',
+                  ])
+                }),
+              ),
+            ]),
+          }),
+        ]
+      }),
   )
 
 /** Compare complete canonical semantic representations. */

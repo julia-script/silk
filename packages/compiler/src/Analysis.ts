@@ -32,6 +32,7 @@ import * as LlvmBackend from './LlvmBackend.js'
 import type * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import type * as ModuleClosure from './ModuleClosure.js'
+import type * as ModuleSelection from './ModuleSelection.js'
 import type * as ModuleSemantics from './ModuleSemantics.js'
 import type * as ModuleSurface from './ModuleSurface.js'
 import * as ModuleTooling from './ModuleTooling.js'
@@ -70,6 +71,7 @@ export type Targeted<A> =
 
 /** One immutable frontend analysis snapshot of one compilation request. */
 export interface FrontendSnapshot {
+  readonly selection?: ModuleSelection.ModuleSelection
   readonly _tag: 'AnalysisSnapshot' | 'ProjectAnalysisView'
   readonly realization: 'SingleRoot' | 'ProjectView'
   readonly profile?: CompilationProfile.CompilationProfile
@@ -1164,7 +1166,7 @@ export const memberByName = (
   self: FrontendSnapshot,
   module: string,
   spelling: string,
-): DeclarationFacts.MemberLookup => DeclarationFacts.member(self.index, module, spelling)
+): DeclarationFacts.MemberLookup => DeclarationFacts.publishedMember(self.index, module, spelling)
 
 /** Looks up one nominal scalar enum declaration. */
 export const enumByName = (

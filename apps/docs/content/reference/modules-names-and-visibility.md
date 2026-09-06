@@ -843,46 +843,33 @@ diagnostic. Catalog-backed completion may add a visible, collision-aware import 
 [standard-library namespace tests](../../../../packages/compiler/test/StdlibNamespaceAcceptance.test.ts),
 [foundational type names](values-and-types.md#type-001--foundational-type-spellings-are-lowercase-and-distinct).
 
-### EXPORT-001 — Imports do not re-export declarations
+### EXPORT-001 — Selective publication is explicit
 
 **Status:** Confirmed
 
-An import creates bindings only in the importing module. Those bindings are not members that a
-third module can import through it.
+An ordinary import creates private bindings in its importing module. Another module cannot access
+those bindings merely by importing that module. Use `pub import` with an explicit member list to
+publish selected public declarations, optionally under local aliases:
 
 ```silk
-// api/Public.silk
-import model.User
-
-pub fn makeUser(id: i32) -> User.User {
-  return User.make(id)
-}
+pub import model.User { User, make as makeUser }
 ```
 
-Another module may access `Public.makeUser`, but it cannot access `Public.User` merely because
-`api/Public` imported `model/User`.
+The published names retain the original declarations' canonical identities, types and contracts.
+Publication chains resolve those identities without wrapper functions. Private members cannot be
+published, and conflicting selected bindings are diagnosed. Module static declaration groups may
+publish mutually exclusive alternatives under the same name.
 
-Silk currently has no explicit re-export declaration. In particular, `pub import` is unsupported:
+**Boundary:** `pub import model.User` without an explicit member list and wildcard publication are
+invalid. An optional namespace alias in a selective import remains private. Ordinary imports do
+not implicitly publish names or activate unlisted methods, operators, conformances or runtime work.
 
-```silk,ignore
-pub import model.User
-```
+**Diagnostics:** A public import without a member list receives a parser diagnostic. Missing or
+private selected members retain the normal unknown-member or inaccessible-member diagnostics.
+Selected binding collisions retain their ordinary diagnostic and declaration origins.
 
-**Boundary:** A module may expose ordinary public wrapper functions whose contracts use public
-types from another module. Those types retain their original canonical identities. Wrapping does
-not create a type alias or re-exported namespace.
-
-Explicit re-export syntax is deferred until Silk's native library and package model is designed. At
-that point it must state exactly which declarations become members, preserve their canonical
-identities, define collision behavior, and avoid turning every ordinary import into a public API
-commitment.
-
-**Diagnostics:** Attempting `pub import` receives a parser diagnostic because no such declaration
-exists. Looking up an importing module's private import binding from another module reports an
-unknown member rather than following the import transitively.
-
-**Evidence:** [non-re-exporting imports](../../../../openspec/specs/bootstrap-name-resolution/spec.md),
-[module semantic surfaces](../../../../openspec/specs/bootstrap-module-semantic-surface/spec.md).
+**Evidence:** [module static selection](module-static-selection.md) and
+[selection design](../../../../openspec/changes/add-module-static-selection/design.md).
 
 ## Implementation evidence
 
@@ -892,13 +879,14 @@ different bindings. The LSP indexes the catalog independently, inserts explicit 
 imports, and owns optional redundancy warnings and consolidation actions. Repository examples,
 fixtures, tests, and generated documentation use the same explicit-import model.
 
-Re-exports remain deferred: `pub import` is unsupported and ordinary imports are not exported.
+Selective public imports are explicit re-exports; ordinary imports remain private.
 
 ## Unused import tooling
 
 The language server reports `LSP0004` on each valid namespace or selected-member import binding that
 has no semantic use in its module. Aliases are tracked as authored bindings, so using one alias does
-not make another alias used. Qualified access uses the namespace binding rather than an independent
+not make another alias used. Explicitly published members and semantic references in module
+conditions are uses. Qualified access uses the namespace binding rather than an independent
 direct selector with the same declaration and spelling. Import declarations, comments, recovered
 syntax, and matching text are not uses.
 

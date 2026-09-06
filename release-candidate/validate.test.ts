@@ -555,6 +555,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
       './MirEncoding',
       './MirVerification',
       './ModuleClosure',
+      './ModuleSelection',
       './ModuleSemantics',
       './ModuleSummary',
       './ModuleSurface',

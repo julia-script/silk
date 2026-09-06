@@ -381,27 +381,39 @@ const namespaceCandidates = (
   index: DeclarationIndex.Index,
   module: string,
   sortGroup = 0,
-): ReadonlyArray<Candidate> =>
-  (index.modules.find((headers) => headers.module === module)?.members ?? []).flatMap(
-    (declaration) => {
-      if (
-        declaration.visibility !== 'Public' ||
-        declaration.name._tag !== 'Present' ||
-        (declaration._tag === 'FunctionDeclaration' && declaration.associatedMember !== undefined)
-      ) {
-        return []
-      }
-      return [
-        candidate({
-          identity: semantic(declarationIdentity(declaration)),
-          kind: declarationKind(declaration, 'Type'),
-          label: declaration.name.spelling,
-          detail: declarationDetail(declaration),
-          sortGroup,
-        }),
-      ]
-    },
-  )
+): ReadonlyArray<Candidate> => {
+  const headers = index.modules.find((headers) => headers.module === module)
+  const entries = [
+    ...(headers?.members ?? []).map((declaration) => ({
+      declaration,
+      label: declaration.name._tag === 'Present' ? declaration.name.spelling : '',
+    })),
+    ...(headers?.publications ?? []).flatMap((publication) => {
+      const resolved = DeclarationFacts.publishedMember(index, module, publication.spelling)
+      return resolved._tag === 'Resolved'
+        ? [{ declaration: resolved.declaration, label: publication.spelling }]
+        : []
+    }),
+  ]
+  return entries.flatMap(({ declaration, label }) => {
+    if (
+      declaration.visibility !== 'Public' ||
+      declaration.name._tag !== 'Present' ||
+      (declaration._tag === 'FunctionDeclaration' && declaration.associatedMember !== undefined)
+    ) {
+      return []
+    }
+    return [
+      candidate({
+        identity: semantic(declarationIdentity(declaration)),
+        kind: declarationKind(declaration, 'Type'),
+        label,
+        detail: declarationDetail(declaration),
+        sortGroup,
+      }),
+    ]
+  })
+}
 
 interface ValueLookup {
   readonly found: boolean

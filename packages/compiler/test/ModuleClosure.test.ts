@@ -3,6 +3,9 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
+import * as Analysis from '../src/Analysis.js'
+import * as Diagnostic from '../src/Diagnostic.js'
+import * as DeclarationFacts from '../src/DeclarationFacts.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceOrigin from '../src/SourceOrigin.js'
@@ -12,6 +15,253 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const fn = 'pub fn main() -> i32 { return 42 }'
+
+it.effect(
+  'selects module declarations through imported static helpers without resolving inactive imports',
+  () =>
+    Effect.gen(function* () {
+      const calls: Array<string> = []
+      const sources = new Map([
+        [
+          'policy',
+          ascii(
+            'type Choice = bool\nconst enabled: Choice = true\npub static fn choose() -> Choice { return enabled }',
+          ),
+        ],
+        ['active', ascii('pub fn value() -> i32 { return 42 }')],
+      ])
+      const resolver = Layer.succeed(SourceResolver.SourceResolver, {
+        resolveStandardLibrary: SourceResolver.resolveEmbeddedStandardLibrary,
+        toolchainSources: SourceResolver.embeddedToolchainSources,
+        resolve: Effect.fn('SelectionFixture.resolve')((module: string) =>
+          Effect.sync(() => {
+            calls.push(module)
+            const bytes = sources.get(module)
+            return bytes === undefined
+              ? Option.none()
+              : Option.some(SourceResolver.resolved(bytes, SourceOrigin.memory()))
+          }),
+        ),
+      })
+      const snapshot = yield* Analysis.make({
+        root: SourceFile.make(
+          'root',
+          ascii(`import policy { choose }
+static if choose() {
+  import active { value }
+  pub fn main() -> i32 { return value() }
+} else {
+  import missing
+  pub fn main() -> i32 { return nonexistent() }
+}`),
+        ),
+        target: 'aarch64-apple-darwin',
+      }).pipe(Effect.provide(resolver))
+      assert.deepEqual(snapshot.diagnostics, [])
+      assert.deepEqual(calls, ['policy', 'active'])
+      assert.deepEqual(Analysis.unusedImports(snapshot, 'root'), [])
+      assert.deepEqual(
+        snapshot.closure.modules.map((module) => module.name),
+        ['active', 'policy', 'root'],
+      )
+      assert.strictEqual(Analysis.declarationByName(snapshot, 'root', 'main')._tag, 'Resolved')
+      assert.strictEqual(snapshot.selection?.inactiveRanges.get('root')?.length, 1)
+    }),
+)
+
+it.effect(
+  'resolves independent forward conditional declarations and keeps loaded inactive syntax diagnostics',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSource(
+        'forward_selection',
+        ascii(`
+static if flag { pub fn main() -> i32 { return 1 } }
+static if true { const flag: bool = true } else { fn bad() -> () { let = 1 } }
+`),
+        'aarch64-apple-darwin',
+      )
+      assert.strictEqual(
+        Analysis.declarationByName(snapshot, 'forward_selection', 'main')._tag,
+        'Resolved',
+      )
+      assert.isTrue(
+        snapshot.diagnostics.some((diagnostic) => diagnostic.code === Diagnostic.missingTokenCode),
+      )
+      assert.isFalse(
+        snapshot.diagnostics.some(
+          (diagnostic) => diagnostic.code === Diagnostic.unknownValueReferenceCode,
+        ),
+      )
+    }),
+)
+
+it.effect('publishes selected aliases across re-export chains with original identity', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.make({
+      root: SourceFile.make(
+        'root',
+        ascii('import facade { selected }\npub fn main() -> i32 { return selected() }'),
+      ),
+      target: 'aarch64-apple-darwin',
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            [
+              'facade',
+              ascii(
+                'static if true { pub import middle { answer as selected } } else { pub import missing { answer as selected } }',
+              ),
+            ],
+            ['middle', ascii('pub import implementation { original as answer }')],
+            ['implementation', ascii('pub fn original() -> i32 { return 42 }')],
+          ]),
+        ),
+      ),
+    )
+    assert.deepEqual(snapshot.diagnostics, [])
+    const selected = DeclarationFacts.publishedMember(snapshot.index, 'facade', 'selected')
+    assert.strictEqual(selected._tag, 'Resolved')
+    if (selected._tag === 'Resolved') {
+      assert.deepEqual(selected.declaration.canonical, {
+        _tag: 'Canonical',
+        id: { _tag: 'CanonicalDeclarationId', module: 'implementation', name: 'original' },
+      })
+    }
+    assert.isFalse(snapshot.closure.sources.has('missing'))
+  }),
+)
+
+it.effect('diagnoses module condition availability cycles with source origins', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'cycle',
+      ascii(`
+static if right { const left: bool = true }
+static if left { const right: bool = true }
+`),
+      'aarch64-apple-darwin',
+    )
+    const cycles = snapshot.diagnostics.filter(
+      (diagnostic) => diagnostic.code === Diagnostic.staticEvaluationCycleCode,
+    )
+    assert.strictEqual(cycles.length, 2)
+    for (const diagnostic of cycles) {
+      assert.strictEqual(diagnostic.span.sourceId, 'cycle')
+      assert.isTrue((diagnostic.relatedSpans?.length ?? 0) > 0)
+    }
+    assert.strictEqual(Analysis.memberByName(snapshot, 'cycle', 'left')._tag, 'Missing')
+  }),
+)
+
+it.effect('tracks availability cycles through selective imports', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.make({
+      root: SourceFile.make(
+        'root',
+        ascii('import policy { enabled }\nstatic if enabled { pub const selected: bool = true }'),
+      ),
+      target: 'aarch64-apple-darwin',
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            [
+              'policy',
+              ascii(
+                'import root { selected }\nstatic if selected { pub const enabled: bool = true }',
+              ),
+            ],
+          ]),
+        ),
+      ),
+    )
+    assert.deepEqual(
+      snapshot.diagnostics
+        .filter((diagnostic) => diagnostic.code === Diagnostic.staticEvaluationCycleCode)
+        .map((diagnostic) => diagnostic.span.sourceId),
+      ['policy', 'root'],
+    )
+  }),
+)
+
+it.effect('uses completed package configuration and rejects default availability cycles', () =>
+  Effect.gen(function* () {
+    const valid = yield* Analysis.make({
+      root: SourceFile.make(
+        'configured',
+        ascii(`pub param enabled: bool = true
+static if enabled { pub const selected: i32 = 1 } else { import missing }`),
+      ),
+      configuration: { package: 'example@1', profile: { target: 'aarch64-apple-darwin' } },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.deepEqual(valid.diagnostics, [])
+    assert.strictEqual(Analysis.memberByName(valid, 'configured', 'selected')._tag, 'Resolved')
+    assert.isDefined(valid.profile)
+    const cyclic = yield* Analysis.make({
+      root: SourceFile.make(
+        'configured',
+        ascii(`pub param enabled: bool = choice
+static if enabled { const choice: bool = true }`),
+      ),
+      configuration: { package: 'example@1', profile: { target: 'aarch64-apple-darwin' } },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    const diagnostic = cyclic.diagnostics.find(
+      (diagnostic) => diagnostic.code === Diagnostic.invalidConfigurationCode,
+    )
+    assert.strictEqual(diagnostic?.reason._tag, 'InvalidConfiguration')
+    if (diagnostic?.reason._tag === 'InvalidConfiguration')
+      assert.strictEqual(diagnostic.reason.error.code, 'DependencyCycle')
+    assert.isTrue((diagnostic?.relatedSpans?.length ?? 0) > 0)
+  }),
+)
+
+it.effect('rejects package schemas first discovered through selected imports', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.make({
+      root: SourceFile.make('root', ascii('static if true { import settings }')),
+      configuration: { package: 'example@1', profile: { target: 'aarch64-apple-darwin' } },
+    }).pipe(
+      Effect.provide(
+        SourceResolver.memory(new Map([['settings', ascii('pub param enabled: bool = true')]])),
+      ),
+    )
+    const diagnostic = snapshot.diagnostics.find(
+      (value) => value.code === Diagnostic.invalidConfigurationCode,
+    )
+    assert.strictEqual(diagnostic?.span.sourceId, 'settings')
+    assert.isTrue((diagnostic?.relatedSpans?.length ?? 0) > 0)
+  }),
+)
+
+it.effect('rejects non-static and non-boolean module conditions without admitting either arm', () =>
+  Effect.gen(function* () {
+    for (const condition of ['runtime()', '42', 'missing']) {
+      const snapshot = yield* Analysis.ofSource(
+        'invalid_condition',
+        ascii(`fn runtime() -> bool { return true }
+static if ${condition} { pub const selected: i32 = 1 } else { pub const other: i32 = 2 }`),
+        'aarch64-apple-darwin',
+      )
+      assert.isTrue(
+        snapshot.diagnostics.some(
+          (diagnostic) => diagnostic.code === Diagnostic.staticPhaseViolationCode,
+        ),
+      )
+      assert.strictEqual(
+        Analysis.memberByName(snapshot, 'invalid_condition', 'selected')._tag,
+        'Missing',
+      )
+      assert.strictEqual(
+        Analysis.memberByName(snapshot, 'invalid_condition', 'other')._tag,
+        'Missing',
+      )
+      for (const diagnostic of snapshot.diagnostics)
+        assert.strictEqual(diagnostic.span.sourceId, 'invalid_condition')
+    }
+  }),
+)
 
 const fixture = (
   rootModule: string,
@@ -28,6 +278,32 @@ const fixture = (
     Effect.provide(SourceResolver.memory(imports)),
   )
 }
+
+it.effect('excludes inactive foreign exports and invalid bodies from realization', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'selected_inventory',
+      ascii(`
+static if true {
+  pub fn main() -> i32 { return 42 }
+} else {
+  export "C" fn inactive_export() -> i32 { return unknown() }
+  unsafe extern "C" fn inactive_call() -> i32
+  struct Hidden { value: Missing }
+}
+`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(snapshot.diagnostics, [])
+    assert.deepEqual(snapshot.instances.foreignCalls, [])
+    assert.deepEqual(snapshot.instances.foreignExports, [])
+    assert.strictEqual(
+      Analysis.memberByName(snapshot, 'selected_inventory', 'Hidden')._tag,
+      'Missing',
+    )
+    assert.strictEqual(snapshot.mir._tag, 'Available')
+  }),
+)
 
 const importNames = (module: ModuleClosure.Module): ReadonlyArray<string> =>
   module.imports.map((fact) =>

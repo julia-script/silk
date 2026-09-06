@@ -113,6 +113,8 @@ not belong in a language rule unless a program can observe them.
   source-root lookup, contextual import-path segments, static imports, cycles, namespace bindings,
   aliases, collisions, nominal qualifiers and associated items, public declaration boundaries,
   redundancy, explicit standard-library imports, and re-export boundaries.
+- [Module static selection](module-static-selection.md) — profile-specific declaration groups,
+  demanded condition dependencies, selective publication, availability cycles and inactive ranges.
 - [Generics, interfaces, and specialization](generics-interfaces-and-specialization.md) — generic
   parameters and inference, compile-time interface contracts, conformances, coherence, and finite
   static specialization, including exact and opaque callable and Effect representations.
