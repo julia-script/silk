@@ -939,15 +939,16 @@ export const lowerPlacePath = (
     })
   }
   if (expression._tag === 'SliceIndexPlace') {
-    const subject = lowerPlacePath(fn, expression.slice, availableRequirements)
+    // A slice descriptor is a value boundary, not inline aggregate storage. Materialize
+    // it before indexing so nested projections retain the pointer and runtime length.
+    const subject = lowerExpression(fn, expression.slice, availableRequirements)
     if (subject === 'Transferred') return subject
     const index = lowerExpression(fn, expression.index, availableRequirements)
     if (index === 'Transferred') return index
     if (subject === undefined || index === undefined) return undefined
     return Object.freeze({
-      root: subject.root,
+      root: subject.result,
       selectors: Object.freeze([
-        ...subject.selectors,
         Object.freeze({
           _tag: 'SliceElementSelector',
           index: index.result,

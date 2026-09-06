@@ -770,6 +770,81 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('retains a hidden array owner through a stored borrowed holder', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`struct Guard { value: i32 }
+impl Drop for Guard { fn drop(self: &mut Guard) -> () { return () } }
+struct Holder { values: &[Guard] }
+fn make(values: &[Guard]) -> Holder { return Holder { values: values } }
+fn read(holder: &Holder) -> i32 {
+  let values = holder.values
+  return values[0].value
+}
+pub fn main() -> i32 {
+  let holder = make(&[Guard { value: 42 }])
+  return read(&holder)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const main =
+      Analysis.loweredMir(self).functions.find((fn) => fn.id.name === 'main') ??
+      unreachable('expected main')
+    const operations = MirVerification.operations(main)
+    const array = operations.find((operation) => operation._tag === 'ConstructArray')
+    assert.isDefined(array)
+    if (array?._tag !== 'ConstructArray') return
+    const cleanup = operations.findIndex(
+      (operation) =>
+        operation._tag === 'Drop' && operation.local.ordinal === array.destination.ordinal,
+    )
+    const calls = operations.flatMap((operation, ordinal) =>
+      operation._tag === 'Call' ? [ordinal] : [],
+    )
+    assert.isAbove(cleanup, calls.at(-1) ?? unreachable('expected holder read'))
+    assert.strictEqual(
+      operations.filter(
+        (operation) =>
+          operation._tag === 'Drop' && operation.local.ordinal === array.destination.ordinal,
+      ).length,
+      1,
+    )
+  }),
+)
+
+it.effect('preserves temporary array inference and rejects escaping hidden storage', () =>
+  Effect.gen(function* () {
+    const source = `struct Holder<'a, A> { values: &'a [A] }
+fn make<'a, A>(values: &'a [A]) -> Holder<'a, A> { return Holder { values: values } }
+fn inferred() -> i32 { let holder = make(&[1, 2]) return holder.values[0] }
+fn typed() -> u32 { let value: u32 = 1 let holder = make(&[value]) return holder.values[0] }
+effect fn deferredRead(holder: Holder<i32>) -> i32 { return holder.values[0] }
+fn wrong() -> u32 { let holder = make(&[1, 2]) return holder.values[0] }
+fn escape<'a>() -> Holder<'a, i32> { let holder = make(&[1, 2]) return move holder }
+fn escapeSlice<'a>() -> &'a [i32] { let view: &[i32] = &[1, 2] return view }
+effect fn escapeEffect<'a>() -> Holder<'a, i32> { let holder = make(&[1, 2]) return move holder }
+fn escapeRetainedEffect() -> once Effect<'static; i32> { let holder = make(&[1, 2]) return deferredRead(move holder) }`
+    const self = yield* analyze(source)
+    const diagnostics = Analysis.diagnostics(self)
+    assert.isFalse(
+      diagnostics.some((diagnostic) => diagnostic.span.start < source.indexOf('fn wrong')),
+    )
+    for (const name of ['wrong', 'escape', 'escapeSlice', 'escapeEffect', 'escapeRetainedEffect']) {
+      const start = source.indexOf(`fn ${name}`)
+      const end = source.indexOf('}', start)
+      assert.isTrue(
+        diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === (name === 'wrong' ? 'SEM0129' : 'OWN0019') &&
+            diagnostic.span.start >= start &&
+            diagnostic.span.end <= end,
+        ),
+        name,
+      )
+    }
+    assert.isTrue(diagnostics.some((diagnostic) => diagnostic.code === 'OWN0019'))
+  }),
+)
+
 it.effect('cleans a hidden temporary owner after its loan ends', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`struct Guard { value: i32 }

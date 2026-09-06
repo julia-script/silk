@@ -175,9 +175,11 @@ export const analyze = (
   const root = entries.at(0)?.[0] ?? declaration.syntax
   const controlFlow = BodyControlFlow.make(statements, root)
   const boundaries = new Map<SyntaxTree.Node, number>()
+  const bindingInitializers = new Set<SyntaxTree.Node>()
   const terminalSpans = new Map<number, SourceSpan.SourceSpan>()
   Elaboration.visitStatementFacts(statements, {
     statement: (statement) => {
+      if (statement._tag === 'BindStatement') bindingInitializers.add(statement.binding.syntax)
       if (statement._tag !== 'ReturnStatement' && statement._tag !== 'FailStatement') return
       if (boundaries.has(statement.syntax)) return
       const point = entries.length + boundaries.size
@@ -309,7 +311,18 @@ export const analyze = (
     if (source._tag === 'BindingRoot' || source._tag === 'PatternRoot')
       syntax = source.binding.syntax
     else if (source._tag === 'TemporaryRoot') syntax = statement
-    const scope = source._tag === 'TemporaryRoot' ? statement : scopeOf(syntax)
+    // Array producers already lower to stable hidden locals and loan-ordered cleanup. A binding
+    // initializer gives that owner the same lexical validity as a named local; calls and other
+    // statement temporaries keep their immediate lifetime. Never hoist across an inner branch.
+    const retainedArray =
+      source._tag === 'TemporaryRoot' &&
+      bindingInitializers.has(statement) &&
+      source.value.type._tag === 'Available' &&
+      Type.isFixedArray(source.value.type.type)
+    let scope = scopeOf(syntax)
+    if (source._tag === 'TemporaryRoot') {
+      scope = retainedArray ? scopeOf(source.value.syntax) : statement
+    }
     const available = entries
       .filter(
         ([node]) =>

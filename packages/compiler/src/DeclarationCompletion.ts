@@ -168,6 +168,7 @@ export const complete = (
         diagnostics.push(...(resolvers.alias?.(member).diagnostics ?? []))
   const finalized = new Map<MemberFact, MemberFact>()
   const finalizedHeads = new Map<InherentImplFact, InherentImplFact>()
+  const finalizedConformances = new Map<ConformanceFact, ConformanceFact>()
   const active = new Set<MemberFact>()
   const nominalParameters = (
     module: string | undefined,
@@ -214,6 +215,16 @@ export const complete = (
     finalizedHeads.set(head, closed)
     return closed
   }
+  const finalizeConformance = (head: ConformanceFact): ConformanceFact => {
+    const cached = finalizedConformances.get(head)
+    if (cached !== undefined) return cached
+    const candidate = DeclarationCollection.finalizeLifetimeHeader(head, (path) =>
+      nominalParameters(head.module, path),
+    )
+    const closed = candidate._tag === 'ConformanceDeclaration' ? candidate : head
+    finalizedConformances.set(head, closed)
+    return closed
+  }
   const finalize = (member: MemberFact): MemberFact => {
     const cached = finalized.get(member)
     if (cached !== undefined) return cached
@@ -228,6 +239,15 @@ export const complete = (
         : self.modules
             .find((candidate) => candidate.module === module)
             ?.inherentImpls.find((candidate) => candidate.ordinal === association.ordinal)
+    const conformance =
+      member._tag === 'FunctionDeclaration' && member.conformanceImplementation !== undefined
+        ? self.modules
+            .find((candidate) => candidate.module === module)
+            ?.conformances.find(
+              (candidate) => candidate.ordinal === member.conformanceImplementation?.ordinal,
+            )
+        : undefined
+    const completedHead = head === undefined ? undefined : finalizeHead(head)
     const candidate =
       member._tag === 'FunctionDeclaration' ||
       member._tag === 'StructDeclaration' ||
@@ -235,11 +255,13 @@ export const complete = (
         ? DeclarationCollection.finalizeLifetimeHeader(
             member,
             (path) => nominalParameters(module, path),
-            head === undefined ? undefined : finalizeHead(head),
+            conformance !== undefined ? finalizeConformance(conformance) : completedHead,
           )
         : member
     const closed =
-      candidate._tag === 'ServiceOperation' || candidate._tag === 'InherentImplDeclaration'
+      candidate._tag === 'ServiceOperation' ||
+      candidate._tag === 'InherentImplDeclaration' ||
+      candidate._tag === 'ConformanceDeclaration'
         ? member
         : candidate
     active.delete(member)
@@ -251,6 +273,7 @@ export const complete = (
     return Object.freeze({
       ...module,
       inherentImpls: Object.freeze(module.inherentImpls.map(finalizeHead)),
+      conformances: Object.freeze(module.conformances.map(finalizeConformance)),
       members: Object.freeze(members),
       declarations: Object.freeze(
         members.filter(

@@ -49,8 +49,6 @@ pub fn main() -> i32 { let e = make() return run e }`,
         ['SEM0212', 114, 121],
         ['OWN0019', 131, 157],
         ['OWN0018', 147, 152],
-        ['OWN0019', 147, 152],
-        ['OWN0019', 147, 155],
       ],
     )
     assert.deepEqual(

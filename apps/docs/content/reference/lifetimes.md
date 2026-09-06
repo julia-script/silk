@@ -97,6 +97,12 @@ instead keeps the impl's applied owner, including its stored-data lifetimes. It 
 those lifetimes to an independently elided input; name the shared lifetime explicitly when a
 constructor returns `Self`.
 
+Conformance headers apply the same nominal lifetime elision. For a holder with one stored-data
+lifetime, `impl<A: Copy> Stream<A, never ? never> for SliceStream<A>` introduces an independent
+impl lifetime and retains it in the operation contracts. It has the same relationships as an
+explicitly bound `impl<'data, A: Copy> ... for SliceStream<'data, A>`. Ordinary type arguments,
+bounds and conformance selection are unchanged; `Self` still denotes that fixed applied owner.
+
 Local type annotations instead infer body-scoped lifetimes from their uses and cleanup. Public
 relationships never depend on return bodies, setter histories, or which constructor happened to
 initialize a field.

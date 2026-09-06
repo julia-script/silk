@@ -4,6 +4,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Type from '../src/Type.js'
+import * as Lifetime from '../src/Lifetime.js'
 import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -290,5 +291,75 @@ impl Holder { pub fn zero() -> i32 { return 0 } }`
     const snapshot = yield* Analysis.ofSource('root', ascii(source))
     assert.deepEqual(codes(snapshot), ['SEM0194'])
     assert.strictEqual(Analysis.diagnostics(snapshot).at(0)?.span.start, source.indexOf('Holder {'))
+  }),
+)
+
+const analyzeConformance = (text: string) =>
+  Analysis.make({ root: SourceFile.make('root', ascii(text)) }).pipe(
+    Effect.provide(SourceResolver.memory(new Map())),
+  )
+
+it.effect('replays conformance owner lifetimes and inherits them in inline operations', () =>
+  Effect.gen(function* () {
+    for (const head of [
+      "impl<'data, A: Copy> Read<A> for SliceStream<'data, A>",
+      'impl<A: Copy> Read<A> for SliceStream<A>',
+    ]) {
+      const snapshot = yield* analyzeConformance(`${elidedSliceStream}
+interface Read<A> { fn first(self: &Self) -> A }
+${head} { pub fn first(self: &Self) -> A { let slice = self.slice return slice[0] } }
+pub fn main() -> i32 { let values = [1, 2] let stream = SliceStream.make(&values) return Read.first(&stream) }`)
+      assert.deepEqual(codes(snapshot), [])
+      const conformance =
+        snapshot.index.modules.find((module) => module.module === 'root')?.conformances.at(0) ??
+        unreachable('expected conformance')
+      assert.strictEqual(
+        conformance.typeParameters.filter((parameter) => parameter.type.kind === 'Lifetime').length,
+        1,
+      )
+      const provider = conformance.provider
+      if (provider._tag !== 'Resolved') return unreachable('expected provider')
+      const lifetimes = Type.freeLifetimes(provider.type)
+      assert.strictEqual(lifetimes.length, 1)
+      const implementation =
+        snapshot.index.modules
+          .find((module) => module.module === 'root')
+          ?.declarations.find(
+            (member) => member.conformanceImplementation?.ordinal === conformance.ordinal,
+          ) ?? unreachable('expected inline implementation')
+      const receiver = implementation.parameters.at(0)?.declaredType
+      if (receiver?._tag !== 'Resolved') return unreachable('expected receiver')
+      assert.strictEqual(
+        Type.freeLifetimes(receiver.type).some((lifetime) =>
+          Lifetime.equals(lifetime, lifetimes.at(0) ?? unreachable('expected owner lifetime')),
+        ),
+        true,
+      )
+      assert.strictEqual(
+        implementation.typeParameters.filter((parameter) => parameter.type.kind === 'Lifetime')
+          .length,
+        2,
+      )
+      assert.strictEqual(conformance.requirements.length, 1)
+    }
+  }),
+)
+
+it.effect('keeps ordinary conformance arity and Copy bounds after owner lifetime replay', () =>
+  Effect.gen(function* () {
+    const aritySource = `struct Holder<A> { value: &A }
+interface Read { fn value(self: &Self) -> i32 }
+impl Read for Holder { pub fn value(self: &Self) -> i32 { return 0 } }`
+    const arity = yield* analyzeConformance(aritySource)
+    const diagnostic =
+      Analysis.diagnostics(arity).find((entry) => entry.code === 'SEM0051') ??
+      unreachable('expected missing ordinary argument diagnostic')
+    assert.strictEqual(diagnostic.span.start, aritySource.indexOf('Holder {'))
+    const bound = yield* analyzeConformance(`struct Token { value: i32 }
+struct Holder<A> { value: &A }
+interface Read { fn value(self: &Self) -> i32 }
+impl<A: Copy> Read for Holder<A> { pub fn value(self: &Self) -> i32 { return 0 } }
+pub fn main() -> i32 { let token = Token { value: 1 } let holder = Holder { value: &token } return Read.value(&holder) }`)
+    assert.strictEqual(codes(bound).includes('SEM0083'), true)
   }),
 )

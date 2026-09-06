@@ -1,3 +1,4 @@
+import { borrowedTemporaryStream, borrowedTemporaryLifecycle } from './borrowedTemporaries.js'
 import { partialSuspension } from './partialSuspension.js'
 /**
  * The shared native acceptance corpus: programs with independently pinned process outcomes.
@@ -6163,6 +6164,24 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 ]
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
+  {
+    name: 'borrowed-temporary-stream-suspension',
+    source: borrowedTemporaryStream,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'borrowed-temporary-owner-lifecycle',
+    source: borrowedTemporaryLifecycle,
+    nativeCSources: {
+      events: `#include <stdint.h>
+#include <stdio.h>
+void silk_record_event(int32_t value) { printf("%d,", value); }
+int32_t silk_finish_events(void) { puts(""); return 42; }
+`,
+    },
+    nativeStdout: '90,11,12,21,1,2,90,13,23,3,90,14,24,4,90,15,95,5,90,16,26,6,\n',
+    expected: { _tag: 'Completes', result: 42 },
+  },
   ...[
     { name: 'borrowed-outcome-box', source: borrowedBox },
     { name: 'borrowed-outcome-stream', source: borrowedStream },
