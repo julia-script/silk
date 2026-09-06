@@ -49,6 +49,7 @@ const ownedWriteSite = (root: Hir.OwnedWriteRoot): BindingSite => {
 /** One binding's ownership fact: site, category, live range, and consuming move if any. */
 export interface BindingFact {
   readonly _tag: 'Binding'
+  readonly ordinal: number
   readonly site: BindingSite
   readonly name: string | undefined
   readonly mutability: 'Immutable' | 'Mutable'
@@ -146,6 +147,8 @@ export interface LoanFact {
   readonly endRegion: Hir.RegionId
   readonly startSpan: SourceSpan.SourceSpan
   readonly endSpan: SourceSpan.SourceSpan
+  /** The retained storage is used by a destructor, so expression completion cannot end this loan. */
+  readonly cleanupOnly?: boolean
 }
 
 /** One write that displaces a live value: lowering cleans the displaced value before the commit. */
@@ -1740,10 +1743,17 @@ const borrowSite = (root: Elaboration.BorrowRootFact): BindingSite => {
 const sameSite = (left: BindingSite, right: BindingSite): boolean =>
   siteKey(left) === siteKey(right)
 
+interface LoanEndpoint {
+  readonly region: Hir.RegionId
+  readonly span: SourceSpan.SourceSpan
+  readonly cleanupOnly?: boolean
+}
+
 const analyzeLoans = (
   fn: Elaboration.FunctionFact,
   index: DeclarationIndex.Index,
   copyAssumptions: ReadonlySet<string>,
+  cleanupExits: ReadonlyArray<ExitPlan>,
 ): LoanAnalysis => {
   let loanAccessChecks = 0
   const loans: Array<LoanFact> = []
@@ -1822,29 +1832,19 @@ const analyzeLoans = (
     return Object.freeze([])
   }
 
-  const runEnds = new Map<
-    number,
-    { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
-  >()
-  const callableEnds = new Map<
-    number,
-    { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
-  >()
-  const slotEnds = new Map<
-    number,
-    { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
-  >()
-  const viewEnds = new Map<
-    number,
-    { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
-  >()
+  const runEnds = new Map<number, LoanEndpoint>()
+  const callableEnds = new Map<number, LoanEndpoint>()
+  const slotEnds = new Map<number, LoanEndpoint>()
+  const viewEnds = new Map<number, LoanEndpoint>()
   const laterExecutableEnd = (
-    left: { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan } | undefined,
-    right: { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan } | undefined,
-  ): { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan } | undefined => {
+    left: LoanEndpoint | undefined,
+    right: LoanEndpoint | undefined,
+  ): LoanEndpoint | undefined => {
     if (left === undefined) return right
     if (right === undefined) return left
-    return left.span.end >= right.span.end ? left : right
+    return left.span.end > right.span.end || (left.span.end === right.span.end && left.cleanupOnly)
+      ? left
+      : right
   }
   // A descriptor passed inside a larger expression is used through that expression's completion,
   // not merely while evaluating its identifier. Otherwise a hidden backing owner can be dropped
@@ -1953,6 +1953,8 @@ const analyzeLoans = (
         scanRunEnds(expression.protected, region, useSpan)
         return
       case 'EffectBlock':
+        scanStatementRunEnds(expression.statements)
+        return
       case 'FunctionItem':
         return
       case 'Integer':
@@ -2060,13 +2062,34 @@ const analyzeLoans = (
     }
   }
   scanStatementRunEnds(fn.statements)
+  // A destructor can observe retained storage after the last authored read.
+  for (const exit of cleanupExits) {
+    if (exit.region === undefined) continue
+    for (const release of exit.releases) {
+      if (
+        release.binding.site._tag !== 'Let' ||
+        LifetimeFlow.cleanupLifetimes(release.cleanup, release.initialization).length === 0
+      )
+        continue
+      const key = release.binding.site.binding.ordinal
+      const previous = viewEnds.get(key)
+      if (previous === undefined || previous.span.end <= exit.span.end)
+        viewEnds.set(key, { region: exit.region, span: exit.span, cleanupOnly: true })
+    }
+  }
 
   const executableAliases = new Map<number, Set<number>>()
   const captureKey = (span: SourceSpan.SourceSpan, ordinal: number): string =>
     `${span.sourceId}:${span.start}:${span.end}:${ordinal}`
   const returnedCallableCaptures = new Set<string>()
+  const bindings = [...fn.bindings]
+  Elaboration.visitStatementFacts(fn.statements, {
+    expression: (expression) => {
+      if (expression._tag === 'EffectBlock') bindings.push(...expression.bindings)
+    },
+  })
   const bindingInitializers = new Map(
-    fn.bindings.map((binding) => [binding.id.ordinal, binding.initializer] as const),
+    bindings.map((binding) => [binding.id.ordinal, binding.initializer] as const),
   )
   const returnedCallable = (
     expression: Elaboration.ExpressionFact,
@@ -2144,7 +2167,7 @@ const analyzeLoans = (
       )
     }
   }
-  for (const binding of fn.bindings) {
+  for (const binding of bindings) {
     const directAlias = directSite(binding.initializer)?.site
     const callableAlias =
       directAlias?._tag === 'Let' &&
@@ -2312,7 +2335,7 @@ const analyzeLoans = (
     const direct = physicalPlace(expression)
     return direct === undefined ? [] : rootsOf(direct.root, direct.path)
   }
-  for (const binding of fn.bindings) {
+  for (const binding of bindings) {
     if (
       binding.inferredType._tag !== 'Available' ||
       Type.storageLifetimes(binding.inferredType.type).length === 0
@@ -2354,7 +2377,11 @@ const analyzeLoans = (
       const ending = viewEnds.get(binding.id.ordinal)
       if (callable?._tag === 'Let' && ending !== undefined) {
         const previous = callableEnds.get(callable.binding.ordinal)
-        if (previous === undefined || previous.span.end < ending.span.end)
+        if (
+          previous === undefined ||
+          previous.span.end < ending.span.end ||
+          (previous.span.end === ending.span.end && ending.cleanupOnly && !previous.cleanupOnly)
+        )
           callableEnds.set(callable.binding.ordinal, ending)
       }
     }
@@ -2419,7 +2446,9 @@ const analyzeLoans = (
         const previous = viewEnds.get(source)
         if (
           ending !== undefined &&
-          (previous === undefined || previous.span.end < ending.span.end)
+          (previous === undefined ||
+            previous.span.end < ending.span.end ||
+            (previous.span.end === ending.span.end && ending.cleanupOnly && !previous.cleanupOnly))
         ) {
           viewEnds.set(source, ending)
           propagatedViewEnd = true
@@ -2628,7 +2657,7 @@ const analyzeLoans = (
     region: Hir.RegionId,
     active: ReadonlyArray<LoanFact>,
     access: 'Read' | 'Write' | 'Move' = 'Read',
-    delayedEnd?: { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan },
+    delayedEnd?: LoanEndpoint,
   ): void => {
     switch (expression._tag) {
       case 'Integer':
@@ -2687,6 +2716,7 @@ const analyzeLoans = (
             startSpan: expression.syntax.span,
             referents: referentsAt(root, expression.syntax.span),
             endSpan: delayedEnd?.span ?? expression.syntax.span,
+            cleanupOnly: delayedEnd?.cleanupOnly ?? false,
           }),
         )
         return
@@ -2867,6 +2897,7 @@ const analyzeLoans = (
             startSpan: candidate.syntax.span,
             referents: referentsAt(root, candidate.syntax.span),
             endSpan: delayedEnd?.span ?? expression.syntax.span,
+            cleanupOnly: delayedEnd?.cleanupOnly ?? false,
           })
           loans.push(loan)
           captureActive.push(loan)
@@ -2929,6 +2960,7 @@ const analyzeLoans = (
                 endRegion: returned ? (delayedEnd?.region ?? region) : region,
                 startSpan: candidate.syntax.span,
                 referents: referentsAt(root, candidate.syntax.span),
+                cleanupOnly: returned && (delayedEnd?.cleanupOnly ?? false),
                 endSpan: returned
                   ? (delayedEnd?.span ?? expression.syntax.span)
                   : expression.syntax.span,
@@ -2937,9 +2969,7 @@ const analyzeLoans = (
               callActive.push(loan)
               continue
             }
-            let argumentEnd:
-              | { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
-              | undefined
+            let argumentEnd: LoanEndpoint | undefined
             if (argument.type._tag === 'Available' && Type.isEffect(argument.type.type))
               argumentEnd = delayedEnd
             else if (returnedOrdinal.has(argumentOrdinal))
@@ -2970,9 +3000,7 @@ const analyzeLoans = (
           if (candidate._tag !== 'Borrow' || candidate.formation._tag === 'Unavailable') {
             const preservesEffectLifetime =
               argument.type._tag === 'Available' && Type.isEffect(argument.type.type)
-            let argumentEnd:
-              | { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
-              | undefined
+            let argumentEnd: LoanEndpoint | undefined
             if (preservesEffectLifetime) argumentEnd = delayedEnd
             else if (returnedOrdinal.has(argumentOrdinal))
               argumentEnd = delayedEnd ?? Object.freeze({ region, span: expression.syntax.span })
@@ -3021,6 +3049,7 @@ const analyzeLoans = (
               : region,
             startSpan: candidate.syntax.span,
             referents: referentsAt(root, candidate.syntax.span),
+            cleanupOnly: returnedOrdinal.has(argumentOrdinal) && (delayedEnd?.cleanupOnly ?? false),
             endSpan: returnedOrdinal.has(argumentOrdinal)
               ? (delayedEnd?.span ?? expression.syntax.span)
               : expression.syntax.span,
@@ -3076,10 +3105,12 @@ const analyzeLoans = (
             startSpan: capture.span,
             referents: referentsAt(root, capture.span),
             endSpan: delayedEnd?.span ?? expression.syntax.span,
+            cleanupOnly: delayedEnd?.cleanupOnly ?? false,
           })
           loans.push(loan)
           captureActive.push(loan)
         }
+        statements(expression.statements)
         return
       }
       case 'Run':
@@ -3136,6 +3167,7 @@ const analyzeLoans = (
             startSpan: provider.span,
             referents: referentsAt(root, provider.span),
             endSpan: delayedEnd?.span ?? expression.syntax.span,
+            cleanupOnly: delayedEnd?.cleanupOnly ?? false,
           }),
         )
         return
@@ -3170,9 +3202,7 @@ const analyzeLoans = (
             region: statement.region,
             span: fn.declaration.syntax.span,
           })
-          let bindingEnd:
-            | { readonly region: Hir.RegionId; readonly span: SourceSpan.SourceSpan }
-            | undefined
+          let bindingEnd: LoanEndpoint | undefined
           if (initializerType._tag === 'Available' && Type.isEffect(initializerType.type))
             bindingEnd =
               runEnds.get(statement.binding.id.ordinal) ??
@@ -4481,6 +4511,7 @@ const checkFunction = (
   const bindingFactOf = (binding: MutableBinding): BindingFact =>
     Object.freeze({
       _tag: 'Binding',
+      ordinal: binding.ordinal,
       site: binding.site,
       name: binding.name,
       mutability: binding.mutability,
@@ -4570,7 +4601,7 @@ const checkFunction = (
           loans: Object.freeze([]),
           diagnostics: Object.freeze([]),
         })
-      : analyzeLoans(loanSemantic, index, copyAssumptions)
+      : analyzeLoans(loanSemantic, index, copyAssumptions, cleanupExits)
   state.work.loanAccessChecks = loanAnalysis.loanAccessChecks
   state.diagnostics.push(...loanAnalysis.diagnostics)
   const exitPlans = Object.freeze(

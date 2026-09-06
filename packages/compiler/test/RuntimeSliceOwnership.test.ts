@@ -782,7 +782,9 @@ fn read(holder: &Holder) -> i32 {
 }
 pub fn main() -> i32 {
   let holder = make(&[Guard { value: 42 }])
-  return read(&holder)
+  let mut result = 0
+  while result < 84 { result = result + read(&holder) }
+  return result
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])

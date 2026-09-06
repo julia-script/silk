@@ -1,4 +1,4 @@
-import { cleanupForLocal, generated, indexExits } from './CleanupEmission.js'
+import { indexExits, loanEndOperations } from './CleanupEmission.js'
 import type { ExitIndex } from './CleanupEmission.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
@@ -47,6 +47,7 @@ export class FunctionLowering {
     number,
     Extract<Mir.Operation, { readonly _tag: 'MakeCallable' }>
   >()
+  // Allocation metadata survives branch/loop rewrites; loanLocals tracks path-local liveness.
   readonly temporaryBorrowOwners = new Map<
     string,
     {
@@ -163,6 +164,11 @@ export class FunctionLowering {
     return [result, operations]
   }
 
+  /** Appends captured operations whose loan bookkeeping has already been applied. */
+  appendCaptured(operations: ReadonlyArray<Mir.Operation>): void {
+    this.operations.push(...operations)
+  }
+
   /** Captures an eager region graph without changing the enclosing operation sequence. */
   captureExecution(
     body: () => { readonly entry: Mir.RegionId; readonly result?: Mir.LocalId } | undefined,
@@ -191,7 +197,9 @@ export class FunctionLowering {
   }
 
   emit(operation: Mir.Operation): void {
-    this.operations.push(operation)
+    this.operations.push(
+      ...(operation._tag === 'EndLoan' ? loanEndOperations(this, operation) : [operation]),
+    )
     if (operation._tag === 'BeginLoan') {
       const key = borrowKey(operation.borrow)
       const parent = [...this.loanLocals.entries()].find(
@@ -201,21 +209,6 @@ export class FunctionLowering {
       this.loanIds.set(key, operation.borrow)
     } else if (operation._tag === 'EndLoan') {
       this.loanIds.set(borrowKey(operation.borrow), operation.borrow)
-      const temporary = this.temporaryBorrowOwners.get(borrowKey(operation.borrow))
-      if (temporary !== undefined) {
-        const localType = this.localTypes.at(temporary.local.ordinal)
-        if (localType !== undefined) {
-          this.operations.push(
-            Object.freeze({
-              _tag: 'Drop',
-              local: temporary.local,
-              cleanup: cleanupForLocal(this, temporary.cleanup, localType),
-              provenance: generated(temporary.span),
-            }),
-          )
-        }
-        this.temporaryBorrowOwners.delete(borrowKey(operation.borrow))
-      }
     }
     // A staged section's captures are only the tail of its environment, so it never serves as a
     // complete definition for the erased checked-scalar fast path.

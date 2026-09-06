@@ -970,7 +970,7 @@ const diagnosticsOf = (
 }
 
 /** Retains only cleanup hooks which can observe initialized borrowed components. */
-const cleanupLifetimes = (
+export const cleanupLifetimes = (
   cleanup: CleanupPlan.CleanupPlan,
   state: MovePath.State,
 ): ReadonlyArray<Lifetime.Lifetime> => {
