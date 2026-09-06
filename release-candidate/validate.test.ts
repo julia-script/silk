@@ -61,12 +61,18 @@ const platformNodeParent: InstalledDependencyParent = Object.freeze({
   root: installedPackageRoot('@effect/platform-node'),
 })
 
+const platformNodeSharedParent: InstalledDependencyParent = Object.freeze({
+  name: '@effect/platform-node-shared',
+  root: installedDependencyRoot(platformNodeParent, '@effect/platform-node-shared'),
+})
+
 const consumerDependencyParents: ReadonlyArray<InstalledDependencyParent> = Object.freeze([
   { name: 'effect', root: installedPackageRoot('effect') },
   platformNodeParent,
+  platformNodeSharedParent,
   {
-    name: '@effect/platform-node-shared',
-    root: installedDependencyRoot(platformNodeParent, '@effect/platform-node-shared'),
+    name: '@types/ws',
+    root: installedDependencyRoot(platformNodeSharedParent, '@types/ws'),
   },
 ])
 
@@ -145,6 +151,14 @@ const nonActorExports: ReadonlyArray<NonActorExport> = Object.freeze([
     kind: 'other-non-actor',
     reason: 'Node platform layer',
   },
+  ...(['CTranslationUnitResolver', 'NativeLinkResolver', 'PlatformSupplyResolver'] as const).map(
+    (name): NonActorExport => ({
+      packageName: '@silklang/compiler',
+      path: `./${name}`,
+      kind: 'other-non-actor',
+      reason: 'Node-native resolution boundary excluded from the browser-safe root',
+    }),
+  ),
   {
     packageName: '@silklang/editor-support',
     path: './bundle',
@@ -487,6 +501,7 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
     expect(manifest.name).toBe('@silklang/compiler')
     expect(manifest.private).not.toBe(true)
     expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual([
+      '@effect/platform-node',
       '@silklang/llvm',
       'effect',
       'smol-toml',
@@ -740,8 +755,15 @@ test('the compiler release candidate exposes only its LLVM compiler actors', () 
     expect(api.root).not.toContain('WasmBackend')
     expect(api.root).toContain('StaticEvaluation')
     expect(api.deep).toHaveLength(deepPaths.length)
-    for (const [index, exports] of api.deep.entries())
-      expect(exports.length, `${deepPaths[index]} has no exports`).toBeGreaterThan(0)
+    for (const [index, exports] of api.deep.entries()) {
+      const path = deepPaths[index]
+      if (path === './CTranslationUnit' || path === './NativeLinkPlan') {
+        expect(exports).toEqual([])
+        expect(readFileSync(resolve(packedRoot, `dist/${path.slice(2)}.d.ts`), 'utf8')).toContain(
+          `export interface ${path.slice(2)}`,
+        )
+      } else expect(exports.length, `${path} has no exports`).toBeGreaterThan(0)
+    }
     assertActorSurfaceParity('@silklang/compiler', api.root, deepPaths)
   } finally {
     rmSync(temporary, { recursive: true, force: true })
@@ -1043,7 +1065,7 @@ test('the CLI release candidate installs with its project-first command surface'
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
@@ -1195,7 +1217,7 @@ test('the lsp release candidate installs and answers an initialize request', asy
     writeFileSync(
       resolve(consumerRoot, 'pnpm-workspace.yaml'),
       consumerWorkspace(
-        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  '@types/node': ${installedVersion(cliPackageRoot, '@types/node')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
+        `  '@silklang/compiler': file:${resolve(archiveRoot, compilerArchive ?? '')}\n  '@silklang/docgen': file:${resolve(archiveRoot, docgenArchive ?? '')}\n  '@silklang/formatter': file:${resolve(archiveRoot, formatterArchive ?? '')}\n  '@silklang/llvm': file:${resolve(archiveRoot, llvmArchive ?? '')}\n  smol-toml: ${installedVersion(compilerPackageRoot, 'smol-toml')}\n  vscode-languageserver: ${lspInstalledVersion('vscode-languageserver')}\n  vscode-languageserver-textdocument: ${lspInstalledVersion('vscode-languageserver-textdocument')}\nallowBuilds:\n  msgpackr-extract: false\n  sharp: false\n`,
       ),
     )
     installConsumer(consumerRoot)
