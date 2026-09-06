@@ -1706,14 +1706,14 @@ export const classificationOfRun = (
     selected = control.outcome.runner.classification
   } else if (execution === undefined) {
     selected = 'Unknown'
-  } else if (execution.classification === 'Unknown') {
-    selected = 'Unknown'
   } else if (
     execution.classification === 'Synchronous' &&
     providedClassification(self, instance) === 'Suspendable'
   ) {
     selected = 'Suspendable'
   } else {
+    // Control construction records every unknown or suspendable run in this execution.
+    // An unknown sibling can widen the execution summary without changing this run.
     selected = 'Synchronous'
   }
   return selected

@@ -74,7 +74,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('retains only the exact execution whose runner fact is unknown', () =>
+it.effect('distinguishes an unknown summary from missing exact execution facts', () =>
   Effect.gen(function* () {
     const raw = yield* snapshot(false)
     const program = Analysis.loweredMir(raw)
@@ -90,7 +90,19 @@ it.effect('retains only the exact execution whose runner fact is unknown', () =>
         ),
       ),
     })
-    const retained = MirNormalization.normalize(program, unknownMain)
+    const knownRuns = MirNormalization.normalize(program, unknownMain)
+    assert.isTrue(
+      mainOperations(knownRuns).some((operation) => operation._tag === 'RunStaticEffect'),
+    )
+    const missingMain: ProvisionalMir.Module = {
+      ...provisional,
+      executions: provisional.executions.filter(
+        (execution) =>
+          execution.key._tag !== 'InstanceExecution' ||
+          execution.key.instance.declaration.name !== 'main',
+      ),
+    }
+    const retained = MirNormalization.normalize(program, missingMain)
     assert.isFalse(
       mainOperations(retained).some((operation) => operation._tag === 'RunStaticEffect'),
     )

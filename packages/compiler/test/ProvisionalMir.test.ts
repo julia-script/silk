@@ -3,6 +3,8 @@ import * as Effect from 'effect/Effect'
 import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Instances from '../src/Instances.js'
+import * as MirVerification from '../src/MirVerification.js'
+import * as SourceSpan from '../src/SourceSpan.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as Type from '../src/Type.js'
@@ -376,3 +378,97 @@ pub fn main() -> i32 {
       )
     }),
 )
+
+for (const variant of ['composed', 'sequential', 'suspending'] as const)
+  it.effect(`preserves per-run control after ${variant} mutable service effects`, () =>
+    Effect.gen(function* () {
+      const source = `import silk.effect { Effect }
+service Input { effect fn count() -> i32 ? &mut Input }
+struct Fixed {}
+struct Problem {}
+effect fn count(self: &mut Fixed) -> i32 {
+  return ${variant === 'suspending' ? 'run Effect.suspend(effect { return 0 })' : '0'}
+}
+impl Input for Fixed { count: Fixed.count }
+effect fn recover(value: i32) -> i32 ! Problem { fail Problem {} }
+effect fn program() -> i32 ! Problem ? &mut Input {
+  ${variant === 'sequential' ? 'let first = run Input.count()\n  let second = run Input.count()' : 'let inputs = run Effect.zip(Input.count(), Input.count())\n  let first = inputs.first\n  let second = inputs.second'}
+  if first == 0 { return run recover(first) }
+  let mut remaining = second
+  while remaining > 0 {
+    let next = run Input.count()
+    remaining = remaining - 1
+  }
+  return second
+}
+effect fn finish(error: Problem) -> i32 { return 0 }
+pub fn main() -> i32 {
+  let mut provider = Fixed {}
+  return run Effect.catchAll(Effect.provideMut(program(), &mut provider), finish)
+}`
+      const self = yield* snapshot(source)
+      assert.deepEqual(
+        Analysis.diagnostics(self).map(({ code, span }) => ({ code, span })),
+        [],
+      )
+      const result = self.instances.instances.find(
+        (instance) => instance.key.declaration.name === 'program',
+      )?.specialization.result
+      assert.isDefined(result)
+      if (result === undefined) return
+      const contract = Type.isRepresented(result) ? result.contract : result
+      assert.isTrue(Type.isEffect(contract))
+      if (!Type.isEffect(contract)) return
+      assert.deepEqual(Type.failureMembers(contract).map(Type.encode), [
+        'provisional-mir/main.Problem',
+      ])
+      assert.deepEqual(
+        Type.requirementMembers(contract).map((requirement) => Type.encodeRequirement(requirement)),
+        ['&mut provisional-mir/main.Input'],
+      )
+      const provisional = available(self)
+      assert.deepEqual(ProvisionalMir.verify(provisional), [])
+      const program = Analysis.loweredMir(self)
+      // JUL-156 independently retains an unavailable zip constructor specialization.
+      // Name the outstanding rule explicitly and reject any additional verifier failure.
+      assert.deepEqual(
+        MirVerification.verify(program).map((violation) => violation.rule),
+        variant === 'sequential' ? [] : ['InvalidCallShape'],
+      )
+      const ownership = Projections.suspensionOwnershipOf(self)
+      assert.strictEqual(ownership._tag, 'Available')
+      if (ownership._tag === 'Available') {
+        assert.deepEqual(ownership.value.violations, [])
+        if (variant === 'suspending') assert.isNotEmpty(ownership.value.plans)
+      }
+      const recoveryStart = source.indexOf(' run recover(first)')
+      const recoveryEnd = recoveryStart + ' run recover(first)'.length
+      const executions = program.functions.filter((fn) => fn.id.name.startsWith('program$effect$'))
+      assert.isNotEmpty(executions)
+      for (const fn of executions) {
+        const execution = ProvisionalMir.executionOf(provisional, fn.instance)
+        assert.isDefined(execution)
+        const span =
+          SourceSpan.fromOffsets('provisional-mir/main', recoveryStart, recoveryEnd) ??
+          unreachable('expected recovery span')
+        assert.strictEqual(
+          ProvisionalMir.classificationOfRun(provisional, fn.instance, span),
+          'Synchronous',
+        )
+        assert.isUndefined(ProvisionalMir.controlOfRun(provisional, fn.instance, span))
+      }
+      for (const fn of program.functions)
+        for (const operation of MirVerification.operations(fn)) {
+          if (
+            operation._tag !== 'RunEffect' &&
+            operation._tag !== 'RunEffectValue' &&
+            operation._tag !== 'CatchEffect' &&
+            operation._tag !== 'ExecutionPark'
+          )
+            continue
+          const span = operation.provenance.span
+          if (ProvisionalMir.classificationOfRun(provisional, fn.instance, span) !== 'Synchronous')
+            assert.isDefined(ProvisionalMir.controlOfRun(provisional, fn.instance, span))
+        }
+    }),
+  )
