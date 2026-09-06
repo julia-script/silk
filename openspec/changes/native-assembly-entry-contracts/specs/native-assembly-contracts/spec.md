@@ -2,7 +2,7 @@
 
 ### Requirement: Typed sealed assembly boundary
 
-Silk SHALL expose `Intrinsic.assembly<Result, Inputs>(template, constraints, clobbers, memory,
+Silk SHALL expose `Intrinsic.assembly<Result>(template, constraints, clobbers, memory,
 sideEffects, noReturn, inputs)` as an unsafe residual primitive. The first six arguments SHALL be
 literal compiler metadata; only the final tuple SHALL enter runtime lowering. Result SHALL be unit,
 a 64-bit integer/usize/isize, or an admitted data pointer; tuple inputs SHALL contain zero through

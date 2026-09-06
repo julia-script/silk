@@ -8,9 +8,8 @@ lanes; the compiler does not interpret an instruction as an OS operation or know
 
 ## Decisions
 
-`Intrinsic.assembly<Result, Inputs>(template, constraints, clobbers, memory, sideEffects,
-noReturn, inputs)` has six literal metadata arguments and one runtime tuple. Named type arguments
-remain ordinary Silk generic arguments. The metadata is validated and consumed before runtime
+`Intrinsic.assembly<Result>(template, constraints, clobbers, memory, sideEffects,
+noReturn, inputs)` has six literal metadata arguments and one runtime tuple. The result uses an ordinary Silk type argument; the compiler infers the input tuple type from its literal expression, since anonymous tuple types are not source type syntax. The metadata is validated and consumed before runtime
 lowering, with no string allocation or metadata parameters in the emitted calling convention.
 This is a compiler-owned mixed operation, unlike ordinary source wrappers. Literal-only metadata
 avoids admitting a second static descriptor language or allowing runtime strings to become code.

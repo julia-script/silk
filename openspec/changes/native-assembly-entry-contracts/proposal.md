@@ -5,7 +5,7 @@ entry fragments. LLVM assembly builders already exist; Silk lacks their source c
 
 ## What Changes
 
-- Add sealed `Intrinsic.assembly<Result, Inputs>` with literal template/constraint/clobber/memory/
+- Add sealed `Intrinsic.assembly<Result>` with literal template/constraint/clobber/memory/
   side-effect/no-return metadata and a typed tuple of runtime scalar/pointer inputs.
 - Admit only the initial Linux 64-bit register lanes and reject malformed or conflicting contracts.
 - Add `with Intrinsic.machine(naked: true, noReturn: true)` for constrained zero-argument unit

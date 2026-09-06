@@ -7,7 +7,7 @@ wrappers, OS error handling, stack decoding and startup composition remain ordin
 
 **Status:** Candidate.
 
-**Rule:** `Intrinsic.assembly<Result, Inputs>(template, constraints, clobbers, memory, sideEffects,
+**Rule:** `Intrinsic.assembly<Result>(template, constraints, clobbers, memory, sideEffects,
 noReturn, inputs)` is unsafe. The first four arguments are literal strings; the next two are literal
 booleans; the last is a tuple of zero through seven runtime operands. Metadata is consumed by the
 compiler. The result is unit or one `i64`, `u64`, `isize`, `usize` or data-pointer value. Each operand
@@ -17,7 +17,7 @@ is one of those non-unit lanes. Linux x86-64 and ARM64 are the only admitted tar
 
 ```silk
 unsafe fn add(left: u64, right: u64) -> u64 {
-  return unsafe Intrinsic.assembly<u64, (u64, u64)>(
+  return unsafe Intrinsic.assembly<u64>(
     "addq $2, $0", "={rax},0,{rdi}", "flags", "none", false, false, (left, right))
 }
 ```
@@ -79,7 +79,7 @@ branches, cleanup, captures, loans or additional statements are admitted.
 ```silk
 unsafe export "C" fn entry() -> () as "entry"
   with Intrinsic.machine(naked: true, noReturn: true) {
-  return unsafe Intrinsic.assembly<(), ()>(
+  return unsafe Intrinsic.assembly<()>(
     "movq %rsp, %rdi\njmp native_entry_probe", "", "", "readwrite", true, true, ())
 }
 ```
