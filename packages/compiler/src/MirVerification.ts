@@ -3023,6 +3023,17 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
     const operations = fn.regions.flatMap(operationsOf).flatMap(operationTree)
     for (const operation of operations) {
       if (operation._tag !== 'NativeAssembly') continue
+      const destination = fn.localTypes[operation.destination.ordinal]
+      if (
+        destination === undefined ||
+        !SilkType.equals(semanticType(destination), semanticType(operation.type))
+      )
+        violations.push({
+          _tag: 'Violation',
+          rule: 'InvalidNativeAssembly',
+          function: fn.id,
+          detail: 'assembly destination must have the declared result type',
+        })
       const operands = operation.arguments.flatMap((argument) => {
         const type = fn.localTypes[argument.ordinal]
         return type === undefined ? [] : [semanticType(type)]

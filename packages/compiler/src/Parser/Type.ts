@@ -195,9 +195,7 @@ export const parseTypeParameterList = (
   while (
     nextSignificantKind(state) !== 'Greater' &&
     nextSignificantKind(state) !== 'EndOfFile' &&
-    (!following.includes(nextSignificantKind(state) ?? 'EndOfFile') ||
-      nullablePointerStarts(state) ||
-      nextSignificantKind(state) === 'LeftParenthesis')
+    (!following.includes(nextSignificantKind(state) ?? 'EndOfFile') || nullablePointerStarts(state))
   ) {
     const markerKind = nextSignificantKind(state)
     const marker =

@@ -1,3 +1,4 @@
+import * as MirVerification from '../src/MirVerification.js'
 import * as NativeAssembly from '../src/NativeAssembly.js'
 import * as Exit from 'effect/Exit'
 import * as ForeignContract from '../src/ForeignContract.js'
@@ -715,6 +716,30 @@ export "C" fn sum(left: u64, right: u64) -> u64 { return unsafe add(left, right)
     const artifact = yield* Analysis.codegen(analysis, { mode: 'release' })
     assert.match(artifact.ir, /asm "addq \$2, \$0", "=\{rax\},0,\{rdi\},~\{flags\}"/)
     assert.notMatch(artifact.ir, /@silk\.static\./)
+    const program =
+      analysis.mir._tag === 'Available' ? analysis.mir.value : unreachable('expected assembly MIR')
+    const corrupted = {
+      ...program,
+      functions: program.functions.map((fn) => ({
+        ...fn,
+        regions: fn.regions.map((region) =>
+          region._tag === 'OperationRegion'
+            ? {
+                ...region,
+                operations: region.operations.map((operation) =>
+                  operation._tag === 'NativeAssembly'
+                    ? { ...operation, type: { _tag: 'bool' as const } }
+                    : operation,
+                ),
+              }
+            : region,
+        ),
+      })),
+    }
+    assert.include(
+      MirVerification.verify(corrupted).map((violation) => violation.rule),
+      'InvalidNativeAssembly',
+    )
   }),
 )
 
