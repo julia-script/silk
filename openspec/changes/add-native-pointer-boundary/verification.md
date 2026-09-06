@@ -60,16 +60,41 @@ standard-library source, catalog, toolchain integrity and documentation artifact
 - `pnpm typecheck`: passed, 18 tasks.
 - `pnpm format:check`: passed.
 - `pnpm lint`: passed after replacing the new conformance runner's raw Node boundaries with Effect services.
-- `pnpm test`: the corrected 2,314-test compiler run passed; its serial native sweep was stopped after the final Copy-bound review found the missing operation constraints. The complete run is restarting with that regression fixed.
-- `pnpm check`: pending the full test run.
-- `pnpm release:candidate`: pending the full workspace gates.
+- `pnpm test`: passed, 22 workspace tasks; 2,315 compiler tests across 211 files and all 319 serial native acceptance tests.
+- `pnpm check`: passed, including all 17 script tests.
+- `pnpm release:candidate`: passed, all 10 tests.
 
 The first full compiler run passed 2,313 tests and failed the standard-library namespace inventory
 for the new output module. Its manifest now names Uninitialized and exposes Initialized as an
 alias for tooling discovery. This failure was introduced by the change. The repeated full run
-is pending.
+passed every workspace and native acceptance test.
 
 Initial integration failures from the changed intrinsic inventory and pointer symbol spellings
 were introduced by this change and corrected together with their fixtures. The independent
 Darwin optimized fixture found the narrow C extension bug described above; all six conformance
-runs pass after that fix. No required workspace gate is claimed complete while pending.
+runs pass after that fix.
+
+## CI evidence
+
+[GitHub CI for implementation e8bef47a](https://github.com/julia-script/silk/actions/runs/34016745741)
+passed all four compiler shards, all three native acceptance shards, macOS native-OS, browser,
+validation and all ten release-candidate tests. The committed conformance report additionally
+covers the designated pinned C/Silk boundary on all three native targets and both optimization modes.
+
+[The JUL-121 CI run](https://github.com/julia-script/silk/actions/runs/34013255120) also passed.
+Its validation job initially reached the existing 180-second aggregate documentation-test timeout;
+the main-branch baseline took 171 seconds. An unchanged rerun passed, without increasing a timeout
+or skipping a test.
+
+The final output-bound review first reproduced acceptance of move-only values by the new wrapper.
+Adding explicit `T: Copy` bounds at its five operations corrected that introduced gap, using the
+same parameter refinement as existing container operations. The new regression and the valid
+output-state tests pass. The earlier local native run was deliberately stopped so the complete
+workspace gates could restart against that fix; no interrupted run is counted as a pass.
+
+## Delivery
+
+`gh stack` stack #360 contains draft [JUL-121 PR #357](https://github.com/julia-script/silk/pull/357)
+below draft [JUL-123 PR #359](https://github.com/julia-script/silk/pull/359). JUL-123 is based on
+`julia/jul-121-static-selection`; both PR descriptions include validation evidence. The final
+verification-only commit updates this record and the completed task list without changing code.

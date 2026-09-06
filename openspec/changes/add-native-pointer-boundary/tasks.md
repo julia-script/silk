@@ -21,5 +21,5 @@
 
 ## 5. Delivery
 
-- [ ] 5.1 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, pnpm check and pnpm release:candidate; record exact failures and whether they predate the change.
-- [ ] 5.2 Commit JUL-123 above JUL-121 with gh stack, submit/update both draft PR descriptions with validation evidence and verify the final stack order.
+- [x] 5.1 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, pnpm check and pnpm release:candidate; record exact failures and whether they predate the change.
+- [x] 5.2 Commit JUL-123 above JUL-121 with gh stack, submit/update both draft PR descriptions with validation evidence and verify the final stack order.
