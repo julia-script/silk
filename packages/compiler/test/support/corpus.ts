@@ -7926,6 +7926,7 @@ pub fn main() -> i32 { return unsafe silk_test_libm_order(i32.toF64(85)) }`,
 int32_t silk_test_libm_order(double value) { return (int32_t)fmod(value, 43.0); }
 `,
     },
+    nativeDynamicLibraries: ['m'],
     expected: { _tag: 'Completes', result: 42 },
   },
   {
