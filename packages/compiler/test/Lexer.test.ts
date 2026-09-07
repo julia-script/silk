@@ -95,7 +95,7 @@ it('recognizes canonical duration literals as one token', () => {
 })
 
 it('commits malformed numeric-plus-letter candidates to one invalid duration token', () => {
-  const text = '3sec 1H 1.5s 0x10s 1e5s 1h60m 1m1h 1h1h 1h_'
+  const text = '3sec 1H 1.5s 0x10s 1e5s 1h60m 1m1h 1h1h 1h_ 1__0s'
   const source = SourceFile.make('memory://invalid-durations.silk', ascii(text))
   const result = Lexer.lex(source)
 
@@ -113,6 +113,7 @@ it('commits malformed numeric-plus-letter candidates to one invalid duration tok
       { kind: 'InvalidDurationLiteral', start: 30, end: 34, slice: '1m1h' },
       { kind: 'InvalidDurationLiteral', start: 35, end: 39, slice: '1h1h' },
       { kind: 'InvalidDurationLiteral', start: 40, end: 43, slice: '1h_' },
+      { kind: 'InvalidDurationLiteral', start: 44, end: 49, slice: '1__0s' },
     ],
   )
   assert.deepEqual(
@@ -148,6 +149,7 @@ it('commits malformed numeric-plus-letter candidates to one invalid duration tok
         span: [38, 39],
       },
       { code: 'LEX0008', reason: { _tag: 'InvalidDurationAmount' }, span: [42, 43] },
+      { code: 'LEX0005', reason: { _tag: 'InvalidDigitSeparator' }, span: [44, 48] },
     ],
   )
 })
