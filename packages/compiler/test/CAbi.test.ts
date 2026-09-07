@@ -555,7 +555,7 @@ it('reserves the entry point, runtime symbols, and generated symbol shapes', () 
   for (const symbol of [
     'main',
     'silk_main',
-    'silk_os_file_open_v1',
+    'silk_os_process_execute_v1',
     'silk_coroutine_frame_push_v1',
     'silk_host_argc_v1',
     'silk_host_argv_v1',

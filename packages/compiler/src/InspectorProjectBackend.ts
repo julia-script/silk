@@ -880,8 +880,6 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = if ${localText(operation.condition)}`
     case 'ShortCircuit':
       return `${localText(operation.destination)} = ${operation.operator === 'And' ? '&&' : '||'} ${localText(operation.left)}`
-    case 'OsOpen':
-      return `${localText(operation.destination)} = ${Intrinsic.operationText(operation.operation)}(${operation.arguments.map(localText).join(', ')}) via ${localText(operation.success)}/${localText(operation.failure)}`
     case 'OsCall':
       return `${localText(operation.destination)} = ${Intrinsic.operationText(operation.operation)}(${operation.arguments.map(localText).join(', ')})`
     case 'ForeignIndirectCall':
@@ -924,6 +922,7 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = is null ${localText(operation.pointer)}`
     case 'PointerAddress':
       return `${localText(operation.destination)} = address of ${localText(operation.pointer)}`
+    case 'PointerBytes':
     case 'PointerRequalify':
     case 'PointerFromStorage':
       return `${localText(operation.destination)} = pointer from ${localText(operation.source)}`

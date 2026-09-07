@@ -38,6 +38,37 @@ type Operation = Extract<
   }
 >
 
+/** Restores success lanes from the wider shared success/failure outcome representation. */
+const successPayload = Effect.fnUntraced(function* (
+  context: Context,
+  values: ReadonlyArray<Value.Input>,
+  outcome: Mir.LocalId,
+  result: Mir.Type,
+  name: string,
+) {
+  const source = context.storage.fn.localTypes.at(outcome.ordinal)
+  if (source === undefined) throw new RangeError('Effect success lost its outcome type')
+  const sourceLanes = NativeType.lanesFor(context.types, source).slice(1)
+  const resultLanes = NativeType.lanesFor(context.types, result)
+  const payload: Array<Value.Input> = []
+  for (const [ordinal, lane] of resultLanes.entries()) {
+    const value = values.at(ordinal + 1)
+    const sourceLane = sourceLanes.at(ordinal)
+    if (value === undefined || sourceLane === undefined)
+      throw new RangeError('Effect success lost a payload lane')
+    payload.push(
+      yield* NativeArith.coerceLane(
+        context.arith.lane,
+        value,
+        sourceLane,
+        lane,
+        `${name}_${ordinal}`,
+      ),
+    )
+  }
+  return Object.freeze(payload)
+})
+
 export const emit = Effect.fnUntraced(function* (context: Context, operation: Operation) {
   const {
     arith,
@@ -251,10 +282,15 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'UnpackEffectSuccess': {
-      const count = NativeType.lanesFor(types, operation.type).length
       nativeStorage.locals.set(
         operation.destination.ordinal,
-        Object.freeze(NativeStorage.readLocal(nativeStorage, operation.source).slice(1, 1 + count)),
+        yield* successPayload(
+          context,
+          NativeStorage.readLocal(nativeStorage, operation.source),
+          operation.source,
+          operation.type,
+          `effect_unpack${operation.destination.ordinal}`,
+        ),
       )
       break
     }
@@ -318,12 +354,17 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         `effect_run${operation.destination.ordinal}_following`,
       )
       yield* FunctionBody.conditionalBranch(body, succeeded, successBlock, failureBlock)
-      const resultLaneCount = NativeType.lanesFor(types, operation.type).length
       yield* LlvmBlock.setInsertionPoint(body, successBlock)
       yield* NativeStorage.storeMutable(
         nativeStorage,
         operation.destination,
-        Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
+        yield* successPayload(
+          context,
+          outcomeValues,
+          operation.outcome,
+          operation.type,
+          `effect_success${operation.destination.ordinal}`,
+        ),
       )
       yield* FunctionBody.branch(body, followingBlock)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
@@ -355,6 +396,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           release.cleanup,
           NativeStorage.readLocal(nativeStorage, release.local),
           `propagation_release${release.local.ordinal}`,
+          undefined,
+          release.initialization,
         )
       }
       const returned: Array<Value.Input> = [
@@ -559,11 +602,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
       }
       nativeStorage.locals.set(operation.outcome.ordinal, Object.freeze(outcomeValues))
-      const resultLaneCount = NativeType.lanesFor(types, operation.type).length
       if (operation.propagationType === undefined) {
         nativeStorage.locals.set(
           operation.destination.ordinal,
-          Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
+          yield* successPayload(
+            context,
+            outcomeValues,
+            operation.outcome,
+            operation.type,
+            `effect_success${operation.destination.ordinal}`,
+          ),
         )
         break
       }
@@ -593,7 +641,13 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       yield* NativeStorage.storeMutable(
         nativeStorage,
         operation.destination,
-        Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
+        yield* successPayload(
+          context,
+          outcomeValues,
+          operation.outcome,
+          operation.type,
+          `effect_success${operation.destination.ordinal}`,
+        ),
       )
       yield* FunctionBody.branch(body, completed)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
@@ -622,6 +676,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           release.cleanup,
           NativeStorage.readLocal(nativeStorage, release.local),
           `effect_composite_release${release.local.ordinal}`,
+          undefined,
+          release.initialization,
         )
       }
       const returned: Array<Value.Input> = [
@@ -753,11 +809,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               `effect_value_run${operation.destination.ordinal}`,
             )
       nativeStorage.locals.set(operation.outcome.ordinal, outcomeValues)
-      const resultLaneCount = NativeType.lanesFor(types, operation.type).length
       if (operation.propagationType === undefined) {
         nativeStorage.locals.set(
           operation.destination.ordinal,
-          Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
+          yield* successPayload(
+            context,
+            outcomeValues,
+            operation.outcome,
+            operation.type,
+            `effect_success${operation.destination.ordinal}`,
+          ),
         )
         break
       }
@@ -788,7 +849,13 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       yield* NativeStorage.storeMutable(
         nativeStorage,
         operation.destination,
-        Object.freeze(outcomeValues.slice(1, 1 + resultLaneCount)),
+        yield* successPayload(
+          context,
+          outcomeValues,
+          operation.outcome,
+          operation.type,
+          `effect_success${operation.destination.ordinal}`,
+        ),
       )
       yield* FunctionBody.branch(body, followingBlock)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
@@ -820,6 +887,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           release.cleanup,
           NativeStorage.readLocal(nativeStorage, release.local),
           `propagation_release${release.local.ordinal}`,
+          undefined,
+          release.initialization,
         )
       }
       const returned: Array<Value.Input> = [

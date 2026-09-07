@@ -35,6 +35,23 @@ pub struct Pointer
 
 The operations for data pointers, which hold no ownership or loan.
 
+<a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e6279746573"></a>
+
+### Associated function `Pointer.bytes`
+
+```silk
+pub unsafe fn bytes<T>(pointer: ?*const T) -> ?[*]const u8
+```
+
+Projects a typed raw pointer as a readonly byte address without reading storage.
+
+#### Safety
+
+The result preserves null and the address but grants no ownership or readable extent.
+Every later access must independently address initialized readable bytes. This permits
+inspection of a valid prefix of a variable-sized external record without loading the
+nominal record. It does not keep the allocation alive.
+
 <a id="declaration-73696c6b2f706f696e7465723a3a506f696e7465722e61646472657373"></a>
 
 ### Associated function `Pointer.address`

@@ -14,15 +14,16 @@ code. Supply an in-memory [`FileSystem`](./filesystem.md#declaration-73696c6b2f6
 ## Details
 
 Portable `/` denotes the provider root rather than the host filesystem root. The native boundary
-rejects malformed paths, root escape, and symlink traversal outside that confinement. Whole-FileSystem.file
-reads and writes own or commit complete contents, FileSystem.directory listings retry oversized entries and
+rejects malformed portable paths and symlinks below the configured root. Whole-file
+reads and writes own or commit complete contents, directory listings retry oversized entries and
 sort complete child paths deterministically. Low-level failures become portable [`FileError`](./filesystem.md#declaration-73696c6b2f66696c6573797374656d3a3a46696c654572726f72)
 values with retained native codes.
 
 [`make`](#declaration-73696c6b2f6f735f66696c6573797374656d3a3a4f7346696c6553797374656d2e6d616b65) copies its root. The root must be an absolute, non-empty, NUL-free native path. A root
 that violates this precondition traps. Open handles close on success and failure. If an
 operation and close both fail, the operation's original typed failure remains the reported
-result.
+result. The configured root and its ancestors must be trusted; confinement does not promise
+protection against hostile directory renames or privileged mount changes.
 
 Constructing the provider performs no filesystem operation beyond owning the root bytes.
 Portable code uses `FileSystem` operations after the application supplies `&mut OsFileSystem`
@@ -47,7 +48,7 @@ import silk.os_filesystem { OsFileSystem }
 effect fn program() -> i32
 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let provider = run OsFileSystem.make("/tmp")
+  let provider = run OsFileSystem.make(b"/tmp")
     |> Effect.provideMut<Allocator>(&mut allocator)
   drop provider
   return 42
@@ -86,7 +87,7 @@ Portable absolute paths resolve inside this root. The provider never exposes the
 ### Associated function `OsFileSystem.make`
 
 ```silk
-pub effect<'life0> fn make<'life0>(root: string<'life0>) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn make<'life0>(root: &'life0 [u8]) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator
 ```
 
 Copies one absolute native root and creates a confined filesystem provider.
@@ -98,7 +99,7 @@ that uses the portable filesystem service.
 
 #### Details
 
-Construction owns the root bytes but does not open the FileSystem.directory. Portable `/` then denotes
+Construction owns the root bytes but does not open the directory. Portable `/` then denotes
 this provider root instead of the host filesystem root.
 
 #### Gotchas

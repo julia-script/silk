@@ -51,7 +51,6 @@ export interface Context {
     string,
     {
       readonly handle: FunctionActor.Function
-      readonly abi: 'Direct' | 'OpenOut'
       readonly resultLaneCount: number
       readonly symbol: string
     }

@@ -297,6 +297,7 @@ jobs:
           node packages/compiler/conformance/standard-streams/run.mjs
           node packages/compiler/conformance/native-clocks/run.mjs
           node packages/compiler/conformance/native-entropy/run.mjs
+          node packages/compiler/conformance/native-filesystem/run.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -308,5 +309,6 @@ jobs:
             .scratch/standard-streams
             .scratch/native-clocks
             .scratch/native-entropy
+            .scratch/native-filesystem
             .scratch/gnu-packages.txt
           if-no-files-found: error

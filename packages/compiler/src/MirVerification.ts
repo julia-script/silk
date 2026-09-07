@@ -1034,15 +1034,6 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       return [operation.destination, operation.layout, operation.count]
     case 'Allocate':
       return [operation.destination, operation.layout]
-    case 'OsOpen':
-      return [
-        operation.destination,
-        operation.valid,
-        operation.handle,
-        ...operation.arguments,
-        operation.success,
-        operation.failure,
-      ]
     case 'ForeignIndirectCall':
       return [operation.destination, operation.callee, ...operation.arguments]
     case 'OsCall':
@@ -1116,6 +1107,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'PointerIsNull':
     case 'PointerRead':
       return [operation.destination, operation.pointer]
+    case 'PointerBytes':
     case 'PointerRequalify':
     case 'PointerFromStorage':
       return [operation.destination, operation.source]
@@ -2004,14 +1996,6 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         ...cleanupTypes(operation.presentCleanup),
         ...cleanupTypes(operation.absentCleanup),
       ]
-    case 'OsOpen':
-      return [
-        semanticType(operation.handleType),
-        semanticType(operation.type),
-        'bool',
-        ...cleanupTypes(operation.successCleanup),
-        ...cleanupTypes(operation.failureCleanup),
-      ]
     case 'RawBufferFrom':
       return [semanticType(operation.type), operation.element]
     case 'SharedFromAllocation':
@@ -2068,6 +2052,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'RawBufferFill':
       return [semanticType(operation.type)]
     case 'PointerNull':
+    case 'PointerBytes':
     case 'PointerRequalify':
     case 'PointerFromStorage':
     case 'PointerAt':
@@ -2254,8 +2239,6 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.layout, operation.count]
     case 'Allocate':
       return [operation.layout]
-    case 'OsOpen':
-      return [...operation.arguments, operation.success, operation.failure]
     case 'ForeignIndirectCall':
       return [operation.callee, ...operation.arguments]
     case 'OsCall':
@@ -2298,6 +2281,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'PointerIsNull':
     case 'PointerRead':
       return [operation.pointer]
+    case 'PointerBytes':
     case 'PointerRequalify':
     case 'PointerFromStorage':
       return [operation.source]
@@ -2903,6 +2887,7 @@ const pointerOperationViolation = (
         | 'PointerIsNull'
         | 'PointerAddress'
         | 'PointerRequalify'
+        | 'PointerBytes'
         | 'PointerFromStorage'
         | 'PointerAt'
         | 'PointerRead'
@@ -2930,6 +2915,25 @@ const pointerOperationViolation = (
       return pointerAt(operation.pointer) !== undefined && destination?._tag === 'bool'
         ? undefined
         : 'Pointer null test lost its pointer operand or bool destination'
+    case 'PointerBytes': {
+      const source = pointerAt(operation.source)
+      return source !== undefined &&
+        !source.mutable &&
+        source.nullable &&
+        source.extent === 'Single' &&
+        source.alignment === 'Natural' &&
+        source.addressSpace === 0 &&
+        destination?._tag === 'Pointer' &&
+        SilkType.equals(destination.type, operation.type.type) &&
+        destination.type.pointee === 'u8' &&
+        !destination.type.mutable &&
+        destination.type.nullable &&
+        destination.type.extent === 'Many' &&
+        destination.type.alignment === 'Natural' &&
+        destination.type.addressSpace === source.addressSpace
+        ? undefined
+        : 'Pointer byte projection lost its readonly byte view or source qualifiers'
+    }
     case 'PointerRequalify': {
       const source = pointerAt(operation.source)
       return source !== undefined &&
@@ -4394,52 +4398,6 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               }),
             )
         }
-        if (operation._tag === 'OsOpen') {
-          const catalog = Intrinsic.findOperationById(operation.operation)
-          const rule = catalog?.rule._tag === 'BuiltinRule' ? catalog.rule : undefined
-          const destination = fn.localTypes.at(operation.destination.ordinal)
-          const valid = fn.localTypes.at(operation.valid.ordinal)
-          const handle = fn.localTypes.at(operation.handle.ordinal)
-          const success = fn.localTypes.at(operation.success.ordinal)
-          const failure = fn.localTypes.at(operation.failure.ordinal)
-          const parameters = rule?.parameters.slice(0, -2)
-          const argumentsValid =
-            rule !== undefined &&
-            (rule.operation === 'OsFileOpen' || rule.operation === 'OsDirectoryOpen') &&
-            parameters?.length === operation.arguments.length &&
-            parameters.every((expected, ordinal) => {
-              const argument = operation.arguments.at(ordinal)
-              const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
-              return actual !== undefined && sameRuntimeType(semanticType(actual), expected)
-            })
-          if (
-            catalog?.unsafe !== true ||
-            destination === undefined ||
-            valid?._tag !== 'bool' ||
-            handle?._tag !== 'Nominal' ||
-            !SilkType.equals(handle.type, SilkType.osHandle) ||
-            !SilkType.equals(operation.handleType.type, SilkType.osHandle) ||
-            success?._tag !== 'CallableValue' ||
-            success.type.parameters.length !== 1 ||
-            !SilkType.equals(success.type.parameters[0] ?? 'never', SilkType.osHandle) ||
-            !SilkType.equals(success.type.result, semanticType(operation.type)) ||
-            failure?._tag !== 'CallableValue' ||
-            failure.type.parameters.length !== 0 ||
-            !SilkType.equals(failure.type.result, semanticType(operation.type)) ||
-            !SilkType.equals(semanticType(destination), semanticType(operation.type)) ||
-            !argumentsValid
-          ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidOsOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'OS open does not match its affine carrier signature',
-              }),
-            )
-          }
-        }
         if (operation._tag === 'ForeignStaticLoad') {
           const record = self.foreignStatics.find((candidate) =>
             sameDeclaration(candidate.declaration, operation.declaration),
@@ -5256,6 +5214,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           operation._tag === 'PointerIsNull' ||
           operation._tag === 'PointerAddress' ||
           operation._tag === 'PointerRequalify' ||
+          operation._tag === 'PointerBytes' ||
           operation._tag === 'PointerFromStorage' ||
           operation._tag === 'PointerAt' ||
           operation._tag === 'PointerRead' ||

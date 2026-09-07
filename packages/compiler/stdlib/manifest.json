@@ -199,6 +199,11 @@
     "namespace": "NativeDescriptor"
   },
   {
+    "module": "silk/native_filesystem",
+    "path": "silk/native_filesystem.silk",
+    "namespace": "NativeFileSystem"
+  },
+  {
     "module": "silk/numeric",
     "path": "silk/numeric.silk",
     "namespace": "Integer"

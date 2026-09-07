@@ -1,0 +1,137 @@
+{
+  "schema": 1,
+  "runner": "packages/compiler/conformance/native-filesystem/run.mjs",
+  "llvm": "22.1.8",
+  "evidence": "Independent selected C header signatures, varargs mode promotions, native record field offsets and constants; actual deterministic C receiver execution including partial I/O, primary errors, failed close, short directory records, raw bytes, 128 collisions, and cancellation. Generic coroutine frame runtime only; no compiler filesystem policy.",
+  "runs": [
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "reportSha256": "79b256054fe5f00f7fe7473bdbc57ff8f261dc1557e9fa3123df08336cf403c6",
+      "headers": {
+        "usr/include/unistd.h": "99eb4050035a1a816090762770f0843c728666745d7e727e64dc347d8a99ac28",
+        "usr/include/errno.h": "c46073c84e5396855c6861272a8b02e352bb20d658bbfc12690e483a4be73053",
+        "usr/include/x86_64-linux-gnu/sys/types.h": "6914c8861f2943a9f6b95d17f1ef279657569763aa8ab52334d4141db5aa959e",
+        "usr/include/x86_64-linux-gnu/bits/types.h": "cd152b6a5b70db5ff301e428b13e7a02d64dde93c4ae0a7879378dc04fd4fbcd",
+        "usr/include/fcntl.h": "5e6b12d71c0d8fabb5ab7ee9ba9f1e1eb6b19bef0e5e7938f1da68c28ab8044d",
+        "usr/include/dirent.h": "7c24a1339f41ccd4614b274411f39a95aa02e25d8811c4993cba07368e87c1cc",
+        "usr/include/x86_64-linux-gnu/sys/stat.h": "a20cea5838b1e02a2ba679bd84b72e0aaa61cccca5c718160e3cc09ea2556660",
+        "usr/include/x86_64-linux-gnu/bits/stat.h": "370f651b34008005ed1593686f7c3926d0cb0d68c7e6d1357d3096289e19183e",
+        "usr/include/x86_64-linux-gnu/bits/struct_stat.h": "7ee08b609ac74bc08807535abe0a19767b0bb383d14e89e89af1d26e8497df87",
+        "usr/include/x86_64-linux-gnu/bits/dirent.h": "07eaa0d768087ca6092ce725353315c2e326a2b169ddcda47b0233650bb67d71",
+        "usr/include/x86_64-linux-gnu/bits/fcntl.h": "42f9d5cd3449128060a96de7416b139ce1dab58820990d797155fae78df17e07",
+        "usr/include/x86_64-linux-gnu/bits/fcntl-linux.h": "4b48b82929efc51b32adf721c7898810c524b53b211e0126554c07aff2965b23"
+      },
+      "lto": "rejected",
+      "lanes": [
+        {
+          "optimization": "none",
+          "executionStatus": 42,
+          "planIdentity": "8d9866f6f5cad4f417f3cebff98d2ab3a46f2176eceeeeb4c079318cd8adcc3f",
+          "runtimeSymbols": [
+            "malloc",
+            "free",
+            "silk_coroutine_frame_push_v1",
+            "silk_coroutine_frame_pop_v1"
+          ]
+        },
+        {
+          "optimization": "speed",
+          "executionStatus": 42,
+          "planIdentity": "6320c25e07ee9ddfb8231f2eaf2fb7b240b7b2e8cd9e305c5718b294f314d83b",
+          "runtimeSymbols": [
+            "malloc",
+            "free",
+            "silk_coroutine_frame_push_v1",
+            "silk_coroutine_frame_pop_v1"
+          ]
+        }
+      ]
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "reportSha256": "fa2e53ba5f5e41996ac930cd9229f29a59dfe7cff596c0a4cd6994094e69a28b",
+      "headers": {
+        "usr/include/unistd.h": "be3d2b42ce70c5934942bed0ad31d512e9226393140ea783fca887ea35324ab1",
+        "usr/include/errno.h": "ff95a158e0799dcf0622e83882e64d88f1783b98a91d9b206bcba2a12f8425e6",
+        "usr/include/sys/types.h": "82111e1f1d0262bee191b4679842e5ff51de57310ce4da9f48d39af0d8e10284",
+        "usr/include/sys/errno.h": "80dc0ead0d8a003014c02d1f2bf63808000af9babc63a67ea1f36252c0a05212",
+        "usr/include/sys/_types/_ssize_t.h": "58eb3bdea24b27e6b5fb45e203e476faf2510b5c0aa81a0b45c17b528aa9c192",
+        "usr/include/sys/_types/_size_t.h": "3e1bcf6c23ad00e0fe2b5a4683e687299baf51cf26b0a4ebc73db6140378acc2",
+        "usr/include/fcntl.h": "289f3be20c07d8eae5589f43994cfdb5fb33b3b099a6aee67f63e00d90039a8f",
+        "usr/include/dirent.h": "8f4f9ef7f696e4326c6d273142da7257a50031ffa58b235bd48da8fba56821b6",
+        "usr/include/sys/stat.h": "31c8f252b05785343ca577c007657c0fbab45a182b60fc5b73994c621dc318d4",
+        "usr/include/sys/fcntl.h": "ebe22134742232b94f282575ff1fd901ac8b834976aab8d988ea0b37b0c52f85",
+        "usr/include/sys/dirent.h": "974e1e468150f7654f059d800c76f4f33e9fc7bb1efcf81deb70efa463e07d94",
+        "usr/include/sys/_types/_mode_t.h": "7c4261bde41387fc23aefe5dee1e6298ae6b6f5592bca51947fdd9736e0640a6"
+      },
+      "lto": "rejected",
+      "lanes": [
+        {
+          "optimization": "none",
+          "executionStatus": 42,
+          "planIdentity": "bbabc38bdf847efee7c5e56436ba74079d9a8a5f7ca6a42c3e8395ee59d10eb1",
+          "runtimeSymbols": [
+            "malloc",
+            "free",
+            "silk_coroutine_frame_push_v1",
+            "silk_coroutine_frame_pop_v1"
+          ]
+        },
+        {
+          "optimization": "speed",
+          "executionStatus": 42,
+          "planIdentity": "e2fa90c3d78facf6eaf329a5bddca328e3e0251640c668943d38bda898322b64",
+          "runtimeSymbols": [
+            "malloc",
+            "free",
+            "silk_coroutine_frame_push_v1",
+            "silk_coroutine_frame_pop_v1"
+          ]
+        }
+      ]
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "reportSha256": "5e1e2fff1ff4c0b447bf0a4d27c6497185a956ebe2d00fe7e80436bfd0a7a057",
+      "headers": {
+        "usr/include/unistd.h": "99eb4050035a1a816090762770f0843c728666745d7e727e64dc347d8a99ac28",
+        "usr/include/errno.h": "c46073c84e5396855c6861272a8b02e352bb20d658bbfc12690e483a4be73053",
+        "usr/include/aarch64-linux-gnu/sys/types.h": "6914c8861f2943a9f6b95d17f1ef279657569763aa8ab52334d4141db5aa959e",
+        "usr/include/aarch64-linux-gnu/bits/types.h": "cd152b6a5b70db5ff301e428b13e7a02d64dde93c4ae0a7879378dc04fd4fbcd",
+        "usr/include/fcntl.h": "5e6b12d71c0d8fabb5ab7ee9ba9f1e1eb6b19bef0e5e7938f1da68c28ab8044d",
+        "usr/include/dirent.h": "7c24a1339f41ccd4614b274411f39a95aa02e25d8811c4993cba07368e87c1cc",
+        "usr/include/aarch64-linux-gnu/sys/stat.h": "a20cea5838b1e02a2ba679bd84b72e0aaa61cccca5c718160e3cc09ea2556660",
+        "usr/include/aarch64-linux-gnu/bits/stat.h": "370f651b34008005ed1593686f7c3926d0cb0d68c7e6d1357d3096289e19183e",
+        "usr/include/aarch64-linux-gnu/bits/struct_stat.h": "605493170ffd01f55297a18c77038efabd8a2c02de9555b1bfd1e51c257236b0",
+        "usr/include/aarch64-linux-gnu/bits/dirent.h": "07eaa0d768087ca6092ce725353315c2e326a2b169ddcda47b0233650bb67d71",
+        "usr/include/aarch64-linux-gnu/bits/fcntl.h": "cc0657b13e7b6e665acd8bae436a47b6d626f41d6971c0fa196e2084739d81a5",
+        "usr/include/aarch64-linux-gnu/bits/fcntl-linux.h": "4b48b82929efc51b32adf721c7898810c524b53b211e0126554c07aff2965b23"
+      },
+      "lto": "rejected",
+      "lanes": [
+        {
+          "optimization": "none",
+          "executionStatus": 42,
+          "planIdentity": "f2515c2cb152f5217f0d48ea780b60a92cde9d5a489af98ec68655ef39c05dd4",
+          "runtimeSymbols": [
+            "malloc",
+            "free",
+            "silk_coroutine_frame_push_v1",
+            "silk_coroutine_frame_pop_v1"
+          ]
+        },
+        {
+          "optimization": "speed",
+          "executionStatus": 42,
+          "planIdentity": "cf901a014fa4cf05b26a40cf5ec508b60f2600c3f63344cf090e344ded875ad3",
+          "runtimeSymbols": [
+            "malloc",
+            "free",
+            "silk_coroutine_frame_push_v1",
+            "silk_coroutine_frame_pop_v1"
+          ]
+        }
+      ]
+    }
+  ]
+}

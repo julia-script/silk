@@ -267,26 +267,16 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     string,
     {
       readonly handle: FunctionActor.Function
-      readonly abi: 'Direct' | 'OpenOut'
       readonly resultLaneCount: number
       readonly symbol: string
     }
   >()
   for (const operation of program.functions.flatMap((fn) => MirVerification.operations(fn))) {
-    if (
-      (operation._tag !== 'OsCall' && operation._tag !== 'OsOpen') ||
-      osRuntimes.has(operation.operation.name)
-    )
-      continue
-    const resultLanes = lanesFor(
-      operation._tag === 'OsOpen' ? operation.handleType : operation.type,
-    )
-    const abi = operation._tag === 'OsOpen' ? 'OpenOut' : 'Direct'
+    if (operation._tag !== 'OsCall' || osRuntimes.has(operation.operation.name)) continue
+    const resultLanes = lanesFor(operation.type)
     const singleResultLane = resultLanes.at(0)
     let resultType: LlvmType.Type
-    if (abi === 'OpenOut') {
-      resultType = i32
-    } else if (resultLanes.length === 0) {
+    if (resultLanes.length === 0) {
       resultType = voidType ?? (yield* LlvmType.voidType(builder))
     } else if (resultLanes.length === 1 && singleResultLane !== undefined) {
       resultType = laneType(singleResultLane)
@@ -302,16 +292,11 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     osRuntimes.set(
       operation.operation.name,
       Object.freeze({
-        abi,
         symbol: NativeDeclare.osRuntimeSymbol(operation.operation.name),
         handle: yield* FunctionActor.declare(
           builder,
           NativeDeclare.osRuntimeSymbol(operation.operation.name),
-          yield* LlvmType.functionType(
-            builder,
-            resultType,
-            abi === 'OpenOut' ? [...parameters, ...resultLanes.map(() => pointer)] : parameters,
-          ),
+          yield* LlvmType.functionType(builder, resultType, parameters),
         ),
         resultLaneCount: resultLanes.length,
       }),

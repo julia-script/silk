@@ -6,11 +6,10 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
-import * as OsRuntime from '../src/OsRuntime.js'
+import * as MirVerification from '../src/MirVerification.js'
+import * as Target from '../src/Target.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import * as Termination from '../src/Termination.js'
-import * as ToolchainPlan from '../src/ToolchainPlan.js'
 import * as Driver from './support/TestDriver.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -29,117 +28,6 @@ afterAll(() => {
   rmSync(destinationRoot, { recursive: true, force: true })
 })
 
-const lowLevelSource = `import silk.u32 as u32
-import silk.usize as usize
-pub fn main() -> i32 {
-  let mut kind = 0
-  let mut length = usize.add(0, 0)
-  let mut reason = 0
-  let mut nativeCode = u32.toU32(0)
-  let mut inspected = false
-  unsafe {
-    inspected = run Intrinsic.osPathInspect(Intrinsic.stringUtf8Bytes("/tmp"), Intrinsic.stringUtf8Bytes("/file"), &mut kind, &mut length, &mut reason, &mut nativeCode)
-  }
-  if inspected { return kind + usize.toI32(length) }
-  return reason
-}`
-const returnedStatusTermination: Termination.Contract = Object.freeze({
-  _tag: 'EntryTermination',
-  success: 'ReturnedStatus',
-  failures: Object.freeze([]),
-  logicalFrames: Object.freeze([]),
-  report: Termination.emptyReport,
-})
-
-it('classifies file-open metadata independently of stale errno and cleanup errors', () => {
-  const source = `#define _GNU_SOURCE 1
-#define _DARWIN_C_SOURCE 1
-#define _POSIX_C_SOURCE 200809L
-#define open silk_test_open
-#define openat silk_test_openat
-#define fstat silk_test_fstat
-#define close silk_test_close
-${OsRuntime.source(['silk_os_file_open_v1'])}
-#include <stdio.h>
-
-static int metadata_status;
-static int metadata_errno;
-static int parent_closes;
-static int file_closes;
-static int unexpected_closes;
-
-int silk_test_open(const char *path, int flags, ...) {
-  (void)path; (void)flags;
-  return 70;
-}
-int silk_test_openat(int parent, const char *path, int flags, ...) {
-  (void)parent; (void)path; (void)flags;
-  return 71;
-}
-int silk_test_fstat(int fd, struct stat *info) {
-  if (fd != 71) return -1;
-  info->st_mode = S_IFDIR;
-  errno = metadata_errno;
-  return metadata_status;
-}
-int silk_test_close(int fd) {
-  if (fd == 70) parent_closes += 1;
-  else if (fd == 71) file_closes += 1;
-  else unexpected_closes += 1;
-  errno = EIO;
-  return -1;
-}
-
-int main(void) {
-  const int statuses[] = { 0, 0, -1 };
-  const int errors[] = { EACCES, ENOENT, EACCES };
-  for (int index = 0; index < 3; index += 1) {
-    metadata_status = statuses[index]; metadata_errno = errors[index];
-    parent_closes = 0; file_closes = 0; unexpected_closes = 0;
-    int reason = -1, kind = -1, active = 0;
-    uint32_t native_code = 0;
-    size_t identity = 0;
-    int result = silk_os_file_open_v1((const unsigned char *)"/root", 5,
-      (const unsigned char *)"/entry", 6, 0, &reason, &native_code, &identity, &kind, &active);
-    printf("%d %d %d %d %d %d %d\\n", result, reason,
-      native_code == (index == 2 ? (uint32_t)EACCES : 0), parent_closes, file_closes,
-      unexpected_closes, identity == 0 && active == 0);
-  }
-  return 0;
-}
-`
-  const sourcePath = join(destinationRoot, 'file-open-metadata.c')
-  const executable = join(destinationRoot, 'file-open-metadata')
-  writeFileSync(sourcePath, source)
-  const built = spawnSync(
-    '/usr/bin/clang',
-    [
-      '-std=c11',
-      '-Wall',
-      '-Wextra',
-      '-Werror',
-      '-Wno-unused-function',
-      sourcePath,
-      '-o',
-      executable,
-    ],
-    { encoding: 'utf8' },
-  )
-  assert.strictEqual(built.status, 0, built.stderr)
-  const run = spawnSync(executable, [], { encoding: 'utf8' })
-  assert.strictEqual(run.status, 0, run.stderr)
-  const outcomes = run.stdout
-    .trim()
-    .split('\n')
-    .map((line) => line.split(' ').map(Number))
-  // result, reason, original native code preserved, parent/file/unexpected closes, no handle.
-  assert.deepStrictEqual(outcomes, [
-    [0, 4, 1, 1, 1, 0, 1],
-    [0, 4, 1, 1, 1, 0, 1],
-    [0, 2, 1, 1, 1, 0, 1],
-  ])
-})
-
 it.effect('loads the ordinary canonical OS provider without compiler-known library privilege', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSourceRealized(
@@ -148,7 +36,7 @@ it.effect('loads the ordinary canonical OS provider without compiler-known libra
 import silk.allocator { OutOfMemoryError }
 import silk.os_filesystem { OsFileSystem }
 pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
-  return run OsFileSystem.make(root)
+  return run OsFileSystem.make(Intrinsic.stringUtf8Bytes(root))
 }`),
       'aarch64-apple-darwin',
     )
@@ -172,7 +60,7 @@ import silk.vector { Vector }
 
 pub effect fn main() -> () ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut fs = run OsFileSystem.make("/tmp") |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make(b"/tmp") |> Effect.provideMut(&mut allocator)
   let path = run Path.root() |> Effect.provideMut(&mut allocator)
   let entries = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(FileSystem.listDirectory(&path), &mut fs),
@@ -184,212 +72,10 @@ pub effect fn main() -> () ! FileError | OutOfMemoryError {
         'aarch64-apple-darwin',
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
       yield* Analysis.codegen(snapshot, { mode: 'release' })
     }),
   60_000,
-)
-
-it.effect('keeps OsHandle opaque, affine, consuming, and unsafe-only', () =>
-  Effect.gen(function* () {
-    const construct = yield* Analysis.ofSourceRealized(
-      'os-filesystem/construct-handle',
-      ascii(`pub fn main() -> i32 {
-  let handle = OsHandle {}
-  return 0
-}`),
-    )
-    assert.include(
-      Analysis.diagnostics(construct).map((diagnostic) => diagnostic.code),
-      'SEM0021',
-    )
-
-    const copied = yield* Analysis.ofSourceRealized(
-      'os-filesystem/copy-handle',
-      ascii(`pub fn copy(handle: OsHandle) -> () {
-  let copied = handle
-  drop copied
-  return ()
-}
-pub fn main() -> i32 { return 0 }`),
-    )
-    assert.include(
-      Analysis.diagnostics(copied).map((diagnostic) => diagnostic.code),
-      'OWN0003',
-    )
-
-    const inspectedHandle = yield* Analysis.ofSourceRealized(
-      'os-filesystem/inspect-handle',
-      ascii(`pub fn inspect(handle: &OsHandle) -> i32 { return handle.identity }
-pub fn main() -> i32 { return 0 }`),
-    )
-    assert.isAbove(Analysis.diagnostics(inspectedHandle).length, 0)
-
-    const unacknowledged = yield* Analysis.ofSourceRealized(
-      'os-filesystem/safe-call',
-      ascii(
-        lowLevelSource
-          .replace('  unsafe {\n    inspected = ', '  inspected = ')
-          .replace('\n  }\n  if inspected', '\n  if inspected'),
-      ),
-    )
-    assert.include(
-      Analysis.diagnostics(unacknowledged).map((diagnostic) => diagnostic.code),
-      'SEM0082',
-    )
-
-    const reused = yield* Analysis.ofSourceRealized(
-      'os-filesystem/reused-handle',
-      ascii(`import silk.u32 as u32
-pub effect fn twice(handle: OsHandle) -> bool {
-  let mut reason = 0
-  let mut code = u32.toU32(0)
-  unsafe {
-    let first = run Intrinsic.osHandleClose(move handle, &mut reason, &mut code)
-    return run Intrinsic.osHandleClose(move handle, &mut reason, &mut code)
-  }
-  return false
-}
-pub fn main() -> i32 { return 0 }`),
-    )
-    assert.include(
-      Analysis.diagnostics(reused).map((diagnostic) => diagnostic.code),
-      'OWN0001',
-    )
-  }),
-)
-
-it.effect('navigates provider policy to Silk source and low-level calls to Intrinsic', () =>
-  Effect.gen(function* () {
-    const source = `import silk.allocator { Allocator }
-import silk.allocator { OutOfMemoryError }
-import silk.u32 as u32
-import silk.usize as usize
-import silk.os_filesystem { OsFileSystem }
-pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
-  return run OsFileSystem.make(root)
-}
-pub fn main() -> i32 {
-  let mut kind = 0
-  let mut length = usize.add(0, 0)
-  let mut reason = 0
-  let mut code = u32.toU32(0)
-  unsafe {
-    let inspected = run Intrinsic.osPathInspect(Intrinsic.stringUtf8Bytes("/root"), Intrinsic.stringUtf8Bytes("/path"), &mut kind, &mut length, &mut reason, &mut code)
-  }
-  return 42
-}`
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'os-filesystem/navigation',
-      ascii(source),
-      'aarch64-apple-darwin',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    const providerOccurrence = Analysis.semanticOccurrenceAt(
-      snapshot,
-      'os-filesystem/navigation',
-      source.indexOf('make(root)'),
-    )
-    assert.strictEqual(providerOccurrence?.declaration?.module, 'silk/os_filesystem')
-    const intrinsicOccurrence = Analysis.semanticOccurrenceAt(
-      snapshot,
-      'os-filesystem/navigation',
-      source.indexOf('osPathInspect'),
-    )
-    assert.strictEqual(intrinsicOccurrence?.declaration, undefined)
-    assert.strictEqual(intrinsicOccurrence?.resolution._tag, 'Available')
-    if (intrinsicOccurrence?.resolution._tag === 'Available') {
-      assert.strictEqual(intrinsicOccurrence.resolution.identity._tag, 'IntrinsicOperationIdentity')
-    }
-  }),
-)
-
-it.effect('keeps analysis browser-safe and native runtime pay-for-use', () =>
-  Effect.gen(function* () {
-    for (const source of ['../src/Analysis.ts', '../src/OsRuntime.ts']) {
-      assert.notInclude(readFileSync(new URL(source, import.meta.url), 'utf8'), "from 'node:")
-    }
-
-    const pure = yield* Analysis.ofSourceRealized(
-      'os-filesystem/pure',
-      ascii('pub fn main() -> i32 { return 42 }'),
-    )
-    const artifact = yield* Analysis.codegen(pure, { mode: 'release' })
-    assert.deepEqual(artifact.nativeRuntimeSymbols, [])
-    for (const symbol of OsRuntime.symbols) assert.notInclude(artifact.ir, symbol)
-
-    const selected = OsRuntime.source(['silk_os_path_inspect_v1'])
-    assert.include(selected, 'silk_os_path_inspect_v1')
-    assert.notInclude(selected, 'silk_os_file_open_v1(')
-    const checked = spawnSync(
-      '/usr/bin/clang',
-      [
-        '-x',
-        'c',
-        '-std=c11',
-        '-Wall',
-        '-Wextra',
-        '-Werror',
-        '-Wno-unused-function',
-        '-fsyntax-only',
-        '-',
-      ],
-      {
-        input: ToolchainPlan.executableSource(returnedStatusTermination, [
-          'silk_os_path_inspect_v1',
-        ]),
-        encoding: 'utf8',
-      },
-    )
-    assert.strictEqual(checked.status, 0, checked.stderr)
-
-    const securitySource = `${ToolchainPlan.executableSource(returnedStatusTermination, [
-      'silk_os_path_inspect_v1',
-    ])}
-static int rejected(const unsigned char *root, size_t root_length,
-                    const unsigned char *path, size_t path_length) {
-  int kind = 0;
-  size_t length = 0;
-  int reason = 0;
-  uint32_t code = 0;
-  int inspected = silk_os_path_inspect_v1(
-    root, root_length, path, path_length, &kind, &length, &reason, &code
-  );
-  return inspected == 0;
-}
-
-int silk_main(void) {
-  static const unsigned char root[] = "${nativeRoot}";
-  static const unsigned char dot[] = "/./outside";
-  static const unsigned char dotdot[] = "/nested/../../outside";
-  static const unsigned char doubled[] = "//outside";
-  static const unsigned char relative[] = "relative";
-  static const unsigned char symlinked[] = "/escape/marker";
-  static const unsigned char nul_path[] = { '/', 0, 'x' };
-  static const unsigned char invalid_utf8[] = { '/', 255 };
-  size_t root_length = sizeof(root) - 1;
-  if (!rejected(root, root_length, dot, sizeof(dot) - 1)) return 1;
-  if (!rejected(root, root_length, dotdot, sizeof(dotdot) - 1)) return 2;
-  if (!rejected(root, root_length, doubled, sizeof(doubled) - 1)) return 3;
-  if (!rejected(root, root_length, relative, sizeof(relative) - 1)) return 4;
-  if (!rejected(root, root_length, nul_path, sizeof(nul_path))) return 5;
-  if (!rejected(root, root_length, invalid_utf8, sizeof(invalid_utf8))) return 6;
-  if (!rejected(root, root_length, symlinked, sizeof(symlinked) - 1)) return 7;
-  return 42;
-}
-`
-    const securitySourcePath = join(destinationRoot, 'runtime-security.c')
-    const securityExecutable = join(destinationRoot, 'runtime-security')
-    writeFileSync(securitySourcePath, securitySource)
-    const built = spawnSync(
-      '/usr/bin/clang',
-      ['-std=c11', '-O2', securitySourcePath, '-o', securityExecutable],
-      { encoding: 'utf8' },
-    )
-    assert.strictEqual(built.status, 0, built.stderr)
-    const secured = spawnSync(securityExecutable, [], { encoding: 'utf8' })
-    assert.strictEqual(secured.status, 42, secured.stderr)
-    assert.strictEqual(readFileSync(outsideMarker, 'utf8'), 'untouched')
-  }),
 )
 
 it.effect(
@@ -404,13 +90,14 @@ import silk.u32 as u32
 import silk.u8 as u8
 import silk.usize as usize
 import silk.os_filesystem { OsFileSystem }
+import silk.native_filesystem { NativeFileSystem }
 import silk.bytes { Bytes }
 import silk.filesystem { FileError, FileSystem, Path }
 import silk.result { Result }
-
+import silk.vector { Vector }
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let mut fs = run OsFileSystem.make("${nativeRoot}") |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make(b"${nativeRoot}") |> Effect.provideMut(&mut allocator)
   let path = run Path.make("/hello.txt") |> Effect.provideMut(&mut allocator)
   let input = [u8.toU8(104), u8.toU8(101), u8.toU8(108), u8.toU8(108), u8.toU8(111)]
   let written = run Intrinsic.bindRequirementMut(FileSystem.writeFile(&path, &input), &mut fs)
@@ -425,22 +112,30 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let empty = run Path.make("/empty") |> Effect.provideMut(&mut allocator)
   let created = run Intrinsic.bindRequirementMut(FileSystem.createDirectory(&empty), &mut fs)
   let removedEmpty = run Intrinsic.bindRequirementMut(FileSystem.removeDirectory(&empty), &mut fs)
+  let parent = run Path.make("/nested") |> Effect.provideMut(&mut allocator)
+  let rawName = [u8.toU8(${process.platform === 'darwin' ? 195 : 255}), u8.toU8(${process.platform === 'darwin' ? 169 : 97})]
+  let rawPath = run Path.joinBytes(&parent, &rawName) |> Effect.provideMut(&mut allocator)
+  run FileSystem.writeFile(&rawPath, &input) |> Effect.provideMut(&mut fs)
+  let listed = run FileSystem.listDirectory(&parent) |> Effect.provideMut(&mut fs) |> Effect.provideMut(&mut allocator)
+  if Vector.length(&listed) != 1 { return 5 }
+  let listedEntries = Vector.asSlice(&listed)
+  let listedPath = Path.rawBytes(&listedEntries[0].path)
+  if listedPath.length != 10 || listedPath[8] != u8.toU8(${process.platform === 'darwin' ? 195 : 255}) { return 6 }
+  run FileSystem.removeFile(&rawPath) |> Effect.provideMut(&mut fs)
   let mut kind = 0
-  let mut length = usize.add(0, 0)
-  let mut reason = 0
-  let mut nativeCode = u32.toU32(0)
-  let mut escaped = false
-  unsafe {
-    escaped = run Intrinsic.osPathInspect(Intrinsic.stringUtf8Bytes("${nativeRoot}"), Intrinsic.stringUtf8Bytes("/../outside"), &mut kind, &mut length, &mut reason, &mut nativeCode)
+  let mut length: usize = 0
+  let escaped = run Effect.result(NativeFileSystem.inspect(b"${nativeRoot}", b"/../outside", &mut kind, &mut length, 2))
+  let rejected = match move escaped {
+    Result<(), FileError>.Success { value } => false
+    Result<(), FileError>.Failure { error } => true
   }
-  if escaped { return 3 }
-  if reason != 3 { return 4 }
-  reason = 0
-  unsafe {
-    escaped = run Intrinsic.osPathInspect(Intrinsic.stringUtf8Bytes("${nativeRoot}"), Intrinsic.stringUtf8Bytes("/escape/marker"), &mut kind, &mut length, &mut reason, &mut nativeCode)
+  if rejected == false { return 3 }
+  let followed = run Effect.result(NativeFileSystem.inspect(b"${nativeRoot}", b"/escape/marker", &mut kind, &mut length, 2))
+  let blocked = match move followed {
+    Result<(), FileError>.Success { value } => false
+    Result<(), FileError>.Failure { error } => true
   }
-  if escaped { return 5 }
-  if reason == 0 { return 6 }
+  if blocked == false { return 4 }
   return 42
 }
 
@@ -448,14 +143,17 @@ pub fn main() -> i32 {
   let completed = run Effect.result(program())
   return match move completed {
       Result<i32, FileError | OutOfMemoryError>.Success { value } => value
-      Result<i32, FileError | OutOfMemoryError>.Failure { error } => 10
+      Result<i32, FileError | OutOfMemoryError>.Failure { error } => match move error {
+        FileError failure => 20 + failure.operation.code * 20 + failure.reason.code
+        OutOfMemoryError exhausted => 250
+      }
   }
 }`
       const compiled = yield* Driver.compile({
         compilation: {
           root: SourceFile.make('os-filesystem/native-provider', ascii(source)),
         },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: 'clang', llvmAr: 'llvm-ar' }),
         optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-provider'),
@@ -475,4 +173,33 @@ pub fn main() -> i32 {
       assert.strictEqual(readFileSync(outsideMarker, 'utf8'), 'untouched')
     }),
   60_000,
+)
+
+it.effect('omits native filesystem providers from Wasm and no-libc selections', () =>
+  Effect.gen(function* () {
+    const source = 'import silk.os_filesystem { OsFileSystem }\npub fn main() -> i32 { return 42 }'
+    for (const target of Target.all) {
+      const snapshot = yield* Analysis.makeRealized({
+        root: SourceFile.make('filesystem/unavailable', ascii(source)),
+        configuration: {
+          profile: { target: target.id, artifact: 'object', libc: 'none', entry: { kind: 'none' } },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => [
+          diagnostic.code,
+          diagnostic.span.start,
+          diagnostic.span.end,
+        ]),
+        [
+          [
+            'SEM0014',
+            source.indexOf('OsFileSystem'),
+            source.indexOf('OsFileSystem') + 'OsFileSystem'.length,
+          ],
+        ],
+      )
+      assert.deepEqual(snapshot.instances.foreignCalls, [])
+    }
+  }),
 )

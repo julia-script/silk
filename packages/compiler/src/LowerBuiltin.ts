@@ -775,6 +775,7 @@ const lowerBuiltinOperation = (
   }
   if (
     expression.operation === 'PointerRequalify' ||
+    expression.operation === 'PointerBytes' ||
     expression.operation === 'SlotAddress' ||
     expression.operation === 'PointerFromRef' ||
     expression.operation === 'PointerFromMutRef' ||
@@ -790,7 +791,9 @@ const lowerBuiltinOperation = (
         _tag:
           expression.operation === 'PointerRequalify'
             ? ('PointerRequalify' as const)
-            : ('PointerFromStorage' as const),
+            : expression.operation === 'PointerBytes'
+              ? ('PointerBytes' as const)
+              : ('PointerFromStorage' as const),
         destination,
         source,
         type,

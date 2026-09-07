@@ -1751,43 +1751,6 @@ function lowerRunExpression(
       }
       const type = fn.type(expression.type)
       if (type === undefined) return undefined
-      if (recipe.operation === 'OsFileOpen' || recipe.operation === 'OsDirectoryOpen') {
-        const success = arguments_.at(-2)
-        const failure = arguments_.at(-1)
-        const successType = success === undefined ? undefined : fn.localTypes.at(success.ordinal)
-        const failureType = failure === undefined ? undefined : fn.localTypes.at(failure.ordinal)
-        const handleType = fn.type(Type.osHandle)
-        if (
-          success === undefined ||
-          failure === undefined ||
-          successType?._tag !== 'CallableValue' ||
-          failureType?._tag !== 'CallableValue' ||
-          handleType?._tag !== 'Nominal'
-        )
-          return undefined
-        const valid = fn.alloc(bool)
-        const handle = fn.alloc(handleType)
-        const destination = fn.alloc(type)
-        fn.emit(
-          Object.freeze({
-            _tag: 'OsOpen' as const,
-            operation: recipe.intrinsic,
-            destination,
-            valid,
-            handle,
-            arguments: Object.freeze(arguments_.slice(0, -2)),
-            success,
-            failure,
-            successCleanup: callableLocalCleanup(fn, successType),
-            failureCleanup: callableLocalCleanup(fn, failureType),
-            handleType,
-            type,
-            provenance: authored(expression.span),
-          }),
-        )
-        endLoans(fn, recipe.loanEnds, expression.span)
-        return Object.freeze({ result: destination })
-      }
       const destination = fn.alloc(type)
       fn.emit(
         Object.freeze({

@@ -295,6 +295,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'PointerReadUnaligned',
   'PointerWriteUnaligned',
   'PointerRequalify',
+  'PointerBytes',
   'NativeAssembly',
   'SlotAddress',
   'SlotWrite',
@@ -305,17 +306,6 @@ const nonScalarBuiltinOperations = Object.freeze([
   'StringUtf8Bytes',
   'StringByteLength',
   'StringEqualsExact',
-  'OsFileOpen',
-  'OsFileRead',
-  'OsFileWrite',
-  'OsDirectoryOpen',
-  'OsDirectoryNext',
-  'OsPathInspect',
-  'OsDirectoryCreate',
-  'OsDirectoryCreateUnique',
-  'OsFileRemove',
-  'OsDirectoryRemove',
-  'OsHandleClose',
   'OsProcessExecute',
   'OsProcessCapture',
   'OsHostArgumentCount',
@@ -618,7 +608,6 @@ export const layoutOverflow: Nominal = nominal('silk/layout', 'LayoutOverflow')
 /** A self-contained affine owner carrying one private active reclaim ticket. */
 export const allocation: Nominal = nominal('silk/core', 'Allocation')
 /** Opaque affine native file-or-directory handle used only by unsafe OS intrinsics. */
-export const osHandle: Nominal = nominal('silk/core', 'OsHandle')
 /** Compiler-sealed cleanup capability used only by restricted impl declarations. */
 export const dropCapability: Nominal = nominal('silk/core', 'Drop')
 /** Compiler-sealed zero-operation property proving that values duplicate without user code. */
@@ -775,7 +764,6 @@ export const containsStaticPhaseOnly = (self: Type): boolean => {
 
 export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [allocation.name, allocation],
-  [osHandle.name, osHandle],
   [copyCapability.name, copyCapability],
   [dropCapability.name, dropCapability],
   ['RawBuffer', nominal('silk/core', 'RawBuffer')],

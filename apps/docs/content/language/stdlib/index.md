@@ -41,6 +41,8 @@ Each page describes the selected source API for the listed profiles. Distinct su
 | [`silk/native_descriptor`](./native-descriptor.md)             | `aarch64-apple-darwin`                                                                                    |                   4 |
 | [`silk/native_descriptor`](./native-descriptor.profile-2.md)   | `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`                                                   |                   4 |
 | [`silk/native_descriptor`](./native-descriptor.profile-3.md)   | `wasm32-unknown-unknown`                                                                                  |                   0 |
+| [`silk/native_filesystem`](./native-filesystem.md)             | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`                           |                   3 |
+| [`silk/native_filesystem`](./native-filesystem.profile-2.md)   | `wasm32-unknown-unknown`                                                                                  |                   0 |
 | [`silk/numeric`](./numeric.md)                                 | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   2 |
 | [`silk/option`](./option.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   1 |
 | [`silk/order`](./order.md)                                     | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   5 |
