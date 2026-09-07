@@ -786,14 +786,13 @@ const lowerBuiltinOperation = (
     const type = fn.type(expression.type)
     if (source === undefined || type?._tag !== 'Pointer') return undefined
     const destination = fn.alloc(type)
+    const tag =
+      expression.operation === 'PointerRequalify' || expression.operation === 'PointerBytes'
+        ? expression.operation
+        : 'PointerFromStorage'
     fn.emit(
       Object.freeze({
-        _tag:
-          expression.operation === 'PointerRequalify'
-            ? ('PointerRequalify' as const)
-            : expression.operation === 'PointerBytes'
-              ? ('PointerBytes' as const)
-              : ('PointerFromStorage' as const),
+        _tag: tag,
         destination,
         source,
         type,
