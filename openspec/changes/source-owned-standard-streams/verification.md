@@ -10,3 +10,5 @@ Verified 2026-09-06 at implementation revision 72a5e39a with LLVM/Clang 22.1.8 f
 - Earlier recovery fixture and two MIR golden failures were migrated and verified before the final run. No failures remain in the final gates.
 
 Detailed local logs: /tmp/silk-jul128-{typecheck,format,lint,test,check,release}.log.
+
+Publication: stacked PR #374; no merge performed.
