@@ -45,7 +45,7 @@ pub unsafe fn bytes<T>(pointer: ?*const T) -> ?[*]const u8
 
 Projects a typed raw pointer as a readonly byte address without reading storage.
 
-#### Safety
+#### Gotchas
 
 The result preserves null and the address but grants no ownership or readable extent.
 Every later access must independently address initialized readable bytes. This permits

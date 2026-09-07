@@ -26,11 +26,11 @@ initialized storage. A copied name outlives the next readdir; its borrowed origi
 
 ## Paths and confinement
 
-OsFileSystem.make copies an absolute byte root and performs no I/O. Non-UTF-8 names are valid;
-The root must be nonempty and NUL-free. Portable paths reject embedded NUL, dot/dot-dot and malformed normalized components. Path.rawBytes and
-Path.joinBytes preserve identity, including directory names. The underlying filesystem can still
-reject a byte name (for example, APFS rejects invalid UTF-8); that native failure is reported. Text path helpers remain available
-for text callers. Each operation opens the configured root anew and traverses descriptors with
+OsFileSystem.make copies an absolute byte root and performs no I/O. The root must be nonempty
+and NUL-free. Portable paths reject embedded NUL, dot/dot-dot and malformed normalized components.
+Path.rawBytes and Path.joinBytes preserve byte identity, including directory names. The underlying
+filesystem can still reject a byte name (for example, APFS rejects invalid UTF-8); that native
+failure is reported. Text path helpers remain available for text callers. Each operation opens the configured root anew and traverses descriptors with
 no-follow directory flags. The configured root and its ancestors are trusted. Symlinks below it
 are rejected. This is not a guarantee against privileged mounts or hostile directory renames
 across the root boundary.

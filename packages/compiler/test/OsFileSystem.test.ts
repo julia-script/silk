@@ -203,3 +203,33 @@ it.effect('omits native filesystem providers from Wasm and no-libc selections', 
     }
   }),
 )
+
+it.effect('consumes a native file handle exactly once in source ownership analysis', () =>
+  Effect.gen(function* () {
+    const source = `import silk.native_filesystem { NativeFileSystem, FileHandle }
+import silk.filesystem { FileSystem, FileError }
+pub effect fn closeTwice(handle: FileHandle) -> () ! FileError {
+  run NativeFileSystem.closeFile(move handle, FileSystem.readFileOperation())
+  run NativeFileSystem.closeFile(move handle, FileSystem.readFileOperation())
+}`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'filesystem/consumed-handle',
+      ascii(source),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.span.start,
+        diagnostic.span.end,
+      ]),
+      [
+        [
+          'OWN0001',
+          source.lastIndexOf('move handle'),
+          source.lastIndexOf('move handle') + 'move handle'.length,
+        ],
+      ],
+    )
+  }),
+)
