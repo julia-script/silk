@@ -84,7 +84,7 @@ export const create = (
  * transition all complete inside that one step instead of bouncing through the fiber run loop
  * for every stage. JUL-154 construction profiles also attribute allocation cost to operand
  * resolution and commit validation below; their direct Result transitions are bounded to this
- * instruction loop. See packages/compiler/benchmarks/construction/README.md for evidence.
+ * instruction loop.
  *
  * @internal
  */

@@ -16,8 +16,7 @@ import {
 /**
  * Construction's measured per-instruction append/validation loop. Direct Result transitions
  * avoid generator/iterator allocation; forward walks allocate a visited set only for forwards.
- * Public operations and the body transaction remain effectful. Evidence and reproduction:
- * packages/compiler/benchmarks/construction/README.md (JUL-154).
+ * Public operations and the body transaction remain effectful (JUL-154).
  *
  * @internal
  */
