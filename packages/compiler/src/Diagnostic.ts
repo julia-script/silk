@@ -78,7 +78,7 @@ export const reservedModuleIdentityCode = 'MOD0004' as const
 /** Stable code for a present return-type name that is not a bootstrap built-in. */
 export const unknownTypeCode = 'SEM0001' as const
 
-/** Stable code for a present decimal literal outside the positive `i32` range. */
+/** Stable code for a literal outside its selected integer range. */
 export const integerOutOfRangeCode = 'SEM0002' as const
 
 /** Stable code for a present declaration name repeated after its first occurrence. */
@@ -857,8 +857,9 @@ export type Reason =
   | {
       readonly _tag: 'IntegerOutOfRange'
       readonly spelling: string
-      readonly maximum: 2147483647
-      readonly minimum: -2147483648
+      readonly type: string
+      readonly maximum: string
+      readonly minimum: string
     }
   | { readonly _tag: 'UsizeNegative'; readonly spelling: string }
   | { readonly _tag: 'InvalidFailureType'; readonly type: string }
@@ -3130,19 +3131,25 @@ export const unknownType = (spelling: string, span: SourceSpan.SourceSpan): Diag
     span,
   })
 
-/** Creates the diagnostic for one decimal literal outside the signed `i32` range. */
-export const integerOutOfRange = (spelling: string, span: SourceSpan.SourceSpan): Diagnostic =>
+/** Creates a range diagnostic with the selected integer type and exact decimal bounds. */
+export const integerOutOfRange = (
+  spelling: string,
+  type: string,
+  range: { readonly minimum: bigint; readonly maximum: bigint },
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
   Object.freeze({
     _tag: 'Diagnostic',
     phase: 'semantic',
     code: integerOutOfRangeCode,
     severity: 'error',
-    message: 'Integer literal exceeds the i32 range',
+    message: `Integer literal ${spelling} exceeds the ${type} range ${range.minimum} through ${range.maximum}`,
     reason: Object.freeze({
       _tag: 'IntegerOutOfRange',
       spelling,
-      maximum: 2147483647,
-      minimum: -2147483648,
+      type,
+      maximum: range.maximum.toString(),
+      minimum: range.minimum.toString(),
     }),
     span,
   })

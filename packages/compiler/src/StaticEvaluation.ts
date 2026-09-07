@@ -563,28 +563,31 @@ export const evaluateLiteral = (
         )
   }
   if (node.kind === 'CharacterLiteralExpression') {
-    const wrong = mismatch('char')
-    if (wrong !== undefined) return wrong
     const bytes = tokenBytes(source, node, 'CharLiteral')
     const form = bytes === undefined ? undefined : LiteralForm.recognize(bytes)
     const decoded =
       bytes === undefined || form === undefined
         ? undefined
         : StaticText.decodeScalar(Array.from(bytes), form)
-    return decoded?._tag === 'Scalar'
-      ? admittedValue(
-          environment,
-          { _tag: 'CharacterValue', value: decoded.value },
-          'StaticEvaluation.evaluateLiteral',
-          node.span,
-          trace,
-        )
-      : primitiveFailure(
-          'StaticEvaluation.evaluateLiteral',
-          decoded?._tag === 'Invalid' ? decoded.detail : 'character syntax has no source token',
-          node.span,
-          trace,
-        )
+    if (decoded?._tag !== 'Scalar')
+      return primitiveFailure(
+        'StaticEvaluation.evaluateLiteral',
+        decoded?._tag === 'Invalid' ? decoded.detail : 'character syntax has no source token',
+        node.span,
+        trace,
+      )
+    const selected = expected ?? 'char'
+    const wrong = Scalar.isIntegerSpelling(selected) ? undefined : mismatch('char')
+    if (wrong !== undefined) return wrong
+    return admittedValue(
+      environment,
+      Scalar.isIntegerSpelling(selected)
+        ? { _tag: 'IntegerValue', type: selected, value: BigInt(decoded.value) }
+        : { _tag: 'CharacterValue', value: decoded.value },
+      'StaticEvaluation.evaluateLiteral',
+      node.span,
+      trace,
+    )
   }
   if (node.kind === 'StaticTextLiteralExpression') {
     const wrong = mismatch('string')
