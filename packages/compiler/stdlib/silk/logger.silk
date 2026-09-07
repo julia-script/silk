@@ -2,7 +2,7 @@
 //!
 //! # When to use
 //! Require [`Logger`] when code emits whole semantic messages but should not choose storage or
-//! destination. Provide [`StdoutLogger`] at a process edge. Use [`InMemoryLogger`] for
+//! destination. Provide `silk.os_logger.StdoutLogger` at a native process edge. Use [`InMemoryLogger`] for
 //! deterministic observation and failure tests.
 //!
 //! # Details
@@ -53,7 +53,6 @@ import silk.bool as bool
 import silk.effect { Effect }
 import silk.i32 as i32
 import silk.result { Result }
-import silk.writer { StdoutWriter, WriterError, Writer }
 import silk.string { String }
 import silk.u8 as u8
 import silk.usize as usize
@@ -111,6 +110,9 @@ pub service Logger {
 }
 
 impl Logger {
+  /// Creates a logging failure with a provider-defined code.
+  pub fn failure(code: i32) -> LogError { return LogError { code: code } }
+
   /// Returns the provider-defined failure code for diagnostics.
   ///
   /// # Gotchas
@@ -118,14 +120,6 @@ impl Logger {
   /// Interpret this code only with knowledge of the selected provider. Different providers can use
   /// the same code for different failures.
   pub fn errorCode(error: LogError) -> i32 { return error.code }
-
-  /// Creates a logger that forwards each complete message to process standard output.
-  ///
-  /// # Gotchas
-  ///
-  /// The caller must include a newline in `message` when line separation is required. A standard-
-  /// output write failure becomes a provider-defined [`LogError`].
-  pub fn stdoutProvider() -> StdoutLogger { return StdoutLogger {} }
 
   /// Creates an empty in-memory logger with capacity for eight events and 64 message bytes.
   ///
@@ -217,42 +211,6 @@ impl Logger {
   /// Returns the number of calls attempted, including calls that produced [`LogError`].
   pub fn attempts(self: &InMemoryLogger) -> usize { return self.attempts }
 }
-
-/// A [`Logger`] provider that writes each complete message to process standard output.
-///
-/// # Details
-///
-/// The provider ignores the severity for physical formatting and writes only the UTF-8 message
-/// bytes. It adds no newline and performs no message allocation.
-pub struct StdoutLogger {}
-
-impl StdoutLogger {
-  effect fn writeStdout(
-    self: &mut Self,
-    level: LogLevel,
-    message: string
-  ) -> () ! LogError {
-    let mut streams = Writer.stdoutWriterProvider()
-    let bytes = String.utf8Bytes(message)
-    let completed = run Effect.result(writeStdoutBytes(&mut streams, bytes))
-    return match move completed {
-      Result<(), WriterError>.Success { value: _ } => ()
-      Result<(), WriterError>.Failure { error: _ } => run reject(3)
-    }
-  }
-}
-
-effect fn writeStdoutBytes(
-  writer: &mut StdoutWriter,
-  message: &[u8]
-) -> () ! WriterError {
-  run Intrinsic.bindRequirementMut(Writer.writeAll(message), writer)
-}
-
-impl Logger for StdoutLogger {
-  log: StdoutLogger.writeStdout
-}
-
 /// A deterministic [`Logger`] provider that retains up to eight events and 64 total message bytes.
 ///
 /// # When to use

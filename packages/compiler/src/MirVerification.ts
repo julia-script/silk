@@ -1034,8 +1034,6 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       return [operation.destination, operation.layout, operation.count]
     case 'Allocate':
       return [operation.destination, operation.layout]
-    case 'HostWrite':
-      return [operation.destination, operation.stream, operation.bytes]
     case 'OsOpen':
       return [
         operation.destination,
@@ -1965,7 +1963,6 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'ValidateLayout':
     case 'RepeatLayout':
     case 'Allocate':
-    case 'HostWrite':
     case 'OsCall':
     case 'NativeAssembly':
     case 'ForeignIndirectCall':
@@ -2257,8 +2254,6 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.layout, operation.count]
     case 'Allocate':
       return [operation.layout]
-    case 'HostWrite':
-      return [operation.stream, operation.bytes]
     case 'OsOpen':
       return [...operation.arguments, operation.success, operation.failure]
     case 'ForeignIndirectCall':
@@ -4398,44 +4393,6 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                   'allocation does not preserve Layout, Allocation, or sealed storage-failure contracts',
               }),
             )
-        }
-        if (operation._tag === 'HostWrite') {
-          const stream = fn.localTypes.at(operation.stream.ordinal)
-          const bytes = fn.localTypes.at(operation.bytes.ordinal)
-          const destination = fn.localTypes.at(operation.destination.ordinal)
-          const expectedFailure = SilkType.failureCarrierMember(
-            operation.propagationType.type,
-            operation.failureTag,
-            'OneBased',
-          )
-          const byteType = bytes === undefined ? undefined : semanticType(bytes)
-          const byteView =
-            byteType !== undefined &&
-            SilkType.isSlice(byteType) &&
-            byteType.access === 'Shared' &&
-            byteType.element === 'u8'
-          if (
-            stream?._tag !== 'bool' ||
-            !byteView ||
-            destination?._tag !== 'Nominal' ||
-            !SilkType.equals(destination.type, SilkType.unit) ||
-            !SilkType.equals(operation.type.type, SilkType.unit) ||
-            !SilkType.equals(operation.failure, SilkType.streamWriteFailure) ||
-            expectedFailure === undefined ||
-            !SilkType.equals(expectedFailure, operation.failure) ||
-            !SilkType.equals(semanticType(fn.result), operation.propagationType.type)
-          ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidStandardStreamOperation',
-                function: fn.id,
-                region: region.id,
-                detail:
-                  'standard-stream write does not preserve destination, byte-view, unit, or typed-failure contracts',
-              }),
-            )
-          }
         }
         if (operation._tag === 'OsOpen') {
           const catalog = Intrinsic.findOperationById(operation.operation)

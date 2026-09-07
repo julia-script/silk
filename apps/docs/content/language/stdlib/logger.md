@@ -9,7 +9,7 @@ Typed semantic logging with replaceable stdout and bounded in-memory providers.
 ## When to use
 
 Require [`Logger`](#declaration-73696c6b2f6c6f676765723a3a4c6f67676572) when code emits whole semantic messages but should not choose storage or
-destination. Provide [`StdoutLogger`](#declaration-73696c6b2f6c6f676765723a3a5374646f75744c6f67676572) at a process edge. Use [`InMemoryLogger`](#declaration-73696c6b2f6c6f676765723a3a496e4d656d6f72794c6f67676572) for
+destination. Provide `silk.os_logger.StdoutLogger` at a native process edge. Use [`InMemoryLogger`](#declaration-73696c6b2f6c6f676765723a3a496e4d656d6f72794c6f67676572) for
 deterministic observation and failure tests.
 
 ## Details
@@ -61,7 +61,7 @@ pub fn main() -> i32 {
 
 Import as `Logger` with `import silk.logger { Logger }`.
 
-Public declarations: 5.
+Public declarations: 4.
 
 <a id="declaration-73696c6b2f6c6f676765723a3a4c6f674c6576656c"></a>
 
@@ -173,6 +173,16 @@ Submits one complete UTF-8 message at one severity to the active provider.
 The call preserves the message bytes exactly. It does not add a newline, severity label,
 timestamp, or other formatting. A provider failure produces [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
 
+<a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6661696c757265"></a>
+
+### Associated function `Logger.failure`
+
+```silk
+pub fn failure(code: i32) -> LogError
+```
+
+Creates a logging failure with a provider-defined code.
+
 <a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6572726f72436f6465"></a>
 
 ### Associated function `Logger.errorCode`
@@ -187,21 +197,6 @@ Returns the provider-defined failure code for diagnostics.
 
 Interpret this code only with knowledge of the selected provider. Different providers can use
 the same code for different failures.
-
-<a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e7374646f757450726f7669646572"></a>
-
-### Associated function `Logger.stdoutProvider`
-
-```silk
-pub fn stdoutProvider() -> StdoutLogger
-```
-
-Creates a logger that forwards each complete message to process standard output.
-
-#### Gotchas
-
-The caller must include a newline in `message` when line separation is required. A standard-
-output write failure becomes a provider-defined [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
 
 <a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e696e4d656d6f727950726f7669646572"></a>
 
@@ -305,37 +300,6 @@ pub fn attempts<'life0>(self: &'life0 silk/logger.InMemoryLogger) -> usize
 
 Returns the number of calls attempted, including calls that produced [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
 
-<a id="declaration-73696c6b2f6c6f676765723a3a5374646f75744c6f67676572"></a>
-
-## `StdoutLogger`
-
-```silk
-pub struct StdoutLogger
-```
-
-A [`Logger`](#declaration-73696c6b2f6c6f676765723a3a4c6f67676572) provider that writes each complete message to process standard output.
-
-### Details
-
-The provider ignores the severity for physical formatting and writes only the UTF-8 message
-bytes. It adds no newline and performs no message allocation.
-
-<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Logger for StdoutLogger`
-
-```silk
-impl Logger for StdoutLogger
-```
-
-<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
-
-### Operation `log`
-
-```silk
-log = StdoutLogger.writeStdout
-```
-
 <a id="declaration-73696c6b2f6c6f676765723a3a496e4d656d6f72794c6f67676572"></a>
 
 ## `InMemoryLogger`
@@ -357,7 +321,7 @@ The provider copies each committed message into fixed internal storage. It recor
 calls separately from committed events. Capacity failure and configured failure do not commit an
 event.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a31"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a30"></a>
 
 ## Implementation `Logger for InMemoryLogger`
 
@@ -365,7 +329,7 @@ event.
 impl Logger for InMemoryLogger
 ```
 
-<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `log`
 

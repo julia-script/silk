@@ -71,7 +71,6 @@ export const emit = Effect.fnUntraced(function* (
     case 'StringEqualsExact':
       return yield* NativeValueOperation.emit(context.value, operation)
     case 'Allocate':
-    case 'HostWrite':
     case 'OsCall':
     case 'OsOpenOutcome':
     case 'RawBufferFrom':

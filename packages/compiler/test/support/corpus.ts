@@ -281,7 +281,8 @@ pub fn main() -> i32 {
 }`
 
 /** Formatting options are observed through the real native stdout boundary. */
-export const formatOptionsAcceptance = `import silk.effect { Effect }
+export const formatOptionsAcceptance = `import silk.os_writer { StdoutWriter }
+import silk.effect { Effect }
 import silk.format { Alignment, Format, FormatOptions, Sign }
 import silk.option { Option }
 import silk.usize as usize
@@ -366,7 +367,7 @@ effect fn render() -> () ! WriterError ? &mut Writer {
 
 effect fn build() -> i32 ! WriterError {
   if !accessorsHold() { return 2 }
-  let mut writer = Writer.stdoutWriterProvider()
+  let mut writer = StdoutWriter.make()
   run render() |> Effect.provideMut<Writer>(&mut writer)
   return 42
 }
@@ -5996,7 +5997,8 @@ export "C" fn silk_test_export_touched() -> i32 { return unsafe silk_test_export
 pub fn main() -> i32 { return unsafe silk_test_export_checksum() }`
 
 /** Replacement cleanup: a displaced local, field, array element, and slice element clean once. */
-export const replaceCleanupProgram = `import silk.allocator { Allocator, OutOfMemoryError }
+export const replaceCleanupProgram = `import silk.os_writer { StdoutWriter }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.shared { Shared }
 import silk.format { Format }
@@ -6036,7 +6038,7 @@ fn tracer(id: i32, log: &Shared<Log>) -> Tracer {
 }
 effect fn printLog(log: &Shared<Log>) -> () ! WriterError {
   let code = Shared.with<Log, i32>(log, encode)
-  let mut writer = Writer.stdoutWriterProvider()
+  let mut writer = StdoutWriter.make()
   return run (Format.display(&code) |> Effect.provideMut<Writer>(&mut writer))
 }
 effect fn makeLog() -> Shared<Log> ! OutOfMemoryError {
@@ -6087,7 +6089,8 @@ pub fn main() -> i32 {
 }`
 
 /** Replacement cleanup runs at the write, before an explicit drop and scope exit. */
-export const replaceDropProgram = `import silk.allocator { Allocator, OutOfMemoryError }
+export const replaceDropProgram = `import silk.os_writer { StdoutWriter }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.shared { Shared }
 import silk.format { Format }
@@ -6127,7 +6130,7 @@ fn tracer(id: i32, log: &Shared<Log>) -> Tracer {
 }
 effect fn printLog(log: &Shared<Log>) -> () ! WriterError {
   let code = Shared.with<Log, i32>(log, encode)
-  let mut writer = Writer.stdoutWriterProvider()
+  let mut writer = StdoutWriter.make()
   return run (Format.display(&code) |> Effect.provideMut<Writer>(&mut writer))
 }
 effect fn makeLog() -> Shared<Log> ! OutOfMemoryError {
@@ -8022,11 +8025,13 @@ pub effect fn load() -> i32 ! NotFoundError {
   {
     name: 'standard-stream-ordering',
     source: 'pub fn main() -> i32 { return 0 }',
-    nativeSource: `import silk.effect { Effect }
+    nativeSource: `import silk.os_writer { StderrWriter }
+import silk.os_writer { StdoutWriter }
+import silk.effect { Effect }
 import silk.writer { Writer, WriterError }
 pub effect fn main() -> () ! WriterError {
-  let mut stdout = Writer.stdoutWriterProvider()
-  let mut stderr = Writer.stderrWriterProvider()
+  let mut stdout = StdoutWriter.make()
+  let mut stderr = StderrWriter.make()
   run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("heading\\n")), &mut stdout)
   run Effect.provideMut(Writer.writeAll(b"warning\\n"), &mut stderr)
   run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("row\\n")), &mut stdout)

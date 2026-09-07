@@ -33,9 +33,12 @@ Each page describes the selected source API for the listed profiles. Distinct su
 | [`silk/isize`](./isize.md)                                     | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                  59 |
 | [`silk/layout`](./layout.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   3 |
 | [`silk/local_scheduler`](./local-scheduler.md)                 | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   2 |
-| [`silk/logger`](./logger.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   5 |
+| [`silk/logger`](./logger.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   4 |
 | [`silk/metrics`](./metrics.md)                                 | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   2 |
 | [`silk/monotonic_clock`](./monotonic-clock.md)                 | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   1 |
+| [`silk/native_descriptor`](./native-descriptor.md)             | `aarch64-apple-darwin`                                                                                    |                   4 |
+| [`silk/native_descriptor`](./native-descriptor.profile-2.md)   | `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`                                                   |                   4 |
+| [`silk/native_descriptor`](./native-descriptor.profile-3.md)   | `wasm32-unknown-unknown`                                                                                  |                   0 |
 | [`silk/numeric`](./numeric.md)                                 | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   2 |
 | [`silk/option`](./option.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   1 |
 | [`silk/order`](./order.md)                                     | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   5 |
@@ -45,6 +48,8 @@ Each page describes the selected source API for the listed profiles. Distinct su
 | [`silk/os_filesystem`](./os-filesystem.profile-2.md)           | `wasm32-unknown-unknown`                                                                                  |                   0 |
 | [`silk/os_host_input`](./os-host-input.md)                     | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`                           |                   1 |
 | [`silk/os_host_input`](./os-host-input.profile-2.md)           | `wasm32-unknown-unknown`                                                                                  |                   0 |
+| [`silk/os_logger`](./os-logger.md)                             | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`                           |                   1 |
+| [`silk/os_logger`](./os-logger.profile-2.md)                   | `wasm32-unknown-unknown`                                                                                  |                   0 |
 | [`silk/os_monotonic_clock`](./os-monotonic-clock.md)           | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`                           |                   1 |
 | [`silk/os_monotonic_clock`](./os-monotonic-clock.profile-2.md) | `wasm32-unknown-unknown`                                                                                  |                   0 |
 | [`silk/os_random`](./os-random.md)                             | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`                           |                   1 |
@@ -53,6 +58,8 @@ Each page describes the selected source API for the listed profiles. Distinct su
 | [`silk/os_standard_input`](./os-standard-input.profile-2.md)   | `wasm32-unknown-unknown`                                                                                  |                   0 |
 | [`silk/os_system_clock`](./os-system-clock.md)                 | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`                           |                   1 |
 | [`silk/os_system_clock`](./os-system-clock.profile-2.md)       | `wasm32-unknown-unknown`                                                                                  |                   0 |
+| [`silk/os_writer`](./os-writer.md)                             | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`                           |                   2 |
+| [`silk/os_writer`](./os-writer.profile-2.md)                   | `wasm32-unknown-unknown`                                                                                  |                   0 |
 | [`silk/output`](./output.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   2 |
 | [`silk/pointer`](./pointer.md)                                 | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   1 |
 | [`silk/random`](./random.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   1 |
@@ -82,7 +89,7 @@ Each page describes the selected source API for the listed profiles. Distinct su
 | [`silk/unicode_tables`](./unicode-tables.md)                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   3 |
 | [`silk/usize`](./usize.md)                                     | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                  58 |
 | [`silk/vector`](./vector.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   4 |
-| [`silk/writer`](./writer.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   4 |
+| [`silk/writer`](./writer.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu` |                   2 |
 
 Profile identities:
 

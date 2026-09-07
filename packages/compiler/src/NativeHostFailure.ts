@@ -9,7 +9,7 @@ import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeSuspension from './NativeSuspension.js'
 import * as NativeType from './NativeType.js'
 
-/** Failure-return state for allocation and host-I/O boundaries. */
+/** Failure-return state for allocation boundaries. */
 export interface Context {
   readonly builder: Builder.Builder
   readonly body: FunctionBody.FunctionBody
@@ -21,7 +21,7 @@ export interface Context {
 /** Emits one host-boundary failure in the function's synchronous or suspension ABI. */
 export const emit = Effect.fnUntraced(function* (
   context: Context,
-  operation: Extract<Mir.Operation, { readonly _tag: 'Allocate' | 'HostWrite' }>,
+  operation: Extract<Mir.Operation, { readonly _tag: 'Allocate' }>,
 ): Effect.fn.Return<void, LlvmError.LlvmError> {
   const lanes = NativeType.lanesFor(context.types, operation.propagationType)
   const values: Array<Value.Input> = []

@@ -5119,15 +5119,6 @@
       "invariant": "consumes exactly one live file or directory handle whether close succeeds or fails"
     },
     {
-      "operation": "Intrinsic.osStandardInputRead",
-      "signature": "unsafe fn Intrinsic.osStandardInputRead(output: &mut [u8], count: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_standard_input.read",
-      "identity": "OsStandardInputRead",
-      "invariant": "output is initialized writable storage; success reports the exact transferred byte count and zero means end of input"
-    },
-    {
       "operation": "Intrinsic.osProcessExecute",
       "signature": "unsafe fn Intrinsic.osProcessExecute(program: &[u8], arguments: &[u8], environment: &[u8], workingDirectory: &[u8], status: &mut i32, code: &mut i32, outputLength: &mut usize, errorLength: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
       "unsafe": true,
@@ -5278,15 +5269,6 @@
       "admission": "Platform",
       "consumer": "silk/allocator.allocate",
       "identity": "StorageAcquire"
-    },
-    {
-      "operation": "Intrinsic.standardStreamWrite",
-      "signature": "fn Intrinsic.standardStreamWrite(destination: bool, bytes: &[u8]) -> Effect<() ! WriterError>",
-      "unsafe": false,
-      "admission": "Platform",
-      "consumer": "silk/writer.writeAll",
-      "identity": "HostWrite",
-      "hostImport": "silk_standard_stream_write_v1"
     },
     {
       "operation": "Intrinsic.rawBufferFrom",

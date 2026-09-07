@@ -27,6 +27,7 @@ Template parsing, field selection, and `Display` selection occur during compilat
 This program writes `42..+42` to standard output and returns zero.
 
 ```silk
+import silk.os_writer { StdoutWriter }
 import silk.effect { Effect }
 
 import silk.format { Alignment, Format, FormatOptions, Sign }
@@ -52,7 +53,7 @@ effect fn render() -> () ! WriterError ? &mut Writer {
 }
 
 effect fn writeExample() -> () ! WriterError {
-  let mut writer = Writer.stdoutWriterProvider()
+  let mut writer = StdoutWriter.make()
   let completed = run render()
     |> Effect.provideMut<Writer>(&mut writer)
   return completed
@@ -403,11 +404,12 @@ failure preserves the prefix that the provider accepted.
 This program writes `Hello, Julia. Age: 31` to standard output.
 
 ```silk
+import silk.os_writer { StdoutWriter }
 import silk.effect { Effect }
 
 import silk.format { Format }
 
-import silk.writer { Writer, WriterError, StdoutWriter }
+import silk.writer { Writer, WriterError }
 
 import silk.writer { Writer, WriterError }
 
@@ -417,7 +419,7 @@ effect fn render() -> () ! WriterError ? &mut Writer {
 }
 
 effect fn writeExample() -> () ! WriterError {
-  let mut writer = Writer.stdoutWriterProvider()
+  let mut writer = StdoutWriter.make()
   return run render()
     |> Effect.provideMut<Writer>(&mut writer)
 }

@@ -9,7 +9,6 @@ export const reservedSymbols: ReadonlyArray<string> = Object.freeze([
   '__silk_foreign_personality',
   ...OsRuntime.symbols,
   ...CoroutineRuntime.symbols,
-  'silk_standard_stream_write_v1',
   'silk_host_argc_v1',
   'silk_host_argv_v1',
 ])

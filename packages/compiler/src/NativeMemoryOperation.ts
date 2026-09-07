@@ -23,7 +23,6 @@ type Operation = Extract<
   {
     readonly _tag:
       | 'Allocate'
-      | 'HostWrite'
       | 'OsCall'
       | 'OsOpenOutcome'
       | 'RawBufferFrom'
@@ -58,7 +57,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     osRuntimes,
     pointer,
     program,
-    standardWrite,
     storage: nativeStorage,
     types,
     unsignedOverflowSignatures,
@@ -200,48 +198,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operation.destination.ordinal,
         Object.freeze([base, bytes, alignment, one, rawAddress, one]),
       )
-      break
-    }
-    case 'HostWrite': {
-      const stream = NativeStorage.readLocal(nativeStorage, operation.stream).at(0)
-      const [address, length] = NativeStorage.readLocal(nativeStorage, operation.bytes)
-      if (
-        stream === undefined ||
-        address === undefined ||
-        length === undefined ||
-        standardWrite === undefined
-      ) {
-        throw new RangeError('LLVM standard-stream write lost its host boundary lanes')
-      }
-      const status = yield* FunctionBody.callDirect(
-        body,
-        standardWrite,
-        [stream, address, length],
-        `standard_stream${operation.destination.ordinal}_status`,
-      )
-      if (status === undefined) {
-        throw new RangeError('LLVM standard-stream host returned no status')
-      }
-      const failedStatus = yield* FunctionBody.integerCompare(
-        body,
-        'ne',
-        status,
-        yield* Constant.integerUnsigned(builder, i32, 0n),
-        `standard_stream${operation.destination.ordinal}_failed`,
-      )
-      const failed = yield* LlvmBlock.make(
-        body,
-        `standard_stream${operation.destination.ordinal}_failure`,
-      )
-      const written = yield* LlvmBlock.make(
-        body,
-        `standard_stream${operation.destination.ordinal}_success`,
-      )
-      yield* FunctionBody.conditionalBranch(body, failedStatus, failed, written)
-      yield* LlvmBlock.setInsertionPoint(body, failed)
-      yield* NativeHostFailure.emit(hostFailure, operation)
-      yield* LlvmBlock.setInsertionPoint(body, written)
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
       break
     }
     case 'OsOpenOutcome': {

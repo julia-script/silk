@@ -144,3 +144,5 @@ documentation remain separate from this reference.
 - [Foreign-call contracts](foreign-call-contracts.md): explicit immediate C-call behavior, call-only references and fatal foreign-unwind boundaries.
 
 - [Native assembly and entry fragments](native-assembly.md)
+
+- [Native standard streams](./native-standard-streams)

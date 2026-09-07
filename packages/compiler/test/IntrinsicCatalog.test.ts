@@ -251,11 +251,16 @@ effect fn suspendDirect(
   return run Intrinsic.suspendEffect(move deferred)
 }
 pub fn main() -> i32 { return 42 }`,
-  `import silk.writer { Writer, WriterError, StdoutWriter }
+  `import silk.writer { Writer, WriterError }
 import silk.writer { Writer, WriterError }
 import silk.effect { Effect }
+struct Sink {}
+impl Writer for Sink {
+  effect fn writeAll(self: &mut Self, bytes: &[u8]) -> () ! WriterError ? &mut Writer { return () }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer { return () }
+}
 pub effect fn main() -> () ! WriterError {
-  let mut native = Writer.stdoutWriterProvider()
+  let mut native = Sink {}
   let first = run Effect.provideMut(Writer.writeAll(b"out"), &mut native)
   let second = run Effect.provideMut(Writer.writeAll(b"error"), &mut native)
   return ()
@@ -323,10 +328,6 @@ effect fn removeDirectory(root: &[u8], path: &[u8], reason: &mut i32, code: &mut
 }
 effect fn close(handle: OsHandle, reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osHandleClose(move handle, reason, code) }
-  return false
-}
-effect fn standardInputRead(output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osStandardInputRead(move output, count, reason, code) }
   return false
 }
 effect fn processExecute(program: &[u8], arguments: &[u8], environment: &[u8], directory: &[u8], status: &mut i32, exit: &mut i32, outputLength: &mut usize, errorLength: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
@@ -603,7 +604,6 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
     consumer: entry.consumer,
     ...(entry.hir === undefined ? {} : { identity: entry.hir }),
     ...(entry.invariant === undefined ? {} : { invariant: entry.invariant }),
-    ...(entry.hostImport === undefined ? {} : { hostImport: entry.hostImport }),
   }))
   assert.deepEqual(fixture, { targets: Intrinsic.runtimeTargets, entries })
   assert.deepEqual(

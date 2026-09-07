@@ -175,7 +175,7 @@
     "module": "silk/logger",
     "path": "silk/logger.silk",
     "namespace": "Logger",
-    "aliases": ["InMemoryLogger", "LogError", "LogLevel", "StdoutLogger"]
+    "aliases": ["InMemoryLogger", "LogError", "LogLevel"]
   },
   {
     "module": "silk/metrics",
@@ -186,6 +186,11 @@
     "module": "silk/monotonic_clock",
     "path": "silk/monotonic_clock.silk",
     "namespace": "MonotonicClock"
+  },
+  {
+    "module": "silk/native_descriptor",
+    "path": "silk/native_descriptor.silk",
+    "namespace": "NativeDescriptor"
   },
   {
     "module": "silk/numeric",
@@ -220,6 +225,11 @@
     "namespace": "OsHostInput"
   },
   {
+    "module": "silk/os_logger",
+    "path": "silk/os_logger.silk",
+    "namespace": "StdoutLogger"
+  },
+  {
     "module": "silk/os_monotonic_clock",
     "path": "silk/os_monotonic_clock.silk",
     "namespace": "OsMonotonicClock"
@@ -238,6 +248,12 @@
     "module": "silk/os_system_clock",
     "path": "silk/os_system_clock.silk",
     "namespace": "OsSystemClock"
+  },
+  {
+    "module": "silk/os_writer",
+    "path": "silk/os_writer.silk",
+    "namespace": "StdoutWriter",
+    "aliases": ["StderrWriter"]
   },
   {
     "module": "silk/output",
@@ -389,6 +405,6 @@
     "module": "silk/writer",
     "path": "silk/writer.silk",
     "namespace": "Writer",
-    "aliases": ["StdoutWriter", "StderrWriter", "WriterError"]
+    "aliases": ["WriterError"]
   }
 ]

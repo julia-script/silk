@@ -258,11 +258,7 @@ const lowerBuiltinOperation = (
     )
     return finishBuiltin(destination)
   }
-  if (
-    expression.operation === 'EffectSuspend' ||
-    expression.operation === 'StorageAcquire' ||
-    expression.operation === 'HostWrite'
-  )
+  if (expression.operation === 'EffectSuspend' || expression.operation === 'StorageAcquire')
     return undefined
   if (expression.operation === 'RawBufferFrom') {
     const [allocation, count] = argumentLocals

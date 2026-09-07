@@ -14,7 +14,6 @@ export const symbols = Object.freeze([
   'silk_os_file_remove_v1',
   'silk_os_directory_remove_v1',
   'silk_os_handle_close_v1',
-  'silk_os_standard_input_read_v1',
   'silk_os_process_execute_v1',
   'silk_os_process_capture_v1',
   'silk_os_host_argument_count_v1',
@@ -731,16 +730,6 @@ int silk_os_handle_close_v1(size_t identity, int kind, int active,
   silk_success(reason, native_code); return 1;
 }
 `,
-  silk_os_standard_input_read_v1: `
-int silk_os_standard_input_read_v1(unsigned char *output, size_t capacity, size_t *count,
-                                   int *reason, uint32_t *native_code) {
-  ssize_t received;
-  do { received = read(0, output, capacity); } while (received < 0 && errno == EINTR);
-  if (received < 0) { silk_failure(reason, native_code, errno); return 0; }
-  silk_success(reason, native_code);
-  return silk_transfer((size_t)received, count);
-}
-`,
   silk_os_process_execute_v1: `
 /*
  * Runs one child to completion. The pre-exec channel is close-on-exec, so a failure to start is
@@ -1093,7 +1082,6 @@ const filesystemSymbols: ReadonlySet<Symbol> = new Set([
   'silk_os_handle_close_v1',
 ])
 
-const standardInputSymbols: ReadonlySet<Symbol> = new Set(['silk_os_standard_input_read_v1'])
 const childProcessSymbols: ReadonlySet<Symbol> = new Set([
   'silk_os_process_execute_v1',
   'silk_os_process_capture_v1',
@@ -1118,15 +1106,13 @@ const randomSymbols: ReadonlySet<Symbol> = new Set(['silk_os_random_fill_v1'])
 
 const includes = (groups: {
   readonly filesystem: boolean
-  readonly standardInput: boolean
   readonly childProcess: boolean
   readonly hostInput: boolean
   readonly clock: boolean
   readonly clockWait: boolean
   readonly random: boolean
 }): string => {
-  const legacy =
-    groups.filesystem || groups.standardInput || groups.childProcess || groups.hostInput
+  const legacy = groups.filesystem || groups.childProcess || groups.hostInput
   const selected: ReadonlyArray<readonly [boolean, string]> = [
     [groups.filesystem, '<dirent.h>'],
     [legacy || groups.clockWait, '<errno.h>'],
@@ -1140,10 +1126,7 @@ const includes = (groups: {
     [groups.filesystem || groups.childProcess, '<sys/types.h>'],
     [groups.childProcess, '<sys/wait.h>'],
     [groups.clock, '<time.h>'],
-    [
-      groups.filesystem || groups.standardInput || groups.childProcess || groups.hostInput,
-      '<unistd.h>',
-    ],
+    [groups.filesystem || groups.childProcess || groups.hostInput, '<unistd.h>'],
   ]
   return selected
     .filter(([needed]) => needed)
@@ -1158,7 +1141,6 @@ export const source = (selected: ReadonlyArray<string>): string => {
   const has = (group: ReadonlySet<Symbol>): boolean => retained.some((symbol) => group.has(symbol))
   const groups = Object.freeze({
     filesystem: has(filesystemSymbols),
-    standardInput: has(standardInputSymbols),
     childProcess: has(childProcessSymbols),
     hostInput: has(hostInputSymbols),
     clock: has(clockSymbols),
@@ -1167,8 +1149,7 @@ export const source = (selected: ReadonlyArray<string>): string => {
     clockWait: has(clockWaitSymbols),
     random: has(randomSymbols),
   })
-  const legacy =
-    groups.filesystem || groups.standardInput || groups.childProcess || groups.hostInput
+  const legacy = groups.filesystem || groups.childProcess || groups.hostInput
   return [
     includes(groups),
     legacy ? statusPrelude : '',

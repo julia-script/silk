@@ -39,7 +39,7 @@ pub fn main() -> i32 {
 
 it.effect('forwards provider-selection evidence only from an exact enclosing constraint', () =>
   Effect.gen(function* () {
-    const wrapper = (constraint: string) => `import silk.logger { StdoutLogger }
+    const wrapper = (constraint: string) => `import silk.os_logger { StdoutLogger }
 import silk.effect { Effect }
 import silk.logger { Logger, LogError }
 
@@ -56,7 +56,7 @@ effect fn read() -> () ! LogError ? &mut Logger {
 }
 
 pub effect fn main() -> () ! LogError {
-  let mut logger = Logger.stdoutProvider()
+  let mut logger = StdoutLogger.make()
   return run bind(read(), &mut logger)
 }`
 

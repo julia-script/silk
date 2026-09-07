@@ -13,7 +13,7 @@ code. Use a scripted provider in tests to control partial reads, end-of-input, a
 
 ## Details
 
-The provider owns no persistent state and commits each host read directly into the caller's
+The provider remembers observed end-of-input and commits each libc read directly into the caller's
 buffer. For a non-empty buffer, a zero-length host transfer becomes the outcome selected by
 [`StandardInput.endOfInput`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e656e644f66496e707574). Only a host read error becomes [`StreamReadError`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72). Partial transfer counts are
 preserved exactly.
@@ -25,7 +25,8 @@ Constructing the provider performs no read. Portable code reads after the applic
 
 This module publishes its provider only for the supported native profiles.
 WebAssembly selection leaves the module empty.
-The caller must use a non-empty buffer. A zero-capacity host read also transfers zero bytes.
+Empty buffers produce Filled(0) without reading, including after observed end-of-input.
+A fresh provider can observe descriptor changes after a previous provider latched end-of-input.
 
 ## Examples
 
@@ -53,7 +54,7 @@ Public declarations: 1.
 pub struct OsStandardInput
 ```
 
-A stateless native [`StandardInput`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e707574) provider for the process input descriptor.
+A native [`StandardInput`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e707574) provider for the process input descriptor.
 
 ### Details
 
@@ -68,7 +69,7 @@ buffer and preserves the host transfer count.
 pub fn make() -> OsStandardInput
 ```
 
-Creates a stateless provider for native standard-input bytes.
+Creates a provider for native standard-input bytes.
 
 #### When to use
 
@@ -77,7 +78,7 @@ portable code that calls `silk.standard_input.receive`.
 
 #### Details
 
-Construction performs no read and cannot fail. For a non-empty read buffer, a later zero-byte
+Construction initializes only the EOF flag and cannot fail. For a non-empty read buffer, a zero-byte
 host transfer becomes end-of-input data. A host read error becomes [`StreamReadError`](./standard-input.md#declaration-73696c6b2f7374616e646172645f696e7075743a3a53747265616d526561644572726f72).
 
 <a id="declaration-73696c6b2f6f735f7374616e646172645f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>

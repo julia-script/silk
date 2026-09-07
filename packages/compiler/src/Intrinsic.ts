@@ -107,7 +107,6 @@ export interface Operation {
   readonly consumer?: string
   readonly targets: ReadonlyArray<Target.Id>
   readonly invariant?: string
-  readonly hostImport?: string
 
   readonly rule: Rule
 }
@@ -151,7 +150,6 @@ const intrinsicSpelling = (family: string, operation: string): string => {
   if (family === 'Parking' && operation === 'park') return 'park'
   if (family === 'Place' && operation === 'replace') return 'replace'
   if (family === 'Storage' && operation === 'acquire') return 'systemAllocationAcquire'
-  if (family === 'Host' && operation === 'write') return 'standardStreamWrite'
   if (family === 'Os') return `os${upperInitial(operation)}`
   return `${family.slice(0, 1).toLowerCase()}${family.slice(1)}${upperInitial(operation)}`
 }
@@ -180,7 +178,6 @@ const osConsumer = (spelling: string): string => {
   if (spelling === 'monotonicClockResolution') return 'silk/os_monotonic_clock.getResolution'
   if (spelling === 'monotonicClockWaitUntil') return 'silk/os_monotonic_clock.waitUntil'
   if (spelling === 'randomFill') return 'silk/os_random.fillBytes'
-  if (spelling === 'standardInputRead') return 'silk/os_standard_input.read'
   if (spelling === 'processExecute') return 'silk/os_child_process.execute'
   if (spelling === 'processCapture') return 'silk/os_child_process.capture'
   if (spelling.startsWith('host'))
@@ -201,7 +198,6 @@ const consumer = (family: string, operation: string): string => {
       : `silk/execution.${operation}`
   if (family === 'Wake' || family === 'Parking') return 'language:external-wake-parking'
   if (family === 'Storage') return 'silk/allocator.allocate'
-  if (family === 'Host') return 'silk/writer.writeAll'
   if (family === 'Os') return osConsumer(operation)
   if (family === 'Place') return 'language:place-replacement'
   return `silk/${family.replaceAll(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}.${operation}`
@@ -277,9 +273,6 @@ const builtin = (options: {
     consumer: consumer(options.actor, options.name),
     targets: normalizeRuntimeTargets(options.targets ?? runtimeTargets),
     ...(invariant === undefined ? {} : { invariant }),
-    ...(options.actor === 'Host' && options.name === 'write'
-      ? { hostImport: 'silk_standard_stream_write_v1' }
-      : {}),
 
     rule: Object.freeze({
       _tag: 'BuiltinRule',
@@ -1555,26 +1548,6 @@ const intrinsicOperations = Object.freeze([
         'consumes exactly one live file or directory handle whether close succeeds or fails',
     }),
     osBuiltin({
-      name: 'standardInputRead',
-      operation: 'OsStandardInputRead',
-      parameters: Object.freeze([
-        valueParameter('output', '&mut [u8]'),
-        valueParameter('count', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.slice('Exclusive', 'u8', contractLifetime('standardInputRead')),
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'output is initialized writable storage; success reports the exact transferred byte count and zero means end of input',
-    }),
-    osBuiltin({
       name: 'processExecute',
       operation: 'OsProcessExecute',
       parameters: Object.freeze([
@@ -1909,30 +1882,6 @@ const intrinsicOperations = Object.freeze([
         undefined,
         Object.freeze([]),
       ),
-    }),
-  ]),
-  ...Object.freeze([
-    builtin({
-      actor: 'Host',
-      name: 'write',
-      operation: 'HostWrite',
-      parameters: Object.freeze([
-        valueParameter('destination', 'bool'),
-        valueParameter('bytes', '&[u8]'),
-      ]),
-      semanticParameters: Object.freeze([
-        'bool',
-        Type.slice('Shared', 'u8', contractLifetime('write')),
-      ]),
-      result: 'Effect<() ! WriterError>',
-      semanticResult: Type.effect(
-        Type.unit,
-        Object.freeze([Type.streamWriteFailure]),
-        { environment: contractLifetime('write'), lifetimeBinders: [] },
-        undefined,
-        Object.freeze([]),
-      ),
-      targets: nativeTargets,
     }),
   ]),
   ...Object.freeze([
@@ -2592,7 +2541,6 @@ export interface InventoryEntry {
   readonly hir?: string
   readonly mir?: string
   readonly targets: ReadonlyArray<Target.Id>
-  readonly hostImport?: string
 }
 
 /** Publishes the closed intrinsic inventory used by verification and release review. */
@@ -2665,7 +2613,6 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         consumer: operation.consumer,
         ...(identity === undefined ? {} : { hir: identity, mir: identity }),
         targets: operation.targets,
-        ...(operation.hostImport === undefined ? {} : { hostImport: operation.hostImport }),
       })
     }),
   )

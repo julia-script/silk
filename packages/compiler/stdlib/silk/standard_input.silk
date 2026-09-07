@@ -14,8 +14,8 @@
 //! while input is inherently partial and eventually ends.
 //!
 //! # Gotchas
-//! The caller must supply a non-empty read buffer. A zero-length native read cannot distinguish
-//! available input from end-of-input.
+//! Empty buffers return Filled(0) without observing end-of-input. A provider must preserve this
+//! behavior even after a non-empty read has observed permanent end-of-input.
 //!
 //! # Examples
 //! ## Read one byte and then observe the end of input
@@ -35,6 +35,7 @@
 //!
 //! effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> ReadOutcome
 //! ! StreamReadError {
+//!   if buffer.length == 0 { return Input.filled(usize.ZERO) }
 //!   if self.complete {
 //!     return Input.endOfInput()
 //!   }
@@ -127,8 +128,7 @@ pub service StandardInput {
   ///
   /// # Gotchas
   ///
-  /// `buffer` must be non-empty. A native provider cannot distinguish a zero-capacity read from
-  /// end-of-input.
+  /// An empty `buffer` returns Filled(0) without reading, including after end-of-input.
   effect fn read(
     buffer: &mut [u8]
   ) -> ReadOutcome ! StreamReadError ? &mut StandardInput

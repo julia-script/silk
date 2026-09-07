@@ -21,6 +21,7 @@
 //! This program writes `42..+42` to standard output and returns zero.
 //!
 //! ```silk
+//! import silk.os_writer { StdoutWriter }
 //! import silk.effect { Effect }
 //!
 //! import silk.format { Alignment, Format, FormatOptions, Sign }
@@ -46,7 +47,7 @@
 //! }
 //!
 //! effect fn writeExample() -> () ! WriterError {
-//!   let mut writer = Writer.stdoutWriterProvider()
+//!   let mut writer = StdoutWriter.make()
 //!   let completed = run render()
 //!     |> Effect.provideMut<Writer>(&mut writer)
 //!   return completed
@@ -333,11 +334,12 @@ impl Format {
   /// This program writes `Hello, Julia. Age: 31` to standard output.
   ///
   /// ```silk
+  /// import silk.os_writer { StdoutWriter }
   /// import silk.effect { Effect }
   ///
   /// import silk.format { Format }
   ///
-  /// import silk.writer { Writer, WriterError, StdoutWriter }
+  /// import silk.writer { Writer, WriterError }
   ///
   /// import silk.writer { Writer, WriterError }
   ///
@@ -347,7 +349,7 @@ impl Format {
   /// }
   ///
   /// effect fn writeExample() -> () ! WriterError {
-  ///   let mut writer = Writer.stdoutWriterProvider()
+  ///   let mut writer = StdoutWriter.make()
   ///   return run render()
   ///     |> Effect.provideMut<Writer>(&mut writer)
   /// }

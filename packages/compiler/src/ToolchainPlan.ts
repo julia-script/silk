@@ -262,30 +262,6 @@ export const wasmCommand = (
     ]),
   })
 
-/**
- * The minimal C runtime boundary: a private, compiler-versioned scalar ABI reaching a closed
- * native entry. The executable source's `main` receives the process command line, holds it for the host-input runtime,
- * and returns `silk_main`'s `i32` result as the process exit status. Silk `main` itself keeps its
- * zero-parameter shape: arguments reach a program through a service, never through the entry
- * signature. Not user-facing FFI; issue 07 owns the ABI's growth.
- */
-const standardStreamsShimSource = `#include <errno.h>
-#include <stddef.h>
-#include <unistd.h>
-
-int silk_standard_stream_write_v1(int destination, const unsigned char *bytes, size_t length) {
-  const int descriptor = destination == 0 ? 1 : 2;
-  size_t offset = 0;
-  while (offset < length) {
-    const ssize_t written = write(descriptor, bytes + offset, length - offset);
-    if (written < 0 && errno == EINTR) continue;
-    if (written <= 0) return 1;
-    offset += (size_t)written;
-  }
-  return 0;
-}
-`
-
 const commandLineStateSource = `int silk_host_argc_v1 = 0;
 char **silk_host_argv_v1 = 0;
 `
@@ -404,7 +380,6 @@ static int silk_write_path(int site, int depth, const int *path) {
 
 const runtimeSourceFor = (
   nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
-  forceStandardStreams = false,
 ): string => {
   const osRuntime = OsRuntime.source(nativeRuntimeSymbols)
   const coroutineRuntime = CoroutineRuntime.source(nativeRuntimeSymbols)
@@ -412,12 +387,9 @@ const runtimeSourceFor = (
     (symbol) =>
       symbol === 'silk_os_host_argument_count_v1' || symbol === 'silk_os_host_argument_v1',
   )
-  const needsStandardStreams =
-    forceStandardStreams || nativeRuntimeSymbols.includes('silk_standard_stream_write_v1')
   const commandLine = needsCommandLine ? commandLineStateSource : ''
   return `/* silk-effect native runtime — private, compiler-versioned. */
 ${translationUnitPreamble}
-${needsStandardStreams ? standardStreamsShimSource : ''}
 ${commandLine}
 ${osRuntime}
 ${coroutineRuntime}
@@ -434,7 +406,7 @@ export const executableSource = (
   termination: Backend.Termination,
   nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
 ): string => {
-  const runtime = runtimeSourceFor(nativeRuntimeSymbols, termination.failures.length > 0)
+  const runtime = runtimeSourceFor(nativeRuntimeSymbols)
   const needsCommandLine = nativeRuntimeSymbols.some(
     (symbol) =>
       symbol === 'silk_os_host_argument_count_v1' || symbol === 'silk_os_host_argument_v1',

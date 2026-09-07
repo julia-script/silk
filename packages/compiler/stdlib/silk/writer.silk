@@ -2,7 +2,7 @@
 //!
 //! # When to use
 //! Use [`Writer`] when code must write complete byte sequences without selecting a destination.
-//! Use [`StdoutWriter`] or [`StderrWriter`] at a process boundary. Use `silk.logger.Logger` for
+//! Use `silk.os_writer` providers at a native process boundary. Use `silk.logger.Logger` for
 //! structured log events.
 //!
 //! # Details
@@ -11,20 +11,21 @@
 //! [`WriterError`].
 //!
 //! # Gotchas
-//! The native providers require a host standard-stream boundary. [`ignoreError`] removes the typed
+//! Native providers live in `silk.os_writer` and require selected Darwin or GNU libc. [`ignoreError`] removes the typed
 //! failure value and returns unit for a failed Effect.
 //!
 //! # Examples
 //! ## Write one complete stdout message
 //!
 //! ```silk
+//! import silk.os_writer { StdoutWriter }
 //! import silk.effect { Effect }
 //!
 //! import silk.writer { Writer, WriterError }
 //!
 //! effect fn writeMessage() -> ()
 //! ! WriterError {
-//!   let mut writer = Writer.stdoutWriterProvider()
+//!   let mut writer = StdoutWriter.make()
 //!   return run Writer.writeAll(b"Silk\n")
 //!     |> Effect.provideMut<Writer>(&mut writer)
 //! }
@@ -59,14 +60,9 @@ pub service Writer {
 }
 
 impl Writer {
-  /// Creates a process-backed Writer provider for standard output.
-  pub fn stdoutWriterProvider() -> StdoutWriter {
-    return StdoutWriter { stream: false }
-  }
-
-  /// Creates a process-backed Writer provider for standard error.
-  pub fn stderrWriterProvider() -> StderrWriter {
-    return StderrWriter { stream: true }
+  /// Creates a failure for a provider that could not complete a write or flush operation.
+  pub fn failure() -> WriterError {
+    return WriterError { message: "Writer operation failed" }
   }
 
   /// Runs one Effect and converts its typed failure to unit while it preserves a successful value.
@@ -88,32 +84,3 @@ impl Writer {
     run Writer.writeAll(String.utf8Bytes(val))
   }
 }
-
-/// A Writer provider that writes to process standard output.
-pub struct StdoutWriter {
-  stream: bool
-}
-
-/// A Writer provider that writes to process standard error.
-pub struct StderrWriter {
-  stream: bool
-}
-
-impl Writer for StdoutWriter {
-  effect fn writeAll(self: &mut Self, val: &[u8]) -> () ! WriterError ? &mut Writer {
-    run Intrinsic.standardStreamWrite(self.stream, val)
-  }
-  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer {
-    return ()
-  }
-}
-
-impl Writer for StderrWriter {
-  effect fn writeAll(self: &mut Self, val: &[u8]) -> () ! WriterError ? &mut Writer {
-    run Intrinsic.standardStreamWrite(self.stream, val)
-  }
-  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer {
-    return ()
-  }
-}
-

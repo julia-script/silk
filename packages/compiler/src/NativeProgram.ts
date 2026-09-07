@@ -263,18 +263,6 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
           yield* LlvmType.functionType(builder, i32, [pointer, pointer, usizeType]),
         )
       : undefined
-  const needsHostWrite = program.functions.some((fn) =>
-    MirVerification.operations(fn).some((operation) => operation._tag === 'HostWrite'),
-  )
-  const standardWrite =
-    needsHostWrite && usizeType !== undefined
-      ? yield* FunctionActor.declare(
-          builder,
-          'silk_standard_stream_write_v1',
-          yield* LlvmType.functionType(builder, i32, [i32, pointer, usizeType]),
-        )
-      : undefined
-
   const osRuntimes = new Map<
     string,
     {
@@ -360,7 +348,6 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     (program.entry._tag !== 'NoInvocation' ||
       needsAllocation ||
       frameRuntimeEnabled ||
-      needsHostWrite ||
       osRuntimes.size !== 0 ||
       program.foreignCalls.length !== 0 ||
       program.foreignStatics.length !== 0 ||
@@ -682,7 +669,6 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
       ...(executionRelease === undefined ? {} : { executionRelease: executionRelease.handle }),
       ...(memcmp === undefined ? {} : { memcmp }),
-      ...(standardWrite === undefined ? {} : { standardWrite }),
       osRuntimes,
       foreignFunctions,
       foreignStatics,
@@ -768,7 +754,6 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(malloc === undefined ? [] : ['malloc']),
       ...(free === undefined ? [] : ['free']),
       ...[...osRuntimes.values()].map((runtime) => runtime.symbol),
-      ...(needsHostWrite ? ['silk_standard_stream_write_v1'] : []),
       ...(coroutineFramePush === undefined ? [] : [CoroutineRuntime.pushSymbol]),
       ...(coroutineFramePop === undefined ? [] : [CoroutineRuntime.popSymbol]),
     ]),

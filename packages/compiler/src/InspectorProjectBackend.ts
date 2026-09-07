@@ -880,8 +880,6 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = if ${localText(operation.condition)}`
     case 'ShortCircuit':
       return `${localText(operation.destination)} = ${operation.operator === 'And' ? '&&' : '||'} ${localText(operation.left)}`
-    case 'HostWrite':
-      return `${localText(operation.destination)} = write all ${localText(operation.bytes)} to stream ${localText(operation.stream)} ! ${operation.failure.name}`
     case 'OsOpen':
       return `${localText(operation.destination)} = ${Intrinsic.operationText(operation.operation)}(${operation.arguments.map(localText).join(', ')}) via ${localText(operation.success)}/${localText(operation.failure)}`
     case 'OsCall':

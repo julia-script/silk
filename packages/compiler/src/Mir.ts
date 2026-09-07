@@ -524,18 +524,6 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
-      /** Commits one immutable byte view to an explicit host-provided process destination. */
-      readonly _tag: 'HostWrite'
-      readonly destination: LocalId
-      readonly stream: LocalId
-      readonly bytes: LocalId
-      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
-      readonly failure: SilkType.Nominal
-      readonly propagationType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
-      readonly failureTag: number
-      readonly provenance: Provenance
-    }
-  | {
       /** Opens one affine OS handle and transfers it only through the selected exact carrier. */
       readonly _tag: 'OsOpen'
       readonly operation: Intrinsic.OperationId
@@ -1913,7 +1901,6 @@ export interface Violation {
     | 'InvalidIntegerOperation'
     | 'InvalidLayoutOperation'
     | 'InvalidAllocationOperation'
-    | 'InvalidStandardStreamOperation'
     | 'InvalidOsOperation'
     | 'InvalidForeignCall'
     | 'InvalidForeignOperation'

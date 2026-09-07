@@ -1,5 +1,7 @@
-export const recoveredWriterModule = `import silk.effect { Effect }
+export const recoveredWriterModule = `import silk.os_writer { StdoutWriter }
+import silk.effect { Effect }
 import silk.result { Result }
+import silk.writer { Writer as NativeWriter }
 
 pub struct WriterError {}
 
@@ -22,7 +24,8 @@ impl Writer for StdoutWriter {
     self: &mut StdoutWriter,
     bytes: &[u8]
   ) -> () ! WriterError ? &mut Writer {
-    return run Intrinsic.standardStreamWrite(false, bytes) |> translate
+    let mut writer = StdoutWriter.make()
+    return run NativeWriter.writeAll(bytes) |> Effect.provideMut<NativeWriter>(&mut writer) |> translate
   }
 }
 
@@ -38,8 +41,10 @@ pub effect fn main() -> () ! WriterError {
   return run program() |> Effect.provideMut(&mut writer)
 }`
 
-export const recoveredDirectWrite = `import silk.effect { Effect }
+export const recoveredDirectWrite = `import silk.os_writer { StdoutWriter }
+import silk.effect { Effect }
 import silk.result { Result }
+import silk.writer { Writer as NativeWriter }
 
 pub struct WriterError {}
 
@@ -52,5 +57,6 @@ effect fn translate<A, E, ?R>(self: once Effect<A ! E ? R>) -> A ! WriterError ?
 }
 
 pub effect fn main() -> () ! WriterError {
-  return run Intrinsic.standardStreamWrite(false, b"Hello") |> translate
+  let mut writer = StdoutWriter.make()
+  return run NativeWriter.writeAll(b"Hello") |> Effect.provideMut<NativeWriter>(&mut writer) |> translate
 }`

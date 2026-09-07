@@ -557,7 +557,6 @@ it('reserves the entry point, runtime symbols, and generated symbol shapes', () 
     'silk_main',
     'silk_os_file_open_v1',
     'silk_coroutine_frame_push_v1',
-    'silk_standard_stream_write_v1',
     'silk_host_argc_v1',
     'silk_host_argv_v1',
     'silk_suspend_child_0',

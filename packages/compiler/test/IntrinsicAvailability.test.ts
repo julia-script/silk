@@ -171,10 +171,11 @@ pub fn main() -> i32 {
     )
 
     const standardOutput = yield* snapshot(
-      `import silk.effect { Effect }
+      `import silk.os_writer { StdoutWriter }
+import silk.effect { Effect }
 import silk.writer { Writer, WriterError }
 effect fn writeMessage() -> () ! WriterError {
-  let mut writer = Writer.stdoutWriterProvider()
+  let mut writer = StdoutWriter.make()
   return run Writer.writeAll(b"Silk") |> Effect.provideMut<Writer>(&mut writer)
 }
 effect fn ignoreWriteFailure(error: WriterError) -> () { return () }
@@ -184,20 +185,9 @@ pub fn main() -> i32 {
 }`,
       'wasm32-unknown-unknown',
     )
-    assert.deepEqual(Analysis.diagnostics(standardOutput), [])
-    const outputUnavailable = yield* Effect.flip(
-      Analysis.codegen(standardOutput, { mode: 'release' }),
+    assert.isTrue(
+      Analysis.diagnostics(standardOutput).some((diagnostic) => diagnostic.code === 'SEM0014'),
     )
-    assert.strictEqual(outputUnavailable._tag, 'CodegenUnavailable')
-    if (outputUnavailable._tag === 'CodegenUnavailable')
-      assert.isTrue(
-        outputUnavailable.diagnostics.some(
-          (candidate) =>
-            candidate.reason._tag === 'IntrinsicTargetUnavailable' &&
-            candidate.reason.operation === 'Intrinsic.standardStreamWrite' &&
-            candidate.reason.target === 'wasm32-unknown-unknown',
-        ),
-      )
   }),
 )
 
@@ -979,5 +969,71 @@ it.effect('reports source assembly constraints and target admission with call sp
       assert.equal(diagnostic.span.sourceId, 'bad-assembly')
       assert.isAbove(diagnostic.span.end, diagnostic.span.start)
     }
+  }),
+)
+
+it.effect('keeps native stream providers absent from no-libc selections', () =>
+  Effect.gen(function* () {
+    const source = `import silk.os_writer { StdoutWriter }
+import silk.os_logger { StdoutLogger }
+import silk.os_standard_input { OsStandardInput }
+pub fn main() -> i32 { return 42 }`
+    for (const target of Target.native) {
+      const self = yield* Analysis.makeRealized({
+        root: SourceFile.make('stream-selection/main', encoder.encode(source)),
+        configuration: {
+          profile: { target: target.id, artifact: 'object', libc: 'none', entry: { kind: 'none' } },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.deepEqual(
+        Analysis.diagnostics(self).map((value) => [value.code, value.span.start, value.span.end]),
+        ['StdoutWriter', 'StdoutLogger', 'OsStandardInput'].map((name) => [
+          'SEM0014',
+          source.indexOf(name),
+          source.indexOf(name) + name.length,
+        ]),
+      )
+      assert.deepEqual(self.instances.foreignCalls, [])
+    }
+  }),
+)
+
+it.effect('compiles portable stream replacements on Wasm without foreign stream imports', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.ofSourceRealized(
+      'stream-portable/main',
+      encoder.encode(`import silk.writer { Writer, WriterError }
+import silk.standard_input { StandardInput, StreamReadError, ReadOutcome }
+import silk.effect { Effect }
+import silk.u8 as u8
+struct Sink {}
+impl Writer for Sink {
+  effect fn writeAll(self: &mut Self, bytes: &[u8]) -> () ! WriterError ? &mut Writer { return () }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer { return () }
+}
+struct Ended {}
+impl StandardInput for Ended {
+  effect fn read(self: &mut Self, buffer: &mut [u8]) -> ReadOutcome ! StreamReadError ? &mut StandardInput {
+    if buffer.length == 0 { return StandardInput.filled(0) }
+    return StandardInput.endOfInput()
+  }
+}
+effect fn program() -> i32 ! WriterError | StreamReadError {
+  let mut sink = Sink {}
+  run Writer.writeAll(b"portable") |> Effect.provideMut<Writer>(&mut sink)
+  let mut input = Ended {}
+  let mut buffer = [u8.toU8(9)]
+  let outcome = run StandardInput.receive(&mut buffer) |> Effect.provideMut<StandardInput>(&mut input)
+  if StandardInput.isEndOfInput(&outcome) { return 42 }
+  return 1
+}
+effect fn recover(error: WriterError | StreamReadError) -> i32 { return 0 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const artifact = yield* Analysis.codegen(self, { mode: 'release' })
+    assert.deepEqual(artifact.foreignImports, [])
+    assert.deepEqual(artifact.nativeRuntimeSymbols, [])
   }),
 )

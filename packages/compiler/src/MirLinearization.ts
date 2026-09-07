@@ -156,7 +156,6 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'ValidateLayout':
     case 'RepeatLayout':
     case 'Allocate':
-    case 'HostWrite':
     case 'OsCall':
     case 'NativeAssembly':
     case 'ForeignIndirectCall':
@@ -205,7 +204,6 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
 
 export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'Allocate' ||
-  operation._tag === 'HostWrite' ||
   operation._tag === 'OsCall' ||
   operation._tag === 'OsOpenOutcome' ||
   operation._tag === 'RawBufferFrom' ||

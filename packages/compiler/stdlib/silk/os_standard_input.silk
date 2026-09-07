@@ -5,7 +5,7 @@
 //! code. Use a scripted provider in tests to control partial reads, end-of-input, and failures.
 //!
 //! # Details
-//! The provider owns no persistent state and commits each host read directly into the caller's
+//! The provider remembers observed end-of-input and commits each libc read directly into the caller's
 //! buffer. For a non-empty buffer, a zero-length host transfer becomes the outcome selected by
 //! [`StandardInput.endOfInput`]. Only a host read error becomes [`StreamReadError`]. Partial transfer counts are
 //! preserved exactly.
@@ -16,7 +16,8 @@
 //! # Gotchas
 //! This module publishes its provider only for the supported native profiles.
 //! WebAssembly selection leaves the module empty.
-//! The caller must use a non-empty buffer. A zero-capacity host read also transfers zero bytes.
+//! Empty buffers produce Filled(0) without reading, including after observed end-of-input.
+//! A fresh provider can observe descriptor changes after a previous provider latched end-of-input.
 //!
 //! # Examples
 //! ## Construct the native provider without reading standard input
@@ -31,20 +32,19 @@
 //! }
 //! ```
 
-static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
-  import silk.i32 as i32
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.native_descriptor { NativeDescriptor }
   import silk.standard_input { ReadOutcome, StandardInput, StreamReadError }
-  import silk.u32 as u32
-  import silk.u8 as u8
-  import silk.usize as usize
 
-  /// A stateless native [`StandardInput`] provider for the process input descriptor.
+  /// A native [`StandardInput`] provider for the process input descriptor.
   ///
   /// # Details
   ///
   /// The process owns the descriptor. Each read changes only the committed prefix of the caller's
   /// buffer and preserves the host transfer count.
-  pub struct OsStandardInput {}
+  pub struct OsStandardInput {
+    ended: bool
+  }
 
   impl OsStandardInput {
     /// Commits one host read into the caller's buffer.
@@ -52,21 +52,25 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     /// The low-level boundary reports a zero-length transfer for the end of input, which becomes
     /// `EndOfInput` data rather than a typed failure. Only a host error becomes `StreamReadError`.
     ///
-    /// The caller must use a non-empty `buffer`. With no capacity, the host also reports a zero-length
-    /// transfer and cannot prove permanent end-of-input.
+    /// Empty buffers return Filled(0) without a libc call. Once a non-empty read observes zero,
+    /// later non-empty reads return EndOfInput without touching the descriptor.
     effect fn read(self: &mut Self, buffer: &mut [u8]) -> ReadOutcome ! StreamReadError {
-      let mut lowReason = 0
-      let mut nativeCode = u32.toU32(0)
-      let mut length = usize.ZERO
-      let received = run rawRead(move buffer, &mut length, &mut lowReason, &mut nativeCode)
+      if buffer.length == 0 { return StandardInput.filled(0) }
+      if self.ended { return StandardInput.endOfInput() }
+      let mut nativeError = 0
+      let mut length: usize = 0
+      let received = run NativeDescriptor.read(0, move buffer, &mut length, &mut nativeError)
       if received == false { return run raise() }
-      if length == usize.ZERO { return StandardInput.endOfInput() }
+      if length == 0 {
+        self.ended = true
+        return StandardInput.endOfInput()
+      }
       return StandardInput.filled(length)
     }
   }
 
   impl OsStandardInput {
-    /// Creates a stateless provider for native standard-input bytes.
+    /// Creates a provider for native standard-input bytes.
     ///
     /// # When to use
     ///
@@ -75,21 +79,11 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     ///
     /// # Details
     ///
-    /// Construction performs no read and cannot fail. For a non-empty read buffer, a later zero-byte
+    /// Construction initializes only the EOF flag and cannot fail. For a non-empty read buffer, a zero-byte
     /// host transfer becomes end-of-input data. A host read error becomes [`StreamReadError`].
     pub fn make() -> OsStandardInput {
-      return OsStandardInput {}
+      return OsStandardInput { ended: false }
     }
-  }
-
-  effect fn rawRead(
-    output: &mut [u8],
-    count: &mut usize,
-    lowReason: &mut i32,
-    nativeCode: &mut u32
-  ) -> bool {
-    unsafe { return run Intrinsic.osStandardInputRead(output, count, lowReason, nativeCode) }
-    return false
   }
 
   effect fn raise() -> never ! StreamReadError {
