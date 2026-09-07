@@ -1,7 +1,14 @@
-export const recoveredWriterModule = `import silk.os_writer { StdoutWriter }
+export const recoveredWriterModule = `import silk.native_descriptor { NativeDescriptor }
 import silk.effect { Effect }
 import silk.result { Result }
-import silk.writer { Writer as NativeWriter }
+import silk.writer { Writer as NativeWriter, WriterError as NativeWriterError }
+
+effect fn writeNative(bytes: &[u8]) -> () ! NativeWriterError {
+  let mut error = 0
+  let complete = run NativeDescriptor.writeAll(1, bytes, &mut error)
+  if complete == false { fail NativeWriter.failure() }
+  return ()
+}
 
 pub struct WriterError {}
 
@@ -24,8 +31,7 @@ impl Writer for StdoutWriter {
     self: &mut StdoutWriter,
     bytes: &[u8]
   ) -> () ! WriterError ? &mut Writer {
-    let mut writer = StdoutWriter.make()
-    return run NativeWriter.writeAll(bytes) |> Effect.provideMut<NativeWriter>(&mut writer) |> translate
+    return run writeNative(bytes) |> translate
   }
 }
 
@@ -41,10 +47,17 @@ pub effect fn main() -> () ! WriterError {
   return run program() |> Effect.provideMut(&mut writer)
 }`
 
-export const recoveredDirectWrite = `import silk.os_writer { StdoutWriter }
+export const recoveredDirectWrite = `import silk.native_descriptor { NativeDescriptor }
 import silk.effect { Effect }
 import silk.result { Result }
-import silk.writer { Writer as NativeWriter }
+import silk.writer { Writer as NativeWriter, WriterError as NativeWriterError }
+
+effect fn writeNative(bytes: &[u8]) -> () ! NativeWriterError {
+  let mut error = 0
+  let complete = run NativeDescriptor.writeAll(1, bytes, &mut error)
+  if complete == false { fail NativeWriter.failure() }
+  return ()
+}
 
 pub struct WriterError {}
 
@@ -57,6 +70,5 @@ effect fn translate<A, E, ?R>(self: once Effect<A ! E ? R>) -> A ! WriterError ?
 }
 
 pub effect fn main() -> () ! WriterError {
-  let mut writer = StdoutWriter.make()
-  return run NativeWriter.writeAll(b"Hello") |> Effect.provideMut<NativeWriter>(&mut writer) |> translate
+  return run writeNative(b"Hello") |> translate
 }`

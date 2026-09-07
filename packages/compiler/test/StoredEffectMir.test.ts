@@ -25,12 +25,13 @@ const lowerStored = Effect.fnUntraced(function* (
   name: string,
   source: string,
   imports: ReadonlyMap<string, Uint8Array> = new Map(),
+  target: Target.Id = Target.wasm32UnknownUnknown.id,
 ) {
   const frontend = yield* Analysis.make({
     root: SourceFile.make(name, ascii(source)),
-    target: Target.wasm32UnknownUnknown.id,
+    target,
   }).pipe(Effect.provide(SourceResolver.memory(imports)))
-  const snapshot = yield* Analysis.realize(frontend, Target.wasm32UnknownUnknown.id, {
+  const snapshot = yield* Analysis.realize(frontend, target, {
     normalizeMir: false,
   })
   const layout =
@@ -273,6 +274,7 @@ it.effect('retains provided runner contracts through typed-failure recovery', ()
       'stored-effect-mir/recovered-provided-write',
       recoveredProvidedWrite,
       new Map([['recovered_writer', ascii(recoveredWriterModule)]]),
+      Target.aarch64AppleDarwin.id,
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.deepEqual(MirVerification.verify(module), [])
