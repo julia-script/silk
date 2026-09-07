@@ -20,7 +20,6 @@ export const symbols = Object.freeze([
   'silk_os_host_argument_v1',
   'silk_os_host_variable_v1',
   'silk_os_host_working_directory_v1',
-  'silk_os_random_fill_v1',
 ] as const)
 
 export type Symbol = (typeof symbols)[number]
@@ -92,22 +91,6 @@ static char *silk_string(const unsigned char *bytes, size_t length) {
   value[length] = 0;
   return value;
 }
-`
-
-const randomPrelude = `
-#include <stddef.h>
-#include <stdint.h>
-#if defined(__linux__)
-#include <errno.h>
-#include <sys/random.h>
-#elif defined(__APPLE__)
-#include <stdlib.h>
-#else
-#error "Silk OS random supports only GNU/Linux and macOS"
-#endif
-
-/* Linux documents at most 32 MiB minus one byte per getrandom call. */
-#define SILK_GETRANDOM_MAX ((size_t)33554431)
 `
 
 const filesystemPrelude = `
@@ -939,29 +922,6 @@ int silk_os_host_working_directory_v1(unsigned char *output, size_t capacity, si
   return 0;
 }
 `,
-  silk_os_random_fill_v1: `
-int32_t silk_os_random_fill_v1(unsigned char *output, size_t length) {
-  if (length == 0) return 1;
-#if defined(__linux__)
-  size_t filled = 0;
-  while (filled < length) {
-    size_t remaining = length - filled;
-    size_t requested = remaining < SILK_GETRANDOM_MAX ? remaining : SILK_GETRANDOM_MAX;
-    ssize_t count = getrandom(output + filled, requested, GRND_NONBLOCK);
-    if (count > 0) {
-      filled += (size_t)count;
-      continue;
-    }
-    if (count < 0 && errno == EINTR) continue;
-    return 0;
-  }
-  return 1;
-#else
-  arc4random_buf(output, length);
-  return 1;
-#endif
-}
-`,
 })
 
 const filesystemSymbols: ReadonlySet<Symbol> = new Set([
@@ -988,13 +948,11 @@ const hostInputSymbols: ReadonlySet<Symbol> = new Set([
   'silk_os_host_variable_v1',
   'silk_os_host_working_directory_v1',
 ])
-const randomSymbols: ReadonlySet<Symbol> = new Set(['silk_os_random_fill_v1'])
 
 const includes = (groups: {
   readonly filesystem: boolean
   readonly childProcess: boolean
   readonly hostInput: boolean
-  readonly random: boolean
 }): string => {
   const legacy = groups.filesystem || groups.childProcess || groups.hostInput
   const selected: ReadonlyArray<readonly [boolean, string]> = [
@@ -1026,7 +984,6 @@ export const source = (selected: ReadonlyArray<string>): string => {
     filesystem: has(filesystemSymbols),
     childProcess: has(childProcessSymbols),
     hostInput: has(hostInputSymbols),
-    random: has(randomSymbols),
   })
   const legacy = groups.filesystem || groups.childProcess || groups.hostInput
   return [
@@ -1036,7 +993,6 @@ export const source = (selected: ReadonlyArray<string>): string => {
     groups.filesystem ? filesystemPrelude : '',
     groups.childProcess ? childProcessPrelude : '',
     groups.hostInput ? hostInputPrelude : '',
-    groups.random ? randomPrelude : '',
     ...retained.map((symbol) => implementations[symbol]),
   ]
     .filter((fragment) => fragment.length > 0)

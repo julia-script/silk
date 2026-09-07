@@ -147,3 +147,4 @@ documentation remain separate from this reference.
 
 - [Native standard streams](./native-standard-streams)
 - [Native clocks](./native-clocks)
+- [Native entropy](./native-entropy)

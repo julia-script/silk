@@ -270,10 +270,6 @@ import silk.option { Option }
 fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
 fn opened(handle: OsHandle) -> Option<OsHandle> { return Option.some<OsHandle>(move handle) }
 fn refused() -> Option<OsHandle> { return Option.none<OsHandle>() }
-effect fn randomFill(output: &mut [u8]) -> bool {
-  unsafe { return run Intrinsic.osRandomFill(move output) }
-  return false
-}
 effect fn fileOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
   unsafe { return run Intrinsic.osFileOpen<Option<OsHandle>>(root, path, 0, reason, code, opened, refused) }
   return Option.none<OsHandle>()

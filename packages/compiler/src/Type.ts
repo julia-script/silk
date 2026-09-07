@@ -305,7 +305,6 @@ const nonScalarBuiltinOperations = Object.freeze([
   'StringUtf8Bytes',
   'StringByteLength',
   'StringEqualsExact',
-  'OsRandomFill',
   'OsFileOpen',
   'OsFileRead',
   'OsFileWrite',

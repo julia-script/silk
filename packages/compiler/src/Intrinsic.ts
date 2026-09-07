@@ -174,7 +174,6 @@ const admission = (family: string): AdmissionCategory => {
 
 /** The canonical standard-library consumer of one OS boundary operation. */
 const osConsumer = (spelling: string): string => {
-  if (spelling === 'randomFill') return 'silk/os_random.fillBytes'
   if (spelling === 'processExecute') return 'silk/os_child_process.execute'
   if (spelling === 'processCapture') return 'silk/os_child_process.capture'
   if (spelling.startsWith('host'))
@@ -1307,18 +1306,6 @@ const intrinsicOperations = Object.freeze([
   ...Scalar.all().flatMap(scalarOperations),
   ...stringOperations,
   ...Object.freeze([
-    osBuiltin({
-      name: 'randomFill',
-      operation: 'OsRandomFill',
-      parameters: Object.freeze([valueParameter('output', '&mut [u8]')]),
-      semanticParameters: Object.freeze([
-        Type.slice('Exclusive', 'u8', contractLifetime('randomFill')),
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'true means the complete initialized output contains fresh cryptographically secure bytes; false exposes no recoverable output',
-    }),
     osOpen({
       name: 'fileOpen',
       operation: 'OsFileOpen',

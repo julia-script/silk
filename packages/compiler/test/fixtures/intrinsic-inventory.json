@@ -4984,15 +4984,6 @@
       "identity": "StringEqualsExact"
     },
     {
-      "operation": "Intrinsic.osRandomFill",
-      "signature": "unsafe fn Intrinsic.osRandomFill(output: &mut [u8]) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_random.fillBytes",
-      "identity": "OsRandomFill",
-      "invariant": "true means the complete initialized output contains fresh cryptographically secure bytes; false exposes no recoverable output"
-    },
-    {
       "operation": "Intrinsic.osFileOpen",
       "signature": "unsafe fn Intrinsic.osFileOpen<R>(root: &[u8], path: &[u8], mode: i32, reason: &mut i32, nativeCode: &mut u32, success: once fn(OsHandle) -> R, failure: once fn() -> R) -> Effect<R>",
       "unsafe": true,
