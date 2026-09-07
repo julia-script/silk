@@ -12,5 +12,5 @@
 ## 3. Integration and evidence
 
 - [x] 3.1 Replace clock boundary tests with deterministic source/C fixtures and run debug/optimized conformance on Darwin ARM64 and GNU x86-64/ARM64; record actual results and reject LTO.
-- [ ] 3.2 Update shared native corpus, portable availability checks, scheduler consumers and generated docs; verify no new Wasm clock imports and documentation checks.
+- [x] 3.2 Update shared native corpus, portable availability checks, scheduler consumers and generated docs; verify no new Wasm clock imports and documentation checks.
 - [ ] 3.3 Run pnpm typecheck, format:check, lint, test, check and release:candidate; record exact outcomes and publish the verified layer with gh stack.
