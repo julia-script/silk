@@ -1,0 +1,107 @@
+import lexer.Span {Span}
+
+import silk.format {Format}
+
+import silk.writer {Writer, WriterError}
+
+/// A lexical failure attached to an invalid token.
+pub union LexicalDiagnostic {
+  UnsupportedBytes {pub span: Span},
+  UnknownLiteralModifier {pub modifier: Span, pub span: Span},
+  UnterminatedStaticLiteral {
+    pub modifier: Span,
+    pub delimiter: u8,
+    pub delimiterWidth: usize,
+    pub span: Span,
+  },
+  MissingBaseDigits {pub radix: u8, pub span: Span},
+  InvalidDigitSeparator {pub span: Span},
+  MissingExponentDigits {pub span: Span},
+  CharacterLiteralScalarCount {pub scalars: usize, pub span: Span},
+  InvalidDurationAmount {pub span: Span},
+  UnknownDurationUnit {pub spelling: Span, pub span: Span},
+  RepeatedDurationUnit {pub unit: Span, pub span: Span},
+  OutOfOrderDurationUnit {pub unit: Span, pub previous: Span, pub span: Span},
+  SubordinateDurationOutOfRange {
+    pub unit: Span,
+    pub amount: Span,
+    pub maximum: usize,
+    pub span: Span,
+  },
+}
+
+effect fn writeLine(code: string, reason: string, span: Span) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString("diagnostic ")
+  run Writer.writeString(code)
+  run Writer.writeString(" ")
+  run Writer.writeString(reason)
+  run Writer.writeString(" ")
+  run Format.display(&span.start)
+  run Writer.writeString("..")
+  run Format.display(&span.end)
+  return run Writer.writeString("\n")
+}
+
+/// Writes the stable code, reason tag, and focused source span.
+pub effect fn write(diagnostic: LexicalDiagnostic) -> () ! WriterError ? &mut Writer {
+  return match move diagnostic {
+    LexicalDiagnostic.UnsupportedBytes {span} => run writeLine("LEX0001", "UnsupportedBytes", span)
+    LexicalDiagnostic.UnknownLiteralModifier {modifier: _, span} => run writeLine(
+      "LEX0002",
+      "UnknownLiteralModifier",
+      span,
+    )
+    LexicalDiagnostic.UnterminatedStaticLiteral {
+      modifier: ignoredModifier,
+      delimiter: ignoredDelimiter,
+      delimiterWidth: ignoredDelimiterWidth,
+      span,
+    } => run writeLine("LEX0003", "UnterminatedStaticLiteral", span)
+    LexicalDiagnostic.MissingBaseDigits {radix: _, span} => run writeLine(
+      "LEX0004",
+      "MissingBaseDigits",
+      span,
+    )
+    LexicalDiagnostic.InvalidDigitSeparator {span} => run writeLine(
+      "LEX0005",
+      "InvalidDigitSeparator",
+      span,
+    )
+    LexicalDiagnostic.MissingExponentDigits {span} => run writeLine(
+      "LEX0006",
+      "MissingExponentDigits",
+      span,
+    )
+    LexicalDiagnostic.CharacterLiteralScalarCount {scalars: _, span} => run writeLine(
+      "LEX0007",
+      "CharacterLiteralScalarCount",
+      span,
+    )
+    LexicalDiagnostic.InvalidDurationAmount {span} => run writeLine(
+      "LEX0008",
+      "InvalidDurationAmount",
+      span,
+    )
+    LexicalDiagnostic.UnknownDurationUnit {spelling: _, span} => run writeLine(
+      "LEX0009",
+      "UnknownDurationUnit",
+      span,
+    )
+    LexicalDiagnostic.RepeatedDurationUnit {unit: _, span} => run writeLine(
+      "LEX0010",
+      "RepeatedDurationUnit",
+      span,
+    )
+    LexicalDiagnostic.OutOfOrderDurationUnit {unit: ignoredUnit, previous: ignoredPrevious, span} => run writeLine(
+      "LEX0011",
+      "OutOfOrderDurationUnit",
+      span,
+    )
+    LexicalDiagnostic.SubordinateDurationOutOfRange {
+      unit: ignoredUnit,
+      amount: ignoredAmount,
+      maximum: ignoredMaximum,
+      span,
+    } => run writeLine("LEX0012", "SubordinateDurationOutOfRange", span)
+  }
+}
