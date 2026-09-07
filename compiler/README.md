@@ -23,6 +23,10 @@ without retaining a token vector. Token lines use
 `diagnostic <code> <reason> <start>..<end>`. Spans are half-open byte offsets. EOF is emitted once
 at `source.length`; the next pull returns `Option.None` and ends the loop.
 
+The scanner uses short-circuit byte predicates and contextually typed integer literals for cursor
+arithmetic. Literal categories form an exhaustively matched enum; duration-unit membership uses
+one bit per checked unit rank. Each pull destructures its scanned token and end offset directly.
+
 The bootstrap lexer at revision `dd4510fa` is the compatibility authority for this experiment.
 The fixtures in `fixtures/` cover keywords, trivia, punctuation, numbers, durations, static
 literals, lifetimes, unsupported bytes, and empty input. Their token kinds, spans, diagnostic codes,

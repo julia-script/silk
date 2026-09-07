@@ -2,7 +2,7 @@ import lexer.Lexer {Lexer}
 
 import Stream {Stream}
 
-import lexer.Token as TokenOutput {Token}
+import lexer.Token {Token, write}
 
 import silk.allocator {Allocator, OutOfMemoryError}
 
@@ -26,7 +26,7 @@ import silk.result {Result}
 
 import silk.string {InvalidUtf8}
 
-import silk.usize as usize
+import silk.usize
 
 import silk.writer {Writer, WriterError}
 
@@ -62,7 +62,7 @@ effect fn printTokens<'source>(lexer: &mut Lexer<'source>) -> () ! WriterError ?
   while true {
     let taken = run Stream.take(lexer)
     if let Option<Token>.Some {value} = move taken {
-      run TokenOutput.write(move value)
+      run write(move value)
     } else {
       break
     }
