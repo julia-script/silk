@@ -1,0 +1,698 @@
+{
+  "schemaVersion": 1,
+  "revision": "63eff3ed34794c49287c7d0331083e12f13bd3d5",
+  "warmups": 2,
+  "measuredSamples": 5,
+  "processPolicy": "Timing: one fresh process per workload, two discarded warmups then five emissions of the same MIR/request. Memory: five separate fresh processes, one emission each; RSS includes frontend, construction, verification and encoding, excludes children. No construction-memory attribution.",
+  "results": [
+    {
+      "name": "minimal",
+      "medianMs": 0.959041999999954,
+      "medianPeakRssKiB": 242016,
+      "timing": {
+        "revision": "63eff3ed34794c49287c7d0331083e12f13bd3d5",
+        "llvmRevision": "63eff3ed34794c49287c7d0331083e12f13bd3d5",
+        "workload": "minimal",
+        "ordinal": "timing",
+        "builtIdentity": [
+          {
+            "name": "compiler",
+            "sha256": "af7a41e665092474b42568ee2536fd43ac80548149a5c2edd35aa8600085f0a7"
+          },
+          {
+            "name": "llvm",
+            "sha256": "49ae780991e0c10b0bfb9e02738fe0751b6e18cc2a38ceb72ea9e148bf13eb53"
+          }
+        ],
+        "harnessSha256": "9596844336b7169b166a2a88d86190ca0c95d6e5efaad547c72a9d80a0192af6",
+        "builtMode": "tsc dist ESM",
+        "node": "v26.7.0",
+        "nodeFlags": ["--expose-gc"],
+        "nodeOptions": "",
+        "host": {
+          "architecture": "arm64",
+          "platform": "darwin",
+          "release": "24.5.0",
+          "cpu": "Apple M1 Max"
+        },
+        "target": "aarch64-apple-darwin",
+        "profile": {
+          "target": {
+            "_tag": "Target",
+            "revision": 1,
+            "id": "aarch64-apple-darwin",
+            "kind": "Native",
+            "architecture": "aarch64",
+            "operatingSystem": "darwin",
+            "abi": "apple",
+            "objectFormat": "macho",
+            "pointerSize": 8,
+            "pointerAlignment": 8,
+            "endianness": "little",
+            "primitives": {
+              "bool": {
+                "size": 4,
+                "alignment": 4
+              },
+              "cBool": {
+                "size": 1,
+                "alignment": 1
+              },
+              "i8": {
+                "size": 1,
+                "alignment": 1
+              },
+              "i16": {
+                "size": 2,
+                "alignment": 2
+              },
+              "i32": {
+                "size": 4,
+                "alignment": 4
+              },
+              "i64": {
+                "size": 8,
+                "alignment": 8
+              },
+              "f32": {
+                "size": 4,
+                "alignment": 4
+              },
+              "f64": {
+                "size": 8,
+                "alignment": 8
+              },
+              "cLong": {
+                "size": 8,
+                "alignment": 8
+              }
+            },
+            "stackAlignment": 16,
+            "dataAddressSpace": 0,
+            "toolchainClass": "darwin",
+            "defaultCpu": "generic",
+            "supportedCpus": ["generic"],
+            "supportedFeatures": ["crc", "crypto", "fp-armv8", "lse", "neon"]
+          },
+          "cpu": {
+            "model": "generic",
+            "features": ["fp-armv8", "neon"]
+          },
+          "libc": "system",
+          "artifact": "executable",
+          "entry": {
+            "kind": "default"
+          },
+          "link": "dynamic",
+          "codeModel": "small",
+          "relocation": "pic",
+          "optimization": "none",
+          "debug": true,
+          "safety": "checked",
+          "threading": "single",
+          "sanitizers": [],
+          "unwind": "none",
+          "runtime": {
+            "kind": "default"
+          },
+          "_tag": "CompilationProfile",
+          "identity": "21:CompilationProfile.v1520:19:CompilationFacts.v1327:17:TargetDescription1:120:aarch64-apple-darwin6:Native7:aarch646:darwin5:apple5:macho1:81:86:little2:161:06:darwin7:generic16:5:Array7:generic41:5:Array3:crc6:crypto8:fp-armv83:lse4:neon137:5:Array12:4:bool1:41:413:5:cBool1:11:113:5:cLong1:81:811:3:f321:41:411:3:f641:81:811:3:i161:21:211:3:i321:41:411:3:i641:81:810:2:i81:11:140:3:cpu7:generic23:5:Array8:fp-armv84:neon13:10:deployment6:system10:executable9:7:default7:dynamic5:small3:pic4:none4:true7:checked6:single7:5:Array4:none9:7:default7:5:Array",
+          "parameters": []
+        },
+        "request": {
+          "mode": "debug",
+          "support": false
+        },
+        "cache": "disabled: direct NativeProgram.emit of freshly realized MIR; no Driver cache",
+        "sources": [
+          {
+            "id": "main",
+            "sha256": "fa0a50689c0766594b35ff6d19e60d1ac4807d9211296c50af425d1a30f144c9"
+          }
+        ],
+        "diagnostics": [],
+        "mirViolations": [],
+        "verifier": "Verify.verify returned no violations; NativeProgram.emit fails otherwise",
+        "realizedSymbolCount": 1,
+        "mirOperationCount": 1,
+        "inventorySha256": "244a4a8e28993310871f6bad227e29b0c18166a1d7178f1294de86d56b129069",
+        "timings": [
+          6.506792000000019, 1.0120830000000183, 0.9659580000000005, 0.9369580000000042,
+          0.959041999999954, 1.000583000000006, 0.9399579999999901
+        ],
+        "constructionMs": 0.959041999999954,
+        "peakRssKiB": 242960,
+        "bitcodeSha256": "039fb51df39abe92dd26e41ec4a7d7e5e04af59520671d0c363c6dc0de9e402f"
+      },
+      "memory": [
+        {
+          "peakRssKiB": 242128,
+          "bitcodeSha256": "039fb51df39abe92dd26e41ec4a7d7e5e04af59520671d0c363c6dc0de9e402f",
+          "inventorySha256": "244a4a8e28993310871f6bad227e29b0c18166a1d7178f1294de86d56b129069"
+        },
+        {
+          "peakRssKiB": 237616,
+          "bitcodeSha256": "039fb51df39abe92dd26e41ec4a7d7e5e04af59520671d0c363c6dc0de9e402f",
+          "inventorySha256": "244a4a8e28993310871f6bad227e29b0c18166a1d7178f1294de86d56b129069"
+        },
+        {
+          "peakRssKiB": 242544,
+          "bitcodeSha256": "039fb51df39abe92dd26e41ec4a7d7e5e04af59520671d0c363c6dc0de9e402f",
+          "inventorySha256": "244a4a8e28993310871f6bad227e29b0c18166a1d7178f1294de86d56b129069"
+        },
+        {
+          "peakRssKiB": 241328,
+          "bitcodeSha256": "039fb51df39abe92dd26e41ec4a7d7e5e04af59520671d0c363c6dc0de9e402f",
+          "inventorySha256": "244a4a8e28993310871f6bad227e29b0c18166a1d7178f1294de86d56b129069"
+        },
+        {
+          "peakRssKiB": 242016,
+          "bitcodeSha256": "039fb51df39abe92dd26e41ec4a7d7e5e04af59520671d0c363c6dc0de9e402f",
+          "inventorySha256": "244a4a8e28993310871f6bad227e29b0c18166a1d7178f1294de86d56b129069"
+        }
+      ]
+    },
+    {
+      "name": "arithmetic",
+      "medianMs": 1228.5126249999994,
+      "medianPeakRssKiB": 632272,
+      "timing": {
+        "revision": "63eff3ed34794c49287c7d0331083e12f13bd3d5",
+        "llvmRevision": "63eff3ed34794c49287c7d0331083e12f13bd3d5",
+        "workload": "arithmetic",
+        "ordinal": "timing",
+        "builtIdentity": [
+          {
+            "name": "compiler",
+            "sha256": "af7a41e665092474b42568ee2536fd43ac80548149a5c2edd35aa8600085f0a7"
+          },
+          {
+            "name": "llvm",
+            "sha256": "49ae780991e0c10b0bfb9e02738fe0751b6e18cc2a38ceb72ea9e148bf13eb53"
+          }
+        ],
+        "harnessSha256": "9596844336b7169b166a2a88d86190ca0c95d6e5efaad547c72a9d80a0192af6",
+        "builtMode": "tsc dist ESM",
+        "node": "v26.7.0",
+        "nodeFlags": ["--expose-gc"],
+        "nodeOptions": "",
+        "host": {
+          "architecture": "arm64",
+          "platform": "darwin",
+          "release": "24.5.0",
+          "cpu": "Apple M1 Max"
+        },
+        "target": "aarch64-apple-darwin",
+        "profile": {
+          "target": {
+            "_tag": "Target",
+            "revision": 1,
+            "id": "aarch64-apple-darwin",
+            "kind": "Native",
+            "architecture": "aarch64",
+            "operatingSystem": "darwin",
+            "abi": "apple",
+            "objectFormat": "macho",
+            "pointerSize": 8,
+            "pointerAlignment": 8,
+            "endianness": "little",
+            "primitives": {
+              "bool": {
+                "size": 4,
+                "alignment": 4
+              },
+              "cBool": {
+                "size": 1,
+                "alignment": 1
+              },
+              "i8": {
+                "size": 1,
+                "alignment": 1
+              },
+              "i16": {
+                "size": 2,
+                "alignment": 2
+              },
+              "i32": {
+                "size": 4,
+                "alignment": 4
+              },
+              "i64": {
+                "size": 8,
+                "alignment": 8
+              },
+              "f32": {
+                "size": 4,
+                "alignment": 4
+              },
+              "f64": {
+                "size": 8,
+                "alignment": 8
+              },
+              "cLong": {
+                "size": 8,
+                "alignment": 8
+              }
+            },
+            "stackAlignment": 16,
+            "dataAddressSpace": 0,
+            "toolchainClass": "darwin",
+            "defaultCpu": "generic",
+            "supportedCpus": ["generic"],
+            "supportedFeatures": ["crc", "crypto", "fp-armv8", "lse", "neon"]
+          },
+          "cpu": {
+            "model": "generic",
+            "features": ["fp-armv8", "neon"]
+          },
+          "libc": "system",
+          "artifact": "executable",
+          "entry": {
+            "kind": "default"
+          },
+          "link": "dynamic",
+          "codeModel": "small",
+          "relocation": "pic",
+          "optimization": "none",
+          "debug": true,
+          "safety": "checked",
+          "threading": "single",
+          "sanitizers": [],
+          "unwind": "none",
+          "runtime": {
+            "kind": "default"
+          },
+          "_tag": "CompilationProfile",
+          "identity": "21:CompilationProfile.v1520:19:CompilationFacts.v1327:17:TargetDescription1:120:aarch64-apple-darwin6:Native7:aarch646:darwin5:apple5:macho1:81:86:little2:161:06:darwin7:generic16:5:Array7:generic41:5:Array3:crc6:crypto8:fp-armv83:lse4:neon137:5:Array12:4:bool1:41:413:5:cBool1:11:113:5:cLong1:81:811:3:f321:41:411:3:f641:81:811:3:i161:21:211:3:i321:41:411:3:i641:81:810:2:i81:11:140:3:cpu7:generic23:5:Array8:fp-armv84:neon13:10:deployment6:system10:executable9:7:default7:dynamic5:small3:pic4:none4:true7:checked6:single7:5:Array4:none9:7:default7:5:Array",
+          "parameters": []
+        },
+        "request": {
+          "mode": "debug",
+          "support": false
+        },
+        "cache": "disabled: direct NativeProgram.emit of freshly realized MIR; no Driver cache",
+        "sources": [
+          {
+            "id": "main",
+            "sha256": "24cdd879d464c885635cf36e84ffda1a77f5cef85a265823545c088f4597d103"
+          }
+        ],
+        "diagnostics": [],
+        "mirViolations": [],
+        "verifier": "Verify.verify returned no violations; NativeProgram.emit fails otherwise",
+        "realizedSymbolCount": 161,
+        "mirOperationCount": 13764,
+        "inventorySha256": "dcfe6812d88ad33676e6665d4ed3dae850c189ca13009d7327e7a86a852d769a",
+        "timings": [
+          1535.8536669999999, 1285.596458, 1286.9233329999997, 1256.0695000000005,
+          1228.5126249999994, 1219.5179580000004, 1218.3476660000015
+        ],
+        "constructionMs": 1228.5126249999994,
+        "peakRssKiB": 1034048,
+        "bitcodeSha256": "4d86baca40426bdfff8f24050c6eaf94c24d5eb2fb1a27ff721d62d714542fb5"
+      },
+      "memory": [
+        {
+          "peakRssKiB": 636352,
+          "bitcodeSha256": "4d86baca40426bdfff8f24050c6eaf94c24d5eb2fb1a27ff721d62d714542fb5",
+          "inventorySha256": "dcfe6812d88ad33676e6665d4ed3dae850c189ca13009d7327e7a86a852d769a"
+        },
+        {
+          "peakRssKiB": 660656,
+          "bitcodeSha256": "4d86baca40426bdfff8f24050c6eaf94c24d5eb2fb1a27ff721d62d714542fb5",
+          "inventorySha256": "dcfe6812d88ad33676e6665d4ed3dae850c189ca13009d7327e7a86a852d769a"
+        },
+        {
+          "peakRssKiB": 632272,
+          "bitcodeSha256": "4d86baca40426bdfff8f24050c6eaf94c24d5eb2fb1a27ff721d62d714542fb5",
+          "inventorySha256": "dcfe6812d88ad33676e6665d4ed3dae850c189ca13009d7327e7a86a852d769a"
+        },
+        {
+          "peakRssKiB": 619696,
+          "bitcodeSha256": "4d86baca40426bdfff8f24050c6eaf94c24d5eb2fb1a27ff721d62d714542fb5",
+          "inventorySha256": "dcfe6812d88ad33676e6665d4ed3dae850c189ca13009d7327e7a86a852d769a"
+        },
+        {
+          "peakRssKiB": 570720,
+          "bitcodeSha256": "4d86baca40426bdfff8f24050c6eaf94c24d5eb2fb1a27ff721d62d714542fb5",
+          "inventorySha256": "dcfe6812d88ad33676e6665d4ed3dae850c189ca13009d7327e7a86a852d769a"
+        }
+      ]
+    },
+    {
+      "name": "lexer",
+      "medianMs": 2591.815375000002,
+      "medianPeakRssKiB": 1219280,
+      "timing": {
+        "revision": "63eff3ed34794c49287c7d0331083e12f13bd3d5",
+        "llvmRevision": "63eff3ed34794c49287c7d0331083e12f13bd3d5",
+        "workload": "lexer",
+        "ordinal": "timing",
+        "builtIdentity": [
+          {
+            "name": "compiler",
+            "sha256": "af7a41e665092474b42568ee2536fd43ac80548149a5c2edd35aa8600085f0a7"
+          },
+          {
+            "name": "llvm",
+            "sha256": "49ae780991e0c10b0bfb9e02738fe0751b6e18cc2a38ceb72ea9e148bf13eb53"
+          }
+        ],
+        "harnessSha256": "9596844336b7169b166a2a88d86190ca0c95d6e5efaad547c72a9d80a0192af6",
+        "builtMode": "tsc dist ESM",
+        "node": "v26.7.0",
+        "nodeFlags": ["--expose-gc"],
+        "nodeOptions": "",
+        "host": {
+          "architecture": "arm64",
+          "platform": "darwin",
+          "release": "24.5.0",
+          "cpu": "Apple M1 Max"
+        },
+        "target": "aarch64-apple-darwin",
+        "profile": {
+          "target": {
+            "_tag": "Target",
+            "revision": 1,
+            "id": "aarch64-apple-darwin",
+            "kind": "Native",
+            "architecture": "aarch64",
+            "operatingSystem": "darwin",
+            "abi": "apple",
+            "objectFormat": "macho",
+            "pointerSize": 8,
+            "pointerAlignment": 8,
+            "endianness": "little",
+            "primitives": {
+              "bool": {
+                "size": 4,
+                "alignment": 4
+              },
+              "cBool": {
+                "size": 1,
+                "alignment": 1
+              },
+              "i8": {
+                "size": 1,
+                "alignment": 1
+              },
+              "i16": {
+                "size": 2,
+                "alignment": 2
+              },
+              "i32": {
+                "size": 4,
+                "alignment": 4
+              },
+              "i64": {
+                "size": 8,
+                "alignment": 8
+              },
+              "f32": {
+                "size": 4,
+                "alignment": 4
+              },
+              "f64": {
+                "size": 8,
+                "alignment": 8
+              },
+              "cLong": {
+                "size": 8,
+                "alignment": 8
+              }
+            },
+            "stackAlignment": 16,
+            "dataAddressSpace": 0,
+            "toolchainClass": "darwin",
+            "defaultCpu": "generic",
+            "supportedCpus": ["generic"],
+            "supportedFeatures": ["crc", "crypto", "fp-armv8", "lse", "neon"]
+          },
+          "cpu": {
+            "model": "generic",
+            "features": ["fp-armv8", "neon"]
+          },
+          "libc": "system",
+          "artifact": "executable",
+          "entry": {
+            "kind": "default"
+          },
+          "link": "dynamic",
+          "codeModel": "small",
+          "relocation": "pic",
+          "optimization": "none",
+          "debug": true,
+          "safety": "checked",
+          "threading": "single",
+          "sanitizers": [],
+          "unwind": "none",
+          "runtime": {
+            "kind": "default"
+          },
+          "_tag": "CompilationProfile",
+          "identity": "21:CompilationProfile.v1520:19:CompilationFacts.v1327:17:TargetDescription1:120:aarch64-apple-darwin6:Native7:aarch646:darwin5:apple5:macho1:81:86:little2:161:06:darwin7:generic16:5:Array7:generic41:5:Array3:crc6:crypto8:fp-armv83:lse4:neon137:5:Array12:4:bool1:41:413:5:cBool1:11:113:5:cLong1:81:811:3:f321:41:411:3:f641:81:811:3:i161:21:211:3:i321:41:411:3:i641:81:810:2:i81:11:140:3:cpu7:generic23:5:Array8:fp-armv84:neon13:10:deployment6:system10:executable9:7:default7:dynamic5:small3:pic4:none4:true7:checked6:single7:5:Array4:none9:7:default7:5:Array",
+          "parameters": []
+        },
+        "request": {
+          "mode": "debug",
+          "support": false
+        },
+        "cache": "disabled: direct NativeProgram.emit of freshly realized MIR; no Driver cache",
+        "sources": [
+          {
+            "id": "lexer/Lexer",
+            "sha256": "708ca22eb457c97f32704713e465bb3af07b19278f169153d7fb062bc845cd27"
+          },
+          {
+            "id": "lexer/LexicalDiagnostic",
+            "sha256": "293a4ac9d055694b4a4fb73b732aaac530c0e637c57004fa226e4bd443d5853d"
+          },
+          {
+            "id": "lexer/Span",
+            "sha256": "f040c37030ad3954c55ea30edc9df164e83831b3c0dc5e3102fce91b81f24536"
+          },
+          {
+            "id": "lexer/Token",
+            "sha256": "bf220e1c79926c110d6224328ce3e69cca1c2a67aa403c90d777072928dc2dd9"
+          },
+          {
+            "id": "main",
+            "sha256": "5ac5b495990f696cf4fb22f3d686a3d8852c07171ce5ead9189526217f683993"
+          },
+          {
+            "id": "silk/allocator",
+            "sha256": "f5b95171c42ee17aef4bee14c04672fc8faa9b70b12236500f2eb845252b72bf"
+          },
+          {
+            "id": "silk/bool",
+            "sha256": "fe5ffd619bfefef88c2fcd21db585ae1fbce0e6cca9dee5922c8435b88e3a03d"
+          },
+          {
+            "id": "silk/bytes",
+            "sha256": "347eb2a4f6f4497158a3d807bc08d6a0496a288ed739168a444d1c7d57a23e8d"
+          },
+          {
+            "id": "silk/char",
+            "sha256": "f379bc92c941529f5c89ed9fdcda35cf29fc92a65d505e16ddd24e45bdd8a1c4"
+          },
+          {
+            "id": "silk/effect",
+            "sha256": "7690e2b449b8fcbf68bbf020bb278a8946abb647c788042a0160dfacab36aafd"
+          },
+          {
+            "id": "silk/f32",
+            "sha256": "68cf92b9e464e95eb845e6496d5eca0cd48d4c9853d18f5363388b23ddd34a2d"
+          },
+          {
+            "id": "silk/f64",
+            "sha256": "d49b701bcc4c28426fcfbe938aaf5abad26a78e5b8261f72f451d65ea796def4"
+          },
+          {
+            "id": "silk/filesystem",
+            "sha256": "edd9e1b0ac5b86ca9be34d07df40f4a3cca5af7035466aac1be5e517055dd6f5"
+          },
+          {
+            "id": "silk/format",
+            "sha256": "c0251e9beb65050dc077b26a042bee6d0340615755ca8f4b538ee994bae704d5"
+          },
+          {
+            "id": "silk/host_input",
+            "sha256": "35c5fbd4d2562b6bf8def964f024b5f227389ae081425c331f1a9cdfd346d196"
+          },
+          {
+            "id": "silk/i16",
+            "sha256": "0af817a817ff5df143a11583f2055d4ec8343ffb44c8e0b8c06b891b76191fc7"
+          },
+          {
+            "id": "silk/i32",
+            "sha256": "ec8e7d6601910a3dadf5002e2f10f9696e6f6240f8a995fb0655f433bef18741"
+          },
+          {
+            "id": "silk/i64",
+            "sha256": "e99df8401fa4f5a548b413e86897b0a4bd6959e6ed134e24455d84cce23894f8"
+          },
+          {
+            "id": "silk/i8",
+            "sha256": "e8e6a963a8848c93b2f3e2db94bc6c41ce173c3ac87c1f7cb03447fa6574a002"
+          },
+          {
+            "id": "silk/isize",
+            "sha256": "f0e8b415b23237223b84ae39ca62c2d8bf03953f4e71acb18db83460cdc47b10"
+          },
+          {
+            "id": "silk/layout",
+            "sha256": "50b0930ffea89c615df6d97fd20c497cb99db3b71a1e84fe8b2dbd2ba07da78f"
+          },
+          {
+            "id": "silk/logger",
+            "sha256": "34ef4068a69e978eb0ef46d45fb6c10c01e872a1d38ccbe6241bb68acef512f7"
+          },
+          {
+            "id": "silk/monotonic_clock",
+            "sha256": "13b6a9797870b5469ccea8c71c35842f95960efcdc982c40f200f11233a41315"
+          },
+          {
+            "id": "silk/native_descriptor",
+            "sha256": "451c49c134f20fb15954647f8426983e1ace85eed9023a8ebe477090d6146239"
+          },
+          {
+            "id": "silk/native_filesystem",
+            "sha256": "e29aa4740a1bbe8664e930fde6e106720624fff75d6898d4213a392b8b18108c"
+          },
+          {
+            "id": "silk/option",
+            "sha256": "38cf4ffdb4385d552d1baffb199afb02354bf69610fc57c99844af1c702060b0"
+          },
+          {
+            "id": "silk/order",
+            "sha256": "d05a4c4390f9d088a8a9c5fd6067ec6347bd5b974bb0ae0e7dbc9990622e8546"
+          },
+          {
+            "id": "silk/os_filesystem",
+            "sha256": "6e648189768fd34ff316dd9fdff4fde35e3545aa3927ce8e5b95c03c3b981fe1"
+          },
+          {
+            "id": "silk/os_host_input",
+            "sha256": "7434ab7652720c994f026d1e5afaf700f23621a4c7043468f56d69ded877cd45"
+          },
+          {
+            "id": "silk/os_writer",
+            "sha256": "96e4556da05bcfb52c4563ad882bd22e998531814d5d0b82a6b7e7ac9e8d8583"
+          },
+          {
+            "id": "silk/pointer",
+            "sha256": "906cb54e7e04c44bc364c0bd846c00400f829f762b7563b8d36f457aae9de327"
+          },
+          {
+            "id": "silk/raw_buffer",
+            "sha256": "72e6a4d25b331c264d921ffa09b2153b31586556a0a6028331afc36aee07fdda"
+          },
+          {
+            "id": "silk/reflect",
+            "sha256": "18df1ce27325e94f7588eb28b77eb0f19233e6958566e5a9737bf795aa400be9"
+          },
+          {
+            "id": "silk/result",
+            "sha256": "d5f23027661dc4b7dfabc9035d84cd6c0792f5e548d1918b29871fbf6a24286a"
+          },
+          {
+            "id": "silk/slot",
+            "sha256": "0e3b79dfcd79b2ddb41da32f54654ec3a39f379232321000ca993d69a6932279"
+          },
+          {
+            "id": "silk/static_sequence",
+            "sha256": "63775f601e568c0183c6cd28d7702332af4cf89f3b479d1073080a2b3cf0c97e"
+          },
+          {
+            "id": "silk/static_text",
+            "sha256": "625d6c11d3c045afb61ab5c2d23969a0bdc49fbcf563a8716b5526a6e53b34f6"
+          },
+          {
+            "id": "silk/string",
+            "sha256": "d53f07f11665c82c5313c63d1a5a42fe29c4c8432116d99ab8638842a8b98836"
+          },
+          {
+            "id": "silk/system_clock",
+            "sha256": "4242a221b19874a2179c2b50c7587a778af4d273edae2dbcca2b9eebad315ed6"
+          },
+          {
+            "id": "silk/target",
+            "sha256": "fbbac11f87d2466f28e7e3955d719675b33d0e24e74e79e1f39a83712ed251d8"
+          },
+          {
+            "id": "silk/u16",
+            "sha256": "baa8eb673386d3476fa4738726ba7940edd671d285b9ecce9ab95dbdda06f7d2"
+          },
+          {
+            "id": "silk/u32",
+            "sha256": "017ee3bf1b9806c91817ac36d2415e38f3963b6f8c24e00e1a8727c494a9eece"
+          },
+          {
+            "id": "silk/u64",
+            "sha256": "fbb21c4bbc2f1576576fae50b3f27f4b6474bf9ba2b6bf24c7b905fab780d64c"
+          },
+          {
+            "id": "silk/u8",
+            "sha256": "e422752e7f1686e3d3f8eb4b23003d6e77fac173f55abecd4fa7c2bd9f6c6943"
+          },
+          {
+            "id": "silk/usize",
+            "sha256": "5f59bd6a99d051c5495e76282845f1ac8c72c2fb8280252f147cf007b85b0e99"
+          },
+          {
+            "id": "silk/vector",
+            "sha256": "78b13e0860d0b4d85ea78b77465451c7528199fe2b0a217802d796d26894cbae"
+          },
+          {
+            "id": "silk/writer",
+            "sha256": "9e91c8b4884ba7839f1ab8c010c1f41b40a3d5478800955a00b75bb1ba6f93e4"
+          },
+          {
+            "id": "Stream",
+            "sha256": "902feda55b96f32b97841186b9a451928255306549a60876e4867c07ef16a882"
+          }
+        ],
+        "diagnostics": [],
+        "mirViolations": [],
+        "verifier": "Verify.verify returned no violations; NativeProgram.emit fails otherwise",
+        "realizedSymbolCount": 347,
+        "mirOperationCount": 6526,
+        "inventorySha256": "3cc88440c6c44876fb3084d2d2781c633d6ab747dd751d18dd30b6c85bdfd1d2",
+        "timings": [
+          3085.3674580000006, 2713.721749999999, 2614.419332999998, 2595.4722919999986,
+          2591.815375000002, 2588.6072910000003, 2551.7209589999984
+        ],
+        "constructionMs": 2591.815375000002,
+        "peakRssKiB": 1905776,
+        "bitcodeSha256": "a8a09802bbd4ebb45bfa785fb689606563b91957d458ea6b8f5f71f2ccdc7a25"
+      },
+      "memory": [
+        {
+          "peakRssKiB": 1182112,
+          "bitcodeSha256": "a8a09802bbd4ebb45bfa785fb689606563b91957d458ea6b8f5f71f2ccdc7a25",
+          "inventorySha256": "3cc88440c6c44876fb3084d2d2781c633d6ab747dd751d18dd30b6c85bdfd1d2"
+        },
+        {
+          "peakRssKiB": 1219280,
+          "bitcodeSha256": "a8a09802bbd4ebb45bfa785fb689606563b91957d458ea6b8f5f71f2ccdc7a25",
+          "inventorySha256": "3cc88440c6c44876fb3084d2d2781c633d6ab747dd751d18dd30b6c85bdfd1d2"
+        },
+        {
+          "peakRssKiB": 1064064,
+          "bitcodeSha256": "a8a09802bbd4ebb45bfa785fb689606563b91957d458ea6b8f5f71f2ccdc7a25",
+          "inventorySha256": "3cc88440c6c44876fb3084d2d2781c633d6ab747dd751d18dd30b6c85bdfd1d2"
+        },
+        {
+          "peakRssKiB": 1355360,
+          "bitcodeSha256": "a8a09802bbd4ebb45bfa785fb689606563b91957d458ea6b8f5f71f2ccdc7a25",
+          "inventorySha256": "3cc88440c6c44876fb3084d2d2781c633d6ab747dd751d18dd30b6c85bdfd1d2"
+        },
+        {
+          "peakRssKiB": 1247696,
+          "bitcodeSha256": "a8a09802bbd4ebb45bfa785fb689606563b91957d458ea6b8f5f71f2ccdc7a25",
+          "inventorySha256": "3cc88440c6c44876fb3084d2d2781c633d6ab747dd751d18dd30b6c85bdfd1d2"
+        }
+      ]
+    }
+  ]
+}

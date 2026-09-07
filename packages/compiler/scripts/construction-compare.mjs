@@ -7,8 +7,31 @@ if (!baselinePath || !candidatePath)
   throw new Error('Usage: node construction-compare.mjs BASELINE_DIRECTORY CANDIDATE_DIRECTORY')
 const baseline = JSON.parse(readFileSync(resolve(baselinePath, 'samples.json'), 'utf8'))
 const candidate = JSON.parse(readFileSync(resolve(candidatePath, 'samples.json'), 'utf8'))
-if (baseline.results.length !== 3 || candidate.results.length !== 3)
-  throw new Error('Incomplete benchmark run')
+for (const report of [baseline, candidate]) {
+  if (
+    report.schemaVersion !== 1 ||
+    report.warmups !== 2 ||
+    report.measuredSamples !== 5 ||
+    !isDeepStrictEqual(
+      report.results
+        .map((r) => r.name)
+        .sort((left, right) => {
+          if (left === right) return 0
+          return left < right ? -1 : 1
+        }),
+      ['arithmetic', 'lexer', 'minimal'],
+    )
+  )
+    throw new Error('Incomplete benchmark run')
+  for (const result of report.results) {
+    if (
+      result.timing.timings.length !== 7 ||
+      result.memory.length !== 5 ||
+      result.timing.timings.some((duration) => !Number.isFinite(duration) || duration < 0)
+    )
+      throw new Error('Invalid sample inventory')
+  }
+}
 const results = baseline.results.map((base) => {
   const next = candidate.results.find((entry) => entry.name === base.name)
   if (next === undefined) throw new Error(`Missing ${base.name}`)
@@ -30,6 +53,10 @@ const results = baseline.results.map((base) => {
     if (!isDeepStrictEqual(base.timing[key], next.timing[key]))
       throw new Error(`${base.name}: incomparable ${key}`)
   }
+  const compiler = (entry) =>
+    entry.timing.builtIdentity.find((artifact) => artifact.name === 'compiler')?.sha256
+  if (compiler(base) === undefined || compiler(base) !== compiler(next))
+    throw new Error(`${base.name}: compiler build changed`)
   const inventoryEqual = readFileSync(resolve(baselinePath, `${base.name}-inventory.json`)).equals(
     readFileSync(resolve(candidatePath, `${base.name}-inventory.json`)),
   )
@@ -58,5 +85,5 @@ const report = {
   passed: results.every((r) => r.timePass && r.rssPass && r.inventoryEqual && r.bitcodeEqual),
 }
 writeFileSync(resolve(candidatePath, 'comparison.json'), `${JSON.stringify(report, null, 2)}\n`)
-console.log(JSON.stringify(report, null, 2))
+process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
 if (!report.passed) process.exitCode = 1

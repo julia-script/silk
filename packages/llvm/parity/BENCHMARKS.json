@@ -52,5 +52,17 @@
     "improvementPercent": 0.66,
     "retainEffectFnUntraced": false,
     "productionDecision": "Production actor operations remain Effect.fn; byte packing stays imperative behind Bitcode.encode."
+  },
+  "constructionEvidence": {
+    "issue": "JUL-154",
+    "documentation": "packages/compiler/benchmarks/construction/README.md",
+    "comparison": "packages/compiler/benchmarks/construction/evidence/comparison.json",
+    "paths": [
+      "internal/BuilderState.ts",
+      "internal/FunctionBodyState/registry.ts",
+      "internal/FunctionBodyState/InstructionEncoder.ts",
+      "internal/FunctionBodyState/primitives.ts"
+    ],
+    "decision": "Retain bounded synchronous Result instruction transitions and in-place freezing of draft-owned instruction containers; measured medium construction reductions exceed 40% with identical bitcode."
   }
 }

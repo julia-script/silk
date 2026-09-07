@@ -1,0 +1,43 @@
+{
+  "baseline": "dd4510fa0f42dc436da6d17e476cbc91dba593fe",
+  "candidate": "63eff3ed34794c49287c7d0331083e12f13bd3d5",
+  "results": [
+    {
+      "workload": "minimal",
+      "baselineMs": 0.9382080000000315,
+      "candidateMs": 0.959041999999954,
+      "ratio": 1.022206163238772,
+      "timePass": true,
+      "baselinePeakRssKiB": 240112,
+      "candidatePeakRssKiB": 242016,
+      "rssPass": true,
+      "inventoryEqual": true,
+      "bitcodeEqual": true
+    },
+    {
+      "workload": "arithmetic",
+      "baselineMs": 2222.006874999999,
+      "candidateMs": 1228.5126249999994,
+      "ratio": 0.5528842591902421,
+      "timePass": true,
+      "baselinePeakRssKiB": 879552,
+      "candidatePeakRssKiB": 632272,
+      "rssPass": true,
+      "inventoryEqual": true,
+      "bitcodeEqual": true
+    },
+    {
+      "workload": "lexer",
+      "baselineMs": 4859.082999999999,
+      "candidateMs": 2591.815375000002,
+      "ratio": 0.5333959874733571,
+      "timePass": true,
+      "baselinePeakRssKiB": 1800560,
+      "candidatePeakRssKiB": 1219280,
+      "rssPass": true,
+      "inventoryEqual": true,
+      "bitcodeEqual": true
+    }
+  ],
+  "passed": true
+}

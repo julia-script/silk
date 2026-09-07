@@ -5,6 +5,39 @@ through the completed module, immediately before `Verify.verify`. It excludes ve
 bitcode encoding, source analysis, MIR realization, object generation, and linking. No timing
 threshold is part of `pnpm check`.
 
+## Recorded result
+
+On Node v26.7.0, Apple M1 Max, arm64 macOS (Darwin 24.5.0), with `--expose-gc`:
+
+| Workload                                        | Baseline median | Candidate median |                        Construction reduction |
+| ----------------------------------------------- | --------------: | ---------------: | --------------------------------------------: |
+| One-function control                            |        0.938 ms |         0.959 ms | -2.2% (0.021 ms regression; passes allowance) |
+| Arithmetic (161 symbols, 13,764 MIR operations) |    2,222.007 ms |     1,228.513 ms |                                         44.7% |
+| Lexer (347 symbols, 6,526 MIR operations)       |    4,859.083 ms |     2,591.815 ms |                                         46.7% |
+
+All three bitcode artifacts and symbol/MIR inventories match byte for byte; all diagnostics and
+verifier results are unchanged. Median whole-process peak RSS is within the 10% bound for each
+workload. These are same-host observations, not portable absolute thresholds or an attribution
+of memory savings to construction.
+
+[evidence/comparison.json](evidence/comparison.json) records both revisions and every gate.
+`evidence/baseline-samples.json` and `evidence/candidate-samples.json` retain every warmup,
+measured duration, fresh-process RSS observation, and environment identity. The corresponding
+`*-artifacts.tar.gz` archives contain the exact bitcode, full inventories, and a separate
+construction-only lexer CPU profile plus its sample metadata. `recorded-harness.mjs` in each
+archive is the exact harness at `63eff3ed`, matching the recorded SHA-256; subsequent tooling
+changes make buffer decoding, configuration reads, and ordering explicit without changing the
+measured module-construction boundary. Archives can be extracted with
+`tar -xzf`; copy the corresponding sample JSON to `samples.json` in each extracted directory
+to rerun `construction-compare.mjs`.
+
+The separate cold profiles attribute 809 ms of baseline sampled self time to `Result.js` and
+626 ms to `InstructionEncoder.js`, versus 281 ms and 236 ms in the candidate. Garbage-collector
+sampled time also falls from 1,327 ms to 767 ms. These profiles identify the allocation-heavy
+instruction path; their cold timings and inspector overhead are excluded from the performance
+gates. The complete module totals and aggregation method are in
+[evidence/attribution.json](evidence/attribution.json).
+
 ## Frozen workloads
 
 - `lexer/`: experimental lexer copied from the untracked `compiler/src` and `compiler/silk.toml`
@@ -23,7 +56,9 @@ already contains the August 31 removal of per-operation semaphores and instructi
 
 ## Run
 
-Build using the pinned workspace dependencies:
+The benchmark requires Node 22.15 or newer for synchronous module loader hooks. Use the recorded
+Node version and flags when reproducing this comparison. Build using the pinned workspace
+dependencies:
 
 ```sh
 pnpm install --frozen-lockfile

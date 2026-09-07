@@ -105,7 +105,12 @@ if (!process.argv.includes('--sample')) {
           source: readFileSync(resolve(llvmDist, url.slice(llvmPrefix.length)), 'utf8'),
         }
       if (url === new URL('../dist/NativeProgram.js', import.meta.url).href) {
-        let source = String(loaded.source)
+        if (loaded.source === undefined || loaded.source === null)
+          throw new Error('Missing built JavaScript text')
+        let source =
+          typeof loaded.source === 'string'
+            ? loaded.source
+            : new TextDecoder().decode(loaded.source)
         const start = 'const builder = yield* Builder.make('
         const end = 'const violations = yield* Verify.verify(builder);'
         for (const anchor of [start, end])
@@ -135,6 +140,10 @@ if (!process.argv.includes('--sample')) {
     },
   })
   const Effect = await import('effect/Effect')
+  const Config = await import('effect/Config')
+  const nodeOptions = await Effect.runPromise(
+    Config.string('NODE_OPTIONS').pipe(Config.withDefault('')),
+  )
   const Analysis = await import('../dist/Analysis.js')
   const SourceFile = await import('../dist/SourceFile.js')
   const SourceResolver = await import('../dist/SourceResolver.js')
@@ -144,7 +153,10 @@ if (!process.argv.includes('--sample')) {
   const sources = new Map(
     readdirSync(sourceRoot, { recursive: true })
       .filter((name) => name.endsWith('.silk'))
-      .sort()
+      .sort((left, right) => {
+        if (left === right) return 0
+        return left < right ? -1 : 1
+      })
       .map((name) => [name.slice(0, -5), readFileSync(resolve(sourceRoot, name))]),
   )
   const main = sources.get('main')
@@ -205,7 +217,10 @@ if (!process.argv.includes('--sample')) {
     const hash = createHash('sha256')
     for (const file of readdirSync(root, { recursive: true })
       .filter((file) => file.endsWith('.js'))
-      .sort())
+      .sort((left, right) => {
+        if (left === right) return 0
+        return left < right ? -1 : 1
+      }))
       hash.update(file).update(readFileSync(resolve(root, file)))
     return { name, sha256: hash.digest('hex') }
   })
@@ -224,7 +239,7 @@ if (!process.argv.includes('--sample')) {
     builtMode: 'tsc dist ESM',
     node: process.version,
     nodeFlags: process.execArgv,
-    nodeOptions: process.env.NODE_OPTIONS ?? '',
+    nodeOptions,
     host: {
       architecture: process.arch,
       platform: process.platform,
