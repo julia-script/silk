@@ -13,4 +13,4 @@
 ## 3. Integration and publication
 
 - [x] 3.1 Run six independent native conformance lanes and record exact supplies/results; retain real filesystem effects in shared native acceptance.
-- [ ] 3.2 Run typecheck, format:check, lint, test, check and release:candidate in order; record results and publish with gh stack without merging.
+- [x] 3.2 Run typecheck, format:check, lint, test, check and release:candidate in order; record results and publish with gh stack without merging.
