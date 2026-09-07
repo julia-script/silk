@@ -141,6 +141,9 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-rc.112(effect@4.0.0-rc.112)(vitest@4.1.10)
+      '@silklang/lsp':
+        specifier: workspace:*
+        version: link:../../packages/lsp
       '@tailwindcss/postcss':
         specifier: ^4.3.3
         version: 4.3.3
