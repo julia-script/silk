@@ -98,7 +98,7 @@ export const assertActive = (
       actual: fiber,
     })
   }
-  return Result.succeed(undefined)
+  return Result.void
 }
 
 /** @internal */

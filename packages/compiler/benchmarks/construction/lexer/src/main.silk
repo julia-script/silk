@@ -1,0 +1,100 @@
+import lexer.Lexer {Lexer}
+
+import Stream {Stream}
+
+import lexer.Token as TokenOutput {Token}
+
+import silk.allocator {Allocator, OutOfMemoryError}
+
+import silk.bytes {Bytes}
+
+import silk.effect {Effect}
+
+import silk.filesystem {FileError, FileSystem, Path}
+
+import silk.host_input {HostInput, HostInputError}
+
+import silk.option {Option}
+
+import silk.os_filesystem {OsFileSystem}
+
+import silk.os_host_input {OsHostInput}
+
+import silk.os_writer {StdoutWriter}
+
+import silk.result {Result}
+
+import silk.string {InvalidUtf8}
+
+import silk.usize as usize
+
+import silk.writer {Writer, WriterError}
+
+/// A command-line contract failure before source reading begins.
+pub union ApplicationError {
+  InvalidArgumentCount {pub actual: usize},
+  InvalidWorkingDirectoryEncoding,
+}
+
+effect fn invalidArgumentCount(actual: usize) -> never ! ApplicationError {
+  fail ApplicationError.InvalidArgumentCount {actual: actual}
+}
+
+effect fn invalidWorkingDirectoryEncoding() -> never ! ApplicationError {
+  fail ApplicationError.InvalidWorkingDirectoryEncoding
+}
+
+effect fn sourceArgument() -> Bytes
+! ApplicationError | HostInputError | OutOfMemoryError
+? &mut HostInput | &mut Allocator {
+  let count = run HostInput.argumentCount()
+  if count != usize.add(0, 2) {
+    return run invalidArgumentCount(count)
+  }
+  let found = run HostInput.argument(usize.ONE)
+  return match move found {
+    Option<Bytes>.Some {value} => move value
+    Option<Bytes>.None => run invalidArgumentCount(count)
+  }
+}
+
+effect fn printTokens<'source>(lexer: &mut Lexer<'source>) -> () ! WriterError ? &mut Writer {
+  while true {
+    let taken = run Stream.take(lexer)
+    if let Option<Token>.Some {value} = move taken {
+      run TokenOutput.write(move value)
+    } else {
+      break
+    }
+  }
+  return ()
+}
+
+effect fn program() -> ()
+! ApplicationError | HostInputError | OutOfMemoryError | FileError | WriterError
+? &mut HostInput | &mut Allocator | &mut Writer {
+  let argument = run sourceArgument()
+  let workingDirectory = run HostInput.workingDirectory()
+  let validated = match move HostInput.text(Bytes.asSlice(&workingDirectory)) {
+    Result<string, InvalidUtf8>.Success {value: _} => ()
+    Result<string, InvalidUtf8>.Failure {error: _} => run invalidWorkingDirectoryEncoding()
+  }
+  let mut files = run OsFileSystem.make(Bytes.asSlice(&workingDirectory))
+  let root = run Path.root()
+  let path = run Path.joinUtf8(&root, Bytes.asSlice(&argument))
+  let source = run FileSystem.readFile(&path)
+    |> Effect.provideMut<FileSystem>(&mut files)
+  let mut lexer = Lexer.make(Bytes.asSlice(&source))
+  return run printTokens(&mut lexer)
+}
+
+pub effect fn main() -> ()
+! ApplicationError | HostInputError | OutOfMemoryError | FileError | WriterError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut input = OsHostInput.make()
+  let mut output = StdoutWriter.make()
+  return run program()
+    |> Effect.provideMut<HostInput>(&mut input)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+    |> Effect.provideMut<Writer>(&mut output)
+}

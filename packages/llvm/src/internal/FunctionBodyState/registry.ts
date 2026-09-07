@@ -82,20 +82,23 @@ export const create = (
  * primitive: `Effect.withFiber` reads the current fiber synchronously (`fiber.id` is the same
  * number `Effect.fiberId` yields) and the draft lookup, active/ownership assertion, and
  * transition all complete inside that one step instead of bouncing through the fiber run loop
- * for every stage.
+ * for every stage. JUL-154 construction profiles also attribute allocation cost to operand
+ * resolution and commit validation below; their direct Result transitions are bounded to this
+ * instruction loop. See packages/compiler/benchmarks/construction/README.md for evidence.
  *
  * @internal
  */
 export const builder = (
   self: FunctionBodyActor.FunctionBody,
 ): Effect.Effect<Builder.Builder, LlvmError> =>
-  Effect.withFiber((fiber) =>
-    Effect.fromResult(
-      Result.flatMap(lookup(self, 'FunctionBody.builder'), (draft) =>
-        Result.map(assertActive(draft, fiber.id, 'FunctionBody.builder'), () => draft.builder),
-      ),
-    ),
-  )
+  Effect.withFiber((fiber) => {
+    const found = lookup(self, 'FunctionBody.builder')
+    if (Result.isFailure(found)) return Effect.fail(found.failure)
+    const active = assertActive(found.success, fiber.id, 'FunctionBody.builder')
+    return Result.isFailure(active)
+      ? Effect.fail(active.failure)
+      : Effect.succeed(found.success.builder)
+  })
 
 /** @internal */
 export const mutate = <A>(
@@ -103,13 +106,14 @@ export const mutate = <A>(
   operation: string,
   transition: (draft: Draft) => Result.Result<A, LlvmError>,
 ): Effect.Effect<A, LlvmError> =>
-  Effect.withFiber((fiber) =>
-    Effect.fromResult(
-      Result.flatMap(lookup(self, operation), (draft) =>
-        Result.flatMap(assertActive(draft, fiber.id, operation), () => transition(draft)),
-      ),
-    ),
-  )
+  Effect.withFiber((fiber) => {
+    const found = lookup(self, operation)
+    if (Result.isFailure(found)) return Effect.fail(found.failure)
+    const active = assertActive(found.success, fiber.id, operation)
+    return Result.isFailure(active)
+      ? Effect.fail(active.failure)
+      : Effect.fromResult(transition(found.success))
+  })
 
 /** @internal */
 export const mutateModule = <A>(
@@ -117,13 +121,17 @@ export const mutateModule = <A>(
   operation: string,
   transition: (draft: Draft, module: BuilderState.MutableState) => Result.Result<A, LlvmError>,
 ): Effect.Effect<A, LlvmError> =>
-  Effect.withFiber((fiber) =>
-    Effect.flatMap(Effect.fromResult(lookup(self, operation)), (draft) =>
-      BuilderState.mutate(draft.builder, operation, (module) =>
-        Result.flatMap(assertActive(draft, fiber.id, operation), () => transition(draft, module)),
-      ),
-    ),
-  )
+  Effect.withFiber((fiber) => {
+    const found = lookup(self, operation)
+    if (Result.isFailure(found)) return Effect.fail(found.failure)
+    const draft = found.success
+    return Effect.fromResult(
+      BuilderState.transitionResult(draft.builder, operation, (module) => {
+        const active = assertActive(draft, fiber.id, operation)
+        return Result.isFailure(active) ? Result.fail(active.failure) : transition(draft, module)
+      }),
+    )
+  })
 
 /** @internal */
 export const close = (
@@ -177,15 +185,16 @@ const resolveLocalValue = (
 ): Result.Result<
   { readonly operand: FunctionBodyDescription.Operand; readonly type: number },
   LlvmError
-> =>
-  Result.gen(function* () {
-    const entry = yield* localEntry(valueEntries, draft, value, operation, 'value')
-    const description = draft.values[entry.index]
-    if (description === undefined) {
-      return yield* fail(operation, 'Local value table entry is missing', value)
-    }
-    return { operand: { _tag: 'Local', value: entry.index }, type: description.type }
+> => {
+  const entry = localEntry(valueEntries, draft, value, operation, 'value')
+  if (Result.isFailure(entry)) return Result.fail(entry.failure)
+  const description = draft.values[entry.success.index]
+  if (description === undefined) return fail(operation, 'Local value table entry is missing', value)
+  return Result.succeed({
+    operand: { _tag: 'Local', value: entry.success.index },
+    type: description.type,
   })
+}
 
 /** @internal */
 export const resolveOperand = (
@@ -196,22 +205,17 @@ export const resolveOperand = (
 ): Result.Result<
   { readonly operand: FunctionBodyDescription.Operand; readonly type: number },
   LlvmError
-> =>
-  Result.gen(function* () {
-    if (value._tag === 'Value') return yield* resolveLocalValue(draft, value, operation)
-    const index = yield* Handle.resolve(
-      draft.builder,
-      draft.moduleOwner,
-      value,
-      'Constant',
-      operation,
-    )
-    const constant = module.constants.descriptions[index]
-    if (constant === undefined) {
-      return yield* fail(operation, 'Constant table entry is missing', value)
-    }
-    return { operand: { _tag: 'Constant', constant: index }, type: constant.type }
+> => {
+  if (value._tag === 'Value') return resolveLocalValue(draft, value, operation)
+  const index = Handle.resolve(draft.builder, draft.moduleOwner, value, 'Constant', operation)
+  if (Result.isFailure(index)) return Result.fail(index.failure)
+  const constant = module.constants.descriptions[index.success]
+  if (constant === undefined) return fail(operation, 'Constant table entry is missing', value)
+  return Result.succeed({
+    operand: { _tag: 'Constant', constant: index.success },
+    type: constant.type,
   })
+}
 
 /** @internal */
 export const typeAt = (
@@ -593,78 +597,71 @@ export const makeSwitchHandle = (
 export const validate = Effect.fnUntraced(function* (
   self: FunctionBodyActor.FunctionBody,
 ): Effect.fn.Return<FunctionBodyDescription.Snapshot, LlvmError> {
-  return yield* mutate(self, 'FunctionBody.validate', (draft) =>
-    Result.gen(function* () {
-      if (draft.blocks.length === 0) {
-        return yield* fail(
+  return yield* mutate(self, 'FunctionBody.validate', (draft) => {
+    if (draft.blocks.length === 0) {
+      return fail('FunctionBody.validate', 'A function body requires at least one block', self)
+    }
+    for (let blockIndex = 0; blockIndex < draft.blocks.length; blockIndex += 1) {
+      const block = draft.blocks[blockIndex]
+      if (block === undefined || block.instructions.length === 0) {
+        return fail('FunctionBody.validate', 'Every block must contain a terminator', blockIndex)
+      }
+      const terminatorIndex = block.instructions.at(-1)
+      const terminator =
+        terminatorIndex === undefined ? undefined : draft.instructions[terminatorIndex]
+      if (terminator === undefined || !FunctionBodyDescription.isTerminator(terminator)) {
+        return fail(
           'FunctionBody.validate',
-          'A function body requires at least one block',
-          self,
+          'Every block must end in exactly one terminator',
+          blockIndex,
         )
       }
-      for (let blockIndex = 0; blockIndex < draft.blocks.length; blockIndex += 1) {
-        const block = draft.blocks[blockIndex]
-        if (block === undefined || block.instructions.length === 0) {
-          return yield* fail(
+      for (const instructionIndex of block.instructions) {
+        const instruction = draft.instructions[instructionIndex]
+        if (instruction === undefined) {
+          return fail(
             'FunctionBody.validate',
-            'Every block must contain a terminator',
-            blockIndex,
+            'Block references a missing instruction',
+            instructionIndex,
           )
         }
-        const terminatorIndex = block.instructions.at(-1)
-        const terminator =
-          terminatorIndex === undefined ? undefined : draft.instructions[terminatorIndex]
-        if (terminator === undefined || !FunctionBodyDescription.isTerminator(terminator)) {
-          return yield* fail(
+        if (instruction._tag === 'Switch' && !instruction.sealed) {
+          return fail(
             'FunctionBody.validate',
-            'Every block must end in exactly one terminator',
-            blockIndex,
+            'Switch construction was not finalized',
+            instructionIndex,
           )
         }
-        for (const instructionIndex of block.instructions) {
-          const instruction = draft.instructions[instructionIndex]
-          if (instruction === undefined) {
-            return yield* fail(
+        if (instruction._tag === 'Phi') {
+          if (!instruction.sealed) {
+            return fail(
               'FunctionBody.validate',
-              'Block references a missing instruction',
+              'Phi construction was not finalized',
               instructionIndex,
             )
           }
-          if (instruction._tag === 'Switch' && !instruction.sealed) {
-            return yield* fail(
+          const incoming = new Set(instruction.incoming.map((entry) => entry.block))
+          if (
+            incoming.size !== block.predecessors.size ||
+            [...block.predecessors].some((predecessor) => !incoming.has(predecessor))
+          ) {
+            return fail(
               'FunctionBody.validate',
-              'Switch construction was not finalized',
-              instructionIndex,
+              'Phi incoming blocks must cover every predecessor once',
+              {
+                block: blockIndex,
+                predecessors: [...block.predecessors],
+                incoming: [...incoming],
+              },
             )
-          }
-          if (instruction._tag === 'Phi') {
-            if (!instruction.sealed) {
-              return yield* fail(
-                'FunctionBody.validate',
-                'Phi construction was not finalized',
-                instructionIndex,
-              )
-            }
-            const incoming = new Set(instruction.incoming.map((entry) => entry.block))
-            if (
-              incoming.size !== block.predecessors.size ||
-              [...block.predecessors].some((predecessor) => !incoming.has(predecessor))
-            ) {
-              return yield* fail(
-                'FunctionBody.validate',
-                'Phi incoming blocks must cover every predecessor once',
-                {
-                  block: blockIndex,
-                  predecessors: [...block.predecessors],
-                  incoming: [...incoming],
-                },
-              )
-            }
           }
         }
       }
-      yield* validateInstructions(draft)
-      return Object.freeze({
+    }
+    const validated = validateInstructions(draft)
+    if (Result.isFailure(validated)) return Result.fail(validated.failure)
+    return Result.succeed(
+      Object.freeze({
         arguments: Object.freeze([...draft.arguments]),
         blocks: Object.freeze(
           draft.blocks.map((block) =>
@@ -697,9 +694,9 @@ export const validate = Effect.fnUntraced(function* (
           draft.metadata.map((attachments) => Object.freeze([...attachments])),
         ),
         debugLocations: Object.freeze([...draft.debugLocations]),
-      })
-    }),
-  )
+      }),
+    )
+  })
 })
 
 /** @internal */
