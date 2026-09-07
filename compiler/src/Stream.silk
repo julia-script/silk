@@ -1,0 +1,6 @@
+import silk.option {Option}
+
+/// A pull-based source that yields one value at a time.
+pub interface Stream<A, E, ?R> {
+  effect fn take(self: &mut Self) -> Option<A> ! E ? R
+}

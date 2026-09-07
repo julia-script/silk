@@ -1,0 +1,13 @@
+"text" "escaped\\\"quote" """multi
+line"""
+b"bytes\\x41" b"""byte
+block"""
+r"raw\\" r"""raw
+block"""
+'a' 'é' '\n' '\u{1f600}' '' 'ab'
+'source 'a1
+wat"body" wat"""body"""
+"unterminated
+b"unterminated
+r"unterminated
+"""unterminated
