@@ -1,3 +1,5 @@
+import * as Array from 'effect/Array'
+import * as Match from 'effect/Match'
 import * as Option from 'effect/Option'
 import * as Diagnostic from './Diagnostic.js'
 import * as ByteClass from './internal/ByteClass.js'
@@ -25,33 +27,6 @@ const isLineCommentStart = (bytes: ReadonlyArray<number>, index: number): boolea
 const isLiteralStart = (bytes: ReadonlyArray<number>, index: number): boolean =>
   LiteralForm.recognize(bytes, index) !== undefined
 
-const isPunctuation = (byte: number | undefined): boolean =>
-  byte === 0x28 ||
-  byte === 0x29 ||
-  byte === 0x7b ||
-  byte === 0x7d ||
-  byte === 0x5b ||
-  byte === 0x5d ||
-  byte === 0x3a ||
-  byte === 0x3b ||
-  byte === 0x2c ||
-  byte === 0x3d ||
-  byte === 0x2d ||
-  byte === 0x2b ||
-  byte === 0x2a ||
-  byte === 0x2f ||
-  byte === 0x25 ||
-  byte === 0x21 ||
-  byte === 0x3f ||
-  byte === 0x40 ||
-  byte === 0x3c ||
-  byte === 0x3e ||
-  byte === 0x7c ||
-  byte === 0x26 ||
-  byte === 0x5e ||
-  byte === 0x7e ||
-  byte === 0x2e
-
 const compoundPunctuationKind = (
   bytes: ReadonlyArray<number>,
   index: number,
@@ -78,9 +53,7 @@ const isSupportedTokenStart = (bytes: ReadonlyArray<number>, index: number): boo
     ByteClass.isIdentifierStart(byte) ||
     ByteClass.isDecimalDigit(byte) ||
     isLiteralStart(bytes, index) ||
-    isLineCommentStart(bytes, index) ||
-    compoundPunctuationKind(bytes, index) !== undefined ||
-    isPunctuation(byte)
+    punctuationKind(byte) !== 'Invalid'
   )
 }
 
@@ -138,12 +111,18 @@ const matchesSpelling = (
   return true
 }
 
-const keywordKind = (bytes: ReadonlyArray<number>, start: number, end: number): Token.TokenKind => {
-  for (const [spelling, kind] of keywordSpellings) {
-    if (matchesSpelling(bytes, start, end, spelling)) return kind
-  }
-  return 'Identifier'
-}
+// Length buckets avoid comparing an identifier against keywords it cannot possibly match.
+const keywordsByLength = Array.groupBy(keywordSpellings, ([spelling]) => String(spelling.length))
+
+const keywordKind = (bytes: ReadonlyArray<number>, start: number, end: number): Token.TokenKind =>
+  Array.findFirst(keywordsByLength[end - start] ?? [], ([spelling]) =>
+    matchesSpelling(bytes, start, end, spelling),
+  ).pipe(
+    Option.match({
+      onNone: () => 'Identifier',
+      onSome: ([, kind]) => kind,
+    }),
+  )
 
 const punctuationKind = (byte: number | undefined): Token.TokenKind => {
   switch (byte) {
@@ -246,6 +225,26 @@ const spanAt = (source: SourceFile.SourceFile, start: number, end: number): Sour
     () => new RangeError(`Lexer produced an invalid span [${start}, ${end})`),
   )
 
+/** Maps every duration rejection to its diagnostic at the rejected component's span. */
+const durationDiagnostic = (
+  source: SourceFile.SourceFile,
+  reason: DurationLiteral.InvalidReason,
+): Diagnostic.Diagnostic => {
+  const span = spanAt(source, reason.start, reason.end)
+  return Match.value(reason).pipe(
+    Match.tagsExhaustive({
+      InvalidAmount: () => Diagnostic.invalidDurationAmount(span),
+      InvalidDigitSeparator: () => Diagnostic.invalidDigitSeparator(span),
+      UnknownUnit: ({ spelling }) => Diagnostic.unknownDurationUnit(spelling, span),
+      RepeatedUnit: ({ unit }) => Diagnostic.repeatedDurationUnit(unit, span),
+      OutOfOrderUnit: ({ unit, previous }) =>
+        Diagnostic.outOfOrderDurationUnit(unit, previous, span),
+      SubordinateOutOfRange: ({ unit, amount, maximum }) =>
+        Diagnostic.subordinateDurationOutOfRange(unit, amount, maximum, span),
+    }),
+  )
+}
+
 /**
  * Classifies every source byte exactly once and always appends an empty EOF token.
  *
@@ -271,37 +270,7 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
     pushToken(parsed._tag === 'Valid' ? 'DurationLiteral' : 'InvalidDurationLiteral', start, index)
     if (parsed._tag === 'Valid') return true
 
-    const reason = parsed.reason
-    const reasonSpan = spanAt(source, reason.start, reason.end)
-    switch (reason._tag) {
-      case 'InvalidAmount':
-        diagnostics.push(Diagnostic.invalidDurationAmount(reasonSpan))
-        break
-      case 'InvalidDigitSeparator':
-        diagnostics.push(Diagnostic.invalidDigitSeparator(reasonSpan))
-        break
-      case 'UnknownUnit':
-        diagnostics.push(Diagnostic.unknownDurationUnit(reason.spelling, reasonSpan))
-        break
-      case 'RepeatedUnit':
-        diagnostics.push(Diagnostic.repeatedDurationUnit(reason.unit, reasonSpan))
-        break
-      case 'OutOfOrderUnit':
-        diagnostics.push(
-          Diagnostic.outOfOrderDurationUnit(reason.unit, reason.previous, reasonSpan),
-        )
-        break
-      case 'SubordinateOutOfRange':
-        diagnostics.push(
-          Diagnostic.subordinateDurationOutOfRange(
-            reason.unit,
-            reason.amount,
-            reason.maximum,
-            reasonSpan,
-          ),
-        )
-        break
-    }
+    diagnostics.push(durationDiagnostic(source, parsed.reason))
     return true
   }
 
@@ -446,9 +415,10 @@ export const lex = (source: SourceFile.SourceFile): LexicalResult => {
       continue
     }
 
-    if (isPunctuation(byte)) {
+    const punctuation = punctuationKind(byte)
+    if (punctuation !== 'Invalid') {
       index += 1
-      pushToken(punctuationKind(byte), start, index)
+      pushToken(punctuation, start, index)
       continue
     }
 
