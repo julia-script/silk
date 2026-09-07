@@ -11,5 +11,5 @@
 
 ## 3. Integration
 
-- [ ] 3.1 Preserve portable replacements/derived operations and native shared corpus, update generated docs/catalogs and verify no new Wasm imports.
-- [ ] 3.2 Run pnpm typecheck, format:check, lint, test, check and release:candidate; record exact outcomes and publish with gh stack.
+- [x] 3.1 Preserve portable replacements/derived operations and native shared corpus, update generated docs/catalogs and verify no new Wasm imports.
+- [x] 3.2 Run pnpm typecheck, format:check, lint, test, check and release:candidate; record exact outcomes and publish with gh stack.
