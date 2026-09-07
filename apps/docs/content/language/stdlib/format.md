@@ -24,10 +24,10 @@ Template parsing, field selection, and `Display` selection occur during compilat
 
 ### Display with defaults and explicit options
 
-This program writes `42..+42` to standard output and returns zero.
+This program formats `42..+42` through a portable discard writer. Supply a native
+`silk.os_writer.StdoutWriter` at an application edge to send the bytes to stdout.
 
 ```silk
-import silk.os_writer { StdoutWriter }
 import silk.effect { Effect }
 
 import silk.format { Alignment, Format, FormatOptions, Sign }
@@ -35,6 +35,16 @@ import silk.format { Alignment, Format, FormatOptions, Sign }
 import silk.option { Option }
 
 import silk.writer { Writer, WriterError }
+
+struct DiscardWriter {}
+impl Writer for DiscardWriter {
+  effect fn writeAll(self: &mut Self, val: &[u8]) -> () ! WriterError ? &mut Writer {
+    return ()
+  }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer {
+    return ()
+  }
+}
 
 effect fn render() -> () ! WriterError ? &mut Writer {
   let value = 42
@@ -53,7 +63,7 @@ effect fn render() -> () ! WriterError ? &mut Writer {
 }
 
 effect fn writeExample() -> () ! WriterError {
-  let mut writer = StdoutWriter.make()
+  let mut writer = DiscardWriter {}
   let completed = run render()
     |> Effect.provideMut<Writer>(&mut writer)
   return completed
@@ -401,17 +411,24 @@ failure preserves the prefix that the provider accepted.
 
 ##### Write a named argument pack
 
-This program writes `Hello, Julia. Age: 31` to standard output.
+This program formats `Hello, Julia. Age: 31` through a portable discard writer.
 
 ```silk
-import silk.os_writer { StdoutWriter }
 import silk.effect { Effect }
 
 import silk.format { Format }
 
 import silk.writer { Writer, WriterError }
 
-import silk.writer { Writer, WriterError }
+struct DiscardWriter {}
+impl Writer for DiscardWriter {
+  effect fn writeAll(self: &mut Self, val: &[u8]) -> () ! WriterError ? &mut Writer {
+    return ()
+  }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer {
+    return ()
+  }
+}
 
 effect fn render() -> () ! WriterError ? &mut Writer {
   let args = .{name: "Julia", age: 31}
@@ -419,7 +436,7 @@ effect fn render() -> () ! WriterError ? &mut Writer {
 }
 
 effect fn writeExample() -> () ! WriterError {
-  let mut writer = StdoutWriter.make()
+  let mut writer = DiscardWriter {}
   return run render()
     |> Effect.provideMut<Writer>(&mut writer)
 }

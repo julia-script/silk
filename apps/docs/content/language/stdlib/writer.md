@@ -23,33 +23,6 @@ tests can replace the provider for one lexical operation. Provider failure produ
 Native providers live in `silk.os_writer` and require selected Darwin or GNU libc. [`ignoreError`](#declaration-73696c6b2f7772697465723a3a5772697465722e69676e6f72654572726f72) removes the typed
 failure value and returns unit for a failed Effect.
 
-## Examples
-
-### Write one complete stdout message
-
-```silk
-import silk.os_writer { StdoutWriter }
-import silk.effect { Effect }
-
-import silk.writer { Writer, WriterError }
-
-effect fn writeMessage() -> ()
-! WriterError {
-  let mut writer = StdoutWriter.make()
-  return run Writer.writeAll(b"Silk\n")
-    |> Effect.provideMut<Writer>(&mut writer)
-}
-
-effect fn ignoreWriteFailure(error: WriterError) -> () {
-  return ()
-}
-
-pub fn main() -> i32 {
-  let completed = run Effect.catchAll(writeMessage(), ignoreWriteFailure)
-  return 42
-}
-```
-
 Import as `Writer` with `import silk.writer { Writer }`.
 
 Public declarations: 2.

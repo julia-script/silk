@@ -14,31 +14,6 @@
 //! Native providers live in `silk.os_writer` and require selected Darwin or GNU libc. [`ignoreError`] removes the typed
 //! failure value and returns unit for a failed Effect.
 //!
-//! # Examples
-//! ## Write one complete stdout message
-//!
-//! ```silk
-//! import silk.os_writer { StdoutWriter }
-//! import silk.effect { Effect }
-//!
-//! import silk.writer { Writer, WriterError }
-//!
-//! effect fn writeMessage() -> ()
-//! ! WriterError {
-//!   let mut writer = StdoutWriter.make()
-//!   return run Writer.writeAll(b"Silk\n")
-//!     |> Effect.provideMut<Writer>(&mut writer)
-//! }
-//!
-//! effect fn ignoreWriteFailure(error: WriterError) -> () {
-//!   return ()
-//! }
-//!
-//! pub fn main() -> i32 {
-//!   let completed = run Effect.catchAll(writeMessage(), ignoreWriteFailure)
-//!   return 42
-//! }
-//! ```
 
 import silk.effect { Effect }
 

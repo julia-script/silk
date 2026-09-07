@@ -430,7 +430,7 @@
     },
     {
       "identity": "packages/compiler/stdlib/silk/os_writer.silk",
-      "version": "sha256:5b472760893c98038e2c0f578ed41ff987eb5b1705eb9067406406d540179cbd"
+      "version": "sha256:96e4556da05bcfb52c4563ad882bd22e998531814d5d0b82a6b7e7ac9e8d8583"
     },
     {
       "identity": "packages/compiler/stdlib/silk/os_logger.silk",
@@ -442,7 +442,7 @@
     },
     {
       "identity": "packages/compiler/stdlib/silk/writer.silk",
-      "version": "sha256:b375b6ec03234b2ed733cf3b6ba33e33907f62b5517f33b36406749d6d1f0196"
+      "version": "sha256:9e91c8b4884ba7839f1ab8c010c1f41b40a3d5478800955a00b75bb1ba6f93e4"
     },
     {
       "identity": "packages/compiler/stdlib/silk/logger.silk",

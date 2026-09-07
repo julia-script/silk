@@ -12,6 +12,32 @@
 //! A failed write may have committed a prefix. Descriptors remain process-owned and are never
 //! closed by these providers. The module is empty on WebAssembly and no-libc profiles.
 
+//! # Examples
+//! ## Write one complete stdout message
+//!
+//! ```silk
+//! import silk.os_writer { StdoutWriter }
+//! import silk.effect { Effect }
+//!
+//! import silk.writer { Writer, WriterError }
+//!
+//! effect fn writeMessage() -> ()
+//! ! WriterError {
+//!   let mut writer = StdoutWriter.make()
+//!   return run Writer.writeAll(b"Silk\n")
+//!     |> Effect.provideMut<Writer>(&mut writer)
+//! }
+//!
+//! effect fn ignoreWriteFailure(error: WriterError) -> () {
+//!   return ()
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   let completed = run Effect.catchAll(writeMessage(), ignoreWriteFailure)
+//!   return 42
+//! }
+//! ```
+
 static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
   import silk.native_descriptor { NativeDescriptor }
   import silk.writer { Writer, WriterError }

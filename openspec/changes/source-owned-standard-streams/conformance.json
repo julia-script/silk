@@ -6,10 +6,10 @@
   "evidence": "Independent pinned header/signature/layout/constant and object checks, with deterministic foreign-boundary execution in debug and optimized modes. Real GNU ARM64 and x86-64 containers executed both modes.",
   "sources": {
     "packages/compiler/stdlib/silk/native_descriptor.silk": "451c49c134f20fb15954647f8426983e1ace85eed9023a8ebe477090d6146239",
-    "packages/compiler/stdlib/silk/os_writer.silk": "5b472760893c98038e2c0f578ed41ff987eb5b1705eb9067406406d540179cbd",
+    "packages/compiler/stdlib/silk/os_writer.silk": "96e4556da05bcfb52c4563ad882bd22e998531814d5d0b82a6b7e7ac9e8d8583",
     "packages/compiler/stdlib/silk/os_logger.silk": "bbb25a169add98fd23213abe4dacd75d8a47810b409260c5623d11837cc0eadb",
     "packages/compiler/stdlib/silk/os_standard_input.silk": "6ca9f59e76865fe1433c75a525f2e02fd1adace1deed4fda5492576d70551c23",
-    "packages/compiler/stdlib/silk/writer.silk": "b375b6ec03234b2ed733cf3b6ba33e33907f62b5517f33b36406749d6d1f0196",
+    "packages/compiler/stdlib/silk/writer.silk": "9e91c8b4884ba7839f1ab8c010c1f41b40a3d5478800955a00b75bb1ba6f93e4",
     "packages/compiler/stdlib/silk/logger.silk": "34ef4068a69e978eb0ef46d45fb6c10c01e872a1d38ccbe6241bb68acef512f7",
     "packages/compiler/stdlib/silk/standard_input.silk": "8793510f470416dac516c24ea92b4880791ef95df2e8a9a7bf6fec0528ae97c3",
     "packages/compiler/conformance/standard-streams/run.mjs": "d20784391f3fe6fe4a8f860f49ab170e4dfa432726279a6c367ad9d1f7abd247",
@@ -19,7 +19,7 @@
   "runs": [
     {
       "target": "aarch64-apple-darwin",
-      "reportSha256": "ce1fc95ff40817bbcc5da0b86cfdf44061652ec1eee19e2b092000d2c0127444",
+      "reportSha256": "87d174c10a5012b69a6abd094f96b1c7541b7117f71b3a098cb911ac776d697c",
       "headers": {
         "usr/include/unistd.h": "be3d2b42ce70c5934942bed0ad31d512e9226393140ea783fca887ea35324ab1",
         "usr/include/errno.h": "ff95a158e0799dcf0622e83882e64d88f1783b98a91d9b206bcba2a12f8425e6",
@@ -33,7 +33,7 @@
         {
           "optimization": "none",
           "executionStatus": 42,
-          "planIdentity": "5a94d89e83af2a408b0e80461b74e73007c5adb297730ae381da2f449b65bc04",
+          "planIdentity": "69f455962511be60bcae17e5a5b3fdbd38bbcf42d73b9f6271731d2018e86043",
           "foreignImports": ["__error", "read", "write"],
           "runtimeImports": [],
           "objectDigest": "45233cce03f52d81542d4faa908d34ea0384406be682ac65ce08b21f386f1f5c"
@@ -50,7 +50,7 @@
     },
     {
       "target": "x86_64-unknown-linux-gnu",
-      "reportSha256": "7df47ef5b4fc553891195ff7e40f64af8b9c914077a6d43627112832e4a4ca4e",
+      "reportSha256": "07c1e72c100a5dd7e3792b35a0442ec71514ee136acc27dbf322a04eca9348db",
       "headers": {
         "usr/include/unistd.h": "99eb4050035a1a816090762770f0843c728666745d7e727e64dc347d8a99ac28",
         "usr/include/errno.h": "c46073c84e5396855c6861272a8b02e352bb20d658bbfc12690e483a4be73053",
@@ -62,7 +62,7 @@
         {
           "optimization": "none",
           "executionStatus": 42,
-          "planIdentity": "83df86e4b4167350584f64ba7d58d18f87e51b14e5dd4d9e5598a74885bfff84",
+          "planIdentity": "e4d69afb54bbcd3728129d023cc010e0439a05344494e18ccacf59f2da67b25b",
           "foreignImports": ["__errno_location", "read", "write"],
           "runtimeImports": [],
           "objectDigest": "a26ba249f975a00cd973f5c9f90f82eb8171968bd8f8597fce4d1ebf6aac1971"
@@ -79,7 +79,7 @@
     },
     {
       "target": "aarch64-unknown-linux-gnu",
-      "reportSha256": "b5ba6b7b3ad762f71dad5325098598a75d61079497cfe937f35380f731618cc4",
+      "reportSha256": "6f83fe444a9989f6d712b0ad33269b5f1d2c9ab5dd6bb00219615b08e594fd6c",
       "headers": {
         "usr/include/unistd.h": "99eb4050035a1a816090762770f0843c728666745d7e727e64dc347d8a99ac28",
         "usr/include/errno.h": "c46073c84e5396855c6861272a8b02e352bb20d658bbfc12690e483a4be73053",
@@ -91,7 +91,7 @@
         {
           "optimization": "none",
           "executionStatus": 42,
-          "planIdentity": "3a5f465ddbef246d865884670b0f208a087cb9e945e8f32c357e12e6fe462d1a",
+          "planIdentity": "97a81675353a56d90dc1f6d6ff6ac9fe7e92878f01a8bab01be85469b29855cb",
           "foreignImports": ["__errno_location", "read", "write"],
           "runtimeImports": [],
           "objectDigest": "831a58464b4ab8a0530bd1b60c547cf6b823efc64aa4b26fbfa0adf8ccff097e"
