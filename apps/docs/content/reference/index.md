@@ -146,3 +146,4 @@ documentation remain separate from this reference.
 - [Native assembly and entry fragments](native-assembly.md)
 
 - [Native standard streams](./native-standard-streams)
+- [Native clocks](./native-clocks)

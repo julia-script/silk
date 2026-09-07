@@ -12,86 +12,24 @@
 //! # Gotchas
 //! The clock may move backwards when the operating system adjusts its external reference. Reachable
 //! operations support the current Unix-family native targets. Linux requires `glibc` 2.17 or later
-//! and needs no `librt` link. WebAssembly selection leaves this module empty.
+//! and needs no `librt` link. WebAssembly and no-libc selection leave this module empty.
 
-static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
-  import silk.i64 as i64
-  import silk.pointer { Pointer }
-  import silk.system_clock { SystemClock }
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.native_clock { NativeClock }
   import silk.system_clock { Instant }
-  import silk.u64 as u64
+  import silk.system_clock { SystemClock }
 
-  extern "C" struct Timespec {
-    seconds: i64
-    nanoseconds: i64
-  }
-
-  unsafe extern "C" fn clock_gettime(clock: i32, value: *mut Timespec) -> i32
-  unsafe extern "C" fn clock_getres(clock: i32, value: *mut Timespec) -> i32
-
-  const CLOCK_REALTIME: i32 = 0
-
-  /// A stateless Unix-family native provider of Unix-epoch time.
-  /// A failed, invalid, or unrepresentable clock result traps.
-  ///
-  /// # Details
-  ///
-  /// This declaration is absent from WebAssembly profiles.
+  /// A stateless native provider; construction makes no call and failed operations trap.
   pub struct OsSystemClock {}
 
   impl OsSystemClock {
-    effect fn now(self: &mut Self) -> Instant {
-      let mut seconds = i64.toI64(0)
-      let mut nanoseconds = i64.toI64(0)
-      let succeeded = run read(&mut seconds, &mut nanoseconds)
-      if succeeded { return SystemClock.make(seconds, nanoseconds) }
-      let invalid = 1 / 0
-      return SystemClock.make(seconds, nanoseconds)
-    }
-
-    effect fn getResolution(self: &mut Self) -> u64 {
-      let mut nanoseconds = u64.MIN
-      let succeeded = run readResolution(&mut nanoseconds)
-      if succeeded {
-        if nanoseconds > u64.MIN { return nanoseconds }
-      }
-      let invalid = 1 / 0
-      return nanoseconds
-    }
-  }
-
-  impl OsSystemClock {
-    /// Creates a native system-clock provider without reading the clock or installing it as a default.
-    pub fn make() -> OsSystemClock {
-      return OsSystemClock {}
-    }
-  }
-
-  effect fn read(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
-    let mut value = Timespec { seconds: i64.toI64(0), nanoseconds: i64.toI64(0) }
-    if unsafe clock_gettime(CLOCK_REALTIME, Pointer.fromMutRef(&mut value)) != 0 { return false }
-    if value.nanoseconds < 0 { return false }
-    if value.nanoseconds >= 1000000000 { return false }
-    seconds.* = value.seconds
-    nanoseconds.* = value.nanoseconds
-    return true
-  }
-
-  effect fn readResolution(nanoseconds: &mut u64) -> bool {
-    let mut value = Timespec { seconds: i64.toI64(0), nanoseconds: i64.toI64(0) }
-    if unsafe clock_getres(CLOCK_REALTIME, Pointer.fromMutRef(&mut value)) != 0 { return false }
-    if value.seconds < 0 { return false }
-    if value.nanoseconds < 0 { return false }
-    if value.nanoseconds >= 1000000000 { return false }
-    let billion = u64.toU64(1000000000)
-    let total = i64.toU64(value.seconds) * billion + i64.toU64(value.nanoseconds)
-    if total == u64.MIN { return false }
-    nanoseconds.* = total
-    return true
+    /// Creates a native clock provider without reading the clock or installing a default.
+    pub fn make() -> OsSystemClock { return OsSystemClock {} }
   }
 
   impl SystemClock for OsSystemClock {
-    now: OsSystemClock.now
-    getResolution: OsSystemClock.getResolution
+    effect fn now(self: &mut Self) -> Instant { return run NativeClock.now(false) }
+    effect fn getResolution(self: &mut Self) -> u64 { return run NativeClock.resolution(false) }
   }
 }

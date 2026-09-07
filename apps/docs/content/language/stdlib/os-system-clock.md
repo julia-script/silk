@@ -21,7 +21,7 @@ unrepresentable resolution is a fatal trap because the public service has no fai
 
 The clock may move backwards when the operating system adjusts its external reference. Reachable
 operations support the current Unix-family native targets. Linux requires `glibc` 2.17 or later
-and needs no `librt` link. WebAssembly selection leaves this module empty.
+and needs no `librt` link. WebAssembly and no-libc selection leave this module empty.
 
 Import as `OsSystemClock` with `import silk.os_system_clock { OsSystemClock }`.
 
@@ -35,12 +35,7 @@ Public declarations: 1.
 pub struct OsSystemClock
 ```
 
-A stateless Unix-family native provider of Unix-epoch time.
-A failed, invalid, or unrepresentable clock result traps.
-
-### Details
-
-This declaration is absent from WebAssembly profiles.
+A stateless native provider; construction makes no call and failed operations trap.
 
 <a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a4f7353797374656d436c6f636b2e6d616b65"></a>
 
@@ -50,7 +45,7 @@ This declaration is absent from WebAssembly profiles.
 pub fn make() -> OsSystemClock
 ```
 
-Creates a native system-clock provider without reading the clock or installing it as a default.
+Creates a native clock provider without reading the clock or installing a default.
 
 <a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -65,7 +60,7 @@ impl SystemClock for OsSystemClock
 ### Operation `now`
 
 ```silk
-now = OsSystemClock.now
+now = OsSystemClock.impl@0.now
 ```
 
 <a id="declaration-73696c6b2f6f735f73797374656d5f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
@@ -73,5 +68,5 @@ now = OsSystemClock.now
 ### Operation `getResolution`
 
 ```silk
-getResolution = OsSystemClock.getResolution
+getResolution = OsSystemClock.impl@0.getResolution
 ```

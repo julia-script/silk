@@ -13,8 +13,8 @@ blocking deadlines. Use a scripted provider when tests need virtual advancement.
 
 ## Details
 
-Construction performs no host call. Reads, resolution queries, and absolute waits use three
-matching native intrinsics. `waitFor` performs exactly one starting read and uses checked
+Construction performs no host call. Reads, resolution queries, and absolute waits use selected
+ordinary libc declarations and source-owned policy. `waitFor` performs exactly one starting read and uses checked
 split-field deadline arithmetic. It then uses the same absolute-wait operation as `waitUntil`.
 
 ## Gotchas
@@ -22,7 +22,7 @@ split-field deadline arithmetic. It then uses the same absolute-wait operation a
 Marks and deadlines are meaningful only on this provider's monotonic timeline. Native waits
 block the calling host thread; they do not park one Fiber. Failure, malformed host output, or
 deadline overflow is a fatal trap. Linux requires `glibc` 2.17 or later and excludes system
-suspend time from this clock. macOS includes system suspend time. WebAssembly selection leaves this module empty.
+suspend time from this clock. macOS includes system suspend time. WebAssembly and no-libc selection leave this module empty.
 
 Import as `OsMonotonicClock` with `import silk.os_monotonic_clock { OsMonotonicClock }`.
 
@@ -36,11 +36,7 @@ Public declarations: 1.
 pub struct OsMonotonicClock
 ```
 
-A stateless Unix-family native provider of monotonic marks and blocking deadlines.
-
-### Gotchas
-
-A failed, invalid, or unrepresentable clock result traps. This declaration is absent from WebAssembly profiles.
+A stateless native provider; construction makes no call and failed operations trap.
 
 <a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a4f734d6f6e6f746f6e6963436c6f636b2e6d616b65"></a>
 
@@ -50,7 +46,7 @@ A failed, invalid, or unrepresentable clock result traps. This declaration is ab
 pub fn make() -> OsMonotonicClock
 ```
 
-Creates a native monotonic-clock provider without reading the clock or installing a default.
+Creates a native clock provider without reading the clock or installing a default.
 
 <a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -65,7 +61,7 @@ impl MonotonicClock for OsMonotonicClock
 ### Operation `now`
 
 ```silk
-now = OsMonotonicClock.now
+now = OsMonotonicClock.impl@0.now
 ```
 
 <a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
@@ -73,7 +69,7 @@ now = OsMonotonicClock.now
 ### Operation `getResolution`
 
 ```silk
-getResolution = OsMonotonicClock.getResolution
+getResolution = OsMonotonicClock.impl@0.getResolution
 ```
 
 <a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a32"></a>
@@ -81,7 +77,7 @@ getResolution = OsMonotonicClock.getResolution
 ### Operation `waitUntil`
 
 ```silk
-waitUntil = OsMonotonicClock.waitUntil
+waitUntil = OsMonotonicClock.impl@0.waitUntil
 ```
 
 <a id="declaration-73696c6b2f6f735f6d6f6e6f746f6e69635f636c6f636b3a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a33"></a>
@@ -89,5 +85,5 @@ waitUntil = OsMonotonicClock.waitUntil
 ### Operation `waitFor`
 
 ```silk
-waitFor = OsMonotonicClock.waitFor
+waitFor = OsMonotonicClock.impl@0.waitFor
 ```

@@ -270,18 +270,6 @@ import silk.option { Option }
 fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
 fn opened(handle: OsHandle) -> Option<OsHandle> { return Option.some<OsHandle>(move handle) }
 fn refused() -> Option<OsHandle> { return Option.none<OsHandle>() }
-effect fn monotonicClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
-  unsafe { return run Intrinsic.osMonotonicClockNow(seconds, nanoseconds) }
-  return false
-}
-effect fn monotonicClockResolution(nanoseconds: &mut u64) -> bool {
-  unsafe { return run Intrinsic.osMonotonicClockResolution(nanoseconds) }
-  return false
-}
-effect fn monotonicClockWaitUntil(seconds: i64, nanoseconds: i64) -> bool {
-  unsafe { return run Intrinsic.osMonotonicClockWaitUntil(seconds, nanoseconds) }
-  return false
-}
 effect fn randomFill(output: &mut [u8]) -> bool {
   unsafe { return run Intrinsic.osRandomFill(move output) }
   return false

@@ -1,0 +1,126 @@
+//! Selected libc clocks and source-owned canonical result and wait policy.
+//!
+//! # When to use
+//! Use [`NativeClock`] to implement the native SystemClock and MonotonicClock providers.
+//! Portable applications should require those replaceable services instead.
+//!
+//! # Details
+//! Selected declarations match the pinned Darwin/GNU clock ABI. Reads validate initialized
+//! Timespec records. Waits retain one deadline across interruptions; GNU uses direct status
+//! and Darwin captures errno only after a failed relative sleep.
+//!
+//! # Gotchas
+//! Operations trap on failed or invalid results and block the calling host thread during waits.
+//! Native declarations are absent on unsupported and no-libc profiles.
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+import silk.i64 as i64
+import silk.u64 as u64
+import silk.pointer { Pointer }
+import silk.system_clock { SystemClock, Instant }
+
+extern "C" struct Timespec {
+  seconds: i64
+  nanoseconds: i64
+}
+
+static if Intrinsic.targetOperatingSystem() == "darwin" {
+  unsafe extern "C" fn clock_gettime(clock: u32, value: *mut Timespec) -> i32 with Intrinsic.foreign(noCapture: ("value",))
+  unsafe extern "C" fn clock_getres(clock: u32, value: *mut Timespec) -> i32 with Intrinsic.foreign(noCapture: ("value",))
+  unsafe extern "C" fn nanosleep(request: *const Timespec, remaining: ?*mut Timespec) -> i32 with Intrinsic.foreign(noCapture: ("request", "remaining"))
+  unsafe extern "C" fn __error() -> *mut i32
+  unsafe fn currentError() -> i32 { unsafe { return Pointer.read<i32>(__error()) } }
+  const CLOCK_REALTIME: u32 = 0
+  const CLOCK_MONOTONIC: u32 = 6
+} else {
+  unsafe extern "C" fn clock_gettime(clock: i32, value: *mut Timespec) -> i32 with Intrinsic.foreign(noCapture: ("value",))
+  unsafe extern "C" fn clock_getres(clock: i32, value: *mut Timespec) -> i32 with Intrinsic.foreign(noCapture: ("value",))
+  unsafe extern "C" fn clock_nanosleep(clock: i32, flags: i32, request: *const Timespec, remaining: ?*mut Timespec) -> i32 with Intrinsic.foreign(noCapture: ("request", "remaining"))
+  const CLOCK_REALTIME: i32 = 0
+  const CLOCK_MONOTONIC: i32 = 1
+}
+
+/// Source-owned validation and blocking wait operations for selected native clocks.
+pub struct NativeClock {}
+impl NativeClock {
+  /// Reads canonical civil time, or a nonnegative mark on the native monotonic timeline.
+  ///
+  /// # Gotchas
+  /// A failed call or malformed result traps. `monotonic` selects the clock domain.
+  pub effect fn now(monotonic: bool) -> Instant {
+    let mut clock = CLOCK_REALTIME
+    if monotonic { clock = CLOCK_MONOTONIC }
+    let mut value = Timespec { seconds: i64.toI64(0), nanoseconds: i64.toI64(0) }
+    let status = unsafe clock_gettime(clock, Pointer.fromMutRef(&mut value))
+    if status != 0 { let invalid = 1 / 0 }
+    if monotonic && value.seconds < 0 { let invalid = 1 / 0 }
+    return SystemClock.make(value.seconds, value.nanoseconds)
+  }
+
+  /// Returns the positive nominal resolution of the selected clock in whole nanoseconds.
+  ///
+  /// # Gotchas
+  /// Failed calls, noncanonical fields, zero resolution and checked overflow trap.
+  pub effect fn resolution(monotonic: bool) -> u64 {
+    let mut clock = CLOCK_REALTIME
+    if monotonic { clock = CLOCK_MONOTONIC }
+    let mut value = Timespec { seconds: i64.toI64(0), nanoseconds: i64.toI64(0) }
+    let status = unsafe clock_getres(clock, Pointer.fromMutRef(&mut value))
+    if status != 0 { let invalid = 1 / 0 }
+    if value.seconds < 0 || value.nanoseconds < 0 || value.nanoseconds >= 1000000000 { let invalid = 1 / 0 }
+    let billion = u64.toU64(1000000000)
+    let seconds = i64.toU64(value.seconds)
+    let fraction = i64.toU64(value.nanoseconds)
+    if seconds > u64.MAX / billion { let invalid = 1 / 0 }
+    let whole = seconds * billion
+    if fraction > u64.MAX - whole { let invalid = 1 / 0 }
+    let total = whole + fraction
+    if total == u64.MIN { let invalid = 1 / 0 }
+    return total
+  }
+
+  /// Blocks the host thread until a nonnegative deadline on this native monotonic timeline.
+  ///
+  /// # Details
+  /// Retries retain the original deadline. GNU errors come from direct status; Darwin relative
+  /// sleeps recompute the remaining interval after success or interruption.
+  ///
+  /// # Gotchas
+  /// A negative deadline, failed call or unrepresentable result traps. This does not park a Fiber.
+  pub effect fn waitUntil(when: Instant) -> () {
+    let seconds = SystemClock.seconds(&when)
+    let nanoseconds = SystemClock.nanoseconds(&when)
+    if seconds < 0 { let invalid = 1 / 0 }
+    static if Intrinsic.targetOperatingSystem() == "linux" {
+      let deadline = Timespec { seconds: seconds, nanoseconds: nanoseconds }
+      while true {
+        let status = unsafe clock_nanosleep(CLOCK_MONOTONIC, 1, Pointer.fromRef(&deadline), Pointer.null<Timespec>())
+        if status == 0 { return () }
+        if status != 4 { let invalid = 1 / 0 }
+      }
+    } else {
+      while true {
+        let now = run NativeClock.now(true)
+        let nowSeconds = SystemClock.seconds(&now)
+        let nowNanoseconds = SystemClock.nanoseconds(&now)
+        if nowSeconds > seconds || (nowSeconds == seconds && nowNanoseconds >= nanoseconds) { return () }
+        let mut remainingSeconds = seconds - nowSeconds
+        let mut remainingNanoseconds = nanoseconds - nowNanoseconds
+        if remainingNanoseconds < 0 {
+          remainingSeconds = remainingSeconds - 1
+          remainingNanoseconds = remainingNanoseconds + 1000000000
+        }
+        let remaining = Timespec { seconds: remainingSeconds, nanoseconds: remainingNanoseconds }
+        let status = unsafe nanosleep(Pointer.fromRef(&remaining), Pointer.null<Timespec>())
+        if status != 0 {
+          if status == -1 {
+            let nativeError = unsafe currentError()
+            if nativeError != 4 { let invalid = 1 / 0 }
+          } else { let invalid = 1 / 0 }
+        }
+      }
+    }
+    return ()
+  }
+}
+}

@@ -133,7 +133,7 @@ it.effect('does not admit targetPointerBits into runtime HIR', () =>
   }),
 )
 
-it.effect('checks native-only intrinsics after reachability for LLVM-to-Wasm', () =>
+it.effect('rejects selected native providers and preserves portable LLVM-to-Wasm imports', () =>
   Effect.gen(function* () {
     const unused = yield* snapshot(
       `import silk.os_monotonic_clock
@@ -1035,5 +1035,31 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`),
     const artifact = yield* Analysis.codegen(self, { mode: 'release' })
     assert.deepEqual(artifact.foreignImports, [])
     assert.deepEqual(artifact.nativeRuntimeSymbols, [])
+  }),
+)
+
+it.effect('keeps native clock providers absent from no-libc selections', () =>
+  Effect.gen(function* () {
+    const source = `import silk.os_system_clock { OsSystemClock }
+import silk.os_monotonic_clock { OsMonotonicClock }
+import silk.native_clock { NativeClock }
+pub fn main() -> i32 { return 42 }`
+    for (const target of Target.native) {
+      const self = yield* Analysis.makeRealized({
+        root: SourceFile.make('clock-selection/main', encoder.encode(source)),
+        configuration: {
+          profile: { target: target.id, artifact: 'object', libc: 'none', entry: { kind: 'none' } },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.deepEqual(
+        Analysis.diagnostics(self).map((value) => [value.code, value.span.start, value.span.end]),
+        ['OsSystemClock', 'OsMonotonicClock', 'NativeClock'].map((name) => [
+          'SEM0014',
+          source.indexOf(name),
+          source.indexOf(name) + name.length,
+        ]),
+      )
+      assert.deepEqual(self.instances.foreignCalls, [])
+    }
   }),
 )

@@ -188,6 +188,12 @@
     "namespace": "MonotonicClock"
   },
   {
+    "module": "silk/native_clock",
+    "path": "silk/native_clock.silk",
+    "namespace": "NativeClock",
+    "aliases": []
+  },
+  {
     "module": "silk/native_descriptor",
     "path": "silk/native_descriptor.silk",
     "namespace": "NativeDescriptor"

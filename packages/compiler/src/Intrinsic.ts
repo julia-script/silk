@@ -174,9 +174,6 @@ const admission = (family: string): AdmissionCategory => {
 
 /** The canonical standard-library consumer of one OS boundary operation. */
 const osConsumer = (spelling: string): string => {
-  if (spelling === 'monotonicClockNow') return 'silk/os_monotonic_clock.now'
-  if (spelling === 'monotonicClockResolution') return 'silk/os_monotonic_clock.getResolution'
-  if (spelling === 'monotonicClockWaitUntil') return 'silk/os_monotonic_clock.waitUntil'
   if (spelling === 'randomFill') return 'silk/os_random.fillBytes'
   if (spelling === 'processExecute') return 'silk/os_child_process.execute'
   if (spelling === 'processCapture') return 'silk/os_child_process.capture'
@@ -676,9 +673,7 @@ const catchContract = CallableContract.make({
 })
 const byteSlice = Type.slice('Shared', 'u8', contractLifetime('byteSlice'))
 const mutableI32 = Type.reference('Exclusive', 'i32', contractLifetime('mutableI32'))
-const mutableI64 = Type.reference('Exclusive', 'i64', contractLifetime('mutableI64'))
 const mutableU32 = Type.reference('Exclusive', 'u32', contractLifetime('mutableU32'))
-const mutableU64 = Type.reference('Exclusive', 'u64', contractLifetime('mutableU64'))
 const mutableUsize = Type.reference('Exclusive', 'usize', contractLifetime('mutableUsize'))
 const mutableHandle = Type.reference('Exclusive', Type.osHandle, contractLifetime('mutableHandle'))
 
@@ -1312,42 +1307,6 @@ const intrinsicOperations = Object.freeze([
   ...Scalar.all().flatMap(scalarOperations),
   ...stringOperations,
   ...Object.freeze([
-    osBuiltin({
-      name: 'monotonicClockNow',
-      operation: 'OsMonotonicClockNow',
-      parameters: Object.freeze([
-        valueParameter('seconds', '&mut i64'),
-        valueParameter('nanoseconds', '&mut i64'),
-      ]),
-      semanticParameters: Object.freeze([mutableI64, mutableI64]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'outputs are initialized only on success and form a canonical mark on one monotonic timeline',
-    }),
-    osBuiltin({
-      name: 'monotonicClockResolution',
-      operation: 'OsMonotonicClockResolution',
-      parameters: Object.freeze([valueParameter('nanoseconds', '&mut u64')]),
-      semanticParameters: Object.freeze([mutableU64]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'output is initialized only on success and is a positive whole-nanosecond resolution',
-    }),
-    osBuiltin({
-      name: 'monotonicClockWaitUntil',
-      operation: 'OsMonotonicClockWaitUntil',
-      parameters: Object.freeze([
-        valueParameter('seconds', 'i64'),
-        valueParameter('nanoseconds', 'i64'),
-      ]),
-      semanticParameters: Object.freeze(['i64', 'i64']),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'deadline is a canonical non-negative mark from the selected monotonic timeline and success means it has been reached',
-    }),
     osBuiltin({
       name: 'randomFill',
       operation: 'OsRandomFill',

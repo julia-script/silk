@@ -295,6 +295,7 @@ jobs:
           node packages/compiler/conformance/integer-variadics/run.mjs
           node packages/compiler/conformance/llvm-helpers/run.mjs
           node packages/compiler/conformance/standard-streams/run.mjs
+          node packages/compiler/conformance/native-clocks/run.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -304,5 +305,6 @@ jobs:
             .scratch/integer-variadics
             .scratch/llvm-helpers
             .scratch/standard-streams
+            .scratch/native-clocks
             .scratch/gnu-packages.txt
           if-no-files-found: error

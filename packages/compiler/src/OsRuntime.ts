@@ -20,9 +20,6 @@ export const symbols = Object.freeze([
   'silk_os_host_argument_v1',
   'silk_os_host_variable_v1',
   'silk_os_host_working_directory_v1',
-  'silk_os_monotonic_clock_now_v1',
-  'silk_os_monotonic_clock_resolution_v1',
-  'silk_os_monotonic_clock_wait_until_v1',
   'silk_os_random_fill_v1',
 ] as const)
 
@@ -390,59 +387,6 @@ static int silk_host_copy(const unsigned char *value, size_t length,
 static int silk_host_absent(int *reason, uint32_t *native_code) {
   silk_protocol_failure(reason, native_code, SILK_NOT_FOUND);
   return 0;
-}
-`
-
-const clockPrelude = `
-#define SILK_CLOCK_NANOSECONDS_PER_SECOND UINT64_C(1000000000)
-`
-
-const clockReadPrelude = `
-static int silk_clock_read(clockid_t clock, int64_t *seconds, int64_t *nanoseconds) {
-  struct timespec value;
-  if (clock_gettime(clock, &value) != 0 || value.tv_nsec < 0 ||
-      value.tv_nsec >= (long)SILK_CLOCK_NANOSECONDS_PER_SECOND) return 0;
-  int64_t checked_seconds = (int64_t)value.tv_sec;
-  if ((time_t)checked_seconds != value.tv_sec) return 0;
-  int64_t checked_nanoseconds = (int64_t)value.tv_nsec;
-  *seconds = checked_seconds;
-  *nanoseconds = checked_nanoseconds;
-  return 1;
-}
-`
-
-const clockResolutionPrelude = `
-static int silk_clock_resolution(clockid_t clock, uint64_t *nanoseconds) {
-  struct timespec value;
-  if (clock_getres(clock, &value) != 0 || value.tv_sec < 0 || value.tv_nsec < 0 ||
-      value.tv_nsec >= (long)SILK_CLOCK_NANOSECONDS_PER_SECOND) return 0;
-  uint64_t seconds = (uint64_t)value.tv_sec;
-  if ((time_t)seconds != value.tv_sec ||
-      seconds > UINT64_MAX / SILK_CLOCK_NANOSECONDS_PER_SECOND) return 0;
-  uint64_t total = seconds * SILK_CLOCK_NANOSECONDS_PER_SECOND;
-  uint64_t fraction = (uint64_t)value.tv_nsec;
-  if (fraction > UINT64_MAX - total) return 0;
-  total += fraction;
-  if (total == 0) return 0;
-  *nanoseconds = total;
-  return 1;
-}
-`
-
-const clockWaitPrelude = `
-static int silk_clock_fraction_valid(int64_t nanoseconds) {
-  return nanoseconds >= 0 && nanoseconds < (int64_t)SILK_CLOCK_NANOSECONDS_PER_SECOND;
-}
-
-static int silk_clock_deadline(int64_t seconds, int64_t nanoseconds,
-                               struct timespec *deadline) {
-  if (seconds < 0 || !silk_clock_fraction_valid(nanoseconds)) return 0;
-  time_t checked_seconds = (time_t)seconds;
-  long checked_nanoseconds = (long)nanoseconds;
-  if ((int64_t)checked_seconds != seconds || (int64_t)checked_nanoseconds != nanoseconds) return 0;
-  deadline->tv_sec = checked_seconds;
-  deadline->tv_nsec = checked_nanoseconds;
-  return 1;
 }
 `
 
@@ -995,54 +939,6 @@ int silk_os_host_working_directory_v1(unsigned char *output, size_t capacity, si
   return 0;
 }
 `,
-  silk_os_monotonic_clock_now_v1: `
-int32_t silk_os_monotonic_clock_now_v1(int64_t *seconds, int64_t *nanoseconds) {
-  return (int32_t)silk_clock_read(CLOCK_MONOTONIC, seconds, nanoseconds);
-}
-`,
-  silk_os_monotonic_clock_resolution_v1: `
-int32_t silk_os_monotonic_clock_resolution_v1(uint64_t *nanoseconds) {
-  return (int32_t)silk_clock_resolution(CLOCK_MONOTONIC, nanoseconds);
-}
-`,
-  silk_os_monotonic_clock_wait_until_v1: `
-int32_t silk_os_monotonic_clock_wait_until_v1(int64_t seconds, int64_t nanoseconds) {
-  struct timespec deadline;
-  if (!silk_clock_deadline(seconds, nanoseconds, &deadline)) return 0;
-#if defined(__linux__)
-  for (;;) {
-    int status = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &deadline, NULL);
-    if (status == 0) return 1;
-    if (status != EINTR) return 0;
-  }
-#else
-  for (;;) {
-    int64_t now_seconds;
-    int64_t now_nanoseconds;
-    if (!silk_clock_read(CLOCK_MONOTONIC, &now_seconds, &now_nanoseconds) || now_seconds < 0)
-      return 0;
-    if (now_seconds > seconds ||
-        (now_seconds == seconds && now_nanoseconds >= nanoseconds)) return 1;
-    int64_t remaining_seconds = seconds - now_seconds;
-    int64_t remaining_nanoseconds = nanoseconds - now_nanoseconds;
-    if (remaining_nanoseconds < 0) {
-      remaining_seconds -= 1;
-      remaining_nanoseconds += (int64_t)SILK_CLOCK_NANOSECONDS_PER_SECOND;
-    }
-    struct timespec remaining = {
-      .tv_sec = (time_t)remaining_seconds,
-      .tv_nsec = (long)remaining_nanoseconds,
-    };
-    if ((int64_t)remaining.tv_sec != remaining_seconds ||
-        (int64_t)remaining.tv_nsec != remaining_nanoseconds) return 0;
-    int status = nanosleep(&remaining, NULL);
-    if (status == 0) continue;
-    if (status == -1 && errno == EINTR) continue;
-    return 0;
-  }
-#endif
-}
-`,
   silk_os_random_fill_v1: `
 int32_t silk_os_random_fill_v1(unsigned char *output, size_t length) {
   if (length == 0) return 1;
@@ -1092,40 +988,27 @@ const hostInputSymbols: ReadonlySet<Symbol> = new Set([
   'silk_os_host_variable_v1',
   'silk_os_host_working_directory_v1',
 ])
-const clockSymbols: ReadonlySet<Symbol> = new Set([
-  'silk_os_monotonic_clock_now_v1',
-  'silk_os_monotonic_clock_resolution_v1',
-  'silk_os_monotonic_clock_wait_until_v1',
-])
-const clockReadSymbols: ReadonlySet<Symbol> = new Set(['silk_os_monotonic_clock_now_v1'])
-const clockResolutionSymbols: ReadonlySet<Symbol> = new Set([
-  'silk_os_monotonic_clock_resolution_v1',
-])
-const clockWaitSymbols: ReadonlySet<Symbol> = new Set(['silk_os_monotonic_clock_wait_until_v1'])
 const randomSymbols: ReadonlySet<Symbol> = new Set(['silk_os_random_fill_v1'])
 
 const includes = (groups: {
   readonly filesystem: boolean
   readonly childProcess: boolean
   readonly hostInput: boolean
-  readonly clock: boolean
-  readonly clockWait: boolean
   readonly random: boolean
 }): string => {
   const legacy = groups.filesystem || groups.childProcess || groups.hostInput
   const selected: ReadonlyArray<readonly [boolean, string]> = [
     [groups.filesystem, '<dirent.h>'],
-    [legacy || groups.clockWait, '<errno.h>'],
+    [legacy, '<errno.h>'],
     [groups.filesystem || groups.childProcess, '<fcntl.h>'],
     [groups.childProcess, '<poll.h>'],
     [legacy, '<stddef.h>'],
-    [legacy || groups.clock, '<stdint.h>'],
+    [legacy, '<stdint.h>'],
     [groups.filesystem || groups.childProcess || groups.hostInput, '<stdlib.h>'],
     [groups.filesystem || groups.childProcess || groups.hostInput, '<string.h>'],
     [groups.filesystem, '<sys/stat.h>'],
     [groups.filesystem || groups.childProcess, '<sys/types.h>'],
     [groups.childProcess, '<sys/wait.h>'],
-    [groups.clock, '<time.h>'],
     [groups.filesystem || groups.childProcess || groups.hostInput, '<unistd.h>'],
   ]
   return selected
@@ -1143,10 +1026,6 @@ export const source = (selected: ReadonlyArray<string>): string => {
     filesystem: has(filesystemSymbols),
     childProcess: has(childProcessSymbols),
     hostInput: has(hostInputSymbols),
-    clock: has(clockSymbols),
-    clockRead: has(clockReadSymbols),
-    clockResolution: has(clockResolutionSymbols),
-    clockWait: has(clockWaitSymbols),
     random: has(randomSymbols),
   })
   const legacy = groups.filesystem || groups.childProcess || groups.hostInput
@@ -1157,10 +1036,6 @@ export const source = (selected: ReadonlyArray<string>): string => {
     groups.filesystem ? filesystemPrelude : '',
     groups.childProcess ? childProcessPrelude : '',
     groups.hostInput ? hostInputPrelude : '',
-    groups.clock ? clockPrelude : '',
-    groups.clockRead || groups.clockWait ? clockReadPrelude : '',
-    groups.clockResolution ? clockResolutionPrelude : '',
-    groups.clockWait ? clockWaitPrelude : '',
     groups.random ? randomPrelude : '',
     ...retained.map((symbol) => implementations[symbol]),
   ]

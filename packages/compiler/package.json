@@ -581,7 +581,8 @@
     "test:foreign-contracts": "node conformance/foreign-contracts/run.mjs",
     "test:native-boundary": "node conformance/native-boundary/run.mjs",
     "test:llvm-helpers": "node conformance/llvm-helpers/run.mjs",
-    "test:standard-streams": "node conformance/standard-streams/run.mjs"
+    "test:standard-streams": "node conformance/standard-streams/run.mjs",
+    "test:native-clocks": "node conformance/native-clocks/run.mjs"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.112",
