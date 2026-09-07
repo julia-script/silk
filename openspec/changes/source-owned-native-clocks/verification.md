@@ -9,3 +9,5 @@ Verified 2026-09-06 with LLVM/Clang 22.1.8 first on PATH.
 - The earlier full run caught the inherited stale landing-page logger example. The streams fix was rebased into this layer and all gates passed afterward. The subsequent rebase adds only streams verification documentation.
 
 Detailed logs: /tmp/silk-jul132-{workspace-typecheck,format,lint,test,check,release}.log.
+
+Publication: stacked PR #375; no merge performed.
