@@ -1,24 +1,56 @@
+//! A source-byte lexer that returns tokens through the `Stream` interface.
+//!
+//! # When to use
+//! Use [`Lexer`] to inspect tokens in source order without a token array.
+//! Create the lexer with `Lexer.make`, then call `Stream.take` for each token.
+//! The source must already be in memory; this module does not read files.
+//!
+//! # Details
+//! The lexer borrows the source and retains whitespace and comments as tokens.
+//! Token spans include the start byte offset and exclude the end byte offset.
+//! Invalid tokens carry lexical diagnostics, so a consumer can continue after an error.
+//! After the source, the stream returns one `Token.EndOfFile`, then `Option.None` on every call.
+//!
+//! # Gotchas
+//! Identifiers use ASCII letters, digits, and underscores. Span offsets count bytes, not Unicode scalars.
+//! Literal tokens identify source ranges; they do not contain decoded values.
+//! A literal token does not prove that its escapes or UTF-8 bytes are valid.
+
 import lexer.LexicalDiagnostic {LexicalDiagnostic}
-
 import lexer.Span {Span}
-
 import Stream {Stream}
-
 import lexer.Token {Token}
-
 import silk.option {Option}
-
 import silk.i32
-
 import silk.u8
 
-/// A pull lexer over one borrowed, immutable source byte sequence.
+/// A token stream over one borrowed, immutable source byte sequence.
+///
+/// # When to use
+///
+/// Use when a consumer needs each token in source order, including whitespace and comments.
+///
+/// # Details
+///
+/// `Lexer.make` borrows the complete source. `Stream.take` advances through it without a token array or source copy.
+/// Tokens contain byte spans and, for invalid input, lexical diagnostics.
+/// The lexer does not fail through the Effect error channel or require a provider.
+///
+/// # Gotchas
+///
+/// Keep the source alive for the lifetime of the lexer. Tokens contain offsets, not their source text.
+/// Empty input still produces one `Token.EndOfFile` before `Option.None`.
+/// A literal token does not validate decoded values, escapes, or UTF-8.
 pub struct Lexer<'source> {
+  // The caller owns these bytes; the lexer only advances its cursor.
   source: &'source [u8]
+  // The first unconsumed byte, always at or before source.length.
   cursor: usize
   eofEmitted: bool
 }
 
+// Each scanner returns one token and the first byte after that token.
+// A non-EOF scan must advance beyond its start, including on invalid input.
 struct Scanned {
   token: Token
   end: usize
@@ -30,11 +62,14 @@ enum LiteralCategory {
   Character,
 }
 
+// A closed literal includes its closing delimiter in end.
+// An unclosed literal stops before a line break or at the source end.
 struct Boundary {
   end: usize
   terminated: bool
 }
 
+// Keep token extent separate from validity so malformed separators stay in one token.
 struct DigitRun {
   end: usize
   digits: bool
@@ -52,12 +87,25 @@ union DurationResult {
 }
 
 impl<'source> Lexer<'source> {
-  /// Creates a lexer positioned before the first source byte.
+  /// Creates a lexer before the first byte without scanning or copying the source.
+  ///
+  /// # Details
+  ///
+  /// The returned lexer borrows `source`. Keep its owner alive until the lexer is no longer needed.
+  /// Call `Stream.take` with a mutable lexer reference to obtain each token.
+  /// Invalid source bytes become diagnostic tokens when read; construction does not validate the source.
+  ///
+  /// # Gotchas
+  ///
+  /// For empty input, the first read returns `Token.EndOfFile` at `0..0`.
+  /// Later reads return `Option.None`.
   pub fn make(source: &'source [u8]) -> Lexer<'source> {
     return Lexer<'source> {source: source, cursor: 0, eofEmitted: false}
   }
 }
 
+// Lookahead uses zero outside the source. Callers compare against nonzero ASCII bytes;
+// this helper does not distinguish an actual NUL byte from the source end.
 fn byteAtOrZero(source: &[u8], index: usize) -> u8 {
   if index < source.length {
     return source[index]
@@ -69,6 +117,8 @@ fn isWhitespace(byte: u8) -> bool {
   return byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r'
 }
 
+// Identifier recognition is deliberately ASCII-only. Non-ASCII source bytes reach
+// invalid-token recovery unless they occur inside a literal or comment.
 fn isAsciiLetter(byte: u8) -> bool {
   return (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z')
 }
@@ -93,6 +143,7 @@ fn hasTriple(source: &[u8], index: usize, delimiter: u8) -> bool {
   return hasPair(source, index, delimiter, delimiter) && byteAtOrZero(source, index + 2) == delimiter
 }
 
+// Require the whole spelling to match, so a keyword prefix does not split an identifier.
 fn matches(source: &[u8], start: usize, end: usize, spelling: &[u8]) -> bool {
   if end - start != spelling.length {
     return false
@@ -120,6 +171,9 @@ fn scanWhitespace(source: &[u8], start: usize) -> Scanned {
   return Scanned {token: Token.Whitespace {span: span}, end: end}
 }
 
+// The caller has consumed the decision for //, but not its bytes.
+// Keep the line break for the next whitespace token. //! and exactly /// introduce
+// documentation; four or more initial slashes remain an ordinary line comment.
 fn scanComment(source: &[u8], start: usize) -> Scanned {
   let mut end = start + 2
   while end < source.length && source[end] != '\n' && source[end] != '\r' {
@@ -266,6 +320,8 @@ fn isPunctuation(byte: u8) -> bool {
   return byte == '(' || byte == ')' || byte == '{' || byte == '}' || byte == '[' || byte == ']' || byte == ':' || byte == ';' || byte == ',' || byte == '=' || byte == '-' || byte == '+' || byte == '*' || byte == '/' || byte == '%' || byte == '!' || byte == '?' || byte == '@' || byte == '<' || byte == '>' || byte == '|' || byte == '&' || byte == '^' || byte == '~' || byte == '.'
 }
 
+// The caller has established isPunctuation. Test three bytes, then two, then one
+// to preserve the longest operator. The final dot case depends on that precondition.
 fn scanPunctuation(source: &[u8], start: usize) -> Scanned {
   if hasTriple(source, start, '.') {
     let end = start + 3
@@ -383,6 +439,9 @@ fn scanPunctuation(source: &[u8], start: usize) -> Scanned {
   return Scanned {token: Token.Dot {span: span}, end: end}
 }
 
+// Locate the token boundary without decoding its body. Width is one or three.
+// A backslash hides the next byte only in escaped forms. A single-delimiter
+// literal cannot cross a line break, even when a backslash precedes that break.
 fn literalBoundary(
   source: &[u8],
   contentStart: usize,
@@ -420,6 +479,9 @@ fn literalBoundary(
   return Boundary {end: source.length, terminated: false}
 }
 
+// Count character-body units without allocating decoded text. For valid UTF-8,
+// continuation bytes belong to the preceding scalar. Escape spellings count as
+// one unit. This is a scalar-count check, not UTF-8 or escape validation.
 fn scalarCount(source: &[u8], start: usize, end: usize) -> usize {
   let mut index = start
   let mut scalars: usize = 0
@@ -459,6 +521,8 @@ fn scalarCount(source: &[u8], start: usize, end: usize) -> usize {
   return scalars
 }
 
+// Find the full token span before checking the character-body count.
+// An unterminated body takes precedence over a scalar-count diagnostic.
 fn scanLiteral(
   source: &[u8],
   start: usize,
@@ -502,18 +566,14 @@ fn scanLiteral(
   return Scanned {token: move token, end: boundary.end}
 }
 
+// Consume an unknown modifier and its quoted body together for recovery.
+// The modifier diagnostic remains primary even if the body has no closing quote.
 fn scanUnknownLiteral(source: &[u8], start: usize, modifierEnd: usize) -> Scanned {
   let mut delimiterWidth: usize = 1
   if hasTriple(source, modifierEnd, '"') {
     delimiterWidth = 3
   }
-  let boundary = literalBoundary(
-    source,
-    modifierEnd + delimiterWidth,
-    '"',
-    delimiterWidth,
-    false,
-  )
+  let boundary = literalBoundary(source, modifierEnd + delimiterWidth, '"', delimiterWidth, false)
   let span = tokenSpan(start, boundary.end)
   let diagnostic = LexicalDiagnostic.UnknownLiteralModifier {
     modifier: tokenSpan(start, modifierEnd),
@@ -525,6 +585,8 @@ fn scanUnknownLiteral(source: &[u8], start: usize, modifierEnd: usize) -> Scanne
   }
 }
 
+// The caller has established a supported literal start. Apostrophes select
+// characters; b selects bytes; r selects raw text; an unprefixed quote selects text.
 fn scanRecognizedLiteral(source: &[u8], start: usize) -> Scanned {
   let byte = source[start]
   if byte == '\'' {
@@ -555,6 +617,8 @@ fn isRecognizedLiteralStart(source: &[u8], start: usize) -> bool {
   ) == '"')
 }
 
+// A recognized prefix consumes two bytes. Decimal input has no prefix.
+// Only these four radices reach isBaseDigit.
 fn baseAt(source: &[u8], start: usize) -> Base {
   if byteAtOrZero(source, start) != '0' {
     return Base {radix: 10, width: 0}
@@ -585,6 +649,8 @@ fn isBaseDigit(radix: u8, byte: u8) -> bool {
   return isDecimalDigit(byte) || (byte >= 'A' && byte <= 'F') || (byte >= 'a' && byte <= 'f')
 }
 
+// Consume digits and underscores before reporting validity. An underscore must
+// have a digit on both sides; a run can also contain no digits at all.
 fn scanDigitRun(source: &[u8], radix: u8, start: usize) -> DigitRun {
   let mut end = start
   let mut digits = false
@@ -613,6 +679,8 @@ fn scanDigitRun(source: &[u8], radix: u8, start: usize) -> DigitRun {
   return DigitRun {end: end, digits: digits, separated: separated}
 }
 
+// Keep the identifier-shaped suffix in one duration candidate. Validation then
+// reports a focused diagnostic without splitting the malformed token.
 fn durationCandidateEnd(source: &[u8], start: usize) -> usize {
   let mut end = start
   while end < source.length && isIdentifierContinue(source[end]) {
@@ -621,6 +689,8 @@ fn durationCandidateEnd(source: &[u8], start: usize) -> usize {
   return end
 }
 
+// Ranks order units from weeks to nanoseconds. A larger rank means a smaller unit;
+// -1 denotes an unknown spelling and must be rejected before a bit shift.
 fn unitRank(source: &[u8], start: usize, end: usize) -> i32 {
   if matches(source, start, end, b"w") {
     return 0
@@ -649,6 +719,8 @@ fn unitRank(source: &[u8], start: usize, end: usize) -> i32 {
   return -1
 }
 
+// Only components after the first use these limits: days < 7, hours < 24,
+// minutes and seconds < 60, and each subsecond component < 1000.
 fn subordinateMaximum(rank: i32) -> usize {
   if rank == 1 {
     return 6
@@ -662,6 +734,9 @@ fn subordinateMaximum(rank: i32) -> usize {
   return 999
 }
 
+// The caller supplies decimal digits and separators with a maximum of at most 999.
+// Stop once the partial value exceeds that limit, before another multiplication
+// can overflow. The first duration component does not use this bounded check.
 fn amountExceeds(source: &[u8], start: usize, end: usize, maximum: usize) -> bool {
   let mut value: usize = 0
   let mut index = start
@@ -690,6 +765,8 @@ fn amountIsZero(source: &[u8], start: usize, end: usize) -> bool {
   return true
 }
 
+// Exclude a known unit suffix from the amount diagnostic, testing two letters first.
+// Otherwise exclude trailing letters, or retain at least the first invalid byte.
 fn invalidAmountEnd(source: &[u8], start: usize, end: usize) -> usize {
   if start + 2 <= end {
     let twoStart = end - 1 - 1
@@ -716,6 +793,9 @@ fn invalidAmountEnd(source: &[u8], start: usize, end: usize) -> usize {
   return start + 1
 }
 
+// Validate components from left to right and return the first diagnostic.
+// This checks duration syntax, unit order, and subordinate limits; it does not
+// calculate a total duration or check the first amount against a storage type.
 fn parseDuration(source: &[u8], start: usize, end: usize) -> DurationResult {
   if byteAtOrZero(source, start) == '0' {
     let second = byteAtOrZero(source, start + 1)
@@ -758,6 +838,7 @@ fn parseDuration(source: &[u8], start: usize, end: usize) -> DurationResult {
     let rank = unitRank(source, unitStart, unitEnd)
     let unitSpan = tokenSpan(unitStart, unitEnd)
     if rank < 0 {
+      // Reject exponent-like or base-prefix-like amounts before unknown-unit recovery.
       let exponentOrPrefix = matches(source, unitStart, unitEnd, b"e") || matches(
         source,
         unitStart,
@@ -844,6 +925,8 @@ fn invalidNumber(start: usize, end: usize, diagnostic: LexicalDiagnostic) -> Sca
   return Scanned {token: Token.Invalid {span: span, diagnostic: move diagnostic}, end: end}
 }
 
+// Recognize the numeric extent before deciding whether an alphabetic suffix makes
+// the token a duration candidate. DecimalInteger also represents base-prefixed integers.
 fn scanNumber(source: &[u8], start: usize) -> Scanned {
   let base = baseAt(source, start)
   if base.radix != 10 {
@@ -867,6 +950,7 @@ fn scanNumber(source: &[u8], start: usize) -> Scanned {
   let mut end = whole.end
   let mut separated = whole.separated
   let mut floating = false
+  // A fraction requires a digit. Leave a trailing dot or range operator unconsumed.
   if byteAtOrZero(source, end) == '.' && byteAtOrZero(source, end + 1) != '.' {
     let fraction = scanDigitRun(source, 10, end + 1)
     if fraction.digits {
@@ -915,6 +999,8 @@ fn isSupportedTokenStart(source: &[u8], index: usize) -> bool {
   ) || isPunctuation(byte)
 }
 
+// Consume at least one byte, then stop before the next supported token start.
+// One diagnostic covers the unsupported run and leaves the next token untouched.
 fn scanInvalid(source: &[u8], start: usize) -> Scanned {
   let mut end = start + 1
   while end < source.length {
@@ -928,6 +1014,9 @@ fn scanInvalid(source: &[u8], start: usize) -> Scanned {
   return Scanned {token: Token.Invalid {span: span, diagnostic: move diagnostic}, end: end}
 }
 
+// Dispatch order resolves overlapping starts: comments before slash punctuation,
+// lifetimes before character literals, and literal modifiers before identifiers.
+// The caller guarantees start < source.length.
 fn scanToken(source: &[u8], start: usize) -> Scanned {
   let byte = source[start]
   if isWhitespace(byte) {
@@ -937,6 +1026,8 @@ fn scanToken(source: &[u8], start: usize) -> Scanned {
     return scanComment(source, start)
   }
 
+  // A closing apostrophe or backslash keeps this in character-literal recovery.
+  // Otherwise the apostrophe and identifier form a lifetime token.
   if byte == '\'' && isIdentifierStart(byteAtOrZero(source, start + 1)) {
     let lifetimeEnd = scanIdentifierEnd(source, start + 1)
     let boundary = byteAtOrZero(source, lifetimeEnd)
@@ -966,6 +1057,19 @@ fn scanToken(source: &[u8], start: usize) -> Scanned {
 }
 
 impl<'source> Stream<Token, never ? never> for Lexer<'source> {
+  /// Returns the next token, one final EOF token, or `Option.None` after EOF.
+  ///
+  /// # Details
+  ///
+  /// Each read advances past one token, including whitespace, comments, and invalid input.
+  /// Invalid tokens carry lexical diagnostics instead of an Effect failure.
+  /// Token spans count source bytes and exclude their end offset.
+  /// No allocator or other provider is required.
+  ///
+  /// # Gotchas
+  ///
+  /// The EOF token has an empty span at the source length, including for empty input.
+  /// Only reads after that token return `Option.None`; all further reads also return `Option.None`.
   effect fn take(self: &mut Self) -> Option<Token> {
     if self.cursor < self.source.length {
       let Scanned {token, end} = move scanToken(self.source, self.cursor)
