@@ -656,6 +656,26 @@ it.effect('evaluates real literal syntax with contextual scalar and target range
         StaticEvaluation.evaluateLiteral(
           environment,
           file,
+          literal('CharacterLiteralExpression'),
+          'u8',
+        ),
+      ),
+      { _tag: 'IntegerValue', type: 'u8', value: 233n },
+    )
+    assert.strictEqual(
+      StaticEvaluation.evaluateLiteral(
+        environment,
+        file,
+        literal('CharacterLiteralExpression'),
+        'i8',
+      )._tag,
+      'Failed',
+    )
+    assert.deepEqual(
+      completedValue(
+        StaticEvaluation.evaluateLiteral(
+          environment,
+          file,
           literal('IntegerLiteralExpression'),
           'i8',
         ),

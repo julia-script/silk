@@ -957,7 +957,12 @@ export const analyzeDeclaredType = (
       const lengthSpelling = spelling(source, lengthToken)
       const value = Number(IntegerLiteral.magnitude(lengthSpelling))
       if (!Number.isSafeInteger(value) || value > 2147483647) {
-        const diagnostic = Diagnostic.integerOutOfRange(lengthSpelling, lengthToken.span)
+        const diagnostic = Diagnostic.integerOutOfRange(
+          lengthSpelling,
+          'i32',
+          { minimum: -2147483648n, maximum: 2147483647n },
+          lengthToken.span,
+        )
         diagnostics.push(diagnostic)
         length = Object.freeze({
           _tag: 'OutOfRange',
