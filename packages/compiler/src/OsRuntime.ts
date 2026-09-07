@@ -1,30 +1,13 @@
 /**
- * Compiler-owned native runtime symbols for the sealed OS filesystem, byte-input,
- * child-process, host-input, clock, and secure-random protocols.
+ * Compiler-owned native runtime symbols for the remaining child-process and host-input protocols.
  */
 export const symbols = Object.freeze([
-  'silk_os_file_open_v1',
-  'silk_os_file_read_v1',
-  'silk_os_file_write_v1',
-  'silk_os_directory_open_v1',
-  'silk_os_directory_next_v1',
-  'silk_os_path_inspect_v1',
-  'silk_os_directory_create_v1',
-  'silk_os_directory_create_unique_v1',
-  'silk_os_file_remove_v1',
-  'silk_os_directory_remove_v1',
-  'silk_os_handle_close_v1',
-  'silk_os_standard_input_read_v1',
   'silk_os_process_execute_v1',
   'silk_os_process_capture_v1',
   'silk_os_host_argument_count_v1',
   'silk_os_host_argument_v1',
   'silk_os_host_variable_v1',
   'silk_os_host_working_directory_v1',
-  'silk_os_monotonic_clock_now_v1',
-  'silk_os_monotonic_clock_resolution_v1',
-  'silk_os_monotonic_clock_wait_until_v1',
-  'silk_os_random_fill_v1',
 ] as const)
 
 export type Symbol = (typeof symbols)[number]
@@ -95,207 +78,6 @@ static char *silk_string(const unsigned char *bytes, size_t length) {
   memcpy(value, bytes, length);
   value[length] = 0;
   return value;
-}
-`
-
-const randomPrelude = `
-#include <stddef.h>
-#include <stdint.h>
-#if defined(__linux__)
-#include <errno.h>
-#include <sys/random.h>
-#elif defined(__APPLE__)
-#include <stdlib.h>
-#else
-#error "Silk OS random supports only GNU/Linux and macOS"
-#endif
-
-/* Linux documents at most 32 MiB minus one byte per getrandom call. */
-#define SILK_GETRANDOM_MAX ((size_t)33554431)
-`
-
-const filesystemPrelude = `
-#ifndef O_NOFOLLOW
-#error "Silk OS filesystem requires O_NOFOLLOW"
-#endif
-
-/* Suffix width for provider-chosen unique directory names, and the retry ceiling for collisions. */
-#define SILK_UNIQUE_SUFFIX 8
-#define SILK_UNIQUE_ATTEMPTS 128
-
-typedef struct { size_t identity; int kind; int active; } silk_os_handle;
-
-typedef struct {
-  int kind;
-  int fd;
-  DIR *directory;
-  unsigned char *pending_name;
-  size_t pending_length;
-  int pending_kind;
-} silk_native_handle;
-
-static int silk_utf8(const unsigned char *bytes, size_t length) {
-  size_t index = 0;
-  while (index < length) {
-    unsigned char first = bytes[index++];
-    if (first == 0) return 0;
-    if (first < 0x80) continue;
-    size_t remaining = 0;
-    uint32_t code = 0;
-    if (first >= 0xc2 && first <= 0xdf) { remaining = 1; code = first & 0x1f; }
-    else if (first >= 0xe0 && first <= 0xef) { remaining = 2; code = first & 0x0f; }
-    else if (first >= 0xf0 && first <= 0xf4) { remaining = 3; code = first & 0x07; }
-    else return 0;
-    if (length - index < remaining) return 0;
-    for (size_t offset = 0; offset < remaining; offset += 1) {
-      unsigned char next = bytes[index++];
-      if ((next & 0xc0) != 0x80) return 0;
-      code = (code << 6) | (uint32_t)(next & 0x3f);
-    }
-    if ((remaining == 1 && code < 0x80) ||
-        (remaining == 2 && code < 0x800) ||
-        (remaining == 3 && code < 0x10000) ||
-        (code >= 0xd800 && code <= 0xdfff) || code > 0x10ffff) return 0;
-  }
-  return 1;
-}
-
-static int silk_component_valid(const unsigned char *bytes, size_t length) {
-  if (length == 0) return 0;
-  if (length == 1 && bytes[0] == '.') return 0;
-  if (length == 2 && bytes[0] == '.' && bytes[1] == '.') return 0;
-  return 1;
-}
-
-/* Resolve a normalized provider-absolute path to an opened parent plus an owned final name. */
-static int silk_parent(const unsigned char *root, size_t root_length,
-                       const unsigned char *path, size_t path_length,
-                       int *parent, char **leaf, int *reason, uint32_t *native_code) {
-  *parent = -1;
-  *leaf = NULL;
-  if (root_length == 0 || root[0] != '/' || path_length == 0 || path[0] != '/' ||
-      !silk_utf8(root, root_length) || !silk_utf8(path, path_length)) {
-    silk_protocol_failure(reason, native_code, SILK_INVALID_PATH);
-    return 0;
-  }
-  char *root_string = silk_string(root, root_length);
-  if (root_string == NULL) {
-    silk_protocol_failure(reason, native_code, SILK_NO_SPACE);
-    return 0;
-  }
-  int current = open(root_string, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
-  int opened_errno = errno;
-  free(root_string);
-  if (current < 0) {
-    silk_failure(reason, native_code, opened_errno);
-    return 0;
-  }
-  if (path_length == 1) {
-    *parent = current;
-    return 1;
-  }
-  size_t start = 1;
-  while (start < path_length) {
-    size_t end = start;
-    while (end < path_length && path[end] != '/') end += 1;
-    if (!silk_component_valid(path + start, end - start) || end == start ||
-        (end < path_length && end + 1 == path_length)) {
-      close(current);
-      silk_protocol_failure(reason, native_code, SILK_INVALID_PATH);
-      return 0;
-    }
-    char *component = silk_string(path + start, end - start);
-    if (component == NULL) {
-      close(current);
-      silk_protocol_failure(reason, native_code, SILK_NO_SPACE);
-      return 0;
-    }
-    if (end == path_length) {
-      *parent = current;
-      *leaf = component;
-      return 1;
-    }
-    int next = openat(current, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
-    int next_errno = errno;
-    free(component);
-    close(current);
-    if (next < 0) {
-      silk_failure(reason, native_code, next_errno);
-      return 0;
-    }
-    current = next;
-    start = end + 1;
-  }
-  close(current);
-  silk_protocol_failure(reason, native_code, SILK_INVALID_PATH);
-  return 0;
-}
-
-/* Opens one normalized provider-absolute directory itself, rather than its parent. */
-static int silk_directory(const unsigned char *root, size_t root_length,
-                          const unsigned char *path, size_t path_length,
-                          int *reason, uint32_t *native_code) {
-  int parent; char *leaf;
-  if (!silk_parent(root, root_length, path, path_length, &parent, &leaf, reason, native_code)) {
-    return -1;
-  }
-  if (leaf == NULL) return parent;
-  int opened = openat(parent, leaf, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
-  int selected = errno;
-  free(leaf);
-  close(parent);
-  if (opened < 0) { silk_failure(reason, native_code, selected); return -1; }
-  return opened;
-}
-
-/*
- * Fills a unique-name suffix. The kernel decides uniqueness — mkdirat fails with EEXIST rather
- * than adopting an existing directory — so this only has to make collisions rare enough that the
- * retry loop terminates. The degraded path is therefore a correctness-preserving fallback, not a
- * silent weakening of an exclusivity guarantee.
- */
-static void silk_entropy(unsigned char *output, size_t length) {
-  static uint64_t counter = 0;
-  int source = open("/dev/urandom", O_RDONLY);
-  if (source >= 0) {
-    size_t filled = 0;
-    while (filled < length) {
-      ssize_t received = read(source, output + filled, length - filled);
-      if (received > 0) { filled += (size_t)received; continue; }
-      if (received < 0 && errno == EINTR) continue;
-      break;
-    }
-    close(source);
-    if (filled == length) return;
-  }
-  uint64_t mixed = (uint64_t)getpid() ^ (counter += 0x9e3779b97f4a7c15ull);
-  for (size_t index = 0; index < length; index += 1) {
-    mixed = mixed * 6364136223846793005ull + 1442695040888963407ull;
-    output[index] = (unsigned char)(mixed >> 33);
-  }
-}
-
-static silk_native_handle *silk_live(silk_os_handle *handle, int kind,
-                                     int *reason, uint32_t *native_code) {
-  if (handle == NULL || handle->active != 1 || handle->kind != kind || handle->identity == 0) {
-    silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE);
-    return NULL;
-  }
-  silk_native_handle *native = (silk_native_handle *)(uintptr_t)handle->identity;
-  if (native->kind != kind) {
-    silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE);
-    return NULL;
-  }
-  return native;
-}
-
-static silk_native_handle *silk_allocate_handle(int kind, int fd, DIR *directory) {
-  silk_native_handle *native = (silk_native_handle *)calloc(1, sizeof(silk_native_handle));
-  if (native == NULL) return NULL;
-  native->kind = kind;
-  native->fd = fd;
-  native->directory = directory;
-  return native;
 }
 `
 
@@ -394,353 +176,7 @@ static int silk_host_absent(int *reason, uint32_t *native_code) {
 }
 `
 
-const clockPrelude = `
-#define SILK_CLOCK_NANOSECONDS_PER_SECOND UINT64_C(1000000000)
-`
-
-const clockReadPrelude = `
-static int silk_clock_read(clockid_t clock, int64_t *seconds, int64_t *nanoseconds) {
-  struct timespec value;
-  if (clock_gettime(clock, &value) != 0 || value.tv_nsec < 0 ||
-      value.tv_nsec >= (long)SILK_CLOCK_NANOSECONDS_PER_SECOND) return 0;
-  int64_t checked_seconds = (int64_t)value.tv_sec;
-  if ((time_t)checked_seconds != value.tv_sec) return 0;
-  int64_t checked_nanoseconds = (int64_t)value.tv_nsec;
-  *seconds = checked_seconds;
-  *nanoseconds = checked_nanoseconds;
-  return 1;
-}
-`
-
-const clockResolutionPrelude = `
-static int silk_clock_resolution(clockid_t clock, uint64_t *nanoseconds) {
-  struct timespec value;
-  if (clock_getres(clock, &value) != 0 || value.tv_sec < 0 || value.tv_nsec < 0 ||
-      value.tv_nsec >= (long)SILK_CLOCK_NANOSECONDS_PER_SECOND) return 0;
-  uint64_t seconds = (uint64_t)value.tv_sec;
-  if ((time_t)seconds != value.tv_sec ||
-      seconds > UINT64_MAX / SILK_CLOCK_NANOSECONDS_PER_SECOND) return 0;
-  uint64_t total = seconds * SILK_CLOCK_NANOSECONDS_PER_SECOND;
-  uint64_t fraction = (uint64_t)value.tv_nsec;
-  if (fraction > UINT64_MAX - total) return 0;
-  total += fraction;
-  if (total == 0) return 0;
-  *nanoseconds = total;
-  return 1;
-}
-`
-
-const clockWaitPrelude = `
-static int silk_clock_fraction_valid(int64_t nanoseconds) {
-  return nanoseconds >= 0 && nanoseconds < (int64_t)SILK_CLOCK_NANOSECONDS_PER_SECOND;
-}
-
-static int silk_clock_deadline(int64_t seconds, int64_t nanoseconds,
-                               struct timespec *deadline) {
-  if (seconds < 0 || !silk_clock_fraction_valid(nanoseconds)) return 0;
-  time_t checked_seconds = (time_t)seconds;
-  long checked_nanoseconds = (long)nanoseconds;
-  if ((int64_t)checked_seconds != seconds || (int64_t)checked_nanoseconds != nanoseconds) return 0;
-  deadline->tv_sec = checked_seconds;
-  deadline->tv_nsec = checked_nanoseconds;
-  return 1;
-}
-`
-
 const implementations: Readonly<Record<Symbol, string>> = Object.freeze({
-  silk_os_file_open_v1: `
-int silk_os_file_open_v1(const unsigned char *root, size_t root_length,
-                         const unsigned char *path, size_t path_length, int mode,
-                         int *reason, uint32_t *native_code,
-                         size_t *identity, int *kind, int *active) {
-  int parent;
-  char *leaf;
-  if (!silk_parent(root, root_length, path, path_length, &parent, &leaf, reason, native_code))
-    return 0;
-  if (leaf == NULL) {
-    close(parent);
-    silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE);
-    return 0;
-  }
-  int flags = mode == 0 ? O_RDONLY : mode == 1 ? O_WRONLY | O_CREAT | O_TRUNC : -1;
-  if (flags < 0) {
-    free(leaf); close(parent);
-    silk_protocol_failure(reason, native_code, SILK_INVALID_PATH);
-    return 0;
-  }
-  int fd = openat(parent, leaf, flags | O_NOFOLLOW, 0666);
-  int opened_errno = errno;
-  free(leaf); close(parent);
-  if (fd < 0) { silk_failure(reason, native_code, opened_errno); return 0; }
-  struct stat info;
-  if (fstat(fd, &info) != 0) {
-    int selected = errno;
-    close(fd);
-    silk_failure(reason, native_code, selected);
-    return 0;
-  }
-  if (!S_ISREG(info.st_mode)) {
-    close(fd);
-    silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE);
-    return 0;
-  }
-  silk_native_handle *native = silk_allocate_handle(0, fd, NULL);
-  if (native == NULL) { close(fd); silk_protocol_failure(reason, native_code, SILK_NO_SPACE); return 0; }
-  silk_success(reason, native_code);
-  *identity = (size_t)(uintptr_t)native; *kind = 0; *active = 1;
-  return 1;
-}
-`,
-  silk_os_file_read_v1: `
-int silk_os_file_read_v1(silk_os_handle *handle, unsigned char *output,
-                         size_t capacity, size_t *count, int *reason, uint32_t *native_code) {
-  silk_native_handle *native = silk_live(handle, 0, reason, native_code);
-  if (native == NULL) return 0;
-  ssize_t received;
-  do { received = read(native->fd, output, capacity); } while (received < 0 && errno == EINTR);
-  if (received < 0) { silk_failure(reason, native_code, errno); return 0; }
-  silk_success(reason, native_code);
-  return silk_transfer((size_t)received, count);
-}
-`,
-  silk_os_file_write_v1: `
-int silk_os_file_write_v1(silk_os_handle *handle, const unsigned char *input,
-                          size_t length, size_t offset, size_t *count,
-                          int *reason, uint32_t *native_code) {
-  silk_native_handle *native = silk_live(handle, 0, reason, native_code);
-  if (native == NULL) return 0;
-  if (offset > length) { silk_protocol_failure(reason, native_code, SILK_INVALID_PATH); return 0; }
-  ssize_t written;
-  do { written = write(native->fd, input + offset, length - offset); } while (written < 0 && errno == EINTR);
-  if (written < 0) { silk_failure(reason, native_code, errno); return 0; }
-  silk_success(reason, native_code);
-  return silk_transfer((size_t)written, count);
-}
-`,
-  silk_os_directory_open_v1: `
-int silk_os_directory_open_v1(const unsigned char *root, size_t root_length,
-                              const unsigned char *path, size_t path_length,
-                              int *reason, uint32_t *native_code,
-                              size_t *identity, int *kind, int *active) {
-  int parent;
-  char *leaf;
-  if (!silk_parent(root, root_length, path, path_length, &parent, &leaf, reason, native_code))
-    return 0;
-  int fd = leaf == NULL ? parent : openat(parent, leaf, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
-  int opened_errno = errno;
-  if (leaf != NULL) { free(leaf); close(parent); }
-  if (fd < 0) { silk_failure(reason, native_code, opened_errno); return 0; }
-  DIR *directory = fdopendir(fd);
-  if (directory == NULL) { int selected = errno; close(fd); silk_failure(reason, native_code, selected); return 0; }
-  silk_native_handle *native = silk_allocate_handle(1, fd, directory);
-  if (native == NULL) { closedir(directory); silk_protocol_failure(reason, native_code, SILK_NO_SPACE); return 0; }
-  silk_success(reason, native_code);
-  *identity = (size_t)(uintptr_t)native; *kind = 1; *active = 1;
-  return 1;
-}
-`,
-  silk_os_directory_next_v1: `
-int silk_os_directory_next_v1(silk_os_handle *handle, unsigned char *output,
-                              size_t capacity, size_t *count, int *kind, size_t *required,
-                              int *reason, uint32_t *native_code) {
-  silk_native_handle *native = silk_live(handle, 1, reason, native_code);
-  if (native == NULL) return 0;
-  while (native->pending_name == NULL) {
-    errno = 0;
-    struct dirent *entry = readdir(native->directory);
-    if (entry == NULL) {
-      if (errno != 0) { silk_failure(reason, native_code, errno); return 0; }
-      silk_success(reason, native_code);
-      return silk_transfer(0, count);
-    }
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
-    struct stat info;
-    if (fstatat(native->fd, entry->d_name, &info, AT_SYMLINK_NOFOLLOW) != 0) {
-      silk_failure(reason, native_code, errno);
-      return 0;
-    }
-    if (S_ISLNK(info.st_mode) || (!S_ISREG(info.st_mode) && !S_ISDIR(info.st_mode))) {
-      silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE);
-      return 0;
-    }
-    native->pending_length = strlen(entry->d_name);
-    native->pending_name = (unsigned char *)malloc(native->pending_length);
-    if (native->pending_name == NULL) {
-      silk_protocol_failure(reason, native_code, SILK_NO_SPACE);
-      return 0;
-    }
-    memcpy(native->pending_name, entry->d_name, native->pending_length);
-    native->pending_kind = S_ISREG(info.st_mode) ? 0 : 1;
-  }
-  if (capacity < native->pending_length) {
-    *required = native->pending_length;
-    silk_protocol_failure(reason, native_code, SILK_BUFFER_TOO_SMALL);
-    return 0;
-  }
-  memcpy(output, native->pending_name, native->pending_length);
-  *kind = native->pending_kind;
-  size_t length = native->pending_length;
-  free(native->pending_name);
-  native->pending_name = NULL;
-  native->pending_length = 0;
-  silk_success(reason, native_code);
-  return silk_transfer(length, count);
-}
-`,
-  silk_os_path_inspect_v1: `
-int silk_os_path_inspect_v1(const unsigned char *root, size_t root_length,
-                            const unsigned char *path, size_t path_length,
-                            int *kind, size_t *byte_length,
-                            int *reason, uint32_t *native_code) {
-  int parent;
-  char *leaf;
-  if (!silk_parent(root, root_length, path, path_length, &parent, &leaf, reason, native_code)) return 0;
-  struct stat info;
-  int status = leaf == NULL ? fstat(parent, &info) : fstatat(parent, leaf, &info, AT_SYMLINK_NOFOLLOW);
-  int selected = errno;
-  free(leaf); close(parent);
-  if (status != 0) { silk_failure(reason, native_code, selected); return 0; }
-  if (S_ISLNK(info.st_mode) || (!S_ISREG(info.st_mode) && !S_ISDIR(info.st_mode))) {
-    silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE); return 0;
-  }
-  *kind = S_ISREG(info.st_mode) ? 0 : 1;
-  *byte_length = S_ISREG(info.st_mode) ? (size_t)info.st_size : 0;
-  silk_success(reason, native_code);
-  return 1;
-}
-`,
-  silk_os_directory_create_v1: `
-int silk_os_directory_create_v1(const unsigned char *root, size_t root_length,
-                                const unsigned char *path, size_t path_length,
-                                int *reason, uint32_t *native_code) {
-  int parent; char *leaf;
-  if (!silk_parent(root, root_length, path, path_length, &parent, &leaf, reason, native_code)) return 0;
-  if (leaf == NULL) { close(parent); silk_protocol_failure(reason, native_code, SILK_ALREADY_EXISTS); return 0; }
-  int status = mkdirat(parent, leaf, 0777); int selected = errno;
-  free(leaf); close(parent);
-  if (status != 0) { silk_failure(reason, native_code, selected); return 0; }
-  silk_success(reason, native_code); return 1;
-}
-`,
-  silk_os_directory_create_unique_v1: `
-int silk_os_directory_create_unique_v1(const unsigned char *root, size_t root_length,
-                                       const unsigned char *parent, size_t parent_length,
-                                       const unsigned char *prefix, size_t prefix_length,
-                                       unsigned char *output, size_t capacity, size_t *count,
-                                       size_t *required, int *reason, uint32_t *native_code) {
-  static const char alphabet[] = "abcdefghijklmnopqrstuvwxyz0123456789";
-  size_t length = prefix_length + SILK_UNIQUE_SUFFIX;
-  if (capacity < length) {
-    *required = length;
-    silk_protocol_failure(reason, native_code, SILK_BUFFER_TOO_SMALL);
-    return 0;
-  }
-  if (!silk_utf8(prefix, prefix_length) || !silk_component_valid(prefix, prefix_length) ||
-      memchr(prefix, '/', prefix_length) != NULL) {
-    silk_protocol_failure(reason, native_code, SILK_INVALID_PATH);
-    return 0;
-  }
-  int directory = silk_directory(root, root_length, parent, parent_length, reason, native_code);
-  if (directory < 0) return 0;
-  char *name = (char *)malloc(length + 1);
-  if (name == NULL) {
-    close(directory);
-    silk_protocol_failure(reason, native_code, SILK_NO_SPACE);
-    return 0;
-  }
-  memcpy(name, prefix, prefix_length);
-  name[length] = 0;
-  for (int attempt = 0; attempt < SILK_UNIQUE_ATTEMPTS; attempt += 1) {
-    unsigned char chosen[SILK_UNIQUE_SUFFIX];
-    silk_entropy(chosen, sizeof(chosen));
-    for (size_t index = 0; index < SILK_UNIQUE_SUFFIX; index += 1) {
-      name[prefix_length + index] = alphabet[chosen[index] % (sizeof(alphabet) - 1)];
-    }
-    /* mkdirat fails with EEXIST rather than adopting a directory, so success is exclusive. */
-    if (mkdirat(directory, name, 0700) == 0) {
-      memcpy(output, name, length);
-      free(name);
-      close(directory);
-      silk_success(reason, native_code);
-      return silk_transfer(length, count);
-    }
-    int selected = errno;
-    if (selected != EEXIST) {
-      free(name);
-      close(directory);
-      silk_failure(reason, native_code, selected);
-      return 0;
-    }
-  }
-  free(name);
-  close(directory);
-  silk_protocol_failure(reason, native_code, SILK_ALREADY_EXISTS);
-  return 0;
-}
-`,
-  silk_os_file_remove_v1: `
-int silk_os_file_remove_v1(const unsigned char *root, size_t root_length,
-                           const unsigned char *path, size_t path_length,
-                           int *reason, uint32_t *native_code) {
-  int parent; char *leaf;
-  if (!silk_parent(root, root_length, path, path_length, &parent, &leaf, reason, native_code)) return 0;
-  if (leaf == NULL) { close(parent); silk_protocol_failure(reason, native_code, SILK_INVALID_PATH); return 0; }
-  struct stat info;
-  if (fstatat(parent, leaf, &info, AT_SYMLINK_NOFOLLOW) != 0) { int selected = errno; free(leaf); close(parent); silk_failure(reason, native_code, selected); return 0; }
-  if (!S_ISREG(info.st_mode)) { free(leaf); close(parent); silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE); return 0; }
-  int status = unlinkat(parent, leaf, 0); int selected = errno;
-  free(leaf); close(parent);
-  if (status != 0) { silk_failure(reason, native_code, selected); return 0; }
-  silk_success(reason, native_code); return 1;
-}
-`,
-  silk_os_directory_remove_v1: `
-int silk_os_directory_remove_v1(const unsigned char *root, size_t root_length,
-                                const unsigned char *path, size_t path_length,
-                                int *reason, uint32_t *native_code) {
-  int parent; char *leaf;
-  if (!silk_parent(root, root_length, path, path_length, &parent, &leaf, reason, native_code)) return 0;
-  if (leaf == NULL) { close(parent); silk_protocol_failure(reason, native_code, SILK_INVALID_PATH); return 0; }
-  struct stat info;
-  if (fstatat(parent, leaf, &info, AT_SYMLINK_NOFOLLOW) != 0) { int selected = errno; free(leaf); close(parent); silk_failure(reason, native_code, selected); return 0; }
-  if (!S_ISDIR(info.st_mode)) { free(leaf); close(parent); silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE); return 0; }
-  int status = unlinkat(parent, leaf, AT_REMOVEDIR); int selected = errno;
-  free(leaf); close(parent);
-  if (status != 0) { silk_failure(reason, native_code, selected); return 0; }
-  silk_success(reason, native_code); return 1;
-}
-`,
-  silk_os_handle_close_v1: `
-int silk_os_handle_close_v1(size_t identity, int kind, int active,
-                            int *reason, uint32_t *native_code) {
-  if (identity == 0 || active != 1 || (kind != 0 && kind != 1)) {
-    silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE); return 0;
-  }
-  silk_native_handle *native = (silk_native_handle *)(uintptr_t)identity;
-  int status;
-  if (native->kind != kind) {
-    free(native->pending_name); free(native);
-    silk_protocol_failure(reason, native_code, SILK_WRONG_TYPE); return 0;
-  }
-  if (kind == 1) status = closedir(native->directory);
-  else status = close(native->fd);
-  int selected = errno;
-  free(native->pending_name);
-  free(native);
-  if (status != 0) { silk_failure(reason, native_code, selected); return 0; }
-  silk_success(reason, native_code); return 1;
-}
-`,
-  silk_os_standard_input_read_v1: `
-int silk_os_standard_input_read_v1(unsigned char *output, size_t capacity, size_t *count,
-                                   int *reason, uint32_t *native_code) {
-  ssize_t received;
-  do { received = read(0, output, capacity); } while (received < 0 && errno == EINTR);
-  if (received < 0) { silk_failure(reason, native_code, errno); return 0; }
-  silk_success(reason, native_code);
-  return silk_transfer((size_t)received, count);
-}
-`,
   silk_os_process_execute_v1: `
 /*
  * Runs one child to completion. The pre-exec channel is close-on-exec, so a failure to start is
@@ -1006,94 +442,8 @@ int silk_os_host_working_directory_v1(unsigned char *output, size_t capacity, si
   return 0;
 }
 `,
-  silk_os_monotonic_clock_now_v1: `
-int32_t silk_os_monotonic_clock_now_v1(int64_t *seconds, int64_t *nanoseconds) {
-  return (int32_t)silk_clock_read(CLOCK_MONOTONIC, seconds, nanoseconds);
-}
-`,
-  silk_os_monotonic_clock_resolution_v1: `
-int32_t silk_os_monotonic_clock_resolution_v1(uint64_t *nanoseconds) {
-  return (int32_t)silk_clock_resolution(CLOCK_MONOTONIC, nanoseconds);
-}
-`,
-  silk_os_monotonic_clock_wait_until_v1: `
-int32_t silk_os_monotonic_clock_wait_until_v1(int64_t seconds, int64_t nanoseconds) {
-  struct timespec deadline;
-  if (!silk_clock_deadline(seconds, nanoseconds, &deadline)) return 0;
-#if defined(__linux__)
-  for (;;) {
-    int status = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &deadline, NULL);
-    if (status == 0) return 1;
-    if (status != EINTR) return 0;
-  }
-#else
-  for (;;) {
-    int64_t now_seconds;
-    int64_t now_nanoseconds;
-    if (!silk_clock_read(CLOCK_MONOTONIC, &now_seconds, &now_nanoseconds) || now_seconds < 0)
-      return 0;
-    if (now_seconds > seconds ||
-        (now_seconds == seconds && now_nanoseconds >= nanoseconds)) return 1;
-    int64_t remaining_seconds = seconds - now_seconds;
-    int64_t remaining_nanoseconds = nanoseconds - now_nanoseconds;
-    if (remaining_nanoseconds < 0) {
-      remaining_seconds -= 1;
-      remaining_nanoseconds += (int64_t)SILK_CLOCK_NANOSECONDS_PER_SECOND;
-    }
-    struct timespec remaining = {
-      .tv_sec = (time_t)remaining_seconds,
-      .tv_nsec = (long)remaining_nanoseconds,
-    };
-    if ((int64_t)remaining.tv_sec != remaining_seconds ||
-        (int64_t)remaining.tv_nsec != remaining_nanoseconds) return 0;
-    int status = nanosleep(&remaining, NULL);
-    if (status == 0) continue;
-    if (status == -1 && errno == EINTR) continue;
-    return 0;
-  }
-#endif
-}
-`,
-  silk_os_random_fill_v1: `
-int32_t silk_os_random_fill_v1(unsigned char *output, size_t length) {
-  if (length == 0) return 1;
-#if defined(__linux__)
-  size_t filled = 0;
-  while (filled < length) {
-    size_t remaining = length - filled;
-    size_t requested = remaining < SILK_GETRANDOM_MAX ? remaining : SILK_GETRANDOM_MAX;
-    ssize_t count = getrandom(output + filled, requested, GRND_NONBLOCK);
-    if (count > 0) {
-      filled += (size_t)count;
-      continue;
-    }
-    if (count < 0 && errno == EINTR) continue;
-    return 0;
-  }
-  return 1;
-#else
-  arc4random_buf(output, length);
-  return 1;
-#endif
-}
-`,
 })
 
-const filesystemSymbols: ReadonlySet<Symbol> = new Set([
-  'silk_os_file_open_v1',
-  'silk_os_file_read_v1',
-  'silk_os_file_write_v1',
-  'silk_os_directory_open_v1',
-  'silk_os_directory_next_v1',
-  'silk_os_path_inspect_v1',
-  'silk_os_directory_create_v1',
-  'silk_os_directory_create_unique_v1',
-  'silk_os_file_remove_v1',
-  'silk_os_directory_remove_v1',
-  'silk_os_handle_close_v1',
-])
-
-const standardInputSymbols: ReadonlySet<Symbol> = new Set(['silk_os_standard_input_read_v1'])
 const childProcessSymbols: ReadonlySet<Symbol> = new Set([
   'silk_os_process_execute_v1',
   'silk_os_process_capture_v1',
@@ -1104,46 +454,23 @@ const hostInputSymbols: ReadonlySet<Symbol> = new Set([
   'silk_os_host_variable_v1',
   'silk_os_host_working_directory_v1',
 ])
-const clockSymbols: ReadonlySet<Symbol> = new Set([
-  'silk_os_monotonic_clock_now_v1',
-  'silk_os_monotonic_clock_resolution_v1',
-  'silk_os_monotonic_clock_wait_until_v1',
-])
-const clockReadSymbols: ReadonlySet<Symbol> = new Set(['silk_os_monotonic_clock_now_v1'])
-const clockResolutionSymbols: ReadonlySet<Symbol> = new Set([
-  'silk_os_monotonic_clock_resolution_v1',
-])
-const clockWaitSymbols: ReadonlySet<Symbol> = new Set(['silk_os_monotonic_clock_wait_until_v1'])
-const randomSymbols: ReadonlySet<Symbol> = new Set(['silk_os_random_fill_v1'])
 
 const includes = (groups: {
-  readonly filesystem: boolean
-  readonly standardInput: boolean
   readonly childProcess: boolean
   readonly hostInput: boolean
-  readonly clock: boolean
-  readonly clockWait: boolean
-  readonly random: boolean
 }): string => {
-  const legacy =
-    groups.filesystem || groups.standardInput || groups.childProcess || groups.hostInput
+  const legacy = groups.childProcess || groups.hostInput
   const selected: ReadonlyArray<readonly [boolean, string]> = [
-    [groups.filesystem, '<dirent.h>'],
-    [legacy || groups.clockWait, '<errno.h>'],
-    [groups.filesystem || groups.childProcess, '<fcntl.h>'],
+    [legacy, '<errno.h>'],
+    [groups.childProcess, '<fcntl.h>'],
     [groups.childProcess, '<poll.h>'],
     [legacy, '<stddef.h>'],
-    [legacy || groups.clock, '<stdint.h>'],
-    [groups.filesystem || groups.childProcess || groups.hostInput, '<stdlib.h>'],
-    [groups.filesystem || groups.childProcess || groups.hostInput, '<string.h>'],
-    [groups.filesystem, '<sys/stat.h>'],
-    [groups.filesystem || groups.childProcess, '<sys/types.h>'],
+    [legacy, '<stdint.h>'],
+    [groups.childProcess || groups.hostInput, '<stdlib.h>'],
+    [groups.childProcess || groups.hostInput, '<string.h>'],
+    [groups.childProcess, '<sys/types.h>'],
     [groups.childProcess, '<sys/wait.h>'],
-    [groups.clock, '<time.h>'],
-    [
-      groups.filesystem || groups.standardInput || groups.childProcess || groups.hostInput,
-      '<unistd.h>',
-    ],
+    [groups.childProcess || groups.hostInput, '<unistd.h>'],
   ]
   return selected
     .filter(([needed]) => needed)
@@ -1157,30 +484,16 @@ export const source = (selected: ReadonlyArray<string>): string => {
   if (retained.length === 0) return ''
   const has = (group: ReadonlySet<Symbol>): boolean => retained.some((symbol) => group.has(symbol))
   const groups = Object.freeze({
-    filesystem: has(filesystemSymbols),
-    standardInput: has(standardInputSymbols),
     childProcess: has(childProcessSymbols),
     hostInput: has(hostInputSymbols),
-    clock: has(clockSymbols),
-    clockRead: has(clockReadSymbols),
-    clockResolution: has(clockResolutionSymbols),
-    clockWait: has(clockWaitSymbols),
-    random: has(randomSymbols),
   })
-  const legacy =
-    groups.filesystem || groups.standardInput || groups.childProcess || groups.hostInput
+  const legacy = groups.childProcess || groups.hostInput
   return [
     includes(groups),
     legacy ? statusPrelude : '',
-    groups.filesystem || groups.childProcess ? stringPrelude : '',
-    groups.filesystem ? filesystemPrelude : '',
+    groups.childProcess ? stringPrelude : '',
     groups.childProcess ? childProcessPrelude : '',
     groups.hostInput ? hostInputPrelude : '',
-    groups.clock ? clockPrelude : '',
-    groups.clockRead || groups.clockWait ? clockReadPrelude : '',
-    groups.clockResolution ? clockResolutionPrelude : '',
-    groups.clockWait ? clockWaitPrelude : '',
-    groups.random ? randomPrelude : '',
     ...retained.map((symbol) => implementations[symbol]),
   ]
     .filter((fragment) => fragment.length > 0)

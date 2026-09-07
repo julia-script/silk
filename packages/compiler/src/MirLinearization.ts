@@ -47,7 +47,6 @@ export type LinearOperation =
           | 'Conditional'
           | 'ShortCircuit'
           | 'CheckedScalar'
-          | 'OsOpen'
           | 'PropagateEffectFailure'
       }
     >
@@ -59,15 +58,6 @@ export type LinearOperation =
       readonly operands: ReadonlyArray<Mir.LocalId>
       readonly sourceType: Mir.ScalarType
       readonly valueType: Mir.ScalarType
-      readonly provenance: Mir.Provenance
-    }
-  | {
-      readonly _tag: 'OsOpenOutcome'
-      readonly operation: Extract<Mir.Operation, { readonly _tag: 'OsOpen' }>['operation']
-      readonly valid: Mir.LocalId
-      readonly handle: Mir.LocalId
-      readonly arguments: ReadonlyArray<Mir.LocalId>
-      readonly handleType: Extract<Mir.Type, { readonly _tag: 'Nominal' }>
       readonly provenance: Mir.Provenance
     }
   | {
@@ -89,7 +79,6 @@ export const isLinearOperation = (
   operation._tag !== 'Conditional' &&
   operation._tag !== 'ShortCircuit' &&
   operation._tag !== 'CheckedScalar' &&
-  operation._tag !== 'OsOpen' &&
   operation._tag !== 'PropagateEffectFailure'
 
 export const linearOperations = (
@@ -156,7 +145,6 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'ValidateLayout':
     case 'RepeatLayout':
     case 'Allocate':
-    case 'HostWrite':
     case 'OsCall':
     case 'NativeAssembly':
     case 'ForeignIndirectCall':
@@ -177,7 +165,9 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'RawBufferCopy':
     case 'RawBufferFill':
     case 'PointerNull':
+    case 'PointerAddress':
     case 'PointerIsNull':
+    case 'PointerBytes':
     case 'PointerRequalify':
     case 'PointerFromStorage':
     case 'PointerAt':
@@ -190,8 +180,6 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
       return operation.destination
     case 'CheckedScalarOutcome':
       return operation.value
-    case 'OsOpenOutcome':
-      return operation.valid
     case 'BindMatch':
       return operation.destination
     case 'CheckPlace':
@@ -204,9 +192,7 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
 
 export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'Allocate' ||
-  operation._tag === 'HostWrite' ||
   operation._tag === 'OsCall' ||
-  operation._tag === 'OsOpenOutcome' ||
   operation._tag === 'RawBufferFrom' ||
   operation._tag === 'SharedFromAllocation' ||
   operation._tag === 'ExecutionFromAllocation' ||
@@ -360,7 +346,6 @@ export const expandMatches = (
         operation._tag === 'Conditional' ||
         operation._tag === 'ShortCircuit' ||
         operation._tag === 'CheckedScalar' ||
-        operation._tag === 'OsOpen' ||
         operation._tag === 'PropagateEffectFailure',
     )
     if (specialIndex < 0) {
@@ -467,88 +452,6 @@ export const expandMatches = (
         origin,
         'Normal',
         [drop(special.present, special.presentCleanup), apply(special.absent, absentType, [])],
-        jump(following, special.provenance),
-      )
-      return
-    }
-    if (special?._tag === 'OsOpen') {
-      const successType = fn.localTypes.at(special.success.ordinal)
-      const failureType = fn.localTypes.at(special.failure.ordinal)
-      if (successType?._tag !== 'CallableValue' || failureType?._tag !== 'CallableValue')
-        throw new RangeError('LLVM OS open expansion lost its carrier callables')
-      const following = reserve()
-      const succeeded = reserve()
-      const failed = reserve()
-      const apply = (
-        callable: Mir.LocalId,
-        callableType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
-        arguments_: ReadonlyArray<Mir.LocalId>,
-      ): Extract<Mir.Operation, { readonly _tag: 'ApplyCallable' }> =>
-        Object.freeze({
-          _tag: 'ApplyCallable',
-          destination: special.destination,
-          callable,
-          typeArguments:
-            callableType.environment?.callable.typeArguments ??
-            callableType.storage?.realization.targetArguments ??
-            callableType.typeArguments ??
-            Object.freeze([]),
-          captures: Object.freeze([]),
-          arguments: arguments_,
-          callableType: callableType.type,
-          access: callableType.type.mode,
-          evaluation: 'CalleeThenArguments',
-          realization: 'Environment',
-          type: special.type,
-          provenance: special.provenance,
-        })
-      const drop = (
-        local: Mir.LocalId,
-        cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
-      ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
-        Object.freeze({ _tag: 'Drop', local, cleanup, provenance: special.provenance })
-      blocks.push(
-        Object.freeze({
-          id,
-          origin,
-          kind,
-          operations: linearOperations([
-            ...operations.slice(0, specialIndex),
-            Object.freeze({
-              _tag: 'OsOpenOutcome' as const,
-              operation: special.operation,
-              valid: special.valid,
-              handle: special.handle,
-              arguments: special.arguments,
-              handleType: special.handleType,
-              provenance: special.provenance,
-            }),
-          ]),
-          terminator: Object.freeze({
-            _tag: 'Branch',
-            condition: special.valid,
-            taken: succeeded,
-            otherwise: failed,
-            provenance: special.provenance,
-          }),
-        }),
-      )
-      lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
-      lowerSequence(
-        succeeded,
-        origin,
-        'Normal',
-        [
-          drop(special.failure, special.failureCleanup),
-          apply(special.success, successType, Object.freeze([special.handle])),
-        ],
-        jump(following, special.provenance),
-      )
-      lowerSequence(
-        failed,
-        origin,
-        'Normal',
-        [drop(special.success, special.successCleanup), apply(special.failure, failureType, [])],
         jump(following, special.provenance),
       )
       return

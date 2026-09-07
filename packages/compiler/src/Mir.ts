@@ -524,35 +524,7 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
-      /** Commits one immutable byte view to an explicit host-provided process destination. */
-      readonly _tag: 'HostWrite'
-      readonly destination: LocalId
-      readonly stream: LocalId
-      readonly bytes: LocalId
-      readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
-      readonly failure: SilkType.Nominal
-      readonly propagationType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
-      readonly failureTag: number
-      readonly provenance: Provenance
-    }
-  | {
-      /** Opens one affine OS handle and transfers it only through the selected exact carrier. */
-      readonly _tag: 'OsOpen'
-      readonly operation: Intrinsic.OperationId
-      readonly destination: LocalId
-      readonly valid: LocalId
-      readonly handle: LocalId
-      readonly arguments: ReadonlyArray<LocalId>
-      readonly success: LocalId
-      readonly failure: LocalId
-      readonly successCleanup: CleanupPlan.CleanupPlan
-      readonly failureCleanup: CleanupPlan.CleanupPlan
-      readonly handleType: Extract<Type, { readonly _tag: 'Nominal' }>
-      readonly type: Type
-      readonly provenance: Provenance
-    }
-  | {
-      /** Executes one validated native-only opaque-handle protocol operation. */
+      /** Executes one remaining validated native-only runtime protocol operation. */
       readonly _tag: 'OsCall'
       readonly operation: Intrinsic.OperationId
       readonly destination: LocalId
@@ -805,6 +777,13 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Observes a raw data address as unsigned target-width `usize` without accessing storage. */
+      readonly _tag: 'PointerAddress'
+      readonly destination: LocalId
+      readonly pointer: LocalId
+      readonly provenance: Provenance
+    }
+  | {
       /**
        * Forms a pointer from the address lane of a reference or slice local. Formation is an
        * ordinary read of the borrow: the result holds no loan and keeps nothing alive.
@@ -821,6 +800,14 @@ export type Operation =
        * ordinary read of the borrow: the result holds no loan and keeps nothing alive.
        */
       readonly _tag: 'PointerRequalify'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Pointer' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /** Projects the same address as readonly bytes without loading or claiming an extent. */
+      readonly _tag: 'PointerBytes'
       readonly destination: LocalId
       readonly source: LocalId
       readonly type: Extract<Type, { readonly _tag: 'Pointer' }>
@@ -1906,7 +1893,6 @@ export interface Violation {
     | 'InvalidIntegerOperation'
     | 'InvalidLayoutOperation'
     | 'InvalidAllocationOperation'
-    | 'InvalidStandardStreamOperation'
     | 'InvalidOsOperation'
     | 'InvalidForeignCall'
     | 'InvalidForeignOperation'

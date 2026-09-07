@@ -71,9 +71,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'StringEqualsExact':
       return yield* NativeValueOperation.emit(context.value, operation)
     case 'Allocate':
-    case 'HostWrite':
     case 'OsCall':
-    case 'OsOpenOutcome':
     case 'RawBufferFrom':
     case 'SharedFromAllocation':
     case 'SharedClone':
@@ -143,7 +141,9 @@ export const emit = Effect.fnUntraced(function* (
     case 'ForeignFunctionAddress':
       return yield* NativeForeignOperation.emit(context.call, operation)
     case 'PointerNull':
+    case 'PointerAddress':
     case 'PointerIsNull':
+    case 'PointerBytes':
     case 'PointerRequalify':
     case 'PointerFromStorage':
     case 'PointerAt':

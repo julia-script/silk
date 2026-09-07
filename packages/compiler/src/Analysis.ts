@@ -1293,6 +1293,24 @@ export const codegen = Effect.fn('Analysis.codegen')(function* (
       resolutionFailures: self.closure.resolutionFailures,
     })
   }
+  if (
+    request.support &&
+    (self.profile === undefined ||
+      self.profile.artifact !== 'object' ||
+      self.profile.entry.kind !== 'none' ||
+      self.profile.runtime.kind !== 'none' ||
+      self.profile.libc !== 'none' ||
+      self.profile.sanitizers.length !== 0 ||
+      self.profile.unwind !== 'none')
+  ) {
+    return yield* new Backend.BackendError({
+      operation: 'Backend.emit',
+      backend: 'LLVM',
+      message:
+        'Support compilation requires an object-only, no-entry, no-runtime, no-libc profile without sanitizers or unwind',
+      reason: { _tag: 'UnsupportedMir', detail: 'Invalid support profile' },
+    })
+  }
   return yield* Backend.emit(selected, self.mir.value, {
     ...request,
     sources:

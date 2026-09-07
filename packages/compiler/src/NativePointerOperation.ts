@@ -21,7 +21,9 @@ type Operation = Extract<
     readonly _tag:
       | 'PointerNull'
       | 'PointerIsNull'
+      | 'PointerAddress'
       | 'PointerRequalify'
+      | 'PointerBytes'
       | 'PointerFromStorage'
       | 'PointerAt'
       | 'PointerRead'
@@ -51,6 +53,18 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       storage.locals.set(destination, Object.freeze([yield* Constant.nullValue(builder, pointer)]))
       return
     }
+    case 'PointerAddress': {
+      const addressType = yield* LlvmType.integer(builder, program.layout.target.pointerSize * 8)
+      const address = yield* FunctionBody.cast(
+        body,
+        'ptrtoint',
+        NativeStorage.readScalar(storage, operation.pointer),
+        addressType,
+        `ptr_address${destination}`,
+      )
+      storage.locals.set(destination, Object.freeze([address]))
+      return
+    }
     case 'PointerIsNull': {
       // icmp takes integers only, so the lane is compared as its pointer-width address.
       const addressType = yield* LlvmType.integer(builder, program.layout.target.pointerSize * 8)
@@ -75,6 +89,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       return
     }
+    case 'PointerBytes':
     case 'PointerRequalify':
     case 'PointerFromStorage': {
       // A reference is its address lane; a slice is address then length.

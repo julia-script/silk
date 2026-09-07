@@ -5307,11 +5307,11 @@ export function analyzeBuiltinCall(
   const pointerSourceType = instantiatedParameters.at(0)
   let qualifierDiagnostic: Diagnostic.Diagnostic | undefined
   if (
-    signature?.operation === 'PointerIsNull' &&
+    (signature?.operation === 'PointerIsNull' || signature?.operation === 'PointerAddress') &&
     !(pointerSourceType !== undefined && Type.isPointer(pointerSourceType))
   ) {
     qualifierDiagnostic = Diagnostic.invalidPointerQualifier(
-      'null test',
+      signature.operation === 'PointerAddress' ? 'address observation' : 'null test',
       'operand must be a data pointer',
       call.span,
     )

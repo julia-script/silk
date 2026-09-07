@@ -192,12 +192,10 @@ export interface EmissionContext {
   readonly coroutineFramePop?: FunctionActor.Function
   readonly executionRelease?: FunctionActor.Function
   readonly memcmp?: FunctionActor.Function
-  readonly standardWrite?: FunctionActor.Function
   readonly osRuntimes: ReadonlyMap<
     string,
     {
       readonly handle: FunctionActor.Function
-      readonly abi: 'Direct' | 'OpenOut'
       readonly resultLaneCount: number
       readonly symbol: string
     }
@@ -265,7 +263,6 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
     coroutineFramePop,
     executionRelease,
     memcmp,
-    standardWrite,
     osRuntimes,
     foreignIndirects,
     foreignFunctions,
@@ -857,7 +854,6 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           ...(malloc === undefined ? {} : { malloc }),
           ...(free === undefined ? {} : { free }),
           ...(memcmp === undefined ? {} : { memcmp }),
-          ...(standardWrite === undefined ? {} : { standardWrite }),
           osRuntimes,
           foreignIndirects,
           foreignFunctions,

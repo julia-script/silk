@@ -208,6 +208,22 @@ Validates UTF-8 bytes as one normalized relative fragment and appends them to `b
 This is useful for a child name returned as bytes by another portable API. Invalid UTF-8 and the
 same malformed components rejected by [`join`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e6a6f696e) fail with the `InvalidPath` reason.
 
+<a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e6a6f696e4279746573"></a>
+
+### Associated function `Path.joinBytes`
+
+```silk
+pub effect<'env> fn joinBytes<'life0: 'env, 'life1: 'env, 'env>(base: &'life0 silk/filesystem.Path, fragment: &'life1 [u8]) -> Path ! FileError | OutOfMemoryError ? &mut Allocator
+```
+
+Appends one normalized relative byte fragment while preserving non-UTF-8 names.
+
+#### Details
+
+The fragment must be nonempty and contain no NUL, empty, dot or dot-dot component.
+This is the byte-preserving operation for native directory names; use [`joinUtf8`](#declaration-73696c6b2f66696c6573797374656d3a3a506174682e6a6f696e55746638)
+when the caller also requires valid UTF-8.
+
 <a id="declaration-73696c6b2f66696c6573797374656d3a3a506174682e7265736f6c7665"></a>
 
 ### Associated function `Path.resolve`

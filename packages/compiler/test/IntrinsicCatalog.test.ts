@@ -192,11 +192,13 @@ pub fn main() -> i32 {
 fn pointers(value: &mut i32, values: &mut [u8], shared: &i32, view: &[u8]) -> i32 {
   let empty = Intrinsic.pointerNull<Opaque>()
   let missing = Intrinsic.pointerIsNull<?*mut Opaque>(empty)
+  let address = Intrinsic.pointerAddress<?*mut Opaque>(empty)
   let constant = Intrinsic.pointerFromRef<i32>(shared)
   let mutable = Intrinsic.pointerFromMutRef<i32>(value)
   let first = Intrinsic.pointerFromSlice<u8>(view)
   let firstMut = Intrinsic.pointerFromMutSlice<u8>(values)
   unsafe {
+    let bytes = Intrinsic.pointerBytes<i32>(constant)
     let many = Intrinsic.pointerRequalify<?[*]const u8, [*]const u8>(first)
     let manyMut = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(firstMut)
     let second = Intrinsic.pointerAt<u8>(many, 1)
@@ -250,11 +252,16 @@ effect fn suspendDirect(
   return run Intrinsic.suspendEffect(move deferred)
 }
 pub fn main() -> i32 { return 42 }`,
-  `import silk.writer { Writer, WriterError, StdoutWriter }
+  `import silk.writer { Writer, WriterError }
 import silk.writer { Writer, WriterError }
 import silk.effect { Effect }
+struct Sink {}
+impl Writer for Sink {
+  effect fn writeAll(self: &mut Self, bytes: &[u8]) -> () ! WriterError ? &mut Writer { return () }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer { return () }
+}
 pub effect fn main() -> () ! WriterError {
-  let mut native = Writer.stdoutWriterProvider()
+  let mut native = Sink {}
   let first = run Effect.provideMut(Writer.writeAll(b"out"), &mut native)
   let second = run Effect.provideMut(Writer.writeAll(b"error"), &mut native)
   return ()
@@ -262,72 +269,6 @@ pub effect fn main() -> () ! WriterError {
   `import silk.usize as usize
 import silk.option { Option }
 fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
-fn opened(handle: OsHandle) -> Option<OsHandle> { return Option.some<OsHandle>(move handle) }
-fn refused() -> Option<OsHandle> { return Option.none<OsHandle>() }
-effect fn monotonicClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> bool {
-  unsafe { return run Intrinsic.osMonotonicClockNow(seconds, nanoseconds) }
-  return false
-}
-effect fn monotonicClockResolution(nanoseconds: &mut u64) -> bool {
-  unsafe { return run Intrinsic.osMonotonicClockResolution(nanoseconds) }
-  return false
-}
-effect fn monotonicClockWaitUntil(seconds: i64, nanoseconds: i64) -> bool {
-  unsafe { return run Intrinsic.osMonotonicClockWaitUntil(seconds, nanoseconds) }
-  return false
-}
-effect fn randomFill(output: &mut [u8]) -> bool {
-  unsafe { return run Intrinsic.osRandomFill(move output) }
-  return false
-}
-effect fn fileOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
-  unsafe { return run Intrinsic.osFileOpen<Option<OsHandle>>(root, path, 0, reason, code, opened, refused) }
-  return Option.none<OsHandle>()
-}
-effect fn fileRead(handle: &mut OsHandle, output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osFileRead(handle, output, count, reason, code) }
-  return false
-}
-effect fn fileWrite(handle: &mut OsHandle, input: &[u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osFileWrite(handle, input, 0, count, reason, code) }
-  return false
-}
-effect fn directoryOpen(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> Option<OsHandle> {
-  unsafe { return run Intrinsic.osDirectoryOpen<Option<OsHandle>>(root, path, reason, code, opened, refused) }
-  return Option.none<OsHandle>()
-}
-effect fn directoryNext(handle: &mut OsHandle, output: &mut [u8], count: &mut usize, kind: &mut i32, required: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osDirectoryNext(handle, output, count, kind, required, reason, code) }
-  return false
-}
-effect fn inspect(root: &[u8], path: &[u8], kind: &mut i32, length: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osPathInspect(root, path, kind, length, reason, code) }
-  return false
-}
-effect fn create(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osDirectoryCreate(root, path, reason, code) }
-  return false
-}
-effect fn createUnique(root: &[u8], parent: &[u8], prefix: &[u8], output: &mut [u8], count: &mut usize, required: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osDirectoryCreateUnique(root, parent, prefix, move output, count, required, reason, code) }
-  return false
-}
-effect fn removeFile(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osFileRemove(root, path, reason, code) }
-  return false
-}
-effect fn removeDirectory(root: &[u8], path: &[u8], reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osDirectoryRemove(root, path, reason, code) }
-  return false
-}
-effect fn close(handle: OsHandle, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osHandleClose(move handle, reason, code) }
-  return false
-}
-effect fn standardInputRead(output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osStandardInputRead(move output, count, reason, code) }
-  return false
-}
 effect fn processExecute(program: &[u8], arguments: &[u8], environment: &[u8], directory: &[u8], status: &mut i32, exit: &mut i32, outputLength: &mut usize, errorLength: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
   unsafe { return run Intrinsic.osProcessExecute(program, arguments, environment, directory, status, exit, outputLength, errorLength, reason, code) }
   return false
@@ -508,11 +449,13 @@ it('admits the Pointer actor with one invariant per unsafe primitive', () => {
   assert.deepEqual(
     pointer.map((entry) => [entry.operation, entry.unsafe, entry.invariant !== undefined]),
     [
+      ['Intrinsic.pointerBytes', true, true],
       ['Intrinsic.pointerRequalify', true, true],
       ['Intrinsic.pointerReadUnaligned', true, true],
       ['Intrinsic.pointerWriteUnaligned', true, true],
       ['Intrinsic.pointerNull', false, false],
       ['Intrinsic.pointerIsNull', false, false],
+      ['Intrinsic.pointerAddress', false, false],
       ['Intrinsic.pointerFromRef', false, false],
       ['Intrinsic.pointerFromMutRef', false, false],
       ['Intrinsic.pointerFromSlice', false, false],
@@ -601,7 +544,6 @@ it('matches the checked intrinsic inventory and records every unsafe invariant',
     consumer: entry.consumer,
     ...(entry.hir === undefined ? {} : { identity: entry.hir }),
     ...(entry.invariant === undefined ? {} : { invariant: entry.invariant }),
-    ...(entry.hostImport === undefined ? {} : { hostImport: entry.hostImport }),
   }))
   assert.deepEqual(fixture, { targets: Intrinsic.runtimeTargets, entries })
   assert.deepEqual(
@@ -816,4 +758,18 @@ it.effect(
         assert.strictEqual(occurrence.resolution.identity._tag, 'DeclarationIdentity')
       assert.strictEqual(occurrence?.declaration?.module, 'silk/i32')
     }),
+)
+
+it.effect('rejects numeric operands to raw pointer address observation at the call span', () =>
+  Effect.gen(function* () {
+    const source = 'pub fn main() -> i32 { let a = Intrinsic.pointerAddress<i32>(1) return 0 }'
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'pointer/address-invalid',
+      encoder.encode(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((entry) => [entry.code, entry.span.start, entry.span.end]),
+      [['SEM0215', 30, 63]],
+    )
+  }),
 )

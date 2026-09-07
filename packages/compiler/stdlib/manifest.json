@@ -175,7 +175,7 @@
     "module": "silk/logger",
     "path": "silk/logger.silk",
     "namespace": "Logger",
-    "aliases": ["InMemoryLogger", "LogError", "LogLevel", "StdoutLogger"]
+    "aliases": ["InMemoryLogger", "LogError", "LogLevel"]
   },
   {
     "module": "silk/metrics",
@@ -186,6 +186,22 @@
     "module": "silk/monotonic_clock",
     "path": "silk/monotonic_clock.silk",
     "namespace": "MonotonicClock"
+  },
+  {
+    "module": "silk/native_clock",
+    "path": "silk/native_clock.silk",
+    "namespace": "NativeClock",
+    "aliases": []
+  },
+  {
+    "module": "silk/native_descriptor",
+    "path": "silk/native_descriptor.silk",
+    "namespace": "NativeDescriptor"
+  },
+  {
+    "module": "silk/native_filesystem",
+    "path": "silk/native_filesystem.silk",
+    "namespace": "NativeFileSystem"
   },
   {
     "module": "silk/numeric",
@@ -220,6 +236,11 @@
     "namespace": "OsHostInput"
   },
   {
+    "module": "silk/os_logger",
+    "path": "silk/os_logger.silk",
+    "namespace": "StdoutLogger"
+  },
+  {
     "module": "silk/os_monotonic_clock",
     "path": "silk/os_monotonic_clock.silk",
     "namespace": "OsMonotonicClock"
@@ -238,6 +259,12 @@
     "module": "silk/os_system_clock",
     "path": "silk/os_system_clock.silk",
     "namespace": "OsSystemClock"
+  },
+  {
+    "module": "silk/os_writer",
+    "path": "silk/os_writer.silk",
+    "namespace": "StdoutWriter",
+    "aliases": ["StderrWriter"]
   },
   {
     "module": "silk/output",
@@ -309,6 +336,30 @@
     "aliases": ["InvalidUtf8", "ScalarCursor", "ScalarStep"]
   },
   {
+    "module": "silk/support/bcmp",
+    "path": "silk/support/bcmp.silk"
+  },
+  {
+    "module": "silk/support/bzero",
+    "path": "silk/support/bzero.silk"
+  },
+  {
+    "module": "silk/support/memcmp",
+    "path": "silk/support/memcmp.silk"
+  },
+  {
+    "module": "silk/support/memcpy",
+    "path": "silk/support/memcpy.silk"
+  },
+  {
+    "module": "silk/support/memmove",
+    "path": "silk/support/memmove.silk"
+  },
+  {
+    "module": "silk/support/memset",
+    "path": "silk/support/memset.silk"
+  },
+  {
     "module": "silk/system_clock",
     "path": "silk/system_clock.silk",
     "namespace": "SystemClock",
@@ -365,6 +416,6 @@
     "module": "silk/writer",
     "path": "silk/writer.silk",
     "namespace": "Writer",
-    "aliases": ["StdoutWriter", "StderrWriter", "WriterError"]
+    "aliases": ["WriterError"]
   }
 ]

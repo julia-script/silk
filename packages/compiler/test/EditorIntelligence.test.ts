@@ -771,7 +771,8 @@ pub fn main() -> i32 { return 0 }`
 })
 
 it.effect('completes and navigates the source-defined logging surface', () => {
-  const source = `import silk.effect { Effect }
+  const source = `import silk.os_logger { StdoutLogger }
+import silk.effect { Effect }
 import silk.logger { LogError }
 import silk.logger { LogLevel }
 import silk.logger { Logger }
@@ -783,12 +784,12 @@ effect fn direct() -> () ! LogError ? &mut Logger {
 }
 pub fn main() -> i32 {
   let memory = Logger.inMemoryProvider()
-  let output = Logger.stdoutProvider()
+  let output = StdoutLogger.make()
   return 42
 }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSourceRealized('main', encoder.encode(source), 'x86_64-unknown-linux-gnu').pipe(
     Effect.map((snapshot) => {
-      const logger = occurrenceAt(snapshot, source, 'Logger', 3)
+      const logger = occurrenceAt(snapshot, source, 'Logger.log', 0)
       assert.strictEqual(logger?.role, 'Actor')
       assert.strictEqual(logger?.declaration?.module, 'silk/logger')
 
@@ -797,7 +798,7 @@ pub fn main() -> i32 {
         ['log(', 'silk/logger', 0],
         ['Info', 'silk/logger', 0],
         ['inMemoryProvider', 'silk/logger', 0],
-        ['stdoutProvider', 'silk/logger', 0],
+        ['make()', 'silk/os_logger', 0],
       ] as const) {
         const occurrence = occurrenceAt(snapshot, source, spelling, ordinal)
         assert.isDefined(occurrence, spelling)
@@ -819,7 +820,7 @@ pub fn main() -> i32 {
       )
       for (const [prefix, expected] of [
         ['Effect.', ['log', 'logAt', 'logTrace', 'logDebug', 'logInfo', 'logWarning', 'logError']],
-        ['Logger.', ['log', 'inMemoryProvider', 'stdoutProvider', 'length', 'levelAt']],
+        ['Logger.', ['log', 'inMemoryProvider', 'failure', 'length', 'levelAt']],
         ['LogLevel.', ['Trace', 'Debug', 'Info', 'Warning', 'Error']],
       ] as const) {
         const offset = source.indexOf(prefix) + prefix.length
@@ -1048,18 +1049,19 @@ fn explicit(value: string<'static>) -> string<'static> { return value }`
 })
 
 it.effect('publishes proved hover contracts and inferred provider-selector hints', () => {
-  const source = `import silk.writer { Writer, WriterError, StdoutWriter }
+  const source = `import silk.os_writer { StdoutWriter }
+import silk.writer { Writer, WriterError }
 import silk.writer { Writer }
 import silk.effect { Effect }
 
 fn inspect(value: StdoutWriter) -> () { return () }
 
 pub effect fn main() -> () ! WriterError {
-  let mut streams = Writer.stdoutWriterProvider()
+  let mut streams = StdoutWriter.make()
   return run Writer.writeAll(b"Hello, world!")
     |> Effect.provideMut(&mut streams)
 }`
-  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source), 'x86_64-unknown-linux-gnu').pipe(
     Effect.map((snapshot) => {
       const contractsAt = (spelling: string, occurrence = 0) => {
         let offset = -1
@@ -1073,13 +1075,13 @@ pub effect fn main() -> () ! WriterError {
       }
 
       assert.deepEqual(contractsAt('StdoutWriter'), ['Writer'])
-      assert.deepEqual(contractsAt('stdoutWriterProvider'), ['Writer'])
+      assert.deepEqual(contractsAt('make()'), ['Writer'])
       assert.deepEqual(contractsAt('streams', 1), ['Writer'])
       assert.deepEqual(
         Analysis.hoverSubjectAt(
           snapshot,
           'main',
-          source.indexOf('stdoutWriterProvider()') + 'stdoutWriterProvider'.length,
+          source.indexOf('make()') + 'make'.length,
         )?.implementedContracts.map((contract) => contract.text) ?? [],
         ['Writer'],
       )
@@ -1115,11 +1117,12 @@ pub effect fn main() -> () ! WriterError {
 })
 
 it.effect('presents selected imports and shared and owned provider selectors', () => {
-  const selectedImportSource = `import silk.writer { Writer, WriterError }
+  const selectedImportSource = `import silk.os_writer { StdoutWriter }
+import silk.writer { Writer, WriterError }
 import silk.effect { Effect }
 
 pub effect fn main() -> () ! WriterError {
-  let mut streams = Writer.stdoutWriterProvider()
+  let mut streams = StdoutWriter.make()
   return run Writer.writeAll(b"selected\\n")
     |> Effect.provideMut(&mut streams)
 }`
@@ -1139,7 +1142,7 @@ pub fn main() -> i32 {
   return run owned
 }`
   return Effect.all([
-    Analysis.ofSource('main', encoder.encode(selectedImportSource)),
+    Analysis.ofSource('main', encoder.encode(selectedImportSource), 'x86_64-unknown-linux-gnu'),
     Analysis.ofSource('main', encoder.encode(accessFormsSource)),
   ]).pipe(
     Effect.map(([selectedImport, accessForms]) => {
@@ -1224,15 +1227,16 @@ pub fn main() -> i32 {
 })
 
 it.effect('omits explicit provider selectors while retaining binding hints', () => {
-  const source = `import silk.writer { Writer, WriterError, StdoutWriter }
+  const source = `import silk.os_writer { StdoutWriter }
+import silk.writer { Writer, WriterError }
 import silk.effect { Effect }
 
 pub effect fn main() -> () ! WriterError {
-  let mut streams = Writer.stdoutWriterProvider()
+  let mut streams = StdoutWriter.make()
   return run Writer.writeAll(b"ok\\n")
     |> Effect.provideMut<Writer>(&mut streams)
 }`
-  return Analysis.ofSource('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source), 'x86_64-unknown-linux-gnu').pipe(
     Effect.map((snapshot) => {
       const hints = Analysis.typeHints(snapshot, 'main', 0, encoder.encode(source).length)
       assert.deepEqual(

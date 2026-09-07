@@ -385,13 +385,14 @@ stream, or other service merely because an official implementation ships with th
 ```silk,ignore
 import silk.effect { Effect }
 import silk.logger { LogError, LogLevel, Logger }
+import silk.os_logger { StdoutLogger }
 
 effect fn program() -> () ! LogError ? &mut Logger {
   return run Logger.log(LogLevel.Info, "ready")
 }
 
 pub effect fn main() ! LogError {
-  let mut logger = Logger.stdoutProvider()
+  let mut logger = StdoutLogger.make()
   return run Effect.provideMut<Logger>(program(), &mut logger)
 }
 ```

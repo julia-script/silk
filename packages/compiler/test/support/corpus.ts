@@ -281,7 +281,8 @@ pub fn main() -> i32 {
 }`
 
 /** Formatting options are observed through the real native stdout boundary. */
-export const formatOptionsAcceptance = `import silk.effect { Effect }
+export const formatOptionsAcceptance = `import silk.os_writer { StdoutWriter }
+import silk.effect { Effect }
 import silk.format { Alignment, Format, FormatOptions, Sign }
 import silk.option { Option }
 import silk.usize as usize
@@ -366,7 +367,7 @@ effect fn render() -> () ! WriterError ? &mut Writer {
 
 effect fn build() -> i32 ! WriterError {
   if !accessorsHold() { return 2 }
-  let mut writer = Writer.stdoutWriterProvider()
+  let mut writer = StdoutWriter.make()
   run render() |> Effect.provideMut<Writer>(&mut writer)
   return 42
 }
@@ -1627,7 +1628,29 @@ ${integerParsingRanges
   return 42
 }`
 
+export const narrowEffectRecord = `import silk.effect { Effect }
+import silk.u16 as u16
+import silk.u8 as u8
+struct Small { first: u16 second: u8 }
+struct WideFailure { first: i64 second: i64 }
+effect fn build(failNow: bool) -> Small ! WideFailure {
+ if failNow { fail WideFailure { first: 1, second: 2 } }
+ return Small { first: u16.toU16(32769), second: u8.toU8(241) }
+}
+effect fn check() -> i32 ! WideFailure {
+ let value = run build(false)
+ if value.first != u16.toU16(32769) || value.second != u8.toU8(241) { return 0 }
+ return 42
+}
+effect fn recover(error: WideFailure) -> i32 { return 1 }
+pub fn main() -> i32 { return run Effect.catchAll(check(), recover) }`
+
 export const corpus: ReadonlyArray<CorpusProgram> = [
+  {
+    name: 'narrow-record-effect-success-lanes',
+    source: narrowEffectRecord,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   {
     name: 'package-parameter-final-defaults',
     source: `pub param enabled: bool = true
@@ -4870,6 +4893,7 @@ import silk.shared { Shared }
 struct Problem { code: i32 }
 struct Counter { value: i32 sum: i32 }
 struct Guard { value: i32 counter: Shared<Counter> }
+struct Holder { guard: Guard }
 struct Deferred<A, E, ?R, F: once Effect<'static; A ! E ? R>> { operation: F }
 fn record(counter: &mut Counter, value: i32) -> i32 {
   counter.value = counter.value + 1
@@ -4905,6 +4929,10 @@ effect fn runFailure(counter: &Shared<Counter>) -> i32 ! Problem {
   let failed = defer(failing(guard(7, counter)))
   return run failed.operation
 }
+effect fn runMovedField(counter: &Shared<Counter>) -> i32 ! Problem {
+  let holder = Holder { guard: guard(4, counter) }
+  return run failing(move holder.guard)
+}
 effect fn runSuspended(counter: &Shared<Counter>) -> i32 {
   let suspended = defer(delayed(guard(2, counter)))
   return run suspended.operation
@@ -4917,13 +4945,15 @@ effect fn build() -> i32 ! OutOfMemoryError {
   let unrun = defer(effect { return consume(move unrunGuard) })
   drop unrun
   let failureResult = run Effect.catchAll(runFailure(&counter), recover)
+  let movedResult = run Effect.catchAll(runMovedField(&counter), recover)
   let suspensionResult = run runSuspended(&counter)
   let count = Shared.with<Counter, i32>(&counter, read)
   let sum = Shared.with<Counter, i32>(&counter, readSum)
   drop counter
   if failureResult != 7 || suspensionResult != 42 { return 1 }
-  if sum != 10 { return 2 }
-  if count != 3 { return 3 }
+  if movedResult != 4 { return 4 }
+  if sum != 14 { return 2 }
+  if count != 4 { return 3 }
   return 42
 }
 effect fn recoverAllocation(error: OutOfMemoryError) -> i32 { return -1 }
@@ -5996,7 +6026,8 @@ export "C" fn silk_test_export_touched() -> i32 { return unsafe silk_test_export
 pub fn main() -> i32 { return unsafe silk_test_export_checksum() }`
 
 /** Replacement cleanup: a displaced local, field, array element, and slice element clean once. */
-export const replaceCleanupProgram = `import silk.allocator { Allocator, OutOfMemoryError }
+export const replaceCleanupProgram = `import silk.os_writer { StdoutWriter }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.shared { Shared }
 import silk.format { Format }
@@ -6036,7 +6067,7 @@ fn tracer(id: i32, log: &Shared<Log>) -> Tracer {
 }
 effect fn printLog(log: &Shared<Log>) -> () ! WriterError {
   let code = Shared.with<Log, i32>(log, encode)
-  let mut writer = Writer.stdoutWriterProvider()
+  let mut writer = StdoutWriter.make()
   return run (Format.display(&code) |> Effect.provideMut<Writer>(&mut writer))
 }
 effect fn makeLog() -> Shared<Log> ! OutOfMemoryError {
@@ -6087,7 +6118,8 @@ pub fn main() -> i32 {
 }`
 
 /** Replacement cleanup runs at the write, before an explicit drop and scope exit. */
-export const replaceDropProgram = `import silk.allocator { Allocator, OutOfMemoryError }
+export const replaceDropProgram = `import silk.os_writer { StdoutWriter }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.shared { Shared }
 import silk.format { Format }
@@ -6127,7 +6159,7 @@ fn tracer(id: i32, log: &Shared<Log>) -> Tracer {
 }
 effect fn printLog(log: &Shared<Log>) -> () ! WriterError {
   let code = Shared.with<Log, i32>(log, encode)
-  let mut writer = Writer.stdoutWriterProvider()
+  let mut writer = StdoutWriter.make()
   return run (Format.display(&code) |> Effect.provideMut<Writer>(&mut writer))
 }
 effect fn makeLog() -> Shared<Log> ! OutOfMemoryError {
@@ -7894,6 +7926,7 @@ pub fn main() -> i32 { return unsafe silk_test_libm_order(i32.toF64(85)) }`,
 int32_t silk_test_libm_order(double value) { return (int32_t)fmod(value, 43.0); }
 `,
     },
+    nativeDynamicLibraries: ['m'],
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -8022,11 +8055,13 @@ pub effect fn load() -> i32 ! NotFoundError {
   {
     name: 'standard-stream-ordering',
     source: 'pub fn main() -> i32 { return 0 }',
-    nativeSource: `import silk.effect { Effect }
+    nativeSource: `import silk.os_writer { StderrWriter }
+import silk.os_writer { StdoutWriter }
+import silk.effect { Effect }
 import silk.writer { Writer, WriterError }
 pub effect fn main() -> () ! WriterError {
-  let mut stdout = Writer.stdoutWriterProvider()
-  let mut stderr = Writer.stderrWriterProvider()
+  let mut stdout = StdoutWriter.make()
+  let mut stderr = StderrWriter.make()
   run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("heading\\n")), &mut stdout)
   run Effect.provideMut(Writer.writeAll(b"warning\\n"), &mut stderr)
   run Effect.provideMut(Writer.writeAll(Intrinsic.stringUtf8Bytes("row\\n")), &mut stdout)

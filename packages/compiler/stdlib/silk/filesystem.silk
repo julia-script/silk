@@ -155,7 +155,7 @@ impl Path {
     base: &Path,
     fragment: string
   ) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
-    return run joinBytes(base, String.utf8Bytes(fragment))
+    return run Path.joinBytes(base, String.utf8Bytes(fragment))
   }
 
   /// Validates UTF-8 bytes as one normalized relative fragment and appends them to `base`.
@@ -169,7 +169,29 @@ impl Path {
     fragment: &[u8]
   ) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
     if validUtf8(fragment) == false { return run rejectPath() }
-    return run joinBytes(base, fragment)
+    return run Path.joinBytes(base, fragment)
+  }
+
+  /// Appends one normalized relative byte fragment while preserving non-UTF-8 names.
+  ///
+  /// # Details
+  ///
+  /// The fragment must be nonempty and contain no NUL, empty, dot or dot-dot component.
+  /// This is the byte-preserving operation for native directory names; use [`joinUtf8`]
+  /// when the caller also requires valid UTF-8.
+  pub effect fn joinBytes(
+    base: &Path,
+    fragment: &[u8]
+  ) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
+    if validRelativeFragment(fragment) == false { return run rejectPath() }
+    let baseBytes = pathBytes(base)
+    let mut combined = run appendRange(Bytes.make(), baseBytes, usize.ZERO, baseBytes.length)
+    if Path.isRoot(base) == false {
+      let slash = run Bytes.append(&mut combined, String.utf8Bytes("/"))
+    }
+    let beforeChild = Intrinsic.replace(combined, Bytes.make())
+    combined = run appendRange(move beforeChild, fragment, usize.ZERO, fragment.length)
+    return run finishPath(move combined)
   }
 
   /// Resolves relative text lexically against an explicit absolute base.
@@ -471,21 +493,6 @@ effect fn finishPath(bytes: Bytes) -> Path ! OutOfMemoryError ? &mut Allocator {
 }
 
 fn pathBytes(self: &Path) -> &[u8] { return Bytes.asSlice(&self.bytes) }
-
-effect fn joinBytes(
-  base: &Path,
-  fragment: &[u8]
-) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
-  if validRelativeFragment(fragment) == false { return run rejectPath() }
-  let baseBytes = pathBytes(base)
-  let mut combined = run appendRange(Bytes.make(), baseBytes, usize.ZERO, baseBytes.length)
-  if Path.isRoot(base) == false {
-    let slash = run Bytes.append(&mut combined, String.utf8Bytes("/"))
-  }
-  let beforeChild = Intrinsic.replace(combined, Bytes.make())
-  combined = run appendRange(move beforeChild, fragment, usize.ZERO, fragment.length)
-  return run finishPath(move combined)
-}
 
 fn componentCount(values: &[u8]) -> usize {
   if values.length == usize.ONE { return usize.ZERO }

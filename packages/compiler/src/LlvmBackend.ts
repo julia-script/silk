@@ -33,6 +33,7 @@ export const LlvmBackend: Backend.Backend<Backend.LlvmBitcodeArtifact> = Object.
     )
     const artifact = {
       _tag: 'LlvmBitcodeArtifact',
+      support: request.support === true,
       backend: 'llvm',
       module: program.module,
       target: program.layout.target,

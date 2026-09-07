@@ -273,7 +273,6 @@ const nonScalarBuiltinOperations = Object.freeze([
   'ExecutionPark',
   'EffectSuspend',
   'StorageAcquire',
-  'HostWrite',
   'RawBufferFrom',
   'RawBufferSlot',
   'RawBufferCount',
@@ -284,6 +283,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'RawBufferFill',
   'PointerNull',
   'PointerIsNull',
+  'PointerAddress',
   'PointerFromRef',
   'PointerFromMutRef',
   'PointerFromSlice',
@@ -295,6 +295,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'PointerReadUnaligned',
   'PointerWriteUnaligned',
   'PointerRequalify',
+  'PointerBytes',
   'NativeAssembly',
   'SlotAddress',
   'SlotWrite',
@@ -305,22 +306,6 @@ const nonScalarBuiltinOperations = Object.freeze([
   'StringUtf8Bytes',
   'StringByteLength',
   'StringEqualsExact',
-  'OsMonotonicClockNow',
-  'OsMonotonicClockResolution',
-  'OsMonotonicClockWaitUntil',
-  'OsRandomFill',
-  'OsFileOpen',
-  'OsFileRead',
-  'OsFileWrite',
-  'OsDirectoryOpen',
-  'OsDirectoryNext',
-  'OsPathInspect',
-  'OsDirectoryCreate',
-  'OsDirectoryCreateUnique',
-  'OsFileRemove',
-  'OsDirectoryRemove',
-  'OsHandleClose',
-  'OsStandardInputRead',
   'OsProcessExecute',
   'OsProcessCapture',
   'OsHostArgumentCount',
@@ -620,14 +605,9 @@ export const specializeNominal = (
 export const layout: Nominal = nominal('silk/layout', 'Layout')
 export const invalidAlignment: Nominal = nominal('silk/layout', 'InvalidAlignment')
 export const layoutOverflow: Nominal = nominal('silk/layout', 'LayoutOverflow')
-/** Explicit host capability for complete stdout and stderr byte writes. */
-export const standardStreams: Nominal = nominal('silk/writer', 'Writer')
-/** Allocation-free typed failure returned when a host cannot commit a complete write. */
-export const streamWriteFailure: Nominal = nominal('silk/writer', 'WriterError')
 /** A self-contained affine owner carrying one private active reclaim ticket. */
 export const allocation: Nominal = nominal('silk/core', 'Allocation')
 /** Opaque affine native file-or-directory handle used only by unsafe OS intrinsics. */
-export const osHandle: Nominal = nominal('silk/core', 'OsHandle')
 /** Compiler-sealed cleanup capability used only by restricted impl declarations. */
 export const dropCapability: Nominal = nominal('silk/core', 'Drop')
 /** Compiler-sealed zero-operation property proving that values duplicate without user code. */
@@ -784,7 +764,6 @@ export const containsStaticPhaseOnly = (self: Type): boolean => {
 
 export const intrinsicNominals: ReadonlyMap<string, Nominal> = new Map([
   [allocation.name, allocation],
-  [osHandle.name, osHandle],
   [copyCapability.name, copyCapability],
   [dropCapability.name, dropCapability],
   ['RawBuffer', nominal('silk/core', 'RawBuffer')],

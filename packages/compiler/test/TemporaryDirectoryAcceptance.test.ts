@@ -115,7 +115,7 @@ ${nativeRootResolution}
 effect fn program() -> i32 ! FileError | OutOfMemoryError | HostInputError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let root = run confinedRootString() |> Effect.provideMut(&mut allocator)
-  let mut fs = run OsFileSystem.make(String.view(&root)) |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make(String.utf8Bytes(String.view(&root))) |> Effect.provideMut(&mut allocator)
   let parent = run Path.make("/scopes") |> Effect.provideMut(&mut allocator)
   let prepared = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(FileSystem.createDirectoriesRecursively(&parent), &mut fs),
@@ -170,7 +170,7 @@ ${nativeRootResolution}
 effect fn program() -> i32 ! FileError | OutOfMemoryError | HostInputError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let root = run confinedRootString() |> Effect.provideMut(&mut allocator)
-  let mut fs = run OsFileSystem.make(String.view(&root)) |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make(String.utf8Bytes(String.view(&root))) |> Effect.provideMut(&mut allocator)
   let target = run Path.make("/tree") |> Effect.provideMut(&mut allocator)
   let removed = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(FileSystem.removeDirectoryRecursively(&target), &mut fs),
@@ -200,7 +200,7 @@ ${nativeRootResolution}
 effect fn program() -> i32 ! FileError | OutOfMemoryError | HostInputError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let root = run confinedRootString() |> Effect.provideMut(&mut allocator)
-  let mut fs = run OsFileSystem.make(String.view(&root)) |> Effect.provideMut(&mut allocator)
+  let mut fs = run OsFileSystem.make(String.utf8Bytes(String.view(&root))) |> Effect.provideMut(&mut allocator)
   let parent = run Path.make("/many") |> Effect.provideMut(&mut allocator)
   let prepared = run Intrinsic.bindRequirementMut(
     Intrinsic.bindRequirementMut(FileSystem.createDirectoriesRecursively(&parent), &mut fs),
@@ -250,7 +250,7 @@ it.effect(
         compilation: {
           root: SourceFile.make('temporary-directory/native', ascii(nativeSource)),
         },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: 'clang', llvmAr: 'llvm-ar' }),
         // Release, so this also stands as the regression test for #130: the backend used to let
         // a cleanup arm's reloaded lanes escape into the arm's join block, which is invalid SSA,
         // and Clang crashed on it at -O2 instead of diagnosing it.
@@ -293,7 +293,7 @@ it.effect(
         compilation: {
           root: SourceFile.make('temporary-directory/native-tree', ascii(nativeTreeSource)),
         },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: 'clang', llvmAr: 'llvm-ar' }),
         // Release for the same reason as above — this is the walk #130 crashed on.
         optimization: 'release',
         artifactKind: 'NativeExecutable',
@@ -326,7 +326,7 @@ it.effect(
         compilation: {
           root: SourceFile.make('temporary-directory/native-many', ascii(nativeManySource)),
         },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
+        toolchain: Object.freeze({ _tag: 'Toolchain', clang: 'clang', llvmAr: 'llvm-ar' }),
         optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-many'),

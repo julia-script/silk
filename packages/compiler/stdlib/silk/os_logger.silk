@@ -1,0 +1,64 @@
+//! Native logging through the process standard-output descriptor.
+//!
+//! # When to use
+//! Provide [`StdoutLogger`] at a native application edge. Portable code uses `silk.logger.Logger`
+//! and can replace this provider with `silk.logger.InMemoryLogger`.
+//!
+//! # Details
+//! Construction performs no output. Each log writes exactly the message's UTF-8 bytes without
+//! adding a newline or severity label. Descriptor failures become LogError code 3.
+//!
+//! # Gotchas
+//! The descriptor remains process-owned. A failed write may have committed a prefix.
+//! The module is empty on WebAssembly and no-libc profiles.
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.writer { WriterError, Writer }
+  import silk.os_writer { StdoutWriter }
+  import silk.logger { Logger, LogError, LogLevel }
+  import silk.effect { Effect }
+  import silk.result { Result }
+  import silk.string { String }
+
+/// A [`Logger`] provider that writes each complete message to process standard output.
+///
+/// # Details
+///
+/// The provider ignores the severity for physical formatting and writes only the UTF-8 message
+/// bytes. It adds no newline and performs no message allocation.
+pub struct StdoutLogger {}
+
+impl StdoutLogger {
+  /// Creates a native stdout logger without writing or acquiring a descriptor.
+  pub fn make() -> StdoutLogger { return StdoutLogger {} }
+
+  effect fn writeStdout(
+    self: &mut Self,
+    level: LogLevel,
+    message: string
+  ) -> () ! LogError {
+    let mut streams = StdoutWriter.make()
+    let bytes = String.utf8Bytes(message)
+    let completed = run Effect.result(writeStdoutBytes(&mut streams, bytes))
+    return match move completed {
+      Result<(), WriterError>.Success { value: _ } => ()
+      Result<(), WriterError>.Failure { error: _ } => run writeFailure()
+    }
+  }
+}
+
+effect fn writeStdoutBytes(
+  writer: &mut StdoutWriter,
+  message: &[u8]
+) -> () ! WriterError {
+  run Intrinsic.bindRequirementMut(Writer.writeAll(message), writer)
+}
+
+effect fn writeFailure() -> never ! LogError { fail Logger.failure(3) }
+
+impl Logger for StdoutLogger {
+  log: StdoutLogger.writeStdout
+}
+
+}
+

@@ -29,7 +29,7 @@ Effect requirement or a runtime provider slot.
   service at runtime.
 
 Standard-library constructors intentionally presented as explicit provider helpers use the
-`Provider` suffix, such as `stdoutProvider` or `systemAllocatorProvider`. Other constructors may
+`Provider` suffix, such as `systemAllocatorProvider`. Other constructors may
 return conforming implementation values under ordinary actor names such as `make` or `seeded`. The
 service remains the capability contract; a constructor named as a provider neither creates a new
 requirement key nor changes conformance selection.

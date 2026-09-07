@@ -21,15 +21,21 @@ const sourceText = (spelling: string): string => {
 
 const formattingFailureProgram = (body: string): string => `import silk.effect { Effect }
 import silk.format { Format }
-import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { Writer, WriterError }
+import silk.writer { Writer, WriterError }
+
+struct Sink {}
+impl Writer for Sink {
+  effect fn writeAll(self: &mut Self, bytes: &[u8]) -> () ! WriterError ? &mut Writer { return () }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer { return () }
+}
 
 effect fn render() -> () ! WriterError ? &mut Writer {
 ${body}
 }
 
 pub effect fn main() -> () ! WriterError {
-  let mut writer = Writer.stdoutWriterProvider()
+  let mut writer = Sink {}
   return run render() |> Effect.provideMut<Writer>(&mut writer)
 }`
 
@@ -220,8 +226,14 @@ it.effect('does not expose private fields as named formatting candidates', () =>
     const source = `import model.Person as Model
 import silk.effect { Effect }
 import silk.format { Format }
-import silk.writer { Writer, WriterError, StdoutWriter }
 import silk.writer { Writer, WriterError }
+import silk.writer { Writer, WriterError }
+
+struct Sink {}
+impl Writer for Sink {
+  effect fn writeAll(self: &mut Self, bytes: &[u8]) -> () ! WriterError ? &mut Writer { return () }
+  effect fn flush(self: &mut Self) -> () ! WriterError ? &mut Writer { return () }
+}
 
 effect fn render() -> () ! WriterError ? &mut Writer {
   let person = Model.make()
@@ -229,7 +241,7 @@ effect fn render() -> () ! WriterError ? &mut Writer {
 }
 
 pub effect fn main() -> () ! WriterError {
-  let mut writer = Writer.stdoutWriterProvider()
+  let mut writer = Sink {}
   return run render() |> Effect.provideMut<Writer>(&mut writer)
 }`
     const snapshot = yield* Analysis.makeRealized({

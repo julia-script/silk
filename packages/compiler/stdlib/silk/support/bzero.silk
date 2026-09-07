@@ -1,0 +1,21 @@
+//! Source-owned byte clearing for the Darwin LLVM zero-fill helper.
+
+import silk.pointer { Pointer }
+
+/// Writes zero to each of the `count` destination bytes.
+///
+/// # Gotchas
+///
+/// The caller must provide a live writable range of `count` bytes.
+export "C" fn bzero(destination: ?[*]mut u8, count: usize) -> () {
+  if count == 0 { return () }
+  unsafe {
+    let output = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(destination)
+    let mut index: usize = 0
+    while index < count {
+      Pointer.write<u8>(Pointer.atMut<u8>(output, index), 0)
+      index = index + 1
+    }
+  }
+  return ()
+}

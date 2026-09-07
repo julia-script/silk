@@ -1,3 +1,4 @@
+import { narrowEffectRecord } from './support/corpus.js'
 import { outputStorageSource } from './support/corpus.js'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
@@ -1007,5 +1008,65 @@ it.effect('forms an output slot address without reading or initializing its valu
         false,
       )
     }
+  }),
+)
+
+it.effect(
+  'projects external record bytes without loading a nominal record and verifies readonly qualifiers',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* Analysis.ofSourceRealized(
+        'mir/pointer-bytes',
+        ascii(`import silk.pointer { Pointer }
+extern "C" struct Record {
+ first: i32
+ second: i32
+}
+export "C" fn inspect(pointer: ?*const Record) -> usize {
+  unsafe { return Pointer.addressMany(Pointer.bytes(pointer)) }
+}
+pub fn main() -> i32 { let ignored = inspect(Pointer.null<Record>()) return 42 }`),
+        'aarch64-apple-darwin',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const program = Analysis.loweredMir(snapshot)
+      assert.deepEqual(MirVerification.verify(program), [])
+      const operations = program.functions.flatMap(MirVerification.operations)
+      assert.strictEqual(operations.filter((op) => op._tag === 'PointerBytes').length, 1)
+      assert.strictEqual(operations.filter((op) => op._tag === 'PointerRead').length, 0)
+      assert.include(MirEncoding.encode(program), '= pointer-bytes ')
+      for (const qualifier of [{ mutable: true }, { pointee: 'i32' as const }]) {
+        const forged: Mir.Module = {
+          ...program,
+          functions: program.functions.map((fn) => ({
+            ...fn,
+            localTypes: fn.localTypes.map((type, ordinal) =>
+              type._tag === 'Pointer' &&
+              MirVerification.operations(fn).some(
+                (op) => op._tag === 'PointerBytes' && op.destination.ordinal === ordinal,
+              )
+                ? { ...type, type: Type.pointer({ ...type.type, ...qualifier }) }
+                : type,
+            ),
+          })),
+        }
+        assert.include(
+          MirVerification.verify(forged).map((v) => v.rule),
+          'InvalidPointerOperation',
+        )
+      }
+    }),
+)
+
+it.effect('restores narrow success fields from widened Effect outcome lanes', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'mir/narrow-effect-record',
+      ascii(narrowEffectRecord),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'debug' })
+    assert.match(artifact.ir, /effect_success\w+_width = trunc i64 .* to i16/)
+    assert.match(artifact.ir, /effect_success\w+_width = trunc i64 .* to i8/)
   }),
 )

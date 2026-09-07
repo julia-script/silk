@@ -31,7 +31,11 @@ pub fn main() -> i32 {
   if resolution > 0 { return i64.toI32(SystemClock.seconds(&instant)) }
   return 0
 }`
-    for (const target of ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu'] as const) {
+    for (const target of [
+      'aarch64-apple-darwin',
+      'x86_64-unknown-linux-gnu',
+      'aarch64-unknown-linux-gnu',
+    ] as const) {
       const system = yield* snapshot(source, target)
       assert.deepEqual(Analysis.diagnostics(system), [])
       const systemCalls = Analysis.loweredMir(system)
@@ -43,7 +47,7 @@ pub fn main() -> i32 {
         ['clock_getres', 'clock_gettime'],
       )
       const systemArtifact = yield* Analysis.codegen(system, { mode: 'release' })
-      assert.deepEqual(systemArtifact.nativeRuntimeSymbols, [])
+      assert.deepEqual(systemArtifact.nativeRuntimeSymbols, ['silk_trap_report_v1'])
       assert.deepEqual(
         systemArtifact.foreignImports.map((entry) => entry.symbol),
         ['clock_getres', 'clock_gettime'],
@@ -52,7 +56,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('keeps monotonic clock intrinsics isolated from the system-clock migration', () =>
+it.effect('lowers monotonic clock reads and waits to ordinary selected source calls', () =>
   Effect.gen(function* () {
     const monotonic = yield* snapshot(`import silk.effect { Effect }
 import silk.monotonic_clock { MonotonicClock }
@@ -70,16 +74,12 @@ pub fn main() -> i32 {
       .functions.flatMap(MirVerification.operations)
       .filter((operation) => operation._tag === 'OsCall')
       .map((operation) => operation.operation.name)
-    assert.deepEqual([...new Set(monotonicCalls)].sort(), [
-      'osMonotonicClockNow',
-      'osMonotonicClockResolution',
-      'osMonotonicClockWaitUntil',
-    ])
+    assert.deepEqual(monotonicCalls, [])
+    assert.deepEqual(
+      monotonic.instances.foreignCalls.map((call) => call.symbol),
+      ['__error', 'clock_getres', 'clock_gettime', 'nanosleep'],
+    )
     const monotonicArtifact = yield* Analysis.codegen(monotonic, { mode: 'release' })
-    assert.deepEqual([...monotonicArtifact.nativeRuntimeSymbols].sort(), [
-      'silk_os_monotonic_clock_now_v1',
-      'silk_os_monotonic_clock_resolution_v1',
-      'silk_os_monotonic_clock_wait_until_v1',
-    ])
+    assert.deepEqual([...monotonicArtifact.nativeRuntimeSymbols].sort(), ['silk_trap_report_v1'])
   }),
 )

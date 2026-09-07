@@ -21,13 +21,14 @@ const encoder = new TextEncoder()
 
 const open = (
   text: string,
+  target?: string,
 ): Effect.Effect<{
   readonly document: Document.Document
   readonly snapshot: Analysis.FrontendSnapshot
 }> =>
   Effect.gen(function* () {
     const bytes = encoder.encode(text)
-    const snapshot = yield* Analysis.ofSource('main', bytes)
+    const snapshot = yield* Analysis.ofSource('main', bytes, target)
     const document = Document.make({
       uri: 'file:///project/main.silk',
       version: 1,
@@ -407,16 +408,17 @@ pub fn main() -> i32 {
 
 it.effect('renders proved hover contracts and inferred provider selectors', () =>
   Effect.gen(function* () {
-    const source = `import silk.writer { Writer, WriterError, StdoutWriter }
+    const source = `import silk.os_writer { StdoutWriter }
+import silk.writer { Writer, WriterError }
 import silk.effect { Effect }
 
 pub effect fn main() -> () ! WriterError {
-  let mut streams = Writer.stdoutWriterProvider()
+  let mut streams = StdoutWriter.make()
   // π🙂 keeps the selector position on UTF-16 coordinates
   return run Writer.writeAll(b"Hello\\n")
     |> Effect.provideMut(&mut streams)
 }`
-    const { document, snapshot } = yield* open(source)
+    const { document, snapshot } = yield* open(source, 'x86_64-unknown-linux-gnu')
     const hover = Document.hover(document, snapshot, positionOf(source, 'streams', 1))
     assert.deepEqual(hover?.contents, {
       kind: 'markdown',
@@ -525,14 +527,15 @@ pub fn broken() -> i32 { return missing() }`
 
 it.effect('does not duplicate an explicitly written provider selector', () =>
   Effect.gen(function* () {
-    const source = `import silk.writer { Writer, WriterError, StdoutWriter }
+    const source = `import silk.os_writer { StdoutWriter }
+import silk.writer { Writer, WriterError }
 import silk.effect { Effect }
 pub effect fn main() -> () ! WriterError {
-  let mut streams = Writer.stdoutWriterProvider()
+  let mut streams = StdoutWriter.make()
   return run Writer.writeAll(b"ok\\n")
     |> Effect.provideMut<Writer>(&mut streams)
 }`
-    const { document, snapshot } = yield* open(source)
+    const { document, snapshot } = yield* open(source, 'x86_64-unknown-linux-gnu')
     assert.deepEqual(
       Document.inlayHints(document, snapshot, {
         start: { line: 0, character: 0 },

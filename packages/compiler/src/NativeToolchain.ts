@@ -1,3 +1,7 @@
+import * as HelperCapability from './HelperCapability.js'
+import * as HelperSource from './HelperSource.js'
+import * as ToolchainIntegrity from './ToolchainIntegrity.js'
+import * as ObjectSymbols from './internal/ObjectSymbols.js'
 import * as Config from 'effect/Config'
 import * as Schema from 'effect/Schema'
 import { NodeServices } from '@effect/platform-node'
@@ -116,6 +120,7 @@ export type Stage =
   | 'artifact-cleanup'
 
 export type ToolchainErrorReason =
+  | { readonly _tag: 'HelperFailed'; readonly failure: HelperCapability.HelperError }
   | { readonly _tag: 'SupplyFailed'; readonly failure: PlatformSupply.SupplyError }
   | {
       readonly _tag: 'SpawnFailed'
@@ -157,6 +162,14 @@ const supplyError = (failure: PlatformSupply.SupplyError): ToolchainError =>
     stage: 'supply',
     message: failure.message,
     reason: { _tag: 'SupplyFailed', failure },
+  })
+
+const helperError = (failure: HelperCapability.HelperError): ToolchainError =>
+  new ToolchainError({
+    operation: failure.operation,
+    stage: 'object',
+    message: `${failure.code}: ${failure.subject} (${failure.origins.join(' -> ')})`,
+    reason: { _tag: 'HelperFailed', failure },
   })
 
 /** Resolves a physical provider once for a native build; all subsequent consumers share it. */
@@ -673,12 +686,15 @@ export interface BuildScope {
 }
 
 export interface ObjectArtifact {
+  readonly helpers?: HelperCapability.Report
+  readonly inventory?: ObjectSymbols.Inventory
   readonly _tag: 'ObjectArtifact'
   readonly artifact: PathArtifact
   readonly planned: ToolchainPlan.PlannedCommand
 }
 
 export interface FinalArtifact {
+  readonly helpers?: HelperCapability.Report
   readonly _tag: 'FinalArtifact'
   readonly kind: ArtifactKind.ArtifactKind
   readonly path: string
@@ -823,13 +839,36 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
   profile: CompilationProfile.CompilationProfile,
   baseName = 'program',
 ): Effect.fn.Return<ObjectArtifact, ToolchainError> {
+  if (
+    artifact.support &&
+    (profile.artifact !== 'object' ||
+      profile.entry.kind !== 'none' ||
+      profile.runtime.kind !== 'none' ||
+      profile.libc !== 'none' ||
+      profile.sanitizers.length !== 0 ||
+      profile.unwind !== 'none')
+  )
+    return yield* helperError(
+      new HelperCapability.HelperError({
+        operation: 'NativeToolchain.emitObject',
+        code: 'InvalidSupportProfile',
+        subject: 'Support artifact requires the restricted object profile',
+        origins: [baseName],
+      }),
+    )
   const target = profile.target
   const bitcodePath = join(scope.root, `${baseName}.bc`)
   const objectPath = join(scope.root, `${baseName}.o`)
   const base = ToolchainPlan.objectCommand(toolchain.clang, profile, bitcodePath, objectPath)
   const planned = Object.freeze({
     ...base,
-    arguments: Object.freeze(['--no-default-config', ...base.arguments]),
+    arguments: Object.freeze([
+      '--no-default-config',
+      ...base.arguments,
+      ...(artifact.support
+        ? ['-mllvm', '-disable-loop-idiom-memcpy', '-mllvm', '-disable-loop-idiom-memset']
+        : []),
+    ]),
     environment:
       toolchain.supply?.environment ??
       Object.freeze({
@@ -850,8 +889,32 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
   yield* writeArtifact(scope, target, `${baseName}.bc`, artifact.bitcode)
   yield* runPlanned('NativeToolchain.emitObject', 'object', planned)
   yield* requirePath('NativeToolchain.emitObject', 'object', objectPath)
+  const bytes = yield* Effect.try({
+    try: () => readFileSync(objectPath),
+    catch: (cause) => storageError('NativeToolchain.emitObject', 'object', objectPath, cause),
+  })
+  const inventory = ObjectSymbols.inspect(bytes, target)
+  if (Result.isFailure(inventory))
+    return yield* helperError(
+      new HelperCapability.HelperError({
+        operation: 'NativeToolchain.emitObject',
+        code: 'InvalidObject',
+        subject: inventory.failure.detail,
+        origins: [objectPath, target.id],
+      }),
+    )
+  const helpers = yield* HelperCapability.reconcile(
+    inventory.success,
+    artifact,
+    profile,
+    objectPath,
+    ToolchainIntegrity.contentDigest(bytes),
+  ).pipe(Effect.mapError(helperError))
+
   return Object.freeze({
     _tag: 'ObjectArtifact',
+    helpers,
+    inventory: inventory.success,
     artifact: Object.freeze({
       _tag: 'PathArtifact',
       scope: scope.name,
@@ -860,6 +923,49 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
     }),
     planned,
   })
+})
+
+/** Realizes each source helper once and audits its actual emitted dependency closure. */
+export const compileHelpers = Effect.fn('NativeToolchain.compileHelpers')(function* (
+  toolchain: Toolchain,
+  scope: BuildScope,
+  profile: CompilationProfile.Facts,
+  report: HelperCapability.Report,
+): Effect.fn.Return<ReadonlyArray<ObjectArtifact>, ToolchainError> {
+  const providers = [
+    ...new Map(report.requirements.map((entry) => [entry.provider.id, entry.provider])).values(),
+  ]
+  const selected = yield* HelperCapability.closure(
+    report.requirements.map((entry) => entry.contract.symbol),
+    providers,
+    profile.target,
+  ).pipe(Effect.mapError(helperError))
+  const objects: Array<ObjectArtifact> = []
+  for (const provider of selected) {
+    if (provider.kind !== 'source') continue
+    const source = yield* HelperSource.compile(provider, profile).pipe(Effect.mapError(helperError))
+    const object = yield* emitObject(
+      toolchain,
+      scope,
+      source.artifact,
+      source.profile,
+      `helper-${objects.length}`,
+    )
+    if (object.inventory === undefined)
+      return yield* helperError(
+        new HelperCapability.HelperError({
+          operation: 'NativeToolchain.compileHelpers',
+          code: 'InvalidObject',
+          subject: 'Missing provider inventory',
+          origins: [provider.id],
+        }),
+      )
+    yield* HelperCapability.verifyProvider(provider, object.inventory, profile.target).pipe(
+      Effect.mapError(helperError),
+    )
+    objects.push(object)
+  }
+  return Object.freeze(objects)
 })
 
 /**
@@ -1049,6 +1155,7 @@ export const planNativeLink = Effect.fn('NativeToolchain.planNativeLink')(functi
   nativeLinkInputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>,
   destination: string,
   entry: NativeLinkPlan.NativeLinkPlan['entry'],
+  helpers: ReadonlyArray<HelperCapability.Report> = [],
 ): Effect.fn.Return<NativeLinkPlan.NativeLinkPlan, ToolchainError> {
   let outputName = 'linked-program'
   if (kind === 'NativeStaticLibrary') outputName = 'archive.a'
@@ -1079,6 +1186,7 @@ export const planNativeLink = Effect.fn('NativeToolchain.planNativeLink')(functi
     profile,
     objects: generatedObjects.map((object) => object.path),
     inputs: nativeLinkInputs,
+    helpers,
     translations: generatedObjects.flatMap((object) =>
       object.translation === undefined ? [] : [object.translation],
     ),
@@ -1327,7 +1435,7 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
   destination: string,
 ): Effect.fn.Return<FinalArtifact, ToolchainError> {
   const target = profile.target
-  const bitcode = yield* writeArtifact(scope, target, 'program.bc', artifact.bitcode)
+  const object = yield* emitObject(toolchain, scope, artifact, profile)
   const runtime = yield* compileCObject(
     toolchain,
     scope,
@@ -1335,11 +1443,45 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
     'silk_wasm_runtime',
     LlvmWasmRuntime.source,
   )
+  const bootstrapBytes = yield* Effect.try({
+    try: () => readFileSync(runtime.artifact.path),
+    catch: (cause) =>
+      storageError('NativeToolchain.finalizeWasm', 'runtime', runtime.artifact.path, cause),
+  })
+  const bootstrap = ObjectSymbols.inspect(bootstrapBytes, target)
+  if (Result.isFailure(bootstrap))
+    return yield* helperError(
+      new HelperCapability.HelperError({
+        operation: 'NativeToolchain.finalizeWasm',
+        code: 'InvalidObject',
+        subject: bootstrap.failure.detail,
+        origins: [runtime.artifact.path],
+      }),
+    )
+  yield* HelperCapability.verifyProvider(
+    {
+      id: 'llvm-wasm-memory.v1',
+      kind: 'bootstrap',
+      root: 'llvm-wasm-memory.v1',
+      targets: [target.id],
+      provides: ['memcpy', 'memmove', 'memset', 'memcmp'],
+      requires: [
+        '__heap_base',
+        '__stack_pointer',
+        '__memory_base',
+        '__table_base',
+        '__indirect_function_table',
+      ],
+      identity: ToolchainIntegrity.contentDigest(LlvmWasmRuntime.source),
+    },
+    bootstrap.success,
+    target,
+  ).pipe(Effect.mapError(helperError))
   const outputPath = join(scope.root, 'program.wasm')
   const planned = ToolchainPlan.wasmCommand(
     toolchain.clang,
     profile,
-    bitcode.path,
+    object.artifact.path,
     runtime.artifact.path,
     outputPath,
   )
@@ -1372,6 +1514,7 @@ export const finalizeWasm = Effect.fn('NativeToolchain.finalizeWasm')(function* 
   return Object.freeze({
     _tag: 'FinalArtifact',
     kind: 'WebAssemblyModule',
+    ...(object.helpers === undefined ? {} : { helpers: object.helpers }),
     path,
     bytes,
     target,

@@ -1741,48 +1741,6 @@ function lowerRunExpression(
       )
       return Object.freeze({ result: destination })
     }
-    if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'HostWrite') {
-      const [streamExpression, bytesExpression] = recipe.arguments
-      if (
-        streamExpression === undefined ||
-        bytesExpression === undefined ||
-        fn.effectOutcome === undefined
-      )
-        return undefined
-      const stream = lowerExpression(fn, streamExpression, availableRequirements)
-      if (stream === 'Transferred') return stream
-      const bytes = lowerExpression(fn, bytesExpression, availableRequirements)
-      if (bytes === 'Transferred') return bytes
-      const type = fn.type(expression.type)
-      const propagationType = fn.type(fn.effectOutcome)
-      const failureTag = Type.failureMembers(fn.effectOutcome).findIndex((failure) =>
-        Type.equals(failure, Type.streamWriteFailure),
-      )
-      if (
-        stream === undefined ||
-        bytes === undefined ||
-        type?._tag !== 'Nominal' ||
-        !Type.equals(type.type, Type.unit) ||
-        propagationType?._tag !== 'EffectOutcome' ||
-        failureTag < 0
-      )
-        return undefined
-      const destination = fn.alloc(type)
-      fn.emit(
-        Object.freeze({
-          _tag: 'HostWrite' as const,
-          destination,
-          stream: stream.result,
-          bytes: bytes.result,
-          type,
-          failure: Type.streamWriteFailure,
-          propagationType,
-          failureTag: failureTag + 1,
-          provenance: authored(expression.span),
-        }),
-      )
-      return Object.freeze({ result: destination })
-    }
     if (recipe?._tag === 'BuiltinCall' && isOsOperation(recipe.operation)) {
       const arguments_: Array<Mir.LocalId> = []
       for (const argument of recipe.arguments) {
@@ -1793,43 +1751,6 @@ function lowerRunExpression(
       }
       const type = fn.type(expression.type)
       if (type === undefined) return undefined
-      if (recipe.operation === 'OsFileOpen' || recipe.operation === 'OsDirectoryOpen') {
-        const success = arguments_.at(-2)
-        const failure = arguments_.at(-1)
-        const successType = success === undefined ? undefined : fn.localTypes.at(success.ordinal)
-        const failureType = failure === undefined ? undefined : fn.localTypes.at(failure.ordinal)
-        const handleType = fn.type(Type.osHandle)
-        if (
-          success === undefined ||
-          failure === undefined ||
-          successType?._tag !== 'CallableValue' ||
-          failureType?._tag !== 'CallableValue' ||
-          handleType?._tag !== 'Nominal'
-        )
-          return undefined
-        const valid = fn.alloc(bool)
-        const handle = fn.alloc(handleType)
-        const destination = fn.alloc(type)
-        fn.emit(
-          Object.freeze({
-            _tag: 'OsOpen' as const,
-            operation: recipe.intrinsic,
-            destination,
-            valid,
-            handle,
-            arguments: Object.freeze(arguments_.slice(0, -2)),
-            success,
-            failure,
-            successCleanup: callableLocalCleanup(fn, successType),
-            failureCleanup: callableLocalCleanup(fn, failureType),
-            handleType,
-            type,
-            provenance: authored(expression.span),
-          }),
-        )
-        endLoans(fn, recipe.loanEnds, expression.span)
-        return Object.freeze({ result: destination })
-      }
       const destination = fn.alloc(type)
       fn.emit(
         Object.freeze({

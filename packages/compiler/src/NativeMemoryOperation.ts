@@ -23,9 +23,7 @@ type Operation = Extract<
   {
     readonly _tag:
       | 'Allocate'
-      | 'HostWrite'
       | 'OsCall'
-      | 'OsOpenOutcome'
       | 'RawBufferFrom'
       | 'SharedFromAllocation'
       | 'SharedClone'
@@ -58,7 +56,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     osRuntimes,
     pointer,
     program,
-    standardWrite,
     storage: nativeStorage,
     types,
     unsignedOverflowSignatures,
@@ -200,95 +197,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operation.destination.ordinal,
         Object.freeze([base, bytes, alignment, one, rawAddress, one]),
       )
-      break
-    }
-    case 'HostWrite': {
-      const stream = NativeStorage.readLocal(nativeStorage, operation.stream).at(0)
-      const [address, length] = NativeStorage.readLocal(nativeStorage, operation.bytes)
-      if (
-        stream === undefined ||
-        address === undefined ||
-        length === undefined ||
-        standardWrite === undefined
-      ) {
-        throw new RangeError('LLVM standard-stream write lost its host boundary lanes')
-      }
-      const status = yield* FunctionBody.callDirect(
-        body,
-        standardWrite,
-        [stream, address, length],
-        `standard_stream${operation.destination.ordinal}_status`,
-      )
-      if (status === undefined) {
-        throw new RangeError('LLVM standard-stream host returned no status')
-      }
-      const failedStatus = yield* FunctionBody.integerCompare(
-        body,
-        'ne',
-        status,
-        yield* Constant.integerUnsigned(builder, i32, 0n),
-        `standard_stream${operation.destination.ordinal}_failed`,
-      )
-      const failed = yield* LlvmBlock.make(
-        body,
-        `standard_stream${operation.destination.ordinal}_failure`,
-      )
-      const written = yield* LlvmBlock.make(
-        body,
-        `standard_stream${operation.destination.ordinal}_success`,
-      )
-      yield* FunctionBody.conditionalBranch(body, failedStatus, failed, written)
-      yield* LlvmBlock.setInsertionPoint(body, failed)
-      yield* NativeHostFailure.emit(hostFailure, operation)
-      yield* LlvmBlock.setInsertionPoint(body, written)
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
-      break
-    }
-    case 'OsOpenOutcome': {
-      const runtime = osRuntimes.get(operation.operation.name)
-      if (runtime === undefined || runtime.abi !== 'OpenOut')
-        throw new RangeError(`LLVM OS open runtime ${operation.operation.name} is unavailable`)
-      const arguments_ = operation.arguments.flatMap((argument) => [
-        ...NativeStorage.readLocal(nativeStorage, argument),
-      ])
-      const handleLanes = NativeType.lanesFor(types, operation.handleType)
-      const outputs = yield* Effect.forEach(handleLanes, (lane, ordinal) =>
-        Effect.gen(function* () {
-          const type = NativeType.laneType(types, lane)
-          const output = yield* FunctionBody.alloca(
-            body,
-            type,
-            `os${operation.valid.ordinal}_out${ordinal}`,
-          )
-          yield* FunctionBody.store(body, yield* Constant.zero(builder, type), output)
-          return output
-        }),
-      )
-      const result = yield* FunctionBody.callDirect(
-        body,
-        runtime.handle,
-        [...arguments_, ...outputs],
-        `os${operation.valid.ordinal}`,
-      )
-      for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
-        yield* NativeStorage.reloadAddressRoot(nativeStorage, root)
-      }
-      if (result === undefined) throw new RangeError('LLVM OS open runtime returned no status')
-      const handle: Array<Value.Input> = []
-      for (const [ordinal, output] of outputs.entries()) {
-        const lane = handleLanes.at(ordinal)
-        if (lane === undefined) throw new RangeError('LLVM OS open runtime lost an output lane')
-        handle.push(
-          yield* FunctionBody.load(
-            body,
-            NativeType.laneType(types, lane),
-            output,
-            `os${operation.valid.ordinal}_out${ordinal}_value`,
-          ),
-        )
-      }
-      nativeStorage.locals.set(operation.valid.ordinal, Object.freeze([result]))
-      nativeStorage.locals.set(operation.handle.ordinal, Object.freeze(handle))
       break
     }
     case 'OsCall': {

@@ -13,15 +13,15 @@ Construct [`OsRandom`](#declaration-73696c6b2f6f735f72616e646f6d3a3a4f7352616e64
 
 ## Details
 
-Construction is stateless and performs no host call. Each nonempty fill crosses one native
-boundary and succeeds only after the complete slice contains fresh CSPRNG bytes. GNU/Linux uses
+Construction is stateless and performs no host call. Each nonempty fill calls selected ordinary libc declarations and succeeds only after the complete slice contains fresh CSPRNG bytes. GNU/Linux uses
 nonblocking `getrandom`; macOS uses `arc4random_buf`.
 
 ## Gotchas
 
 Host failure is a fatal trap because continuing with weak or partial bytes would violate the
-service contract. GNU/Linux requires glibc 2.25 and Linux 3.17 or later. WebAssembly and Windows
-do not provide this implementation.
+service contract. GNU/Linux requires glibc 2.25 and Linux 3.17 or later. Unsupported and no-libc profiles
+do not provide this implementation. A failed fill may already have modified a prefix;
+the remaining initialized bytes retain their prior values. Failure does not promise rollback.
 
 Import as `OsRandom` with `import silk.os_random { OsRandom }`.
 
@@ -35,7 +35,11 @@ Public declarations: 1.
 pub struct OsRandom
 ```
 
-A stateless Unix-family provider of fresh cryptographically secure bytes.
+A stateless native provider of complete fresh secure bytes in initialized borrowed storage.
+
+### Gotchas
+
+Native failure traps, possibly after modifying a prefix. No rollback or typed failure is provided.
 
 <a id="declaration-73696c6b2f6f735f72616e646f6d3a3a4f7352616e646f6d2e6d616b65"></a>
 
@@ -45,7 +49,7 @@ A stateless Unix-family provider of fresh cryptographically secure bytes.
 pub fn make() -> OsRandom
 ```
 
-Creates a native random provider without reading randomness or installing an ambient default.
+Creates a native provider without reading entropy or installing an ambient default.
 
 <a id="declaration-73696c6b2f6f735f72616e646f6d3a3a696d706c656d656e746174696f6e3a30"></a>
 
@@ -60,5 +64,5 @@ impl Random for OsRandom
 ### Operation `fillBytes`
 
 ```silk
-fillBytes = OsRandom.fillBytes
+fillBytes = OsRandom.impl@0.fillBytes
 ```

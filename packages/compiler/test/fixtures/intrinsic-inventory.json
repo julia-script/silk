@@ -4984,150 +4984,6 @@
       "identity": "StringEqualsExact"
     },
     {
-      "operation": "Intrinsic.osMonotonicClockNow",
-      "signature": "unsafe fn Intrinsic.osMonotonicClockNow(seconds: &mut i64, nanoseconds: &mut i64) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_monotonic_clock.now",
-      "identity": "OsMonotonicClockNow",
-      "invariant": "outputs are initialized only on success and form a canonical mark on one monotonic timeline"
-    },
-    {
-      "operation": "Intrinsic.osMonotonicClockResolution",
-      "signature": "unsafe fn Intrinsic.osMonotonicClockResolution(nanoseconds: &mut u64) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_monotonic_clock.getResolution",
-      "identity": "OsMonotonicClockResolution",
-      "invariant": "output is initialized only on success and is a positive whole-nanosecond resolution"
-    },
-    {
-      "operation": "Intrinsic.osMonotonicClockWaitUntil",
-      "signature": "unsafe fn Intrinsic.osMonotonicClockWaitUntil(seconds: i64, nanoseconds: i64) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_monotonic_clock.waitUntil",
-      "identity": "OsMonotonicClockWaitUntil",
-      "invariant": "deadline is a canonical non-negative mark from the selected monotonic timeline and success means it has been reached"
-    },
-    {
-      "operation": "Intrinsic.osRandomFill",
-      "signature": "unsafe fn Intrinsic.osRandomFill(output: &mut [u8]) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_random.fillBytes",
-      "identity": "OsRandomFill",
-      "invariant": "true means the complete initialized output contains fresh cryptographically secure bytes; false exposes no recoverable output"
-    },
-    {
-      "operation": "Intrinsic.osFileOpen",
-      "signature": "unsafe fn Intrinsic.osFileOpen<R>(root: &[u8], path: &[u8], mode: i32, reason: &mut i32, nativeCode: &mut u32, success: once fn(OsHandle) -> R, failure: once fn() -> R) -> Effect<R>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_filesystem.fileOpen",
-      "identity": "OsFileOpen",
-      "invariant": "root is an absolute native path; path is normalized provider-absolute; status outputs are initialized; traversal rejects symlinks and namespace escape; success transfers one live handle only to the selected carrier"
-    },
-    {
-      "operation": "Intrinsic.osFileRead",
-      "signature": "unsafe fn Intrinsic.osFileRead(handle: &mut OsHandle, output: &mut [u8], count: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_filesystem.fileRead",
-      "identity": "OsFileRead",
-      "invariant": "handle is a live file; output is initialized writable storage; success reports the exact transferred byte count"
-    },
-    {
-      "operation": "Intrinsic.osFileWrite",
-      "signature": "unsafe fn Intrinsic.osFileWrite(handle: &mut OsHandle, input: &[u8], offset: usize, count: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_filesystem.fileWrite",
-      "identity": "OsFileWrite",
-      "invariant": "handle is a live file; input is initialized; success reports the exact transferred byte count and may be partial"
-    },
-    {
-      "operation": "Intrinsic.osDirectoryOpen",
-      "signature": "unsafe fn Intrinsic.osDirectoryOpen<R>(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32, success: once fn(OsHandle) -> R, failure: once fn() -> R) -> Effect<R>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_filesystem.directoryOpen",
-      "identity": "OsDirectoryOpen",
-      "invariant": "root and path satisfy confined traversal; status outputs are initialized; success transfers one live handle only to the selected carrier"
-    },
-    {
-      "operation": "Intrinsic.osDirectoryNext",
-      "signature": "unsafe fn Intrinsic.osDirectoryNext(handle: &mut OsHandle, output: &mut [u8], count: &mut usize, kind: &mut i32, requiredCapacity: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_filesystem.directoryNext",
-      "identity": "OsDirectoryNext",
-      "invariant": "handle is a live directory; buffer-too-small does not advance and reports required capacity; zero means end"
-    },
-    {
-      "operation": "Intrinsic.osPathInspect",
-      "signature": "unsafe fn Intrinsic.osPathInspect(root: &[u8], path: &[u8], kind: &mut i32, byteLength: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_filesystem.pathInspect",
-      "identity": "OsPathInspect",
-      "invariant": "root and path satisfy confined traversal; kind and byteLength outputs are initialized"
-    },
-    {
-      "operation": "Intrinsic.osDirectoryCreateUnique",
-      "signature": "unsafe fn Intrinsic.osDirectoryCreateUnique(root: &[u8], parent: &[u8], prefix: &[u8], output: &mut [u8], count: &mut usize, requiredCapacity: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_filesystem.directoryCreateUnique",
-      "identity": "OsDirectoryCreateUnique",
-      "invariant": "root and parent satisfy confined traversal; prefix is one valid final component fragment; the provider chooses the unique suffix, creates exactly one directory no other caller holds, and writes its complete final component name; buffer-too-small creates nothing and reports required capacity"
-    },
-    {
-      "operation": "Intrinsic.osDirectoryCreate",
-      "signature": "unsafe fn Intrinsic.osDirectoryCreate(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_filesystem.directoryCreate",
-      "identity": "OsDirectoryCreate",
-      "invariant": "root and path satisfy confined traversal and failure outputs are initialized"
-    },
-    {
-      "operation": "Intrinsic.osFileRemove",
-      "signature": "unsafe fn Intrinsic.osFileRemove(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_filesystem.fileRemove",
-      "identity": "OsFileRemove",
-      "invariant": "root and path satisfy confined traversal and failure outputs are initialized"
-    },
-    {
-      "operation": "Intrinsic.osDirectoryRemove",
-      "signature": "unsafe fn Intrinsic.osDirectoryRemove(root: &[u8], path: &[u8], reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_filesystem.directoryRemove",
-      "identity": "OsDirectoryRemove",
-      "invariant": "root and path satisfy confined traversal and failure outputs are initialized"
-    },
-    {
-      "operation": "Intrinsic.osHandleClose",
-      "signature": "unsafe fn Intrinsic.osHandleClose(handle: OsHandle, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_filesystem.handleClose",
-      "identity": "OsHandleClose",
-      "invariant": "consumes exactly one live file or directory handle whether close succeeds or fails"
-    },
-    {
-      "operation": "Intrinsic.osStandardInputRead",
-      "signature": "unsafe fn Intrinsic.osStandardInputRead(output: &mut [u8], count: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_standard_input.read",
-      "identity": "OsStandardInputRead",
-      "invariant": "output is initialized writable storage; success reports the exact transferred byte count and zero means end of input"
-    },
-    {
       "operation": "Intrinsic.osProcessExecute",
       "signature": "unsafe fn Intrinsic.osProcessExecute(program: &[u8], arguments: &[u8], environment: &[u8], workingDirectory: &[u8], status: &mut i32, code: &mut i32, outputLength: &mut usize, errorLength: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
       "unsafe": true,
@@ -5280,15 +5136,6 @@
       "identity": "StorageAcquire"
     },
     {
-      "operation": "Intrinsic.standardStreamWrite",
-      "signature": "fn Intrinsic.standardStreamWrite(destination: bool, bytes: &[u8]) -> Effect<() ! WriterError>",
-      "unsafe": false,
-      "admission": "Platform",
-      "consumer": "silk/writer.writeAll",
-      "identity": "HostWrite",
-      "hostImport": "silk_standard_stream_write_v1"
-    },
-    {
       "operation": "Intrinsic.rawBufferFrom",
       "signature": "unsafe fn Intrinsic.rawBufferFrom<T>(allocation: Allocation, count: usize) -> RawBuffer<T>",
       "unsafe": true,
@@ -5360,6 +5207,15 @@
       "invariant": "caller proves raw-buffer bounds, ownership, and initializedness required by the operation"
     },
     {
+      "operation": "Intrinsic.pointerBytes",
+      "signature": "unsafe fn Intrinsic.pointerBytes<T>(pointer: ?*const T) -> ?[*]const u8",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.bytes",
+      "identity": "PointerBytes",
+      "invariant": "caller proves the readable initialized extent for every subsequent byte access; projection grants no extent or ownership"
+    },
+    {
       "operation": "Intrinsic.pointerRequalify",
       "signature": "unsafe fn Intrinsic.pointerRequalify<From, To>(pointer: From) -> To",
       "unsafe": true,
@@ -5409,6 +5265,14 @@
       "admission": "Ownership",
       "consumer": "silk/pointer.isNull",
       "identity": "PointerIsNull"
+    },
+    {
+      "operation": "Intrinsic.pointerAddress",
+      "signature": "fn Intrinsic.pointerAddress<P>(pointer: P) -> usize",
+      "unsafe": false,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.address",
+      "identity": "PointerAddress"
     },
     {
       "operation": "Intrinsic.pointerFromRef",

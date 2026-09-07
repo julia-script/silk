@@ -6,15 +6,16 @@
 //!
 //! # Details
 //! Portable `/` denotes the provider root rather than the host filesystem root. The native boundary
-//! rejects malformed paths, root escape, and symlink traversal outside that confinement. Whole-FileSystem.file
-//! reads and writes own or commit complete contents, FileSystem.directory listings retry oversized entries and
+//! rejects malformed portable paths and symlinks below the configured root. Whole-file
+//! reads and writes own or commit complete contents, directory listings retry oversized entries and
 //! sort complete child paths deterministically. Low-level failures become portable [`FileError`]
 //! values with retained native codes.
 //!
 //! [`make`] copies its root. The root must be an absolute, non-empty, NUL-free native path. A root
 //! that violates this precondition traps. Open handles close on success and failure. If an
 //! operation and close both fail, the operation's original typed failure remains the reported
-//! result.
+//! result. The configured root and its ancestors must be trusted; confinement does not promise
+//! protection against hostile directory renames or privileged mount changes.
 //!
 //! Constructing the provider performs no filesystem operation beyond owning the root bytes.
 //! Portable code uses `FileSystem` operations after the application supplies `&mut OsFileSystem`
@@ -37,7 +38,7 @@
 //! effect fn program() -> i32
 //! ! OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
-//!   let provider = run OsFileSystem.make("/tmp")
+//!   let provider = run OsFileSystem.make(b"/tmp")
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
 //!   drop provider
 //!   return 42
@@ -52,18 +53,16 @@
 //! }
 //! ```
 
-static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.native_filesystem { NativeFileSystem, FileHandle, DirectoryHandle }
+  import silk.u64 as u64
   import silk.bool as bool
   import silk.effect { Effect }
   import silk.bytes { Bytes }
   import silk.allocator { Allocator, OutOfMemoryError }
-  import silk.allocator { OutOfMemoryError }
   import silk.filesystem { DirectoryEntry, DirectoryInfo, FileError, FileInfo, FileOperation, FileReason, FileSystem, Path }
   import silk.i32 as i32
-  import silk.option { Option }
   import silk.result { Result }
-  import silk.string { String }
-  import silk.u32 as u32
   import silk.u8 as u8
   import silk.usize as usize
   import silk.vector { Vector }
@@ -76,6 +75,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
   /// [`Path`], and operations reject lexical or symbolic-link escape from the root.
   pub struct OsFileSystem {
     root: Bytes
+    counter: u64
   }
 
   impl OsFileSystem {
@@ -83,9 +83,9 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       self: &mut Self,
       path: &Path
     ) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
-      let mut handle = run openFile(move self, path, 0, FileSystem.readFileOperation())
+      let mut handle = run NativeFileSystem.openFile(Bytes.asSlice(&self.root), Path.rawBytes(path), false, 0)
       let attempted = run Effect.result(readLoop(&mut handle))
-      let closed = run Effect.result(close(move handle, FileSystem.readFileOperation()))
+      let closed = run Effect.result(NativeFileSystem.closeFile(move handle, FileSystem.readFileOperation()))
       return match move attempted {
         Result<Bytes, FileError | OutOfMemoryError>.Success { value: bytes } => match move closed {
           Result<(), FileError>.Success { value: completed } => move bytes
@@ -99,9 +99,9 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     }
 
     effect fn writeFile(self: &mut Self, path: &Path, bytes: &[u8]) -> () ! FileError {
-      let mut handle = run openFile(move self, path, 1, FileSystem.writeFileOperation())
+      let mut handle = run NativeFileSystem.openFile(Bytes.asSlice(&self.root), Path.rawBytes(path), true, 1)
       let attempted = run Effect.result(writeLoop(&mut handle, bytes))
-      let closed = run Effect.result(close(move handle, FileSystem.writeFileOperation()))
+      let closed = run Effect.result(NativeFileSystem.closeFile(move handle, FileSystem.writeFileOperation()))
       return match move attempted {
         Result<(), FileError>.Success { value: completed } => match move closed {
           Result<(), FileError>.Success { value: closedValue } => ()
@@ -114,10 +114,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     effect fn stat(self: &mut Self, path: &Path) -> FileInfo | DirectoryInfo ! FileError {
       let mut kind = 0
       let mut byteLength = usize.ZERO
-      let mut lowReason = 0
-      let mut nativeCode = u32.toU32(0)
-      let inspected = run rawInspect(Bytes.asSlice(&self.root), pathBytes(path), &mut kind, &mut byteLength, &mut lowReason, &mut nativeCode)
-      if inspected == false { return run raise(FileSystem.statOperation(), lowReason, nativeCode) }
+      run NativeFileSystem.inspect(Bytes.asSlice(&self.root), Path.rawBytes(path), &mut kind, &mut byteLength, 2)
       if kind == 0 { return FileSystem.fileInfo(byteLength) }
       return FileSystem.directoryInfo()
     }
@@ -126,9 +123,9 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       self: &mut Self,
       path: &Path
     ) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut Allocator {
-      let mut handle = run openDirectory(move self, path, FileSystem.listDirectoryOperation())
+      let mut handle = run NativeFileSystem.openDirectory(Bytes.asSlice(&self.root), Path.rawBytes(path), 3)
       let attempted = run Effect.result(listLoop(&mut handle, path))
-      let closed = run Effect.result(close(move handle, FileSystem.listDirectoryOperation()))
+      let closed = run Effect.result(NativeFileSystem.closeDirectory(move handle, FileSystem.listDirectoryOperation()))
       return match move attempted {
         Result<Vector<DirectoryEntry>, FileError | OutOfMemoryError>.Success { value: entries } => match move closed {
           Result<(), FileError>.Success { value: completed } => move entries
@@ -152,49 +149,28 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
       prefix: &[u8]
     ) -> Path ! FileError | OutOfMemoryError ? &mut Allocator {
       let mut buffer = run Bytes.zeroed(64)
-      let mut created = Option.none<Path>()
+      let mut required: usize = 0
+      let mut length: usize = 0
       let mut complete = false
       while complete == false {
-        let mut required = usize.ZERO
-        let mut lowReason = 0
-        let mut nativeCode = u32.toU32(0)
-        let mut output = Bytes.asMutSlice(&mut buffer)
-        let mut length = usize.ZERO
-        let chosen = run rawCreateUnique(
-          Bytes.asSlice(&self.root),
-          pathBytes(parent),
-          prefix,
-          move output,
-          &mut length,
-          &mut required,
-          &mut lowReason,
-          &mut nativeCode
-        )
-        if chosen == false {
-          if lowReason == 8 {
-            let resized = Bytes.zeroed(required)
-            buffer = run resized
-          } else {
-            return run raise(FileSystem.createTemporaryDirectoryOperation(), lowReason, nativeCode)
-          }
-        } else {
-          let view = Bytes.asSlice(&buffer)
-          let mut name = Bytes.make()
-          let mut index = usize.ZERO
-          while index < length {
-            let one = [view[index]]
-            let appended = run Bytes.append(&mut name, &one)
-            index = index + usize.ONE
-          }
-          let child = run Path.joinUtf8(parent, Bytes.asSlice(&name))
-          created = Option.some<Path>(move child)
-          complete = true
+        let mut counter = self.counter
+        let attempted = run Effect.result(NativeFileSystem.createUnique(Bytes.asSlice(&self.root), Path.rawBytes(parent), prefix, &mut counter, Bytes.asMutSlice(&mut buffer), &mut length, &mut required, 8))
+        self.counter = counter
+        complete = match move attempted {
+          Result<bool, FileError>.Success { value } => value
+          Result<bool, FileError>.Failure { error } => run rerouteFile(move error)
         }
+        if complete == false { buffer = run Bytes.zeroed(required) }
       }
-      return match move created {
-        Option<Path>.Some { value: path } => move path
-        Option<Path>.None => run raise(FileSystem.createTemporaryDirectoryOperation(), 10, u32.toU32(0))
+      let mut name = Bytes.make()
+      let view = Bytes.asSlice(&buffer)
+      let mut index: usize = 0
+      while index < length {
+        let one = [view[index]]
+        run Bytes.append(&mut name, &one)
+        index = index + 1
       }
+      return run Path.joinBytes(parent, Bytes.asSlice(&name))
     }
 
     effect fn createDirectory(self: &mut Self, path: &Path) -> () ! FileError {
@@ -220,15 +196,15 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     ///
     /// # Details
     ///
-    /// Construction owns the root bytes but does not open the FileSystem.directory. Portable `/` then denotes
+    /// Construction owns the root bytes but does not open the directory. Portable `/` then denotes
     /// this provider root instead of the host filesystem root.
     ///
     /// # Gotchas
     ///
     /// `root` must be non-empty, absolute, and NUL-free. A value that violates this precondition traps.
     /// Allocation failure leaves no provider value.
-    pub effect fn make(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
-      let rootBytes = String.utf8Bytes(root)
+    pub effect fn make(root: &[u8]) -> OsFileSystem ! OutOfMemoryError ? &mut Allocator {
+      let rootBytes = root
       if rootBytes.length == usize.ZERO { let invalid = 1 / 0 }
       if rootBytes[usize.ZERO] != u8.toU8(47) { let invalid = 1 / 0 }
       let mut index = usize.ZERO
@@ -237,101 +213,12 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
         index = index + usize.ONE
       }
       let owned = run Bytes.copy(rootBytes)
-      return OsFileSystem { root: move owned }
+      return OsFileSystem { root: move owned, counter: 0 }
     }
   }
 
   fn pathBytes(path: &Path) -> &[u8] {
-    return String.utf8Bytes(Path.view(path))
-  }
-
-  fn reason(value: i32) -> FileReason {
-    if value == 0 { return FileSystem.notFound() }
-    if value == 1 { return FileSystem.alreadyExists() }
-    if value == 2 { return FileSystem.permissionDenied() }
-    if value == 3 { return FileSystem.invalidPath() }
-    if value == 4 { return FileSystem.wrongType() }
-    if value == 5 { return FileSystem.notEmpty() }
-    if value == 6 { return FileSystem.noSpace() }
-    if value == 7 { return FileSystem.tooLarge() }
-    if value == 9 { return FileSystem.unsupported() }
-    return FileSystem.other()
-  }
-
-  effect fn raise(operation: FileOperation, lowReason: i32, nativeCode: u32) -> never ! FileError {
-    fail FileSystem.errorWithCode(move operation, reason(lowReason), u32.toI32(nativeCode))
-  }
-
-  effect fn rawFileOpen(root: &[u8], path: &[u8], mode: i32, lowReason: &mut i32, nativeCode: &mut u32) -> Option<OsHandle> {
-    unsafe { return run Intrinsic.osFileOpen<Option<OsHandle>>(root, path, mode, lowReason, nativeCode, Option.some, Option.none) }
-    let impossible = 1 / 0
-    return Option.none<OsHandle>()
-  }
-
-  effect fn rawDirectoryOpen(root: &[u8], path: &[u8], lowReason: &mut i32, nativeCode: &mut u32) -> Option<OsHandle> {
-    unsafe { return run Intrinsic.osDirectoryOpen<Option<OsHandle>>(root, path, lowReason, nativeCode, Option.some, Option.none) }
-    let impossible = 1 / 0
-    return Option.none<OsHandle>()
-  }
-
-  effect fn rawClose(handle: OsHandle, lowReason: &mut i32, nativeCode: &mut u32) -> bool {
-    unsafe { return run Intrinsic.osHandleClose(move handle, lowReason, nativeCode) }
-    return false
-  }
-
-  effect fn rawInspect(root: &[u8], path: &[u8], kind: &mut i32, byteLength: &mut usize, lowReason: &mut i32, nativeCode: &mut u32) -> bool {
-    unsafe { return run Intrinsic.osPathInspect(root, path, kind, byteLength, lowReason, nativeCode) }
-    return false
-  }
-
-  effect fn rawCreate(root: &[u8], path: &[u8], lowReason: &mut i32, nativeCode: &mut u32) -> bool {
-    unsafe { return run Intrinsic.osDirectoryCreate(root, path, lowReason, nativeCode) }
-    return false
-  }
-  effect fn rawRemoveFile(root: &[u8], path: &[u8], lowReason: &mut i32, nativeCode: &mut u32) -> bool {
-    unsafe { return run Intrinsic.osFileRemove(root, path, lowReason, nativeCode) }
-    return false
-  }
-  effect fn rawRemoveDirectory(root: &[u8], path: &[u8], lowReason: &mut i32, nativeCode: &mut u32) -> bool {
-    unsafe { return run Intrinsic.osDirectoryRemove(root, path, lowReason, nativeCode) }
-    return false
-  }
-
-  effect fn openFile(
-    self: &mut OsFileSystem,
-    path: &Path,
-    mode: i32,
-    operation: FileOperation
-  ) -> OsHandle ! FileError {
-    let mut lowReason = 0
-    let mut nativeCode = u32.toU32(0)
-    let opened = run rawFileOpen(Bytes.asSlice(&self.root), pathBytes(path), mode, &mut lowReason, &mut nativeCode)
-    return match move opened {
-      Option<OsHandle>.Some { value: handle } => move handle
-      Option<OsHandle>.None => run raise(move operation, lowReason, nativeCode)
-    }
-  }
-
-  effect fn openDirectory(
-    self: &mut OsFileSystem,
-    path: &Path,
-    operation: FileOperation
-  ) -> OsHandle ! FileError {
-    let mut lowReason = 0
-    let mut nativeCode = u32.toU32(0)
-    let opened = run rawDirectoryOpen(Bytes.asSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
-    return match move opened {
-      Option<OsHandle>.Some { value: handle } => move handle
-      Option<OsHandle>.None => run raise(move operation, lowReason, nativeCode)
-    }
-  }
-
-  effect fn close(handle: OsHandle, operation: FileOperation) -> () ! FileError {
-    let mut lowReason = 0
-    let mut nativeCode = u32.toU32(0)
-    let closed = run rawClose(move handle, &mut lowReason, &mut nativeCode)
-    if closed == false { return run raise(move operation, lowReason, nativeCode) }
-    return ()
+    return Path.rawBytes(path)
   }
 
   fn ignoreClose(result: Result<(), FileError>) -> () {
@@ -362,68 +249,31 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     fail move error
   }
 
-  effect fn readLoop(handle: &mut OsHandle) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
+  effect fn readLoop(handle: &mut FileHandle) -> Bytes ! FileError | OutOfMemoryError ? &mut Allocator {
     let mut result = Bytes.make()
     let mut buffer = run Bytes.zeroed(256)
     let mut complete = false
     while complete == false {
-      let mut lowReason = 0
-      let mut nativeCode = u32.toU32(0)
-      let mut output = Bytes.asMutSlice(&mut buffer)
-      let mut length = usize.ZERO
-      let mut received = false
-      unsafe {
-        received = run Intrinsic.osFileRead(
-          handle,
-          output,
-          &mut length,
-          &mut lowReason,
-          &mut nativeCode
-        )
-      }
-      if received == false { return run raise(FileSystem.readFileOperation(), lowReason, nativeCode) }
-      if length == usize.ZERO {
-        complete = true
-      } else {
+      let length = run NativeFileSystem.readFile(&mut handle, Bytes.asMutSlice(&mut buffer), 0)
+      if length == 0 { complete = true } else {
         let view = Bytes.asSlice(&buffer)
-        let mut index = usize.ZERO
+        let mut index: usize = 0
         while index < length {
           let one = [view[index]]
-          let appended = run Bytes.append(&mut result, &one)
-          index = index + usize.ONE
+          run Bytes.append(&mut result, &one)
+          index = index + 1
         }
       }
     }
     return move result
   }
 
-  effect fn writeLoop(handle: &mut OsHandle, bytes: &[u8]) -> () ! FileError {
-    let mut offset = usize.ZERO
-    while offset < bytes.length {
-      let mut lowReason = 0
-      let mut nativeCode = u32.toU32(0)
-      // The low-level operation may commit a prefix. Re-presenting the remaining bytes is provider policy.
-      let mut length = usize.ZERO
-      let mut written = false
-      unsafe {
-        written = run Intrinsic.osFileWrite(
-          handle,
-          bytes,
-          offset,
-          &mut length,
-          &mut lowReason,
-          &mut nativeCode
-        )
-      }
-      if written == false { return run raise(FileSystem.writeFileOperation(), lowReason, nativeCode) }
-      if length == usize.ZERO { return run raise(FileSystem.writeFileOperation(), 10, u32.toU32(0)) }
-      offset = offset + length
-    }
-    return ()
+  effect fn writeLoop(handle: &mut FileHandle, bytes: &[u8]) -> () ! FileError {
+    return run NativeFileSystem.writeFile(move handle, bytes, 1)
   }
 
   effect fn listLoop(
-    handle: &mut OsHandle,
+    handle: &mut DirectoryHandle,
     parent: &Path
   ) -> Vector<DirectoryEntry> ! FileError | OutOfMemoryError ? &mut Allocator {
     let mut entries = Vector.make<DirectoryEntry>()
@@ -433,29 +283,10 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     while complete == false {
       let mut kind = 0
       let mut required = usize.ZERO
-      let mut lowReason = 0
-      let mut nativeCode = u32.toU32(0)
-      let mut output = Bytes.asMutSlice(&mut buffer)
       let mut length = usize.ZERO
-      let mut next = false
-      unsafe {
-        next = run Intrinsic.osDirectoryNext(
-          handle,
-          output,
-          &mut length,
-          &mut kind,
-          &mut required,
-          &mut lowReason,
-          &mut nativeCode
-        )
-      }
+      let next = run NativeFileSystem.next(&mut handle, Bytes.asMutSlice(&mut buffer), &mut length, &mut required, &mut kind, 3)
       if next == false {
-        if lowReason == 8 {
-          let resized = Bytes.zeroed(required)
-          buffer = run resized
-        } else {
-          return run raise(FileSystem.listDirectoryOperation(), lowReason, nativeCode)
-        }
+        buffer = run Bytes.zeroed(required)
       } else {
         if length == usize.ZERO {
           complete = true
@@ -468,7 +299,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
             let appended = run Bytes.append(&mut name, &one)
             index = index + usize.ONE
           }
-          let child = run Path.joinUtf8(parent, Bytes.asSlice(&name))
+          let child = run Path.joinBytes(parent, Bytes.asSlice(&name))
           let mut entryKind = FileSystem.directory()
           if kind == 0 { entryKind = FileSystem.file() }
           let insertion = insertionFor(&child, Vector.asSlice<DirectoryEntry>(&entries))
@@ -515,45 +346,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     operation: FileOperation,
     selector: i32
   ) -> () ! FileError {
-    let mut lowReason = 0
-    let mut nativeCode = u32.toU32(0)
-    let mut completed = false
-    if selector == 0 {
-      completed = run rawCreate(Bytes.asSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
-    } else {
-      if selector == 1 {
-        completed = run rawRemoveFile(Bytes.asSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
-      } else {
-        completed = run rawRemoveDirectory(Bytes.asSlice(&self.root), pathBytes(path), &mut lowReason, &mut nativeCode)
-      }
-    }
-    if completed == false { return run raise(move operation, lowReason, nativeCode) }
-    return ()
-  }
-
-  effect fn rawCreateUnique(
-    root: &[u8],
-    parent: &[u8],
-    prefix: &[u8],
-    output: &mut [u8],
-    count: &mut usize,
-    required: &mut usize,
-    lowReason: &mut i32,
-    nativeCode: &mut u32
-  ) -> bool {
-    unsafe {
-      return run Intrinsic.osDirectoryCreateUnique(
-        root,
-        parent,
-        prefix,
-        output,
-        count,
-        required,
-        lowReason,
-        nativeCode
-      )
-    }
-    return false
+    return run NativeFileSystem.command(Bytes.asSlice(&self.root), Path.rawBytes(path), selector, operation.code)
   }
 
   impl FileSystem for OsFileSystem {

@@ -365,11 +365,18 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`),
   }),
 )
 
-it('declares one discoverable namespace for every standard-library module', () => {
+it('declares discoverable namespaces for public modules and keeps C-only support private', () => {
   // Catalog namespaces drive tooling discovery only; they never enter source scope implicitly.
   assert.deepEqual(
     Stdlib.manifest.filter((entry) => entry.namespace === undefined).map((entry) => entry.module),
-    [],
+    [
+      'silk/support/bcmp',
+      'silk/support/bzero',
+      'silk/support/memcmp',
+      'silk/support/memcpy',
+      'silk/support/memmove',
+      'silk/support/memset',
+    ],
   )
   assert.strictEqual(Stdlib.findNamespace('Uninitialized')?.module, 'silk/output')
   assert.deepEqual(Stdlib.find('silk/output')?.aliases, ['Initialized'])

@@ -1,3 +1,4 @@
+import type * as HelperCapability from './HelperCapability.js'
 import * as Schema from 'effect/Schema'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import * as Effect from 'effect/Effect'
@@ -334,6 +335,7 @@ export interface Options {
 
   readonly kind: ToolchainPlan.NativeArtifactKind
   readonly profile: CompilationProfile.Facts
+  readonly helpers?: ReadonlyArray<HelperCapability.Report>
   readonly objects: ReadonlyArray<string>
   readonly inputs: ReadonlyArray<NativeLinkInput.NativeLinkInput>
   readonly output: string
@@ -643,7 +645,8 @@ export const resolvePlan = Effect.fn('NativeLinkResolver.resolvePlan')(function*
   }
   const identity = PlatformSupplyResolver.digest(
     yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))([
-      'native-link-v1',
+      'native-link-v2',
+      (options.helpers ?? []).map((report) => report.identity),
       supply.target.id,
       options.kind,
       options.entry,
@@ -657,6 +660,7 @@ export const resolvePlan = Effect.fn('NativeLinkResolver.resolvePlan')(function*
   )
   return Object.freeze({
     _tag: 'NativeLinkPlan',
+    helpers: Object.freeze([...(options.helpers ?? [])]),
     translations: Object.freeze([...(options.translations ?? [])]),
     kind: options.kind,
     supply: resolvedSupply,

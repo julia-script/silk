@@ -258,11 +258,7 @@ const lowerBuiltinOperation = (
     )
     return finishBuiltin(destination)
   }
-  if (
-    expression.operation === 'EffectSuspend' ||
-    expression.operation === 'StorageAcquire' ||
-    expression.operation === 'HostWrite'
-  )
+  if (expression.operation === 'EffectSuspend' || expression.operation === 'StorageAcquire')
     return undefined
   if (expression.operation === 'RawBufferFrom') {
     const [allocation, count] = argumentLocals
@@ -763,8 +759,23 @@ const lowerBuiltinOperation = (
     )
     return finishBuiltin(destination)
   }
+  if (expression.operation === 'PointerAddress') {
+    const [pointer] = argumentLocals
+    if (pointer === undefined) return undefined
+    const destination = fn.alloc(Object.freeze({ _tag: 'usize' as const }))
+    fn.emit(
+      Object.freeze({
+        _tag: 'PointerAddress' as const,
+        destination,
+        pointer,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
   if (
     expression.operation === 'PointerRequalify' ||
+    expression.operation === 'PointerBytes' ||
     expression.operation === 'SlotAddress' ||
     expression.operation === 'PointerFromRef' ||
     expression.operation === 'PointerFromMutRef' ||
@@ -775,12 +786,13 @@ const lowerBuiltinOperation = (
     const type = fn.type(expression.type)
     if (source === undefined || type?._tag !== 'Pointer') return undefined
     const destination = fn.alloc(type)
+    const tag =
+      expression.operation === 'PointerRequalify' || expression.operation === 'PointerBytes'
+        ? expression.operation
+        : 'PointerFromStorage'
     fn.emit(
       Object.freeze({
-        _tag:
-          expression.operation === 'PointerRequalify'
-            ? ('PointerRequalify' as const)
-            : ('PointerFromStorage' as const),
+        _tag: tag,
         destination,
         source,
         type,

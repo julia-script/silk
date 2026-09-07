@@ -21,6 +21,38 @@ import silk.option { Option }
 pub struct Pointer {}
 
 impl Pointer {
+  /// Projects a typed raw pointer as a readonly byte address without reading storage.
+  ///
+  /// # Gotchas
+  ///
+  /// The result preserves null and the address but grants no ownership or readable extent.
+  /// Every later access must independently address initialized readable bytes. This permits
+  /// inspection of a valid prefix of a variable-sized external record without loading the
+  /// nominal record. It does not keep the allocation alive.
+  pub unsafe fn bytes<T>(pointer: ?*const T) -> ?[*]const u8 {
+    unsafe { return Intrinsic.pointerBytes<T>(pointer) }
+  }
+
+  /// Returns the unsigned numeric address of a raw data pointer.
+  ///
+  /// # Details
+  ///
+  /// Null has address zero. Observation does not read memory or keep storage alive.
+  /// The result has the selected target's pointer width and cannot reconstruct a pointer.
+  pub fn address<T>(pointer: ?*const T) -> usize {
+    return Intrinsic.pointerAddress<?*const T>(pointer)
+  }
+
+  /// Returns the unsigned numeric address of a many-element data pointer.
+  ///
+  /// # Details
+  ///
+  /// Null has address zero. Observation does not read memory or keep storage alive.
+  /// The result has the selected target's pointer width and cannot reconstruct a pointer.
+  pub fn addressMany<T>(pointer: ?[*]const T) -> usize {
+    return Intrinsic.pointerAddress<?[*]const T>(pointer)
+  }
+
   /// Returns a null single-element pointer.
   pub fn null<T>() -> ?*mut T {
     return Intrinsic.pointerNull<T>()

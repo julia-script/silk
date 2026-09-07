@@ -107,7 +107,6 @@ export interface Operation {
   readonly consumer?: string
   readonly targets: ReadonlyArray<Target.Id>
   readonly invariant?: string
-  readonly hostImport?: string
 
   readonly rule: Rule
 }
@@ -151,7 +150,6 @@ const intrinsicSpelling = (family: string, operation: string): string => {
   if (family === 'Parking' && operation === 'park') return 'park'
   if (family === 'Place' && operation === 'replace') return 'replace'
   if (family === 'Storage' && operation === 'acquire') return 'systemAllocationAcquire'
-  if (family === 'Host' && operation === 'write') return 'standardStreamWrite'
   if (family === 'Os') return `os${upperInitial(operation)}`
   return `${family.slice(0, 1).toLowerCase()}${family.slice(1)}${upperInitial(operation)}`
 }
@@ -176,11 +174,6 @@ const admission = (family: string): AdmissionCategory => {
 
 /** The canonical standard-library consumer of one OS boundary operation. */
 const osConsumer = (spelling: string): string => {
-  if (spelling === 'monotonicClockNow') return 'silk/os_monotonic_clock.now'
-  if (spelling === 'monotonicClockResolution') return 'silk/os_monotonic_clock.getResolution'
-  if (spelling === 'monotonicClockWaitUntil') return 'silk/os_monotonic_clock.waitUntil'
-  if (spelling === 'randomFill') return 'silk/os_random.fillBytes'
-  if (spelling === 'standardInputRead') return 'silk/os_standard_input.read'
   if (spelling === 'processExecute') return 'silk/os_child_process.execute'
   if (spelling === 'processCapture') return 'silk/os_child_process.capture'
   if (spelling.startsWith('host'))
@@ -201,7 +194,6 @@ const consumer = (family: string, operation: string): string => {
       : `silk/execution.${operation}`
   if (family === 'Wake' || family === 'Parking') return 'language:external-wake-parking'
   if (family === 'Storage') return 'silk/allocator.allocate'
-  if (family === 'Host') return 'silk/writer.writeAll'
   if (family === 'Os') return osConsumer(operation)
   if (family === 'Place') return 'language:place-replacement'
   return `silk/${family.replaceAll(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()}.${operation}`
@@ -209,6 +201,10 @@ const consumer = (family: string, operation: string): string => {
 
 /** The caller obligation of each unsafe pointer primitive, keyed by operation name. */
 const pointerInvariants: ReadonlyMap<string, string> = new Map([
+  [
+    'bytes',
+    'caller proves the readable initialized extent for every subsequent byte access; projection grants no extent or ownership',
+  ],
   ['at', 'caller proves the pointer and the offset result address elements of one live allocation'],
   [
     'atMut',
@@ -277,9 +273,6 @@ const builtin = (options: {
     consumer: consumer(options.actor, options.name),
     targets: normalizeRuntimeTargets(options.targets ?? runtimeTargets),
     ...(invariant === undefined ? {} : { invariant }),
-    ...(options.actor === 'Host' && options.name === 'write'
-      ? { hostImport: 'silk_standard_stream_write_v1' }
-      : {}),
 
     rule: Object.freeze({
       _tag: 'BuiltinRule',
@@ -683,11 +676,8 @@ const catchContract = CallableContract.make({
 })
 const byteSlice = Type.slice('Shared', 'u8', contractLifetime('byteSlice'))
 const mutableI32 = Type.reference('Exclusive', 'i32', contractLifetime('mutableI32'))
-const mutableI64 = Type.reference('Exclusive', 'i64', contractLifetime('mutableI64'))
 const mutableU32 = Type.reference('Exclusive', 'u32', contractLifetime('mutableU32'))
-const mutableU64 = Type.reference('Exclusive', 'u64', contractLifetime('mutableU64'))
 const mutableUsize = Type.reference('Exclusive', 'usize', contractLifetime('mutableUsize'))
-const mutableHandle = Type.reference('Exclusive', Type.osHandle, contractLifetime('mutableHandle'))
 
 const osEffect = (value: Type.Type): Type.Effect =>
   Type.effect(
@@ -721,52 +711,6 @@ const osBuiltin = (options: {
     }),
     invariant: options.invariant,
   })
-
-const osOpen = (options: {
-  readonly name: 'fileOpen' | 'directoryOpen'
-  readonly operation: 'OsFileOpen' | 'OsDirectoryOpen'
-  readonly parameters: ReadonlyArray<ValueParameter>
-  readonly semanticParameters: ReadonlyArray<Type.Type>
-  readonly invariant: string
-}): Operation => {
-  const carrierOwner = Object.freeze({
-    module: 'Intrinsic',
-    name: `$Os.${options.name}`,
-  })
-  const carrierResult = Type.parameter(carrierOwner, 0, 'R')
-  const success = Type.callable(
-    Object.freeze([Type.osHandle]),
-    carrierResult,
-    { environment: contractLifetime('success'), lifetimeBinders: [] },
-    'Take',
-  )
-  const failure = Type.callable(
-    Object.freeze([]),
-    carrierResult,
-    { environment: contractLifetime('failure'), lifetimeBinders: [] },
-    'Take',
-  )
-  return Object.freeze({
-    ...builtin({
-      actor: 'Os',
-      name: options.name,
-      operation: options.operation,
-      typeParameters: Object.freeze(['R']),
-      semanticTypeParameters: Object.freeze([carrierResult]),
-      parameters: Object.freeze([
-        ...options.parameters,
-        valueParameter('success', 'once fn(OsHandle) -> R'),
-        valueParameter('failure', 'once fn() -> R'),
-      ]),
-      semanticParameters: Object.freeze([...options.semanticParameters, success, failure]),
-      result: 'Effect<R>',
-      semanticResult: osEffect(carrierResult),
-      unsafe: true,
-      targets: nativeTargets,
-    }),
-    invariant: options.invariant,
-  })
-}
 
 const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Operation => {
   let concreteResult: Type.Type
@@ -1320,261 +1264,6 @@ const intrinsicOperations = Object.freeze([
   ...stringOperations,
   ...Object.freeze([
     osBuiltin({
-      name: 'monotonicClockNow',
-      operation: 'OsMonotonicClockNow',
-      parameters: Object.freeze([
-        valueParameter('seconds', '&mut i64'),
-        valueParameter('nanoseconds', '&mut i64'),
-      ]),
-      semanticParameters: Object.freeze([mutableI64, mutableI64]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'outputs are initialized only on success and form a canonical mark on one monotonic timeline',
-    }),
-    osBuiltin({
-      name: 'monotonicClockResolution',
-      operation: 'OsMonotonicClockResolution',
-      parameters: Object.freeze([valueParameter('nanoseconds', '&mut u64')]),
-      semanticParameters: Object.freeze([mutableU64]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'output is initialized only on success and is a positive whole-nanosecond resolution',
-    }),
-    osBuiltin({
-      name: 'monotonicClockWaitUntil',
-      operation: 'OsMonotonicClockWaitUntil',
-      parameters: Object.freeze([
-        valueParameter('seconds', 'i64'),
-        valueParameter('nanoseconds', 'i64'),
-      ]),
-      semanticParameters: Object.freeze(['i64', 'i64']),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'deadline is a canonical non-negative mark from the selected monotonic timeline and success means it has been reached',
-    }),
-    osBuiltin({
-      name: 'randomFill',
-      operation: 'OsRandomFill',
-      parameters: Object.freeze([valueParameter('output', '&mut [u8]')]),
-      semanticParameters: Object.freeze([
-        Type.slice('Exclusive', 'u8', contractLifetime('randomFill')),
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'true means the complete initialized output contains fresh cryptographically secure bytes; false exposes no recoverable output',
-    }),
-    osOpen({
-      name: 'fileOpen',
-      operation: 'OsFileOpen',
-      parameters: Object.freeze([
-        valueParameter('root', '&[u8]'),
-        valueParameter('path', '&[u8]'),
-        valueParameter('mode', 'i32'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([byteSlice, byteSlice, 'i32', mutableI32, mutableU32]),
-      invariant:
-        'root is an absolute native path; path is normalized provider-absolute; status outputs are initialized; traversal rejects symlinks and namespace escape; success transfers one live handle only to the selected carrier',
-    }),
-    osBuiltin({
-      name: 'fileRead',
-      operation: 'OsFileRead',
-      parameters: Object.freeze([
-        valueParameter('handle', '&mut OsHandle'),
-        valueParameter('output', '&mut [u8]'),
-        valueParameter('count', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        mutableHandle,
-        Type.slice('Exclusive', 'u8', contractLifetime('fileRead')),
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'handle is a live file; output is initialized writable storage; success reports the exact transferred byte count',
-    }),
-    osBuiltin({
-      name: 'fileWrite',
-      operation: 'OsFileWrite',
-      parameters: Object.freeze([
-        valueParameter('handle', '&mut OsHandle'),
-        valueParameter('input', '&[u8]'),
-        valueParameter('offset', 'usize'),
-        valueParameter('count', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        mutableHandle,
-        byteSlice,
-        'usize',
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'handle is a live file; input is initialized; success reports the exact transferred byte count and may be partial',
-    }),
-    osOpen({
-      name: 'directoryOpen',
-      operation: 'OsDirectoryOpen',
-      parameters: Object.freeze([
-        valueParameter('root', '&[u8]'),
-        valueParameter('path', '&[u8]'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([byteSlice, byteSlice, mutableI32, mutableU32]),
-      invariant:
-        'root and path satisfy confined traversal; status outputs are initialized; success transfers one live handle only to the selected carrier',
-    }),
-    osBuiltin({
-      name: 'directoryNext',
-      operation: 'OsDirectoryNext',
-      parameters: Object.freeze([
-        valueParameter('handle', '&mut OsHandle'),
-        valueParameter('output', '&mut [u8]'),
-        valueParameter('count', '&mut usize'),
-        valueParameter('kind', '&mut i32'),
-        valueParameter('requiredCapacity', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        mutableHandle,
-        Type.slice('Exclusive', 'u8', contractLifetime('directoryNext')),
-        mutableUsize,
-        mutableI32,
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'handle is a live directory; buffer-too-small does not advance and reports required capacity; zero means end',
-    }),
-    osBuiltin({
-      name: 'pathInspect',
-      operation: 'OsPathInspect',
-      parameters: Object.freeze([
-        valueParameter('root', '&[u8]'),
-        valueParameter('path', '&[u8]'),
-        valueParameter('kind', '&mut i32'),
-        valueParameter('byteLength', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        byteSlice,
-        byteSlice,
-        mutableI32,
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'root and path satisfy confined traversal; kind and byteLength outputs are initialized',
-    }),
-    osBuiltin({
-      name: 'directoryCreateUnique',
-      operation: 'OsDirectoryCreateUnique',
-      parameters: Object.freeze([
-        valueParameter('root', '&[u8]'),
-        valueParameter('parent', '&[u8]'),
-        valueParameter('prefix', '&[u8]'),
-        valueParameter('output', '&mut [u8]'),
-        valueParameter('count', '&mut usize'),
-        valueParameter('requiredCapacity', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        byteSlice,
-        byteSlice,
-        byteSlice,
-        Type.slice('Exclusive', 'u8', contractLifetime('directoryCreateUnique')),
-        mutableUsize,
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'root and parent satisfy confined traversal; prefix is one valid final component fragment; the provider chooses the unique suffix, creates exactly one directory no other caller holds, and writes its complete final component name; buffer-too-small creates nothing and reports required capacity',
-    }),
-    ...(
-      [
-        ['directoryCreate', 'OsDirectoryCreate'],
-        ['fileRemove', 'OsFileRemove'],
-        ['directoryRemove', 'OsDirectoryRemove'],
-      ] as const
-    ).map(([name, operation]) =>
-      osBuiltin({
-        name,
-        operation,
-        parameters: Object.freeze([
-          valueParameter('root', '&[u8]'),
-          valueParameter('path', '&[u8]'),
-          valueParameter('reason', '&mut i32'),
-          valueParameter('nativeCode', '&mut u32'),
-        ]),
-        semanticParameters: Object.freeze([byteSlice, byteSlice, mutableI32, mutableU32]),
-        result: 'Effect<bool>',
-        semanticResult: 'bool',
-        invariant: 'root and path satisfy confined traversal and failure outputs are initialized',
-      }),
-    ),
-    osBuiltin({
-      name: 'handleClose',
-      operation: 'OsHandleClose',
-      parameters: Object.freeze([
-        valueParameter('handle', 'OsHandle'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([Type.osHandle, mutableI32, mutableU32]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'consumes exactly one live file or directory handle whether close succeeds or fails',
-    }),
-    osBuiltin({
-      name: 'standardInputRead',
-      operation: 'OsStandardInputRead',
-      parameters: Object.freeze([
-        valueParameter('output', '&mut [u8]'),
-        valueParameter('count', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.slice('Exclusive', 'u8', contractLifetime('standardInputRead')),
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'output is initialized writable storage; success reports the exact transferred byte count and zero means end of input',
-    }),
-    osBuiltin({
       name: 'processExecute',
       operation: 'OsProcessExecute',
       parameters: Object.freeze([
@@ -1913,30 +1602,6 @@ const intrinsicOperations = Object.freeze([
   ]),
   ...Object.freeze([
     builtin({
-      actor: 'Host',
-      name: 'write',
-      operation: 'HostWrite',
-      parameters: Object.freeze([
-        valueParameter('destination', 'bool'),
-        valueParameter('bytes', '&[u8]'),
-      ]),
-      semanticParameters: Object.freeze([
-        'bool',
-        Type.slice('Shared', 'u8', contractLifetime('write')),
-      ]),
-      result: 'Effect<() ! WriterError>',
-      semanticResult: Type.effect(
-        Type.unit,
-        Object.freeze([Type.streamWriteFailure]),
-        { environment: contractLifetime('write'), lifetimeBinders: [] },
-        undefined,
-        Object.freeze([]),
-      ),
-      targets: nativeTargets,
-    }),
-  ]),
-  ...Object.freeze([
-    builtin({
       actor: 'RawBuffer',
       name: 'from',
       operation: 'RawBufferFrom',
@@ -2086,6 +1751,34 @@ const intrinsicOperations = Object.freeze([
   ...Object.freeze([
     builtin({
       actor: 'Pointer',
+      name: 'bytes',
+      operation: 'PointerBytes',
+      typeParameters: Object.freeze(['T']),
+      semanticTypeParameters: rawTypeParameters,
+      parameters: Object.freeze([valueParameter('pointer', '?*const T')]),
+      semanticParameters: Object.freeze([
+        Type.pointer({
+          mutable: false,
+          pointee: rawElement,
+          nullable: true,
+          extent: 'Single',
+          alignment: 'Natural',
+          addressSpace: 0,
+        }),
+      ]),
+      result: '?[*]const u8',
+      semanticResult: Type.pointer({
+        mutable: false,
+        pointee: 'u8',
+        nullable: true,
+        extent: 'Many',
+        alignment: 'Natural',
+        addressSpace: 0,
+      }),
+      unsafe: true,
+    }),
+    builtin({
+      actor: 'Pointer',
       name: 'requalify',
       operation: 'PointerRequalify',
       typeParameters: Object.freeze(['From', 'To']),
@@ -2188,6 +1881,17 @@ const intrinsicOperations = Object.freeze([
       semanticParameters: Object.freeze([pointerSource]),
       result: 'bool',
       semanticResult: 'bool',
+    }),
+    builtin({
+      actor: 'Pointer',
+      name: 'address',
+      operation: 'PointerAddress',
+      typeParameters: Object.freeze(['P']),
+      semanticTypeParameters: Object.freeze([pointerSource]),
+      parameters: Object.freeze([valueParameter('pointer', 'P')]),
+      semanticParameters: Object.freeze([pointerSource]),
+      result: 'usize',
+      semanticResult: 'usize',
     }),
     builtin({
       actor: 'Pointer',
@@ -2581,7 +2285,6 @@ export interface InventoryEntry {
   readonly hir?: string
   readonly mir?: string
   readonly targets: ReadonlyArray<Target.Id>
-  readonly hostImport?: string
 }
 
 /** Publishes the closed intrinsic inventory used by verification and release review. */
@@ -2654,7 +2357,6 @@ export const inventory = (): ReadonlyArray<InventoryEntry> =>
         consumer: operation.consumer,
         ...(identity === undefined ? {} : { hir: identity, mir: identity }),
         targets: operation.targets,
-        ...(operation.hostImport === undefined ? {} : { hostImport: operation.hostImport }),
       })
     }),
   )

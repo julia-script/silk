@@ -26,12 +26,13 @@
     ><span class="live">live · hover for types</span>
   </div>
   <!-- prettier-ignore -->
-  <silk-snippet diagnostics hover inlay-hints>
+  <silk-snippet diagnostics hover inlay-hints target="aarch64-apple-darwin">
 import silk.effect { Effect }
 import silk.logger { Logger, LogError }
+import silk.os_logger { StdoutLogger }
 
 pub effect fn main() -&gt; () ! LogError {
-  let mut logger = Logger.stdoutProvider()
+  let mut logger = StdoutLogger.make()
 
   run Effect.log(&quot;Hello!&quot;)
     |&gt; Effect.provideMut(&amp;mut logger)
@@ -52,7 +53,7 @@ pub effect fn main() -&gt; () ! LogError {
   <code>Effect.log</code> is not hard-coded to stdout, a global logger, an exception mechanism, or
   some invisible runtime environment. It builds a lazy description of work. Both its possible
   <code>LogError</code> and its need for a <code>Logger</code> are part of the type.
-  <code>stdoutProvider</code> is just one implementation of that capability.
+  <code>StdoutLogger</code> is just one implementation of that capability.
   <code>provideMut</code> supplies it through an exclusive borrow, and the inner <code>run</code> is
   the point where the description finally becomes execution.
 </p>
@@ -439,12 +440,13 @@ service Logger {
     ><span class="live">live · hover for types</span>
   </div>
   <!-- prettier-ignore -->
-  <silk-snippet diagnostics hover inlay-hints>
+  <silk-snippet diagnostics hover inlay-hints target="aarch64-apple-darwin">
 import silk.effect { Effect }
 import silk.logger { Logger, LogError }
+import silk.os_logger { StdoutLogger }
 
 pub effect fn main() -&gt; () ! LogError {
-  let mut logger = Logger.stdoutProvider()
+  let mut logger = StdoutLogger.make()
   run Effect.log(&quot;connected&quot;)
     |&gt; Effect.provideMut(&amp;mut logger)
 }

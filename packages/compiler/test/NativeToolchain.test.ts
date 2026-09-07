@@ -1,3 +1,8 @@
+import type * as Backend from '../src/Backend.js'
+import * as ForeignContract from '../src/ForeignContract.js'
+import * as Result from 'effect/Result'
+import * as HelperCapability from '../src/HelperCapability.js'
+import * as ObjectSymbols from '../src/internal/ObjectSymbols.js'
 import * as Schema from 'effect/Schema'
 import { NodeServices } from '@effect/platform-node'
 import * as PlatformSupply from '../src/PlatformSupply.js'
@@ -1463,6 +1468,7 @@ it.effect(
           const plan = Effect.fnUntraced(function* (
             objects: ReadonlyArray<NativeToolchain.PathArtifact>,
             name = 'output.a',
+            helpers: ReadonlyArray<HelperCapability.Report> = [],
           ) {
             return yield* NativeToolchain.planNativeLink(
               selected,
@@ -1473,6 +1479,7 @@ it.effect(
               [],
               join(scope.root, name),
               entry,
+              helpers,
             )
           })
           const first = yield* plan([a, b])
@@ -1480,6 +1487,45 @@ it.effect(
           const swapped = yield* plan([b, a])
           assert.strictEqual(first.identity, moved.identity)
           assert.notStrictEqual(first.identity, swapped.identity)
+          const helperInventory: ObjectSymbols.Inventory = {
+            format: target.operatingSystem === 'darwin' ? 'macho' : 'elf',
+            symbols: [
+              {
+                name: target.operatingSystem === 'darwin' ? '_memcpy' : 'memcpy',
+                defined: false,
+                weak: false,
+                visibility: 'default',
+              },
+            ],
+            references: [],
+          }
+          const origins = { foreignImports: [], foreignStatics: [], nativeRuntimeSymbols: [] }
+          const hostedHelper = yield* HelperCapability.reconcile(
+            helperInventory,
+            origins,
+            profile,
+            a.path,
+            'same-object',
+          )
+          const bareProfile = yield* CompilationProfile.normalize({
+            target: target.id,
+            artifact: 'object',
+            libc: 'none',
+          })
+          const bareHelper = yield* HelperCapability.reconcile(
+            helperInventory,
+            origins,
+            bareProfile,
+            a.path,
+            'same-object',
+          )
+          assert.notStrictEqual(hostedHelper.identity, bareHelper.identity)
+          const hostedPlan = yield* plan([a, b], 'hosted.a', [hostedHelper])
+          const barePlan = yield* plan([a, b], 'bare.a', [bareHelper])
+          assert.notDeepEqual(
+            NativeToolchain.finalArtifactCacheAdmission('NativeStaticLibrary', hostedPlan),
+            NativeToolchain.finalArtifactCacheAdmission('NativeStaticLibrary', barePlan),
+          )
           const wrongTarget =
             target.operatingSystem === 'darwin'
               ? Target.x8664UnknownLinuxGnu
@@ -1704,4 +1750,214 @@ it.effect(
       assert.strictEqual(cycle._tag, 'Failure')
       if (cycle._tag === 'Failure') assert.strictEqual(cycle.failure.code, 'UnsupportedInput')
     }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect(
+  'reads symbols and relocations from pinned native and Wasm objects and rejects truncated tables',
+  () =>
+    Effect.gen(function* () {
+      const fixture = yield* Schema.decodeEffect(
+        Schema.fromJsonString(
+          Schema.Struct({
+            objects: Schema.Record(Schema.String, Schema.String),
+            cycles: Schema.Record(Schema.String, Schema.String),
+          }),
+        ),
+      )(readFileSync(new URL('./fixtures/helper-object-symbols.json', import.meta.url), 'utf8'))
+      for (const target of [...Target.native, Target.wasm32UnknownUnknown]) {
+        const encoded = fixture.objects[target.id]
+        assert.isDefined(encoded)
+        if (encoded === undefined) return assert.fail('Missing object fixture')
+        const bytes = Uint8Array.from(Buffer.from(encoded, 'base64'))
+        const inventory = ObjectSymbols.inspect(bytes, target)
+        if (Result.isFailure(inventory)) return assert.fail(inventory.failure.detail)
+        const normalized = inventory.success.symbols.map((entry) => ({
+          ...entry,
+          name: HelperCapability.symbolName(target, entry.name),
+        }))
+        assert.deepEqual(
+          normalized.find((entry) => entry.name === 'helper_entry'),
+          {
+            name: 'helper_entry',
+            defined: true,
+            weak: false,
+            visibility: 'hidden',
+          },
+        )
+        assert.isTrue(
+          normalized.some((entry) => entry.name === 'weak_entry' && entry.defined && entry.weak),
+        )
+        assert.deepEqual(
+          normalized
+            .filter((entry) => !entry.defined && !entry.name.startsWith('__'))
+            .map((entry) => entry.name)
+            .sort(),
+          ['foreign_data', 'foreign_value'],
+        )
+        assert.deepEqual(
+          inventory.success.references
+            .map((name) => HelperCapability.symbolName(target, name))
+            .filter((name) => !name.startsWith('__')),
+          ['foreign_data', 'foreign_value'],
+        )
+        const cycleBytes = fixture.cycles[target.id]
+        if (cycleBytes === undefined) return assert.fail('Missing cycle object fixture')
+        const cycle = ObjectSymbols.inspect(
+          Uint8Array.from(Buffer.from(cycleBytes, 'base64')),
+          target,
+        )
+        if (Result.isFailure(cycle)) return assert.fail(cycle.failure.detail)
+        const profile = yield* CompilationProfile.normalize({ target: target.id })
+        const provider = yield* HelperCapability.provider('memcpy', profile)
+        const verified = yield* Effect.result(
+          HelperCapability.verifyProvider(provider, cycle.success, target),
+        )
+        if (Result.isSuccess(verified))
+          return assert.fail('Emitted self-reference escaped verification')
+        assert.strictEqual(verified.failure.code, 'ProviderCycle')
+        for (const length of [0, 7, 24, bytes.length - 1])
+          assert.isTrue(Result.isFailure(ObjectSymbols.inspect(bytes.subarray(0, length), target)))
+      }
+    }),
+)
+
+it.effect(
+  'accounts emitted helper ABIs separately from source foreign calls and runtime contracts',
+  () =>
+    Effect.gen(function* () {
+      const profile = yield* CompilationProfile.normalize({ target: 'x86_64-unknown-linux-gnu' })
+      const foreign: Backend.ForeignImport = {
+        symbol: 'foreign_read',
+        parameters: [],
+        result: 'i32',
+        variadic: false,
+        contract: ForeignContract.conservative,
+      }
+      const input = {
+        foreignImports: [foreign],
+        foreignStatics: [],
+        nativeRuntimeSymbols: ['malloc'],
+      }
+      const symbols = ['memcpy', 'fmodf', 'malloc', 'foreign_read'].map((name) => ({
+        name,
+        defined: false,
+        weak: false,
+        visibility: 'default' as const,
+      }))
+      const report = yield* HelperCapability.reconcile(
+        { format: 'elf', symbols, references: symbols.map((entry) => entry.name) },
+        input,
+        profile,
+        'program.o',
+        'object-digest',
+      )
+      assert.deepEqual(
+        report.requirements.map((entry) => [
+          entry.contract.symbol,
+          entry.contract.parameters,
+          entry.contract.result,
+        ]),
+        [
+          ['fmodf', ['f32', 'f32'], 'f32'],
+          ['memcpy', ['pointer', 'pointer', 'u64'], 'pointer'],
+        ],
+      )
+      assert.deepEqual(report.runtime, ['malloc'])
+      assert.deepEqual(report.foreign, ['foreign_read'])
+      assert.deepEqual(HelperCapability.linkInputs([report]), [
+        NativeLinkInput.library('m', 'Dynamic'),
+      ])
+      const empty = yield* HelperCapability.reconcile(
+        { format: 'elf', symbols: [], references: [] },
+        input,
+        profile,
+        'empty.o',
+        'empty-digest',
+      )
+      assert.deepEqual(HelperCapability.linkInputs([empty]), [])
+      assert.notStrictEqual(report.identity, empty.identity)
+      for (const [symbol, code] of [
+        ['unknown_helper', 'UnexplainedSymbol'],
+        ['__atomic_load_16', 'UnsupportedFamily'],
+        ['__stack_chk_fail', 'UnsupportedFamily'],
+        ['__divti3', 'UnsupportedFamily'],
+        ['__rust_probestack', 'UnsupportedFamily'],
+        ['__asan_report_load8', 'UnsupportedFamily'],
+        ['_Unwind_Resume', 'UnsupportedFamily'],
+      ]) {
+        const result = yield* Effect.result(HelperCapability.provider(symbol ?? '', profile))
+        if (Result.isSuccess(result)) return assert.fail('Unexpected helper provider')
+        assert.strictEqual(result.failure.code, code)
+      }
+      const noLibc = yield* CompilationProfile.normalize({
+        target: profile.target.id,
+        libc: 'none',
+        artifact: 'object',
+        entry: { kind: 'none' },
+        runtime: { kind: 'none' },
+      })
+      const absent = yield* Effect.result(HelperCapability.provider('fmod', noLibc))
+      if (Result.isSuccess(absent)) return assert.fail('Unexpected no-libc arithmetic provider')
+      assert.strictEqual(absent.failure.code, 'MissingProvider')
+    }),
+)
+
+it.effect(
+  'rejects direct and transitive provider cycles, incompatible targets and emitted self dependencies',
+  () =>
+    Effect.gen(function* () {
+      const profile = yield* CompilationProfile.normalize({ target: 'aarch64-apple-darwin' })
+      const copy = yield* HelperCapability.provider('memcpy', profile)
+      const move = yield* HelperCapability.provider('memmove', profile)
+      const abi = yield* Effect.result(
+        HelperCapability.verifyExports(
+          copy,
+          [
+            {
+              symbol: 'memcpy',
+              parameters: [],
+              result: 'i32',
+              variadic: false,
+              contract: ForeignContract.conservative,
+            },
+          ],
+          profile.target,
+        ),
+      )
+      if (Result.isSuccess(abi)) return assert.fail('Mismatched C helper signature was admitted')
+      assert.strictEqual(abi.failure.code, 'IncompatibleProvider')
+
+      for (const [providers, code] of [
+        [[{ ...copy, requires: ['memcpy'] }], 'ProviderCycle'],
+        [
+          [
+            { ...copy, requires: ['memmove'] },
+            { ...move, requires: ['memcpy'] },
+          ],
+          'ProviderCycle',
+        ],
+        [[{ ...copy, requires: ['missing'] }], 'MissingProvider'],
+        [[{ ...copy, targets: [] }], 'IncompatibleProvider'],
+      ] as const) {
+        const outcome = yield* Effect.result(
+          HelperCapability.closure(['memcpy'], providers, profile.target),
+        )
+        if (Result.isSuccess(outcome)) return assert.fail('Unexpected valid provider graph')
+        assert.strictEqual(outcome.failure.code, code)
+      }
+      const outcome = yield* Effect.result(
+        HelperCapability.verifyProvider(
+          copy,
+          {
+            format: 'macho',
+            symbols: [{ name: '_memcpy', defined: true, weak: false, visibility: 'default' }],
+            references: ['_memcpy'],
+          },
+          profile.target,
+        ),
+      )
+      if (Result.isSuccess(outcome)) return assert.fail('Unexpected self-reference admission')
+      assert.strictEqual(outcome.failure.code, 'ProviderCycle')
+      assert.deepEqual(outcome.failure.origins, [copy.id, 'memcpy', copy.id])
+    }),
 )

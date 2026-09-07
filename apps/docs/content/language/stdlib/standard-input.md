@@ -23,8 +23,8 @@ while input is inherently partial and eventually ends.
 
 ## Gotchas
 
-The caller must supply a non-empty read buffer. A zero-length native read cannot distinguish
-available input from end-of-input.
+Empty buffers return Filled(0) without observing end-of-input. A provider must preserve this
+behavior even after a non-empty read has observed permanent end-of-input.
 
 ## Examples
 
@@ -45,6 +45,7 @@ struct OneByte {
 
 effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> ReadOutcome
 ! StreamReadError {
+  if buffer.length == 0 { return Input.filled(usize.ZERO) }
   if self.complete {
     return Input.endOfInput()
   }
@@ -191,8 +192,7 @@ Bytes after a [`Filled`](#declaration-73696c6b2f7374616e646172645f696e7075743a3a
 
 #### Gotchas
 
-`buffer` must be non-empty. A native provider cannot distinguish a zero-capacity read from
-end-of-input.
+An empty `buffer` returns Filled(0) without reading, including after end-of-input.
 
 <a id="declaration-73696c6b2f7374616e646172645f696e7075743a3a5374616e64617264496e7075742e726561644661696c757265"></a>
 

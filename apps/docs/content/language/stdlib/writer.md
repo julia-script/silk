@@ -9,7 +9,7 @@ Complete stdout and stderr byte writes through a replaceable service.
 ## When to use
 
 Use [`Writer`](#declaration-73696c6b2f7772697465723a3a577269746572) when code must write complete byte sequences without selecting a destination.
-Use [`StdoutWriter`](#declaration-73696c6b2f7772697465723a3a5374646f7574577269746572) or [`StderrWriter`](#declaration-73696c6b2f7772697465723a3a537464657272577269746572) at a process boundary. Use `silk.logger.Logger` for
+Use `silk.os_writer` providers at a native process boundary. Use `silk.logger.Logger` for
 structured log events.
 
 ## Details
@@ -20,38 +20,12 @@ tests can replace the provider for one lexical operation. Provider failure produ
 
 ## Gotchas
 
-The native providers require a host standard-stream boundary. [`ignoreError`](#declaration-73696c6b2f7772697465723a3a5772697465722e69676e6f72654572726f72) removes the typed
+Native providers live in `silk.os_writer` and require selected Darwin or GNU libc. [`ignoreError`](#declaration-73696c6b2f7772697465723a3a5772697465722e69676e6f72654572726f72) removes the typed
 failure value and returns unit for a failed Effect.
-
-## Examples
-
-### Write one complete stdout message
-
-```silk
-import silk.effect { Effect }
-
-import silk.writer { Writer, WriterError }
-
-effect fn writeMessage() -> ()
-! WriterError {
-  let mut writer = Writer.stdoutWriterProvider()
-  return run Writer.writeAll(b"Silk\n")
-    |> Effect.provideMut<Writer>(&mut writer)
-}
-
-effect fn ignoreWriteFailure(error: WriterError) -> () {
-  return ()
-}
-
-pub fn main() -> i32 {
-  let completed = run Effect.catchAll(writeMessage(), ignoreWriteFailure)
-  return 42
-}
-```
 
 Import as `Writer` with `import silk.writer { Writer }`.
 
-Public declarations: 4.
+Public declarations: 2.
 
 <a id="declaration-73696c6b2f7772697465723a3a5772697465724572726f72"></a>
 
@@ -93,25 +67,15 @@ effect<'static> fn flush() -> () ! WriterError ? &mut Writer
 
 Requests that the active Writer provider commit its buffered output.
 
-<a id="declaration-73696c6b2f7772697465723a3a5772697465722e7374646f757457726974657250726f7669646572"></a>
+<a id="declaration-73696c6b2f7772697465723a3a5772697465722e6661696c757265"></a>
 
-### Associated function `Writer.stdoutWriterProvider`
-
-```silk
-pub fn stdoutWriterProvider() -> StdoutWriter
-```
-
-Creates a process-backed Writer provider for standard output.
-
-<a id="declaration-73696c6b2f7772697465723a3a5772697465722e73746465727257726974657250726f7669646572"></a>
-
-### Associated function `Writer.stderrWriterProvider`
+### Associated function `Writer.failure`
 
 ```silk
-pub fn stderrWriterProvider() -> StderrWriter
+pub fn failure() -> WriterError
 ```
 
-Creates a process-backed Writer provider for standard error.
+Creates a failure for a provider that could not complete a write or flush operation.
 
 <a id="declaration-73696c6b2f7772697465723a3a5772697465722e69676e6f72654572726f72"></a>
 
@@ -137,71 +101,3 @@ pub effect<'life0> fn writeString<'life0>(val: string<'life0>) -> () ! WriterErr
 ```
 
 Writes the UTF-8 bytes of `val` through the active Writer provider.
-
-<a id="declaration-73696c6b2f7772697465723a3a5374646f7574577269746572"></a>
-
-## `StdoutWriter`
-
-```silk
-pub struct StdoutWriter
-```
-
-A Writer provider that writes to process standard output.
-
-<a id="declaration-73696c6b2f7772697465723a3a537464657272577269746572"></a>
-
-## `StderrWriter`
-
-```silk
-pub struct StderrWriter
-```
-
-A Writer provider that writes to process standard error.
-
-<a id="declaration-73696c6b2f7772697465723a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Writer for StdoutWriter`
-
-```silk
-impl Writer for StdoutWriter
-```
-
-<a id="declaration-73696c6b2f7772697465723a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
-
-### Operation `writeAll`
-
-```silk
-writeAll = StdoutWriter.impl@0.writeAll
-```
-
-<a id="declaration-73696c6b2f7772697465723a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a31"></a>
-
-### Operation `flush`
-
-```silk
-flush = StdoutWriter.impl@0.flush
-```
-
-<a id="declaration-73696c6b2f7772697465723a3a696d706c656d656e746174696f6e3a31"></a>
-
-## Implementation `Writer for StderrWriter`
-
-```silk
-impl Writer for StderrWriter
-```
-
-<a id="declaration-73696c6b2f7772697465723a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
-
-### Operation `writeAll`
-
-```silk
-writeAll = StderrWriter.impl@1.writeAll
-```
-
-<a id="declaration-73696c6b2f7772697465723a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a31"></a>
-
-### Operation `flush`
-
-```silk
-flush = StderrWriter.impl@1.flush
-```

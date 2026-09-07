@@ -25,7 +25,7 @@ it.effect('creates the canonical sparse executable project in a missing child di
     assert.strictEqual(yield* fileSystem.readFileString(`${root}/hello/.gitignore`), '/build/\n')
     assert.strictEqual(
       yield* fileSystem.readFileString(`${root}/hello/src/main.silk`),
-      'import silk.effect { Effect }\nimport silk.logger { Logger, LogError }\n\npub effect fn main() -> () ! LogError {\n  let mut logger = Logger.stdoutProvider()\n\n  run Effect.log("Hello, world!")\n    |> Effect.provideMut(&mut logger)\n}\n',
+      'import silk.effect { Effect }\nimport silk.logger { LogError }\nimport silk.os_logger { StdoutLogger }\n\npub effect fn main() -> () ! LogError {\n  let mut logger = StdoutLogger.make()\n\n  run Effect.log("Hello, world!")\n    |> Effect.provideMut(&mut logger)\n}\n',
     )
     const project = yield* Project.load({ workingDirectory: `${root}/hello` })
     assert.strictEqual(project.entry.module, 'main')

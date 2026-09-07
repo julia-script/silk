@@ -259,7 +259,6 @@ const installedComponents = (): ReadonlyArray<Component> => {
                 operation: entry.operation,
                 hir: entry.hir,
                 mir: entry.mir,
-                ...(entry.hostImport === undefined ? {} : { hostImport: entry.hostImport }),
               }),
             ),
             dependencies: Object.freeze([compiler.id, intrinsic.id]),

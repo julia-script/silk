@@ -263,42 +263,20 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
           yield* LlvmType.functionType(builder, i32, [pointer, pointer, usizeType]),
         )
       : undefined
-  const needsHostWrite = program.functions.some((fn) =>
-    MirVerification.operations(fn).some((operation) => operation._tag === 'HostWrite'),
-  )
-  const standardWrite =
-    needsHostWrite && usizeType !== undefined
-      ? yield* FunctionActor.declare(
-          builder,
-          'silk_standard_stream_write_v1',
-          yield* LlvmType.functionType(builder, i32, [i32, pointer, usizeType]),
-        )
-      : undefined
-
   const osRuntimes = new Map<
     string,
     {
       readonly handle: FunctionActor.Function
-      readonly abi: 'Direct' | 'OpenOut'
       readonly resultLaneCount: number
       readonly symbol: string
     }
   >()
   for (const operation of program.functions.flatMap((fn) => MirVerification.operations(fn))) {
-    if (
-      (operation._tag !== 'OsCall' && operation._tag !== 'OsOpen') ||
-      osRuntimes.has(operation.operation.name)
-    )
-      continue
-    const resultLanes = lanesFor(
-      operation._tag === 'OsOpen' ? operation.handleType : operation.type,
-    )
-    const abi = operation._tag === 'OsOpen' ? 'OpenOut' : 'Direct'
+    if (operation._tag !== 'OsCall' || osRuntimes.has(operation.operation.name)) continue
+    const resultLanes = lanesFor(operation.type)
     const singleResultLane = resultLanes.at(0)
     let resultType: LlvmType.Type
-    if (abi === 'OpenOut') {
-      resultType = i32
-    } else if (resultLanes.length === 0) {
+    if (resultLanes.length === 0) {
       resultType = voidType ?? (yield* LlvmType.voidType(builder))
     } else if (resultLanes.length === 1 && singleResultLane !== undefined) {
       resultType = laneType(singleResultLane)
@@ -314,16 +292,11 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     osRuntimes.set(
       operation.operation.name,
       Object.freeze({
-        abi,
         symbol: NativeDeclare.osRuntimeSymbol(operation.operation.name),
         handle: yield* FunctionActor.declare(
           builder,
           NativeDeclare.osRuntimeSymbol(operation.operation.name),
-          yield* LlvmType.functionType(
-            builder,
-            resultType,
-            abi === 'OpenOut' ? [...parameters, ...resultLanes.map(() => pointer)] : parameters,
-          ),
+          yield* LlvmType.functionType(builder, resultType, parameters),
         ),
         resultLaneCount: resultLanes.length,
       }),
@@ -355,10 +328,29 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     .flatMap((fn) => MirVerification.operations(fn))
     .filter((operation) => operation._tag === 'ForeignCall')
   const declaredForeign = new Map<string, CAbi.CAbiSignature>()
+  if (
+    request.support &&
+    (program.entry._tag !== 'NoInvocation' ||
+      needsAllocation ||
+      frameRuntimeEnabled ||
+      osRuntimes.size !== 0 ||
+      program.foreignCalls.length !== 0 ||
+      program.foreignStatics.length !== 0 ||
+      indirectCalls.length !== 0 ||
+      program.functions.some((fn) => fn.machine !== undefined))
+  )
+    return yield* new BackendError({
+      operation: 'Backend.emit',
+      backend: 'LLVM',
+      message:
+        'Support objects require source-only, runtime-free bodies without an entry or foreign calls',
+      reason: { _tag: 'UnsupportedMir', detail: 'Invalid support compilation' },
+    })
   const foreignGuard =
-    program.foreignCalls.length === 0 &&
-    program.foreignExports.length === 0 &&
-    indirectCalls.length === 0
+    request.support ||
+    (program.foreignCalls.length === 0 &&
+      program.foreignExports.length === 0 &&
+      indirectCalls.length === 0)
       ? undefined
       : yield* NativeForeignGuard.make(builder)
   for (const operation of indirectCalls) {
@@ -476,7 +468,15 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   }
 
   const functionDeclarations = yield* NativeDeclare.functions(
-    Object.freeze({ builder, program, i32, pointer, lanesFor, laneType }),
+    Object.freeze({
+      builder,
+      program,
+      i32,
+      pointer,
+      lanesFor,
+      laneType,
+      support: request.support === true,
+    }),
   )
   const declared = functionDeclarations.declared
   const retained: Array<Constant.Constant> = []
@@ -513,7 +513,14 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     voidType,
   )
   const exportThunks = yield* NativeDeclare.exportThunks(
-    Object.freeze({ builder, program, declared, cType, foreignGuard }),
+    Object.freeze({
+      builder,
+      program,
+      declared,
+      cType,
+      foreignGuard,
+      support: request.support === true,
+    }),
   )
   const foreignCallbacks = new Map<string, Constant.Constant>()
   for (const [symbol, thunk] of exportThunks)
@@ -647,7 +654,6 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
       ...(executionRelease === undefined ? {} : { executionRelease: executionRelease.handle }),
       ...(memcmp === undefined ? {} : { memcmp }),
-      ...(standardWrite === undefined ? {} : { standardWrite }),
       osRuntimes,
       foreignFunctions,
       foreignStatics,
@@ -729,8 +735,10 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       }),
     ),
     nativeRuntimeSymbols: Object.freeze([
+      ...(termination.state.trapReport === undefined ? [] : [NativeTermination.trapReportSymbol]),
+      ...(malloc === undefined ? [] : ['malloc']),
+      ...(free === undefined ? [] : ['free']),
       ...[...osRuntimes.values()].map((runtime) => runtime.symbol),
-      ...(needsHostWrite ? ['silk_standard_stream_write_v1'] : []),
       ...(coroutineFramePush === undefined ? [] : [CoroutineRuntime.pushSymbol]),
       ...(coroutineFramePop === undefined ? [] : [CoroutineRuntime.popSymbol]),
     ]),

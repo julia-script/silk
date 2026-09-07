@@ -52,6 +52,8 @@ A possibly empty slice uses an explicitly nullable many pointer at that boundary
 never proves pinning, ownership transfer, foreign retention permission or liveness after moving or
 destroying its owner.
 
+Raw address observation is `Intrinsic.pointerAddress<P>(pointer: P) -> usize`. It accepts only data pointers and returns their unsigned target-width address, with zero for null. It does not access the pointee, retain storage or provide integer-to-pointer reconstruction. `Pointer.address` and `Pointer.addressMany` expose the single-element and many-element forms. Address observation is a runtime operation.
+
 ## Native output storage
 
 Ordinary source owns `Uninitialized<T>` and `Initialized<T>` output states for Copy values. Private

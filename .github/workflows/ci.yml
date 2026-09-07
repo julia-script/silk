@@ -37,10 +37,7 @@ jobs:
           key: silk-native-${{ runner.os }}-${{ github.sha }}
           restore-keys: silk-native-${{ runner.os }}-
       # CLI integration tests also resolve complete native tool installations.
-      - name: Install LLVM archiver
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes llvm
+      - uses: ./.github/actions/setup-linux-llvm
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: node scripts/turbo.mjs run build
@@ -76,10 +73,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Install LLVM archiver
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes llvm
+      - uses: ./.github/actions/setup-linux-llvm
       - uses: actions/cache@v4
         with:
           path: .turbo/cache
@@ -116,10 +110,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - name: Install LLVM archiver
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes llvm
+      - uses: ./.github/actions/setup-linux-llvm
       - uses: actions/cache@v4
         with:
           path: .turbo/cache
@@ -293,6 +284,11 @@ jobs:
         run: |
           node packages/compiler/conformance/platform-supplies/run.mjs
           node packages/compiler/conformance/integer-variadics/run.mjs
+          node packages/compiler/conformance/llvm-helpers/run.mjs
+          node packages/compiler/conformance/standard-streams/run.mjs
+          node packages/compiler/conformance/native-clocks/run.mjs
+          node packages/compiler/conformance/native-entropy/run.mjs
+          node packages/compiler/conformance/native-filesystem/run.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -300,5 +296,10 @@ jobs:
           path: |
             .scratch/platform-supplies
             .scratch/integer-variadics
+            .scratch/llvm-helpers
+            .scratch/standard-streams
+            .scratch/native-clocks
+            .scratch/native-entropy
+            .scratch/native-filesystem
             .scratch/gnu-packages.txt
           if-no-files-found: error

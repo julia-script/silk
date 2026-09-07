@@ -102,10 +102,6 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = layout-repeat ${localText(operation.layout)} count=${localText(operation.count)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Allocate':
       return `${localText(operation.destination)} = allocate ${localText(operation.layout)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'HostWrite':
-      return `${localText(operation.destination)} = standard-stream-write destination=${localText(operation.stream)} bytes=${localText(operation.bytes)} failure=${SilkType.encode(operation.failure)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'OsOpen':
-      return `${localText(operation.destination)} = os-open ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) success=${localText(operation.success)} failure=${localText(operation.failure)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'OsCall':
       return `${localText(operation.destination)} = os-call ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'NativeAssembly':
@@ -148,6 +144,10 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = pointer-null : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PointerIsNull':
       return `${localText(operation.destination)} = pointer-is-null ${localText(operation.pointer)} : bool ${provenanceText(operation.provenance)}`
+    case 'PointerAddress':
+      return `${localText(operation.destination)} = pointer-address ${localText(operation.pointer)} : usize ${provenanceText(operation.provenance)}`
+    case 'PointerBytes':
+      return `${localText(operation.destination)} = pointer-bytes ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PointerRequalify':
       return `${localText(operation.destination)} = pointer-requalify ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PointerFromStorage':

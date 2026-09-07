@@ -168,10 +168,11 @@ const manifest = (name: string): string =>
   `[package]\nname = "${name}"\nversion = "0.1.0"\nroot = "src/main.silk"\n`
 
 const entry = `import silk.effect { Effect }
-import silk.logger { Logger, LogError }
+import silk.logger { LogError }
+import silk.os_logger { StdoutLogger }
 
 pub effect fn main() -> () ! LogError {
-  let mut logger = Logger.stdoutProvider()
+  let mut logger = StdoutLogger.make()
 
   run Effect.log("Hello, world!")
     |> Effect.provideMut(&mut logger)

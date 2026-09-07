@@ -1177,12 +1177,6 @@ export const catalog = (
           Object.freeze(['$context', 'usize'] as const),
           Object.freeze(['$active', 'usize'] as const),
         ])
-      } else if (Type.equals(type, Type.osHandle)) {
-        fieldTypes = Object.freeze([
-          Object.freeze(['$identity', 'usize'] as const),
-          Object.freeze(['$kind', 'i32'] as const),
-          Object.freeze(['$active', 'i32'] as const),
-        ])
       } else if (Type.isRawBuffer(type)) {
         fieldTypes = Object.freeze([
           Object.freeze(['$allocation', Type.allocation] as const),

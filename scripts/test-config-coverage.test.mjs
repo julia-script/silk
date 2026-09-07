@@ -105,12 +105,24 @@ const ciJobBody = (name) => {
   return ciWorkflow.slice(start, end)
 }
 
-void test('every Linux test job that exercises native archives installs llvm-ar', () => {
-  for (const job of ['native-acceptance', 'compiler-tests']) {
+void test('every Linux native test job selects the complete verified LLVM toolchain', () => {
+  for (const job of ['validate', 'native-acceptance', 'compiler-tests']) {
     assert.match(
       ciJobBody(job),
-      /sudo apt-get install --yes llvm/,
-      `${job} executes archive-producing tests and must install llvm-ar in its own runner`,
+      /uses: \.\/\.github\/actions\/setup-linux-llvm/,
+      `${job} must select the complete LLVM installation rather than the runner default`,
     )
   }
+  const setup = readFileSync(
+    join(workspaceRoot, '.github/actions/setup-linux-llvm/action.yml'),
+    'utf8',
+  )
+  assert.match(setup, /sha256sum -c -/, 'Downloaded tools must be checked against a pinned digest')
+  assert.match(
+    setup,
+    /bin.*GITHUB_PATH/,
+    'Generic clang invocations must use the selected installation',
+  )
+  assert.match(setup, /SILK_TEST_CLANG=.*\/bin\/clang/)
+  assert.match(setup, /SILK_TEST_LLVM_AR=.*\/bin\/llvm-ar/)
 })

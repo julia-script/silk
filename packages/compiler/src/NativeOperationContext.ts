@@ -47,12 +47,10 @@ export interface Context {
   readonly malloc?: FunctionActor.Function
   readonly free?: FunctionActor.Function
   readonly memcmp?: FunctionActor.Function
-  readonly standardWrite?: FunctionActor.Function
   readonly osRuntimes: ReadonlyMap<
     string,
     {
       readonly handle: FunctionActor.Function
-      readonly abi: 'Direct' | 'OpenOut'
       readonly resultLaneCount: number
       readonly symbol: string
     }

@@ -1,0 +1,126 @@
+//! Borrowed native descriptor transfers through selected libc declarations.
+//!
+//! # When to use
+//! Use [`NativeDescriptor`] to build native byte-stream providers without owning the descriptor.
+//! Use `silk.writer.Writer` and `silk.standard_input.StandardInput` for replaceable portable services.
+//!
+//! # Details
+//! The selected Darwin and GNU providers use 32-bit descriptors and pointer-width transfer counts.
+//! Transfers are bounded to 0x7ffff000 bytes per call. Interrupted calls retry without advancing;
+//! only a failed call reads native error state. Empty operations make no foreign call.
+//!
+//! # Gotchas
+//! The caller controls descriptor lifetime and synchronization. These operations never close it.
+//! Native declarations are absent on WebAssembly and no-libc profiles. A failed complete write may
+//! already have committed a prefix; failure does not roll it back.
+//!
+//! # Examples
+//! ## Complete an empty write without touching standard output
+//! ```silk
+//! import silk.native_descriptor { NativeDescriptor }
+//! pub fn main() -> i32 {
+//!   let mut nativeError = 0
+//!   let completed = run NativeDescriptor.writeAll(1, b"", &mut nativeError)
+//!   if completed { return 42 }
+//!   return 1
+//! }
+//! ```
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+import silk.pointer { Pointer }
+import silk.isize as isize
+
+/// Reads at most `count` bytes through a borrowed process descriptor.
+///
+/// # Gotchas
+///
+/// The caller must keep `count` writable bytes live for the call. A negative result requires
+/// immediate native error capture; a nonnegative result is the initialized prefix length.
+pub unsafe extern "C" fn read(fd: i32, buffer: ?[*]mut u8, count: usize) -> isize with Intrinsic.foreign(noCapture: ("buffer",))
+/// Writes at most `count` readable bytes through a borrowed process descriptor.
+///
+/// # Gotchas
+///
+/// The caller must keep `count` readable bytes live for the call. A negative result requires
+/// immediate native error capture. A positive result may be shorter than `count`.
+pub unsafe extern "C" fn write(fd: i32, buffer: ?[*]const u8, count: usize) -> isize with Intrinsic.foreign(noCapture: ("buffer",))
+static if Intrinsic.targetOperatingSystem() == "darwin" {
+  /// Returns the current thread's Darwin error slot; read it immediately after a failed call.
+  pub unsafe extern "C" fn __error() -> *mut i32
+  unsafe fn currentError() -> i32 { unsafe { return Pointer.read<i32>(__error()) } }
+} else {
+  /// Returns the current thread's GNU error slot; read it immediately after a failed call.
+  pub unsafe extern "C" fn __errno_location() -> *mut i32
+  unsafe fn currentError() -> i32 { unsafe { return Pointer.read<i32>(__errno_location()) } }
+}
+
+/// Byte-transfer policy for borrowed native descriptors with no resource ownership.
+pub struct NativeDescriptor {}
+impl NativeDescriptor {
+  /// Reads one committed prefix, retrying interrupted calls without advancing the buffer.
+  ///
+  /// # Details
+  ///
+  /// Success stores the exact prefix length in `count`; zero capacity succeeds with zero bytes.
+  /// Failure stores zero in `count` and captures a native error in `error`, or zero for an invalid
+  /// transfer count. Bytes beyond a successful prefix retain their initial values.
+  pub effect fn read(fd: i32, buffer: &mut [u8], count: &mut usize, error: &mut i32) -> bool {
+    count.* = 0
+    error.* = 0
+    if buffer.length == 0 { return true }
+    let mut requested = buffer.length
+    if requested > 2147479552 { requested = 2147479552 }
+    let pointer = Pointer.fromMutSlice<u8>(move buffer)
+    while true {
+      let transferred = unsafe read(fd, pointer, requested)
+      if transferred < 0 {
+        let code = unsafe currentError()
+        if code != 4 { error.* = code
+return false }
+      } else {
+        let received = isize.toUsize(transferred)
+        if received > requested { return false }
+        count.* = received
+        return true
+      }
+    }
+    return false
+  }
+
+  /// Completes a byte sequence by advancing only after positive transfers.
+  ///
+  /// # Details
+  ///
+  /// Success leaves `error` zero. Failure stores the native error, or zero for zero progress or an
+  /// invalid transfer count. Empty input succeeds without a call.
+  ///
+  /// # Gotchas
+  ///
+  /// Failure can follow a committed prefix. The caller must not retry the whole message blindly.
+  pub effect fn writeAll(fd: i32, buffer: &[u8], error: &mut i32) -> bool {
+    error.* = 0
+    let mut offset: usize = 0
+    while offset < buffer.length {
+      let mut requested = buffer.length - offset
+      if requested > 2147479552 { requested = 2147479552 }
+      let mut transferred: isize = 0
+      unsafe {
+        let base = Intrinsic.pointerRequalify<?[*]const u8, [*]const u8>(Pointer.fromSlice<u8>(buffer))
+        let next = Pointer.assumeMany<u8>(Pointer.at<u8>(base, offset))
+        transferred = write(fd, next, requested)
+      }
+      if transferred < 0 {
+        let code = unsafe currentError()
+        if code != 4 { error.* = code
+return false }
+      } else {
+        let written = isize.toUsize(transferred)
+        if written == 0 { return false }
+        if written > requested { return false }
+        offset = offset + written
+      }
+    }
+    return true
+  }
+}
+}
