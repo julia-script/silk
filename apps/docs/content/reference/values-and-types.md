@@ -312,8 +312,30 @@ fn snowman() -> char {
 `'é'` is also one `char` even though its UTF-8 encoding uses more than one byte. `char` supports
 equality and ordering by scalar value.
 
-**Boundary:** `char` is not an integer type. Arithmetic is unavailable, and conversion to or from
-an integer requires an explicit checked or named operation.
+Character literals default to `char`. An immediate concrete integer context instead selects that
+integer type when the decoded Unicode scalar number fits its range. The same contexts as integer
+literals apply: annotated bindings, constants, concrete call and pipeline parameters, returns,
+fields, contextual array elements, assignments, and known homogeneous operator operands.
+
+```silk
+fn examples(byte: u8) -> bool {
+  let letter = 'A'       // char
+  let ascii: u8 = 'A'    // 65
+  let accented: u8 = 'é' // 233
+  return byte == 'A' && 'A' == byte && letter == 'A' && ascii == 65 && accented == 233
+}
+```
+
+The value 233 is a Unicode scalar number, not the UTF-8 encoding of `'é'`. An integer type does
+not enforce ASCII. A literal such as `'☃'` cannot fit `u8`, and `'é'` cannot fit `i8`; both report
+a compile-time range error. Unicode validation happens first, so `\u{d800}` remains an invalid
+scalar escape even in a `u32` context.
+
+**Boundary:** `char` is not an integer type. Already-typed `char` values do not adapt to integer
+contexts. Arithmetic on them is unavailable, and conversion to or from an integer requires an
+explicit checked or named operation. Contextual literal selection does not admit floats, Boolean
+values, strings or nominal enums. When an operator has only literal operands and no applicable
+integer context, its existing first-literal fallback still applies; this is not global inference.
 
 ```silk
 import silk.char { fromU32, toU32 }
@@ -335,7 +357,9 @@ because every existing `char` is already a valid scalar. Canonical string traver
 
 **Diagnostics:** A literal containing zero or multiple scalar values reports `LEX0007`. Malformed
 escapes and invalid scalar spellings receive their literal diagnostic without constructing a
-partial `char`. Supplying `u32` where `char` is required, or `char` where `u32` is required, uses
+partial value. An expression character literal outside the selected integer range reports `SEM0002`
+with the selected type and exact bounds; invalid primitive constants use `SEM0086`. Supplying an
+already-typed `u32` where `char` is required, or `char` where `u32` is required, uses
 the ordinary type-mismatch diagnostic; `fromU32` represents an invalid integer as
 `Option<char>.None` rather
 than a diagnostic or trap.

@@ -239,6 +239,10 @@ const snowman: char = '\u{2603}'
 const apostrophe: char = '\''
 ```
 
+Character literals default to `char`; an immediate integer context selects their Unicode scalar
+number when it fits that integer type. For example, `let byte: u8 = 'A'` stores 65. This does not
+change literal decoding or encode the character as UTF-8 bytes.
+
 Character literals recognize the escaped text vocabulary plus `\'` for their delimiter. Their
 value and type behavior is defined by
 [CHAR-001](values-and-types.md#char-001--char-holds-exactly-one-unicode-scalar-value).
