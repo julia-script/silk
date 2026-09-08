@@ -57,9 +57,9 @@ it.effect(
         skipped,
       )
     }),
-  // The native example sweep now analyzes the source startup composition for each program;
-  // measured individual examples take about 3 s before the shared documentation analysis.
-  300_000,
+  // This aggregate sweep checks 53 independent programs plus shared documentation analysis.
+  // Linux CI exceeds five minutes after source startup became part of each compilation.
+  600_000,
 )
 
 /**
