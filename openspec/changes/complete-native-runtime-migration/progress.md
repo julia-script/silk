@@ -2549,3 +2549,18 @@ Commit `d46071aa` gives native acceptance jobs 60 minutes including setup/build;
 individual test deadlines, assertions, shard assignments and case selection are
 unchanged. A fresh CI run verifies the complete cold shards. The active local
 `ci-fix3` sequence continues with unchanged compiler/test inputs.
+
+### Real-worker integration deadline
+
+CI runs `34261542409` (`d46071aa`) and `34261608202` (`eff61c64`) both passed
+every job, including all native shards. Linux shard 2 explicitly passed
+`foreign-libc-environ-static` and all 111 shard tests. The local `ci-fix3` run
+passed 2,429 compiler tests and all 324 native acceptance tests, then failed only
+`ProjectWorker.test.ts`'s real-worker integration at its explicit 30-second deadline;
+the other 159 LSP tests passed. This one scenario starts a worker, performs cold
+analysis, queries it and checks orderly shutdown. Commit `5f858239` removes its
+undersized override so it uses the existing 60-second workspace deadline. All five
+project-worker tests pass. The final ordered local sequence is rerun in
+`ci-fix4-{typecheck,format,lint,test,check,release}.log`; unchanged compiler/native
+inputs can reuse the successful `ci-fix3` results. No failed full run is counted as
+a passing gate.
