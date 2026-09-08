@@ -1,0 +1,1086 @@
+//! A source-byte lexer that returns tokens through the `Stream` interface.
+//!
+//! # When to use
+//! Use [`Lexer`] to inspect tokens in source order without a token array.
+//! Create the lexer with `Lexer.make`, then call `Stream.take` for each token.
+//! The source must already be in memory; this module does not read files.
+//!
+//! # Details
+//! The lexer borrows the source and retains whitespace and comments as tokens.
+//! Token spans include the start byte offset and exclude the end byte offset.
+//! Invalid tokens carry lexical diagnostics, so a consumer can continue after an error.
+//! After the source, the stream returns one `Token.EndOfFile`, then `Option.None` on every call.
+//!
+//! # Gotchas
+//! Identifiers use ASCII letters, digits, and underscores. Span offsets count bytes, not Unicode scalars.
+//! Literal tokens identify source ranges; they do not contain decoded values.
+//! A literal token does not prove that its escapes or UTF-8 bytes are valid.
+
+import lexer.LexicalDiagnostic {LexicalDiagnostic}
+import lexer.Span {Span}
+import Stream {Stream}
+import lexer.Token {Token}
+import silk.option {Option}
+import silk.i32
+import silk.u8
+
+/// A token stream over one borrowed, immutable source byte sequence.
+///
+/// # When to use
+///
+/// Use when a consumer needs each token in source order, including whitespace and comments.
+///
+/// # Details
+///
+/// `Lexer.make` borrows the complete source. `Stream.take` advances through it without a token array or source copy.
+/// Tokens contain byte spans and, for invalid input, lexical diagnostics.
+/// The lexer does not fail through the Effect error channel or require a provider.
+///
+/// # Gotchas
+///
+/// Keep the source alive for the lifetime of the lexer. Tokens contain offsets, not their source text.
+/// Empty input still produces one `Token.EndOfFile` before `Option.None`.
+/// A literal token does not validate decoded values, escapes, or UTF-8.
+pub struct Lexer<'source> {
+  // The caller owns these bytes; the lexer only advances its cursor.
+  source: &'source [u8]
+  // The first unconsumed byte, always at or before source.length.
+  cursor: usize
+  eofEmitted: bool
+}
+
+// Each scanner returns one token and the first byte after that token.
+// A non-EOF scan must advance beyond its start, including on invalid input.
+struct Scanned {
+  token: Token
+  end: usize
+}
+
+enum LiteralCategory {
+  Text,
+  Bytes,
+  Character,
+}
+
+// A closed literal includes its closing delimiter in end.
+// An unclosed literal stops before a line break or at the source end.
+struct Boundary {
+  end: usize
+  terminated: bool
+}
+
+// Keep token extent separate from validity so malformed separators stay in one token.
+struct DigitRun {
+  end: usize
+  digits: bool
+  separated: bool
+}
+
+struct Base {
+  radix: u8
+  width: usize
+}
+
+union DurationResult {
+  Valid,
+  Invalid {diagnostic: LexicalDiagnostic},
+}
+
+impl<'source> Lexer<'source> {
+  /// Creates a lexer before the first byte without scanning or copying the source.
+  ///
+  /// # Details
+  ///
+  /// The returned lexer borrows `source`. Keep its owner alive until the lexer is no longer needed.
+  /// Call `Stream.take` with a mutable lexer reference to obtain each token.
+  /// Invalid source bytes become diagnostic tokens when read; construction does not validate the source.
+  ///
+  /// # Gotchas
+  ///
+  /// For empty input, the first read returns `Token.EndOfFile` at `0..0`.
+  /// Later reads return `Option.None`.
+  pub fn make(source: &'source [u8]) -> Lexer<'source> {
+    return Lexer<'source> {source: source, cursor: 0, eofEmitted: false}
+  }
+}
+
+// Lookahead uses zero outside the source. Callers compare against nonzero ASCII bytes;
+// this helper does not distinguish an actual NUL byte from the source end.
+fn byteAtOrZero(source: &[u8], index: usize) -> u8 {
+  if index < source.length {
+    return source[index]
+  }
+  return 0
+}
+
+fn isWhitespace(byte: u8) -> bool {
+  return byte == ' ' || byte == '\t' || byte == '\n' || byte == '\r'
+}
+
+// Identifier recognition is deliberately ASCII-only. Non-ASCII source bytes reach
+// invalid-token recovery unless they occur inside a literal or comment.
+fn isAsciiLetter(byte: u8) -> bool {
+  return (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z')
+}
+
+fn isDecimalDigit(byte: u8) -> bool {
+  return byte >= '0' && byte <= '9'
+}
+
+fn isIdentifierStart(byte: u8) -> bool {
+  return byte == '_' || isAsciiLetter(byte)
+}
+
+fn isIdentifierContinue(byte: u8) -> bool {
+  return isIdentifierStart(byte) || isDecimalDigit(byte)
+}
+
+fn hasPair(source: &[u8], index: usize, first: u8, second: u8) -> bool {
+  return byteAtOrZero(source, index) == first && byteAtOrZero(source, index + 1) == second
+}
+
+fn hasTriple(source: &[u8], index: usize, delimiter: u8) -> bool {
+  return hasPair(source, index, delimiter, delimiter) && byteAtOrZero(source, index + 2) == delimiter
+}
+
+// Require the whole spelling to match, so a keyword prefix does not split an identifier.
+fn matches(source: &[u8], start: usize, end: usize, spelling: &[u8]) -> bool {
+  if end - start != spelling.length {
+    return false
+  }
+  let mut index: usize = 0
+  while index < spelling.length {
+    if source[start + index] != spelling[index] {
+      return false
+    }
+    index = index + 1
+  }
+  return true
+}
+
+fn tokenSpan(start: usize, end: usize) -> Span {
+  return Span.make(start, end)
+}
+
+fn scanWhitespace(source: &[u8], start: usize) -> Scanned {
+  let mut end = start + 1
+  while end < source.length && isWhitespace(source[end]) {
+    end = end + 1
+  }
+  let span = tokenSpan(start, end)
+  return Scanned {token: Token.Whitespace {span: span}, end: end}
+}
+
+// The caller has consumed the decision for //, but not its bytes.
+// Keep the line break for the next whitespace token. //! and exactly /// introduce
+// documentation; four or more initial slashes remain an ordinary line comment.
+fn scanComment(source: &[u8], start: usize) -> Scanned {
+  let mut end = start + 2
+  while end < source.length && source[end] != '\n' && source[end] != '\r' {
+    end = end + 1
+  }
+  let span = tokenSpan(start, end)
+  if byteAtOrZero(source, start + 2) == '!' {
+    return Scanned {token: Token.ModuleDocComment {span: span}, end: end}
+  }
+  if byteAtOrZero(source, start + 2) == '/' && byteAtOrZero(source, start + 3) != '/' {
+    return Scanned {token: Token.DocComment {span: span}, end: end}
+  }
+  return Scanned {token: Token.LineComment {span: span}, end: end}
+}
+
+fn scanIdentifierEnd(source: &[u8], start: usize) -> usize {
+  let mut end = start + 1
+  while end < source.length && isIdentifierContinue(source[end]) {
+    end = end + 1
+  }
+  return end
+}
+
+fn keywordToken(source: &[u8], start: usize, end: usize) -> Token {
+  let span = tokenSpan(start, end)
+  if matches(source, start, end, b"as") {
+    return Token.AsKeyword {span: span}
+  }
+  if matches(source, start, end, b"static") {
+    return Token.StaticKeyword {span: span}
+  }
+  if matches(source, start, end, b"compileError") {
+    return Token.CompileErrorKeyword {span: span}
+  }
+  if matches(source, start, end, b"fn") {
+    return Token.FnKeyword {span: span}
+  }
+  if matches(source, start, end, b"let") {
+    return Token.LetKeyword {span: span}
+  }
+  if matches(source, start, end, b"move") {
+    return Token.MoveKeyword {span: span}
+  }
+  if matches(source, start, end, b"pub") {
+    return Token.PubKeyword {span: span}
+  }
+  if matches(source, start, end, b"return") {
+    return Token.ReturnKeyword {span: span}
+  }
+  if matches(source, start, end, b"import") {
+    return Token.ImportKeyword {span: span}
+  }
+  if matches(source, start, end, b"run") {
+    return Token.RunKeyword {span: span}
+  }
+  if matches(source, start, end, b"fail") {
+    return Token.FailKeyword {span: span}
+  }
+  if matches(source, start, end, b"drop") {
+    return Token.DropKeyword {span: span}
+  }
+  if matches(source, start, end, b"unsafe") {
+    return Token.UnsafeKeyword {span: span}
+  }
+  if matches(source, start, end, b"extern") {
+    return Token.ExternKeyword {span: span}
+  }
+  if matches(source, start, end, b"export") {
+    return Token.ExportKeyword {span: span}
+  }
+  if matches(source, start, end, b"impl") {
+    return Token.ImplKeyword {span: span}
+  }
+  if matches(source, start, end, b"for") {
+    return Token.ForKeyword {span: span}
+  }
+  if matches(source, start, end, b"effect") {
+    return Token.EffectKeyword {span: span}
+  }
+  if matches(source, start, end, b"if") {
+    return Token.IfKeyword {span: span}
+  }
+  if matches(source, start, end, b"else") {
+    return Token.ElseKeyword {span: span}
+  }
+  if matches(source, start, end, b"mut") {
+    return Token.MutKeyword {span: span}
+  }
+  if matches(source, start, end, b"once") {
+    return Token.OnceKeyword {span: span}
+  }
+  if matches(source, start, end, b"match") {
+    return Token.MatchKeyword {span: span}
+  }
+  if matches(source, start, end, b"while") {
+    return Token.WhileKeyword {span: span}
+  }
+  if matches(source, start, end, b"break") {
+    return Token.BreakKeyword {span: span}
+  }
+  if matches(source, start, end, b"continue") {
+    return Token.ContinueKeyword {span: span}
+  }
+  if matches(source, start, end, b"const") {
+    return Token.ConstKeyword {span: span}
+  }
+  if matches(source, start, end, b"param") {
+    return Token.ParamKeyword {span: span}
+  }
+  if matches(source, start, end, b"struct") {
+    return Token.StructKeyword {span: span}
+  }
+  if matches(source, start, end, b"tuple") {
+    return Token.TupleKeyword {span: span}
+  }
+  if matches(source, start, end, b"enum") {
+    return Token.EnumKeyword {span: span}
+  }
+  if matches(source, start, end, b"union") {
+    return Token.UnionKeyword {span: span}
+  }
+  if matches(source, start, end, b"type") {
+    return Token.TypeKeyword {span: span}
+  }
+  if matches(source, start, end, b"service") {
+    return Token.ServiceKeyword {span: span}
+  }
+  if matches(source, start, end, b"interface") {
+    return Token.InterfaceKeyword {span: span}
+  }
+  if matches(source, start, end, b"role") {
+    return Token.RoleKeyword {span: span}
+  }
+  if matches(source, start, end, b"true") {
+    return Token.TrueKeyword {span: span}
+  }
+  if matches(source, start, end, b"false") {
+    return Token.FalseKeyword {span: span}
+  }
+  return Token.Identifier {span: span}
+}
+
+fn isPunctuation(byte: u8) -> bool {
+  return byte == '(' || byte == ')' || byte == '{' || byte == '}' || byte == '[' || byte == ']' || byte == ':' || byte == ';' || byte == ',' || byte == '=' || byte == '-' || byte == '+' || byte == '*' || byte == '/' || byte == '%' || byte == '!' || byte == '?' || byte == '@' || byte == '<' || byte == '>' || byte == '|' || byte == '&' || byte == '^' || byte == '~' || byte == '.'
+}
+
+// The caller has established isPunctuation. Test three bytes, then two, then one
+// to preserve the longest operator. The final dot case depends on that precondition.
+fn scanPunctuation(source: &[u8], start: usize) -> Scanned {
+  if hasTriple(source, start, '.') {
+    let end = start + 3
+    let span = tokenSpan(start, end)
+    return Scanned {token: Token.Ellipsis {span: span}, end: end}
+  }
+  let two = start + 2
+  let compoundSpan = tokenSpan(start, two)
+  if hasPair(source, start, '-', '>') {
+    return Scanned {token: Token.Arrow {span: compoundSpan}, end: two}
+  }
+  if hasPair(source, start, '=', '=') {
+    return Scanned {token: Token.EqualEqual {span: compoundSpan}, end: two}
+  }
+  if hasPair(source, start, '=', '>') {
+    return Scanned {token: Token.FatArrow {span: compoundSpan}, end: two}
+  }
+  if hasPair(source, start, '!', '=') {
+    return Scanned {token: Token.BangEqual {span: compoundSpan}, end: two}
+  }
+  if hasPair(source, start, '<', '=') {
+    return Scanned {token: Token.LessEqual {span: compoundSpan}, end: two}
+  }
+  if hasPair(source, start, '>', '=') {
+    return Scanned {token: Token.GreaterEqual {span: compoundSpan}, end: two}
+  }
+  if hasPair(source, start, '|', '>') {
+    return Scanned {token: Token.PipeGreater {span: compoundSpan}, end: two}
+  }
+  if hasPair(source, start, '|', '|') {
+    return Scanned {token: Token.PipePipe {span: compoundSpan}, end: two}
+  }
+  if hasPair(source, start, '&', '&') {
+    return Scanned {token: Token.AmpersandAmpersand {span: compoundSpan}, end: two}
+  }
+  if hasPair(source, start, '.', '.') {
+    return Scanned {token: Token.DotDot {span: compoundSpan}, end: two}
+  }
+
+  let end = start + 1
+  let span = tokenSpan(start, end)
+  let byte = source[start]
+  if byte == '(' {
+    return Scanned {token: Token.LeftParenthesis {span: span}, end: end}
+  }
+  if byte == ')' {
+    return Scanned {token: Token.RightParenthesis {span: span}, end: end}
+  }
+  if byte == '{' {
+    return Scanned {token: Token.LeftBrace {span: span}, end: end}
+  }
+  if byte == '}' {
+    return Scanned {token: Token.RightBrace {span: span}, end: end}
+  }
+  if byte == '[' {
+    return Scanned {token: Token.LeftBracket {span: span}, end: end}
+  }
+  if byte == ']' {
+    return Scanned {token: Token.RightBracket {span: span}, end: end}
+  }
+  if byte == ':' {
+    return Scanned {token: Token.Colon {span: span}, end: end}
+  }
+  if byte == ';' {
+    return Scanned {token: Token.Semicolon {span: span}, end: end}
+  }
+  if byte == ',' {
+    return Scanned {token: Token.Comma {span: span}, end: end}
+  }
+  if byte == '=' {
+    return Scanned {token: Token.Equals {span: span}, end: end}
+  }
+  if byte == '-' {
+    return Scanned {token: Token.Minus {span: span}, end: end}
+  }
+  if byte == '+' {
+    return Scanned {token: Token.Plus {span: span}, end: end}
+  }
+  if byte == '*' {
+    return Scanned {token: Token.Star {span: span}, end: end}
+  }
+  if byte == '/' {
+    return Scanned {token: Token.Slash {span: span}, end: end}
+  }
+  if byte == '%' {
+    return Scanned {token: Token.Percent {span: span}, end: end}
+  }
+  if byte == '!' {
+    return Scanned {token: Token.Bang {span: span}, end: end}
+  }
+  if byte == '?' {
+    return Scanned {token: Token.Question {span: span}, end: end}
+  }
+  if byte == '@' {
+    return Scanned {token: Token.At {span: span}, end: end}
+  }
+  if byte == '<' {
+    return Scanned {token: Token.Less {span: span}, end: end}
+  }
+  if byte == '>' {
+    return Scanned {token: Token.Greater {span: span}, end: end}
+  }
+  if byte == '|' {
+    return Scanned {token: Token.Pipe {span: span}, end: end}
+  }
+  if byte == '&' {
+    return Scanned {token: Token.Ampersand {span: span}, end: end}
+  }
+  if byte == '^' {
+    return Scanned {token: Token.Caret {span: span}, end: end}
+  }
+  if byte == '~' {
+    return Scanned {token: Token.Tilde {span: span}, end: end}
+  }
+  return Scanned {token: Token.Dot {span: span}, end: end}
+}
+
+// Locate the token boundary without decoding its body. Width is one or three.
+// A backslash hides the next byte only in escaped forms. A single-delimiter
+// literal cannot cross a line break, even when a backslash precedes that break.
+fn literalBoundary(
+  source: &[u8],
+  contentStart: usize,
+  delimiter: u8,
+  delimiterWidth: usize,
+  raw: bool,
+) -> Boundary {
+  let mut index = contentStart
+  while index < source.length {
+    let byte = source[index]
+    if delimiterWidth == 1 && (byte == '\n' || byte == '\r') {
+      return Boundary {end: index, terminated: false}
+    }
+    if byte == delimiter {
+      if delimiterWidth == 1 {
+        return Boundary {end: index + 1, terminated: true}
+      }
+      if hasTriple(source, index, delimiter) {
+        return Boundary {end: index + 3, terminated: true}
+      }
+      index = index + 1
+    } else {
+      if !raw && byte == '\\' && index + 1 < source.length {
+        let escaped = source[index + 1]
+        if delimiterWidth == 1 && (escaped == '\n' || escaped == '\r') {
+          index = index + 1
+        } else {
+          index = index + 2
+        }
+      } else {
+        index = index + 1
+      }
+    }
+  }
+  return Boundary {end: source.length, terminated: false}
+}
+
+// Count character-body units without allocating decoded text. For valid UTF-8,
+// continuation bytes belong to the preceding scalar. Escape spellings count as
+// one unit. This is a scalar-count check, not UTF-8 or escape validation.
+fn scalarCount(source: &[u8], start: usize, end: usize) -> usize {
+  let mut index = start
+  let mut scalars: usize = 0
+  while index < end {
+    scalars = scalars + 1
+    if source[index] != '\\' {
+      index = index + 1
+      while index < end {
+        let byte = source[index]
+        if byte < 128 || byte > 191 {
+          break
+        }
+        index = index + 1
+      }
+    } else {
+      let escaped = byteAtOrZero(source, index + 1)
+      if escaped == 'u' && byteAtOrZero(source, index + 2) == '{' {
+        index = index + 3
+        while index < end {
+          if source[index] == '}' {
+            break
+          }
+          index = index + 1
+        }
+        if index < end {
+          index = index + 1
+        }
+      } else {
+        if escaped == 'x' {
+          index = index + 4
+        } else {
+          index = index + 2
+        }
+      }
+    }
+  }
+  return scalars
+}
+
+// Find the full token span before checking the character-body count.
+// An unterminated body takes precedence over a scalar-count diagnostic.
+fn scanLiteral(
+  source: &[u8],
+  start: usize,
+  modifierWidth: usize,
+  delimiterWidth: usize,
+  delimiter: u8,
+  category: LiteralCategory,
+  raw: bool,
+) -> Scanned {
+  let contentStart = start + modifierWidth + delimiterWidth
+  let boundary = literalBoundary(source, contentStart, delimiter, delimiterWidth, raw)
+  let span = tokenSpan(start, boundary.end)
+  let modifier = tokenSpan(start, start + modifierWidth)
+  if !boundary.terminated {
+    let diagnostic = LexicalDiagnostic.UnterminatedStaticLiteral {
+      modifier: modifier,
+      delimiter: delimiter,
+      delimiterWidth: delimiterWidth,
+      span: span,
+    }
+    return Scanned {
+      token: Token.InvalidStaticLiteral {span: span, diagnostic: move diagnostic},
+      end: boundary.end,
+    }
+  }
+  if category == LiteralCategory.Character {
+    let count = scalarCount(source, contentStart, boundary.end - delimiterWidth)
+    if count != 1 {
+      let diagnostic = LexicalDiagnostic.CharacterLiteralScalarCount {scalars: count, span: span}
+      return Scanned {
+        token: Token.InvalidStaticLiteral {span: span, diagnostic: move diagnostic},
+        end: boundary.end,
+      }
+    }
+  }
+  let token = match category {
+    LiteralCategory.Text => Token.TextLiteral {span: span}
+    LiteralCategory.Bytes => Token.ByteStringLiteral {span: span}
+    LiteralCategory.Character => Token.CharLiteral {span: span}
+  }
+  return Scanned {token: move token, end: boundary.end}
+}
+
+// Consume an unknown modifier and its quoted body together for recovery.
+// The modifier diagnostic remains primary even if the body has no closing quote.
+fn scanUnknownLiteral(source: &[u8], start: usize, modifierEnd: usize) -> Scanned {
+  let mut delimiterWidth: usize = 1
+  if hasTriple(source, modifierEnd, '"') {
+    delimiterWidth = 3
+  }
+  let boundary = literalBoundary(source, modifierEnd + delimiterWidth, '"', delimiterWidth, false)
+  let span = tokenSpan(start, boundary.end)
+  let diagnostic = LexicalDiagnostic.UnknownLiteralModifier {
+    modifier: tokenSpan(start, modifierEnd),
+    span: span,
+  }
+  return Scanned {
+    token: Token.InvalidStaticLiteral {span: span, diagnostic: move diagnostic},
+    end: boundary.end,
+  }
+}
+
+// The caller has established a supported literal start. Apostrophes select
+// characters; b selects bytes; r selects raw text; an unprefixed quote selects text.
+fn scanRecognizedLiteral(source: &[u8], start: usize) -> Scanned {
+  let byte = source[start]
+  if byte == '\'' {
+    return scanLiteral(source, start, 0, 1, '\'', LiteralCategory.Character, false)
+  }
+  if byte == '"' {
+    let mut width: usize = 1
+    if hasTriple(source, start, '"') {
+      width = 3
+    }
+    return scanLiteral(source, start, 0, width, '"', LiteralCategory.Text, false)
+  }
+  let mut width: usize = 1
+  if hasTriple(source, start + 1, '"') {
+    width = 3
+  }
+  if byte == 'b' {
+    return scanLiteral(source, start, 1, width, '"', LiteralCategory.Bytes, false)
+  }
+  return scanLiteral(source, start, 1, width, '"', LiteralCategory.Text, true)
+}
+
+fn isRecognizedLiteralStart(source: &[u8], start: usize) -> bool {
+  let byte = byteAtOrZero(source, start)
+  return byte == '"' || byte == '\'' || ((byte == 'b' || byte == 'r') && byteAtOrZero(
+    source,
+    start + 1,
+  ) == '"')
+}
+
+// A recognized prefix consumes two bytes. Decimal input has no prefix.
+// Only these four radices reach isBaseDigit.
+fn baseAt(source: &[u8], start: usize) -> Base {
+  if byteAtOrZero(source, start) != '0' {
+    return Base {radix: 10, width: 0}
+  }
+  let second = byteAtOrZero(source, start + 1)
+  if second == 'b' || second == 'B' {
+    return Base {radix: 2, width: 2}
+  }
+  if second == 'o' || second == 'O' {
+    return Base {radix: 8, width: 2}
+  }
+  if second == 'x' || second == 'X' {
+    return Base {radix: 16, width: 2}
+  }
+  return Base {radix: 10, width: 0}
+}
+
+fn isBaseDigit(radix: u8, byte: u8) -> bool {
+  if radix == 2 {
+    return byte == '0' || byte == '1'
+  }
+  if radix == 8 {
+    return byte >= '0' && byte <= '7'
+  }
+  if radix == 10 {
+    return isDecimalDigit(byte)
+  }
+  return isDecimalDigit(byte) || (byte >= 'A' && byte <= 'F') || (byte >= 'a' && byte <= 'f')
+}
+
+// Consume digits and underscores before reporting validity. An underscore must
+// have a digit on both sides; a run can also contain no digits at all.
+fn scanDigitRun(source: &[u8], radix: u8, start: usize) -> DigitRun {
+  let mut end = start
+  let mut digits = false
+  let mut separated = true
+  let mut afterSeparator = false
+  while end < source.length {
+    let byte = source[end]
+    if isBaseDigit(radix, byte) {
+      digits = true
+      afterSeparator = false
+      end = end + 1
+    } else {
+      if byte != '_' {
+        break
+      }
+      if end == start || afterSeparator {
+        separated = false
+      }
+      afterSeparator = true
+      end = end + 1
+    }
+  }
+  if afterSeparator {
+    separated = false
+  }
+  return DigitRun {end: end, digits: digits, separated: separated}
+}
+
+// Keep the identifier-shaped suffix in one duration candidate. Validation then
+// reports a focused diagnostic without splitting the malformed token.
+fn durationCandidateEnd(source: &[u8], start: usize) -> usize {
+  let mut end = start
+  while end < source.length && isIdentifierContinue(source[end]) {
+    end = end + 1
+  }
+  return end
+}
+
+// Ranks order units from weeks to nanoseconds. A larger rank means a smaller unit;
+// -1 denotes an unknown spelling and must be rejected before a bit shift.
+fn unitRank(source: &[u8], start: usize, end: usize) -> i32 {
+  if matches(source, start, end, b"w") {
+    return 0
+  }
+  if matches(source, start, end, b"d") {
+    return 1
+  }
+  if matches(source, start, end, b"h") {
+    return 2
+  }
+  if matches(source, start, end, b"m") {
+    return 3
+  }
+  if matches(source, start, end, b"s") {
+    return 4
+  }
+  if matches(source, start, end, b"ms") {
+    return 5
+  }
+  if matches(source, start, end, b"us") {
+    return 6
+  }
+  if matches(source, start, end, b"ns") {
+    return 7
+  }
+  return -1
+}
+
+// Only components after the first use these limits: days < 7, hours < 24,
+// minutes and seconds < 60, and each subsecond component < 1000.
+fn subordinateMaximum(rank: i32) -> usize {
+  if rank == 1 {
+    return 6
+  }
+  if rank == 2 {
+    return 23
+  }
+  if rank == 3 || rank == 4 {
+    return 59
+  }
+  return 999
+}
+
+// The caller supplies decimal digits and separators with a maximum of at most 999.
+// Stop once the partial value exceeds that limit, before another multiplication
+// can overflow. The first duration component does not use this bounded check.
+fn amountExceeds(source: &[u8], start: usize, end: usize, maximum: usize) -> bool {
+  let mut value: usize = 0
+  let mut index = start
+  while index < end {
+    let byte = source[index]
+    if byte != '_' {
+      if value > maximum {
+        return true
+      }
+      value = value * 10 + u8.toUsize(byte - '0')
+    }
+    index = index + 1
+  }
+  return value > maximum
+}
+
+fn amountIsZero(source: &[u8], start: usize, end: usize) -> bool {
+  let mut index = start
+  while index < end {
+    let byte = source[index]
+    if byte != '_' && byte != '0' {
+      return false
+    }
+    index = index + 1
+  }
+  return true
+}
+
+// Exclude a known unit suffix from the amount diagnostic, testing two letters first.
+// Otherwise exclude trailing letters, or retain at least the first invalid byte.
+fn invalidAmountEnd(source: &[u8], start: usize, end: usize) -> usize {
+  if start + 2 <= end {
+    let twoStart = end - 1 - 1
+    if unitRank(source, twoStart, end) >= 0 {
+      return twoStart
+    }
+  }
+  if start + 1 <= end {
+    let oneStart = end - 1
+    if unitRank(source, oneStart, end) >= 0 {
+      return oneStart
+    }
+  }
+  let mut suffixStart = end
+  while suffixStart > start {
+    if isAsciiLetter(source[suffixStart - 1]) == false {
+      break
+    }
+    suffixStart = suffixStart - 1
+  }
+  if suffixStart > start {
+    return suffixStart
+  }
+  return start + 1
+}
+
+// Validate components from left to right and return the first diagnostic.
+// This checks duration syntax, unit order, and subordinate limits; it does not
+// calculate a total duration or check the first amount against a storage type.
+fn parseDuration(source: &[u8], start: usize, end: usize) -> DurationResult {
+  if byteAtOrZero(source, start) == '0' {
+    let second = byteAtOrZero(source, start + 1)
+    if second == 'x' || second == 'X' || second == 'b' || second == 'B' || second == 'o' || second == 'O' {
+      let span = tokenSpan(start, invalidAmountEnd(source, start, end))
+      return DurationResult.Invalid {
+        diagnostic: LexicalDiagnostic.InvalidDurationAmount {span: span},
+      }
+    }
+  }
+
+  // Each canonical unit owns one bit, indexed by its checked rank (0 through 7).
+  let mut seen: i32 = 0
+  let mut index = start
+  let mut previousRank = -1
+  let mut previousUnit = tokenSpan(start, start)
+  let mut component: usize = 0
+  while index < end {
+    let componentStart = index
+    let digits = scanDigitRun(source, 10, index)
+    index = digits.end
+    if !digits.digits || !digits.separated {
+      let span = tokenSpan(componentStart, digits.end)
+      return DurationResult.Invalid {
+        diagnostic: LexicalDiagnostic.InvalidDigitSeparator {span: span},
+      }
+    }
+    let amountEnd = index
+    if isAsciiLetter(byteAtOrZero(source, index)) == false {
+      let span = tokenSpan(componentStart, invalidAmountEnd(source, componentStart, end))
+      return DurationResult.Invalid {
+        diagnostic: LexicalDiagnostic.InvalidDurationAmount {span: span},
+      }
+    }
+    let unitStart = index
+    while index < end && isAsciiLetter(source[index]) {
+      index = index + 1
+    }
+    let unitEnd = index
+    let rank = unitRank(source, unitStart, unitEnd)
+    let unitSpan = tokenSpan(unitStart, unitEnd)
+    if rank < 0 {
+      // Reject exponent-like or base-prefix-like amounts before unknown-unit recovery.
+      let exponentOrPrefix = matches(source, unitStart, unitEnd, b"e") || matches(
+        source,
+        unitStart,
+        unitEnd,
+        b"E",
+      ) || (amountIsZero(source, componentStart, amountEnd) && (matches(
+        source,
+        unitStart,
+        unitEnd,
+        b"x",
+      ) || matches(source, unitStart, unitEnd, b"X") || matches(source, unitStart, unitEnd, b"b") || matches(
+        source,
+        unitStart,
+        unitEnd,
+        b"B",
+      ) || matches(source, unitStart, unitEnd, b"o") || matches(source, unitStart, unitEnd, b"O")))
+      if exponentOrPrefix && index < end && isDecimalDigit(source[index]) {
+        let span = tokenSpan(componentStart, invalidAmountEnd(source, componentStart, end))
+        return DurationResult.Invalid {
+          diagnostic: LexicalDiagnostic.InvalidDurationAmount {span: span},
+        }
+      }
+      return DurationResult.Invalid {
+        diagnostic: LexicalDiagnostic.UnknownDurationUnit {spelling: unitSpan, span: unitSpan},
+      }
+    }
+    let unitBit = i32.shiftLeft(1, rank)
+    if (seen & unitBit) != 0 {
+      return DurationResult.Invalid {
+        diagnostic: LexicalDiagnostic.RepeatedDurationUnit {unit: unitSpan, span: unitSpan},
+      }
+    }
+    if previousRank >= 0 && rank < previousRank {
+      return DurationResult.Invalid {
+        diagnostic: LexicalDiagnostic.OutOfOrderDurationUnit {
+          unit: unitSpan,
+          previous: previousUnit,
+          span: unitSpan,
+        },
+      }
+    }
+    if component > 0 {
+      let maximum = subordinateMaximum(rank)
+      if amountExceeds(source, componentStart, amountEnd, maximum) {
+        let span = tokenSpan(componentStart, unitEnd)
+        return DurationResult.Invalid {
+          diagnostic: LexicalDiagnostic.SubordinateDurationOutOfRange {
+            unit: unitSpan,
+            amount: tokenSpan(componentStart, amountEnd),
+            maximum: maximum,
+            span: span,
+          },
+        }
+      }
+    }
+    seen = seen | unitBit
+    previousRank = rank
+    previousUnit = unitSpan
+    component = component + 1
+    if index < end && isDecimalDigit(source[index]) == false {
+      let span = tokenSpan(index, invalidAmountEnd(source, index, end))
+      return DurationResult.Invalid {
+        diagnostic: LexicalDiagnostic.InvalidDurationAmount {span: span},
+      }
+    }
+  }
+  return DurationResult.Valid
+}
+
+fn scanDuration(source: &[u8], start: usize, numericEnd: usize) -> Scanned {
+  let end = durationCandidateEnd(source, numericEnd)
+  let span = tokenSpan(start, end)
+  return match move parseDuration(source, start, end) {
+    DurationResult.Valid => Scanned {token: Token.DurationLiteral {span: span}, end: end}
+    DurationResult.Invalid {diagnostic} => Scanned {
+      token: Token.InvalidDurationLiteral {span: span, diagnostic: move diagnostic},
+      end: end,
+    }
+  }
+}
+
+fn invalidNumber(start: usize, end: usize, diagnostic: LexicalDiagnostic) -> Scanned {
+  let span = tokenSpan(start, end)
+  return Scanned {token: Token.Invalid {span: span, diagnostic: move diagnostic}, end: end}
+}
+
+// Recognize the numeric extent before deciding whether an alphabetic suffix makes
+// the token a duration candidate. DecimalInteger also represents base-prefixed integers.
+fn scanNumber(source: &[u8], start: usize) -> Scanned {
+  let base = baseAt(source, start)
+  if base.radix != 10 {
+    let digits = scanDigitRun(source, base.radix, start + base.width)
+    if isAsciiLetter(byteAtOrZero(source, digits.end)) {
+      return scanDuration(source, start, digits.end)
+    }
+    let span = tokenSpan(start, digits.end)
+    if !digits.digits {
+      let diagnostic = LexicalDiagnostic.MissingBaseDigits {radix: base.radix, span: span}
+      return invalidNumber(start, digits.end, move diagnostic)
+    }
+    if !digits.separated {
+      let diagnostic = LexicalDiagnostic.InvalidDigitSeparator {span: span}
+      return invalidNumber(start, digits.end, move diagnostic)
+    }
+    return Scanned {token: Token.DecimalInteger {span: span}, end: digits.end}
+  }
+
+  let whole = scanDigitRun(source, 10, start)
+  let mut end = whole.end
+  let mut separated = whole.separated
+  let mut floating = false
+  // A fraction requires a digit. Leave a trailing dot or range operator unconsumed.
+  if byteAtOrZero(source, end) == '.' && byteAtOrZero(source, end + 1) != '.' {
+    let fraction = scanDigitRun(source, 10, end + 1)
+    if fraction.digits {
+      floating = true
+      end = fraction.end
+      separated = separated && fraction.separated
+    }
+  }
+  let mut exponentDigits = true
+  let exponent = byteAtOrZero(source, end)
+  if exponent == 'e' || exponent == 'E' {
+    floating = true
+    end = end + 1
+    let sign = byteAtOrZero(source, end)
+    if sign == '+' || sign == '-' {
+      end = end + 1
+    }
+    let exponentRun = scanDigitRun(source, 10, end)
+    end = exponentRun.end
+    exponentDigits = exponentRun.digits
+    separated = separated && exponentRun.separated
+  }
+  if isAsciiLetter(byteAtOrZero(source, end)) {
+    return scanDuration(source, start, end)
+  }
+  let span = tokenSpan(start, end)
+  if !separated {
+    let diagnostic = LexicalDiagnostic.InvalidDigitSeparator {span: span}
+    return invalidNumber(start, end, move diagnostic)
+  }
+  if !exponentDigits {
+    let diagnostic = LexicalDiagnostic.MissingExponentDigits {span: span}
+    return invalidNumber(start, end, move diagnostic)
+  }
+  if floating {
+    return Scanned {token: Token.DecimalFloat {span: span}, end: end}
+  }
+  return Scanned {token: Token.DecimalInteger {span: span}, end: end}
+}
+
+fn isSupportedTokenStart(source: &[u8], index: usize) -> bool {
+  let byte = byteAtOrZero(source, index)
+  return isWhitespace(byte) || isIdentifierStart(byte) || isDecimalDigit(byte) || isRecognizedLiteralStart(
+    source,
+    index,
+  ) || isPunctuation(byte)
+}
+
+// Consume at least one byte, then stop before the next supported token start.
+// One diagnostic covers the unsupported run and leaves the next token untouched.
+fn scanInvalid(source: &[u8], start: usize) -> Scanned {
+  let mut end = start + 1
+  while end < source.length {
+    if isSupportedTokenStart(source, end) {
+      break
+    }
+    end = end + 1
+  }
+  let span = tokenSpan(start, end)
+  let diagnostic = LexicalDiagnostic.UnsupportedBytes {span: span}
+  return Scanned {token: Token.Invalid {span: span, diagnostic: move diagnostic}, end: end}
+}
+
+// Dispatch order resolves overlapping starts: comments before slash punctuation,
+// lifetimes before character literals, and literal modifiers before identifiers.
+// The caller guarantees start < source.length.
+fn scanToken(source: &[u8], start: usize) -> Scanned {
+  let byte = source[start]
+  if isWhitespace(byte) {
+    return scanWhitespace(source, start)
+  }
+  if hasPair(source, start, '/', '/') {
+    return scanComment(source, start)
+  }
+
+  // A closing apostrophe or backslash keeps this in character-literal recovery.
+  // Otherwise the apostrophe and identifier form a lifetime token.
+  if byte == '\'' && isIdentifierStart(byteAtOrZero(source, start + 1)) {
+    let lifetimeEnd = scanIdentifierEnd(source, start + 1)
+    let boundary = byteAtOrZero(source, lifetimeEnd)
+    if boundary != '\'' && boundary != '\\' {
+      let span = tokenSpan(start, lifetimeEnd)
+      return Scanned {token: Token.Lifetime {span: span}, end: lifetimeEnd}
+    }
+  }
+
+  if isRecognizedLiteralStart(source, start) {
+    return scanRecognizedLiteral(source, start)
+  }
+  if isIdentifierStart(byte) {
+    let end = scanIdentifierEnd(source, start)
+    if byteAtOrZero(source, end) == '"' {
+      return scanUnknownLiteral(source, start, end)
+    }
+    return Scanned {token: keywordToken(source, start, end), end: end}
+  }
+  if isDecimalDigit(byte) {
+    return scanNumber(source, start)
+  }
+  if isPunctuation(byte) {
+    return scanPunctuation(source, start)
+  }
+  return scanInvalid(source, start)
+}
+
+impl<'source> Stream<Token, never ? never> for Lexer<'source> {
+  /// Returns the next token, one final EOF token, or `Option.None` after EOF.
+  ///
+  /// # Details
+  ///
+  /// Each read advances past one token, including whitespace, comments, and invalid input.
+  /// Invalid tokens carry lexical diagnostics instead of an Effect failure.
+  /// Token spans count source bytes and exclude their end offset.
+  /// No allocator or other provider is required.
+  ///
+  /// # Gotchas
+  ///
+  /// The EOF token has an empty span at the source length, including for empty input.
+  /// Only reads after that token return `Option.None`; all further reads also return `Option.None`.
+  effect fn take(self: &mut Self) -> Option<Token> {
+    if self.cursor < self.source.length {
+      let Scanned {token, end} = move scanToken(self.source, self.cursor)
+      self.cursor = end
+      return Option.some<Token>(move token)
+    }
+    if !self.eofEmitted {
+      self.eofEmitted = true
+      let span = tokenSpan(self.source.length, self.source.length)
+      return Option.some<Token>(Token.EndOfFile {span: span})
+    }
+    return Option.none<Token>()
+  }
+}

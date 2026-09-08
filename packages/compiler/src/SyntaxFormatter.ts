@@ -37,6 +37,7 @@ const isTrivia = (kind: Token.TokenKind): boolean =>
   kind === 'ModuleDocComment'
 
 interface Gap {
+  readonly importSeparation?: 1 | 2
   readonly previous: Token.Token | undefined
   readonly trivia: ReadonlyArray<Token.Token>
 }
@@ -58,6 +59,25 @@ const makeContext = (syntax: SyntaxFile.SyntaxFile): Context => {
     gaps.set(token, { previous, trivia: Object.freeze(trivia) })
     previous = token
     trivia = []
+  }
+  const declarations = directNodes(syntax.root)
+  for (const [index, declaration] of declarations.entries()) {
+    const previousDeclaration = declarations[index - 1]
+    if (
+      previousDeclaration === undefined ||
+      (declaration.kind !== 'ImportDeclaration' && previousDeclaration.kind !== 'ImportDeclaration')
+    )
+      continue
+    const first = SyntaxTree.tokens(declaration).find((token) => !isTrivia(token.kind))
+    const gap = first === undefined ? undefined : gaps.get(first)
+    if (first === undefined || gap === undefined) continue
+    gaps.set(first, {
+      ...gap,
+      importSeparation:
+        declaration.kind === 'ImportDeclaration' && previousDeclaration.kind === 'ImportDeclaration'
+          ? 1
+          : 2,
+    })
   }
   return Object.freeze({ syntax, gaps })
 }
@@ -119,6 +139,8 @@ const commentLeading = (
       : prefix
   }
 
+  const compactImports = gap.importSeparation === 1
+  let startsWithTrailingComment = false
   const documents: Array<FormatDocument.Document> = []
   let triviaStart = 0
   for (const [index, comment] of comments.entries()) {
@@ -127,22 +149,31 @@ const commentLeading = (
     const breaks = lineBreaks(context, before)
     if (index === 0) {
       if (gap.previous !== undefined && breaks === 0) {
+        startsWithTrailingComment = true
         documents.push(gap.previous.kind === 'Comma' ? prefix : FormatDocument.text(' '))
       } else {
         documents.push(prefix)
         if (preserveBlank && breaks >= 2) documents.push(FormatDocument.hardLine)
       }
     } else {
-      documents.push(FormatDocument.hardLine)
-      if (breaks >= 2) documents.push(FormatDocument.hardLine)
+      if (index === 1 && startsWithTrailingComment && gap.importSeparation !== undefined) {
+        documents.push(prefix)
+      } else {
+        documents.push(FormatDocument.hardLine)
+        if (!compactImports && breaks >= 2) documents.push(FormatDocument.hardLine)
+      }
     }
     documents.push(FormatDocument.text(bytes(context, comment)))
     triviaStart = triviaIndex < 0 ? gap.trivia.length : triviaIndex + 1
   }
 
   const after = gap.trivia.slice(triviaStart)
-  documents.push(FormatDocument.hardLine)
-  if (lineBreaks(context, after) >= 2) documents.push(FormatDocument.hardLine)
+  if (comments.length === 1 && startsWithTrailingComment && gap.importSeparation !== undefined) {
+    documents.push(prefix)
+  } else {
+    documents.push(FormatDocument.hardLine)
+    if (!compactImports && lineBreaks(context, after) >= 2) documents.push(FormatDocument.hardLine)
+  }
   return FormatDocument.concat(...documents)
 }
 
@@ -904,15 +935,14 @@ const printSourceFile = (
   prefix: FormatDocument.Document,
 ): FormatDocument.Document => {
   const declarations = directNodes(node)
-  const declarationDocuments = declarations.map((declaration, index) =>
-    printNode(
-      context,
-      declaration,
-      index === 0
-        ? prefix
-        : FormatDocument.concat(FormatDocument.hardLine, FormatDocument.hardLine),
-    ),
-  )
+  const declarationDocuments = declarations.map((declaration, index) => {
+    const separation =
+      declaration.kind === 'ImportDeclaration' &&
+      declarations[index - 1]?.kind === 'ImportDeclaration'
+        ? FormatDocument.hardLine
+        : FormatDocument.concat(FormatDocument.hardLine, FormatDocument.hardLine)
+    return printNode(context, declaration, index === 0 ? prefix : separation)
+  })
   const endOfFile = node.children.find(
     (element): element is Token.Token =>
       SyntaxTree.isToken(element) && element.kind === 'EndOfFile',

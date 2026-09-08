@@ -1463,3 +1463,51 @@ it.effect('preserves the C variadic boundary while formatting declarations', () 
     assert.strictEqual(formattedText(second), text)
   }),
 )
+
+for (const [name, source, expected] of [
+  [
+    'three imports and a following declaration',
+    'import Core.Math\n\nimport Core.Text\n\n\nimport Core.IO\nfn main() {}',
+    'import Core.Math\nimport Core.Text\nimport Core.IO\n\nfn main() {}\n',
+  ],
+  [
+    'both block boundaries without reorganizing imports',
+    'const before:i32=1\nimport Zebra\n\nimport Alpha\nconst after:i32=2\nimport Zebra\npub import Zebra {value}',
+    'const before: i32 = 1\n\nimport Zebra\nimport Alpha\n\nconst after: i32 = 2\n\nimport Zebra\npub import Zebra {value}\n',
+  ],
+  [
+    'all-import file and final newline',
+    'import Zebra\n\nimport Alpha\n\nimport Alpha\n\n\n',
+    'import Zebra\nimport Alpha\nimport Alpha\n',
+  ],
+  [
+    'module documentation and comments inside an import block',
+    '//! Module documentation\n\nimport Zebra // trailing\n\n// first group\n\n// second group\n\nimport Alpha\n\n// last import\n\npub import Beta {value} // end',
+    '//! Module documentation\n\nimport Zebra // trailing\n// first group\n// second group\nimport Alpha\n// last import\npub import Beta {value} // end\n',
+  ],
+  [
+    'trailing and standalone comments at both block boundaries',
+    'const before:i32=1 // before\n// imports\nimport Alpha // alpha\nimport Beta // beta\n// function\nfn main() {}',
+    'const before: i32 = 1 // before\n\n// imports\nimport Alpha // alpha\nimport Beta // beta\n\n// function\nfn main() {}\n',
+  ],
+  [
+    'trailing comments alone at block boundaries',
+    'const before:i32=1 // before\nimport Alpha // alpha\nfn main() {}',
+    'const before: i32 = 1 // before\n\nimport Alpha // alpha\n\nfn main() {}\n',
+  ],
+] satisfies ReadonlyArray<readonly [string, string, string]>) {
+  it.effect(`formats ${name} canonically`, () =>
+    Effect.gen(function* () {
+      const original = parse(`memory://imports-${name}.silk`, source)
+      const first = yield* SyntaxFormatter.format(original)
+      assert.strictEqual(formattedText(first), expected)
+      const reparsed = parse(`memory://imports-${name}-formatted.silk`, expected)
+      yield* SyntaxFormatter.validate(reparsed)
+      assert.deepEqual(normalized(reparsed, reparsed.root), normalized(original, original.root))
+      assert.deepEqual(comments(reparsed), comments(original))
+      const second = yield* SyntaxFormatter.format(reparsed)
+      assert.strictEqual(formattedText(second), expected)
+      assert.isFalse(second.changed)
+    }),
+  )
+}

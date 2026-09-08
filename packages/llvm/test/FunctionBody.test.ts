@@ -460,3 +460,41 @@ it.effect('validates vararg calls and preserves call settings', () =>
     )
   }),
 )
+
+it.effect('rejects unresolved and cyclic forward chains and releases the body reservation', () =>
+  Effect.gen(function* () {
+    const builder = yield* Builder.make()
+    const i32 = yield* Type.integer(builder, 32)
+    const signature = yield* Type.functionType(builder, i32, [])
+    const zero = yield* Constant.integerUnsigned(builder, i32, 0)
+    for (const cyclic of [false, true]) {
+      const fn = yield* FunctionActor.declare(builder, cyclic ? 'cyclic' : 'unresolved', signature)
+      const failure = yield* Effect.flip(
+        FunctionActor.buildBody(
+          builder,
+          fn,
+          Effect.fnUntraced(function* (body) {
+            yield* Block.make(body, 'entry')
+            const first = yield* Value.forward(body, i32)
+            const second = yield* Value.forward(body, i32)
+            yield* Value.resolveForward(body, first, second)
+            if (cyclic) yield* Value.resolveForward(body, second, first)
+            // An unused reservation must also be checked by the commit sweep.
+            yield* FunctionBody.returnValue(body, zero)
+          }),
+        ),
+      )
+      assert.strictEqual(failure._tag, 'LlvmError')
+      assert.strictEqual(failure.operation, 'FunctionBody.validate')
+      assert.strictEqual(failure.reason._tag, 'InvalidInput')
+      yield* FunctionActor.buildBody(
+        builder,
+        fn,
+        Effect.fnUntraced(function* (body) {
+          yield* Block.make(body, 'retry')
+          yield* FunctionBody.returnValue(body, zero)
+        }),
+      )
+    }
+  }),
+)

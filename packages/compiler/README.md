@@ -73,6 +73,12 @@ that program needs. A damaged or mixed installation returns `ToolchainFailed`; a
 target, unresolved entry, source rejection, backend failure, and external process failure remain
 distinct outcomes. Successful artifacts retain the exact toolchain graph digest.
 
+`src/ToolchainIntegrity.generated.ts` is an ignored build artifact. Builds generate its compiler
+source digest and ship the compiled module in `dist`; Turbo restores both outputs on cache hits.
+The package's `dev` command refreshes the digest during watch mode, and `test` and `typecheck`
+generate it before checking source. After editing compiler source, regenerate it with
+`pnpm --filter @silklang/compiler toolchain:generate` before invoking Vitest directly.
+
 ## Implemented language surface
 
 The bootstrap language currently includes:

@@ -43,6 +43,7 @@ import type {
   IdentifierExpressionFact,
   IdentifierResult,
   IntegerResult,
+  IntegerExpressionFact,
   InterfaceOperationFact,
   IntrinsicReferenceFact,
   MatchArmFact,
@@ -198,7 +199,7 @@ export const analyzeInteger = (
     diagnostics: Object.freeze([
       selected.spelling === 'usize' && negative
         ? Diagnostic.usizeNegative(tokenSpelling, literalSpan)
-        : Diagnostic.integerOutOfRange(tokenSpelling, literalSpan),
+        : Diagnostic.integerOutOfRange(tokenSpelling, selected.spelling, range, literalSpan),
     ]),
   })
 }
@@ -345,17 +346,21 @@ export const analyzeConstant = (
   } else if (declared.type === 'char' && literal._tag === 'CharacterLiteral') {
     type = 'char'
     value = Object.freeze({ _tag: 'Character', value: literal.value })
-  } else if (Scalar.isIntegerSpelling(declared.type) && literal._tag === 'IntegerLiteral') {
+  } else if (
+    Scalar.isIntegerSpelling(declared.type) &&
+    (literal._tag === 'IntegerLiteral' || literal._tag === 'CharacterLiteral')
+  ) {
     const scalar = Scalar.find(declared.type)
     if (scalar === undefined || scalar.category !== 'Integer') {
       detail = `unknown integer type ${declared.type}`
     } else {
       const range = Scalar.range(scalar, 64)
-      if (literal.value < range.minimum || literal.value > range.maximum) {
-        detail = `${literal.spelling} does not fit ${declared.type}`
+      const magnitude = BigInt(literal.value)
+      if (magnitude < range.minimum || magnitude > range.maximum) {
+        detail = `${magnitude} does not fit ${declared.type}`
       } else {
         type = declared.type
-        value = Object.freeze({ _tag: 'Integer', value: literal.value, type })
+        value = Object.freeze({ _tag: 'Integer', value: magnitude, type })
       }
     }
   } else if (declared.type === 'u64' && literal._tag === 'DurationLiteral') {
@@ -6539,11 +6544,15 @@ export const analyzeOperatorExpression = (
     })
   }
 
-  // A bare numeric literal's scalar type is only a default (Scalar.defaultInteger), so it must
+  // A bare numeric or character literal's scalar type is only a default, so it must
   // not drive the operand retry when another operand carries a declared scalar type: `5 + x`
   // must type like `x + 5`. When every operand is a literal, the first (defaulted) one drives.
   const drivingOrdinal = operandNodes.findIndex((operand, ordinal) => {
-    if (operand.kind === 'IntegerLiteralExpression' || operand.kind === 'FloatingLiteralExpression')
+    if (
+      operand.kind === 'IntegerLiteralExpression' ||
+      operand.kind === 'FloatingLiteralExpression' ||
+      operand.kind === 'CharacterLiteralExpression'
+    )
       return false
     const type = argumentsResult.facts.at(ordinal)?.type
     return (
@@ -9232,6 +9241,48 @@ export function analyzeExpression(
         ? Diagnostic.invalidStaticLiteral(result.detail, node.span)
         : undefined
     const scalar = result?._tag === 'Scalar' ? result.value : undefined
+    const selected = typeof expected === 'string' ? Scalar.find(expected) : undefined
+    if (scalar !== undefined && token !== undefined && selected?.category === 'Integer') {
+      const value = BigInt(scalar)
+      const range = Scalar.range(selected, 64)
+      const fits = value >= range.minimum && value <= range.maximum
+      const integer: IntegerExpressionFact = fits
+        ? Object.freeze({
+            _tag: 'Available',
+            type: selected.spelling,
+            value,
+            token,
+            syntax: node,
+          })
+        : Object.freeze({
+            _tag: 'OutOfRange',
+            type: selected.spelling,
+            spelling: value.toString(),
+            token,
+            syntax: node,
+          })
+      return Object.freeze({
+        fact: Object.freeze({
+          _tag: 'Integer',
+          integer,
+          type: fits ? availableExpressionType(selected.spelling) : unavailableExpressionType,
+          syntax: node,
+        }),
+        diagnostics: Object.freeze(
+          fits
+            ? []
+            : [
+                Diagnostic.integerOutOfRange(
+                  value.toString(),
+                  selected.spelling,
+                  range,
+                  token.span,
+                ),
+              ],
+        ),
+        type: fits ? selected.spelling : undefined,
+      })
+    }
     const type = scalar === undefined ? unavailableExpressionType : availableExpressionType('char')
     return Object.freeze({
       fact: Object.freeze({

@@ -44,6 +44,21 @@
         "$TURBO_ROOT$/apps/docs/content/language/stdlib/**"
       ],
       "outputs": []
+    },
+    "@silklang/compiler#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tsconfig.base.json",
+        "!benchmarks/**",
+        "!docs/**",
+        "!fixtures/**",
+        "!parity/**",
+        "!test/**",
+        "!*.md",
+        "!src/ToolchainIntegrity.generated.ts"
+      ],
+      "outputs": ["dist/**", "src/ToolchainIntegrity.generated.ts"]
     }
   }
 }

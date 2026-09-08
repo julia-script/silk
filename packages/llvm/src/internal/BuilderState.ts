@@ -1,5 +1,5 @@
 import * as Effect from 'effect/Effect'
-import type * as Result from 'effect/Result'
+import * as Result from 'effect/Result'
 import type * as Attribute from '../Attribute.js'
 import type * as Builder from '../Builder.js'
 import type * as ByteString from '../ByteString.js'
@@ -94,15 +94,21 @@ export const mutate = <A>(
   operation: string,
   transition: (state: MutableState, owner: OwnedHandle.Owner) => Result.Result<A, LlvmError>,
 ): Effect.Effect<A, LlvmError> =>
-  Effect.suspend(() => {
-    const state = states.get(self)
-    if (state === undefined) {
-      return Effect.fail(
-        invalidState({ operation, message: 'Unknown LLVM builder value', state: self }),
-      )
-    }
-    return Effect.fromResult(transition(state.value, state.owner))
-  })
+  Effect.suspend(() => Effect.fromResult(transitionResult(self, operation, transition)))
+
+/** The synchronous critical section shared by module and fiber-owned body mutations. @internal */
+export const transitionResult = <A>(
+  self: Builder.Builder,
+  operation: string,
+  transition: (state: MutableState, owner: OwnedHandle.Owner) => Result.Result<A, LlvmError>,
+): Result.Result<A, LlvmError> => {
+  const state = states.get(self)
+  if (state === undefined)
+    return Result.fail(
+      invalidState({ operation, message: 'Unknown LLVM builder value', state: self }),
+    )
+  return transition(state.value, state.owner)
+}
 
 /** @internal */
 export const snapshot = (

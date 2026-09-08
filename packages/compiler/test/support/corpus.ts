@@ -2673,6 +2673,9 @@ pub fn main() -> i32 {
 const asciiSpace: char = ' '
 const asciiTab: char = '\\t'
 const snowman: char = '\\u{2603}'
+const accentByte: u8 = 'é'
+
+fn contextualByte(value: u8) -> bool { return value == 'é' && 'é' == value }
 
 fn eq(left: char, right: char) -> bool { return left == right }
 fn ne(left: char, right: char) -> bool { return left != right }
@@ -2709,6 +2712,10 @@ pub fn main() -> i32 {
   if lessOrEqual('a', 'b') {} else { return 23 }
   if greaterThan('b', 'a') {} else { return 24 }
   if greaterOrEqual('b', 'a') {} else { return 25 }
+  let zero: u8 = '\\0'
+  let scalar: u32 = '😀'
+  if zero != 0 || scalar != 128512 { return 28 }
+  if contextualByte('é') && contextualByte(accentByte) {} else { return 29 }
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },
