@@ -1,0 +1,24 @@
+//! One recoverable parser result backed by flat token and node arrays.
+//!
+//! # Details
+//!
+//! Nodes refer to children by [`NodeId`]. Tokens remain in source order and parser elements refer
+//! to them by [`TokenId`]. A diagnostic does not invalidate unrelated nodes.
+
+import lexer.Token {Token}
+import parser.Diagnostic {Diagnostic}
+import parser.Node {Node}
+import parser.NodeId {NodeId}
+import silk.vector {Vector}
+
+/// Owns all tokens, nodes, and syntax diagnostics for one source file.
+pub struct SyntaxTree {
+  /// The lossless lexer output in source order.
+  pub tokens: Vector<Token>
+  /// The flat node storage addressed by [`NodeId`].
+  pub nodes: Vector<Node>
+  /// The root [`NodeKind.SourceFile`](parser.Node.NodeKind.SourceFile) node.
+  pub root: NodeId
+  /// Syntax diagnostics in discovery order.
+  pub diagnostics: Vector<Diagnostic>
+}

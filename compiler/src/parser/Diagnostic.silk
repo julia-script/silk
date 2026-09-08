@@ -1,0 +1,24 @@
+//! Syntax diagnostics produced while building a recoverable parser result.
+
+import lexer.Span {Span}
+import lexer.Token {TokenKind}
+
+/// One syntax problem attached to the parser result.
+pub union Diagnostic {
+  /// A required token was absent at an insertion point.
+  MissingToken {
+    /// The lexical category required by the grammar.
+    pub expected: TokenKind,
+    /// The zero-width source span of the insertion point.
+    pub span: Span,
+  },
+  /// A source token could not start or continue the current construct.
+  UnexpectedToken {
+    /// The lexical category found in the source.
+    pub actual: TokenKind,
+    /// The source span of the unexpected token.
+    pub span: Span,
+  },
+}
+
+impl Copy for Diagnostic {}

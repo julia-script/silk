@@ -1,0 +1,445 @@
+//! Recoverable parsing into one flat abstract syntax tree.
+//!
+//! # Details
+//!
+//! The parser retains source tokens in one array and appends nodes after their children. A
+//! [`NodeId`] is therefore the stable index of a node for the full life of the result. Trivia stays
+//! available in the token array but is not copied into AST node elements.
+
+import lexer.Span {Span}
+import lexer.Token {Token, TokenKind, kind, span}
+import parser.Diagnostic {Diagnostic}
+import parser.Element {Element, TokenId}
+import parser.Node {Node, NodeKind}
+import parser.NodeId {NodeId}
+import parser.SyntaxTree {SyntaxTree}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.usize as usize
+import silk.vector {Vector}
+
+struct Parser {
+  tokens: Vector<Token>
+  nodes: Vector<Node>
+  diagnostics: Vector<Diagnostic>
+  index: usize
+}
+
+fn isTrivia(tokenKind: TokenKind) -> bool {
+  return match tokenKind {
+    TokenKind.Whitespace => true
+    TokenKind.LineComment => true
+    TokenKind.DocComment => true
+    TokenKind.ModuleDocComment => true
+    _ => false
+  }
+}
+
+fn isImportSegment(tokenKind: TokenKind) -> bool {
+  return match tokenKind {
+    TokenKind.Identifier => true
+    TokenKind.PubKeyword => true
+    TokenKind.StructKeyword => true
+    TokenKind.EnumKeyword => true
+    TokenKind.UnionKeyword => true
+    TokenKind.TypeKeyword => true
+    TokenKind.ServiceKeyword => true
+    TokenKind.InterfaceKeyword => true
+    TokenKind.RoleKeyword => true
+    TokenKind.EffectKeyword => true
+    TokenKind.FnKeyword => true
+    TokenKind.RunKeyword => true
+    TokenKind.FailKeyword => true
+    TokenKind.DropKeyword => true
+    TokenKind.UnsafeKeyword => true
+    TokenKind.ImplKeyword => true
+    TokenKind.ForKeyword => true
+    TokenKind.ReturnKeyword => true
+    TokenKind.ImportKeyword => true
+    TokenKind.AsKeyword => true
+    TokenKind.LetKeyword => true
+    TokenKind.ConstKeyword => true
+    TokenKind.MutKeyword => true
+    TokenKind.OnceKeyword => true
+    TokenKind.MoveKeyword => true
+    TokenKind.MatchKeyword => true
+    TokenKind.IfKeyword => true
+    TokenKind.ElseKeyword => true
+    TokenKind.WhileKeyword => true
+    TokenKind.BreakKeyword => true
+    TokenKind.ContinueKeyword => true
+    TokenKind.TrueKeyword => true
+    TokenKind.FalseKeyword => true
+    _ => false
+  }
+}
+
+impl Parser {
+  fn significantIndex(self: &Self) -> usize {
+    let mut index = self.index
+    while index < Vector.length<Token>(&self.tokens) {
+      let token = Vector.get<Token>(&self.tokens, index)
+      if !isTrivia(kind(token)) {
+        return index
+      }
+      index = index + usize.ONE
+    }
+    return index
+  }
+  fn hasCurrent(self: &Self) -> bool {
+    return self.significantIndex() < Vector.length<Token>(&self.tokens)
+  }
+  fn currentKind(self: &Self) -> TokenKind {
+    let index = self.significantIndex()
+    if Vector.length<Token>(&self.tokens) <= index {
+      return TokenKind.EndOfFile
+    }
+    return kind(Vector.get<Token>(&self.tokens, index))
+  }
+  fn currentTokenId(self: &Self) -> TokenId {
+    return TokenId {index: self.significantIndex()}
+  }
+  fn insertionSpan(self: &Self) -> Span {
+    let index = self.significantIndex()
+    if index < Vector.length<Token>(&self.tokens) {
+      let tokenSpan = span(Vector.get<Token>(&self.tokens, index))
+      return Span.make(tokenSpan.start, tokenSpan.start)
+    }
+    let length = Vector.length<Token>(&self.tokens)
+    if length == usize.ZERO {
+      return Span.make(usize.ZERO, usize.ZERO)
+    }
+    let finalSpan = span(Vector.get<Token>(&self.tokens, length - usize.ONE))
+    return Span.make(finalSpan.end, finalSpan.end)
+  }
+  fn elementSpan(self: &Self, element: Element) -> Span {
+    return match move element {
+      Element.Node {id} => Vector.asSlice<Node>(&self.nodes)[id.index].span
+      Element.Token {id} => span(Vector.get<Token>(&self.tokens, id.index))
+      Element.MissingToken {expected: ignoredExpected, span} => span
+    }
+  }
+  fn makeNode(self: &Self, nodeKind: NodeKind, elements: Vector<Element>, emptySpan: Span) -> Node {
+    let length = Vector.length<Element>(&elements)
+    let mut nodeSpan = emptySpan
+    if usize.ZERO < length {
+      let first = self.elementSpan(Vector.get<Element>(&elements, usize.ZERO))
+      let last = self.elementSpan(Vector.get<Element>(&elements, length - usize.ONE))
+      nodeSpan = Span.make(first.start, last.end)
+    }
+    return Node {kind: nodeKind, span: nodeSpan, elements: move elements}
+  }
+}
+
+/// Parses source tokens into a recoverable flat abstract syntax tree.
+///
+/// # Details
+///
+/// The current parser slice recognizes import declarations. Unsupported top-level syntax becomes
+/// a [`NodeKind.Error`](parser.Node.NodeKind.Error) node so later recognized imports remain usable.
+/// Allocation failure is the only effect failure; syntax problems are stored in the result.
+pub effect fn parse(tokens: Vector<Token>) -> SyntaxTree ! OutOfMemoryError ? &mut Allocator {
+  let mut parser = Parser {
+    tokens: move tokens,
+    nodes: Vector.make<Node>(),
+    diagnostics: Vector.make<Diagnostic>(),
+    index: usize.ZERO,
+  }
+  let mut sourceElements = Vector.make<Element>()
+
+  while parser.currentKind() != TokenKind.EndOfFile {
+    if parser.currentKind() == TokenKind.ImportKeyword || parser.currentKind() == TokenKind.PubKeyword {
+      let declarationStart = parser.insertionSpan()
+      let mut declarationElements = Vector.make<Element>()
+      let mut isPublic = false
+      let mut hasMembers = false
+
+      if parser.currentKind() == TokenKind.PubKeyword {
+        isPublic = true
+        let id = parser.currentTokenId()
+        parser.index = id.index + usize.ONE
+        run Vector.append<Element>(&mut declarationElements, Element.Token {id: id})
+      }
+
+      if parser.hasCurrent() && parser.currentKind() == TokenKind.ImportKeyword {
+        let id = parser.currentTokenId()
+        parser.index = id.index + usize.ONE
+        run Vector.append<Element>(&mut declarationElements, Element.Token {id: id})
+      } else {
+        let missingSpan = parser.insertionSpan()
+        run Vector.append<Diagnostic>(
+          &mut parser.diagnostics,
+          Diagnostic.MissingToken {expected: TokenKind.ImportKeyword, span: missingSpan},
+        )
+        run Vector.append<Element>(
+          &mut declarationElements,
+          Element.MissingToken {expected: TokenKind.ImportKeyword, span: missingSpan},
+        )
+      }
+
+      let pathStart = parser.insertionSpan()
+      let mut pathElements = Vector.make<Element>()
+      if parser.hasCurrent() && isImportSegment(parser.currentKind()) {
+        let id = parser.currentTokenId()
+        parser.index = id.index + usize.ONE
+        run Vector.append<Element>(&mut pathElements, Element.Token {id: id})
+      } else {
+        let missingSpan = parser.insertionSpan()
+        run Vector.append<Diagnostic>(
+          &mut parser.diagnostics,
+          Diagnostic.MissingToken {expected: TokenKind.Identifier, span: missingSpan},
+        )
+        run Vector.append<Element>(
+          &mut pathElements,
+          Element.MissingToken {expected: TokenKind.Identifier, span: missingSpan},
+        )
+      }
+      while parser.currentKind() == TokenKind.Dot {
+        let dot = parser.currentTokenId()
+        parser.index = dot.index + usize.ONE
+        run Vector.append<Element>(&mut pathElements, Element.Token {id: dot})
+        if parser.hasCurrent() && isImportSegment(parser.currentKind()) {
+          let segment = parser.currentTokenId()
+          parser.index = segment.index + usize.ONE
+          run Vector.append<Element>(&mut pathElements, Element.Token {id: segment})
+        } else {
+          let missingSpan = parser.insertionSpan()
+          run Vector.append<Diagnostic>(
+            &mut parser.diagnostics,
+            Diagnostic.MissingToken {expected: TokenKind.Identifier, span: missingSpan},
+          )
+          run Vector.append<Element>(
+            &mut pathElements,
+            Element.MissingToken {expected: TokenKind.Identifier, span: missingSpan},
+          )
+          break
+        }
+      }
+      let path = NodeId {index: Vector.length<Node>(&parser.nodes)}
+      let pathNode = parser.makeNode(NodeKind.ImportPath, move pathElements, pathStart)
+      run Vector.append<Node>(&mut parser.nodes, move pathNode)
+      run Vector.append<Element>(&mut declarationElements, Element.Node {id: path})
+
+      if parser.currentKind() == TokenKind.AsKeyword {
+        let aliasStart = parser.insertionSpan()
+        let mut aliasElements = Vector.make<Element>()
+        let keyword = parser.currentTokenId()
+        parser.index = keyword.index + usize.ONE
+        run Vector.append<Element>(&mut aliasElements, Element.Token {id: keyword})
+        if parser.hasCurrent() && parser.currentKind() == TokenKind.Identifier {
+          let name = parser.currentTokenId()
+          parser.index = name.index + usize.ONE
+          run Vector.append<Element>(&mut aliasElements, Element.Token {id: name})
+        } else {
+          let missingSpan = parser.insertionSpan()
+          run Vector.append<Diagnostic>(
+            &mut parser.diagnostics,
+            Diagnostic.MissingToken {expected: TokenKind.Identifier, span: missingSpan},
+          )
+          run Vector.append<Element>(
+            &mut aliasElements,
+            Element.MissingToken {expected: TokenKind.Identifier, span: missingSpan},
+          )
+        }
+        let alias = NodeId {index: Vector.length<Node>(&parser.nodes)}
+        let aliasNode = parser.makeNode(NodeKind.ImportAlias, move aliasElements, aliasStart)
+        run Vector.append<Node>(&mut parser.nodes, move aliasNode)
+        run Vector.append<Element>(&mut declarationElements, Element.Node {id: alias})
+      }
+
+      if parser.currentKind() == TokenKind.LeftBrace {
+        hasMembers = true
+        let listStart = parser.insertionSpan()
+        let mut listElements = Vector.make<Element>()
+        let left = parser.currentTokenId()
+        parser.index = left.index + usize.ONE
+        run Vector.append<Element>(&mut listElements, Element.Token {id: left})
+        let mut parsedMember = false
+
+        while parser.currentKind() != TokenKind.RightBrace && parser.currentKind() != TokenKind.EndOfFile {
+          if parser.currentKind() == TokenKind.Identifier {
+            let memberStart = parser.insertionSpan()
+            let mut memberElements = Vector.make<Element>()
+            let name = parser.currentTokenId()
+            parser.index = name.index + usize.ONE
+            run Vector.append<Element>(&mut memberElements, Element.Token {id: name})
+
+            if parser.currentKind() == TokenKind.AsKeyword {
+              let aliasStart = parser.insertionSpan()
+              let mut aliasElements = Vector.make<Element>()
+              let keyword = parser.currentTokenId()
+              parser.index = keyword.index + usize.ONE
+              run Vector.append<Element>(&mut aliasElements, Element.Token {id: keyword})
+              if parser.hasCurrent() && parser.currentKind() == TokenKind.Identifier {
+                let aliasName = parser.currentTokenId()
+                parser.index = aliasName.index + usize.ONE
+                run Vector.append<Element>(&mut aliasElements, Element.Token {id: aliasName})
+              } else {
+                let missingSpan = parser.insertionSpan()
+                run Vector.append<Diagnostic>(
+                  &mut parser.diagnostics,
+                  Diagnostic.MissingToken {expected: TokenKind.Identifier, span: missingSpan},
+                )
+                run Vector.append<Element>(
+                  &mut aliasElements,
+                  Element.MissingToken {expected: TokenKind.Identifier, span: missingSpan},
+                )
+              }
+              let alias = NodeId {index: Vector.length<Node>(&parser.nodes)}
+              let aliasNode = parser.makeNode(NodeKind.ImportAlias, move aliasElements, aliasStart)
+              run Vector.append<Node>(&mut parser.nodes, move aliasNode)
+              run Vector.append<Element>(&mut memberElements, Element.Node {id: alias})
+            }
+
+            let member = NodeId {index: Vector.length<Node>(&parser.nodes)}
+            let memberNode = parser.makeNode(
+              NodeKind.ImportMember,
+              move memberElements,
+              memberStart,
+            )
+            run Vector.append<Node>(&mut parser.nodes, move memberNode)
+            run Vector.append<Element>(&mut listElements, Element.Node {id: member})
+            parsedMember = true
+          } else {
+            let errorStart = parser.insertionSpan()
+            let actual = parser.currentKind()
+            let unexpected = parser.currentTokenId()
+            let unexpectedSpan = span(Vector.get<Token>(&parser.tokens, unexpected.index))
+            parser.index = unexpected.index + usize.ONE
+            run Vector.append<Diagnostic>(
+              &mut parser.diagnostics,
+              Diagnostic.UnexpectedToken {actual: actual, span: unexpectedSpan},
+            )
+            let mut errorElements = Vector.make<Element>()
+            run Vector.append<Element>(&mut errorElements, Element.Token {id: unexpected})
+            let error = NodeId {index: Vector.length<Node>(&parser.nodes)}
+            let errorNode = parser.makeNode(NodeKind.Error, move errorElements, errorStart)
+            run Vector.append<Node>(&mut parser.nodes, move errorNode)
+            run Vector.append<Element>(&mut listElements, Element.Node {id: error})
+          }
+
+          if parser.currentKind() == TokenKind.Comma {
+            let comma = parser.currentTokenId()
+            parser.index = comma.index + usize.ONE
+            run Vector.append<Element>(&mut listElements, Element.Token {id: comma})
+            if parser.currentKind() == TokenKind.RightBrace {
+              break
+            }
+          } else {
+            break
+          }
+        }
+
+        if !parsedMember {
+          let missingSpan = parser.insertionSpan()
+          run Vector.append<Diagnostic>(
+            &mut parser.diagnostics,
+            Diagnostic.MissingToken {expected: TokenKind.Identifier, span: missingSpan},
+          )
+          run Vector.append<Element>(
+            &mut listElements,
+            Element.MissingToken {expected: TokenKind.Identifier, span: missingSpan},
+          )
+        }
+        if parser.hasCurrent() && parser.currentKind() == TokenKind.RightBrace {
+          let right = parser.currentTokenId()
+          parser.index = right.index + usize.ONE
+          run Vector.append<Element>(&mut listElements, Element.Token {id: right})
+        } else {
+          let missingSpan = parser.insertionSpan()
+          run Vector.append<Diagnostic>(
+            &mut parser.diagnostics,
+            Diagnostic.MissingToken {expected: TokenKind.RightBrace, span: missingSpan},
+          )
+          run Vector.append<Element>(
+            &mut listElements,
+            Element.MissingToken {expected: TokenKind.RightBrace, span: missingSpan},
+          )
+        }
+        let list = NodeId {index: Vector.length<Node>(&parser.nodes)}
+        let listNode = parser.makeNode(NodeKind.ImportMemberList, move listElements, listStart)
+        run Vector.append<Node>(&mut parser.nodes, move listNode)
+        run Vector.append<Element>(&mut declarationElements, Element.Node {id: list})
+      }
+
+      if isPublic && !hasMembers {
+        let missingSpan = parser.insertionSpan()
+        run Vector.append<Diagnostic>(
+          &mut parser.diagnostics,
+          Diagnostic.MissingToken {expected: TokenKind.LeftBrace, span: missingSpan},
+        )
+        run Vector.append<Element>(
+          &mut declarationElements,
+          Element.MissingToken {expected: TokenKind.LeftBrace, span: missingSpan},
+        )
+      }
+
+      let declaration = NodeId {index: Vector.length<Node>(&parser.nodes)}
+      let declarationNode = parser.makeNode(
+        NodeKind.ImportDeclaration,
+        move declarationElements,
+        declarationStart,
+      )
+      run Vector.append<Node>(&mut parser.nodes, move declarationNode)
+      run Vector.append<Element>(&mut sourceElements, Element.Node {id: declaration})
+    } else {
+      let errorStart = parser.insertionSpan()
+      let actual = parser.currentKind()
+      let unexpected = parser.currentTokenId()
+      let unexpectedSpan = span(Vector.get<Token>(&parser.tokens, unexpected.index))
+      parser.index = unexpected.index + usize.ONE
+      run Vector.append<Diagnostic>(
+        &mut parser.diagnostics,
+        Diagnostic.UnexpectedToken {actual: actual, span: unexpectedSpan},
+      )
+      let mut errorElements = Vector.make<Element>()
+      run Vector.append<Element>(&mut errorElements, Element.Token {id: unexpected})
+      while parser.currentKind() != TokenKind.EndOfFile && parser.currentKind() != TokenKind.ImportKeyword && parser.currentKind() != TokenKind.PubKeyword {
+        let token = parser.currentTokenId()
+        parser.index = token.index + usize.ONE
+        run Vector.append<Element>(&mut errorElements, Element.Token {id: token})
+      }
+      let error = NodeId {index: Vector.length<Node>(&parser.nodes)}
+      let errorNode = parser.makeNode(NodeKind.Error, move errorElements, errorStart)
+      run Vector.append<Node>(&mut parser.nodes, move errorNode)
+      run Vector.append<Element>(&mut sourceElements, Element.Node {id: error})
+    }
+  }
+
+  if parser.hasCurrent() && parser.currentKind() == TokenKind.EndOfFile {
+    let endOfFile = parser.currentTokenId()
+    parser.index = endOfFile.index + usize.ONE
+    run Vector.append<Element>(&mut sourceElements, Element.Token {id: endOfFile})
+  } else {
+    let missingSpan = parser.insertionSpan()
+    run Vector.append<Diagnostic>(
+      &mut parser.diagnostics,
+      Diagnostic.MissingToken {expected: TokenKind.EndOfFile, span: missingSpan},
+    )
+    run Vector.append<Element>(
+      &mut sourceElements,
+      Element.MissingToken {expected: TokenKind.EndOfFile, span: missingSpan},
+    )
+  }
+
+  let root = NodeId {index: Vector.length<Node>(&parser.nodes)}
+  let sourceEnd = parser.insertionSpan().end
+  let rootNode = Node {
+    kind: NodeKind.SourceFile,
+    span: Span.make(usize.ZERO, sourceEnd),
+    elements: move sourceElements,
+  }
+  run Vector.append<Node>(&mut parser.nodes, move rootNode)
+  return match move parser {
+    Parser {
+      tokens: storedTokens,
+      nodes: storedNodes,
+      diagnostics: storedDiagnostics,
+      index: ignoredIndex,
+    } => SyntaxTree {
+      tokens: move storedTokens,
+      nodes: move storedNodes,
+      root: root,
+      diagnostics: move storedDiagnostics,
+    }
+  }
+}

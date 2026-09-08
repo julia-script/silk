@@ -1,11 +1,13 @@
-//! Flat parser node identities, storage ranges, and syntax categories.
+//! Flat parser nodes and their syntax categories.
 //!
 //! # Details
 //!
-//! A [`NodeId`] is the index of one [`Node`] in the parser node vector. A node stores one
-//! [`ElementRange`] into the shared element vector. The node does not own child storage.
+//! Each [`Node`] owns its direct elements. Child elements contain stable identities into the
+//! parser node vector.
 
 import lexer.Span {Span}
+import parser.Element {Element}
+import silk.vector {Vector}
 
 /// The syntax category of one parser node.
 pub enum NodeKind {
@@ -273,36 +275,12 @@ pub enum NodeKind {
   Error,
 }
 
-/// The stable index of one node in a parser node vector.
-///
-/// # Gotchas
-///
-/// The index is valid only for the syntax tree that created the identity.
-pub struct NodeId {
-  /// The position of the node in its owning node vector.
-  pub index: usize
-}
-
-impl Copy for NodeId {}
-
-/// A half-open range in the shared parser element vector.
-pub struct ElementRange {
-  /// The index of the first element in the range.
-  pub start: usize
-  /// The index after the last element in the range.
-  pub end: usize
-}
-
-impl Copy for ElementRange {}
-
-/// One parser node with a source span and direct elements in shared storage.
+/// One parser node with a source span and its direct elements.
 pub struct Node {
   /// The syntax category of the node.
   pub kind: NodeKind
   /// The half-open source byte range of the node.
   pub span: Span
-  /// The direct elements of the node in the shared element vector.
-  pub elements: ElementRange
+  /// The direct child nodes and significant tokens in source order.
+  pub elements: Vector<Element>
 }
-
-impl Copy for Node {}

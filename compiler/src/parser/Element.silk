@@ -2,10 +2,12 @@
 //!
 //! # Details
 //!
-//! An [`Element`] refers to shared node or token storage. A present token comes from the source.
-//! A missing token refers to a zero-width synthetic token that records its expected variant.
+//! An [`Element`] refers to a node or token by its stable index. A missing token stores the
+//! expected category and insertion span directly because it has no source token.
 
-import parser.Node {NodeId}
+import lexer.Span {Span}
+import lexer.Token {TokenKind}
+import parser.NodeId {NodeId}
 
 /// The stable index of one token in a parser token vector.
 ///
@@ -33,8 +35,10 @@ pub union Element {
   },
   /// An expected token that does not occur in the source.
   MissingToken {
-    /// The identity of the zero-width synthetic token.
-    pub id: TokenId,
+    /// The lexical category expected at the insertion point.
+    pub expected: TokenKind,
+    /// The zero-width source span of the insertion point.
+    pub span: Span,
   },
 }
 

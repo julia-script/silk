@@ -1,0 +1,13 @@
+//! Stable identities for nodes in one parser result.
+
+/// The stable index of one node in a parser node vector.
+///
+/// # Gotchas
+///
+/// The index is valid only for the syntax tree that created the identity.
+pub struct NodeId {
+  /// The position of the node in its owning node vector.
+  pub index: usize
+}
+
+impl Copy for NodeId {}

@@ -1,7 +1,5 @@
 import lexer.Span {Span}
-
 import silk.format {Format}
-
 import silk.writer {Writer, WriterError}
 
 /// A lexical failure attached to an invalid token.
@@ -29,6 +27,8 @@ pub union LexicalDiagnostic {
     pub span: Span,
   },
 }
+
+impl Copy for LexicalDiagnostic {}
 
 effect fn writeLine(code: string, reason: string, span: Span) -> () ! WriterError ? &mut Writer {
   run Writer.writeString("diagnostic ")
