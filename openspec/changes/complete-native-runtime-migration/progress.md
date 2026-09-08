@@ -2492,3 +2492,16 @@ local run was deliberately stopped to incorporate newly completed CI failures. T
 complete replacement sequence runs in `ci-fix2-{typecheck,format,lint,test,check,release}`
 logs. Type checking, formatting and lint pass; full test/release results remain pending.
 Implementation fixes are committed in `a4fde63a` and carried into the audit stack.
+
+### CLI workflow budget after the second CI run
+
+Replacement CI run `34249675709` passed the previously failing compiler shard 1;
+shards 2 and 4 also passed. The complete documentation sweep passed in 385,963 ms,
+confirming the old five-minute deadline was below its real CI cost. Validation then
+exposed a distinct timeout in `Cli.test.ts`: init/check/build/run drove three compiler
+pipelines under the one-build 60-second budget. The original test reproduced the
+60-second timeout locally while the full compiler suite was running. With all source,
+execution and status assertions unchanged, the integration now receives three
+single-build budgets. The focused run passed and printed `Hello, world!`; CLI test
+type checking, formatting and lint also pass. The stale sub-second timing rationale
+in the single-build timeout module is updated to the current source-startup cost.
