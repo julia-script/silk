@@ -50,7 +50,8 @@ it.effect(
       const ran = yield* execute(['run', '--manifest-path', `${projectRoot}/silk.toml`])
       assert.strictEqual(Result.isSuccess(ran), true)
     }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
-  Timeouts.nativeBuild,
+  // Check, build and run each drive a compiler pipeline; CI exceeds one build budget.
+  3 * Timeouts.nativeBuild,
 )
 
 it.effect(
