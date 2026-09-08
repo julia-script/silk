@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -277,7 +278,7 @@ pub fn main() -> i32 { let parser = outer<i32>(true) return parser(1) }`
     assert.strictEqual(definition?.construction.producer.name, 'inner')
     assert.deepEqual(definition?.construction.arguments, ['i32'])
 
-    const realized = yield* Analysis.ofSourceRealized(
+    const realized = yield* AnalysisFixture.retainingMain(
       module,
       encoder.encode(source),
       'wasm32-unknown-unknown',
@@ -307,7 +308,7 @@ pub fn main() -> i32 {
   let token = tokenParser(0)
   return first(0) + second(0) + token.left
 }`
-      const self = yield* Analysis.ofSourceRealized(
+      const self = yield* AnalysisFixture.retainingMain(
         module,
         encoder.encode(source),
         'wasm32-unknown-unknown',
@@ -391,7 +392,7 @@ it.effect('keeps opaque identity out of runtime facts', () =>
     const source = `fn add(left: i32, right: i32) -> i32 { return left + right }
 fn make(value: i32) -> some<F: fn<'static>(i32) -> i32> F { return add(value) }
 pub fn main() -> i32 { let parser = make(40) return parser(2) }`
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'opaque/runtime-fence',
       encoder.encode(source),
       'wasm32-unknown-unknown',
@@ -430,7 +431,7 @@ pub fn main() -> i32 { let parser = make(40) return parser(2) }`
 
 it.effect('lowers an opaque Effect through its private static runner', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'opaque/effect-runtime-fence',
       encoder.encode(`fn make(value: i32) -> some<F: Effect<'static; i32>> F {
   return effect { return value }

@@ -2,7 +2,7 @@ import type * as ArtifactComposition from './ArtifactComposition.js'
 import * as ConfigurationError from './ConfigurationError.js'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
 import type * as ProfileBootstrap from './ProfileBootstrap.js'
-import type * as CAbi from './CAbi.js'
+import * as CAbi from './CAbi.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as ConformanceProof from './ConformanceProof.js'
 import * as Constraint from './Constraint.js'
@@ -30,7 +30,7 @@ import * as Type from './Type.js'
 import type * as TypeCompatibility from './TypeCompatibility.js'
 
 /**
- * Instance discovery: which concrete runtime instances are reachable from the user entry. Keys
+ * Instance discovery: which concrete runtime instances are reachable from artifact roots. Keys
  * are canonical declaration identities plus normalized type and contract-row arguments — both
  * empty in the frozen slice. The worklist records an instance before following it, so ordinary
  * recursion terminates.
@@ -206,54 +206,12 @@ export interface ForeignExport {
   readonly declarationSpan: SourceSpan.SourceSpan
 }
 
-/** One normalized owned failure retained by an effectful user entry. */
-export interface EntryFailure {
-  readonly type: Type.Type
-  readonly identity: string
-}
-
 /** One target-selected primitive constant value with no runtime storage. */
 export interface SelectedConstant {
   readonly _tag: 'SelectedConstant'
   readonly declaration: DeclarationFacts.CanonicalId
   readonly value: StaticValue.Value
 }
-
-/** The resolved or explicitly unavailable user entry. */
-export type Entry =
-  | {
-      readonly _tag: 'Resolved'
-      readonly kind: 'Ordinary'
-      readonly result: 'Unit' | 'Status'
-      readonly key: InstanceKey
-    }
-  | {
-      readonly _tag: 'Resolved'
-      readonly kind: 'Effect'
-      readonly key: InstanceKey
-      readonly failures: ReadonlyArray<EntryFailure>
-      readonly requirements: ReadonlyArray<Type.Requirement>
-    }
-  | {
-      readonly _tag: 'None'
-    }
-  | {
-      readonly _tag: 'Unavailable'
-      readonly reason:
-        | 'MissingEntry'
-        | 'AmbiguousEntry'
-        | 'GenericEntry'
-        | 'StaticEntry'
-        | 'ParameterizedEntry'
-        | 'PrivateEntry'
-        | 'UntypedEntry'
-        | 'InvalidOrdinaryEntryResult'
-        | 'InvalidEffectEntryResult'
-        | 'EffectEntryRequirements'
-        | 'UnavailableEntryBody'
-        | 'InvalidSource'
-      readonly requirements?: ReadonlyArray<Type.Requirement>
-    }
 
 /** The deterministic discovery result. */
 export interface Counters {
@@ -267,7 +225,6 @@ export interface Discovery {
   readonly retention: ReadonlyArray<InstanceKey>
   readonly _tag: 'InstanceDiscovery'
   readonly rootModule: string
-  readonly entry: Entry
   readonly instances: ReadonlyArray<Instance>
   /** Demanded residual specializations rejected before executable reachability. */
   readonly unavailableOwnership: ReadonlyArray<UnavailableResidualOwnership>
@@ -282,6 +239,9 @@ export interface Discovery {
   readonly constants: ReadonlyArray<SelectedConstant>
   /** Exact direct/nested/external-park summaries in canonical subject order. */
   readonly suspension: ReadonlyArray<SuspensionFact>
+  /** Function bodies whose executed closure enters diagnostic observation. */
+  readonly contextFreeTerminalObservations: ReadonlyArray<SourceSpan.SourceSpan>
+  readonly observingExecutions: ReadonlyArray<InstanceKey>
   /** Target-relative diagnostics produced while selecting and residualizing static work. */
   readonly residualizationDiagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly specializationFailures: ReadonlyArray<NonConcreteSpecialization>
@@ -366,13 +326,12 @@ const forwardedRequirementBinding = (
   return binding.initializer
 }
 
-/** Retains an explicit unavailable entry when frontend errors prevent discovery. */
+/** Produces empty discovery when frontend errors prevent reachability analysis. */
 export const invalid = (rootModule: string): Discovery =>
   Object.freeze({
     _tag: 'InstanceDiscovery',
     retention: Object.freeze([]),
     rootModule,
-    entry: Object.freeze({ _tag: 'Unavailable', reason: 'InvalidSource' }),
     instances: Object.freeze([]),
     unavailableOwnership: Object.freeze([]),
     callables: Object.freeze([]),
@@ -383,6 +342,8 @@ export const invalid = (rootModule: string): Discovery =>
     foreignExports: Object.freeze([]),
     constants: Object.freeze([]),
     suspension: Object.freeze([]),
+    contextFreeTerminalObservations: Object.freeze([]),
+    observingExecutions: Object.freeze([]),
     residualizationDiagnostics: Object.freeze([]),
     specializationFailures: Object.freeze([]),
     violations: Object.freeze([]),
@@ -713,73 +674,6 @@ export const matchingSpecialization = (
 export const effectIdentity = (owner: InstanceKey, site: Hir.EffectSiteId): string =>
   `${keyText(owner)}\u0004${Hir.executableSiteKey(site)}`
 
-const resolveEntry = (root: Elaboration.Result, name: string): Entry => {
-  const lookup = Elaboration.declarationByName(root, name)
-  if (lookup._tag === 'Missing')
-    return Object.freeze({ _tag: 'Unavailable', reason: 'MissingEntry' })
-  if (lookup._tag === 'Ambiguous') {
-    return Object.freeze({ _tag: 'Unavailable', reason: 'AmbiguousEntry' })
-  }
-  const declaration = lookup.declaration
-  if (declaration.phase === 'Static') {
-    return Object.freeze({ _tag: 'Unavailable', reason: 'StaticEntry' })
-  }
-  if (declaration.typeParameters.length > 0) {
-    return Object.freeze({ _tag: 'Unavailable', reason: 'GenericEntry' })
-  }
-  if (declaration.parameterCount > 0) {
-    return Object.freeze({ _tag: 'Unavailable', reason: 'ParameterizedEntry' })
-  }
-  if (declaration.visibility !== 'Public') {
-    return Object.freeze({ _tag: 'Unavailable', reason: 'PrivateEntry' })
-  }
-  if (
-    declaration.returnType._tag !== 'Resolved' ||
-    declaration.canonical._tag !== 'Canonical' ||
-    !declaration.failureRow.available ||
-    !declaration.requirementRow.available
-  ) {
-    return Object.freeze({ _tag: 'Unavailable', reason: 'UntypedEntry' })
-  }
-  if (declaration.functionKind === 'Ordinary') {
-    if (
-      declaration.failureRow.failures.length !== 0 ||
-      declaration.requirementRow.requirements.length !== 0 ||
-      (!Type.equals(declaration.returnType.type, Type.unit) &&
-        declaration.returnType.type !== 'i32')
-    ) {
-      return Object.freeze({ _tag: 'Unavailable', reason: 'InvalidOrdinaryEntryResult' })
-    }
-    return Object.freeze({
-      _tag: 'Resolved',
-      kind: 'Ordinary',
-      result: Type.equals(declaration.returnType.type, Type.unit) ? 'Unit' : 'Status',
-      key: keyOf(declaration.canonical.id, Hir.contractOf(declaration)),
-    })
-  }
-  if (!Type.equals(declaration.returnType.type, Type.unit)) {
-    return Object.freeze({ _tag: 'Unavailable', reason: 'InvalidEffectEntryResult' })
-  }
-  if (declaration.requirementRow.requirements.length > 0) {
-    return Object.freeze({
-      _tag: 'Unavailable',
-      reason: 'EffectEntryRequirements',
-      requirements: Object.freeze(declaration.requirementRow.requirements),
-    })
-  }
-  return Object.freeze({
-    _tag: 'Resolved',
-    kind: 'Effect',
-    key: keyOf(declaration.canonical.id, Hir.contractOf(declaration)),
-    requirements: Object.freeze(declaration.requirementRow.requirements),
-    failures: Object.freeze(
-      declaration.failureRow.failures.map((failure) =>
-        Object.freeze({ type: failure, identity: Type.encode(failure) }),
-      ),
-    ),
-  })
-}
-
 const instanceSubstitution = (
   fn: Hir.HirFunction,
   key: InstanceKey,
@@ -1091,7 +985,7 @@ const exportRoots = (
   )
 
 /**
- * Discovers the reachable instances from the root module's entry. The worklist records an
+ * Discovers the reachable instances from the artifact's foreign exports and explicit retention roots. The worklist records an
  * instance before following its calls, so directly and mutually recursive programs terminate.
  */
 export const discover = (
@@ -1108,14 +1002,6 @@ export const discover = (
     throw new RangeError(`Instance discovery lost its root module ${rootModule}`)
   }
   const foreignExports = exportRoots(index, target)
-  const invoked =
-    composition.invocation === undefined ? undefined : results.get(composition.invocation.module)
-  let entry: Entry = Object.freeze({ _tag: 'None' })
-  if (composition.invocation !== undefined)
-    entry =
-      invoked === undefined
-        ? Object.freeze({ _tag: 'Unavailable', reason: 'MissingEntry' })
-        : resolveEntry(invoked, composition.invocation.declaration)
   const retention: Array<InstanceKey> = []
   const rootDiagnostics: Array<Diagnostic.Diagnostic> = []
   for (const selector of composition.retention) {
@@ -1165,10 +1051,6 @@ export const discover = (
       foreignExports,
       residualizationDiagnostics: Object.freeze(rootDiagnostics),
     })
-  if (entry._tag === 'Unavailable') {
-    return Object.freeze({ ...invalid(rootModule), entry, foreignExports })
-  }
-
   const residualization = Residualization.make(
     completion.profile,
     results,
@@ -1295,14 +1177,10 @@ export const discover = (
       ancestors: new Map([[declarationText(key), Object.freeze({ key })]]),
       cleanupReachable: false,
     })
-  const pending: Array<WorkItem> = [
-    ...(entry._tag === 'Resolved' ? [rootItem(entry.key)] : []),
-    ...retention.map(rootItem),
-  ]
-  // The export inventory is recorded for every target so planning can reject it off native;
-  // only a native target seeds the executable worklist with its implementation body.
-  if (target.kind === 'Native')
-    for (const record of foreignExports) pending.push(rootItem(record.key))
+  const pending: Array<WorkItem> = retention.map(rootItem)
+  // Retain exactly the export implementations admitted by the selected target's C contract.
+  for (const record of foreignExports)
+    if (CAbi.available(target, record.signature)) pending.push(rootItem(record.key))
   const violations: Array<PolymorphicRecursion> = []
   const violationKeys = new Set<string>()
   const specializationFailures = new Map<string, NonConcreteSpecialization>()
@@ -1343,7 +1221,6 @@ export const discover = (
       [...types.values()].flatMap((type) => hookCalls(CleanupPlan.cleanupPlan(index, type), index)),
     )
   }
-  let graph: ExecutableOrigin.SuspensionGraph | undefined
   while (true) {
     while (pending.length > 0) {
       const item = pending.shift()
@@ -1466,17 +1343,7 @@ export const discover = (
           call,
         )
       }
-      const cleanupTargets = [
-        ...slotDropHookTargets(fn, index, substitution),
-        ...cleanupHooks,
-        ...(entry._tag === 'Resolved' &&
-        entry.kind === 'Effect' &&
-        keyText(key) === keyText(entry.key)
-          ? entry.failures.flatMap((failure) =>
-              hookCalls(CleanupPlan.cleanupPlan(index, failure.type), index),
-            )
-          : []),
-      ]
+      const cleanupTargets = [...slotDropHookTargets(fn, index, substitution), ...cleanupHooks]
       const identityOfCall = Specialization.key
       const cleanupIdentities = new Set(cleanupTargets.map(identityOfCall))
       const reachableCalls: ReadonlyArray<CallTarget> = [
@@ -1681,7 +1548,6 @@ export const discover = (
       }
     }
     if (!scheduledProvided) {
-      graph = currentGraph
       break
     }
   }
@@ -1744,8 +1610,9 @@ export const discover = (
       })
     }),
   )
-  const finalGraph = graph ?? suspensionGraph(instances, results, index)
+  const finalGraph = suspensionGraph(instances, results, index)
   const summaries = ExecutableOrigin.suspensionSummaries(finalGraph)
+  const observing = ExecutableOrigin.observingExecutions(finalGraph)
   const summaryOfNode = (node: string): SuspensionMode.Summary =>
     summaries.get(node) ?? SuspensionMode.direct
   const callInstances = Object.freeze([...recordedCalls.values(), ...providerCalls.values()])
@@ -1753,7 +1620,6 @@ export const discover = (
     _tag: 'InstanceDiscovery',
     retention: Object.freeze(retention),
     rootModule,
-    entry,
     instances,
     unavailableOwnership,
     callables: Object.freeze([...recordedCallables.values()]),
@@ -1769,6 +1635,13 @@ export const discover = (
     foreignCalls: ExecutableOrigin.reachableForeignCalls(instances, index, target),
     foreignExports,
     constants: Object.freeze(selectedConstants),
+    contextFreeTerminalObservations: finalGraph.contextFreeTerminalObservations,
+    observingExecutions: Object.freeze(
+      instances
+        .filter((instance) => observing.has(instanceNode(instance.key)))
+        .map((instance) => instance.key)
+        .sort(compareInstanceKeys),
+    ),
     suspension: Object.freeze([
       ...instances
         .slice()

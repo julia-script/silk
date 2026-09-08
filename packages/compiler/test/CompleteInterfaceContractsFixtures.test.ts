@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { NodeServices } from '@effect/platform-node'
 import { assert, layer } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -28,7 +29,7 @@ const parse = Effect.fnUntraced(function* (name: string) {
 })
 const analyze = Effect.fnUntraced(function* (name: string) {
   const source = yield* fixture(name)
-  return yield* Analysis.ofSourceRealized(
+  return yield* AnalysisFixture.declarations(
     `complete-interface-contracts/${name}`,
     source,
     'wasm32-unknown-unknown',

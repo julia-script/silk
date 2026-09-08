@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -62,12 +63,12 @@ const infixShape = (source: string): InfixShape => {
 
 it.effect('rejects mixed operand types exactly as the named operation rejects them', () =>
   Effect.gen(function* () {
-    const viaOperator = yield* Analysis.ofSourceRealized(
+    const viaOperator = yield* AnalysisFixture.retainingMain(
       'bitwise-operator/mixed-operator',
       ascii(`fn mixed(a: u32, b: i32) -> u32 { return a & b }
 pub fn main() -> i32 { return 0 }`),
     )
-    const viaFunction = yield* Analysis.ofSourceRealized(
+    const viaFunction = yield* AnalysisFixture.retainingMain(
       'bitwise-operator/mixed-function',
       ascii(`import silk.u32 as u32
 fn mixed(a: u32, b: i32) -> u32 { return u32.bitAnd(a, b) }
@@ -85,7 +86,7 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('reports a type diagnostic instead of failing on a float bitwise operand', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'bitwise-operator/float',
       ascii(`fn f(a: f64, b: f64) -> f64 { return a & b }
 fn g(a: f64) -> f64 { return ~a }

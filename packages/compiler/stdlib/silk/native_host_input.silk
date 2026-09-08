@@ -1,0 +1,232 @@
+//! Owned native process-input snapshots and per-call working-directory lookup.
+//!
+//! # When to use
+//! Capture arguments and environment at a hosted entry, then move the snapshot into a HostInput
+//! provider. Capture copies every byte so later lookups do not depend on foreign input lifetimes.
+//!
+//! # Gotchas
+//! Capture is unsafe: input vectors and their NUL-terminated strings must remain readable and
+//! unchanged until it returns. Working-directory lookup observes the process at the time of call.
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.allocator { Allocator, OutOfMemoryError }
+  import silk.bytes { Bytes }
+  import silk.host_input { HostInput, HostInputError }
+  import silk.option { Option }
+  import silk.pointer { Pointer }
+  import silk.vector { Vector }
+  import silk.i32 as i32
+
+  unsafe extern "C" fn getcwd(buffer: ?[*]mut u8, size: usize) -> ?[*]mut u8 with Intrinsic.foreign(noCapture: ("buffer",))
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    unsafe extern "C" fn __error() -> *mut i32
+    unsafe extern "C" fn _NSGetEnviron() -> *const ?[*]const ?[*]const u8
+    unsafe fn environmentVector() -> ?[*]const ?[*]const u8 {
+      unsafe { return Pointer.read(_NSGetEnviron()) }
+    }
+    unsafe fn currentError() -> i32 { unsafe { return Pointer.read(__error()) } }
+  } else {
+    unsafe extern "C" fn __errno_location() -> *mut i32
+    unsafe extern "C" static processEnvironment: ?[*]const ?[*]const u8 as "environ"
+    unsafe fn environmentVector() -> ?[*]const ?[*]const u8 {
+      unsafe { return processEnvironment }
+    }
+    unsafe fn currentError() -> i32 { unsafe { return Pointer.read(__errno_location()) } }
+  }
+
+  /// An affine snapshot owning every argument and environment byte.
+  pub struct NativeHostInput {
+    arguments: Vector<Bytes>
+    environment: Vector<Bytes>
+  }
+
+  unsafe effect fn copyString(text: [*]const u8) -> Bytes ! OutOfMemoryError ? &mut Allocator {
+    let mut result = Bytes.make()
+    let mut index: usize = 0
+    while true {
+      let byte = unsafe Pointer.read(unsafe Pointer.at(text, index))
+      if byte == 0 { break }
+      let one = [byte]
+      let appended = run Bytes.append(&mut result, &one)
+      index = index + 1
+    }
+    return move result
+  }
+
+  fn copyPrefix(value: &[u8], start: usize, output: &mut [u8]) -> usize {
+    let length = value.length - start
+    let mut index: usize = 0
+    while index < length && index < output.length {
+      output[index] = value[start + index]
+      index = index + 1
+    }
+    return length
+  }
+
+  unsafe effect fn copyArguments(result: &mut NativeHostInput, argc: i32, argv: [*]const ?[*]const u8) -> () ! HostInputError | OutOfMemoryError ? &mut Allocator {
+    if argc < 0 { fail HostInput.inputFailure() }
+      let count = i32.toUsize(argc)
+      let mut index: usize = 0
+      while index < count {
+        let pointer = unsafe Pointer.read(unsafe Pointer.at(argv, index))
+        let selected = Pointer.nonNullMany(pointer)
+        let text = match move selected {
+          Option<[*]const u8>.Some { value } => value
+          Option<[*]const u8>.None => { fail HostInput.inputFailure() }
+        }
+        let copied = run unsafe copyString(text)
+        let appended = run Vector.append<Bytes>(&mut result.arguments, move copied)
+        index = index + 1
+      }
+    return ()
+  }
+
+  impl NativeHostInput {
+    /// Copies the current libc environment into a snapshot with no arguments.
+    ///
+    /// # When to use
+    /// Use at a library boundary that receives no command line. Hosted entries should capture
+    /// their actual argument vector with capture instead.
+    ///
+    /// # Gotchas
+    /// No foreign environment mutation may overlap this operation. Later lookups use owned bytes
+    /// and need no access to libc's environment storage. A null environment means no variables.
+    pub unsafe effect fn environmentSnapshot() -> NativeHostInput ! HostInputError | OutOfMemoryError ? &mut Allocator {
+      let selected = Pointer.nonNullMany(unsafe environmentVector())
+      return match move selected {
+        Option<[*]const ?[*]const u8>.Some { value } => run unsafe NativeHostInput.capture(0, value, value)
+        Option<[*]const ?[*]const u8>.None => NativeHostInput {
+          arguments: Vector.make<Bytes>(),
+          environment: Vector.make<Bytes>(),
+        }
+      }
+    }
+
+    /// Copies C entry arguments and the current libc environment into owned storage.
+    ///
+    /// # Gotchas
+    /// argv must remain readable through argc elements, and each element must point to an
+    /// unchanged NUL-terminated string. No foreign environment mutation may overlap capture.
+    /// Failure releases every partially copied argument and environment value.
+    pub unsafe effect fn captureProcess(argc: i32, argv: [*]const ?[*]const u8) -> NativeHostInput ! HostInputError | OutOfMemoryError ? &mut Allocator {
+      if argc < 0 { fail HostInput.inputFailure() }
+      let mut result = run unsafe NativeHostInput.environmentSnapshot()
+      run unsafe copyArguments(&mut result, argc, argv)
+      return move result
+    }
+
+    /// Copies complete entry input vectors into independent owned storage.
+    ///
+    /// # Gotchas
+    /// The caller supplies readable argv elements through argc and environment elements through
+    /// its null terminator. Every non-null element identifies a live NUL-terminated byte string.
+    /// No foreign mutation may overlap capture. Failure releases every partially copied value.
+    pub unsafe effect fn capture(
+      argc: i32,
+      argv: [*]const ?[*]const u8,
+      environment: [*]const ?[*]const u8
+    ) -> NativeHostInput ! HostInputError | OutOfMemoryError ? &mut Allocator {
+      if argc < 0 { fail HostInput.inputFailure() }
+      let mut result = NativeHostInput {
+        arguments: Vector.make<Bytes>(),
+        environment: Vector.make<Bytes>(),
+      }
+      run unsafe copyArguments(&mut result, argc, argv)
+      let mut index: usize = 0
+      while true {
+        let pointer = unsafe Pointer.read(unsafe Pointer.at(environment, index))
+        if Pointer.isNullMany(pointer) { break }
+        let selected = Pointer.nonNullMany(pointer)
+        let text = match move selected {
+          Option<[*]const u8>.Some { value } => value
+          Option<[*]const u8>.None => { fail HostInput.inputFailure() }
+        }
+        let copied = run unsafe copyString(text)
+        let appended = run Vector.append<Bytes>(&mut result.environment, move copied)
+        index = index + 1
+      }
+      return move result
+    }
+
+    /// Returns the captured argument count, including the program name when present.
+    pub fn argumentCount(self: &Self) -> usize {
+      return Vector.length<Bytes>(&self.arguments)
+    }
+
+    /// Copies the fitting argument prefix and returns its full length, or None when absent.
+    ///
+    /// # Details
+    /// An empty argument is Some(0). Bytes beyond the committed prefix remain unchanged.
+    pub fn argument(self: &Self, index: usize, output: &mut [u8]) -> Option<usize> {
+      if index >= Vector.length<Bytes>(&self.arguments) { return Option.none<usize>() }
+      let arguments = Vector.asSlice<Bytes>(&self.arguments)
+      return Option.some<usize>(copyPrefix(Bytes.asSlice(&arguments[index]), 0, move output))
+    }
+
+    /// Copies the first matching environment value's prefix and returns its complete byte length.
+    ///
+    /// # Details
+    /// Matching is byte-exact. Missing names are None; empty values are Some(0). Names containing
+    /// NUL or equals do not match. Malformed entries without equals are ignored.
+    pub fn variable(self: &Self, name: &[u8], output: &mut [u8]) -> Option<usize> {
+      let entries = Vector.asSlice<Bytes>(&self.environment)
+      let mut entry: usize = 0
+      while entry < entries.length {
+        let bytes = Bytes.asSlice(&entries[entry])
+        let mut separator: usize = 0
+        while separator < bytes.length && bytes[separator] != 61 {
+          separator = separator + 1
+        }
+        if separator < bytes.length && separator == name.length {
+          let mut equal = true
+          let mut index: usize = 0
+          while index < separator {
+            if bytes[index] != name[index] { equal = false }
+            index = index + 1
+          }
+          if equal { return Option.some<usize>(copyPrefix(bytes, separator + 1, move output)) }
+        }
+        entry = entry + 1
+      }
+      return Option.none<usize>()
+    }
+
+    /// Reads the current working directory into independently owned bytes.
+    ///
+    /// # Details
+    /// Grows from 256 bytes through 1 MiB only on ERANGE. Every attempt owns and releases its
+    /// buffer. Allocation failure is OutOfMemoryError; other failures are HostInputError.
+    pub effect fn workingDirectory() -> Bytes ! HostInputError | OutOfMemoryError ? &mut Allocator {
+      let mut room: usize = 256
+      while room <= 1048576 {
+        let mut buffer = run Bytes.zeroed(room)
+        let pointer = Pointer.fromMutSlice(Bytes.asMutSlice(&mut buffer))
+        let found = unsafe getcwd(pointer, room)
+        if Pointer.isNullMany(found) == false {
+          let bytes = Bytes.asSlice(&buffer)
+          let mut length: usize = 0
+          while length < room && bytes[length] != 0 { length = length + 1 }
+          if length == room { fail HostInput.inputFailure() }
+          let mut result = Bytes.make()
+          let mut index: usize = 0
+          while index < length {
+            let one = [bytes[index]]
+            let appended = run Bytes.append(&mut result, &one)
+            index = index + 1
+          }
+          return move result
+        }
+        let error = unsafe currentError()
+        if error != 34 { fail HostInput.inputFailure() }
+        room = room * 2
+      }
+      fail HostInput.inputFailure()
+    }
+
+    /// Copies the fitting cwd prefix and reports its full length, leaving the remaining tail intact.
+    pub effect fn workingDirectoryCopy(output: &mut [u8]) -> usize ! HostInputError | OutOfMemoryError ? &mut Allocator {
+      let value = run NativeHostInput.workingDirectory()
+      return copyPrefix(Bytes.asSlice(&value), 0, move output)
+    }
+  }
+}

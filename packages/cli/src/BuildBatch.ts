@@ -108,10 +108,11 @@ export const make = Effect.fn('BuildBatch.make')(function* (
           ...profile,
           input: {
             ...profile.input,
-            artifact:
+            artifact: ArtifactKind.profileArtifact(
               target.kind === 'WebAssembly'
-                ? 'loadable-module'
-                : ArtifactKind.profileArtifact(project.build.artifact),
+                ? ArtifactKind.webAssemblyModule
+                : project.build.artifact,
+            ),
             optimization:
               options.optimization === undefined || options.optimization === 'debug'
                 ? 'none'

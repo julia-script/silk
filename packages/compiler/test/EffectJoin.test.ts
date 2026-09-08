@@ -1,6 +1,8 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
@@ -57,7 +59,57 @@ pub fn main() -> i32 {
 }`
 
 const snapshotOf = (name: string, text: string) =>
-  Analysis.ofSourceRealized(name, ascii(text), 'wasm32-unknown-unknown')
+  AnalysisFixture.retainingMain(name, ascii(text), 'wasm32-unknown-unknown')
+
+it.effect('finalizes chosen capture environments through ordinary suspension controls', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* snapshotOf(
+      'effect-join/finalized',
+      `import silk.effect { Effect }
+struct Problem { code: i32 }
+struct OtherProblem { code: i32 }
+effect fn success(value: i32) -> i32 { return run Effect.suspend(effect { return value }) }
+effect fn failure(left: i32, right: i32) -> i32 ! Problem { fail Problem { code: left + right } }
+effect fn other(value: i32) -> i32 ! OtherProblem { run Effect.suspend(effect { return () }) fail OtherProblem { code: value } }
+fn choose(flag: i32) -> Effect<'static; i32 ! Problem | OtherProblem> {
+  if flag == 0 { return success(42) }
+  if flag == 1 { return failure(20, 22) }
+  return other(42)
+}
+effect fn finish() -> () { return () }
+effect fn delayedFinish(value: i32) -> () { let completed = run Effect.suspend(effect { return value }) return () }
+fn chooseFinish(flag: bool) -> Effect<'static; ()> {
+  if flag { return finish() }
+  return delayedFinish(42)
+}
+effect fn recover(error: Problem | OtherProblem) -> i32 { return 42 }
+pub fn main() -> i32 { return run Effect.catchAll(Effect.ensuring(choose(2), chooseFinish(false)), recover) }`,
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      [],
+    )
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const operations = mir.functions.flatMap(MirVerification.operations)
+    assert.isTrue(operations.some((operation) => operation._tag === 'UnpackEffectComposite'))
+    assert.isTrue(
+      operations.some(
+        (operation) =>
+          operation._tag === 'PropagateEffectFailure' && operation.outcome !== undefined,
+      ),
+    )
+    assert.isTrue(
+      mir.functions.some((fn) =>
+        fn.suspension?.regions.some(
+          (region) =>
+            region._tag === 'RunSuspendableEffectRegion' && region.operation._tag === 'CatchEffect',
+        ),
+      ),
+    )
+    yield* Analysis.codegen(snapshot, { mode: 'release' })
+  }),
+)
 
 it.effect('diagnoses a join whose representation is not a closed finite set', () =>
   Effect.gen(function* () {

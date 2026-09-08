@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -24,7 +25,7 @@ pub fn main() -> i32 {
 }`
 
 const lowered = () =>
-  Analysis.ofSourceRealized('string/mir', encoder.encode(source), 'wasm32-unknown-unknown')
+  AnalysisFixture.retainingMain('string/mir', encoder.encode(source), 'wasm32-unknown-unknown')
 
 const mapOperations = (
   self: Mir.Module,

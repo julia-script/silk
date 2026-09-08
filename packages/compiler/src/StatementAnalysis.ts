@@ -1517,13 +1517,15 @@ export const analyzeStatements = (
       if (
         !context.effectBlock &&
         failure !== undefined &&
-        !(Type.isParameter(failure)
-          ? Type.failureMemberParameters(context.declaration.failureRow.row).some((parameter) =>
-              Type.equals(parameter, failure),
-            )
-          : context.declaration.failureRow.failures.some((candidate) =>
-              typesCompatible(failure, candidate, context.resolution.lifetimeCompatibility),
-            ))
+        !(Type.isUnion(failure) ? failure.members : [failure]).every((member) =>
+          Type.isParameter(member)
+            ? Type.failureMemberParameters(context.declaration.failureRow.row).some((parameter) =>
+                Type.equals(parameter, member),
+              )
+            : context.declaration.failureRow.failures.some((candidate) =>
+                typesCompatible(member, candidate, context.resolution.lifetimeCompatibility),
+              ),
+        )
       )
         context.diagnostics.push(
           Diagnostic.undeclaredFailure(Type.encode(failure), expressionNode.span),

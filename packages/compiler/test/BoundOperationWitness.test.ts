@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -29,7 +30,7 @@ const analyzed = (
   source: string,
   target?: string,
   options?: Parameters<typeof Analysis.ofSourceRealized>[3],
-) => Analysis.ofSourceRealized(name, ascii(source), target, options)
+) => AnalysisFixture.retainingMain(name, ascii(source), target, options)
 
 const frontend = (name: string, source: string) => Analysis.ofSource(name, ascii(source))
 

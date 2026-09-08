@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import { pipe } from 'effect/Function'
@@ -508,7 +509,7 @@ fn main() -> i32 {
 
 it.effect('rejects a concrete provideMut provider without the required capability', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'effect/provide-mut-conformance',
       new TextEncoder().encode(`import silk.effect { Effect }
 service Clock {}
@@ -2522,7 +2523,7 @@ fn main() -> i32 { return double(2) }`,
 
 it.effect('realizes a module holding an uncalled foreign declaration without a body error', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'foreign/Idle',
       ascii(`unsafe extern "C" fn abs(value: i32) -> i32
 pub fn main() -> i32 { return 0 }`),
@@ -2605,6 +2606,9 @@ it.effect('checks nullable pointer refinement, unaligned access, and owned outpu
 import silk.pointer { Pointer }
 import silk.output { Uninitialized, Initialized }
 import silk.option { Option }
+unsafe fn reinterpretStorage(value: ?*mut u8) -> ?*mut i32 {
+  unsafe { return Intrinsic.pointerReinterpret<?*mut u8, ?*mut i32>(value) }
+}
 fn refine(value: ?[*]mut i32) -> Option<[*]mut i32> {
   return Pointer.nonNullManyMut<i32>(value)
 }
@@ -2635,6 +2639,24 @@ fn bad(value: *const i32) -> *const u8 {
       ['SEM0215'],
     )
   }),
+)
+
+it.effect(
+  'requires an unsafe boundary and preserves pointer capabilities during reinterpretation',
+  () =>
+    Effect.gen(function* () {
+      for (const [body, code] of [
+        ['return Intrinsic.pointerReinterpret<*const u8, *const i32>(value)', 'SEM0082'],
+        ['unsafe { return Intrinsic.pointerReinterpret<*const u8, *mut i32>(value) }', 'SEM0215'],
+      ] satisfies ReadonlyArray<readonly [string, string]>) {
+        const source = `fn bad(value: *const u8) -> ${body.includes('*mut') ? '*mut' : '*const'} i32 { ${body} }`
+        const checked = yield* analyzeWithStdlib('pointer/reinterpret-invalid', source)
+        assert.deepStrictEqual(
+          checked.diagnostics.map((diagnostic) => diagnostic.code),
+          [code],
+        )
+      }
+    }),
 )
 
 it.effect('keeps output initialization and extraction explicit in ordinary ownership', () =>

@@ -10,6 +10,10 @@ import type { LinearOperation } from './MirLinearization.js'
 import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
+import * as NativeDiagnosticOutcome from './NativeDiagnosticOutcome.js'
+import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
+import * as NativeDiagnosticText from './NativeDiagnosticText.js'
+import * as NativeReturn from './NativeReturn.js'
 import * as NativeOwnedPlace from './NativeOwnedPlace.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
@@ -26,6 +30,7 @@ type Operation = Extract<
       | 'MakeEffect'
       | 'MakeCallable'
       | 'PackEffectComposite'
+      | 'UnpackEffectComposite'
       | 'PackEffectOutcome'
       | 'PackEffectFailureUnion'
       | 'UnpackEffectSuccess'
@@ -34,7 +39,7 @@ type Operation = Extract<
       | 'RunEffectValue'
       | 'RunStaticEffect'
       | 'CatchEffect'
-      | 'CloseEffectEntry'
+      | 'DiagnosticUnhandled'
   }
 >
 
@@ -87,6 +92,17 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   } = context
   const checkOrdinal = context.state.checkOrdinal
   switch (operation._tag) {
+    case 'DiagnosticUnhandled': {
+      const lane = NativeType.lanesFor(types, operation.type).at(0)
+      if (lane === undefined) throw new RangeError('Terminal observation lost its usize result')
+      const diagnostic = call.synchronous.diagnostic
+      const result =
+        diagnostic === undefined
+          ? yield* Constant.integerUnsigned(builder, NativeType.laneType(types, lane), 0n)
+          : yield* NativeDiagnosticContext.unhandled(diagnostic)
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+      break
+    }
     case 'Drop': {
       if (CleanupPlan.hasEffect(operation.cleanup)) {
         let values = NativeStorage.readLocal(nativeStorage, operation.local)
@@ -153,6 +169,50 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(captured))
       break
     }
+    case 'UnpackEffectComposite': {
+      const source = NativeStorage.readLocal(nativeStorage, operation.source)
+      const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
+      const tag = source.at(0)
+      if (sourceType?._tag !== 'EffectComposite' || tag === undefined)
+        throw new RangeError('LLVM Effect choice projection lost its representation')
+      const sourceLanes = NativeType.lanesFor(types, sourceType)
+      const values: Array<Value.Input> = []
+      for (const [ordinal, targetLane] of NativeType.lanesFor(types, operation.type).entries()) {
+        const input = source.at(ordinal + 1)
+        const sourceLane = sourceLanes.at(ordinal + 1)
+        if (input === undefined || sourceLane === undefined)
+          throw new RangeError('LLVM Effect choice projection lost a capture lane')
+        values.push(
+          yield* NativeArith.coerceLane(
+            arith.lane,
+            input,
+            sourceLane,
+            targetLane,
+            `effect_choice${operation.destination.ordinal}_${ordinal}`,
+          ),
+        )
+      }
+      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
+      nativeStorage.locals.set(
+        operation.matched.ordinal,
+        Object.freeze([
+          yield* FunctionBody.cast(
+            body,
+            'zext',
+            yield* FunctionBody.integerCompare(
+              body,
+              'eq',
+              tag,
+              yield* Constant.integerSigned(builder, i32, BigInt(operation.alternative)),
+              `effect_choice${operation.destination.ordinal}_matched`,
+            ),
+            i32,
+            `effect_choice${operation.destination.ordinal}_flag`,
+          ),
+        ]),
+      )
+      break
+    }
     case 'PackEffectComposite': {
       const source = [...NativeStorage.readLocal(nativeStorage, operation.source)]
       const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
@@ -187,23 +247,29 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       if (sourceType === undefined) throw new RangeError('LLVM effect outcome lost its source type')
       const sourceLanes = NativeType.valueLanesFor(types, sourceType)
       const targetLanes = NativeType.lanesFor(types, operation.type)
-      if (operation.tag === 0) {
-        yield* NativeTermination.clearCause(context.termination)
-      } else {
-        yield* NativeTermination.storeProduced(
-          context.termination,
-          yield* Constant.integerSigned(
-            builder,
-            i32,
-            BigInt(
-              NativeTermination.registerFailureSite(
-                context.termination,
-                NativeTermination.identityOf(operation.type.type, operation.tag),
+      const diagnostic = call.synchronous.diagnostic
+      const diagnosticSlot = diagnostic?.outcomes.get(operation.destination.ordinal)
+      if (diagnostic !== undefined && diagnosticSlot !== undefined) {
+        if (operation.tag === 0) yield* NativeDiagnosticOutcome.release(diagnosticSlot, diagnostic)
+        else
+          yield* NativeDiagnosticOutcome.produce(
+            diagnosticSlot,
+            diagnostic,
+            yield* NativeDiagnosticText.literal(
+              diagnostic,
+              NativeTermination.identityOf(operation.type.type, operation.tag),
+              `${entry.symbol}.failure${operation.destination.ordinal}.identity`,
+            ),
+            yield* NativeDiagnosticText.literal(
+              diagnostic,
+              NativeDiagnosticText.origin(
+                context.termination.module,
+                entry.fn,
                 operation.provenance.span,
               ),
+              `${entry.symbol}.failure${operation.destination.ordinal}.origin`,
             ),
-          ),
-        )
+          )
       }
       const values: Array<Value.Input> = [
         yield* Constant.integerSigned(builder, i32, BigInt(operation.tag)),
@@ -231,7 +297,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const sourceTag = source.at(0)
       if (sourceTag === undefined) throw new RangeError('Effect failure union lost its tag lane')
       let mappedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
-      let site: Value.Input = yield* Constant.integerSigned(builder, i32, 0n)
+      const diagnostic = call.synchronous.diagnostic
+      const diagnosticSlot = diagnostic?.outcomes.get(operation.destination.ordinal)
+      let diagnosticIdentity: readonly [Value.Input, Value.Input] | undefined
+      if (diagnostic !== undefined && diagnosticSlot !== undefined)
+        diagnosticIdentity = [
+          yield* Constant.nullValue(builder, diagnostic.pointer),
+          yield* Constant.integerUnsigned(builder, diagnostic.word, 0n),
+        ]
       for (const [ordinal, mapping] of operation.mappings.entries()) {
         const matches = yield* FunctionBody.integerCompare(
           body,
@@ -240,6 +313,29 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           yield* Constant.integerSigned(builder, i32, BigInt(mapping.source)),
           `effect_failure_union${operation.destination.ordinal}_${ordinal}`,
         )
+        if (diagnostic !== undefined && diagnosticIdentity !== undefined) {
+          const identity = yield* NativeDiagnosticText.literal(
+            diagnostic,
+            NativeTermination.identityOf(operation.type.type, mapping.target),
+            `${entry.symbol}.failure${operation.destination.ordinal}.${ordinal}.identity`,
+          )
+          diagnosticIdentity = [
+            yield* FunctionBody.select(
+              body,
+              matches,
+              identity[0],
+              diagnosticIdentity[0],
+              `failure_identity${ordinal}`,
+            ),
+            yield* FunctionBody.select(
+              body,
+              matches,
+              identity[1],
+              diagnosticIdentity[1],
+              `failure_identity_length${ordinal}`,
+            ),
+          ]
+        }
         mappedTag = yield* FunctionBody.select(
           body,
           matches,
@@ -247,25 +343,26 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           mappedTag,
           `effect_failure_union${operation.destination.ordinal}_${ordinal}_tag`,
         )
-        site = yield* FunctionBody.select(
-          body,
-          matches,
-          yield* Constant.integerSigned(
-            builder,
-            i32,
-            BigInt(
-              NativeTermination.registerFailureSite(
-                context.termination,
-                NativeTermination.identityOf(operation.type.type, mapping.target),
-                operation.provenance.span,
-              ),
-            ),
-          ),
-          site,
-          `effect_failure_union${operation.destination.ordinal}_${ordinal}_site`,
-        )
       }
-      yield* NativeTermination.storeProduced(context.termination, site)
+      if (
+        diagnostic !== undefined &&
+        diagnosticSlot !== undefined &&
+        diagnosticIdentity !== undefined
+      )
+        yield* NativeDiagnosticOutcome.produce(
+          diagnosticSlot,
+          diagnostic,
+          diagnosticIdentity,
+          yield* NativeDiagnosticText.literal(
+            diagnostic,
+            NativeDiagnosticText.origin(
+              context.termination.module,
+              entry.fn,
+              operation.provenance.span,
+            ),
+            `${entry.symbol}.failure${operation.destination.ordinal}.origin`,
+          ),
+        )
       const values: Array<Value.Input> = [
         mappedTag,
         ...(yield* NativeAggregate.failurePayload(
@@ -368,7 +465,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       yield* FunctionBody.branch(body, followingBlock)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
-      yield* NativeTermination.storePropagated(context.termination)
+      yield* NativeTermination.storePropagated(
+        context.termination,
+        operation.outcome,
+        operation.provenance.span,
+      )
       let mappedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
       for (const [ordinal, mapping] of operation.tagMappings.entries()) {
         const source = yield* Constant.integerSigned(builder, i32, BigInt(mapping.source))
@@ -412,28 +513,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           `effect_run${operation.destination.ordinal}_payload`,
         )),
       ]
-      if (entry.suspendable) {
-        yield* NativeSuspension.returnStep(
-          suspension.returns,
-          0n,
-          Object.freeze(returned),
-          'propagated_effect_step',
-        )
-      } else if (returned.length === 1) {
-        const single = returned.at(0)
-        if (single === undefined) throw new RangeError('Effect propagation lost its tag')
-        yield* FunctionBody.returnValue(body, single)
-      } else {
-        yield* FunctionBody.returnValue(
-          body,
-          yield* FunctionBody.buildAggregate(
-            body,
-            entry.resultType,
-            Object.freeze(returned.slice(0, operation.propagationLaneCount)),
-            'propagated_effect',
-          ),
-        )
-      }
+      yield* NativeReturn.complete(
+        suspension.returns,
+        Object.freeze(returned.slice(0, operation.propagationLaneCount)),
+        'propagated_effect',
+        operation.outcome,
+      )
       yield* LlvmBlock.setInsertionPoint(body, followingBlock)
       // Both arms of this outcome dispatch reach here, so neither arm's cached
       // values are readable in the join. Reloading re-roots them at this block.
@@ -532,7 +617,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const sourceOutcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> =
           Object.freeze({ _tag: 'EffectOutcome', type: alternative.type.type })
         const sourceOutcomeLanes = NativeType.lanesFor(types, sourceOutcomeType)
-        const sourceTag = called.at(0)
+        const sourceTag = called.values.at(0)
         if (sourceTag === undefined)
           throw new RangeError('LLVM Effect composite runner lost its outcome tag')
         let mappedTag: Value.Input = sourceTag
@@ -554,7 +639,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         }
         const joined: Array<Value.Input> = [mappedTag]
         for (const [ordinal, targetLane] of joinedOutcomeLanes.slice(1).entries()) {
-          const input = called.at(ordinal + 1)
+          const input = called.values.at(ordinal + 1)
           const sourceLane = sourceOutcomeLanes.at(ordinal + 1)
           joined.push(
             input === undefined || sourceLane === undefined
@@ -568,7 +653,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
                 ),
           )
         }
-        yield* NativeStorage.storeMutable(nativeStorage, operation.outcome, Object.freeze(joined))
+        yield* NativeStorage.storeMutable(
+          nativeStorage,
+          operation.outcome,
+          yield* NativeDiagnosticOutcome.accept(call.synchronous.diagnostic, operation.outcome, {
+            ...called,
+            values: Object.freeze(joined),
+          }),
+        )
         yield* FunctionBody.branch(body, following)
         yield* LlvmBlock.setInsertionPoint(body, otherwise)
       }
@@ -651,7 +743,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       yield* FunctionBody.branch(body, completed)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
-      yield* NativeTermination.storePropagated(context.termination)
+      yield* NativeTermination.storePropagated(
+        context.termination,
+        operation.outcome,
+        operation.provenance.span,
+      )
       let propagatedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
       for (const [ordinal, mapping] of operation.tagMappings.entries()) {
         const matches = yield* FunctionBody.integerCompare(
@@ -692,26 +788,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           `effect_composite${operation.destination.ordinal}_payload`,
         )),
       ]
-      if (entry.suspendable) {
-        yield* NativeSuspension.returnStep(
-          suspension.returns,
-          0n,
-          Object.freeze(returned),
-          'propagated_effect_composite_step',
-        )
-      } else {
-        yield* FunctionBody.returnValue(
-          body,
-          returned.length === 1
-            ? (returned.at(0) ?? propagatedTag)
-            : yield* FunctionBody.buildAggregate(
-                body,
-                entry.resultType,
-                Object.freeze(returned.slice(0, operation.propagationLaneCount)),
-                'propagated_effect_composite',
-              ),
-        )
-      }
+      yield* NativeReturn.complete(
+        suspension.returns,
+        Object.freeze(returned.slice(0, operation.propagationLaneCount)),
+        'propagated_effect_composite',
+        operation.outcome,
+      )
       yield* LlvmBlock.setInsertionPoint(body, completed)
       yield* NativeStorage.reloadRoots(
         nativeStorage,
@@ -801,7 +883,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       const outcomeValues =
         operation._tag === 'RunStaticEffect'
-          ? called
+          ? yield* NativeDiagnosticOutcome.accept(
+              call.synchronous.diagnostic,
+              operation.outcome,
+              called,
+            )
           : yield* NativeSuspension.joinOutcome(
               suspension,
               operation,
@@ -859,7 +945,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       yield* FunctionBody.branch(body, followingBlock)
       yield* LlvmBlock.setInsertionPoint(body, failureBlock)
-      yield* NativeTermination.storePropagated(context.termination)
+      yield* NativeTermination.storePropagated(
+        context.termination,
+        operation.outcome,
+        operation.provenance.span,
+      )
       let mappedTag: Value.Input = yield* Constant.integerSigned(builder, i32, -1n)
       for (const [ordinal, mapping] of operation.tagMappings.entries()) {
         const source = yield* Constant.integerSigned(builder, i32, BigInt(mapping.source))
@@ -903,26 +993,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           `effect_value${operation.destination.ordinal}_payload`,
         )),
       ]
-      if (entry.suspendable) {
-        yield* NativeSuspension.returnStep(
-          suspension.returns,
-          0n,
-          Object.freeze(returned),
-          'propagated_effect_value_step',
-        )
-      } else {
-        yield* FunctionBody.returnValue(
-          body,
-          returned.length === 1
-            ? (returned.at(0) ?? mappedTag)
-            : yield* FunctionBody.buildAggregate(
-                body,
-                entry.resultType,
-                Object.freeze(returned.slice(0, operation.propagationLaneCount)),
-                'propagated_effect_value',
-              ),
-        )
-      }
+      yield* NativeReturn.complete(
+        suspension.returns,
+        Object.freeze(returned.slice(0, operation.propagationLaneCount)),
+        'propagated_effect_value',
+        operation.outcome,
+      )
       yield* LlvmBlock.setInsertionPoint(body, followingBlock)
       // Both arms of this outcome dispatch reach here, so neither arm's cached
       // values are readable in the join. Reloading re-roots them at this block.
@@ -994,21 +1070,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         zero,
         `effect_result_success${operation.destination.ordinal}`,
       )
-      if (context.termination.module.enabled) {
-        const caught = yield* LlvmBlock.make(
-          body,
-          `effect_result_caught${operation.destination.ordinal}`,
-        )
-        const following = yield* LlvmBlock.make(
-          body,
-          `effect_result_following${operation.destination.ordinal}`,
-        )
-        yield* FunctionBody.conditionalBranch(body, succeeded, following, caught)
-        yield* LlvmBlock.setInsertionPoint(body, caught)
-        yield* NativeTermination.storeCaught(context.termination)
-        yield* FunctionBody.branch(body, following)
-        yield* LlvmBlock.setInsertionPoint(body, following)
-      }
       nativeStorage.locals.set(
         operation.destination.ordinal,
         Object.freeze([
@@ -1085,128 +1146,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       nativeStorage.locals.set(operation.failureValue.ordinal, coercedFailureValues)
       yield* NativeStorage.storeMutable(nativeStorage, operation.failureValue, coercedFailureValues)
-      break
-    }
-    case 'CloseEffectEntry': {
-      const target = declared.find((candidate) =>
-        Mir.matchesInstance(candidate.fn, operation.target, operation.typeArguments),
-      )
-      const runner = declared.find((candidate) =>
-        Mir.matchesInstance(candidate.fn, operation.runner, operation.typeArguments),
-      )
-      if (target === undefined || runner === undefined)
-        throw new RangeError('Backend cannot resolve effect entry constructor or runner')
-      const effectValues = yield* NativeCall.callValues(call, target, [], 'effect_entry_make')
-      nativeStorage.locals.set(operation.effect.ordinal, effectValues)
-      const outcomeValues = yield* NativeCall.callValues(
-        call,
-        runner,
-        effectValues,
-        'effect_entry_run',
-      )
-      nativeStorage.locals.set(operation.outcome.ordinal, outcomeValues)
-      const tag = outcomeValues.at(0)
-      if (tag === undefined) throw new RangeError('Effect entry outcome lost its tag')
-      const following = yield* LlvmBlock.make(body, 'effect_entry_following')
-      const success = yield* LlvmBlock.make(body, 'effect_entry_success')
-      const failureDispatch = yield* LlvmBlock.make(body, 'effect_entry_failure')
-      yield* FunctionBody.conditionalBranch(
-        body,
-        yield* FunctionBody.integerCompare(
-          body,
-          'eq',
-          tag,
-          yield* Constant.integerSigned(builder, i32, 0n),
-          'effect_entry_succeeded',
-        ),
-        success,
-        failureDispatch,
-      )
-      yield* LlvmBlock.setInsertionPoint(body, success)
-      yield* NativeStorage.storeMutable(
-        nativeStorage,
-        operation.destination,
-        Object.freeze([yield* Constant.integerSigned(builder, i32, 0n)]),
-      )
-      yield* FunctionBody.branch(body, following)
-      yield* LlvmBlock.setInsertionPoint(body, failureDispatch)
-      for (const [ordinal, failure] of operation.failures.entries()) {
-        const selected = yield* LlvmBlock.make(body, `effect_entry_tag${failure.tag}`)
-        const otherwise = yield* LlvmBlock.make(body, `effect_entry_tag${failure.tag}_otherwise`)
-        yield* FunctionBody.conditionalBranch(
-          body,
-          yield* FunctionBody.integerCompare(
-            body,
-            'eq',
-            tag,
-            yield* Constant.integerSigned(builder, i32, BigInt(failure.tag)),
-            `effect_entry_is_tag${failure.tag}`,
-          ),
-          selected,
-          otherwise,
-        )
-        yield* LlvmBlock.setInsertionPoint(body, selected)
-        const payloadType = entry.fn.localTypes.at(failure.payload.ordinal)
-        if (payloadType === undefined)
-          throw new RangeError('Effect entry failure lost its payload type')
-        const payloadLaneCount = NativeType.lanesFor(types, payloadType).length
-        const payload = outcomeValues.slice(1, 1 + payloadLaneCount)
-        if (payload.length !== payloadLaneCount) {
-          throw new RangeError('Effect entry failure lost its typed payload lanes')
-        }
-        nativeStorage.locals.set(failure.payload.ordinal, Object.freeze(payload))
-        if (CleanupPlan.hasEffect(failure.cleanup)) {
-          yield* NativeAggregate.dropThroughPlan(
-            cleanup,
-            failure.cleanup,
-            Object.freeze(payload),
-            `effect_entry_cleanup${failure.tag}`,
-          )
-        }
-        yield* NativeTermination.storeFailureTag(context.termination, failure.tag)
-        yield* NativeStorage.storeMutable(
-          nativeStorage,
-          operation.destination,
-          Object.freeze([yield* Constant.integerSigned(builder, i32, 1n)]),
-        )
-        yield* FunctionBody.branch(body, following)
-        yield* LlvmBlock.setInsertionPoint(body, otherwise)
-        if (ordinal === operation.failures.length - 1) {
-          yield* FunctionBody.branch(
-            body,
-            yield* NativeTermination.trapBlock(
-              context.termination,
-              'invalid effect outcome tag',
-              operation.provenance.span,
-            ),
-          )
-        }
-      }
-      if (operation.failures.length === 0) {
-        yield* FunctionBody.branch(
-          body,
-          yield* NativeTermination.trapBlock(
-            context.termination,
-            'invalid effect outcome tag',
-            operation.provenance.span,
-          ),
-        )
-      }
-      yield* LlvmBlock.setInsertionPoint(body, following)
-      // The success arm and every failure-tag arm reach here, so no arm's cached
-      // values are readable in the join — and the failure arms run cleanup, which
-      // reloads. Reloading re-roots the cache at this block.
-      yield* NativeStorage.reloadRoots(
-        nativeStorage,
-        `effect_entry${operation.destination.ordinal}_following`,
-      )
-      const storage = nativeStorage.mutableStorage.get(operation.destination.ordinal)
-      const pointer = storage?.at(0)
-      if (pointer === undefined) throw new RangeError('Effect entry status is not materialized')
-      nativeStorage.locals.set(
-        operation.destination.ordinal,
-        Object.freeze([yield* FunctionBody.load(body, i32, pointer, 'effect_entry_status')]),
-      )
       break
     }
   }

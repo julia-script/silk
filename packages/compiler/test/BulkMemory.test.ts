@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -14,7 +15,7 @@ const sourceOf = (name: string): string => {
 
 it.effect('lowers raw-storage copies to defined overlapping moves', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'bulk-memory/copy-range',
       encoder.encode(sourceOf('raw-buffer-copy-range')),
     )
@@ -27,7 +28,7 @@ it.effect('lowers raw-storage copies to defined overlapping moves', () =>
 
 it.effect('lowers raw-storage fills to LLVM memset', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'bulk-memory/fill-range',
       encoder.encode(sourceOf('raw-buffer-fill-range')),
     )

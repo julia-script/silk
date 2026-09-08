@@ -75,20 +75,6 @@ export const instanceText = (
   staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
 ): string => Specialization.runtimeKey({ declaration, typeArguments, staticArguments })
 
-export const effectEntryAdapterId = (module: string): DeclarationFacts.CanonicalId =>
-  Object.freeze({
-    _tag: 'CanonicalDeclarationId',
-    module,
-    name: '$effect-entry',
-  })
-
-export const unitEntryAdapterId = (module: string): DeclarationFacts.CanonicalId =>
-  Object.freeze({
-    _tag: 'CanonicalDeclarationId',
-    module,
-    name: '$unit-entry',
-  })
-
 export const baseRunnerKey = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): string =>
   `${instanceText(owner.declaration, owner.typeArguments, owner.staticArguments)}\u0000${Hir.executableSiteKey(site)}`
 

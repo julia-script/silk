@@ -1,4 +1,10 @@
-import { modules } from './Stdlib.generated.js'
+import { modules, runtimeDefaults, runtimeComponents } from './Stdlib.generated.js'
+
+/** Installed build defaults generated from distribution composition data. */
+export const compositions = Object.freeze({
+  runtimes: runtimeDefaults,
+  components: runtimeComponents,
+})
 
 /** The reserved namespace prefix. User resolvers are never consulted for these identities. */
 export const namespacePrefix = 'silk/'

@@ -14,16 +14,20 @@ import * as Specialization from './Specialization.js'
 import type * as StaticEvaluation from './StaticEvaluation.js'
 import type * as StaticValue from './StaticValue.js'
 import * as SuspensionMode from './SuspensionMode.js'
+import type * as SourceSpan from './SourceSpan.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
 import type * as TypeCompatibility from './TypeCompatibility.js'
 
-type Instance = Omit<Instances.Instance, 'ownership'>
+type Instance = Omit<Instances.Instance, 'ownership'> &
+  Partial<Pick<Instances.Instance, 'ownership'>>
 type InstanceKey = Instances.InstanceKey
 type IntrinsicCall = Instances.IntrinsicCall
 type ForeignCall = Instances.ForeignCall
 
 export interface SuspensionGraph {
+  readonly contextFreeTerminalObservations: ReadonlyArray<SourceSpan.SourceSpan>
+  readonly diagnosticObservations: ReadonlySet<string>
   readonly roots: ReadonlyMap<SuspensionMode.Mode, ReadonlySet<string>>
   readonly dependencies: ReadonlyMap<string, ReadonlySet<string>>
   readonly effectIdentities: ReadonlySet<string>
@@ -201,6 +205,30 @@ export const suspensionSummaries = (
   graph: SuspensionGraph,
 ): ReadonlyMap<string, SuspensionMode.Summary> => SuspensionMode.summarize(graph)
 
+/** Executions that can enter diagnostic observation, including called cleanup hooks. */
+export const observingExecutions = (graph: SuspensionGraph): ReadonlySet<string> => {
+  if (graph.diagnosticObservations.size === 0) return new Set<string>()
+  const callers = new Map<string, Set<string>>()
+  for (const [caller, targets] of graph.dependencies)
+    for (const target of targets) {
+      const incoming = callers.get(target) ?? new Set<string>()
+      incoming.add(caller)
+      callers.set(target, incoming)
+    }
+  const reached = new Set(graph.diagnosticObservations)
+  const pending = [...reached]
+  for (let cursor = 0; cursor < pending.length; cursor += 1) {
+    const node = pending.at(cursor)
+    if (node === undefined) continue
+    for (const caller of callers.get(node) ?? []) {
+      if (reached.has(caller)) continue
+      reached.add(caller)
+      pending.push(caller)
+    }
+  }
+  return reached
+}
+
 export interface Operations {
   readonly specializeInstanceType: (
     type: Type.Type,
@@ -283,7 +311,8 @@ export const make = (operations: Operations) => {
     effectIdentity,
   } = operations
   type InstanceKey = Instances.InstanceKey
-  type Instance = Omit<Instances.Instance, 'ownership'>
+  type Instance = Omit<Instances.Instance, 'ownership'> &
+    Partial<Pick<Instances.Instance, 'ownership'>>
   type CallInstance = Instances.CallInstance
   type CallableInstance = Instances.CallableInstance
   type EffectInstance = Instances.EffectInstance
@@ -335,30 +364,47 @@ export const make = (operations: Operations) => {
   const hookCalls = (
     cleanup: CleanupPlan.CleanupPlan,
     index: DeclarationIndex.Index,
+    includeWitnessDependencies = true,
   ): ReadonlyArray<CallTarget> => {
     switch (cleanup._tag) {
       case 'HookCleanup':
         return [
-          ...witnessDependencyCallTargets(index, cleanup.type, Type.dropCapability),
+          ...(includeWitnessDependencies
+            ? witnessDependencyCallTargets(index, cleanup.type, Type.dropCapability)
+            : []),
           Object.freeze({ declaration: cleanup.hook, typeArguments: cleanup.typeArguments }),
-          ...hookCalls(cleanup.inner, index),
+          ...hookCalls(cleanup.inner, index, includeWitnessDependencies),
         ]
       case 'StructCleanup':
-        return cleanup.fields.flatMap((field) => hookCalls(field.cleanup, index))
+        return cleanup.fields.flatMap((field) =>
+          hookCalls(field.cleanup, index, includeWitnessDependencies),
+        )
       case 'NominalUnionCleanup':
         return cleanup.variants.flatMap((variant) =>
-          variant.fields.flatMap((field) => hookCalls(field.cleanup, index)),
+          variant.fields.flatMap((field) =>
+            hookCalls(field.cleanup, index, includeWitnessDependencies),
+          ),
         )
       case 'ArrayCleanup':
-        return hookCalls(cleanup.element, index)
+        return hookCalls(cleanup.element, index, includeWitnessDependencies)
       case 'UnionCleanup':
-        return cleanup.cases.flatMap((entry) => hookCalls(entry.cleanup, index))
+        return cleanup.cases.flatMap((entry) =>
+          hookCalls(entry.cleanup, index, includeWitnessDependencies),
+        )
       case 'RawBufferCleanup':
-        return hookCalls(cleanup.allocation, index)
+        return hookCalls(cleanup.allocation, index, includeWitnessDependencies)
       case 'CallableCleanup':
-        return cleanup.slots.flatMap((slot) => hookCalls(slot.cleanup, index))
+        return cleanup.slots.flatMap((slot) =>
+          hookCalls(slot.cleanup, index, includeWitnessDependencies),
+        )
       case 'EffectCleanup':
-        return cleanup.slots.flatMap((slot) => hookCalls(slot.cleanup, index))
+        return cleanup.slots.flatMap((slot) =>
+          hookCalls(slot.cleanup, index, includeWitnessDependencies),
+        )
+      case 'EffectCompositeCleanup':
+        return cleanup.alternatives.flatMap((alternative) =>
+          hookCalls(alternative, index, includeWitnessDependencies),
+        )
       default:
         return []
     }
@@ -662,6 +708,14 @@ export const make = (operations: Operations) => {
         provider === undefined || capability === undefined || !Type.isNominal(capability)
           ? []
           : witnessDependencyCallTargets(index, provider, capability)
+      const concreteOperands =
+        expression._tag === 'InterfaceOperationCall' &&
+        expression.witnessEffectSite === undefined &&
+        expression.arguments.some((argument) => {
+          if (argument._tag === 'Unavailable') return false
+          const type = Type.substitute(argument.type, substitution)
+          return Type.isEffect(type) || Type.isCallable(type)
+        })
       // A conditional witness is generic in its header's binders, so the target carries the arguments
       // this specialization proved rather than reaching code through an unsubstituted declaration.
       let own: CallTarget[]
@@ -670,7 +724,7 @@ export const make = (operations: Operations) => {
       } else {
         own = [
           ...dependencies,
-          ...(target === undefined
+          ...(target === undefined || concreteOperands
             ? []
             : [
                 Object.freeze({
@@ -838,6 +892,19 @@ export const make = (operations: Operations) => {
     expression: Hir.Expression,
     context: EffectOriginContext,
   ): Type.CallableIdentityArgument | undefined => {
+    if (expression._tag !== 'Unavailable') {
+      const specialized = Type.substitute(
+        expression.type,
+        context.substitution,
+        context.compatibility,
+      )
+      if (
+        Type.isRepresented(specialized) &&
+        Type.isExactRepresentationArgument(specialized.representation.argument) &&
+        Type.isCallableIdentityArgument(specialized.representation.argument.identity)
+      )
+        return specialized.representation.argument.identity
+    }
     if (expression._tag === 'FunctionItem') {
       const target = Hir.callableTargetIdentity(expression.target)
       const typeArguments = expression.typeArguments.map((argument) =>
@@ -1449,12 +1516,17 @@ export const make = (operations: Operations) => {
     const specialized = Specialization.specializeType(context.owner, expression.type, [
       context.substitution,
     ])
+    const contract = Type.isRepresented(specialized) ? specialized.contract : specialized
+    if (!Type.isEffect(contract)) return undefined
     if (
       Type.isRepresented(specialized) &&
       Type.isEffect(specialized.contract) &&
       Type.isCompositeEffectRepresentationArgument(specialized.representation.argument)
     )
       return specialized.representation.argument
+    const resolution = `composite\0${keyText(context.owner)}\0${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
+    if (context.resolving.has(resolution)) return undefined
+    context = { ...context, resolving: new Set(context.resolving).add(resolution) }
     if (expression._tag === 'BindingReference') {
       const initializer = callableBindings(context.fn).get(expression.binding.ordinal)
       return initializer === undefined
@@ -2077,6 +2149,43 @@ export const make = (operations: Operations) => {
     )
   }
 
+  const interfaceCallOf = (
+    expression: Extract<
+      Hir.Expression,
+      { readonly _tag: 'InterfaceOperationCall' | 'BuiltinCall' }
+    >,
+    context: EffectOriginContext,
+  ): Extract<Hir.Expression, { readonly _tag: 'Call' }> | undefined => {
+    const bound =
+      expression._tag === 'InterfaceOperationCall' ? expression : expression.interfaceOperation
+    if (bound === undefined || expression.witnessEffectSite !== undefined) return undefined
+    const capability = Type.substitute(
+      bound.capability,
+      context.substitution,
+      context.compatibility,
+    )
+    if (!Type.isNominal(capability)) return undefined
+    const witness = ConformanceProof.interfaceWitnessTarget(
+      context.index,
+      Type.substitute(bound.provider, context.substitution, context.compatibility),
+      capability,
+      bound.operation,
+    )
+    if (witness === undefined) return undefined
+    return {
+      _tag: 'Call',
+      target: witness.implementation,
+      typeArguments: witness.typeArguments,
+      evidence: [],
+      staticArguments: [],
+      arguments: expression.arguments,
+      loanEnds: expression.loanEnds,
+      heldLoans: expression._tag === 'BuiltinCall' ? expression.heldLoans : [],
+      type: expression.type,
+      span: expression.span,
+    }
+  }
+
   const directCallInstances = (
     fn: Hir.HirFunction,
     owner: InstanceKey,
@@ -2141,6 +2250,21 @@ export const make = (operations: Operations) => {
       },
     }
     expressions.forEach((expression) => {
+      if (
+        (expression._tag === 'InterfaceOperationCall' || expression._tag === 'BuiltinCall') &&
+        expression.witnessEffectSite === undefined
+      ) {
+        const call = interfaceCallOf(expression, context)
+        if (call === undefined) return
+        if (!carriesHiddenIdentity(call, substitution)) return
+        const ordinal = expressionOrder.get(expression)
+        if (ordinal === undefined) return
+        // Use the ordinary call-origin machinery to preserve executable operand identities.
+        // The synthetic call shares its authored interface call's place in discovery order.
+        expressionOrder.set(call, ordinal)
+        targetKeyOfCall(call, context)
+        return
+      }
       if (expression._tag === 'CallableApply') {
         targetKeyOfCallableApply(expression, context)
         return
@@ -3049,12 +3173,34 @@ export const make = (operations: Operations) => {
     index: DeclarationIndex.Index,
   ): SuspensionGraph => {
     const nestedRoots = new Set<string>()
+    const diagnosticObservations = new Set<string>()
+    const recoveryExecutions = new Set<string>()
+    const unresolvedDiagnosticExecutions = new Set<string>()
+    const readinessExecutions = new Set<string>()
+    const readinessCallbacks = new Set<string>()
+    let unresolvedReadiness = false
+    const terminalObservations: Array<{
+      readonly execution: string
+      readonly span: SourceSpan.SourceSpan
+    }> = []
+    let unresolvedRecovery = false
     const externalRoots = new Set<string>()
     const dependencies = new Map<string, Set<string>>()
+    const diagnosticDependencies = new Map<string, Set<string>>()
     const effectIdentities = new Set<string>()
     const permitted = new Map<string, Set<SuspensionMode.Mode>>()
     const unavailable = new Set<string>()
     const providedTargets = new Map<string, SuspensionGraph['providedTargets'][number]>()
+    let cleanupEffects: ReadonlyMap<string, EffectInstance> | undefined
+    const effectForCleanup = (identity: string): EffectInstance | undefined => {
+      cleanupEffects ??= new Map(
+        concreteEffects(instances, new Map(), results, index, []).map((effect) => [
+          effect.identity,
+          effect,
+        ]),
+      )
+      return cleanupEffects.get(identity)
+    }
     // A constructor carrying service Effects has no concrete argument identity until traversal
     // reaches it with a lexical provider. Keep that dependency so discovery can revisit the call.
     const deferredCalls = new Map<
@@ -3139,10 +3285,19 @@ export const make = (operations: Operations) => {
         expressions.flatMap((expression) => serviceEffectRecipes(expression, recipeContext)),
       )
     }
-    const addDependency = (owner: string, target: string): void => {
+    const addDependency = (
+      owner: string,
+      target: string,
+      diagnosticContext: 'Inherited' | 'Independent' = 'Inherited',
+    ): void => {
       const targets = dependencies.get(owner) ?? new Set<string>()
       targets.add(target)
       dependencies.set(owner, targets)
+      if (diagnosticContext === 'Inherited') {
+        const inherited = diagnosticDependencies.get(owner) ?? new Set<string>()
+        inherited.add(target)
+        diagnosticDependencies.set(owner, inherited)
+      }
     }
     const executionNodeForKey = (key: InstanceKey): string => {
       const result = instances.find(
@@ -3252,6 +3407,65 @@ export const make = (operations: Operations) => {
             )
       }
 
+      const callableApplicationTarget = (expression: Hir.Expression): string | undefined => {
+        const origin = callableOriginOf(expression, context)
+        if (origin?.target._tag !== 'Declaration') return undefined
+        const declaration: DeclarationFacts.CanonicalId = Object.freeze({
+          _tag: 'CanonicalDeclarationId',
+          module: origin.target.module,
+          name: origin.target.name,
+        })
+        const target = targetFunction(results, declaration)
+        const arguments_ =
+          target === undefined ? undefined : callableTargetArguments(target, origin.typeArguments)
+        if (target === undefined || arguments_ === undefined) return undefined
+        return instanceNode(
+          keyOf(
+            declaration,
+            target.contract,
+            target.declaration.typeParameters.map((parameter) => parameter.type),
+            arguments_,
+          ),
+        )
+      }
+      const addBuiltinCallbacks = (
+        expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+        execution: string,
+      ): void => {
+        let ordinals: ReadonlyArray<number>
+        switch (expression.operation) {
+          case 'ExecutionDrive':
+            ordinals = [2, 3]
+            break
+          case 'ExecutionPark':
+            ordinals = [0]
+            break
+          case 'SharedWithMut':
+            ordinals = [1, 2]
+            break
+          default:
+            ordinals = []
+        }
+        for (const ordinal of ordinals) {
+          const argument = expression.arguments.at(ordinal)
+          const target = argument === undefined ? undefined : callableApplicationTarget(argument)
+          if (target === undefined) unresolvedDiagnosticExecutions.add(execution)
+          else addDependency(execution, target)
+        }
+        if (
+          expression.operation === 'ExecutionDrive' ||
+          expression.operation === 'ExecutionNotifyInitial' ||
+          expression.operation === 'ExecutionWake'
+        )
+          readinessExecutions.add(execution)
+        if (expression.operation === 'ExecutionFromAllocation') {
+          const callback = expression.arguments.at(3)
+          const target = callback === undefined ? undefined : callableApplicationTarget(callback)
+          if (target === undefined) unresolvedReadiness = true
+          else readinessCallbacks.add(target)
+        }
+      }
+
       const executionTargets = (expression: Hir.Expression): ReadonlyArray<string> => {
         if (expression._tag === 'EffectBindRequirement')
           return Object.freeze([providerBindingNode(instance.key, expression)])
@@ -3298,11 +3512,33 @@ export const make = (operations: Operations) => {
             const identity = effectIdentity(instance.key, site)
             const execution = effectNode(identity)
             effectIdentities.add(identity)
+            addBuiltinCallbacks(expression, execution)
             if (expression.operation === 'EffectSuspend') nestedRoots.add(execution)
             else if (expression.operation === 'ExecutionPark') externalRoots.add(execution)
-            for (const argument of expression.arguments)
+            else if (expression.operation === 'EffectObserveDiagnostics') {
+              diagnosticObservations.add(execution)
+              // Scope exit restores the enclosing context before either owner is dropped.
+              for (const argument of expression.arguments.slice(0, 2)) {
+                if (argument._tag === 'Unavailable') continue
+                addCleanup(
+                  CleanupPlan.cleanupPlan(
+                    index,
+                    Type.substitute(argument.type, instance.substitution, context.compatibility),
+                  ),
+                  execution,
+                )
+              }
+            }
+            for (const [ordinal, argument] of expression.arguments.entries())
               for (const target of executionTargets(argument))
-                if (target !== execution) addDependency(execution, target)
+                if (target !== execution)
+                  addDependency(
+                    execution,
+                    target,
+                    expression.operation === 'EffectObserveDiagnostics' && ordinal === 2
+                      ? 'Independent'
+                      : 'Inherited',
+                  )
             return Object.freeze([execution])
           }
         }
@@ -3441,6 +3677,61 @@ export const make = (operations: Operations) => {
         }
       }
 
+      const cleanupRegions = new Map<number, string>()
+      const addCleanup = (cleanup: CleanupPlan.CleanupPlan, execution: string): void => {
+        for (const hook of hookCalls(cleanup, index, false)) {
+          const target = targetFunction(results, hook.declaration)
+          if (target === undefined) continue
+          const targetKey = keyOf(
+            hook.declaration,
+            target.contract,
+            target.declaration.typeParameters.map((parameter) => parameter.type),
+            hook.typeArguments.map((argument) =>
+              Type.substituteGenericArgument(
+                argument,
+                instance.substitution,
+                instance.specialization.compatibility,
+              ),
+            ),
+          )
+          addDependency(execution, instanceNode(targetKey))
+        }
+      }
+      const recordRegions = (statement: Hir.Statement, execution: string): void => {
+        cleanupRegions.set(statement.region.ordinal, execution)
+        if (statement._tag === 'Unsafe') {
+          for (const child of statement.statements) recordRegions(child, execution)
+        } else if (statement._tag === 'While') {
+          for (const child of statement.body) recordRegions(child, execution)
+        } else if (statement._tag === 'If') {
+          for (const child of [...statement.taken, ...statement.otherwise])
+            recordRegions(child, execution)
+        } else if (statement._tag === 'Drop' && statement.expression._tag !== 'Unavailable') {
+          addCleanup(
+            CleanupPlan.cleanupPlan(
+              index,
+              Type.substitute(statement.expression.type, instance.substitution),
+            ),
+            execution,
+          )
+          for (const identity of effectOrigins(statement.expression))
+            addOwnedEffectCleanup(identity, execution)
+        }
+      }
+      const addOwnedEffectCleanup = (
+        identity: string,
+        execution: string,
+        visited: ReadonlySet<string> = new Set(),
+      ): void => {
+        if (visited.has(identity)) return
+        const next = new Set(visited).add(identity)
+        for (const capture of effectForCleanup(identity)?.captures ?? []) {
+          if (capture.access === 'Shared' || capture.access === 'Exclusive') continue
+          addCleanup(CleanupPlan.cleanupPlan(index, capture.type), execution)
+          if (capture.effectIdentity !== undefined)
+            addOwnedEffectCleanup(capture.effectIdentity, execution, next)
+        }
+      }
       const scanExpression = (expression: Hir.Expression, execution: string): void => {
         if (expression._tag === 'EffectBlock') {
           const identity = effectIdentity(instance.key, expression.site)
@@ -3480,10 +3771,17 @@ export const make = (operations: Operations) => {
               target === undefined || targetKey === undefined
                 ? undefined
                 : resultEffectIdentity(target, targetKey, results, index)
-            if (handlerEffect !== undefined)
+            // Both applying the handler and running its returned Effect inherit the selected
+            // failure. Seeding both is conservative when construction itself performs work.
+            if (targetKey !== undefined) recoveryExecutions.add(instanceNode(targetKey))
+            else unresolvedRecovery = true
+            if (handlerEffect !== undefined) {
+              recoveryExecutions.add(effectNode(handlerEffect))
               addDependency(catchExecution, effectNode(handlerEffect))
-            else if (targetKey !== undefined) addDependency(catchExecution, instanceNode(targetKey))
+            } else if (targetKey !== undefined)
+              addDependency(catchExecution, instanceNode(targetKey))
           }
+          if (handler?.target._tag !== 'Declaration') unresolvedRecovery = true
           scanExpression(expression.protected, catchExecution)
           scanExpression(expression.handler, catchExecution)
           return
@@ -3542,12 +3840,38 @@ export const make = (operations: Operations) => {
         ) {
           for (const target of executionTargets(expression)) addDependency(execution, target)
         } else if (expression._tag === 'BuiltinCall') {
-          for (const target of executionTargets(expression)) addDependency(execution, target)
+          const selectedCall = interfaceCallOf(expression, context)
+          if (selectedCall !== undefined) {
+            const target = targetKeyOfCall(selectedCall, context)
+            addDependency(
+              execution,
+              target === undefined ? deferredCallNode(selectedCall) : instanceNode(target),
+            )
+          }
+          if (expression.operation === 'EffectObserveUnhandled')
+            terminalObservations.push(Object.freeze({ execution, span: expression.span }))
+          const targets = executionTargets(expression)
+          if (!Type.isEffect(Type.substitute(expression.type, instance.substitution)))
+            addBuiltinCallbacks(expression, execution)
+          // Observation starts when its returned Effect runs. Construction only records the
+          // deferred node; argument evaluation is still scanned in the enclosing execution.
+          if (expression.operation !== 'EffectObserveDiagnostics')
+            for (const target of targets) addDependency(execution, target)
+        } else if (expression._tag === 'InterfaceOperationCall') {
+          const selectedCall = interfaceCallOf(expression, context)
+          if (selectedCall !== undefined) {
+            const target = targetKeyOfCall(selectedCall, context)
+            addDependency(
+              execution,
+              target === undefined ? deferredCallNode(selectedCall) : instanceNode(target),
+            )
+          }
         } else if (expression._tag === 'ServiceEffectConstruct') {
           for (const target of executionTargets(expression)) addDependency(execution, target)
         } else if (expression._tag === 'CallableApply') {
           const target = targetKeyOfCallableApply(expression, context)
           if (target !== undefined) addDependency(execution, instanceNode(target))
+          else unresolvedDiagnosticExecutions.add(execution)
           recordForwardedCallableServiceTargets(expression, execution)
         } else if (expression._tag === 'Run') {
           if (isSuspensionSubject(expression.subject)) {
@@ -3555,8 +3879,9 @@ export const make = (operations: Operations) => {
           } else if (isExternalParkSubject(expression.subject)) {
             externalRoots.add(execution)
           } else {
-            for (const target of executionTargets(expression.subject))
-              addDependency(execution, target)
+            const targets = executionTargets(expression.subject)
+            if (targets.length === 0) unresolvedDiagnosticExecutions.add(execution)
+            for (const target of targets) addDependency(execution, target)
           }
         }
         for (const child of Hir.expressionChildren(expression)) scanExpression(child, execution)
@@ -3566,11 +3891,42 @@ export const make = (operations: Operations) => {
         execution: string,
       ): void => {
         for (const statement of statements) {
+          recordRegions(statement, execution)
           for (const expression of Hir.statementExpressions(statement))
             scanExpression(expression, execution)
         }
       }
       scanStatements(instance.function.statements, instanceNode(instance.key))
+      // Cleanup executes in the region that exits, including deferred Effect regions.
+      // Merely constructing a lazy Effect must not execute that body's destructors.
+      for (const exit of instance.ownership?.exits ?? []) {
+        const execution =
+          exit.region === undefined ? undefined : cleanupRegions.get(exit.region.ordinal)
+        if (execution === undefined) continue
+        for (const release of [...exit.releases, ...exit.temporaries])
+          addCleanup(release.cleanup, execution)
+        for (const release of exit.releases) {
+          const site = release.binding.site
+          if (site._tag === 'Let') {
+            const initializer = bindings.get(site.binding.ordinal)
+            for (const identity of initializer === undefined ? [] : effectOrigins(initializer))
+              addOwnedEffectCleanup(identity, execution)
+          } else if (site._tag === 'Parameter') {
+            const identity = parameterEffectIdentity(
+              instance.function,
+              instance.key,
+              site.parameter.ordinal,
+            )
+            if (identity !== undefined) addOwnedEffectCleanup(identity, execution)
+          }
+        }
+        for (const match of exit.matches)
+          for (const entry of match.cleanup) addCleanup(entry.cleanup, execution)
+      }
+      for (const replacement of instance.ownership?.replacements ?? []) {
+        const execution = cleanupRegions.get(replacement.region.ordinal)
+        if (execution !== undefined) addCleanup(replacement.cleanup, execution)
+      }
     }
 
     interface ProviderTraversal {
@@ -3697,11 +4053,46 @@ export const make = (operations: Operations) => {
     }
     for (const [owner, target] of selectedEdges) addDependency(owner, target)
 
+    // Package readiness is selected dynamically. Every retained endpoint is a possible
+    // target, while the independently started body is never an inherited-context edge.
+    for (const execution of readinessExecutions) {
+      for (const callback of readinessCallbacks) addDependency(execution, callback)
+      if (unresolvedReadiness) unresolvedDiagnosticExecutions.add(execution)
+    }
+
+    // A fresh observer's protected execution cannot inherit the enclosing selected
+    // failure. Argument construction and owner cleanup remain in the enclosing context.
+    // Unresolved execution prevents an absence proof rather than guessing a target.
+    const potentiallySelected = new Set(recoveryExecutions)
+    const pendingSelected = [...potentiallySelected]
+    for (let ordinal = 0; ordinal < pendingSelected.length; ordinal++) {
+      const execution = pendingSelected[ordinal]
+      if (execution === undefined) continue
+      for (const target of diagnosticDependencies.get(execution) ?? []) {
+        if (potentiallySelected.has(target)) continue
+        potentiallySelected.add(target)
+        pendingSelected.push(target)
+      }
+    }
+    const contextFreeTerminalObservations = Object.freeze(
+      unresolvedRecovery ||
+        [...potentiallySelected].some(
+          (execution) =>
+            unresolvedDiagnosticExecutions.has(execution) || deferredCalls.has(execution),
+        )
+        ? []
+        : terminalObservations
+            .filter(({ execution }) => !potentiallySelected.has(execution))
+            .map(({ span }) => span),
+    )
+
     return Object.freeze({
+      contextFreeTerminalObservations,
       roots: new Map<SuspensionMode.Mode, ReadonlySet<string>>([
         ['NestedTransfer', nestedRoots],
         ['ExternalPark', externalRoots],
       ]),
+      diagnosticObservations,
       dependencies,
       effectIdentities,
       permitted,

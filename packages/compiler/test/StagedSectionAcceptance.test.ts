@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -12,7 +13,7 @@ pub fn main() -> i32 {
   let withThree = combine(3)
   return withThree(1, 2, 4)
 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'staged-section/too-many',
       ascii(source),
       'wasm32-unknown-unknown',

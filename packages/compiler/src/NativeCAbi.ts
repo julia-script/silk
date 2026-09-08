@@ -17,6 +17,7 @@ export const attributes = Effect.fn('NativeCAbi.attributes')(function* (
     functionAttributes.push(yield* Attribute.integer(builder, 'memory', effects))
   }
   if (contract.noReturn) functionAttributes.push(yield* Attribute.flag(builder, 'noreturn'))
+  let hasSlotAttributes = false
   const group = Effect.fnUntraced(function* (type: CAbi.CAbiType, ordinal: number) {
     const entries: Array<Attribute.Attribute> = []
     if (type._tag === 'Integer' && type.extension !== 'None')
@@ -33,11 +34,15 @@ export const attributes = Effect.fn('NativeCAbi.attributes')(function* (
       }
       if (contract.returned === ordinal) entries.push(yield* Attribute.flag(builder, 'returned'))
     }
+    if (entries.length > 0) hasSlotAttributes = true
     return yield* Attribute.set(builder, entries)
   })
+  const returnAttributes = yield* group(signature.result, -1)
+  const parameterAttributes = yield* Effect.forEach(signature.parameters, group)
+  if (functionAttributes.length === 0 && !hasSlotAttributes) return undefined
   return yield* Attribute.functionSet(builder, {
     functionAttributes: yield* Attribute.set(builder, functionAttributes),
-    returnAttributes: yield* group(signature.result, -1),
-    parameterAttributes: yield* Effect.forEach(signature.parameters, group),
+    returnAttributes,
+    parameterAttributes,
   })
 })

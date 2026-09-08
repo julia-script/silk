@@ -14,17 +14,45 @@ import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeSuspension from './NativeSuspension.js'
 import * as NativeType from './NativeType.js'
+import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
+import * as NativeResult from './NativeResult.js'
 
 export interface DeclaredTarget {
   readonly handle: FunctionActor.Function
   readonly resultLaneCount: number
+  readonly diagnosticResult?: LlvmType.Type
   readonly suspendable: boolean
+  readonly diagnosticParameter?: number
 }
 
 export interface SynchronousContext {
   readonly body: FunctionBody.FunctionBody
   readonly storage: NativeStorage.Context
+  readonly diagnostic?: NativeDiagnosticContext.NativeDiagnosticContext
 }
+
+/** Ordinary calls inherit observation; independently owned execution bodies start a fresh root. */
+export const argumentsFor = Effect.fnUntraced(function* (
+  context: Pick<SynchronousContext, 'diagnostic'>,
+  target: Pick<DeclaredTarget, 'diagnosticParameter'>,
+  arguments_: ReadonlyArray<Value.Input>,
+  observation: 'Inherited' | 'Independent' = 'Inherited',
+) {
+  if (target.diagnosticParameter === undefined) return arguments_
+  if (context.diagnostic === undefined)
+    throw new RangeError('Native call lost its invocation diagnostic context')
+  if (arguments_.length !== target.diagnosticParameter)
+    throw new RangeError('Native call diagnostic argument is not after its source parameters')
+  return Object.freeze([
+    ...arguments_,
+    observation === 'Independent'
+      ? yield* Constant.nullValue(context.diagnostic.builder, context.diagnostic.pointer)
+      : yield* NativeDiagnosticContext.current(context.diagnostic),
+    observation === 'Independent'
+      ? yield* Constant.nullValue(context.diagnostic.builder, context.diagnostic.causeType)
+      : yield* NativeDiagnosticContext.currentCause(context.diagnostic),
+  ])
+})
 
 /** Calls one synchronous native target and unpacks its ABI result lanes. */
 export const callSynchronous = Effect.fnUntraced(function* (
@@ -32,19 +60,27 @@ export const callSynchronous = Effect.fnUntraced(function* (
   target: DeclaredTarget,
   arguments_: ReadonlyArray<Value.Input>,
   name: string,
-): Effect.fn.Return<ReadonlyArray<Value.Input>, LlvmError.LlvmError> {
+): Effect.fn.Return<NativeResult.NativeResult, LlvmError.LlvmError> {
   if (target.suspendable)
     throw new RangeError('LLVM synchronous helper selected a suspendable target')
-  const result = yield* FunctionBody.callDirect(context.body, target.handle, arguments_, name)
+  const result = yield* FunctionBody.callDirect(
+    context.body,
+    target.handle,
+    yield* argumentsFor(context, target, arguments_),
+    name,
+  )
   for (const root of [...context.storage.addressRoots].sort((left, right) => left - right))
     yield* NativeStorage.reloadAddressRoot(context.storage, root)
-  if (target.resultLaneCount === 0) return Object.freeze([])
-  if (result === undefined) throw new RangeError('Backend call produced no value')
-  if (target.resultLaneCount === 1) return Object.freeze([result])
-  const values: Array<Value.Input> = []
-  for (let lane = 0; lane < target.resultLaneCount; lane += 1)
-    values.push(yield* FunctionBody.extractValue(context.body, result, [lane], `${name}_${lane}`))
-  return Object.freeze(values)
+  const unpacked = yield* NativeResult.unpack(
+    context.body,
+    {
+      resultLaneCount: target.resultLaneCount,
+      diagnosticResult: target.diagnosticResult !== undefined,
+    },
+    result,
+    name,
+  )
+  return unpacked
 })
 
 /** Runtime inputs consumed by an Effect execution operation. */
@@ -151,6 +187,43 @@ export const retainRelay = Effect.fnUntraced(function* (
       `${name}_store_resume`,
     ),
   )
+  if (entry.diagnosticParameter !== undefined) {
+    const diagnostic = context.synchronous.diagnostic
+    if (diagnostic === undefined) throw new RangeError('Relay lost its diagnostic context')
+    yield* FunctionBody.store(
+      body,
+      yield* NativeDiagnosticContext.current(diagnostic),
+      yield* NativeLanePointer.lanePointer(
+        lanePointers,
+        body,
+        frame,
+        program.layout.target.pointerSize * 2,
+        `${name}_store_observer`,
+      ),
+    )
+    yield* FunctionBody.store(
+      body,
+      diagnostic.incomingCause,
+      yield* NativeLanePointer.lanePointer(
+        lanePointers,
+        body,
+        frame,
+        program.layout.target.pointerSize * 3,
+        `${name}_incoming_cause`,
+      ),
+    )
+    yield* FunctionBody.store(
+      body,
+      yield* NativeDiagnosticContext.currentCause(diagnostic),
+      yield* NativeLanePointer.lanePointer(
+        lanePointers,
+        body,
+        frame,
+        program.layout.target.pointerSize * 9,
+        `${name}_current_cause`,
+      ),
+    )
+  }
   for (const field of generated.layout.payload) {
     const values = NativeStorage.readLocal(storage, field.local)
     const type = entry.fn.localTypes.at(field.local.ordinal)
@@ -203,7 +276,7 @@ export const callValues = Effect.fnUntraced(function* (
     body,
     target.handle,
     [
-      ...arguments_,
+      ...(yield* argumentsFor(context.synchronous, target, arguments_)),
       transferPointer,
       nullPointer,
       yield* Constant.integerUnsigned(builder, i32, 0n),
@@ -211,6 +284,10 @@ export const callValues = Effect.fnUntraced(function* (
     name,
   )
   if (result === undefined) throw new RangeError('LLVM suspension step produced no value')
+  // The callee may mutate borrowed state before transferring. Refresh it before either
+  // consuming a completed result or spilling the caller's continuation payload.
+  for (const root of [...storage.addressRoots].sort((left, right) => left - right))
+    yield* NativeStorage.reloadAddressRoot(storage, root)
   const status = yield* FunctionBody.extractValue(body, result, [0], `${name}_status`)
   const completed = yield* LlvmBlock.make(body, `${name}_complete`)
   const transferred = yield* LlvmBlock.make(body, `${name}_transfer`)
@@ -247,12 +324,15 @@ export const callValues = Effect.fnUntraced(function* (
   yield* LlvmBlock.setInsertionPoint(body, nested)
   yield* NativeSuspension.returnStep(context.returns, 1n, Object.freeze([]), `${name}_relayed`)
   yield* LlvmBlock.setInsertionPoint(body, completed)
-  for (const root of [...storage.addressRoots].sort((left, right) => left - right)) {
-    yield* NativeStorage.reloadAddressRoot(storage, root)
-  }
-  const values: Array<Value.Input> = []
-  for (let lane = 0; lane < target.resultLaneCount; lane += 1) {
-    values.push(yield* FunctionBody.extractValue(body, result, [lane + 1], `${name}_${lane}`))
-  }
-  return Object.freeze(values)
+  const unpacked = yield* NativeResult.unpack(
+    body,
+    {
+      resultLaneCount: target.resultLaneCount,
+      diagnosticResult: target.diagnosticResult !== undefined,
+    },
+    result,
+    name,
+    'SuspensionStep',
+  )
+  return unpacked
 })

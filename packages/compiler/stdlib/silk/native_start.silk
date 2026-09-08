@@ -1,0 +1,149 @@
+//! Source-owned startup for a hosted native executable.
+//!
+//! # When to use
+//!
+//! Select this module as the runtime root for Darwin ARM64 or GNU Linux x86-64/ARM64.
+//! It supplies the platform C main entry and calls the explicitly selected application module.
+//!
+//! # Details
+//!
+//! The application returns i32, unit, or an Effect producing unit. The Effect may require mutable
+//! HostInput; startup provides an owned argument/environment snapshot. Other requirements must
+//! be supplied by application source. Returned and directly authored Effects use the same policy.
+//!
+//! Application execution owns a 64-node diagnostic pool with 4096 output bytes and 32 frames.
+//! Initialization uses allocation-free fallback diagnostics. Typed failures return status 1 after
+//! payload cleanup, even when reporting cannot allocate or write. Fatal traps do not unwind.
+//!
+//! # Gotchas
+//!
+//! Startup supplies no scheduler or event loop. A park-capable application must establish its own
+//! execution owner; the application closure is checked with Intrinsic.NonParking.
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText(
+  "libc",
+) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
+  "libc",
+) == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import Intrinsic.application as app
+
+  import silk.effect {Effect}
+
+  import silk.native_diagnostics {NativeDiagnostics}
+
+  import silk.native_report {NativeReport}
+
+  import silk.usize as usize
+
+  import silk.host_input {HostInput, HostInputError}
+
+  import silk.native_host_input {NativeHostInput}
+
+  import silk.os_host_input {OsHostInput}
+  struct Application<T> {}
+  interface EntryResult<T> {
+    fn code(value: T, inputs: &mut OsHostInput) -> i32
+  }
+  impl EntryResult<i32> for Application<i32> {
+    fn code(value: i32, inputs: &mut OsHostInput) -> i32 {
+      return value
+    }
+  }
+  impl EntryResult<()> for Application<()> {
+    fn code(value: (), inputs: &mut OsHostInput) -> i32 {
+      return 0
+    }
+  }
+  effect fn failed<E>(error: E) -> i32 {
+    drop error
+    return usize.toI32(Intrinsic.observeUnhandled())
+  }
+  effect fn succeeded(value: ()) -> i32 {
+    return 0
+  }
+  impl<'env, E> EntryResult<Effect<'env; () ! E>> for Application<Effect<'env; () ! E>> {
+    fn code(value: Effect<'env; () ! E>, inputs: &mut OsHostInput) -> i32 {
+      let computation = Effect.flatMap(move value, succeeded)
+      return run Effect.catchAll(move computation, failed)
+    }
+  }
+  impl<'env, E> EntryResult<Effect<'env; () ! E ? &mut HostInput>> for Application<
+    Effect<'env; () ! E ? &mut HostInput>,
+  > {
+    fn code(value: Effect<'env; () ! E ? &mut HostInput>, inputs: &mut OsHostInput) -> i32 {
+      let supplied = Effect.provideMut<HostInput>(move value, move inputs)
+      let computation = Effect.flatMap(move supplied, succeeded)
+      return run Effect.catchAll(move computation, failed)
+    }
+  }
+  fn select<T>(value: &T) -> Application<T> {
+    return Application<T> {}
+  }
+  fn adapt<T, P: EntryResult<T>>(value: T, provider: P, inputs: &mut OsHostInput) -> i32 {
+    return EntryResult<T>.code(move value, inputs)
+  }
+
+  import silk.allocator {Allocator, OutOfMemoryError}
+
+  import silk.execution {Execution}
+  struct EntrySuspended {}
+  struct Status {
+    complete: bool
+    code: i32
+  }
+  fn ready(state: &()) -> () {}
+  fn complete(state: &mut Status, code: i32) -> () {
+    state.complete = true
+    state.code = code
+  }
+  fn suspended(state: &mut Status, execution: Intrinsic.Execution<i32>) -> () {
+    drop execution
+    return ()
+  }
+  fn application(inputs: OsHostInput) -> i32 {
+    let mut host = move inputs
+    let value = app.main()
+    let provider = select(&value)
+    return adapt(move value, move provider, &mut host)
+  }
+  fn invoke<F: fn<'static>(OsHostInput) -> i32 + Intrinsic.NonParking>(body: F, inputs: OsHostInput) -> i32 {
+    return body(move inputs)
+  }
+  effect fn observedApplication(inputs: OsHostInput) -> i32 {
+    let observer = run NativeDiagnostics.make(NativeReport.make(2, 4096, 32), 64)
+    return run NativeDiagnostics.observe(
+      move observer,
+      effect {
+        return invoke(application, move inputs)
+      },
+    )
+  }
+  effect fn start(argc: i32, argv: [*]const ?[*]const u8) -> i32
+  ! HostInputError | OutOfMemoryError | EntrySuspended {
+    let mut allocator = Allocator.systemAllocatorProvider()
+    let inputs = run unsafe NativeHostInput.captureProcess(argc, argv)
+      |> Effect.provideMut<Allocator>(&mut allocator)
+    let provider = OsHostInput.make(move inputs)
+    let execution = run Execution.make(observedApplication(move provider), (), ready)
+      |> Effect.provideMut<Allocator>(&mut allocator)
+    let mut status = Status {complete: false, code: 0}
+    run Execution.drive(move execution, &mut status, complete, suspended)
+    if status.complete == false {
+      fail EntrySuspended {}
+    }
+    return status.code
+  }
+  effect fn startup(argc: i32, argv: [*]const ?[*]const u8) -> i32 {
+    return run Effect.catchAll(start(argc, argv), failed)
+  }
+  /// Receives the platform C process inputs and returns the source startup policy.
+  ///
+  /// # Details
+  ///
+  /// The platform must supply the standard main argument-vector contract. Initialization failures
+  /// return status 1 after best-effort reporting. Application status is returned unchanged.
+  export "C" fn enter(argc: i32, argv: [*]const ?[*]const u8) -> i32 as "main" {
+    let observer = run NativeDiagnostics.make(NativeReport.make(2, 4096, 32), 0)
+    return run NativeDiagnostics.observe(move observer, startup(argc, argv))
+  }
+}

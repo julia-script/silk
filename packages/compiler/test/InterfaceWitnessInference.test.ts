@@ -12,6 +12,28 @@ const binder = (
   representationBound?: Type.RepresentationBound,
 ): Type.Parameter => Type.parameter(owner, ordinal, name, kind, representationBound)
 
+it('retains identical open failure-row evidence in a nominal witness receiver', () => {
+  const failure = binder(0, 'E')
+  const receiver = Type.nominal('witness-inference', 'Entry', [
+    Type.effect(Type.unit, [failure], {
+      environment: Lifetime.staticLifetime,
+      lifetimeBinders: [],
+    }),
+  ])
+  const evidence = { label: 'receiver', pattern: receiver, actual: receiver }
+  const inferred = InterfaceWitnessInference.infer([failure], [evidence])
+  assert.strictEqual(inferred._tag, 'Inferred')
+  if (inferred._tag === 'Inferred') assert.deepEqual(inferred.arguments, [failure])
+
+  const conflicting = InterfaceWitnessInference.infer(
+    [failure],
+    [{ label: 'earlier', pattern: failure, actual: 'i32' }, evidence],
+  )
+  assert.strictEqual(conflicting._tag, 'Failed')
+  if (conflicting._tag === 'Failed')
+    assert.strictEqual(conflicting.problem._tag, 'ConflictingBinder')
+})
+
 it('infers type, row, callable, and Effect representation binders in declaration order', () => {
   const value = binder(0, 'T')
   const failures = binder(1, 'E')

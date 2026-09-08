@@ -1,6 +1,7 @@
 import * as Analysis from '@silklang/compiler/Analysis'
 import * as DeclarationFacts from '@silklang/compiler/DeclarationFacts'
 import * as Presentation from '@silklang/compiler/Presentation'
+import * as Type from '@silklang/compiler/Type'
 import * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
 import type * as SourceFile from '@silklang/compiler/SourceFile'
 import type * as SyntaxTree from '@silklang/compiler/SyntaxTree'
@@ -572,6 +573,16 @@ const conformanceItem = (
   conformance: DeclarationFacts.ConformanceFact,
 ): Item => {
   const id = `${module}::implementation:${conformance.ordinal}`
+  const index = Analysis.declarationIndex(snapshot)
+  const privateHead = [conformance.capability, conformance.provider].some(
+    (head) =>
+      head._tag === 'Resolved' &&
+      Type.someSubterm(head.type, (type) => {
+        if (!Type.isNominal(type)) return false
+        const member = DeclarationFacts.member(index, type.module, type.name)
+        return member._tag === 'Resolved' && member.declaration.visibility === 'Private'
+      }),
+  )
   const documentation = resolveDocumentation(
     snapshot,
     module,
@@ -603,7 +614,7 @@ const conformanceItem = (
     id,
     kind: 'Implementation',
     name: `${declaredType(conformance.capability)} for ${declaredType(conformance.provider)}`,
-    visibility: 'Inherited',
+    visibility: privateHead ? 'Private' : 'Inherited',
     signature: Object.freeze({
       text: `impl ${declaredType(conformance.capability)} for ${declaredType(conformance.provider)}`,
     }),
@@ -681,9 +692,9 @@ const moduleModel = (
       }),
     )
   }
-  const conformances = headers.conformances.map((conformance) =>
-    conformanceItem(snapshot, headers.module, syntax.source, conformance),
-  )
+  const conformances = headers.conformances
+    .map((conformance) => conformanceItem(snapshot, headers.module, syntax.source, conformance))
+    .filter((item) => options.includePrivate === true || item.visibility !== 'Private')
   return Object.freeze({
     name: headers.module,
     sourceId: syntax.source.id,

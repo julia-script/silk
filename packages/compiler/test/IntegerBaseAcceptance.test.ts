@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -9,7 +10,10 @@ it.effect('reports the existing out-of-range diagnostic for a prefixed literal',
   Effect.gen(function* () {
     const source = `fn accept(value: u8) -> u8 { return value }
 pub fn main() -> i32 { let value = accept(0x1ff) return 42 }`
-    const snapshot = yield* Analysis.ofSourceRealized('integer-base/out-of-range', ascii(source))
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'integer-base/out-of-range',
+      ascii(source),
+    )
     const outOfRange = Analysis.expressionsOf(snapshot, 'integer-base/out-of-range').filter(
       (expression) => expression._tag === 'Integer' && expression.integer._tag === 'OutOfRange',
     )
@@ -29,7 +33,7 @@ pub fn main() -> i32 { let value = accept(0x1ff) return 42 }`
 
 it.effect('rejects a base prefix without digits before parsing', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'integer-base/missing-digits',
       ascii('pub fn main() -> i32 { return 0x }'),
     )

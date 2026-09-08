@@ -1,0 +1,462 @@
+//! Source-owned native failure reports with bounded optional context.
+//!
+//! # When to use
+//!
+//! Use `NativeDiagnostics.make` to select the report writer and context capacity.
+//! Use `NativeDiagnostics.observe` to give one lazy computation ownership of that report state.
+//!
+//! # Details
+//!
+//! Failure identity and origin remain available when optional storage is exhausted.
+//! Handled failures release their context for reuse. Report output uses the supplied writer's bounds.
+//!
+//! # Gotchas
+//!
+//! This observer borrows the writer's descriptor. It does not close the descriptor or select a process exit code.
+//! Terminal failure observation returns policy `1`, including when output fails. Fatal reports end in the compiler's trap.
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText(
+  "libc",
+) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
+  "libc",
+) == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.execution_storage {ExecutionStorage}
+  import silk.allocator {OutOfMemoryError}
+  import silk.pointer {Pointer}
+  import silk.layout {Layout}
+  import silk.usize as usize
+  import silk.native_report {NativeReport}
+  struct NoStorage {}
+  struct Node {
+    references: usize
+    first: usize
+    second: usize
+    next: usize
+    kind: u8
+    identity: string<'static>
+    origin: string<'static>
+  }
+  impl Copy for Node {}
+  struct Cursor {
+    handle: usize
+    afterCause: usize
+  }
+  impl Copy for Cursor {}
+  struct Context {
+    storage: NoStorage | ExecutionStorage
+    memory: ?*mut u8
+    scratch: ?*mut u8
+    capacity: usize
+    free: usize
+    live: usize
+  }
+  // All references must be consumed before the observer releases its storage owner.
+  impl Drop for Context {
+    fn drop(self: &mut Context) -> () {
+      if self.live != 0 {
+        let invalid = 1 / 0
+      }
+      return ()
+    }
+  }
+  unsafe fn read(memory: ?*mut u8, handle: usize) -> Node {
+    unsafe {
+      let base = Intrinsic.pointerRequalify<?*mut u8, [*]mut u8>(memory)
+      let many = Intrinsic.pointerReinterpret<[*]mut u8, [*]mut Node>(base)
+      return Pointer.read<Node>(Pointer.atMut<Node>(many, handle - 1))
+    }
+  }
+  unsafe fn write(memory: ?*mut u8, handle: usize, node: Node) -> () {
+    unsafe {
+      let base = Intrinsic.pointerRequalify<?*mut u8, [*]mut u8>(memory)
+      let many = Intrinsic.pointerReinterpret<[*]mut u8, [*]mut Node>(base)
+      Pointer.write<Node>(Pointer.atMut<Node>(many, handle - 1), node)
+    }
+  }
+  effect fn makePool(storage: ExecutionStorage, capacity: usize) -> Context ! OutOfMemoryError {
+    let mut owner = move storage
+    let layout = Layout.of<Node>()
+    let cursorLayout = Layout.of<Cursor>()
+    let stride = layout.bytes + cursorLayout.bytes
+    if capacity == 0 || capacity > usize.MAX / stride {
+      fail OutOfMemoryError {}
+    }
+    let memory = unsafe ExecutionStorage.acquire(&mut owner, capacity * stride, layout.alignment)
+    if Pointer.isNull<u8>(memory) {
+      fail OutOfMemoryError {}
+    }
+    let mut scratch = Pointer.null<u8>()
+    unsafe {
+      let base = Intrinsic.pointerRequalify<?*mut u8, [*]mut u8>(memory)
+      scratch = Intrinsic.pointerRequalify<*mut u8, ?*mut u8>(
+        Pointer.atMut<u8>(base, capacity * layout.bytes),
+      )
+    }
+    let mut result = Context {
+      storage: move owner,
+      memory: memory,
+      scratch: scratch,
+      capacity: capacity,
+      free: 1,
+      live: 0,
+    }
+    let mut index: usize = 1
+    while index <= capacity {
+      let mut next = index + 1
+      if index == capacity {
+        next = 0
+      }
+      unsafe write(
+        result.memory,
+        index,
+        Node {references: 0, first: 0, second: 0, next: next, kind: 0, identity: "", origin: ""},
+      )
+      index = index + 1
+    }
+    return move result
+  }
+  unsafe fn retain(self: &mut Context, handle: usize) -> usize {
+    if handle == 0 {
+      return 0
+    }
+    unsafe {
+      let mut node = read(self.memory, handle)
+      if node.references == usize.MAX {
+        return 0
+      }
+      node.references = node.references + 1
+      write(self.memory, handle, node)
+    }
+    return handle
+  }
+  // A node enters the work list exactly when its final reference is consumed. The
+  // list uses dead nodes' next fields, so destruction needs neither allocation nor recursion.
+  unsafe fn decrement(self: &mut Context, handle: usize, pending: usize) -> usize {
+    if handle == 0 {
+      return pending
+    }
+    unsafe {
+      let mut node = read(self.memory, handle)
+      node.references = node.references - 1
+      if node.references == 0 {
+        node.next = pending
+        write(self.memory, handle, node)
+        return handle
+      }
+      write(self.memory, handle, node)
+    }
+    return pending
+  }
+  unsafe fn release(self: &mut Context, handle: usize) -> () {
+    unsafe {
+      let mut pending = decrement(&mut self, handle, 0)
+      while pending != 0 {
+        let current = pending
+        let node = read(self.memory, current)
+        pending = decrement(&mut self, node.first, node.next)
+        pending = decrement(&mut self, node.second, pending)
+        write(
+          self.memory,
+          current,
+          Node {
+            references: 0,
+            first: 0,
+            second: 0,
+            next: self.free,
+            kind: 0,
+            identity: "",
+            origin: "",
+          },
+        )
+        self.free = current
+        self.live = self.live - 1
+      }
+    }
+  }
+  unsafe fn insert(
+    self: &mut Context,
+    kind: u8,
+    first: usize,
+    second: usize,
+    identity: string<'static>,
+    origin: string<'static>,
+  ) -> usize {
+    if self.free == 0 {
+      return 0
+    }
+    unsafe {
+      let left = retain(&mut self, first)
+      if first != 0 && left == 0 {
+        return 0
+      }
+      let right = retain(&mut self, second)
+      if second != 0 && right == 0 {
+        release(&mut self, left)
+        return 0
+      }
+      let handle = self.free
+      self.free = read(self.memory, handle).next
+      write(
+        self.memory,
+        handle,
+        Node {
+          references: 1,
+          first: left,
+          second: right,
+          next: 0,
+          kind: kind,
+          identity: identity,
+          origin: origin,
+        },
+      )
+      self.live = self.live + 1
+      return handle
+    }
+  }
+  // Find the next oldest node of one kind without recursion or mutable context links.
+  unsafe fn preceding(memory: ?*mut u8, head: usize, boundary: usize, kind: u8) -> usize {
+    let mut cursor = head
+    let mut found: usize = 0
+    while cursor != 0 && cursor != boundary {
+      let node = unsafe read(memory, cursor)
+      if node.kind == kind {
+        found = cursor
+      }
+      cursor = node.first
+    }
+    return found
+  }
+  unsafe fn cursorAt(memory: ?*mut u8, index: usize) -> *mut Cursor {
+    unsafe {
+      let base = Intrinsic.pointerRequalify<?*mut u8, [*]mut u8>(memory)
+      let cursors = Intrinsic.pointerReinterpret<[*]mut u8, [*]mut Cursor>(base)
+      return Pointer.atMut<Cursor>(cursors, index)
+    }
+  }
+  unsafe effect fn writeContext(
+    memory: ?*mut u8,
+    report: &mut NativeReport,
+    handle: usize,
+    identity: string<'static>,
+    origin: string<'static>,
+    cause: bool,
+  ) -> bool {
+    let mut cursor = handle
+    let mut name = identity
+    let mut source = origin
+    while cursor != 0 {
+      let node = unsafe read(memory, cursor)
+      if node.kind == 0 {
+        name = node.identity
+        source = node.origin
+        break
+      }
+      cursor = node.first
+    }
+    if cause && cursor == 0 {
+      return run NativeReport.truncate(&mut report)
+    }
+    let mut written = false
+    if cause {
+      written = run NativeReport.cause(&mut report, name, source)
+    } else {
+      written = run NativeReport.unhandled(&mut report, name, source)
+    }
+    if written == false {
+      return false
+    }
+    if cursor == 0 {
+      return run NativeReport.truncate(&mut report)
+    }
+    let mut previous: usize = 0
+    while true {
+      let frame = unsafe preceding(memory, handle, previous, 1)
+      if frame == 0 {
+        return true
+      }
+      let node = unsafe read(memory, frame)
+      let accepted = run NativeReport.frame(&mut report, node.identity)
+      if accepted == false {
+        return false
+      }
+      previous = frame
+    }
+    return true
+  }
+  // A live traversal path cannot exceed the number of nodes in the acyclic pool.
+  // Scratch is reserved with the nodes, so output and release allocate nothing.
+  unsafe effect fn render(
+    memory: ?*mut u8,
+    scratch: ?*mut u8,
+    capacity: usize,
+    report: &mut NativeReport,
+    handle: usize,
+    identity: string<'static>,
+    origin: string<'static>,
+    cause: bool,
+  ) -> bool {
+    let written = run unsafe writeContext(memory, &mut report, handle, identity, origin, cause)
+    if written == false {
+      return false
+    }
+    if capacity == 0 {
+      return run NativeReport.truncate(&mut report)
+    }
+    unsafe Pointer.write<Cursor>(
+      unsafe cursorAt(scratch, 0),
+      Cursor {handle: handle, afterCause: 0},
+    )
+    let mut depth: usize = 1
+    while depth != 0 {
+      let index = depth - 1
+      let entry = unsafe Pointer.read<Cursor>(unsafe cursorAt(scratch, index))
+      let next = unsafe preceding(memory, entry.handle, entry.afterCause, 2)
+      if next == 0 {
+        depth = index
+      } else {
+        unsafe Pointer.write<Cursor>(
+          unsafe cursorAt(scratch, index),
+          Cursor {handle: entry.handle, afterCause: next},
+        )
+        let nested = unsafe read(memory, next)
+        let accepted = run unsafe writeContext(memory, &mut report, nested.second, "", "", true)
+        if accepted == false {
+          return false
+        }
+        if depth == capacity {
+          return run NativeReport.truncate(&mut report)
+        }
+        unsafe Pointer.write<Cursor>(
+          unsafe cursorAt(scratch, depth),
+          Cursor {handle: nested.second, afterCause: 0},
+        )
+        depth = depth + 1
+      }
+    }
+    return true
+  }
+  /// An owned native report writer with bounded optional failure context.
+  pub struct NativeDiagnostics {
+    context: Context
+    report: NativeReport
+  }
+  fn onEvent(
+    self: &mut NativeDiagnostics,
+    event: u8,
+    first: usize,
+    second: usize,
+    identity: string<'static>,
+    origin: string<'static>,
+  ) -> usize {
+    if event == 0 {
+      return unsafe insert(&mut self.context, 0, 0, 0, identity, origin)
+    }
+    if event == 1 {
+      return unsafe insert(&mut self.context, 1, first, 0, identity, "")
+    }
+    if event == 2 {
+      return unsafe insert(&mut self.context, 2, first, second, "", "")
+    }
+    if event == 3 {
+      return unsafe retain(&mut self.context, first)
+    }
+    if event == 4 {
+      unsafe release(&mut self.context, first)
+      return 0
+    }
+    if event == 5 {
+      let written = run unsafe render(
+        self.context.memory,
+        self.context.scratch,
+        self.context.capacity,
+        &mut self.report,
+        first,
+        identity,
+        origin,
+        false,
+      )
+      return 1
+    }
+    if event == 6 {
+      let written = run NativeReport.fatal(&mut self.report, identity, origin)
+      if written && first != 0 {
+        let cause = run unsafe render(
+          self.context.memory,
+          self.context.scratch,
+          self.context.capacity,
+          &mut self.report,
+          first,
+          "",
+          "",
+          true,
+        )
+      }
+      return 0
+    }
+    return 0
+  }
+  fn withoutStorage() -> Context {
+    return Context {
+      storage: NoStorage {},
+      memory: Pointer.null<u8>(),
+      scratch: Pointer.null<u8>(),
+      capacity: 0,
+      free: 0,
+      live: 0,
+    }
+  }
+  effect fn allocateContext(capacity: usize) -> Context ! OutOfMemoryError {
+    if capacity == 0 {
+      return withoutStorage()
+    }
+    let storage = run ExecutionStorage.make(usize.MAX)
+    return run makePool(move storage, capacity)
+  }
+  effect fn unavailableContext(error: OutOfMemoryError) -> Context {
+    drop error
+    return withoutStorage()
+  }
+  fn observeWith<
+    'env,
+    S,
+    A,
+    ?R,
+    F: fn<'static>(&mut S, u8, usize, usize, string<'static>, string<'static>) -> usize + Intrinsic.NonParking,
+  >(state: S, callback: F, body: once Effect<'env; A ? R>) -> once Effect<'env; A ? R> {
+    return Intrinsic.observeDiagnostics<S, A, R, F>(move state, move callback, move body)
+  }
+  impl NativeDiagnostics {
+    /// Creates an independent report owner with space for at most `capacity` context nodes.
+    ///
+    /// # Details
+    ///
+    /// Zero capacity allocates no context storage. Overflow or allocation refusal also disables optional context storage.
+    /// The writer retains the descriptor and output limits supplied by the caller. Construction writes no output.
+    ///
+    /// # Gotchas
+    ///
+    /// Failure identity and origin remain available without optional context. Frames and causes can be omitted when storage is exhausted.
+    pub effect fn make(report: NativeReport, capacity: usize) -> NativeDiagnostics {
+      let context = run Intrinsic.catchFailure<OutOfMemoryError>(
+        allocateContext(capacity),
+        unavailableContext,
+      )
+      return NativeDiagnostics {context: move context, report: move report}
+    }
+    /// Transfers this report owner into a lazy observation scope around `body`.
+    ///
+    /// # Details
+    ///
+    /// Construction does not run `body`. Dropping the returned Effect releases the report state, including before the first run.
+    /// Suspension retains the state. Completion and cancellation release it after protected cleanup.
+    /// The body's success value and requirements are unchanged. The body must handle its typed failures.
+    ///
+    /// # Gotchas
+    ///
+    /// Destroy a terminal failure payload before calling `Intrinsic.observeUnhandled` in its selected handler.
+    /// Terminal observation returns policy `1` even when the writer cannot complete the report.
+    pub fn observe<'env, A, ?R>(self: Self, body: once Effect<'env; A ? R>) -> once Effect<'env; A ? R> {
+      return observeWith(move self, onEvent, move body)
+    }
+  }
+}

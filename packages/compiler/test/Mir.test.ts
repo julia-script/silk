@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { narrowEffectRecord } from './support/corpus.js'
 import { outputStorageSource } from './support/corpus.js'
 import { readFileSync } from 'node:fs'
@@ -67,7 +68,7 @@ it.effect(
   'lowers scalar enum constants, projection, equality, and matches with logical identity',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'mir/scalar-enum',
         ascii(`enum State { Ready = 3, Done = 7 }
 enum Other { Ready = 3 }
@@ -113,7 +114,7 @@ pub fn main() -> i32 {
 
 it.effect('rejects malformed scalar enum MIR before execution engines', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/invalid-scalar-enum',
       ascii(`enum State { Ready = 3, Done = 7 }
 enum Other { Ready = 3 }
@@ -285,11 +286,7 @@ it('rejects nested unavailable values at the monomorphic MIR frontier', () => {
   }
   const unavailableIdentity: Mir.Module = {
     ...sample,
-    entry: {
-      _tag: 'OrdinaryEntry',
-      target: unavailableInstance,
-      machine: unavailableInstance,
-    },
+    retainedRoots: [unavailableInstance],
     functions: [{ ...fn, instance: unavailableInstance }],
   }
   assert.include(
@@ -324,7 +321,6 @@ it('reports broken graphs deterministically as data', () => {
     foreignCalls: Object.freeze([]),
     foreignExports: Object.freeze([]),
     foreignStatics: Object.freeze([]),
-    entry: straight?.entry ?? raise('expected the sample entry'),
     layout: straight?.layout ?? raise('expected the sample layout'),
     executionTransitions: straight?.executionTransitions ?? Object.freeze([]),
     functions: [
@@ -541,7 +537,7 @@ it('constructs and encodes byte-identically across repeated runs', () => {
 
 it.effect('lowers a foreign call to one ForeignCall carrying the classified C signature', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/foreign-call',
       ascii(`unsafe extern "C" fn abs(value: i32) -> i32
 pub fn main() -> i32 { return unsafe abs(-42) }`),
@@ -603,7 +599,7 @@ it('verifies foreign call arity and C classes as structural violations', () => {
 
 it.effect('verifies a foreign pointer argument against the declared pointee', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/foreign-pointer-argument',
       ascii(`import silk.pointer { Pointer }
 unsafe extern "C" fn inspect(value: *const i32) -> i32
@@ -687,7 +683,7 @@ pub fn main() -> i32 {
   }
   return 0
 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/invalid-foreign-callbacks',
       ascii(source),
       'aarch64-apple-darwin',
@@ -727,7 +723,7 @@ pub fn main() -> i32 {
 
 it.effect('requires an unsafe boundary to read an imported C static', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/unsafe-foreign-static',
       ascii(`unsafe extern "C" static environment: *mut *mut u8 as "environ"
 pub fn main() -> i32 { let value = environment return 0 }`),
@@ -742,7 +738,7 @@ pub fn main() -> i32 { let value = environment return 0 }`),
 
 it.effect('keeps a C static binding immutable independently of pointee mutability', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/immutable-foreign-static',
       ascii(`export "C" static answer: i32 = 42
 pub fn main() -> i32 { answer = 1 return answer }`),
@@ -757,7 +753,7 @@ pub fn main() -> i32 { answer = 1 return answer }`),
 
 it.effect('rejects a pointer-sized C static initializer outside the selected target', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/foreign-static-target-range',
       ascii(`export "C" static wide: usize = 4294967296
 pub fn main() -> i32 { return 0 }`),
@@ -773,7 +769,7 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('lowers pointer formation, offset, write, and read to explicit pointer operations', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/pointer-slice',
       ascii(`import silk.pointer { Pointer }
 pub fn main() -> i32 {
@@ -826,7 +822,7 @@ pub fn main() -> i32 {
 
 it.effect('rejects a direct-intrinsic pointer write of a move-only pointee as data', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/pointer-move-only-write',
       ascii(`struct Owned { value: i32 }
 pub fn main() -> i32 {
@@ -849,7 +845,7 @@ pub fn main() -> i32 {
 
 it.effect('rejects copying a non-Copy slot element with a conformance diagnostic', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'slot-copy/non-copy',
       ascii(`import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
@@ -885,7 +881,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`),
 
 it.effect('rejects missing normal match results and invented results on transferring arms', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/ordinary-arm-results',
       ascii(`enum Choice { First, Last }
 fn inspect(value: Choice) -> i32 {
@@ -985,7 +981,7 @@ pub fn main() -> i32 { return inspect(Choice.Last) }`),
 
 it.effect('forms an output slot address without reading or initializing its value', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/output-storage',
       ascii(outputStorageSource),
     )
@@ -1015,7 +1011,7 @@ it.effect(
   'projects external record bytes without loading a nominal record and verifies readonly qualifiers',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'mir/pointer-bytes',
         ascii(`import silk.pointer { Pointer }
 extern "C" struct Record {
@@ -1060,7 +1056,7 @@ pub fn main() -> i32 { let ignored = inspect(Pointer.null<Record>()) return 42 }
 
 it.effect('restores narrow success fields from widened Effect outcome lanes', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'mir/narrow-effect-record',
       ascii(narrowEffectRecord),
     )

@@ -1,12 +1,55 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as Hir from '../src/Hir.js'
 import * as Lifetime from '../src/Lifetime.js'
+import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Type from '../src/Type.js'
 import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
+import { independentExecutionFinalizedDestroy } from './support/corpus.js'
+
+it.effect(
+  'proves allocation through directly forwarded Effects without an executable startup root',
+  () =>
+    Effect.gen(function* () {
+      const module = 'allocation/finalized-export'
+      const source = independentExecutionFinalizedDestroy.replace(
+        'pub fn main()',
+        'export "C" fn lifecycle()',
+      )
+      const snapshot = yield* Analysis.makeRealized({
+        root: SourceFile.make(module, ascii(source)),
+        configuration: AnalysisFixture.configuration(module, 'wasm32-unknown-unknown', []),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+      )
+      const mir = Analysis.loweredMir(snapshot)
+      assert.deepEqual(MirVerification.verify(mir), [])
+      const finalizers = mir.functions.flatMap((fn) =>
+        (fn.suspension?.frame?.states ?? [])
+          .flatMap((state) => state.slots)
+          .filter(
+            (slot) =>
+              slot.type._tag === 'EffectValue' &&
+              slot.type.environment.instance.declaration.name === 'finalizer',
+          ),
+      )
+      assert.isNotEmpty(finalizers)
+      for (const slot of finalizers) {
+        assert.strictEqual(slot.access._tag, 'AffineTransfer')
+        if (slot.access._tag !== 'AffineTransfer') continue
+        assert.strictEqual(slot.access.cleanup._tag, 'EffectCleanup')
+        assert.isTrue(CleanupPlan.reclaims(slot.access.cleanup))
+      }
+    }),
+)
 
 it.effect('rejects a callback-dependent Effect environment at a local-shared boundary', () =>
   Effect.gen(function* () {
@@ -148,7 +191,7 @@ unsafe fn probe(core: Intrinsic.SharedCore<i32>) -> i32 {
   return Intrinsic.sharedWithMut<i32, i32>(&core, consume(move core), conflict)
 }
 pub fn main() -> i32 { return 0 }`)
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'local-shared-lifecycle/consume-borrowed-receiver',
       source,
       'wasm32-unknown-unknown',
@@ -177,7 +220,7 @@ effect fn construct() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'local-shared-allocation/helper',
       source,
       'wasm32-unknown-unknown',
@@ -209,7 +252,7 @@ effect fn construct() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'local-shared-allocation/mutable-parameter',
       source,
       'wasm32-unknown-unknown',
@@ -252,7 +295,7 @@ effect fn construct() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'local-shared-allocation/mutable-parameter-replace',
       source,
       'wasm32-unknown-unknown',
@@ -291,7 +334,7 @@ effect fn construct() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(construct(), recover) }`)
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'local-shared-allocation/provider',
       source,
       'wasm32-unknown-unknown',
@@ -577,7 +620,7 @@ pub fn main() -> i32 { return 0 }`,
       for (const [name, source, code] of cases) {
         const realized =
           code === 'SEM0138'
-            ? yield* Analysis.ofSourceRealized(
+            ? yield* AnalysisFixture.retainingMain(
                 `owned-allocation-negative/${name}`,
                 ascii(source),
                 'wasm32-unknown-unknown',

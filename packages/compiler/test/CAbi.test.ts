@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as MirVerification from '../src/MirVerification.js'
@@ -551,20 +552,24 @@ it('validates native symbol spelling', () => {
   }
 })
 
-it('reserves the entry point, runtime symbols, and generated symbol shapes', () => {
+it('reserves compiler symbols and admits ordinary source entry names', () => {
   for (const symbol of [
-    'main',
-    'silk_main',
-    'silk_os_process_execute_v1',
-    'silk_coroutine_frame_push_v1',
-    'silk_host_argc_v1',
-    'silk_host_argv_v1',
+    '__silk_foreign_personality',
     'silk_suspend_child_0',
     'silk_app_main_run__1',
   ]) {
     assert.isTrue(ForeignSymbol.isReserved(symbol), symbol)
   }
-  for (const symbol of ['abs', 'malloc', 'silk_test_add', 'silky_main', 'main2', 'suspend_x']) {
+  for (const symbol of [
+    'main',
+    'abs',
+    'malloc',
+    'silk_test_add',
+    'silky_main',
+    'silk_main',
+    'main2',
+    'suspend_x',
+  ]) {
     assert.isFalse(ForeignSymbol.isReserved(symbol), symbol)
   }
   assert.isTrue(ForeignSymbol.reservedSymbols.every(ForeignSymbol.isReserved))
@@ -609,7 +614,7 @@ pub fn main() -> i32 {
   let value = 42
   unsafe { if inspect(&value) != 42 || same(&value) != 42 { return 1 } return value }
 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'contracts/valid',
       new TextEncoder().encode(source),
       'aarch64-apple-darwin',
@@ -746,7 +751,7 @@ it.effect('rejects capture-capable references and incompatible complete-call loa
         'OWN0010',
       ],
     ] as const) {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         `contracts/${name}`,
         new TextEncoder().encode(source),
         'aarch64-apple-darwin',
@@ -776,7 +781,7 @@ fn independent(callback: extern "C" fn(&mut i32, &i32) -> () with Intrinsic.fore
 }
 pub fn main() -> i32 { let value = 42 return invoke(read, &value) }
 `
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'callbacks/valid',
       new TextEncoder().encode(source),
       'aarch64-apple-darwin',
@@ -934,7 +939,7 @@ pub fn main() { unsafe visit(entry) }`,
                 },
               },
             }).pipe(Effect.provide(SourceResolver.empty))
-          : yield* Analysis.ofSourceRealized(
+          : yield* AnalysisFixture.declarations(
               `callbacks/${name}`,
               new TextEncoder().encode(source),
               'aarch64-apple-darwin',
@@ -960,7 +965,7 @@ pub fn main() { unsafe visit(entry) }`,
 
 it.effect('keeps one variadic declaration and promotes integer tails per call', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'variadic/promotions',
       new TextEncoder().encode(`
 unsafe extern "C" fn receive(tag: i32, ...) -> i32
@@ -1112,7 +1117,7 @@ it.effect('diagnoses unsupported variadic definitions, operands and missing fixe
         'SEM0187',
       ],
     ] as const) {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'variadic/rejected',
         new TextEncoder().encode(source),
         'aarch64-apple-darwin',
@@ -1148,7 +1153,7 @@ pub fn main() -> i32 { return unsafe receive(1, 42) }`)
       'x86_64-unknown-linux-gnu',
       'aarch64-unknown-linux-gnu',
     ] as const) {
-      const snapshot = yield* Analysis.ofSourceRealized('variadic/selected', source, target)
+      const snapshot = yield* AnalysisFixture.retainingMain('variadic/selected', source, target)
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       assert.deepEqual(
         Analysis.instancesOf(snapshot).foreignCalls.map((entry) => [
@@ -1163,7 +1168,7 @@ pub fn main() -> i32 { return unsafe receive(1, 42) }`)
 
 it.effect('preserves synchronous callback contracts on the fixed side of a variadic call', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'variadic/callback',
       new TextEncoder().encode(`
 export "C" fn add(value: i32) -> i32 { return value + 1 }
@@ -1184,3 +1189,42 @@ pub fn main() -> i32 { let value: u16 = 41 return unsafe receive(add, 0, value) 
     assert.strictEqual(artifact.foreignExports.at(0)?.variadic, false)
   }),
 )
+
+it('limits direct Wasm C components to pointers, 32-bit integers and void', () => {
+  const target = Target.wasm32UnknownUnknown
+  const pointer = Type.pointer({
+    mutable: true,
+    pointee: 'u8',
+    nullable: true,
+    extent: 'Single',
+    alignment: 'Natural',
+    addressSpace: 0,
+  })
+  const allocate = CAbi.signature([pointer, 'usize', 'usize'], pointer, target)
+  assert.isTrue(CAbi.available(target, allocate))
+  for (const contract of [
+    { ...allocate.contract, borrow: [0] },
+    { ...allocate.contract, callbacks: [0] },
+  ])
+    assert.isFalse(CAbi.available(target, { ...allocate, contract }))
+  assert.isFalse(
+    CAbi.available(
+      target,
+      CAbi.signature([Type.foreignFunction(['i32'], 'i32')], Type.unit, target),
+    ),
+  )
+  for (const [parameters, result] of [
+    [['usize'], 'usize'],
+    [['i32'], Type.unit],
+  ] satisfies ReadonlyArray<readonly [ReadonlyArray<Type.Type>, Type.Type]>) {
+    assert.isTrue(CAbi.available(target, CAbi.signature(parameters, result, target)))
+  }
+  for (const type of ['u8', 'i16', 'u64', 'f32', 'f64'] satisfies ReadonlyArray<Type.Type>) {
+    const signature = CAbi.signature([type], Type.unit, target)
+    assert.isFalse(CAbi.available(target, signature))
+    assert.isTrue(CAbi.available(Target.aarch64AppleDarwin, signature))
+  }
+  assert.isFalse(
+    CAbi.available(target, { ...CAbi.signature(['i32'], Type.unit, target), variadic: true }),
+  )
+})

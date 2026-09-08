@@ -20,8 +20,10 @@ This page records the confirmed language, library, provider, and runtime-layer r
   using target-restricted primitives.
 - **Toolchain runtime support** is the target machinery implementing reachable intrinsic and entry
   contracts. Its guaranteed surface is those contracts, not its raw implementation symbols or ABI.
-- The **source closure** is the root module plus modules reached through explicit imports.
-- The **executable closure** is the concretely specialized code reachable from the selected entry.
+- The **source closure** contains the selected application, runtime, and component modules plus their
+  transitive explicit imports.
+- The **executable closure** is the concretely specialized code reachable from foreign exports and
+  explicitly retained declarations.
 - A **toolchain distribution** is one verified set of compiler, canonical library source, target
   support, and toolchain runtime artifacts.
 
@@ -34,7 +36,7 @@ This page records the confirmed language, library, provider, and runtime-layer r
 Silk programs interact with four layers:
 
 1. The language core defines syntax, built-in type identities, static semantics, ownership, Effect
-   execution, traps, entry adaptation, and the sealed intrinsic catalog.
+   execution, traps, foreign ABI boundaries, and the sealed intrinsic catalog.
 2. Portable standard-library modules define public values, functions, interfaces, services,
    validation, policy, and safe composition in ordinary Silk source.
 3. Target-provider modules are ordinary Silk implementations that explicitly use target-restricted
@@ -378,9 +380,10 @@ source feature.
 
 **Status:** Confirmed
 
-After ordinary composition, an effectful `main` must have an empty requirement row. The compiler and
-runtime do not automatically provide an allocator, logger, filesystem, clock, host input, standard
-stream, or other service merely because an official implementation ships with the toolchain.
+Source composition supplies an application's requirements. The installed hosted startup explicitly
+provides mutable HostInput from an owned process snapshot. It supplies no logger, filesystem, clock,
+standard stream, or other application service. The standalone WebAssembly startup requires a closed
+application Effect. A custom source runtime may provide services under its own visible contract.
 
 ```silk,ignore
 import silk.effect { Effect }
@@ -400,23 +403,18 @@ pub effect fn main() ! LogError {
 The example's exact provider construction remains library API; the semantic point is that source
 selects and provides it before the entry closes.
 
-**Boundary:** A future proposal may define target-specific default providers that explicit source
-can override. Such defaults require a visible selection order, collision rule, lifetime, failure
-contract, target contract, and tooling presentation. Shipping a provider today does not anticipate
-or activate that behavior. Optional service requirements are a separate future design in the same
-area: it must define how absence appears in a requirement row, how source observes or defaults that
-absence, and how explicit provision and entry closure behave. An ordinary required service does not
-become optional merely because a provider is absent.
+**Boundary:** Shipping an implementation does not install it. A selected source runtime constructs
+and scopes any providers it supplies, and ordinary lexical provision can replace a provider. An
+ordinary required service does not become optional when a provider is absent.
 
-**Diagnostics:** An effect entry with remaining requirements is unavailable before backend emission,
-and the entry diagnostic lists each unresolved requirement. It does not suggest that the runtime
-will fill the row later.
+**Diagnostics:** A remaining requirement that the selected runtime cannot supply fails its ordinary
+source interface or execution-boundary obligation before backend emission. A runtime-none artifact
+has no application invocation and does not impose a separate compiler entry requirement row.
 
-**Current compiler:** Aligned with empty requirement-row entry discovery. Some private native
-adapter state supports explicitly selected host providers but does not satisfy a source requirement
-by itself.
+**Current compiler:** Startup is ordinary selected source. Its HostInput snapshot and source provider
+have explicit ownership and cleanup; there is no private generated host-input state.
 
-**Evidence:** [ENTRY-004](program-entry.md#entry-004--effect-entry-requirements-must-be-resolved),
+**Evidence:** [ENTRY-004](program-entry.md#entry-004--source-composition-resolves-application-requirements),
 [service provision](requirements-and-services.md),
 [host-input explicit-provider requirement](../../../../openspec/specs/bootstrap-host-input/spec.md).
 
@@ -427,7 +425,7 @@ by itself.
 **Status:** Confirmed
 
 Explicit imports determine the dependency-complete source closure that must parse and type-check.
-Concrete specialization and entry reachability determine the executable closure that may emit code,
+Concrete specialization and artifact-root reachability determine the executable closure that may emit code,
 static data, host imports, adapters, and toolchain runtime support.
 
 Importing an unused module therefore has source-analysis cost but no runtime behavior. An unreachable
@@ -465,7 +463,7 @@ closure, while executable support follows reachable specialized operations.
 
 **Status:** Confirmed
 
-Each execution target implements the language entry contract and every reachable intrinsic contract
+Each execution target implements the selected foreign ABI and every reachable intrinsic contract
 through target instructions, compiler-emitted helpers, or a linked support object.
 Those contracts are the supported boundary. The raw symbols, calling conventions, layouts, and
 helper structure beneath them may be compiler-versioned and may change whenever lowering, intrinsic
@@ -497,7 +495,7 @@ toolchain does not imply compatibility merely because a symbol existed in anothe
 and are not presented as a user-facing runtime library.
 
 **Evidence:** [sealed intrinsic contracts](unsafe-intrinsics-and-targets.md#sealed-intrinsic-boundary),
-[current native runtime support](../../../../packages/compiler/src/OsRuntime.ts).
+[current native toolchain composition](../../../../packages/compiler/src/ToolchainPlan.ts).
 
 ### RUNTIME-004 — Silk has no ambient runtime facilities
 
@@ -509,8 +507,8 @@ environment, current directory, console, or logger.
 
 Language-owned behavior is limited to the selected program's ordinary execution semantics: values,
 calls, ownership and cleanup, Effect construction and execution, typed failure, fatal traps, and the
-entry boundary. A program gains additional facilities by importing ordinary APIs and explicitly
-constructing or providing their implementations.
+foreign ABI boundary. A program gains additional facilities through its selected source runtime
+and by importing ordinary APIs and constructing or providing their implementations.
 
 `Effect.suspend` transfers one deferred child through the explicit stack-safe execution boundary.
 It does not park an unfinished execution or schedule another one. The sealed Execution and Wake
@@ -519,8 +517,9 @@ The ordinary `silk.execution` module exposes safe construction, drive, and park 
 Schedulers, executors, queues, timers, deferred values, and cancellation policies remain ordinary
 source. Programs that cannot reach these sealed operations acquire no scheduler or fiber cost.
 
-This makes an allocation-free, host-independent program genuinely require no heap provider or host
-runtime:
+A source function such as the following needs no heap provider itself. Its artifact costs also
+include the selected source startup; the default executable runtime explicitly owns an Execution.
+A retained function in a runtime-none object acquires no startup machinery:
 
 ```silk
 pub fn main() -> i32 {
@@ -529,9 +528,9 @@ pub fn main() -> i32 {
 ```
 
 **Boundary:** Compiler-planned storage for a value or callable representation is part of target
-lowering, not evidence of an ambient public allocator. A toolchain adapter may receive machine
-process state so an explicitly selected provider can expose it, but ordinary source cannot read that
-state without the provider contract. External parking specifies Wake ownership, dormant cleanup,
+lowering, not evidence of an ambient public allocator. Source startup receives the foreign process
+inputs and constructs an owned snapshot for its provider. Execution storage is an explicit selected
+source component; it has no process-global allocation policy. External parking specifies Wake ownership, dormant cleanup,
 and target behavior. It does not select an executor. None of these contracts is inferred from
 `Effect.suspend`.
 
@@ -539,54 +538,48 @@ and target behavior. It does not select an executor. None of these contracts is 
 unprovided service receives a requirement diagnostic. The compiler must not silently initialize a
 runtime facility to make either program succeed.
 
-**Current compiler:** Aligned for the current inventory. Entry and intrinsic reachability retain
-only explicitly selected facilities, while artifact and pressure tests keep trivial programs
-free of host imports, Scheduler, Fiber, LocalScheduler, Execution, and Wake machinery.
+**Current compiler:** Artifact-root and intrinsic reachability retain the selected source facilities.
+Runtime-none artifacts omit startup and its dependencies. Default hosted and standalone startup
+include their documented Execution owner; neither installs a scheduler or event loop.
 
 **Evidence:** [explicit requirements](requirements-and-services.md),
 [Effect suspension](effect-suspension.md),
-[entry requirement closure](program-entry.md#entry-004--effect-entry-requirements-must-be-resolved),
+[entry requirement closure](program-entry.md#entry-004--source-composition-resolves-application-requirements),
 [runtime-tier pressure tests](../../../../packages/compiler/test/LocalSharedPressure.test.ts),
 [intrinsic availability tests](../../../../packages/compiler/test/IntrinsicAvailability.test.ts).
 
-### RUNTIME-005 — The compiler-generated adapter is the only mandatory program runtime boundary
+### RUNTIME-005 — Source compositions own application startup and termination
 
 **Status:** Confirmed
 
-An executable contains one compiler-generated target adapter that invokes the selected public
-zero-parameter `main` according to the language's program-entry rules. It is not a standard-library
-function and cannot be imported as a source module. Ordinary `main` compilation does not replace
-this adapter from source or create an additional user-visible entry API; a future explicit custom-
-entry or freestanding build mode may define a different boundary.
+The build selects a source runtime independently of the loader entry symbol. The runtime imports
+`Intrinsic.application`, calls its visible application function, and defines the platform entry
+through an ordinary C export. The compiler discovers C exports and explicit retained declarations;
+it does not discover a specially shaped application `main` or generate an invocation adapter.
 
-- An ordinary `pub fn main() -> ()` executes eagerly and supplies status zero, while
-  `pub fn main() -> i32` supplies its explicit status to the target entry contract.
-- A `pub effect fn main()` constructs one Effect and the adapter runs it exactly once.
-- Effect success becomes successful target termination.
-- A concrete unhandled typed failure is closed at the boundary, reported according to the target's
-  defined entry contract, and its owned payload receives ordinary failure cleanup.
-- A fatal trap remains abnormal termination and promises no cleanup.
+The distribution's hosted `silk/native_start` composition exports C `main(argc, argv)`. It snapshots
+process inputs, installs bounded diagnostics, owns one Execution, and calls the application.
+Its source interfaces adapt an ordinary `i32`, unit, or an Effect producing unit with no requirements
+or one mutable HostInput requirement. Integer results become exit status; unit and Effect success
+become zero. An unhandled typed failure drops its owned payload before reporting and returns one,
+including when allocation or stderr output fails. Fatal traps remain abnormal termination without
+cleanup guarantees. A NonParking constraint rejects application bodies needing an external scheduler.
 
-The adapter does not require a `Report` conformance, synthesize service providers, infer command-line
-parameters, or expose native ABI values to `main`. Process arguments, environment, current
-directory, and streams remain available only through explicitly selected ordinary services.
+The standalone WebAssembly composition `silk/wasm_start` exports `main() -> i32`. It owns one
+Execution and adapts integer, unit, and requirement-free Effect results. It provides no host inputs
+or native reporter. Typed failures drop their payload and return one; machine traps remain bare.
 
-**Boundary:** Target implementations may use different private machine signatures—for example a
-native process entry versus an exported WebAssembly function—while preserving the same applicable
-Silk entry semantics. Exact external embedding ABIs and custom entry points are separate future
-contracts.
+Custom source compositions define their own application calls, services, scheduling, reporting,
+and status policy. Explicit libraries, objects, and runtime-none profiles acquire neither default
+startup nor default execution storage. Source runtimes that need storage select its component
+explicitly through build composition.
 
-**Diagnostics:** Invalid `main` shapes and unresolved requirements are rejected before lowering
-through the program-entry diagnostics. Missing private adapter support is a broken-toolchain error.
-Unhandled typed failures and fatal traps retain their distinct runtime behavior rather than being
-reported as source validation errors.
+**Diagnostics:** Ordinary import, visibility, call, interface-conformance, requirement, and executable
+property checks validate runtime source. Missing distribution source is a toolchain integrity error.
+No special compiler entry-shape diagnostic or generated status/report protocol remains.
 
-**Implementation:** Entry discovery, generated MIR, and backend termination contracts share the
-same entry inventory. The private native adapter is derived from that inventory;
-a trivial closed entry links no stream, command-line, scheduler, allocator, or provider machinery.
-
-**Evidence:** [program entry](program-entry.md),
-[entry termination specification](../../../../openspec/specs/bootstrap-entry-termination/spec.md),
+**Evidence:** [artifact roots](artifact-roots-and-requirements.md),
+[hosted startup conformance](../../../../packages/compiler/conformance/hosted-start/README.md),
 [typed-failure cleanup](typed-failures.md#fail-006--typed-failure-applies-ordinary-cleanup-and-preserves-diagnostic-context).
 
 ## Distribution compatibility and diagnostics
@@ -638,7 +631,7 @@ The toolchain classifies failures at the boundary that owns them:
 | An import names no project or canonical library module                                | source-resolution error                                                              |
 | A canonical module exists but its source is invalid                                   | ordinary source diagnostic at the library location, plus broken-distribution context |
 | A reachable intrinsic does not support the selected target                            | compile-time target-compatibility error                                              |
-| `main` retains a service requirement                                                  | unavailable-entry diagnostic listing the open row                                    |
+| The application retains an unsupported service requirement                            | ordinary source conformance or execution-boundary diagnostic                         |
 | A matched runtime-support artifact required by the compiler is absent or incompatible | broken-toolchain error                                                               |
 | A supported host operation fails while executing                                      | the operation's declared value, typed failure, or fatal-trap outcome                 |
 
@@ -656,8 +649,7 @@ codes belong to the diagnostic catalog; this table fixes their semantic classifi
 
 **Current compiler:** Aligned at the bootstrap driver boundary. A malformed, unreadable, or
 mismatched distribution produces the structured `ToolchainFailed` outcome; unsupported reachable
-intrinsics produce `TargetFailed`; missing project imports remain `SourceResolutionFailed`; open or
-invalid entries remain `NoEntry`; source diagnostics remain `Rejected`; backend construction and
+intrinsics produce `TargetFailed`; missing project imports remain `SourceResolutionFailed`; invalid application calls are ordinary source diagnostics and remain `Rejected`; backend construction and
 external tool execution retain their own outcomes. The CLI renders these classes separately and
 does not reinterpret a broken installation as a source or backend error.
 

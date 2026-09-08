@@ -51,6 +51,7 @@ const nativeRootResolution = `import silk.bytes { Bytes }
 import silk.host_input { HostInputError, HostInput }
 import silk.option { Option }
 import silk.os_host_input { OsHostInput }
+import silk.native_host_input { NativeHostInput }
 import silk.string { InvalidUtf8, String }
 
 effect fn missingRoot() -> Bytes ! HostInputError {
@@ -72,7 +73,8 @@ effect fn invalidRoot() -> String ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn confinedRootString() -> String ! HostInputError | OutOfMemoryError ? &mut Allocator {
-  let mut hostInput = OsHostInput.make()
+  let inputs = run unsafe NativeHostInput.environmentSnapshot()
+  let mut hostInput = OsHostInput.make(move inputs)
   let found = run Effect.provideMut(HostInput.variableNamed("SILK_TEST_ROOT"), &mut hostInput)
   let rootBytes = run requiredRoot(move found)
   let copied = run String.copyUtf8(Bytes.asSlice(&rootBytes))

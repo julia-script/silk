@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as ArtifactComposition from '../src/ArtifactComposition.js'
 import * as ArtifactPlan from '../src/ArtifactPlan.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
@@ -30,7 +31,7 @@ const ascii = (value: string): Uint8Array =>
 // Pinned, not host-resolved: the goldens record a target line, so an unpinned host target makes
 // these assertions pass only on Apple Silicon.
 const snapshot = (text: string): Effect.Effect<Analysis.Snapshot> =>
-  Analysis.ofSourceRealized('golden/program', ascii(text), 'aarch64-apple-darwin')
+  AnalysisFixture.retainingMain('golden/program', ascii(text), 'aarch64-apple-darwin')
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
@@ -46,6 +47,17 @@ it.effect('discovers reachable call chains once and terminates recursion', () =>
       yield* snapshot(`pub fn main() -> i32 { return other() }
 pub fn other() -> i32 { return main() }`),
     )
+    const aggregate = Analysis.instancesOf(
+      yield* snapshot(`struct Pair { left: i32 right: i32 }
+fn build(remaining: i32) -> Pair {
+  if remaining == 0 { return Pair { left: 40, right: 2 } }
+  return build(remaining - 1)
+}
+pub fn main() -> i32 {
+  let pair = build(4)
+  return pair.left + pair.right
+}`),
+    )
     assert.deepEqual(
       nested.instances.map((instance) => instance.key.declaration.name),
       ['main', 'identity'],
@@ -57,6 +69,10 @@ pub fn other() -> i32 { return main() }`),
     assert.deepEqual(
       mutual.instances.map((instance) => instance.key.declaration.name),
       ['main', 'other'],
+    )
+    assert.deepEqual(
+      aggregate.instances.map((instance) => instance.key.declaration.name),
+      ['main', 'build'],
     )
   }),
 )
@@ -71,10 +87,9 @@ pub fn main() -> i32 { return 0 }`),
     )
     const prepared = yield* Realization.prepare(frontend, 'aarch64-apple-darwin', {
       artifactKind: 'NativeSharedLibrary',
-    })
+    }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(prepared._tag, 'Prepared')
     if (prepared._tag !== 'Prepared') return
-    assert.strictEqual(prepared.program.entry._tag, 'NoInvocation')
     assert.deepStrictEqual(
       {
         functions: prepared.program.functions.map((fn) => fn.id.name),
@@ -102,7 +117,7 @@ it.effect('emits an empty native library without retaining unrelated public func
     )
     const prepared = yield* Realization.prepare(frontend, 'aarch64-apple-darwin', {
       artifactKind: 'NativeStaticLibrary',
-    })
+    }).pipe(Effect.provide(SourceResolver.empty))
     assert.strictEqual(prepared._tag, 'Prepared')
     if (prepared._tag === 'Prepared') {
       assert.deepEqual(prepared.program.functions, [])
@@ -305,100 +320,24 @@ pub fn main() -> i32 { return expand<i32>(0, 1) }`)
   }),
 )
 
-it.effect('excludes unreachable declarations and reports unavailable entries', () =>
+it.effect('discovers cleanup hooks called by source failure recovery', () =>
   Effect.gen(function* () {
-    const reachable = Analysis.instancesOf(
-      yield* snapshot(`pub fn unused() -> i32 { return 1 }
-pub fn main() -> i32 { return 42 }`),
-    )
-    const missing = Analysis.instancesOf(yield* snapshot('pub fn answer() -> i32 { return 42 }'))
-    const parameterized = Analysis.instancesOf(
-      yield* snapshot('pub fn main(value: i32) -> i32 { return value }'),
-    )
-    const generic = Analysis.instancesOf(yield* snapshot('pub fn main<T>() -> i32 { return 42 }'))
-    const privateEntry = Analysis.instancesOf(yield* snapshot('fn main() -> () { return () }'))
-    const unitEntry = Analysis.instancesOf(yield* snapshot('pub fn main() -> () { return () }'))
-    assert.deepEqual(
-      reachable.instances.map((instance) => instance.key.declaration.name),
-      ['main'],
-    )
-    assert.deepEqual(missing.entry, { _tag: 'Unavailable', reason: 'MissingEntry' })
-    assert.deepEqual(generic.entry, { _tag: 'Unavailable', reason: 'GenericEntry' })
-    assert.deepEqual(parameterized.entry, { _tag: 'Unavailable', reason: 'ParameterizedEntry' })
-    assert.deepEqual(privateEntry.entry, { _tag: 'Unavailable', reason: 'PrivateEntry' })
-    assert.strictEqual(unitEntry.entry._tag, 'Resolved')
-    if (unitEntry.entry._tag === 'Resolved') {
-      assert.strictEqual(unitEntry.entry.kind, 'Ordinary')
-      if (unitEntry.entry.kind === 'Ordinary') assert.strictEqual(unitEntry.entry.result, 'Unit')
-    }
-  }),
-)
-
-it.effect('resolves closed effect entries and rejects invalid effect contracts', () =>
-  Effect.gen(function* () {
-    const resolved = Analysis.instancesOf(
-      yield* snapshot(`struct SomeError { code: i32 }
-pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
-    )
-    assert.strictEqual(resolved.entry._tag, 'Resolved')
-    if (resolved.entry._tag === 'Resolved') {
-      assert.strictEqual(resolved.entry.kind, 'Effect')
-      if (resolved.entry.kind === 'Effect') {
-        assert.deepEqual(resolved.entry.failures, [
-          {
-            type: Type.nominal('golden/program', 'SomeError'),
-            identity: 'golden/program.SomeError',
-          },
-        ])
-      }
-    }
-
-    const invalidResult = Analysis.instancesOf(
-      yield* snapshot('pub effect fn main() -> i32 { return 0 }'),
-    )
-    const requirements = Analysis.instancesOf(
-      yield* snapshot('service Clock {}\npub effect fn main() -> () ? &mut Clock { return () }'),
-    )
-    const ordinaryFailure = Analysis.instancesOf(
-      yield* snapshot(`struct SomeError { code: i32 }
-pub effect fn main() -> () ! SomeError { fail SomeError { code: 1 } }`),
-    )
-    assert.deepEqual(invalidResult.entry, {
-      _tag: 'Unavailable',
-      reason: 'InvalidEffectEntryResult',
-    })
-    assert.deepEqual(requirements.entry, {
-      _tag: 'Unavailable',
-      reason: 'EffectEntryRequirements',
-      requirements: [
-        {
-          access: 'Exclusive',
-          capability: Type.nominal('golden/program', 'Clock'),
-          role: 'DefaultRole',
-        },
-      ],
-    })
-    assert.strictEqual(ordinaryFailure.entry._tag, 'Resolved')
-  }),
-)
-
-it.effect('discovers cleanup hooks owned by effect-entry failures', () =>
-  Effect.gen(function* () {
-    const discovery = Analysis.instancesOf(
-      yield* snapshot(`struct SomeError { storage: RawBuffer<i32> }
+    const result = yield* snapshot(`struct SomeError { storage: RawBuffer<i32> }
 impl Drop for SomeError {
   fn drop(self: &mut SomeError) -> () { return () }
 }
 fn makeError() -> SomeError { return makeError() }
-pub effect fn main() -> () ! SomeError {
+effect fn failWithOwnedError() -> () ! SomeError {
   let error = makeError()
   fail move error
-}`),
-    )
-    assert.strictEqual(discovery.entry._tag, 'Resolved')
+}
+effect fn recover(error: SomeError) -> () { drop error }
+pub fn main() -> () { return run Intrinsic.catchFailure<SomeError>(failWithOwnedError(), recover) }`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    const discovery = Analysis.instancesOf(result)
     assert.deepEqual(
       discovery.instances.map((instance) => instance.key.declaration.name),
-      ['main', 'makeError', 'drop@impl#0'],
+      ['main', 'failWithOwnedError', 'recover', 'makeError', 'drop@impl#0'],
     )
   }),
 )
@@ -969,7 +908,7 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('discovers an uncalled native export after main and none for a Wasm target', () =>
+it.effect('discovers an uncalled admitted C export after main on native and Wasm targets', () =>
   Effect.gen(function* () {
     const source = `export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
 pub fn main() -> i32 { return 0 }`
@@ -990,11 +929,15 @@ pub fn main() -> i32 { return 0 }`
       ],
     )
     const wasm = Analysis.instancesOf(
-      yield* Analysis.ofSourceRealized('golden/program', ascii(source), 'wasm32-unknown-unknown'),
+      yield* AnalysisFixture.retainingMain(
+        'golden/program',
+        ascii(source),
+        'wasm32-unknown-unknown',
+      ),
     )
     assert.deepEqual(
       wasm.instances.map((instance) => instance.key.declaration.name),
-      ['main'],
+      ['main', 'silk_test_double_v1'],
     )
   }),
 )
@@ -1115,7 +1058,7 @@ pub fn main() -> i32 {
         ),
       },
     }
-    assert.strictEqual(Backend.symbolFor(fn, undefined), Backend.symbolFor(alternate, undefined))
+    assert.strictEqual(Backend.symbolFor(fn), Backend.symbolFor(alternate))
   }),
 )
 
@@ -1223,7 +1166,6 @@ it.effect(
         ['application', 'capability', 'runtime'],
       )
       const discovery = Analysis.instancesOf(snapshot)
-      assert.strictEqual(discovery.entry._tag, 'None')
       assert.deepEqual(
         discovery.instances.map((instance) => instance.key.declaration.name).sort(),
         ['answer', 'keep', 'proxy'],
@@ -1376,6 +1318,45 @@ it.effect('distinguishes runtime selection rules and loader policies without phy
 )
 
 it.effect(
+  'keeps component catalogs separate from entry roots and preserves their bindings in identity',
+  () =>
+    Effect.gen(function* () {
+      const binding = { operation: 'acquire', module: 'custom/storage', declaration: 'reserve' }
+      const component = { capability: 'execution-storage', bindings: [binding] }
+      const catalog = yield* ArtifactComposition.decode({ components: [component] })
+      const profile = yield* CompilationProfile.decode({
+        target: 'x86_64-unknown-linux-gnu',
+        artifact: 'object',
+        runtime: { kind: 'none' },
+      })
+      const selected = yield* ArtifactComposition.resolve(catalog, 'library', profile)
+      assert.deepStrictEqual(selected.modules, ['library'])
+      assert.deepStrictEqual(selected.components[0]?.bindings, [binding])
+      const restored = yield* ArtifactComposition.resolve(
+        yield* ArtifactComposition.decode(ArtifactComposition.input(catalog)),
+        'library',
+        profile,
+      )
+      assert.strictEqual(selected.identity, restored.identity)
+      const changed = yield* ArtifactComposition.resolve(
+        yield* ArtifactComposition.decode({
+          components: [{ ...component, bindings: [{ ...binding, declaration: 'reserveBounded' }] }],
+        }),
+        'library',
+        profile,
+      )
+      assert.notStrictEqual(selected.identity, changed.identity)
+      for (const components of [
+        [component, component],
+        [{ ...component, bindings: [binding, { ...binding, declaration: 'other' }] }],
+      ]) {
+        const failure = yield* Effect.flip(ArtifactComposition.decode({ components }))
+        assert.strictEqual(failure.code, 'ConflictingBindings')
+      }
+    }),
+)
+
+it.effect(
   'publishes stable artifact identity with stage, compiler and ordered supply distinctions',
   () =>
     Effect.gen(function* () {
@@ -1482,4 +1463,283 @@ it.effect(
       )
       assert.strictEqual(rejected.code, 'UnsupportedCombination')
     }),
+)
+
+it.effect('loads and validates storage components only for specialized private frame demand', () =>
+  Effect.gen(function* () {
+    const plain = yield* AnalysisFixture.retainingMain(
+      'component/plain',
+      ascii('pub fn main() -> i32 { return 42 }'),
+      'wasm32-unknown-unknown',
+    )
+    assert.isFalse(plain.closure.sources.has('silk/execution_storage'))
+    assert.isUndefined(Analysis.loweredMir(plain).executionStorage)
+    const suspended = yield* AnalysisFixture.retainingMain(
+      'component/suspended',
+      ascii(`
+import silk.effect { Effect }
+pub fn main() -> i32 { return run Effect.suspend(effect { return 42 }) }
+`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(suspended), [])
+    const component = Analysis.loweredMir(suspended).executionStorage
+    assert.isDefined(component)
+    assert.strictEqual(component?.acquire.declaration.module, 'silk/execution_storage')
+    assert.isTrue(suspended.closure.sources.has('silk/execution_storage'))
+    assert.isTrue(
+      suspended.artifactPlan?.sources.some((source) => source.module === 'silk/execution_storage'),
+    )
+    assert.isTrue(
+      suspended.index.modules.some((module) => module.module === 'silk/execution_storage'),
+    )
+    assert.isTrue(suspended.toolingModules.has('silk/execution_storage'))
+    const prepared = yield* Realization.prepare(suspended, 'wasm32-unknown-unknown').pipe(
+      Effect.provide(SourceResolver.empty),
+    )
+    assert.strictEqual(prepared._tag, 'Prepared')
+    if (prepared._tag === 'Prepared') {
+      assert.strictEqual(
+        prepared.program.executionStorage?.acquire.symbol,
+        component?.acquire.symbol,
+      )
+      assert.isTrue(prepared.frontend.closure.sources.has('silk/execution_storage'))
+      assert.isTrue(
+        prepared.artifactPlan?.sources.some((source) => source.module === 'silk/execution_storage'),
+      )
+    }
+  }),
+)
+
+const storageFixture = Effect.gen(function* () {
+  const profile = yield* CompilationProfile.decode({
+    target: 'wasm32-unknown-unknown',
+    artifact: 'object',
+    runtime: { kind: 'none' },
+  })
+  const defaults = {
+    ...ArtifactComposition.defaults(profile),
+    retention: [{ module: 'component/application', declaration: 'main' }],
+  }
+  const component = {
+    capability: 'execution-storage',
+    bindings: [
+      ['create', 'newState'],
+      ['acquire', 'reserve'],
+      ['release', 'reclaim'],
+      ['destroy', 'finish'],
+    ].map(([operation, declaration]) => ({
+      operation: operation ?? unreachable('operation'),
+      module: 'custom/storage',
+      declaration: declaration ?? unreachable('declaration'),
+    })),
+  }
+  const provider = `
+export "C" fn newState() -> ?*mut u8 { return Intrinsic.pointerNull<u8>() }
+export "C" fn reserve(state: ?*mut u8, size: usize, alignment: usize) -> ?*mut u8 { return Intrinsic.pointerNull<u8>() }
+export "C" fn reclaim(state: ?*mut u8, frame: ?*mut u8) -> () {}
+export "C" fn finish(state: ?*mut u8) -> () {}
+`
+  const drivenProvider =
+    `import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.allocator { Allocator, OutOfMemoryError }
+struct Status { code: i32 }
+fn ready(state: &()) -> () {}
+fn complete(state: &mut Status, value: i32) -> () {}
+fn suspended(state: &mut Status, execution: Intrinsic.Execution<i32>) -> () { drop execution }
+effect fn body() -> i32 { return run Effect.suspend(effect { return 42 }) }
+effect fn work() -> () ! OutOfMemoryError ? &mut Allocator {
+  let execution = run Execution.make(body(), (), ready)
+  let mut state = Status { code: 0 }
+  run Execution.drive(move execution, &mut state, complete, suspended)
+  return ()
+}
+effect fn failed(error: OutOfMemoryError) -> () {}
+fn helper() -> () {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run Effect.catchAll(work(), failed) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+` +
+    provider.replace(
+      'return Intrinsic.pointerNull<u8>()',
+      'helper() return Intrinsic.pointerNull<u8>()',
+    )
+  const observedProvider =
+    `struct Guard {}
+impl Drop for Guard { fn drop(self: &mut Guard) -> () { helper() } }
+fn observe(state: &mut Guard, event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize { return 0 }
+fn observing<'env, S, A, ?R, F: fn<'static>(&mut S, u8, usize, usize, string<'static>, string<'static>) -> usize + Intrinsic.NonParking>(state: S, observer: F, body: once Effect<'env; A ? R>) -> once Effect<'env; A ? R> {
+  return Intrinsic.observeDiagnostics<S, A, R, F>(move state, move observer, move body)
+}
+` +
+    drivenProvider.replace(
+      'helper() return Intrinsic.pointerNull<u8>()',
+      'return run observing(Guard {}, observe, effect { return Intrinsic.pointerNull<u8>() })',
+    )
+  const source =
+    'import silk.effect { Effect }\npub fn main() -> i32 { return run Effect.suspend(effect { return 42 }) }'
+  const allocatedProvider =
+    `import silk.layout { Layout }
+effect fn allocateSome() -> () ! OutOfMemoryError ? &mut Allocator {
+  let allocation = run Allocator.allocate(Layout.of<i32>())
+  drop allocation
+  return ()
+}
+fn allocateOnly() -> () {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run Effect.catchAll(allocateSome(), failed) |> Effect.provideMut<Allocator>(&mut allocator)
+}
+` +
+    drivenProvider.replace(
+      'helper() return Intrinsic.pointerNull<u8>()',
+      'allocateOnly() return Intrinsic.pointerNull<u8>()',
+    )
+  const analyze = Effect.fnUntraced(function* (
+    body: string,
+    selected: boolean,
+    application = source,
+  ) {
+    return yield* Analysis.makeRealized({
+      root: SourceFile.make('component/application', ascii(application)),
+      configuration: {
+        profile: CompilationProfile.input(profile),
+        composition: { ...defaults, components: selected ? [component] : [] },
+      },
+    }).pipe(Effect.provide(SourceResolver.memory(new Map([['custom/storage', ascii(body)]]))))
+  })
+  const rejections = [
+    [provider, false, 'MissingParameter'],
+    [provider.replace('size: usize', 'size: i32'), true, 'InvalidInput'],
+    [drivenProvider, true, 'DependencyCycle'],
+    [observedProvider, true, 'DependencyCycle'],
+    [
+      observedProvider
+        .replace(
+          'fn drop(self: &mut Guard) -> () { helper() }',
+          'fn drop(self: &mut Guard) -> () {}',
+        )
+        .replace('-> usize { return 0 }', '-> usize { helper() return 0 }'),
+      true,
+      'DependencyCycle',
+    ],
+    [
+      'struct Guard {}\nimpl Drop for Guard { fn drop(self: &mut Guard) -> () { helper() } }\n' +
+        drivenProvider.replace(
+          'helper() return Intrinsic.pointerNull<u8>()',
+          'let guard = Guard {} drop guard return Intrinsic.pointerNull<u8>()',
+        ),
+      true,
+      'DependencyCycle',
+    ],
+    [
+      'import silk.effect { Effect }\n' +
+        provider.replace(
+          'return Intrinsic.pointerNull<u8>()',
+          'return run Effect.suspend(effect { return Intrinsic.pointerNull<u8>() })',
+        ),
+      true,
+      'DependencyCycle',
+    ],
+    [
+      allocatedProvider +
+        '\nexport "C" fn malloc(bytes: usize) -> ?*mut u8 { helper() return Intrinsic.pointerNull<u8>() }',
+      true,
+      'DependencyCycle',
+    ],
+    [
+      allocatedProvider + '\nexport "C" fn free(pointer: ?*mut u8) -> () { helper() }',
+      true,
+      'DependencyCycle',
+    ],
+  ] satisfies ReadonlyArray<
+    readonly [string, boolean, 'MissingParameter' | 'InvalidInput' | 'DependencyCycle']
+  >
+  return { analyze, provider, observedProvider, rejections }
+})
+
+it.effect('binds arbitrary storage exports and keys their source content', () =>
+  Effect.gen(function* () {
+    const { analyze, provider } = yield* storageFixture
+    const valid = yield* analyze(provider, true)
+    const changed = yield* analyze(
+      provider.replace(
+        'fn finish(state: ?*mut u8) -> () {}',
+        'fn finish(state: ?*mut u8) -> () { let changed = 1 }',
+      ),
+      true,
+    )
+    assert.deepEqual(Analysis.diagnostics(valid), [])
+    assert.deepEqual(Analysis.diagnostics(changed), [])
+    assert.strictEqual(Analysis.loweredMir(valid).executionStorage?.acquire.symbol, 'reserve')
+    assert.notStrictEqual(valid.artifactPlan?.identity, changed.artifactPlan?.identity)
+  }),
+)
+
+it.effect('admits storage bootstrap observation whose cleanup needs no storage', () =>
+  Effect.gen(function* () {
+    const { analyze, observedProvider } = yield* storageFixture
+    const snapshot = yield* analyze(
+      observedProvider.replace(
+        'fn drop(self: &mut Guard) -> () { helper() }',
+        'fn drop(self: &mut Guard) -> () {}',
+      ),
+      true,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
+it.effect('does not execute an unstarted storage-bootstrap Effect', () =>
+  Effect.gen(function* () {
+    const { analyze, provider } = yield* storageFixture
+    const snapshot = yield* analyze(
+      'import silk.effect { Effect }\n' +
+        provider.replace(
+          'return Intrinsic.pointerNull<u8>()',
+          'let deferred = effect { return run Effect.suspend(effect { return 42 }) } drop deferred return Intrinsic.pointerNull<u8>()',
+        ),
+      true,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
+for (const [ordinal, name] of [
+  'missing binding',
+  'incompatible signature',
+  'execution drive',
+  'observation state cleanup',
+  'observer callback',
+  'explicit owner cleanup',
+  'direct suspension',
+  'implicit allocation helper',
+  'implicit deallocation helper',
+].entries()) {
+  it.effect(`rejects storage bootstrap: ${name}`, () =>
+    Effect.gen(function* () {
+      const { analyze, rejections } = yield* storageFixture
+      const [body, selected, code] = rejections.at(ordinal) ?? unreachable('storage rejection case')
+      const rejected = yield* analyze(body, selected)
+      assert.strictEqual(rejected.mir._tag, 'Unavailable')
+      assert.deepEqual(
+        Analysis.diagnostics(rejected).map((diagnostic) => [
+          diagnostic.code,
+          diagnostic.reason._tag === 'InvalidConfiguration'
+            ? diagnostic.reason.error.code
+            : undefined,
+        ]),
+        [['SEM0214', code]],
+      )
+    }),
+  )
+}
+
+it.effect('keeps an unused storage catalog out of the source closure', () =>
+  Effect.gen(function* () {
+    const { analyze } = yield* storageFixture
+    const unused = yield* analyze('', true, 'pub fn main() -> i32 { return 42 }')
+    assert.deepEqual(Analysis.diagnostics(unused), [])
+    assert.isFalse(unused.closure.sources.has('custom/storage'))
+  }),
 )

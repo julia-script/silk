@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -25,7 +26,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const realized = Effect.fnUntraced(function* (name: string, source: string) {
-  return yield* Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
+  return yield* AnalysisFixture.retainingMain(name, ascii(source), 'wasm32-unknown-unknown')
 })
 
 /** Builds the realization index the same way every downstream phase reaches it. */

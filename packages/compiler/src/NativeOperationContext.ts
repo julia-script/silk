@@ -18,6 +18,7 @@ import type * as NativeStorage from './NativeStorage.js'
 import type * as NativeSuspension from './NativeSuspension.js'
 import type * as NativeTermination from './NativeTermination.js'
 import type * as NativeType from './NativeType.js'
+import type * as NativeDiagnosticScope from './NativeDiagnosticScope.js'
 
 interface OverflowSignature {
   readonly returnType: LlvmType.Type
@@ -26,6 +27,7 @@ interface OverflowSignature {
 
 /** Data and cohesive actor contexts shared by native operation emitters. */
 export interface Context {
+  readonly diagnosticScopes: ReadonlyMap<number, NativeDiagnosticScope.NativeDiagnosticScope>
   readonly runtimeFeatures: Set<Backend.RuntimeFeature>
   readonly builder: Builder.Builder
   readonly body: FunctionBody.FunctionBody
@@ -47,14 +49,6 @@ export interface Context {
   readonly malloc?: FunctionActor.Function
   readonly free?: FunctionActor.Function
   readonly memcmp?: FunctionActor.Function
-  readonly osRuntimes: ReadonlyMap<
-    string,
-    {
-      readonly handle: FunctionActor.Function
-      readonly resultLaneCount: number
-      readonly symbol: string
-    }
-  >
   readonly foreignIndirects: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly foreignFunctions: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly foreignStatics: ReadonlyMap<string, NativeForeignOperation.StaticDeclaration>

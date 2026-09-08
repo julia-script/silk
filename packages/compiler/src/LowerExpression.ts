@@ -1,8 +1,7 @@
+import * as ConcreteCleanup from './ConcreteCleanup.js'
 import {
   authored,
   lowerBorrowedWritePlace,
-  callableLocalCleanup,
-  concreteCleanup,
   generated,
   emitReleases,
   emitInitializationTransition,
@@ -32,8 +31,10 @@ import {
   lowerCatchEffectValue,
   lowerEffectCatch,
   lowerEffectExecution,
+  lowerFinalizedEffect,
   lowerPlace,
   lowerRunEffectComposite,
+  lowerRunEffectValue,
   lowerServiceEffectValue,
   ownedWriteRoot,
   patternPlace,
@@ -52,7 +53,7 @@ import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type { DelayedEffectState, ProvidedRequirement } from './Lower.js'
-import { bool, borrowKey, character, isOsOperation, patternKey, spanKey, usize } from './Lower.js'
+import { bool, borrowKey, character, patternKey, spanKey, usize } from './Lower.js'
 import { lowerSequence } from './LowerStatements.js'
 import { lowerBuiltinExpression } from './LowerBuiltin.js'
 import * as Match from './Match.js'
@@ -1160,8 +1161,8 @@ function lowerCallableApplyExpression(
         operands: Object.freeze(operands),
         present,
         absent,
-        presentCleanup: callableLocalCleanup(fn, presentType),
-        absentCleanup: callableLocalCleanup(fn, absentType),
+        presentCleanup: ConcreteCleanup.forCallable(fn, presentType),
+        absentCleanup: ConcreteCleanup.forCallable(fn, absentType),
         sourceType,
         valueType: Object.freeze({ _tag: valueScalar.spelling }),
         type,
@@ -1372,7 +1373,9 @@ function lowerRunExpression(
     // Compiler-backed effects lower directly from their recipe. Lowering the effect expression
     // first would form every borrowed argument twice before the dedicated operation is emitted.
     const loweredSubject =
-      recipe?._tag === 'BuiltinCall' && recipe.witnessEffectSite === undefined
+      recipe?._tag === 'BuiltinCall' &&
+      recipe.witnessEffectSite === undefined &&
+      (recipe.operation !== 'EffectSuspend' || fn.builtinEffectRunner)
         ? undefined
         : lowerExpression(fn, expression.subject, availableRequirements)
     if (loweredSubject === 'Transferred') return loweredSubject
@@ -1524,6 +1527,96 @@ function lowerRunExpression(
             availableRequirements,
           )
     }
+    if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectFinalize') {
+      const [protectedExpression, finalizerExpression] = recipe.arguments
+      if (protectedExpression === undefined || finalizerExpression === undefined) return undefined
+      const protectedValue = lowerExpression(fn, protectedExpression, availableRequirements)
+      if (protectedValue === undefined || protectedValue === 'Transferred') return protectedValue
+      const finalizer = lowerExpression(fn, finalizerExpression, availableRequirements)
+      if (finalizer === undefined || finalizer === 'Transferred') return finalizer
+      const protectedType = fn.localTypes.at(protectedValue.result.ordinal)
+      const finalizerType = fn.localTypes.at(finalizer.result.ordinal)
+      if (
+        (protectedType?._tag !== 'EffectValue' && protectedType?._tag !== 'EffectComposite') ||
+        (finalizerType?._tag !== 'EffectValue' && finalizerType?._tag !== 'EffectComposite')
+      )
+        return undefined
+      return lowerFinalizedEffect(
+        fn,
+        protectedValue.result,
+        protectedType,
+        finalizer.result,
+        finalizerType,
+        expression.span,
+        protectedExpression.span,
+        finalizerExpression.span,
+        availableRequirements,
+      )
+    }
+    if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectObserveDiagnostics') {
+      const [stateExpression, observerExpression, protectedExpression] = recipe.arguments
+      if (
+        stateExpression === undefined ||
+        observerExpression === undefined ||
+        protectedExpression === undefined
+      )
+        return undefined
+      const state = lowerExpression(fn, stateExpression, availableRequirements)
+      if (state === undefined || state === 'Transferred') return state
+      const observer = lowerExpression(fn, observerExpression, availableRequirements)
+      if (observer === undefined || observer === 'Transferred') return observer
+      const protected_ = lowerExpression(fn, protectedExpression, availableRequirements)
+      if (protected_ === undefined || protected_ === 'Transferred') return protected_
+      const protectedType = fn.localTypes.at(protected_.result.ordinal)
+      const observerType = fn.localTypes.at(observer.result.ordinal)
+      const type = fn.type(expression.type)
+      const resultShape = Layout.callingShape(fn.layout, fn.semantic(expression.type))
+      if (
+        observerType?._tag !== 'CallableValue' ||
+        type === undefined ||
+        type._tag === 'EffectOutcome' ||
+        resultShape === undefined ||
+        stateExpression._tag === 'Unavailable' ||
+        (protectedType?._tag !== 'EffectValue' && protectedType?._tag !== 'EffectComposite')
+      )
+        return undefined
+      const body = lowerExecution(fn, expression.span, () =>
+        protectedType._tag === 'EffectValue'
+          ? lowerRunEffectValue(
+              fn,
+              protected_.result,
+              protectedType,
+              expression.type,
+              expression.span,
+              availableRequirements,
+            )
+          : lowerRunEffectComposite(
+              fn,
+              protected_.result,
+              protectedType,
+              expression.type,
+              expression.span,
+              availableRequirements,
+            ),
+      )
+      if (body === undefined) return undefined
+      const destination = fn.alloc(type)
+      fn.emit(
+        Object.freeze({
+          _tag: 'DiagnosticScope',
+          destination,
+          state: state.result,
+          observer: observer.result,
+          body,
+          stateCleanup: ConcreteCleanup.forType(fn, stateExpression.type),
+          observerCleanup: ConcreteCleanup.forCallable(fn, observerType),
+          type,
+          resultShape,
+          provenance: generated(expression.span),
+        }),
+      )
+      return body.result === undefined ? 'Transferred' : Object.freeze({ result: destination })
+    }
     if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'ExecutionDrive') {
       const [executionExpression, branchExpression, completeExpression, suspendExpression] =
         recipe.arguments
@@ -1575,8 +1668,11 @@ function lowerRunExpression(
       const callbackCleanup = (local: Mir.LocalId): CleanupPlan.CleanupPlan => {
         const localType = fn.localTypes.at(local.ordinal)
         return localType?._tag === 'CallableValue'
-          ? callableLocalCleanup(fn, localType)
-          : concreteCleanup(fn, localType === undefined ? Type.unit : Mir.semanticType(localType))
+          ? ConcreteCleanup.forCallable(fn, localType)
+          : ConcreteCleanup.forType(
+              fn,
+              localType === undefined ? Type.unit : Mir.semanticType(localType),
+            )
       }
       fn.emit(
         Object.freeze({
@@ -1698,9 +1794,9 @@ function lowerRunExpression(
           registerAccess: 'Take' as const,
           guardCleanup:
             guard._tag === 'CallableValue'
-              ? callableLocalCleanup(fn, guard)
-              : concreteCleanup(fn, Mir.semanticType(guard)),
-          registerCleanup: callableLocalCleanup(fn, registerType),
+              ? ConcreteCleanup.forCallable(fn, guard)
+              : ConcreteCleanup.forType(fn, Mir.semanticType(guard)),
+          registerCleanup: ConcreteCleanup.forCallable(fn, registerType),
           registrationTypeArguments,
           type,
           provenance: authored(expression.span),
@@ -1739,30 +1835,6 @@ function lowerRunExpression(
           provenance: authored(expression.span),
         }),
       )
-      return Object.freeze({ result: destination })
-    }
-    if (recipe?._tag === 'BuiltinCall' && isOsOperation(recipe.operation)) {
-      const arguments_: Array<Mir.LocalId> = []
-      for (const argument of recipe.arguments) {
-        const lowered = lowerExpression(fn, argument, availableRequirements)
-        if (lowered === 'Transferred') return lowered
-        if (lowered === undefined) return undefined
-        arguments_.push(lowered.result)
-      }
-      const type = fn.type(expression.type)
-      if (type === undefined) return undefined
-      const destination = fn.alloc(type)
-      fn.emit(
-        Object.freeze({
-          _tag: 'OsCall' as const,
-          operation: recipe.intrinsic,
-          destination,
-          arguments: Object.freeze(arguments_),
-          type,
-          provenance: authored(expression.span),
-        }),
-      )
-      endLoans(fn, recipe.loanEnds, expression.span)
       return Object.freeze({ result: destination })
     }
     if (recipe?._tag !== 'EffectConstruct') return undefined

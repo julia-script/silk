@@ -1,3 +1,4 @@
+import type * as RuntimeComponent from '../../src/RuntimeComponent.js'
 import { borrowedTemporaryStream, borrowedTemporaryLifecycle } from './borrowedTemporaries.js'
 import { partialSuspension } from './partialSuspension.js'
 /**
@@ -109,7 +110,7 @@ export interface CorpusProgram {
   readonly source: string
   readonly nativeSource?: string
   readonly nativeImports?: Readonly<Record<string, string>>
-  readonly nativeEnvironment?: Readonly<Record<string, string>>
+  readonly nativeComponents?: ReadonlyArray<RuntimeComponent.Input>
   /** C translation units compiled with `compileCObject` and linked as structured object inputs. */
   readonly nativeCSources?: Readonly<Record<string, string>>
   readonly nativeDynamicLibraries?: ReadonlyArray<string>
@@ -118,7 +119,6 @@ export interface CorpusProgram {
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
     | { readonly _tag: 'Trap' }
-    | { readonly _tag: 'UnavailableEntry'; readonly reason: string }
 }
 
 export interface InvalidCorpusProgram {
@@ -458,53 +458,10 @@ pub fn main() -> i32 {
 }`
 
 /** Two independent roots resume in reverse suspension order without sharing a frame stack. */
-export const independentExecutionNonLifo = `import silk.allocator { Allocator, OutOfMemoryError }
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
-import silk.execution { Execution }
-struct Empty {}
-struct Stored { execution: Intrinsic.Execution<i32> }
-struct Owner { slot: Empty | Stored result: i32 }
-struct Guard {}
-fn register(wake: Intrinsic.Wake) -> Guard { Intrinsic.wake(move wake) return Guard {} }
-effect fn body(value: i32) -> i32 { run Execution.park(register) return value }
-fn complete(owner: &mut Owner, result: i32) -> () { owner.result = result return () }
-fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
-  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
-  drop previous
-  return ()
-}
-fn ready(state: &()) -> () { return () }
-effect fn driveOnce(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
-  return run Execution.drive(move execution, move owner, complete, suspend)
-}
-effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
-  return match move selected {
-    Empty {} => ()
-    Stored { execution } => run finishStored(move execution, move owner)
-  }
-}
-effect fn finishStored(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
-  return run Execution.drive(move execution, move owner, complete, suspend)
-}
-effect fn program() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let mut firstOwner = Owner { slot: Empty {}, result: 0 }
-  let mut secondOwner = Owner { slot: Empty {}, result: 0 }
-  let first = run Execution.make(body(20), (), ready)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let second = run Execution.make(body(22), (), ready)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  run driveOnce(move first, &mut firstOwner)
-  run driveOnce(move second, &mut secondOwner)
-  let selectedSecond = Intrinsic.replace(secondOwner.slot, Empty {})
-  run finish(move selectedSecond, &mut secondOwner)
-  let selectedFirst = Intrinsic.replace(firstOwner.slot, Empty {})
-  run finish(move selectedFirst, &mut firstOwner)
-  return secondOwner.result * 10 + firstOwner.result
-}
-effect fn recover(error: OutOfMemoryError) -> i32 { return -2 }
-pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
+export const independentExecutionNonLifo = readFileSync(
+  new URL('../../conformance/execution-storage/non-lifo.silk', import.meta.url),
+  'utf8',
+)
 
 export const independentExecutionIllegalDormantDrive = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.allocator { Allocator, OutOfMemoryError }
@@ -714,51 +671,10 @@ export const independentExecutionStackExhaustionObservable =
 }`,
   )
 
-export const independentExecutionMultiplePackages = `import silk.allocator { Allocator, OutOfMemoryError }
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
-import silk.execution { Execution }
-struct Empty {}
-struct Stored { execution: Intrinsic.Execution<i32> }
-struct Owner { slot: Empty | Stored result: i32 }
-struct Guard {}
-fn register(wake: Intrinsic.Wake) -> Guard { Intrinsic.wake(move wake) return Guard {} }
-effect fn firstBody() -> i32 { run Execution.park(register) return 20 }
-effect fn secondBody() -> i32 { run Execution.park(register) return 22 }
-fn complete(owner: &mut Owner, result: i32) -> () { owner.result = result return () }
-fn suspend(owner: &mut Owner, execution: Intrinsic.Execution<i32>) -> () {
-  let previous = Intrinsic.replace(owner.slot, Stored { execution: move execution })
-  drop previous
-  return ()
-}
-fn ready(state: &()) -> () { return () }
-effect fn driveOnce(execution: Intrinsic.Execution<i32>, owner: &mut Owner) -> () {
-  return run Execution.drive(move execution, move owner, complete, suspend)
-}
-effect fn finish(selected: Empty | Stored, owner: &mut Owner) -> () {
-  return match move selected {
-    Empty {} => ()
-    Stored { execution } => run driveOnce(move execution, move owner)
-  }
-}
-effect fn program() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let mut firstOwner = Owner { slot: Empty {}, result: 0 }
-  let mut secondOwner = Owner { slot: Empty {}, result: 0 }
-  let first = run Execution.make(firstBody(), (), ready)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let second = run Execution.make(secondBody(), (), ready)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  run driveOnce(move first, &mut firstOwner)
-  run driveOnce(move second, &mut secondOwner)
-  let selectedSecond = Intrinsic.replace(secondOwner.slot, Empty {})
-  run finish(move selectedSecond, &mut secondOwner)
-  let selectedFirst = Intrinsic.replace(firstOwner.slot, Empty {})
-  run finish(move selectedFirst, &mut firstOwner)
-  return firstOwner.result + secondOwner.result
-}
-effect fn recover(error: OutOfMemoryError) -> i32 { return -2 }
-pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
+export const independentExecutionMultiplePackages = readFileSync(
+  new URL('../../conformance/execution-storage/multiple-packages.silk', import.meta.url),
+  'utf8',
+)
 
 export const independentExecutionLateCancelledWake = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.allocator { Allocator, OutOfMemoryError }
@@ -2604,23 +2520,6 @@ pub fn main() -> i32 {
     expected: { _tag: 'Completes', result: 42 },
   },
   {
-    name: 'missing-entry',
-    source: 'pub fn answer() -> i32 { return 42 }',
-    expected: { _tag: 'UnavailableEntry', reason: 'MissingEntry' },
-  },
-  {
-    name: 'generic-entry',
-    source: 'pub fn main<T>() -> i32 { return 42 }',
-    expected: { _tag: 'UnavailableEntry', reason: 'GenericEntry' },
-  },
-  {
-    name: 'parameterized-entry',
-    source: 'pub fn main(value: i32) -> i32 { return value }',
-    expected: { _tag: 'UnavailableEntry', reason: 'ParameterizedEntry' },
-  },
-  // folded from StringAcceptance.test.ts: literals, owned copy/view/append, exact equality, and
-  // scalar traversal.
-  {
     name: 'string-owned-scalars',
     source: `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
@@ -3083,6 +2982,14 @@ pub fn main() -> i32 {
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'direct-suspend-continuation',
+    source: readFileSync(
+      new URL('../../conformance/native-report/direct-suspend-regression.silk', import.meta.url),
+      'utf8',
+    ),
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'effect-suspended-map-flat-map',
     source: `import silk.effect { Effect }
 effect fn base() -> i32 { return run Effect.suspend(effect { return 20 }) }
@@ -3150,10 +3057,11 @@ pub fn main() -> i32 { return (run inspect(0)) + (run inspect(1)) + (run inspect
 import silk.result { Result }
 struct First { code: i32 }
 struct Second { code: i32 }
+struct Adjustment { offset: i32 }
 effect fn succeed() -> i32 ! First { return 40 }
 effect fn failFirst() -> i32 ! First { fail First { code: 2 } }
 fn addTwo(value: i32) -> i32 { return value + 2 }
-fn toSecond(error: First) -> Second { return Second { code: error.code + 40 } }
+fn toSecond(error: First, adjustment: Adjustment) -> Second { return Second { code: error.code + adjustment.offset } }
 fn observe(result: Result<i32, Second>) -> i32 {
   return match move result {
     Result<i32, Second>.Success { value } => value
@@ -3161,8 +3069,8 @@ fn observe(result: Result<i32, Second>) -> i32 {
   }
 }
 pub fn main() -> i32 {
-  let success = run Effect.result(succeed() |> Effect.mapError(toSecond) |> Effect.map(addTwo))
-  let failure = run Effect.result(failFirst() |> Effect.mapBoth(addTwo, toSecond))
+  let success = run Effect.result(succeed() |> Effect.mapError(toSecond(Adjustment { offset: 40 })) |> Effect.map(addTwo))
+  let failure = run Effect.result(failFirst() |> Effect.mapBoth(addTwo, toSecond(Adjustment { offset: 40 })))
   return observe(move success) + observe(move failure) - 42
 }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -3315,6 +3223,14 @@ pub fn main() -> i32 {
   if second.value != 12 { return 4 }
   return 42
 }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'effect-ensuring-finalized-choice',
+    source: readFileSync(
+      new URL('../../conformance/execution-storage/finalized-choice.silk', import.meta.url),
+      'utf8',
+    ),
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -5655,46 +5571,14 @@ effect fn program() -> i32 ! OutOfMemoryError {
 effect fn recover(error: OutOfMemoryError) -> i32 { return -2 }
 pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
 
-const independentExecutionLatchedDestroy = `import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
-import silk.execution { Execution }
-import silk.shared { Shared }
-struct Guard {}
-struct ReadyState { called: i32 }
-fn register(wake: Intrinsic.Wake) -> Guard {
-  Intrinsic.wake(move wake)
-  return Guard {}
-}
-effect fn body() -> i32 { run Execution.park(register) return 1 }
-fn markReady(state: &mut ReadyState) -> () { state.called = 1 return () }
-fn ready(state: &Shared<ReadyState>) -> () {
-  Shared.withMut(state, markReady)
-  return ()
-}
-fn readReady(state: &mut ReadyState) -> i32 { return state.called }
-fn complete(state: &mut (), value: i32) -> () { return () }
-fn suspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () {
-  drop execution
-  return ()
-}
-effect fn driveOnce(execution: Intrinsic.Execution<i32>, state: &mut ()) -> () {
-  return run Execution.drive(move execution, move state, complete, suspend)
-}
-effect fn program() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let readyState = run Shared.make<ReadyState>(ReadyState { called: 0 })
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let endpoint = Shared.clone(&readyState)
-  let execution = run Execution.make(body(), move endpoint, ready)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut state = ()
-  run driveOnce(move execution, &mut state)
-  let called = Shared.withMut(&readyState, readReady)
-  drop readyState
-  return 42 + called * 1000
-}
-effect fn recover(error: OutOfMemoryError) -> i32 { return -2 }
-pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`
+const independentExecutionLatchedDestroy = readFileSync(
+  new URL('../../conformance/execution-storage/latched-destroy.silk', import.meta.url),
+  'utf8',
+)
+export const independentExecutionFinalizedDestroy = readFileSync(
+  new URL('../../conformance/execution-storage/finalized-destroy.silk', import.meta.url),
+  'utf8',
+)
 
 const nativeSecureRandom = `import silk.effect { Effect }
 import silk.os_random { OsRandom }
@@ -5901,25 +5785,25 @@ export const foreignLibcRoundtripNative = `import silk.i32 as i32
 import silk.isize as isize
 import silk.usize as usize
 import silk.pointer { Pointer }
-unsafe extern "C" fn malloc(size: usize) -> ?[*]mut u8
-unsafe extern "C" fn free(pointer: ?[*]mut u8) -> ()
+unsafe extern "C" fn malloc(size: usize) -> ?*mut u8
+unsafe extern "C" fn free(pointer: ?*mut u8) -> ()
 unsafe extern "C" fn memcpy(destination: [*]mut u8, source: ?[*]const u8, length: usize) -> [*]mut u8
 unsafe extern "C" fn memcmp(left: [*]const u8, right: ?[*]const u8, length: usize) -> i32
 unsafe extern "C" fn strlen(text: [*]const u8) -> usize
-unsafe extern "C" fn write(descriptor: i32, data: [*]const u8, length: usize) -> isize
+unsafe extern "C" fn write(descriptor: i32, data: ?[*]const u8, length: usize) -> isize with Intrinsic.foreign(noCapture: ("data",))
 pub fn main() -> i32 {
   let bytes = b"hello\\n"
   let length = bytes.length
   let allocated = unsafe malloc(length + 1)
-  if Pointer.isNullMany(allocated) { return 1 }
+  if Pointer.isNull(allocated) { return 1 }
   unsafe {
-    let buffer = Intrinsic.pointerRequalify<?[*]mut u8, [*]mut u8>(allocated)
+    let buffer = Intrinsic.pointerRequalify<?*mut u8, [*]mut u8>(allocated)
     let copied = memcpy(buffer, Pointer.fromSlice(bytes), length)
     Pointer.write(Pointer.atMut(buffer, length), i32.toU8(0))
     if memcmp(buffer, Pointer.fromSlice(bytes), length) != 0 { return 2 }
     if strlen(buffer) != length { return 3 }
     if isize.toI32(write(1, buffer, length)) != usize.toI32(length) { return 4 }
-    free(buffer)
+    free(allocated)
   }
   return usize.toI32(length) * 7
 }`
@@ -7973,7 +7857,7 @@ pub effect fn main() ! NotFoundError | OfflineError {
   fail OfflineError {}
 }`,
     nativeStderr:
-      'unhandled error: memory/driver.OfflineError\n  at memory/driver.main (memory/driver:4:54)\n',
+      'unhandled error: memory/driver.OfflineError\n  at memory/driver.main (memory/driver:4:54)\n  at silk/effect.Effect.flatMap (silk/effect:294:18)\n',
     expected: { _tag: 'Trap' },
   },
   {
@@ -7994,7 +7878,38 @@ pub effect fn main() ! NotFoundError {
   return ()
 }`,
     nativeStderr:
-      'unhandled error: memory/driver.NotFoundError\n  at memory/driver.load (memory/driver:3:42)\n  at memory/driver.middle (memory/driver:8:10)\n  at memory/driver.main (memory/driver:13:10)\n',
+      'unhandled error: memory/driver.NotFoundError\n  at memory/driver.load (memory/driver:3:42)\n  at memory/driver.middle (memory/driver:8:10)\n  at memory/driver.main (memory/driver:13:10)\n  at silk/effect.Effect.flatMap (silk/effect:294:18)\n',
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'native-termination-cleanup-preserves-primary',
+    source: `import silk.effect { Effect }
+pub struct Primary {}
+struct Noise {}
+struct Guard {}
+effect fn primary() -> () ! Primary {
+  fail Primary {}
+}
+effect fn noise() -> () ! Noise {
+  fail Noise {}
+}
+effect fn recovered(error: Noise) -> () { return () }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    run Effect.catchAll(noise(), recovered)
+  }
+}
+impl Drop for Primary {
+  fn drop(self: &mut Primary) -> () {
+    run Effect.catchAll(noise(), recovered)
+  }
+}
+pub effect fn main() ! Primary {
+  let guard = Guard {}
+  run primary()
+}`,
+    nativeStderr:
+      'unhandled error: memory/driver.Primary\n  at memory/driver.primary (memory/driver:5:38)\n  at memory/driver.main (memory/driver:23:23)\n  at silk/effect.Effect.flatMap (silk/effect:294:18)\n',
     expected: { _tag: 'Trap' },
   },
   {
@@ -8017,7 +7932,7 @@ pub effect fn main() ! OfflineError {
   return ()
 }`,
     nativeStderr:
-      'unhandled error: memory/driver.OfflineError\n  at memory/driver.recover (memory/driver:10:64)\n  at silk/effect.Effect.catch (silk/effect:406:15)\n  at memory/driver.main (memory/driver:15:43)\nwhile handling: memory/driver.NotFoundError\n  at memory/driver.load (memory/driver:6:42)\n',
+      'unhandled error: memory/driver.OfflineError\n  at memory/driver.recover (memory/driver:10:64)\n  at silk/effect.Effect.catch (silk/effect:398:11)\n  at memory/driver.main (memory/driver:15:10)\n  at silk/effect.Effect.flatMap (silk/effect:294:18)\nwhile handling: memory/driver.NotFoundError\n  at memory/driver.load (memory/driver:6:42)\n',
     expected: { _tag: 'Trap' },
   },
   {
@@ -8049,7 +7964,7 @@ pub effect fn load() -> i32 ! NotFoundError {
 }`,
     },
     nativeStderr:
-      'unhandled error: errors/kinds.NotFoundError\n  at errors/kinds.load (errors/kinds:2:46)\n  at memory/driver.main (memory/driver:3:10)\n',
+      'unhandled error: errors/kinds.NotFoundError\n  at errors/kinds.load (errors/kinds:2:46)\n  at memory/driver.main (memory/driver:3:10)\n  at silk/effect.Effect.flatMap (silk/effect:294:18)\n',
     expected: { _tag: 'Trap' },
   },
   {
@@ -8138,6 +8053,11 @@ pub effect fn main() -> () ! WriterError {
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'independent-execution-finalized-destroy',
+    source: independentExecutionFinalizedDestroy,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'independent-execution-illegal-dormant-drive',
     source: independentExecutionIllegalDormantDrive,
     expected: { _tag: 'Trap' },
@@ -8150,7 +8070,33 @@ pub effect fn main() -> () ! WriterError {
   {
     name: 'independent-execution-stack-exhaustion',
     source: independentExecutionStackExhaustion,
-    nativeEnvironment: { SILK_PRIVATE_EXECUTION_STACK_LIMIT_BYTES: '1' },
+    nativeImports: {
+      'test/refusing_storage':
+        'export "C" fn refuse(state: ?*mut u8, size: usize, alignment: usize) -> ?*mut u8 { return Intrinsic.pointerNull<u8>() }',
+    },
+    nativeComponents: [
+      {
+        capability: 'execution-storage',
+        bindings: [
+          {
+            operation: 'create',
+            module: 'silk/execution_storage',
+            declaration: 'silk_execution_storage_create',
+          },
+          { operation: 'acquire', module: 'test/refusing_storage', declaration: 'refuse' },
+          {
+            operation: 'release',
+            module: 'silk/execution_storage',
+            declaration: 'silk_execution_storage_release',
+          },
+          {
+            operation: 'destroy',
+            module: 'silk/execution_storage',
+            declaration: 'silk_execution_storage_destroy',
+          },
+        ],
+      },
+    ],
     expected: { _tag: 'Trap' },
   },
   {

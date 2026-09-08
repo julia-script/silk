@@ -213,7 +213,7 @@ upper bounds. Named effect functions do not infer a missing failure type from `r
 
 An ordinary function has no failure channel, so its `run` operand must have residual failure type
 `never`. An effect entry is handled separately by the generated program boundary, as defined under
-[program entry](program-entry.md#entry-003--unhandled-effect-entry-failures-become-process-failures).
+[program entry](program-entry.md#entry-003--source-policy-handles-unhandled-outcomes).
 
 **Boundary:** An enclosing Effect may not silently discard a propagated failure by omitting it from
 the declaration.
@@ -456,6 +456,12 @@ Cleanup whose failure matters is an explicit Effect operation and must complete 
 normally through a standard-library finalization combinator. A trap during cleanup belongs to the
 separate trap rules and is not converted into a typed failure.
 
+`Effect.ensuring` runs its infallible unit finalizer after the protected operation's local cleanup,
+then forwards the original success or typed failure. The pending failure retains its diagnostic
+owner and origin across finalizer suspension. It does not become a selected recovery cause inside
+the finalizer. The source wrapper uses the sealed, target-neutral `Intrinsic.finalizeEffect` seam
+to retain that outcome without converting it to `Result` and raising it again.
+
 The language guarantees that structured cleanup preserves the information needed to report the
 failure. The stable logical trace minimum and debug-versus-release boundary are defined by
 [TERM-004 and TERM-007](program-termination-and-reporting.md#term-004--a-failure-report-has-one-stable-minimum).
@@ -464,13 +470,14 @@ tooling policy.
 
 **Diagnostics:** Valid cleanup and propagation produce no compile-time diagnostic. Ordinary
 ownership diagnostics identify double cleanup, use after move, or an invalid implicit transfer.
-When a typed failure reaches the generated entry boundary, its runtime report includes the failure
-identity and available logical Effect trace after cleanup has completed.
+When a typed failure reaches a source terminal observer, its report can include the failure
+identity and available logical Effect trace after cleanup has completed. The selected source
+composition controls report capacity and output.
 
 **Implementation:** Runtime reporting retains an explicit causal history and source-level logical path
-on terminal outcomes. Generated entry cleanup still releases the owned payload exactly once before
-the failure becomes a host outcome. Physical entry adapters and coroutine-resume helpers are not
-logical source frames.
+on terminal outcomes under a lexical observer. Source terminal recovery drops the owned payload
+exactly once before observing the retained context. Compiler-generated coroutine-resume helpers
+are not logical source frames.
 
 **Evidence:** [ownership cleanup rule](ownership-and-borrowing.md#cleanup-001--cleanup-follows-ownership),
 [effect finalization contract](../../../../packages/compiler/stdlib/silk/effect.silk),
@@ -492,8 +499,8 @@ do not become a hidden failure alternative, and cannot be intercepted by `catch`
 
 A trap terminates the program. It may bypass `ensuring`, `Drop` hooks, and all other structured
 cleanup; the language makes no cleanup guarantee after the trapping operation. For a
-compiler-generated checked operation, the runtime should report its source origin and available
-logical execution trace before termination. Failures such as corrupted runtime state or invalid
+compiler-generated checked operation under a lexical observer, the observer receives the reason
+and source origin before termination. Without an observer the operation emits a bare machine trap. Failures such as corrupted runtime state or invalid
 unsafe memory may permit only a best-effort report.
 
 Scheduler outcomes remain on the typed side of this boundary. For example,

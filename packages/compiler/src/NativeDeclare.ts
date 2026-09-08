@@ -16,6 +16,9 @@ import type * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import { linearize } from './MirLinearization.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
+import * as NativeDiagnosticFailure from './NativeDiagnosticFailure.js'
+import * as NativeSymbol from './NativeSymbol.js'
+import * as SilkType from './Type.js'
 
 export interface DeclarationContext {
   readonly support?: boolean
@@ -39,13 +42,31 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
 > {
   let voidType: LlvmType.Type | undefined
   const declared: Array<NativeLoweringContext.DeclaredFunction> = []
-  const machineEntry =
-    context.program.entry._tag === 'NoInvocation' ? undefined : Mir.machineEntry(context.program)
+  const diagnostics = Mir.hasDiagnosticObservation(context.program)
+  const causeType = diagnostics
+    ? yield* NativeDiagnosticFailure.type({
+        builder: context.builder,
+        pointer: context.pointer,
+        word: yield* LlvmType.integer(
+          context.builder,
+          context.program.layout.target.pointerSize * 8,
+        ),
+      })
+    : undefined
   for (const fn of context.program.functions) {
     const resultLanes = context.lanesFor(fn.result)
     const resultLaneCount = resultLanes.length
+    const diagnosticResult =
+      fn.result._tag === 'EffectOutcome' && SilkType.failureMembers(fn.result.type).length > 0
+        ? causeType
+        : undefined
     let resultType: LlvmType.Type
-    if (resultLaneCount === 0) {
+    if (diagnosticResult !== undefined) {
+      resultType = yield* LlvmType.structure(context.builder, [
+        ...resultLanes.map(context.laneType),
+        diagnosticResult,
+      ])
+    } else if (resultLaneCount === 0) {
       const selected = voidType ?? (yield* LlvmType.voidType(context.builder))
       voidType = selected
       resultType = selected
@@ -56,19 +77,28 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
     } else {
       resultType = yield* LlvmType.structure(context.builder, resultLanes.map(context.laneType))
     }
-    const parameters =
+    const sourceParameters =
       fn.regions.length === 0
         ? []
         : fn.localTypes
             .slice(0, fn.parameterCount)
             .flatMap((type) => context.lanesFor(type).map(context.laneType))
+    const diagnosticParameter =
+      diagnostics && fn.machine === undefined ? sourceParameters.length : undefined
+    const parameters =
+      diagnosticParameter === undefined || causeType === undefined
+        ? sourceParameters
+        : [...sourceParameters, context.pointer, causeType]
     const suspendable =
       fn.suspension !== undefined && fn.suspension.classification !== 'Synchronous'
     const machineExport =
       fn.machine === undefined
         ? undefined
         : context.program.foreignExports.find((record) => Mir.matchesInstanceKey(fn, record.key))
-    const publicSymbol = machineExport?.symbol ?? symbolFor(fn, machineEntry)
+    const publicSymbol =
+      machineExport === undefined
+        ? symbolFor(fn)
+        : NativeSymbol.foreign(context.program.layout.target, machineExport.symbol)
     const machineAttributes =
       fn.machine === undefined
         ? undefined
@@ -84,6 +114,7 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
       ? yield* LlvmType.structure(context.builder, [
           context.i32,
           ...resultLanes.map(context.laneType),
+          ...(diagnosticResult === undefined ? [] : [diagnosticResult]),
         ])
       : resultType
     const parameterTypes = suspendable
@@ -95,11 +126,10 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
       parameterTypes,
     )
     const symbol = suspendable ? `${publicSymbol}$suspend_step` : publicSymbol
-    const isMachine = machineEntry !== undefined && Mir.matchesInstanceKey(fn, machineEntry)
     const driver = suspendable
       ? yield* FunctionActor.declare(
           context.builder,
-          isMachine ? publicSymbol : `${publicSymbol}$drive`,
+          `${publicSymbol}$drive`,
           yield* LlvmType.functionType(context.builder, resultType, parameters),
           { visibility: 'hidden' },
         )
@@ -117,9 +147,11 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
         resultType,
         emittedResultType,
         resultLaneCount,
+        ...(diagnosticResult === undefined ? {} : { diagnosticResult }),
         suspendable,
         ...(driver === undefined ? {} : { driver }),
         parameterTypes,
+        ...(diagnosticParameter === undefined ? {} : { diagnosticParameter }),
         linear: linearize(fn),
       }),
     )
@@ -190,7 +222,7 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
     })
     const thunk = yield* FunctionActor.declare(
       context.builder,
-      record.symbol,
+      NativeSymbol.foreign(context.program.layout.target, record.symbol),
       yield* LlvmType.functionType(
         context.builder,
         resultType,
@@ -219,6 +251,15 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
         const arguments_: Array<Value.Input> = []
         for (let ordinal = 0; ordinal < parameters.length; ordinal += 1)
           arguments_.push(yield* Value.argument(body, ordinal))
+        if (implementation.diagnosticParameter !== undefined) {
+          const causeType = implementation.parameterTypes.at(implementation.diagnosticParameter + 1)
+          if (causeType === undefined)
+            throw new RangeError('C export lost its empty diagnostic cause')
+          arguments_.push(
+            yield* Constant.nullValue(context.builder, yield* LlvmType.pointer(context.builder)),
+            yield* Constant.nullValue(context.builder, causeType),
+          )
+        }
         if (context.support) {
           const result = yield* FunctionBody.callDirect(
             body,
@@ -264,12 +305,3 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
   }
   return thunks
 })
-
-/** Stable C ABI symbol for one sealed OS intrinsic. */
-export const osRuntimeSymbol = (name: string): string => {
-  const words = name
-    .replace(/^os/, '')
-    .replaceAll(/([a-z])([A-Z])/g, '$1_$2')
-    .toLowerCase()
-  return `silk_os_${words}_v1`
-}

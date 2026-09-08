@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -8,7 +9,6 @@ import * as Instances from '../src/Instances.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as MirVerification from '../src/MirVerification.js'
-import * as SourceSpan from '../src/SourceSpan.js'
 import * as SuspensionMode from '../src/SuspensionMode.js'
 import * as Type from '../src/Type.js'
 import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
@@ -17,7 +17,10 @@ import * as Projections from './support/projections.js'
 const encoder = new TextEncoder()
 
 const snapshot = (source: string) =>
-  Analysis.ofSourceRealized('suspendability/main', encoder.encode(ordinaryStorageSource(source)))
+  AnalysisFixture.retainingMain(
+    'suspendability/main',
+    encoder.encode(ordinaryStorageSource(source)),
+  )
 
 const key = (instance: Instances.InstanceKey): string =>
   `${instance.declaration.module}.${instance.declaration.name}<${instance.typeArguments
@@ -124,13 +127,6 @@ it('normalizes direct, nested, external, open, and unavailable graph summaries d
   const delimiter = ExecutionBoundary.delimit(external)
   assert.isTrue(SuspensionMode.has(delimiter.body, 'ExternalPark'))
   assert.strictEqual(SuspensionMode.encode(delimiter.owner), 'Complete[Direct]')
-  const span = SourceSpan.fromOffsets('suspension-boundary', 4, 12)
-  assert.isDefined(span)
-  if (span === undefined) return
-  const diagnostic = ExecutionBoundary.entryDiagnostic(external, false, span)
-  assert.strictEqual(diagnostic?.code, 'SEM0140')
-  assert.strictEqual(diagnostic?.reason._tag, 'MissingExplicitExecutionOwner')
-  assert.strictEqual(ExecutionBoundary.entryDiagnostic(external, true, span), undefined)
   const nestedOnly = first.get('nested') ?? SuspensionMode.direct
   assert.strictEqual(ExecutableProperty.nonParkingOfSummary(nestedOnly)._tag, 'Satisfied')
   const nonParking = ExecutableProperty.nonParkingOfSummary(external)
@@ -591,6 +587,56 @@ pub fn main() -> i32 { let callback = suspendAndRecover return callback(42) }`)
   }),
 )
 
+it.effect('preserves nested transfer through an exact NonParking callback parameter', () =>
+  Effect.gen(function* () {
+    const self =
+      yield* snapshot(`fn invoke<F: fn<'static>() -> i32 + Intrinsic.NonParking>(body: F) -> i32 {
+  return body()
+}
+fn nested() -> i32 { return run Intrinsic.suspendEffect(effect { return 42 }) }
+pub fn main() -> i32 { return invoke(nested) }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const invoke = self.instances.instances.find(
+      (instance) => instance.key.declaration.name === 'invoke',
+    )
+    assert.isDefined(invoke)
+    if (invoke !== undefined)
+      assert.isTrue(
+        SuspensionMode.has(Instances.suspensionOf(self.instances, invoke.key), 'NestedTransfer'),
+      )
+    assert.include(names(self), 'suspendability/main.main<>')
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const artifact = yield* Analysis.codegen(self, { mode: 'debug' })
+    assert.include(artifact.ir, '$suspend_step')
+  }),
+)
+
+it.effect('checks NonParking through an ordinary selected interface operation', () =>
+  Effect.gen(function* () {
+    const source = `import silk.execution { Execution }
+interface Job<T> { fn code(value: T) -> i32 }
+struct Provider {}
+fn register(wake: Intrinsic.Wake) -> () { drop wake return () }
+impl Job<()> for Provider {
+  fn code(value: ()) -> i32 { run Execution.park(register) return 42 }
+}
+fn adapt<P: Job<()>>(provider: P) -> i32 { return Job<()>.code(()) }
+fn application() -> i32 { return adapt(Provider {}) }
+fn invoke<F: fn<'static>() -> i32 + Intrinsic.NonParking>(body: F) -> i32 { return body() }
+pub fn main() -> i32 { return invoke(application) }`
+    const self = yield* snapshot(source)
+    const diagnostics = Analysis.diagnostics(self)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0139'],
+    )
+    assert.strictEqual(
+      diagnostics.find((diagnostic) => diagnostic.code === 'SEM0139')?.span.start,
+      source.indexOf(' invoke(application)'),
+    )
+  }),
+)
+
 it.effect('keeps synchronous controls empty', () =>
   Effect.gen(function* () {
     const source = `import silk.effect { Effect }
@@ -709,11 +755,12 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.strictEqual(Analysis.mirOf(self)._tag, 'Available')
-    const entry = self.instances.entry
-    const summary =
-      entry._tag === 'Resolved'
-        ? Instances.suspensionOf(self.instances, entry.key)
-        : SuspensionMode.direct
+    const entry = self.instances.instances.find(
+      (instance) => instance.key.declaration.name === 'main',
+    )
+    assert.isDefined(entry)
+    if (entry === undefined) return
+    const summary = Instances.suspensionOf(self.instances, entry.key)
     assert.isTrue(SuspensionMode.has(summary, 'NestedTransfer'))
     assert.isTrue(
       summary.causes.some((entry) =>
@@ -745,11 +792,12 @@ pub fn main() -> i32 {
 }`)
 
     assert.deepEqual(Analysis.diagnostics(self), [])
-    const entry = self.instances.entry
-    const summary =
-      entry._tag === 'Resolved'
-        ? Instances.suspensionOf(self.instances, entry.key)
-        : SuspensionMode.direct
+    const entry = self.instances.instances.find(
+      (instance) => instance.key.declaration.name === 'main',
+    )
+    assert.isDefined(entry)
+    if (entry === undefined) return
+    const summary = Instances.suspensionOf(self.instances, entry.key)
     assert.isFalse(SuspensionMode.has(summary, 'NestedTransfer'))
     const delayed = self.instances.instances.find(
       (instance) => instance.key.declaration.name === 'delayed',

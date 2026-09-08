@@ -1,3 +1,5 @@
+import * as OpaqueRealization from '../src/OpaqueRealization.js'
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -27,13 +29,14 @@ const lowerStored = Effect.fnUntraced(function* (
   imports: ReadonlyMap<string, Uint8Array> = new Map(),
   target: Target.Id = Target.wasm32UnknownUnknown.id,
 ) {
+  const configuration = AnalysisFixture.configuration(name, target)
   const frontend = yield* Analysis.make({
     root: SourceFile.make(name, ascii(source)),
-    target,
+    configuration,
   }).pipe(Effect.provide(SourceResolver.memory(imports)))
-  const snapshot = yield* Analysis.realize(frontend, target, {
+  const snapshot = yield* Analysis.realize(frontend, configuration, {
     normalizeMir: false,
-  })
+  }).pipe(Effect.provide(SourceResolver.empty))
   const layout =
     snapshot.layout._tag === 'Available' ? snapshot.layout.value : unreachable('expected layout')
   const module = Analysis.loweredMir(snapshot)
@@ -51,7 +54,12 @@ const finalizeSuspension = (
     SuspensionMir.finalize(
       normalized,
       provisional,
-      SuspensionOwnership.plan(normalized, provisional, snapshot.index),
+      SuspensionOwnership.plan(
+        normalized,
+        provisional,
+        snapshot.index,
+        OpaqueRealization.catalogOf(snapshot),
+      ),
       snapshot.index,
     ),
   )

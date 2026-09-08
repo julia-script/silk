@@ -47,9 +47,29 @@ export type LinearOperation =
           | 'Conditional'
           | 'ShortCircuit'
           | 'CheckedScalar'
+          | 'DiagnosticScope'
           | 'PropagateEffectFailure'
       }
     >
+  | {
+      readonly _tag: 'EnterDiagnosticScope'
+      /** Stable function-local identity shared with the matching leave operation. */
+      readonly scope: Mir.LocalId
+      readonly state: Mir.LocalId
+      readonly observer: Mir.LocalId
+      readonly provenance: Mir.Provenance
+    }
+  | {
+      readonly _tag: 'LeaveDiagnosticScope'
+      readonly scope: Mir.LocalId
+      readonly provenance: Mir.Provenance
+    }
+  | {
+      /** Successful selected recovery consumes the protected outcome before later source work. */
+      readonly _tag: 'ReleaseDiagnosticOutcome'
+      readonly outcome: Mir.LocalId
+      readonly provenance: Mir.Provenance
+    }
   | {
       readonly _tag: 'CheckedScalarOutcome'
       readonly operation: Extract<Mir.Operation, { readonly _tag: 'CheckedScalar' }>['operation']
@@ -79,6 +99,7 @@ export const isLinearOperation = (
   operation._tag !== 'Conditional' &&
   operation._tag !== 'ShortCircuit' &&
   operation._tag !== 'CheckedScalar' &&
+  operation._tag !== 'DiagnosticScope' &&
   operation._tag !== 'PropagateEffectFailure'
 
 export const linearOperations = (
@@ -96,6 +117,10 @@ export interface LinearBlock {
   readonly kind: 'Normal' | 'Cleanup'
   readonly operations: ReadonlyArray<LinearOperation>
   readonly terminator: LinearTerminator
+  /** Lexically active selected failures, outermost first; payload values remain separate. */
+  readonly recoveryOutcomes?: ReadonlyArray<Mir.LocalId>
+  /** Observation that clears any cause inherited by this function before these local scopes. */
+  readonly recoveryBoundary?: Mir.LocalId
 }
 
 export interface StructuredBlock {
@@ -136,7 +161,6 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'RunEffectValue':
     case 'RunStaticEffect':
     case 'CatchEffect':
-    case 'CloseEffectEntry':
     case 'Construct':
     case 'ConstructUnionVariant':
     case 'ConstructArray':
@@ -145,7 +169,6 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'ValidateLayout':
     case 'RepeatLayout':
     case 'Allocate':
-    case 'OsCall':
     case 'NativeAssembly':
     case 'ForeignIndirectCall':
     case 'ForeignCall':
@@ -165,9 +188,11 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'RawBufferCopy':
     case 'RawBufferFill':
     case 'PointerNull':
+    case 'DiagnosticUnhandled':
     case 'PointerAddress':
     case 'PointerIsNull':
     case 'PointerBytes':
+    case 'PointerReinterpret':
     case 'PointerRequalify':
     case 'PointerFromStorage':
     case 'PointerAt':
@@ -186,13 +211,15 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'WritePlace':
     case 'EndLoan':
     case 'Drop':
+    case 'EnterDiagnosticScope':
+    case 'LeaveDiagnosticScope':
+    case 'ReleaseDiagnosticOutcome':
       return undefined
   }
 }
 
 export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'Allocate' ||
-  operation._tag === 'OsCall' ||
   operation._tag === 'RawBufferFrom' ||
   operation._tag === 'SharedFromAllocation' ||
   operation._tag === 'ExecutionFromAllocation' ||
@@ -212,7 +239,6 @@ export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'RunEffectComposite' ||
   operation._tag === 'RunStaticEffect' ||
   operation._tag === 'CatchEffect' ||
-  operation._tag === 'CloseEffectEntry' ||
   (operation._tag === 'Binary' &&
     operation.operator !== 'Equals' &&
     operation.operator !== 'NotEquals' &&
@@ -238,6 +264,21 @@ export const expandMatches = (
     Math.max(-1, ...Mir.regionsTree(fn.regions).map((region) => region.id.ordinal)) + 1
   const reserve = (): Mir.RegionId => Object.freeze({ _tag: 'Region', ordinal: nextRegion++ })
   const blocks: Array<LinearBlock> = []
+  let activeRecoveryOutcomes: ReadonlyArray<Mir.LocalId> = Object.freeze([])
+  let activeRecoveryBoundary: Mir.LocalId | undefined
+  const append = (block: LinearBlock): void => {
+    blocks.push(
+      activeRecoveryOutcomes.length === 0 && activeRecoveryBoundary === undefined
+        ? block
+        : Object.freeze({
+            ...block,
+            recoveryOutcomes: activeRecoveryOutcomes,
+            ...(activeRecoveryBoundary === undefined
+              ? {}
+              : { recoveryBoundary: activeRecoveryBoundary }),
+          }),
+    )
+  }
   const jump = (target: Mir.RegionId, provenance: Mir.Provenance): LinearTerminator =>
     Object.freeze({ _tag: 'Jump', target, provenance })
 
@@ -251,9 +292,18 @@ export const expandMatches = (
     execution: Mir.Execution,
     completionOperations: ReadonlyArray<LinearOperation>,
     completion: LinearTerminator,
+    observationBoundary?: Mir.LocalId,
   ): Mir.RegionId => {
     const previousTargets = activeTargets
     const previousLoops = activeLoops
+    const previousRecoveryOutcomes = activeRecoveryOutcomes
+    const previousRecoveryBoundary = activeRecoveryBoundary
+    if (observationBoundary !== undefined) {
+      activeRecoveryOutcomes = Object.freeze([])
+      activeRecoveryBoundary = observationBoundary
+    }
+    if (execution.recoveryOutcome !== undefined)
+      activeRecoveryOutcomes = Object.freeze([...activeRecoveryOutcomes, execution.recoveryOutcome])
     activeTargets = new Map(activeTargets)
     activeLoops = new Map(activeLoops)
     for (const region of execution.regions) {
@@ -265,7 +315,7 @@ export const expandMatches = (
     for (const region of execution.regions) {
       const id = target(region.id)
       if (region._tag === 'ConditionalRegion') {
-        blocks.push(
+        append(
           Object.freeze({
             id,
             origin: region.id,
@@ -283,7 +333,7 @@ export const expandMatches = (
         continue
       }
       if (region._tag === 'LoopRegion') {
-        blocks.push(
+        append(
           Object.freeze({
             id,
             origin: region.id,
@@ -324,12 +374,26 @@ export const expandMatches = (
         id,
         region.id,
         region._tag === 'CleanupRegion' ? 'Cleanup' : 'Normal',
-        [...Mir.operationsOf(region), ...(outcome._tag === 'Complete' ? completionOperations : [])],
+        [
+          ...Mir.operationsOf(region),
+          ...(outcome._tag === 'Complete' ? completionOperations : []),
+          ...(outcome._tag === 'Complete' && execution.recoveryOutcome !== undefined
+            ? [
+                Object.freeze({
+                  _tag: 'ReleaseDiagnosticOutcome' as const,
+                  outcome: execution.recoveryOutcome,
+                  provenance: outcome.provenance,
+                }),
+              ]
+            : []),
+        ],
         terminator,
       )
     }
     activeTargets = previousTargets
     activeLoops = previousLoops
+    activeRecoveryOutcomes = previousRecoveryOutcomes
+    activeRecoveryBoundary = previousRecoveryBoundary
     return entry
   }
 
@@ -346,10 +410,11 @@ export const expandMatches = (
         operation._tag === 'Conditional' ||
         operation._tag === 'ShortCircuit' ||
         operation._tag === 'CheckedScalar' ||
+        operation._tag === 'DiagnosticScope' ||
         operation._tag === 'PropagateEffectFailure',
     )
     if (specialIndex < 0) {
-      blocks.push(
+      append(
         Object.freeze({
           id,
           origin,
@@ -361,8 +426,76 @@ export const expandMatches = (
       return
     }
     const special = operations.at(specialIndex)
+    if (special?._tag === 'DiagnosticScope') {
+      const following = reserve()
+      const release = reserve()
+      const completion: Array<LinearOperation> = []
+      if (special.body.result !== undefined)
+        completion.push(
+          Object.freeze({
+            _tag: 'Move',
+            destination: special.destination,
+            source: special.body.result,
+            provenance: special.provenance,
+          }),
+        )
+      const cleanup: ReadonlyArray<LinearOperation> = Object.freeze([
+        Object.freeze({
+          _tag: 'LeaveDiagnosticScope',
+          scope: special.destination,
+          provenance: special.provenance,
+        }),
+        Object.freeze({
+          _tag: 'Drop',
+          local: special.observer,
+          cleanup: special.observerCleanup,
+          provenance: special.provenance,
+        }),
+        Object.freeze({
+          _tag: 'Drop',
+          local: special.state,
+          cleanup: special.stateCleanup,
+          provenance: special.provenance,
+        }),
+      ])
+      const entry = emitExecution(
+        special.body,
+        completion,
+        jump(release, special.provenance),
+        special.destination,
+      )
+      append(
+        Object.freeze({
+          id: release,
+          origin,
+          kind,
+          operations: cleanup,
+          terminator: jump(following, special.provenance),
+        }),
+      )
+      append(
+        Object.freeze({
+          id,
+          origin,
+          kind,
+          operations: linearOperations([
+            ...operations.slice(0, specialIndex),
+            Object.freeze({
+              _tag: 'EnterDiagnosticScope' as const,
+              scope: special.destination,
+              state: special.state,
+              observer: special.observer,
+              provenance: special.provenance,
+            }),
+          ]),
+          terminator: jump(entry, special.provenance),
+        }),
+      )
+      lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
+      return
+    }
     if (special?._tag === 'PropagateEffectFailure') {
-      blocks.push(
+      append(
         Object.freeze({
           id,
           origin,
@@ -409,7 +542,7 @@ export const expandMatches = (
         cleanup: Extract<Mir.Operation, { readonly _tag: 'Drop' }>['cleanup'],
       ): Extract<Mir.Operation, { readonly _tag: 'Drop' }> =>
         Object.freeze({ _tag: 'Drop', local, cleanup, provenance: special.provenance })
-      blocks.push(
+      append(
         Object.freeze({
           id,
           origin,
@@ -475,7 +608,7 @@ export const expandMatches = (
         )
       const taken = branch(special.taken)
       const otherwise = branch(special.otherwise)
-      blocks.push(
+      append(
         Object.freeze({
           id,
           origin,
@@ -510,7 +643,7 @@ export const expandMatches = (
         jump(following, special.provenance),
       )
       const decided = reserve()
-      blocks.push(
+      append(
         Object.freeze({
           id,
           origin,
@@ -528,7 +661,7 @@ export const expandMatches = (
         }),
       )
       lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
-      blocks.push(
+      append(
         Object.freeze({
           id: decided,
           origin,
@@ -552,7 +685,7 @@ export const expandMatches = (
     const match = special
     const dispatch = reserve()
     const following = reserve()
-    blocks.push(
+    append(
       Object.freeze({
         id,
         origin,
@@ -564,7 +697,7 @@ export const expandMatches = (
     lowerSequence(following, origin, kind, operations.slice(specialIndex + 1), terminator)
 
     const trap = reserve()
-    blocks.push(
+    append(
       Object.freeze({
         id: trap,
         origin,
@@ -586,7 +719,7 @@ export const expandMatches = (
       const entry = reserve()
       const candidate = candidates.at(ordinal)
       if (candidate === undefined) {
-        blocks.push(
+        append(
           Object.freeze({
             id: entry,
             origin,
@@ -705,7 +838,7 @@ export const expandMatches = (
         )
         if (declared === undefined)
           throw new RangeError('Verified scalar enum match lost its declared discriminant')
-        blocks.push(
+        append(
           Object.freeze({
             id: dispatchIds.at(ordinal) ?? dispatch,
             origin,
@@ -732,7 +865,7 @@ export const expandMatches = (
       match.scrutineeShape.tree._tag !== 'NominalUnionShape'
     ) {
       const selected = decisionEntries.at(0) ?? trap
-      blocks.push(
+      append(
         Object.freeze({
           id: dispatch,
           origin,
@@ -745,7 +878,7 @@ export const expandMatches = (
     }
     const dispatchIds = match.decisions.map((_, ordinal) => (ordinal === 0 ? dispatch : reserve()))
     match.decisions.forEach((decision, ordinal) => {
-      blocks.push(
+      append(
         Object.freeze({
           id: dispatchIds.at(ordinal) ?? dispatch,
           origin,

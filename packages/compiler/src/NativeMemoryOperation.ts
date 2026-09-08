@@ -23,7 +23,6 @@ type Operation = Extract<
   {
     readonly _tag:
       | 'Allocate'
-      | 'OsCall'
       | 'RawBufferFrom'
       | 'SharedFromAllocation'
       | 'SharedClone'
@@ -53,7 +52,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     i32,
     lanePointers,
     malloc,
-    osRuntimes,
     pointer,
     program,
     storage: nativeStorage,
@@ -197,46 +195,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operation.destination.ordinal,
         Object.freeze([base, bytes, alignment, one, rawAddress, one]),
       )
-      break
-    }
-    case 'OsCall': {
-      const runtime = osRuntimes.get(operation.operation.name)
-      if (runtime === undefined) {
-        throw new RangeError(`LLVM OS runtime ${operation.operation.name} is unavailable`)
-      }
-      const arguments_ = operation.arguments.flatMap((argument) => [
-        ...NativeStorage.readLocal(nativeStorage, argument),
-      ])
-      const result = yield* FunctionBody.callDirect(
-        body,
-        runtime.handle,
-        arguments_,
-        `os${operation.destination.ordinal}`,
-      )
-      for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
-        yield* NativeStorage.reloadAddressRoot(nativeStorage, root)
-      }
-      if (runtime.resultLaneCount === 0) {
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
-        break
-      }
-      if (result === undefined) throw new RangeError('LLVM OS runtime returned no value')
-      if (runtime.resultLaneCount === 1) {
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
-        break
-      }
-      const values: Array<Value.Input> = []
-      for (let lane = 0; lane < runtime.resultLaneCount; lane += 1) {
-        values.push(
-          yield* FunctionBody.extractValue(
-            body,
-            result,
-            [lane],
-            `os${operation.destination.ordinal}_${lane}`,
-          ),
-        )
-      }
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
       break
     }
     case 'RawBufferFrom': {

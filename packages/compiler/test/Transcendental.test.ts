@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { assert, it } from '@effect/vitest'
@@ -54,7 +55,7 @@ it('stays within four ulp of independently generated high-precision vectors', ()
 
 it.effect('rejects a mismatched transcendental MIR result before execution', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'transcendental/malformed',
       new TextEncoder().encode(
         'import silk.f64 as f64\npub fn main() -> i32 { return f64.toI32(f64.cos(1.0)) }',

@@ -210,7 +210,7 @@ const catalogDigest = (): string =>
           .map(field)
           .join(''),
       )
-      .join(''),
+      .join('') + field(JSON.stringify(Stdlib.compositions)),
   )
 
 const inventoryDigest = (): string => contentDigest(JSON.stringify(Intrinsic.inventory()))

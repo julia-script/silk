@@ -75,34 +75,4 @@ int memcmp(const void *left, const void *right, size_t count) {
   return 0;
 }
 
-typedef struct silk_coroutine_frame_header_v1 {
-  void *allocation;
-} silk_coroutine_frame_header_v1;
-
-void *silk_coroutine_frame_push_v1(size_t size, size_t alignment) {
-  if (alignment < sizeof(void *)) alignment = sizeof(void *);
-  if ((alignment & (alignment - 1)) != 0) return (void *)0;
-  const size_t overhead = sizeof(silk_coroutine_frame_header_v1) + alignment - 1;
-  if (size > (__SIZE_MAX__) - overhead) return (void *)0;
-  void *allocation = malloc(size + overhead);
-  if (allocation == (void *)0) return (void *)0;
-  const uintptr_t start = (uintptr_t)allocation;
-  const uintptr_t payload = (start + sizeof(silk_coroutine_frame_header_v1) + alignment - 1) &
-    ~((uintptr_t)alignment - 1);
-  silk_coroutine_frame_header_v1 *header =
-    (silk_coroutine_frame_header_v1 *)(payload - sizeof(silk_coroutine_frame_header_v1));
-  header->allocation = allocation;
-  return (void *)payload;
-}
-
-void silk_coroutine_frame_pop_v1(void *frame) {
-  if (frame == (void *)0) return;
-  silk_coroutine_frame_header_v1 *header =
-    (silk_coroutine_frame_header_v1 *)((unsigned char *)frame -
-      sizeof(silk_coroutine_frame_header_v1));
-  if (header->allocation == (void *)0) __builtin_trap();
-  void *allocation = header->allocation;
-  header->allocation = (void *)0;
-  free(allocation);
-}
 `

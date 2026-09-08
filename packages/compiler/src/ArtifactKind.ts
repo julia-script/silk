@@ -89,6 +89,6 @@ export const encode = (self: ArtifactKind): string => self
 export const profileArtifact = (self: ArtifactKind): CompilationProfile.Artifact => {
   if (self === 'NativeObject') return 'object'
   if (self === 'NativeStaticLibrary') return 'static-archive'
-  if (self === 'NativeExecutable') return 'executable'
+  if (self === 'NativeExecutable' || self === 'WebAssemblyModule') return 'executable'
   return 'loadable-module'
 }

@@ -49,8 +49,24 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
             ['unloaded', ascii(unused)],
           ]),
         )
-      const darwinOptions = { configuration: { profile: { target: 'aarch64-apple-darwin' } } }
-      const linuxOptions = { configuration: { profile: { target: 'x86_64-unknown-linux-gnu' } } }
+      const darwinOptions: ProjectAnalysis.Options = {
+        configuration: {
+          profile: {
+            target: 'aarch64-apple-darwin',
+            artifact: 'object',
+            runtime: { kind: 'none' },
+          },
+        },
+      }
+      const linuxOptions: ProjectAnalysis.Options = {
+        configuration: {
+          profile: {
+            target: 'x86_64-unknown-linux-gnu',
+            artifact: 'object',
+            runtime: { kind: 'none' },
+          },
+        },
+      }
       const darwin = yield* ProjectAnalysis.make([root], darwinOptions).pipe(
         Effect.provide(supply('')),
       )
@@ -102,7 +118,11 @@ it.effect('invalidates selection when an imported condition helper body changes'
       ascii(`import policy { enabled }
 static if enabled() { pub const first: i32 = 1 } else { pub const second: i32 = 2 }`),
     )
-    const options = { configuration: { profile: { target: 'aarch64-apple-darwin' } } }
+    const options: ProjectAnalysis.Options = {
+      configuration: {
+        profile: { target: 'aarch64-apple-darwin', artifact: 'object', runtime: { kind: 'none' } },
+      },
+    }
     const resolver = (value: boolean) =>
       SourceResolver.memory(
         new Map([['policy', ascii(`pub static fn enabled() -> bool { return ${value} }`)]]),
@@ -940,7 +960,16 @@ it.effect('loads a configured application independently of open document roots',
           ascii('import Util\npub fn main() -> i32 { return Util.answer() }'),
         ),
       ],
-      { application: 'Entry', configuration: { profile: { target: 'aarch64-apple-darwin' } } },
+      {
+        application: 'Entry',
+        configuration: {
+          profile: {
+            target: 'aarch64-apple-darwin',
+            artifact: 'object',
+            runtime: { kind: 'none' },
+          },
+        },
+      },
     ).pipe(
       Effect.provide(
         SourceResolver.memory(
@@ -959,3 +988,28 @@ it.effect('loads a configured application independently of open document roots',
     assert.isTrue(project.closure.sources.has('Entry'))
   }),
 )
+
+for (const [target, startup, explicitApplication] of [
+  ['aarch64-apple-darwin', 'silk/native_start', false],
+  ['wasm32-unknown-unknown', 'silk/wasm_start', true],
+] as const) {
+  it.effect(`loads default ${startup} before selecting project declarations`, () =>
+    Effect.gen(function* () {
+      const application = SourceFile.make('Main', ascii('pub fn main() -> i32 { return 42 }'))
+      const helper = SourceFile.make('Helper', ascii('pub fn value() -> i32 { return 7 }'))
+      const project = yield* ProjectAnalysis.make(
+        explicitApplication ? [helper, application] : [application, helper],
+        {
+          ...(explicitApplication ? { application: 'Main' } : {}),
+          configuration: { profile: { target } },
+        },
+      ).pipe(Effect.provide(SourceResolver.memory(new Map())))
+      const view = ProjectAnalysis.view(project, 'Main') ?? raise('application view')
+      assert.deepEqual(Analysis.diagnostics(view), [])
+      assert.deepEqual(project.closure.resolutionFailures, [])
+      assert.isTrue(project.closure.sources.has(startup))
+      assert.deepEqual(view.configuration?.profile, { target })
+      assert.strictEqual(view.closure.rootModule, 'Main')
+    }),
+  )
+}

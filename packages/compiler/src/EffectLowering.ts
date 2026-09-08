@@ -1,7 +1,7 @@
+import * as ConcreteCleanup from './ConcreteCleanup.js'
 import {
   authored,
   cleanupForLocal,
-  concreteCleanup,
   generated,
   ownershipLocal,
   lowerOwnershipPath,
@@ -331,6 +331,7 @@ export const lowerRunEffectComposite = (
 }
 
 export interface CaughtEffect {
+  readonly outcome: Mir.LocalId
   readonly valid: Mir.LocalId
   readonly success: Mir.LocalId
   readonly failure: Mir.LocalId
@@ -403,6 +404,7 @@ export const runCaughtEffectValue = (
     }),
   )
   return Object.freeze({
+    outcome,
     valid,
     success,
     failure,
@@ -410,17 +412,221 @@ export const runCaughtEffectValue = (
   })
 }
 
+/** Selects one exact capture environment before invoking a composition on it. */
+const lowerWithEffectValue = (
+  fn: FunctionLowering,
+  source: Mir.LocalId,
+  composite: Extract<Mir.Type, { readonly _tag: 'EffectComposite' }>,
+  success: Type.Type,
+  span: SourceSpan.SourceSpan,
+  use: (
+    value: Mir.LocalId,
+    type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
+  ) => LoweredExpression | undefined,
+): LoweredExpression | undefined => {
+  const resultType = fn.type(success)
+  const boolType = fn.type('bool')
+  const resultShape = Layout.callingShape(fn.layout, success)
+  if (
+    resultType === undefined ||
+    resultType._tag === 'EffectOutcome' ||
+    boolType?._tag !== 'bool' ||
+    resultShape === undefined
+  )
+    return undefined
+  const select = (ordinal: number): LoweredExpression | undefined => {
+    const type = composite.alternatives.at(ordinal)
+    if (type === undefined) return 'Transferred'
+    const destination = fn.alloc(type)
+    const matched = fn.alloc(boolType)
+    fn.emit(
+      Object.freeze({
+        _tag: 'UnpackEffectComposite',
+        destination,
+        matched,
+        source,
+        alternative: ordinal,
+        type,
+        provenance: generated(span),
+      }),
+    )
+    const taken = lowerExecution(fn, span, () => use(destination, type))
+    const otherwise = lowerExecution(fn, span, () => select(ordinal + 1))
+    if (taken === undefined || otherwise === undefined) return undefined
+    const result = fn.alloc(resultType)
+    fn.emit(
+      Object.freeze({
+        _tag: 'Conditional',
+        destination: result,
+        condition: matched,
+        taken,
+        otherwise,
+        type: resultType,
+        resultShape,
+        provenance: generated(span),
+      }),
+    )
+    return Object.freeze({ result })
+  }
+  return select(0)
+}
+
+/** Holds the protected outcome through finalization without selecting a recovery cause. */
+export const lowerFinalizedEffect = (
+  fn: FunctionLowering,
+  protectedValue: Mir.LocalId,
+  protectedType: Extract<Mir.Type, { readonly _tag: 'EffectValue' | 'EffectComposite' }>,
+  finalizer: Mir.LocalId,
+  finalizerType: Extract<Mir.Type, { readonly _tag: 'EffectValue' | 'EffectComposite' }>,
+  span: SourceSpan.SourceSpan,
+  protectedSpan: SourceSpan.SourceSpan,
+  finalizerSpan: SourceSpan.SourceSpan,
+  availableRequirements: ReadonlyArray<ProvidedRequirement>,
+): LoweredExpression | undefined => {
+  if (protectedType._tag === 'EffectComposite')
+    return lowerWithEffectValue(
+      fn,
+      protectedValue,
+      protectedType,
+      protectedType.contract.success,
+      protectedSpan,
+      (value, type) =>
+        lowerFinalizedEffect(
+          fn,
+          value,
+          type,
+          finalizer,
+          finalizerType,
+          span,
+          protectedSpan,
+          finalizerSpan,
+          availableRequirements,
+        ),
+    )
+  const finalize = (): LoweredExpression | undefined =>
+    finalizerType._tag === 'EffectComposite'
+      ? lowerWithEffectValue(
+          fn,
+          finalizer,
+          finalizerType,
+          Type.unit,
+          finalizerSpan,
+          (value, type) =>
+            lowerRunEffectValue(fn, value, type, Type.unit, finalizerSpan, availableRequirements),
+        )
+      : lowerRunEffectValue(
+          fn,
+          finalizer,
+          finalizerType,
+          Type.unit,
+          finalizerSpan,
+          availableRequirements,
+        )
+  const failures = Type.failureMembers(protectedType.type)
+  if (failures.length === 0) {
+    const protectedResult = lowerRunEffectValue(
+      fn,
+      protectedValue,
+      protectedType,
+      protectedType.type.success,
+      protectedSpan,
+      availableRequirements,
+    )
+    if (protectedResult === undefined || protectedResult === 'Transferred') return protectedResult
+    const finalized = finalize()
+    return finalized === undefined || finalized === 'Transferred' ? finalized : protectedResult
+  }
+  const caught = runCaughtEffectValue(
+    fn,
+    protectedValue,
+    protectedType,
+    protectedSpan,
+    availableRequirements,
+  )
+  if (caught === undefined || fn.effectOutcome === undefined) return undefined
+  const successType = fn.localTypes.at(caught.success.ordinal)
+  const failureType = fn.localTypes.at(caught.failure.ordinal)
+  const propagationType = fn.type(fn.effectOutcome)
+  const successShape = Layout.callingShape(fn.layout, protectedType.type.success)
+  const propagationShape = Layout.callingShape(fn.layout, fn.effectOutcome)
+  if (
+    successType === undefined ||
+    successType._tag === 'EffectOutcome' ||
+    failureType === undefined ||
+    failureType._tag === 'EffectOutcome' ||
+    propagationType?._tag !== 'EffectOutcome' ||
+    successShape === undefined ||
+    propagationShape === undefined
+  )
+    return undefined
+  const propagatedFailures = Type.failureMembers(propagationType.type)
+  const tagMappings = failures.flatMap((failure, source) => {
+    const target = propagatedFailures.findIndex(
+      (candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(failure),
+    )
+    return target < 0 ? [] : [Object.freeze({ source, target: target + 1 })]
+  })
+  if (tagMappings.length !== failures.length) return undefined
+  const taken = lowerExecution(fn, span, () => {
+    const finalized = finalize()
+    return finalized === undefined || finalized === 'Transferred'
+      ? finalized
+      : Object.freeze({ result: caught.success })
+  })
+  const otherwise = lowerExecution(fn, span, () => {
+    const finalized = finalize()
+    if (finalized === undefined || finalized === 'Transferred') return finalized
+    const bottom = fn.type('never')
+    if (bottom?._tag !== 'Bottom') return undefined
+    const releases = propagationReleases(fn, span)
+    fn.emit(
+      Object.freeze({
+        _tag: 'PropagateEffectFailure',
+        source: caught.failure,
+        outcome: caught.outcome,
+        sourceType: failureType,
+        propagationType,
+        tagMappings: Object.freeze(tagMappings),
+        propagationLaneCount: propagationShape.laneCount,
+        ...(releases.length === 0 ? {} : { releases }),
+        type: bottom,
+        provenance: generated(span),
+      }),
+    )
+    return 'Transferred'
+  })
+  if (taken === undefined || otherwise === undefined) return undefined
+  const destination = fn.alloc(successType)
+  fn.emit(
+    Object.freeze({
+      _tag: 'Conditional',
+      destination,
+      condition: caught.valid,
+      taken,
+      otherwise,
+      type: successType,
+      resultShape: successShape,
+      provenance: generated(span),
+    }),
+  )
+  return Object.freeze({ result: destination })
+}
+
+const callableTargetArguments = (
+  callable: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
+): ReadonlyArray<Type.GenericArgument> =>
+  callable.environment === undefined
+    ? (callable.storage?.realization.targetArguments ?? callable.typeArguments ?? Object.freeze([]))
+    : Layout.callableTargetArguments(callable.environment)
+
 export const callableEffectValue = (
   fn: FunctionLowering,
   callable: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
   if (callable.target._tag !== 'DeclarationCallableTarget') return undefined
-  const typeArguments =
-    callable.environment?.callable.typeArguments ??
-    callable.storage?.realization.targetArguments ??
-    callable.typeArguments ??
-    Object.freeze([])
-  const result = fn.effectResults.get(instanceText(callable.target.declaration, typeArguments))
+  const result = fn.effectResults.get(
+    instanceText(callable.target.declaration, callableTargetArguments(callable)),
+  )
   return result?._tag === 'EffectValue' ? result : undefined
 }
 
@@ -521,7 +727,7 @@ export const lowerEffectCatch = (
   const unusedHandlerDrop = (): ReadonlyArray<Mir.DropOperation> => {
     const cleanup = cleanupForLocal(
       fn,
-      concreteCleanup(fn, Mir.semanticType(handlerType)),
+      ConcreteCleanup.forType(fn, Mir.semanticType(handlerType)),
       handlerType,
     )
     return cleanup._tag === 'NoCleanup'
@@ -624,19 +830,12 @@ export const lowerEffectCatch = (
   const successType = fn.type(resultEffect.success)
   const successShape = Layout.callingShape(fn.layout, resultEffect.success)
   const failureValueMir = fn.type(caught.failureValueType)
-  const propagationEffect = fn.effectOutcome
-  const propagationType = propagationEffect === undefined ? undefined : fn.type(propagationEffect)
-  const propagationShape =
-    propagationEffect === undefined ? undefined : Layout.callingShape(fn.layout, propagationEffect)
   if (
     successType === undefined ||
     successType._tag === 'EffectOutcome' ||
     successShape === undefined ||
     failureValueMir === undefined ||
-    failureValueMir._tag === 'EffectOutcome' ||
-    propagationEffect === undefined ||
-    propagationType?._tag !== 'EffectOutcome' ||
-    propagationShape === undefined
+    failureValueMir._tag === 'EffectOutcome'
   )
     return undefined
 
@@ -655,11 +854,7 @@ export const lowerEffectCatch = (
           _tag: 'ApplyCallable' as const,
           destination: applied,
           callable: handler.result,
-          typeArguments:
-            handlerType.environment?.callable.typeArguments ??
-            handlerType.storage?.realization.targetArguments ??
-            handlerType.typeArguments ??
-            Object.freeze([]),
+          typeArguments: callableTargetArguments(handlerType),
           captures: Object.freeze([]),
           arguments: Object.freeze([caught.failure]),
           callableType: handlerType.type,
@@ -680,7 +875,7 @@ export const lowerEffectCatch = (
         destination,
         condition: caught.valid,
         taken,
-        otherwise,
+        otherwise: Object.freeze({ ...otherwise, recoveryOutcome: caught.outcome }),
         type: successType,
         resultShape: successShape,
         provenance: generated(expression.span),
@@ -764,11 +959,7 @@ export const lowerEffectCatch = (
             _tag: 'ApplyCallable' as const,
             destination: applied,
             callable: handler.result,
-            typeArguments:
-              handlerType.environment?.callable.typeArguments ??
-              handlerType.storage?.realization.targetArguments ??
-              handlerType.typeArguments ??
-              Object.freeze([]),
+            typeArguments: callableTargetArguments(handlerType),
             captures: Object.freeze([]),
             arguments: Object.freeze([handlerArgument]),
             callableType: handlerType.type,
@@ -781,6 +972,21 @@ export const lowerEffectCatch = (
         )
         return runHandler(applied)
       }
+      // A fully handled catch is valid in an ordinary function. Only an unselected
+      // failure needs an enclosing Effect outcome through which it can propagate.
+      const propagationEffect = fn.effectOutcome
+      const propagationType =
+        propagationEffect === undefined ? undefined : fn.type(propagationEffect)
+      const propagationShape =
+        propagationEffect === undefined
+          ? undefined
+          : Layout.callingShape(fn.layout, propagationEffect)
+      if (
+        propagationEffect === undefined ||
+        propagationType?._tag !== 'EffectOutcome' ||
+        propagationShape === undefined
+      )
+        return undefined
       const target = Type.failureMembers(propagationEffect).findIndex(
         (candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(member),
       )
@@ -792,6 +998,7 @@ export const lowerEffectCatch = (
         Object.freeze({
           _tag: 'PropagateEffectFailure' as const,
           source: bound,
+          outcome: caught.outcome,
           sourceType: memberType,
           propagationType,
           tagMappings: Object.freeze([Object.freeze({ source: 0, target: target + 1 })]),
@@ -824,7 +1031,9 @@ export const lowerEffectCatch = (
         cleanupBindings: Object.freeze([]),
         selected: Object.freeze({
           access: 'Move' as const,
-          execution: selectedExecution,
+          execution: selectedMembers.some((candidate) => Type.equals(candidate, member))
+            ? Object.freeze({ ...selectedExecution, recoveryOutcome: caught.outcome })
+            : selectedExecution,
           cleanup: Object.freeze([]),
           endBorrow: false,
         }),
@@ -1055,7 +1264,7 @@ export const dropOwnedProvider = (
   type: Type.Nominal,
   span: SourceSpan.SourceSpan,
 ): void => {
-  const cleanup = concreteCleanup(fn, type)
+  const cleanup = ConcreteCleanup.forType(fn, type)
   if (cleanup._tag === 'NoCleanup') return
   fn.emit(
     Object.freeze({

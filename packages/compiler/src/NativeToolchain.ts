@@ -92,14 +92,10 @@ export const runtimeObjectCacheStats = (self: RuntimeObjectCache): RuntimeObject
 /** Returns the exact runtime source participating in one final artifact and its cache identity. */
 export const artifactRuntimeSource = (
   kind: FinalArtifact['kind'],
-  termination: Backend.Termination,
   nativeRuntimeSymbols: ReadonlyArray<string>,
-  invokesApplication: boolean,
 ): string => {
-  if (kind === 'NativeExecutable' && invokesApplication)
-    return ToolchainPlan.executableSource(termination, nativeRuntimeSymbols)
   if (kind === 'WebAssemblyModule') return LlvmWasmRuntime.source
-  if (nativeRuntimeSymbols.length > 0) return ToolchainPlan.runtimeSource(nativeRuntimeSymbols)
+  if (nativeRuntimeSymbols.length > 0) return ToolchainPlan.runtimeSource()
   return ''
 }
 
@@ -840,6 +836,19 @@ export const emitObject = Effect.fn('NativeToolchain.emitObject')(function* (
   baseName = 'program',
 ): Effect.fn.Return<ObjectArtifact, ToolchainError> {
   if (
+    profile.target.kind === 'Native' &&
+    profile.libc === 'none' &&
+    artifact.nativeRuntimeSymbols.length > 0
+  )
+    return yield* helperError(
+      new HelperCapability.HelperError({
+        operation: 'NativeToolchain.emitObject',
+        code: 'MissingProvider',
+        subject: 'No-libc artifact requires explicitly supplied language runtime capabilities',
+        origins: artifact.nativeRuntimeSymbols,
+      }),
+    )
+  if (
     artifact.support &&
     (profile.artifact !== 'object' ||
       profile.entry.kind !== 'none' ||
@@ -1063,36 +1072,17 @@ export const compileCObject = Effect.fn('NativeToolchain.compileCObject')(functi
   })
 })
 
-export const compileExecutableRuntime = Effect.fn('NativeToolchain.compileExecutableRuntime')(
-  function* (
-    toolchain: Toolchain,
-    scope: BuildScope,
-    target: Target.Target,
-    termination: Backend.Termination,
-    nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
-  ): Effect.fn.Return<ObjectArtifact, ToolchainError> {
-    return yield* compileCObject(
-      toolchain,
-      scope,
-      target,
-      'silk_runtime',
-      ToolchainPlan.executableSource(termination, nativeRuntimeSymbols),
-    )
-  },
-)
-
 export const compileRuntime = Effect.fn('NativeToolchain.compileRuntime')(function* (
   toolchain: Toolchain,
   scope: BuildScope,
   target: Target.Target,
-  nativeRuntimeSymbols: ReadonlyArray<string> = Object.freeze([]),
 ): Effect.fn.Return<ObjectArtifact, ToolchainError> {
   return yield* compileCObject(
     toolchain,
     scope,
     target,
     'silk_runtime',
-    ToolchainPlan.runtimeSource(nativeRuntimeSymbols),
+    ToolchainPlan.runtimeSource(),
   )
 })
 

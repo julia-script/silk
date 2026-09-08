@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -93,8 +94,9 @@ pub fn main() -> i32 {
 }`,
       ],
     ] as const) {
-      const snapshot = yield* Analysis.realize(
-        yield* snapshotOf(name, source),
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        name,
+        ascii(source),
         'wasm32-unknown-unknown',
       )
       assert.deepEqual(codesOf(snapshot), ['SEM0103'], name)

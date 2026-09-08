@@ -16,7 +16,7 @@ interface ViewResult {
   readonly moduleUris: Readonly<Record<string, string>>
 }
 
-it('projects inspector views over real stdio', { timeout: 30_000 }, async () => {
+it('projects inspector views over real stdio', async () => {
   assert.isTrue(existsSync(binPath), 'dist/bin.js missing; run pnpm build first')
   const client = connect()
   try {

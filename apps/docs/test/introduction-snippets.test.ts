@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
+import * as SourceFile from '@silklang/compiler/SourceFile'
+import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as Effect from 'effect/Effect'
 
 const introductionSource = readFileSync(
@@ -52,11 +54,15 @@ const liveSnippets: ReadonlyArray<LiveSnippet> = Array.from(
 it.effect('keeps every live landing-page example diagnostics-correct', () =>
   Effect.gen(function* () {
     for (const [index, snippet] of liveSnippets.entries()) {
-      const snapshot = yield* Analysis.ofSourceRealized(
-        `landing-page/${index + 1}`,
-        new TextEncoder().encode(snippet.source),
-        snippet.target,
-      )
+      const snapshot = yield* Analysis.makeRealized({
+        root: SourceFile.make(
+          `landing-page/${index + 1}`,
+          new TextEncoder().encode(snippet.source),
+        ),
+        configuration: {
+          profile: { target: snippet.target, artifact: 'object', runtime: { kind: 'none' } },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepStrictEqual(
         Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
         snippet.expectedDiagnosticCodes,

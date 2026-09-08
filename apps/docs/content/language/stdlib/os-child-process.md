@@ -4,35 +4,30 @@
 
 Profiles: `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`.
 
-Native [`ChildProcess`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a4368696c6450726f63657373) provider that executes directly through the platform process boundary.
+Native ChildProcess provider with source-owned request staging and per-call captures.
 
 ## When to use
 
-Construct [`OsChildProcess`](#declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a4f734368696c6450726f63657373) at a native application edge, then provide it to portable code that
-requires [`ChildProcess`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a4368696c6450726f63657373). Tests can supply an in-memory provider without importing this module.
+Construct OsChildProcess at a native application edge and provide it as ChildProcess.
 
 ## Details
 
-The provider owns no persistent state. It translates low-level spawn and capture reasons into
-portable [`ProcessError`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72) data, preserves a native numeric code, and copies the complete stdout
-and stderr captures into independently owned [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) values. Exit status and signal
-termination remain ordinary [`ProcessOutcome`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65) data.
-
-Constructing the provider performs no process operation. Portable code invokes
-`ChildProcess.execute` after an application provides `&mut OsChildProcess` for the
-`&mut ChildProcess` requirement and supplies an allocator for owned captures.
+Each invocation owns its request staging, descriptors, child and output buffers. Nonzero exit
+codes and signals are outcome data. Recoverable failures release resources and reap the child.
 
 ## Gotchas
 
-This module publishes its provider only for the supported native profiles.
-WebAssembly selection leaves the module empty.
+Execution blocks. The provider is absent on unsupported and no-libc profiles. Fatal traps do
+not guarantee cleanup. The host must not separately reap a child owned by this provider.
+On GNU Linux, a startup failure whose error notice cannot write even one byte is indistinguishable
+from successful exec followed by exit 127. A partially delivered notice is a provider failure.
 
 ## Examples
 
-### Construct the native provider without starting a process
+### Construct a provider without starting a process
 
 ```silk
-import silk.os_child_process { OsChildProcess }
+import silk.os_child_process {OsChildProcess}
 
 pub fn main() -> i32 {
   let provider = OsChildProcess.make()
@@ -53,12 +48,7 @@ Public declarations: 1.
 pub struct OsChildProcess
 ```
 
-A stateless native [`ChildProcess`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a4368696c6450726f63657373) provider with blocking execution and complete capture.
-
-### Details
-
-The provider borrows the request and transfers each completed capture into independent [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573)
-storage. The returned [`ProcessOutcome`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734f7574636f6d65) owns that storage.
+A stateless provider whose executions each own their native resources and captures.
 
 <a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a4f734368696c6450726f636573732e6d616b65"></a>
 
@@ -68,17 +58,7 @@ storage. The returned [`ProcessOutcome`](./child-process.md#declaration-73696c6b
 pub fn make() -> OsChildProcess
 ```
 
-Creates a stateless provider for the native process boundary.
-
-#### When to use
-
-Use this function at a native application edge. Provide the result as `&mut ChildProcess` to
-portable code that calls `ChildProcess.execute` or `silk.child_process.submit`.
-
-#### Details
-
-Construction starts no process and allocates no storage. Each execution translates native
-failures into [`ProcessError`](./child-process.md#declaration-73696c6b2f6368696c645f70726f636573733a3a50726f636573734572726f72) and requires an allocator for owned output captures.
+Creates a provider without allocating storage or starting a child.
 
 <a id="declaration-73696c6b2f6f735f6368696c645f70726f636573733a3a696d706c656d656e746174696f6e3a30"></a>
 

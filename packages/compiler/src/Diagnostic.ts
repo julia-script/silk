@@ -193,8 +193,6 @@ export const misplacedUnsafeAcknowledgementCode = 'SEM0137' as const
 export const localSharedLayoutMismatchCode = 'SEM0138' as const
 /** Stable code for a concrete executable that fails one sealed static-property obligation. */
 export const unsatisfiedExecutablePropertyCode = 'SEM0139' as const
-/** Stable code for an externally parking entry with no explicit Execution owner. */
-export const missingExplicitExecutionOwnerCode = 'SEM0140' as const
 /** Stable code for an ordinary capability conjoined with one exact executable bound. */
 export const invalidExecutablePropertyConjunctCode = 'SEM0141' as const
 /** Stable code for a statically known execution-package allocation/layout mismatch. */
@@ -251,6 +249,10 @@ export const invalidConstantCode = 'SEM0086' as const
 export const invalidConfigurationCode = 'SEM0214' as const
 /** Stable code for invalid raw-pointer alignment, address space, or qualifier conversion. */
 export const invalidPointerQualifierCode = 'SEM0215' as const
+/** A diagnostic observer callback lacks a complete direct-execution proof. */
+export const invalidDiagnosticObserverCode = 'SEM0216' as const
+/** Terminal observation is provably outside a selected failure handler. */
+export const missingDiagnosticContextCode = 'SEM0217' as const
 /** Stable code for an expression statement whose result cannot be intentionally ignored. */
 export const expressionStatementResultCode = 'SEM0087' as const
 /** Stable code for using a generic binder in a value, failure-row, or requirement-row position of another kind. */
@@ -420,8 +422,6 @@ export const exportSuspendsCode = 'SEM0201' as const
 export const ambiguousSuppliedOperationCode = 'SEM0202' as const
 /** Stable code for naming a conformance-supplied receiver operation as a value instead of calling it. */
 export const suppliedOperationValueCode = 'SEM0203' as const
-/** Stable code for a selected invocation whose declaration shape is not a valid program entry. */
-export const invalidEntryShapeCode = 'SEM0204' as const
 /** Stable code for a C-layout record that declares type parameters. */
 export const genericCLayoutRecordCode = 'SEM0205' as const
 /** Stable code for a C-layout record field outside the closed C object subset. */
@@ -583,7 +583,6 @@ export type Code =
   | typeof misplacedUnsafeAcknowledgementCode
   | typeof localSharedLayoutMismatchCode
   | typeof unsatisfiedExecutablePropertyCode
-  | typeof missingExplicitExecutionOwnerCode
   | typeof invalidExecutablePropertyConjunctCode
   | typeof executionLayoutMismatchCode
   | typeof invalidMutableParameterCode
@@ -692,10 +691,11 @@ export type Code =
   | typeof exportSuspendsCode
   | typeof ambiguousSuppliedOperationCode
   | typeof suppliedOperationValueCode
-  | typeof invalidEntryShapeCode
   | typeof genericCLayoutRecordCode
   | typeof unsupportedCLayoutFieldCode
   | typeof invalidForeignCallbackCode
+  | typeof missingDiagnosticContextCode
+  | typeof invalidDiagnosticObserverCode
   | typeof foreignStaticTargetUnavailableCode
   | typeof useAfterMoveCode
   | typeof partialMoveCode
@@ -890,7 +890,6 @@ export type Reason =
       readonly property: 'Intrinsic.Detached' | 'Intrinsic.NonParking'
       readonly causes: ReadonlyArray<string>
     }
-  | { readonly _tag: 'MissingExplicitExecutionOwner'; readonly summary: string }
   | { readonly _tag: 'InvalidExecutablePropertyConjunct'; readonly conjunct: string }
   | { readonly _tag: 'InvalidConformance'; readonly detail: string }
   | { readonly _tag: 'InvalidOperatorContract'; readonly detail: string }
@@ -1175,6 +1174,8 @@ export type Reason =
   | { readonly _tag: 'ForeignDeclarationRestriction'; readonly restriction: string }
   | { readonly _tag: 'ForeignFunctionNotFirstClass'; readonly name: string }
   | { readonly _tag: 'InvalidForeignCallback'; readonly name: string; readonly detail: string }
+  | { readonly _tag: 'MissingDiagnosticContext' }
+  | { readonly _tag: 'InvalidDiagnosticObserver'; readonly detail: string }
   | {
       readonly _tag: 'ForeignStaticTargetUnavailable'
       readonly symbol: string
@@ -1437,7 +1438,6 @@ export type Reason =
       readonly receiver: string
       readonly member: string
     }
-  | { readonly _tag: 'InvalidEntryShape'; readonly detail: string }
   | {
       readonly _tag: 'AmbiguousSuppliedOperation'
       readonly receiver: string
@@ -2588,6 +2588,31 @@ export const invalidForeignCallback = (
     span,
   })
 
+export const missingDiagnosticContext = (span: SourceSpan.SourceSpan): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: missingDiagnosticContextCode,
+    severity: 'error',
+    message: 'Terminal diagnostic observation requires a selected failure context',
+    reason: Object.freeze({ _tag: 'MissingDiagnosticContext' }),
+    span,
+  })
+
+export const invalidDiagnosticObserver = (
+  detail: string,
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  Object.freeze({
+    _tag: 'Diagnostic',
+    phase: 'semantic',
+    code: invalidDiagnosticObserverCode,
+    severity: 'error',
+    message: `Diagnostic observer callback requires direct execution: ${detail}`,
+    reason: Object.freeze({ _tag: 'InvalidDiagnosticObserver', detail }),
+    span,
+  })
+
 export const foreignStaticTargetUnavailable = (
   symbol: string,
   surface: string,
@@ -2866,17 +2891,6 @@ export const suppliedOperationValue = (
     severity: 'error',
     message: `${member} is supplied to ${receiver} by an interface and must be called; it has no value form`,
     reason: Object.freeze({ _tag: 'SuppliedOperationValue', receiver, member }),
-    span,
-  })
-
-export const invalidEntryShape = (detail: string, span: SourceSpan.SourceSpan): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: invalidEntryShapeCode,
-    severity: 'error',
-    message: `Selected invocation ${detail}`,
-    reason: Object.freeze({ _tag: 'InvalidEntryShape', detail }),
     span,
   })
 
@@ -4769,21 +4783,6 @@ export const unsatisfiedExecutableProperty = (
       property,
       causes: Object.freeze(Array.from(causes)),
     }),
-    span,
-  })
-
-/** Diagnoses external parking whose complete entry has no explicit owner delimiter. */
-export const missingExplicitExecutionOwner = (
-  summary: string,
-  span: SourceSpan.SourceSpan,
-): Diagnostic =>
-  Object.freeze({
-    _tag: 'Diagnostic',
-    phase: 'semantic',
-    code: missingExplicitExecutionOwnerCode,
-    severity: 'error',
-    message: 'External parking requires an explicit Intrinsic.Execution owner',
-    reason: Object.freeze({ _tag: 'MissingExplicitExecutionOwner', summary }),
     span,
   })
 

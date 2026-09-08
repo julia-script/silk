@@ -1,0 +1,130 @@
+//! Borrowed Linux process inputs decoded from the kernel's initial stack.
+//!
+//! # When to use
+//!
+//! Use `ProcessInputs.decode` only at a raw process entry. The process owns all input storage.
+//! Arguments and environment entries remain byte strings; page size comes from AT_PAGESZ.
+//!
+//! # Gotchas
+//!
+//! The decoder requires a complete readable kernel stack image. It does not validate arbitrary
+//! memory. Returned pointers carry no ownership and are valid only while that image remains live.
+
+static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText("libc") == "none" && (Intrinsic.targetArchitecture() == "x86_64" || Intrinsic.targetArchitecture() == "aarch64") {
+  import silk.pointer {Pointer}
+  import silk.raw_linux as RawLinux
+  import silk.result {Result}
+  /// Borrowed argument/environment words and a validated runtime page size.
+  pub struct ProcessInputs {
+    arguments: [*]const usize
+    argumentCount: usize
+    environment: [*]const usize
+    environmentCount: usize
+    page: usize
+  }
+  impl ProcessInputs {
+    /// Decodes one complete kernel-provided initial stack without allocation.
+    ///
+    /// # Details
+    ///
+    /// Invalid argv termination or missing, duplicate or non-power-of-two AT_PAGESZ returns error 22.
+    /// Unknown auxiliary-vector keys are ignored. No input is copied or changed.
+    ///
+    /// # Gotchas
+    ///
+    /// The caller must provide aligned readable words through both pointer-vector terminators and
+    /// AT_NULL. Each nonzero argument/environment address must identify a live NUL-terminated string.
+    pub unsafe fn decode(stack: [*]const usize) -> Result<ProcessInputs, usize> {
+      unsafe {
+        let argc = Pointer.read<usize>(Pointer.at<usize>(stack, 0))
+        if argc > 18446744073709551613 {
+          return Result.failResult<ProcessInputs, usize>(22)
+        }
+        let arguments = Pointer.assumeMany<usize>(Pointer.at<usize>(stack, 1))
+        if Pointer.read<usize>(Pointer.at<usize>(arguments, argc)) != 0 {
+          return Result.failResult<ProcessInputs, usize>(22)
+        }
+        let environment = Pointer.assumeMany<usize>(Pointer.at<usize>(stack, argc + 2))
+        let mut count: usize = 0
+        while Pointer.read<usize>(Pointer.at<usize>(environment, count)) != 0 {
+          count = count + 1
+        }
+        let auxv = Pointer.assumeMany<usize>(Pointer.at<usize>(environment, count + 1))
+        let mut index: usize = 0
+        let mut page: usize = 0
+        while true {
+          let key = Pointer.read<usize>(Pointer.at<usize>(auxv, index))
+          if key == 0 {
+            break
+          }
+          let value = Pointer.read<usize>(Pointer.at<usize>(auxv, index + 1))
+          if key == 6 {
+            if page != 0 || value == 0 || (value & (value - 1)) != 0 {
+              return Result.failResult<ProcessInputs, usize>(22)
+            }
+            page = value
+          }
+          index = index + 2
+        }
+        if page == 0 {
+          return Result.failResult<ProcessInputs, usize>(22)
+        }
+        return Result.succeed<ProcessInputs, usize>(
+          ProcessInputs {
+            arguments: arguments,
+            argumentCount: argc,
+            environment: environment,
+            environmentCount: count,
+            page: page,
+          },
+        )
+      }
+    }
+    /// Returns the validated runtime AT_PAGESZ value.
+    pub fn pageSize(self: &ProcessInputs) -> usize {
+      return self.page
+    }
+    /// Returns the number of argument strings, including the program name.
+    pub fn argc(self: &ProcessInputs) -> usize {
+      return self.argumentCount
+    }
+    /// Returns the number of environment strings.
+    pub fn envc(self: &ProcessInputs) -> usize {
+      return self.environmentCount
+    }
+    /// Returns an argument's NUL-terminated byte pointer, or null for an absent index.
+    ///
+    /// # Gotchas
+    ///
+    /// The decoder's original stack and string storage must remain live. The pointer owns no storage.
+    pub unsafe fn argument(self: &ProcessInputs, index: usize) -> ?[*]const u8 {
+      if index >= self.argumentCount {
+        return unsafe Intrinsic.pointerRequalify<?[*]mut u8, ?[*]const u8>(
+          unsafe RawLinux.pointer(0),
+        )
+      }
+      unsafe {
+        return Intrinsic.pointerRequalify<?[*]mut u8, ?[*]const u8>(
+          RawLinux.pointer(Pointer.read<usize>(Pointer.at<usize>(self.arguments, index))),
+        )
+      }
+    }
+    /// Returns an environment entry's NUL-terminated byte pointer, or null for an absent index.
+    ///
+    /// # Gotchas
+    ///
+    /// The decoder's original stack and string storage must remain live. The pointer owns no storage.
+    pub unsafe fn variable(self: &ProcessInputs, index: usize) -> ?[*]const u8 {
+      if index >= self.environmentCount {
+        return unsafe Intrinsic.pointerRequalify<?[*]mut u8, ?[*]const u8>(
+          unsafe RawLinux.pointer(0),
+        )
+      }
+      unsafe {
+        return Intrinsic.pointerRequalify<?[*]mut u8, ?[*]const u8>(
+          RawLinux.pointer(Pointer.read<usize>(Pointer.at<usize>(self.environment, index))),
+        )
+      }
+    }
+  }
+}

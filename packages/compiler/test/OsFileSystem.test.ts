@@ -1,3 +1,6 @@
+import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as TestToolchain from './support/TestToolchain.js'
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -30,7 +33,7 @@ afterAll(() => {
 
 it.effect('loads the ordinary canonical OS provider without compiler-known library privilege', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.declarations(
       'os-filesystem/importer',
       ascii(`import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
@@ -48,7 +51,7 @@ it.effect(
   'lowers the OS directory-list provider runner',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'os-filesystem/list-runner',
         ascii(`import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
@@ -148,13 +151,21 @@ pub fn main() -> i32 {
         OutOfMemoryError exhausted => 250
       }
   }
-}`
+}
+export "C" fn enter() -> i32 as "main" { return main() }`
       const compiled = yield* Driver.compile({
         compilation: {
           root: SourceFile.make('os-filesystem/native-provider', ascii(source)),
+          configuration: {
+            profile: {
+              target: (yield* NativeToolchain.hostTarget()).id,
+              runtime: { kind: 'none' },
+              optimization: 'speed',
+              debug: false,
+            },
+          },
         },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: 'clang', llvmAr: 'llvm-ar' }),
-        optimization: 'release',
+        toolchain: yield* TestToolchain.configured,
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-provider'),
       }).pipe(Effect.provide(SourceResolver.empty))
@@ -172,7 +183,8 @@ pub fn main() -> i32 {
       )
       assert.strictEqual(readFileSync(outsideMarker, 'utf8'), 'untouched')
     }),
-  60_000,
+  // This compiles the complete native filesystem provider before exercising the confined root.
+  120_000,
 )
 
 it.effect('omits native filesystem providers from Wasm and no-libc selections', () =>
@@ -212,7 +224,7 @@ pub effect fn closeTwice(handle: FileHandle) -> () ! FileError {
   run NativeFileSystem.closeFile(move handle, FileSystem.readFileOperation())
   run NativeFileSystem.closeFile(move handle, FileSystem.readFileOperation())
 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.declarations(
       'filesystem/consumed-handle',
       ascii(source),
       'aarch64-apple-darwin',

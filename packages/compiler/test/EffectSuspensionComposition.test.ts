@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -6,7 +7,7 @@ import * as Type from '../src/Type.js'
 const encoder = new TextEncoder()
 
 const snapshot = (source: string) =>
-  Analysis.ofSourceRealized(
+  AnalysisFixture.retainingMain(
     'effect-suspension-composition/main',
     encoder.encode(source),
     'wasm32-unknown-unknown',

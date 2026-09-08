@@ -3173,12 +3173,6 @@ export const plan = (
       }
     }
   }
-  if (
-    discovery.entry._tag === 'Resolved' &&
-    (discovery.entry.kind === 'Effect' || discovery.entry.result === 'Unit')
-  ) {
-    reached.set(Type.runtimeKey('i32'), 'i32')
-  }
   for (const callable of discovery.callables) {
     for (const capture of callable.captures)
       reached.set(Type.runtimeKey(capture.type), capture.type)

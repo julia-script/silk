@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -16,7 +17,7 @@ const ascii = (value: string): Uint8Array =>
 const target = 'wasm32-unknown-unknown'
 
 const realized = (id: string, source: string) =>
-  Analysis.ofSourceRealized(id, ascii(source), target)
+  AnalysisFixture.retainingMain(id, ascii(source), target)
 
 const codes = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
@@ -134,40 +135,5 @@ it.effect('rejects a static function used as a runtime callable value', () =>
       `static fn c(v: i32) -> i32 { return v + 41 }\npub fn main() -> i32 {\n  let n = 1\n  return c(n)\n}\n`,
     )
     assert.deepEqual(codes(runtimeCall), [Diagnostic.staticPhaseViolationCode])
-  }),
-)
-
-// ISSUE-37 — invalid entry shapes are reported at the `main` declaration.
-
-it.effect('reports invalid entry shapes at the declaration', () =>
-  Effect.gen(function* () {
-    const cases: ReadonlyArray<readonly [string, string, readonly [number, number]]> = [
-      ['private', 'effect fn main() {\n}\n', [0, 20]],
-      ['bool', 'pub fn main() -> bool {\n  return true\n}\n', [0, 39]],
-      ['effect-i32', 'pub effect fn main() -> i32 { return 42 }\n', [0, 41]],
-      ['params', 'pub fn main(argc: i32) -> i32 {\n  return argc\n}\n', [0, 47]],
-      ['generic', 'pub fn main<T>() -> i32 {\n  return 0\n}\n', [0, 38]],
-      [
-        'open',
-        'service Clock {}\n\neffect fn work() -> () ? &Clock {\n  return ()\n}\n\npub effect fn main() ? &Clock {\n  return run work()\n}\n',
-        [65, 120],
-      ],
-    ]
-    for (const [name, source, span] of cases) {
-      const snapshot = yield* realized(`stabilization/entry-${name}`, source)
-      assert.deepEqual(codes(snapshot), [Diagnostic.invalidEntryShapeCode], name)
-      assert.deepEqual(spans(snapshot, Diagnostic.invalidEntryShapeCode), [span], name)
-    }
-    const open = yield* realized(
-      'stabilization/entry-open-two',
-      'service Clock {}\nservice Logger {}\nrole Audit\n\neffect fn work() -> () ? &Clock | &mut Logger at Audit {\n  return ()\n}\n\npub effect fn main() ? &Clock | &mut Logger at Audit {\n  return run work()\n}\n',
-    )
-    const [diagnostic] = Analysis.diagnostics(open)
-    assert.strictEqual(diagnostic?.code, Diagnostic.invalidEntryShapeCode)
-    assert.deepEqual(diagnostic?.reason, {
-      _tag: 'InvalidEntryShape',
-      detail:
-        'has unresolved requirements: &stabilization/entry-open-two.Clock, &mut stabilization/entry-open-two.Logger at Audit',
-    })
   }),
 )

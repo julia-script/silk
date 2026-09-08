@@ -15,13 +15,42 @@
 //! deterministic data. `Random.fillBytes` performs no provider call for empty storage.
 //!
 //! # Examples
-//! ## Request a secure word
+//! ## Test word decoding with scripted bytes
 //! ```silk
-//! import silk.random { Random }
+//! import silk.effect {Effect}
 //!
-//! effect fn tokenWord() -> u64
-//! ? &mut Random {
-//!   return run Random.nextU64()
+//! import silk.random {Random}
+//!
+//! import silk.usize
+//!
+//! // A deterministic test double; never supply it for secrets or credentials.
+//! struct Scripted {
+//!   filled: usize
+//! }
+//!
+//! impl Random for Scripted {
+//!   effect fn fillBytes(self: &mut Self, output: &mut [u8]) -> () {
+//!     let mut index = usize.ZERO
+//!     while index < output.length {
+//!       output[index] = 0
+//!       index = index + 1
+//!     }
+//!     if output.length > 0 {
+//!       output[0] = 42
+//!     }
+//!     self.filled = self.filled + output.length
+//!     return ()
+//!   }
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   let mut provider = Scripted {filled: usize.ZERO}
+//!   let word = run Random.nextU64()
+//!     |> Effect.provideMut<Random>(&mut provider)
+//!   if word == 42 && provider.filled == 8 {
+//!     return 42
+//!   }
+//!   return 0
 //! }
 //! ```
 

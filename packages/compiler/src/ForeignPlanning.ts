@@ -5,6 +5,7 @@
  * restriction.
  */
 import * as Diagnostic from './Diagnostic.js'
+import * as CAbi from './CAbi.js'
 import * as Mir from './Mir.js'
 import * as MirVerification from './MirVerification.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -47,7 +48,7 @@ export const check = (
       diagnostics.push(
         Diagnostic.conflictingForeignSignature(record.symbol, record.declarationSpan, other),
       )
-    if (target.kind !== 'Native')
+    if (!CAbi.available(target, record.signature))
       diagnostics.push(
         Diagnostic.foreignFunctionTargetUnavailable(record.symbol, surface, record.declarationSpan),
       )

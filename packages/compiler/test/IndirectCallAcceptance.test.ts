@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -22,7 +23,7 @@ const callableTargetName = (type: Mir.Type | undefined): string | undefined =>
 
 it.effect('keeps the callable parameter in the lowered contract', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'indirect-call/contract',
       ascii(concrete),
       'wasm32-unknown-unknown',
@@ -49,7 +50,7 @@ fn twice(transform: once fn(i32) -> i32, value: i32) -> i32 {
 }
 
 pub fn main() -> i32 { return twice(double, 10) + 2 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'indirect-call/affine',
       ascii(source),
       'wasm32-unknown-unknown',
@@ -73,7 +74,7 @@ fn outer(transform: once fn(i32) -> i32, value: i32) -> i32 {
 }
 
 pub fn main() -> i32 { return outer(double, 21) }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'indirect-call/forward-move',
       ascii(source),
       'wasm32-unknown-unknown',

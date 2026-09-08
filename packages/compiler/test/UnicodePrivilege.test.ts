@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -118,7 +119,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('normalizes through ordinary Silk functions reached by ordinary calls', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'unicode-privilege/normalize',
       ascii(normalizing),
     )

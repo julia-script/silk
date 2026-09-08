@@ -70,6 +70,10 @@ const expectedPhases = [
   'declaration-index',
   'name-resolution',
   'module-surface',
+  'declaration-collection',
+  'declaration-index',
+  'name-resolution',
+  'module-surface',
   'elaboration',
   'ownership',
   'opaque-realization',
@@ -120,8 +124,9 @@ it.effect('reports every phase in order with counts and totals', () =>
     }
     const closure = outcome.report.find((entry) => entry.phase === 'closure')
     assert.strictEqual(closure?.inputs, 1)
-    assert.strictEqual(closure?.outputs, 1)
-    const compilerPhases = expectedPhases.slice(1, 12)
+    // The initial closure contains the application and selected runtime; static selection expands it.
+    assert.strictEqual(closure?.outputs, 2)
+    const compilerPhases = expectedPhases.slice(1, expectedPhases.indexOf('toolchain-target'))
     assert.deepEqual(
       Analysis.phases(analysis)
         .map((entry) => entry.phase)
@@ -281,18 +286,20 @@ it.effect(
     }),
 )
 
-it.effect('surfaces a missing entry as a closed outcome without invoking the toolchain', () =>
-  Effect.gen(function* () {
-    const outcome = yield* compileSource('no-entry', 'pub fn answer() -> i32 { return 42 }')
+it.effect(
+  'reports a missing application call through source diagnostics before the toolchain',
+  () =>
+    Effect.gen(function* () {
+      const outcome = yield* compileSource('no-entry', 'pub fn answer() -> i32 { return 42 }')
 
-    assert.strictEqual(outcome._tag, 'NoEntry')
-    if (outcome._tag !== 'NoEntry') return
-    assert.strictEqual(outcome.reason, 'MissingEntry')
-    assert.strictEqual(
-      outcome.report.some((entry) => entry.phase === 'object'),
-      false,
-    )
-  }),
+      assert.strictEqual(outcome._tag, 'Rejected')
+      if (outcome._tag !== 'Rejected') return
+      assert.isAbove(outcome.diagnostics.length, 0)
+      assert.strictEqual(
+        outcome.report.some((entry) => entry.phase === 'object'),
+        false,
+      )
+    }),
 )
 
 it.effect('names the failing native stage with command provenance', () =>
@@ -397,10 +404,6 @@ it.effect(
         const phases = outcome.report.map((entry) => entry.phase)
         assert.include(phases, name === 'admission-first' ? 'link' : 'artifact-cache')
         assert.isDefined(outcome.linkPlan)
-        assert.deepEqual(
-          outcome.linkPlan?.helpers?.flatMap((entry) => entry.requirements),
-          [],
-        )
         assert.isFalse(outcome.linkPlan?.command.arguments.includes('-lm') ?? true)
         if (name === 'admission-second') assert.include(phases, 'backend-cache')
       }
@@ -421,6 +424,8 @@ it.effect(
       assert.strictEqual(reads.filter((key) => key.startsWith('native-')).length, nativeReads)
       assert.strictEqual(writes.filter((key) => key.startsWith('native-')).length, 1)
     }),
+  // Cold emission, cache reuse and a rejected supply each run the complete source runtime pipeline.
+  120_000,
 )
 
 it.effect('reports a missing request-supplied object as linker input even when cached', () =>

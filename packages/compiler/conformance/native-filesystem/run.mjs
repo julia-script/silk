@@ -194,12 +194,7 @@ const program = Effect.gen(function* () {
           ],
           'independent C filesystem receiver',
         )
-        const runtime = yield* NativeToolchain.compileRuntime(
-          tools,
-          scope,
-          profile.target,
-          artifact.nativeRuntimeSymbols,
-        )
+        const runtime = yield* NativeToolchain.compileRuntime(tools, scope, profile.target)
         const runtimeInspection = yield* run(inspect, [
           '--symbols',
           '--relocations',

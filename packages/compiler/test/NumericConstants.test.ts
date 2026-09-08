@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -130,7 +131,7 @@ it('declares no NAN, which no literal spelling can produce', () => {
  */
 it.effect('reports no invalid-constant diagnostic for any stdlib declaration', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'numeric-constants/clean',
       ascii('pub fn main() -> i32 { return 42 }'),
     )

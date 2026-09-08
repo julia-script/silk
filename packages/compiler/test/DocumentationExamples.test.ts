@@ -154,19 +154,25 @@ it('gives every diagnostic constant a distinct stable code', () => {
 })
 
 for (const block of blocks) {
-  it.effect(`compiles ${block.file}:${block.line} without a diagnostic`, () =>
-    Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
-        `documentation/${block.file.replace(/[^A-Za-z0-9_-]/g, '-')}/${block.line}`,
-        ascii(block.source),
-        'wasm32-unknown-unknown',
-      )
-      const diagnostics = Analysis.diagnostics(snapshot)
-      assert.deepEqual(
-        diagnostics.map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`),
-        [],
-        `${block.file}:${block.line}\n${block.source}`,
-      )
-    }),
+  // The complete Fiber walkthrough exceeded the shared minute under the saturated compiler
+  // suite. Its scheduler realization needs a larger correctness deadline than the small examples.
+  const timeout = block.file === 'fibers.md' ? 120_000 : undefined
+  it.effect(
+    `compiles ${block.file}:${block.line} without a diagnostic`,
+    () =>
+      Effect.gen(function* () {
+        const snapshot = yield* Analysis.ofSourceRealized(
+          `documentation/${block.file.replace(/[^A-Za-z0-9_-]/g, '-')}/${block.line}`,
+          ascii(block.source),
+          'wasm32-unknown-unknown',
+        )
+        const diagnostics = Analysis.diagnostics(snapshot)
+        assert.deepEqual(
+          diagnostics.map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`),
+          [],
+          `${block.file}:${block.line}\n${block.source}`,
+        )
+      }),
+    timeout,
   )
 }

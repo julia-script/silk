@@ -289,6 +289,25 @@ jobs:
           node packages/compiler/conformance/native-clocks/run.mjs
           node packages/compiler/conformance/native-entropy/run.mjs
           node packages/compiler/conformance/native-filesystem/run.mjs
+          node packages/compiler/conformance/native-process/run.mjs
+          SILK_PROCESS_FAULTS=true node packages/compiler/conformance/native-process/run.mjs
+          if [[ "$SILK_SUPPLY_TARGET" == *linux* ]]; then
+            SILK_PROCESS_CHILD_FAULTS=true node packages/compiler/conformance/native-process/run.mjs
+          fi
+          node packages/compiler/conformance/hosted-start/run.mjs
+          SILK_STARTUP_FAULTS=true node packages/compiler/conformance/hosted-start/run.mjs
+          node packages/compiler/conformance/native-host-input/run.mjs
+          node packages/compiler/conformance/native-report/run.mjs
+          node packages/compiler/conformance/execution-storage/run.mjs
+          SILK_STORAGE_FAULTS=true node packages/compiler/conformance/execution-storage/run.mjs
+      - name: Required Wasm storage conformance
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: node packages/compiler/conformance/execution-storage/wasm.mjs
+      - name: Required raw Linux conformance
+        if: runner.os == 'Linux'
+        env:
+          SILK_SUPPLY_TARGET: ${{ matrix.target }}
+        run: node packages/compiler/conformance/raw-linux/run.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -301,5 +320,12 @@ jobs:
             .scratch/native-clocks
             .scratch/native-entropy
             .scratch/native-filesystem
+            .scratch/native-process
+            .scratch/hosted-start
+            .scratch/hosted-start-faults
+            .scratch/native-host-input
+            .scratch/native-report
+            .scratch/execution-storage
+            .scratch/raw-linux-conformance
             .scratch/gnu-packages.txt
           if-no-files-found: error

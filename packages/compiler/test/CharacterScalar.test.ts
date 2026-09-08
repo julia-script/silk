@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -9,7 +10,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const analyze = (name: string, text: string) =>
-  Analysis.ofSourceRealized(`char/${name}`, ascii(text), 'wasm32-unknown-unknown')
+  AnalysisFixture.retainingMain(`char/${name}`, ascii(text), 'wasm32-unknown-unknown')
 
 const codes = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code)
@@ -178,7 +179,10 @@ it.effect('declares no arithmetic and exposes only explicit integer conversion',
 
 it.effect('refuses to give an integer literal the char type', () =>
   Effect.gen(function* () {
-    const snapshot = yield* analyze('literal', 'const letter: char = 97')
+    const snapshot = yield* AnalysisFixture.declarations(
+      'char/literal',
+      new TextEncoder().encode('const letter: char = 97'),
+    )
     assert.deepEqual(codes(snapshot), ['SEM0086'])
     assert.include(messages(snapshot).at(0), 'char')
   }),

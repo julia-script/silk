@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -23,6 +24,7 @@ const declarations = (id: string, source: string) =>
 const analyzeAt = (id: string, source: string, path: string) =>
   Analysis.make({
     root: SourceFile.make(id, encoder.encode(source), SourceOrigin.projectFile(path)),
+    configuration: AnalysisFixture.configuration(id, 'wasm32-unknown-unknown'),
   }).pipe(Effect.provide(SourceResolver.empty))
 
 const exactCallable = (module: string, name = 'decode') =>
@@ -487,8 +489,12 @@ pub fn main() -> i32 {
       Analysis.sources(moved).get(module)?.origin,
       SourceOrigin.projectFile('/relocated/project/Main.silk'),
     )
-    const firstRealized = yield* Analysis.realize(first, 'wasm32-unknown-unknown')
-    const movedRealized = yield* Analysis.realize(moved, 'wasm32-unknown-unknown')
+    const firstRealized = yield* Analysis.realize(first, first.configuration).pipe(
+      Effect.provide(SourceResolver.empty),
+    )
+    const movedRealized = yield* Analysis.realize(moved, moved.configuration).pipe(
+      Effect.provide(SourceResolver.empty),
+    )
     assert.deepEqual(
       Analysis.diagnostics(firstRealized).map((diagnostic) => diagnostic.code),
       [],

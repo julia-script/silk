@@ -94,8 +94,10 @@ describe('silk-snippet', () => {
     assert.isAbove(lintMarks(element), 0)
   })
 
-  it('shows no diagnostics for an example doctest accepts', async () => {
-    const element = snippet(passing, ['diagnostics'])
+  it('accepts declaration-only examples without executable startup', async () => {
+    const element = snippet('effect fn load() -> i32 ! string<\'static> { fail "not found" }', [
+      'diagnostics',
+    ])
     revealAll()
     await flush()
     assert.strictEqual(lintMarks(element), 0)

@@ -8,6 +8,7 @@ import * as Match from './Match.js'
 import * as MovePath from './MovePath.js'
 import type {
   CoroutineFramePathPlan,
+  Execution,
   LocalId,
   LoopId,
   MirFunction,
@@ -82,6 +83,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = string-${operation.negated ? 'not-equals-exact' : 'equals-exact'} ${localText(operation.left)}, ${localText(operation.right)} : bool ${provenanceText(operation.provenance)}`
     case 'PackEffectComposite':
       return `${localText(operation.destination)} = effect-composite alternative=${operation.alternative} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'UnpackEffectComposite':
+      return `${localText(operation.destination)}, ${localText(operation.matched)} = effect-choice alternative=${operation.alternative} ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Binary':
       return `${localText(operation.destination)} = ${operation.operator.toLowerCase()} ${localText(operation.left)}, ${localText(operation.right)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ConvertInteger':
@@ -102,8 +105,6 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = layout-repeat ${localText(operation.layout)} count=${localText(operation.count)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Allocate':
       return `${localText(operation.destination)} = allocate ${localText(operation.layout)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'OsCall':
-      return `${localText(operation.destination)} = os-call ${operation.operation.actor}.${operation.operation.name}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'NativeAssembly':
       return `${localText(operation.destination)} = assembly ${NativeAssembly.encode(operation.assembly)}(${operation.arguments.map(localText).join(', ')}) : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ForeignIndirectCall':
@@ -140,6 +141,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = raw-buffer-copy ${localText(operation.buffer)} offset=${localText(operation.offset)} source=${localText(operation.source)} length=${localText(operation.length)} element=${SilkType.encode(operation.element)} stride=${operation.stride} retains-source=${operation.retainsSource} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferFill':
       return `${localText(operation.destination)} = raw-buffer-fill ${localText(operation.buffer)} offset=${localText(operation.offset)} length=${localText(operation.length)} value=${localText(operation.value)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'DiagnosticUnhandled':
+      return `${localText(operation.destination)} = diagnostic-unhandled : usize ${provenanceText(operation.provenance)}`
     case 'PointerNull':
       return `${localText(operation.destination)} = pointer-null : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PointerIsNull':
@@ -148,6 +151,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = pointer-address ${localText(operation.pointer)} : usize ${provenanceText(operation.provenance)}`
     case 'PointerBytes':
       return `${localText(operation.destination)} = pointer-bytes ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'PointerReinterpret':
+      return `${localText(operation.destination)} = pointer-reinterpret ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PointerRequalify':
       return `${localText(operation.destination)} = pointer-requalify ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PointerFromStorage':
@@ -197,7 +202,7 @@ const operationText = (operation: Operation): string => {
     case 'PackEffectFailureUnion':
       return `${localText(operation.destination)} = effect-failure-union ${localText(operation.source)} mappings=${operation.mappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'PropagateEffectFailure':
-      return `propagate-effect-failure ${localText(operation.source)} mappings=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.propagationType)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
+      return `propagate-effect-failure ${localText(operation.source)} outcome=${localText(operation.outcome)} mappings=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.propagationType)} ${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'UnpackEffectSuccess':
       return `${localText(operation.destination)} = effect-success ${localText(operation.source)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RunEffect':
@@ -210,8 +215,6 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = run-static-effect runner=${targetText(operation.runner)} captures=${operation.captures.map((capture) => `${localText(capture.source)}:${capture.access.toLowerCase()}`).join(',') || 'none'} arguments=${operation.arguments.map(localText).join(',') || 'none'} propagate=${operation.tagMappings.map((mapping) => `${mapping.source}->${mapping.target}`).join(',')} : ${typeText(operation.type)} ${operation.failureLoanEnds === undefined || operation.failureLoanEnds.length === 0 ? '' : `failure-loans=${operation.failureLoanEnds.map((ending) => `l${ending.borrow.ordinal}:${localText(ending.slice)}`).join(',')} `}${operation.releases === undefined || operation.releases.length === 0 ? '' : `releases=${operation.releases.map((release) => localText(release.local)).join(',')} `}${provenanceText(operation.provenance)}`
     case 'CatchEffect':
       return `${localText(operation.destination)} = catch-effect ${localText(operation.effect)} runner=${targetText(operation.runner)} arguments=${operation.arguments.map(localText).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
-    case 'CloseEffectEntry':
-      return `${localText(operation.destination)} = close-effect-entry ${targetText(operation.target)} effect=${localText(operation.effect)} runner=${targetText(operation.runner)} outcome=${localText(operation.outcome)} failures=${operation.failures.map((failure) => `${failure.tag}:${SilkType.encode(failure.type)}->${localText(failure.payload)}:${failure.cleanup._tag}`).join(',') || 'none'} : i32 ${provenanceText(operation.provenance)}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type)} { ${operation.fields.map(({ field, value, stored }) => `#${field.ordinal}: ${localText(value)}${stored === undefined ? '' : ` stored=${storedExecutableText(stored)}`}`).join(', ')} } ${provenanceText(operation.provenance)}`
     case 'ConstructUnionVariant':
@@ -230,6 +233,8 @@ const operationText = (operation: Operation): string => {
       return `drop ${localText(operation.local)}${selectorText(operation.selectors ?? [])}${operation.initialization === undefined ? '' : ` initialized=${MovePath.encodeState(operation.initialization.state)} flags=${operation.initialization.flags.map((flag) => `${MovePath.key(flag.path)}:${localText(flag.local)}`).join(',')}`}${operation.cleanup._tag === 'NoCleanup' ? '' : ` cleanup=${operation.cleanup._tag}`}${operation.localShared === undefined ? '' : ` element=${SilkType.encode(operation.localShared.element)} layout=${operation.localShared.block.provenance} transition=decrement-or-cleanup-release`} ${provenanceText(operation.provenance)}`
     case 'Match':
       return `${operation.destination === undefined ? 'never' : localText(operation.destination)} = match#${operation.id.span.start} ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}${selectorText(operation.selectors ?? [])} : ${typeText(operation.scrutineeType)} -> ${typeText(operation.type)}${operation.retainsBindings ? ' retain-bindings' : ''} ${provenanceText(operation.provenance)}`
+    case 'DiagnosticScope':
+      return `${localText(operation.destination)} = diagnostic-scope state=${localText(operation.state)} observer=${localText(operation.observer)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'Conditional':
       return `${localText(operation.destination)} = conditional ${localText(operation.condition)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'ShortCircuit':
@@ -240,15 +245,26 @@ const operationText = (operation: Operation): string => {
 const fieldPathText = (path: ReadonlyArray<DeclarationFacts.FieldId>): string =>
   path.length === 0 ? 'payload' : path.map((field) => `#${field.ordinal}`).join('.')
 
+const recoveryText = (execution: Execution): string =>
+  execution.recoveryOutcome === undefined ? '' : ` recovery=${localText(execution.recoveryOutcome)}`
+
 const operationLines = (operation: Operation, indent: string): ReadonlyArray<string> => {
+  if (operation._tag === 'DiagnosticScope') {
+    return [
+      `${indent}${operationText(operation)}`,
+      ...topologicalRegions(operation.body)
+        .flatMap(regionLines)
+        .map((line) => `${indent}  ${line}`),
+    ]
+  }
   if (operation._tag === 'Conditional') {
     return [
       `${indent}${operationText(operation)}`,
-      `${indent}  taken -> ${operation.taken.result === undefined ? 'never' : localText(operation.taken.result)}`,
+      `${indent}  taken -> ${operation.taken.result === undefined ? 'never' : localText(operation.taken.result)}${recoveryText(operation.taken)}`,
       ...topologicalRegions(operation.taken)
         .flatMap(regionLines)
         .map((line) => `${indent}  ${line}`),
-      `${indent}  otherwise -> ${operation.otherwise.result === undefined ? 'never' : localText(operation.otherwise.result)}`,
+      `${indent}  otherwise -> ${operation.otherwise.result === undefined ? 'never' : localText(operation.otherwise.result)}${recoveryText(operation.otherwise)}`,
       ...topologicalRegions(operation.otherwise)
         .flatMap(regionLines)
         .map((line) => `${indent}  ${line}`),
@@ -257,7 +273,7 @@ const operationLines = (operation: Operation, indent: string): ReadonlyArray<str
   if (operation._tag === 'ShortCircuit') {
     return [
       `${indent}${operationText(operation)}`,
-      `${indent}  right -> ${operation.right.result === undefined ? 'never' : localText(operation.right.result)}`,
+      `${indent}  right -> ${operation.right.result === undefined ? 'never' : localText(operation.right.result)}${recoveryText(operation.right)}`,
       ...topologicalRegions(operation.right)
         .flatMap(regionLines)
         .map((line) => `${indent}  ${line}`),
@@ -284,12 +300,12 @@ const operationLines = (operation: Operation, indent: string): ReadonlyArray<str
         ...(arm.guard === undefined
           ? []
           : [
-              `${indent}    guard -> ${arm.guard.execution.result === undefined ? 'never' : localText(arm.guard.execution.result)}`,
+              `${indent}    guard -> ${arm.guard.execution.result === undefined ? 'never' : localText(arm.guard.execution.result)}${recoveryText(arm.guard.execution)}`,
               ...topologicalRegions(arm.guard.execution)
                 .flatMap(regionLines)
                 .map((line) => `${indent}    ${line}`),
             ]),
-        `${indent}    selected access=${arm.selected.access} result=${arm.selected.execution.result === undefined ? 'never' : localText(arm.selected.execution.result)} end-borrow=${arm.selected.endBorrow}`,
+        `${indent}    selected access=${arm.selected.access} result=${arm.selected.execution.result === undefined ? 'never' : localText(arm.selected.execution.result)} end-borrow=${arm.selected.endBorrow}${recoveryText(arm.selected.execution)}`,
         ...topologicalRegions(arm.selected.execution)
           .flatMap(regionLines)
           .map((line) => `${indent}    ${line}`),
@@ -411,6 +427,12 @@ const suspensionLines = (fn: MirFunction): ReadonlyArray<string> => {
 const coroutineFrameTargetLines = (self: Module): ReadonlyArray<string> =>
   (self.coroutineFrames?.entries ?? []).flatMap((entry) => [
     `coroutine-frame ${instanceText(entry.function)} size=${entry.size} alignment=${entry.alignment} storage=private-execution-stack`,
+    ...entry.diagnosticScopes.map(
+      (field) => `  diagnostic-scope ${localText(field.scope)} offset=${field.offset}`,
+    ),
+    ...entry.diagnosticOutcomes.map(
+      (field) => `  diagnostic-outcome ${localText(field.outcome)} offset=${field.offset}`,
+    ),
     ...entry.header.map(
       (field) =>
         `  header ${field.role.toLowerCase()} offset=${field.offset} size=${field.size} alignment=${field.alignment}`,
@@ -433,25 +455,11 @@ const foreignStaticInitializerText = (
 }
 
 export const encode = (self: Module): string => {
-  let entry: string
-  switch (self.entry._tag) {
-    case 'UnavailableEntry':
-      entry = `entry unavailable reason=${self.entry.reason}`
-      break
-    case 'NoInvocation':
-      entry = `entry none exports=${self.foreignExports.map((export_) => export_.symbol).join(',')}`
-      break
-    case 'OrdinaryEntry':
-      entry = `entry ordinary target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)}`
-      break
-    case 'EffectEntry':
-      entry = `entry effect target=${targetText(self.entry.target.declaration)} machine=${targetText(self.entry.machine.declaration)} failures=${self.entry.failures.map((failure) => `${failure.tag}:${failure.identity}`).join(',') || 'none'} requirements=${self.entry.requirements.map((requirement) => `${requirement.access}:${SilkType.encode(requirement.capability)}@${requirement.role}`).join(',') || 'none'}`
-      break
-  }
   return [
     `mir-module ${self.module}`,
-    entry,
-    ...(self.retainedRoots ?? []).map((root) => `retain ${Instances.keyText(root)}`),
+    ...(self.retainedRoots ?? []).map(
+      (root) => `retain ${JSON.stringify(Instances.keyText(root))}`,
+    ),
     ...self.foreignExports.map(
       (record) =>
         `foreign-export ${record.symbol} type=${SilkType.encode(record.type)} signature=${CAbi.signatureKey(record.signature)} implementation=${instanceText(record.key)} declaration=${targetText(record.declaration)} ${spanText(record.declarationSpan)}`,

@@ -1,3 +1,5 @@
+import * as SourceFile from '../../dist/SourceFile.js'
+import * as SourceResolver from '../../dist/SourceResolver.js'
 import { createHash } from 'node:crypto'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../../dist/Analysis.js'
@@ -70,7 +72,16 @@ pub fn main() -> i32 {
 
 const bytes = new TextEncoder().encode(source)
 const hash = (value) => createHash('sha256').update(value).digest('hex')
-const analyze = (target) => Effect.runPromise(Analysis.ofSourceRealized(module_, bytes, target))
+const analyze = (target) =>
+  Effect.runPromise(
+    Analysis.makeRealized({
+      root: SourceFile.make(module_, bytes),
+      configuration: {
+        profile: { target, artifact: 'object', runtime: { kind: 'none' } },
+        composition: { retention: [{ module: module_, declaration: 'main' }] },
+      },
+    }).pipe(Effect.provide(SourceResolver.empty)),
+  )
 
 // Both targets are pinned. A host-resolved triple would make the artifact hashes describe the
 // machine that ran the fixture rather than the compiler that produced them.

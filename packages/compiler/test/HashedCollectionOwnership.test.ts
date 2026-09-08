@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -8,7 +9,8 @@ import { unreachable } from './support/raise.js'
 /** Mutation callbacks cannot return a retained value borrow or park while holding one. */
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
-const analyzed = (name: string, source: string) => Analysis.ofSourceRealized(name, ascii(source))
+const analyzed = (name: string, source: string) =>
+  AnalysisFixture.retainingMain(name, ascii(source))
 const imports = `import silk.hash { Hash, Word }
 import silk.hash_map { HashMap }`
 
@@ -56,7 +58,10 @@ pub fn main() -> i32 {
     const snapshot = yield* analyzed('hashed-ownership/callback-parking', source)
     const diagnostics = Analysis.diagnostics(snapshot)
     assert.deepEqual(codesOf(snapshot), ['SEM0139'])
-    const reason = (diagnostics.at(0) ?? unreachable('expected one diagnostic')).reason
+    const reason = (
+      diagnostics.find((diagnostic) => diagnostic.code === 'SEM0139') ??
+      unreachable('expected the callback property diagnostic')
+    ).reason
     assert.strictEqual(reason._tag, 'UnsatisfiedExecutableProperty')
     if (reason._tag !== 'UnsatisfiedExecutableProperty') return
     assert.strictEqual(reason.property, 'Intrinsic.NonParking')

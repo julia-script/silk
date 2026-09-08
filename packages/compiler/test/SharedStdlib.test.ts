@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -155,7 +156,7 @@ pub fn main() -> i32 { return 0 }`
 
 it.effect('derives affine local ownership through the ordinary Shared wrapper', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'shared-stdlib/facts',
       ascii(`import silk.shared { Shared }
 struct Holder<T> { value: Shared<T> }
@@ -193,7 +194,7 @@ it.effect(
   'rejects a forged allocator even when another caller proves the same make specialization',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'shared-stdlib/mixed-allocators',
         ascii(mixedAllocatorConstruction),
         'wasm32-unknown-unknown',
@@ -207,7 +208,7 @@ it.effect(
 
 it.effect('does not infer access-boundary privilege from an unrelated wrapper shape', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'shared-stdlib/unrelated-shape',
       ascii(unrelatedCallbackShape),
       'wasm32-unknown-unknown',
@@ -218,7 +219,7 @@ it.effect('does not infer access-boundary privilege from an unrelated wrapper sh
 
 it.effect('propagates the sealed access edge through a renamed multi-callback wrapper', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'shared-stdlib/renamed-multi-callback',
       ascii(renamedMultiCallbackBoundary),
       'wasm32-unknown-unknown',
@@ -247,7 +248,7 @@ it.effect(
   'rejects dependent callback results and suspended borrows through both public access operations',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'shared-stdlib/public-escape',
         ascii(publicEscapeMatrix),
         'wasm32-unknown-unknown',

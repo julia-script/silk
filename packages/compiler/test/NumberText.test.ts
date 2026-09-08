@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -62,7 +63,7 @@ it.effect('anchors malformed, mixed, arity, and field diagnostics to template by
     for (const testCase of cases) {
       const sourceId = `number-text/template-${testCase.name}`
       const source = formattingFailureProgram(testCase.body)
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         sourceId,
         encoder.encode(source),
         'wasm32-unknown-unknown',
@@ -97,7 +98,7 @@ it.effect('anchors malformed, mixed, arity, and field diagnostics to template by
     ] as const) {
       const sourceId = `number-text/template-${testCase.name}`
       const source = formattingFailureProgram(testCase.body)
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         sourceId,
         encoder.encode(source),
         'wasm32-unknown-unknown',
@@ -118,7 +119,7 @@ it.effect('anchors malformed, mixed, arity, and field diagnostics to template by
 
 it.effect('keeps unreachable invalid templates unevaluated and missing Display ordinary', () =>
   Effect.gen(function* () {
-    const unreachable = yield* Analysis.ofSourceRealized(
+    const unreachable = yield* AnalysisFixture.retainingMain(
       'number-text/template-unreachable',
       encoder.encode(`import silk.format { Format }
 import silk.writer { Writer, WriterError }
@@ -133,7 +134,7 @@ pub fn main() -> i32 { return 42 }`),
     const missingDisplaySource = formattingFailureProgram(
       '  return run Format.format("{enabled}", &.{ enabled: true })',
     )
-    const missingDisplay = yield* Analysis.ofSourceRealized(
+    const missingDisplay = yield* AnalysisFixture.retainingMain(
       'number-text/template-missing-display',
       encoder.encode(missingDisplaySource),
       'wasm32-unknown-unknown',
@@ -147,7 +148,7 @@ pub fn main() -> i32 { return 42 }`),
 
 it.effect('classifies static template bytes and residualizes only the selected arm', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'number-text/template-byte',
       ascii(`import silk.static_text as StaticText
 import silk.static_sequence as StaticSequence
@@ -178,7 +179,7 @@ pub fn main() -> i32 {
 
 it.effect('residualizes borrowed aggregate formatting without allocator machinery', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'number-text/templates-structure',
       ascii(templateFormattingAcceptance),
       'wasm32-unknown-unknown',
@@ -306,7 +307,7 @@ it('declares inline Display witnesses without a second string-writing route', ()
 
 it.effect('rejects the removed toText operation as an unknown module member', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'number-text/no-to-text',
       ascii(`import silk.i32 as i32
 pub fn main() -> i32 { let text = i32.toText(42) return 0 }`),

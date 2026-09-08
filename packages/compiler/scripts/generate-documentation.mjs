@@ -18,7 +18,7 @@ import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
 import * as SourceFile from '../dist/SourceFile.js'
 import * as SourceResolver from '../dist/SourceResolver.js'
 import * as Stdlib from '../dist/Stdlib.js'
-import * as Target from '../dist/Target.js'
+import { documentationProfiles } from './documentation-profiles.mjs'
 
 const logError = (...values) => Effect.runSync(Console.error(...values))
 
@@ -59,13 +59,16 @@ const stdlibTree = async () => {
     roots.push(SourceFile.make(module.module, bytes))
   }
   const projects = []
-  for (const target of Target.all) {
+  for (const selected of documentationProfiles) {
     const analysis = await Effect.runPromise(
-      ProjectAnalysis.make(roots, { configuration: { profile: { target: target.id } } }).pipe(
+      ProjectAnalysis.make(roots, { configuration: { profile: selected.profile } }).pipe(
         Effect.provide(SourceResolver.empty),
       ),
     )
-    projects.push({ name: target.id, project: DocumentationProject.fromProjectAnalysis(analysis) })
+    projects.push({
+      name: selected.name,
+      project: DocumentationProject.fromProjectAnalysis(analysis),
+    })
   }
   const rendered = DocumentationReference.makeProfiles(Stdlib.manifest, projects)
   if (rendered._tag === 'Failure') {

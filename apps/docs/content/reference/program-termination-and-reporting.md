@@ -1,8 +1,9 @@
 # Program termination and reporting
 
 Silk distinguishes normal completion, unhandled typed failure, and fatal trap. These rules describe
-the generated host boundary after a valid `main` has been selected. They do not add a source-visible
-exception system, ambient console, or formatting requirement to error values.
+the installed source startup compositions. A custom runtime selects its own source policy through
+ordinary calls, Effect recovery, lexical observation, and foreign exports. None of these operations
+adds a formatting requirement to error values.
 
 TERM-001–012 are confirmed stabilization rules.
 
@@ -29,17 +30,17 @@ pub fn main() -> i32 {
 adopts a general return-omission rule. A native host may expose only a target-defined subset of the
 `i32`; an embedded WebAssembly host observes the exact machine-entry result.
 
-**Diagnostics:** Any other ordinary result reports an invalid entry shape naming `()` and `i32` as
-the permitted results. A missing annotation receives the ordinary missing-result diagnostic.
+**Diagnostics:** An unsupported application result fails the selected source runtime’s ordinary
+interface conformance. A missing annotation receives the ordinary missing-result diagnostic.
 
-**Evidence:** [ordinary entry rule](program-entry.md#entry-005--an-ordinary-entry-explicitly-returns--or-i32).
+**Evidence:** [source application selection](program-entry.md#entry-001--runtime-source-chooses-a-visible-application-function).
 
 ## TERM-002 — A successful effect entry returns zero
 
 **Status:** Confirmed
 
 `pub effect fn main()` is constructed and executed exactly once. When it succeeds with `()`, the
-generated machine entry returns status `0` and prints nothing automatically.
+source startup export returns status `0` and prints nothing automatically.
 
 ```silk
 pub effect fn main() {
@@ -49,18 +50,17 @@ pub effect fn main() {
 **Boundary:** Effect-entry success must be unit. Returning an integer success value does not turn it
 into an ordinary entry or choose a process status.
 
-**Diagnostics:** A non-unit effect-entry success type reports the invalid entry shape before
-backend emission.
+**Diagnostics:** A non-unit Effect success type fails the selected source runtime’s ordinary
+interface conformance before backend emission.
 
-**Evidence:** [effect entry execution](program-entry.md#entry-002--the-compiler-executes-an-effect-entry),
-[effect entry failure boundary](program-entry.md#entry-003--unhandled-effect-entry-failures-become-process-failures).
+**Evidence:** [effect entry execution](program-entry.md#entry-002--source-startup-owns-execution),
+[effect entry failure boundary](program-entry.md#entry-003--source-policy-handles-unhandled-outcomes).
 
 ## TERM-003 — Every unhandled typed failure uses status one
 
 **Status:** Confirmed
 
-Any valid concrete error reaching the effect-entry boundary produces one structured unhandled-error
-outcome and machine status `1`. The actual error identity belongs to the structured outcome and
+Any valid concrete error reaching the effect-entry boundary produces machine status `1`. The actual error identity belongs to the structured outcome and
 report, not to a numeric status ordinal.
 
 ```silk
@@ -80,18 +80,18 @@ status. Application-specific statuses require handling the error explicitly befo
 **Diagnostics:** A valid unhandled entry error receives no compile-time diagnostic. The runtime
 outcome is an unhandled error, not a source diagnostic.
 
-**Implementation:** Internal entry tags still select the active failure identity, but standalone
-adapters normalize every recognized failure tag to public status `1`, independently of member
-order.
+**Implementation:** Both installed startup modules use ordinary generic recovery handlers to drop
+the active owned error and select status `1`, independently of union member order. Hosted startup
+observes the retained diagnostic context; standalone WebAssembly startup performs no report.
 
-**Evidence:** [entry failure rule](program-entry.md#entry-003--unhandled-effect-entry-failures-become-process-failures),
+**Evidence:** [entry failure rule](program-entry.md#entry-003--source-policy-handles-unhandled-outcomes),
 [current backend contract](../../../../openspec/specs/bootstrap-backend/spec.md).
 
 ## TERM-004 — A failure report has one stable minimum
 
 **Status:** Confirmed
 
-Every unhandled typed-error report contains, in order:
+When diagnostic capacity and output permit, the hosted source reporter presents, in order:
 
 1. an explicit `unhandled error` classification;
 2. the canonical fully qualified type identity of the active error;
@@ -106,8 +106,10 @@ unhandled error: app.NotFoundError
 
 The exact wording is illustrative; the information and order are the contract.
 
-**Boundary:** Colors, source excerpts, absolute path spelling, target information, and additional
-debug frames are optional decoration and cannot replace the stable minimum.
+**Boundary:** Reporting is bounded and best effort. The installed hosted composition permits 64
+diagnostic nodes, 4096 output bytes, and 32 frames. Capacity refusal retains the primary identity
+and available context and may truncate presentation. Output failure preserves status one. Colors,
+source excerpts, absolute path spelling, and target information are optional decoration.
 
 **Diagnostics:** No compile-time diagnostic applies. Missing provenance caused by a compiler defect
 must not be disguised as an empty successful report.
@@ -118,7 +120,7 @@ must not be disguised as an empty successful report.
 
 **Status:** Confirmed
 
-The entry adapter reports canonical error identity and retained diagnostic context. It does not
+The source reporter presents canonical error identity and retained diagnostic context. It does not
 reflect over, serialize, or generically format the payload's fields.
 
 ```silk
@@ -129,7 +131,7 @@ pub struct NotFoundError {
 
 An automatic report identifies `NotFoundError`; it does not automatically print `resourceId`.
 
-**Boundary:** The adapter cannot expose private fields accidentally, require a display operation,
+**Boundary:** The reporter cannot expose private fields accidentally, require a display operation,
 or fail because one payload field has no formatter. Source recovery code may inspect and report the
 payload explicitly before it reaches entry. A future opt-in error-formatting interface may customize
 the report, but implementing it must never be required for a value to participate in the typed-error
@@ -138,7 +140,7 @@ channel or reach the automatic entry boundary.
 **Diagnostics:** No marker interface or formatting diagnostic applies to a valid error type.
 
 **Evidence:** [ordinary error values](typed-failures.md#fail-001--any-concrete-lifetime-valid-value-may-be-a-typed-failure),
-[removal of Report ceremony](program-entry.md#entry-003--unhandled-effect-entry-failures-become-process-failures).
+[removal of Report ceremony](program-entry.md#entry-003--source-policy-handles-unhandled-outcomes).
 
 ## TERM-006 — Recovery history becomes causal report context
 
@@ -209,9 +211,10 @@ runtime trap is abnormal termination and must not be reported as an unhandled ty
 
 **Status:** Confirmed
 
-Terminal reporting belongs to the compiler-generated host adapter and matched toolchain support. It
-adds no Logger, Console, filesystem, environment, allocator, or other source requirement and makes
-none of those facilities ambient inside the program.
+Terminal reporting belongs to the selected source runtime. Hosted startup creates and scopes its
+NativeDiagnostics owner and NativeReport writer explicitly. The compiler transports diagnostic
+metadata through the lexical observer and owned outcomes. It defines neither a process-global
+report store nor the formatting, output, capacity, or termination policy.
 
 **Boundary:** Failure while writing a best-effort report cannot become a new typed error or replace
 the original termination. Ordinary program logging still requires its explicit service.
@@ -219,23 +222,27 @@ the original termination. Ordinary program logging still requires its explicit s
 **Diagnostics:** No requirement-row entry is added for automatic reporting. A source log operation
 with an unresolved service remains an ordinary open-requirement error.
 
-**Evidence:** [generated adapter boundary](runtime-and-standard-library.md#runtime-005--the-compiler-generated-adapter-is-the-only-mandatory-program-runtime-boundary),
+**Evidence:** [source startup boundary](runtime-and-standard-library.md#runtime-005--source-compositions-own-application-startup-and-termination),
 [no ambient facilities](runtime-and-standard-library.md#runtime-004--silk-has-no-ambient-runtime-facilities).
 
-## TERM-010 — Standalone and embedded hosts expose equivalent termination data
+## TERM-010 — Embedded reporting is explicit source composition
 
 **Status:** Confirmed
 
-A standalone executable writes its automatic report to the host diagnostic stream, conventionally
-standard error. A target without such a stream, including an import-free WebAssembly module, receives
-structured termination data through its runner or embedding boundary and chooses how to present it.
+The default hosted executable writes best-effort diagnostics to standard error. The default
+standalone WebAssembly runtime exports `main() -> i32`: integer results pass through, unit and
+Effect-unit success return zero, and typed failure returns one after payload cleanup. It installs
+no diagnostic observer, console, or hidden reporting import. Fatal traps remain bare machine traps.
 
-**Boundary:** Silk does not invent a console or hidden import for embedded targets. Exact embedding
-ABI is target policy; semantic parity requires the same classification, identity or reason, origin,
-and logical path rather than identical output bytes.
+A custom embedding runtime may install a lexical observer and expose its chosen presentation or
+structured data through ordinary foreign exports. That source composition defines its ABI and
+capacity contract; the compiler does not synthesize an embedded report object.
 
-**Diagnostics:** A target incapable of satisfying its declared runner contract is a toolchain or
-target-compatibility failure, not a source error in `main`.
+**Boundary:** Numeric status alone does not encode a typed error's identity or trace. An embedding
+that needs those details must select a source reporting composition.
+
+**Diagnostics:** Source compositions obey ordinary target, ownership, Effect, and foreign-ABI
+checks. No implicit runner capability repairs an unsupported source composition.
 
 **Evidence:** [runtime layers](runtime-and-standard-library.md#runtime-001--language-public-source-target-providers-and-toolchain-runtime-support-are-distinct-layers),
 [program entry](program-entry.md).
@@ -245,7 +252,7 @@ target-compatibility failure, not a source error in `main`.
 **Status:** Confirmed
 
 On unhandled typed failure, every exited owner except the failure payload is cleaned during
-propagation. The entry boundary then cleans the payload exactly once while retaining its hidden
+propagation. The source recovery handler then drops the payload exactly once while retaining its hidden
 diagnostic context for reporting.
 
 **Boundary:** Reporting does not keep arbitrary user payload storage alive. Fatal traps retain their
@@ -262,7 +269,7 @@ terminal failure adds no cleanup diagnostic.
 **Status:** Confirmed
 
 A program wanting a custom message, payload rendering, telemetry event, or application-specific
-status handles the typed error before it reaches the automatic entry boundary. It closes every
+status handles the typed error in application source or selects a custom source runtime. It closes every
 Effect error and requirement and returns an ordinary `i32` entry result when it wants to select a
 status.
 
@@ -273,7 +280,7 @@ changes entry behavior. Future standard-library helpers remain ordinary source A
 requirements receives the existing boundary diagnostic before backend emission.
 
 **Evidence:** [ordinary execution boundary](effects-and-execution.md),
-[explicit entry requirements](program-entry.md#entry-004--effect-entry-requirements-must-be-resolved),
+[explicit entry requirements](program-entry.md#entry-004--source-composition-resolves-application-requirements),
 [style guide](style-guide.md).
 
 ## Future direction: custom error formatting

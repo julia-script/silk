@@ -664,29 +664,14 @@ Parsing, importing, resolving, and type-checking a target-restricted intrinsic i
 target. After generic specialization and executable reachability select one concrete program, every
 retained intrinsic call must support the requested execution target.
 
-```silk,ignore
-fn nativeWorkingDirectory(...) -> ... {
-  return unsafe Intrinsic.osHostWorkingDirectory(...)
-}
+An imported function containing a target-specific operation does not constrain an executable
+that cannot reach it. Changing the selected entry or a static call edge so that the function
+becomes executable makes its intrinsic availability relevant to the selected target.
 
-pub fn portableMain() -> i32 {
-  return 42
-}
-```
+Ordinary runtime control flow does not hide a call from availability. A call guarded by a
+runtime Boolean still belongs to the executable closure.
 
-A Wasm executable rooted at `portableMain` is valid because it cannot reach the native operation.
-Changing the selected entry or a static call edge so that `nativeWorkingDirectory` becomes
-executable makes the same intrinsic call a compile-time target error.
-
-Ordinary runtime control flow does not hide a call from availability:
-
-```silk,ignore
-if flag {
-  nativeWorkingDirectory(...)
-}
-```
-
-When `flag` is runtime data, both branches belong to the executable behavior and the intrinsic must
+When the condition is runtime data, both branches belong to the executable behavior and the intrinsic must
 support the target. Availability cannot depend on an optimizer deciding to delete source behavior.
 
 **Boundary:** Loading a module, importing a wrapper, mentioning it in documentation, or retaining
@@ -941,9 +926,11 @@ A native symbol is a non-empty ASCII identifier: a letter or underscore followed
 digits, or underscores. Any other spelling, including an embedded NUL, is rejected at the
 declaration.
 
-A symbol the compiler owns is reserved: the process entry `main`, the Silk entry `silk_main`, the
-`silk_os_*_v1` and coroutine runtime symbols, the host-argument and standard-stream symbols, and
-the foreign personality `__silk_foreign_personality`, and the generated shapes `silk_suspend_*` and `silk_<module>_<name>__<instance>`.
+Platform entry names such as `main` are ordinary foreign export names: a selected source
+runtime may define them. The remaining private compiler symbols are reserved:
+`__silk_foreign_personality`, plus the generated shapes `silk_suspend_*` and
+`silk_<module>_<name>__<instance>`. Source-owned startup, storage, process, host-input and
+standard-stream operations have no reserved names.
 
 Within one executable closure, two reachable foreign declarations of one symbol are accepted when
 their classified C signatures and normalized behavioral contracts are equal and rejected when either differs. The executable declares
@@ -951,7 +938,7 @@ the symbol once.
 
 ```silk,ignore
 unsafe extern "C" fn f() -> () as "not a symbol"
-unsafe extern "C" fn g() -> i32 as "silk_main"
+unsafe extern "C" fn g() -> i32 as "__silk_foreign_personality"
 ```
 
 **Boundary:** Agreement is judged on the classified C signature, not the Silk spelling. `isize` on

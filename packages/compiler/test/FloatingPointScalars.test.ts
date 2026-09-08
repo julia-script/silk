@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -48,7 +49,7 @@ it('rounds decimal source directly to canonical IEEE bits', () => {
 
 it.effect('fails to compile a float literal whose exponent has no digits', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'float/malformed-exponent',
       new TextEncoder().encode('pub fn main() -> f64 {\n  return 1e\n}'),
       'wasm32-unknown-unknown',
@@ -69,7 +70,7 @@ it('publishes canonical float catalog entries', () => {
 
 it.effect('guards native float-to-integer conversion against out-of-range and NaN inputs', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'float/native-convert-guard',
       new TextEncoder().encode(
         'import silk.f64 as f64\n' +
@@ -86,6 +87,6 @@ it.effect('guards native float-to-integer conversion against out-of-range and Na
     assert.include(llvm.ir, '_below')
     assert.include(llvm.ir, '_above')
     assert.include(llvm.ir, 'trap_site')
-    assert.include(llvm.ir, '@silk_trap_report_v1')
+    assert.notInclude(llvm.ir, '@silk_trap_report_v1')
   }),
 )

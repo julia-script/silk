@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -21,7 +22,7 @@ effect fn program() -> i32 {
 pub fn main() -> i32 { return run program() }`
 
 const analyze = (source = suspended) =>
-  Analysis.ofSourceRealized(
+  AnalysisFixture.retainingMain(
     'coroutine-frame/main',
     encoder.encode(source),
     'wasm32-unknown-unknown',

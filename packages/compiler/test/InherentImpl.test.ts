@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -13,7 +14,7 @@ const ascii = (value: string): Uint8Array =>
 const analyze = (text: string, target?: string) =>
   Analysis.makeRealized({
     root: SourceFile.make('root', ascii(text)),
-    ...(target === undefined ? {} : { target }),
+    configuration: AnalysisFixture.configuration('root', target),
   }).pipe(Effect.provide(SourceResolver.memory(new Map())))
 
 const analyzeModules = (
@@ -27,9 +28,10 @@ const analyzeModules = (
       .filter(([name]) => name !== rootModule)
       .map(([name, text]) => [name, ascii(text)] as const),
   )
-  return Analysis.makeRealized({ root: SourceFile.make(rootModule, ascii(rootText)) }).pipe(
-    Effect.provide(SourceResolver.memory(imports)),
-  )
+  return Analysis.makeRealized({
+    root: SourceFile.make(rootModule, ascii(rootText)),
+    configuration: AnalysisFixture.configuration(rootModule),
+  }).pipe(Effect.provide(SourceResolver.memory(imports)))
 }
 
 const codes = (self: Analysis.SingleRootFrontendSnapshot): ReadonlyArray<string> =>

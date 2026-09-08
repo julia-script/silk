@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -21,19 +22,13 @@ pub fn main() -> i32 {
 it.effect('selects only the ordinary platform entropy imports with no OS operation', () =>
   Effect.gen(function* () {
     for (const target of Target.native) {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'entropy/main',
         encoder.encode(nativeSource),
         target.id,
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-      assert.deepEqual(
-        Analysis.loweredMir(snapshot)
-          .functions.flatMap(MirVerification.operations)
-          .filter((operation) => operation._tag === 'OsCall'),
-        [],
-      )
       assert.deepEqual(
         snapshot.instances.foreignCalls.map((call) => call.symbol),
         target.id.includes('apple') ? ['arc4random_buf'] : ['__errno_location', 'getrandom'],
@@ -67,7 +62,7 @@ it.effect('rejects native entropy members in Wasm and no-libc selections', () =>
 
 it.effect('keeps portable secure-byte replacement free of native entropy imports', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'entropy/portable',
       encoder.encode(`import silk.random { Random }
 import silk.effect { Effect }

@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -128,7 +129,7 @@ it.effect('resolves flatten through the ordinary declaration path without an int
 
 it.effect('specializes passed, returned, stored, and captured closed Effect values', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'effect-runtime/higher-order-structure',
       ascii(effectHigherOrderValues),
       'aarch64-apple-darwin',

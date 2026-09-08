@@ -57,7 +57,9 @@ it.effect(
         skipped,
       )
     }),
-  180_000,
+  // The native example sweep now analyzes the source startup composition for each program;
+  // measured individual examples take about 3 s before the shared documentation analysis.
+  300_000,
 )
 
 /**

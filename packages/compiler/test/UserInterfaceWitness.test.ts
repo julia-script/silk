@@ -1,11 +1,14 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const analyzed = (name: string, source: string) => Analysis.ofSourceRealized(name, ascii(source))
+const analyzed = (name: string, source: string) =>
+  AnalysisFixture.retainingMain(name, ascii(source))
 
 const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
@@ -196,5 +199,49 @@ pub fn main() -> i32 { return 0 }`,
     assert.deepEqual(messages(snapshot), [
       'Invalid conformance: mapped operation Cell.absent does not exist',
     ])
+  }),
+)
+
+it.effect('selects source application result policies without storing an erased Effect', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyzed(
+      'user-witness/application-result',
+      `import silk.effect { Effect }
+struct Application<T> {}
+interface EntryResult<T> { fn code(value: T) -> i32 }
+impl EntryResult<i32> for Application<i32> { fn code(value: i32) -> i32 { return value } }
+impl EntryResult<()> for Application<()> { fn code(value: ()) -> i32 { return 0 } }
+effect fn failed<E>(error: E) -> i32 { drop error return 1 }
+effect fn succeeded(value: ()) -> i32 { return 0 }
+impl<'env, E> EntryResult<Effect<'env; () ! E>> for Application<Effect<'env; () ! E>> {
+  fn code(value: Effect<'env; () ! E>) -> i32 {
+    let computation = Effect.flatMap(move value, succeeded)
+    return run Effect.catchAll(move computation, failed)
+  }
+}
+struct Problem {}
+effect fn test() -> () ! Problem { fail Problem {} }
+effect fn successEffect() -> () {}
+fn select<T>(value: &T) -> Application<T> { return Application<T> {} }
+fn adapt<T, P: EntryResult<T>>(value: T, provider: P) -> i32 { return EntryResult<T>.code(move value) }
+pub fn main() -> i32 {
+  let value = test()
+  let provider = select(&value)
+  let failedCode = adapt(move value, move provider)
+  let successfulEffect = successEffect()
+  let effectProvider = select(&successfulEffect)
+  let effectCode = adapt(move successfulEffect, move effectProvider)
+  let success: i32 = 41
+  let successProvider = select(&success)
+  let unit = ()
+  let unitProvider = select(&unit)
+  return effectCode + failedCode + adapt(success, move successProvider) + adapt(unit, move unitProvider)
+}
+`,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.strictEqual(snapshot.mir._tag, 'Available')
+    if (snapshot.mir._tag === 'Available')
+      assert.deepEqual(MirVerification.verify(snapshot.mir.value), [])
   }),
 )

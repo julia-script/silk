@@ -164,7 +164,7 @@ pub fn main() -> i32 {
 })
 
 it.effect('indexes allocator tokens as source binding, actor, and function identities', () =>
-  Analysis.ofSourceRealized('main', encoder.encode(allocatorSource)).pipe(
+  Analysis.ofSource('main', encoder.encode(allocatorSource)).pipe(
     Effect.map((snapshot) => {
       const source = new TextDecoder().decode(
         SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
@@ -202,7 +202,7 @@ pub service Logger {
   fn enabled() -> bool
 }
 pub fn main() -> i32 { return 0 }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const service = occurrenceAt(snapshot, source, 'Logger')
       const operation = occurrenceAt(snapshot, source, 'enabled()')
@@ -243,7 +243,7 @@ pub union Result<A, E> {
   Failure { pub error: E },
 }
 pub fn main() -> i32 { return 0 }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const declaration = occurrenceAt(snapshot, source, 'Result')
       const variant = occurrenceAt(snapshot, source, 'Success')
@@ -312,7 +312,7 @@ pub fn main() -> i32 {
   let state = State.ready()
   return 0
 }`
-  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(source)) }).pipe(
+  return Analysis.make({ root: SourceFile.make('main', encoder.encode(source)) }).pipe(
     Effect.provide(
       SourceResolver.memory(
         new Map([
@@ -394,7 +394,7 @@ pub effect fn recover(
 }
 pub fn main() -> i32 { return recover(Problem { code: 41 }) }
 `
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       assert.strictEqual(
         documentationText(snapshot, Analysis.moduleDocumentation(snapshot, 'main')),
@@ -438,7 +438,7 @@ it.effect('links public Effect operations to visible standard-library source', (
 fn increment(value: i32) -> i32 { return value + 1 }
 effect fn answer() -> i32 { return 41 }
 pub effect fn main() -> i32 { return run answer() |> Effect.map(increment) }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const occurrence = occurrenceAt(snapshot, source, 'map')
       assert.strictEqual(occurrence?.role, 'Value')
@@ -640,7 +640,7 @@ pub fn main() -> i32 {
   let exclusive = Vector.asMutSlice<i32>(&mut values)
   return usize.toI32(shared.length + exclusive.length)
 }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       for (const [name, documentation] of [
         [
@@ -710,7 +710,7 @@ effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return usize.toI32(count + writable.length)
 }
 pub fn main() -> i32 { return 0 }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       for (const [name, documentation] of [
         ['make', '/// Creates an empty `Bytes` value without allocating storage.'],
@@ -787,7 +787,7 @@ pub fn main() -> i32 {
   let output = StdoutLogger.make()
   return 42
 }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source), 'x86_64-unknown-linux-gnu').pipe(
+  return Analysis.ofSource('main', encoder.encode(source), 'x86_64-unknown-linux-gnu').pipe(
     Effect.map((snapshot) => {
       const logger = occurrenceAt(snapshot, source, 'Logger.log', 0)
       assert.strictEqual(logger?.role, 'Actor')
@@ -848,7 +848,7 @@ effect fn locate(base: &Path) -> Path ! FileError | OutOfMemoryError ? &mut Allo
 effect fn canonical() -> Path ! OutOfMemoryError ? &mut Allocator { return run Path.root() }
 fn code(error: &FileError) -> i32 { return FileSystem.operationCode(error.operation) }
 pub fn main() -> i32 { return 42 }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       for (const [spelling, ordinal, expected] of [
         ['stat', 0, ["effect<'life0> fn stat<'life0>(", '! FileError ? &mut FileSystem']],
@@ -967,7 +967,7 @@ impl Counter {
   fn secret(self: &Self) -> i32 { return self.value }
 }
 pub fn local() -> i32 { let counter = Counter. return 0 }`
-  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(main)) }).pipe(
+  return Analysis.make({ root: SourceFile.make('main', encoder.encode(main)) }).pipe(
     Effect.provide(SourceResolver.memory(new Map([['shapes', encoder.encode(shapes)]]))),
     Effect.map((snapshot) => {
       const labels = (module: string, source: string) =>
@@ -987,7 +987,7 @@ pub fn local() -> i32 { let counter = Counter. return 0 }`
 })
 
 it.effect('answers deterministic inferred hints and recovered completions', () =>
-  Analysis.ofSourceRealized('main', encoder.encode(recoveredMemberSource)).pipe(
+  Analysis.ofSource('main', encoder.encode(recoveredMemberSource)).pipe(
     Effect.map((snapshot) => {
       const source = new TextDecoder().decode(
         SourceFile.toUint8Array(Analysis.rootAnalysis(snapshot).syntax.source),
@@ -1393,7 +1393,7 @@ pub fn make() -> Provider { return Provider {} }`
 it.effect(
   'retains exact semantic tokens for calls, constructors, initializers, and projections',
   () =>
-    Analysis.ofSourceRealized(
+    Analysis.ofSource(
       'main',
       encoder.encode(`import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
@@ -1431,7 +1431,7 @@ fn pick() -> i32 {
 )
 
 it.effect('recursively indexes generic nominal and type-parameter references', () =>
-  Analysis.ofSourceRealized(
+  Analysis.ofSource(
     'main',
     encoder.encode(`struct Problem {}
 struct Box<T> { value: T }
@@ -1464,7 +1464,7 @@ it.effect('indexes every row-expression and constraint binder reference', () => 
 where &mut P provides S from R {
   return run self
 }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const occurrences = snapshot.semanticOccurrences.modules.get('main')?.occurrences ?? []
       const spellings = occurrences.map((occurrence) =>
@@ -1492,7 +1492,7 @@ where &mut P provides S from R {
 
 it.effect('completes from the innermost lexical scope and excludes later declarations', () => {
   const source = nestedBindingSource
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const analysis = Analysis.rootAnalysis(snapshot)
       const scopes = analysis.lexicalScopes
@@ -1533,7 +1533,7 @@ pub fn main() -> i32 {
     Full { value } => val
   }
 }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const offset = encoder.encode(source.slice(0, source.lastIndexOf('val') + 3)).length
       const completion = Analysis.completionAt(snapshot, 'main', offset)
@@ -1557,7 +1557,7 @@ pub fn main() -> i32 {
   if let Full inner = &second { let taken = inn } else { let missed = inn }
   return value
 }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return Analysis.ofSource('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const atCompletion = (prefix: string) =>
         Analysis.completionAt(snapshot, 'main', source.indexOf(prefix) + prefix.length)
@@ -1600,7 +1600,7 @@ it.effect('retains exact import, alias, qualifier, and unavailable-member tokens
 pub fn main() -> i32 { return read() }`
   const library = `pub fn answer() -> i32 { return 42 }
 fn hidden() -> i32 { return 0 }`
-  return Analysis.makeRealized({ root: SourceFile.make('root', encoder.encode(root)) }).pipe(
+  return Analysis.make({ root: SourceFile.make('root', encoder.encode(root)) }).pipe(
     Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
     Effect.map((snapshot) => {
       const at = (spelling: string, occurrence = 0) => {
@@ -1639,7 +1639,7 @@ pub fn main() -> i32 {
 }`
   const library = `pub struct Secret { pub value: i32 key: i32 }
 pub fn make(value: i32) -> Secret { return Secret { value: value, key: 7 } }`
-  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
+  return Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
     Effect.provide(SourceResolver.memory(new Map([['lib', encoder.encode(library)]]))),
     Effect.map((snapshot) => {
       const completionOffset = root.lastIndexOf('secret.') + 'secret.'.length
@@ -1674,7 +1674,7 @@ struct Problem {}
 pub fn main() -> i32 { return 0 }`
   const models = `pub struct Box<T> { value: T }
 pub struct Other {}`
-  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
+  return Analysis.make({ root: SourceFile.make('main', encoder.encode(root)) }).pipe(
     Effect.provide(SourceResolver.memory(new Map([['types/Models', encoder.encode(models)]]))),
     Effect.map((snapshot) => {
       const scope = NameResolution.scopeOf(snapshot.resolution, 'main')
@@ -1766,8 +1766,8 @@ pub fn main() -> i32 {
 }
 fn damaged( -> {`
   return Effect.gen(function* () {
-    const first = yield* Analysis.ofSourceRealized('main', encoder.encode(source))
-    const second = yield* Analysis.ofSourceRealized('main', encoder.encode(source))
+    const first = yield* Analysis.ofSource('main', encoder.encode(source))
+    const second = yield* Analysis.ofSource('main', encoder.encode(source))
     const firstIndex = first.semanticOccurrences.modules.get('main')
     const secondIndex = second.semanticOccurrences.modules.get('main')
     assert.deepEqual(secondIndex, firstIndex)
@@ -1794,7 +1794,7 @@ it.effect('preserves ambiguous, missing, namespace, and type completion contexts
     const ambiguousSource = `import silk.vector { Vector }
 struct Vector {}
 pub fn main() -> i32 { return Vector. }`
-    const ambiguous = yield* Analysis.ofSourceRealized('main', encoder.encode(ambiguousSource))
+    const ambiguous = yield* Analysis.ofSource('main', encoder.encode(ambiguousSource))
     const ambiguousResult = Analysis.completionAt(
       ambiguous,
       'main',
@@ -1811,7 +1811,7 @@ pub fn main() -> i32 { return Vector. }`
     // inherent members to offer, and completion is empty rather than ambiguous.
     const shadowedSource = `struct SystemAllocator {}
 pub fn main() -> i32 { return SystemAllocator. }`
-    const shadowed = yield* Analysis.ofSourceRealized('main', encoder.encode(shadowedSource))
+    const shadowed = yield* Analysis.ofSource('main', encoder.encode(shadowedSource))
     const shadowedResult = Analysis.completionAt(
       shadowed,
       'main',
@@ -1830,7 +1830,7 @@ pub fn main() -> i32 { return SystemAllocator. }`
     )
 
     const missingSource = `pub fn main() -> i32 { return Mystery. }`
-    const missing = yield* Analysis.ofSourceRealized('main', encoder.encode(missingSource))
+    const missing = yield* Analysis.ofSource('main', encoder.encode(missingSource))
     assert.deepEqual(
       Analysis.completionAt(missing, 'main', missingSource.indexOf('Mystery.') + 'Mystery.'.length)
         ?.context,
@@ -1840,7 +1840,7 @@ pub fn main() -> i32 { return SystemAllocator. }`
     const namespaceSource = `import lib as Library
 struct Local {}
 pub fn main(value: i32) -> i32 { return Library. }`
-    const namespace = yield* Analysis.makeRealized({
+    const namespace = yield* Analysis.make({
       root: SourceFile.make('main', encoder.encode(namespaceSource)),
     }).pipe(
       Effect.provide(
@@ -1870,7 +1870,7 @@ pub fn main(value: i32) -> i32 { return Library. }`
 
     const serviceSource = `service LocalLogger { fn enabled() -> bool }
 pub fn main() -> i32 { return LocalLogger. }`
-    const serviceSnapshot = yield* Analysis.ofSourceRealized('main', encoder.encode(serviceSource))
+    const serviceSnapshot = yield* Analysis.ofSource('main', encoder.encode(serviceSource))
     const serviceResult = Analysis.completionAt(
       serviceSnapshot,
       'main',
@@ -1887,7 +1887,7 @@ pub fn main() -> i32 { return LocalLogger. }`
 
     const importedServiceSource = `import contracts { ContractLogger }
 pub fn main() -> i32 { return ContractLogger. }`
-    const importedService = yield* Analysis.makeRealized({
+    const importedService = yield* Analysis.make({
       root: SourceFile.make('main', encoder.encode(importedServiceSource)),
     }).pipe(
       Effect.provide(
@@ -1916,7 +1916,7 @@ pub fn main() -> i32 { return ContractLogger. }`
 union LocalChoice { Empty }
 service Logger { fn enabled() -> bool }
 fn identity<T>(value: ) -> i32 { return 0 }`
-    const typeSnapshot = yield* Analysis.ofSourceRealized('main', encoder.encode(typeSource))
+    const typeSnapshot = yield* Analysis.ofSource('main', encoder.encode(typeSource))
     const typeResult = Analysis.completionAt(
       typeSnapshot,
       'main',
@@ -1933,7 +1933,7 @@ fn identity<T>(value: ) -> i32 { return 0 }`
 
     const importedUnionSource = `import contracts { ContractChoice }
 fn identity(value: ) -> i32 { return 0 }`
-    const importedUnion = yield* Analysis.makeRealized({
+    const importedUnion = yield* Analysis.make({
       root: SourceFile.make('main', encoder.encode(importedUnionSource)),
     }).pipe(
       Effect.provide(
@@ -1992,7 +1992,7 @@ pub fn helper() -> i32 { return 1 }
 `
   const source = `import shapes as Shapes
 pub fn main() -> i32 { let value = Shapes. return 0 }`
-  return Analysis.makeRealized({ root: SourceFile.make('main', encoder.encode(source)) }).pipe(
+  return Analysis.make({ root: SourceFile.make('main', encoder.encode(source)) }).pipe(
     Effect.provide(SourceResolver.memory(new Map([['shapes', encoder.encode(shapes)]]))),
     Effect.map((snapshot) => {
       const offset = source.indexOf('Shapes.') + 'Shapes.'.length

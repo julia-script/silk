@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { unreachable } from './support/raise.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -15,7 +16,7 @@ const ascii = (value: string): Uint8Array =>
 
 it.effect('retains failed referent facts and rejects affine borrowed reads', () =>
   Effect.gen(function* () {
-    const invalid = yield* Analysis.ofSourceRealized(
+    const invalid = yield* AnalysisFixture.declarations(
       'reference-projection/non-reference-referent',
       ascii('fn invalid(value: i32) -> i32 { return value.* }'),
       'wasm32-unknown-unknown',
@@ -30,7 +31,7 @@ it.effect('retains failed referent facts and rejects affine borrowed reads', () 
       'Unavailable',
     )
 
-    const affine = yield* Analysis.ofSourceRealized(
+    const affine = yield* AnalysisFixture.declarations(
       'reference-projection/affine-referent',
       ascii(`struct Token { value: i32 }
 fn invalid(value: &Token) -> Token { return value.* }`),
@@ -45,7 +46,7 @@ fn invalid(value: &Token) -> Token { return value.* }`),
 
 it.effect('rejects strengthening a shared value-reference reborrow', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'reference-projection/value-reborrow-strengthening',
       ascii(`struct Box { value: i32 }
 fn mutate(box: &mut Box) -> () { box.value = 1 }
@@ -62,7 +63,7 @@ fn invalid(box: &Box) -> () { mutate(&mut box) }`),
 
 it.effect('retains zero-lane reads and nested reborrows while restoring the parent', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'reference-projection/surviving-runtime-structure',
       ascii(referenceProjectionAcceptance),
       'aarch64-apple-darwin',
@@ -78,7 +79,7 @@ it.effect('retains zero-lane reads and nested reborrows while restoring the pare
 
 it.effect('consumes a static field descriptor into an ordinary shared residual borrow', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'reference-projection/static-descriptor',
       ascii(`struct Box { value: i32 }
 
@@ -321,7 +322,7 @@ fn invalid(
 
 it.effect('rejects forged consuming reads and writes through shared references', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'reference-projection/forged-shared-mir',
       ascii(`fn read(value: &i32) -> i32 { return value.* }
 pub fn main() -> i32 {
@@ -427,7 +428,7 @@ pub fn main() -> i32 {
 it.effect('keeps reference projection inside the borrow contract', () =>
   Effect.gen(function* () {
     // Writing through a shared reference is not a writable place.
-    const shared = yield* Analysis.ofSourceRealized(
+    const shared = yield* AnalysisFixture.retainingMain(
       'reference-projection/shared-write',
       ascii(`struct Counter { value: i32 }
 fn bump(self: &Counter) -> i32 {
@@ -442,7 +443,7 @@ fn bump(self: &Counter) -> i32 {
     )
 
     // Consuming a field through a reference stays a partial move.
-    const stolen = yield* Analysis.ofSourceRealized(
+    const stolen = yield* AnalysisFixture.retainingMain(
       'reference-projection/steal',
       ascii(`struct Token { value: i32 }
 struct Holder { token: Token }

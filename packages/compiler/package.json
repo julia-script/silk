@@ -514,10 +514,6 @@
       "types": "./dist/TargetSelector.d.ts",
       "import": "./dist/TargetSelector.js"
     },
-    "./Termination": {
-      "types": "./dist/Termination.d.ts",
-      "import": "./dist/Termination.js"
-    },
     "./Token": {
       "types": "./dist/Token.d.ts",
       "import": "./dist/Token.js"
@@ -549,6 +545,10 @@
     "./WorkspaceInventory": {
       "types": "./dist/WorkspaceInventory.d.ts",
       "import": "./dist/WorkspaceInventory.js"
+    },
+    "./RuntimeComponent": {
+      "types": "./dist/RuntimeComponent.d.ts",
+      "import": "./dist/RuntimeComponent.js"
     }
   },
   "publishConfig": {
@@ -583,8 +583,19 @@
     "test:llvm-helpers": "node conformance/llvm-helpers/run.mjs",
     "test:standard-streams": "node conformance/standard-streams/run.mjs",
     "test:native-clocks": "node conformance/native-clocks/run.mjs",
+    "test:hosted-start": "node conformance/hosted-start/run.mjs",
+    "test:hosted-start-faults": "SILK_STARTUP_FAULTS=true node conformance/hosted-start/run.mjs",
+    "test:native-host-input": "node conformance/native-host-input/run.mjs",
+    "test:native-report": "node conformance/native-report/run.mjs",
+    "test:native-process": "node conformance/native-process/run.mjs",
+    "test:native-process-child-faults": "SILK_PROCESS_CHILD_FAULTS=true node conformance/native-process/run.mjs",
+    "test:native-process-faults": "SILK_PROCESS_FAULTS=true node conformance/native-process/run.mjs",
     "test:native-entropy": "node conformance/native-entropy/run.mjs",
-    "test:native-filesystem": "node conformance/native-filesystem/run.mjs"
+    "test:native-filesystem": "node conformance/native-filesystem/run.mjs",
+    "test:raw-linux": "node conformance/raw-linux/run.mjs",
+    "test:execution-storage": "node conformance/execution-storage/run.mjs",
+    "test:execution-storage-faults": "SILK_STORAGE_FAULTS=true node conformance/execution-storage/run.mjs",
+    "test:execution-storage-wasm": "node conformance/execution-storage/wasm.mjs"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.112",

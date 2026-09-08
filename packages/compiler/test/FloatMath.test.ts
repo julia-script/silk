@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -61,7 +62,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       for (const program of floatMathPrograms) {
-        const native = yield* Analysis.ofSourceRealized(
+        const native = yield* AnalysisFixture.retainingMain(
           `float-math/${program.name}-ir`,
           encode(program.source),
           'aarch64-apple-darwin',
@@ -87,7 +88,7 @@ pub fn main() -> i32 {
   if f32.sqrt(1764.0) != 42.0 { return 2 }
   return 42
 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'float-math/sqrt-lowering',
       encode(source),
       'aarch64-apple-darwin',

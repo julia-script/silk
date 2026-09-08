@@ -168,16 +168,26 @@ export const realize = Effect.fn('Analysis.realize')(function* (
   target: string | ModuleClosure.CompilationRequest['configuration'] = self.requestedTarget ??
     Target.x8664UnknownLinuxGnu.id,
   options: Frontend.Options = {},
-): Effect.fn.Return<Snapshot> {
-  const realization = yield* Realization.realize(self, target, options)
+): Effect.fn.Return<Snapshot, never, SourceResolver.SourceResolver> {
+  const { frontend, ...realization } = yield* Realization.realize(self, target, options)
+  const tooling =
+    frontend.index === self.index && frontend.closure === self.closure
+      ? {
+          toolingModules: self.toolingModules,
+          semanticOccurrences: self.semanticOccurrences,
+          anonymousExpressions: self.anonymousExpressions,
+          report: frontend.report,
+        }
+      : yield* FrontendTooling.make(frontend, self.toolingModules)
   return OpaqueRealization.withCatalog(
     Object.freeze({
-      ...self,
+      ...frontend,
+      ...tooling,
       ...realization,
       _tag: 'AnalysisSnapshot',
       realization: 'SingleRoot',
     }),
-    OpaqueRealization.catalogOf(self),
+    OpaqueRealization.catalogOf(frontend),
   )
 })
 
@@ -185,7 +195,11 @@ export const realize = Effect.fn('Analysis.realize')(function* (
 export const makeRealized = Effect.fn('Analysis.makeRealized')(function* (
   request: ModuleClosure.CompilationRequest,
 ): Effect.fn.Return<Snapshot, never, SourceResolver.SourceResolver> {
-  return yield* realize(yield* make(request), request.configuration ?? request.target)
+  const selected =
+    request.configuration === undefined && request.target === undefined
+      ? { ...request, target: Target.x8664UnknownLinuxGnu.id }
+      : request
+  return yield* realize(yield* make(selected), selected.configuration ?? selected.target)
 })
 
 /** Builds the snapshot of one single-module source. */
@@ -205,10 +219,12 @@ export const ofSource = (
 export const ofSourceRealized = (
   sourceId: string,
   bytes: Uint8Array,
-  target?: string,
+  target: string = Target.x8664UnknownLinuxGnu.id,
   options: Frontend.Options = {},
 ): Effect.Effect<Snapshot> =>
-  Effect.flatMap(ofSource(sourceId, bytes, target), (self) => realize(self, target, options))
+  Effect.flatMap(ofSource(sourceId, bytes, target), (self) => realize(self, target, options)).pipe(
+    Effect.provide(SourceResolver.empty),
+  )
 
 /** Returns every loaded module of the snapshot in canonical identity order. */
 export const modules = (self: FrontendSnapshot): ReadonlyArray<ModuleClosure.Module> =>

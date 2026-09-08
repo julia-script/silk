@@ -138,13 +138,10 @@ const passesSettled = Effect.fnUntraced(function* (passes: ReadonlyArray<unknown
 })
 
 /**
- * One watch-mode compilation: its reported status, and the entry source the pass read. The status
- * alone cannot see a torn read — `check` of an empty entry finds no declaration to reject and
- * reports success — so a test that asks whether a pass compiled a finished file has to look at
- * the bytes the pass loaded.
+ * The entry source delivered to one watch-mode compilation callback. Writer-settlement tests
+ * observe these bytes directly; separate tests exercise semantic checking and diagnostic recovery.
  */
 interface Pass {
-  readonly status: Workflow.ExitStatus
   readonly source: string
 }
 
@@ -154,15 +151,12 @@ interface Pass {
  */
 const watchRecording = Effect.fnUntraced(function* (root: string) {
   const passes: Array<Pass> = []
-  const record = (project: Project.Project, selection: Workflow.ProjectSelection) =>
-    Workflow.checkProject(project, selection).pipe(
-      Effect.tap((status) =>
-        Effect.sync(() => {
-          const source = new TextDecoder().decode(project.entry.bytes)
-          passes.push({ status, source })
-        }),
-      ),
-    )
+  const record = Effect.fnUntraced(function* (project: Project.Project) {
+    yield* Effect.sync(() => {
+      passes.push({ source: new TextDecoder().decode(project.entry.bytes) })
+    })
+    return 0 as const
+  })
   const watching = yield* Effect.forkChild(Workflow.watch(record, options(root)))
   yield* waitUntil(() => passes.length >= 1)
   yield* editUntilRecompiled(
@@ -318,7 +312,7 @@ it.effect(
       const wasmModule = new WebAssembly.Module(Uint8Array.from(wasmBytes))
       assert.deepEqual(WebAssembly.Module.imports(wasmModule), [])
       const wasmInstance = new WebAssembly.Instance(wasmModule)
-      const wasmMain = wasmInstance.exports['silk_main']
+      const wasmMain = wasmInstance.exports['main']
       assert.isTrue(isI32Main(wasmMain))
       if (isI32Main(wasmMain)) assert.strictEqual(wasmMain(), 42)
       assert.strictEqual(
@@ -644,10 +638,6 @@ it.live(
         torn.map((pass) => pass.source.length),
         [],
         `${torn.length} of ${observed.length} passes read a file that was still being written`,
-      )
-      assert.deepStrictEqual(
-        observed.filter((pass) => pass.status !== 0),
-        [],
       )
     }).pipe(Effect.scoped, Effect.provide(CompilerHost.layer)),
   Timeouts.nativeBuild,

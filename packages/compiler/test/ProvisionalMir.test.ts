@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Json from './support/Json.js'
@@ -14,7 +15,7 @@ import { unreachable } from './support/raise.js'
 const encoder = new TextEncoder()
 
 const snapshot = (source: string) =>
-  Analysis.ofSourceRealized('provisional-mir/main', encoder.encode(source))
+  AnalysisFixture.retainingMain('provisional-mir/main', encoder.encode(source))
 
 const available = (self: Analysis.Snapshot): ProvisionalMir.Module => {
   const provisional = Projections.provisionalMirOf(self)

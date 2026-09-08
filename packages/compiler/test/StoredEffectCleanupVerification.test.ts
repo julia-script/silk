@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -17,7 +18,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
-  const snapshot = yield* Analysis.ofSourceRealized(
+  const snapshot = yield* AnalysisFixture.retainingMain(
     name,
     ascii(source),
     Target.wasm32UnknownUnknown.id,

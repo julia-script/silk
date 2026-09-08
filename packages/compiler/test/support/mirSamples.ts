@@ -46,11 +46,7 @@ export const samples = (): ReadonlyArray<Module> => {
     foreignCalls: Object.freeze([]),
     foreignExports: Object.freeze([]),
     foreignStatics: Object.freeze([]),
-    entry: Object.freeze({
-      _tag: 'OrdinaryEntry',
-      target: instance(canonical(source.id, 'answer')),
-      machine: instance(canonical(source.id, 'answer')),
-    }),
+    retainedRoots: Object.freeze([instance(canonical(source.id, 'answer'))]),
     layout: Layout.make(Target.aarch64AppleDarwin, ['i32']),
     executionTransitions: Object.freeze([]),
     functions: Object.freeze([
@@ -92,11 +88,7 @@ export const samples = (): ReadonlyArray<Module> => {
     foreignCalls: Object.freeze([]),
     foreignExports: Object.freeze([]),
     foreignStatics: Object.freeze([]),
-    entry: Object.freeze({
-      _tag: 'OrdinaryEntry',
-      target: instance(canonical(source.id, 'choose')),
-      machine: instance(canonical(source.id, 'choose')),
-    }),
+    retainedRoots: Object.freeze([instance(canonical(source.id, 'choose'))]),
     layout: Layout.make(Target.aarch64AppleDarwin, ['i32', 'bool']),
     executionTransitions: Object.freeze([]),
     functions: Object.freeze([
@@ -193,11 +185,7 @@ export const foreignCallSample = (
     foreignCalls: Object.freeze([]),
     foreignExports: Object.freeze([]),
     foreignStatics: Object.freeze([]),
-    entry: Object.freeze({
-      _tag: 'OrdinaryEntry',
-      target: instance(canonical(source.id, 'answer')),
-      machine: instance(canonical(source.id, 'answer')),
-    }),
+    retainedRoots: Object.freeze([instance(canonical(source.id, 'answer'))]),
     layout: Layout.make(target, ['i32']),
     executionTransitions: Object.freeze([]),
     functions: Object.freeze([

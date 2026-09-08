@@ -443,13 +443,14 @@ export const lowerStaticInterfaceWitnessCall = (
   if (target === undefined || resultType === undefined) return undefined
   const witnessArguments = sourceWitnessArguments(fn, target, argumentLocals, expression.span)
   if (witnessArguments === undefined) return undefined
+  const selected = fn.call(expression.span, target.implementation, target.typeArguments)
   const destination = fn.alloc(resultType)
   fn.emit(
     Object.freeze({
       _tag: 'Call',
       destination,
       target: target.implementation,
-      typeArguments: target.typeArguments,
+      typeArguments: selected?.target.typeArguments ?? target.typeArguments,
       arguments: witnessArguments.arguments,
       type: resultType,
       provenance: generated(expression.span),

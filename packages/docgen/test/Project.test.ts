@@ -27,6 +27,8 @@ pub fn recover(
 
 /// Not part of public output.
 fn helper() -> i32 { return 0 }
+struct Hidden {}
+impl Copy for Hidden {}
 
 /// A recoverable problem.
 pub struct Problem {
@@ -109,6 +111,10 @@ pub type Trouble = Problem
 
     const privateProject = Project.make(snapshot, { includePrivate: true })
     assert.isTrue(privateProject.modules[0]?.items.some((item) => item.name === 'helper'))
+    assert.strictEqual(
+      privateProject.modules[0]?.items.find((item) => item.name === 'Copy for Hidden')?.visibility,
+      'Private',
+    )
     assert.isTrue(
       privateProject.modules[0]?.items
         .find((item) => item.name === 'Problem')

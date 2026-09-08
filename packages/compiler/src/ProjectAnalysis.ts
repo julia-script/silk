@@ -158,6 +158,7 @@ const analyze = Effect.fnUntraced(function* (
           _tag: 'ProjectAnalysisView',
           realization: 'ProjectView',
           ...frontend,
+          ...(options.configuration === undefined ? {} : { configuration: options.configuration }),
           ...tooling,
           closure,
           semanticInvalidation: frontend.semanticInvalidation,
