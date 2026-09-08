@@ -61,7 +61,9 @@ jobs:
   # cases are adjacent in the corpus, so index-mod-3 places one per shard.
   native-acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Cold source-runtime corpus shards exceed 30 minutes, including toolchain/build setup.
+    # Each test still enforces its own bounded compile/run deadline.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
