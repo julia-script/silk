@@ -60,8 +60,12 @@ not passing evidence. CI findings and their reproductions are recorded in
 filesystem execution storage, honor configured LLVM tools in native tests, and give
 the aggregate doctest sweep its measured CI allowance. Clean Linux supply builds,
 24 header checks, both Darwin filesystem lanes and eight native tests pass. The
-complete replacement gate runs in `.scratch/ci-fix2-{test,check,release}.log`; results
-are pending. Earlier conformance receipts preserve their recorded source/tool/supply
+`ci-fix2` ordered typecheck/format/lint/test sequence passed, including 2,428 compiler
+and 324 native acceptance tests. Its following check was stopped to incorporate the
+remaining Linux data-import and LSP worker repairs in `58564933`. Those fixes pass
+55 ABI/planning tests, 24 workspace-engine tests, 16 stdio tests and exact GNU
+executable codegen. The replacement complete stack sequence runs in
+`.scratch/ci-fix3-{typecheck,format,lint,test,check,release}.log`; final results are pending. Earlier conformance receipts preserve their recorded source/tool/supply
 provenance and are not represented as newly executed on the merged revision.
 
 ## Scope boundary

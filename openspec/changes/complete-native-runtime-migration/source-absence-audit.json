@@ -348,7 +348,7 @@
     },
     {
       "path": "packages/compiler/src/ForeignPlanning.ts",
-      "sha256": "3414e7fa38e02d8baf580fd209b620459e2e0e111a21ff05d7fe2e2100590080"
+      "sha256": "fe9d6b32fa43b0db0887e33d6a58cbf829dbe891c198d23077bb12ce0d6e43cc"
     },
     {
       "path": "packages/compiler/src/ForeignSymbol.ts",
@@ -748,7 +748,7 @@
     },
     {
       "path": "packages/compiler/src/NativeProgram.ts",
-      "sha256": "17a69971f6c4d1cea5a547b657c4de29e434507df01f387d8843ed5890a618b2"
+      "sha256": "299cb5328b84fda7405f4c08e1fda0b50d546605a6e8d72ba2783193f16e10ce"
     },
     {
       "path": "packages/compiler/src/NativeRequirement.ts",

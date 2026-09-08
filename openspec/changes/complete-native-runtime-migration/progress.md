@@ -2505,3 +2505,35 @@ execution and status assertions unchanged, the integration now receives three
 single-build budgets. The focused run passed and printed `Hello, world!`; CLI test
 type checking, formatting and lint also pass. The stale sub-second timing rationale
 in the single-build timeout module is updated to the current source-startup cost.
+
+### Shared data imports and cold LSP analysis
+
+CI run `34251502269` passed all four compiler shards, native shards 1/3, browser,
+macOS native OS, and all three full platform-supply lanes. Native shard 2 rejected
+the `foreign-libc-environ-static` corpus case with `SEM0192`: the GNU source runtime
+and fixture both import `environ`. Matching the source pointer contract alone still
+failed because ForeignPlanning rejected every duplicate data import. A focused
+regression reproduced that planner failure. Commit `58564933` accepts matching C
+data imports, emits one LLVM global and artifact record, and retains typed/span
+assertions for incompatible imports, function/data collisions and export collisions.
+All 55 ABI/planning tests pass. The exact GNU executable codegen request now succeeds
+with the matching fixture contract; the old incompatible pointer contract still fails.
+The source-absence hashes for ForeignPlanning and NativeProgram were refreshed after
+review; preserved object receipts retain their original provenance.
+
+The same CI run retired healthy LSP workers during cold source-runtime analysis.
+A deterministic virtual-clock regression reproduces a second worker spawn after the
+old ten-second no-progress lease. The new 30-second lease retains the worker while
+ordinary query/diagnostic/startup/inspection deadlines remain unchanged. All 24 engine
+tests pass, including actual stalled-worker retirement. All 16 stdio tests pass with
+a bounded 120-second multi-revision budget and 60-second per-response budget. No
+assertions or test cases were removed. The audit PR's validate failure reproduces
+the same LSP problem.
+
+The `ci-fix2` ordered typecheck/format/lint/test sequence passed (2,428 compiler tests,
+324 native acceptance tests, 87 CLI tests and the remaining package suites). Its
+subsequent check was deliberately stopped after new compiler edits invalidated those
+inputs. This is partial validation, not a completed final gate. The final stack
+sequence runs in `ci-fix3-{typecheck,format,lint,test,check,release}.log`. Focused checks
+and strict OpenSpec validation already pass; full test/check/release and replacement
+remote CI results remain pending.
