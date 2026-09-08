@@ -368,7 +368,11 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       foreignFunctions.set(key, Object.freeze({ handle: guarded, signature: call.signature }))
     }
   }
-  for (const record of program.foreignStatics) {
+  // Planning has rejected incompatible claims; matching imports share one C global.
+  const staticDeclarations = [
+    ...new Map(program.foreignStatics.map((record) => [record.symbol, record])).values(),
+  ]
+  for (const record of staticDeclarations) {
     const classified = CAbi.classify(record.type, program.layout.target, 'Parameter')
     const valueType = cType(classified)
     if (valueType === undefined)
@@ -715,7 +719,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         ),
     ),
     foreignStatics: Object.freeze(
-      [...program.foreignStatics]
+      staticDeclarations
         .sort(
           (left, right) =>
             left.symbol.localeCompare(right.symbol, 'en') ||

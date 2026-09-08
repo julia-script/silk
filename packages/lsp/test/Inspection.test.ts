@@ -1,7 +1,15 @@
 import { existsSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Inspection from '../src/Inspection.js'
-import { binPath, connect, didOpen, failure, pulledDiagnostics, response } from './StdioClient.js'
+import {
+  binPath,
+  connect,
+  didOpen,
+  failure,
+  pulledDiagnostics,
+  response,
+  stdioTestTimeout,
+} from './StdioClient.js'
 
 interface ViewResult {
   readonly rows: ReadonlyArray<{
@@ -16,7 +24,7 @@ interface ViewResult {
   readonly moduleUris: Readonly<Record<string, string>>
 }
 
-it('projects inspector views over real stdio', async () => {
+it('projects inspector views over real stdio', { timeout: stdioTestTimeout }, async () => {
   assert.isTrue(existsSync(binPath), 'dist/bin.js missing; run pnpm build first')
   const client = connect()
   try {

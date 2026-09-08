@@ -7798,9 +7798,9 @@ pub fn main() -> i32 {
     name: 'foreign-libc-environ-static',
     source: 'pub fn main() -> i32 { return 42 }',
     nativeSource: `import silk.pointer { Pointer }
-unsafe extern "C" static environment: *mut *mut u8 as "environ"
+unsafe extern "C" static environment: ?[*]const ?[*]const u8 as "environ"
 pub fn main() -> i32 {
-  unsafe { if Pointer.isNull(environment) { return 1 } }
+  unsafe { if Pointer.isNullMany(environment) { return 1 } }
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },

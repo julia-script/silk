@@ -139,3 +139,7 @@ The local Zig checkout is exactly e78ea8f2cb3677c0a104319b8aa5e37ea64d9cfa; the 
 ## Migration Plan
 
 Complete admission per slice, implement and remove its obsolete path together, migrate every affected consumer, and verify it before checking off its ticket tasks. Maintain the final audit ledger during implementation. Do not archive or claim core closure until all replacements and designated checks are complete.
+
+### Shared imported data symbols
+
+The hosted source runtime and application code may independently read the same C data symbol (for example GNU `environ`). Planning accepts repeated imports only when their classified C value types agree, emits one LLVM global, and records one artifact data import. It continues to reject incompatible value types, function/data collisions, duplicate exports, and import/export collisions before emission. Source names do not create separate C globals; the classified pointer contract must still agree.

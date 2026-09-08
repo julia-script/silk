@@ -15,15 +15,17 @@ import type * as Target from './Target.js'
  * Reports one conflicting-foreign-signature diagnostic per export whose symbol an import or an
  * earlier export already claims, one target-unavailable diagnostic per export off a native
  * target, and one export-suspends diagnostic per export whose MIR function is not synchronous.
+ * Matching data imports share a symbol; definitions and incompatible C value types still collide.
  */
 export const check = (
   program: Mir.Module,
   target: Target.Target,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
   const surface = target.id
-  const claimed = new Map<string, SourceSpan.SourceSpan>(
-    program.foreignCalls.map((call) => [call.symbol, call.declarationSpan]),
-  )
+  const claimed = new Map<
+    string,
+    { readonly span: SourceSpan.SourceSpan; readonly importedDataType?: string }
+  >(program.foreignCalls.map((call) => [call.symbol, { span: call.declarationSpan }]))
   const callbackAddresses = program.functions.flatMap((fn) =>
     MirVerification.operations(fn).filter(
       (operation) => operation._tag === 'ForeignFunctionAddress',
@@ -43,10 +45,10 @@ export const check = (
           )
   for (const record of program.foreignExports) {
     const other = claimed.get(record.symbol)
-    if (other === undefined) claimed.set(record.symbol, record.declarationSpan)
+    if (other === undefined) claimed.set(record.symbol, { span: record.declarationSpan })
     else
       diagnostics.push(
-        Diagnostic.conflictingForeignSignature(record.symbol, record.declarationSpan, other),
+        Diagnostic.conflictingForeignSignature(record.symbol, record.declarationSpan, other.span),
       )
     if (!CAbi.available(target, record.signature))
       diagnostics.push(
@@ -79,10 +81,18 @@ export const check = (
   }
   for (const record of program.foreignStatics) {
     const other = claimed.get(record.symbol)
-    if (other === undefined) claimed.set(record.symbol, record.declarationSpan)
-    else
+    const importedDataType =
+      record.direction === 'Import'
+        ? CAbi.typeText(CAbi.classify(record.type, target, 'Parameter'))
+        : undefined
+    if (other === undefined)
+      claimed.set(record.symbol, {
+        span: record.declarationSpan,
+        ...(importedDataType === undefined ? {} : { importedDataType }),
+      })
+    else if (importedDataType === undefined || other.importedDataType !== importedDataType)
       diagnostics.push(
-        Diagnostic.conflictingForeignSignature(record.symbol, record.declarationSpan, other),
+        Diagnostic.conflictingForeignSignature(record.symbol, record.declarationSpan, other.span),
       )
   }
   return Diagnostic.merge(diagnostics)

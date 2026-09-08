@@ -1258,7 +1258,9 @@ export "C" static silk_abi_version: u32 = 1
 Reading an imported static requires a lexical unsafe boundary and loads the current value from the
 external global. An exported static requires one matching integer or floating-point literal and
 becomes an externally visible constant global. Native artifacts record imported and exported data
-symbols, their C class, and direction in deterministic symbol order.
+symbols, their C class, and direction in deterministic symbol order. Repeated imports with the
+same classified C value type share one native global and one artifact record. Incompatible
+imports, function/data collisions, duplicate exports, and import/export collisions are rejected.
 
 **Boundary:** C statics are native-only. LLVM-to-Wasm reports a reachable read before emission and
 never synthesizes ambient data. Unreferenced imports do not enter MIR or the
