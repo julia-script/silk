@@ -1,0 +1,41 @@
+//! Compact references to the direct contents of parser nodes.
+//!
+//! # Details
+//!
+//! An [`Element`] refers to shared node or token storage. A present token comes from the source.
+//! A missing token refers to a zero-width synthetic token that records its expected variant.
+
+import parser.Node {NodeId}
+
+/// The stable index of one token in a parser token vector.
+///
+/// # Gotchas
+///
+/// The index is valid only for the syntax tree that created the identity.
+pub struct TokenId {
+  /// The position of the token in its owning token vector.
+  pub index: usize
+}
+
+impl Copy for TokenId {}
+
+/// One direct node element stored as a compact identity.
+pub union Element {
+  /// A child node.
+  Node {
+    /// The identity of the child node.
+    pub id: NodeId,
+  },
+  /// A token that occurs in the source.
+  Token {
+    /// The identity of the source token.
+    pub id: TokenId,
+  },
+  /// An expected token that does not occur in the source.
+  MissingToken {
+    /// The identity of the zero-width synthetic token.
+    pub id: TokenId,
+  },
+}
+
+impl Copy for Element {}
