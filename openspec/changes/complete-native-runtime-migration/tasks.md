@@ -69,10 +69,10 @@
 
 ## 6. JUL-147 closure and handoff
 
-- [ ] 6.1 Complete the WS/SPEC ledger, JUL-137–146 remainders and JUL-148/149/150 corrected-outcome evidence.
-- [ ] 6.2 Verify source/artifact absence of every superseded core path and audit every retained compiler privilege.
-- [ ] 6.2.1 Audit remaining Effect combinators that convert failures through Result and raise again, including tap and ensuring; preserve propagation or selected-cause semantics where promised.
-- [ ] 6.2.2 Implement the planned target-neutral finalization composition, migrate ensuring, and verify original outcome/context retention across success, failure, suspension and parked destruction.
-- [ ] 6.3 Reconcile prescriptive/generated documentation, catalogs, examples and exact target/tool/supply evidence.
-- [ ] 6.3.1 Correct generated reference visibility for private providers, interfaces and generic arguments while retaining explicit private output and public conformances.
-- [ ] 6.4 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, then pnpm check; run pnpm release:candidate for changed package contents and record exact results.
+- [x] 6.1 Complete the WS/SPEC ledger, JUL-137–146 remainders and JUL-148/149/150 corrected-outcome evidence.
+- [x] 6.2 Verify source/artifact absence of every superseded core path and audit every retained compiler privilege.
+- [x] 6.2.1 Audit remaining Effect combinators that convert failures through Result and raise again, including tap and ensuring; preserve propagation or selected-cause semantics where promised.
+- [x] 6.2.2 Implement the planned target-neutral finalization composition, migrate ensuring, and verify original outcome/context retention across success, failure, suspension and parked destruction.
+- [x] 6.3 Reconcile prescriptive/generated documentation, catalogs, examples and exact target/tool/supply evidence.
+- [x] 6.3.1 Correct generated reference visibility for private providers, interfaces and generic arguments while retaining explicit private output and public conformances.
+- [x] 6.4 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, then pnpm check; run pnpm release:candidate for changed package contents and record exact results.
