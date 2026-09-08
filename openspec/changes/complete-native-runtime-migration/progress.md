@@ -2549,3 +2549,33 @@ Commit `d46071aa` gives native acceptance jobs 60 minutes including setup/build;
 individual test deadlines, assertions, shard assignments and case selection are
 unchanged. A fresh CI run verifies the complete cold shards. The active local
 `ci-fix3` sequence continues with unchanged compiler/test inputs.
+
+### Real-worker integration deadline
+
+CI runs `34261542409` (`d46071aa`) and `34261608202` (`eff61c64`) both passed
+every job, including all native shards. Linux shard 2 explicitly passed
+`foreign-libc-environ-static` and all 111 shard tests. The local `ci-fix3` run
+passed 2,429 compiler tests and all 324 native acceptance tests, then failed only
+`ProjectWorker.test.ts`'s real-worker integration at its explicit 30-second deadline;
+the other 159 LSP tests passed. This one scenario starts a worker, performs cold
+analysis, queries it and checks orderly shutdown. Commit `5f858239` removes its
+undersized override so it uses the existing 60-second workspace deadline. All five
+project-worker tests pass. The final ordered local sequence is rerun in
+`ci-fix4-{typecheck,format,lint,test,check,release}.log`; unchanged compiler/native
+inputs can reuse the successful `ci-fix3` results. No failed full run is counted as
+a passing gate.
+
+### Final local verification and merged PR follow-up
+
+The ordered `ci-fix4` sequence passed typecheck, formatting, lint, all package tests,
+`pnpm check` and `pnpm release:candidate`. Its Vitest summaries total 3,283 passing
+tests, including 2,429 compiler, 324 native acceptance, 160 LSP and 87 CLI tests.
+Unchanged compiler/native inputs reused the successful `ci-fix3` cache; all LSP tests
+ran again and passed. Repository checks passed all 19 script tests and release
+validation ran all 10 packed-package/consumer checks. The source/artifact audit and
+strict OpenSpec validation passed again. Task 6.4 is now complete.
+
+Both original PRs passed every CI job and were merged into `main` at `a67354bc` during
+verification. The final small follow-up carries the real-worker test's existing
+workspace deadline and this completed audit record. The merged implementation and
+audit are preserved; no further runtime/compiler change is included.
