@@ -2464,3 +2464,31 @@ and preserved artifact audit pass. Full post-merge repository/release gates are
 running in `pr-merge-*` logs; the pre-merge final11 results remain scoped to their
 original revision. The PR stack separates the coherent implementation and reference
 updates from JUL-147's audit verifier, inventories, ledger and verification report.
+
+### CI failure reproduction and repair
+
+PR #387's first CI run (`34248071207`) exposed four verification problems:
+
+- The live Debian security index no longer served `linux-libc-dev=6.1.180-1`.
+  A clean Docker build reproduced the exact package-resolution failure. The three
+  pinned conformance Dockerfiles now use Debian and Debian-security indexes frozen
+  at `20260907T000000Z`, preserving every existing package version. Clean ARM64 and
+  x86-64 builds pass; all 12 filesystem header hashes match on each architecture.
+- The entry-free filesystem conformance object exercised suspended execution without
+  selecting execution storage. Its exact analysis request reproduced `SEM0214`
+  (`MissingParameter: execution-storage`). Explicit source component bindings repair
+  that request; the complete Darwin receiver passes in debug and optimized modes.
+- Native suspension and nested-row tests bypassed `SILK_TEST_CLANG` and invoked LLVM
+  18 on CI. Those tests and the same configuration mistake in temporary-directory
+  acceptance now use `TestToolchain.configured`. All eight affected tests pass with
+  LLVM 22. A recording compiler wrapper also proves the configured executable is used.
+- The aggregate 53-example standard-library doctest exceeded its five-minute Linux
+  deadline. Its bounded deadline is now ten minutes; examples, diagnostics and the
+  no-skips requirement are unchanged. The full gate verifies the sweep again.
+
+The first post-merge local run failed because a concurrent rebuild temporarily
+removed `dist`; this was verification sequencing, not a compiler result. A subsequent
+local run was deliberately stopped to incorporate newly completed CI failures. The
+complete replacement sequence runs in `ci-fix2-{typecheck,format,lint,test,check,release}`
+logs. Type checking, formatting and lint pass; full test/release results remain pending.
+Implementation fixes are committed in `a4fde63a` and carried into the audit stack.

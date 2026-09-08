@@ -75,4 +75,4 @@
 - [x] 6.2.2 Implement the planned target-neutral finalization composition, migrate ensuring, and verify original outcome/context retention across success, failure, suspension and parked destruction.
 - [x] 6.3 Reconcile prescriptive/generated documentation, catalogs, examples and exact target/tool/supply evidence.
 - [x] 6.3.1 Correct generated reference visibility for private providers, interfaces and generic arguments while retaining explicit private output and public conformances.
-- [x] 6.4 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, then pnpm check; run pnpm release:candidate for changed package contents and record exact results.
+- [ ] 6.4 Run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test, then pnpm check; run pnpm release:candidate for changed package contents and record exact results.

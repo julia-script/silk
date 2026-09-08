@@ -54,7 +54,13 @@ landing-page verifier while adopting LSP diagnostic projection.
 Post-merge type checking, formatting and linting pass. The focused character-literal,
 lexer and formatter suites pass all 129 tests. The source audit was refreshed for the
 six changed upstream compiler modules, and both source/artifact absence checks pass.
-Full post-merge gates run in `.scratch/pr-merge-{test,check,release}.log`; their results
+The superseded local post-merge run was interrupted by a concurrent rebuild; it is
+not passing evidence. CI findings and their reproductions are recorded in
+[progress.md](progress.md). Fixes in `a4fde63a` freeze Debian indexes, select explicit
+filesystem execution storage, honor configured LLVM tools in native tests, and give
+the aggregate doctest sweep its measured CI allowance. Clean Linux supply builds,
+24 header checks, both Darwin filesystem lanes and eight native tests pass. The
+complete replacement gate runs in `.scratch/ci-fix2-{test,check,release}.log`; results
 are pending. Earlier conformance receipts preserve their recorded source/tool/supply
 provenance and are not represented as newly executed on the merged revision.
 
