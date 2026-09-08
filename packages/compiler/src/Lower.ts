@@ -29,10 +29,6 @@ export const character: Extract<Mir.Type, { readonly _tag: 'char' }> = Object.fr
   _tag: 'char',
 })
 
-export const isOsOperation = (
-  operation: Hir.BuiltinOperation,
-): operation is Extract<Hir.BuiltinOperation, `Os${string}`> => operation.startsWith('Os')
-
 export const mirType = (
   type: Type.Type,
   substitution: Type.Substitution = new Map(),
@@ -130,6 +126,13 @@ const withLocalSharedDropPlan = (layout: Layout.Plan, operation: Mir.Operation):
           localShared: Object.freeze({ element: operation.cleanup.element, block }),
         })
   }
+  if (operation._tag === 'DiagnosticScope')
+    return Object.freeze({
+      ...operation,
+      body: Mir.mapExecutionOperations(operation.body, (operations) =>
+        operations.map((child) => withLocalSharedDropPlan(layout, child)),
+      ),
+    })
   if (operation._tag === 'Conditional')
     return Object.freeze({
       ...operation,
@@ -277,13 +280,7 @@ import {
 } from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import type { GeneratedEffectRunner } from './ValueType.js'
-import {
-  baseRunnerKey,
-  effectEntryAdapterId,
-  effectValueType,
-  instanceText,
-  unitEntryAdapterId,
-} from './ValueType.js'
+import { baseRunnerKey, effectValueType, instanceText } from './ValueType.js'
 export const lowerProgram = (
   discovery: Instances.Discovery,
   layout: Layout.Plan,
@@ -504,15 +501,8 @@ export const lowerProgram = (
   // visited. Filter only after the worklist reaches its fixed point so backends never compile an
   // unreachable open runner that still calls another open runner without provider arguments.
   const unresolvedOpenBase = (spec: GeneratedEffectRunner): boolean => {
-    const entryOwnsRunner =
-      discovery.entry._tag === 'Resolved' &&
-      discovery.entry.kind === 'Effect' &&
-      instanceText(spec.owner.key.declaration, spec.owner.key.typeArguments) ===
-        instanceText(discovery.entry.key.declaration, discovery.entry.key.typeArguments)
     return (
-      !entryOwnsRunner &&
-      spec.providedRequirements.length === 0 &&
-      Type.requirementMembers(spec.type.type).length > 0
+      spec.providedRequirements.length === 0 && Type.requirementMembers(spec.type.type).length > 0
     )
   }
   const runnerKey = (
@@ -583,223 +573,6 @@ export const lowerProgram = (
           left.declarationSpan.end - right.declarationSpan.end,
       ),
   )
-  const unavailableEntryModule = (
-    reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason'],
-  ): Mir.Module =>
-    Object.freeze({
-      _tag: 'MirModule',
-      module: discovery.rootModule,
-      intrinsics: discovery.intrinsics,
-      foreignCalls: discovery.foreignCalls,
-      foreignExports: discovery.foreignExports,
-      retainedRoots: discovery.retention,
-      foreignStatics,
-      entry: Object.freeze({ _tag: 'UnavailableEntry', reason }),
-      layout: finalizedLayout,
-      staticData,
-      executionTransitions: Object.freeze(
-        finalizedLayout.executionPackages.plans.map((plan, ordinal) =>
-          ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
-        ),
-      ),
-      functions: withLocalSharedDropPlans(layout, functions),
-    })
-  if (discovery.entry._tag !== 'Resolved') {
-    if (discovery.entry._tag === 'None') {
-      return Object.freeze({
-        _tag: 'MirModule',
-        module: discovery.rootModule,
-        intrinsics: discovery.intrinsics,
-        foreignCalls: discovery.foreignCalls,
-        foreignExports: discovery.foreignExports,
-        retainedRoots: discovery.retention,
-        foreignStatics,
-        entry: Object.freeze({ _tag: 'NoInvocation' }),
-        layout: finalizedLayout,
-        staticData,
-        executionTransitions: Object.freeze(
-          finalizedLayout.executionPackages.plans.map((plan, ordinal) =>
-            ExecutionTransition.authority(ordinal, ordinal + 1, plan.readinessStorage),
-          ),
-        ),
-        functions: withLocalSharedDropPlans(layout, functions),
-      })
-    }
-    return unavailableEntryModule(discovery.entry.reason)
-  }
-  const resolvedEntry = discovery.entry
-  const entrySource = discovery.instances.find(
-    (instance) => Instances.keyText(instance.key) === Instances.keyText(resolvedEntry.key),
-  )
-  if (entrySource === undefined) throw new RangeError('Entry lowering lost its source declaration')
-  const entrySpan = entrySource.function.declaration.syntax.span
-  let entry: Mir.Entry
-  if (resolvedEntry.kind === 'Ordinary') {
-    if (resolvedEntry.result === 'Status') {
-      entry = Object.freeze({
-        _tag: 'OrdinaryEntry',
-        target: resolvedEntry.key,
-        machine: resolvedEntry.key,
-      })
-    } else {
-      const target = functions.find((fn) =>
-        Mir.matchesInstance(fn, resolvedEntry.key.declaration, resolvedEntry.key.typeArguments),
-      )
-      if (target === undefined) throw new RangeError('Unit entry lowering lost its target')
-      const span = entrySpan
-      const adapterId = unitEntryAdapterId(discovery.rootModule)
-      const adapterKey: Instances.InstanceKey = Object.freeze({
-        _tag: 'InstanceKey',
-        declaration: adapterId,
-        typeArguments: Object.freeze([]),
-        evidence: Object.freeze([]),
-        staticArguments: Object.freeze([]),
-        contractRow: Object.freeze(['generated:unit-entry']),
-      })
-      functions.push(
-        Object.freeze({
-          _tag: 'MirFunction',
-          id: adapterId,
-          instance: adapterKey,
-          parameterCount: 0,
-          localTypes: Object.freeze([i32, target.result]),
-          result: i32,
-          entry: Object.freeze({ _tag: 'Region', ordinal: 0 }),
-          regions: Object.freeze([
-            Object.freeze({
-              _tag: 'OperationRegion' as const,
-              id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
-              operations: Object.freeze([
-                Object.freeze({
-                  _tag: 'Call' as const,
-                  destination: local(1),
-                  target: resolvedEntry.key.declaration,
-                  typeArguments: resolvedEntry.key.typeArguments,
-                  arguments: Object.freeze([]),
-                  type: target.result,
-                  provenance: generated(span),
-                }),
-                Object.freeze({
-                  _tag: 'Literal' as const,
-                  destination: local(0),
-                  type: i32,
-                  value: 0,
-                  provenance: generated(span),
-                }),
-              ]),
-              outcome: Object.freeze({
-                _tag: 'Return' as const,
-                value: local(0),
-                provenance: generated(span),
-              }),
-            }),
-          ]),
-        }),
-      )
-      entry = Object.freeze({
-        _tag: 'OrdinaryEntry',
-        target: resolvedEntry.key,
-        machine: adapterKey,
-      })
-    }
-  } else {
-    const target = functions.find(
-      (fn) =>
-        instanceText(fn.instance.declaration, fn.instance.typeArguments) ===
-        instanceText(resolvedEntry.key.declaration, resolvedEntry.key.typeArguments),
-    )
-    const runnerSpec = generatedRunners.find(
-      (candidate) =>
-        instanceText(candidate.owner.key.declaration, candidate.owner.key.typeArguments) ===
-        instanceText(resolvedEntry.key.declaration, resolvedEntry.key.typeArguments),
-    )
-    const runner =
-      runnerSpec === undefined
-        ? undefined
-        : functions.find((fn) =>
-            Mir.matchesInstance(fn, runnerSpec.id, resolvedEntry.key.typeArguments),
-          )
-    if (target?.result._tag !== 'EffectValue' || runner?.result._tag !== 'EffectOutcome') {
-      return unavailableEntryModule('UnavailableEntryBody')
-    }
-    const adapterId = effectEntryAdapterId(discovery.rootModule)
-    const adapterKey: Instances.InstanceKey = Object.freeze({
-      _tag: 'InstanceKey',
-      declaration: adapterId,
-      typeArguments: Object.freeze([]),
-      evidence: Object.freeze([]),
-      staticArguments: Object.freeze([]),
-      contractRow: Object.freeze(['generated:effect-entry']),
-    })
-    const span = entrySpan
-    const failures = resolvedEntry.failures.map((failure, ordinal) =>
-      Object.freeze({
-        tag: ordinal + 1,
-        type: failure.type,
-        identity: failure.identity,
-        payload: local(ordinal + 3),
-        cleanup: CleanupPlan.cleanupPlan(index, failure.type),
-      }),
-    )
-    const failurePayloadTypes = failures.map((failure) => {
-      const type = mirType(failure.type)
-      if (type === undefined)
-        throw new RangeError(`Effect entry failure ${Type.encode(failure.type)} has no MIR type`)
-      return type
-    })
-    const effect = local(1)
-    const outcome = local(2)
-    const status = local(0)
-    functions.push(
-      Object.freeze({
-        _tag: 'MirFunction',
-        id: adapterId,
-        instance: adapterKey,
-        parameterCount: 0,
-        localTypes: Object.freeze([i32, target.result, runner.result, ...failurePayloadTypes]),
-        result: i32,
-        entry: Object.freeze({ _tag: 'Region', ordinal: 0 }),
-        regions: Object.freeze([
-          Object.freeze({
-            _tag: 'OperationRegion' as const,
-            id: Object.freeze({ _tag: 'Region' as const, ordinal: 0 }),
-            operations: Object.freeze([
-              Object.freeze({
-                _tag: 'CloseEffectEntry' as const,
-                destination: status,
-                effect,
-                outcome,
-                target: resolvedEntry.key.declaration,
-                runner: runner.id,
-                typeArguments: resolvedEntry.key.typeArguments,
-                effectType: target.result,
-                outcomeType: runner.result,
-                failures: Object.freeze(failures),
-                type: i32,
-                provenance: generated(span),
-              }),
-            ]),
-            outcome: Object.freeze({
-              _tag: 'Return' as const,
-              value: status,
-              provenance: generated(span),
-            }),
-          }),
-        ]),
-      }),
-    )
-    entry = Object.freeze({
-      _tag: 'EffectEntry',
-      target: resolvedEntry.key,
-      machine: adapterKey,
-      requirements: resolvedEntry.requirements,
-      failures: Object.freeze(
-        resolvedEntry.failures.map((failure, ordinal) =>
-          Object.freeze({ tag: ordinal + 1, type: failure.type, identity: failure.identity }),
-        ),
-      ),
-    })
-  }
   return Object.freeze({
     _tag: 'MirModule',
     module: discovery.rootModule,
@@ -808,7 +581,6 @@ export const lowerProgram = (
     foreignExports: discovery.foreignExports,
     retainedRoots: discovery.retention,
     foreignStatics,
-    entry,
     layout: finalizedLayout,
     staticData,
     executionTransitions: Object.freeze(

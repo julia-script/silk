@@ -240,16 +240,14 @@ impl Effect {
   ///
   /// Exactly one callback runs after `self`: `onSuccess` changes `A` to `B`, while `onFailure` changes
   /// `E` to `F` and re-raises it. Requirements are preserved, and traps bypass both callbacks.
+  /// When diagnostic observation is active, the mapped failure retains the original selected cause.
   pub effect fn mapBoth<'env, A, B, E, F, ?R>(
     self: once Effect<'env; A ! E ? R>,
     onSuccess: once fn<'env>(A) -> B,
     onFailure: once fn<'env>(E) -> F
   ) -> B ! F ? R {
-    let completed = run Effect.result(move self)
-    return match move completed {
-      Result<A, E>.Success { value: success } => onSuccess(move success)
-      Result<A, E>.Failure { error } => run raise(onFailure(move error))
-    }
+    let mapped = Effect.map<A, B, E>(move self, move onSuccess)
+    return run Effect.mapError<B, E, F>(move mapped, move onFailure)
   }
 
   /// Applies a pure callback to success while preserving typed failure and requirements.
@@ -272,15 +270,14 @@ impl Effect {
   ///
   /// `onFailure` runs once only when `self` fails, and its returned `F` becomes the new typed failure.
   /// Success bypasses the callback. This changes an error value; use [`catchAll`] to recover to success.
+  /// Mapping runs inside selected recovery, preserving the original failure as its diagnostic cause.
   pub effect fn mapError<'env, A, E, F, ?R>(
     self: once Effect<'env; A ! E ? R>,
     onFailure: once fn<'env>(E) -> F
   ) -> A ! F ? R {
-    let completed = run Effect.result(move self)
-    return match move completed {
-      Result<A, E>.Success { value: success } => move success
-      Result<A, E>.Failure { error } => run raise(onFailure(move error))
-    }
+    return run Intrinsic.catchFailure<E>(move self, effect fn(error: E) -> never ! F {
+      return run raise(onFailure(move error))
+    })
   }
 
   /// Runs `self`, then continues its success with an effectful callback.
@@ -294,11 +291,8 @@ impl Effect {
     self: once Effect<'env; A ! E ? R>,
     onSuccess: once fn<'env>(A) -> Effect<'env; B ! F ? S>
   ) -> B ! E | F ? R | S {
-    let completed = run Effect.result(move self)
-    return match move completed {
-      Result<A, E>.Success { value: success } => run onSuccess(move success)
-      Result<A, E>.Failure { error } => run raise(move error)
-    }
+    let success = run move self
+    return run onSuccess(move success)
   }
 
   /// Runs an outer Effect and then the inner Effect it produces.
@@ -364,11 +358,8 @@ impl Effect {
     self: once Effect<'env; A ! E ? R>,
     callback: once fn<'env>(A) -> Effect<'env; A ! F ? S>
   ) -> A ! E | F ? R | S {
-    let completed = run Effect.result(move self)
-    return match move completed {
-      Result<A, E>.Success { value: success } => run callback(move success)
-      Result<A, E>.Failure { error } => run raise(move error)
-    }
+    let success = run move self
+    return run callback(move success)
   }
 
   /// Recovers every typed failure in the protected row with another Effect.
@@ -379,9 +370,10 @@ impl Effect {
   /// failure row is removed in full; only the handler's own `F` can fail afterwards. Success bypasses
   /// the handler, requirements from both paths remain, and traps are not recovered. Use [`catch`] to
   /// handle one selected member while leaving the other failures in the row.
+  /// The handler's returned Effect runs once and may consume captured values.
   pub effect fn catchAll<'env, A, B, E, F, ?R, ?S>(
     self: once Effect<'env; A ! E ? R>,
-    onFailure: once fn<'env>(E) -> Effect<'env; B ! F ? S>
+    onFailure: once fn<'env>(E) -> once Effect<'env; B ! F ? S>
   ) -> A | B ! F ? R | S {
     return run Intrinsic.catchFailure<E>(move self, move onFailure)
   }
@@ -400,7 +392,7 @@ impl Effect {
   /// the entire failure value regardless of its union member.
   pub effect fn catch<'env, S, A, B, E, F, ?R, ?Q>(
     self: once Effect<'env; A ! E ? R>,
-    onFailure: once fn<'env>(S) -> Effect<'env; B ! F ? Q>
+    onFailure: once fn<'env>(S) -> once Effect<'env; B ! F ? Q>
   ) -> A | B ! Without<E, S> | F ? R | Q
   where S in E {
     return run Intrinsic.catchFailure<S>(move self, move onFailure)
@@ -410,16 +402,21 @@ impl Effect {
   ///
   /// # Details
   ///
-  /// The protected Effect is converted into Result data before the finalizer runs, which is what fixes
-  /// the order: a typed failure reaches this body as data rather than as a propagation, so the
-  /// protected Effect's own frame — and every local it cleans up — is already gone by the time the
+  /// The protected outcome remains owned while the finalizer runs. The protected Effect's own
+  /// frame — and every local it cleans up — is already gone by the time the
   /// finalizer starts. The finalizer therefore exits last, in reverse acquisition order against the
   /// cleanup it wraps. The original success value or the original typed failure is only handed on
   /// afterwards, so a recovering caller never observes the outcome before the finalizer has run.
+  /// A typed failure retains its original diagnostic origin and context; it is not raised again.
+  /// The finalizer runs in the surrounding observation scope. The pending failure does not become
+  /// a selected recovery cause for failures handled inside the finalizer.
   ///
   /// The finalizer is typed `! never`: it cannot fail, so there is no second outcome to reconcile
   /// with the one being preserved. A caller with fallible cleanup recovers it into `! never` first
   /// — for example with `Effect.catch` — and decides there what a failed release means.
+  ///
+  /// Both inputs may suspend. Destroying the parked composition drops its held outcome and
+  /// remaining captures exactly once; it does not resume or finish the finalizer.
   ///
   /// A trap is not an outcome. It bypasses the finalizer exactly as it bypasses `Effect.catch` and
   /// every Drop hook.
@@ -427,12 +424,7 @@ impl Effect {
     self: once Effect<'env; A ! E ? R>,
     finalizer: once Effect<'env; () ! never ? S>
   ) -> A ! E ? R | S {
-    let completed = run Effect.result(move self)
-    let finalized = run move finalizer
-    return match move completed {
-      Result<A, E>.Success { value: success } => move success
-      Result<A, E>.Failure { error } => run raise(move error)
-    }
+    return run Intrinsic.finalizeEffect(move self, move finalizer)
   }
 
   /// Runs exactly one of two suspended branches, selected by a condition.
@@ -474,6 +466,7 @@ impl Effect {
   /// # Details
   ///
   /// Success stops the loop immediately. If every attempt fails, the final typed failure propagates.
+  /// Earlier failure payloads are released before the next attempt; the last failure keeps its origin.
   /// `retries == 0` means one initial attempt. Traps are not retried, and `self` must be reusable
   /// (`mut Effect`) because the same computation may execute more than once.
   pub effect fn retry<'env, A, E, ?R>(
@@ -612,11 +605,7 @@ impl Effect {
     acquire: Effect<'env; P ! F ? Q>
   ) -> A ! E | F ? Without<R, S> | Q
   where &'env mut P provides S from R {
-    let completed = run acquireProvider<S>(move self, acquire)
-    return match move completed {
-      Result<A, E>.Success { value: success } => move success
-      Result<A, E>.Failure { error } => run raise(move error)
-    }
+    return run acquireProvider<S>(move self, acquire)
   }
 
   /// Defers one Effect through stack-safe execution while preserving its channels exactly.
@@ -694,9 +683,7 @@ effect fn retryFailure<'env, A, E, ?R>(
   error: E,
   retries: usize
 ) -> A ! E ? R {
-  if retries == 0 {
-    return run raise(move error)
-  }
+  drop move error
   return run retryLoop(self, retries - 1)
 }
 
@@ -704,6 +691,9 @@ effect fn retryLoop<'env, A, E, ?R>(
   self: mut Effect<'env; A ! E ? R>,
   retries: usize
 ) -> A ! E ? R {
+  if retries == 0 {
+    return run self
+  }
   let completed = run Effect.result(self)
   return match move completed {
     Result<A, E>.Success { value: success } => move success
@@ -714,12 +704,11 @@ effect fn retryLoop<'env, A, E, ?R>(
 effect fn acquireProvider<'env, ?S, A, P, E, F, ?R, ?Q>(
   self: once Effect<'env; A ! E ? R>,
   acquire: Effect<'env; P ! F ? Q>
-) -> Result<A, E> ! F ? Without<R, S> | Q
+) -> A ! E | F ? Without<R, S> | Q
 where &'env mut P provides S from R {
   let mut provider = run acquire
-  let bound = Intrinsic.bindRequirementMut<S>(Effect.result(move self), &mut provider)
+  let bound = Intrinsic.bindRequirementMut<S>(move self, &mut provider)
   return run bound
 }
 
 import silk.monotonic_clock { MonotonicClock }
-

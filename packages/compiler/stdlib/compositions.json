@@ -1,0 +1,49 @@
+{
+  "runtimes": [
+    {
+      "targets": ["aarch64-apple-darwin"],
+      "libc": "system",
+      "name": "hosted",
+      "module": "silk/native_start"
+    },
+    {
+      "targets": ["aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"],
+      "libc": "gnu",
+      "name": "hosted",
+      "module": "silk/native_start"
+    },
+    {
+      "targets": ["wasm32-unknown-unknown"],
+      "libc": "none",
+      "name": "standalone",
+      "module": "silk/wasm_start"
+    }
+  ],
+  "components": [
+    {
+      "capability": "execution-storage",
+      "bindings": [
+        {
+          "operation": "create",
+          "module": "silk/execution_storage",
+          "declaration": "silk_execution_storage_create"
+        },
+        {
+          "operation": "acquire",
+          "module": "silk/execution_storage",
+          "declaration": "silk_execution_storage_acquire"
+        },
+        {
+          "operation": "release",
+          "module": "silk/execution_storage",
+          "declaration": "silk_execution_storage_release"
+        },
+        {
+          "operation": "destroy",
+          "module": "silk/execution_storage",
+          "declaration": "silk_execution_storage_destroy"
+        }
+      ]
+    }
+  ]
+}

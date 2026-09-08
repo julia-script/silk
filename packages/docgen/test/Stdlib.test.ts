@@ -57,7 +57,9 @@ it.effect(
         skipped,
       )
     }),
-  180_000,
+  // This aggregate sweep checks 53 independent programs plus shared documentation analysis.
+  // Linux CI exceeds five minutes after source startup became part of each compilation.
+  600_000,
 )
 
 /**

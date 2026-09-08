@@ -4,7 +4,6 @@ import * as Effect from 'effect/Effect'
 import * as Json from './support/Json.js'
 import * as Analysis from '../src/Analysis.js'
 import * as Intrinsic from '../src/Intrinsic.js'
-import * as MirVerification from '../src/MirVerification.js'
 
 const encoder = new TextEncoder()
 
@@ -72,7 +71,7 @@ pub fn main() -> () {
   }),
 )
 
-it.effect('diagnoses an unowned park-capable complete entry at the explicit boundary', () =>
+it.effect('rejects parking through the default source runtime NonParking constraint', () =>
   Effect.gen(function* () {
     const source = `import silk.execution { Execution }
 struct Guard {}
@@ -82,24 +81,14 @@ pub fn main() -> () { return run Execution.park(register) }`
     const diagnostics = Analysis.diagnostics(snapshot)
     assert.deepEqual(
       diagnostics.map((diagnostic) => diagnostic.code),
-      ['SEM0140'],
+      ['SEM0139'],
     )
     const diagnostic = diagnostics.at(0)
-    assert.strictEqual(diagnostic?.reason._tag, 'MissingExplicitExecutionOwner')
-    assert.strictEqual(
-      diagnostic === undefined
-        ? undefined
-        : source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
-      'pub fn main() -> () { return run Execution.park(register) }',
-    )
+    assert.strictEqual(diagnostic?.reason._tag, 'UnsatisfiedExecutableProperty')
+    assert.strictEqual(diagnostic?.span.sourceId, 'silk/wasm_start')
     assert.notInclude(
       diagnostics.map((candidate) => candidate.code),
       'SEM0123',
-    )
-    assert.isFalse(
-      Analysis.loweredMir(snapshot)
-        .functions.flatMap(MirVerification.operations)
-        .some((operation) => operation._tag === 'ExecutionFromAllocation'),
     )
   }),
 )

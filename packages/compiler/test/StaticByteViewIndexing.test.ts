@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -53,8 +54,8 @@ const rewriteOperations = (
 
 it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, and MIR', () =>
   Effect.gen(function* () {
-    const first = yield* Analysis.ofSourceRealized(moduleName, ascii(directSource))
-    const second = yield* Analysis.ofSourceRealized(moduleName, ascii(directSource))
+    const first = yield* AnalysisFixture.retainingMain(moduleName, ascii(directSource))
+    const second = yield* AnalysisFixture.retainingMain(moduleName, ascii(directSource))
     assert.deepEqual(Analysis.diagnostics(first), [])
 
     const hir = Projections.hirOf(first, moduleName)
@@ -96,7 +97,7 @@ it.effect('keeps byte literals as shared u8 slices through semantic facts, HIR, 
 it.effect('lowers immutable static byte storage through LLVM for native and WebAssembly', () =>
   Effect.gen(function* () {
     for (const target of ['aarch64-apple-darwin', 'wasm32-unknown-unknown']) {
-      const snapshot = yield* Analysis.ofSourceRealized(moduleName, ascii(directSource), target)
+      const snapshot = yield* AnalysisFixture.retainingMain(moduleName, ascii(directSource), target)
       assert.deepEqual(Analysis.diagnostics(snapshot), [], target)
       const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
       assert.include(artifact.ir, 'constant [4 x i8]', target)
@@ -108,7 +109,7 @@ it.effect('lowers immutable static byte storage through LLVM for native and WebA
 
 it.effect('accepts canonical static selectors and rejects malformed roots, indices, and data', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(moduleName, ascii(directSource))
+    const snapshot = yield* AnalysisFixture.retainingMain(moduleName, ascii(directSource))
     const mir = Analysis.loweredMir(snapshot)
     const fnIndex = mir.functions.findIndex((fn) => fn.id.name === 'main')
     const fn = mir.functions.at(fnIndex)

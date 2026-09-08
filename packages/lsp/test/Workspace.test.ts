@@ -14,6 +14,7 @@ import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Document from '../src/Document.js'
+import * as Inspection from '../src/Inspection.js'
 import * as Workspace from '../src/Workspace.js'
 
 const encoder = new TextEncoder()
@@ -146,8 +147,14 @@ it.effect('analyzes imports against sibling files on disk', () =>
       [],
     )
     assert.deepEqual(
-      Analysis.modules(snapshot).map((module) => module.name),
+      Analysis.modules(snapshot)
+        .map((module) => module.name)
+        .filter((name) => !name.startsWith('silk/')),
       ['Main', 'Util'],
+    )
+    assert.include(
+      Analysis.modules(snapshot).map(({ name }) => name),
+      'silk/native_start',
     )
   }).pipe(Effect.provide(NodeServices.layer)),
 )
@@ -166,6 +173,10 @@ it.effect('keeps editor analysis on frontend phases only', () =>
       Analysis.phases(snapshot).map(({ phase }) => phase),
       [
         'closure',
+        'declaration-collection',
+        'declaration-index',
+        'name-resolution',
+        'module-surface',
         'declaration-collection',
         'declaration-index',
         'name-resolution',
@@ -237,7 +248,9 @@ it.effect('shares one project frontend across overlapping open roots', () =>
     assert.strictEqual(mainSession.snapshot.closure.rootModule, 'Main')
     assert.strictEqual(utilSession.snapshot.closure.rootModule, 'Util')
     assert.deepEqual(
-      Analysis.modules(mainSession.snapshot).map(({ name }) => name),
+      Analysis.modules(mainSession.snapshot)
+        .map(({ name }) => name)
+        .filter((name) => !name.startsWith('silk/')),
       ['Main', 'Shared', 'Util'],
     )
     const closure = Analysis.phases(mainSession.snapshot).at(0)
@@ -245,7 +258,9 @@ it.effect('shares one project frontend across overlapping open roots', () =>
       closure === undefined
         ? undefined
         : { phase: closure.phase, inputs: closure.inputs, outputs: closure.outputs },
-      { phase: 'closure', inputs: 2, outputs: 3 },
+      // The initial closure includes the three application modules and the startup root.
+      // Profile selection subsequently loads the startup's conditional imports.
+      { phase: 'closure', inputs: 2, outputs: 4 },
     )
     assert.deepEqual(
       Document.diagnostics(main, mainSession.snapshot, () => undefined),
@@ -274,16 +289,21 @@ it.effect('shares one project frontend across overlapping open roots', () =>
     assert.strictEqual(revisedMain.project.syntaxRevisions.get('Main')?._tag, 'Changed')
     assert.strictEqual(revisedMain.project.syntaxRevisions.get('Util')?._tag, 'Reused')
     assert.strictEqual(revisedMain.project.syntaxRevisions.get('Shared')?._tag, 'Reused')
-    assert.deepEqual(revisedMain.project.semanticInvalidation.observations, [
-      {
-        _tag: 'Recomputed',
-        module: 'Main',
-        reasons: ['LocalChange'],
-        surfaceChanged: true,
-      },
-      { _tag: 'Reusable', module: 'Shared', surfaceChanged: false },
-      { _tag: 'Reusable', module: 'Util', surfaceChanged: false },
-    ])
+    assert.deepEqual(
+      revisedMain.project.semanticInvalidation.observations.filter(
+        ({ module }) => !module.startsWith('silk/'),
+      ),
+      [
+        {
+          _tag: 'Recomputed',
+          module: 'Main',
+          reasons: ['LocalChange'],
+          surfaceChanged: true,
+        },
+        { _tag: 'Reusable', module: 'Shared', surfaceChanged: false },
+        { _tag: 'Reusable', module: 'Util', surfaceChanged: false },
+      ],
+    )
     const previousSyntax = new Map(
       mainSession.project.closure.modules.map((module) => [module.name, module.syntax]),
     )
@@ -314,7 +334,9 @@ it.effect('indexes closed source-root modules without widening semantic project 
     if (session === undefined) return
 
     assert.deepEqual(
-      Analysis.modules(session.snapshot).map((module) => module.name),
+      Analysis.modules(session.snapshot)
+        .map((module) => module.name)
+        .filter((name) => !name.startsWith('silk/')),
       ['Main'],
     )
     assert.deepEqual(
@@ -476,5 +498,15 @@ it.effect(
         },
       }).pipe(Effect.provide(SourceResolver.empty))
       assert.strictEqual(after.identity, direct.profile?.identity)
+      const session = next.get(right.uri)
+      assert.ok(session)
+      assert.ok(session.snapshot.configuration)
+      const inspected = Inspection.project(session, { uri: right.uri, view: 'closure' })
+      assert.strictEqual(inspected._tag, 'InspectorView')
+      if (inspected._tag === 'InspectorView') {
+        const modules = inspected.rows.filter((row) => row.head).map((row) => row.label)
+        assert.include(modules, 'silk/wasm_start')
+        assert.notInclude(modules, 'silk/native_start')
+      }
     }).pipe(Effect.provide(NodeServices.layer)),
 )

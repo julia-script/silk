@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -71,8 +72,8 @@ pub fn main() -> i32 {
 
 it.effect('accepts a shared borrow through the qualified spelling', () =>
   Effect.gen(function* () {
-    const qualified = yield* Analysis.ofSourceRealized('borrow/program', ascii(shared))
-    const imported = yield* Analysis.ofSourceRealized('borrow/program', ascii(importedShared))
+    const qualified = yield* AnalysisFixture.retainingMain('borrow/program', ascii(shared))
+    const imported = yield* AnalysisFixture.retainingMain('borrow/program', ascii(importedShared))
     assert.deepEqual(codes(qualified), [])
     assert.deepEqual(codes(imported), [])
     // One call, one lowering: the qualifier is a spelling, not a different operation.
@@ -85,8 +86,11 @@ it.effect('accepts a shared borrow through the qualified spelling', () =>
 
 it.effect('accepts an exclusive borrow through the qualified spelling', () =>
   Effect.gen(function* () {
-    const qualified = yield* Analysis.ofSourceRealized('borrow/exclusive', ascii(exclusive))
-    const imported = yield* Analysis.ofSourceRealized('borrow/exclusive', ascii(importedExclusive))
+    const qualified = yield* AnalysisFixture.retainingMain('borrow/exclusive', ascii(exclusive))
+    const imported = yield* AnalysisFixture.retainingMain(
+      'borrow/exclusive',
+      ascii(importedExclusive),
+    )
     assert.deepEqual(codes(qualified), [])
     assert.deepEqual(codes(imported), [])
     assert.strictEqual(
@@ -99,7 +103,7 @@ it.effect('accepts an exclusive borrow through the qualified spelling', () =>
 it.effect('still rejects a borrow where the parameter wants an owned value', () =>
   Effect.gen(function* () {
     // `get`'s second parameter is a `usize`, so the natural reference type is incompatible.
-    const snapshot = yield* Analysis.ofSourceRealized('borrow/owned', ascii(ownedPosition))
+    const snapshot = yield* AnalysisFixture.retainingMain('borrow/owned', ascii(ownedPosition))
     assert.deepEqual(codes(snapshot), ['SEM0012'])
   }),
 )
@@ -120,7 +124,7 @@ pub fn main() -> i32 {
 
 it.effect('accepts a borrow through a seeded namespace with no import', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized('borrow/seeded', ascii(seeded))
+    const snapshot = yield* AnalysisFixture.retainingMain('borrow/seeded', ascii(seeded))
     assert.deepEqual(codes(snapshot), [])
   }),
 )

@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -141,7 +142,7 @@ pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
 
 it.effect('emits deterministic native never-driven package cleanup', () =>
   Effect.gen(function* () {
-    const first = yield* Analysis.ofSourceRealized(
+    const first = yield* AnalysisFixture.retainingMain(
       'external-wake-parking/native-cleanup',
       new TextEncoder().encode(source),
       'aarch64-apple-darwin',
@@ -159,7 +160,7 @@ it.effect(
   'rejects forged execution package and take-once callback authorities before lowering',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'independent-execution/forged-mir-authority',
         new TextEncoder().encode(independentExecutionMultiplePackages),
         'wasm32-unknown-unknown',
@@ -260,7 +261,7 @@ it.effect(
 
 it.effect('assigns only the sealed nominal Wake the local-execution affinity seed', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'external-wake-parking/affinity',
       new TextEncoder().encode(`import silk.shared { Shared }
 struct Wake {}
@@ -309,25 +310,27 @@ pub fn main() -> i32 { return 42 }`),
   }),
 )
 
-it.effect('rejects external parking at a complete entry without an explicit Execution owner', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'external-wake-parking/unowned-entry',
-      new TextEncoder().encode(`import silk.execution { Execution }
+it.effect(
+  'retains a park-capable library function without imposing executable startup policy',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        'external-wake-parking/unowned-entry',
+        new TextEncoder().encode(`import silk.execution { Execution }
 struct Guard {}
 fn register(wake: Intrinsic.Wake) -> Guard { drop wake return Guard {} }
 pub fn main() -> () { return run Execution.park(register) }`),
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      ['SEM0140'],
-    )
-  }),
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+      )
+    }),
 )
 
 it.effect('rejects a second signal as an ordinary use after move', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'external-wake-parking/double-signal',
       new TextEncoder().encode(`fn duplicate(wake: Intrinsic.Wake) -> () {
   Intrinsic.wake(move wake)
@@ -345,7 +348,7 @@ pub fn main() -> i32 { return 42 }`),
 
 it.effect('rejects a registration callback that transitively parks', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'external-wake-parking/non-parking-registration',
       new TextEncoder().encode(`import silk.execution { Execution }
 struct Guard {}
@@ -360,7 +363,7 @@ pub fn main() -> () { return run Execution.park(invalid) }`),
     )
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      ['SEM0140', 'SEM0139'],
+      ['SEM0139'],
     )
   }),
 )
@@ -393,7 +396,7 @@ fn selected(value: &mut Pair) -> i32 { return parks() }`,
       },
     ]
     for (const [ordinal, variant] of variants.entries()) {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         `external-wake-parking/shared-access-${ordinal}`,
         new TextEncoder().encode(`import silk.execution { Execution }
 import silk.shared { Shared }
@@ -413,7 +416,7 @@ pub fn main() -> i32 { return 42 }`),
       )
     }
 
-    const wakeSnapshot = yield* Analysis.ofSourceRealized(
+    const wakeSnapshot = yield* AnalysisFixture.retainingMain(
       'external-wake-parking/shared-access-wake',
       new TextEncoder().encode(`import silk.shared { Shared }
 struct Empty {}
@@ -469,7 +472,7 @@ effect fn program() -> () ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> () { return () }
 pub fn main() -> () { return run Effect.catchAll(program(), recover) }`
-    const snapshot = yield* Analysis.ofSourceRealized(module, new TextEncoder().encode(source))
+    const snapshot = yield* AnalysisFixture.retainingMain(module, new TextEncoder().encode(source))
     const capture = snapshot.ownership
       .get(module)
       ?.functions.flatMap((fn) => [...fn.loans])
@@ -543,7 +546,7 @@ it.effect(
   'accepts a timer-shaped extract-then-signal boundary without privileged actor policy',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'external-wake-parking/timer-shaped',
         new TextEncoder().encode(`import silk.execution { Execution }
 import silk.shared { Shared }

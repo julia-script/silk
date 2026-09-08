@@ -1,6 +1,6 @@
 import * as Effect from 'effect/Effect'
 import type * as Backend from './Backend.js'
-import { BackendError, terminationOf } from './Backend.js'
+import { BackendError } from './Backend.js'
 import type * as Mir from './Mir.js'
 import { llvmControl } from './MirLinearization.js'
 import * as NativeProgram from './NativeProgram.js'
@@ -38,7 +38,6 @@ export const LlvmBackend: Backend.Backend<Backend.LlvmBitcodeArtifact> = Object.
       module: program.module,
       target: program.layout.target,
       symbols: Object.freeze(output.symbols),
-      termination: terminationOf(program, output.report),
       nativeRuntimeSymbols: output.nativeRuntimeSymbols,
       runtimeFeatures: output.runtimeFeatures,
       foreignImports: output.foreignImports,

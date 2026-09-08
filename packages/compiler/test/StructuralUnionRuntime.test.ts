@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -18,7 +19,7 @@ pub fn main() -> i32 { return widen(A {}) }`
 
 it.effect('verifies union conversion with exact executable source identity', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'unions/executable-source',
       ascii(`fn add(left: i32, right: i32) -> i32 { return left + right }
 fn selectedCallable() -> typeof(add) | i32 { return add }
@@ -93,12 +94,12 @@ it('computes canonical total member mappings', () => {
 
 it.effect('emits deterministic native union conversion artifacts', () =>
   Effect.gen(function* () {
-    const first = yield* Analysis.ofSourceRealized(
+    const first = yield* AnalysisFixture.retainingMain(
       'unions/main',
       ascii(source),
       'aarch64-apple-darwin',
     )
-    const second = yield* Analysis.ofSourceRealized(
+    const second = yield* AnalysisFixture.retainingMain(
       'unions/main',
       ascii(source),
       'aarch64-apple-darwin',
@@ -113,7 +114,7 @@ it.effect('emits deterministic native union conversion artifacts', () =>
 
 it.effect('diagnoses narrowing and non-containing union targets deterministically', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'union-invalid/main',
       ascii(`struct A {}
 struct B {}

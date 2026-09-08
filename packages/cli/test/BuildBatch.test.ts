@@ -9,6 +9,7 @@ import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as TargetSelector from '@silklang/compiler/TargetSelector'
 import * as Result from 'effect/Result'
 import * as BuildBatch from '../src/BuildBatch.js'
+import * as BuildPlan from '../src/BuildPlan.js'
 
 const project = (
   nativeLinkInputs: Project.Project['build']['nativeLinkInputs'] = [],
@@ -55,6 +56,10 @@ it.effect('preflights an ordered deduplicated multi-target LLVM batch', () =>
     assert.deepStrictEqual(
       batch.success.plans.map((plan) => plan.nativeLinkInputs),
       [[], []],
+    )
+    assert.deepStrictEqual(
+      batch.success.plans.map((plan) => BuildPlan.compilationConfiguration(plan).profile.artifact),
+      ['executable', 'executable'],
     )
   }),
 )

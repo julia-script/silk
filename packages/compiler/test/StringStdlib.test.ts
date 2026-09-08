@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -24,7 +25,7 @@ it.effect('ships String as navigable ordinary source with private storage', () =
     const source = `import silk.string { String }
 fn inspect(value: &String) -> string { return String.view(value) }
 pub fn main() -> i32 { return 42 }`
-    const snapshot = yield* Analysis.ofSourceRealized('string-stdlib/navigation', ascii(source))
+    const snapshot = yield* AnalysisFixture.retainingMain('string-stdlib/navigation', ascii(source))
     assert.deepEqual(diagnosticSummary(snapshot), [])
 
     const callOffset = source.lastIndexOf('view')
@@ -52,7 +53,7 @@ pub fn main() -> i32 { return 42 }`
     )
     assert.isFalse(Intrinsic.all().some((actor) => actor.spelling === 'String'))
 
-    const forged = yield* Analysis.ofSourceRealized(
+    const forged = yield* AnalysisFixture.retainingMain(
       'string-stdlib/private-storage',
       ascii(`import silk.string { String }
 fn expose(value: &String) -> usize { return value.bytes.values.length }
@@ -68,7 +69,7 @@ pub fn main() -> i32 { return 42 }`),
 it.effect('plans allocation cleanup for owned String storage', () =>
   Effect.gen(function* () {
     const module = 'string-stdlib/owned-cleanup'
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       module,
       ascii(`import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }

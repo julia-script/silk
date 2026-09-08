@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -11,7 +12,7 @@ import * as SyntaxFormatter from '../src/SyntaxFormatter.js'
 const encoder = new TextEncoder()
 
 const snapshot = (source: string) =>
-  Analysis.ofSourceRealized('operator-contracts/main', encoder.encode(source))
+  AnalysisFixture.retainingMain('operator-contracts/main', encoder.encode(source))
 
 const parse = (id: string, source: string) =>
   Parser.parse(Lexer.lex(SourceFile.make(id, encoder.encode(source))))

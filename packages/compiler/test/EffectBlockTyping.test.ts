@@ -1,6 +1,8 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Hir from '../src/Hir.js'
+import * as Type from '../src/Type.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 
@@ -63,5 +65,37 @@ fn wrap<E>(flag: bool, problem: E) -> i32 {
 }
 pub fn main() -> i32 { return wrap<Boom>(true, Boom { code: 7 }) }`)
     assert.include(codes(self), 'SEM0066')
+  }),
+)
+
+it.effect('retains failure and service rows of operations run inside a deferred block', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`import silk.host_input { HostInput, HostInputError }
+effect fn deferred() -> Effect<'static; usize ! HostInputError ? &mut HostInput> ! HostInputError ? &mut HostInput {
+  return effect { return run HostInput.argumentCount() }
+}
+pub fn main() -> i32 { let value = deferred() drop value return 42 }`)
+    assert.deepEqual(codes(self), [])
+    const blocks = self.instances.instances
+      .flatMap((instance) => instance.function.statements)
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .flatMap((expression) =>
+        expression._tag === 'EffectBlock' && expression.type.success === 'usize'
+          ? [expression]
+          : [],
+      )
+    assert.isAbove(blocks.length, 0)
+    for (const block of blocks) {
+      assert.deepEqual(Type.failureMembers(block.type).map(Type.encode), [
+        'silk/host_input.HostInputError',
+      ])
+      assert.deepEqual(
+        Type.requirementMembers(block.type).map((requirement) =>
+          Type.encode(requirement.capability),
+        ),
+        ['silk/host_input.HostInput'],
+      )
+    }
   }),
 )

@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -137,7 +138,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
  */
 it.effect('plans one hook call per box rather than inlining the held value', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'box-heap-indirection/plan',
       ascii(tree),
       'wasm32-unknown-unknown',
@@ -200,7 +201,7 @@ it.effect('plans one hook call per box rather than inlining the held value', () 
 
 it.effect('releases Box.into storage exactly once after transferring the element', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'box-heap-indirection/into-cleanup',
       ascii(accessors),
     )
@@ -277,7 +278,7 @@ pub struct Expr {
 }
 
 pub fn main() -> i32 { return 0 }`
-    const single = yield* Analysis.ofSourceRealized(
+    const single = yield* AnalysisFixture.retainingMain(
       'box-heap-indirection/expr',
       ascii(expr),
       'wasm32-unknown-unknown',
@@ -345,7 +346,7 @@ pub fn main() -> i32 {
   let held = Vector.make<Bad<i32>>()
   return 0
 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'box-heap-indirection/polymorphic',
       ascii(polymorphic),
       'wasm32-unknown-unknown',
@@ -367,7 +368,7 @@ it.effect('gives Box no compiler privilege', () =>
     assert.isUndefined(Type.intrinsicNominals.get('Box'))
     assert.isFalse(Type.isIntrinsicNominal(Type.nominal('silk/box', 'Box', ['i32'])))
 
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'box-heap-indirection/privilege',
       ascii(accessors),
       'wasm32-unknown-unknown',

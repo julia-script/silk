@@ -56,6 +56,11 @@
     "namespace": "Execution"
   },
   {
+    "module": "silk/execution_storage",
+    "path": "silk/execution_storage.silk",
+    "namespace": "ExecutionStorage"
+  },
+  {
     "module": "silk/f32",
     "path": "silk/f32.silk",
     "namespace": "f32"
@@ -199,9 +204,34 @@
     "namespace": "NativeDescriptor"
   },
   {
+    "module": "silk/native_diagnostics",
+    "path": "silk/native_diagnostics.silk",
+    "namespace": "NativeDiagnostics"
+  },
+  {
     "module": "silk/native_filesystem",
     "path": "silk/native_filesystem.silk",
     "namespace": "NativeFileSystem"
+  },
+  {
+    "module": "silk/native_host_input",
+    "path": "silk/native_host_input.silk",
+    "namespace": "NativeHostInput"
+  },
+  {
+    "module": "silk/native_process",
+    "path": "silk/native_process.silk",
+    "namespace": "NativeProcess"
+  },
+  {
+    "module": "silk/native_report",
+    "path": "silk/native_report.silk",
+    "namespace": "NativeReport"
+  },
+  {
+    "module": "silk/native_start",
+    "path": "silk/native_start.silk",
+    "namespace": "NativeStart"
   },
   {
     "module": "silk/numeric",
@@ -286,6 +316,26 @@
     "module": "silk/raw_buffer",
     "path": "silk/raw_buffer.silk",
     "namespace": "RawBuffer"
+  },
+  {
+    "module": "silk/raw_linux",
+    "path": "silk/raw_linux.silk",
+    "namespace": "RawLinux"
+  },
+  {
+    "module": "silk/raw_mapping",
+    "path": "silk/raw_mapping.silk",
+    "namespace": "Mapping"
+  },
+  {
+    "module": "silk/raw_process_inputs",
+    "path": "silk/raw_process_inputs.silk",
+    "namespace": "ProcessInputs"
+  },
+  {
+    "module": "silk/raw_start",
+    "path": "silk/raw_start.silk",
+    "namespace": "RawStart"
   },
   {
     "module": "silk/reflect",
@@ -411,6 +461,11 @@
     "module": "silk/vector",
     "path": "silk/vector.silk",
     "namespace": "Vector"
+  },
+  {
+    "module": "silk/wasm_start",
+    "path": "silk/wasm_start.silk",
+    "namespace": "WasmStart"
   },
   {
     "module": "silk/writer",

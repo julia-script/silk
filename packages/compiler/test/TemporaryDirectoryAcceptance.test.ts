@@ -9,6 +9,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Driver from './support/TestDriver.js'
+import * as TestToolchain from './support/TestToolchain.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -51,6 +52,7 @@ const nativeRootResolution = `import silk.bytes { Bytes }
 import silk.host_input { HostInputError, HostInput }
 import silk.option { Option }
 import silk.os_host_input { OsHostInput }
+import silk.native_host_input { NativeHostInput }
 import silk.string { InvalidUtf8, String }
 
 effect fn missingRoot() -> Bytes ! HostInputError {
@@ -72,7 +74,8 @@ effect fn invalidRoot() -> String ! OutOfMemoryError ? &mut Allocator {
 }
 
 effect fn confinedRootString() -> String ! HostInputError | OutOfMemoryError ? &mut Allocator {
-  let mut hostInput = OsHostInput.make()
+  let inputs = run unsafe NativeHostInput.environmentSnapshot()
+  let mut hostInput = OsHostInput.make(move inputs)
   let found = run Effect.provideMut(HostInput.variableNamed("SILK_TEST_ROOT"), &mut hostInput)
   let rootBytes = run requiredRoot(move found)
   let copied = run String.copyUtf8(Bytes.asSlice(&rootBytes))
@@ -250,7 +253,7 @@ it.effect(
         compilation: {
           root: SourceFile.make('temporary-directory/native', ascii(nativeSource)),
         },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: 'clang', llvmAr: 'llvm-ar' }),
+        toolchain: yield* TestToolchain.configured,
         // Release, so this also stands as the regression test for #130: the backend used to let
         // a cleanup arm's reloaded lanes escape into the arm's join block, which is invalid SSA,
         // and Clang crashed on it at -O2 instead of diagnosing it.
@@ -293,7 +296,7 @@ it.effect(
         compilation: {
           root: SourceFile.make('temporary-directory/native-tree', ascii(nativeTreeSource)),
         },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: 'clang', llvmAr: 'llvm-ar' }),
+        toolchain: yield* TestToolchain.configured,
         // Release for the same reason as above — this is the walk #130 crashed on.
         optimization: 'release',
         artifactKind: 'NativeExecutable',
@@ -326,7 +329,7 @@ it.effect(
         compilation: {
           root: SourceFile.make('temporary-directory/native-many', ascii(nativeManySource)),
         },
-        toolchain: Object.freeze({ _tag: 'Toolchain', clang: 'clang', llvmAr: 'llvm-ar' }),
+        toolchain: yield* TestToolchain.configured,
         optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'native-many'),

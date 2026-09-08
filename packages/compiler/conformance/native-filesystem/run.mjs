@@ -139,7 +139,21 @@ const program = Effect.gen(function* () {
       Effect.fnUntraced(function* (scope) {
         const snapshot = yield* Analysis.makeRealized({
           root: SourceFile.make('filesystem-conformance/root', source),
-          configuration: { profile: { ...input, artifact: 'object', entry: { kind: 'none' } } },
+          configuration: {
+            profile: { ...input, artifact: 'object', entry: { kind: 'none' } },
+            composition: {
+              components: [
+                {
+                  capability: 'execution-storage',
+                  bindings: ['create', 'acquire', 'release', 'destroy'].map((operation) => ({
+                    operation,
+                    module: 'silk/execution_storage',
+                    declaration: `silk_execution_storage_${operation}`,
+                  })),
+                },
+              ],
+            },
+          },
         }).pipe(Effect.provide(SourceResolver.empty))
         const diagnostics = Analysis.diagnostics(snapshot)
         if (diagnostics.length !== 0)
@@ -194,12 +208,7 @@ const program = Effect.gen(function* () {
           ],
           'independent C filesystem receiver',
         )
-        const runtime = yield* NativeToolchain.compileRuntime(
-          tools,
-          scope,
-          profile.target,
-          artifact.nativeRuntimeSymbols,
-        )
+        const runtime = yield* NativeToolchain.compileRuntime(tools, scope, profile.target)
         const runtimeInspection = yield* run(inspect, [
           '--symbols',
           '--relocations',

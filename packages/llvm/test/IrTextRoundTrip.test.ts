@@ -16,6 +16,7 @@ import * as IrText from '../src/IrText.js'
 import * as Metadata from '../src/Metadata.js'
 import * as Type from '../src/Type.js'
 import * as Value from '../src/Value.js'
+import * as Verify from '../src/Verify.js'
 import { raise } from './support/raise.js'
 
 const directory = mkdtempSync(join(tmpdir(), 'silk-effect-llvm-roundtrip-'))
@@ -108,6 +109,71 @@ const assemble = (name: string, text: string): Canonical => {
   ])
   return canonical(`${name}-text`, assembled)
 }
+
+it.effect(
+  'round-trips typed and signature-typed references to later-listed dominating blocks',
+  () =>
+    Effect.gen(function* () {
+      const builder = yield* Builder.make({ sourceFilename: 'forward-block.ll' })
+      const i32 = yield* Type.integer(builder, 32)
+      const i64 = yield* Type.integer(builder, 64)
+      const fixed = yield* FunctionActor.declare(
+        builder,
+        'fixed',
+        yield* Type.functionType(builder, i32, [i32]),
+      )
+      const variadic = yield* FunctionActor.declare(
+        builder,
+        'variadic',
+        yield* Type.functionType(builder, i32, [i32], { variadic: true }),
+      )
+      const fn = yield* FunctionActor.declare(
+        builder,
+        'forward_block',
+        yield* Type.functionType(builder, i32, [i32, i64]),
+      )
+      yield* FunctionActor.buildBody(
+        builder,
+        fn,
+        Effect.fnUntraced(function* (body) {
+          const entry = yield* Block.make(body, 'entry')
+          const uses = yield* Block.make(body, 'uses')
+          const definitions = yield* Block.make(body, 'definitions')
+          yield* Block.setInsertionPoint(body, entry)
+          yield* FunctionBody.branch(body, definitions)
+          yield* Block.setInsertionPoint(body, definitions)
+          const value = yield* FunctionBody.binary(
+            body,
+            'add',
+            yield* Value.argument(body, 0),
+            yield* Constant.integerSigned(builder, i32, 1),
+            'value',
+          )
+          const wide = yield* FunctionBody.binary(
+            body,
+            'add',
+            yield* Value.argument(body, 1),
+            yield* Constant.integerSigned(builder, i64, 5),
+            'wide',
+          )
+          const storage = yield* FunctionBody.alloca(body, i32, 'storage')
+          yield* FunctionBody.branch(body, uses)
+          yield* Block.setInsertionPoint(body, uses)
+          yield* FunctionBody.callDirect(body, fixed, [value], 'fixed_result')
+          yield* FunctionBody.callDirect(body, variadic, [value, wide], 'variadic_result')
+          yield* FunctionBody.binary(body, 'add', value, value, 'sum')
+          yield* FunctionBody.store(body, value, storage)
+          yield* FunctionBody.load(body, i32, storage, 'loaded')
+          yield* FunctionBody.returnValue(body, value)
+        }),
+      )
+      assert.deepEqual(yield* Verify.verify(builder), [])
+      assert.deepEqual(
+        assemble('forward-block', yield* IrText.render(builder)),
+        canonical('forward-block-bitcode', yield* Bitcode.encode(builder)),
+      )
+    }),
+)
 
 /**
  * A module built from the shapes that made rendered text unassemblable.

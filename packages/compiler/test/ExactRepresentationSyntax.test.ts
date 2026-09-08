@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -479,7 +480,7 @@ it.effect('navigates valid and invalid exact item tokens to their declaration', 
   const source = `pub fn identity<T>(value: T) -> T { return value }
 pub fn valid() -> typeof(identity<i32>) { return 0 }
 pub fn open() -> typeof(identity) { return 0 }`
-  return Analysis.ofSourceRealized('main', encoder.encode(source)).pipe(
+  return AnalysisFixture.retainingMain('main', encoder.encode(source)).pipe(
     Effect.map((snapshot) => {
       const validOffset = source.indexOf('identity<i32>')
       const openOffset = source.lastIndexOf('identity)')

@@ -66,6 +66,8 @@ impl Execution {
   /// Completion calls `onComplete`. Relinquishment calls `onSuspend` with the dormant Execution.
   /// Each activation calls exactly one callback. Nested transfer can complete in the same drive.
   /// External parking relinquishes ownership until the fixed readiness endpoint reports eligibility.
+  /// The body starts an independent diagnostic invocation. Install observation inside the body to
+  /// retain it across parking. Outcome callbacks run in the driving caller's diagnostic context.
   ///
   /// # Gotchas
   ///
@@ -130,4 +132,3 @@ fn absurd<T>() -> T {
   let boom = 1 / 0
   return absurd<T>()
 }
-

@@ -1,3 +1,4 @@
+import * as ContinuationTransfer from './ContinuationTransfer.js'
 import * as ByteString from '@silklang/llvm/ByteString'
 import * as NativeForeignGuard from './NativeForeignGuard.js'
 import * as NativeCAbi from './NativeCAbi.js'
@@ -29,7 +30,7 @@ import {
 } from './Backend.js'
 import * as CAbi from './CAbi.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
-import * as CoroutineRuntime from './CoroutineRuntime.js'
+import * as NativeExecutionStorage from './NativeExecutionStorage.js'
 import * as Instances from './Instances.js'
 import { alignUp } from './internal/Align.js'
 import * as Layout from './Layout.js'
@@ -44,18 +45,17 @@ import * as NativeFunction from './NativeFunction.js'
 import type * as NativeLanePointer from './NativeLanePointer.js'
 import * as NativeOperation from './NativeOperation.js'
 import * as NativeSuspension from './NativeSuspension.js'
+import * as NativeSymbol from './NativeSymbol.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
 import type * as Scalar from './Scalar.js'
-import type * as Termination from './Termination.js'
 
 export const emit = Effect.fn('NativeProgram.emit')(function* (
   program: Mir.Module,
   request: CodegenRequest,
 ): Effect.fn.Return<
   {
-    /** Static host-report tables for the standalone adapter; empty for freestanding targets. */
-    readonly report: Termination.Report
+    /** Source declarations retained in the emitted object. */
     readonly symbols: ReadonlyArray<SymbolEntry>
     readonly nativeRuntimeSymbols: ReadonlyArray<string>
     readonly runtimeFeatures: ReadonlyArray<RuntimeFeature>
@@ -112,6 +112,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       MirVerification.operations(fn).some(
         (operation) =>
           operation._tag === 'Allocate' ||
+          operation._tag === 'DiagnosticScope' ||
           operation._tag === 'RawBufferFrom' ||
           operation._tag === 'SharedFromAllocation' ||
           operation._tag === 'SharedClone' ||
@@ -178,7 +179,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   const laneType = (lane: Layout.CallingLane): LlvmType.Type =>
     NativeType.laneType(typeContext, lane)
   // The fourth private word identifies the independently driven Execution owner.
-  const transferHeaderSize = program.layout.target.pointerSize * 4
+  const transferHeaderSize = program.layout.target.pointerSize * ContinuationTransfer.headerWords
   const originArgumentLanes = program.functions.flatMap((fn) =>
     (fn.suspension?.regions ?? []).flatMap((region) =>
       region._tag === 'SuspendEffectRegion'
@@ -222,31 +223,14 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     needsAllocation && usizeType !== undefined
       ? yield* FunctionActor.declare(
           builder,
-          'malloc',
+          NativeSymbol.foreign(program.layout.target, 'malloc'),
           yield* LlvmType.functionType(builder, pointer, [usizeType]),
         )
       : undefined
   const free = needsAllocation
     ? yield* FunctionActor.declare(
         builder,
-        'free',
-        yield* LlvmType.functionType(builder, voidType ?? (yield* LlvmType.voidType(builder)), [
-          pointer,
-        ]),
-      )
-    : undefined
-  const coroutineFramePush =
-    suspensionEnabled && usizeType !== undefined
-      ? yield* FunctionActor.declare(
-          builder,
-          CoroutineRuntime.pushSymbol,
-          yield* LlvmType.functionType(builder, pointer, [usizeType, usizeType]),
-        )
-      : undefined
-  const coroutineFramePop = frameRuntimeEnabled
-    ? yield* FunctionActor.declare(
-        builder,
-        CoroutineRuntime.popSymbol,
+        NativeSymbol.foreign(program.layout.target, 'free'),
         yield* LlvmType.functionType(builder, voidType ?? (yield* LlvmType.voidType(builder)), [
           pointer,
         ]),
@@ -259,49 +243,10 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     needsStringEquality && usizeType !== undefined
       ? yield* FunctionActor.declare(
           builder,
-          'memcmp',
+          NativeSymbol.foreign(program.layout.target, 'memcmp'),
           yield* LlvmType.functionType(builder, i32, [pointer, pointer, usizeType]),
         )
       : undefined
-  const osRuntimes = new Map<
-    string,
-    {
-      readonly handle: FunctionActor.Function
-      readonly resultLaneCount: number
-      readonly symbol: string
-    }
-  >()
-  for (const operation of program.functions.flatMap((fn) => MirVerification.operations(fn))) {
-    if (operation._tag !== 'OsCall' || osRuntimes.has(operation.operation.name)) continue
-    const resultLanes = lanesFor(operation.type)
-    const singleResultLane = resultLanes.at(0)
-    let resultType: LlvmType.Type
-    if (resultLanes.length === 0) {
-      resultType = voidType ?? (yield* LlvmType.voidType(builder))
-    } else if (resultLanes.length === 1 && singleResultLane !== undefined) {
-      resultType = laneType(singleResultLane)
-    } else {
-      resultType = yield* LlvmType.structure(builder, resultLanes.map(laneType))
-    }
-    const parameters = operation.arguments.flatMap((argument) => {
-      const type = program.functions
-        .find((fn) => MirVerification.operations(fn).includes(operation))
-        ?.localTypes.at(argument.ordinal)
-      return type === undefined ? [] : lanesFor(type).map(laneType)
-    })
-    osRuntimes.set(
-      operation.operation.name,
-      Object.freeze({
-        symbol: NativeDeclare.osRuntimeSymbol(operation.operation.name),
-        handle: yield* FunctionActor.declare(
-          builder,
-          NativeDeclare.osRuntimeSymbol(operation.operation.name),
-          yield* LlvmType.functionType(builder, resultType, parameters),
-        ),
-        resultLaneCount: resultLanes.length,
-      }),
-    )
-  }
 
   // Foreign symbols are declared once each under the default (C) calling convention with the
   // LLVM types the classified C signature selects; agreeing redeclarations share one entry.
@@ -330,10 +275,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   const declaredForeign = new Map<string, CAbi.CAbiSignature>()
   if (
     request.support &&
-    (program.entry._tag !== 'NoInvocation' ||
-      needsAllocation ||
+    (needsAllocation ||
       frameRuntimeEnabled ||
-      osRuntimes.size !== 0 ||
       program.foreignCalls.length !== 0 ||
       program.foreignStatics.length !== 0 ||
       indirectCalls.length !== 0 ||
@@ -384,7 +327,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     const attributes = yield* NativeCAbi.attributes(builder, call.signature)
     const handle = yield* FunctionActor.declare(
       builder,
-      call.symbol,
+      NativeSymbol.foreign(program.layout.target, call.symbol),
       yield* LlvmType.functionType(
         builder,
         cType(call.signature.result) ?? voidType ?? (yield* LlvmType.voidType(builder)),
@@ -425,7 +368,11 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       foreignFunctions.set(key, Object.freeze({ handle: guarded, signature: call.signature }))
     }
   }
-  for (const record of program.foreignStatics) {
+  // Planning has rejected incompatible claims; matching imports share one C global.
+  const staticDeclarations = [
+    ...new Map(program.foreignStatics.map((record) => [record.symbol, record])).values(),
+  ]
+  for (const record of staticDeclarations) {
     const classified = CAbi.classify(record.type, program.layout.target, 'Parameter')
     const valueType = cType(classified)
     if (valueType === undefined)
@@ -442,12 +389,17 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
           ? yield* Constant.floatFromNumber(builder, valueType, Number(record.literal.spelling))
           : yield* Constant.doubleFromNumber(builder, valueType, Number(record.literal.spelling))
     }
-    const variable = yield* Variable.make(builder, record.symbol, valueType, {
-      ...(initializer === undefined ? {} : { initializer }),
-      constant: record.direction === 'Export',
-      linkage: 'external',
-      externallyInitialized: record.direction === 'Import',
-    }).pipe(
+    const variable = yield* Variable.make(
+      builder,
+      NativeSymbol.foreign(program.layout.target, record.symbol),
+      valueType,
+      {
+        ...(initializer === undefined ? {} : { initializer }),
+        constant: record.direction === 'Export',
+        linkage: 'external',
+        externallyInitialized: record.direction === 'Import',
+      },
+    ).pipe(
       Effect.mapError(
         (cause) =>
           new BackendError({
@@ -479,6 +431,9 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     }),
   )
   const declared = functionDeclarations.declared
+  const executionStorage = NativeExecutionStorage.make(program, declared)
+  if (frameRuntimeEnabled && executionStorage === undefined)
+    throw new RangeError('Private frame lowering requires a selected execution-storage component')
   const retained: Array<Constant.Constant> = []
   for (const root of program.retainedRoots ?? []) {
     const declaration = declared.find((candidate) => Mir.matchesInstanceKey(candidate.fn, root))
@@ -621,7 +576,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     file,
     types: debugTypes,
   })
-  const termination = NativeTermination.make(builder, program, request, i32)
+  const termination = NativeTermination.make(request)
   yield* NativeFunction.emitBodies(
     Object.freeze({
       termination,
@@ -650,11 +605,9 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       unsignedOverflowSignatures,
       ...(malloc === undefined ? {} : { malloc }),
       ...(free === undefined ? {} : { free }),
-      ...(coroutineFramePush === undefined ? {} : { coroutineFramePush }),
-      ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
+      ...(executionStorage === undefined ? {} : { executionStorage }),
       ...(executionRelease === undefined ? {} : { executionRelease: executionRelease.handle }),
       ...(memcmp === undefined ? {} : { memcmp }),
-      osRuntimes,
       foreignFunctions,
       foreignStatics,
       foreignCallbacks,
@@ -680,7 +633,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         pointer,
         ...(usizeType === undefined ? {} : { usizeType }),
         ...(free === undefined ? {} : { free }),
-        ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
+        ...(executionStorage === undefined ? {} : { executionStorage }),
         resumeThunks,
         declared,
         types: typeContext,
@@ -702,6 +655,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       originThunks,
       resumeThunks,
       types: typeContext,
+      ...(executionStorage === undefined ? {} : { executionStorage }),
       transferHeaderSize,
       transferResultOffset,
       transferStorageSize,
@@ -726,7 +680,6 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   const context = yield* Effect.context<never>()
 
   return {
-    report: NativeTermination.report(termination),
     symbols: declared.map((entry) =>
       Object.freeze({
         declaration: entry.fn.id,
@@ -735,12 +688,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       }),
     ),
     nativeRuntimeSymbols: Object.freeze([
-      ...(termination.state.trapReport === undefined ? [] : [NativeTermination.trapReportSymbol]),
       ...(malloc === undefined ? [] : ['malloc']),
       ...(free === undefined ? [] : ['free']),
-      ...[...osRuntimes.values()].map((runtime) => runtime.symbol),
-      ...(coroutineFramePush === undefined ? [] : [CoroutineRuntime.pushSymbol]),
-      ...(coroutineFramePop === undefined ? [] : [CoroutineRuntime.popSymbol]),
     ]),
     runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),
     foreignImports: Object.freeze(
@@ -770,7 +719,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         ),
     ),
     foreignStatics: Object.freeze(
-      [...program.foreignStatics]
+      staticDeclarations
         .sort(
           (left, right) =>
             left.symbol.localeCompare(right.symbol, 'en') ||

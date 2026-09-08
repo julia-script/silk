@@ -244,15 +244,9 @@ const operationClassification = (
   fn: Mir.MirFunction,
   operation: Extract<
     Mir.Operation,
-    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' | 'CloseEffectEntry' }
+    { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' }
   >,
 ): ProvisionalMir.Classification => {
-  if (operation._tag === 'CloseEffectEntry')
-    return ProvisionalMir.classificationOfRunner(
-      provisional,
-      operation.runner,
-      operation.typeArguments,
-    )
   if (ProvisionalMir.isOriginOfRun(provisional, fn.instance, operation.provenance.span))
     return 'Suspendable'
   return ProvisionalMir.classificationOfRun(provisional, fn.instance, operation.provenance.span)
@@ -284,6 +278,8 @@ const mapRegions = (
           ),
         ),
       })
+    if (value._tag === 'DiagnosticScope')
+      return Object.freeze({ ...value, body: execution(value.body) })
     if (value._tag === 'Conditional')
       return Object.freeze({
         ...value,
@@ -378,12 +374,7 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
     for (const region of Mir.regionsTree(folded.regions)) {
       if (region._tag !== 'OperationRegion') continue
       for (const operation of region.operations) {
-        if (
-          operation._tag !== 'RunEffect' &&
-          operation._tag !== 'CatchEffect' &&
-          operation._tag !== 'CloseEffectEntry'
-        )
-          continue
+        if (operation._tag !== 'RunEffect' && operation._tag !== 'CatchEffect') continue
         const reason = suspensionReason(operationClassification(provisional, folded, operation))
         if (reason === undefined) continue
         verdicts.push(

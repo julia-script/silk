@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -9,7 +10,7 @@ it.effect(
   'keeps Bytes move-only and rejects exclusive field projection through shared access',
   () =>
     Effect.gen(function* () {
-      const moved = yield* Analysis.ofSourceRealized(
+      const moved = yield* AnalysisFixture.retainingMain(
         'bytes-acceptance/moved',
         ascii(`import silk.usize as usize
 import silk.bytes { Bytes }
@@ -24,7 +25,7 @@ pub fn main() -> i32 {
         'OWN0001',
       )
 
-      const shared = yield* Analysis.ofSourceRealized(
+      const shared = yield* AnalysisFixture.retainingMain(
         'bytes-acceptance/shared-field',
         ascii(`struct Wrapper { values: [u8; 1] }
 fn consume(values: &mut [u8]) -> () { return () }

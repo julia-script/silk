@@ -541,22 +541,9 @@ fn survivingRelative(values: &[u8], after: usize) -> bool {
 /// platform policy, but every implementation must preserve the portable error categories,
 /// create-or-truncate writes, and deterministic listing order described here.
 ///
-/// # Examples
-/// ## Write a file after creating its parents
-/// ```silk
-/// import silk.allocator { Allocator, OutOfMemoryError }
-///
-/// import silk.filesystem { FileSystem, FileError, Path }
-///
-/// import silk.usize
-///
-/// pub effect fn store(path: &Path, contents: &[u8]) -> usize
-/// ! FileError | OutOfMemoryError
-/// ? &mut FileSystem | &mut Allocator {
-///   let written = run FileSystem.writeFileWithParents(path, contents)
-///   return contents.length
-/// }
-/// ```
+/// [`writeFileWithParents`] composes parent creation and the final write using the same lexical
+/// provider. Supply both `&mut FileSystem` and `&mut Allocator` for this operation. Its directory
+/// creation is not transactional: a failed final write may leave newly created parents behind.
 pub service FileSystem {
   /// Reads one complete regular file into independently owned bytes.
   ///

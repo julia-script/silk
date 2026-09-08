@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -360,7 +361,7 @@ pub fn main() -> i32 {
   let parser = Parser<i32> { parse: decode }
   return consume<i32>(move parser)
 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'representation-inference/instances',
       ascii(source),
     )

@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -8,7 +9,7 @@ const ascii = (value: string): Uint8Array =>
 
 it.effect('publishes target-sized Layout and checked repetition contracts', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'layout-value/contracts',
       ascii(`import silk.layout { Layout }
 import silk.layout { LayoutOverflow }

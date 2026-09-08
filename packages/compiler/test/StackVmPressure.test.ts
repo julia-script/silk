@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -232,7 +233,7 @@ const corpus = [
 it.effect('publishes only general MIR operations for the pressure VM', () =>
   Effect.gen(function* () {
     const generated = sourceFor(corpus[1].bytecode)
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'stack-vm-pressure/general-mir',
       ascii(generated.source),
       'wasm32-unknown-unknown',

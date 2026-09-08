@@ -23,6 +23,9 @@ import {
 } from './ValueType.js'
 
 export class FunctionLowering {
+  /** Only the generated primitive runner may emit the terminal suspension origin. */
+  builtinEffectRunner = false
+
   readonly regions: Array<Mir.Region | undefined> = []
   readonly localTypes: Array<Mir.Type> = []
   readonly bindingLocals = new Map<number, Mir.LocalId>()

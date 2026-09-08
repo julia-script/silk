@@ -22,6 +22,7 @@ type Operation = Extract<
       | 'PointerNull'
       | 'PointerIsNull'
       | 'PointerAddress'
+      | 'PointerReinterpret'
       | 'PointerRequalify'
       | 'PointerBytes'
       | 'PointerFromStorage'
@@ -90,6 +91,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       return
     }
     case 'PointerBytes':
+    case 'PointerReinterpret':
     case 'PointerRequalify':
     case 'PointerFromStorage': {
       // A reference is its address lane; a slice is address then length.

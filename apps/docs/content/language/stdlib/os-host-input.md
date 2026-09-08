@@ -4,43 +4,22 @@
 
 Profiles: `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`.
 
-Native [`HostInput`](./host-input.md#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e707574) provider for the process command line, environment, and working directory.
+Native HostInput provider backed by an owned process-input snapshot.
 
 ## When to use
 
-Construct [`OsHostInput`](#declaration-73696c6b2f6f735f686f73745f696e7075743a3a4f73486f7374496e707574) at a native application edge and provide it to portable code requiring
-[`HostInput`](./host-input.md#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e707574). Tests can replace it with a deterministic provider and keep process state out of
-the program under test.
+Capture NativeHostInput at the application boundary and move it into this provider. Portable
+code receives it through the mutable HostInput service and obtains independent owned results.
 
 ## Details
 
-The provider owns no persistent state. Each successful lookup copies the host value into
-independent [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573), beginning with a bounded buffer and retrying once at the exact size the
-boundary reports. An absent argument or variable remains [`None`](./option.md#declaration-73696c6b2f6f7074696f6e3a3a4f7074696f6e3a3a76617269616e743a30); an unavailable working
-directory and contradictory host lengths become [`HostInputError`](./host-input.md#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e7075744572726f72).
-
-Constructing the provider reads no host state. Portable code performs lookups after the
-application supplies `&mut OsHostInput` for the `&mut HostInput` requirement. Each owned result
-also requires an allocator.
+Arguments and environment retain their captured bytes. Working-directory lookup observes the
+current process directory on each call. Dropping the provider releases the complete snapshot.
 
 ## Gotchas
 
-This module publishes its provider only for the supported native profiles.
-WebAssembly selection leaves the module empty.
-
-## Examples
-
-### Construct the native provider without reading process state
-
-```silk
-import silk.os_host_input { OsHostInput }
-
-pub fn main() -> i32 {
-  let provider = OsHostInput.make()
-  drop provider
-  return 42
-}
-```
+Available only on the supported native libc profiles. Capturing foreign input requires that
+its storage remain readable and unchanged throughout capture.
 
 Import as `OsHostInput` with `import silk.os_host_input { OsHostInput }`.
 
@@ -54,32 +33,21 @@ Public declarations: 1.
 pub struct OsHostInput
 ```
 
-A stateless native [`HostInput`](./host-input.md#declaration-73696c6b2f686f73745f696e7075743a3a486f7374496e707574) provider for process arguments, environment, and directory.
-
-### Details
-
-The process owns the source values. Each successful byte lookup returns a new owned copy through
-the portable service.
+An affine HostInput provider owning its argument and environment snapshot.
 
 <a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a4f73486f7374496e7075742e6d616b65"></a>
 
 ### Associated function `OsHostInput.make`
 
 ```silk
-pub fn make() -> OsHostInput
+pub fn make(inputs: NativeHostInput) -> OsHostInput
 ```
 
-Creates a stateless provider for native process input.
-
-#### When to use
-
-Use this function at a native application edge. Provide the result as `&mut HostInput` to
-portable lookup operations in `silk.host_input`.
+Moves an already captured snapshot into the portable service provider.
 
 #### Details
 
-Construction performs no lookup and cannot fail. Argument and environment absence remain
-ordinary `None` values when a later lookup runs.
+Construction reads no foreign state and performs no allocation.
 
 <a id="declaration-73696c6b2f6f735f686f73745f696e7075743a3a696d706c656d656e746174696f6e3a30"></a>
 

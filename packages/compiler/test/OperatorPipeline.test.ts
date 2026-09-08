@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
@@ -16,7 +17,7 @@ const golden = (name: string): string =>
 
 it.effect('lowers negation to generated zero plus source-authored trapping subtraction', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'golden/negation',
       encoder.encode('pub fn main() -> i32 { let value = 42 return -value }'),
       'aarch64-apple-darwin',
@@ -39,7 +40,7 @@ it.effect('lowers negation to generated zero plus source-authored trapping subtr
 
 it.effect('pins one operator pipeline through canonical HIR, MIR, and LLVM', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'golden/operator',
       encoder.encode(pipelineSource),
       'aarch64-apple-darwin',

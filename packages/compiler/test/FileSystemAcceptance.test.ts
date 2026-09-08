@@ -22,9 +22,8 @@ pub effect fn main() -> () ! FileError | OutOfMemoryError ? &mut FileSystem | &m
       )
       assert.deepEqual(
         Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-        ['SEM0204'],
+        ['SEM0083'],
       )
-      const mir = Analysis.loweredMir(snapshot)
-      assert.strictEqual(mir.entry._tag, 'UnavailableEntry')
+      assert.strictEqual(Analysis.diagnostics(snapshot).at(0)?.span.sourceId, 'silk/native_start')
     }),
 )

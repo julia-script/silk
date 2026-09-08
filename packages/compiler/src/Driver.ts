@@ -13,7 +13,6 @@ import * as CHeader from './CHeader.js'
 import * as Diagnostic from './Diagnostic.js'
 import * as Frontend from './Frontend.js'
 import * as HeapObservation from './HeapObservation.js'
-import type * as Instances from './Instances.js'
 import * as LlvmBackend from './LlvmBackend.js'
 import type * as ModuleClosure from './ModuleClosure.js'
 import * as NativeLinkInput from './NativeLinkInput.js'
@@ -26,7 +25,6 @@ import * as SourceResolver from './SourceResolver.js'
 import * as Target from './Target.js'
 import * as ToolchainIntegrity from './ToolchainIntegrity.js'
 import * as ToolchainPlan from './ToolchainPlan.js'
-import type * as Type from './Type.js'
 
 /**
  * The end-to-end compiler driver: one orchestration path from a compilation request to a durable
@@ -71,7 +69,7 @@ const backendEmissionCacheKey = (
     .sort()
   const digest = ToolchainIntegrity.contentDigest(
     [
-      'backend-emission-v5',
+      'backend-emission-v10',
       distributionDigest,
       backendId,
       profileIdentity,
@@ -91,9 +89,8 @@ const backendEmissionCacheKey = (
 }
 
 interface CachedEmissionHeader {
-  readonly schema: 6
+  readonly schema: 7
   readonly module: string
-  readonly report: Backend.Termination['report']
   readonly symbols: Backend.LlvmBitcodeArtifact['symbols']
   readonly nativeRuntimeSymbols: ReadonlyArray<string>
   readonly runtimeFeatures: Backend.LlvmBitcodeArtifact['runtimeFeatures']
@@ -105,9 +102,8 @@ interface CachedEmissionHeader {
 const encodeCachedEmission = (artifact: Backend.LlvmBitcodeArtifact): Uint8Array | undefined => {
   try {
     const header: CachedEmissionHeader = {
-      schema: 6,
+      schema: 7,
       module: artifact.module,
-      report: artifact.termination.report,
       symbols: artifact.symbols,
       nativeRuntimeSymbols: artifact.nativeRuntimeSymbols,
       runtimeFeatures: artifact.runtimeFeatures,
@@ -129,7 +125,6 @@ const encodeCachedEmission = (artifact: Backend.LlvmBitcodeArtifact): Uint8Array
 
 const decodeCachedEmission = (
   bytes: Uint8Array,
-  program: Parameters<typeof Backend.terminationOf>[0],
   target: Target.Target,
 ): Backend.LlvmBitcodeArtifact | undefined => {
   try {
@@ -139,7 +134,7 @@ const decodeCachedEmission = (
     const header: CachedEmissionHeader = JSON.parse(
       new TextDecoder().decode(bytes.subarray(4, 4 + jsonLength)),
     )
-    if (header.schema !== 6) return undefined
+    if (header.schema !== 7) return undefined
     if (
       ![...header.foreignImports, ...header.foreignExports].every(
         (entry) =>
@@ -158,7 +153,6 @@ const decodeCachedEmission = (
       module: header.module,
       target,
       symbols: header.symbols,
-      termination: Backend.terminationOf(program, header.report),
       nativeRuntimeSymbols: header.nativeRuntimeSymbols,
       runtimeFeatures: header.runtimeFeatures,
       foreignImports: header.foreignImports,
@@ -214,19 +208,9 @@ export interface Compiled {
   readonly foreignExports: ReadonlyArray<Backend.ForeignExport>
   readonly foreignStatics: ReadonlyArray<Backend.ForeignStatic>
   readonly libraryInterface?: NativeToolchain.LibraryInterfaceArtifacts
-  readonly termination?: Backend.Termination
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
   readonly report: ReadonlyArray<DriverPhaseReport>
   readonly toolchainIdentity: string
-}
-
-/** The request's root module has no valid entry; the toolchain was never invoked. */
-export interface NoEntry {
-  readonly _tag: 'NoEntry'
-  readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
-  readonly requirements?: ReadonlyArray<Type.Requirement>
-  readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-  readonly report: ReadonlyArray<DriverPhaseReport>
 }
 
 /** Target selection stopped compilation before MIR lowering. */
@@ -273,7 +257,7 @@ export class SourceResolutionFailed extends Data.TaggedError('SourceResolutionFa
 }> {}
 
 /** The closed outcome of one driver run. */
-export type Outcome = Compiled | Rejected | NoEntry | TargetFailed | BackendFailed | ToolchainFailed
+export type Outcome = Compiled | Rejected | TargetFailed | BackendFailed | ToolchainFailed
 
 const commitLibraryInterface = Effect.fnUntraced(function* (
   request: CompileRequest,
@@ -430,14 +414,6 @@ export const compile = Effect.fn('Driver.compile')(function* (
       diagnostics: preparation.diagnostics,
       report: Object.freeze([...report]),
     })
-  if (preparation._tag === 'NoEntry')
-    return Object.freeze({
-      _tag: 'NoEntry',
-      reason: preparation.reason,
-      ...(preparation.requirements === undefined ? {} : { requirements: preparation.requirements }),
-      diagnostics: preparation.diagnostics,
-      report: Object.freeze([...report]),
-    })
   if (preparation._tag === 'TargetFailed')
     return Object.freeze({
       _tag: 'TargetFailed',
@@ -449,7 +425,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
   const stage = request.stage ?? 'final'
   const plannedArtifact = yield* Effect.result(
     ArtifactPlan.make(
-      frontend,
+      preparation.frontend,
       preparation.profile,
       preparation.composition,
       program,
@@ -538,7 +514,6 @@ export const compile = Effect.fn('Driver.compile')(function* (
       ? decodeCachedEmission(
           (yield* NativeToolchain.readArtifactCache(emissionCache, emissionCacheKey)) ??
             new Uint8Array(0),
-          program,
           target,
         )
       : undefined
@@ -675,9 +650,7 @@ export const compile = Effect.fn('Driver.compile')(function* (
       : undefined
   const runtimeSource = NativeToolchain.artifactRuntimeSource(
     cacheKind,
-    artifact.termination,
     artifact.nativeRuntimeSymbols,
-    program.entry._tag !== 'NoInvocation',
   )
   const cacheKey =
     artifactCache !== undefined && artifact._tag === 'LlvmBitcodeArtifact'
@@ -732,7 +705,6 @@ export const compile = Effect.fn('Driver.compile')(function* (
         foreignExports: artifact.foreignExports,
         foreignStatics: artifact.foreignStatics,
         ...(libraryInterface === undefined ? {} : { libraryInterface }),
-        ...(ArtifactKind.isLibrary(cacheKind) ? {} : { termination: artifact.termination }),
         diagnostics,
         report: Object.freeze([...report]),
         toolchainIdentity: distribution.digest,
@@ -777,7 +749,6 @@ export const compile = Effect.fn('Driver.compile')(function* (
             foreignImports: artifact.foreignImports,
             foreignExports: artifact.foreignExports,
             foreignStatics: artifact.foreignStatics,
-            termination: artifact.termination,
             diagnostics,
             report: Object.freeze([...report]),
             toolchainIdentity: distribution.digest,
@@ -824,25 +795,12 @@ export const compile = Effect.fn('Driver.compile')(function* (
           ? [...nativeLinkInputs, ...HelperCapability.linkInputs(helpers)]
           : nativeLinkInputs
 
-        if (program.entry._tag !== 'NoInvocation' || artifact.nativeRuntimeSymbols.length > 0) {
+        if (artifact.nativeRuntimeSymbols.length > 0) {
           const runtime = yield* PhaseReport.measureEffectInto(
             report,
             'runtime',
             1,
-            program.entry._tag !== 'NoInvocation'
-              ? NativeToolchain.compileExecutableRuntime(
-                  toolchain,
-                  scope,
-                  target,
-                  artifact.termination,
-                  artifact.nativeRuntimeSymbols,
-                )
-              : NativeToolchain.compileRuntime(
-                  toolchain,
-                  scope,
-                  target,
-                  artifact.nativeRuntimeSymbols,
-                ),
+            NativeToolchain.compileRuntime(toolchain, scope, target),
             () => 1,
             () => 0,
             { heapBytes },
@@ -952,7 +910,6 @@ export const compile = Effect.fn('Driver.compile')(function* (
           foreignExports: artifact.foreignExports,
           foreignStatics: artifact.foreignStatics,
           ...(libraryInterface === undefined ? {} : { libraryInterface }),
-          ...(ArtifactKind.isLibrary(cacheKind) ? {} : { termination: artifact.termination }),
           diagnostics,
           report: Object.freeze([...report]),
           toolchainIdentity: distribution.digest,

@@ -1,3 +1,9 @@
+import * as NativeDiagnosticTransfer from './NativeDiagnosticTransfer.js'
+import * as NativeResult from './NativeResult.js'
+import * as NativeDiagnosticOutcome from './NativeDiagnosticOutcome.js'
+import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
+import * as ContinuationTransfer from './ContinuationTransfer.js'
+import * as NativeExecutionStorage from './NativeExecutionStorage.js'
 import * as Alignment from '@silklang/llvm/Alignment'
 import * as LlvmBlock from '@silklang/llvm/Block'
 import type * as Builder from '@silklang/llvm/Builder'
@@ -24,8 +30,11 @@ export interface ReturnContext {
   readonly pointer: LlvmType.Type
   readonly entry: NativeLoweringContext.DeclaredFunction
   readonly invocationFrameStorage?: Value.Input
-  readonly coroutineFramePop?: FunctionActor.Function
+  readonly executionStorage?: NativeExecutionStorage.NativeExecutionStorage
+  readonly transferPointer?: Value.Input
+  readonly lanePointers: NativeLanePointer.Context
   readonly types: NativeType.LoweringContext
+  readonly diagnostic?: NativeDiagnosticContext.NativeDiagnosticContext
 }
 
 /** Emits one suspension-step ABI return and releases a completed invocation frame. */
@@ -34,16 +43,36 @@ export const returnStep = Effect.fnUntraced(function* (
   status: bigint,
   values: ReadonlyArray<Value.Input>,
   tag: string,
-): Effect.fn.Return<void, LlvmError.LlvmError> {
+  diagnostic?: Value.Input,
+): Effect.fn.Return<FunctionBody.Instruction, LlvmError.LlvmError> {
   if (!context.entry.suspendable)
     throw new RangeError('LLVM synchronous function cannot return a suspension step')
+  if (diagnostic !== undefined && context.entry.diagnosticResult === undefined)
+    throw new RangeError('LLVM suspension return cannot discard diagnostic ownership')
   if (status === 0n && context.invocationFrameStorage !== undefined) {
-    if (context.coroutineFramePop === undefined)
+    if (context.executionStorage === undefined || context.transferPointer === undefined)
       throw new RangeError('LLVM suspension step lost private frame release')
-    yield* FunctionBody.callDirect(
-      context.body,
-      context.coroutineFramePop,
+    yield* NativeExecutionStorage.invoke(
+      {
+        builder: context.builder,
+        body: context.body,
+        pointer: context.pointer,
+        storage: context.executionStorage,
+      },
+      'release',
       [
+        yield* FunctionBody.load(
+          context.body,
+          context.pointer,
+          yield* NativeLanePointer.lanePointer(
+            context.lanePointers,
+            context.body,
+            context.transferPointer,
+            NativeExecutionStorage.stateOffset(context.types.program.layout.target.pointerSize),
+            `${tag}_storage_slot`,
+          ),
+          `${tag}_storage_state`,
+        ),
         yield* FunctionBody.load(
           context.body,
           context.pointer,
@@ -55,6 +84,10 @@ export const returnStep = Effect.fnUntraced(function* (
     )
   }
   const padded = [...values]
+  const resultDiagnostic =
+    context.entry.diagnosticResult === undefined
+      ? undefined
+      : (diagnostic ?? (yield* Constant.nullValue(context.builder, context.entry.diagnosticResult)))
   const resultLanes = NativeType.lanesFor(context.types, context.entry.fn.result)
   while (padded.length < resultLanes.length) {
     const lane = resultLanes.at(padded.length)
@@ -63,14 +96,20 @@ export const returnStep = Effect.fnUntraced(function* (
       yield* Constant.nullValue(context.builder, NativeType.laneType(context.types, lane)),
     )
   }
-  yield* FunctionBody.returnValue(
+  return yield* FunctionBody.returnValue(
     context.body,
     yield* FunctionBody.buildAggregate(
       context.body,
       context.entry.emittedResultType,
       Object.freeze([
         yield* Constant.integerUnsigned(context.builder, context.i32, status),
-        ...padded.slice(0, resultLanes.length),
+        ...NativeResult.fields(
+          {
+            values: padded.slice(0, resultLanes.length),
+            ...(resultDiagnostic === undefined ? {} : { diagnostic: resultDiagnostic }),
+          },
+          { resultLaneCount: resultLanes.length, diagnosticResult: resultDiagnostic !== undefined },
+        ),
       ]),
       tag,
     ),
@@ -119,6 +158,7 @@ export interface ThunkContext {
     }
   >
   readonly types: NativeType.LoweringContext
+  readonly executionStorage?: NativeExecutionStorage.NativeExecutionStorage
   readonly transferHeaderSize: number
   readonly transferResultOffset: number
   readonly transferStorageSize: number
@@ -140,6 +180,7 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
     originThunks,
     resumeThunks,
     types,
+    executionStorage,
     transferHeaderSize,
     transferResultOffset,
     transferStorageSize,
@@ -187,6 +228,38 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
             ),
           )
         }
+        if (target.diagnosticParameter !== undefined) {
+          if (arguments_.length !== target.diagnosticParameter)
+            throw new RangeError('Child observer argument lost its source lane position')
+          const causeType = target.parameterTypes.at(target.diagnosticParameter + 1)
+          if (causeType === undefined) throw new RangeError('Child call lost diagnostic cause type')
+          arguments_.push(
+            yield* FunctionBody.load(
+              body,
+              pointer,
+              yield* NativeLanePointer.lanePointer(
+                lanePointers,
+                body,
+                transfer,
+                ContinuationTransfer.observerOffset(program.layout.target.pointerSize),
+                'child_observer_ptr',
+              ),
+              'child_observer',
+            ),
+            yield* FunctionBody.load(
+              body,
+              causeType,
+              yield* NativeLanePointer.lanePointer(
+                lanePointers,
+                body,
+                transfer,
+                ContinuationTransfer.causeOffset(program.layout.target.pointerSize),
+                'child_cause_ptr',
+              ),
+              'child_cause',
+            ),
+          )
+        }
         const result = yield* FunctionBody.callDirect(
           body,
           target.handle,
@@ -213,6 +286,16 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
           status = yield* Constant.integerUnsigned(builder, i32, 0n)
         }
         if (status === undefined) throw new RangeError('LLVM child thunk lost status')
+        const unpacked = yield* NativeResult.unpack(
+          body,
+          {
+            resultLaneCount: target.resultLaneCount,
+            diagnosticResult: target.diagnosticResult !== undefined,
+          },
+          result,
+          'child_result',
+          target.suspendable ? 'SuspensionStep' : 'Synchronous',
+        )
         const resultLanes = NativeType.lanesFor(types, target.fn.result)
         const resultPacked = NativeType.packLanes(
           program.layout.target,
@@ -220,19 +303,7 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
           transferResultOffset,
         )
         for (const [ordinal, lane] of resultPacked.entries.entries()) {
-          let value: Value.Input | undefined
-          if (resultLanes.length === 1 && !target.suspendable) {
-            value = result
-          } else if (result === undefined) {
-            value = undefined
-          } else {
-            value = yield* FunctionBody.extractValue(
-              body,
-              result,
-              [target.suspendable ? ordinal + 1 : ordinal],
-              `child_result${ordinal}`,
-            )
-          }
+          const value = unpacked.values.at(ordinal)
           if (value === undefined) throw new RangeError('LLVM child thunk lost result lane')
           yield* FunctionBody.store(
             body,
@@ -246,6 +317,11 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
             ),
           )
         }
+        if (unpacked.diagnostic !== undefined)
+          yield* NativeDiagnosticTransfer.publish(
+            { builder, body, wordSize: program.layout.target.pointerSize, transfer },
+            unpacked.diagnostic,
+          )
         yield* FunctionBody.returnValue(body, status)
       }),
     )
@@ -271,6 +347,12 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
         const parameters = resume.owner.fn.localTypes
           .slice(0, resume.owner.fn.parameterCount)
           .flatMap((type) => NativeType.lanesFor(types, type))
+        const causeType =
+          resume.owner.diagnosticParameter === undefined
+            ? undefined
+            : resume.owner.parameterTypes.at(resume.owner.diagnosticParameter + 1)
+        if (resume.owner.diagnosticParameter !== undefined && causeType === undefined)
+          throw new RangeError('Resume call lost diagnostic cause type')
         const result = yield* FunctionBody.callDirect(
           body,
           resume.owner.handle,
@@ -278,6 +360,34 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
             ...(yield* Effect.forEach(parameters, (lane) =>
               Constant.nullValue(builder, NativeType.laneType(types, lane)),
             )),
+            ...(causeType === undefined
+              ? []
+              : [
+                  yield* FunctionBody.load(
+                    body,
+                    pointer,
+                    yield* NativeLanePointer.lanePointer(
+                      lanePointers,
+                      body,
+                      frame,
+                      program.layout.target.pointerSize * 2,
+                      'resume_observer_ptr',
+                    ),
+                    'resume_observer',
+                  ),
+                  yield* FunctionBody.load(
+                    body,
+                    causeType,
+                    yield* NativeLanePointer.lanePointer(
+                      lanePointers,
+                      body,
+                      frame,
+                      program.layout.target.pointerSize * 3,
+                      'resume_cause_ptr',
+                    ),
+                    'resume_cause',
+                  ),
+                ]),
             transfer,
             frame,
             yield* Constant.integerUnsigned(builder, i32, BigInt(ordinal + 1)),
@@ -286,18 +396,24 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
         )
         if (result === undefined) throw new RangeError('LLVM resume thunk lost step result')
         const status = yield* FunctionBody.extractValue(body, result, [0], 'resume_status')
+        const unpacked = yield* NativeResult.unpack(
+          body,
+          {
+            resultLaneCount: resume.owner.resultLaneCount,
+            diagnosticResult: resume.owner.diagnosticResult !== undefined,
+          },
+          result,
+          'resume_result',
+          'SuspensionStep',
+        )
         const resultPacked = NativeType.packLanes(
           program.layout.target,
           NativeType.lanesFor(types, resume.owner.fn.result),
           transferResultOffset,
         )
         for (const [laneOrdinal, lane] of resultPacked.entries.entries()) {
-          const value = yield* FunctionBody.extractValue(
-            body,
-            result,
-            [laneOrdinal + 1],
-            `resume_result${laneOrdinal}`,
-          )
+          const value = unpacked.values.at(laneOrdinal)
+          if (value === undefined) throw new RangeError('LLVM resume thunk lost result lane')
           yield* FunctionBody.store(
             body,
             yield* FunctionBody.freeze(body, value, `resume_result${laneOrdinal}_stable`),
@@ -310,6 +426,11 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
             ),
           )
         }
+        if (unpacked.diagnostic !== undefined)
+          yield* NativeDiagnosticTransfer.publish(
+            { builder, body, wordSize: program.layout.target.pointerSize, transfer },
+            unpacked.diagnostic,
+          )
         yield* FunctionBody.returnValue(body, status)
       }),
     )
@@ -335,6 +456,27 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
           alignment: yield* Alignment.fromByteUnits(program.layout.target.pointerAlignment),
         })
         const nullPointer = yield* Constant.nullValue(builder, pointer)
+        if (executionStorage === undefined || usizeType === undefined)
+          throw new RangeError('Suspension driver lost storage component')
+        const stateSlot = yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
+          transfer,
+          NativeExecutionStorage.stateOffset(program.layout.target.pointerSize),
+          'suspend_storage_slot',
+        )
+        yield* FunctionBody.store(body, nullPointer, stateSlot)
+        yield* FunctionBody.store(
+          body,
+          nullPointer,
+          yield* NativeLanePointer.lanePointer(
+            lanePointers,
+            body,
+            transfer,
+            program.layout.target.pointerSize * 3,
+            'suspend_unowned_execution_slot',
+          ),
+        )
         yield* FunctionBody.store(
           body,
           nullPointer,
@@ -374,32 +516,40 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
           drive,
         )
         const returnMachineResult = Effect.fnUntraced(function* (
-          values: ReadonlyArray<Value.Input>,
+          completed: NativeResult.NativeResult,
           tag: string,
         ) {
-          if (machine.resultLaneCount === 0) return yield* FunctionBody.returnVoid(body)
-          if (machine.resultLaneCount === 1) {
-            const value = values.at(0)
-            if (value === undefined) throw new RangeError('LLVM driver lost scalar result')
-            return yield* FunctionBody.returnValue(body, value)
-          }
-          return yield* FunctionBody.returnValue(
-            body,
-            yield* FunctionBody.buildAggregate(body, machine.resultType, values, tag),
+          yield* NativeExecutionStorage.destroy(
+            { builder, body, pointer, usizeType, storage: executionStorage },
+            stateSlot,
+            `${tag}_storage`,
           )
+          const result = yield* NativeResult.pack(
+            completed,
+            { body },
+            {
+              resultLaneCount: machine.resultLaneCount,
+              diagnosticResult: machine.diagnosticResult !== undefined,
+            },
+            machine.resultType,
+            tag,
+          )
+          return result === undefined
+            ? yield* FunctionBody.returnVoid(body)
+            : yield* FunctionBody.returnValue(body, result)
         })
         yield* LlvmBlock.setInsertionPoint(body, initialComplete)
-        const initialValues: Array<Value.Input> = []
-        for (let ordinal = 0; ordinal < machine.resultLaneCount; ordinal += 1)
-          initialValues.push(
-            yield* FunctionBody.extractValue(
-              body,
-              initial,
-              [ordinal + 1],
-              `suspend_initial_result${ordinal}`,
-            ),
-          )
-        yield* returnMachineResult(Object.freeze(initialValues), 'suspend_initial_result')
+        const initialResult = yield* NativeResult.unpack(
+          body,
+          {
+            resultLaneCount: machine.resultLaneCount,
+            diagnosticResult: machine.diagnosticResult !== undefined,
+          },
+          initial,
+          'suspend_initial_result',
+          'SuspensionStep',
+        )
+        yield* returnMachineResult(initialResult, 'suspend_initial_result')
         yield* LlvmBlock.setInsertionPoint(body, drive)
         const child = yield* FunctionBody.load(
           body,
@@ -550,13 +700,27 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
               `suspend_final_result${ordinal}`,
             ),
           )
-        yield* returnMachineResult(Object.freeze(finalValues), 'suspend_final_result')
+        const diagnostic =
+          machine.diagnosticResult === undefined
+            ? undefined
+            : yield* NativeDiagnosticTransfer.take(
+                { builder, body, wordSize: program.layout.target.pointerSize, transfer },
+                machine.diagnosticResult,
+              )
+        yield* returnMachineResult(
+          {
+            values: Object.freeze(finalValues),
+            ...(diagnostic === undefined ? {} : { diagnostic }),
+          },
+          'suspend_final_result',
+        )
       }),
     )
   }
 })
 
 export interface OperationContext {
+  readonly diagnostic?: NativeDiagnosticContext.NativeDiagnosticContext
   readonly builder: Builder.Builder
   readonly body: FunctionBody.FunctionBody
   readonly program: Mir.Module
@@ -678,6 +842,31 @@ const originateTransfer = Effect.fnUntraced(function* (
       `${name}_append_ptr`,
     ),
   )
+  yield* FunctionBody.store(
+    body,
+    context.diagnostic === undefined
+      ? yield* Constant.nullValue(builder, context.pointer)
+      : yield* NativeDiagnosticContext.current(context.diagnostic),
+    yield* NativeLanePointer.lanePointer(
+      lanePointers,
+      body,
+      transferPointer,
+      ContinuationTransfer.observerOffset(program.layout.target.pointerSize),
+      `${name}_observer`,
+    ),
+  )
+  if (context.diagnostic !== undefined)
+    yield* FunctionBody.store(
+      body,
+      yield* NativeDiagnosticContext.currentCause(context.diagnostic),
+      yield* NativeLanePointer.lanePointer(
+        lanePointers,
+        body,
+        transferPointer,
+        ContinuationTransfer.causeOffset(program.layout.target.pointerSize),
+        `${name}_cause`,
+      ),
+    )
   const packed = NativeType.packLanes(
     program.layout.target,
     logicalLanes(entry.fn, NativeCall.operationInputs(region.operation), types),
@@ -740,7 +929,7 @@ export const joinOutcome = Effect.fnUntraced(function* (
     Mir.Operation,
     { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' }
   >,
-  completedValues: ReadonlyArray<Value.Input>,
+  completedResult: NativeResult.NativeResult,
   name: string,
 ) {
   const {
@@ -760,6 +949,11 @@ export const joinOutcome = Effect.fnUntraced(function* (
     transferResultOffset,
     types,
   } = context
+  const completedValues = yield* NativeDiagnosticOutcome.accept(
+    context.returns.diagnostic,
+    operation.outcome,
+    completedResult,
+  )
   const suspension = suspensionRegions.get(operation)
   const descriptor =
     suspension?._tag === 'RunSuspendableEffectRegion' ? suspension.relay.state : undefined
@@ -774,6 +968,18 @@ export const joinOutcome = Effect.fnUntraced(function* (
   const following = yield* LlvmBlock.make(body, `${name}_joined`)
   yield* FunctionBody.branch(body, following)
   yield* LlvmBlock.setInsertionPoint(body, resumeBlock)
+  if (completedResult.diagnostic !== undefined) {
+    const diagnosticContext = context.returns.diagnostic
+    if (diagnosticContext === undefined)
+      throw new RangeError('Resumed result lost its diagnostic context')
+    yield* NativeDiagnosticOutcome.accept(diagnosticContext, operation.outcome, {
+      values: [],
+      diagnostic: yield* NativeDiagnosticTransfer.take(
+        { builder, body, wordSize: program.layout.target.pointerSize, transfer: transferPointer },
+        diagnosticContext.causeType,
+      ),
+    })
+  }
   for (const field of generated.layout.payload) {
     const type = entry.fn.localTypes.at(field.local.ordinal)
     const storage = nativeStorage.mutableStorage.get(field.local.ordinal)

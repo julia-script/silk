@@ -1,3 +1,4 @@
+import * as TestToolchain from './support/TestToolchain.js'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -221,7 +222,7 @@ const failuresIn = (name: string, cases: ReadonlyArray<Case>) =>
     const source = program(cases)
     const compiled = yield* Driver.compile({
       compilation: { root: SourceFile.make(name, ascii(source)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
+      toolchain: yield* TestToolchain.configured,
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, name.replaceAll('/', '-')),

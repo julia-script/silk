@@ -1,3 +1,5 @@
+import * as NativeDiagnosticOutcome from './NativeDiagnosticOutcome.js'
+import * as NativeExecutionStorage from './NativeExecutionStorage.js'
 import * as NativeAssemblyOperation from './NativeAssemblyOperation.js'
 import * as Alignment from '@silklang/llvm/Alignment'
 import * as LlvmBlock from '@silklang/llvm/Block'
@@ -25,7 +27,7 @@ import * as NativeControl from './NativeControl.js'
 import * as NativeDebug from './NativeDebug.js'
 import type * as NativeForeignOperation from './NativeForeignOperation.js'
 import type * as NativeHostFailure from './NativeHostFailure.js'
-import type * as NativeLanePointer from './NativeLanePointer.js'
+import * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeOperation from './NativeOperation.js'
 import type * as NativeOperationContext from './NativeOperationContext.js'
@@ -33,6 +35,8 @@ import * as NativeStorage from './NativeStorage.js'
 import type * as NativeSuspension from './NativeSuspension.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
+import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
+import * as NativeDiagnosticScope from './NativeDiagnosticScope.js'
 
 export interface MutableRoots {
   readonly mutable: ReadonlySet<number>
@@ -142,6 +146,13 @@ export const discoverRoots = (
   const address = new Set([
     ...blocks.flatMap((block) =>
       block.operations.flatMap((operation) =>
+        operation._tag === 'EnterDiagnosticScope'
+          ? [operation.state.ordinal, operation.observer.ordinal]
+          : [],
+      ),
+    ),
+    ...blocks.flatMap((block) =>
+      block.operations.flatMap((operation) =>
         operation._tag === 'BeginLoan' &&
         (Mir.borrowsDescriptor(operation) ||
           (operation.sourceType._tag !== 'Slice' &&
@@ -188,18 +199,9 @@ export interface EmissionContext {
   >
   readonly malloc?: FunctionActor.Function
   readonly free?: FunctionActor.Function
-  readonly coroutineFramePush?: FunctionActor.Function
-  readonly coroutineFramePop?: FunctionActor.Function
+  readonly executionStorage?: NativeExecutionStorage.NativeExecutionStorage
   readonly executionRelease?: FunctionActor.Function
   readonly memcmp?: FunctionActor.Function
-  readonly osRuntimes: ReadonlyMap<
-    string,
-    {
-      readonly handle: FunctionActor.Function
-      readonly resultLaneCount: number
-      readonly symbol: string
-    }
-  >
   readonly foreignIndirects: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly foreignFunctions: ReadonlyMap<string, NativeForeignOperation.Declaration>
   readonly foreignStatics: ReadonlyMap<string, NativeForeignOperation.StaticDeclaration>
@@ -259,11 +261,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
     unsignedOverflowSignatures,
     malloc,
     free,
-    coroutineFramePush,
-    coroutineFramePop,
+    executionStorage,
     executionRelease,
     memcmp,
-    osRuntimes,
     foreignIndirects,
     foreignFunctions,
     foreignStatics,
@@ -376,11 +376,40 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
             ? yield* FunctionBody.alloca(body, pointer, 'suspend_invocation_frame_slot')
             : undefined
         const operationState: NativeOperation.State = { trapBlocks: [], checkOrdinal: 0 }
+        const diagnostic =
+          entry.diagnosticParameter === undefined
+            ? undefined
+            : yield* NativeDiagnosticContext.make(
+                builder,
+                body,
+                pointer,
+                i8,
+                integerTypes.get(program.layout.target.pointerSize * 8) ?? i32,
+                yield* Value.argument(body, entry.diagnosticParameter),
+                yield* Value.argument(body, entry.diagnosticParameter + 1),
+              )
+        // A transfer-only runner can use the suspension ABI without retaining a
+        // resumable frame. Its outcome slots belong to this native invocation;
+        // child results escape through the separate transfer result record.
+        if (diagnostic !== undefined && invocationFrameStorage === undefined) {
+          for (const outcome of Mir.diagnosticOutcomeLocals(program, entry.fn)) {
+            const slot = Object.freeze({
+              storage: yield* FunctionBody.alloca(
+                body,
+                diagnostic.causeType,
+                `diagnostic_outcome${outcome.ordinal}`,
+              ),
+            })
+            yield* NativeDiagnosticOutcome.initialize(slot, diagnostic)
+            diagnostic.outcomes.set(outcome.ordinal, slot)
+          }
+        }
         const terminationContext: NativeTermination.FunctionContext = Object.freeze({
           module: termination,
           body,
           fn: entry.fn,
           state: operationState,
+          ...(diagnostic === undefined ? {} : { diagnostic }),
         })
         const locals = new Map<number, ReadonlyArray<Value.Input>>()
         const roots = discoverRoots(entry.fn, entry.linear)
@@ -429,7 +458,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           const layout =
             logicalType === undefined
               ? undefined
-              : Layout.entry(program.layout, Mir.semanticType(logicalType))
+              : NativeType.addressLayout(program.layout, logicalType)
           if (logicalType === undefined || layout === undefined) {
             throw new RangeError(`Backend lost address-taken value %${root}`)
           }
@@ -488,6 +517,21 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
             `addr${root}_zero`,
           )
         }
+        const diagnosticScopes =
+          diagnostic === undefined
+            ? new Map<number, NativeDiagnosticScope.NativeDiagnosticScope>()
+            : yield* NativeDiagnosticScope.prepare({
+                builder,
+                body,
+                entry,
+                declared,
+                diagnostic,
+                program,
+                types: nativeTypes,
+                lanePointers,
+              })
+        if (entry.suspendable && diagnosticScopes.size > 0 && coroutineFrame === undefined)
+          throw new RangeError('Suspended diagnostic scope lost its persistent frame')
         let physicalParameter = 0
         for (let ordinal = 0; ordinal < entry.fn.parameterCount; ordinal += 1) {
           const logicalType = entry.fn.localTypes.at(ordinal)
@@ -552,6 +596,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
             )
           }
         }
+        if (entry.diagnosticParameter !== undefined) physicalParameter += 2
         const transferPointer = entry.suspendable
           ? yield* Value.argument(body, physicalParameter)
           : undefined
@@ -577,7 +622,8 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           if (coroutineFrame !== undefined) {
             if (
               invocationFrameStorage === undefined ||
-              coroutineFramePush === undefined ||
+              executionStorage === undefined ||
+              transferPointer === undefined ||
               usizeType === undefined ||
               frameReuseBlock === undefined ||
               frameAllocateBlock === undefined ||
@@ -609,10 +655,22 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
             yield* FunctionBody.store(body, resumeFrame, invocationFrameStorage)
             yield* FunctionBody.branch(body, frameAcquiredBlock)
             yield* LlvmBlock.setInsertionPoint(body, frameAllocateBlock)
-            const allocatedFrame = yield* FunctionBody.callDirect(
-              body,
-              coroutineFramePush,
+            const state = yield* NativeExecutionStorage.ensure(
+              { builder, body, pointer, usizeType, storage: executionStorage },
+              yield* NativeLanePointer.lanePointer(
+                lanePointers,
+                body,
+                transferPointer,
+                NativeExecutionStorage.stateOffset(program.layout.target.pointerSize),
+                'suspend_storage_slot',
+              ),
+              'suspend_storage',
+            )
+            const allocatedFrame = yield* NativeExecutionStorage.invoke(
+              { builder, body, pointer, storage: executionStorage },
+              'acquire',
               [
+                state,
                 yield* Constant.integerUnsigned(
                   builder,
                   usizeType,
@@ -641,12 +699,34 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
               yield* Constant.integerUnsigned(builder, usizeType, 0n),
               'suspend_invocation_frame_exhausted',
             )
+            yield* FunctionBody.store(body, allocatedFrame, invocationFrameStorage)
             yield* FunctionBody.conditionalBranch(body, exhausted, frameTrapBlock, framePushedBlock)
             yield* LlvmBlock.setInsertionPoint(body, frameTrapBlock)
             yield* Intrinsic.call(body, 'trap', [], [])
             yield* FunctionBody.unreachable(body)
             yield* LlvmBlock.setInsertionPoint(body, framePushedBlock)
-            yield* FunctionBody.store(body, allocatedFrame, invocationFrameStorage)
+            const pushedFrame = yield* FunctionBody.load(
+              body,
+              pointer,
+              invocationFrameStorage,
+              'suspend_pushed_frame',
+            )
+            if (diagnostic !== undefined) {
+              for (const field of coroutineFrame.diagnosticOutcomes) {
+                yield* NativeDiagnosticOutcome.initialize(
+                  {
+                    storage: yield* NativeLanePointer.lanePointer(
+                      lanePointers,
+                      body,
+                      pushedFrame,
+                      field.offset,
+                      `suspend_initialize_outcome${field.outcome.ordinal}`,
+                    ),
+                  },
+                  diagnostic,
+                )
+              }
+            }
             for (const [root, field] of stableAddressFields) {
               if (root >= entry.fn.parameterCount) continue
               const logicalType = entry.fn.localTypes.at(root)
@@ -656,19 +736,22 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
               const base = yield* FunctionBody.getElementPtr(
                 body,
                 i8,
-                allocatedFrame,
+                pushedFrame,
                 [yield* Constant.integerUnsigned(builder, i32, BigInt(field.offset))],
                 `suspend_parameter_root${root}`,
               )
               for (const [ordinal, lane] of valueLanesFor(logicalType).entries()) {
-                const offset = LayoutVerify.laneOffset(
+                const offset = NativeType.addressLaneOffset(
                   program.layout,
-                  Mir.semanticType(logicalType),
-                  lane.path,
+                  logicalType,
+                  lane,
+                  ordinal,
                 )
                 const value = values.at(ordinal)
                 if (offset === undefined || value === undefined)
-                  throw new RangeError(`LLVM coroutine parameter root %${root} lost a lane`)
+                  throw new RangeError(
+                    `LLVM coroutine parameter root %${root} lost lane ${ordinal} in ${entry.fn.id.module}.${entry.fn.id.name}: offset=${offset}, values=${values.length}, type=${logicalType._tag}`,
+                  )
                 yield* FunctionBody.store(
                   body,
                   value,
@@ -690,6 +773,40 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
               invocationFrameStorage,
               'suspend_selected_invocation_frame',
             )
+            if (diagnostic !== undefined) {
+              for (const field of coroutineFrame.diagnosticOutcomes) {
+                diagnostic.outcomes.set(
+                  field.outcome.ordinal,
+                  Object.freeze({
+                    storage: yield* NativeLanePointer.lanePointer(
+                      lanePointers,
+                      body,
+                      invocationFrame,
+                      field.offset,
+                      `suspend_diagnostic_outcome${field.outcome.ordinal}`,
+                    ),
+                  }),
+                )
+              }
+            }
+            for (const field of coroutineFrame.diagnosticScopes) {
+              const scope = diagnosticScopes.get(field.scope.ordinal)
+              if (scope === undefined)
+                throw new RangeError('Persistent diagnostic descriptor lost its scope')
+              diagnosticScopes.set(
+                field.scope.ordinal,
+                Object.freeze({
+                  ...scope,
+                  record: yield* NativeLanePointer.lanePointer(
+                    lanePointers,
+                    body,
+                    invocationFrame,
+                    field.offset,
+                    `suspend_diagnostic_scope${field.scope.ordinal}`,
+                  ),
+                }),
+              )
+            }
             for (const [root, field] of stableAddressFields) {
               addressStorage.set(
                 root,
@@ -745,9 +862,12 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           i32,
           pointer,
           entry,
+          lanePointers,
+          ...(transferPointer === undefined ? {} : { transferPointer }),
           ...(invocationFrameStorage === undefined ? {} : { invocationFrameStorage }),
-          ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
+          ...(executionStorage === undefined ? {} : { executionStorage }),
           types: nativeTypes,
+          ...(diagnostic === undefined ? {} : { diagnostic }),
         })
         const hostFailureContext: NativeHostFailure.Context = Object.freeze({
           builder,
@@ -755,10 +875,12 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           entry,
           types: nativeTypes,
           suspension: suspensionReturnContext,
+          termination: terminationContext,
         })
         const synchronousCallContext: NativeCall.SynchronousContext = Object.freeze({
           body,
           storage: storageContext,
+          ...(diagnostic === undefined ? {} : { diagnostic }),
         })
         const arithContext: NativeArith.OperationContext = Object.freeze({
           builder,
@@ -774,6 +896,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           termination: terminationContext,
         })
         const suspensionContext: NativeSuspension.OperationContext = Object.freeze({
+          ...(diagnostic === undefined ? {} : { diagnostic }),
           builder,
           body,
           program,
@@ -821,7 +944,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           pointer,
           ...(usizeType === undefined ? {} : { usizeType }),
           ...(free === undefined ? {} : { free }),
-          ...(coroutineFramePop === undefined ? {} : { coroutineFramePop }),
+          ...(executionStorage === undefined ? {} : { executionStorage }),
           ...(executionRelease === undefined ? {} : { executionRelease }),
           declared,
           resumeThunks,
@@ -833,6 +956,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
         })
 
         const actorContext: NativeOperationContext.Context = Object.freeze({
+          diagnosticScopes,
           runtimeFeatures,
           builder,
           body,
@@ -854,7 +978,6 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           ...(malloc === undefined ? {} : { malloc }),
           ...(free === undefined ? {} : { free }),
           ...(memcmp === undefined ? {} : { memcmp }),
-          osRuntimes,
           foreignIndirects,
           foreignFunctions,
           foreignStatics,
@@ -886,6 +1009,19 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           const blockHandle = blocks.get(block.id.ordinal)
           if (blockHandle === undefined) continue
           yield* LlvmBlock.setInsertionPoint(body, blockHandle)
+          if (diagnostic !== undefined) {
+            const recovered = block.recoveryOutcomes?.at(-1)
+            const slot =
+              recovered === undefined ? undefined : diagnostic.outcomes.get(recovered.ordinal)
+            if (recovered !== undefined && slot === undefined)
+              throw new RangeError('Selected recovery lost its diagnostic outcome storage')
+            let cause =
+              block.recoveryBoundary === undefined
+                ? diagnostic.incomingCause
+                : yield* Constant.nullValue(builder, diagnostic.causeType)
+            if (slot !== undefined) cause = yield* NativeDiagnosticOutcome.borrow(slot, diagnostic)
+            yield* FunctionBody.store(body, cause, diagnostic.cause)
+          }
           if (blockOrdinal > 0)
             yield* NativeStorage.reloadRoots(storageContext, `b${block.id.ordinal}`)
           for (const operation of block.operations) {
@@ -905,6 +1041,10 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
                 NativeStorage.readLocal(storageContext, destination),
                 `addr${destination.ordinal}_defined`,
               )
+            }
+            if (diagnostic?.sourceState.dirty === true) {
+              yield* NativeStorage.reloadAddressRoots(storageContext)
+              diagnostic.sourceState.dirty = false
             }
           }
           const terminalAssembly = block.operations.at(-1)

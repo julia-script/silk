@@ -380,6 +380,7 @@ const bootstrapFacts = Effect.fnUntraced(function* (
 export const frontend = Effect.fn('Frontend.frontend')(function* (
   request: ModuleClosure.CompilationRequest,
   options: Options = {},
+  componentModules: ReadonlyArray<string> = [],
 ): Effect.fn.Return<Frontend, never, SourceResolver.SourceResolver> {
   const initialInput =
     request.configuration?.profile ??
@@ -423,8 +424,7 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
       ? yield* Effect.result(
           Effect.gen(function* () {
             const catalog = yield* ArtifactComposition.decode(
-              configuration?.composition ??
-                ArtifactComposition.defaults(request.root.id, initial.success),
+              configuration?.composition ?? ArtifactComposition.defaults(initial.success),
               configuration?.compositionOrigin,
             )
             return yield* ArtifactComposition.resolve(catalog, request.root.id, initial.success)
@@ -436,7 +436,7 @@ export const frontend = Effect.fn('Frontend.frontend')(function* (
   let rootError: ConfigurationError.ConfigurationError | undefined
   if (composition !== undefined && Result.isSuccess(composition)) {
     const missing: Array<string> = []
-    for (const module of composition.success.modules) {
+    for (const module of new Set([...composition.success.modules, ...componentModules])) {
       if (module === request.root.id) continue
       const resolved = yield* Effect.result(
         Stdlib.isReserved(module)
@@ -580,12 +580,12 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
   const requestedModules = new Set(application === undefined ? [] : [application])
   const failures: Array<SourceResolver.SourceResolverError> = []
   const missing: Array<string> = []
-  if (request.configuration?.composition !== undefined && application !== undefined) {
+  if (request.configuration !== undefined && application !== undefined) {
     const selectedRoots = yield* Effect.result(
       Effect.gen(function* () {
         const profile = yield* CompilationProfile.decode(request.configuration?.profile)
         const catalog = yield* ArtifactComposition.decode(
-          request.configuration?.composition,
+          request.configuration?.composition ?? ArtifactComposition.defaults(profile),
           request.configuration?.compositionOrigin,
         )
         return yield* ArtifactComposition.resolve(catalog, application, profile)
@@ -608,7 +608,7 @@ export const selectProject = Effect.fn('Frontend.selectProject')(function* (
         SourceFile.make(module, resolved.success.value.bytes, resolved.success.value.origin),
       )
   }
-  const expanded = { ...request, roots }
+  const expanded = { ...request, roots, ...(application === undefined ? {} : { application }) }
   let closure = yield* PhaseReport.measureEffectInto(
     report,
     'closure',
@@ -806,5 +806,44 @@ export const frontendProject = Effect.fn('Frontend.frontendProject')(function* (
       report: Object.freeze([...report]),
     }),
     OpaqueRealization.catalogOf(semantics),
+  )
+})
+
+/** Extends a proven source snapshot with demanded component modules through the explicit resolver. */
+export const withComponents = Effect.fn('Frontend.withComponents')(function* (
+  self: Frontend,
+  profile: CompilationProfile.CompilationProfile,
+  modules: ReadonlyArray<string>,
+  options: Options = {},
+): Effect.fn.Return<Frontend, never, SourceResolver.SourceResolver> {
+  if (modules.every((module) => self.closure.sources.has(module))) return self
+  const root = self.closure.sources.get(self.closure.rootModule)
+  if (root === undefined) throw new RangeError('Component activation lost application source')
+  const resolver = yield* SourceResolver.SourceResolver
+  const existing = (module: string) => {
+    const source = self.closure.sources.get(module)
+    return source === undefined
+      ? undefined
+      : SourceResolver.resolved(SourceFile.toUint8Array(source), source.origin)
+  }
+  const resolve = Effect.fnUntraced(function* (module: string, standard: boolean) {
+    const source = existing(module)
+    return source === undefined
+      ? yield* standard ? resolver.resolveStandardLibrary(module) : resolver.resolve(module)
+      : Option.some(source)
+  })
+  return yield* frontend(
+    {
+      root,
+      configuration: { ...self.configuration, profile: CompilationProfile.input(profile) },
+    },
+    options,
+    modules,
+  ).pipe(
+    Effect.provideService(SourceResolver.SourceResolver, {
+      ...resolver,
+      resolve: (module) => resolve(module, false),
+      resolveStandardLibrary: (module) => resolve(module, true),
+    }),
   )
 })

@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -8,7 +9,7 @@ const encoder = new TextEncoder()
 
 it.effect('terminates direct recursion discovered through a bound service implementation', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'effect-forwarding/direct-service-recursion',
       encoder.encode(`import silk.effect { Effect }
 service Loop {
@@ -38,7 +39,7 @@ pub fn main() -> i32 {
 
 it.effect('retains provider targets through expression and ordinary statement arms', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'effect-forwarding/service-branches',
       encoder.encode(`import silk.effect { Effect }
 service Choice {

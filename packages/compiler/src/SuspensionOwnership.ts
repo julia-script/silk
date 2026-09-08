@@ -1,3 +1,5 @@
+import * as ConcreteCleanup from './ConcreteCleanup.js'
+import type * as OpaqueRealization from './OpaqueRealization.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as ExecutionAffinity from './ExecutionAffinity.js'
@@ -59,6 +61,8 @@ export interface Plan {
   readonly point: ProvisionalMir.ControlId
   readonly function: Instances.InstanceKey
   readonly region: Mir.RegionId
+  /** Exact lowered call; one authored control may expand into several match-arm calls. */
+  readonly operation: Mir.Operation
   readonly span: SourceSpan.SourceSpan
   readonly frame: 'StatefulRelay'
   readonly slots: ReadonlyArray<Slot>
@@ -162,12 +166,12 @@ const operationDefinitions = (operation: Mir.Operation): ReadonlySet<number> => 
     if ('destination' in nested && nested.destination !== undefined)
       definitions.add(nested.destination.ordinal)
     if (nested._tag === 'ExecutionPark') definitions.add(nested.guard.ordinal)
+    if (nested._tag === 'UnpackEffectComposite') definitions.add(nested.matched.ordinal)
     if (
       nested._tag === 'RunEffect' ||
       nested._tag === 'RunEffectValue' ||
       nested._tag === 'RunStaticEffect' ||
-      nested._tag === 'CatchEffect' ||
-      nested._tag === 'CloseEffectEntry'
+      nested._tag === 'CatchEffect'
     )
       definitions.add(nested.outcome.ordinal)
     if (nested._tag === 'CatchEffect') {
@@ -202,7 +206,13 @@ const operationInputs = (
       nested._tag === 'Drop' &&
       !CleanupPlan.mayReadStorage(nested.cleanup, nested.initialization?.state)
         ? (nested.initialization?.flags.map((flag) => flag.local) ?? [])
-        : MirVerification.operationLocals(nested),
+        : MirVerification.operationLocals(nested).filter(
+            // Propagation reads the payload from source and only metadata from outcome.
+            // Diagnostic owners have dedicated frame fields; retaining the erased Effect
+            // as ordinary value storage would invent a second owner and has no data layout.
+            (local) =>
+              nested._tag !== 'PropagateEffectFailure' || local.ordinal !== nested.outcome.ordinal,
+          ),
     )
     .map((local) => local.ordinal)
   return new Set(
@@ -386,6 +396,14 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
               ),
             )
         }
+      } else if (operation._tag === 'DiagnosticScope') {
+        const outer = new Set(
+          [...live].filter((local) => !operationDefinitions(operation).has(local)),
+        )
+        outer.add(operation.state.ordinal)
+        outer.add(operation.observer.ordinal)
+        if (operation.body.result !== undefined) outer.add(operation.body.result.ordinal)
+        analyzeExecution(operation.body, outer)
       } else if (operation._tag === 'Conditional') {
         const outer = new Set(
           [...live].filter((local) => !operationDefinitions(operation).has(local)),
@@ -507,6 +525,7 @@ const accessOf = (
   definitions: ReadonlyMap<number, Mir.Operation>,
   local: Mir.LocalId,
   type: Mir.Type,
+  opaqueRealizations: OpaqueRealization.Catalog,
 ): Access => {
   if (type._tag === 'Reference' || type._tag === 'Slice' || type._tag === 'EnvironmentBorrow') {
     return borrowOf(fn, definitions, local)
@@ -516,7 +535,10 @@ const accessOf = (
   }
   return Object.freeze({
     _tag: 'AffineTransfer',
-    cleanup: CleanupPlan.cleanupPlan(index, Mir.semanticType(type)),
+    cleanup: ConcreteCleanup.forLocal(
+      { index, layout: program.layout, opaqueRealizations, semantic: (type) => type },
+      type,
+    ),
   })
 }
 
@@ -578,6 +600,7 @@ const planFor = (
   operation: Mir.Operation,
   live: ReadonlySet<number>,
   control: ProvisionalMir.RunControl,
+  opaqueRealizations: OpaqueRealization.Catalog,
 ): Plan => {
   const definitions = definitionMap(fn)
   const operationDefined = operationDefinitions(operation)
@@ -602,7 +625,48 @@ const planFor = (
     }
   }
   const retained = new Set([...live, ...(parkGuard === undefined ? [] : [parkGuard])])
-  for (const ordinal of live)
+  // A suspended child still uses its borrowed captures even when the parent never
+  // reads them again. Follow represented environments to the actual referents;
+  // retaining only locals live after the run leaves these pointers on the stack.
+  const visited = new Set<number>()
+  const retainReferents = (local: Mir.LocalId): void => {
+    if (visited.has(local.ordinal)) return
+    visited.add(local.ordinal)
+    const type = fn.localTypes.at(local.ordinal)
+    if (
+      type?._tag === 'Reference' ||
+      type?._tag === 'Slice' ||
+      type?._tag === 'EnvironmentBorrow'
+    ) {
+      const root = borrowOf(fn, definitions, local).root
+      if (root.ordinal !== local.ordinal) retained.add(root.ordinal)
+    }
+    const definition = definitions.get(local.ordinal)
+    if (definition?._tag === 'MakeEffect' || definition?._tag === 'MakeCallable') {
+      if (definition._tag === 'MakeCallable' && definition.base !== undefined)
+        retainReferents(definition.base)
+      for (const [ordinal, capture] of definition.captures.entries()) {
+        const borrowsStorage =
+          definition._tag === 'MakeEffect'
+            ? definition.type.environment.fields.at(ordinal)?.representation === 'Borrow'
+            : capture.access === 'Shared' || capture.access === 'Exclusive'
+        if (borrowsStorage) retained.add(borrowOf(fn, definitions, capture.source).root.ordinal)
+        retainReferents(capture.source)
+      }
+    } else if (
+      definition?._tag === 'Move' ||
+      definition?._tag === 'Project' ||
+      definition?._tag === 'ConvertUnion' ||
+      definition?._tag === 'PackEffectComposite' ||
+      definition?._tag === 'UnpackEffectComposite'
+    ) {
+      retainReferents(definition.source)
+    }
+  }
+  for (const local of MirVerification.operationLocals(operation))
+    if (!operationDefined.has(local.ordinal)) retainReferents(local)
+  for (const ordinal of live) retainReferents({ _tag: 'Local', ordinal })
+  for (const ordinal of retained)
     for (const flag of initializationOf(ordinal)?.flags ?? []) retained.add(flag.local.ordinal)
   const slots: ReadonlyArray<Slot> = Object.freeze(
     [...retained]
@@ -618,7 +682,7 @@ const planFor = (
                 _tag: 'AffineTransfer' as const,
                 cleanup: operation.guardCleanup,
               })
-            : accessOf(program, index, fn, definitions, local, type)
+            : accessOf(program, index, fn, definitions, local, type, opaqueRealizations)
         const executionAffinity = affinityOf(index, fn, type, access)
         const localSharedObligations = obligationsOf(index, type)
         let runtimeLanes: ReturnType<typeof Layout.effectEnvironmentLanes>
@@ -684,6 +748,7 @@ const planFor = (
     point: control.id,
     function: fn.instance,
     region: region.id,
+    operation,
     span: operation.provenance.span,
     // Every suspendable invocation owns one frame. Header-only states are retained because even a
     // final `run` may adapt the child's represented Effect outcome to the caller's result shape.
@@ -715,6 +780,7 @@ export const plan = (
   program: Mir.Module,
   provisional: ProvisionalMir.Module,
   index: DeclarationIndex.Index,
+  opaqueRealizations: OpaqueRealization.Catalog,
 ): Module => {
   const plans: Array<Plan> = []
   const violations: Array<Violation> = []
@@ -761,6 +827,7 @@ export const plan = (
           operation,
           live.get(operation) ?? new Set(),
           control,
+          opaqueRealizations,
         )
         const assignedFlags = MirVerification.initializationOf(fn, program.layout).flagsBefore.get(
           operation,

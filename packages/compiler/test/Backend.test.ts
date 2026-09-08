@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as ForeignContract from '../src/ForeignContract.js'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -48,7 +49,7 @@ pub fn main() -> i32 {
 }`
 
 const emit = Effect.fnUntraced(function* (text: string, request: Backend.CodegenRequest) {
-  const snapshot = yield* Analysis.ofSourceRealized(
+  const snapshot = yield* AnalysisFixture.retainingMain(
     'golden/program',
     ascii(text),
     'aarch64-apple-darwin',
@@ -61,7 +62,7 @@ const golden = (name: string): string =>
 
 it.effect('lowers scalar enums to exact native integer lanes and declared discriminants', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'golden/program',
       ascii(scalarEnumNativeWidths),
       'aarch64-apple-darwin',
@@ -93,7 +94,7 @@ it.effect('emits one artifact per program with deterministic symbols', () =>
     assert.deepEqual(
       artifact.symbols.map((entry) => entry.symbol),
       [
-        'silk_main',
+        'silk_golden_program_main__14_676f6c64656e2f70726f6772616d_4_6d61696e_18_726573756c743a6275696c74696e3a693332',
         'silk_golden_program_identity__14_676f6c64656e2f70726f6772616d_8_6964656e74697479_11_6275696c74696e3a693332_18_726573756c743a6275696c74696e3a693332',
       ],
     )
@@ -123,20 +124,27 @@ it.effect('emits byte-identical bitcode across repeated fresh runs', () =>
   }),
 )
 
-it.effect('emits target-correct LLVM bitcode for wasm32 while retaining silk_main', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
-      'golden/llvm-wasm',
-      ascii('pub fn main() -> i32 { return 42 }'),
-      'wasm32-unknown-unknown',
-    )
-    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
-    assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
-    assert.strictEqual(artifact.backend, 'llvm')
-    assert.strictEqual(artifact.target.id, 'wasm32-unknown-unknown')
-    assert.include(artifact.ir, 'target triple = "wasm32-unknown-unknown"')
-    assert.strictEqual(artifact.symbols.at(0)?.symbol, 'silk_main')
-  }),
+it.effect(
+  'emits target-correct LLVM bitcode for wasm32 while retaining its ordinary source root',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        'golden/llvm-wasm',
+        ascii(
+          'pub fn main() -> i32 { return 42 }\nexport "C" fn enter() -> i32 as "main" { return main() }',
+        ),
+        'wasm32-unknown-unknown',
+      )
+      const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+      assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
+      assert.strictEqual(artifact.backend, 'llvm')
+      assert.strictEqual(artifact.target.id, 'wasm32-unknown-unknown')
+      assert.include(artifact.ir, 'target triple = "wasm32-unknown-unknown"')
+      assert.strictEqual(artifact.symbols.at(0)?.declaration.name, 'main')
+      assert.notInclude(artifact.ir, '@silk_main')
+      assert.include(artifact.ir, '@"\\01main"()')
+      assert.notInclude(artifact.ir, '@main(')
+    }),
 )
 
 it.effect('refuses diagnosed trap bodies before backend emission', () =>
@@ -220,7 +228,7 @@ it.effect('emits checked arithmetic through overflow intrinsics and guarded divi
     assert.include(artifact.ir, 'llvm.smul.with.overflow')
     assert.include(artifact.ir, 'llvm.ssub.with.overflow')
     assert.include(artifact.ir, 'trap_site')
-    assert.include(artifact.ir, '@silk_trap_report_v1')
+    assert.notInclude(artifact.ir, '@silk_trap_report_v1')
     assert.include(division.ir, 'sdiv')
     assert.include(division.ir, 'icmp eq')
     assert.include(division.ir, '@llvm.trap()')
@@ -329,7 +337,7 @@ it.effect('publishes native branch provenance back to canonical loop regions', (
 
 it.effect('declares each reachable foreign symbol once and calls through its unwind guard', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'backend/foreign-native',
       ascii(`import silk.i32 as i32
 import silk.usize as usize
@@ -398,7 +406,7 @@ pub fn main() -> i32 {
 
 it.effect('rejects a foreign declaration of a symbol the native backend declares itself', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'backend/foreign-malloc',
       ascii(`import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
@@ -428,7 +436,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`),
 
 it.effect('defines one C thunk per export that forwards to the private implementation', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'backend/foreign-export',
       ascii(`export "C" fn silk_test_double_v1(value: i32) -> i32 { return value * 2 }
 pub fn main() -> i32 { return 0 }`),
@@ -467,7 +475,7 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('reloads a pointed-to local from its storage after a foreign call', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'backend/pointer-reload',
       ascii(`import silk.pointer { Pointer }
 unsafe extern "C" fn touch(pointer: *mut i32) -> ()
@@ -508,7 +516,7 @@ pub fn main() -> i32 {
 
 it.effect('declares a foreign pointer signature with the LLVM pointer type', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'backend/pointer-malloc',
       ascii(`import silk.pointer { Pointer }
 import silk.i32 as i32

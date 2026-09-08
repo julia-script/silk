@@ -1,6 +1,7 @@
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as MirVerification from '../src/MirVerification.js'
 
 const utf8 = (value: string): Uint8Array => new TextEncoder().encode(value)
@@ -193,7 +194,7 @@ it.effect(
   'lowers default and static contextual character literals to their selected MIR types',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'char-literal/lowering',
         utf8(
           'pub fn below(left: char, right: char) -> bool { return left < right }\n' +

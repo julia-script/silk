@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Json from './support/Json.js'
@@ -12,7 +13,11 @@ const describeValue = (value: unknown): string =>
 /** Asserts a program reports exactly `codes`, in source order. */
 const rejects = (id: string, source: string, codes: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(id, ascii(source), 'wasm32-unknown-unknown')
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      id,
+      ascii(source),
+      'wasm32-unknown-unknown',
+    )
     const diagnostics = Analysis.diagnostics(snapshot)
     assert.deepEqual(
       diagnostics.map((diagnostic) => diagnostic.code),
@@ -63,7 +68,7 @@ impl Encodable<i32> for Age { fn encode(value: &Self) -> i32 { return value.year
 
 it.effect('resolves a service-bound call with a self-named receiver', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'stabilization/service-bound-self-name',
       ascii(`service Clock { fn now(self: &Self) -> i64 }
 struct SystemClock {}

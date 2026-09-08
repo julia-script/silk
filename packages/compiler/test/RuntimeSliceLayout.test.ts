@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -30,7 +31,7 @@ pub fn main() -> i32 {
 }`
 
 const snapshot = (target: 'wasm32-unknown-unknown' | 'x86_64-unknown-linux-gnu') =>
-  Analysis.ofSourceRealized('slices/Layout', ascii(source), target)
+  AnalysisFixture.retainingMain('slices/Layout', ascii(source), target)
 
 it.effect('plans target-width address plus usize slice layouts and heterogeneous lanes', () =>
   Effect.gen(function* () {

@@ -30,14 +30,6 @@ pub struct FileHandle
 
 An affine descriptor with one close obligation, transferred by consuming operations.
 
-<a id="declaration-73696c6b2f6e61746976655f66696c6573797374656d3a3a696d706c656d656e746174696f6e3a30"></a>
-
-## Implementation `Drop for Descriptor`
-
-```silk
-impl Drop for Descriptor
-```
-
 <a id="declaration-73696c6b2f6e61746976655f66696c6573797374656d3a3a4469726563746f727948616e646c65"></a>
 
 ## `DirectoryHandle`

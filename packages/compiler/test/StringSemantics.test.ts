@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -149,7 +150,7 @@ it.effect('elaborates text and byte literals with distinct semantic types', () =
 
 it.effect('passes borrowed string values through ordinary reference and slice boundaries', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'string/ordinary-borrows',
       new TextEncoder().encode(`fn shared(value: &string) -> () { return () }
 fn exclusive(value: &mut string) -> () { return () }

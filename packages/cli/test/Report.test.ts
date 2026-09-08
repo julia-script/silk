@@ -84,32 +84,6 @@ it('renders each diagnostic against the physical file for its source identity', 
   )
 })
 
-it('explains a missing entry in terms of the declaration the user must add', () => {
-  const outcome: Driver.Outcome = {
-    _tag: 'NoEntry',
-    reason: 'MissingEntry',
-    diagnostics: [],
-    report: [],
-  }
-  assert.strictEqual(
-    Report.outcome(outcome, source('pub fn other() -> i32 { return 1 }'), 'main.silk'),
-    'No entry point: the selected invocation declaration is missing',
-  )
-})
-
-it('identifies private main visibility instead of blaming its resolved result', () => {
-  const outcome: Driver.Outcome = {
-    _tag: 'NoEntry',
-    reason: 'PrivateEntry',
-    diagnostics: [],
-    report: [],
-  }
-  assert.strictEqual(
-    Report.outcome(outcome, source('fn main() -> () { return () }'), 'main.silk'),
-    'No entry point: the selected invocation must be public',
-  )
-})
-
 it('names the executable, target, and symbol count on success', () => {
   const outcome: Driver.Outcome = {
     _tag: 'Compiled',
@@ -128,19 +102,12 @@ it('names the executable, target, and symbol count on success', () => {
           staticArguments: [],
           contractRow: [],
         },
-        symbol: 'silk_main',
+        symbol: 'silk_main_main__4_6d61696e_4_6d61696e',
       },
     ],
     foreignImports: [],
     foreignExports: [],
     foreignStatics: [],
-    termination: {
-      _tag: 'EntryTermination',
-      success: 'ReturnedStatus',
-      failures: [],
-      logicalFrames: [],
-      report: { frames: [], failureSites: [], trapSites: [] },
-    },
     diagnostics: [],
     report: [],
     toolchainIdentity: 'fixture-toolchain',
@@ -198,7 +165,7 @@ it('lists each MIR violation with its rule, location, and owning function', () =
             provenance: { span: span(4, 8), generated: false },
             detail: 'loan escapes its region',
           },
-          { _tag: 'Violation', rule: 'InvalidEntry', detail: 'entry region missing' },
+          { _tag: 'Violation', rule: 'InvalidArtifactRoot', detail: 'retained root missing' },
         ],
       },
     }),
@@ -210,7 +177,7 @@ it('lists each MIR violation with its rule, location, and owning function', () =
     [
       'Backend error: LLVM cannot emit invalid MIR',
       '  main.silk:2:1: error[InvalidLoan] loan escapes its region (in main.useCounter)',
-      '  error[InvalidEntry] entry region missing',
+      '  error[InvalidArtifactRoot] retained root missing',
     ].join('\n'),
   )
 })
@@ -296,7 +263,7 @@ it('reports broken distribution identity separately from backend and source fail
 
 it('treats only a Compiled outcome as success', () => {
   assert.strictEqual(
-    Report.succeeded({ _tag: 'NoEntry', reason: 'MissingEntry', diagnostics: [], report: [] }),
+    Report.succeeded({ _tag: 'Rejected', sources: new Map(), diagnostics: [], report: [] }),
     false,
   )
 })

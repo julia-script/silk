@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Json from './support/Json.js'
@@ -7,7 +8,7 @@ import * as MirVerification from '../src/MirVerification.js'
 const encoder = new TextEncoder()
 
 const snapshot = (source: string) =>
-  Analysis.ofSourceRealized('order-interface/main', encoder.encode(source))
+  AnalysisFixture.retainingMain('order-interface/main', encoder.encode(source))
 
 it.effect('rejects a type with no Order witness', () =>
   Effect.gen(function* () {

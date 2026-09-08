@@ -1,3 +1,5 @@
+import type * as RuntimeComponent from '../src/RuntimeComponent.js'
+import * as ArtifactComposition from '../src/ArtifactComposition.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -7,8 +9,7 @@ import { afterAll, assert, it } from '@effect/vitest'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Json from './support/Json.js'
-import * as Analysis from '../src/Analysis.js'
-import type * as ArtifactKind from '../src/ArtifactKind.js'
+import * as ArtifactKind from '../src/ArtifactKind.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -38,14 +39,10 @@ const toolchain: NativeToolchain.Toolchain = Object.freeze({
 const encoder = new TextEncoder()
 const ascii = (value: string): Uint8Array => encoder.encode(value)
 
-const runCompiled = Effect.fnUntraced(function* (
-  path: string,
-  nativeEnvironment: Readonly<Record<string, string>> | undefined,
-) {
+const runCompiled = Effect.fnUntraced(function* (path: string) {
   return yield* Effect.sync(() =>
     spawnSync(path, [], {
       encoding: 'utf8',
-      ...(nativeEnvironment === undefined ? {} : { env: { ...process.env, ...nativeEnvironment } }),
     }),
   )
 })
@@ -55,27 +52,41 @@ afterAll(() => {
   rmSync(destinationRoot, { recursive: true, force: true })
 })
 
-const compileSource = (
+const compileSource = Effect.fnUntraced(function* (
   name: string,
   text: string,
   imports?: Readonly<Record<string, string>>,
   options: {
+    readonly components?: ReadonlyArray<RuntimeComponent.Input>
     readonly artifactKind?: ArtifactKind.ArtifactKind
     readonly packageName?: string
     readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
     readonly cache?: boolean
     readonly artifactCache?: NativeToolchain.ArtifactCache
   } = {},
-): Effect.Effect<Driver.Outcome, Driver.SourceResolutionFailed | NativeToolchain.ToolchainError> =>
-  Driver.compile({
+) {
+  const profile = yield* CompilationProfile.normalize({
+    target: (yield* NativeToolchain.hostTarget()).id,
+    artifact: ArtifactKind.profileArtifact(options.artifactKind ?? 'NativeExecutable'),
+    optimization: 'speed',
+    debug: false,
+  })
+  return yield* Driver.compile({
     compilation: {
       root: SourceFile.make('memory/driver', ascii(text)),
+      configuration: {
+        profile: CompilationProfile.input(profile),
+        package: `${options.packageName ?? 'compiler-test'}@0.0.0`,
+        composition: {
+          ...ArtifactComposition.defaults(profile),
+          ...(options.components === undefined ? {} : { components: options.components }),
+        },
+      },
     },
     toolchain:
       options.artifactCache === undefined
         ? toolchain
         : { ...toolchain, artifactCache: options.artifactCache },
-    optimization: 'release',
     artifactKind: options.artifactKind ?? 'NativeExecutable',
     packageName: options.packageName ?? 'compiler-test',
     destination: join(destinationRoot, name),
@@ -94,6 +105,7 @@ const compileSource = (
           ),
     ),
   )
+})
 
 /** Compiles corpus C sources through the pinned Clang into durable objects under the test root. */
 const compileCSources = Effect.fnUntraced(function* (
@@ -207,7 +219,7 @@ pub fn main() -> i32 { return unsafe silk_cache_selected() }`
         const outcome = yield* compileSource('named-archive-cache', source, undefined, options)
         assert.strictEqual(outcome._tag, 'Compiled')
         if (outcome._tag !== 'Compiled') return
-        const run = yield* runCompiled(outcome.path, undefined)
+        const run = yield* runCompiled(outcome.path)
         statuses.push(run.status)
         phases.push(outcome.report.map((entry) => entry.phase))
       }
@@ -345,99 +357,77 @@ it.effect(
   60_000,
 )
 
-it.each(shardedCorpus)(
-  'runs the native corpus case $name',
-  async (program) => {
-    await Effect.gen(function* () {
-      if (selectedNativeCase.length > 0 && program.name !== selectedNativeCase) return
-      const snapshot = yield* Analysis.ofSourceRealized('memory/driver', ascii(program.source))
-      assert.strictEqual(
-        snapshot.mir._tag,
-        'Available',
-        `${program.name}: ${Analysis.diagnostics(snapshot)
-          .map(
-            (diagnostic) =>
-              `${diagnostic.code}@${diagnostic.span.start}-${diagnostic.span.end}: ${diagnostic.message}`,
-          )
-          .join('\n')}`,
-      )
-      if (snapshot.mir._tag !== 'Available') return
-      const compiledObjects =
-        program.nativeCSources === undefined
-          ? []
-          : yield* compileCSources(`corpus-${program.name}`, program.nativeCSources)
-      const outcome = yield* compileSource(
-        `corpus-${program.name}`,
-        program.nativeSource ?? program.source,
-        program.nativeImports,
-        {
-          nativeLinkInputs: [
-            ...compiledObjects.map(NativeLinkInput.object),
-            ...(program.nativeDynamicLibraries ?? []).map((name) =>
-              NativeLinkInput.library(name, 'Dynamic'),
-            ),
-          ],
-        },
-      )
+for (const program of shardedCorpus.filter(
+  (program) => selectedNativeCase.length === 0 || program.name === selectedNativeCase,
+))
+  it.effect(
+    `runs the native corpus case ${program.name}`,
+    () =>
+      Effect.gen(function* () {
+        // Driver compilation checks and lowers this program once. MIR structure is covered by
+        // the shared verifier suite; repeating that pipeline here adds no runtime oracle.
+        const compiledObjects =
+          program.nativeCSources === undefined
+            ? []
+            : yield* compileCSources(`corpus-${program.name}`, program.nativeCSources)
+        const outcome = yield* compileSource(
+          `corpus-${program.name}`,
+          program.nativeSource ?? program.source,
+          program.nativeImports,
+          {
+            ...(program.nativeComponents === undefined
+              ? {}
+              : { components: program.nativeComponents }),
+            nativeLinkInputs: [
+              ...compiledObjects.map(NativeLinkInput.object),
+              ...(program.nativeDynamicLibraries ?? []).map((name) =>
+                NativeLinkInput.library(name, 'Dynamic'),
+              ),
+            ],
+          },
+        )
 
-      if (program.expected._tag === 'UnavailableEntry') {
-        if (program.expected.reason === 'MissingEntry') {
-          assert.strictEqual(outcome._tag, 'NoEntry', program.name)
-        } else {
-          assert.strictEqual(outcome._tag, 'Rejected', program.name)
-          assert.deepEqual(
-            outcome._tag === 'Rejected'
-              ? outcome.diagnostics.map((diagnostic) => diagnostic.code)
-              : [],
-            ['SEM0204'],
-            program.name,
+        let compilationMessage = program.name
+        if (outcome._tag === 'BackendFailed') {
+          compilationMessage = `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
+        } else if (outcome._tag === 'Rejected') {
+          compilationMessage = `${program.name}: ${outcome.diagnostics
+            .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+            .join('\n')}`
+        }
+        assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)
+        if (outcome._tag !== 'Compiled') return
+
+        if (program.expected._tag === 'Completes') {
+          const run = yield* runCompiled(outcome.path)
+          if (program.nativeStdout !== undefined)
+            assert.strictEqual(run.stdout, program.nativeStdout, program.name)
+          if (program.nativeStderr !== undefined)
+            assert.strictEqual(run.stderr, program.nativeStderr, program.name)
+          const nativeStatus = run.status === null ? null : BigInt(run.status)
+          // POSIX exposes only the low unsigned byte of a process exit value.
+          const expectedStatus = BigInt(program.expected.result) & 0xffn
+          assert.strictEqual(
+            nativeStatus,
+            expectedStatus,
+            `unexpected native result for ${program.name}: expected ${program.expected.result}, native ${run.status}`,
+          )
+          return
+        }
+
+        if (program.expected._tag === 'Trap') {
+          const run = yield* runCompiled(outcome.path)
+          if (program.nativeStderr !== undefined)
+            assert.strictEqual(run.stderr, program.nativeStderr, program.name)
+          assert.strictEqual(
+            run.signal !== null || (run.status !== null && run.status !== 0),
+            true,
+            `expected ${program.name} to trap, native exited ${run.status}`,
           )
         }
-        return
-      }
-
-      let compilationMessage = program.name
-      if (outcome._tag === 'BackendFailed') {
-        compilationMessage = `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
-      } else if (outcome._tag === 'Rejected') {
-        compilationMessage = `${program.name}: ${outcome.diagnostics
-          .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
-          .join('\n')}`
-      }
-      assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)
-      if (outcome._tag !== 'Compiled') return
-
-      if (program.expected._tag === 'Completes') {
-        const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
-        if (program.nativeStdout !== undefined)
-          assert.strictEqual(run.stdout, program.nativeStdout, program.name)
-        if (program.nativeStderr !== undefined)
-          assert.strictEqual(run.stderr, program.nativeStderr, program.name)
-        const nativeStatus = run.status === null ? null : BigInt(run.status)
-        // POSIX exposes only the low unsigned byte of a process exit value.
-        const expectedStatus = BigInt(program.expected.result) & 0xffn
-        assert.strictEqual(
-          nativeStatus,
-          expectedStatus,
-          `unexpected native result for ${program.name}: expected ${program.expected.result}, native ${run.status}`,
-        )
-        return
-      }
-
-      if (program.expected._tag === 'Trap') {
-        const run = yield* runCompiled(outcome.path, program.nativeEnvironment)
-        if (program.nativeStderr !== undefined)
-          assert.strictEqual(run.stderr, program.nativeStderr, program.name)
-        assert.strictEqual(
-          run.signal !== null || (run.status !== null && run.status !== 0),
-          true,
-          `expected ${program.name} to trap, native exited ${run.status}`,
-        )
-      }
-    }).pipe(Effect.runPromise)
-  },
-  1_500_000,
-)
+      }),
+    1_500_000,
+  )
 it.effect(
   'fails to link a foreign symbol nothing defines and keeps the linker output',
   () =>
@@ -504,7 +494,7 @@ pub fn main() -> i32 {
           : outcome._tag,
       )
       if (outcome._tag !== 'Compiled') return
-      const run = yield* runCompiled(outcome.path, undefined)
+      const run = yield* runCompiled(outcome.path)
       assert.strictEqual(run.signal, null)
       assert.strictEqual(run.status, 42)
     }),

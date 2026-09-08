@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -11,7 +12,7 @@ import { raise } from './support/raise.js'
 const ascii = (value: string): Uint8Array => Uint8Array.from(value, (unit) => unit.charCodeAt(0))
 
 const analyze = (name: string, source: string) =>
-  Analysis.ofSourceRealized(name, ascii(source), 'wasm32-unknown-unknown')
+  AnalysisFixture.retainingMain(name, ascii(source), 'wasm32-unknown-unknown')
 
 /**
  * One wrapper whose decoder conformance holds exactly when its source type has one.

@@ -60,7 +60,7 @@ through the selected `Allocator`. It returns the package in the `Initial` state 
 starting the body.
 
 Construction failure is `Allocator.OutOfMemoryError`. It publishes no Execution and leaves every input
-under ordinary Effect cleanup. Later growth of the compiler-owned execution stack is a fatal trap,
+under ordinary Effect cleanup. Later refusal by the selected execution-storage component is a fatal trap,
 not an allocator requirement or typed failure.
 
 **Boundary:** Importing `silk.execution` and constructing ordinary Effects allocate no execution

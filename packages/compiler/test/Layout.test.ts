@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
@@ -153,7 +154,7 @@ it('selects primitive conflict beneath every later public shared/exclusive neste
 
 it.effect('rejects an unrepresentable local-shared block at its layout call before MIR', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'layout/local-shared-overflow',
       ascii(`import silk.layout { Layout }
 pub fn main() -> i32 {
@@ -176,7 +177,7 @@ pub fn main() -> i32 {
 
 it.effect('plans only concrete types reached through discovered instances', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'layout/program',
       ascii(`pub fn unused(value: bool) -> bool { return value }
 pub fn main() -> i32 { return 42 }`),
@@ -194,7 +195,7 @@ pub fn main() -> i32 { return 42 }`),
 
 it.effect('plans nominal types carried through Evaluate expressions', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'layout/evaluate',
       ascii(`struct Token { value: i32 }
 fn consume(token: Token) -> () { drop move token return () }
@@ -220,7 +221,7 @@ pub fn main() -> i32 { consume(Token { value: 1 }) return 0 }`),
 it.effect('plans hidden Effect capture environments by construction site and target', () =>
   Effect.gen(function* () {
     for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'layout/effect-environment',
         ascii(`pub fn main() -> i32 {
   let mut counter = 0
@@ -249,7 +250,7 @@ it.effect('plans hidden Effect capture environments by construction site and tar
 it.effect('plans target-aware callable environments and ephemeral code/environment views', () =>
   Effect.gen(function* () {
     for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'layout/callable-environment',
         ascii(`struct Token { value: i32 }
 fn choose(value: i32, values: &mut [i32], token: Token) -> i32 { return value }
@@ -319,7 +320,7 @@ pub fn main() -> i32 { return 0 }`
       ['I64', 'i64', 8],
     ]
     for (const target of Target.all) {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'layout/scalar-enums',
         ascii(source),
         target.id,
@@ -361,7 +362,7 @@ pub fn main() -> i32 { return 0 }`
 
 it.effect('rejects malformed scalar enum width, signedness, metadata, and calling lanes', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'layout/verify-scalar-enum',
       ascii(`enum State { Ready }
 pub fn main() -> i32 { let state = State.Ready drop state return 0 }`),
@@ -415,7 +416,7 @@ pub fn main() -> i32 { let state = State.Ready drop state return 0 }`),
 
 it.effect('isolates invalid scalar enum layouts from valid peers', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'layout/invalid-scalar-enum',
       ascii(`enum(usize) Broken { Value }
 enum Good { Only }
@@ -495,7 +496,7 @@ pub fn main() -> i32 {
   return 42
 }`
       for (const target of Target.all) {
-        const snapshot = yield* Analysis.ofSourceRealized(
+        const snapshot = yield* AnalysisFixture.retainingMain(
           'layout/effect-outcome',
           ascii(source),
           target.id,
@@ -520,7 +521,7 @@ pub fn main() -> i32 {
 
 it.effect('rejects non-canonical failure tags before payload-member indexing', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'layout/failure-tags',
       ascii(`import silk.effect { Effect }
 struct A { code: i32 }
@@ -634,7 +635,7 @@ it.effect(
   'catalogs empty and nested structs before reachability and reuses their exact entries',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'layout/catalog',
         ascii(`struct Empty {}
 struct Pair { left: i32 right: bool }
@@ -701,7 +702,7 @@ pub fn main() -> i32 { let outer = make() return outer.pair.left }`),
 
 it.effect('plans nominal union tags and variant-local payload layouts', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'layout/nominal-union',
       ascii(`union State { Ready, Data { flag: bool, value: i64 }, Empty { impossible: never } }
 union Box<T> { Full { value: T }, Vacant }
@@ -789,7 +790,7 @@ it.effect(
   'retains unavailable fields, cycles, and transitive dependencies without harming peers',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'layout/unavailable',
         ascii(`struct Good { value: i32 }
 struct Broken { value: Missing }
@@ -838,17 +839,17 @@ it.effect(
       const source = ascii(
         'struct Pair { left: i32 right: bool }\npub fn main() -> i32 { return 42 }',
       )
-      const first = yield* Analysis.ofSourceRealized(
+      const first = yield* AnalysisFixture.retainingMain(
         'layout/repeat',
         source,
         'aarch64-apple-darwin',
       )
-      const second = yield* Analysis.ofSourceRealized(
+      const second = yield* AnalysisFixture.retainingMain(
         'layout/repeat',
         source,
         'aarch64-apple-darwin',
       )
-      const wasm = yield* Analysis.ofSourceRealized(
+      const wasm = yield* AnalysisFixture.retainingMain(
         'layout/repeat',
         source,
         'wasm32-unknown-unknown',
@@ -878,7 +879,7 @@ it.effect(
 
 it.effect('reports malformed aggregate facts and divergence from the catalog', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'layout/verify-aggregate',
       ascii('extern "C" struct Pair { left: i32 right: i64 }\npub fn main() -> i32 { return 0 }'),
       'aarch64-apple-darwin',
@@ -1001,7 +1002,7 @@ it.effect('matches mixed nested and array record layout with the host C compiler
     const host = yield* NativeToolchain.hostTarget()
 
     const sourceId = 'layout/c-record-oracle'
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       sourceId,
       ascii(`extern "C" struct Inner {
   count: i32

@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -7,7 +8,7 @@ import * as Stdlib from '../src/Stdlib.js'
 const encoder = new TextEncoder()
 
 const snapshot = (source: string, target = 'aarch64-apple-darwin') =>
-  Analysis.ofSourceRealized('clock/main', encoder.encode(source), target)
+  AnalysisFixture.retainingMain('clock/main', encoder.encode(source), target)
 
 it('registers the clock modules, namespaces, and shared Instant alias', () => {
   assert.strictEqual(Stdlib.findNamespace('SystemClock')?.module, 'silk/system_clock')
@@ -38,16 +39,12 @@ pub fn main() -> i32 {
     ] as const) {
       const system = yield* snapshot(source, target)
       assert.deepEqual(Analysis.diagnostics(system), [])
-      const systemCalls = Analysis.loweredMir(system)
-        .functions.flatMap(MirVerification.operations)
-        .filter((operation) => operation._tag === 'OsCall')
-      assert.deepEqual(systemCalls, [])
       assert.deepEqual(
         system.instances.foreignCalls.map((call) => call.symbol),
         ['clock_getres', 'clock_gettime'],
       )
       const systemArtifact = yield* Analysis.codegen(system, { mode: 'release' })
-      assert.deepEqual(systemArtifact.nativeRuntimeSymbols, ['silk_trap_report_v1'])
+      assert.deepEqual(systemArtifact.nativeRuntimeSymbols, [])
       assert.deepEqual(
         systemArtifact.foreignImports.map((entry) => entry.symbol),
         ['clock_getres', 'clock_gettime'],
@@ -70,16 +67,11 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(monotonic), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(monotonic)), [])
-    const monotonicCalls = Analysis.loweredMir(monotonic)
-      .functions.flatMap(MirVerification.operations)
-      .filter((operation) => operation._tag === 'OsCall')
-      .map((operation) => operation.operation.name)
-    assert.deepEqual(monotonicCalls, [])
     assert.deepEqual(
       monotonic.instances.foreignCalls.map((call) => call.symbol),
       ['__error', 'clock_getres', 'clock_gettime', 'nanosleep'],
     )
     const monotonicArtifact = yield* Analysis.codegen(monotonic, { mode: 'release' })
-    assert.deepEqual([...monotonicArtifact.nativeRuntimeSymbols].sort(), ['silk_trap_report_v1'])
+    assert.deepEqual([...monotonicArtifact.nativeRuntimeSymbols].sort(), [])
   }),
 )

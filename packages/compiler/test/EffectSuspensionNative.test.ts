@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -10,19 +10,12 @@ import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Driver from './support/TestDriver.js'
+import * as TestToolchain from './support/TestToolchain.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const clang = existsSync('/opt/homebrew/opt/llvm/bin/clang')
-  ? '/opt/homebrew/opt/llvm/bin/clang'
-  : '/usr/bin/clang'
-const toolchain: NativeToolchain.Toolchain = Object.freeze({
-  _tag: 'Toolchain',
-  clang,
-  llvmAr: 'llvm-ar',
-  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
-})
+const runtimeObjectCache = NativeToolchain.makeRuntimeObjectCache()
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-effect-suspension-native-'))
 
 afterAll(() => {
@@ -72,7 +65,7 @@ it.effect('runs one million suspended native recursive frames with bounded machi
       compilation: {
         root: SourceFile.make('suspension-native/deep', ascii(recursiveSource(1_000_000))),
       },
-      toolchain,
+      toolchain: { ...(yield* TestToolchain.configured), runtimeObjectCache },
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'deep'),
@@ -83,16 +76,6 @@ it.effect('runs one million suspended native recursive frames with bounded machi
     const run = spawnSync(compiled.path, [], { encoding: 'utf8', timeout: 60_000 })
     assert.strictEqual(run.signal, null, run.stderr)
     assert.strictEqual(run.status, 42, run.stderr)
-
-    const exhausted = spawnSync(compiled.path, [], {
-      encoding: 'utf8',
-      timeout: 60_000,
-      env: { ...process.env, SILK_PRIVATE_EXECUTION_STACK_LIMIT_BYTES: '1' },
-    })
-    assert.isTrue(
-      exhausted.signal !== null || exhausted.status !== 42,
-      'private execution-stack exhaustion must terminate instead of entering Effect failure',
-    )
   }),
 )
 
@@ -115,10 +98,15 @@ it.effect('uses a private iterative native coroutine-frame protocol', () =>
     assert.include(artifact.ir, '$suspend_step')
     assert.include(artifact.ir, 'suspend_drive')
     assert.include(artifact.ir, 'silk_suspend_resume_')
-    assert.include(artifact.ir, 'silk_coroutine_frame_push_v1')
-    assert.include(artifact.ir, 'silk_coroutine_frame_pop_v1')
-    assert.notInclude(artifact.ir, 'declare ptr @malloc')
-    assert.notInclude(artifact.ir, 'declare void @free')
+    assert.isDefined(Analysis.loweredMir(analysis).executionStorage)
+    assert.isFalse(
+      artifact.nativeRuntimeSymbols.some((symbol) => symbol.startsWith('silk_coroutine_frame_')),
+    )
+    assert.include(artifact.ir, 'suspend_storage_create')
+    assert.match(artifact.ir, /call void @silk_\S*execution_storage_release\S*\(ptr [^,]+, ptr /)
+    assert.include(artifact.ir, 'suspend_initial_result_storage_release')
+    assert.include(artifact.ir, 'declare ptr @malloc')
+    assert.include(artifact.ir, 'declare void @free')
     assert.notInclude(artifact.ir, 'llvm.coro.')
     assert.notInclude(artifact.ir, 'musttail')
     assert.notInclude(artifact.ir, 'setjmp')
@@ -132,7 +120,7 @@ it.effect('propagates a failure after a resumed retry into its native handler', 
       compilation: {
         root: SourceFile.make('suspension-native/retry-failure', ascii(retryFailureSource)),
       },
-      toolchain,
+      toolchain: { ...(yield* TestToolchain.configured), runtimeObjectCache },
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'retry-failure'),

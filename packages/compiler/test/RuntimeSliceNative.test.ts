@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -21,7 +22,7 @@ it.effect(
   'emits typed pointer lanes, stride-aware storage, and deterministic native artifacts',
   () =>
     Effect.gen(function* () {
-      const self = yield* Analysis.ofSourceRealized(
+      const self = yield* AnalysisFixture.retainingMain(
         'runtime-slice-native/main',
         ascii(source),
         'aarch64-apple-darwin',
@@ -42,7 +43,7 @@ it.effect(
 
 it.effect('loads a projected slice descriptor and checks its runtime bound before indexing', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'runtime-slice-native/projected',
       ascii(`struct Pair { left: i32 right: i32 }
 struct Holder { padding: i32 values: &[Pair] }

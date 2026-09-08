@@ -1,0 +1,33 @@
+import silk.effect { Effect }
+struct Problem { code: i32 }
+effect fn first(value: i32) -> i32 {
+  return run Effect.suspend(effect { return value })
+}
+effect fn second(left: i32, right: i32) -> i32 ! Problem {
+  run Effect.suspend(effect { return () })
+  fail Problem { code: left + right }
+}
+fn choose(flag: bool) -> Effect<'static; i32 ! Problem> {
+  if flag { return first(42) }
+  return second(20, 22)
+}
+effect fn finish() -> () { return () }
+effect fn delayedFinish(value: i32) -> () {
+  let completed = run Effect.suspend(effect { return value })
+  return ()
+}
+fn chooseFinish(flag: bool) -> Effect<'static; ()> {
+  if flag { return finish() }
+  return delayedFinish(42)
+}
+effect fn recover(error: Problem) -> i32 { return error.code }
+effect fn exercise(protectedChoice: bool, finalizerChoice: bool) -> i32 {
+  return run Effect.catchAll(Effect.ensuring(choose(protectedChoice), chooseFinish(finalizerChoice)), recover)
+}
+pub fn main() -> i32 {
+  if (run exercise(true, true)) != 42 { return 1 }
+  if (run exercise(true, false)) != 42 { return 2 }
+  if (run exercise(false, true)) != 42 { return 3 }
+  if (run exercise(false, false)) != 42 { return 4 }
+  return 42
+}

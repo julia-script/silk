@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -41,7 +42,7 @@ it.effect('parses and formats typed constant declarations losslessly', () =>
 
 it.effect('accepts computed constant initializers while rejecting mismatched values', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'constants/invalid',
       encoder.encode(`const wrong: bool = 1
 const computed: i32 = 40 + 2
@@ -57,7 +58,7 @@ pub fn main() -> i32 { return move answer }`),
 
 it.effect('reports one deterministic cycle diagnostic for cyclic constants', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'constants/cycle',
       encoder.encode(`const first: i32 = second
 const second: i32 = first
@@ -83,14 +84,17 @@ Usage: silk build [options]
 """
 
 pub fn main() -> i32 { return 0 }`
-    const snapshot = yield* Analysis.ofSourceRealized('constants/example', encoder.encode(example))
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'constants/example',
+      encoder.encode(example),
+    )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
   }),
 )
 
 it.effect('accepts constant references while retaining string initializer restrictions', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'constants/string-invalid',
       encoder.encode(`const source: string<'static> = "a"
 const copied: string<'static> = source
@@ -113,7 +117,7 @@ it.effect('checks usize constants against the selected target even when unused',
     const wide = '4294967296'
     const input = `const wide: usize = ${wide}
 pub fn main() -> i32 { return 0 }`
-    const native = yield* Analysis.ofSourceRealized(
+    const native = yield* AnalysisFixture.retainingMain(
       'constants/usize',
       encoder.encode(input),
       'aarch64-apple-darwin',
@@ -123,7 +127,7 @@ pub fn main() -> i32 { return 0 }`
       Diagnostic.wordLiteralOutOfRangeCode,
     )
 
-    const wasm = yield* Analysis.ofSourceRealized(
+    const wasm = yield* AnalysisFixture.retainingMain(
       'constants/usize',
       encoder.encode(input),
       'wasm32-unknown-unknown',
@@ -147,7 +151,7 @@ pub fn main() -> i32 {
   answer = 1
   return called
 }`
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'constants/operations',
         encoder.encode(input),
       )

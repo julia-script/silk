@@ -17,6 +17,8 @@ export interface DeclaredFunction {
   readonly resultType: LlvmType.Type
   readonly emittedResultType: LlvmType.Type
   readonly resultLaneCount: number
+  /** Owned failure metadata follows the source result lanes in the private ABI. */
+  readonly diagnosticResult?: LlvmType.Type
   readonly suspendable: boolean
   /**
    * Synchronous-signature entry that drives a suspendable function to completion. Present for
@@ -25,6 +27,8 @@ export interface DeclaredFunction {
    */
   readonly driver?: FunctionActor.Function
   readonly parameterTypes: ReadonlyArray<LlvmType.Type>
+  /** Physical observer parameter, followed by a borrowed cause aggregate and then suspension lanes. */
+  readonly diagnosticParameter?: number
   readonly linear: ReadonlyArray<MirLinearization.LinearBlock>
 }
 

@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import {
   borrowedBox,
   borrowedStream,
@@ -21,7 +22,8 @@ import { unreachable } from './support/raise.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const snapshot = (source: string) => Analysis.ofSourceRealized('slices/Ownership', ascii(source))
+const snapshot = (source: string) =>
+  AnalysisFixture.retainingMain('slices/Ownership', ascii(source))
 const analyze = (source: string) => Analysis.ofSource('slices/Ownership', ascii(source))
 
 it.effect('constructs ordinary boxes with externally borrowed elements', () =>

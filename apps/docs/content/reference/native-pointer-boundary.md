@@ -54,6 +54,16 @@ destroying its owner.
 
 Raw address observation is `Intrinsic.pointerAddress<P>(pointer: P) -> usize`. It accepts only data pointers and returns their unsigned target-width address, with zero for null. It does not access the pointee, retain storage or provide integer-to-pointer reconstruction. `Pointer.address` and `Pointer.addressMany` expose the single-element and many-element forms. Address observation is a runtime operation.
 
+`Intrinsic.pointerReinterpret<From, To>(pointer)` is an unsafe data-pointer
+reinterpretation for allocator-owned storage and foreign records. It preserves
+the numeric address, address space, mutation capability, nullability and
+single/many extent while changing the pointee. The caller must prove the result's
+alignment before typed access and prove initialization before any read. The
+operation does not read memory, initialize a value, acquire ownership or create a
+loan. It does not reconstruct pointers from integers. Qualifier changes remain
+separate explicit operations; reinterpretation cannot also grant write access or
+remove nullability.
+
 ## Native output storage
 
 Ordinary source owns `Uninitialized<T>` and `Initialized<T>` output states for Copy values. Private
@@ -85,3 +95,13 @@ retained-address safety.
 
 The executable [conformance fixture and runner](../../../../packages/compiler/conformance/native-boundary/README.md)
 record exact supply checks, object inspection, and execution evidence for each requested lane.
+
+## Direct C calls in LLVM-to-Wasm storage components
+
+The retained LLVM-to-Wasm path admits direct C functions with address-space-zero
+data pointers, 32-bit integers, and void results for explicitly linked source
+runtime components. Other scalar classes, variadics, callbacks, foreign borrowed
+arguments, indirect C calls and foreign data are not admitted on this target.
+This does not select an OS API or a JavaScript host import. Final linkage must
+resolve the declared symbols. Pointer reinterpretation has the same explicit
+alignment, initialization and lifetime obligations as on native targets.

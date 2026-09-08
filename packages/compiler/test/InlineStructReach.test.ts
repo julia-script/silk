@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -231,7 +232,7 @@ it.effect('produces the same answer regardless of declaration and module order',
  */
 it.effect('lays out a struct that reaches itself through raw storage', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'inline-reach/layout',
       ascii('struct Node { next: RawBuffer<Node> value: i32 }\npub fn main() -> i32 { return 0 }'),
       'wasm32-unknown-unknown',

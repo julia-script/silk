@@ -1,9 +1,12 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as Mir from '../src/Mir.js'
 import * as MirNormalization from '../src/MirNormalization.js'
+import * as MirLinearization from '../src/MirLinearization.js'
+import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as RowAlgebra from '../src/RowAlgebra.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -19,7 +22,7 @@ const ascii = (value: string): Uint8Array =>
 const analyze = (text: string, target?: string) =>
   Analysis.makeRealized({
     root: SourceFile.make('root', ascii(text)),
-    ...(target === undefined ? {} : { target }),
+    configuration: AnalysisFixture.configuration('root', target),
   }).pipe(Effect.provide(SourceResolver.memory(new Map())))
 
 const codes = (self: Analysis.Snapshot): ReadonlyArray<string> =>
@@ -41,6 +44,111 @@ effect fn recoverA(problem: A) -> i32 { return problem.code + 1 }
 effect fn recoverB(problem: B) -> i32 { return problem.code + 2 }
 effect fn recoverRow(problem: A | B) -> i32 { return 99 }
 `
+
+it.effect('lowers fully handled intrinsic catches in ordinary functions and destructors', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`${preamble}
+struct Guard {}
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let recovered = run Intrinsic.catchFailure<A | B>(risky(false), recoverRow)
+    return ()
+  }
+}
+pub fn main() -> i32 {
+  let guard = Guard {}
+  drop guard
+  return run Intrinsic.catchFailure<A | B>(risky(true), recoverRow)
+}`)
+    assert.deepEqual(codes(self), [])
+    const module = Analysis.loweredMir(self)
+    const owners = module.functions.filter(
+      (fn) => fn.id.module === 'root' && (fn.id.name === 'main' || fn.id.name.startsWith('drop@')),
+    )
+    assert.strictEqual(owners.length, 2)
+    for (const owner of owners)
+      assert.isTrue(
+        MirVerification.operations(owner).some((operation) => operation._tag === 'CatchEffect'),
+      )
+    assert.deepEqual(MirVerification.verify(module), [])
+  }),
+)
+
+it.effect('retains captured callback identities through suspending error mapping', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`${preamble}
+import silk.effect { Effect }
+struct C { code: i32 }
+struct Adjustment { offset: i32 }
+fn mapped(error: A | B, adjustment: Adjustment) -> C { return C { code: adjustment.offset } }
+effect fn recover(error: C) -> i32 { return error.code }
+pub fn main() -> i32 {
+  let protected = Effect.suspend(risky(false))
+  let changed = Effect.mapError(move protected, mapped(Adjustment { offset: 42 }))
+  return run Effect.catchAll(move changed, recover)
+}`)
+    assert.deepEqual(codes(self), [])
+    const module = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(module), [])
+    assert.isTrue(
+      module.functions.some((fn) =>
+        MirVerification.operations(fn).some(
+          (operation) =>
+            operation._tag === 'ApplyCallable' &&
+            operation.typeArguments.some(
+              (argument) =>
+                typeof argument !== 'string' && argument._tag === 'CallableIdentityArgument',
+            ),
+        ),
+      ),
+    )
+    const artifact = yield* Analysis.codegen(self, { mode: 'release' })
+    assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
+  }),
+)
+
+it.effect('admits a union-valued failure only when every member is declared', () =>
+  Effect.gen(function* () {
+    const source = `import silk.effect { Effect }
+struct A {}
+struct B {}
+effect fn relay(problem: A | B) -> i32 ! A | B { fail move problem }
+effect fn recover(problem: A | B) -> i32 { return run Intrinsic.suspendEffect(effect { return 42 }) }
+pub fn main() -> i32 { return run Effect.catchAll(relay(A {}), recover) }`
+    const accepted = yield* analyze(source)
+    assert.deepEqual(codes(accepted), [])
+    const module = Analysis.loweredMir(accepted)
+    assert.deepEqual(MirVerification.verify(module), [])
+    assert.isTrue(
+      module.functions.some((fn) =>
+        MirVerification.operations(fn).some(
+          (operation) => operation._tag === 'PackEffectFailureUnion',
+        ),
+      ),
+    )
+    const handlers = module.functions.flatMap((fn) =>
+      fn.id.name === 'Effect.catchAll$effect$-1'
+        ? (fn.suspension?.regions.filter(
+            (region) =>
+              region._tag === 'RunSuspendableEffectRegion' &&
+              region.runner.declaration?.name === 'recover$effect$-1',
+          ) ?? [])
+        : [],
+    )
+    assert.lengthOf(handlers, 2)
+    assert.strictEqual(new Set(handlers.map((handler) => handler.point.ordinal)).size, 2)
+    const rejectedSource = source.replace('! A | B', '! A')
+    const rejected = yield* analyze(rejectedSource)
+    const diagnostic =
+      Analysis.diagnostics(rejected).find((entry) => entry.code === 'SEM0064') ??
+      unreachable('expected the undeclared union member diagnostic')
+    const start = rejectedSource.indexOf(' problem }')
+    assert.deepEqual(
+      [diagnostic.span.start, diagnostic.span.end],
+      [start, start + ' problem'.length],
+    )
+  }),
+)
 
 const borrowedMatchSource = (catch_: string): string => `import silk.effect { Effect }
 struct Selected { code: i32 }
@@ -78,6 +186,108 @@ pub fn main() -> i32 {
   let token = Token { value: 22 }
   return run succeed(20) |> userMap(add(&token))
 }`
+
+it.effect('delimits selected recovery application and execution without marking propagation', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`import silk.effect { Effect }
+${preamble}
+effect fn selective(flag: bool) -> i32 ! B {
+  return run Effect.catch<A>(risky(flag), recoverA)
+}
+pub fn main() -> i32 { return run Effect.catchAll(selective(true), recoverB) }`)
+    assert.deepEqual(codes(self), [])
+    const module = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(module), [])
+    let selectedApplications = 0
+    let selectedRuns = 0
+    let completedRecoveries = 0
+    let unselectedPropagations = 0
+    for (const fn of module.functions) {
+      const caught = MirVerification.operations(fn).filter(
+        (operation) => operation._tag === 'CatchEffect',
+      )
+      if (caught.length === 0) continue
+      const outcomes = new Set(caught.map((operation) => operation.outcome.ordinal))
+      const blocks = MirLinearization.linearize(fn)
+      for (const block of blocks) {
+        for (const outcome of block.recoveryOutcomes ?? [])
+          assert.isTrue(outcomes.has(outcome.ordinal))
+        const recovering = (block.recoveryOutcomes?.length ?? 0) > 0
+        if (block.operations.some((operation) => operation._tag === 'ApplyCallable'))
+          assert.isTrue(recovering)
+        selectedApplications += block.operations.filter(
+          (operation) => recovering && operation._tag === 'ApplyCallable',
+        ).length
+        selectedRuns += block.operations.filter(
+          (operation) => recovering && operation._tag === 'RunEffectValue',
+        ).length
+        for (const operation of block.operations) {
+          if (operation._tag !== 'ReleaseDiagnosticOutcome') continue
+          assert.isTrue(recovering)
+          assert.isTrue(outcomes.has(operation.outcome.ordinal))
+          assert.strictEqual(block.operations.at(-1), operation)
+          completedRecoveries += 1
+        }
+        if (block.terminator._tag === 'PropagateEffectFailure') {
+          assert.isFalse(recovering)
+          assert.isTrue(outcomes.has(block.terminator.outcome.ordinal))
+          assert.notStrictEqual(block.terminator.outcome.ordinal, block.terminator.source.ordinal)
+          unselectedPropagations += 1
+        }
+        if (block.terminator._tag === 'Return') assert.isFalse(recovering)
+      }
+    }
+    assert.strictEqual(selectedApplications, 2)
+    assert.strictEqual(selectedRuns, 2)
+    assert.strictEqual(completedRecoveries, 2)
+    assert.strictEqual(unselectedPropagations, 1)
+    assert.include(MirEncoding.encode(module), 'recovery=%')
+    const wrongPropagationOwner = structuredClone(module)
+    const propagation = wrongPropagationOwner.functions
+      .flatMap(MirVerification.operations)
+      .find((operation) => operation._tag === 'PropagateEffectFailure')
+    if (propagation?._tag !== 'PropagateEffectFailure')
+      return unreachable('expected unselected failure propagation')
+    Reflect.set(propagation, 'outcome', propagation.source)
+    assert.include(
+      MirVerification.verify(wrongPropagationOwner).map((violation) => violation.rule),
+      'InvalidEffectOperation',
+    )
+    const forged = structuredClone(module)
+    const selected = forged.functions
+      .flatMap(MirVerification.operations)
+      .filter((operation) => operation._tag === 'Match')
+      .flatMap((operation) => operation.arms)
+      .find((arm) => arm.selected.execution.recoveryOutcome !== undefined)
+    if (selected === undefined) return unreachable('expected selected recovery execution')
+    Reflect.set(selected.selected.execution, 'recoveryOutcome', { _tag: 'Local', ordinal: -1 })
+    assert.include(
+      MirVerification.verify(forged).map((violation) => violation.rule),
+      'InvalidMatchJoin',
+    )
+    const successScope = structuredClone(module)
+    let forgedSuccess = false
+    for (const fn of successScope.functions) {
+      const operations = MirVerification.operations(fn)
+      const caught = operations.find((operation) => operation._tag === 'CatchEffect')
+      if (caught === undefined) continue
+      const conditional = operations.find(
+        (operation) =>
+          operation._tag === 'Conditional' &&
+          operation.condition.ordinal === caught.destination.ordinal,
+      )
+      if (conditional?._tag !== 'Conditional') continue
+      Reflect.set(conditional.taken, 'recoveryOutcome', caught.outcome)
+      forgedSuccess = true
+      break
+    }
+    assert.isTrue(forgedSuccess)
+    assert.include(
+      MirVerification.verify(successScope).map((violation) => violation.rule),
+      'InvalidEffectOperation',
+    )
+  }),
+)
 
 it.effect('applies ordinary take-once ownership to the direct intrinsic operands', () =>
   Effect.gen(function* () {
@@ -269,7 +479,7 @@ pub fn main() -> i32 { return run handleA(risky(true)) }`
 
 it.effect('rejects failure-only loan metadata on every infallible MIR run form', () =>
   Effect.gen(function* () {
-    const raw = yield* Analysis.ofSourceRealized(
+    const raw = yield* AnalysisFixture.retainingMain(
       'test/infallible-run-failure-loans',
       ascii(infallibleRunLoanSource),
       'wasm32-unknown-unknown',

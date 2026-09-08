@@ -7,11 +7,13 @@
  * boolean attribute, and `editable` lifts the read-only default.
  *
  * A snippet with no semantic attribute never compiles. One with any compiles lazily — on first
- * visibility, not page load — as one complete standalone module with doctest's conventions, so
- * what the reader sees is exactly what doctest verified.
+ * visibility, not page load — as one standalone module without executable startup. Declaration-only
+ * examples do not need an application entry point.
  */
 
 import * as Analysis from '@silklang/compiler/Analysis'
+import * as SourceFile from '@silklang/compiler/SourceFile'
+import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Editor from './Editor.js'
@@ -143,7 +145,16 @@ export class SilkSnippetElement extends HTMLElement {
     this.#compiled = true
     const bytes = encoder.encode(handle.value())
     const snapshot = Effect.runSync(
-      Analysis.ofSourceRealized(this.#module, bytes, this.getAttribute('target') ?? defaultTarget),
+      Analysis.makeRealized({
+        root: SourceFile.make(this.#module, bytes),
+        configuration: {
+          profile: {
+            target: this.getAttribute('target') ?? defaultTarget,
+            artifact: 'object',
+            runtime: { kind: 'none' },
+          },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty)),
     )
     handle.setSession(Editor.session(this.#module, bytes, snapshot))
   }

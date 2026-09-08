@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -17,7 +18,7 @@ fn pass(value: Pair) -> Pair { return move value }
 pub fn main() -> i32 { let pair = pass(make()) return pair.left + pair.right }`
 
 const snapshot = (target?: string) =>
-  Analysis.ofSourceRealized('struct-values/main', ascii(source), target)
+  AnalysisFixture.retainingMain('struct-values/main', ascii(source), target)
 
 const multiSnapshot = (rootModule: string, sources: ReadonlyMap<string, Uint8Array>) => {
   const root = sources.get(rootModule)
@@ -31,7 +32,7 @@ const multiSnapshot = (rootModule: string, sources: ReadonlyMap<string, Uint8Arr
 
 it.effect('lets a value-scope callable shadow a named tuple constructor', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'tuple-values/shadow',
       ascii(`tuple Point(i32)
 fn identity(value: i32) -> i32 { return value }
@@ -125,7 +126,7 @@ it.effect('keeps separate same-shaped anonymous record occurrences nominally inc
 
 it.effect('keeps an all-Copy anonymous record affine as a whole value', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'record-values/ownership',
       ascii(`pub fn main() -> i32 {
   let original = .{ value: 42 }
@@ -326,7 +327,7 @@ fn project(result: Result<i32, bool>) -> i32 { return result.value }`),
 
 it.effect('evaluates initializers in source order before constructing in declaration order', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'struct-values/evaluation-order',
       ascii(`struct Pair { left: i32 right: i32 }
 fn left() -> i32 { return 1 }
@@ -403,7 +404,7 @@ pub fn main() -> i32 { return 0 }`
 
 it.effect('rejects conflicting and absent ordinary struct inference evidence', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'struct-values/inference-errors',
       ascii(`struct Same<T> { first: T second: T }
 struct Phantom<T> { value: i32 }
@@ -424,7 +425,7 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('plans cleanup for omitted fields of the selected nominal-union variant', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'union-values/omitted-cleanup',
       ascii(`struct Bomb {}
 impl Drop for Bomb { fn drop(self: &mut Bomb) -> () { return () } }

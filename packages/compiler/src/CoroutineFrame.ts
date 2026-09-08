@@ -89,7 +89,7 @@ const planDescriptor = (
 ): Mir.CoroutineFrameTargetLayout | undefined => {
   const wordSize = program.layout.target.pointerSize
   const wordAlignment = program.layout.target.pointerAlignment
-  const roles: ReadonlyArray<Mir.CoroutineFrameHeaderRole> = Object.freeze(['Parent', 'State'])
+  const roles = Mir.coroutineFrameHeaderRoles(program)
   const header = Object.freeze(
     roles.map((role, ordinal) =>
       Object.freeze({
@@ -108,8 +108,28 @@ const planDescriptor = (
   if (states.length !== descriptor.states.length) return undefined
   states.sort((left, right) => pointKey(left.point).localeCompare(pointKey(right.point)))
   const alignment = Math.max(wordAlignment, ...states.map((state) => state.alignment))
+  const payloadEnd = Math.max(header.length * wordSize, ...states.map((state) => state.size))
+  const fn = program.functions.find((candidate) =>
+    Mir.matchesInstanceKey(candidate, descriptor.function),
+  )
+  if (fn === undefined) return undefined
+  const diagnosticScopes = Mir.diagnosticScopeLocals(fn).map((scope, ordinal) =>
+    Object.freeze({
+      scope,
+      offset: alignUp(payloadEnd, wordAlignment) + ordinal * wordSize * Mir.diagnosticScopeWords,
+    }),
+  )
+  const outcomesStart =
+    alignUp(payloadEnd, wordAlignment) +
+    diagnosticScopes.length * wordSize * Mir.diagnosticScopeWords
+  const diagnosticOutcomes = Mir.diagnosticOutcomeLocals(program, fn).map((outcome, ordinal) =>
+    Object.freeze({
+      outcome,
+      offset: outcomesStart + ordinal * wordSize * Mir.diagnosticOutcomeWords,
+    }),
+  )
   const size = alignUp(
-    Math.max(header.length * wordSize, ...states.map((state) => state.size)),
+    outcomesStart + diagnosticOutcomes.length * wordSize * Mir.diagnosticOutcomeWords,
     alignment,
   )
   return Object.freeze({
@@ -119,6 +139,8 @@ const planDescriptor = (
     alignment,
     header,
     states: Object.freeze(states),
+    diagnosticScopes: Object.freeze(diagnosticScopes),
+    diagnosticOutcomes: Object.freeze(diagnosticOutcomes),
   })
 }
 

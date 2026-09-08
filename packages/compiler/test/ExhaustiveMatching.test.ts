@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -792,7 +793,7 @@ it.effect(
   'lowers an all-transferring argument without its outer call or a match result local',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'ordinary-mir-argument',
         new TextEncoder().encode(`enum Choice { First, Last }
 fn first(value: i32) -> i32 { return value }
@@ -874,7 +875,7 @@ it.effect(
   'keeps unit completion and a partial enclosing return on distinct match region paths',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'ordinary-mir-partial',
         new TextEncoder().encode(`enum Choice { First, Last }
 fn partial(value: Choice, stop: bool) -> i32 {
@@ -927,7 +928,7 @@ pub fn main() -> i32 { return partial(Choice.First, false) }`),
 
 it.effect('lowers transferring guards and preserves inner and enclosing loop destinations', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'ordinary-mir-guard-loop',
       new TextEncoder().encode(`enum Choice { First, Last }
 fn guarded(value: Choice) -> i32 {

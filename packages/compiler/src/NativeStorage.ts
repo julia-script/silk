@@ -7,7 +7,6 @@ import type * as LlvmType from '@silklang/llvm/Type'
 import type * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import * as Layout from './Layout.js'
-import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import * as NativeType from './NativeType.js'
@@ -74,6 +73,7 @@ export const reloadRoots = Effect.fnUntraced(function* (
     }
     context.locals.set(root, Object.freeze(loaded))
   }
+  yield* reloadAddressRoots(context)
 })
 
 /** Stores every physical lane of an address-taken root into its stable byte storage. */
@@ -88,7 +88,7 @@ export const storeAddressValues = Effect.fnUntraced(function* (
   if (base === undefined || logicalType === undefined)
     throw new RangeError(`Backend lost address storage for %${root}`)
   for (const [ordinal, lane] of NativeType.valueLanesFor(context.types, logicalType).entries()) {
-    const offset = LayoutVerify.laneOffset(context.layout, Mir.semanticType(logicalType), lane.path)
+    const offset = NativeType.addressLaneOffset(context.layout, logicalType, lane, ordinal)
     const stored = values.at(ordinal)
     if (offset === undefined || stored === undefined)
       throw new RangeError(`Backend lost address lane ${ordinal} for %${root}`)
@@ -148,9 +148,7 @@ export const ensureAddressRoot = Effect.fnUntraced(function* (context: Context, 
   if (!context.addressStorage.has(root.ordinal)) {
     const logicalType = context.fn.localTypes.at(root.ordinal)
     const layout =
-      logicalType === undefined
-        ? undefined
-        : Layout.entry(context.layout, Mir.semanticType(logicalType))
+      logicalType === undefined ? undefined : NativeType.addressLayout(context.layout, logicalType)
     if (logicalType === undefined || layout === undefined)
       throw new RangeError(`Backend cannot materialize callable capture %${root.ordinal}`)
     context.addressStorage.set(
@@ -186,7 +184,7 @@ export const reloadAddressRoot = Effect.fnUntraced(function* (context: Context, 
     throw new RangeError(`Backend lost address storage for %${root}`)
   const values: Array<Value.Input> = []
   for (const [ordinal, lane] of NativeType.valueLanesFor(context.types, logicalType).entries()) {
-    const offset = LayoutVerify.laneOffset(context.layout, Mir.semanticType(logicalType), lane.path)
+    const offset = NativeType.addressLaneOffset(context.layout, logicalType, lane, ordinal)
     if (offset === undefined) throw new RangeError(`Backend lost address lane ${ordinal}`)
     values.push(
       yield* FunctionBody.load(

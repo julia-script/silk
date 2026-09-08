@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -27,7 +28,7 @@ it.effect('accepts the compiler-shaped fold through every static compiler phase'
   Effect.gen(function* () {
     const self = yield* Analysis.makeRealized({
       root: SourceFile.make(rootModule, rootBytes),
-      target: 'aarch64-apple-darwin',
+      configuration: AnalysisFixture.configuration(rootModule, 'aarch64-apple-darwin'),
     }).pipe(
       Effect.provide(
         SourceResolver.memory(new Map([...modules].filter(([name]) => name !== rootModule))),

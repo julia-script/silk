@@ -1,16 +1,16 @@
+import * as NativeResult from './NativeResult.js'
+import * as NativeCallable from './NativeCallable.js'
 import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import * as Hir from './Hir.js'
-import * as Layout from './Layout.js'
-import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
+import * as NativeDiagnosticOutcome from './NativeDiagnosticOutcome.js'
 import * as NativeDebug from './NativeDebug.js'
-import * as NativeLanePointer from './NativeLanePointer.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeScalarOperation from './NativeScalarOperation.js'
 import * as NativeStorage from './NativeStorage.js'
@@ -33,7 +33,6 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     f64,
     i32,
     integerTypes,
-    lanePointers,
     program,
     storage: nativeStorage,
     types,
@@ -58,58 +57,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       if (operation.callable !== undefined) {
         if (sourceType?._tag !== 'CallableValue')
           throw new RangeError('Stored callable application lost its identity')
-        const environmentValues = NativeStorage.readLocal(nativeStorage, operation.callable)
-        let cursor = 0
-        for (const field of sourceType.environment?.fields ?? []) {
-          const fieldLanes = Layout.callableFieldLanes(program.layout, field)
-          if (field.representation !== 'Borrow') {
-            captureGroups.push(
-              Object.freeze({
-                parameterOrdinal: field.parameterOrdinal,
-                values: Object.freeze(environmentValues.slice(cursor, cursor + fieldLanes.length)),
-              }),
-            )
-            cursor += fieldLanes.length
-            continue
-          }
-          const base = environmentValues.at(cursor)
-          if (base === undefined)
-            throw new RangeError('Callable borrowed environment lost its pointer')
-          cursor += 1
-          if (!targetUsesEnvironmentBorrows) {
-            const shape = Layout.callingShape(program.layout, field.type)
-            if (shape === undefined)
-              throw new RangeError('Callable borrowed capture lost its semantic calling shape')
-            const values: Array<Value.Input> = []
-            for (const [laneOrdinal, lane] of shape.lanes.entries()) {
-              const offset = LayoutVerify.laneOffset(program.layout, field.type, lane.path)
-              if (offset === undefined)
-                throw new RangeError('Callable borrowed capture lost its lane offset')
-              values.push(
-                yield* FunctionBody.load(
-                  body,
-                  NativeType.laneType(types, lane),
-                  yield* NativeLanePointer.lanePointer(
-                    lanePointers,
-                    body,
-                    base,
-                    offset,
-                    `callable${operation.destination.ordinal}_capture${field.ordinal}_${laneOrdinal}_ptr`,
-                  ),
-                  `callable${operation.destination.ordinal}_capture${field.ordinal}_${laneOrdinal}`,
-                ),
-              )
-            }
-            captureGroups.push(Object.freeze({ parameterOrdinal: field.parameterOrdinal, values }))
-            continue
-          }
-          captureGroups.push(
-            Object.freeze({
-              parameterOrdinal: field.parameterOrdinal,
-              values: Object.freeze([base]),
-            }),
-          )
-        }
+        captureGroups.push(
+          ...(yield* NativeCallable.capturedArguments(
+            context,
+            sourceType,
+            NativeStorage.readLocal(nativeStorage, operation.callable),
+            `callable${operation.destination.ordinal}`,
+          )),
+        )
       } else {
         for (const capture of operation.captures) {
           let values: ReadonlyArray<Value.Input>
@@ -324,16 +279,36 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         throw new RangeError(
           `Backend cannot resolve callable target ${target.declaration.module}.${target.declaration.name}<${operation.typeArguments.map(SilkType.encodeGenericArgument).join(', ')}>`,
         )
-      const result = yield* NativeCall.callValues(
-        call,
-        callableTarget,
-        operands,
+      // Callable application has the same completion boundary as an ordinary source call.
+      const handle = callableTarget.suspendable ? callableTarget.driver : callableTarget.handle
+      if (handle === undefined)
+        throw new RangeError('Backend callable application lost its completion driver')
+      const called = yield* FunctionBody.callDirect(
+        body,
+        handle,
+        yield* NativeCall.argumentsFor(call.synchronous, callableTarget, operands),
+        `callable${operation.destination.ordinal}`,
+      )
+      const result = yield* NativeResult.unpack(
+        body,
+        {
+          resultLaneCount: callableTarget.resultLaneCount,
+          diagnosticResult: callableTarget.diagnosticResult !== undefined,
+        },
+        called,
         `callable${operation.destination.ordinal}`,
       )
       for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
         yield* NativeStorage.reloadAddressRoot(nativeStorage, root)
       }
-      nativeStorage.locals.set(operation.destination.ordinal, result)
+      nativeStorage.locals.set(
+        operation.destination.ordinal,
+        yield* NativeDiagnosticOutcome.accept(
+          call.synchronous.diagnostic,
+          operation.destination,
+          result,
+        ),
+      )
       break
     }
     case 'Call': {
@@ -358,9 +333,13 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const result = yield* FunctionBody.callDirect(
         body,
         handle,
-        operation.arguments.flatMap((argument) => [
-          ...NativeStorage.readLocal(nativeStorage, argument),
-        ]),
+        yield* NativeCall.argumentsFor(
+          call.synchronous,
+          target,
+          operation.arguments.flatMap((argument) => [
+            ...NativeStorage.readLocal(nativeStorage, argument),
+          ]),
+        ),
         `t${operation.destination.ordinal}`,
       )
       for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
@@ -375,22 +354,23 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       }
       const instruction = yield* Value.instruction(body, result)
       yield* NativeDebug.locate(debug, operation.provenance.span, instruction)
-      if (target.resultLaneCount === 1) {
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
-        break
-      }
-      const values: Array<Value.Input> = []
-      for (let lane = 0; lane < target.resultLaneCount; lane += 1) {
-        values.push(
-          yield* FunctionBody.extractValue(
-            body,
-            result,
-            [lane],
-            `t${operation.destination.ordinal}_${lane}`,
-          ),
-        )
-      }
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
+      const unpacked = yield* NativeResult.unpack(
+        body,
+        {
+          resultLaneCount: target.resultLaneCount,
+          diagnosticResult: target.diagnosticResult !== undefined,
+        },
+        result,
+        `t${operation.destination.ordinal}`,
+      )
+      nativeStorage.locals.set(
+        operation.destination.ordinal,
+        yield* NativeDiagnosticOutcome.accept(
+          call.synchronous.diagnostic,
+          operation.destination,
+          unpacked,
+        ),
+      )
       break
     }
   }

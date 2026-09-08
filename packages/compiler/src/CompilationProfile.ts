@@ -280,7 +280,7 @@ export const decode = Effect.fn('CompilationProfile.decode')(function* (
     input,
     'artifact',
     ['executable', 'loadable-module', 'static-archive', 'object'],
-    target.kind === 'WebAssembly' ? 'loadable-module' : 'executable',
+    'executable',
     origin,
   )
   const entry = yield* selection(get(input, 'entry'), 'entry', origin)

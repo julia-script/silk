@@ -1,11 +1,6 @@
+import * as ConcreteCleanup from './ConcreteCleanup.js'
 import { lowerExpression } from './LowerExpression.js'
-import {
-  authored,
-  callableLocalCleanup,
-  cleanupForLocal,
-  concreteCleanup,
-  generated,
-} from './CleanupEmission.js'
+import { authored, cleanupForLocal, generated } from './CleanupEmission.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
@@ -18,7 +13,7 @@ import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as LocalSharedAllocationProvenance from './LocalSharedAllocationProvenance.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
-import { borrowKey, isOsOperation, usize } from './Lower.js'
+import { borrowKey, usize } from './Lower.js'
 import * as Mir from './Mir.js'
 import * as Scalar from './Scalar.js'
 import * as Type from './Type.js'
@@ -258,8 +253,23 @@ const lowerBuiltinOperation = (
     )
     return finishBuiltin(destination)
   }
-  if (expression.operation === 'EffectSuspend' || expression.operation === 'StorageAcquire')
+  if (
+    expression.operation === 'EffectSuspend' ||
+    expression.operation === 'EffectFinalize' ||
+    expression.operation === 'EffectObserveDiagnostics' ||
+    expression.operation === 'StorageAcquire'
+  )
     return undefined
+  if (expression.operation === 'EffectObserveUnhandled') {
+    const destination = fn.alloc(usize)
+    fn.emit({
+      _tag: 'DiagnosticUnhandled',
+      destination,
+      type: usize,
+      provenance: authored(expression.span),
+    })
+    return finishBuiltin(destination)
+  }
   if (expression.operation === 'RawBufferFrom') {
     const [allocation, count] = argumentLocals
     const type = fn.type(expression.type)
@@ -429,17 +439,17 @@ const lowerBuiltinOperation = (
     const destination = fn.alloc(type)
     const bodyCleanup = cleanupForLocal(
       fn,
-      plan.cleanup?.body ?? concreteCleanup(fn, plan.specialization.body),
+      plan.cleanup?.body ?? ConcreteCleanup.forType(fn, plan.specialization.body),
       bodyLocalType,
     )
     const endpointCleanup = cleanupForLocal(
       fn,
-      plan.cleanup?.endpoint ?? concreteCleanup(fn, plan.specialization.endpoint),
+      plan.cleanup?.endpoint ?? ConcreteCleanup.forType(fn, plan.specialization.endpoint),
       endpointLocalType,
     )
     const callbackCleanup = cleanupForLocal(
       fn,
-      plan.cleanup?.callback ?? concreteCleanup(fn, plan.specialization.callback),
+      plan.cleanup?.callback ?? ConcreteCleanup.forType(fn, plan.specialization.callback),
       callbackLocalType,
     )
     fn.emit(
@@ -559,8 +569,12 @@ const lowerBuiltinOperation = (
         block,
         useType: useContract,
         conflictType: conflictContract,
-        useCleanup: cleanupForLocal(fn, concreteCleanup(fn, useType.type), useType),
-        conflictCleanup: cleanupForLocal(fn, concreteCleanup(fn, conflictType.type), conflictType),
+        useCleanup: cleanupForLocal(fn, ConcreteCleanup.forType(fn, useType.type), useType),
+        conflictCleanup: cleanupForLocal(
+          fn,
+          ConcreteCleanup.forType(fn, conflictType.type),
+          conflictType,
+        ),
         loan,
         retainedLoans: Object.freeze([]),
         type,
@@ -774,6 +788,7 @@ const lowerBuiltinOperation = (
     return finishBuiltin(destination)
   }
   if (
+    expression.operation === 'PointerReinterpret' ||
     expression.operation === 'PointerRequalify' ||
     expression.operation === 'PointerBytes' ||
     expression.operation === 'SlotAddress' ||
@@ -787,7 +802,9 @@ const lowerBuiltinOperation = (
     if (source === undefined || type?._tag !== 'Pointer') return undefined
     const destination = fn.alloc(type)
     const tag =
-      expression.operation === 'PointerRequalify' || expression.operation === 'PointerBytes'
+      expression.operation === 'PointerReinterpret' ||
+      expression.operation === 'PointerRequalify' ||
+      expression.operation === 'PointerBytes'
         ? expression.operation
         : 'PointerFromStorage'
     fn.emit(
@@ -940,14 +957,13 @@ const lowerBuiltinOperation = (
         destination,
         slot,
         element: fn.semantic(element),
-        cleanup: concreteCleanup(fn, fn.semantic(element)),
+        cleanup: ConcreteCleanup.forType(fn, fn.semantic(element)),
         type,
         provenance: authored(expression.span),
       }),
     )
     return finishBuiltin(destination)
   }
-  if (isOsOperation(expression.operation)) return undefined
   if (expression.operation === 'StringFromUtf8Unchecked') return undefined
   if (expression.operation === 'StringUtf8Bytes') {
     const [string] = argumentLocals
@@ -1083,8 +1099,8 @@ const lowerBuiltinOperation = (
         operands,
         present,
         absent,
-        presentCleanup: callableLocalCleanup(fn, presentType),
-        absentCleanup: callableLocalCleanup(fn, absentType),
+        presentCleanup: ConcreteCleanup.forCallable(fn, presentType),
+        absentCleanup: ConcreteCleanup.forCallable(fn, absentType),
         sourceType,
         valueType: Object.freeze({ _tag: valueScalar.spelling }),
         type: targetType,

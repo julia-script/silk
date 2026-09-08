@@ -49,7 +49,9 @@ it.effect(
       if (session === undefined) return
 
       assert.deepEqual(
-        Analysis.modules(session.snapshot).map((module) => module.name),
+        Analysis.modules(session.snapshot)
+          .map((module) => module.name)
+          .filter((name) => !name.startsWith('silk/')),
         ['Main'],
       )
       const queryStartedAt = performance.now()

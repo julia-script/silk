@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -7,7 +8,7 @@ const ascii = (value: string): Uint8Array =>
 
 it.effect('rejects invalid replace places with assignment diagnostics', () =>
   Effect.gen(function* () {
-    const immutable = yield* Analysis.ofSourceRealized(
+    const immutable = yield* AnalysisFixture.retainingMain(
       'place-replace/immutable',
       ascii(`pub fn main() -> i32 {
   let value = 1
@@ -20,7 +21,7 @@ it.effect('rejects invalid replace places with assignment diagnostics', () =>
       'SEM0035',
     )
 
-    const sharedRoot = yield* Analysis.ofSourceRealized(
+    const sharedRoot = yield* AnalysisFixture.retainingMain(
       'place-replace/shared',
       ascii(`struct Counter {
   value: i32
@@ -36,7 +37,7 @@ pub fn main() -> i32 { return 0 }`),
       'SEM0036',
     )
 
-    const missingRoot = yield* Analysis.ofSourceRealized(
+    const missingRoot = yield* AnalysisFixture.retainingMain(
       'place-replace/missing',
       ascii(`pub fn main() -> i32 {
   let old = Intrinsic.replace(missing, 2)
@@ -48,7 +49,7 @@ pub fn main() -> i32 { return 0 }`),
       ['SEM0006'],
     )
 
-    const arity = yield* Analysis.ofSourceRealized(
+    const arity = yield* AnalysisFixture.retainingMain(
       'place-replace/arity',
       ascii(`pub fn main() -> i32 {
   let mut value = 1

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -9,19 +9,12 @@ import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Driver from './support/TestDriver.js'
+import * as TestToolchain from './support/TestToolchain.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const clang = existsSync('/opt/homebrew/opt/llvm/bin/clang')
-  ? '/opt/homebrew/opt/llvm/bin/clang'
-  : '/usr/bin/clang'
-const toolchain: NativeToolchain.Toolchain = Object.freeze({
-  _tag: 'Toolchain',
-  clang,
-  llvmAr: 'llvm-ar',
-  runtimeObjectCache: NativeToolchain.makeRuntimeObjectCache(),
-})
+const runtimeObjectCache = NativeToolchain.makeRuntimeObjectCache()
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-nested-effect-row-stabilization-'))
 
 afterAll(() => {
@@ -89,7 +82,7 @@ it.effect(
         compilation: {
           root: SourceFile.make('effect-typing/provide-each-layer', ascii(provideEachLayer)),
         },
-        toolchain,
+        toolchain: { ...(yield* TestToolchain.configured), runtimeObjectCache },
         optimization: 'release',
         artifactKind: 'NativeExecutable',
         destination: join(destinationRoot, 'provide-each-layer'),

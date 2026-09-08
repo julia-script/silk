@@ -193,8 +193,17 @@ const inferFailureRow = (
 ): boolean => {
   if (!allowOpenActual && RowAlgebra.concretize(failureRowPolicy(), actual)._tag !== 'Concrete')
     return false
-  if (RowAlgebra.key(failureRowPolicy(), pattern) === RowAlgebra.key(failureRowPolicy(), actual))
-    return true
+  if (RowAlgebra.key(failureRowPolicy(), pattern) === RowAlgebra.key(failureRowPolicy(), actual)) {
+    // An open witness receiver still supplies evidence when its failure row is identical to
+    // the implementation's pattern. Retain those identity bindings, just as inferType does
+    // for ordinary parameters, rather than leaving the witness binders unresolved.
+    return (
+      !context.allowOpenGenericArguments ||
+      RowAlgebra.parameters(failureRowPolicy(), pattern).members.every((parameter) =>
+        bindGenericArgument(parameter, parameter, inferred, context),
+      )
+    )
+  }
   const substitutedPattern = substituteFailureRow(pattern, inferred)
   if (
     RowAlgebra.key(failureRowPolicy(), substitutedPattern) ===

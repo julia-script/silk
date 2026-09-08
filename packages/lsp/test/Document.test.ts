@@ -2796,7 +2796,9 @@ it.effect('marks compiler-selected inactive tokens without exposing inactive sym
       'static if Intrinsic.targetOperatingSystem() == "darwin" { pub fn active() -> i32 { return 1 } } else { pub fn inactive() -> i32 { return 2 } }'
     const bytes = encoder.encode(source)
     const project = yield* ProjectAnalysis.make([SourceFile.make('main', bytes)], {
-      configuration: { profile: { target: 'aarch64-apple-darwin' } },
+      configuration: {
+        profile: { target: 'aarch64-apple-darwin', artifact: 'object', entry: { kind: 'none' } },
+      },
     }).pipe(Effect.provide(SourceResolver.empty))
     const snapshot = ProjectAnalysis.view(project, 'main')
     assert.ok(snapshot)

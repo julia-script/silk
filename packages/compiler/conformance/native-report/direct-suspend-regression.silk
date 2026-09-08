@@ -1,0 +1,6 @@
+// Direct suspension must resume the division before returning.
+effect fn application() -> i32 {
+  let value = run Intrinsic.suspendEffect(effect { return 1 })
+  return 42 / value
+}
+pub fn main() -> i32 { return run application() }

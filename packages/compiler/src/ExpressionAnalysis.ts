@@ -5321,19 +5321,26 @@ export function analyzeBuiltinCall(
       call.span,
     )
   } else if (
-    signature?.operation === 'PointerRequalify' &&
+    (signature?.operation === 'PointerRequalify' ||
+      signature?.operation === 'PointerReinterpret') &&
     !(
       pointerSourceType !== undefined &&
       Type.isPointer(pointerSourceType) &&
       instantiatedResult !== undefined &&
       Type.isPointer(instantiatedResult) &&
       pointerSourceType.addressSpace === instantiatedResult.addressSpace &&
-      Type.equals(pointerSourceType.pointee, instantiatedResult.pointee)
+      (signature.operation === 'PointerReinterpret'
+        ? pointerSourceType.mutable === instantiatedResult.mutable &&
+          pointerSourceType.nullable === instantiatedResult.nullable &&
+          pointerSourceType.extent === instantiatedResult.extent
+        : Type.equals(pointerSourceType.pointee, instantiatedResult.pointee))
     )
   ) {
     qualifierDiagnostic = Diagnostic.invalidPointerQualifier(
       'conversion',
-      'source and result must be pointers to the same invariant pointee in the same address space',
+      signature.operation === 'PointerReinterpret'
+        ? 'reinterpretation preserves pointer mutability, nullability, extent and address space'
+        : 'source and result must be pointers to the same invariant pointee in the same address space',
       call.span,
     )
   }
@@ -8991,13 +8998,20 @@ export function analyzeExpression(
     const returned = returnFlowOf(statements, false).returns.map(
       (statement) => statement.expression,
     )
-    // Failures in ordinary arms belong to this execution boundary; nested Effects own theirs.
+    // Direct failures and executed computations belong to this boundary; nested Effects own theirs.
     const failures: Array<Type.Type> = []
+    const executed: Array<Type.Effect> = []
     visitStatementFacts(statements, {
       descendEffectBlocks: false,
       statement: (statement) => {
         if (statement._tag === 'FailStatement' && statement.failure !== undefined)
           failures.push(statement.failure)
+      },
+      expression: (expression) => {
+        if (expression._tag !== 'Run' || expression.subject.type._tag !== 'Available') return
+        const subject = expression.subject.type.type
+        const contract = Type.isRepresented(subject) ? subject.contract : subject
+        if (Type.isEffect(contract)) executed.push(contract)
       },
     })
     // Every return site contributes to the success type through the one canonical join rule;
@@ -9069,10 +9083,27 @@ export function analyzeExpression(
         .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
         .map((capture) => capture.expression?.syntax ?? capture.reference.syntax),
     )
-    const type =
+    let inferred =
       success !== undefined && lifetimes !== undefined
-        ? availableExpressionType(Type.effect(success, failures, lifetimes, access))
-        : unavailableExpressionType
+        ? Type.effect(success, failures, lifetimes, access)
+        : undefined
+    if (inferred !== undefined) {
+      for (const computation of executed) {
+        inferred = Type.effectWithRows(
+          inferred.success,
+          RowAlgebra.union(Type.failureRowPolicy(), inferred.failureRow, computation.failureRow),
+          inferred,
+          inferred.access,
+          RowAlgebra.union(
+            Type.requirementRowPolicy(),
+            inferred.requirementRow,
+            computation.requirementRow,
+          ),
+        )
+      }
+    }
+    const type =
+      inferred === undefined ? unavailableExpressionType : availableExpressionType(inferred)
     return Object.freeze({
       fact: Object.freeze({
         _tag: 'EffectBlock',

@@ -1,4 +1,6 @@
 import * as NativeAssemblyOperation from './NativeAssemblyOperation.js'
+import * as NativeDiagnosticScope from './NativeDiagnosticScope.js'
+import * as NativeDiagnosticOutcome from './NativeDiagnosticOutcome.js'
 import * as Effect from 'effect/Effect'
 import * as CleanupPlan from './CleanupPlan.js'
 import type * as Mir from './Mir.js'
@@ -32,8 +34,6 @@ export const needsAllocation = (operation: Mir.Operation): boolean =>
   operation._tag === 'SlotTake' ||
   operation._tag === 'SlotCopy' ||
   operation._tag === 'SlotDrop' ||
-  (operation._tag === 'CloseEffectEntry' &&
-    operation.failures.some((failure) => CleanupPlan.reclaims(failure.cleanup))) ||
   (operation._tag === 'Drop' && CleanupPlan.reclaims(operation.cleanup))
 
 /** Dispatch-only native operation context; each sibling actor owns its lowering behavior. */
@@ -56,6 +56,14 @@ export const emit = Effect.fnUntraced(function* (
   operation: LinearOperation,
 ) {
   switch (operation._tag) {
+    case 'ReleaseDiagnosticOutcome':
+      return yield* NativeDiagnosticOutcome.releaseLocal(
+        context.call.termination.diagnostic,
+        operation.outcome,
+      )
+    case 'EnterDiagnosticScope':
+    case 'LeaveDiagnosticScope':
+      return yield* NativeDiagnosticScope.emit(context.call, operation)
     case 'NativeAssembly':
       return yield* NativeAssemblyOperation.emit(context.call, operation)
     case 'BindMatch':
@@ -71,7 +79,6 @@ export const emit = Effect.fnUntraced(function* (
     case 'StringEqualsExact':
       return yield* NativeValueOperation.emit(context.value, operation)
     case 'Allocate':
-    case 'OsCall':
     case 'RawBufferFrom':
     case 'SharedFromAllocation':
     case 'SharedClone':
@@ -122,6 +129,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'MakeEffect':
     case 'MakeCallable':
     case 'PackEffectComposite':
+    case 'UnpackEffectComposite':
     case 'PackEffectOutcome':
     case 'PackEffectFailureUnion':
     case 'UnpackEffectSuccess':
@@ -130,7 +138,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'RunEffectValue':
     case 'RunStaticEffect':
     case 'CatchEffect':
-    case 'CloseEffectEntry':
+    case 'DiagnosticUnhandled':
       return yield* NativeEffectOperation.emit(context.effect, operation)
     case 'ApplyCallable':
     case 'Call':
@@ -144,6 +152,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'PointerAddress':
     case 'PointerIsNull':
     case 'PointerBytes':
+    case 'PointerReinterpret':
     case 'PointerRequalify':
     case 'PointerFromStorage':
     case 'PointerAt':

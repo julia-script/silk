@@ -14,7 +14,8 @@ import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeDebug from './NativeDebug.js'
 import * as NativeOwnedPlace from './NativeOwnedPlace.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
-import * as NativeSuspension from './NativeSuspension.js'
+import type * as NativeSuspension from './NativeSuspension.js'
+import * as NativeReturn from './NativeReturn.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
 import * as SilkType from './Type.js'
@@ -233,13 +234,16 @@ export const emit = Effect.fnUntraced(function* (
   blockOrdinal: number,
   blockId: Mir.RegionId,
 ): Effect.fn.Return<void, LlvmError.LlvmError> {
-  const { builder, body, i32, entry } = context
+  const { builder, body, i32 } = context
   const readLocal = (local: Mir.LocalId) => read(context, local)
-  const readScalar = (local: Mir.LocalId) => scalar(context, local)
   const block = Object.freeze({ id: blockId })
   switch (terminator._tag) {
     case 'PropagateEffectFailure': {
-      yield* NativeTermination.storePropagated(context.termination)
+      yield* NativeTermination.storePropagated(
+        context.termination,
+        terminator.outcome,
+        terminator.provenance.span,
+      )
       const source = readLocal(terminator.source)
       const sourceTag = terminator.sourceType._tag === 'Union' ? source.at(0) : undefined
       let mappedTag: Value.Input
@@ -291,57 +295,21 @@ export const emit = Effect.fnUntraced(function* (
           `effect_failure_propagation${terminator.source.ordinal}_payload`,
         )),
       ]
-      if (entry.suspendable) {
-        yield* NativeSuspension.returnStep(
-          context.suspension,
-          0n,
-          Object.freeze(returned),
-          'propagated_selective_failure_step',
-        )
-      } else {
-        yield* FunctionBody.returnValue(
-          body,
-          returned.length === 1
-            ? (returned.at(0) ?? mappedTag)
-            : yield* FunctionBody.buildAggregate(
-                body,
-                entry.resultType,
-                Object.freeze(returned.slice(0, terminator.propagationLaneCount)),
-                'propagated_selective_failure',
-              ),
-        )
-      }
+      yield* NativeReturn.complete(
+        context.suspension,
+        Object.freeze(returned.slice(0, terminator.propagationLaneCount)),
+        'propagated_selective_failure',
+        terminator.outcome,
+      )
       break
     }
     case 'Return': {
       const returned = readLocal(terminator.value)
-      if (entry.suspendable) {
-        yield* NativeSuspension.returnStep(
-          context.suspension,
-          0n,
-          returned,
-          `complete_value_b${block.id.ordinal}`,
-        )
-        break
-      }
-      if (returned.length === 0) {
-        const instruction = yield* FunctionBody.returnVoid(body)
-        yield* NativeDebug.locate(context.debug, terminator.provenance.span, instruction)
-        break
-      }
-      if (returned.length === 1) {
-        const instruction = yield* FunctionBody.returnValue(body, readScalar(terminator.value))
-        yield* NativeDebug.locate(context.debug, terminator.provenance.span, instruction)
-        break
-      }
-      const instruction = yield* FunctionBody.returnValue(
-        body,
-        yield* FunctionBody.buildAggregate(
-          body,
-          entry.resultType,
-          returned,
-          `return_value_b${block.id.ordinal}`,
-        ),
+      const instruction = yield* NativeReturn.complete(
+        context.suspension,
+        returned,
+        `return_value_b${block.id.ordinal}`,
+        terminator.value,
       )
       yield* NativeDebug.locate(context.debug, terminator.provenance.span, instruction)
       break

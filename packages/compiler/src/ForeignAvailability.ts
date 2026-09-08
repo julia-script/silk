@@ -60,7 +60,7 @@ export const select = (
   const surface = target.id
   const unavailable = new Map<string, Diagnostic.Diagnostic>()
   for (const call of calls) {
-    if (!native)
+    if (!CAbi.available(target, call.signature))
       if (!unavailable.has(call.symbol))
         unavailable.set(
           call.symbol,

@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -168,7 +169,7 @@ pub fn main() -> i32 {
 
 it.effect('plans reclaim after repeated shared Copy reads', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'owned-allocation/shared-read',
       ascii(sharedReadSource),
       'wasm32-unknown-unknown',
@@ -195,7 +196,7 @@ it.effect('rejects shared RawBuffer reads of move-only nominal and union element
       ['move-only', nonCopyReadSource],
       ['move-only-union', moveOnlyUnionReadSource],
     ] as const) {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         `owned-allocation/read-${name}`,
         ascii(source),
       )
@@ -209,7 +210,7 @@ it.effect('rejects shared RawBuffer reads of move-only nominal and union element
 
 it.effect('requires shared rather than exclusive access for RawBuffer.read', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'owned-allocation/read-exclusive',
       ascii(unsafeProgram('    return RawBuffer.read<i32>(&mut buffer, 0)')),
     )

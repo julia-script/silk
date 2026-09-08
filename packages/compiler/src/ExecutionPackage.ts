@@ -1,3 +1,4 @@
+import * as ContinuationTransfer from './ContinuationTransfer.js'
 import type * as CleanupPlan from './CleanupPlan.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import type * as Target from './Target.js'
@@ -148,7 +149,7 @@ export const planWithin = (
       : []),
     ...(readinessStorage ? [component('WakeControl', word * 4, word)] : []),
     ...(initialContinuationSegment
-      ? [component('InitialContinuationSegment', word * 4, word)]
+      ? [component('InitialContinuationSegment', word * ContinuationTransfer.headerWords, word)]
       : []),
   ])
 

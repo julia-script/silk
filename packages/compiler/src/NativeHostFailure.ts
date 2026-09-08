@@ -6,8 +6,12 @@ import type * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import type * as Mir from './Mir.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
-import * as NativeSuspension from './NativeSuspension.js'
+import type * as NativeSuspension from './NativeSuspension.js'
+import * as NativeReturn from './NativeReturn.js'
 import * as NativeType from './NativeType.js'
+import * as NativeDiagnosticOutcome from './NativeDiagnosticOutcome.js'
+import * as NativeDiagnosticText from './NativeDiagnosticText.js'
+import * as NativeTermination from './NativeTermination.js'
 
 /** Failure-return state for allocation boundaries. */
 export interface Context {
@@ -16,6 +20,7 @@ export interface Context {
   readonly entry: NativeLoweringContext.DeclaredFunction
   readonly types: NativeType.LoweringContext
   readonly suspension: NativeSuspension.ReturnContext
+  readonly termination: NativeTermination.FunctionContext
 }
 
 /** Emits one host-boundary failure in the function's synchronous or suspension ABI. */
@@ -34,31 +39,44 @@ export const emit = Effect.fnUntraced(function* (
       ),
     )
   }
-  if (context.entry.suspendable) {
-    yield* NativeSuspension.returnStep(
-      context.suspension,
-      0n,
-      Object.freeze(values),
-      `host_failure${operation.destination.ordinal}`,
+  let metadata: Value.Input | undefined
+  if (context.entry.diagnosticResult !== undefined) {
+    const diagnostic = context.suspension.diagnostic
+    if (diagnostic === undefined)
+      throw new RangeError('Allocation failure lost its diagnostic context')
+    // Allocation refusal returns immediately. This stack slot cannot survive a suspension
+    // or escape the invocation; the completed result takes its reference before cleanup.
+    const outcome = {
+      storage: yield* FunctionBody.alloca(
+        context.body,
+        diagnostic.causeType,
+        `allocation_failure${operation.destination.ordinal}`,
+      ),
+    }
+    yield* NativeDiagnosticOutcome.initialize(outcome, diagnostic)
+    yield* NativeDiagnosticOutcome.produce(
+      outcome,
+      diagnostic,
+      yield* NativeDiagnosticText.literal(
+        diagnostic,
+        NativeTermination.identityOf(operation.propagationType.type, operation.failureTag),
+        `${context.entry.symbol}.allocation${operation.destination.ordinal}.identity`,
+      ),
+      yield* NativeDiagnosticText.literal(
+        diagnostic,
+        NativeDiagnosticText.origin(
+          context.termination.module,
+          context.entry.fn,
+          operation.provenance.span,
+        ),
+        `${context.entry.symbol}.allocation${operation.destination.ordinal}.origin`,
+      ),
     )
-    return
+    metadata = yield* NativeDiagnosticOutcome.take(outcome, diagnostic)
   }
-  if (values.length === 0) {
-    yield* FunctionBody.returnVoid(context.body)
-    return
-  }
-  const single = values.at(0)
-  if (values.length === 1 && single !== undefined) {
-    yield* FunctionBody.returnValue(context.body, single)
-    return
-  }
-  yield* FunctionBody.returnValue(
-    context.body,
-    yield* FunctionBody.buildAggregate(
-      context.body,
-      context.entry.resultType,
-      Object.freeze(values),
-      `host_failure${operation.destination.ordinal}`,
-    ),
+  yield* NativeReturn.completeResult(
+    context.suspension,
+    { values: Object.freeze(values), ...(metadata === undefined ? {} : { diagnostic: metadata }) },
+    `host_failure${operation.destination.ordinal}`,
   )
 })
