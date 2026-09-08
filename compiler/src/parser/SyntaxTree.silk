@@ -21,11 +21,17 @@
 //! Every node and token identity is local to this value. Copying an identity into another syntax
 //! tree does not preserve its meaning.
 
-import lexer.Token {Token}
+import lexer.Span {Span}
+import lexer.Token {Token, TokenKind}
+import lexer.Token as LexicalToken
 import parser.Diagnostic {Diagnostic}
-import parser.Node {Node}
+import parser.Element {Element}
+import parser.Node {Node, NodeKind}
 import parser.NodeId {NodeId}
+import silk.format {Format}
+import silk.usize
 import silk.vector {Vector}
+import silk.writer {Writer, WriterError}
 
 /// Owns all token storage, node storage, root identity, and diagnostics for one source file.
 ///
@@ -42,4 +48,139 @@ pub struct SyntaxTree {
   pub root: NodeId
   /// Syntax diagnostics in parser discovery order.
   pub diagnostics: Vector<Diagnostic>
+}
+
+fn nodeKindName(kind: NodeKind) -> string<'static> {
+  return match move kind {
+    NodeKind.SourceFile => "SourceFile"
+    NodeKind.ImportDeclaration => "ImportDeclaration"
+    NodeKind.ImportPath => "ImportPath"
+    NodeKind.ImportAlias => "ImportAlias"
+    NodeKind.ImportMemberList => "ImportMemberList"
+    NodeKind.ImportMember => "ImportMember"
+    NodeKind.Error => "Error"
+    _ => "UnprintedNodeKind"
+  }
+}
+
+fn expectedTokenName(kind: TokenKind) -> string<'static> {
+  return match move kind {
+    TokenKind.ImportKeyword => "ImportKeyword"
+    TokenKind.AsKeyword => "AsKeyword"
+    TokenKind.Identifier => "Identifier"
+    TokenKind.LeftBrace => "LeftBrace"
+    TokenKind.RightBrace => "RightBrace"
+    TokenKind.EndOfFile => "EndOfFile"
+    _ => "UnprintedTokenKind"
+  }
+}
+
+effect fn writeSpan(span: Span) -> () ! WriterError ? &mut Writer {
+  run Format.display(&span.start)
+  run Writer.writeString("..")
+  return run Format.display(&span.end)
+}
+
+effect fn writeElement(tree: &SyntaxTree, element: Element) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString("  ")
+  return match move element {
+    Element.Node {id} => {
+      run Writer.writeString("node #")
+      run Format.display(&id.index)
+      run Writer.writeString("\n")
+    }
+    Element.Token {id} => {
+      run Writer.writeString("token #")
+      run Format.display(&id.index)
+      run Writer.writeString(" ")
+      run LexicalToken.write(Vector.get<Token>(&tree.tokens, id.index))
+    }
+    Element.MissingToken {expected, span} => {
+      run Writer.writeString("missing ")
+      run Writer.writeString(expectedTokenName(expected))
+      run Writer.writeString(" ")
+      run writeSpan(span)
+      run Writer.writeString("\n")
+    }
+  }
+}
+
+effect fn writeNode(tree: &SyntaxTree, index: usize) -> () ! WriterError ? &mut Writer {
+  let nodes = Vector.asSlice<Node>(&tree.nodes)
+  let node = &nodes[index]
+  run Writer.writeString("#")
+  run Format.display(&index)
+  run Writer.writeString(" ")
+  run Writer.writeString(nodeKindName(node.kind))
+  run Writer.writeString(" ")
+  run writeSpan(node.span)
+  run Writer.writeString("\n")
+  let elements = Vector.asSlice<Element>(&node.elements)
+  let mut elementIndex = usize.ZERO
+  while elementIndex < elements.length {
+    run writeElement(tree, elements[elementIndex])
+    elementIndex = usize.add(elementIndex, usize.ONE)
+  }
+  return ()
+}
+
+effect fn writeDiagnostic(diagnostic: Diagnostic, index: usize) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString("#")
+  run Format.display(&index)
+  run Writer.writeString(" ")
+  return match move diagnostic {
+    Diagnostic.MissingToken {expected, span} => {
+      run Writer.writeString("MissingToken ")
+      run Writer.writeString(expectedTokenName(expected))
+      run Writer.writeString(" ")
+      run writeSpan(span)
+      run Writer.writeString("\n")
+    }
+    Diagnostic.UnexpectedToken {actual: ignoredActual, span} => {
+      run Writer.writeString("UnexpectedToken ")
+      run writeSpan(span)
+      run Writer.writeString("\n")
+    }
+  }
+}
+
+/// Writes the flat node array, its element identities, and syntax diagnostics.
+///
+/// # When to use
+///
+/// Use to inspect parser output during self-hosted compiler development. The output makes array
+/// identities and child references visible.
+///
+/// # Details
+///
+/// The first line identifies the source-file root. The node section then writes every node in
+/// array order. Each indented line writes one direct element.
+///
+/// A token element includes its token identity, kind, and byte span. A missing-token element
+/// includes its expected kind and zero-width span. The final section writes parser diagnostics.
+///
+/// # Gotchas
+///
+/// This diagnostic format is for humans and is not a stable serialization format. A writer failure
+/// preserves any output prefix that the writer accepted.
+pub effect fn write(tree: &SyntaxTree) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString("root #")
+  run Format.display(&tree.root.index)
+  run Writer.writeString("\n\nnodes ")
+  run Format.display(&Vector.length<Node>(&tree.nodes))
+  run Writer.writeString("\n")
+  let mut nodeIndex = usize.ZERO
+  while nodeIndex < Vector.length<Node>(&tree.nodes) {
+    run writeNode(tree, nodeIndex)
+    nodeIndex = usize.add(nodeIndex, usize.ONE)
+  }
+  run Writer.writeString("\ndiagnostics ")
+  run Format.display(&Vector.length<Diagnostic>(&tree.diagnostics))
+  run Writer.writeString("\n")
+  let mut diagnosticIndex = usize.ZERO
+  while diagnosticIndex < Vector.length<Diagnostic>(&tree.diagnostics) {
+    run writeDiagnostic(Vector.get<Diagnostic>(&tree.diagnostics, diagnosticIndex), diagnosticIndex)
+    diagnosticIndex = usize.add(diagnosticIndex, usize.ONE)
+  }
+  return ()
 }
