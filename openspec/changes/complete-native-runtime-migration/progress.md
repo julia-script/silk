@@ -2537,3 +2537,15 @@ inputs. This is partial validation, not a completed final gate. The final stack
 sequence runs in `ci-fix3-{typecheck,format,lint,test,check,release}.log`. Focused checks
 and strict OpenSpec validation already pass; full test/check/release and replacement
 remote CI results remain pending.
+
+### Native CI job budget
+
+Run `34258325743` passed all compiler shards, all three platform-supply lanes,
+native shard 3, browser/macOS checks and the complete validate job, including LSP
+and release-candidate checks. Native shards 1/2 were cancelled by GitHub at the
+30-minute job limit; check annotations explicitly report `The job has exceeded
+the maximum execution time of 30m0s`, with no test assertion failure in the logs.
+Commit `d46071aa` gives native acceptance jobs 60 minutes including setup/build;
+individual test deadlines, assertions, shard assignments and case selection are
+unchanged. A fresh CI run verifies the complete cold shards. The active local
+`ci-fix3` sequence continues with unchanged compiler/test inputs.
