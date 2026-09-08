@@ -1,22 +1,41 @@
-//! Syntax diagnostics produced while building a recoverable parser result.
+//! Syntax problems recorded while the parser preserves a usable partial tree.
+//!
+//! # When to use
+//!
+//! Use [`Diagnostic`] to report malformed syntax without discarding valid nodes from the same
+//! source file.
+//!
+//! # Details
+//!
+//! A diagnostic describes either an absent required token or one unexpected source token. Parser
+//! operations append diagnostics in discovery order. Each diagnostic owns the token kind and span
+//! needed for a source report.
+//!
+//! Diagnostics do not stop parsing. A compiler can stop at its first diagnostic, while a tool can
+//! continue with unaffected nodes.
 
 import lexer.Span {Span}
 import lexer.Token {TokenKind}
 
-/// One syntax problem attached to the parser result.
+/// One missing or unexpected token problem attached to a parser result.
+///
+/// # Details
+///
+/// Each variant contains a source span. A missing token uses a zero-width insertion span. An
+/// unexpected token uses the span of the source token that recovery consumed.
 pub union Diagnostic {
-  /// A required token was absent at an insertion point.
+  /// A required grammar token that was absent at a zero-width insertion point.
   MissingToken {
-    /// The lexical category required by the grammar.
+    /// The token kind that the active grammar rule required.
     pub expected: TokenKind,
-    /// The zero-width source span of the insertion point.
+    /// The zero-width byte span where the parser inserted the conceptual token.
     pub span: Span,
   },
-  /// A source token could not start or continue the current construct.
+  /// A source token that could not start or continue the active grammar rule.
   UnexpectedToken {
-    /// The lexical category found in the source.
+    /// The kind of the source token that recovery consumed.
     pub actual: TokenKind,
-    /// The source span of the unexpected token.
+    /// The half-open byte span of the consumed source token.
     pub span: Span,
   },
 }

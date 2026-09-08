@@ -1,15 +1,37 @@
-//! Flat parser nodes and their syntax categories.
+//! Flat parser nodes, their syntax categories, and their direct element order.
+//!
+//! # When to use
+//!
+//! Use [`Node`] for structural syntax after lexing. Use [`NodeKind`] to select grammar constructs
+//! without inspecting token spellings.
 //!
 //! # Details
 //!
-//! Each [`Node`] owns its direct elements. Child elements contain stable identities into the
-//! parser node vector.
+//! Each node owns only its kind, byte span, and direct elements. A child element contains a stable
+//! index into the syntax tree's shared node array. A token element contains an index into the
+//! shared token array.
+//!
+//! The parser stores elements in source order. It appends a node after all child nodes are
+//! complete. This postorder layout makes each child index lower than its parent index.
+//!
+//! Error nodes and missing-token elements use the same representation as valid syntax. A consumer
+//! can process valid siblings without a separate error tree.
+//!
+//! # Gotchas
+//!
+//! A node does not own the node or token arrays that resolve its elements. Resolve each identity
+//! only against the syntax tree that owns this node.
 
 import lexer.Span {Span}
 import parser.Element {Element}
 import silk.vector {Vector}
 
-/// The syntax category of one parser node.
+/// The grammar category of one structural parser node.
+///
+/// # Details
+///
+/// Categories cover the full planned parser vocabulary. The current grammar can produce only the
+/// categories for source files, imports, and error recovery.
 pub enum NodeKind {
   /// The root of one parsed source file.
   SourceFile,
@@ -275,12 +297,20 @@ pub enum NodeKind {
   Error,
 }
 
-/// One parser node with a source span and its direct elements.
+/// One structural syntax node stored independently in a flat node array.
+///
+/// # Details
+///
+/// The span covers the node from its first direct element through its last direct element. An
+/// empty node uses the insertion span supplied by its grammar rule.
+///
+/// Elements occur in source order. They include direct child nodes, significant source tokens, and
+/// conceptual missing tokens. Trivia remains in the syntax tree's token array.
 pub struct Node {
-  /// The syntax category of the node.
+  /// The grammar category that determines how consumers interpret the elements.
   pub kind: NodeKind
-  /// The half-open source byte range of the node.
+  /// The half-open source byte range covered by the node.
   pub span: Span
-  /// The direct child nodes and significant tokens in source order.
+  /// The direct child nodes, significant source tokens, and inserted tokens in source order.
   pub elements: Vector<Element>
 }

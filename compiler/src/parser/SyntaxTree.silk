@@ -1,9 +1,25 @@
-//! One recoverable parser result backed by flat token and node arrays.
+//! One recoverable syntax result backed by separate flat token and node arrays.
+//!
+//! # When to use
+//!
+//! Use [`SyntaxTree`] as the parser output for semantic analysis, compiler diagnostics, and source
+//! tools that must continue after malformed syntax.
 //!
 //! # Details
 //!
-//! Nodes refer to children by [`NodeId`]. Tokens remain in source order and parser elements refer
-//! to them by [`TokenId`]. A diagnostic does not invalidate unrelated nodes.
+//! Tokens remain in their original lexer order, including whitespace and comments. Node elements
+//! refer to significant tokens by token index. The parser does not copy token payloads into nodes.
+//!
+//! Nodes occupy one postorder array. A child node has a lower index than its parent. The root
+//! identity selects the source-file node, which is the final node appended by the parser.
+//!
+//! Diagnostics and recovered syntax exist in the same result. Missing tokens are conceptual node
+//! elements. Unexpected source remains available through error nodes and token identities.
+//!
+//! # Gotchas
+//!
+//! Every node and token identity is local to this value. Copying an identity into another syntax
+//! tree does not preserve its meaning.
 
 import lexer.Token {Token}
 import parser.Diagnostic {Diagnostic}
@@ -11,14 +27,19 @@ import parser.Node {Node}
 import parser.NodeId {NodeId}
 import silk.vector {Vector}
 
-/// Owns all tokens, nodes, and syntax diagnostics for one source file.
+/// Owns all token storage, node storage, root identity, and diagnostics for one source file.
+///
+/// # Details
+///
+/// Consumers resolve a node identity by indexing `nodes`. They resolve a token identity by
+/// indexing `tokens`. A diagnostic does not invalidate an unrelated node or token.
 pub struct SyntaxTree {
-  /// The lossless lexer output in source order.
+  /// The complete lexer output in source order, including trivia.
   pub tokens: Vector<Token>
-  /// The flat node storage addressed by [`NodeId`].
+  /// The postorder flat node storage addressed by [`NodeId`].
   pub nodes: Vector<Node>
-  /// The root [`NodeKind.SourceFile`](parser.Node.NodeKind.SourceFile) node.
+  /// The identity of the source-file node that owns all top-level elements.
   pub root: NodeId
-  /// Syntax diagnostics in discovery order.
+  /// Syntax diagnostics in parser discovery order.
   pub diagnostics: Vector<Diagnostic>
 }

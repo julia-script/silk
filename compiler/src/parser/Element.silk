@@ -1,43 +1,67 @@
-//! Compact references to the direct contents of parser nodes.
+//! Compact, source-ordered references to the direct contents of flat parser nodes.
+//!
+//! # When to use
+//!
+//! Use [`Element`] to inspect or build one node without embedding child nodes or copying lexer
+//! tokens into that node.
 //!
 //! # Details
 //!
-//! An [`Element`] refers to a node or token by its stable index. A missing token stores the
-//! expected category and insertion span directly because it has no source token.
+//! A node element identifies an entry in the tree's node array. A token element identifies an
+//! entry in the tree's token array. These identities keep every node value small and make shared
+//! storage ownership explicit.
+//!
+//! A missing token has no token-array entry. Its element stores the expected kind and insertion
+//! span directly. Consumers can therefore traverse damaged syntax without a second recovery tree.
+//!
+//! # Gotchas
+//!
+//! Node and token identities are local to one syntax tree. Do not use an identity with another
+//! tree, even when both trees came from the same source text.
 
 import lexer.Span {Span}
 import lexer.Token {TokenKind}
 import parser.NodeId {NodeId}
 
-/// The stable index of one token in a parser token vector.
+/// The stable index of one lexer token in a syntax tree's token array.
+///
+/// # Details
+///
+/// Token identities refer to the original lexer order. Parser trivia skipping does not renumber
+/// tokens.
 ///
 /// # Gotchas
 ///
 /// The index is valid only for the syntax tree that created the identity.
 pub struct TokenId {
-  /// The position of the token in its owning token vector.
+  /// The zero-based position of the token in its owning syntax tree's token array.
   pub index: usize
 }
 
 impl Copy for TokenId {}
 
-/// One direct node element stored as a compact identity.
+/// One direct child, source token, or inserted token in a parser node.
+///
+/// # Details
+///
+/// A node stores elements in source order. Child nodes and source tokens use stable array
+/// identities. Inserted tokens store their recovery data inline.
 pub union Element {
-  /// A child node.
+  /// A direct child node that already exists in the flat node array.
   Node {
-    /// The identity of the child node.
+    /// The child node's index in the owning syntax tree's node array.
     pub id: NodeId,
   },
-  /// A token that occurs in the source.
+  /// A significant lexer token that occurs directly in this node.
   Token {
-    /// The identity of the source token.
+    /// The source token's index in the owning syntax tree's token array.
     pub id: TokenId,
   },
-  /// An expected token that does not occur in the source.
+  /// A conceptual grammar token that has no corresponding source token.
   MissingToken {
-    /// The lexical category expected at the insertion point.
+    /// The token kind that the active grammar rule expected.
     pub expected: TokenKind,
-    /// The zero-width source span of the insertion point.
+    /// The zero-width byte span where the token would occur.
     pub span: Span,
   },
 }
