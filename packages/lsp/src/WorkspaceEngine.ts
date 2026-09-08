@@ -40,7 +40,9 @@ export const defaultPolicy: Policy = Object.freeze({
   inspectionDeadline: 10_000,
   diagnosticDeadline: 5_000,
   supersededLease: 500,
-  noProgressLease: 10_000,
+  // A cold source-runtime frontend stage can exceed ten seconds on shared hosts.
+  // Query deadlines remain independent, so other projects continue to answer.
+  noProgressLease: 30_000,
   startupDeadline: 10_000,
   retirementDeadline: 2_000,
   failureLimit: 3,

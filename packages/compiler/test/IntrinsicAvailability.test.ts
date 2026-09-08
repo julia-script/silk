@@ -705,6 +705,58 @@ it('plans exports over MIR: symbol map, non-native rejection, and suspension', (
   ])
 })
 
+it.effect('shares matching C data imports and rejects incompatible symbol claims', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`
+unsafe extern "C" static first: i32 as "shared_data"
+unsafe extern "C" static second: i32 as "shared_data"
+pub fn main() -> i32 { unsafe { return first + second } }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const program = Analysis.loweredMir(self)
+    assert.strictEqual(program.foreignStatics.length, 2)
+    assert.deepEqual(ForeignPlanning.check(program, program.layout.target), [])
+    const artifact = yield* Analysis.codegen(self, { mode: 'release' })
+    assert.deepEqual(artifact.foreignStatics, [
+      { symbol: 'shared_data', type: 'i32', direction: 'Import' },
+    ])
+    assert.strictEqual(artifact.ir.split('@shared_data =').length, 2)
+    const first = program.foreignStatics[0] ?? unreachable('first data import')
+    const second = program.foreignStatics[1] ?? unreachable('second data import')
+    const variants: ReadonlyArray<Mir.Module['foreignStatics']> = [
+      [first, { ...second, type: 'i64' }],
+      [first, { ...second, direction: 'Export' }],
+      [{ ...first, direction: 'Export' }, second],
+      [
+        { ...first, direction: 'Export' },
+        { ...second, direction: 'Export' },
+      ],
+    ]
+    for (const foreignStatics of variants) {
+      const diagnostics = ForeignPlanning.check(
+        { ...program, foreignStatics },
+        program.layout.target,
+      )
+      assert.deepEqual(
+        diagnostics.map((entry) => entry.code),
+        ['SEM0192'],
+      )
+      assert.deepEqual(diagnostics[0]?.span, second.declarationSpan)
+      assert.deepEqual(diagnostics[0]?.relatedSpans?.[0]?.span, first.declarationSpan)
+    }
+    const call = foreignEntry('shared_data', [], 'planning/function', 0)
+    const collision = ForeignPlanning.check(
+      { ...program, foreignCalls: [call], foreignStatics: [first] },
+      program.layout.target,
+    )
+    assert.deepEqual(
+      collision.map((entry) => entry.code),
+      ['SEM0192'],
+    )
+    assert.deepEqual(collision[0]?.span, first.declarationSpan)
+    assert.deepEqual(collision[0]?.relatedSpans?.[0]?.span, call.declarationSpan)
+  }),
+)
+
 it.effect('lowers literal typed assembly through fixed and tied native registers', () =>
   Effect.gen(function* () {
     const analysis = yield* Analysis.makeRealized({
