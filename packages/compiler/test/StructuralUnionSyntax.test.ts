@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -82,7 +83,7 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('normalizes reordered scalar and array members to one semantic identity', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'union-syntax/ordinary-order',
       ascii(`fn left(value: i32 | [i32; 2]) -> i32 { return 0 }
 fn right(value: [i32; 2] | i32) -> i32 { return 0 }
@@ -105,7 +106,7 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('requires executable union members to name a finite representation', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'union-syntax/executable',
       ascii(`fn invalidCallable(value: fn(i32) -> i32 | i32) -> i32 { return 0 }
 fn invalidEffect(value: Effect<i32> | i32) -> i32 { return 0 }

@@ -540,13 +540,7 @@ export const views: ReadonlyArray<ViewDefinition> = [
         },
         {
           phase: 'instance discovery',
-          outputs: (() => {
-            if (discovery.entry._tag === 'Resolved')
-              return `${discovery.instances.length} instances`
-            if (discovery.entry._tag === 'None')
-              return `${discovery.instances.length} library instances`
-            return `entry unavailable · ${discovery.entry.reason}`
-          })(),
+          outputs: `${discovery.instances.length} instances`,
           diagnostics: 0,
         },
         {

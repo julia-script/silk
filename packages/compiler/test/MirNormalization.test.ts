@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Json from './support/Json.js'
@@ -24,7 +25,7 @@ effect fn userMap(self: once Effect<i32>, onSuccess: once fn(i32) -> i32) -> i32
 pub fn main() -> i32 { return run succeed(41) |> userMap(addOne) }`
 
 const snapshot = (normalizeMir: boolean) =>
-  Analysis.ofSourceRealized(
+  AnalysisFixture.retainingMain(
     'test/mir-normalization',
     encoder.encode(source),
     'wasm32-unknown-unknown',
@@ -47,7 +48,7 @@ const provisionalOf = (self: Analysis.Snapshot): ProvisionalMir.Module => {
 
 it.effect('retains concrete suspendable runs without a global suspension mode', () =>
   Effect.gen(function* () {
-    const raw = yield* Analysis.ofSourceRealized(
+    const raw = yield* AnalysisFixture.retainingMain(
       'test/mir-normalization-suspendable',
       encoder.encode(`import silk.effect { Effect }
 effect fn delayed(value: i32) -> i32 {
@@ -121,9 +122,9 @@ it.effect('distinguishes an unknown summary from missing exact execution facts',
   }),
 )
 
-it.effect('retains suspendable catch and effect-entry closure control', () =>
+it.effect('retains suspendable catch control', () =>
   Effect.gen(function* () {
-    const caught = yield* Analysis.ofSourceRealized(
+    const caught = yield* AnalysisFixture.retainingMain(
       'test/mir-normalization-catch-suspendable',
       encoder.encode(`import silk.effect { Effect }
 struct Problem {}
@@ -136,46 +137,14 @@ pub fn main() -> i32 {
 }`),
       'wasm32-unknown-unknown',
     )
-    const entry = yield* Analysis.ofSourceRealized(
-      'test/mir-normalization-entry-suspendable',
-      encoder.encode('pub effect fn main() -> () { return () }'),
-      'wasm32-unknown-unknown',
-      { normalizeMir: false },
-    )
     assert.deepEqual(Analysis.diagnostics(caught), [])
-    assert.deepEqual(Analysis.diagnostics(entry), [])
     const caughtProgram = Analysis.loweredMir(caught)
-    const rawEntryProgram = Analysis.loweredMir(entry)
-    const closure = allOperations(rawEntryProgram).find(
-      (operation): operation is Extract<Mir.Operation, { readonly _tag: 'CloseEffectEntry' }> =>
-        operation._tag === 'CloseEffectEntry',
-    )
-    assert.isDefined(closure)
-    if (closure === undefined) return
-    const entryFacts = provisionalOf(entry)
-    const suspendableEntryFacts: ProvisionalMir.Module = Object.freeze({
-      ...entryFacts,
-      executions: Object.freeze(
-        entryFacts.executions.map((execution) =>
-          execution.key._tag !== 'InstanceExecution' &&
-          execution.key.runner.module === closure.runner.module &&
-          execution.key.runner.name === closure.runner.name
-            ? Object.freeze({ ...execution, classification: 'Suspendable' as const })
-            : execution,
-        ),
-      ),
-    })
-    const entryProgram = MirNormalization.normalize(rawEntryProgram, suspendableEntryFacts)
     assert.isTrue(
       allOperations(caughtProgram).some((operation) => operation._tag === 'CatchEffect'),
       MirEncoding.encode(caughtProgram),
     )
     assert.isFalse(allOperations(caughtProgram).some((operation) => operation._tag === 'Allocate'))
-    assert.isTrue(
-      allOperations(entryProgram).some((operation) => operation._tag === 'CloseEffectEntry'),
-      MirEncoding.encode(entryProgram),
-    )
-    for (const program of [caughtProgram, entryProgram]) {
+    for (const program of [caughtProgram]) {
       assert.isTrue(
         (program.normalization ?? []).some(
           (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'SuspendableRunner',
@@ -188,7 +157,7 @@ pub fn main() -> i32 {
 
 it.effect('retains a provider-specialized suspendable runner', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'test/mir-normalization-provided-suspendable',
       encoder.encode(`import silk.effect { Effect }
 service Value {
@@ -275,7 +244,7 @@ it.effect('keeps affine captures materialized and ownership explicit', () =>
 
 it.effect('reports complex constructors and reusable Effects without partial static dispatch', () =>
   Effect.gen(function* () {
-    const complex = yield* Analysis.ofSourceRealized(
+    const complex = yield* AnalysisFixture.retainingMain(
       'test/mir-normalization-complex',
       encoder.encode(`fn complex(value: i32) -> Effect<'static; i32> {
   let adjusted = value + 1
@@ -284,7 +253,7 @@ it.effect('reports complex constructors and reusable Effects without partial sta
 pub fn main() -> i32 { return run complex(41) }`),
       'wasm32-unknown-unknown',
     )
-    const reused = yield* Analysis.ofSourceRealized(
+    const reused = yield* AnalysisFixture.retainingMain(
       'test/mir-normalization-reused',
       encoder.encode(`effect fn succeed() -> i32 { return 21 }
 pub fn main() -> i32 {

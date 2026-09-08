@@ -1,231 +1,70 @@
-//! Native [`HostInput`] provider for the process command line, environment, and working directory.
+//! Native HostInput provider backed by an owned process-input snapshot.
 //!
 //! # When to use
-//! Construct [`OsHostInput`] at a native application edge and provide it to portable code requiring
-//! [`HostInput`]. Tests can replace it with a deterministic provider and keep process state out of
-//! the program under test.
+//! Capture NativeHostInput at the application boundary and move it into this provider. Portable
+//! code receives it through the mutable HostInput service and obtains independent owned results.
 //!
 //! # Details
-//! The provider owns no persistent state. Each successful lookup copies the host value into
-//! independent [`Bytes`], beginning with a bounded buffer and retrying once at the exact size the
-//! boundary reports. An absent argument or variable remains [`None`]; an unavailable working
-//! directory and contradictory host lengths become [`HostInputError`].
-//!
-//! Constructing the provider reads no host state. Portable code performs lookups after the
-//! application supplies `&mut OsHostInput` for the `&mut HostInput` requirement. Each owned result
-//! also requires an allocator.
+//! Arguments and environment retain their captured bytes. Working-directory lookup observes the
+//! current process directory on each call. Dropping the provider releases the complete snapshot.
 //!
 //! # Gotchas
-//! This module publishes its provider only for the supported native profiles.
-//! WebAssembly selection leaves the module empty.
-//!
-//! # Examples
-//! ## Construct the native provider without reading process state
-//!
-//! ```silk
-//! import silk.os_host_input { OsHostInput }
-//!
-//! pub fn main() -> i32 {
-//!   let provider = OsHostInput.make()
-//!   drop provider
-//!   return 42
-//! }
-//! ```
+//! Available only on the supported native libc profiles. Capturing foreign input requires that
+//! its storage remain readable and unchanged throughout capture.
 
-static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
-  import silk.bool as bool
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.allocator { Allocator, OutOfMemoryError }
   import silk.bytes { Bytes }
-  import silk.allocator { Allocator }
-  import silk.allocator { OutOfMemoryError }
   import silk.host_input { HostInput, HostInputError }
-  import silk.i32 as i32
+  import silk.native_host_input { NativeHostInput }
   import silk.option { Option }
   import silk.string { String }
-  import silk.u32 as u32
-  import silk.u8 as u8
-  import silk.usize as usize
 
-  /// A stateless native [`HostInput`] provider for process arguments, environment, and directory.
-  ///
-  /// # Details
-  ///
-  /// The process owns the source values. Each successful byte lookup returns a new owned copy through
-  /// the portable service.
-  pub struct OsHostInput {}
+  /// An affine HostInput provider owning its argument and environment snapshot.
+  pub struct OsHostInput { inputs: NativeHostInput }
 
   impl OsHostInput {
-    /// Reports how many arguments the process received, including the program name at index zero.
-    effect fn argumentCount(self: &mut Self) -> usize ! HostInputError {
-      let mut count = usize.ZERO
-      let mut lowReason = 0
-      let mut nativeCode = u32.toU32(0)
-      let answered = run rawArgumentCount(&mut count, &mut lowReason, &mut nativeCode)
-      if answered == false { return run raise() }
-      return count
-    }
-
-    /// Copies one argument's raw bytes, exactly as the process received them.
-    effect fn argument(
-      self: &mut Self,
-      index: usize
-    ) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
-      return run fetch(0, index, String.utf8Bytes(""))
-    }
-
-    /// Copies one environment value's raw bytes. An unset name is `None` rather than a failure.
-    effect fn variable(
-      self: &mut Self,
-      name: &[u8]
-    ) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
-      return run fetch(1, usize.ZERO, name)
-    }
-
-    /// Copies the process working directory's raw bytes. It always exists, so absence is a host error.
-    effect fn workingDirectory(
-      self: &mut Self
-    ) -> Bytes ! HostInputError | OutOfMemoryError ? &mut Allocator {
-      let found = run fetch(2, usize.ZERO, String.utf8Bytes(""))
-      return match move found {
-        Option<Bytes>.Some { value: bytes } => move bytes
-        Option<Bytes>.None => run raise()
-      }
-    }
-  }
-
-  impl OsHostInput {
-    /// Creates a stateless provider for native process input.
-    ///
-    /// # When to use
-    ///
-    /// Use this function at a native application edge. Provide the result as `&mut HostInput` to
-    /// portable lookup operations in `silk.host_input`.
+    /// Moves an already captured snapshot into the portable service provider.
     ///
     /// # Details
-    ///
-    /// Construction performs no lookup and cannot fail. Argument and environment absence remain
-    /// ordinary `None` values when a later lookup runs.
-    pub fn make() -> OsHostInput {
-      return OsHostInput {}
+    /// Construction reads no foreign state and performs no allocation.
+    pub fn make(inputs: NativeHostInput) -> OsHostInput {
+      return OsHostInput { inputs: move inputs }
+    }
+
+    effect fn argumentCount(self: &mut Self) -> usize ! HostInputError {
+      return NativeHostInput.argumentCount(&self.inputs)
+    }
+
+    effect fn argument(self: &mut Self, index: usize) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
+      return run fetch(&self.inputs, true, index, String.utf8Bytes(""))
+    }
+
+    effect fn variable(self: &mut Self, name: &[u8]) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
+      return run fetch(&self.inputs, false, 0, name)
+    }
+
+    effect fn workingDirectory(self: &mut Self) -> Bytes ! HostInputError | OutOfMemoryError ? &mut Allocator {
+      return run NativeHostInput.workingDirectory()
     }
   }
 
-  effect fn raise() -> never ! HostInputError {
-    fail HostInput.inputFailure()
+  fn lookup(inputs: &NativeHostInput, argument: bool, index: usize, name: &[u8], output: &mut [u8]) -> Option<usize> {
+    if argument { return NativeHostInput.argument(inputs, index, move output) }
+    return NativeHostInput.variable(inputs, name, move output)
   }
 
-  effect fn rawArgumentCount(count: &mut usize, lowReason: &mut i32, nativeCode: &mut u32) -> bool {
-    unsafe { return run Intrinsic.osHostArgumentCount(count, lowReason, nativeCode) }
-    return false
-  }
-
-  effect fn rawArgument(
-    index: usize,
-    output: &mut [u8],
-    count: &mut usize,
-    lowReason: &mut i32,
-    nativeCode: &mut u32
-  ) -> bool {
-    unsafe { return run Intrinsic.osHostArgument(index, output, count, lowReason, nativeCode) }
-    return false
-  }
-
-  effect fn rawVariable(
-    name: &[u8],
-    output: &mut [u8],
-    count: &mut usize,
-    lowReason: &mut i32,
-    nativeCode: &mut u32
-  ) -> bool {
-    unsafe { return run Intrinsic.osHostVariable(name, output, count, lowReason, nativeCode) }
-    return false
-  }
-
-  effect fn rawWorkingDirectory(
-    output: &mut [u8],
-    count: &mut usize,
-    lowReason: &mut i32,
-    nativeCode: &mut u32
-  ) -> bool {
-    unsafe { return run Intrinsic.osHostWorkingDirectory(output, count, lowReason, nativeCode) }
-    return false
-  }
-
-  effect fn ownedPrefix(view: &[u8], length: usize) -> Bytes ! OutOfMemoryError ? &mut Allocator {
-    let mut result = Bytes.make()
-    let mut index = usize.ZERO
-    while index < length {
-      let one = [view[index]]
-      let appended = run Bytes.append(&mut result, &one)
-      index = index + usize.ONE
-    }
-    return move result
-  }
-
-  /// Copies one host value into independently owned bytes, growing the buffer once when needed.
-  ///
-  /// The low-level boundary reports the value's complete byte length even when the buffer it received
-  /// was too small, so a second pass with an exactly sized buffer always completes. An absent value
-  /// is `None` with the not-found reason; any other reason is a host error.
-  effect fn fetch(
-    selector: i32,
-    index: usize,
-    name: &[u8]
-  ) -> Option<Bytes> ! HostInputError | OutOfMemoryError ? &mut Allocator {
-    let initial = Bytes.zeroed(128)
-    let mut buffer = run initial
-    let mut result = Option.none<Bytes>()
-    let mut complete = false
-    let mut grown = false
-    while complete == false {
-      let mut lowReason = 0
-      let mut nativeCode = u32.toU32(0)
-      let mut total = usize.ZERO
-      let mut received = false
-      if selector == 0 {
-        received = run rawArgument(
-          index,
-          Bytes.asMutSlice(&mut buffer),
-          &mut total,
-          &mut lowReason,
-          &mut nativeCode
-        )
-      } else {
-        if selector == 1 {
-          received = run rawVariable(
-            name,
-            Bytes.asMutSlice(&mut buffer),
-            &mut total,
-            &mut lowReason,
-            &mut nativeCode
-          )
-        } else {
-          received = run rawWorkingDirectory(
-            Bytes.asMutSlice(&mut buffer),
-            &mut total,
-            &mut lowReason,
-            &mut nativeCode
-          )
-        }
-      }
-      if received == false {
-        if lowReason != 0 { return run raise() }
-        complete = true
-      } else {
-        if total <= Bytes.length(&buffer) {
-          let owned = run ownedPrefix(Bytes.asSlice(&buffer), total)
-          result = Option.some<Bytes>(move owned)
-          complete = true
-        } else {
-          // An exactly sized buffer completes an honest host in one more pass, so a second short
-          // answer means the host contradicted the length it just reported.
-          if grown { return run raise() }
-          grown = true
-          let resized = Bytes.zeroed(total)
-          buffer = run resized
-        }
+  effect fn fetch(inputs: &NativeHostInput, argument: bool, index: usize, name: &[u8]) -> Option<Bytes> ! OutOfMemoryError ? &mut Allocator {
+    let mut empty = Bytes.make()
+    let found = lookup(inputs, argument, index, name, Bytes.asMutSlice(&mut empty))
+    return match move found {
+      Option<usize>.None => Option.none<Bytes>()
+      Option<usize>.Some { value: length } => {
+        let mut bytes = run Bytes.zeroed(length)
+        let copied = lookup(inputs, argument, index, name, Bytes.asMutSlice(&mut bytes))
+        return Option.some<Bytes>(move bytes)
       }
     }
-    return move result
   }
 
   impl HostInput for OsHostInput {

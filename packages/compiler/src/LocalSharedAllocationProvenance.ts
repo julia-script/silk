@@ -209,6 +209,11 @@ const nestedStatements = (
   return Object.freeze(found)
 }
 
+interface ArgumentSource {
+  readonly owner: Instances.Instance
+  readonly expression: Hir.Expression
+}
+
 interface FunctionContext {
   readonly instance: Instances.Instance
   readonly bindings: ReadonlyMap<number, Hir.Expression>
@@ -319,6 +324,88 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       typeArguments,
     })
     return matches.length === 1 ? matches.at(0) : undefined
+  }
+
+  const incoming = new Map<string, Map<number, Array<ArgumentSource>>>()
+  for (const caller of discovery.instances) {
+    for (const expression of caller.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)) {
+      if (
+        expression._tag !== 'Call' &&
+        expression._tag !== 'EffectConstruct' &&
+        expression._tag !== 'CallableApply'
+      )
+        continue
+      const target = targetAt(caller, expression)
+      if (target === undefined) continue
+      const parameters = incoming.get(ownerKey(target)) ?? new Map<number, Array<ArgumentSource>>()
+      incoming.set(ownerKey(target), parameters)
+      const add = (ordinal: number, value: Hir.Expression): void => {
+        const sources = parameters.get(ordinal) ?? []
+        sources.push({ owner: caller, expression: value })
+        parameters.set(ordinal, sources)
+      }
+      if (
+        expression._tag === 'CallableApply' &&
+        expression.realization === 'DirectErasedSection' &&
+        expression.callee._tag === 'CallableSection'
+      ) {
+        expression.callee.remainingParameters.forEach((parameterOrdinal, ordinal) => {
+          const argument = expression.arguments.at(ordinal)
+          if (argument !== undefined) add(parameterOrdinal, argument)
+        })
+        for (const capture of expression.callee.captures)
+          add(capture.parameterOrdinal, capture.value)
+      } else expression.arguments.forEach((argument, ordinal) => add(ordinal, argument))
+    }
+  }
+
+  // Directly forwarded Effects need no materialized environment in discovery.effects. Their
+  // concrete construction still reaches this parameter through the ordinary call graph.
+  const executionSources = (
+    instance: Instances.Instance,
+    expression: Hir.Expression,
+    visited: Set<string> = new Set(),
+  ): ReadonlyArray<Instances.Instance> => {
+    const key = `${ownerKey(instance)}:${expression._tag}:${expression.span.start}:${expression.span.end}`
+    if (visited.has(key)) return []
+    visited.add(key)
+    if (expression._tag === 'Move') return executionSources(instance, expression.subject, visited)
+    if (expression._tag === 'UnionConvert')
+      return executionSources(instance, expression.source, visited)
+    if (expression._tag === 'EffectBindRequirement')
+      return executionSources(instance, expression.protected, visited)
+    if (expression._tag === 'BindingReference') {
+      const context = contexts.get(ownerKey(instance))
+      if (context?.writtenBindings.has(expression.binding.ordinal)) return []
+      const initializer = context?.bindings.get(expression.binding.ordinal)
+      return initializer === undefined ? [] : executionSources(instance, initializer, visited)
+    }
+    if (expression._tag === 'ParameterReference') {
+      const identity = Instances.parameterEffectIdentity(
+        instance.function,
+        instance.key,
+        expression.parameter.ordinal,
+      )
+      const effect = discovery.effects.find((candidate) => candidate.identity === identity)
+      const owner =
+        effect === undefined ? undefined : instances.get(Instances.keyText(effect.owner))
+      return owner === undefined
+        ? (incoming.get(ownerKey(instance))?.get(expression.parameter.ordinal) ?? []).flatMap(
+            (source) => executionSources(source.owner, source.expression, visited),
+          )
+        : [owner]
+    }
+    if (
+      expression._tag === 'Call' ||
+      expression._tag === 'EffectConstruct' ||
+      expression._tag === 'CallableApply'
+    ) {
+      const target = targetAt(instance, expression)
+      return target === undefined ? [] : [target]
+    }
+    return expression._tag === 'EffectBlock' ? [instance] : []
   }
 
   const summaries = new Map<string, Origin>()
@@ -670,10 +757,29 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       // without reaching the owner cannot reach it through another path either, so reachability is
       // unchanged while the walk stays linear in the call graph.
       seen.add(identity)
-      return (callsByOwner(discovery.calls).get(identity) ?? []).some((call) => {
-        const target = instances.get(Instances.keyText(call.target))
-        return target !== undefined && reachesExecutionOwner(target, expected, seen)
-      })
+      if (
+        (callsByOwner(discovery.calls).get(identity) ?? []).some((call) => {
+          const target = instances.get(Instances.keyText(call.target))
+          return target !== undefined && reachesExecutionOwner(target, expected, seen)
+        })
+      )
+        return true
+      // Running a captured Effect is an execution edge even when no ordinary call targets its
+      // owner. Recovery combinators, for example, execute a protected Effect parameter. Follow
+      // its specialized identity rather than recognizing the combinator's declaration spelling.
+      return candidate.function.statements
+        .flatMap(Hir.statementExpressions)
+        .flatMap(Hir.expressionTree)
+        .some(
+          (expression) =>
+            expression._tag === 'Run' &&
+            Hir.expressionTree(expression.subject).some((nested) => {
+              if (nested._tag !== 'ParameterReference') return false
+              return executionSources(candidate, nested).some((owner) =>
+                reachesExecutionOwner(owner, expected, seen),
+              )
+            }),
+        )
     }
     // An ordinary effect helper executes with the provider bound around the helper construction at
     // its caller. The provider node therefore lives in the caller HIR, while the service operation
@@ -689,24 +795,8 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
                 if (candidate._tag !== 'EffectBindRequirement') return []
                 const reachesOwner = Hir.expressionTree(candidate.protected).some((nested) => {
                   if (nested._tag === 'ParameterReference') {
-                    const identity = Instances.parameterEffectIdentity(
-                      caller.function,
-                      caller.key,
-                      nested.parameter.ordinal,
-                    )
-                    const effect =
-                      identity === undefined
-                        ? undefined
-                        : discovery.effects.find((item) => item.identity === identity)
-                    return (
-                      effect !== undefined &&
-                      (() => {
-                        const effectOwner = instances.get(Instances.keyText(effect.owner))
-                        return (
-                          effectOwner !== undefined &&
-                          reachesExecutionOwner(effectOwner, origin.owner)
-                        )
-                      })()
+                    return executionSources(caller, nested).some((owner) =>
+                      reachesExecutionOwner(owner, origin.owner),
                     )
                   }
                   if (
@@ -809,56 +899,27 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
   let changed = true
   while (changed) {
     changed = false
-    for (const caller of discovery.instances) {
-      const callerParameters = parameterOrigins.get(ownerKey(caller))
-      if (callerParameters === undefined) continue
-      const expressions = caller.function.statements
-        .flatMap(Hir.statementExpressions)
-        .flatMap(Hir.expressionTree)
-        .filter(
-          (
-            candidate,
-          ): candidate is Extract<
-            Hir.Expression,
-            { readonly _tag: 'Call' | 'EffectConstruct' | 'CallableApply' }
-          > =>
-            candidate._tag === 'Call' ||
-            candidate._tag === 'EffectConstruct' ||
-            candidate._tag === 'CallableApply',
-        )
-      for (const expression of expressions) {
-        const target = targetAt(caller, expression)
-        const targetParameters =
-          target === undefined ? undefined : parameterOrigins.get(ownerKey(target))
-        if (targetParameters === undefined) continue
-        const arguments_: Array<readonly [number, Hir.Expression]> = []
-        if (
-          expression._tag === 'CallableApply' &&
-          expression.realization === 'DirectErasedSection' &&
-          expression.callee._tag === 'CallableSection'
-        ) {
-          expression.callee.remainingParameters.forEach((parameterOrdinal, ordinal) => {
-            const argument = expression.arguments.at(ordinal)
-            if (argument !== undefined) arguments_.push([parameterOrdinal, argument])
-          })
-          for (const capture of expression.callee.captures)
-            arguments_.push([capture.parameterOrdinal, capture.value])
-        } else {
-          expression.arguments.forEach((argument, ordinal) => {
-            arguments_.push([ordinal, argument])
-          })
-        }
-        arguments_.forEach(([ordinal, argument]) => {
+    for (const [target, parameters] of incoming) {
+      const targetParameters = parameterOrigins.get(target)
+      if (targetParameters === undefined) continue
+      for (const [ordinal, sources] of parameters) {
+        for (const source of sources) {
           const previous = targetParameters.at(ordinal)
-          if (previous === undefined) return
+          const callerParameters = parameterOrigins.get(ownerKey(source.owner))
+          if (previous === undefined || callerParameters === undefined) continue
           const next = mergeOrigin(
             previous,
-            originOf(argument, caller, callerParameters, new Set([ownerKey(caller)])),
+            originOf(
+              source.expression,
+              source.owner,
+              callerParameters,
+              new Set([ownerKey(source.owner)]),
+            ),
           )
-          if (sameOrigin(previous, next)) return
+          if (sameOrigin(previous, next)) continue
           targetParameters[ordinal] = next
           changed = true
-        })
+        }
       }
     }
   }

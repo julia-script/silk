@@ -1,0 +1,14 @@
+unsafe extern "C" fn bootstrap_body() -> i32
+unsafe extern "C" fn bootstrap_dropped() -> ()
+
+pub struct Problem {}
+impl Drop for Problem {
+  fn drop(self: &mut Problem) -> () {
+    unsafe bootstrap_dropped()
+  }
+}
+
+pub effect fn main() -> () ! Problem {
+  if unsafe bootstrap_body() == 7 { fail Problem {} }
+  return ()
+}

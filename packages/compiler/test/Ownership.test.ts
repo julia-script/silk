@@ -1,3 +1,5 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -506,7 +508,7 @@ it.effect(
   'lowers conditional field cleanup and recreates guarded match bindings and results across loops',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'ownership/partial-cleanup-mir',
         ascii(`
 struct Token { value: i32 }
@@ -2403,11 +2405,18 @@ pub fn main() -> i32 {
   }
   return 0
 }`
-      const front = yield* Analysis.ofSource(`ownership/reacquired-${name}`, ascii(source))
+      const selected = AnalysisFixture.configuration(
+        `ownership/reacquired-${name}`,
+        'wasm32-unknown-unknown',
+      )
+      const front = yield* Analysis.make({
+        root: SourceFile.make(`ownership/reacquired-${name}`, ascii(source)),
+        configuration: selected,
+      }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(Analysis.diagnostics(front), [])
-      const snapshot = yield* Analysis.realize(front, 'wasm32-unknown-unknown', {
+      const snapshot = yield* Analysis.realize(front, selected, {
         normalizeMir: false,
-      })
+      }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const program = Analysis.loweredMir(snapshot)
       assert.deepEqual(MirVerification.verify(program), [])

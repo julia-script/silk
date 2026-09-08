@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -16,7 +17,7 @@ const storedLayout = Effect.fnUntraced(function* (
   source: string,
   target: Target.Target,
 ) {
-  const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), target.id)
+  const snapshot = yield* AnalysisFixture.retainingMain(name, ascii(source), target.id)
   const catalog = Layout.catalog(target, snapshot.index, snapshot.instances)
   const plan = Layout.plan(catalog, snapshot.instances, snapshot.index)
   return Object.freeze({ snapshot, catalog, plan })

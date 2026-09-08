@@ -44,7 +44,7 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
         'wasm32-unknown-unknown',
       ]) {
         const analysis = yield* ProjectAnalysis.make(roots, {
-          configuration: { profile: { target } },
+          configuration: { profile: { target, artifact: 'object', entry: { kind: 'none' } } },
         }).pipe(Effect.provide(SourceResolver.empty))
         const project = Project.fromProjectAnalysis(analysis)
         const alias = project.modules.find((module) => module.name === 'facade')?.items[0]
@@ -134,6 +134,13 @@ pub fn identity<
   value: T,
 ) -> T { return move value }
 
+struct HiddenNode {}
+impl Copy for HiddenNode {}
+pub struct Container<T> { value: T }
+impl Copy for Container<HiddenNode> {}
+interface HiddenContract {}
+impl HiddenContract for Provider {}
+
 /// Private implementation helper.
 fn helper() -> i32 { return 0 }
 
@@ -164,7 +171,7 @@ it.effect('renders the complete public hierarchy in source order with accurate c
     const page = result.reference.files.find((file) => file.path === 'reference.md')?.contents
     assert.isDefined(page)
     assert.include(page, 'Import as `Recovery` with `import test.reference { Recovery }`.')
-    assert.include(page, 'Public declarations: 6.')
+    assert.include(page, 'Public declarations: 7.')
     assert.include(page, '## `cAbs`')
     assert.include(page, 'pub unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"')
     assert.include(page, '## `double`')
@@ -179,6 +186,9 @@ it.effect('renders the complete public hierarchy in source order with accurate c
     assert.include(page, '### Parameter `value`')
     assert.include(page, '## Implementation `Recovery for Provider`')
     assert.notInclude(page, 'helper')
+    assert.include(page, '## `Container`')
+    assert.notInclude(page, 'HiddenNode')
+    assert.notInclude(page, 'HiddenContract')
     assert.isBelow(page.indexOf('`Recovery`'), page.indexOf('`Provider`'))
     assert.isBelow(page.indexOf('`Provider`'), page.indexOf('Implementation'))
     assert.isBelow(page.indexOf('Implementation'), page.indexOf('`identity`'))
@@ -343,7 +353,15 @@ static if Intrinsic.targetOperatingSystem() == "darwin" {
 }`),
         ),
       ],
-      { configuration: { profile: { target: 'wasm32-unknown-unknown' } } },
+      {
+        configuration: {
+          profile: {
+            target: 'wasm32-unknown-unknown',
+            artifact: 'object',
+            entry: { kind: 'none' },
+          },
+        },
+      },
     ).pipe(Effect.provide(SourceResolver.empty))
     const module = Project.fromProjectAnalysis(analysis).modules.find(
       (module) => module.name === 'empty/platform',

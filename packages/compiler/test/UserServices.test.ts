@@ -88,10 +88,6 @@ it.effect('keeps ordinary Report conformance static and out of requirement rows'
     const self = yield* snapshot(`pub struct Problem {}
 pub effect fn main() -> () ! Problem { return () }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
-    const entry = Analysis.instancesOf(self).entry
-    assert.strictEqual(entry._tag, 'Resolved')
-    if (entry._tag === 'Resolved' && entry.kind === 'Effect')
-      assert.deepEqual(entry.requirements, [])
   }),
 )
 

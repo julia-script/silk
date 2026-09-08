@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -56,7 +57,7 @@ pub fn main() -> i32 { return keep<i32>(41) + 1 }`
 
 it.effect('rejects conflicting parametric Copy and Drop declarations', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'drop-hook/copy-instantiation',
       ascii(copyInstantiation),
       'wasm32-unknown-unknown',
@@ -70,7 +71,7 @@ it.effect('rejects conflicting parametric Copy and Drop declarations', () =>
 
 it.effect('monomorphizes one parametric Drop conformance per reachable instantiation', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'drop-hook/parametric',
       ascii(parametric),
       'wasm32-unknown-unknown',

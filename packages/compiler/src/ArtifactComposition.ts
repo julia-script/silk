@@ -1,8 +1,10 @@
+import * as Stdlib from './Stdlib.js'
 import * as Effect from 'effect/Effect'
 import * as CompilationProfile from './CompilationProfile.js'
 import * as ConfigurationError from './ConfigurationError.js'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
 import * as NativeRequirement from './NativeRequirement.js'
+import * as RuntimeComponent from './RuntimeComponent.js'
 import * as SourceResolver from './SourceResolver.js'
 import * as Canonical from './internal/Canonical.js'
 
@@ -12,15 +14,15 @@ export interface RootSelector {
   readonly declaration: string
 }
 
-/** A named source composition; invocation is independent of any loader entry symbol. */
+/** A named source composition whose ordinary source calls the application. */
 export interface Runtime {
   readonly name: string
   readonly module: string
-  readonly invoke?: string
 }
 
 /** Build/package inputs from which one profile selects its source composition. */
 export interface Input {
+  readonly components?: ReadonlyArray<RuntimeComponent.Input>
   readonly runtimes: ReadonlyArray<Runtime>
   readonly defaults: ReadonlyArray<string>
   readonly retention: ReadonlyArray<RootSelector>
@@ -34,6 +36,7 @@ export interface Root extends RootSelector {
 
 /** Validated build catalog with current diagnostic origins and normalized native constraints. */
 export interface ArtifactComposition {
+  readonly components: ReadonlyArray<RuntimeComponent.RuntimeComponent>
   readonly runtimes: ReadonlyArray<
     Runtime & { readonly origin: ConfigurationOrigin.ConfigurationOrigin }
   >
@@ -44,14 +47,14 @@ export interface ArtifactComposition {
   readonly origin: ConfigurationOrigin.ConfigurationOrigin
 }
 
-/** Exactly one selected source runtime or none, plus independent invocation/retention roots. */
+/** Exactly one selected source runtime or none, plus independent retention roots. */
 export interface Resolved {
+  readonly components: ReadonlyArray<RuntimeComponent.RuntimeComponent>
   readonly application: string
   readonly request: CompilationProfile.Selection
   readonly runtime:
     | (Runtime & { readonly origin: ConfigurationOrigin.ConfigurationOrigin })
     | undefined
-  readonly invocation: Root | undefined
   readonly retention: ReadonlyArray<Root>
   readonly requirements: ReadonlyArray<NativeRequirement.NativeRequirement>
   readonly loader: {
@@ -70,23 +73,31 @@ const name = (input: unknown): input is string =>
 const exact = (input: Record<string, unknown>, fields: ReadonlyArray<string>): boolean =>
   Object.keys(input).every((key) => fields.includes(key))
 
-/** The existing hosted application policy, explicitly supplied by build/analysis entry points. */
+/** Supplies executable source runtimes; libraries and runtime-none profiles acquire no startup. */
 export const defaults = (
-  application: string,
-  profile: Pick<CompilationProfile.Facts, 'artifact' | 'target'>,
-): Input =>
-  Object.freeze({
-    runtimes:
-      profile.artifact === 'executable' || profile.target.kind === 'WebAssembly'
-        ? Object.freeze([{ name: 'application', module: application, invoke: 'main' }])
-        : Object.freeze([]),
-    defaults:
-      profile.artifact === 'executable' || profile.target.kind === 'WebAssembly'
-        ? Object.freeze(['application'])
-        : Object.freeze([]),
+  profile: Pick<CompilationProfile.Facts, 'artifact' | 'target' | 'libc' | 'runtime'>,
+): Input => {
+  const executable = profile.artifact === 'executable'
+  const selected = executable
+    ? Stdlib.compositions.runtimes.find(
+        (candidate) =>
+          candidate.targets.some((target) => target === profile.target.id) &&
+          candidate.libc === profile.libc,
+      )
+    : undefined
+  const runtime =
+    selected === undefined ? undefined : { name: selected.name, module: selected.module }
+  return Object.freeze({
+    runtimes: runtime === undefined ? Object.freeze([]) : Object.freeze([runtime]),
+    defaults: runtime === undefined ? Object.freeze([]) : Object.freeze([runtime.name]),
     retention: Object.freeze([]),
     requirements: Object.freeze([]),
+    components:
+      runtime !== undefined && profile.runtime.kind !== 'none'
+        ? Stdlib.compositions.components
+        : Object.freeze([]),
   })
+}
 
 /** Strictly decodes the build catalog; absent fields are empty sets, not hidden runtime defaults. */
 export const decode = Effect.fn('ArtifactComposition.decode')(function* (
@@ -106,20 +117,38 @@ export const decode = Effect.fn('ArtifactComposition.decode')(function* (
     )
   if (
     !record(input) ||
-    !exact(input, ['runtimes', 'defaults', 'retention', 'requirements', 'entry'])
+    !exact(input, ['runtimes', 'defaults', 'retention', 'requirements', 'entry', 'components'])
   )
     return yield* invalid('artifact composition fields')
+  const componentInputs = input.components ?? []
   const runtimeInputs = input.runtimes ?? []
   const defaultInputs = input.defaults ?? []
   const retentionInputs = input.retention ?? []
   const requirementInputs = input.requirements ?? []
   if (
+    !Array.isArray(componentInputs) ||
     !Array.isArray(runtimeInputs) ||
     !Array.isArray(defaultInputs) ||
     !Array.isArray(retentionInputs) ||
     !Array.isArray(requirementInputs)
   )
     return yield* invalid('artifact composition lists')
+  const components: Array<RuntimeComponent.RuntimeComponent> = []
+  for (const [ordinal, value] of componentInputs.entries()) {
+    const component = yield* RuntimeComponent.decode(value, {
+      ...origin,
+      source: `${origin.source}.components[${ordinal}]`,
+    })
+    const previous = components.find((candidate) => candidate.capability === component.capability)
+    if (previous !== undefined)
+      return yield* ConfigurationError.make(
+        'ArtifactComposition.decode',
+        'ConflictingBindings',
+        component.capability,
+        [previous.origin, component.origin],
+      )
+    components.push(component)
+  }
   const runtimes: Array<Runtime & { readonly origin: ConfigurationOrigin.ConfigurationOrigin }> = []
   for (const [ordinal, candidate] of runtimeInputs.entries()) {
     const at = ConfigurationOrigin.snapshot({
@@ -128,19 +157,17 @@ export const decode = Effect.fn('ArtifactComposition.decode')(function* (
     })
     if (
       !record(candidate) ||
-      !exact(candidate, ['name', 'module', 'invoke']) ||
+      !exact(candidate, ['name', 'module']) ||
       typeof candidate.name !== 'string' ||
       !NativeRequirement.isIdentity(candidate.name) ||
       typeof candidate.module !== 'string' ||
-      !SourceResolver.isCanonicalModule(candidate.module) ||
-      (candidate.invoke !== undefined && !name(candidate.invoke))
+      !SourceResolver.isCanonicalModule(candidate.module)
     )
       return yield* invalid('runtime descriptor', [at])
     runtimes.push(
       Object.freeze({
         name: candidate.name,
         module: candidate.module,
-        ...(candidate.invoke === undefined ? {} : { invoke: candidate.invoke }),
         origin: at,
       }),
     )
@@ -216,6 +243,9 @@ export const decode = Effect.fn('ArtifactComposition.decode')(function* (
     else return yield* invalid('composition loader entry')
   }
   return Object.freeze({
+    components: Object.freeze(
+      components.sort((a, b) => Canonical.compare(a.capability, b.capability)),
+    ),
     runtimes: Object.freeze(runtimes.sort((a, b) => Canonical.compare(a.name, b.name))),
     defaults: Object.freeze([...new Set(defaults)].sort(Canonical.compare)),
     retention: Object.freeze(retention.sort((a, b) => Canonical.compare(rootKey(a), rootKey(b)))),
@@ -263,14 +293,6 @@ export const resolve = Effect.fn('ArtifactComposition.resolve')(function* (
       selected.map((runtime) => runtime.origin),
     )
   const runtime = selected[0]
-  const invocation =
-    runtime?.invoke === undefined
-      ? undefined
-      : Object.freeze({
-          module: runtime.module,
-          declaration: runtime.invoke,
-          origin: runtime.origin,
-        })
   const retained = new Map(self.retention.map((root) => [rootKey(root), root]))
   const retention = Object.freeze([...retained.values()])
   if (
@@ -299,14 +321,12 @@ export const resolve = Effect.fn('ArtifactComposition.resolve')(function* (
       ]),
     ].sort(Canonical.compare),
   )
-  const identity = Canonical.record('ArtifactComposition.v1', [
+  const identity = Canonical.record('ArtifactComposition.v2', [
+    Canonical.array(self.components.map(RuntimeComponent.encode)),
     application,
     CompilationProfile.encodeSelection(request),
     Canonical.array(request.kind === 'default' ? self.defaults : []),
-    Canonical.record(
-      'runtime',
-      runtime === undefined ? [] : [runtime.name, runtime.module, runtime.invoke ?? ''],
-    ),
+    Canonical.record('runtime', runtime === undefined ? [] : [runtime.name, runtime.module]),
     Canonical.array(retention.map(rootKey)),
     Canonical.array(self.requirements.map(NativeRequirement.encode).sort(Canonical.compare)),
     CompilationProfile.encodeSelection(loader.request),
@@ -315,9 +335,9 @@ export const resolve = Effect.fn('ArtifactComposition.resolve')(function* (
   ])
   return Object.freeze({
     application,
+    components: self.components,
     request,
     runtime,
-    invocation,
     retention,
     requirements: self.requirements,
     loader,
@@ -329,6 +349,7 @@ export const resolve = Effect.fn('ArtifactComposition.resolve')(function* (
 /** Projects a validated catalog into portable build fields without diagnostic metadata. */
 export const input = (self: ArtifactComposition): Input =>
   Object.freeze({
+    components: Object.freeze(self.components.map(RuntimeComponent.input)),
     runtimes: Object.freeze(
       self.runtimes.map(({ origin: _origin, ...runtime }) => Object.freeze(runtime)),
     ),

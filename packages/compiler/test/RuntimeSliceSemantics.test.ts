@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -555,7 +556,7 @@ pub fn main() -> i32 { let values = [1, 2] return read(&values) }`)
 
 it.effect('discovers one generic slice instance across distinct source lengths', () =>
   Effect.gen(function* () {
-    const self = yield* Analysis.ofSourceRealized(
+    const self = yield* AnalysisFixture.retainingMain(
       'slices/Instances',
       ascii(`import silk.usize as usize
 fn scan<T>(values: &[T]) -> i32 { return usize.toI32(values.length) }

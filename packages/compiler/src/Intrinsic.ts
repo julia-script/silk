@@ -51,10 +51,6 @@ export const runtimeTargets: ReadonlyArray<Target.Id> = Object.freeze(
   Target.all.map((target) => target.id),
 )
 
-const nativeTargets: ReadonlyArray<Target.Id> = Object.freeze(
-  Target.native.map((target) => target.id),
-)
-
 /** Normalizes an availability set to the compiler-owned target order. */
 export const normalizeRuntimeTargets = (
   targets: ReadonlyArray<Target.Id>,
@@ -144,6 +140,9 @@ const upperInitial = (value: string): string =>
 const intrinsicSpelling = (family: string, operation: string): string => {
   if (Scalar.isSpelling(family)) return `${family}${upperInitial(operation)}`
   if (family === 'Effect' && operation === 'suspendEffect') return 'suspendEffect'
+  if (family === 'Effect' && operation === 'finalizeEffect') return 'finalizeEffect'
+  if (family === 'Effect' && operation === 'observeDiagnostics') return 'observeDiagnostics'
+  if (family === 'Effect' && operation === 'observeUnhandled') return 'observeUnhandled'
   if (family === 'Effect' && operation.startsWith('bindRequirement')) return operation
   if (family === 'Effect' && operation === 'catchFailure') return operation
   if (family === 'Wake' && operation === 'signal') return 'wake'
@@ -174,14 +173,17 @@ const admission = (family: string): AdmissionCategory => {
 
 /** The canonical standard-library consumer of one OS boundary operation. */
 const osConsumer = (spelling: string): string => {
-  if (spelling === 'processExecute') return 'silk/os_child_process.execute'
-  if (spelling === 'processCapture') return 'silk/os_child_process.capture'
   if (spelling.startsWith('host'))
     return `silk/os_host_input.${spelling.slice(4, 5).toLowerCase()}${spelling.slice(5)}`
   return `silk/os_filesystem.${spelling}`
 }
 
 const consumer = (family: string, operation: string): string => {
+  if (family === 'Effect' && operation === 'finalizeEffect') return 'silk/effect.ensuring'
+  if (family === 'Effect' && operation === 'observeUnhandled')
+    return 'language:terminal-diagnostic-observation'
+  if (family === 'Effect' && operation === 'observeDiagnostics')
+    return 'language:lexical-diagnostic-observation'
   if (Scalar.isSpelling(family)) return `silk/${family}.${operation}`
   if (family === 'Effect') return `silk/effect.${operation}`
   if (family === 'Shared')
@@ -209,6 +211,10 @@ const pointerInvariants: ReadonlyMap<string, string> = new Map([
   [
     'atMut',
     'caller proves the pointer and the offset result address elements of one live allocation',
+  ],
+  [
+    'reinterpret',
+    'caller proves destination alignment and storage validity before access, and initialization before reading; no ownership or loan is created',
   ],
   [
     'requalify',
@@ -483,6 +489,41 @@ const representedRegistration = Type.represented(
   Type.representationParameterArgument(registrationCallback),
 )
 const suspensionOwner = Object.freeze({ module: 'silk/core', name: '$EffectSuspend' })
+const observationOwner = Object.freeze({ module: 'Intrinsic', name: '$ObserveDiagnostics' })
+const observationState = Type.parameter(observationOwner, 0, 'S')
+const observationSuccess = Type.parameter(observationOwner, 1, 'A')
+const observationRequirement = Type.parameter(observationOwner, 2, 'R', 'RequirementRow')
+const observationBorrow = contractLifetime('observationState')
+const observationCallbackBound = Type.callable(
+  Object.freeze([
+    Type.reference('Exclusive', observationState, observationBorrow),
+    'u8',
+    'usize',
+    'usize',
+    Type.string(Lifetime.staticLifetime),
+    Type.string(Lifetime.staticLifetime),
+  ]),
+  'usize',
+  { environment: Lifetime.staticLifetime, lifetimeBinders: [observationBorrow] },
+  'Shared',
+)
+const observationCallback = Type.parameter(
+  observationOwner,
+  3,
+  'F',
+  'CallableRepresentation',
+  observationCallbackBound,
+  Object.freeze(['Intrinsic.NonParking']),
+)
+const observedEffect = Type.effectWithRows(
+  observationSuccess,
+  RowAlgebra.concrete(Type.failureRowPolicy(), []),
+  { environment: contractLifetime('observeDiagnostics'), lifetimeBinders: [] },
+  'Take',
+  RowAlgebra.parameter<Type.Requirement, Type.Parameter, Type.RequirementMemberShape>(
+    observationRequirement,
+  ),
+)
 const suspensionSuccess = Type.parameter(suspensionOwner, 0, 'A')
 const suspensionFailure = Type.parameter(suspensionOwner, 1, 'E')
 const suspensionRequirement = Type.parameter(suspensionOwner, 2, 'R', 'RequirementRow')
@@ -568,6 +609,41 @@ const bindingContract = (mode: Constraint.ProviderMode): CallableContract.Callab
     ]),
   })
 }
+const finalizationOwner = Object.freeze({ module: 'Intrinsic', name: '$FinalizeEffect' })
+const finalizationSuccess = Type.parameter(finalizationOwner, 0, 'A')
+const finalizationFailure = Type.parameter(finalizationOwner, 1, 'E')
+const finalizationProtectedRequirements = Type.parameter(
+  finalizationOwner,
+  2,
+  'R',
+  'RequirementRow',
+)
+const finalizationFinalizerRequirements = Type.parameter(
+  finalizationOwner,
+  3,
+  'S',
+  'RequirementRow',
+)
+const finalizationFailureRow = RowAlgebra.singleton(
+  Type.failureRowPolicy(),
+  Type.failureMemberShape(finalizationFailure),
+  intrinsicContractOrigin,
+)
+const finalizationProtectedRow = RowAlgebra.parameter<
+  Type.Requirement,
+  Type.Parameter,
+  Type.RequirementMemberShape
+>(finalizationProtectedRequirements)
+const finalizationFinalizerRow = RowAlgebra.parameter<
+  Type.Requirement,
+  Type.Parameter,
+  Type.RequirementMemberShape
+>(finalizationFinalizerRequirements)
+const finalizationEnvironment = {
+  environment: contractLifetime('finalizeEffect'),
+  lifetimeBinders: [],
+}
+
 const catchOwner = Object.freeze({ module: 'silk/core', name: '$CatchFailure' })
 const catchSelected = Type.parameter(catchOwner, 0, 'S')
 const catchSuccess = Type.parameter(catchOwner, 1, 'A')
@@ -646,7 +722,7 @@ const catchContract = CallableContract.make({
           catchHandlerSuccess,
           catchHandlerFailureRow,
           { environment: contractLifetime('catchContract'), lifetimeBinders: [] },
-          'Shared',
+          'Take',
           catchHandlerRequirementRow,
         ),
         { environment: contractLifetime('catchContract'), lifetimeBinders: [] },
@@ -675,43 +751,6 @@ const catchContract = CallableContract.make({
   ]),
 })
 const byteSlice = Type.slice('Shared', 'u8', contractLifetime('byteSlice'))
-const mutableI32 = Type.reference('Exclusive', 'i32', contractLifetime('mutableI32'))
-const mutableU32 = Type.reference('Exclusive', 'u32', contractLifetime('mutableU32'))
-const mutableUsize = Type.reference('Exclusive', 'usize', contractLifetime('mutableUsize'))
-
-const osEffect = (value: Type.Type): Type.Effect =>
-  Type.effect(
-    value,
-    Object.freeze([]),
-    { environment: contractLifetime('osEffect'), lifetimeBinders: [] },
-    undefined,
-    Object.freeze([]),
-  )
-
-const osBuiltin = (options: {
-  readonly name: string
-  readonly operation: Extract<Hir.BuiltinOperation, `Os${string}`>
-  readonly parameters: ReadonlyArray<ValueParameter>
-  readonly semanticParameters: ReadonlyArray<Type.Type>
-  readonly result: string
-  readonly semanticResult: Type.Type
-  readonly invariant: string
-}): Operation =>
-  Object.freeze({
-    ...builtin({
-      actor: 'Os',
-      name: options.name,
-      operation: options.operation,
-      parameters: options.parameters,
-      semanticParameters: options.semanticParameters,
-      result: options.result,
-      semanticResult: osEffect(options.semanticResult),
-      unsafe: true,
-      targets: nativeTargets,
-    }),
-    invariant: options.invariant,
-  })
-
 const scalarOperation = (scalar: Scalar.Scalar, operation: Scalar.Operation): Operation => {
   let concreteResult: Type.Type
   switch (operation.result) {
@@ -1263,141 +1302,6 @@ const intrinsicOperations = Object.freeze([
   ...Scalar.all().flatMap(scalarOperations),
   ...stringOperations,
   ...Object.freeze([
-    osBuiltin({
-      name: 'processExecute',
-      operation: 'OsProcessExecute',
-      parameters: Object.freeze([
-        valueParameter('program', '&[u8]'),
-        valueParameter('arguments', '&[u8]'),
-        valueParameter('environment', '&[u8]'),
-        valueParameter('workingDirectory', '&[u8]'),
-        valueParameter('status', '&mut i32'),
-        valueParameter('code', '&mut i32'),
-        valueParameter('outputLength', '&mut usize'),
-        valueParameter('errorLength', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        byteSlice,
-        byteSlice,
-        byteSlice,
-        byteSlice,
-        mutableI32,
-        mutableI32,
-        mutableUsize,
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'arguments and environment are NUL-terminated entry blocks and an empty workingDirectory inherits the caller directory; the child never interprets a shell and reads closed standard input; success retains exactly one capture until the next execute and reports its exact lengths with status zero for exit and one for signal',
-    }),
-    osBuiltin({
-      name: 'processCapture',
-      operation: 'OsProcessCapture',
-      parameters: Object.freeze([
-        valueParameter('stream', 'i32'),
-        valueParameter('offset', 'usize'),
-        valueParameter('output', '&mut [u8]'),
-        valueParameter('count', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        'i32',
-        'usize',
-        Type.slice('Exclusive', 'u8', contractLifetime('processCapture')),
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'stream selects zero for standard output or one for standard error, offset is within the retained capture of the immediately preceding execute, and output is initialized writable storage',
-    }),
-    osBuiltin({
-      name: 'hostArgumentCount',
-      operation: 'OsHostArgumentCount',
-      parameters: Object.freeze([
-        valueParameter('count', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([mutableUsize, mutableI32, mutableU32]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant: 'count output is initialized and reports the received argument count on success',
-    }),
-    osBuiltin({
-      name: 'hostArgument',
-      operation: 'OsHostArgument',
-      parameters: Object.freeze([
-        valueParameter('index', 'usize'),
-        valueParameter('output', '&mut [u8]'),
-        valueParameter('count', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        'usize',
-        Type.slice('Exclusive', 'u8', contractLifetime('hostArgument')),
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'output is initialized writable storage; success reports the complete argument byte length and copies the prefix that fits, and absence reports the not-found reason',
-    }),
-    osBuiltin({
-      name: 'hostVariable',
-      operation: 'OsHostVariable',
-      parameters: Object.freeze([
-        valueParameter('name', '&[u8]'),
-        valueParameter('output', '&mut [u8]'),
-        valueParameter('count', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        byteSlice,
-        Type.slice('Exclusive', 'u8', contractLifetime('hostVariable')),
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'output is initialized writable storage; success reports the complete value byte length and copies the prefix that fits, and an unset name reports the not-found reason',
-    }),
-    osBuiltin({
-      name: 'hostWorkingDirectory',
-      operation: 'OsHostWorkingDirectory',
-      parameters: Object.freeze([
-        valueParameter('output', '&mut [u8]'),
-        valueParameter('count', '&mut usize'),
-        valueParameter('reason', '&mut i32'),
-        valueParameter('nativeCode', '&mut u32'),
-      ]),
-      semanticParameters: Object.freeze([
-        Type.slice('Exclusive', 'u8', contractLifetime('hostWorkingDirectory')),
-        mutableUsize,
-        mutableI32,
-        mutableU32,
-      ]),
-      result: 'Effect<bool>',
-      semanticResult: 'bool',
-      invariant:
-        'output is initialized writable storage; success reports the complete working-directory byte length and copies the prefix that fits',
-    }),
-  ]),
-  ...Object.freeze([
     builtin({
       actor: 'Layout',
       name: 'of',
@@ -1790,6 +1694,18 @@ const intrinsicOperations = Object.freeze([
       unsafe: true,
     }),
     builtin({
+      actor: 'Pointer',
+      name: 'reinterpret',
+      operation: 'PointerReinterpret',
+      typeParameters: Object.freeze(['From', 'To']),
+      semanticTypeParameters: Object.freeze([pointerSource, pointerDestination]),
+      parameters: Object.freeze([valueParameter('pointer', 'From')]),
+      semanticParameters: Object.freeze([pointerSource]),
+      result: 'To',
+      semanticResult: pointerDestination,
+      unsafe: true,
+    }),
+    builtin({
       actor: 'Slot',
       name: 'address',
       operation: 'SlotAddress',
@@ -2140,6 +2056,89 @@ const intrinsicOperations = Object.freeze([
   ...Object.freeze([
     builtin({
       actor: 'Effect',
+      name: 'finalizeEffect',
+      operation: 'EffectFinalize',
+      typeParameters: Object.freeze(['A', 'E', '?R', '?S']),
+      semanticTypeParameters: Object.freeze([
+        finalizationSuccess,
+        finalizationFailure,
+        finalizationProtectedRequirements,
+        finalizationFinalizerRequirements,
+      ]),
+      parameters: Object.freeze([
+        valueParameter('protected', 'once Effect<A ! E ? R>'),
+        valueParameter('finalizer', 'once Effect<() ? S>'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.effectWithRows(
+          finalizationSuccess,
+          finalizationFailureRow,
+          finalizationEnvironment,
+          'Take',
+          finalizationProtectedRow,
+        ),
+        Type.effectWithRows(
+          Type.unit,
+          RowAlgebra.concrete(Type.failureRowPolicy(), []),
+          finalizationEnvironment,
+          'Take',
+          finalizationFinalizerRow,
+        ),
+      ]),
+      result: 'once Effect<A ! E ? R | S>',
+      semanticResult: Type.effectWithRows(
+        finalizationSuccess,
+        finalizationFailureRow,
+        finalizationEnvironment,
+        'Take',
+        RowAlgebra.union(
+          Type.requirementRowPolicy(),
+          finalizationProtectedRow,
+          finalizationFinalizerRow,
+        ),
+      ),
+    }),
+    builtin({
+      actor: 'Effect',
+      name: 'observeDiagnostics',
+      operation: 'EffectObserveDiagnostics',
+      typeParameters: Object.freeze(['S', 'A', '?R', 'F']),
+      semanticTypeParameters: Object.freeze([
+        observationState,
+        observationSuccess,
+        observationRequirement,
+        observationCallback,
+      ]),
+      parameters: Object.freeze([
+        valueParameter('state', 'S'),
+        valueParameter('observer', 'F'),
+        valueParameter('protected', 'once Effect<A ? R>'),
+      ]),
+      semanticParameters: Object.freeze([
+        observationState,
+        Type.represented(
+          observationCallbackBound,
+          observationCallbackBound,
+          Type.representationParameterArgument(observationCallback),
+        ),
+        observedEffect,
+      ]),
+      result: 'once Effect<A ? R>',
+      semanticResult: observedEffect,
+    }),
+    builtin({
+      actor: 'Effect',
+      name: 'observeUnhandled',
+      operation: 'EffectObserveUnhandled',
+      typeParameters: Object.freeze([]),
+      semanticTypeParameters: Object.freeze([]),
+      parameters: Object.freeze([]),
+      semanticParameters: Object.freeze([]),
+      result: 'usize',
+      semanticResult: 'usize',
+    }),
+    builtin({
+      actor: 'Effect',
       name: 'suspendEffect',
       operation: 'EffectSuspend',
       typeParameters: Object.freeze(['A', 'E', '?R']),
@@ -2205,7 +2204,7 @@ const intrinsicOperations = Object.freeze([
       typeParameters: Object.freeze(['S', 'A', 'B', 'E', 'F', '?R', '?Q']),
       parameters: Object.freeze([
         valueParameter('protected', 'once Effect<A ! E ? R>'),
-        valueParameter('handler', 'once fn(S) -> Effect<B ! F ? Q>'),
+        valueParameter('handler', 'once fn(S) -> once Effect<B ! F ? Q>'),
       ]),
       result: 'Effect<A | B ! Without<E, S> | F ? R | Q>',
       contract: catchContract,

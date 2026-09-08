@@ -747,7 +747,7 @@ const residualWorkload = Effect.fnUntraced(
               unavailableOwnership: discovery.unavailableOwnership.length,
               specializationFailures: discovery.specializationFailures.length,
               violations: discovery.violations.length,
-              unavailableEntry: discovery.entry._tag === 'Unavailable',
+              retainedRoots: discovery.retention.length,
               residualBodies: discovery.counters.residualBodies,
               residualOwnership: discovery.counters.residualOwnership,
               bodyReasons: discovery.residualBodies,

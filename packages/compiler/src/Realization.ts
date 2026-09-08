@@ -19,21 +19,6 @@ const instanceViolationDiagnostics = (
   self: Frontend,
   discovery: Instances.Discovery,
 ): ReadonlyArray<Diagnostic.Diagnostic> => {
-  const entryKey = discovery.entry._tag === 'Resolved' ? discovery.entry.key : undefined
-  const entryInstance =
-    entryKey !== undefined
-      ? discovery.instances.find(
-          (instance) => Instances.keyText(instance.key) === Instances.keyText(entryKey),
-        )
-      : undefined
-  const entryDiagnostic =
-    entryKey !== undefined && entryInstance !== undefined
-      ? ExecutionBoundary.entryDiagnostic(
-          Instances.suspensionOf(discovery, entryKey),
-          false,
-          entryInstance.function.declaration.syntax.span,
-        )
-      : undefined
   return Diagnostic.merge(
     InstanceDiagnostics.violationDiagnostics(discovery),
     InstanceDiagnostics.copyDropViolations(discovery, self.index),
@@ -42,64 +27,8 @@ const instanceViolationDiagnostics = (
     InstanceDiagnostics.storedCallableViolations(discovery, self.index),
     InstanceDiagnostics.storedEffectViolations(discovery, self.index),
     ExecutableProperty.violationDiagnostics(discovery, self.index),
-    ...(entryDiagnostic === undefined ? [] : [[entryDiagnostic]]),
-    entryShapeDiagnostics(self, discovery),
+    DiagnosticObservation.violationDiagnostics(discovery),
   )
-}
-
-/**
- * ENTRY-001/002/004/005: a root `main` whose declared shape cannot be an entry is reported at its
- * declaration. An absent or untyped `main` stays a discovery reason: the first has no declaration
- * to point at and the second already carries the ordinary missing-result diagnostic.
- */
-const entryShapeDiagnostics = (
-  self: Frontend,
-  discovery: Instances.Discovery,
-): ReadonlyArray<Diagnostic.Diagnostic> => {
-  if (discovery.entry._tag !== 'Unavailable') return Object.freeze([])
-  const root = self.results.get(self.composition?.invocation?.module ?? discovery.rootModule)
-  if (root === undefined) return Object.freeze([])
-  const lookup = Elaboration.declarationByName(
-    root,
-    self.composition?.invocation?.declaration ?? 'main',
-  )
-  if (lookup._tag === 'Missing') return Object.freeze([])
-  const declarations = lookup._tag === 'Resolved' ? [lookup.declaration] : lookup.declarations
-  const detail = entryShapeDetail(discovery.entry)
-  if (detail === undefined) return Object.freeze([])
-  return Object.freeze(
-    declarations.map((declaration) =>
-      Diagnostic.invalidEntryShape(detail, declaration.syntax.span),
-    ),
-  )
-}
-
-const entryShapeDetail = (
-  entry: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>,
-): string | undefined => {
-  switch (entry.reason) {
-    case 'AmbiguousEntry':
-      return 'is declared more than once in the root module'
-    case 'StaticEntry':
-      return 'must be a runtime function'
-    case 'GenericEntry':
-      return 'must not declare type parameters'
-    case 'ParameterizedEntry':
-      return 'must take no parameters'
-    case 'PrivateEntry':
-      return 'must be declared `pub`'
-    case 'InvalidOrdinaryEntryResult':
-      return 'must explicitly return `()` or `i32` when it is an ordinary function'
-    case 'InvalidEffectEntryResult':
-      return 'must succeed with `()` when it is an effect function'
-    case 'EffectEntryRequirements':
-      return `has unresolved requirements: ${(entry.requirements ?? []).map((requirement) => Type.encodeRequirement(requirement)).join(', ')}`
-    case 'MissingEntry':
-    case 'UntypedEntry':
-    case 'UnavailableEntryBody':
-    case 'InvalidSource':
-      return undefined
-  }
 }
 
 /** Rejects a pointer-sized exported static that cannot be represented on the selected target. */
@@ -318,17 +247,6 @@ function discoverAndLower(
       diagnostics: baseDiagnostics,
       report: Object.freeze(report),
     })
-  if (prepareForEmission && instances.entry._tag === 'Unavailable')
-    return Object.freeze({
-      _tag: 'NoEntry',
-      reason: instances.entry.reason,
-      ...(instances.entry.requirements === undefined
-        ? {}
-        : { requirements: instances.entry.requirements }),
-      diagnostics: baseDiagnostics,
-      report: Object.freeze(report),
-    })
-
   const diagnostics = Diagnostic.merge(
     baseDiagnostics,
     ...(targetLayout._tag === 'Available' ? [targetLayout.layout.diagnostics] : []),
@@ -377,6 +295,7 @@ function discoverAndLower(
               ),
               ProvisionalMir.build(instances, targetLayout.layout, self.index),
               self.index,
+              OpaqueRealization.catalogOf(self),
               completion?.profile,
               options,
             ),
@@ -411,6 +330,7 @@ function discoverAndLower(
       })
     return Object.freeze({
       _tag: 'Prepared',
+      frontend: self,
       composition: self.composition,
       profile: completion.profile,
       target: targetLayout.target,
@@ -555,8 +475,7 @@ export const configure = Effect.fn('Realization.configure')(function* (
         'profile differs from selected frontend',
       )
     const catalog = yield* ArtifactComposition.decode(
-      configuration?.composition ??
-        ArtifactComposition.defaults(self.closure.rootModule, completion.profile),
+      configuration?.composition ?? ArtifactComposition.defaults(completion.profile),
       configuration?.compositionOrigin,
     )
     const composition = yield* ArtifactComposition.resolve(
@@ -579,7 +498,11 @@ export const configure = Effect.fn('Realization.configure')(function* (
   if (Result.isSuccess(result))
     return {
       frontend: OpaqueRealization.withCatalog(
-        { ...self, composition: result.success.composition },
+        {
+          ...self,
+          ...(configuration === undefined ? {} : { configuration }),
+          composition: result.success.composition,
+        },
         OpaqueRealization.catalogOf(self),
       ),
       completion: result.success.completion,
@@ -630,21 +553,82 @@ export const realize = Effect.fn('Realization.realize')(function* (
   self: Frontend,
   targetId: string | ModuleClosure.CompilationRequest['configuration'] = self.requestedTarget,
   options: Options = {},
-): Effect.fn.Return<Realization> {
-  const ready = yield* configure(
+): Effect.fn.Return<
+  Realization & { readonly frontend: Frontend },
+  never,
+  SourceResolver.SourceResolver
+> {
+  let ready = yield* configure(
     self,
     typeof targetId === 'string' ? targetId : undefined,
     undefined,
     undefined,
     typeof targetId === 'object' ? targetId : undefined,
   )
-  const realized = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
+  let realized = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
+  if (
+    realized.mir._tag === 'Available' &&
+    realized.profile !== undefined &&
+    ExecutionStorageComponent.demanded(realized.mir.value)
+  ) {
+    const selection = yield* Effect.result(
+      ExecutionStorageComponent.select(ready.frontend.composition?.components ?? []),
+    )
+    let failure = Result.isFailure(selection) ? selection.failure : undefined
+    if (Result.isSuccess(selection)) {
+      const expanded = yield* FrontendActor.withComponents(
+        ready.frontend,
+        realized.profile,
+        [...new Set(selection.success.bindings.map((binding) => binding.module))],
+        options,
+      )
+      ready = yield* configure(expanded, realized.profile.target.id)
+      realized = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options)
+      if (realized.mir._tag === 'Available') {
+        const component = yield* Effect.result(
+          ExecutionStorageComponent.resolve(selection.success, realized.mir.value),
+        )
+        if (Result.isFailure(component)) failure = component.failure
+        else
+          realized = {
+            ...realized,
+            mir: {
+              _tag: 'Available',
+              value: {
+                ...realized.mir.value,
+                executionStorage: component.success,
+              },
+            },
+          }
+      }
+    }
+    if (failure !== undefined) {
+      const span = ready.frontend.closure.sources.get(ready.frontend.closure.rootModule)
+      const rootSpan = ready.frontend.closure.modules.find((module) => module.name === span?.id)
+        ?.syntax.root.span
+      if (rootSpan === undefined) throw new RangeError('Storage selection lost application source')
+      return {
+        ...realized,
+        frontend: ready.frontend,
+        diagnostics: Diagnostic.merge(realized.diagnostics, [
+          Diagnostic.invalidConfiguration(failure, rootSpan),
+        ]),
+        mir: {
+          _tag: 'Unavailable',
+          error: new AnalysisUnavailable({
+            operation: 'Analysis.realize',
+            message: 'Execution storage component is unavailable',
+          }),
+        },
+      }
+    }
+  }
   if (
     realized.mir._tag !== 'Available' ||
     realized.profile === undefined ||
     ready.frontend.composition === undefined
   )
-    return realized
+    return { ...realized, frontend: ready.frontend }
   const plan = yield* Effect.result(
     ArtifactPlan.make(
       ready.frontend,
@@ -655,13 +639,15 @@ export const realize = Effect.fn('Realization.realize')(function* (
       ToolchainIntegrity.installed().digest,
     ),
   )
-  if (Result.isSuccess(plan)) return Object.freeze({ ...realized, artifactPlan: plan.success })
+  if (Result.isSuccess(plan))
+    return Object.freeze({ ...realized, frontend: ready.frontend, artifactPlan: plan.success })
   const span = ready.frontend.closure.modules.find(
     (module) => module.name === ready.frontend.closure.rootModule,
   )?.syntax.root.span
   if (span === undefined) throw new RangeError('Artifact planning lost application span')
   return Object.freeze({
     ...realized,
+    frontend: ready.frontend,
     diagnostics: Diagnostic.merge(realized.diagnostics, [
       Diagnostic.invalidConfiguration(plan.failure, span),
     ]),
@@ -683,10 +669,49 @@ export const prepare = Effect.fn('Realization.prepare')(function* (
     readonly artifactKind?: ArtifactKind.ArtifactKind
     readonly optimization?: 'debug' | 'release' | 'release-with-debug'
   } = {},
-): Effect.fn.Return<Preparation> {
-  const ready = yield* configure(self, targetId, options.artifactKind, options.optimization)
-  const prepared = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options, true)
+): Effect.fn.Return<Preparation, never, SourceResolver.SourceResolver> {
+  let ready = yield* configure(self, targetId, options.artifactKind, options.optimization)
+  let prepared = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options, true)
   if (prepared._tag !== 'Prepared') return prepared
+  if (ExecutionStorageComponent.demanded(prepared.program)) {
+    const selection = yield* Effect.result(
+      ExecutionStorageComponent.select(prepared.composition.components),
+    )
+    let failure = Result.isFailure(selection) ? selection.failure : undefined
+    if (Result.isSuccess(selection)) {
+      const expanded = yield* FrontendActor.withComponents(
+        ready.frontend,
+        prepared.profile,
+        [...new Set(selection.success.bindings.map((binding) => binding.module))],
+        options,
+      )
+      ready = yield* configure(expanded, prepared.target.id)
+      prepared = discoverAndLower(ready.frontend, ready.targetId, ready.completion, options, true)
+      if (prepared._tag !== 'Prepared') return prepared
+      const component = yield* Effect.result(
+        ExecutionStorageComponent.resolve(selection.success, prepared.program),
+      )
+      if (Result.isFailure(component)) failure = component.failure
+      else
+        prepared = {
+          ...prepared,
+          program: { ...prepared.program, executionStorage: component.success },
+        }
+    }
+    if (failure !== undefined) {
+      const span = ready.frontend.closure.modules.find(
+        (module) => module.name === ready.frontend.closure.rootModule,
+      )?.syntax.root.span
+      if (span === undefined) throw new RangeError('Storage preparation lost application source')
+      return {
+        _tag: 'Rejected',
+        report: prepared.report,
+        diagnostics: Diagnostic.merge(prepared.diagnostics, [
+          Diagnostic.invalidConfiguration(failure, span),
+        ]),
+      }
+    }
+  }
   const plan = yield* Effect.result(
     ArtifactPlan.make(
       ready.frontend,
@@ -715,12 +740,14 @@ import { AnalysisUnavailable } from './AnalysisUnavailable.js'
 import * as ArtifactKind from './ArtifactKind.js'
 import * as CoroutineFrame from './CoroutineFrame.js'
 import * as Diagnostic from './Diagnostic.js'
-import * as Elaboration from './Elaboration.js'
+import * as DiagnosticObservation from './DiagnosticObservation.js'
 import * as ExecutableProperty from './ExecutableProperty.js'
-import * as ExecutionBoundary from './ExecutionBoundary.js'
 import * as ForeignAvailability from './ForeignAvailability.js'
 import * as ForeignPlanning from './ForeignPlanning.js'
 import type { Frontend, Options } from './Frontend.js'
+import * as FrontendActor from './Frontend.js'
+import * as SourceResolver from './SourceResolver.js'
+import * as ExecutionStorageComponent from './ExecutionStorageComponent.js'
 import * as InstanceDiagnostics from './InstanceDiagnostics.js'
 import * as Instances from './Instances.js'
 import * as IntrinsicAvailability from './IntrinsicAvailability.js'
@@ -735,7 +762,6 @@ import * as Scalar from './Scalar.js'
 import * as SuspensionMir from './SuspensionMir.js'
 import * as SuspensionOwnership from './SuspensionOwnership.js'
 import * as Target from './Target.js'
-import * as Type from './Type.js'
 
 const normalizeMir = (
   program: Mir.Module,
@@ -748,6 +774,7 @@ const finalizeMir = (
   program: Mir.Module,
   provisional: ProvisionalMir.Module,
   index: DeclarationIndex.Index,
+  opaqueRealizations: OpaqueRealization.Catalog,
   profile: CompilationProfile.CompilationProfile | undefined,
   options: Options,
 ): {
@@ -755,7 +782,7 @@ const finalizeMir = (
   readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
 } => {
   const normalized = normalizeMir(program, provisional, options)
-  const ownership = SuspensionOwnership.plan(normalized, provisional, index)
+  const ownership = SuspensionOwnership.plan(normalized, provisional, index, opaqueRealizations)
   const diagnostics = [
     ...ownership.violations.map((violation) =>
       Diagnostic.invalidSuspensionOwnership(violation.detail, violation.span),
@@ -802,13 +829,6 @@ export type Preparation =
       readonly report: ReadonlyArray<PhaseReport.PhaseReport>
     }
   | {
-      readonly _tag: 'NoEntry'
-      readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
-      readonly requirements?: ReadonlyArray<Type.Requirement>
-      readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
-      readonly report: ReadonlyArray<PhaseReport.PhaseReport>
-    }
-  | {
       readonly _tag: 'TargetFailed'
       readonly error: Target.TargetError
       readonly diagnostics: ReadonlyArray<Diagnostic.Diagnostic>
@@ -816,6 +836,7 @@ export type Preparation =
     }
   | {
       readonly _tag: 'Prepared'
+      readonly frontend: Frontend
       readonly composition: ArtifactComposition.Resolved
       readonly artifactPlan?: ArtifactPlan.ArtifactPlan
       readonly profile: CompilationProfile.CompilationProfile

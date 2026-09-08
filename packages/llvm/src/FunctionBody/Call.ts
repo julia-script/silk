@@ -104,7 +104,7 @@ const callInternal = Effect.fnUntraced(function* (
         return yield* Result.fail(
           invalidInput({
             operation: 'FunctionBody.call',
-            message: 'Call argument count does not match the function signature',
+            message: `Call${name === undefined ? '' : ` ${ByteString.escapeForIr(ByteString.coerce(name))}`} argument count does not match the function signature (${args.length} supplied, ${signature.parameters.length} ${signature.variadic ? 'minimum' : 'expected'})`,
             input: args,
           }),
         )

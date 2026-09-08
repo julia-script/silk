@@ -1,3 +1,5 @@
+import * as OpaqueRealization from '../src/OpaqueRealization.js'
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { unreachable } from './support/raise.js'
 import { partialSuspension } from './support/partialSuspension.js'
 import { assert, it } from '@effect/vitest'
@@ -12,7 +14,7 @@ import * as Projections from './support/projections.js'
 const encoder = new TextEncoder()
 
 const snapshot = (source: string) =>
-  Analysis.ofSourceRealized(
+  AnalysisFixture.retainingMain(
     'suspension-ownership/main',
     encoder.encode(source),
     'wasm32-unknown-unknown',
@@ -267,6 +269,7 @@ pub fn main() -> i32 { let first = run partial() let second = run conditional(tr
       missingFlags,
       provisional.value,
       self.index,
+      OpaqueRealization.catalogOf(self),
     ).violations
     assert.isNotEmpty(violations)
     assert.deepEqual(

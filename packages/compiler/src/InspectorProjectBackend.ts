@@ -17,7 +17,6 @@ import type * as Elaboration from './Elaboration.js'
 import type { RowModel, Span } from './InspectorRow.js'
 import { spanOf as asSpan } from './InspectorRow.js'
 import type * as Instances from './Instances.js'
-import * as Intrinsic from './Intrinsic.js'
 import type * as Layout from './Layout.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
@@ -532,19 +531,12 @@ export const ownershipRows = (facts: Ownership.ModuleOwnership): ReadonlyArray<R
 }
 
 export const instanceRows = (discovery: Instances.Discovery): ReadonlyArray<RowModel> => {
-  let entryDetail: string
-  if (discovery.entry._tag === 'Resolved')
-    entryDetail = `${discovery.entry.key.declaration.module}.${discovery.entry.key.declaration.name}`
-  else if (discovery.entry._tag === 'None')
-    entryDetail = `library · ${discovery.foreignExports.length} exports`
-  else entryDetail = `unavailable · ${discovery.entry.reason}`
   const rows: Array<RowModel> = [
     {
-      key: 'entry',
-      label: 'entry',
-      detail: entryDetail,
+      key: 'roots',
+      label: 'artifact roots',
+      detail: `${discovery.foreignExports.length} exports · ${discovery.retention.length} retained declarations`,
       head: true,
-      ...(discovery.entry._tag === 'Unavailable' ? { tone: 'warning' as const } : {}),
     },
     {
       key: 'reachable',
@@ -760,6 +752,8 @@ const placeText = (root: Mir.LocalId, selectors: ReadonlyArray<Mir.PlaceSelector
 
 const operationLabel = (operation: Mir.Operation): string => {
   switch (operation._tag) {
+    case 'DiagnosticUnhandled':
+      return `${localText(operation.destination)} = observe unhandled failure`
     case 'NativeAssembly':
       return `${localText(operation.destination)} = assembly ${operation.assembly.constraints} · ${operation.assembly.memory}${operation.assembly.noReturn ? ' · no return' : ''}`
     case 'SetInitialized':
@@ -788,6 +782,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = byte length ${localText(operation.string)}`
     case 'StringEqualsExact':
       return `${localText(operation.destination)} = exact string ${operation.negated ? 'not equals' : 'equals'} ${localText(operation.left)}, ${localText(operation.right)}`
+    case 'UnpackEffectComposite':
+      return `${localText(operation.destination)}, ${localText(operation.matched)} = effect choice #${operation.alternative} ${localText(operation.source)}`
     case 'PackEffectComposite':
       return `${localText(operation.destination)} = effect choice #${operation.alternative} ${localText(operation.source)}`
     case 'Binary':
@@ -850,8 +846,6 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = run static ${operation.runner.name} with ${operation.captures.map((capture) => localText(capture.source)).join(', ') || 'no captures'}`
     case 'CatchEffect':
       return `${localText(operation.destination)} = result ${localText(operation.effect)} with ${operation.runner.name}`
-    case 'CloseEffectEntry':
-      return `${localText(operation.destination)} = close ${operation.target.name} with ${operation.runner.name}`
     case 'Construct':
       return `${localText(operation.destination)} = construct ${typeText(operation.type.type)} { ${operation.fields
         .map(({ field, value }) => `#${field.ordinal}: ${localText(value)}`)
@@ -876,12 +870,12 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `drop ${localText(operation.local)}`
     case 'Match':
       return `${operation.destination === undefined ? 'never' : localText(operation.destination)} = match ${operation.access.toLowerCase()} ${localText(operation.scrutinee)}`
+    case 'DiagnosticScope':
+      return `${localText(operation.destination)} = observe ${localText(operation.state)} with ${localText(operation.observer)}`
     case 'Conditional':
       return `${localText(operation.destination)} = if ${localText(operation.condition)}`
     case 'ShortCircuit':
       return `${localText(operation.destination)} = ${operation.operator === 'And' ? '&&' : '||'} ${localText(operation.left)}`
-    case 'OsCall':
-      return `${localText(operation.destination)} = ${Intrinsic.operationText(operation.operation)}(${operation.arguments.map(localText).join(', ')})`
     case 'ForeignIndirectCall':
       return `${localText(operation.destination)} = indirect extern C ${localText(operation.callee)}(${operation.arguments.map(localText).join(', ')})`
     case 'ForeignCall':
@@ -923,6 +917,7 @@ const operationLabel = (operation: Mir.Operation): string => {
     case 'PointerAddress':
       return `${localText(operation.destination)} = address of ${localText(operation.pointer)}`
     case 'PointerBytes':
+    case 'PointerReinterpret':
     case 'PointerRequalify':
     case 'PointerFromStorage':
       return `${localText(operation.destination)} = pointer from ${localText(operation.source)}`

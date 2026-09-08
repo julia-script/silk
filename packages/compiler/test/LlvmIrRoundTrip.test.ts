@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -90,7 +91,7 @@ const emit = Effect.fnUntraced(function* (
   request: Backend.CodegenRequest,
   target: string,
 ) {
-  const snapshot = yield* Analysis.ofSourceRealized(name, ascii(text), target)
+  const snapshot = yield* AnalysisFixture.retainingMain(name, ascii(text), target)
   assert.deepEqual(Analysis.diagnostics(snapshot), [])
   return yield* Analysis.codegen(snapshot, request)
 })

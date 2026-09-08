@@ -89,8 +89,8 @@ const relativeOperand = (
   const offset = index.instructionOffsets.get(instructionIndex)
   if (offset === undefined) throw new Error('instruction offset is missing')
   const value = offset - absoluteOperand(body, index, constants, operand)
-  if (value < 0) throw new Error('non-phi instruction has a forward value reference')
-  return value
+  // LLVM value IDs use unsigned 32-bit subtraction, including forward references.
+  return value >>> 0
 }
 
 /** @internal */
@@ -136,11 +136,33 @@ const writeFunctionInstruction = (
 ): void => {
   const relative = (operand: FunctionBodyDescription.Operand): number =>
     relativeOperand(body, index, constants, instructionIndex, operand)
+  // LLVM 22 BitcodeWriter::pushValueAndType emits the type only for a forward
+  // operand. Fixed call arguments and same-typed second operands already have it.
+  // https://github.com/llvm/llvm-project/blob/llvmorg-22.1.8/llvm/lib/Bitcode/Writer/BitcodeWriter.cpp
+  const valueAndType = (operand: FunctionBodyDescription.Operand): ReadonlyArray<number> => {
+    const offset = index.instructionOffsets.get(instructionIndex)
+    if (offset === undefined) throw new Error('instruction offset is missing')
+    return [
+      relative(operand),
+      ...(absoluteOperand(body, index, constants, operand) >= offset
+        ? [bodyOperandType(state, body, operand)]
+        : []),
+    ]
+  }
+  const callArguments = (
+    call: Extract<FunctionBodyDescription.Instruction, { readonly _tag: 'Call' | 'Invoke' }>,
+  ): ReadonlyArray<number> => {
+    const signature = state.types[call.functionType]
+    if (signature?._tag !== 'Function') throw new Error('call function type is missing')
+    return call.arguments.flatMap((argument, ordinal) =>
+      ordinal < signature.parameters.length ? [relative(argument)] : valueAndType(argument),
+    )
+  }
   switch (instruction._tag) {
     case 'Unary': {
       const math = fastMathCode(instruction.fastMath)
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.unary, [
-        relative(instruction.operand),
+        ...valueAndType(instruction.operand),
         0,
         ...(math === 0 ? [] : [math]),
       ])
@@ -154,7 +176,7 @@ const writeFunctionInstruction = (
         (instruction.integerFlags.exact ? 1 : 0)
       const flags = instruction.kind.startsWith('f') ? math : integerFlags
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.binary, [
-        relative(instruction.left),
+        ...valueAndType(instruction.left),
         relative(instruction.right),
         CoreSchema.binaryOpcode[instruction.kind],
         ...(flags === 0 ? [] : [flags]),
@@ -168,7 +190,7 @@ const writeFunctionInstruction = (
           ? CoreSchema.integerPredicate[instruction.predicate]
           : CoreSchema.floatingPredicate[instruction.predicate]
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.compare, [
-        relative(instruction.left),
+        ...valueAndType(instruction.left),
         relative(instruction.right),
         predicate,
         ...(math === 0 ? [] : [math]),
@@ -178,9 +200,9 @@ const writeFunctionInstruction = (
     case 'Select': {
       const math = fastMathCode(instruction.fastMath)
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.select, [
-        relative(instruction.onTrue),
+        ...valueAndType(instruction.onTrue),
         relative(instruction.onFalse),
-        relative(instruction.condition),
+        ...valueAndType(instruction.condition),
         ...(math === 0 ? [] : [math]),
       ])
       break
@@ -188,7 +210,7 @@ const writeFunctionInstruction = (
     case 'Cast': {
       const flags = (instruction.noUnsignedWrap ? 1 : 0) | (instruction.noSignedWrap ? 2 : 0)
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.cast, [
-        relative(instruction.operand),
+        ...valueAndType(instruction.operand),
         instruction.destinationType,
         CoreSchema.castOpcode[instruction.kind],
         ...(flags === 0 ? [] : [flags]),
@@ -197,19 +219,19 @@ const writeFunctionInstruction = (
     }
     case 'Freeze':
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.freeze, [
-        relative(instruction.operand),
+        ...valueAndType(instruction.operand),
       ])
       break
     case 'ExtractValue':
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.extractValue, [
-        relative(instruction.aggregate),
+        ...valueAndType(instruction.aggregate),
         ...instruction.indices,
       ])
       break
     case 'InsertValue':
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.insertValue, [
-        relative(instruction.aggregate),
-        relative(instruction.element),
+        ...valueAndType(instruction.aggregate),
+        ...valueAndType(instruction.element),
         ...instruction.indices,
       ])
       break
@@ -231,7 +253,7 @@ const writeFunctionInstruction = (
     }
     case 'Load': {
       const values = [
-        relative(instruction.pointer),
+        ...valueAndType(instruction.pointer),
         instruction.valueType,
         MemoryAccess.encodeAlignment(instruction.access.alignment),
         instruction.access.kind === 'volatile' ? 1 : 0,
@@ -251,8 +273,8 @@ const writeFunctionInstruction = (
     }
     case 'Store': {
       const values = [
-        relative(instruction.pointer),
-        relative(instruction.value),
+        ...valueAndType(instruction.pointer),
+        ...valueAndType(instruction.value),
         MemoryAccess.encodeAlignment(instruction.access.alignment),
         instruction.access.kind === 'volatile' ? 1 : 0,
       ]
@@ -275,26 +297,26 @@ const writeFunctionInstruction = (
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.getElementPtr, [
         instruction.inbounds ? 1 : 0,
         instruction.sourceType,
-        relative(instruction.base),
-        ...instruction.indices.map(relative),
+        ...valueAndType(instruction.base),
+        ...instruction.indices.flatMap(valueAndType),
       ])
       break
     case 'ExtractElement':
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.extractElement, [
-        relative(instruction.vector),
-        relative(instruction.index),
+        ...valueAndType(instruction.vector),
+        ...valueAndType(instruction.index),
       ])
       break
     case 'InsertElement':
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.insertElement, [
-        relative(instruction.vector),
+        ...valueAndType(instruction.vector),
         relative(instruction.element),
-        relative(instruction.index),
+        ...valueAndType(instruction.index),
       ])
       break
     case 'ShuffleVector':
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.shuffleVector, [
-        relative(instruction.left),
+        ...valueAndType(instruction.left),
         relative(instruction.right),
         relative(instruction.mask),
       ])
@@ -307,8 +329,8 @@ const writeFunctionInstruction = (
       break
     case 'CompareExchange':
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.compareExchange, [
-        relative(instruction.pointer),
-        relative(instruction.comparison),
+        ...valueAndType(instruction.pointer),
+        ...valueAndType(instruction.comparison),
         relative(instruction.replacement),
         instruction.access.kind === 'volatile' ? 1 : 0,
         MemoryAccess.orderingCode[instruction.access.ordering],
@@ -320,8 +342,8 @@ const writeFunctionInstruction = (
       break
     case 'AtomicRmw':
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.atomicRmw, [
-        relative(instruction.pointer),
-        relative(instruction.value),
+        ...valueAndType(instruction.pointer),
+        ...valueAndType(instruction.value),
         MemoryAccess.operationCode[instruction.operation],
         instruction.access.kind === 'volatile' ? 1 : 0,
         MemoryAccess.orderingCode[instruction.access.ordering],
@@ -372,7 +394,7 @@ const writeFunctionInstruction = (
     }
     case 'Return':
       Bitstream.writeUnabbreviatedRecord(block, CoreSchema.code.return, [
-        relative(instruction.value),
+        ...valueAndType(instruction.value),
       ])
       break
     case 'ReturnVoid':
@@ -401,7 +423,10 @@ const writeFunctionInstruction = (
       for (const bundle of instruction.operandBundles) {
         const tag = operandBundleTags.get(CanonicalKey.bytes(bundle.tag))
         if (tag === undefined) throw new Error('operand bundle tag is missing')
-        Bitstream.writeUnabbreviatedRecord(block, 55, [tag, ...bundle.operands.map(relative)])
+        Bitstream.writeUnabbreviatedRecord(block, 55, [
+          tag,
+          ...bundle.operands.flatMap(valueAndType),
+        ])
       }
       Bitstream.writeUnabbreviatedRecord(block, 13, [
         instruction.attributes === undefined ? 0 : instruction.attributes + 1,
@@ -409,8 +434,8 @@ const writeFunctionInstruction = (
         instruction.normal,
         instruction.unwind,
         instruction.functionType,
-        relative(instruction.callee),
-        ...instruction.arguments.map(relative),
+        ...valueAndType(instruction.callee),
+        ...callArguments(instruction),
       ])
       break
     }
@@ -418,7 +443,10 @@ const writeFunctionInstruction = (
       for (const bundle of instruction.operandBundles) {
         const tag = operandBundleTags.get(CanonicalKey.bytes(bundle.tag))
         if (tag === undefined) throw new Error('operand bundle tag is missing')
-        Bitstream.writeUnabbreviatedRecord(block, 55, [tag, ...bundle.operands.map(relative)])
+        Bitstream.writeUnabbreviatedRecord(block, 55, [
+          tag,
+          ...bundle.operands.flatMap(valueAndType),
+        ])
       }
       const math = fastMathCode(instruction.fastMath)
       const callType =
@@ -433,8 +461,8 @@ const writeFunctionInstruction = (
         callType,
         ...(math === 0 ? [] : [math]),
         instruction.functionType,
-        relative(instruction.callee),
-        ...instruction.arguments.map(relative),
+        ...valueAndType(instruction.callee),
+        ...callArguments(instruction),
       ])
       break
     }

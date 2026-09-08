@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,7 +25,7 @@ pub fn main() -> i32 { return 42 }`
 it.effect('ships Effect.suspend as an ordinary Silk wrapper with exact channels', () =>
   Effect.gen(function* () {
     const module = 'effect-suspend/stdlib-wrapper'
-    const snapshot = yield* Analysis.ofSourceRealized(module, encoder.encode(source))
+    const snapshot = yield* AnalysisFixture.retainingMain(module, encoder.encode(source))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
 
     const occurrence = Analysis.semanticOccurrenceAt(

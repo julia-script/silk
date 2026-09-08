@@ -1,3 +1,4 @@
+import * as OpaqueRealization from '../../src/OpaqueRealization.js'
 import type * as Analysis from '../../src/Analysis.js'
 import type * as Backend from '../../src/Backend.js'
 import type * as DeclarationFacts from '../../src/DeclarationFacts.js'
@@ -183,7 +184,12 @@ export const suspensionOwnershipOf = (
     ? provisional
     : Object.freeze({
         _tag: 'Available',
-        value: SuspensionOwnership.plan(self.mir.value, provisional.value, self.index),
+        value: SuspensionOwnership.plan(
+          self.mir.value,
+          provisional.value,
+          self.index,
+          OpaqueRealization.catalogOf(self),
+        ),
       })
 }
 

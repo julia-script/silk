@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -15,7 +16,9 @@ import * as Parser from '../src/Parser.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Stdlib from '../src/Stdlib.js'
+import * as SourceOrigin from '../src/SourceOrigin.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
+import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -337,7 +340,7 @@ it('computes browser-safe SHA-256 identities over exact UTF-8 bytes', () => {
 
 it.effect('keeps allocation metrics outside an unmetered program closure and MIR', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'stdlib/unmetered-allocation',
       ascii(`import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
@@ -415,7 +418,7 @@ pub fn main() -> i32 {
 
 it.effect('resolves the complete InsecureRandom surface to canonical portable Silk source', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'stdlib/insecure-random-importer',
       ascii(insecureRandomImporter),
     )
@@ -454,7 +457,7 @@ it.effect('resolves the complete InsecureRandom surface to canonical portable Si
 
 it.effect('resolves secure Random and InsecureSeed to distinct canonical portable source', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'stdlib/random-capabilities-importer',
       ascii(`import silk.insecure_seed { InsecureSeed }
 import silk.random { Random }
@@ -529,7 +532,7 @@ const called = `pub fn main() -> i32 {
 it.effect('never injects a namespace named only inside a comment', () =>
   Effect.gen(function* () {
     // The closure scan is lexical: a commented mention leaves the user's own Result alone.
-    const snapshot = yield* Analysis.ofSourceRealized('stdlib/commented', ascii(commented))
+    const snapshot = yield* AnalysisFixture.retainingMain('stdlib/commented', ascii(commented))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.notInclude(
       Analysis.modules(snapshot).map((module) => module.name),
@@ -551,7 +554,7 @@ it.effect('never injects a namespace named only inside a static literal', () =>
 
 it.effect('requires an explicit import for a qualified standard-library call', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized('stdlib/called', ascii(called))
+    const snapshot = yield* AnalysisFixture.retainingMain('stdlib/called', ascii(called))
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
       ['SEM0009'],
@@ -565,7 +568,7 @@ it.effect('requires an explicit import for a qualified standard-library call', (
 
 it.effect('resolves standard-library imports without vendoring source', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized('stdlib/importer', ascii(importing))
+    const snapshot = yield* AnalysisFixture.retainingMain('stdlib/importer', ascii(importing))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     // `usize` renders and reads decimal text, so naming it reaches the formatting, writer, Effect,
     // and standard-service stack. The closure is an analysis fact, not an artifact cost: codegen
@@ -655,6 +658,24 @@ it.effect('rejects a user root claiming the reserved namespace', () =>
   }),
 )
 
+it.effect('admits exact toolchain roots without trusting a forged source origin', () =>
+  Effect.gen(function* () {
+    const bytes = Stdlib.sources.get('silk/bool') ?? unreachable('expected shipped bool source')
+    const supplied = yield* ModuleClosure.load({
+      root: SourceFile.make('silk/bool', bytes),
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.isFalse(supplied.diagnostics.some((diagnostic) => diagnostic.code === 'MOD0004'))
+    const forged = yield* ModuleClosure.load({
+      root: SourceFile.make(
+        'silk/bool',
+        ascii('pub fn stolen() -> i32 { return 0 }'),
+        SourceOrigin.toolchainFile('silk/bool'),
+      ),
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.isTrue(forged.diagnostics.some((diagnostic) => diagnostic.code === 'MOD0004'))
+  }),
+)
+
 it.effect('compiles library source with ordinary diagnostics and no privilege', () =>
   Effect.gen(function* () {
     // Inject a defect into the shipped library table for this test only: it must surface as an
@@ -665,7 +686,7 @@ it.effect('compiles library source with ordinary diagnostics and no privilege', 
     if (original === undefined) return
     sources.set('silk/vector', ascii('pub fn broken() -> Missing { return 0 }'))
     try {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'stdlib/defective-importer',
         ascii(importing),
       )
@@ -744,9 +765,10 @@ pub fn main() -> i32 {
 }`
 
 const withHelper = (root: string): Effect.Effect<Analysis.Snapshot> =>
-  Analysis.makeRealized({ root: SourceFile.make('app/main', ascii(root)) }).pipe(
-    Effect.provide(SourceResolver.memory(new Map([['app/helper', ascii(shadowedHelper)]]))),
-  )
+  Analysis.makeRealized({
+    root: SourceFile.make('app/main', ascii(root)),
+    configuration: AnalysisFixture.configuration('app/main'),
+  }).pipe(Effect.provide(SourceResolver.memory(new Map([['app/helper', ascii(shadowedHelper)]]))))
 
 it.effect('keeps catalog declarations out of an importing sibling module', () =>
   Effect.gen(function* () {
@@ -825,7 +847,9 @@ it.effect(
       for (const target of Target.all) {
         const selection = yield* SourceCatalog.analyze({
           roots: [root, facade],
-          configuration: { profile: { target: target.id } },
+          configuration: {
+            profile: { target: target.id, artifact: 'object', runtime: { kind: 'none' } },
+          },
         }).pipe(Effect.provide(SourceResolver.empty))
         assert.deepEqual(selection.closure.resolutionFailures, [])
         assert.deepEqual(selection.closure.diagnostics, [])

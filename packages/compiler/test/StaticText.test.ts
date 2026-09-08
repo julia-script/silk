@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as Schema from 'effect/Schema'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { createHash } from 'node:crypto'
@@ -889,7 +890,7 @@ it.effect('rejects a runtime static iterable before elaborating its body', () =>
 }
 
 pub fn main() -> i32 { return invalid([1]) }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'static/runtime-iteration',
       encoder.encode(source),
       Target.x8664UnknownLinuxGnu.id,
@@ -946,7 +947,7 @@ pub fn main() -> i32 { return invalid([1]) }`
 
 it.effect('rolls back every earlier static iteration when a later element fails', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'static/iteration-rollback',
       encoder.encode(`import silk.static_sequence as StaticSequence
 
@@ -1027,7 +1028,7 @@ pub fn main() -> i32 { return rejected() }`),
 it.effect('derives ordered visible descriptors for every concrete aggregate kind', () =>
   Effect.gen(function* () {
     const sourceId = 'static/reflection-descriptors'
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       sourceId,
       encoder.encode(`import silk.reflect as Reflect
 
@@ -1216,7 +1217,7 @@ fn exercise() -> () {
 }
 
 pub fn main() -> () { exercise() }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       sourceId,
       encoder.encode(program),
       Target.x8664UnknownLinuxGnu.id,
@@ -1248,7 +1249,7 @@ pub fn main() -> () { exercise() }`
 
 it.effect('caches real residual applications and enforces their growth budget', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'static/residual-budget',
       encoder.encode(`fn choose(static selected: bool, value: i32) -> i32 {
   static if selected { return value } else { return 0 }
@@ -1323,7 +1324,7 @@ pub fn main() -> i32 { return choose(true, 42) }`),
 
 it.effect('commits deterministic residual, specialization, ownership, and cleanup encodings', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'static/encoding',
       encoder.encode(`fn choose(static selected: bool, value: i32) -> i32 {
   static if selected {
@@ -1387,7 +1388,7 @@ it.effect(
 }
 
 pub fn main() -> i32 { return guarded(false) }`
-      const failed = yield* Analysis.ofSourceRealized(
+      const failed = yield* AnalysisFixture.retainingMain(
         'static/selected-failure',
         encoder.encode(selectedFailure),
         Target.x8664UnknownLinuxGnu.id,
@@ -1415,7 +1416,7 @@ pub fn main() -> i32 { return guarded(false) }`
 }
 
 pub fn main() -> i32 { return invalid(true, false) }`
-      const crossed = yield* Analysis.ofSourceRealized(
+      const crossed = yield* AnalysisFixture.retainingMain(
         'static/phase-crossing',
         encoder.encode(phaseCrossing),
         Target.x8664UnknownLinuxGnu.id,
@@ -1442,7 +1443,7 @@ pub fn main() -> i32 { return invalid(true, false) }`
 
 it.effect('retains mixed specialization, selected arm, and helper call in static traces', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'static/nested-trace',
       encoder.encode(`static fn reject(value: i32) -> i32 { compileError("nested") }
 
@@ -1473,7 +1474,7 @@ pub fn main() -> i32 { return choose(true) }`),
 
 it.effect('preserves nested static cycle classification through static calls', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'static/nested-cycle',
       encoder.encode(`static fn recurse(value: i32) -> i32 { return recurse(value) }
 
@@ -1505,7 +1506,7 @@ static fn inspect() -> bool { return byteAt("é", 3) == 0 }
 pub fn main() -> i32 {
   static if inspect() { return 42 } else { return 0 }
 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'static/nested-text-failure',
       encoder.encode(nestedTextFailure),
       Target.x8664UnknownLinuxGnu.id,
@@ -1592,7 +1593,7 @@ pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
       },
     ] as const
     for (const testCase of cases) {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         testCase.sourceId,
         encoder.encode(testCase.source),
         Target.x8664UnknownLinuxGnu.id,
@@ -1628,7 +1629,7 @@ static fn outer(value: string) -> string { return slice(inner(value), 0, 2) }
 fn reject(static template: string) -> i32 { compileError(outer(template)) }
 
 pub fn main() -> i32 { return reject("aéz") }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       sourceId,
       encoder.encode(program),
       Target.x8664UnknownLinuxGnu.id,
@@ -1656,7 +1657,7 @@ pub fn main() -> i32 {
   let first = reject("aéz")
   return reject("aéz")
 }`
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         sourceId,
         encoder.encode(program),
         Target.x8664UnknownLinuxGnu.id,
@@ -1675,7 +1676,7 @@ pub fn main() -> i32 {
 
 it.effect('retains ownership evidence for an unavailable selected residual specialization', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'static/unavailable-residual',
       encoder.encode(`fn choose(static selected: bool) -> i32 {
   static if selected { return missing() } else { return 0 }
@@ -1857,7 +1858,7 @@ pub fn main() -> i32 {
 
 it.effect('recovers malformed escapes before the following declaration', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'static/recovery',
       encoder.encode(`fn broken() -> i32 { let bad = "\\q" return 0 }
 pub fn main() -> i32 { return 42 }`),
@@ -1872,7 +1873,7 @@ pub fn main() -> i32 { return 42 }`),
 
 it.effect('keeps lexical literal sentinels out of parser and semantic diagnostic cascades', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'static/lexical-sentinel',
       encoder.encode(`pub fn main() -> i32 {
   let bad = future"value"
@@ -1981,7 +1982,7 @@ pub fn main() -> i32 {
     return 42
   } else { compileError("incorrect statement-arm evaluation") }
 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'static/match-arm-transfers',
       encoder.encode(source),
       Target.x8664UnknownLinuxGnu.id,
@@ -2279,10 +2280,14 @@ it.effect('specializes one source under distinct same-target completed profiles'
 pub param count: i32 = choose() where count > 0
 static fn choose() -> i32 { if enabled { return 42 } else { return 7 } }
 pub fn main() -> i32 { static if enabled { return count } else { return 0 } }`
-    const frontend = yield* Analysis.ofSource('configured', encoder.encode(source))
+    const selected = AnalysisFixture.configuration('configured', Target.wasm32UnknownUnknown.id)
+    const frontend = yield* Analysis.make({
+      root: SourceFile.make('configured', encoder.encode(source)),
+      configuration: selected,
+    }).pipe(Effect.provide(SourceResolver.empty))
     for (const enabled of [false, true]) {
       const snapshot = yield* Analysis.realize(frontend, {
-        profile: { target: Target.wasm32UnknownUnknown.id },
+        ...selected,
         modules: [{ canonical: 'configured', package: 'demo@1.0.0', module: 'configured' }],
         bindings: [
           {
@@ -2294,7 +2299,7 @@ pub fn main() -> i32 { static if enabled { return count } else { return 0 } }`
             origin: ConfigurationOrigin.literal('test profile'),
           },
         ],
-      })
+      }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       assert.strictEqual(snapshot.mir._tag, 'Available')
       assert.deepEqual(
@@ -2451,7 +2456,7 @@ it.effect('snapshots configuration bindings before publishing a frontend', () =>
     }).pipe(Effect.provide(SourceResolver.empty))
     value.value = true
     profile.debug = true
-    const completed = yield* Analysis.realize(frontend)
+    const completed = yield* Analysis.realize(frontend).pipe(Effect.provide(SourceResolver.empty))
     assert.deepEqual(Analysis.diagnostics(completed), [])
     assert.strictEqual(completed.profile?.debug, false)
     assert.deepEqual(completed.profile?.parameters[0]?.value, { kind: 'boolean', value: false })

@@ -10,7 +10,6 @@ import * as ExecutionTransition from './ExecutionTransition.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
-import * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
@@ -19,7 +18,6 @@ import * as Match from './Match.js'
 import type {
   CleanupRegion,
   Execution,
-  CoroutineFrameHeaderRole,
   CoroutineFrameRelease,
   EndLoanOperation,
   LocalId,
@@ -40,6 +38,11 @@ import type {
 } from './Mir.js'
 import {
   acceptsRuntimeOperand,
+  coroutineFrameHeaderRoles,
+  diagnosticScopeWords,
+  diagnosticOutcomeWords,
+  diagnosticOutcomeLocals,
+  diagnosticScopeLocals,
   borrowsDescriptor,
   callingShapeEquals,
   executionOperations,
@@ -213,6 +216,7 @@ const structuredCfgPathsValid = <State>(
       }
       return incoming
     }
+    if (operation._tag === 'DiagnosticScope') return execution(operation.body, incoming)
     if (operation._tag === 'Conditional')
       return semantics.merge(
         execution(operation.taken, incoming),
@@ -353,8 +357,22 @@ const executionCompletion = (
     ),
   )
   const ownOperations = new Set(root.regions.flatMap(operationsOf).flatMap(operationTree))
+  const enclosingOperations = fn.regions.flatMap(operationsOf).flatMap(operationTree)
+  if (root.recoveryOutcome !== undefined) {
+    const recovery = root.recoveryOutcome
+    valid &&=
+      fn.localTypes.at(recovery.ordinal)?._tag === 'EffectOutcome' &&
+      enclosingOperations.some(
+        (operation) =>
+          !ownOperations.has(operation) &&
+          operation._tag === 'CatchEffect' &&
+          operation.outcome.ordinal === recovery.ordinal,
+      )
+  }
   const declares = (operation: Operation, local: LocalId): boolean => {
     if ('destination' in operation && operation.destination?.ordinal === local.ordinal) return true
+    if (operation._tag === 'UnpackEffectComposite' && operation.matched.ordinal === local.ordinal)
+      return true
     if (operation._tag === 'Match')
       return operation.arms.some((arm) =>
         [...arm.bindings, ...arm.cleanupBindings].some(
@@ -373,10 +391,9 @@ const executionCompletion = (
   const initialized =
     result !== undefined &&
     (result.ordinal < fn.parameterCount ||
-      fn.regions
-        .flatMap(operationsOf)
-        .flatMap(operationTree)
-        .some((operation) => !ownOperations.has(operation) && declares(operation, result)))
+      enclosingOperations.some(
+        (operation) => !ownOperations.has(operation) && declares(operation, result),
+      ))
   const incoming = new Map<number, Set<boolean>>()
   const pending: Array<number> = []
   const enqueue = (target: RegionId, state: boolean): void => {
@@ -431,6 +448,8 @@ const executionCompletion = (
             const selected = nested(arm.selected.execution)
             if (selectable.has(arm.id.ordinal) && guard && selected) continuing = true
           }
+        } else if (operation._tag === 'DiagnosticScope') {
+          continuing = nested(operation.body)
         } else if (operation._tag === 'Conditional') {
           const taken = nested(operation.taken)
           const otherwise = nested(operation.otherwise)
@@ -1010,6 +1029,8 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       return [operation.destination, operation.source]
     case 'PackEffectComposite':
       return [operation.destination, operation.source]
+    case 'UnpackEffectComposite':
+      return [operation.destination, operation.matched, operation.source]
     case 'Binary':
       return [operation.destination, operation.left, operation.right]
     case 'ConvertInteger':
@@ -1036,7 +1057,6 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       return [operation.destination, operation.layout]
     case 'ForeignIndirectCall':
       return [operation.destination, operation.callee, ...operation.arguments]
-    case 'OsCall':
     case 'NativeAssembly':
     case 'ForeignCall':
       return [operation.destination, ...operation.arguments]
@@ -1103,11 +1123,14 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
       ]
     case 'PointerNull':
       return [operation.destination]
+    case 'DiagnosticUnhandled':
+      return [operation.destination]
     case 'PointerAddress':
     case 'PointerIsNull':
     case 'PointerRead':
       return [operation.destination, operation.pointer]
     case 'PointerBytes':
+    case 'PointerReinterpret':
     case 'PointerRequalify':
     case 'PointerFromStorage':
       return [operation.destination, operation.source]
@@ -1154,7 +1177,11 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'UnpackEffectSuccess':
       return [operation.destination, operation.source]
     case 'PropagateEffectFailure':
-      return [operation.source, ...(operation.releases ?? []).map((release) => release.local)]
+      return [
+        operation.source,
+        operation.outcome,
+        ...(operation.releases ?? []).map((release) => release.local),
+      ]
     case 'RunEffect':
       return [operation.destination, operation.outcome, ...operation.arguments]
     case 'RunEffectValue':
@@ -1181,13 +1208,6 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         operation.failureValue,
         operation.effect,
         ...operation.arguments,
-      ]
-    case 'CloseEffectEntry':
-      return [
-        operation.destination,
-        operation.effect,
-        operation.outcome,
-        ...operation.failures.map((failure) => failure.payload),
       ]
     case 'Construct':
     case 'ConstructUnionVariant':
@@ -1217,9 +1237,23 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
           ...arm.bindings.map((binding) => binding.destination),
           ...(arm.guard?.execution.result === undefined ? [] : [arm.guard.execution.result]),
           ...(arm.selected.execution.result === undefined ? [] : [arm.selected.execution.result]),
+          ...(arm.guard?.execution.recoveryOutcome === undefined
+            ? []
+            : [arm.guard.execution.recoveryOutcome]),
+          ...(arm.selected.execution.recoveryOutcome === undefined
+            ? []
+            : [arm.selected.execution.recoveryOutcome]),
           ...arm.cleanupBindings.map((binding) => binding.destination),
           ...arm.selected.cleanup.map((entry) => entry.destination),
         ]),
+      ]
+    case 'DiagnosticScope':
+      return [
+        operation.destination,
+        operation.state,
+        operation.observer,
+        ...(operation.body.result === undefined ? [] : [operation.body.result]),
+        ...(operation.body.recoveryOutcome === undefined ? [] : [operation.body.recoveryOutcome]),
       ]
     case 'Conditional':
       return [
@@ -1227,12 +1261,17 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         operation.condition,
         ...(operation.taken.result === undefined ? [] : [operation.taken.result]),
         ...(operation.otherwise.result === undefined ? [] : [operation.otherwise.result]),
+        ...(operation.taken.recoveryOutcome === undefined ? [] : [operation.taken.recoveryOutcome]),
+        ...(operation.otherwise.recoveryOutcome === undefined
+          ? []
+          : [operation.otherwise.recoveryOutcome]),
       ]
     case 'ShortCircuit':
       return [
         operation.destination,
         operation.left,
         ...(operation.right.result === undefined ? [] : [operation.right.result]),
+        ...(operation.right.recoveryOutcome === undefined ? [] : [operation.right.recoveryOutcome]),
       ]
   }
 }
@@ -1955,7 +1994,6 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
     case 'ValidateLayout':
     case 'RepeatLayout':
     case 'Allocate':
-    case 'OsCall':
     case 'NativeAssembly':
     case 'ForeignIndirectCall':
     case 'ForeignCall':
@@ -1967,6 +2005,8 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
       return [operation.type.type]
     case 'PackEffectComposite':
       return [semanticType(operation.type)]
+    case 'UnpackEffectComposite':
+      return [semanticType(operation.type), 'bool']
     case 'StringFromUtf8Unchecked':
       return [SilkType.slice('Shared', 'u8', operation.type.type.lifetime), operation.type.type]
     case 'StringUtf8Bytes':
@@ -2051,8 +2091,11 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
       return [semanticType(operation.type), operation.element]
     case 'RawBufferFill':
       return [semanticType(operation.type)]
+    case 'DiagnosticUnhandled':
+      return [semanticType(operation.type)]
     case 'PointerNull':
     case 'PointerBytes':
+    case 'PointerReinterpret':
     case 'PointerRequalify':
     case 'PointerFromStorage':
     case 'PointerAt':
@@ -2144,17 +2187,6 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         operation.failureValueType,
         ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
       ]
-    case 'CloseEffectEntry':
-      return [
-        semanticType(operation.effectType),
-        semanticType(operation.outcomeType),
-        semanticType(operation.type),
-        ...operation.typeArguments.filter(SilkType.isTypeArgument),
-        ...operation.failures.flatMap((failure) => [
-          failure.type,
-          ...cleanupTypes(failure.cleanup),
-        ]),
-      ]
     case 'Construct':
     case 'ConstructUnionVariant':
     case 'ConstructArray':
@@ -2179,6 +2211,13 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
           ...executionOperations(arm.selected.execution).flatMap(operationTypes),
           ...arm.selected.cleanup.flatMap((entry) => cleanupTypes(entry.cleanup)),
         ]),
+      ]
+    case 'DiagnosticScope':
+      return [
+        semanticType(operation.type),
+        ...cleanupTypes(operation.stateCleanup),
+        ...cleanupTypes(operation.observerCleanup),
+        ...executionOperations(operation.body).flatMap(operationTypes),
       ]
     case 'Conditional':
       return [
@@ -2222,6 +2261,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'EnumValue':
       return [operation.source]
     case 'PackEffectComposite':
+    case 'UnpackEffectComposite':
       return [operation.source]
     case 'Binary':
       return [operation.left, operation.right]
@@ -2241,7 +2281,6 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.layout]
     case 'ForeignIndirectCall':
       return [operation.callee, ...operation.arguments]
-    case 'OsCall':
     case 'NativeAssembly':
     case 'ForeignCall':
       return operation.arguments
@@ -2277,11 +2316,14 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.buffer, operation.offset, operation.length, operation.value]
     case 'PointerNull':
       return []
+    case 'DiagnosticUnhandled':
+      return []
     case 'PointerAddress':
     case 'PointerIsNull':
     case 'PointerRead':
       return [operation.pointer]
     case 'PointerBytes':
+    case 'PointerReinterpret':
     case 'PointerRequalify':
     case 'PointerFromStorage':
       return [operation.source]
@@ -2333,8 +2375,6 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [...operation.captures.map((capture) => capture.source), ...operation.arguments]
     case 'CatchEffect':
       return [operation.effect, ...operation.arguments]
-    case 'CloseEffectEntry':
-      return []
     case 'Construct':
     case 'ConstructUnionVariant':
       return operation.fields.map((field) => field.value)
@@ -2350,6 +2390,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.local]
     case 'Match':
       return [operation.scrutinee]
+    case 'DiagnosticScope':
+      return [operation.state, operation.observer]
     case 'Conditional':
       return [operation.condition]
     case 'ShortCircuit':
@@ -2544,6 +2586,8 @@ const loanViolations = (
           process(executionOperations(arm.selected.execution), active)
         }
       }
+      if (operation._tag === 'DiagnosticScope')
+        process(executionOperations(operation.body), new Map(active))
       if (operation._tag === 'Conditional') {
         process(executionOperations(operation.taken), new Map(active))
         process(executionOperations(operation.otherwise), new Map(active))
@@ -2564,7 +2608,10 @@ interface SuspensionCallTarget {
   readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
 }
 
-const suspensionCallTargets = (operation: Operation): ReadonlyArray<SuspensionCallTarget> => {
+const suspensionCallTargets = (
+  operation: Operation,
+  fn: MirFunction,
+): ReadonlyArray<SuspensionCallTarget> => {
   switch (operation._tag) {
     case 'Call':
     case 'RunEffect':
@@ -2587,20 +2634,19 @@ const suspensionCallTargets = (operation: Operation): ReadonlyArray<SuspensionCa
           typeArguments: alternative.runnerTypeArguments,
         }),
       )
-    case 'CloseEffectEntry':
-      return [
-        Object.freeze({ declaration: operation.target, typeArguments: operation.typeArguments }),
-        Object.freeze({ declaration: operation.runner, typeArguments: operation.typeArguments }),
-      ]
-    case 'ApplyCallable':
-      return operation.target?._tag === 'DeclarationCallableTarget'
+    case 'ApplyCallable': {
+      const type =
+        operation.callable === undefined ? undefined : fn.localTypes.at(operation.callable.ordinal)
+      const target = operation.target ?? (type?._tag === 'CallableValue' ? type.target : undefined)
+      return target?._tag === 'DeclarationCallableTarget'
         ? [
             Object.freeze({
-              declaration: operation.target.declaration,
+              declaration: target.declaration,
               typeArguments: operation.typeArguments,
             }),
           ]
         : []
+    }
     default:
       return []
   }
@@ -2631,7 +2677,7 @@ const originReachableSuspensionFunctions = (self: Module): ReadonlySet<string> =
     .map((fn) => ({
       key: instanceText(fn.instance),
       targets: [
-        ...operations(fn).flatMap(suspensionCallTargets),
+        ...operations(fn).flatMap((operation) => suspensionCallTargets(operation, fn)),
         ...(fn.suspension?.regions ?? []).flatMap((region) =>
           region._tag === 'RunSuspendableEffectRegion' && region.runner.declaration !== undefined
             ? [
@@ -2737,7 +2783,7 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
     const entry = selected.entry
     const wordSize = self.layout.target.pointerSize
     const wordAlignment = self.layout.target.pointerAlignment
-    const roles: ReadonlyArray<CoroutineFrameHeaderRole> = ['Parent', 'State']
+    const roles = coroutineFrameHeaderRoles(self)
     const headerValid =
       entry.header.length === roles.length &&
       entry.header.every(
@@ -2800,14 +2846,34 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
       wordAlignment,
       ...entry.states.map((state) => state.alignment),
     )
+    const payloadEnd = Math.max(roles.length * wordSize, ...entry.states.map((state) => state.size))
+    const descriptorStart = Math.ceil(payloadEnd / wordAlignment) * wordAlignment
+    const scopes = diagnosticScopeLocals(fn)
+    const scopesValid =
+      entry.diagnosticScopes.length === scopes.length &&
+      entry.diagnosticScopes.every(
+        (field, ordinal) =>
+          field.scope.ordinal === scopes.at(ordinal)?.ordinal &&
+          field.offset === descriptorStart + ordinal * wordSize * diagnosticScopeWords,
+      )
+    const outcomesStart = descriptorStart + scopes.length * wordSize * diagnosticScopeWords
+    const outcomes = diagnosticOutcomeLocals(self, fn)
+    const outcomesValid =
+      entry.diagnosticOutcomes.length === outcomes.length &&
+      entry.diagnosticOutcomes.every(
+        (field, ordinal) =>
+          field.outcome.ordinal === outcomes.at(ordinal)?.ordinal &&
+          field.offset === outcomesStart + ordinal * wordSize * diagnosticOutcomeWords,
+      )
     const maximumSize =
       Math.ceil(
-        Math.max(roles.length * wordSize, ...entry.states.map((state) => state.size)) /
-          maximumAlignment,
+        (outcomesStart + outcomes.length * wordSize * diagnosticOutcomeWords) / maximumAlignment,
       ) * maximumAlignment
     if (
       !headerValid ||
       !stateValid ||
+      !scopesValid ||
+      !outcomesValid ||
       entry.states.length !== descriptor.states.length ||
       entry.alignment !== maximumAlignment ||
       entry.size !== maximumSize
@@ -2886,6 +2952,7 @@ const pointerOperationViolation = (
         | 'PointerNull'
         | 'PointerIsNull'
         | 'PointerAddress'
+        | 'PointerReinterpret'
         | 'PointerRequalify'
         | 'PointerBytes'
         | 'PointerFromStorage'
@@ -2934,12 +3001,17 @@ const pointerOperationViolation = (
         ? undefined
         : 'Pointer byte projection lost its readonly byte view or source qualifiers'
     }
+    case 'PointerReinterpret':
     case 'PointerRequalify': {
       const source = pointerAt(operation.source)
       return source !== undefined &&
         destination?._tag === 'Pointer' &&
         SilkType.equals(destination.type, operation.type.type) &&
-        SilkType.equals(source.pointee, destination.type.pointee) &&
+        (operation._tag === 'PointerReinterpret'
+          ? source.mutable === destination.type.mutable &&
+            source.nullable === destination.type.nullable &&
+            source.extent === destination.type.extent
+          : SilkType.equals(source.pointee, destination.type.pointee)) &&
         source.addressSpace === destination.type.addressSpace
         ? undefined
         : 'Pointer qualification changed its invariant pointee or address space'
@@ -3107,7 +3179,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
       violations.push(
         Object.freeze({
           _tag: 'Violation',
-          rule: 'InvalidEntry',
+          rule: 'InvalidArtifactRoot',
           detail: 'Retained roots must uniquely identify emitted function instances',
         }),
       )
@@ -3347,93 +3419,15 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         })`,
       }),
     )
-  const availableEntry =
-    self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'NoInvocation'
-      ? undefined
-      : self.entry
-  const target = self.functions.find(
-    (fn) =>
-      availableEntry !== undefined &&
-      instanceText(fn.instance) === instanceText(availableEntry.target),
-  )
-  const machine = self.functions.find(
-    (fn) =>
-      availableEntry !== undefined &&
-      instanceText(fn.instance) === instanceText(availableEntry.machine),
-  )
-  const machineClosures =
-    machine?.regions
-      .flatMap(operationsOf)
-      .flatMap(operationTree)
-      .filter((operation) => operation._tag === 'CloseEffectEntry') ?? []
-  const machineCalls =
-    machine?.regions
-      .flatMap(operationsOf)
-      .flatMap(operationTree)
-      .filter((operation) => operation._tag === 'Call') ?? []
-  const entryValid =
-    self.entry._tag === 'NoInvocation'
-      ? self.foreignExports.length > 0 &&
-        self.foreignExports.every((export_) =>
-          self.functions.some((fn) => matchesInstanceKey(fn, export_.key)),
-        )
-      : availableEntry !== undefined &&
-        target !== undefined &&
-        machine !== undefined &&
-        machine.parameterCount === 0 &&
-        machine.result._tag === 'i32' &&
-        (availableEntry._tag === 'OrdinaryEntry'
-          ? (instanceText(availableEntry.target) === instanceText(availableEntry.machine) &&
-              target.result._tag === 'i32' &&
-              machineClosures.length === 0) ||
-            (availableEntry.machine.declaration.name === '$unit-entry' &&
-              SilkType.equals(semanticType(target.result), SilkType.unit) &&
-              machineClosures.length === 0 &&
-              machineCalls.length === 1 &&
-              machineCalls.some(
-                (call) =>
-                  call.target.module === availableEntry.target.declaration.module &&
-                  call.target.name === availableEntry.target.declaration.name,
-              ))
-          : target.result._tag === 'EffectValue' &&
-            target.parameterCount === 0 &&
-            machineClosures.length === 1 &&
-            availableEntry.requirements.length ===
-              SilkType.requirementMembers(target.result.type).length &&
-            availableEntry.requirements.every((requirement, ordinal) => {
-              const expected =
-                target.result._tag === 'EffectValue'
-                  ? SilkType.requirementMembers(target.result.type).at(ordinal)
-                  : undefined
-              return (
-                expected !== undefined &&
-                requirement.access === expected.access &&
-                requirement.role === expected.role &&
-                SilkType.equals(requirement.capability, expected.capability)
-              )
-            }) &&
-            availableEntry.failures.length === SilkType.failureMembers(target.result.type).length &&
-            availableEntry.failures.every((failure, ordinal) => {
-              const expected =
-                target.result._tag === 'EffectValue'
-                  ? SilkType.failureCarrierMember(target.result.type, failure.tag, 'OneBased')
-                  : undefined
-              return (
-                expected !== undefined &&
-                failure.tag === ordinal + 1 &&
-                SilkType.equals(failure.type, expected) &&
-                failure.identity === SilkType.encode(expected)
-              )
-            }))
-  if (!entryValid) {
-    violations.push(
-      Object.freeze({
-        _tag: 'Violation',
-        rule: 'InvalidEntry',
-        detail:
-          'machine entry must resolve to one zero-parameter i32 function and preserve its ordinary or effect-closing contract',
-      }),
-    )
+  for (const root of self.foreignExports.map((item) => item.key)) {
+    if (!self.functions.some((fn) => matchesInstanceKey(fn, root)))
+      violations.push(
+        Object.freeze({
+          _tag: 'Violation',
+          rule: 'InvalidArtifactRoot',
+          detail: `artifact root ${instanceText(root)} has no retained function`,
+        }),
+      )
   }
   const sharedElements = [
     ...new Map(
@@ -3488,7 +3482,28 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
   const instanceKeys = new Set<string>()
   for (const fn of self.functions) {
     const allRegions = regionsTree(fn.regions)
+    const caughtOutcomes = new Map(
+      fn.regions
+        .flatMap(operationsOf)
+        .flatMap(operationTree)
+        .filter((operation) => operation._tag === 'CatchEffect')
+        .map((operation) => [operation.outcome.ordinal, operation] as const),
+    )
     const descriptorUses = new Map<number, Set<Operation>>()
+    const propagatedOutcomeOwners = new Map(
+      [...caughtOutcomes.values()].map((caught) => [
+        caught.failureValue.ordinal,
+        caught.outcome.ordinal,
+      ]),
+    )
+    for (const operation of fn.regions.flatMap(operationsOf).flatMap(operationTree)) {
+      if (operation._tag !== 'Match') continue
+      const owner = propagatedOutcomeOwners.get(operation.scrutinee.ordinal)
+      if (owner === undefined) continue
+      for (const arm of operation.arms)
+        for (const binding of arm.bindings)
+          propagatedOutcomeOwners.set(binding.destination.ordinal, owner)
+    }
     const controlLocals = new Set<number>()
     for (const region of allRegions) {
       for (const operation of operationsOf(region).flatMap(operationTree))
@@ -3701,6 +3716,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
     >()
     const localUseCounts = new Map<number, number>()
     const successPathOperations = (operation: Operation): ReadonlyArray<Operation> => {
+      if (operation._tag === 'DiagnosticScope')
+        return [operation, ...executionOperations(operation.body).flatMap(successPathOperations)]
       if (operation._tag === 'Conditional') {
         return [
           operation,
@@ -4583,39 +4600,6 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             )
           }
         }
-        if (operation._tag === 'OsCall') {
-          const catalog = Intrinsic.findOperationById(operation.operation)
-          const rule = catalog?.rule._tag === 'BuiltinRule' ? catalog.rule : undefined
-          const expectedResult =
-            rule !== undefined && SilkType.isEffect(rule.result) ? rule.result.success : undefined
-          const destination = fn.localTypes.at(operation.destination.ordinal)
-          const argumentsValid =
-            rule?.operation.startsWith('Os') &&
-            rule.parameters.length === operation.arguments.length &&
-            rule.parameters.every((expected, ordinal) => {
-              const argument = operation.arguments.at(ordinal)
-              const actual = argument === undefined ? undefined : fn.localTypes.at(argument.ordinal)
-              return actual !== undefined && sameRuntimeType(semanticType(actual), expected)
-            })
-          if (
-            catalog?.unsafe !== true ||
-            expectedResult === undefined ||
-            destination === undefined ||
-            !sameRuntimeType(semanticType(destination), expectedResult) ||
-            !sameRuntimeType(semanticType(operation.type), expectedResult) ||
-            !argumentsValid
-          ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidOsOperation',
-                function: fn.id,
-                region: region.id,
-                detail: 'OS operation does not match its sealed unsafe native-only signature',
-              }),
-            )
-          }
-        }
         if (operation._tag === 'RawBufferFrom') {
           const allocation = fn.localTypes.at(operation.allocation.ordinal)
           const count = fn.localTypes.at(operation.count.ordinal)
@@ -5213,6 +5197,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           operation._tag === 'PointerNull' ||
           operation._tag === 'PointerIsNull' ||
           operation._tag === 'PointerAddress' ||
+          operation._tag === 'PointerReinterpret' ||
           operation._tag === 'PointerRequalify' ||
           operation._tag === 'PointerBytes' ||
           operation._tag === 'PointerFromStorage' ||
@@ -5484,11 +5469,50 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             )
           }
         }
-        if (operation._tag === 'Conditional' || operation._tag === 'ShortCircuit') {
-          const branches =
-            operation._tag === 'Conditional'
-              ? [operation.taken, operation.otherwise]
-              : [operation.right]
+        if (
+          operation._tag === 'DiagnosticUnhandled' &&
+          (operation.type._tag !== 'usize' ||
+            fn.localTypes.at(operation.destination.ordinal)?._tag !== 'usize')
+        )
+          violations.push({
+            _tag: 'Violation',
+            rule: 'InvalidEffectOperation',
+            function: fn.id,
+            region: region.id,
+            detail: 'terminal observation requires one usize destination',
+          })
+        if (
+          operation._tag === 'Conditional' ||
+          operation._tag === 'ShortCircuit' ||
+          operation._tag === 'DiagnosticScope'
+        ) {
+          let branches: ReadonlyArray<Execution>
+          let validRecovery: boolean
+          if (operation._tag === 'Conditional') {
+            branches = [operation.taken, operation.otherwise]
+            const recovered = operation.otherwise.recoveryOutcome
+            validRecovery =
+              operation.taken.recoveryOutcome === undefined &&
+              (recovered === undefined ||
+                caughtOutcomes.get(recovered.ordinal)?.destination.ordinal ===
+                  operation.condition.ordinal)
+          } else if (operation._tag === 'DiagnosticScope') {
+            branches = [operation.body]
+            validRecovery = operation.body.recoveryOutcome === undefined
+          } else {
+            branches = [operation.right]
+            validRecovery = operation.right.recoveryOutcome === undefined
+          }
+          if (!validRecovery)
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidEffectOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'recovery scope is not the selected failure branch of its caught outcome',
+              }),
+            )
           if (
             branches.some((branch) => !executionCompletion(fn, branch, operation.destination).valid)
           )
@@ -5506,6 +5530,22 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           let completes = false
           const selectable = selectableMatchArms(operation)
           for (const arm of operation.arms) {
+            const recovered = arm.selected.execution.recoveryOutcome
+            if (
+              arm.guard?.execution.recoveryOutcome !== undefined ||
+              (recovered !== undefined &&
+                caughtOutcomes.get(recovered.ordinal)?.failureValue.ordinal !==
+                  operation.scrutinee.ordinal)
+            )
+              violations.push(
+                Object.freeze({
+                  _tag: 'Violation',
+                  rule: 'InvalidEffectOperation',
+                  function: fn.id,
+                  region: region.id,
+                  detail: 'recovery scope does not select the matched caught failure',
+                }),
+              )
             const guard =
               arm.guard === undefined
                 ? { completes: true, valid: true }
@@ -6567,6 +6607,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         }
         if (operation._tag === 'PropagateEffectFailure') {
           const source = fn.localTypes.at(operation.source.ordinal)
+          const outcome = fn.localTypes.at(operation.outcome.ordinal)
           const semanticSource = semanticType(operation.sourceType)
           const sourceMembers = SilkType.isUnion(semanticSource)
             ? semanticSource.members
@@ -6597,6 +6638,13 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             })
           if (
             source === undefined ||
+            outcome?._tag !== 'EffectOutcome' ||
+            propagatedOutcomeOwners.get(operation.source.ordinal) !== operation.outcome.ordinal ||
+            !sourceMembers.every((member) =>
+              SilkType.failureMembers(outcome.type).some((failure) =>
+                SilkType.equals(member, failure),
+              ),
+            ) ||
             !SilkType.equals(semanticType(source), semanticType(operation.sourceType)) ||
             !SilkType.equals(semanticType(fn.result), operation.propagationType.type) ||
             propagationShape?.laneCount !== operation.propagationLaneCount ||
@@ -6629,6 +6677,31 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: 'effect success projection does not match its outcome contract',
+              }),
+            )
+        }
+        if (operation._tag === 'UnpackEffectComposite') {
+          const source = fn.localTypes.at(operation.source.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const selected =
+            source?._tag === 'EffectComposite'
+              ? source.alternatives.at(operation.alternative)
+              : undefined
+          if (
+            selected === undefined ||
+            destination?._tag !== 'EffectValue' ||
+            fn.localTypes.at(operation.matched.ordinal)?._tag !== 'bool' ||
+            !SilkType.equals(destination.type, operation.type.type) ||
+            !SilkType.equals(selected.type, operation.type.type) ||
+            !Hir.sameExecutableSite(selected.site, operation.type.site)
+          )
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidEffectOperation',
+                function: fn.id,
+                region: region.id,
+                detail: 'Effect choice projection does not preserve its selected exact alternative',
               }),
             )
         }
@@ -7091,71 +7164,6 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 function: fn.id,
                 region: region.id,
                 detail: `effect result runner, channel data, or calling shapes disagree: ${disagreements.join(', ')}`,
-              }),
-            )
-          }
-        }
-        if (operation._tag === 'CloseEffectEntry') {
-          const target = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.target, operation.typeArguments),
-          )
-          const runner = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.runner, operation.typeArguments),
-          )
-          const destination = fn.localTypes.at(operation.destination.ordinal)
-          const effect = fn.localTypes.at(operation.effect.ordinal)
-          const outcome = fn.localTypes.at(operation.outcome.ordinal)
-          const entryFailures =
-            self.entry._tag === 'EffectEntry' &&
-            instanceText(self.entry.machine) === instanceText(fn.instance)
-              ? self.entry.failures
-              : undefined
-          const failuresValid =
-            runner?.result._tag === 'EffectOutcome' &&
-            entryFailures !== undefined &&
-            operation.failures.length === SilkType.failureMembers(runner.result.type).length &&
-            operation.failures.every((failure, ordinal) => {
-              const expected =
-                runner.result._tag === 'EffectOutcome'
-                  ? SilkType.failureCarrierMember(runner.result.type, failure.tag, 'OneBased')
-                  : undefined
-              const entryFailure = entryFailures.at(ordinal)
-              const payload = fn.localTypes.at(failure.payload.ordinal)
-              return (
-                expected !== undefined &&
-                entryFailure !== undefined &&
-                failure.tag === ordinal + 1 &&
-                entryFailure.tag === failure.tag &&
-                SilkType.equals(failure.type, expected) &&
-                SilkType.equals(entryFailure.type, expected) &&
-                failure.identity === entryFailure.identity &&
-                payload !== undefined &&
-                SilkType.equals(semanticType(payload), expected) &&
-                SilkType.equals(failure.cleanup.type, expected)
-              )
-            })
-          if (
-            target === undefined ||
-            target.parameterCount !== 0 ||
-            target.result._tag !== 'EffectValue' ||
-            runner?.result._tag !== 'EffectOutcome' ||
-            destination?._tag !== 'i32' ||
-            effect?._tag !== 'EffectValue' ||
-            !SilkType.equals(effect.type, operation.effectType.type) ||
-            !SilkType.equals(target.result.type, operation.effectType.type) ||
-            outcome?._tag !== 'EffectOutcome' ||
-            !SilkType.equals(outcome.type, operation.outcomeType.type) ||
-            !SilkType.equals(runner.result.type, operation.outcomeType.type) ||
-            !failuresValid
-          ) {
-            violations.push(
-              Object.freeze({
-                _tag: 'Violation',
-                rule: 'InvalidEntry',
-                function: fn.id,
-                region: region.id,
-                detail:
-                  'effect entry closure disagrees with its target, normalized failures, typed payloads, or cleanup plans',
               }),
             )
           }

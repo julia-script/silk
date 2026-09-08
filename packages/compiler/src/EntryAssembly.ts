@@ -741,6 +741,7 @@ export const lowerBuiltinEffectRunner = (
       }),
     ),
   )
+  lowering.builtinEffectRunner = true
   const region = lowering.reserve()
   const [success, operations] = lowering.capture(() =>
     lowerExpressionInner(
@@ -759,7 +760,7 @@ export const lowerBuiltinEffectRunner = (
                   ordinal,
                 }),
                 type: argument._tag === 'Unavailable' ? ('never' as const) : argument.type,
-                span: spec.expression.span,
+                span: argument.span,
               }),
             ),
           ),

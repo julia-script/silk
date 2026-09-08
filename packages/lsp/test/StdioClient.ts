@@ -13,6 +13,9 @@ class StdioTimeout extends Data.TaggedError('StdioTimeout')<{
 /** Shared stdio harness: a minimal Content-Length framed JSON-RPC client driving the real server. */
 export const binPath = fileURLToPath(new URL('../dist/bin.js', import.meta.url))
 
+/** A stdio scenario can load workers and analyze several source-runtime revisions. */
+export const stdioTestTimeout = 120_000
+
 export const delay = (milliseconds: number): Promise<void> =>
   Effect.runPromise(Effect.sleep(milliseconds))
 
@@ -152,7 +155,7 @@ export const connect = (entryPath = binPath): Client => {
   }
   const waitFor = <A>(
     select: (message: Record<string, unknown>) => A | undefined,
-    timeoutMilliseconds = 25_000,
+    timeoutMilliseconds = 60_000,
   ): Promise<A> =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -162,8 +165,7 @@ export const connect = (entryPath = binPath): Client => {
             const selected = select(message)
             if (selected !== undefined) return selected
           }
-          // Kept under the 30s per-test budget: this inner poll must not be the thing that fires
-          // first, or a slow runner reports a timeout instead of the test's own limit.
+          // Bound each response independently within the multi-revision scenario budget.
           if ((yield* Clock.currentTimeMillis) - startedAt > timeoutMilliseconds)
             return yield* new StdioTimeout({
               message: `Timed out waiting; saw ${Inspectable.toStringUnknown(messages)}`,

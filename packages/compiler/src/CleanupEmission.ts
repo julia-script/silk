@@ -1,3 +1,4 @@
+import * as ConcreteCleanup from './ConcreteCleanup.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Match from './Match.js'
@@ -8,7 +9,6 @@ import type { FunctionLowering } from './FunctionLowering.js'
 import type * as Hir from './Hir.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Instances from './Instances.js'
-import * as Layout from './Layout.js'
 import type { DelayedEffectState } from './Lower.js'
 import { bool, borrowKey, patternKey, spanKey } from './Lower.js'
 import type {} from './LowerExpression.js'
@@ -18,13 +18,6 @@ import * as MovePath from './MovePath.js'
 import * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as Type from './Type.js'
-import {
-  callableValueByIdentity,
-  effectValueByIdentity,
-  representedValueType,
-  storedCallableValueType,
-  storedEffectValueType,
-} from './ValueType.js'
 
 export interface ExitIndex {
   readonly returns: ReadonlyMap<string, Ownership.ExitPlan>
@@ -258,116 +251,13 @@ export const indexExits = (plan: Ownership.FunctionOwnership | undefined): ExitI
   return { returns, scopeEnds, armEnds, loopFallthroughs, transfers }
 }
 
-export const concreteCleanup = (
-  fn: FunctionLowering,
-  type: Type.Type,
-  seen = new Set<string>(),
-): CleanupPlan.CleanupPlan => {
-  const specialized = fn.semantic(type)
-  const resolveRepresented = (candidate: Type.Type): CleanupPlan.CleanupPlan | undefined => {
-    const concrete = fn.semantic(candidate)
-    if (!Type.isRepresented(concrete)) return undefined
-    const value =
-      storedCallableValueType(fn.layout, concrete) ??
-      storedEffectValueType(fn.layout, concrete) ??
-      representedValueType(fn.layout, fn.opaqueRealizations, concrete, new Map())
-    if (value?._tag === 'CallableValue') {
-      if (value.storage?._tag === 'StoredCallableField') {
-        return CleanupPlan.realizedCallableCleanup(fn.index, value.storage.realization)
-      }
-      return callableLocalCleanup(fn, value)
-    }
-    if (value?._tag === 'EffectValue') {
-      return effectLocalCleanup(fn, value, new Set())
-    }
-    if (value?._tag === 'EffectComposite') {
-      return Object.freeze({
-        _tag: 'EffectCompositeCleanup' as const,
-        type: value.type,
-        alternatives: Object.freeze(
-          value.alternatives.map((alternative) => effectLocalCleanup(fn, alternative, new Set())),
-        ),
-      })
-    }
-    return undefined
-  }
-  const realized = resolveRepresented(specialized)
-  if (realized !== undefined) return realized
-  return CleanupPlan.specializeCleanup(
-    CleanupPlan.cleanupPlan(fn.index, specialized, seen),
-    new Map(),
-    (nested) => resolveRepresented(nested) ?? CleanupPlan.cleanupPlan(fn.index, nested, seen),
-  )
-}
-
-export function effectLocalCleanup(
-  fn: FunctionLowering,
-  effectValue: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
-  seen: ReadonlySet<string>,
-): CleanupPlan.CleanupPlan {
-  const identity =
-    effectValue.storage?.realization.runnerIdentity ??
-    Instances.effectIdentity(effectValue.environment.instance, effectValue.site)
-  if (seen.has(identity)) return Object.freeze({ _tag: 'NoCleanup', type: effectValue.type })
-  const next = new Set(seen).add(identity)
-  let laneOffset = 0
-  const slots = effectValue.environment.fields.flatMap((field, ordinal) => {
-    const nested =
-      field.effectIdentity === undefined
-        ? undefined
-        : effectValueByIdentity(fn.layout, field.effectIdentity)
-    const callable =
-      field.callableIdentity === undefined || !Type.isCallable(field.type)
-        ? undefined
-        : callableValueByIdentity(fn.layout, field.callableIdentity, field.type)
-    // Offsets must mirror the runner ABI exactly, so the count comes from the same Layout
-    // helper that materializes the environment lanes for backends.
-    const laneCount = Layout.effectFieldLanes(fn.layout, field).length
-    const currentOffset = laneOffset
-    laneOffset += laneCount
-    const realizationOrdinal =
-      effectValue.storage?.realization.environment.at(ordinal)?.ordinal ?? ordinal
-    const storedOwned =
-      effectValue.storage?.realization.cleanup.unrunLanes.includes(realizationOrdinal) ?? false
-    if (effectValue.storage === undefined ? field.representation === 'Borrow' : !storedOwned)
-      return []
-    let fieldCleanup: CleanupPlan.CleanupPlan
-    if (callable === undefined) {
-      if (nested === undefined) {
-        fieldCleanup = concreteCleanup(fn, field.type)
-      } else {
-        fieldCleanup = effectLocalCleanup(fn, nested, next)
-      }
-    } else {
-      fieldCleanup = callableLocalCleanup(fn, callable)
-    }
-    return fieldCleanup._tag === 'NoCleanup' && effectValue.storage === undefined
-      ? []
-      : [
-          Object.freeze({
-            ordinal: realizationOrdinal,
-            laneOffset: currentOffset,
-            laneCount,
-            cleanup: fieldCleanup,
-          }),
-        ]
-  })
-  const releaseSlots = Ownership.inReleaseOrder(slots)
-  return releaseSlots.length === 0
-    ? Object.freeze({ _tag: 'NoCleanup', type: effectValue.type })
-    : Object.freeze({
-        _tag: 'EffectCleanup',
-        type: effectValue.type,
-        site: effectValue.site,
-        slots: Object.freeze(releaseSlots),
-      })
-}
-
 export const specializedCleanup = (
   fn: FunctionLowering,
   cleanup: CleanupPlan.CleanupPlan,
 ): CleanupPlan.CleanupPlan =>
-  CleanupPlan.specializeCleanup(cleanup, fn.substitution, (type) => concreteCleanup(fn, type))
+  CleanupPlan.specializeCleanup(cleanup, fn.substitution, (type) =>
+    ConcreteCleanup.forType(fn, type),
+  )
 
 export const cleanupForLocal = (
   fn: FunctionLowering,
@@ -376,21 +266,23 @@ export const cleanupForLocal = (
 ): CleanupPlan.CleanupPlan => {
   const specialized = specializedCleanup(fn, cleanup)
   if (localType._tag === 'EffectValue') {
-    return effectLocalCleanup(fn, localType, new Set())
+    return ConcreteCleanup.forEffect(fn, localType, new Set())
   }
   if (localType._tag === 'EffectComposite') {
     return Object.freeze({
       _tag: 'EffectCompositeCleanup',
       type: localType.type,
       alternatives: Object.freeze(
-        localType.alternatives.map((alternative) => effectLocalCleanup(fn, alternative, new Set())),
+        localType.alternatives.map((alternative) =>
+          ConcreteCleanup.forEffect(fn, alternative, new Set()),
+        ),
       ),
     })
   }
   if (localType._tag !== 'CallableValue') {
     return specialized
   }
-  if (localType.storage === undefined) return callableLocalCleanup(fn, localType)
+  if (localType.storage === undefined) return ConcreteCleanup.forCallable(fn, localType)
   if (specialized._tag !== 'CallableCleanup') return specialized
   const fields = localType.environment?.fields ?? []
   return Object.freeze({
@@ -408,7 +300,12 @@ export const cleanupForLocal = (
         const field = fields.find((candidate) => candidate.ordinal === slot.ordinal)
         return field === undefined
           ? []
-          : [Object.freeze({ ordinal: slot.ordinal, cleanup: concreteCleanup(fn, field.type) })]
+          : [
+              Object.freeze({
+                ordinal: slot.ordinal,
+                cleanup: ConcreteCleanup.forType(fn, field.type),
+              }),
+            ]
       }),
     ),
   })
@@ -568,30 +465,6 @@ export const propagationLoanEnds = (
           ]
     }),
   )
-
-export const callableLocalCleanup = (
-  fn: FunctionLowering,
-  localType: Extract<Mir.Type, { readonly _tag: 'CallableValue' }>,
-): CleanupPlan.CleanupPlan => {
-  const environment = localType.environment
-  if (environment === undefined || localType.site === undefined)
-    return Object.freeze({ _tag: 'NoCleanup', type: localType.type })
-  return Object.freeze({
-    _tag: 'CallableCleanup',
-    type: localType.type,
-    environment: Object.freeze({
-      _tag: 'CallableEnvironmentIdentity',
-      identity: Instances.callableEnvironmentIdentity(environment.callable),
-    }),
-    slots: Object.freeze(
-      Ownership.inReleaseOrder(environment.fields).flatMap((field) =>
-        field.access === 'Take' && !Mir.isCopy(fn.layout, field.type)
-          ? [Object.freeze({ ordinal: field.ordinal, cleanup: concreteCleanup(fn, field.type) })]
-          : [],
-      ),
-    ),
-  })
-}
 
 export const emitReleases = (fn: FunctionLowering, exit: Ownership.ExitPlan | undefined): void => {
   const [, endings] = fn.capture(() => {
@@ -946,6 +819,15 @@ export const withoutLoanEndings = (
     operations.flatMap((operation): ReadonlyArray<Mir.Operation> => {
       if (operation._tag === 'EndLoan' && loans.has(borrowKey(operation.borrow))) return []
       if (operation._tag === 'Drop' && owners.has(operation.local.ordinal)) return []
+      if (operation._tag === 'DiagnosticScope')
+        return [
+          Object.freeze({
+            ...operation,
+            body: Mir.mapExecutionOperations(operation.body, (operations) =>
+              withoutLoanEndings(operations, loans, owners),
+            ),
+          }),
+        ]
       if (operation._tag === 'Conditional')
         return [
           Object.freeze({
@@ -1047,6 +929,13 @@ export const withDelayedFailureLoanEndings = (
 ): ReadonlyArray<Mir.Operation> =>
   Object.freeze(
     operations.map((operation): Mir.Operation => {
+      if (operation._tag === 'DiagnosticScope')
+        return Object.freeze({
+          ...operation,
+          body: Mir.mapExecutionOperations(operation.body, (operations) =>
+            withDelayedFailureLoanEndings(fn, operations, loans),
+          ),
+        })
       if (operation._tag === 'Conditional')
         return Object.freeze({
           ...operation,

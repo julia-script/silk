@@ -29,7 +29,7 @@ OsStandardInput borrows process descriptor 0. Construction initializes local sta
 
 ## Compiler boundary
 
-No standard-stream intrinsic, HostWrite HIR/MIR operation, reserved stream import or generated stream adapter remains. Native objects name ordinary selected read/write/error symbols. The separate compiler-generated hosted report loop remains under the reporting migration and does not retain a standard-stream helper. Wasm receives no new host-stream provider.
+No standard-stream intrinsic, HostWrite HIR/MIR operation, reserved stream import or generated stream adapter remains. Native objects name ordinary selected read/write/error symbols. Hosted reporting uses the ordinary NativeReport source writer over NativeDescriptor; it retains no generated report loop or standard-stream helper. Wasm receives no new host-stream provider.
 
 ## Required evidence
 

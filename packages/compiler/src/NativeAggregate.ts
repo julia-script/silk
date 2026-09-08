@@ -1,3 +1,4 @@
+import * as NativeExecutionStorage from './NativeExecutionStorage.js'
 import * as Alignment from '@silklang/llvm/Alignment'
 import * as LlvmBlock from '@silklang/llvm/Block'
 import type * as Builder from '@silklang/llvm/Builder'
@@ -19,6 +20,7 @@ import * as Mir from './Mir.js'
 import * as MovePath from './MovePath.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
+import * as NativeResult from './NativeResult.js'
 import * as NativeExecutionOperation from './NativeExecutionOperation.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
@@ -156,7 +158,7 @@ export interface Context {
   readonly pointer: LlvmType.Type
   readonly usizeType?: LlvmType.Type
   readonly free?: FunctionActor.Function
-  readonly coroutineFramePop?: FunctionActor.Function
+  readonly executionStorage?: NativeExecutionStorage.NativeExecutionStorage
   readonly resumeThunks: ReadonlyMap<
     string,
     {
@@ -170,6 +172,8 @@ export interface Context {
   readonly call: NativeCall.Context
   readonly arith: NativeArith.LaneContext
   readonly storage: NativeStorage.Context
+  /** A cancelled frame's flags use its owner's local ordinals, independent of the caller. */
+  readonly initializationValues?: ReadonlyMap<number, Value.Input>
   /** The module's out-of-line Execution release; see `NativeExecutionOperation.emitReleaseHelper`. */
   readonly executionRelease?: FunctionActor.Function
 }
@@ -235,10 +239,16 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
       .sort((left, right) => right.path.length - left.path.length)
       .at(0)
     if (flag === undefined) throw new RangeError('Conditional cleanup lost its initialization flag')
+    const initialized =
+      context.initializationValues === undefined
+        ? NativeStorage.readScalar(storage, flag.local)
+        : context.initializationValues.get(flag.local.ordinal)
+    if (initialized === undefined)
+      throw new RangeError('Conditional frame cleanup lost its retained initialization flag')
     const condition = yield* FunctionBody.integerCompare(
       body,
       'ne',
-      NativeStorage.readScalar(storage, flag.local),
+      initialized,
       yield* Constant.integerSigned(builder, i32, 0n),
       `${tag}_is_initialized`,
     )
@@ -271,11 +281,18 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
         throw new RangeError('LLVM Execution cleanup lost its release helper')
       // A synchronous call, not a bare `callDirect`: the helper may run user drop hooks, so the
       // caller's address-taken roots reload exactly as they did for the former inline expansion.
-      yield* NativeCall.callSynchronous(
-        call.synchronous,
-        { handle: context.executionRelease, resultLaneCount: 0, suspendable: false },
-        [base],
-        `${tag}_release`,
+      NativeResult.sourceValues(
+        yield* NativeCall.callSynchronous(
+          call.synchronous,
+          {
+            handle: context.executionRelease,
+            resultLaneCount: 0,
+            suspendable: false,
+            ...(Mir.hasDiagnosticObservation(program) ? { diagnosticParameter: 1 } : {}),
+          },
+          [base],
+          `${tag}_release`,
+        ),
       )
       return
     }
@@ -419,6 +436,7 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
       }
       yield* FunctionBody.branch(body, following)
       yield* LlvmBlock.setInsertionPoint(body, following)
+      yield* NativeStorage.reloadRoots(storage, `${tag}_effect_composite_following`)
       return
     }
     case 'LocalSharedCoreCleanup': {
@@ -501,9 +519,9 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
       )
       if (helper === undefined)
         throw new RangeError('LLVM local-shared cleanup lost its payload helper')
-      yield* FunctionBody.callDirect(
-        body,
-        helper.handle,
+      yield* NativeCall.callValues(
+        call,
+        helper,
         yield* loadLanes(plan.element, block.valueOffset, `${tag}_value`),
         `${tag}_value_cleanup`,
       )
@@ -515,6 +533,7 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
       )
       yield* FunctionBody.branch(body, following)
       yield* LlvmBlock.setInsertionPoint(body, following)
+      yield* NativeStorage.reloadRoots(storage, `${tag}_following`)
       return
     }
     case 'AllocationCleanup':
@@ -560,7 +579,7 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
           ),
         )
       }
-      yield* NativeCall.callValues(call, target, [base], `${tag}_hook`)
+      NativeResult.sourceValues(yield* NativeCall.callValues(call, target, [base], `${tag}_hook`))
       const reloaded: Array<Value.Input> = []
       for (const [ordinal, lane] of lanes.entries()) {
         const offset = LayoutVerify.laneOffset(program.layout, plan.type, lane.path)

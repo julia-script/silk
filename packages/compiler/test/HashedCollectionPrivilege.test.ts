@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -21,7 +22,8 @@ import * as MirVerification from '../src/MirVerification.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const analyzed = (name: string, source: string) => Analysis.ofSourceRealized(name, ascii(source))
+const analyzed = (name: string, source: string) =>
+  AnalysisFixture.retainingMain(name, ascii(source))
 
 /** A program that inserts, grows, looks up and removes, so the whole map is lowered, not a corner. */
 const usingAMap = `import silk.allocator { OutOfMemoryError }

@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -55,7 +56,13 @@ static if choose() {
   pub fn main() -> i32 { return nonexistent() }
 }`),
         ),
-        target: 'aarch64-apple-darwin',
+        configuration: {
+          profile: {
+            target: 'aarch64-apple-darwin',
+            artifact: 'object',
+            runtime: { kind: 'none' },
+          },
+        },
       }).pipe(Effect.provide(resolver))
       assert.deepEqual(snapshot.diagnostics, [])
       assert.deepEqual(calls, ['policy', 'active'])
@@ -194,7 +201,10 @@ it.effect('uses completed package configuration and rejects default availability
         ascii(`pub param enabled: bool = true
 static if enabled { pub const selected: i32 = 1 } else { import missing }`),
       ),
-      configuration: { package: 'example@1', profile: { target: 'aarch64-apple-darwin' } },
+      configuration: {
+        package: 'example@1',
+        profile: { target: 'aarch64-apple-darwin', artifact: 'object', runtime: { kind: 'none' } },
+      },
     }).pipe(Effect.provide(SourceResolver.empty))
     assert.deepEqual(valid.diagnostics, [])
     assert.strictEqual(Analysis.memberByName(valid, 'configured', 'selected')._tag, 'Resolved')
@@ -205,7 +215,10 @@ static if enabled { pub const selected: i32 = 1 } else { import missing }`),
         ascii(`pub param enabled: bool = choice
 static if enabled { const choice: bool = true }`),
       ),
-      configuration: { package: 'example@1', profile: { target: 'aarch64-apple-darwin' } },
+      configuration: {
+        package: 'example@1',
+        profile: { target: 'aarch64-apple-darwin', artifact: 'object', runtime: { kind: 'none' } },
+      },
     }).pipe(Effect.provide(SourceResolver.empty))
     const diagnostic = cyclic.diagnostics.find(
       (diagnostic) => diagnostic.code === Diagnostic.invalidConfigurationCode,
@@ -221,7 +234,10 @@ it.effect('rejects package schemas first discovered through selected imports', (
   Effect.gen(function* () {
     const snapshot = yield* Analysis.make({
       root: SourceFile.make('root', ascii('static if true { import settings }')),
-      configuration: { package: 'example@1', profile: { target: 'aarch64-apple-darwin' } },
+      configuration: {
+        package: 'example@1',
+        profile: { target: 'aarch64-apple-darwin', artifact: 'object', runtime: { kind: 'none' } },
+      },
     }).pipe(
       Effect.provide(
         SourceResolver.memory(new Map([['settings', ascii('pub param enabled: bool = true')]])),
@@ -238,7 +254,7 @@ it.effect('rejects package schemas first discovered through selected imports', (
 it.effect('rejects non-static and non-boolean module conditions without admitting either arm', () =>
   Effect.gen(function* () {
     for (const condition of ['runtime()', '42', 'missing']) {
-      const snapshot = yield* Analysis.ofSource(
+      const snapshot = yield* AnalysisFixture.declarations(
         'invalid_condition',
         ascii(`fn runtime() -> bool { return true }
 static if ${condition} { pub const selected: i32 = 1 } else { pub const other: i32 = 2 }`),
@@ -281,7 +297,7 @@ const fixture = (
 
 it.effect('excludes inactive foreign exports and invalid bodies from realization', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'selected_inventory',
       ascii(`
 static if true {

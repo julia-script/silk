@@ -4984,60 +4984,6 @@
       "identity": "StringEqualsExact"
     },
     {
-      "operation": "Intrinsic.osProcessExecute",
-      "signature": "unsafe fn Intrinsic.osProcessExecute(program: &[u8], arguments: &[u8], environment: &[u8], workingDirectory: &[u8], status: &mut i32, code: &mut i32, outputLength: &mut usize, errorLength: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_child_process.execute",
-      "identity": "OsProcessExecute",
-      "invariant": "arguments and environment are NUL-terminated entry blocks and an empty workingDirectory inherits the caller directory; the child never interprets a shell and reads closed standard input; success retains exactly one capture until the next execute and reports its exact lengths with status zero for exit and one for signal"
-    },
-    {
-      "operation": "Intrinsic.osProcessCapture",
-      "signature": "unsafe fn Intrinsic.osProcessCapture(stream: i32, offset: usize, output: &mut [u8], count: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_child_process.capture",
-      "identity": "OsProcessCapture",
-      "invariant": "stream selects zero for standard output or one for standard error, offset is within the retained capture of the immediately preceding execute, and output is initialized writable storage"
-    },
-    {
-      "operation": "Intrinsic.osHostArgumentCount",
-      "signature": "unsafe fn Intrinsic.osHostArgumentCount(count: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_host_input.argumentCount",
-      "identity": "OsHostArgumentCount",
-      "invariant": "count output is initialized and reports the received argument count on success"
-    },
-    {
-      "operation": "Intrinsic.osHostArgument",
-      "signature": "unsafe fn Intrinsic.osHostArgument(index: usize, output: &mut [u8], count: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_host_input.argument",
-      "identity": "OsHostArgument",
-      "invariant": "output is initialized writable storage; success reports the complete argument byte length and copies the prefix that fits, and absence reports the not-found reason"
-    },
-    {
-      "operation": "Intrinsic.osHostVariable",
-      "signature": "unsafe fn Intrinsic.osHostVariable(name: &[u8], output: &mut [u8], count: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_host_input.variable",
-      "identity": "OsHostVariable",
-      "invariant": "output is initialized writable storage; success reports the complete value byte length and copies the prefix that fits, and an unset name reports the not-found reason"
-    },
-    {
-      "operation": "Intrinsic.osHostWorkingDirectory",
-      "signature": "unsafe fn Intrinsic.osHostWorkingDirectory(output: &mut [u8], count: &mut usize, reason: &mut i32, nativeCode: &mut u32) -> Effect<bool>",
-      "unsafe": true,
-      "admission": "Platform",
-      "consumer": "silk/os_host_input.workingDirectory",
-      "identity": "OsHostWorkingDirectory",
-      "invariant": "output is initialized writable storage; success reports the complete working-directory byte length and copies the prefix that fits"
-    },
-    {
       "operation": "Intrinsic.layoutOf",
       "signature": "fn Intrinsic.layoutOf<T>() -> Layout",
       "unsafe": false,
@@ -5225,6 +5171,15 @@
       "invariant": "caller proves every strengthened pointer qualifier, including alignment, nullness, extent and write access"
     },
     {
+      "operation": "Intrinsic.pointerReinterpret",
+      "signature": "unsafe fn Intrinsic.pointerReinterpret<From, To>(pointer: From) -> To",
+      "unsafe": true,
+      "admission": "Ownership",
+      "consumer": "silk/pointer.reinterpret",
+      "identity": "PointerReinterpret",
+      "invariant": "caller proves destination alignment and storage validity before access, and initialization before reading; no ownership or loan is created"
+    },
+    {
       "operation": "Intrinsic.slotAddress",
       "signature": "fn Intrinsic.slotAddress<T>(slot: Slot<T>) -> *mut T",
       "unsafe": false,
@@ -5379,6 +5334,30 @@
       "invariant": "caller proves the selected slot is in bounds and has the initializedness state required by the operation"
     },
     {
+      "operation": "Intrinsic.finalizeEffect",
+      "signature": "fn Intrinsic.finalizeEffect<A, E, ?R, ?S>(protected: once Effect<A ! E ? R>, finalizer: once Effect<() ? S>) -> once Effect<A ! E ? R | S>",
+      "unsafe": false,
+      "admission": "Effect",
+      "consumer": "silk/effect.ensuring",
+      "identity": "EffectFinalize"
+    },
+    {
+      "operation": "Intrinsic.observeDiagnostics",
+      "signature": "fn Intrinsic.observeDiagnostics<S, A, ?R, F>(state: S, observer: F, protected: once Effect<A ? R>) -> once Effect<A ? R>",
+      "unsafe": false,
+      "admission": "Effect",
+      "consumer": "language:lexical-diagnostic-observation",
+      "identity": "EffectObserveDiagnostics"
+    },
+    {
+      "operation": "Intrinsic.observeUnhandled",
+      "signature": "fn Intrinsic.observeUnhandled() -> usize",
+      "unsafe": false,
+      "admission": "Effect",
+      "consumer": "language:terminal-diagnostic-observation",
+      "identity": "EffectObserveUnhandled"
+    },
+    {
       "operation": "Intrinsic.suspendEffect",
       "signature": "fn Intrinsic.suspendEffect<A, E, ?R>(deferred: once Effect<A ! E ? R>) -> Effect<A ! E ? R>",
       "unsafe": false,
@@ -5412,7 +5391,7 @@
     },
     {
       "operation": "Intrinsic.catchFailure",
-      "signature": "fn Intrinsic.catchFailure<S, A, B, E, F, ?R, ?Q>(protected: once Effect<A ! E ? R>, handler: once fn(S) -> Effect<B ! F ? Q>) -> Effect<A | B ! Without<E, S> | F ? R | Q>",
+      "signature": "fn Intrinsic.catchFailure<S, A, B, E, F, ?R, ?Q>(protected: once Effect<A ! E ? R>, handler: once fn(S) -> once Effect<B ! F ? Q>) -> Effect<A | B ! Without<E, S> | F ? R | Q>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effect.catchFailure",

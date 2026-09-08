@@ -1762,6 +1762,9 @@ resumes and completes, as defined by the
 An explicit finalization Effect such as `ensuring` is an ordinary composed operation. It runs on the
 structured success and typed-failure paths promised by its contract, not merely because a hidden
 runtime finalizer exists.
+Its held outcome remains owned while the finalizer is suspended. Destroying that parked composition
+drops the held payload, diagnostic handles and remaining captures exactly once; destruction does
+not drive the suspended finalizer to completion.
 
 **Diagnostics:** Running a consumed Effect reports `OWN0001`. Dropping a captured root while the
 Effect still retains a loan reports `OWN0011`. A retry or reusable composition that would consume a

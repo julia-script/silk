@@ -1,3 +1,4 @@
+import * as TestToolchain from './support/TestToolchain.js'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -142,7 +143,7 @@ it.effect('executes an exact native i64 call and rejects it for the WebAssembly 
   Effect.gen(function* () {
     const native = yield* Driver.compile({
       compilation: { root: SourceFile.make('usize/program', ascii(nativeExact)) },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
+      toolchain: yield* TestToolchain.configured,
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'native-exact'),

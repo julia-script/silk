@@ -7,7 +7,6 @@ import type * as NativeToolchain from '@silklang/compiler/NativeToolchain'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import type * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as ToolchainIntegrity from '@silklang/compiler/ToolchainIntegrity'
-import * as Type from '@silklang/compiler/Type'
 import type * as Path from 'effect/Path'
 
 /**
@@ -181,36 +180,6 @@ export const backendError = (self: Backend.BackendError, sources: SourceCatalog)
   }
 }
 
-/** Explains why the selected invocation declaration is unavailable, in terms a caller can act on. */
-const entryReason = (entry: Driver.NoEntry): string => {
-  switch (entry.reason) {
-    case 'MissingEntry':
-      return 'the selected invocation declaration is missing'
-    case 'AmbiguousEntry':
-      return 'the invocation name resolves to more than one declaration'
-    case 'StaticEntry':
-      return 'the selected invocation must be a runtime function'
-    case 'GenericEntry':
-      return 'the selected invocation must not declare type parameters'
-    case 'ParameterizedEntry':
-      return 'the selected invocation must take no parameters'
-    case 'PrivateEntry':
-      return 'the selected invocation must be public'
-    case 'UntypedEntry':
-      return 'the selected invocation must declare a resolved return type'
-    case 'InvalidOrdinaryEntryResult':
-      return 'the selected ordinary invocation must return `()` or `i32`'
-    case 'InvalidEffectEntryResult':
-      return 'the selected effect invocation must succeed with `()`'
-    case 'EffectEntryRequirements':
-      return `the selected effect invocation has unresolved dependencies: ${entry.requirements?.map((requirement) => Type.encodeRequirement(requirement)).join(', ') ?? 'unknown'}`
-    case 'UnavailableEntryBody':
-      return 'source diagnostics prevented lowering the body of the selected invocation'
-    case 'InvalidSource':
-      return 'source diagnostics prevented entry discovery'
-  }
-}
-
 /** The human-readable summary of one outcome, excluding the phase table. */
 export const outcome = (
   self: Driver.Outcome,
@@ -229,13 +198,6 @@ export const outcome = (
               `C header: ${self.libraryInterface.cHeader}`,
               `ABI manifest: ${self.libraryInterface.abiManifest}`,
             ]),
-      ].join('\n')
-    }
-    case 'NoEntry': {
-      const rendered = diagnostics(self.diagnostics, sources)
-      return [
-        ...(rendered.length > 0 ? [rendered] : []),
-        `No entry point: ${entryReason(self)}`,
       ].join('\n')
     }
     case 'TargetFailed': {

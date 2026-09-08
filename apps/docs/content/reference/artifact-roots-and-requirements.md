@@ -34,10 +34,11 @@ origin. Unsupported combinations are rejected before tool execution.
 additional analysis root. `Intrinsic.application` is the sealed generic import binding for the
 application; it resolves to the same canonical module identity, not a copy or a privileged library.
 Ordinary visibility and selective/public import rules apply. Unselected runtime sources are not
-loaded. A runtime descriptor may supply a concrete invocation root for the existing execution
-adapter, independently of loader entry; source runtimes normally define their own foreign exports.
-The build's current hosted default supplies the application module and `main` invocation explicitly.
-The hosted adapter's source migration belongs to JUL-130.
+loaded. A runtime descriptor names a source module; ordinary calls in that module select the
+application function and adapt its result. Runtime descriptors do not name an invocation function.
+The distribution selects `silk/native_start` for hosted executables and `silk/wasm_start` for
+standalone WebAssembly executables. Their source C exports define `main`. Explicit libraries,
+objects, and runtime-none profiles acquire no default startup or storage component.
 
 **Example:**
 
@@ -196,9 +197,9 @@ composition = { runtimes = [{ name = "custom", module = "runtime" }], defaults =
 ```
 
 Profile `runtime = { kind = "none" }` overrides default candidates by explicitly selecting no
-runtime. A named runtime descriptor's optional `invoke` names a public monomorphic zero-argument
-ordinary function returning `i32` or unit, or an Effect function returning unit. Omitting `invoke`
-retains no implicit application function. Foreign exports in the selected source remain roots.
+runtime. Foreign exports in the selected source and explicit retention declarations are roots.
+A custom runtime may call any visible application function with arguments and result handling
+expressed in ordinary Silk. The compiler imposes no special application function shape.
 
 Native requirements are resolved by explicit build bindings, preserving their listed input order:
 

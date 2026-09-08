@@ -6,7 +6,6 @@ export type {
   BackendFailed,
   Compiled,
   DriverPhaseReport,
-  NoEntry,
   Outcome,
   Rejected,
   SourceResolutionFailed,

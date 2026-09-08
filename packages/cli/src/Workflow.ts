@@ -107,7 +107,6 @@ const loadedSources = (
 
 const outcomeStatus = (outcome: Exclude<Driver.Outcome, { readonly _tag: 'Compiled' }>): 1 | 2 => {
   switch (outcome._tag) {
-    case 'NoEntry':
     case 'Rejected':
     case 'BackendFailed':
       return 1

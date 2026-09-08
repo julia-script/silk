@@ -26,7 +26,8 @@ the root. Compiler-internal transition and realization modules are not part of e
 surface.
 
 ```ts
-import { Analysis } from '@silklang/compiler'
+import * as Analysis from '@silklang/compiler/Analysis'
+import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as Effect from 'effect/Effect'
 
 const program = Effect.gen(function* () {
@@ -35,7 +36,7 @@ const program = Effect.gen(function* () {
     new TextEncoder().encode(`pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(42) }`),
   )
-  const snapshot = Analysis.realize(frontend)
+  const snapshot = yield* Analysis.realize(frontend).pipe(Effect.provide(SourceResolver.empty))
 
   console.log(Analysis.diagnostics(snapshot)) // []
   const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })

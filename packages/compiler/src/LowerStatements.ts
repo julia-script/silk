@@ -1,10 +1,10 @@
+import * as ConcreteCleanup from './ConcreteCleanup.js'
 import type { ExitIndex } from './CleanupEmission.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import {
   authored,
   lowerBorrowedWritePlace,
   cleanupForLocal,
-  concreteCleanup,
   delayedLoopLoans,
   effectContract,
   emitReleases,
@@ -747,7 +747,7 @@ const lowerStatement = (
           _tag: 'Drop',
           local: root,
           selectors,
-          cleanup: cleanupForLocal(fn, concreteCleanup(fn, Mir.semanticType(type)), type),
+          cleanup: cleanupForLocal(fn, ConcreteCleanup.forType(fn, Mir.semanticType(type)), type),
           ...(initialization === undefined ? {} : { initialization }),
           provenance: authored(statement.span),
         })
@@ -874,7 +874,7 @@ const lowerStatement = (
             cleanup: cleanupForLocal(
               fn,
               bindingFact === undefined
-                ? concreteCleanup(fn, Mir.semanticType(localType))
+                ? ConcreteCleanup.forType(fn, Mir.semanticType(localType))
                 : bindingFact.cleanup,
               localType,
             ),

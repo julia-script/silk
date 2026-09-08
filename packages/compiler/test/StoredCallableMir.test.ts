@@ -1,10 +1,11 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
 import * as Instances from '../src/Instances.js'
 import * as LayoutEncode from '../src/LayoutEncode.js'
-import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Target from '../src/Target.js'
@@ -15,9 +16,13 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const lowerAnalyzed = Effect.fnUntraced(function* (frontend: Analysis.SingleRootFrontendSnapshot) {
-  const snapshot = yield* Analysis.realize(frontend, Target.wasm32UnknownUnknown.id, {
-    normalizeMir: false,
-  })
+  const snapshot = yield* Analysis.realize(
+    frontend,
+    AnalysisFixture.configuration(frontend.closure.rootModule, Target.wasm32UnknownUnknown.id),
+    {
+      normalizeMir: false,
+    },
+  ).pipe(Effect.provide(SourceResolver.empty))
   assert.deepEqual(Analysis.diagnostics(snapshot), [])
   const layout =
     snapshot.layout._tag === 'Available' ? snapshot.layout.value : unreachable('expected layout')
@@ -25,7 +30,9 @@ const lowerAnalyzed = Effect.fnUntraced(function* (frontend: Analysis.SingleRoot
 })
 
 const lowerStored = Effect.fnUntraced(function* (name: string, source: string) {
-  return yield* lowerAnalyzed(yield* Analysis.ofSource(name, ascii(source)))
+  return yield* lowerAnalyzed(
+    yield* AnalysisFixture.retainingMain(name, ascii(source), Target.wasm32UnknownUnknown.id),
+  )
 })
 
 it.effect(
@@ -138,9 +145,7 @@ pub fn main() -> i32 {
     const facts = (snapshot: typeof first) => ({
       layout: LayoutEncode.encode(snapshot.layout),
       instances: snapshot.module.functions.map((fn) => Instances.keyText(fn.instance)),
-      symbols: snapshot.module.functions.map((fn) =>
-        Backend.symbolFor(fn, Mir.machineEntry(snapshot.module)),
-      ),
+      symbols: snapshot.module.functions.map((fn) => Backend.symbolFor(fn)),
       mir: MirEncoding.encode(snapshot.module),
     })
     const encoded = facts(first)

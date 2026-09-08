@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -32,7 +33,7 @@ pub fn main() -> i32 {
 it.effect('lowers checked integer outcomes through native and Wasm LLVM targets', () =>
   Effect.gen(function* () {
     for (const target of ['aarch64-apple-darwin', 'wasm32-unknown-unknown'] as const) {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         `integer/checked-${target}`,
         new TextEncoder().encode(checkedIntegerSource),
         target,
@@ -74,17 +75,17 @@ it.effect(
   'rejects duration range and type mismatches before HIR without duplicate recovery errors',
   () =>
     Effect.gen(function* () {
-      const overflow = yield* Analysis.ofSourceRealized(
+      const overflow = yield* AnalysisFixture.retainingMain(
         'integer/duration-overflow',
         new TextEncoder().encode('pub fn main() -> u64 { return 18446744073709551616ns }'),
       )
       assert.deepEqual(
         Analysis.diagnostics(overflow).map((diagnostic) => diagnostic.code),
-        ['SEM0204', 'SEM0170'],
+        ['SEM0170'],
       )
       assert.notInclude(Hir.encode(Analysis.rootAnalysis(overflow).hir), '18446744073709551616')
 
-      const constantOverflow = yield* Analysis.ofSourceRealized(
+      const constantOverflow = yield* AnalysisFixture.retainingMain(
         'integer/duration-constant-overflow',
         new TextEncoder().encode(
           'pub const timeout: u64 = 18446744073709551616ns pub fn main() -> i32 { return 42 }',
@@ -95,7 +96,7 @@ it.effect(
         ['SEM0170'],
       )
 
-      const mismatch = yield* Analysis.ofSourceRealized(
+      const mismatch = yield* AnalysisFixture.retainingMain(
         'integer/duration-mismatch',
         new TextEncoder().encode(
           'fn accept(value: i32) -> i32 { return value } pub fn main() -> i32 { return accept(1s) }',
@@ -114,20 +115,20 @@ it.effect(
         ),
       )
 
-      const malformed = yield* Analysis.ofSourceRealized(
+      const malformed = yield* AnalysisFixture.retainingMain(
         'integer/duration-malformed',
         new TextEncoder().encode('pub fn main() -> u64 { return 1h60m }'),
       )
       assert.deepEqual(
         Analysis.diagnostics(malformed).map((diagnostic) => diagnostic.code),
-        ['SEM0204', 'LEX0012'],
+        ['LEX0012'],
       )
     }),
 )
 
 it.effect('rejects contextual overflow and already-typed integer mismatches before MIR', () =>
   Effect.gen(function* () {
-    const overflow = yield* Analysis.ofSourceRealized(
+    const overflow = yield* AnalysisFixture.retainingMain(
       'integer/contextual-overflow',
       new TextEncoder().encode(
         'fn accept(value: u8) -> u8 { return value } pub fn main() -> i32 { let value = accept(256) return 42 }',
@@ -141,7 +142,7 @@ it.effect('rejects contextual overflow and already-typed integer mismatches befo
     )
     assert.notInclude(Hir.encode(Analysis.rootAnalysis(overflow).hir), 'literal 256')
 
-    const mismatch = yield* Analysis.ofSourceRealized(
+    const mismatch = yield* AnalysisFixture.retainingMain(
       'integer/contextual-mismatch',
       new TextEncoder().encode(`import silk.i32 as i32
 fn accept(value: u8) -> u8 { return value }
@@ -160,7 +161,7 @@ pub fn main() -> i32 {
 
 it.effect('uses call and pipeline parameters as exact integer literal contexts', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'integer/contextual-calls',
       new TextEncoder().encode(contextualCallSource),
     )
@@ -183,7 +184,7 @@ it.effect('uses call and pipeline parameters as exact integer literal contexts',
 it.effect('lets a declared scalar operand drive literal-first infix arithmetic', () =>
   Effect.gen(function* () {
     const id = 'integer/literal-first-infix'
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       id,
       new TextEncoder().encode(`import silk.u16 as u16
 fn mixed(value: u16) -> i32 {

@@ -1,0 +1,93 @@
+//! Owned anonymous Linux mappings with runtime page-size and alignment checks.
+//!
+//! # When to use
+//!
+//! Use `Mapping.allocate` in a raw Linux composition after startup validates AT_PAGESZ.
+//! Each successful value owns its entire mapping and releases it on structured drop.
+//!
+//! # Gotchas
+//!
+//! Raw pointers do not keep their mapping alive. Fatal traps do not guarantee release.
+
+static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText("libc") == "none" && (Intrinsic.targetArchitecture() == "x86_64" || Intrinsic.targetArchitecture() == "aarch64") {
+  import silk.raw_linux as RawLinux
+  import silk.result {Result}
+  import silk.usize as usize
+  /// One affine, zero-initialized anonymous mapping and its aligned usable range.
+  pub struct Mapping {
+    base: usize
+    reserved: usize
+    address: usize
+    requested: usize
+  }
+  impl Drop for Mapping {
+    fn drop(self: &mut Mapping) -> () {
+      let reserved = Intrinsic.replace(self.reserved, 0)
+      if reserved != 0 {
+        let ignored = unsafe RawLinux.syscall2(RawLinux.MUNMAP, self.base, reserved)
+      }
+    }
+  }
+  impl Mapping {
+    /// Allocates a zero-initialized byte range with the requested alignment.
+    ///
+    /// # Details
+    ///
+    /// The caller supplies the process page size from validated AT_PAGESZ. Size must be positive;
+    /// page size and alignment must be powers of two. Invalid values and arithmetic overflow return
+    /// error 22. Mapping failure returns the kernel error. Success owns one complete mapping.
+    pub fn allocate(length: usize, alignment: usize, pageSize: usize) -> Result<Mapping, usize> {
+      if length == 0 || alignment == 0 || pageSize == 0 {
+        return Result.failResult<Mapping, usize>(22)
+      }
+      if (alignment & (alignment - 1)) != 0 || (pageSize & (pageSize - 1)) != 0 {
+        return Result.failResult<Mapping, usize>(22)
+      }
+      let padding = alignment - 1
+      if length > usize.MAX - padding {
+        return Result.failResult<Mapping, usize>(22)
+      }
+      let needed = length + padding
+      if needed > usize.MAX - (pageSize - 1) {
+        return Result.failResult<Mapping, usize>(22)
+      }
+      let reserved = ((needed + (pageSize - 1)) / pageSize) * pageSize
+      let base = unsafe RawLinux.syscall6(RawLinux.MMAP, 0, reserved, 3, 34, usize.MAX, 0)
+      let error = RawLinux.error(base)
+      if error != 0 {
+        return Result.failResult<Mapping, usize>(error)
+      }
+      let owner = Mapping {base: base, reserved: reserved, address: base, requested: length}
+      if base > usize.MAX - padding {
+        return Result.failResult<Mapping, usize>(22)
+      }
+      let address = ((base + padding) / alignment) * alignment
+      let mut mapping = move owner
+      mapping.address = address
+      return Result.succeed<Mapping, usize>(move mapping)
+    }
+    /// Returns the requested usable byte count, excluding alignment padding.
+    pub fn length(self: &Mapping) -> usize {
+      return self.requested
+    }
+    /// Returns the aligned address of the mapping's usable range.
+    ///
+    /// # Gotchas
+    ///
+    /// The pointer grants no ownership. Keep the mapping alive and limit accesses to `length` bytes.
+    /// The initial bytes are zero; subsequent reads require the caller to preserve initialization.
+    pub unsafe fn pointer(self: &mut Mapping) -> ?[*]mut u8 {
+      return unsafe RawLinux.pointer(self.address)
+    }
+    /// Releases the complete mapping and consumes its owner.
+    ///
+    /// # Details
+    ///
+    /// Returns zero on success or the positive kernel error. Drop makes no second release attempt.
+    pub fn release(value: Mapping) -> usize {
+      let mut self = move value
+      let reserved = Intrinsic.replace(self.reserved, 0)
+      return RawLinux.error(unsafe RawLinux.syscall2(RawLinux.MUNMAP, self.base, reserved))
+    }
+  }
+}

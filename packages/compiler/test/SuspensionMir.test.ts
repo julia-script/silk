@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -5,6 +6,7 @@ import type * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SuspensionMir from '../src/SuspensionMir.js'
+import { ownedAllocatorSuspensionFailure } from './support/ownedAllocatorSuspension.js'
 
 const encoder = new TextEncoder()
 
@@ -18,7 +20,11 @@ effect fn program() -> i32 {
 pub fn main() -> i32 { return run program() }`
 
 const snapshot = (input = source) =>
-  Analysis.ofSourceRealized('suspension-mir/main', encoder.encode(input), 'wasm32-unknown-unknown')
+  AnalysisFixture.retainingMain(
+    'suspension-mir/main',
+    encoder.encode(input),
+    'wasm32-unknown-unknown',
+  )
 
 const suspensionRegions = (program: Mir.Module): ReadonlyArray<Mir.SuspensionRegion> =>
   program.functions.flatMap((fn) => fn.suspension?.regions ?? [])
@@ -66,6 +72,25 @@ const replaceSuspensionRegion = (
 
 const hasRule = (program: Mir.Module, rule: Mir.Violation['rule']): boolean =>
   MirVerification.verify(program).some((violation) => violation.rule === rule)
+
+it.effect('keeps synchronous recovery out of its protected recipe suspension regions', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(ownedAllocatorSuspensionFailure)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const program = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const regions = suspensionRegions(program)
+    assert.isTrue(regions.some((region) => region._tag === 'SuspendEffectRegion'))
+    assert.isFalse(
+      regions.some(
+        (region) =>
+          region._tag === 'RunSuspendableEffectRegion' &&
+          region.runner.declaration?.module === 'suspension-mir/main' &&
+          region.runner.declaration.name === 'recover$effect$-1',
+      ),
+    )
+  }),
+)
 
 it.effect(
   'finalizes deterministic target-neutral origin, relay, resume, and logical layout facts',
@@ -274,4 +299,35 @@ it.effect(
       assert.isTrue(hasRule(orphan, 'OrphanSuspensionMachinery'))
       assert.notInclude(MirEncoding.encode(program), 'provisional-mir')
     }),
+)
+
+it.effect('retains the caller continuation after a direct suspension primitive', () =>
+  Effect.gen(function* () {
+    const analysis = yield* snapshot(`effect fn application() -> i32 {
+  let value = run Intrinsic.suspendEffect(effect { return 1 })
+  return 42 / value
+}
+pub fn main() -> i32 { return run application() }`)
+    assert.deepEqual(Analysis.diagnostics(analysis), [])
+    const program = Analysis.loweredMir(analysis)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const caller = program.functions.find((fn) => fn.id.name === 'application$effect$-1')
+    assert.isDefined(caller)
+    assert.isTrue(
+      caller?.suspension?.regions.some(
+        (region) =>
+          region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined,
+      ),
+    )
+    assert.isFalse(
+      caller?.suspension?.regions.some((region) => region._tag === 'SuspendEffectRegion'),
+    )
+    assert.isTrue(
+      program.functions.some(
+        (fn) =>
+          fn !== caller &&
+          fn.suspension?.regions.some((region) => region._tag === 'SuspendEffectRegion'),
+      ),
+    )
+  }),
 )

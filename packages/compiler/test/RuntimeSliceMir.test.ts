@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -9,7 +10,7 @@ const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
 const snapshot = (source: string) =>
-  Analysis.ofSourceRealized('runtime-slice-mir/main', ascii(source))
+  AnalysisFixture.retainingMain('runtime-slice-mir/main', ascii(source))
 
 const source = `import silk.usize as usize
 fn inspect(values: &[i32], index: usize) -> i32 {

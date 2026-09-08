@@ -1,230 +1,98 @@
 # Program entry
 
-The default application runtime selects the public `main` function in the application module as
-its invocation root. A build may select another public invocation declaration, a source runtime
-with its own exported entry, or no runtime. Artifact retention, exports and loader entry are
-independent, as specified in [artifact roots and native requirements](artifact-roots-and-requirements.md).
+A build selects a source runtime, an application module, foreign exports, and optional retained
+functions. Loader entry selection is independent. The compiler treats application calls as ordinary
+Silk calls; it has no specially shaped `main` declaration or generated invocation adapter.
+See [artifact roots and native requirements](artifact-roots-and-requirements.md).
 
-This chapter specifies the existing invocation adapter and illustrates its default `main` selection.
-The selected invocation may be ordinary or effectful; the same signature and visibility rules apply
-when a runtime descriptor names another declaration. A private function is not an invocation root.
-
-## ENTRY-001 — The selected invocation must be public
+## ENTRY-001 — Runtime source chooses a visible application function
 
 **Status:** Confirmed
 
-The selected invocation must be declared with `pub`. The supported shapes are a zero-argument ordinary
-`main` explicitly returning `()` or `i32`, or a zero-argument effect `main` succeeding with `()` and
-carrying no unresolved requirements. Only the effect entry may omit its unit result annotation.
+A selected runtime imports `Intrinsic.application`. That binding resolves to the canonical application
+module with ordinary visibility rules. Source runtime code chooses which function to call, passes
+arguments, and handles its result. A runtime descriptor names the runtime module, without an
+`invoke` field. Foreign C exports and explicit retained declarations seed runtime reachability.
+
+The installed executable defaults call public `app.main`. A custom runtime may choose another
+visible function, including one with parameters. The name `main` has no compiler privilege.
 
 ```silk
-pub fn main() -> () {
-}
+import Intrinsic.application as app
+export "C" fn enter() -> i32 as "main" { return app.answer(42) }
 ```
 
-```silk
-pub fn main() -> i32 {
-  return 0
-}
-```
+**Diagnostics:** Missing or private application members, invalid arguments, and unsupported results
+are ordinary source errors at the runtime import or call. Explicit libraries, objects, and
+runtime-none profiles acquire no default startup or execution-storage component.
 
-```silk
-pub effect fn main() {
-}
-```
-
-An empty effect entry succeeds with `()`.
-
-**Boundary:** Removing `pub` makes the function private and leaves the executable without a usable
-entry.
-
-```silk,ignore
-effect fn main() {
-}
-```
-
-**Diagnostics:** A private root `main` must produce an entry diagnostic that identifies the missing
-`pub` visibility at the declaration. An ordinary `main` without an explicit result receives the
-ordinary missing-result diagnostic rather than entry-specific unit inference. No stable diagnostic
-code is currently assigned.
-
-**Implementation:** Entry discovery retains private visibility as its own reason, and the CLI
-reports `No entry point: the selected invocation must be public`.
-
-**Evidence:** [entry-instance requirements](../../../../openspec/specs/bootstrap-instances/spec.md),
-[entry selection](../../../../packages/compiler/src/Instances.ts),
-[CLI entry messages](../../../../packages/cli/src/Report.ts).
-
-## ENTRY-002 — The compiler executes an effect entry
+## ENTRY-002 — Source startup owns execution
 
 **Status:** Confirmed
 
-The three entry forms are:
+The hosted executable default is `silk/native_start`. Its source C `main(argc, argv)` snapshots
+process inputs, creates a bounded lexical diagnostic observer, owns an Execution, and drives the
+application to completion. It accepts ordinary integer or unit results, or an Effect producing unit
+with no requirements or one mutable HostInput requirement. The HostInput requirement is satisfied
+by an ordinary source provider backed by the owned snapshot.
 
-```silk
-pub fn main() -> () {
-}
-```
+The standalone WebAssembly default is `silk/wasm_start`. Its C export is `main() -> i32`; it owns an
+Execution and accepts integer, unit, or requirement-free Effect-unit results. It installs no native
+host-input provider or diagnostic reporter and publishes no `silk_main` adapter.
 
-```silk
-pub fn main() -> i32 {
-  return 0
-}
-```
+Both source runtimes require a NonParking application body. Nested transfers complete inside their
+Execution; external parking requires a custom source runtime with an explicit scheduling policy.
+An unexpected suspended completion is handled as a startup failure rather than silently completing.
 
-```silk
-pub effect fn main() {
-}
-```
+**Diagnostics:** The selected source runtime's interface and NonParking obligations are checked
+through ordinary specialization. No compiler entry-shape diagnostic or implicit scheduler exists.
 
-All three forms take no parameters and declare no generic parameters. The compiler constructs the selected effect invocation and executes it exactly once through the
-generated invocation boundary. Source does not call `run main()`. An omitted result annotation on the effect entry
-means `()`, so the explicit spelling `pub effect fn main() -> ()` is equivalent but unnecessary.
-
-**Boundary:** Entry kind follows the declaration, not its return type. An ordinary `fn main` must
-explicitly return `()` or `i32`; returning `Effect<()>` does not make it an effect entry. An
-`effect fn main` must succeed with `()`.
-
-**Diagnostics:** An invalid ordinary result must identify the allowed `()` and `i32` entry results.
-An invalid effect success type must identify the required `()` success type. Stable source
-diagnostic codes for invalid entry shapes are not yet assigned. Omitting the effect entry's unit
-result is valid and must not produce an entry diagnostic; omitting an ordinary entry result remains
-invalid.
-
-**Evidence:** [entry-instance requirements](../../../../openspec/specs/bootstrap-instances/spec.md),
-[effect-entry tests](../../../../packages/compiler/test/EffectEntry.test.ts).
-
-## ENTRY-003 — Unhandled effect-entry failures become process failures
+## ENTRY-003 — Source policy handles unhandled outcomes
 
 **Status:** Confirmed
 
-An effect entry may retain any concrete, valid typed failure type. The generated entry boundary
-converts an unhandled failure into a runtime error report and a nonzero process status. Successful
-completion returns process status zero.
+Hosted startup drops an unhandled owned typed-failure payload before observing its diagnostic
+context. Its bounded source reporter preserves the primary identity and available origin/path/cause
+information. Reporting allocation refusal or write failure does not replace the application failure.
+Unhandled typed failure and startup failure return status one. Unit and Effect success return zero;
+an ordinary integer result is the returned status.
 
-The failure remains typed inside the program. Only the generated host boundary converts it into
-process behavior. Declaring the failure in `main` is the explicit decision that it may reach that
-boundary; no marker interface or second opt-in is required.
+Standalone Wasm drops an unhandled typed-failure payload and returns one without host reporting.
+Fatal traps remain abnormal termination and promise no cleanup; without a lexical source observer,
+Wasm retains bare machine traps. A custom source composition may define its own status and reporting
+policy using the same ordinary Effect, ownership, observer, and foreign-boundary operations.
 
-```silk
-pub struct ProblemError {}
+**Boundary:** Diagnostic metadata travels through lexical observers and owned outcomes. No generated
+C report policy, process-global failure state, or compiler-owned fixed report buffer is involved.
 
-pub effect fn main() ! ProblemError {
-  fail ProblemError {}
-}
-```
-
-When `ProblemError` reaches the generated boundary, the adapter reports its canonical type
-identity, retains its hidden logical Effect trace, releases its owned payload, and exits
-unsuccessfully. A later optional formatting protocol may customize the report, but custom
-formatting is not a condition for being a typed failure. See
-[typed-failure cleanup and diagnostic context](typed-failures.md#fail-006--typed-failure-applies-ordinary-cleanup-and-preserves-diagnostic-context).
-
-**Boundary:** Entry failures must still satisfy the ordinary failure-type rules: the type is
-concrete, every possible payload is owned and detached from lexical borrows and providers, and no
-unresolved generic remains. Requirement closure remains the separate ENTRY-004 boundary.
-
-**Diagnostics:** A valid concrete failure type receives no entry-specific diagnostic. Invalid
-failure types and payloads receive the ordinary typed-failure diagnostics at their source. Exact
-process-report rules are defined in
-[program termination and reporting](program-termination-and-reporting.md).
-
-**Implementation:** Analysis, entry discovery, and LLVM planning accept the example without marker
-conformance. The retained failure metadata contains its canonical type identity and ordinary cleanup
-plan.
-
-**Evidence:** [entry-instance requirements](../../../../openspec/specs/bootstrap-instances/spec.md),
-[effect-entry runtime tests](../../../../packages/compiler/test/EffectEntry.test.ts).
-
-## ENTRY-004 — Effect-entry requirements must be resolved
+## ENTRY-004 — Source composition resolves application requirements
 
 **Status:** Confirmed
 
-An effect entry must have an empty requirement row after composition. Every dependency must be
-provided explicitly before the entry Effect completes. The compiler does not currently synthesize
-an implementation for a missing requirement.
+Requirement rows retain ordinary Effect meaning. Hosted default startup supplies only its documented
+mutable HostInput contract. It does not infer other services from the operating system. Applications
+resolve remaining requirements through ordinary source providers, or select a custom runtime whose
+source performs the required composition. Standalone Wasm defaults require a closed application
+Effect and do not provide native services.
 
-```silk
-import silk.effect { Effect }
+Runtime-none and library artifacts may retain ordinary functions with their own signatures; they
+have no implicit application execution or entry-result conversion. Foreign export contracts still
+apply independently at the C boundary.
 
-service Clock {}
-
-struct SystemClock {}
-
-impl Clock for SystemClock {}
-
-effect fn work() -> () ? &Clock {
-  return ()
-}
-
-pub effect fn main() {
-  let clock = SystemClock {}
-  return run Effect.provide<Clock>(work(), &clock)
-}
-```
-
-**Boundary:** An entry that retains a requirement is invalid:
-
-```silk,ignore
-service Clock {}
-
-effect fn work() -> () ? &Clock {
-  return ()
-}
-
-pub effect fn main() ? &Clock {
-  return run work()
-}
-```
-
-**Diagnostics:** An open effect entry must be rejected before backend emission. The entry diagnostic
-must list every unresolved requirement. A stable source diagnostic code is not yet assigned.
-
-Only dependency-eligible services may appear in the row, as defined by
-[SERV-002](requirements-and-services.md#serv-002--only-services-may-be-effect-requirements).
-
-**Deferred direction:** A future proposal may let an entry adapter supply target-specific defaults
-for selected capabilities, such as a standard-output logger, while allowing explicit source
-provision to replace the default. No implicit provider, selection rule, or override rule is part of
-the current language.
-
-**Evidence:** [entry-instance requirements](../../../../openspec/specs/bootstrap-instances/spec.md),
-[effect-entry provision tests](../../../../packages/compiler/test/EffectEntry.test.ts).
-
-## ENTRY-005 — An ordinary entry explicitly returns `()` or `i32`
+## ENTRY-005 — Foreign exports define the platform entry ABI
 
 **Status:** Confirmed
 
-An ordinary entry has one of two valid result shapes: `pub fn main() -> ()` or
-`pub fn main() -> i32`. The declaration kind and explicit result annotation determine the entry
-shape; the integer does not turn the function into an Effect entry.
+Hosted native startup uses the platform C entry ABI and libc startup. Standalone Wasm exports a
+zero-parameter C `main` returning `i32`. Raw Linux startup instead selects its source `_start`, reads
+the validated initial stack, calls the application, and terminates through the kernel; see
+[raw Linux](raw-linux.md).
 
-```silk
-pub fn main() -> () {
-}
-```
+Custom runtimes define their own C exports and loader entry according to the selected artifact and
+target contracts. The compiler preserves those exports and validates their ABI, while source calls
+and interfaces implement application adaptation. Empty libraries and retention-only objects are
+valid and need no C export or loader entry.
 
-```silk
-pub fn main() -> i32 {
-  return 7
-}
-```
-
-The generated host outcomes for these shapes, including native and Wasm status behavior, are
-defined by [TERM-001](program-termination-and-reporting.md#term-001--an-ordinary-entry-explicitly-returns-unit-or-one-status-value).
-
-**Boundary:** The explicit return annotation is required in both ordinary forms. Supporting
-`pub fn main() {}` belongs to a future general return-omission decision rather than an entry-only
-exception.
-
-**Diagnostics:** Any ordinary entry result other than `()` or `i32` reports an invalid entry shape
-and names both permitted types. A missing ordinary result annotation receives the ordinary
-missing-result diagnostic.
-
-**Evidence:** [confirmed stabilization decision](index.md),
-[TERM-001](program-termination-and-reporting.md#term-001--an-ordinary-entry-explicitly-returns-unit-or-one-status-value).
-
-Exact process-report behavior is defined in
-[program termination and reporting](program-termination-and-reporting.md). A later diagnostic pass
-will assign stable codes to invalid entry shapes. Default entry providers are not current
-semantics and require an explicit future specification.
+**Evidence:** [hosted startup conformance](../../../../packages/compiler/conformance/hosted-start/README.md),
+[execution storage conformance](../../../../packages/compiler/conformance/execution-storage/README.md),
+and [raw Linux conformance](../../../../packages/compiler/conformance/raw-linux/README.md).

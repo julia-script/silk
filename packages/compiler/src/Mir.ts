@@ -1,3 +1,4 @@
+import type * as ExecutionStorageComponent from './ExecutionStorageComponent.js'
 import type * as MachineFunction from './MachineFunction.js'
 import type * as NativeAssembly from './NativeAssembly.js'
 import type * as CAbi from './CAbi.js'
@@ -7,7 +8,6 @@ import type * as ExecutionPackage from './ExecutionPackage.js'
 import type * as ExecutionTransition from './ExecutionTransition.js'
 import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
-import type * as Intrinsic from './Intrinsic.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import type * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
@@ -524,15 +524,6 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
-      /** Executes one remaining validated native-only runtime protocol operation. */
-      readonly _tag: 'OsCall'
-      readonly operation: Intrinsic.OperationId
-      readonly destination: LocalId
-      readonly arguments: ReadonlyArray<LocalId>
-      readonly type: Type
-      readonly provenance: Provenance
-    }
-  | {
       /** Invokes a runtime native C address under its exact classified signature. */
       readonly _tag: 'ForeignIndirectCall'
       readonly destination: LocalId
@@ -796,6 +787,17 @@ export type Operation =
     }
   | {
       /**
+       * Reinterprets an unchanged raw address with a different pointee under an unsafe
+       * caller proof of alignment, initialization and lifetime. It holds no loan.
+       */
+      readonly _tag: 'PointerReinterpret'
+      readonly destination: LocalId
+      readonly source: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'Pointer' }>
+      readonly provenance: Provenance
+    }
+  | {
+      /**
        * Forms a pointer from the address lane of a reference or slice local. Formation is an
        * ordinary read of the borrow: the result holds no loan and keeps nothing alive.
        */
@@ -957,6 +959,16 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Projects inert capture lanes; only the matching branch may consume the selected value. */
+      readonly _tag: 'UnpackEffectComposite'
+      readonly destination: LocalId
+      readonly matched: LocalId
+      readonly source: LocalId
+      readonly alternative: number
+      readonly type: Extract<Type, { readonly _tag: 'EffectValue' }>
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'PackEffectComposite'
       readonly destination: LocalId
       readonly source: LocalId
@@ -1006,6 +1018,8 @@ export type Operation =
       /** Propagates one already-materialized failure through the enclosing Effect runner. */
       readonly _tag: 'PropagateEffectFailure'
       readonly source: LocalId
+      /** Original caught outcome owns diagnostics separately from the selected payload. */
+      readonly outcome: LocalId
       readonly sourceType: Type
       readonly propagationType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly tagMappings: ReadonlyArray<{
@@ -1152,27 +1166,6 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
-      /** Runs a closed application effect and converts its owned outcome to a machine status. */
-      readonly _tag: 'CloseEffectEntry'
-      readonly destination: LocalId
-      readonly effect: LocalId
-      readonly outcome: LocalId
-      readonly target: DeclarationFacts.CanonicalId
-      readonly runner: DeclarationFacts.CanonicalId
-      readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
-      readonly effectType: Extract<Type, { readonly _tag: 'EffectValue' }>
-      readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
-      readonly failures: ReadonlyArray<{
-        readonly tag: number
-        readonly type: SilkType.Type
-        readonly identity: string
-        readonly payload: LocalId
-        readonly cleanup: CleanupPlan.CleanupPlan
-      }>
-      readonly type: Extract<Type, { readonly _tag: 'i32' }>
-      readonly provenance: Provenance
-    }
-  | {
       readonly _tag: 'Construct'
       readonly destination: LocalId
       readonly type: Extract<Type, { readonly _tag: 'Nominal' }>
@@ -1249,7 +1242,28 @@ export type Operation =
   | DropOperation
   | MatchOperation
   | ConditionalOperation
+  | DiagnosticScopeOperation
+  | {
+      readonly _tag: 'DiagnosticUnhandled'
+      readonly destination: LocalId
+      readonly type: Extract<Type, { readonly _tag: 'usize' }>
+      readonly provenance: Provenance
+    }
   | ShortCircuitOperation
+
+/** One owned lexical observer around execution of its protected infallible Effect. */
+export interface DiagnosticScopeOperation {
+  readonly _tag: 'DiagnosticScope'
+  readonly destination: LocalId
+  readonly state: LocalId
+  readonly observer: LocalId
+  readonly body: Execution
+  readonly stateCleanup: CleanupPlan.CleanupPlan
+  readonly observerCleanup: CleanupPlan.CleanupPlan
+  readonly type: Exclude<Type, { readonly _tag: 'EffectOutcome' }>
+  readonly resultShape: Layout.CallingShape
+  readonly provenance: Provenance
+}
 
 /** One compiler-owned structured conditional whose branches may produce any value type. */
 export interface ConditionalOperation {
@@ -1321,6 +1335,8 @@ export interface Execution {
   readonly entry: RegionId
   readonly regions: ReadonlyArray<Region>
   readonly result?: LocalId
+  /** Failure whose selected handler is being applied and executed in this region graph. */
+  readonly recoveryOutcome?: LocalId
 }
 
 export interface MatchArm {
@@ -1485,7 +1501,22 @@ export interface CoroutineFrameDescriptor {
   readonly states: ReadonlyArray<CoroutineFrameState>
 }
 
-export type CoroutineFrameHeaderRole = 'Parent' | 'State'
+export type CoroutineFrameHeaderRole =
+  | 'Parent'
+  | 'State'
+  | 'Observer'
+  | 'IncomingCauseObserver'
+  | 'IncomingCauseHandle'
+  | 'IncomingCauseIdentity'
+  | 'IncomingCauseIdentityLength'
+  | 'IncomingCauseOrigin'
+  | 'IncomingCauseOriginLength'
+  | 'CurrentCauseObserver'
+  | 'CurrentCauseHandle'
+  | 'CurrentCauseIdentity'
+  | 'CurrentCauseIdentityLength'
+  | 'CurrentCauseOrigin'
+  | 'CurrentCauseOriginLength'
 
 export interface CoroutineFrameHeaderField {
   readonly _tag: 'CoroutineFrameHeaderField'
@@ -1525,6 +1556,16 @@ export interface CoroutineFrameTargetLayout {
   readonly alignment: number
   readonly header: ReadonlyArray<CoroutineFrameHeaderField>
   readonly states: ReadonlyArray<CoroutineFrameTargetStateLayout>
+  /** Non-owning descriptors kept outside mutually exclusive retained payloads. */
+  readonly diagnosticScopes: ReadonlyArray<{
+    readonly scope: LocalId
+    readonly offset: number
+  }>
+  /** Owned metadata has independent storage after the non-owning scope descriptors. */
+  readonly diagnosticOutcomes: ReadonlyArray<{
+    readonly outcome: LocalId
+    readonly offset: number
+  }>
 }
 
 export interface CoroutineFramePlan {
@@ -1579,37 +1620,13 @@ export interface MirFunction {
   }
 }
 
-export type Entry =
-  | {
-      readonly _tag: 'UnavailableEntry'
-      readonly reason: Extract<Instances.Entry, { readonly _tag: 'Unavailable' }>['reason']
-    }
-  | {
-      readonly _tag: 'NoInvocation'
-    }
-  | {
-      readonly _tag: 'OrdinaryEntry'
-      readonly target: Instances.InstanceKey
-      readonly machine: Instances.InstanceKey
-    }
-  | {
-      readonly _tag: 'EffectEntry'
-      readonly target: Instances.InstanceKey
-      readonly machine: Instances.InstanceKey
-      readonly requirements: ReadonlyArray<SilkType.Requirement>
-      readonly failures: ReadonlyArray<{
-        readonly tag: number
-        readonly type: SilkType.Type
-        readonly identity: string
-      }>
-    }
-
 export interface Module {
+  /** Source component selected only for reachable private frame storage. */
+  readonly executionStorage?: ExecutionStorageComponent.ExecutionStorageComponent
   /** Explicit artifact roots preserved through optimization without creating foreign exports. */
   readonly retainedRoots?: ReadonlyArray<Instances.InstanceKey>
   readonly _tag: 'MirModule'
   readonly module: string
-  readonly entry: Entry
   readonly intrinsics: ReadonlyArray<Instances.IntrinsicCall>
   /** Reachable foreign declarations copied from discovery; every availability site reads it. */
   readonly foreignCalls: ReadonlyArray<Instances.ForeignCall>
@@ -1631,18 +1648,6 @@ export interface Module {
   readonly executionTransitions: ReadonlyArray<ExecutionTransition.Authority>
   readonly normalization?: ReadonlyArray<NormalizationVerdict>
   readonly coroutineFrames?: CoroutineFramePlan
-}
-
-/** The concrete zero-parameter `i32` function exported as the machine entry. */
-export const machineEntry = (self: Module): Instances.InstanceKey => {
-  if (self.entry._tag === 'UnavailableEntry' || self.entry._tag === 'NoInvocation') {
-    throw new RangeError(
-      self.entry._tag === 'UnavailableEntry'
-        ? `MIR has no machine entry: ${self.entry.reason}`
-        : 'MIR library has no machine entry',
-    )
-  }
-  return self.entry.machine
 }
 
 /**
@@ -1893,7 +1898,6 @@ export interface Violation {
     | 'InvalidIntegerOperation'
     | 'InvalidLayoutOperation'
     | 'InvalidAllocationOperation'
-    | 'InvalidOsOperation'
     | 'InvalidForeignCall'
     | 'InvalidForeignOperation'
     | 'InvalidNativeAssembly'
@@ -1906,7 +1910,7 @@ export interface Violation {
     | 'InvalidCallableOperation'
     | 'InvalidEffectOperation'
     | 'InvalidNormalization'
-    | 'InvalidEntry'
+    | 'InvalidArtifactRoot'
     | 'InvalidInitializationState'
     | 'InvalidWrite'
     | 'InvalidLoan'
@@ -1979,6 +1983,7 @@ export const regionsTree = (regions: ReadonlyArray<Region>): ReadonlyArray<Regio
         if (arm.guard !== undefined) visit(topologicalRegions(arm.guard.execution))
         visit(topologicalRegions(arm.selected.execution))
       }
+    else if (value._tag === 'DiagnosticScope') visit(topologicalRegions(value.body))
     else if (value._tag === 'ShortCircuit') visit(topologicalRegions(value.right))
     else if (value._tag === 'Conditional') {
       visit(topologicalRegions(value.taken))
@@ -1998,6 +2003,7 @@ export const regionsTree = (regions: ReadonlyArray<Region>): ReadonlyArray<Regio
 }
 
 export const operationChildren = (operation: Operation): ReadonlyArray<Operation> => {
+  if (operation._tag === 'DiagnosticScope') return executionOperations(operation.body)
   if (operation._tag === 'Conditional')
     return [...executionOperations(operation.taken), ...executionOperations(operation.otherwise)]
   if (operation._tag === 'ShortCircuit') return executionOperations(operation.right)
@@ -2027,3 +2033,69 @@ export const operationTree = (operation: Operation): ReadonlyArray<Operation> =>
   }
   return Object.freeze(walk(operation))
 }
+
+/** Whether internal invocations carry a lexical diagnostic observer. */
+export const hasDiagnosticObservation = (module: Module): boolean =>
+  module.functions.some((fn) =>
+    regionsTree(fn.regions).some((region) =>
+      operationsOf(region).some((operation) => operation._tag === 'DiagnosticScope'),
+    ),
+  )
+
+/** Four descriptor pointers followed by the six-field enclosing cause. */
+export const diagnosticScopeWords = 10
+
+/** Observer, opaque handle, and the two static pointer/length pairs. */
+export const diagnosticOutcomeWords = 6
+
+/** Internal failure outcomes that require independent metadata ownership. */
+export const diagnosticOutcomeLocals = (module: Module, fn: MirFunction): ReadonlyArray<LocalId> =>
+  hasDiagnosticObservation(module)
+    ? Object.freeze(
+        fn.localTypes.flatMap((type, ordinal) =>
+          type._tag === 'EffectOutcome' && SilkType.failureMembers(type.type).length > 0
+            ? [Object.freeze({ _tag: 'Local' as const, ordinal })]
+            : [],
+        ),
+      )
+    : Object.freeze([])
+
+/** Shared physical header roles for layout construction and verification. */
+export const coroutineFrameHeaderRoles = (
+  module: Module,
+): ReadonlyArray<CoroutineFrameHeaderRole> =>
+  hasDiagnosticObservation(module)
+    ? [
+        'Parent',
+        'State',
+        'Observer',
+        'IncomingCauseObserver',
+        'IncomingCauseHandle',
+        'IncomingCauseIdentity',
+        'IncomingCauseIdentityLength',
+        'IncomingCauseOrigin',
+        'IncomingCauseOriginLength',
+        'CurrentCauseObserver',
+        'CurrentCauseHandle',
+        'CurrentCauseIdentity',
+        'CurrentCauseIdentityLength',
+        'CurrentCauseOrigin',
+        'CurrentCauseOriginLength',
+      ]
+    : ['Parent', 'State']
+
+/** Lexical descriptor identities in deterministic local order. */
+export const diagnosticScopeLocals = (fn: MirFunction): ReadonlyArray<LocalId> =>
+  Object.freeze(
+    [
+      ...new Map(
+        regionsTree(fn.regions).flatMap((region) =>
+          operationsOf(region).flatMap((operation) =>
+            operation._tag === 'DiagnosticScope'
+              ? [[operation.destination.ordinal, operation.destination] as const]
+              : [],
+          ),
+        ),
+      ).values(),
+    ].sort((left, right) => left.ordinal - right.ordinal),
+  )

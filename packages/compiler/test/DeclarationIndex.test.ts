@@ -1878,12 +1878,10 @@ it.effect('rejects foreign headers outside the C contract and publishes no calla
       ['unsafe extern "C" fn bad(bytes: &[u8]) -> ()', 'SEM0187', ['&[u8]']],
       ['unsafe extern "C" fn bad(value: &mut i32) -> ()', 'SEM0187', ['&mut i32']],
       ['unsafe extern "C" fn f() -> () as "not a symbol"', 'SEM0190', ['"not a symbol"']],
-      ['unsafe extern "C" fn f() -> i32 as "main"', 'SEM0191', ['"main"']],
-      ['unsafe extern "C" fn f() -> i32 as "silk_main"', 'SEM0191', ['"silk_main"']],
       [
-        'unsafe extern "C" fn silk_os_process_execute_v1() -> i32',
+        'unsafe extern "C" fn f() -> i32 as "__silk_foreign_personality"',
         'SEM0191',
-        ['silk_os_process_execute_v1'],
+        ['"__silk_foreign_personality"'],
       ],
     ]
 
@@ -2032,13 +2030,6 @@ it.effect(
         ['export "C" fn bad() -> string<\'static> { return "" }', 'SEM0187', ["string<'static>"]],
         ['export "C" fn bad(flag: bool) -> char { return \'a\' }', 'SEM0187', ['bool', 'char']],
         ['export "C" fn f() -> () as "not a symbol" { }', 'SEM0190', ['"not a symbol"']],
-        ['export "C" fn f() -> i32 as "main" { return 1 }', 'SEM0191', ['"main"']],
-        ['export "C" fn main() -> i32 { return 1 }', 'SEM0191', ['main']],
-        [
-          'export "C" fn silk_os_process_execute_v1() -> i32 { return 1 }',
-          'SEM0191',
-          ['silk_os_process_execute_v1'],
-        ],
       ]
 
       for (const [source, code, expected] of cases) {

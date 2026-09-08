@@ -383,3 +383,21 @@ export const promoteVariadic = (
 /** Identifies the internal guard by its actual promoted operands, leaving the callee unchanged. */
 export const callKey = (symbol: string, tail: ReadonlyArray<VariadicArgument>): string =>
   `${symbol}(${tail.map((argument) => typeText(argument.promoted)).join(',')})`
+
+/** Admits the direct pointer/32-bit/void C subset needed by static LLVM-to-Wasm runtime components. */
+export const available = (target: Target.Target, signature: CAbiSignature): boolean => {
+  if (target.kind === 'Native') return true
+  if (
+    signature.variadic ||
+    signature.contract.callbacks.length > 0 ||
+    signature.contract.borrow.length > 0
+  )
+    return false
+  const value = (type: CAbiType): boolean =>
+    (type._tag === 'Pointer' && type.type.addressSpace === 0) ||
+    (type._tag === 'Integer' && type.bits === 32)
+  return (
+    signature.parameters.every(value) &&
+    (signature.result._tag === 'Void' || value(signature.result))
+  )
+}

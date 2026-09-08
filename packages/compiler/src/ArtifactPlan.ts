@@ -75,13 +75,9 @@ export const make = Effect.fn('ArtifactPlan.make')(function* (
     profile,
   )
   const roots = Object.freeze(
-    [
-      ...(program.entry._tag === 'OrdinaryEntry' || program.entry._tag === 'EffectEntry'
-        ? [program.entry.target]
-        : []),
-      ...(program.retainedRoots ?? []),
-      ...program.foreignExports.map((record) => record.key),
-    ].sort((a, b) => Canonical.compare(Instances.keyText(a), Instances.keyText(b))),
+    [...(program.retainedRoots ?? []), ...program.foreignExports.map((record) => record.key)].sort(
+      (a, b) => Canonical.compare(Instances.keyText(a), Instances.keyText(b)),
+    ),
   )
   const exports = Object.freeze(
     [

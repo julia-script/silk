@@ -172,13 +172,7 @@ const program = Effect.gen(function* () {
             })
         }
         const object = yield* NativeToolchain.emitObject(tools, scope, artifact, profile)
-        const runtime = yield* NativeToolchain.compileExecutableRuntime(
-          tools,
-          scope,
-          profile.target,
-          artifact.termination,
-          artifact.nativeRuntimeSymbols,
-        )
+        const runtime = yield* NativeToolchain.compileRuntime(tools, scope, profile.target)
         const c = yield* NativeToolchain.compileCObject(
           tools,
           scope,

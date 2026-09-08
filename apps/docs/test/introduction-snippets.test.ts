@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Analysis from '@silklang/compiler/Analysis'
+import * as SourceFile from '@silklang/compiler/SourceFile'
+import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as Document from '@silklang/lsp/Document'
 import * as Effect from 'effect/Effect'
 
@@ -56,7 +58,12 @@ it.effect('keeps every live landing-page example diagnostics-correct', () =>
     for (const [index, snippet] of liveSnippets.entries()) {
       const module = `landing-page/${index + 1}`
       const bytes = new TextEncoder().encode(snippet.source)
-      const snapshot = yield* Analysis.ofSourceRealized(module, bytes, snippet.target)
+      const snapshot = yield* Analysis.makeRealized({
+        root: SourceFile.make(module, bytes),
+        configuration: {
+          profile: { target: snippet.target, artifact: 'object', runtime: { kind: 'none' } },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
       const document = Document.make({
         uri: module,
         version: 0,

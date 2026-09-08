@@ -22,6 +22,7 @@ import * as WorkerProtocol from './WorkerProtocol.js'
 
 export interface Policy {
   readonly debounce: Duration.Input
+  readonly inspectionDeadline: Duration.Input
   readonly queryDeadline: Duration.Input
   readonly diagnosticDeadline: Duration.Input
   readonly supersededLease: Duration.Input
@@ -35,9 +36,13 @@ export interface Policy {
 export const defaultPolicy: Policy = Object.freeze({
   debounce: 25,
   queryDeadline: 2_000,
+  // Cold inspection realizes the selected source runtime as well as the application.
+  inspectionDeadline: 10_000,
   diagnosticDeadline: 5_000,
   supersededLease: 500,
-  noProgressLease: 10_000,
+  // A cold source-runtime frontend stage can exceed ten seconds on shared hosts.
+  // Query deadlines remain independent, so other projects continue to answer.
+  noProgressLease: 30_000,
   startupDeadline: 10_000,
   retirementDeadline: 2_000,
   failureLimit: 3,
@@ -853,13 +858,15 @@ export const make = Effect.fn('WorkspaceEngine.make')(function* <R>(
     }
   })
 
-  const request = <K extends EditorQuery.Tag>(query: EditorQuery.EditorQuery<K>) =>
-    Effect.race(
+  const request = <K extends EditorQuery.Tag>(query: EditorQuery.EditorQuery<K>) => {
+    let deadline = policy.queryDeadline
+    if (query._tag === 'Diagnostics') deadline = policy.diagnosticDeadline
+    if (query._tag === 'Inspection') deadline = policy.inspectionDeadline
+    return Effect.race(
       requestCurrent(query),
-      Effect.sleep(
-        query._tag === 'Diagnostics' ? policy.diagnosticDeadline : policy.queryDeadline,
-      ).pipe(Effect.as(QueryOutcome.deadlineExceeded)),
+      Effect.sleep(deadline).pipe(Effect.as(QueryOutcome.deadlineExceeded)),
     )
+  }
 
   const accepted = (expected: ReadonlyArray<AcceptanceBarrierEntry>): boolean =>
     expected.every((item) => SourceLedger.get(ledger, item.uri)?.version.value === item.version)

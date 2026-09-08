@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import type * as Backend from '../src/Backend.js'
 import * as ForeignContract from '../src/ForeignContract.js'
 import * as Result from 'effect/Result'
@@ -29,13 +30,10 @@ import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Analysis from '../src/Analysis.js'
-import * as CoroutineRuntime from '../src/CoroutineRuntime.js'
-import * as OsRuntime from '../src/OsRuntime.js'
 import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as LlvmWasmRuntime from '../src/LlvmWasmRuntime.js'
 import * as Target from '../src/Target.js'
-import * as Termination from '../src/Termination.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
 
 const defaultClang = (): string => {
@@ -57,120 +55,6 @@ const toolchain: NativeToolchain.Toolchain = Object.freeze({
 const testRoot = mkdtempSync(join(tmpdir(), 'silk-native-boundary-test-'))
 afterAll(() => {
   rmSync(testRoot, { recursive: true, force: true })
-})
-
-it('releases acquired startup pipes and preserves errors through close-on-exec failure', () => {
-  const source = `#define _GNU_SOURCE 1
-#define _DARWIN_C_SOURCE 1
-#define _POSIX_C_SOURCE 200809L
-#define pipe silk_test_pipe
-#define fcntl silk_test_fcntl
-#define close silk_test_close
-#define fork silk_test_fork
-#define read silk_test_read
-#define poll silk_test_poll
-#define waitpid silk_test_waitpid
-${OsRuntime.source(['silk_os_process_execute_v1'])}
-#include <stdio.h>
-#include <stdarg.h>
-
-static int scenario;
-static int pipe_calls, fcntl_calls, fork_calls, unexpected;
-static int closed[6];
-
-int silk_test_pipe(int descriptors[2]) {
-  int ordinal = pipe_calls++;
-  if (ordinal == 2 && scenario == 1) { errno = EMFILE; return -1; }
-  descriptors[0] = 90 + 2 * ordinal;
-  descriptors[1] = 91 + 2 * ordinal;
-  return 0;
-}
-int silk_test_fcntl(int fd, int command, ...) {
-  va_list args;
-  va_start(args, command);
-  int flags = va_arg(args, int);
-  va_end(args);
-  fcntl_calls += 1;
-  if (fd != 95 || command != F_SETFD || flags != FD_CLOEXEC) unexpected += 1;
-  if (scenario == 0) { errno = EACCES; return -1; }
-  return 0;
-}
-int silk_test_close(int fd) {
-  if (fd >= 90 && fd < 96) closed[fd - 90] += 1;
-  else unexpected += 1;
-  errno = EINTR;
-  return -1;
-}
-pid_t silk_test_fork(void) {
-  fork_calls += 1;
-  return 123;
-}
-ssize_t silk_test_read(int fd, void *output, size_t length) {
-  (void)output; (void)length;
-  if (fd != 90 && fd != 92 && fd != 94) unexpected += 1;
-  return 0;
-}
-int silk_test_poll(struct pollfd *fds, nfds_t count, int timeout) {
-  (void)timeout;
-  for (nfds_t index = 0; index < count; index += 1) fds[index].revents = POLLHUP;
-  return (int)count;
-}
-pid_t silk_test_waitpid(pid_t child, int *status, int options) {
-  if (child != 123 || options != 0) unexpected += 1;
-  *status = 42 << 8;
-  return child;
-}
-int main(void) {
-  for (scenario = 0; scenario < 3; scenario += 1) {
-    pipe_calls = 0; fcntl_calls = 0; fork_calls = 0; unexpected = 0;
-    memset(closed, 0, sizeof(closed));
-    int status = -1, code = -1, reason = -1;
-    uint32_t native_code = 0;
-    size_t output_length = 0, error_length = 0;
-    const unsigned char empty[] = "";
-    int result = silk_os_process_execute_v1((const unsigned char *)"fixture", 7,
-      empty, 0, empty, 0, empty, 0, &status, &code, &output_length, &error_length,
-      &reason, &native_code);
-    uint32_t expected_error = scenario == 0 ? EACCES : scenario == 1 ? EMFILE : 0;
-    printf("%d %d %d %d %d %d %d", result, reason, native_code == expected_error,
-      pipe_calls, fcntl_calls, fork_calls, unexpected);
-    for (int index = 0; index < 6; index += 1) printf(" %d", closed[index]);
-    printf(" %d %d %d\\n", status, code, output_length == 0 && error_length == 0);
-  }
-  return 0;
-}
-`
-  const sourcePath = join(testRoot, 'startup-pipe-cleanup.c')
-  const executable = join(testRoot, 'startup-pipe-cleanup')
-  writeFileSync(sourcePath, source)
-  const built = spawnSync(
-    clang,
-    [
-      '-std=c11',
-      '-Wall',
-      '-Wextra',
-      '-Werror',
-      '-Wno-unused-function',
-      sourcePath,
-      '-o',
-      executable,
-    ],
-    { encoding: 'utf8' },
-  )
-  assert.strictEqual(built.status, 0, built.stderr)
-  const run = spawnSync(executable, [], { encoding: 'utf8' })
-  assert.strictEqual(run.status, 0, run.stderr)
-  const outcomes = run.stdout
-    .trim()
-    .split('\n')
-    .map((line) => line.split(' ').map(Number))
-  // result, reason, preserved errno, pipe/fcntl/fork calls, unexpected calls, six closes,
-  // child status/code, empty captures. Each row exercises the same emitted operation.
-  assert.deepStrictEqual(outcomes, [
-    [0, 2, 1, 3, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1],
-    [0, 10, 1, 3, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1],
-    [1, 0, 1, 3, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 42, 1],
-  ])
 })
 
 const finalize = Effect.fnUntraced(function* (
@@ -208,17 +92,6 @@ it('denies native final-cache admission without complete tool and implicit-input
     _tag: 'ExistingWebAssemblyPolicy',
   })
 })
-
-const termination = (...identities: ReadonlyArray<string>): Termination.Contract =>
-  Object.freeze({
-    _tag: 'EntryTermination',
-    success: identities.length === 0 ? 'ReturnedStatus' : 'Zero',
-    failures: Object.freeze(
-      identities.map((identity, ordinal) => Object.freeze({ tag: ordinal + 1, identity })),
-    ),
-    logicalFrames: Object.freeze([]),
-    report: Termination.emptyReport,
-  })
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -316,10 +189,10 @@ const artifactFor = Effect.fnUntraced(function* (
   target: Target.Target,
   profile: ToolchainPlan.OptimizationProfile,
 ) {
-  const snapshot = yield* Analysis.ofSourceRealized(
+  const snapshot = yield* AnalysisFixture.declarations(
     'memory/native',
     ascii(
-      'pub fn identity(value: i32) -> i32 { return value }\npub fn main() -> i32 { return identity(identity(42)) }',
+      'pub fn identity(value: i32) -> i32 { return value }\nexport "C" fn entry() -> i32 as "main" { return identity(identity(42)) }',
     ),
     target.id,
   )
@@ -534,71 +407,13 @@ it('rejects target- and artifact-incompatible structured link inputs', () => {
   assert.strictEqual(unsafePath.reason, 'PathNotAbsolute')
 })
 
-it('generates effect-reporting runtime source from escaped identities with closed status handling', () => {
-  const source = ToolchainPlan.executableSource(termination('module.Error"\\nameé'))
-  assert.include(source, 'identity = "module.Error\\"\\\\name\\303\\251";')
-  assert.notInclude(source, 'Error: module.Error"\\name')
-  assert.include(source, 'silk_write_text("unhandled error: ")')
-  assert.include(source, 'default:\n      return 2;')
-  assert.include(source, 'return ok ? 1 : 2;')
-})
-
-it('reports trap sites and failure paths only when the artifact declares them', () => {
-  const bare = ToolchainPlan.executableSource(termination('module.Error'))
-  assert.notInclude(bare, 'silk_trap_report_v1')
-  assert.notInclude(bare, 'silk_write_path')
-  const contract: Termination.Contract = Object.freeze({
-    ...termination('module.Error'),
-    report: Object.freeze({
-      frames: Object.freeze(['module.main (module:1:1)']),
-      failureSites: Object.freeze([
-        Object.freeze({ identity: 'module.Error', origin: 'module.load (module:3:3)' }),
-      ]),
-      trapSites: Object.freeze([
-        Object.freeze({ reason: 'division by zero', origin: 'module.calc (module:8:10)' }),
-      ]),
-    }),
-  })
-  const full = ToolchainPlan.executableSource(contract)
-  assert.include(full, 'void silk_trap_report_v1(int site)')
-  assert.include(full, '"fatal trap: "')
-  assert.include(full, '"module.calc (module:8:10)"')
-  assert.include(full, '"while handling: "')
-  assert.include(full, '"module.load (module:3:3)"')
-  assert.include(full, '"module.main (module:1:1)"')
-})
-
-it('includes coroutine storage only when suspension requests it', () => {
-  const direct = ToolchainPlan.executableSource(termination())
-  const suspended = ToolchainPlan.executableSource(termination(), CoroutineRuntime.symbols)
-  assert.notInclude(direct, CoroutineRuntime.pushSymbol)
-  assert.include(suspended, CoroutineRuntime.pushSymbol)
-  assert.include(suspended, CoroutineRuntime.popSymbol)
-})
-
-it('separates a process entry from library-only hidden runtime source', () => {
-  const executable = ToolchainPlan.executableSource(termination(), CoroutineRuntime.symbols)
-  const library = ToolchainPlan.runtimeSource(CoroutineRuntime.symbols)
-  assert.include(executable, 'int main(void)')
-  assert.include(executable, 'extern int silk_main(void)')
-  assert.notInclude(library, 'int main(')
-  assert.notInclude(library, 'silk_main')
-  assert.include(library, CoroutineRuntime.pushSymbol)
-  assert.include(library, CoroutineRuntime.popSymbol)
-})
-
 it.effect(
   'includes the selected LLVM-Wasm freestanding runtime in the artifact cache identity',
   () =>
     Effect.gen(function* () {
       const compilationwasm32UnknownUnknown = yield* profileFor(Target.wasm32UnknownUnknown)
       const bitcode = Uint8Array.from([0, 1, 2, 3])
-      const runtimeSource = NativeToolchain.artifactRuntimeSource(
-        'WebAssemblyModule',
-        termination(),
-        [],
-        true,
-      )
+      const runtimeSource = NativeToolchain.artifactRuntimeSource('WebAssemblyModule', [])
       assert.strictEqual(runtimeSource, LlvmWasmRuntime.source)
       const keyFor = (runtimeSource: string) =>
         NativeToolchain.wasmArtifactCacheKey(
@@ -674,16 +489,47 @@ it.effect('yields a typed spawn failure with command, stage, and arbitrary cause
   }),
 )
 
+it.effect('rejects hosted language runtime dependencies before spawning a no-libc compiler', () =>
+  Effect.gen(function* () {
+    const initial = yield* CompilationProfile.normalize({
+      target: 'x86_64-unknown-linux-gnu',
+      libc: 'none',
+      artifact: 'object',
+    })
+    const compilation = yield* CompilationProfile.publish(initial, [])
+    const artifact = yield* artifactFor(compilation.target, 'release')
+    const result = yield* Effect.result(
+      NativeToolchain.withBuildScope(
+        'raw-capability',
+        Effect.fnUntraced(function* (scope) {
+          return yield* NativeToolchain.emitObject(
+            { _tag: 'Toolchain', clang: '/nonexistent/clang', llvmAr: 'llvm-ar' },
+            scope,
+            { ...artifact, nativeRuntimeSymbols: ['silk_test_unsupported_runtime'] },
+            compilation,
+          )
+        }),
+      ),
+    )
+    assert.strictEqual(result._tag, 'Failure')
+    if (result._tag !== 'Failure') return
+    assert.strictEqual(result.failure.reason._tag, 'HelperFailed')
+    if (result.failure.reason._tag !== 'HelperFailed') return
+    assert.strictEqual(result.failure.reason.failure.code, 'MissingProvider')
+    assert.deepStrictEqual(result.failure.reason.failure.origins, ['silk_test_unsupported_runtime'])
+  }),
+)
+
 it.effect('reuses explicitly shared runtime bytes across cleaned build scopes', () =>
   Effect.gen(function* () {
     const target = yield* NativeToolchain.hostTarget()
     const cache = NativeToolchain.makeRuntimeObjectCache()
     const cachedToolchain = Object.freeze({ ...toolchain, runtimeObjectCache: cache })
     yield* NativeToolchain.withBuildScope('runtime-miss', (scope) =>
-      NativeToolchain.compileExecutableRuntime(cachedToolchain, scope, target, termination()),
+      NativeToolchain.compileRuntime(cachedToolchain, scope, target),
     )
     yield* NativeToolchain.withBuildScope('runtime-hit', (scope) =>
-      NativeToolchain.compileExecutableRuntime(cachedToolchain, scope, target, termination()),
+      NativeToolchain.compileRuntime(cachedToolchain, scope, target),
     )
     assert.deepEqual(NativeToolchain.runtimeObjectCacheStats(cache), {
       entries: 1,
@@ -934,11 +780,10 @@ it.effect('translates synchronously throwing runtime-cache reads with cache-stag
     })
     const result = yield* Effect.result(
       NativeToolchain.withBuildScope('cache-read-failure', (scope) =>
-        NativeToolchain.compileExecutableRuntime(
+        NativeToolchain.compileRuntime(
           Object.freeze({ ...toolchain, runtimeObjectCache: cache }),
           scope,
           target,
-          termination(),
         ),
       ),
     )
@@ -968,11 +813,10 @@ it.effect(
       })
       const result = yield* Effect.result(
         NativeToolchain.withBuildScope('cache-write-failure', (scope) =>
-          NativeToolchain.compileExecutableRuntime(
+          NativeToolchain.compileRuntime(
             Object.freeze({ ...toolchain, runtimeObjectCache: cache }),
             scope,
             target,
-            termination(),
           ),
         ),
       )
@@ -1256,12 +1100,7 @@ it.effect(
       const linked = yield* NativeToolchain.withBuildScope('link-run', (scope) =>
         Effect.gen(function* () {
           const object = yield* NativeToolchain.emitObject(toolchain, scope, artifact, compilation)
-          const runtime = yield* NativeToolchain.compileExecutableRuntime(
-            toolchain,
-            scope,
-            target,
-            artifact.termination,
-          )
+          const runtime = yield* NativeToolchain.compileRuntime(toolchain, scope, target)
           assert.include(runtime.planned.arguments, 'cpp-output')
           assert.include(runtime.planned.arguments, join(scope.root, 'silk_runtime.i'))
           return yield* finalize(

@@ -1,6 +1,6 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import * as Effect from 'effect/Effect'
 import { describe, expect, it } from 'vitest'
-import * as Analysis from '../src/Analysis.js'
 import type { ViewContext, ViewResult } from '../src/InspectorRegistry.js'
 import { siblingsOf, viewById, views } from '../src/InspectorRegistry.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
@@ -8,7 +8,7 @@ import * as ToolchainPlan from '../src/ToolchainPlan.js'
 const project = (viewId: string, source: string, target = 'aarch64-apple-darwin'): ViewResult => {
   const sourceId = 'memory/docs/unified-layout'
   const snapshot = Effect.runSync(
-    Analysis.ofSourceRealized(sourceId, new TextEncoder().encode(source), target),
+    AnalysisFixture.retainingMain(sourceId, new TextEncoder().encode(source), target),
   )
   const root = snapshot.closure.rootModule
   const context: ViewContext = {
@@ -210,7 +210,7 @@ describe('downstream panes state why they are empty', () => {
   // the phase that actually broke. Every absent phase has to name its reason.
   it('says why MIR is unavailable for an unresolved target', () => {
     const snapshot = Effect.runSync(
-      Analysis.ofSourceRealized(
+      AnalysisFixture.retainingMain(
         'memory/docs/unavailable',
         new TextEncoder().encode('pub fn main() -> i32 { return 42 }'),
         'not-a-real-target',
@@ -273,7 +273,7 @@ pub fn main() -> i32 { return answer( }`,
     const view = viewById('tree')
     if (view === undefined) throw new Error('missing tree view')
     const snapshot = Effect.runSync(
-      Analysis.ofSourceRealized('memory/docs/trivia', new TextEncoder().encode(source)),
+      AnalysisFixture.retainingMain('memory/docs/trivia', new TextEncoder().encode(source)),
     )
     const base = {
       snapshot,
@@ -307,6 +307,6 @@ describe('toolchain projection', () => {
       project('toolchain', 'pub fn main() -> i32 { return 42 }', 'wasm32-unknown-unknown'),
     )
     expect(rendered).toContain('--target=wasm32-unknown-unknown')
-    expect(rendered).toContain('--export=silk_main')
+    expect(rendered).toContain('--export-dynamic')
   })
 })

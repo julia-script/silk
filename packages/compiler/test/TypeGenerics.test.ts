@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -49,7 +50,7 @@ it.effect('retains source-shaped row expressions and callable constraints in mod
   where &mut P provides S from R, S in R
 }
 pub fn main() -> i32 { return 0 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/constraint-facts',
       new TextEncoder().encode(constrained),
     )
@@ -98,7 +99,7 @@ pub fn main() -> i32 { return 0 }`
 it.effect('rejects residual rows at the complete-application specialization frontier', () =>
   Effect.gen(function* () {
     const module = 'generics/frontier'
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       module,
       new TextEncoder()
         .encode(`effect fn forward<A, E, ?R>(self: once Effect<A ! E ? R>) -> A ! E ? R {
@@ -657,7 +658,7 @@ it.effect('formats channel-kinded generic binders idempotently', () =>
 
 it.effect('accepts failure-row and requirement-row arguments in an explicit prefix', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/RowPrefix',
       new TextEncoder().encode(`struct First {}
 struct Second {}
@@ -681,7 +682,7 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('rejects a borrowed explicit failure type', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/WrongRowPrefix',
       new TextEncoder().encode(`struct Problem {}
 struct Clock {}
@@ -700,7 +701,7 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('names the parameter an explicit prefix leaves undetermined', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/UninferredRemainder',
       new TextEncoder().encode(`fn phantom<A, B>(value: A) -> A { return move value }
 pub fn main() -> i32 { return phantom<i32>(1) }`),
@@ -718,7 +719,7 @@ it.effect('reports a contradicted explicit type argument at what the call wrote'
   Effect.gen(function* () {
     const text = `fn pair<A, B>(left: A, right: B) -> A { return move left }
 pub fn main() -> i32 { return pair<bool>(1, true) }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/ContradictedPrefix',
       new TextEncoder().encode(text),
     )
@@ -738,7 +739,7 @@ pub fn main() -> i32 { return pair<bool>(1, true) }`
 
 it.effect('retains unresolved type-argument causes without fabricating arity failures', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/UnresolvedArgument',
       new TextEncoder().encode(
         'struct Box<T> { value: T }\nfn bad(value: Box<Missing>) -> i32 { return 0 }\npub fn main() -> i32 { return 42 }',
@@ -752,7 +753,7 @@ it.effect('retains unresolved type-argument causes without fabricating arity fai
 
 it.effect('does not fabricate a second identity for duplicate type parameters', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/DuplicateIdentity',
       new TextEncoder().encode(
         'fn bad<T, T>(value: T) -> T { return move value }\npub fn main() -> i32 { return 42 }',
@@ -769,7 +770,7 @@ it.effect('does not fabricate a second identity for duplicate type parameters', 
 
 it.effect('keeps open cleanup symbolic and specializes it before MIR', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/Cleanup',
       new TextEncoder().encode(`struct Payload {}
 fn discard<T>(value: T) -> i32 { return 42 }
@@ -802,9 +803,10 @@ it.effect('cuts off recursive generic calls that change an ancestor specializati
 }
 pub fn main() -> i32 { return expand<i32>(1) }`),
     )
-    const snapshot = yield* Analysis.makeRealized({ root: recursive }).pipe(
-      Effect.provide(SourceResolver.memory(new Map())),
-    )
+    const snapshot = yield* Analysis.makeRealized({
+      root: recursive,
+      configuration: AnalysisFixture.configuration(recursive.id),
+    }).pipe(Effect.provide(SourceResolver.memory(new Map())))
 
     assert.strictEqual(snapshot.instances.violations.length, 1)
     assert.deepEqual(
@@ -823,7 +825,7 @@ pub fn main() -> i32 { return expand<i32>(1) }`),
 
 it.effect('detects parameter-changing recursion across a mutual generic cycle', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/MutualRecursion',
       new TextEncoder().encode(`fn first<T>(value: T) -> i32 {
   return second<[T; 1]>([move value])
@@ -845,7 +847,7 @@ pub fn main() -> i32 { return first<i32>(1) }`),
 
 it.effect('checks repeated instances under every recursive ancestor context', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/ContextualRecursion',
       new TextEncoder().encode(`fn a<T>(value: T) -> i32 { return x<T>(move value) }
 fn x<T>(value: T) -> i32 {
@@ -924,7 +926,7 @@ const invalidCases: ReadonlyArray<readonly [string, string, string]> = [
 for (const [name, text, code] of invalidCases) {
   it.effect(`diagnoses ${name} before target-dependent phases`, () =>
     Effect.gen(function* () {
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         `generics/invalid/${name.replaceAll(' ', '-')}`,
         new TextEncoder().encode(text),
       )
@@ -941,7 +943,7 @@ for (const [name, text, code] of invalidCases) {
 
 it.effect('classifies generic writes after substituting the concrete element type', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/Write',
       new TextEncoder().encode(`fn replace<T>(values: [T; 1], value: T) -> i32 {
   let mut result = move values
@@ -964,7 +966,7 @@ pub fn main() -> i32 { return replace<i32>([1], 2) }`),
 
 it.effect('links an open HIR call through every reached caller instance', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/Facade',
       new TextEncoder().encode(`fn inner<T>(value: T) -> T { return move value }
 fn outer<T>(value: T) -> T { return inner<T>(move value) }
@@ -990,7 +992,7 @@ pub fn main() -> i32 {
 
 it.effect('rejects residual open MIR and keeps specialization symbols injective', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'generics/MirBoundary',
       new TextEncoder().encode(source),
     )
@@ -1026,10 +1028,7 @@ it.effect('rejects residual open MIR and keeps specialization symbols injective'
         instance: Object.freeze({ ...fn.instance, declaration }),
       })
     }
-    assert.notStrictEqual(
-      Backend.symbolFor(collision('a/b'), fn.instance),
-      Backend.symbolFor(collision('a_b'), fn.instance),
-    )
+    assert.notStrictEqual(Backend.symbolFor(collision('a/b')), Backend.symbolFor(collision('a_b')))
     const withStaticArgument = (byte: number): Mir.MirFunction => {
       const argument: StaticValue.TextValue = Object.freeze({
         _tag: 'TextValue',
@@ -1044,8 +1043,8 @@ it.effect('rejects residual open MIR and keeps specialization symbols injective'
       })
     }
     assert.notStrictEqual(
-      Backend.symbolFor(withStaticArgument(97), fn.instance),
-      Backend.symbolFor(withStaticArgument(98), fn.instance),
+      Backend.symbolFor(withStaticArgument(97)),
+      Backend.symbolFor(withStaticArgument(98)),
     )
   }),
 )
@@ -1053,7 +1052,7 @@ it.effect('rejects residual open MIR and keeps specialization symbols injective'
 it.effect('infers T from pointer arguments and widens *mut to *const only at a boundary', () =>
   Effect.gen(function* () {
     const program = (body: string) =>
-      Analysis.ofSourceRealized(
+      AnalysisFixture.retainingMain(
         'generics/pointer-boundary',
         new TextEncoder().encode(`fn identity<T>(value: T) -> T { return move value }
 fn readOnly(value: *const u8) -> i32 { return 0 }
@@ -1084,12 +1083,12 @@ it.effect('keeps specialization identities stable across native and LLVM-Wasm ta
   Effect.gen(function* () {
     const bytes = new TextEncoder().encode(`fn identity<T>(value: T) -> T { return move value }
 pub fn main() -> i32 { let flag = identity(true) if flag { return identity<i32>(42) } return 0 }`)
-    const native = yield* Analysis.ofSourceRealized(
+    const native = yield* AnalysisFixture.retainingMain(
       'generics/cross-target-identities',
       bytes,
       'aarch64-apple-darwin',
     )
-    const wasm = yield* Analysis.ofSourceRealized(
+    const wasm = yield* AnalysisFixture.retainingMain(
       'generics/cross-target-identities',
       bytes,
       'wasm32-unknown-unknown',

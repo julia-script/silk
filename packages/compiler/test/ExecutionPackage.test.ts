@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -127,7 +128,7 @@ it('rejects overflow and every mismatched initializer provenance dimension', () 
 
 it.effect('rejects an initializer whose allocation has different layout provenance', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'execution-package/mismatched-provenance',
       new TextEncoder().encode(`import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
@@ -207,6 +208,71 @@ pub fn main() -> i32 { return 0 }
           d.code === 'OWN0019' &&
           d.span.start >= localStart &&
           source.slice(d.span.start, d.span.end).trim() === "Nested<'a> { values: [&value] }",
+      ),
+    )
+  }),
+)
+
+it.effect('proves execution allocation through a caller-provided allocator', () =>
+  Effect.gen(function* () {
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.execution { Execution }
+import silk.effect { Effect }
+fn ready(state: &()) -> () {}
+effect fn body() -> i32 { return 42 }
+effect fn work() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let execution = run Execution.make(body(), (), ready)
+  drop execution
+  return 42
+}
+effect fn failed(error: OutOfMemoryError) -> i32 { return 0 }
+pub fn main() -> i32 {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run Effect.catchAll(work(), failed) |> Effect.provideMut<Allocator>(&mut allocator)
+}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'execution-package/caller-allocator',
+      new TextEncoder().encode(source),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const forged = source
+      .replace(
+        'pub fn main()',
+        `import silk.layout { Layout }
+struct WrongAllocator {}
+effect fn wrongAllocate(self: &mut WrongAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  let mut inner = Allocator.systemAllocatorProvider()
+  return run Allocator.allocate(Intrinsic.sharedLayout<i32>()) |> Effect.provideMut<Allocator>(&mut inner)
+}
+impl Allocator for WrongAllocator { allocate: WrongAllocator.wrongAllocate }
+pub fn main()`,
+      )
+      .replace(
+        'let mut allocator = Allocator.systemAllocatorProvider()',
+        'let mut allocator = WrongAllocator {}',
+      )
+    const rejected = yield* AnalysisFixture.retainingMain(
+      'execution-package/forged-caller-allocator',
+      new TextEncoder().encode(forged),
+      'wasm32-unknown-unknown',
+    )
+    const diagnostics = Analysis.diagnostics(rejected)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0142'],
+    )
+    const wrongLayout = forged.indexOf('Intrinsic.sharedLayout<i32>()')
+    assert.isTrue(
+      diagnostics.some(
+        (diagnostic) =>
+          diagnostic.span.sourceId === 'silk/execution' &&
+          diagnostic.relatedSpans?.some(
+            ({ span }) =>
+              span.sourceId === 'execution-package/forged-caller-allocator' &&
+              span.start <= wrongLayout &&
+              span.end >= wrongLayout + 'Intrinsic.sharedLayout<i32>()'.length,
+          ),
       ),
     )
   }),

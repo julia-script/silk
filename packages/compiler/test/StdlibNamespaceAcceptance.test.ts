@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -21,7 +22,7 @@ pub fn main() -> i32 {
 it.effect('resolves Option, Result, and Vector operations through their namespaces', () =>
   Effect.gen(function* () {
     const module = 'stdlib-namespace/qualified'
-    const snapshot = yield* Analysis.ofSourceRealized(module, ascii(namespaceProgram))
+    const snapshot = yield* AnalysisFixture.retainingMain(module, ascii(namespaceProgram))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     for (const [spelling, expectedModule] of [
       ['Vector.make', 'silk/vector'],
@@ -76,7 +77,7 @@ pub fn main() -> i32 {
   drop tableVersion
   return answer
 }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'stdlib-namespace/scope-actors',
       ascii(source),
     )

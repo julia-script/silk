@@ -22,7 +22,10 @@ effect fn suspend<A, E, ?R>(
 ```
 
 The compiler and standard library preserve that contract exactly. Coroutine frames use private
-execution-stack storage; they never select a source `Allocator` or add `OutOfMemoryError` to an Effect.
+execution-stack storage supplied by the artifact-selected source component. Suspension never
+selects the lexical `Allocator` service or adds `OutOfMemoryError` to an Effect.
+The component owns allocation, capacity and accounting in an explicit state instance;
+the compiler owns frame representation, transfer and semantic cleanup.
 
 Rule numbers follow the accepted proposal. SUSP-009, SUSP-010, SUSP-012, and SUSP-014 constrain
 private lowering rather than programmer-observable Silk, so their details remain in the proposal
@@ -37,7 +40,7 @@ instead of appearing as standalone language-reference rules.
   may still complete along another branch without suspending.
 - **Resume** — continue the logical caller with the child's success or typed failure. It does not
   imply a thread, task, or scheduler.
-- **Execution stack** — finite compiler-owned storage for logically active suspended calls. It is
+- **Execution stack** — finite source-component storage for logically active suspended calls. It is
   distinct from the source-selected `Allocator` service and from the physical machine stack.
 - **Parking** — leave execution dormant until an external wakeup condition occurs. `Effect.suspend`
   does not provide parking.
@@ -234,8 +237,10 @@ If `work()` has `i32 ! ProblemError ? &Clock`, `protected` has the same three ch
 **Boundary:** Exhausting private execution storage is a fatal trap under SUSP-006, not a hidden
 member of `E`.
 
-**Diagnostics:** `Effect.suspend` produces no allocator-provision or storage-failure diagnostic.
-Existing child-channel mismatches retain their ordinary codes.
+**Diagnostics:** `Effect.suspend` adds no allocator requirement or typed storage failure.
+An artifact with reachable private-frame demand must select a complete, compatible
+`execution-storage` component; missing or invalid bindings produce a configuration
+diagnostic before object emission. Existing child-channel mismatches retain their ordinary codes.
 
 **Evidence:** [Effect channels](effect-contracts.md),
 [suspension composition tests](../../../../packages/compiler/test/EffectSuspensionComposition.test.ts).
@@ -244,7 +249,7 @@ Existing child-channel mismatches retain their ordinary codes.
 
 **Status:** Confirmed
 
-Exhausting the finite compiler-owned execution stack terminates with a fatal trap outside the typed
+Exhausting the finite execution stack supplied by the selected source component terminates with a fatal trap outside the typed
 failure channel, like exhausting the ordinary machine stack.
 
 **Boundary:** `Effect.catch`, `catchAll`, `result`, or another typed-failure combinator cannot recover
@@ -258,6 +263,19 @@ runtime trap according to the program-termination rules.
 
 **Evidence:** [fatal traps](typed-failures.md#fail-007--a-trap-is-fatal-and-remains-outside-effect-outcomes),
 [execution-storage requirements](independent-execution.md#exec-001--construction-is-lazy-explicit-and-caller-funded).
+
+The selected component binds `create`, `acquire`, `release` and `destroy` to ordinary
+source C exports. Bindings are demand-driven: an unused catalog entry does not load
+its provider. Each transient driver or owned Execution has an independent state.
+State is acquired lazily on first frame allocation, preserved across parking and
+consumed after frame cleanup on completion or cancellation. An unstarted Execution
+acquires no state. A retained Wake cannot keep canceled frame storage alive.
+
+The hosted default owns an explicitly unlimited per-instance policy in
+`silk/execution_storage`; there is no environment-variable limit or thread-local
+accounting. A custom provider chooses its own finite capacity and returns null on
+state or frame refusal. The compiler translates that refusal to the existing fatal
+exhaustion path. This contract is shared by native and LLVM-to-Wasm lowering.
 
 ## Execution and composition
 

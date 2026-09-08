@@ -272,6 +272,9 @@ const nonScalarBuiltinOperations = Object.freeze([
   'ExecutionWake',
   'ExecutionPark',
   'EffectSuspend',
+  'EffectFinalize',
+  'EffectObserveDiagnostics',
+  'EffectObserveUnhandled',
   'StorageAcquire',
   'RawBufferFrom',
   'RawBufferSlot',
@@ -295,6 +298,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'PointerReadUnaligned',
   'PointerWriteUnaligned',
   'PointerRequalify',
+  'PointerReinterpret',
   'PointerBytes',
   'NativeAssembly',
   'SlotAddress',
@@ -306,12 +310,6 @@ const nonScalarBuiltinOperations = Object.freeze([
   'StringUtf8Bytes',
   'StringByteLength',
   'StringEqualsExact',
-  'OsProcessExecute',
-  'OsProcessCapture',
-  'OsHostArgumentCount',
-  'OsHostArgument',
-  'OsHostVariable',
-  'OsHostWorkingDirectory',
 ] as const)
 
 /** The closed operation vocabulary shared by semantic callable identities and HIR targets. */

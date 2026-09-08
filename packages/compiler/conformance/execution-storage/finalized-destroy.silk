@@ -1,0 +1,106 @@
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.shared { Shared }
+
+struct State {
+  started: i32
+  dropped: i32
+  finished: i32
+  rejected: bool
+  live: i32
+  produced: usize
+  bad: i32
+  observers: i32
+}
+struct Payload { state: Shared<State> }
+fn recordDrop(state: &mut State) -> () {
+  if state.rejected && state.live <= 0 { state.bad = state.bad + 1 }
+  state.dropped = state.dropped + 1
+  return ()
+}
+impl Drop for Payload {
+  fn drop(self: &mut Payload) -> () { Shared.withMut(&self.state, recordDrop) return () }
+}
+struct Guard { wake: Intrinsic.Wake }
+fn register(wake: Intrinsic.Wake) -> Guard { return Guard { wake: move wake } }
+fn started(state: &mut State) -> () {
+  if state.rejected && state.live <= 0 { state.bad = state.bad + 1 }
+  state.started = state.started + 1
+  return ()
+}
+fn finished(state: &mut State) -> () { state.finished = state.finished + 1 return () }
+fn inspect(state: &mut State) -> i32 {
+  if state.bad != 0 || state.live != 0 || state.observers != 1 { return -1 }
+  return state.started * 100 + state.dropped * 10 + state.finished
+}
+struct Observer { state: Shared<State> }
+fn closeObserver(state: &mut State) -> () {
+  if state.live != 0 { state.bad = state.bad + 1 }
+  state.observers = state.observers + 1
+  return ()
+}
+impl Drop for Observer {
+  fn drop(self: &mut Observer) -> () { Shared.withMut(&self.state, closeObserver) return () }
+}
+fn event(state: &mut State, event: u8, first: usize) -> usize {
+  if event == 0 || event == 1 || event == 2 {
+    if event == 2 { state.bad = state.bad + 1 }
+    state.live = state.live + 1
+    state.produced = state.produced + 1
+    return state.produced
+  }
+  if event == 3 { if first != 0 { state.live = state.live + 1 } return first }
+  if event == 4 { if first != 0 { state.live = state.live - 1 } return 0 }
+  state.bad = state.bad + 1
+  return 0
+}
+fn observe(state: &mut Observer, operation: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize {
+  return Shared.withMut(&state.state, event(operation, first))
+}
+fn observing<'env, S, A, ?R, F: fn<'static>(&mut S, u8, usize, usize, string<'static>, string<'static>) -> usize + Intrinsic.NonParking>(state: S, observer: F, body: once Effect<'env; A ? R>) -> once Effect<'env; A ? R> {
+  return Intrinsic.observeDiagnostics<S, A, R, F>(move state, move observer, move body)
+}
+struct Noise {}
+effect fn noise() -> () ! Noise { fail Noise {} }
+effect fn ignoreNoise(error: Noise) -> () { return () }
+fn ready(state: &Shared<State>) -> () { Shared.withMut(state, finished) return () }
+effect fn protected(state: Shared<State>, rejected: bool, parkBefore: bool) -> Payload ! Payload {
+  if parkBefore { run Execution.park(register) }
+  if rejected { fail Payload { state: move state } }
+  return Payload { state: move state }
+}
+effect fn finalizer(state: Shared<State>) -> () {
+  Shared.withMut(&state, started)
+  run Effect.catchAll(noise(), ignoreNoise)
+  run Execution.park(register)
+  Shared.withMut(&state, finished)
+  return ()
+}
+fn consume(value: Payload) -> i32 { drop move value return 99 }
+effect fn recover(error: Payload) -> i32 { drop move error return 99 }
+effect fn observed(state: Shared<State>, rejected: bool, parkBefore: bool) -> i32 {
+  let guarded = Effect.ensuring(protected(Shared.clone(&state), rejected, parkBefore), finalizer(Shared.clone(&state)))
+  let body = Effect.catchAll(Effect.map(move guarded, consume), recover)
+  return run observing(Observer { state: move state }, observe, move body)
+}
+fn complete(state: &mut (), value: i32) -> () { return () }
+fn suspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () { drop move execution return () }
+effect fn exercise(rejected: bool, parkBefore: bool) -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let state = run Shared.make<State>(State { started: 0, dropped: 0, finished: 0, rejected: rejected, live: 0, produced: 0, bad: 0, observers: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let execution = run Execution.make(observed(Shared.clone(&state), rejected, parkBefore), Shared.clone(&state), ready)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut branch = ()
+  run Execution.drive(move execution, &mut branch, complete, suspend)
+  return Shared.withMut(&state, inspect)
+}
+effect fn program() -> i32 ! OutOfMemoryError {
+  if (run exercise(false, false)) != 110 { return 1 }
+  if (run exercise(true, false)) != 110 { return 2 }
+  if (run exercise(false, true)) != 0 { return 3 }
+  return 42
+}
+effect fn noMemory(error: OutOfMemoryError) -> i32 { return -2 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), noMemory) }

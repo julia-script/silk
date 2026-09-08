@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -88,7 +89,7 @@ effect fn build() -> i32 ! OutOfMemoryError {
 }
 effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
 pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'vector-acceptance/move-only-union-read',
       ascii(source),
     )
@@ -101,7 +102,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`
 
 it.effect('lowers element cleanup before vector backing-storage cleanup', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'vector-acceptance/drop-order',
       ascii(`import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
@@ -141,7 +142,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`),
 
 it.effect('releases sort scratch while returning the initialized element storage', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'vector-acceptance/sort-scratch-cleanup',
       ascii(`import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }

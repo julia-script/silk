@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -11,7 +12,7 @@ it.effect('rejects a raw literal whose body is not valid UTF-8', () =>
       0xff,
       ...encoder.encode('" return 0 }'),
     ])
-    const snapshot = yield* Analysis.ofSourceRealized('raw-string/invalid-utf8', bytes)
+    const snapshot = yield* AnalysisFixture.retainingMain('raw-string/invalid-utf8', bytes)
     assert.isAbove(Analysis.diagnostics(snapshot).length, 0)
   }),
 )

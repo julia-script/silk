@@ -1,3 +1,4 @@
+import * as TestToolchain from './support/TestToolchain.js'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -15,7 +16,7 @@ const failureSource = `pub struct SomeError { code: i32 }
 pub effect fn main() -> () ! SomeError { fail SomeError { code: 42 } }`
 
 const nativeFailureReport =
-  'unhandled error: effect-entry/native.SomeError\n  at effect-entry/native.main (effect-entry/native:2:41)\n'
+  'unhandled error: effect-entry/native.SomeError\n  at effect-entry/native.main (effect-entry/native:2:41)\n  at silk/effect.Effect.flatMap (silk/effect:294:18)\n'
 
 const successSource = `pub struct SomeError { code: i32 }
 pub effect fn main() -> () ! SomeError { return () }`
@@ -29,7 +30,7 @@ it.effect('reports an unhandled effect entry through the native runtime', () =>
       compilation: {
         root: SourceFile.make('effect-entry/native', ascii(failureSource)),
       },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
+      toolchain: yield* TestToolchain.configured,
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'native-failure'),
@@ -44,13 +45,13 @@ it.effect('reports an unhandled effect entry through the native runtime', () =>
       ['-c', 'exec 2>&-; exec "$1"', 'silk-effect-entry', compiled.path],
       { encoding: 'utf8' },
     )
-    assert.strictEqual(closedStderr.status, 2)
+    assert.strictEqual(closedStderr.status, 1)
 
     const succeeded = yield* Driver.compile({
       compilation: {
         root: SourceFile.make('effect-entry/native-success', ascii(successSource)),
       },
-      toolchain: Object.freeze({ _tag: 'Toolchain', clang: '/usr/bin/clang', llvmAr: 'llvm-ar' }),
+      toolchain: yield* TestToolchain.configured,
       optimization: 'release',
       artifactKind: 'NativeExecutable',
       destination: join(destinationRoot, 'native-success'),
@@ -61,9 +62,7 @@ it.effect('reports an unhandled effect entry through the native runtime', () =>
     assert.strictEqual(successRun.status, 0)
     assert.strictEqual(successRun.stderr, '')
 
-    // The native entry receives the process command line so a host-input provider can read it. A
-    // program that never reads it keeps the exact same statuses and report bytes with arguments
-    // present, so the entry shape change is invisible to every existing program.
+    // Source startup owns process inputs; unused arguments preserve its status and report policy.
     const withArguments = spawnSync(compiled.path, ['one', 'two', 'three'], { encoding: 'utf8' })
     assert.strictEqual(withArguments.status, 1)
     assert.strictEqual(withArguments.stderr, nativeFailureReport)
@@ -72,7 +71,7 @@ it.effect('reports an unhandled effect entry through the native runtime', () =>
       ['-c', 'exec 2>&-; exec "$1" one two', 'silk-effect-entry', compiled.path],
       { encoding: 'utf8' },
     )
-    assert.strictEqual(closedWithArguments.status, 2)
+    assert.strictEqual(closedWithArguments.status, 1)
     const successWithArguments = spawnSync(succeeded.path, ['one', 'two'], { encoding: 'utf8' })
     assert.strictEqual(successWithArguments.status, 0)
     assert.strictEqual(successWithArguments.stderr, '')

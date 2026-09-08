@@ -4,11 +4,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
+import * as Config from 'effect/Config'
 import * as BuildExeCommand from '../src/BuildExeCommand.js'
 import * as CompilerHost from './CompilerHost.js'
 import * as Timeouts from './timeouts.js'
 
-const clang = '/usr/bin/clang'
+const defaultClang = (): string => {
+  if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
+  if (existsSync('/usr/local/opt/llvm/bin/clang')) return '/usr/local/opt/llvm/bin/clang'
+  return 'clang'
+}
+const clang = Effect.runSync(
+  Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
+)
 const root = mkdtempSync(join(tmpdir(), 'silk-build-exe-test-'))
 
 afterAll(() => {

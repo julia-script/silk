@@ -155,8 +155,35 @@ const runnerOf = (
   })
 }
 
-const completionOf = (completion: ProvisionalMir.CompletionPolicy): Mir.SuspensionCompletion =>
-  Object.freeze({ ...completion })
+const completionOf = (
+  completion: ProvisionalMir.CompletionPolicy,
+  operation: LocatedOperation['operation'],
+): Mir.SuspensionCompletion => {
+  // A finite choice may narrow a reified contract to one failure member, or to an
+  // infallible arm. Transport the selected call's exact outcome and projections.
+  if (completion._tag === 'Reify') {
+    if (operation._tag === 'CatchEffect')
+      return Object.freeze({
+        _tag: 'Reify',
+        outcome: operation.outcomeType.type,
+        successType: operation.outcomeType.type.success,
+        failureValueType: operation.failureValueType,
+        successShape: operation.successShape,
+        outcomeShape: operation.outcomeShape,
+        failureValueShape: operation.failureValueShape,
+      })
+    if (
+      operation._tag !== 'ExecutionPark' &&
+      Type.failureMembers(operation.outcomeType.type).length === 0
+    )
+      return Object.freeze({
+        _tag: 'Propagate',
+        outcome: operation.outcomeType.type,
+        failureMappings: Object.freeze([]),
+      })
+  }
+  return Object.freeze({ ...completion })
+}
 
 const pathPlanOf = (plan: SuspensionOwnership.ResumePlan): Mir.CoroutineFramePathPlan =>
   Object.freeze({
@@ -226,6 +253,7 @@ const sameSpan = (
 
 const regionsOf = (
   program: Mir.Module,
+  provisional: ProvisionalMir.Module,
   fn: Mir.MirFunction,
   execution: ProvisionalMir.Execution | undefined,
   ownership: SuspensionOwnership.Module,
@@ -233,6 +261,7 @@ const regionsOf = (
 ): ReadonlyArray<Mir.SuspensionRegion> => {
   if (execution === undefined) return Object.freeze([])
   const located = operationsOf(fn)
+  let expandedOrdinal = Math.max(-1, ...execution.regions.map((region) => region.id.ordinal)) + 1
   return Object.freeze(
     execution.regions.flatMap((region): ReadonlyArray<Mir.SuspensionRegion> => {
       if (region.outcome._tag === 'Complete') return []
@@ -260,44 +289,58 @@ const regionsOf = (
         ]
       }
       const outcome = region.outcome
-      const candidate = located.find(
+      const candidates = located.filter(
         (entry) =>
           sameSpan(entry.operation, outcome) &&
           (outcome.completion._tag === 'Reify'
-            ? entry.operation._tag === 'CatchEffect'
+            ? entry.operation._tag === 'CatchEffect' ||
+              (entry.operation._tag !== 'ExecutionPark' &&
+                Type.failureMembers(entry.operation.outcomeType.type).length === 0)
             : entry.operation._tag !== 'CatchEffect') &&
           (entry.operation._tag === 'ExecutionPark'
             ? Type.equals(outcome.runner.outcome.success, Type.unit)
             : true),
       )
-      if (candidate === undefined) return []
-      const plan = ownership.plans.find(
-        (candidatePlan) =>
-          Instances.keyText(candidatePlan.function) === Instances.keyText(fn.instance) &&
-          samePoint(candidatePlan.point, region.id),
-      )
-      const runner = runnerOf(outcome.runner, index, candidate.operation, program.functions)
-      return [
-        Object.freeze({
-          _tag: 'RunSuspendableEffectRegion',
-          point,
-          ownerRegion: candidate.region,
-          operation: candidate.operation,
-          runner,
-          completion: completionOf(outcome.completion),
-          liveLocals: plan?.slots.map((slot) => slot.local) ?? Object.freeze([]),
-          complete: Object.freeze({ _tag: 'CompleteInCurrentActivation' }),
-          relay: Object.freeze({
-            _tag: 'RelayExistingTransfer',
-            preserves: outcome.relay.preserves,
-            frame: plan?.frame ?? 'MissingOwnershipPlan',
-            ...(plan?.frame === 'StatefulRelay'
-              ? { state: descriptorOf(point, runner, plan) }
-              : {}),
+      return candidates.flatMap((candidate, ordinal): ReadonlyArray<Mir.SuspensionRegion> => {
+        const runner = runnerOf(outcome.runner, index, candidate.operation, program.functions)
+        // Lowering a selected failure handler can produce a synchronous call at the same
+        // source span as its protected suspendable recipe. Only the actual runner can relay.
+        if (
+          candidate.operation._tag !== 'ExecutionPark' &&
+          runner.instance !== undefined &&
+          ProvisionalMir.classificationOfExecution(provisional, runner.instance) === 'Synchronous'
+        )
+          return []
+        const selectedPoint =
+          ordinal === 0 ? point : Object.freeze({ ...point, ordinal: expandedOrdinal++ })
+        const plan = ownership.plans.find(
+          (candidatePlan) =>
+            Instances.keyText(candidatePlan.function) === Instances.keyText(fn.instance) &&
+            samePoint(candidatePlan.point, region.id) &&
+            candidatePlan.operation === candidate.operation,
+        )
+        return [
+          Object.freeze({
+            _tag: 'RunSuspendableEffectRegion',
+            point: selectedPoint,
+            ownerRegion: candidate.region,
+            operation: candidate.operation,
+            runner,
+            completion: completionOf(outcome.completion, candidate.operation),
+            liveLocals: plan?.slots.map((slot) => slot.local) ?? Object.freeze([]),
+            complete: Object.freeze({ _tag: 'CompleteInCurrentActivation' }),
+            relay: Object.freeze({
+              _tag: 'RelayExistingTransfer',
+              preserves: outcome.relay.preserves,
+              frame: plan?.frame ?? 'MissingOwnershipPlan',
+              ...(plan?.frame === 'StatefulRelay'
+                ? { state: descriptorOf(selectedPoint, runner, plan) }
+                : {}),
+            }),
+            provenance: candidate.operation.provenance,
           }),
-          provenance: candidate.operation.provenance,
-        }),
-      ]
+        ]
+      })
     }),
   )
 }
@@ -313,7 +356,7 @@ export const finalize = (
     program.functions.map((fn) => {
       const execution = ProvisionalMir.executionOf(provisional, fn.instance)
       const classification = ProvisionalMir.classificationOfExecution(provisional, fn.instance)
-      const regions = regionsOf(program, fn, execution, ownership, index)
+      const regions = regionsOf(program, provisional, fn, execution, ownership, index)
       const states = Object.freeze(
         regions
           .flatMap((region) =>

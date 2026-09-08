@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -14,7 +15,7 @@ const lowerStored = Effect.fnUntraced(function* (
   source: string,
   target: Target.Target,
 ) {
-  const snapshot = yield* Analysis.ofSourceRealized(name, ascii(source), target.id)
+  const snapshot = yield* AnalysisFixture.retainingMain(name, ascii(source), target.id)
   assert.deepEqual(Analysis.diagnostics(snapshot), [], name)
   return { snapshot, module: Analysis.loweredMir(snapshot) }
 })
@@ -135,7 +136,8 @@ it.effect('lowers the same stored-callable matrix through static native LLVM tar
       const artifact = yield* Backend.emit(LlvmBackend.LlvmBackend, module, { mode: 'release' })
       assert.strictEqual(artifact._tag, 'LlvmBitcodeArtifact')
       if (artifact._tag !== 'LlvmBitcodeArtifact') return
-      assert.include(artifact.ir, 'define hidden i32 @silk_main')
+      assert.isTrue(artifact.symbols.some((entry) => entry.declaration.name === 'main'))
+      assert.notInclude(artifact.ir, '@silk_main')
       assert.include(artifact.ir, testCase.target)
     }
   }),

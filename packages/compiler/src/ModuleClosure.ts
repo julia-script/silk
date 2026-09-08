@@ -370,6 +370,21 @@ export const loadProject = Effect.fn('ModuleClosure.loadProject')(function* (
   const diagnostics: Array<ReadonlyArray<Diagnostic.Diagnostic>> = []
   for (const root of roots) {
     if (!Stdlib.isReserved(root.id)) continue
+    // Selected runtime roots arrive through the toolchain resolver. Verify the bytes and origin
+    // against that resolver rather than trusting a caller-provided provenance label. Embedded
+    // toolchain sources have Memory origins, while on-disk supplies have ToolchainFile origins.
+    {
+      const supplied = yield* Effect.result(SourceResolver.resolveStandardLibrary(root.id))
+      if (
+        Result.isSuccess(supplied) &&
+        Option.isSome(supplied.success) &&
+        SourceFile.equals(
+          root,
+          SourceFile.make(root.id, supplied.success.value.bytes, supplied.success.value.origin),
+        )
+      )
+        continue
+    }
     const span = Option.getOrThrow(SourceSpan.make(root, 0, 0))
     diagnostics.push(Object.freeze([Diagnostic.reservedModuleIdentity(root.id, span)]))
   }

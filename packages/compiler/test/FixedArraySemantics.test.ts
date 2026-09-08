@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -9,7 +10,8 @@ import * as Projections from './support/projections.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
-const snapshot = (source: string) => Analysis.ofSourceRealized('fixed-arrays/main', ascii(source))
+const snapshot = (source: string) =>
+  AnalysisFixture.retainingMain('fixed-arrays/main', ascii(source))
 
 const nested = (fact: Elaboration.ExpressionFact): ReadonlyArray<Elaboration.ExpressionFact> => {
   if (fact._tag === 'Move' || fact._tag === 'FieldProjection') return [fact.subject]

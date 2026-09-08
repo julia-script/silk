@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -19,7 +20,7 @@ pub fn main() -> i32 {
 }`
 
 const planned = (target: Target.Target) =>
-  Analysis.ofSourceRealized('string/layout', encoder.encode(source), target.id)
+  AnalysisFixture.retainingMain('string/layout', encoder.encode(source), target.id)
 
 it.effect('selects canonical string storage and calling lanes on every current target', () =>
   Effect.gen(function* () {

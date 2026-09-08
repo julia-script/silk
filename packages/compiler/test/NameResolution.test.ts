@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -22,11 +23,10 @@ const snapshot = (
       .filter(([name]) => name !== root)
       .map(([name, source]) => [name, ascii(source)] as const),
   )
-  return Analysis.makeRealized(
-    target === undefined
-      ? { root: SourceFile.make(root, ascii(rootText)) }
-      : { root: SourceFile.make(root, ascii(rootText)), target },
-  ).pipe(Effect.provide(SourceResolver.memory(imports)))
+  return Analysis.makeRealized({
+    root: SourceFile.make(root, ascii(rootText)),
+    configuration: AnalysisFixture.configuration(root, target),
+  }).pipe(Effect.provide(SourceResolver.memory(imports)))
 }
 
 it.effect('resolves scalar enums as ordinary nominal declaration types', () =>

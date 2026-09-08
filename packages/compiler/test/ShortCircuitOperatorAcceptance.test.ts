@@ -1,3 +1,4 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
@@ -110,7 +111,7 @@ it('binds `&&` tighter than `||` and both looser than equality', () => {
 
 it.effect('rejects a non-bool operand on either side', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'short-circuit/non-bool',
       ascii(`fn left(a: i32, b: bool) -> bool { return a && b }
 fn right(a: bool, b: i32) -> bool { return a || b }
@@ -125,7 +126,7 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('rejects a use reached after one short-circuit path moves its owner', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'short-circuit/conditional-use-after-move',
       ascii(`struct Flag { value: bool }
 fn unwrap(flag: Flag) -> bool { return flag.value }
@@ -144,7 +145,7 @@ pub fn main() -> i32 { return 0 }`),
 
 it.effect('isolates an affine move inside the selected short-circuit MIR branch', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'short-circuit/affine-mir-branch',
       ascii(`struct Flag { value: bool }
 fn unwrap(flag: Flag) -> bool { return flag.value }

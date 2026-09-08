@@ -1,3 +1,17 @@
+import * as AnalysisFixture from './support/AnalysisFixture.js'
+import * as MirEncoding from '../src/MirEncoding.js'
+import * as NativeDiagnosticOutcome from '../src/NativeDiagnosticOutcome.js'
+import * as NativeResult from '../src/NativeResult.js'
+import * as NativeDiagnosticTransfer from '../src/NativeDiagnosticTransfer.js'
+import * as ContinuationTransfer from '../src/ContinuationTransfer.js'
+import * as LlvmFunction from '@silklang/llvm/Function'
+import * as LlvmFunctionBody from '@silklang/llvm/FunctionBody'
+import * as LlvmBlock from '@silklang/llvm/Block'
+import * as LlvmValue from '@silklang/llvm/Value'
+import * as LlvmConstant from '@silklang/llvm/Constant'
+import * as NativeDiagnosticContext from '../src/NativeDiagnosticContext.js'
+import * as NativeDiagnosticFailure from '../src/NativeDiagnosticFailure.js'
+import * as NativeCall from '../src/NativeCall.js'
 import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -7,6 +21,17 @@ import * as Intrinsic from '../src/Intrinsic.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as Scalar from '../src/Scalar.js'
 import * as Type from '../src/Type.js'
+import * as SourceResolver from '../src/SourceResolver.js'
+import * as MirVerification from '../src/MirVerification.js'
+import * as Mir from '../src/Mir.js'
+import * as MirLinearization from '../src/MirLinearization.js'
+import * as NativeFunction from '../src/NativeFunction.js'
+import { unreachable } from './support/raise.js'
+import * as LlvmBuilder from '@silklang/llvm/Builder'
+import * as LlvmType from '@silklang/llvm/Type'
+import * as LlvmIrText from '@silklang/llvm/IrText'
+import * as NativeDeclare from '../src/NativeDeclare.js'
+import * as NativeType from '../src/NativeType.js'
 
 const encoder = new TextEncoder()
 
@@ -22,7 +47,33 @@ const operationKeys = (snapshot: Analysis.FrontendSnapshot): ReadonlyArray<strin
     ),
   )
 
+const observationWrapper = `fn observing<'env, S, A, ?R, F: fn<'static>(&mut S, u8, usize, usize, string<'static>, string<'static>) -> usize + Intrinsic.NonParking>(state: S, observer: F, body: once Effect<'env; A ? R>) -> once Effect<'env; A ? R> {
+  return Intrinsic.observeDiagnostics<S, A, R, F>(move state, move observer, move body)
+}`
+
 const acceptedSources = Object.freeze([
+  `struct Failure {}
+effect fn failed() -> i32 ! Failure { fail Failure {} }
+effect fn recover(error: Failure) -> i32 {
+  drop error
+  let policy = Intrinsic.observeUnhandled()
+  return 42
+}
+pub fn main() -> i32 { return run Intrinsic.catchFailure<Failure>(failed(), recover) }`,
+  `${observationWrapper}
+struct Observer { count: usize }
+fn observer(state: &mut Observer, event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize {
+  state.count = state.count + 1
+  return 0
+}
+effect fn observed() -> i32 { return 42 }
+pub fn main() -> i32 {
+  let deferred = observing(Observer { count: 0 }, observer, observed())
+  return 0
+}`,
+  `pub unsafe fn reinterpretStorage(value: ?*mut u8) -> ?*mut i32 {
+    unsafe {return Intrinsic.pointerReinterpret<?*mut u8, ?*mut i32>(value)}
+  }`,
   ...Scalar.integers().map((scalar, scalarOrdinal) => {
     const calls = scalar.operations.map((operation, operationOrdinal) => {
       const arguments_ = operation.arity === 1 ? '1' : '1, 1'
@@ -266,33 +317,6 @@ pub effect fn main() -> () ! WriterError {
   let second = run Effect.provideMut(Writer.writeAll(b"error"), &mut native)
   return ()
 }`,
-  `import silk.usize as usize
-import silk.option { Option }
-fn absurd<T>() -> T { let boom = 1 / 0 return absurd<T>() }
-effect fn processExecute(program: &[u8], arguments: &[u8], environment: &[u8], directory: &[u8], status: &mut i32, exit: &mut i32, outputLength: &mut usize, errorLength: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osProcessExecute(program, arguments, environment, directory, status, exit, outputLength, errorLength, reason, code) }
-  return false
-}
-effect fn processCapture(output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osProcessCapture(0, usize.ZERO, move output, count, reason, code) }
-  return false
-}
-effect fn hostArgumentCount(count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osHostArgumentCount(count, reason, code) }
-  return false
-}
-effect fn hostArgument(index: usize, output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osHostArgument(index, move output, count, reason, code) }
-  return false
-}
-effect fn hostVariable(name: &[u8], output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osHostVariable(name, move output, count, reason, code) }
-  return false
-}
-effect fn hostWorkingDirectory(output: &mut [u8], count: &mut usize, reason: &mut i32, code: &mut u32) -> bool {
-  unsafe { return run Intrinsic.osHostWorkingDirectory(move output, count, reason, code) }
-  return false
-}`,
 ])
 
 it('models enumValue as a sealed declaration-dependent rule with no generic type hole', () => {
@@ -400,7 +424,7 @@ fn suspend<'env>(
   return Intrinsic.suspendEffect(move deferred)
 }
 pub fn main() -> i32 { return 42 }`
-    const snapshot = yield* Analysis.ofSourceRealized(module, encoder.encode(source))
+    const snapshot = yield* AnalysisFixture.retainingMain(module, encoder.encode(source))
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     const suspended = Analysis.expressionsOf(snapshot, module).find(
       (expression) =>
@@ -423,9 +447,706 @@ pub fn main() -> i32 { return 42 }`
   }),
 )
 
+it.effect('keeps diagnostic observation infallible and preserves protected requirements', () =>
+  Effect.gen(function* () {
+    const module = 'intrinsic/observation-rows'
+    const snapshot = yield* Analysis.ofSource(
+      module,
+      encoder.encode(`${observationWrapper}
+struct Observer {}
+service Clock {}
+fn observer(state: &mut Observer, event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize { return 0 }
+fn observe<'env>(body: once Effect<'env; i32 ? &Clock>) -> once Effect<'env; i32 ? &Clock> {
+  return observing(Observer {}, observer, move body)
+}
+pub fn main() -> i32 { return 42 }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const observed = Analysis.expressionsOf(snapshot, module).find(
+      (expression) =>
+        expression._tag === 'Call' &&
+        expression.type._tag === 'Available' &&
+        Type.isEffect(expression.type.type) &&
+        expression.type.type.success === 'i32',
+    )
+    const type = observed?.type._tag === 'Available' ? observed.type.type : undefined
+    assert.isTrue(type !== undefined && Type.isEffect(type))
+    if (type !== undefined && Type.isEffect(type)) {
+      assert.strictEqual(type.access, 'Take')
+      assert.strictEqual(type.success, 'i32')
+      assert.deepEqual(Type.failureMembers(type), [])
+      assert.deepEqual(
+        Type.requirementMembers(type).map((member) => Type.encode(member.capability)),
+        [`${module}.Clock`],
+      )
+      assert.notStrictEqual(type.environment._tag, 'StaticLifetime')
+    }
+  }),
+)
+
+it.effect('rejects failures escaping the diagnostic observer lifetime', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Analysis.ofSource(
+      'intrinsic/observation-escaping-failure',
+      encoder.encode(`${observationWrapper}
+struct Observer {}
+struct Failure {}
+fn observer(state: &mut Observer, event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize { return 0 }
+effect fn failing() -> i32 ! Failure { fail Failure {} }
+pub fn main() -> i32 {
+  let observed = observing(Observer {}, observer, failing())
+  return 42
+}`),
+    )
+    assert.include(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      'SEM0052',
+    )
+  }),
+)
+
+it.effect('rejects terminal observation proven outside selected recovery execution', () =>
+  Effect.gen(function* () {
+    for (const [name, entry, rejected] of [
+      ['direct', 'let policy = terminal() return 42', true],
+      ['lazy-body', 'return run lazy()', true],
+      ['selected-helper', 'return run Intrinsic.catchFailure<Failure>(failed(), recover)', false],
+      [
+        'mixed-helper',
+        'let policy = terminal() return run Intrinsic.catchFailure<Failure>(failed(), recover)',
+        false,
+      ],
+    ] as const) {
+      const source = `struct Failure {}
+fn terminal() -> usize { return Intrinsic.observeUnhandled() }
+effect fn lazy() -> i32 { let policy = terminal() return 42 }
+effect fn failed() -> i32 ! Failure { fail Failure {} }
+effect fn recover(error: Failure) -> i32 { drop error let policy = terminal() return 42 }
+pub fn main() -> i32 { ${entry} }`
+      const frontend = yield* AnalysisFixture.frontend(
+        `intrinsic/terminal-${name}`,
+        encoder.encode(source),
+      )
+      assert.deepEqual(Analysis.diagnostics(frontend), [])
+      const snapshot = yield* Analysis.realize(frontend, frontend.configuration).pipe(
+        Effect.provide(SourceResolver.empty),
+      )
+      const diagnostics = Analysis.diagnostics(snapshot)
+      assert.deepEqual(
+        diagnostics.map((entry) => entry.code),
+        rejected ? ['SEM0217'] : [],
+        name,
+      )
+      if (rejected)
+        assert.deepEqual(
+          diagnostics.map((entry) => source.slice(entry.span.start, entry.span.end).trim()),
+          ['Intrinsic.observeUnhandled()'],
+          name,
+        )
+    }
+  }),
+)
+
+it.effect(
+  'clears terminal context inside fresh observation but restores the enclosing handler',
+  () =>
+    Effect.gen(function* () {
+      for (const [name, protectedBody, recovery, rejected] of [
+        ['fresh-body', 'let policy = terminal() return 42', 'return run fresh()', true],
+        ['owner-cleanup', 'return 42', 'return run fresh()', false],
+        [
+          'restored-handler',
+          'return 42',
+          'let done = run fresh() let policy = terminal() return 42',
+          false,
+        ],
+        [
+          'inner-handler',
+          'return run Intrinsic.catchFailure<Failure>(failed(), inner)',
+          'return run fresh()',
+          false,
+        ],
+      ] as const) {
+        const source = `${observationWrapper}
+struct Failure {}
+struct State {}
+${name === 'owner-cleanup' ? 'impl Drop for State { fn drop(self: &mut State) -> () { let policy = terminal() return () } }' : ''}
+fn observer(state: &mut State, event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize { return 0 }
+fn terminal() -> usize { return Intrinsic.observeUnhandled() }
+effect fn failed() -> i32 ! Failure { fail Failure {} }
+effect fn inner(error: Failure) -> i32 { drop error let policy = terminal() return 42 }
+effect fn protectedBody() -> i32 { ${protectedBody} }
+effect fn fresh() -> i32 { return run observing(State {}, observer, protectedBody()) }
+effect fn recover(error: Failure) -> i32 { drop error ${recovery} }
+pub fn main() -> i32 { return run Intrinsic.catchFailure<Failure>(failed(), recover) }`
+        const frontend = yield* AnalysisFixture.frontend(
+          `intrinsic/terminal-${name}`,
+          encoder.encode(source),
+        )
+        assert.deepEqual(Analysis.diagnostics(frontend), [])
+        const snapshot = yield* Analysis.realize(frontend, frontend.configuration).pipe(
+          Effect.provide(SourceResolver.empty),
+        )
+        const diagnostics = Analysis.diagnostics(snapshot)
+        assert.deepEqual(
+          diagnostics.map((entry) => entry.code),
+          rejected ? ['SEM0217'] : [],
+          name,
+        )
+        if (rejected)
+          assert.deepEqual(
+            diagnostics.map((entry) => source.slice(entry.span.start, entry.span.end).trim()),
+            ['Intrinsic.observeUnhandled()'],
+          )
+      }
+    }),
+)
+
+it.effect('isolates independent execution bodies while preserving selected drive callbacks', () =>
+  Effect.gen(function* () {
+    for (const [name, body, callback, readiness, rejected] of [
+      ['independent-body', 'let policy = terminal() return 42', 'return ()', 'return ()', true],
+      ['drive-callback', 'return 42', 'let policy = terminal() return ()', 'return ()', false],
+      ['ready-callback', 'return 42', 'return ()', 'let policy = terminal() return ()', false],
+    ] as const) {
+      const source = `import silk.effect { Effect }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.execution { Execution }
+struct Failure {}
+fn terminal() -> usize { return Intrinsic.observeUnhandled() }
+effect fn failed() -> i32 ! Failure { fail Failure {} }
+effect fn body() -> i32 { ${body} }
+fn ready(state: &()) -> () { ${readiness} }
+fn complete(state: (), value: i32) -> () { ${callback} }
+fn suspended(state: (), execution: Intrinsic.Execution<i32>) -> () { drop execution return () }
+effect fn noStorage(error: OutOfMemoryError) -> i32 { drop error return 0 }
+effect fn recover(error: Failure) -> i32 ! OutOfMemoryError {
+  drop error
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut execution = run Execution.make(body(), (), ready) |> Effect.provideMut<Allocator>(&mut allocator)
+  Execution.notifyInitial(&mut execution)
+  run Execution.drive(move execution, (), complete, suspended)
+  return 42
+}
+pub fn main() -> i32 {
+  return run Intrinsic.catchFailure<OutOfMemoryError>(Intrinsic.catchFailure<Failure>(failed(), recover), noStorage)
+}`
+      const frontend = yield* AnalysisFixture.frontend(
+        `intrinsic/terminal-${name}`,
+        encoder.encode(source),
+      )
+      assert.deepEqual(Analysis.diagnostics(frontend), [])
+      const snapshot = yield* Analysis.realize(frontend, frontend.configuration).pipe(
+        Effect.provide(SourceResolver.empty),
+      )
+      const diagnostics = Analysis.diagnostics(snapshot)
+      assert.deepEqual(
+        diagnostics.map((entry) => entry.code),
+        rejected ? ['SEM0217'] : [],
+        name,
+      )
+      if (rejected)
+        assert.deepEqual(
+          diagnostics.map((entry) => source.slice(entry.span.start, entry.span.end).trim()),
+          ['Intrinsic.observeUnhandled()'],
+        )
+    }
+  }),
+)
+
+for (const [name, body, rejected] of [
+  ['direct', 'return 0', false],
+  ['nested-transfer', 'return run Effect.suspend(value())', true],
+  ['lazy-only', 'let ignored = Effect.suspend(value()) return 0', false],
+  ['cleanup-transfer', 'let guard = Guard {} return 0', true],
+  ['explicit-cleanup', 'let guard = Guard {} drop guard return 0', true],
+  ['callee-cleanup', 'return helper()', true],
+  ['lazy-cleanup', 'let ignored = guarded() return 0', false],
+  ['executed-cleanup', 'return run guarded()', true],
+  ['replacement-cleanup', 'state.guard = Guard {} return 0', true],
+] as const) {
+  it.effect(`checks direct observer execution: ${name}`, () =>
+    Effect.gen(function* () {
+      const state = name === 'replacement-cleanup' ? 'Observer { guard: Guard {} }' : 'Observer {}'
+      const call = `observing(${state}, observer, application())`
+      const source = `${observationWrapper}
+import silk.effect { Effect }
+struct Observer { ${name === 'replacement-cleanup' ? 'guard: Guard' : ''} }
+effect fn value() -> usize { return 0 }
+struct Guard {}
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () { let done = run Effect.suspend(value()) return () }
+}
+fn helper() -> usize { let guard = Guard {} return 0 }
+effect fn guarded() -> usize { let guard = Guard {} return 0 }
+fn observer(state: &mut Observer, event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize { ${body} }
+effect fn application() -> i32 { return 42 }
+pub fn main() -> i32 {
+  let observed = ${call}
+  return 0
+}`
+      const frontend = yield* AnalysisFixture.frontend(
+        `intrinsic/observer-${name}`,
+        encoder.encode(source),
+      )
+      assert.deepEqual(Analysis.diagnostics(frontend), [])
+      const snapshot = yield* Analysis.realize(frontend, frontend.configuration).pipe(
+        Effect.provide(SourceResolver.empty),
+      )
+      const diagnostics = Analysis.diagnostics(snapshot).filter((entry) => entry.code === 'SEM0216')
+      assert.strictEqual(diagnostics.length, rejected ? 1 : 0, name)
+      if (rejected) {
+        assert.deepEqual(
+          diagnostics.map((entry) => entry.reason),
+          [{ _tag: 'InvalidDiagnosticObserver', detail: 'NestedTransfer' }],
+        )
+        assert.deepEqual(
+          diagnostics.map((entry) => source.slice(entry.span.start, entry.span.end)),
+          [` ${call}`],
+        )
+      }
+    }),
+  )
+}
+
+it.effect('rejects observation in the executed callback closure', () =>
+  Effect.gen(function* () {
+    for (const [name, body, rejected] of [
+      ['direct', 'return run observing(State {}, leaf, value())', true],
+      ['callee', 'return nested()', true],
+      ['cycle', 'return cycleA(1)', true],
+      ['cleanup', 'let guard = Guard {} return 0', true],
+      [
+        'lazy-owned-cleanup',
+        'let ignored = observing(Guard {}, guardLeaf, value()) drop ignored return 0',
+        true,
+      ],
+      [
+        'lazy-owned-implicit',
+        'let ignored = observing(Guard {}, guardLeaf, value()) return 0',
+        true,
+      ],
+      ['parameter-cleanup', 'return discard(observing(Guard {}, guardLeaf, value()))', true],
+      ['lazy', 'let ignored = observing(State {}, leaf, value()) drop ignored return 0', false],
+      ['lazy-body', 'let ignored = guarded() drop ignored return 0', false],
+      ['executed-body', 'return run guarded()', true],
+    ] as const) {
+      const source = `${observationWrapper}
+${observationWrapper.replaceAll('observing', 'nestedObserving')}
+struct State {}
+effect fn value() -> usize { return 0 }
+fn leaf(state: &mut State, event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize { return 0 }
+fn nested() -> usize { return run nestedObserving(State {}, leaf, value()) }
+fn cycleA(depth: i32) -> usize { if depth == 0 { return nested() } return cycleB(depth - 1) }
+fn cycleB(depth: i32) -> usize { return cycleA(depth) }
+fn discard<'env>(body: once Effect<'env; usize>) -> usize { drop body return 0 }
+struct Guard {}
+impl Drop for Guard { fn drop(self: &mut Guard) -> () { let done = nested() return () } }
+fn guardLeaf(state: &mut Guard, event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize { return 0 }
+effect fn guarded() -> usize { let guard = Guard {} return 0 }
+fn observer(state: &mut State, event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize { ${body} }
+pub fn main() -> i32 { let done = run observing(State {}, observer, value()) return 0 }`
+      const frontend = yield* AnalysisFixture.frontend(
+        `intrinsic/observer-recursion-${name}`,
+        encoder.encode(source),
+      )
+      assert.deepEqual(Analysis.diagnostics(frontend), [], name)
+      const snapshot = yield* Analysis.realize(frontend, frontend.configuration).pipe(
+        Effect.provide(SourceResolver.empty),
+      )
+      const diagnostics = Analysis.diagnostics(snapshot).filter((entry) => entry.code === 'SEM0216')
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).filter((entry) => entry.code !== 'SEM0216'),
+        [],
+        name,
+      )
+      assert.strictEqual(diagnostics.length, rejected ? 1 : 0, name)
+      if (rejected)
+        assert.deepEqual(
+          diagnostics.map((entry) => entry.reason),
+          [
+            {
+              _tag: 'InvalidDiagnosticObserver',
+              detail: 'callback execution recursively observes diagnostics',
+            },
+          ],
+        )
+    }
+  }),
+)
+
+it.effect('retains distinct protected bodies in owned observer environments', () =>
+  Effect.gen(function* () {
+    const frontend = yield* AnalysisFixture.frontend(
+      'intrinsic/observer-captures',
+      encoder.encode(`${observationWrapper}
+struct Observer { value: i32 }
+impl Drop for Observer { fn drop(self: &mut Observer) -> () { return () } }
+fn observer(state: &mut Observer, event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize { return 0 }
+effect fn application() -> i32 { return 42 }
+effect fn otherApplication() -> i32 { return 43 }
+export "C" fn exported() -> i32 as "observer_abi_probe" { return 42 }
+pub fn main() -> i32 {
+  let observed = observing(Observer { value: 7 }, observer, application())
+  let other = observing(Observer { value: 8 }, observer, otherApplication())
+  drop other
+  drop observed
+  return 42
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(frontend), [])
+    const snapshot = yield* Analysis.realize(frontend, frontend.configuration).pipe(
+      Effect.provide(SourceResolver.empty),
+    )
+    const environments = snapshot.instances.effects.filter(
+      (entry) => entry.owner.declaration.name === 'observing',
+    )
+    assert.strictEqual(
+      snapshot.mir._tag,
+      'Available',
+      snapshot.mir._tag === 'Unavailable' ? snapshot.mir.error.message : '',
+    )
+    const scopes = Analysis.loweredMir(snapshot)
+      .functions.flatMap(MirVerification.operations)
+      .filter((operation) => operation._tag === 'DiagnosticScope')
+    assert.strictEqual(scopes.length, 2)
+    assert.deepEqual(
+      scopes.map((scope) => scope.stateCleanup._tag),
+      ['HookCleanup', 'HookCleanup'],
+    )
+    assert.isTrue(
+      scopes.every((scope) =>
+        Mir.executionOperations(scope.body).some(
+          (operation) =>
+            operation._tag === 'RunEffectValue' ||
+            operation._tag === 'RunStaticEffect' ||
+            operation._tag === 'RunEffect',
+        ),
+      ),
+    )
+    for (const fn of Analysis.loweredMir(snapshot).functions) {
+      const operations = MirVerification.operations(fn)
+      for (const scope of operations.filter((operation) => operation._tag === 'DiagnosticScope')) {
+        assert.isFalse(
+          operations.some(
+            (operation) =>
+              operation._tag === 'Drop' && operation.local.ordinal === scope.state.ordinal,
+          ),
+        )
+        const blocks = MirLinearization.linearize(fn)
+        assert.isTrue(
+          blocks.some(
+            (block) =>
+              block.recoveryBoundary?.ordinal === scope.destination.ordinal &&
+              block.operations.some((operation) => operation._tag === 'RunEffectValue'),
+          ),
+        )
+        const leaving =
+          blocks.find((block) =>
+            block.operations.some(
+              (operation) =>
+                operation._tag === 'LeaveDiagnosticScope' &&
+                operation.scope.ordinal === scope.destination.ordinal,
+            ),
+          ) ?? unreachable('expected observation owner cleanup block')
+        assert.notStrictEqual(leaving.recoveryBoundary?.ordinal, scope.destination.ordinal)
+        const roots = NativeFunction.discoverRoots(fn, blocks)
+        assert.isTrue(roots.address.has(scope.state.ordinal))
+        assert.isTrue(roots.mutable.has(scope.state.ordinal))
+        assert.isTrue(roots.address.has(scope.observer.ordinal))
+        assert.isTrue(roots.mutable.has(scope.observer.ordinal))
+        const path: Array<MirLinearization.LinearOperation> = []
+        const visited = new Set<number>()
+        let next = fn.entry
+        while (!visited.has(next.ordinal)) {
+          visited.add(next.ordinal)
+          const block =
+            blocks.find((candidate) => candidate.id.ordinal === next.ordinal) ??
+            unreachable('observer execution has a missing control target')
+          path.push(...block.operations)
+          if (block.terminator._tag !== 'Jump') {
+            assert.strictEqual(block.terminator._tag, 'Return')
+            break
+          }
+          next = block.terminator.target
+        }
+        const enter = path.findIndex((operation) => operation._tag === 'EnterDiagnosticScope')
+        const run = path.findIndex((operation) => operation._tag === 'RunEffectValue')
+        const leave = path.findIndex((operation) => operation._tag === 'LeaveDiagnosticScope')
+        const stateDrop = path.findIndex(
+          (operation) =>
+            operation._tag === 'Drop' && operation.local.ordinal === scope.state.ordinal,
+        )
+        const observerDrop = path.findIndex(
+          (operation) =>
+            operation._tag === 'Drop' && operation.local.ordinal === scope.observer.ordinal,
+        )
+        assert.isAtLeast(enter, 0)
+        assert.isAbove(run, enter)
+        assert.isAbove(leave, run)
+        assert.isAbove(observerDrop, leave)
+        assert.isAbove(stateDrop, observerDrop)
+      }
+    }
+    assert.strictEqual(environments.length, 2)
+    assert.deepEqual(
+      environments.map((entry) => entry.captures.map((capture) => capture.access)),
+      [
+        ['Take', 'Take', 'Take'],
+        ['Take', 'Take', 'Take'],
+      ],
+    )
+    assert.deepEqual(
+      environments.map((entry) => entry.type.access),
+      ['Take', 'Take'],
+    )
+    assert.isTrue(
+      environments.every((entry) => {
+        const capture = entry.captures.at(1)
+        if (capture === undefined || !Type.isRepresented(capture.type)) return false
+        const argument = capture.type.representation.argument
+        return (
+          Type.isExactRepresentationArgument(argument) &&
+          argument.identity._tag === 'CallableIdentityArgument'
+        )
+      }),
+    )
+    assert.isTrue(environments.every((entry) => entry.captures.at(2)?.effectIdentity !== undefined))
+    assert.strictEqual(
+      new Set(environments.map((entry) => entry.captures.at(2)?.effectIdentity)).size,
+      2,
+    )
+    assert.deepEqual(
+      environments.map((entry) => entry.captures.map((capture) => capture.sourceOrdinal)),
+      [
+        [0, 1, 2],
+        [0, 1, 2],
+      ],
+    )
+    const builder = yield* LlvmBuilder.make()
+    const i32 = yield* LlvmType.integer(builder, 32)
+    const pointer = yield* LlvmType.pointer(builder)
+    const types: NativeType.LoweringContext = {
+      program: Analysis.loweredMir(snapshot),
+      i32,
+      f32: yield* LlvmType.float(builder),
+      f64: yield* LlvmType.double(builder),
+      pointer,
+      integerTypes: new Map(
+        yield* Effect.forEach([8, 16, 32, 64], (bits) =>
+          Effect.map(LlvmType.integer(builder, bits), (type) => [bits, type] as const),
+        ),
+      ),
+    }
+    const declarations = yield* NativeDeclare.functions({
+      builder,
+      program: types.program,
+      i32,
+      pointer,
+      lanesFor: (type) => NativeType.lanesFor(types, type),
+      laneType: (lane) => NativeType.laneType(types, lane),
+    })
+    const callbackDeclaration = declarations.declared.find(
+      (entry) => entry.fn.id.name === 'observer',
+    )
+    assert.strictEqual(callbackDeclaration?.diagnosticParameter, 8)
+    assert.strictEqual(callbackDeclaration?.parameterTypes.length, 10)
+    assert.strictEqual(callbackDeclaration?.parameterTypes.at(8), pointer)
+    yield* NativeDeclare.exportThunks({
+      support: true,
+      foreignGuard: undefined,
+      builder,
+      program: types.program,
+      declared: declarations.declared,
+      cType: (type) => (type._tag === 'Void' ? undefined : i32),
+    })
+    const exported = declarations.declared.find((entry) => entry.fn.id.name === 'exported')
+    assert.isDefined(exported)
+    const ir = yield* LlvmIrText.render(builder)
+    assert.include(ir, 'define i32 @observer_abi_probe()')
+    assert.include(
+      ir,
+      `call i32 @${exported?.symbol}(ptr null, { ptr, i64, ptr, i64, ptr, i64 } zeroinitializer)`,
+    )
+  }),
+)
+
+it.effect('retains the diagnostic state owner across a protected suspension', () =>
+  Effect.gen(function* () {
+    const frontend = yield* AnalysisFixture.frontend(
+      'intrinsic/observer-suspension',
+      encoder.encode(`${observationWrapper}
+struct Observer { value: i32 }
+impl Drop for Observer { fn drop(self: &mut Observer) -> () { return () } }
+fn observer(state: &mut Observer, event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>, salt: usize) -> usize { return salt }
+struct Problem { code: i32 }
+effect fn risky() -> i32 ! Problem {
+  let resumed = run Intrinsic.suspendEffect(effect { return 0 })
+  fail Problem { code: resumed }
+}
+import silk.effect { Effect }
+effect fn recover(problem: Problem) -> i32 {
+  let deferred = effect { return 42 + problem.code }
+  let offset = run Intrinsic.suspendEffect(effect { return 0 })
+  return (run Intrinsic.suspendEffect(deferred)) + offset
+}
+effect fn application() -> i32 { return run Effect.catchAll(risky(), recover) }
+pub fn main() -> i32 { return run observing(Observer { value: 7 }, observer(11), application()) }`),
+    )
+    assert.deepEqual(Analysis.diagnostics(frontend), [])
+    const snapshot = yield* Analysis.realize(frontend, frontend.configuration).pipe(
+      Effect.provide(SourceResolver.empty),
+    )
+    assert.strictEqual(
+      snapshot.mir._tag,
+      'Available',
+      snapshot.mir._tag === 'Unavailable' ? snapshot.mir.error.message : '',
+    )
+    const fn =
+      Analysis.loweredMir(snapshot).functions.find((candidate) =>
+        MirVerification.operations(candidate).some(
+          (operation) => operation._tag === 'DiagnosticScope',
+        ),
+      ) ?? unreachable('expected an observer runner')
+    const scope =
+      MirVerification.operations(fn).find((operation) => operation._tag === 'DiagnosticScope') ??
+      unreachable('expected a diagnostic scope')
+    const relay = fn.suspension?.regions.find(
+      (region) => region._tag === 'RunSuspendableEffectRegion',
+    )
+    assert.strictEqual(relay?._tag, 'RunSuspendableEffectRegion')
+    const module = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(module), [])
+    const frames = module.coroutineFrames ?? unreachable('expected observer continuation frames')
+    for (const frame of frames.entries) {
+      assert.deepEqual(
+        frame.header.map((field) => field.role),
+        Mir.coroutineFrameHeaderRoles(module),
+      )
+      assert.strictEqual(frame.header.at(2)?.offset, module.layout.target.pointerSize * 2)
+      for (const state of frame.states)
+        for (const field of state.payload)
+          assert.isAtLeast(field.offset, module.layout.target.pointerSize * 15)
+    }
+    const metadataFields = frames.entries.flatMap((frame) => frame.diagnosticOutcomes)
+    assert.isAbove(metadataFields.length, 0)
+    assert.include(MirEncoding.encode(module), 'diagnostic-outcome %')
+    const recoveredRunners = module.functions.filter(
+      (candidate) =>
+        Mir.diagnosticOutcomeLocals(module, candidate).length > 0 &&
+        MirLinearization.linearize(candidate).some(
+          (block) => (block.recoveryOutcomes?.length ?? 0) > 0,
+        ),
+    )
+    const controlKinds = recoveredRunners.flatMap(
+      (candidate) =>
+        candidate.suspension?.regions.flatMap((region) => {
+          if (region._tag !== 'RunSuspendableEffectRegion') return []
+          assert.deepEqual(
+            [region.point.sourceId, region.point.spanStart, region.point.spanEnd],
+            [
+              region.operation.provenance.span.sourceId,
+              region.operation.provenance.span.start,
+              region.operation.provenance.span.end,
+            ],
+          )
+          assert.isDefined(region.relay.state)
+          return [region.operation._tag]
+        }) ?? [],
+    )
+    assert.include(controlKinds, 'CatchEffect')
+    assert.include(controlKinds, 'RunEffectValue')
+    const recovery =
+      module.functions.find((candidate) => candidate.id.name === 'recover$effect$-1') ??
+      unreachable('expected the suspended recovery handler')
+    const recoveryFrame =
+      frames.entries.find((frame) => Mir.matchesInstanceKey(recovery, frame.function)) ??
+      unreachable('expected the recovery continuation frame')
+    assert.isAtLeast(recoveryFrame.states.length, 2)
+    assert.isTrue(
+      recoveryFrame.states.every((state) =>
+        state.payload.some((field) => field.local.ordinal === 0),
+      ),
+      'the suspended child borrows the failure payload until it completes',
+    )
+
+    for (const frame of frames.entries) {
+      const descriptorsEnd = Math.max(
+        ...frame.states.map((state) => state.size),
+        ...frame.diagnosticScopes.map(
+          (field) => field.offset + module.layout.target.pointerSize * Mir.diagnosticScopeWords,
+        ),
+      )
+      for (const field of frame.diagnosticOutcomes) {
+        assert.isAtLeast(field.offset, descriptorsEnd)
+        assert.isAtLeast(
+          frame.size,
+          field.offset + module.layout.target.pointerSize * Mir.diagnosticOutcomeWords,
+        )
+      }
+    }
+    const invalidOutcomes = {
+      ...module,
+      coroutineFrames: {
+        ...frames,
+        entries: frames.entries.map((frame) => ({
+          ...frame,
+          diagnosticOutcomes: frame.diagnosticOutcomes.map((field) => ({ ...field, offset: 0 })),
+        })),
+      },
+    }
+    assert.isAbove(MirVerification.verify(invalidOutcomes).length, 0)
+    const ownedFrame =
+      frames.entries.find((frame) => Mir.matchesInstanceKey(fn, frame.function)) ??
+      unreachable('expected the observer owner frame')
+    const descriptor =
+      ownedFrame.diagnosticScopes.find(
+        (field) => field.scope.ordinal === scope.destination.ordinal,
+      ) ?? unreachable('expected persistent scope descriptor')
+    assert.isAtLeast(descriptor.offset, Math.max(...ownedFrame.states.map((state) => state.size)))
+    assert.isAtLeast(ownedFrame.size, descriptor.offset + module.layout.target.pointerSize * 10)
+    const overlapping = {
+      ...module,
+      coroutineFrames: {
+        ...frames,
+        entries: frames.entries.map((frame) =>
+          frame === ownedFrame
+            ? {
+                ...frame,
+                diagnosticScopes: frame.diagnosticScopes.map((field) =>
+                  field === descriptor ? { ...field, offset: 0 } : field,
+                ),
+              }
+            : frame,
+        ),
+      },
+    }
+    assert.isTrue(
+      MirVerification.verify(overlapping).some(
+        (violation) => violation.rule === 'InvalidCoroutineFrame',
+      ),
+    )
+    const state = relay?.relay.state ?? unreachable('expected retained observer state')
+    const slot = state.slots.find((candidate) => candidate.local.ordinal === scope.state.ordinal)
+    assert.strictEqual(slot?.access._tag, 'AffineTransfer')
+    if (slot?.access._tag === 'AffineTransfer')
+      assert.strictEqual(slot.access.cleanup._tag, 'HookCleanup')
+    assert.isTrue(
+      state.failure.releases.some((release) => release.local.ordinal === scope.state.ordinal),
+    )
+    assert.isTrue(slot !== undefined && state.success.restores.includes(slot.ordinal))
+    const callback = state.slots.find(
+      (candidate) => candidate.local.ordinal === scope.observer.ordinal,
+    )
+    assert.strictEqual(callback?.type._tag, 'CallableValue')
+    assert.isTrue(callback !== undefined && state.success.restores.includes(callback.ordinal))
+  }),
+)
+
 it.effect('does not retain provideWith as a compatibility alias', () =>
   Effect.gen(function* () {
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'effect/no-provide-with-alias',
       encoder.encode(`import silk.effect { Effect }
 service Clock {}
@@ -451,6 +1172,7 @@ it('admits the Pointer actor with one invariant per unsafe primitive', () => {
     [
       ['Intrinsic.pointerBytes', true, true],
       ['Intrinsic.pointerRequalify', true, true],
+      ['Intrinsic.pointerReinterpret', true, true],
       ['Intrinsic.pointerReadUnaligned', true, true],
       ['Intrinsic.pointerWriteUnaligned', true, true],
       ['Intrinsic.pointerNull', false, false],
@@ -743,7 +1465,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const source = 'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(20, 22) }'
-      const snapshot = yield* Analysis.ofSourceRealized(
+      const snapshot = yield* AnalysisFixture.retainingMain(
         'intrinsic/source-wrapper',
         encoder.encode(source),
       )
@@ -763,7 +1485,7 @@ it.effect(
 it.effect('rejects numeric operands to raw pointer address observation at the call span', () =>
   Effect.gen(function* () {
     const source = 'pub fn main() -> i32 { let a = Intrinsic.pointerAddress<i32>(1) return 0 }'
-    const snapshot = yield* Analysis.ofSourceRealized(
+    const snapshot = yield* AnalysisFixture.retainingMain(
       'pointer/address-invalid',
       encoder.encode(source),
     )
@@ -772,4 +1494,456 @@ it.effect('rejects numeric operands to raw pointer address observation at the ca
       [['SEM0215', 30, 63]],
     )
   }),
+)
+
+it.effect('keeps failure metadata attached to its originating observer', () =>
+  Effect.gen(function* () {
+    for (const bits of [32, 64]) {
+      const builder = yield* LlvmBuilder.make()
+      const pointer = yield* LlvmType.pointer(builder)
+      const byte = yield* LlvmType.integer(builder, 8)
+      const word = yield* LlvmType.integer(builder, bits)
+      const resultType = yield* LlvmType.structure(builder, [
+        pointer,
+        word,
+        pointer,
+        word,
+        pointer,
+        word,
+      ])
+      const fn = yield* LlvmFunction.declare(
+        builder,
+        'failure_metadata',
+        yield* LlvmType.functionType(builder, resultType, [pointer, pointer, pointer, pointer]),
+      )
+      yield* LlvmFunction.buildBody(
+        builder,
+        fn,
+        Effect.fnUntraced(function* (body) {
+          yield* LlvmBlock.make(body, 'entry')
+          const first = yield* LlvmValue.argument(body, 0)
+          const second = yield* LlvmValue.argument(body, 1)
+          const identity = Object.freeze([
+            yield* LlvmValue.argument(body, 2),
+            yield* LlvmConstant.integerUnsigned(builder, word, 7n),
+          ] as const)
+          const origin = Object.freeze([
+            yield* LlvmValue.argument(body, 3),
+            yield* LlvmConstant.integerUnsigned(builder, word, 9n),
+          ] as const)
+          const context = yield* NativeDiagnosticContext.make(
+            builder,
+            body,
+            pointer,
+            byte,
+            word,
+            first,
+          )
+          const failure = yield* NativeDiagnosticFailure.produce(context, identity, origin)
+          // A later lexical observer must not receive the original pool's handles.
+          yield* LlvmFunctionBody.store(body, second, context.current)
+          const retained = yield* NativeDiagnosticFailure.retain(failure, context)
+          const propagated = yield* NativeDiagnosticFailure.propagate(retained, context, identity)
+          const combined = yield* NativeDiagnosticFailure.withCause(propagated, context, failure)
+          yield* NativeDiagnosticFailure.release(retained, context)
+          yield* NativeDiagnosticFailure.release(propagated, context)
+          yield* NativeDiagnosticFailure.release(failure, context)
+          assert.strictEqual(combined.observer, failure.observer)
+          assert.strictEqual(combined.identity, identity)
+          assert.strictEqual(combined.origin, origin)
+          yield* NativeDiagnosticFailure.unhandled(combined, context)
+          const restored = yield* NativeDiagnosticFailure.unpack(
+            context,
+            yield* NativeDiagnosticFailure.pack(combined, context),
+          )
+          yield* LlvmFunctionBody.returnValue(
+            body,
+            yield* NativeDiagnosticFailure.pack(restored, context),
+          )
+        }),
+      )
+      const ir = yield* LlvmIrText.render(builder)
+      assert.lengthOf(ir.match(/load ptr, ptr %diagnostic_observer_slot/g) ?? [], 1)
+      assert.include(ir, `ret { ptr, i${bits}, ptr, i${bits}, ptr, i${bits} }`)
+      assert.include(ir, 'diagnostic_cause_invalid_owner:')
+      assert.include(ir, 'call void @llvm.trap()')
+    }
+  }),
+)
+
+it.effect('forwards borrowed invocation causes and clears independent execution roots', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      for (const bits of [32, 64]) {
+        const builder = yield* LlvmBuilder.make()
+        const pointer = yield* LlvmType.pointer(builder)
+        const byte = yield* LlvmType.integer(builder, 8)
+        const word = yield* LlvmType.integer(builder, bits)
+        const causeType = yield* NativeDiagnosticFailure.type({ builder, pointer, word })
+        const signature = yield* LlvmType.functionType(builder, causeType, [pointer, causeType])
+        const callee = yield* LlvmFunction.declare(builder, 'cause_receiver', signature)
+        const caller = yield* LlvmFunction.declare(builder, 'cause_caller', signature)
+        yield* LlvmFunction.buildBody(
+          builder,
+          caller,
+          Effect.fnUntraced(function* (body) {
+            yield* LlvmBlock.make(body, 'entry')
+            const incoming = yield* LlvmValue.argument(body, 1)
+            const diagnostic = yield* NativeDiagnosticContext.make(
+              builder,
+              body,
+              pointer,
+              byte,
+              word,
+              yield* LlvmValue.argument(body, 0),
+              incoming,
+            )
+            assert.strictEqual(diagnostic.incomingCause, incoming)
+            const inherited = yield* NativeCall.argumentsFor(
+              { diagnostic },
+              { diagnosticParameter: 0 },
+              [],
+            )
+            const independent = yield* NativeCall.argumentsFor(
+              { diagnostic },
+              { diagnosticParameter: 0 },
+              [],
+              'Independent',
+            )
+            const result = yield* LlvmFunctionBody.callDirect(body, callee, inherited, 'inherited')
+            yield* LlvmFunctionBody.callDirect(body, callee, independent, 'independent')
+            yield* LlvmFunctionBody.returnValue(
+              body,
+              result ?? unreachable('expected borrowed cause result'),
+            )
+          }),
+        )
+        const ir = yield* LlvmIrText.render(builder)
+        const aggregate = `{ ptr, i${bits}, ptr, i${bits}, ptr, i${bits} }`
+        assert.include(ir, `store ${aggregate} %v1, ptr %diagnostic_cause_slot`)
+        assert.include(
+          ir,
+          `@cause_receiver(ptr %diagnostic_observer, ${aggregate} %diagnostic_cause)`,
+        )
+        assert.include(ir, `@cause_receiver(ptr null, ${aggregate} zeroinitializer)`)
+        assert.lengthOf(ir.match(/load .*ptr %diagnostic_cause_slot/g) ?? [], 1)
+      }
+    }),
+  ),
+)
+
+it.effect('disables terminal dispatch for absent or foreign observer contexts', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      for (const bits of [32, 64]) {
+        const builder = yield* LlvmBuilder.make()
+        const pointer = yield* LlvmType.pointer(builder)
+        const byte = yield* LlvmType.integer(builder, 8)
+        const word = yield* LlvmType.integer(builder, bits)
+        const causeType = yield* NativeDiagnosticFailure.type({ builder, pointer, word })
+        const caller = yield* LlvmFunction.declare(
+          builder,
+          'terminal_context',
+          yield* LlvmType.functionType(builder, word, [pointer, causeType]),
+        )
+        yield* LlvmFunction.buildBody(
+          builder,
+          caller,
+          Effect.fnUntraced(function* (body) {
+            yield* LlvmBlock.make(body, 'entry')
+            const context = yield* NativeDiagnosticContext.make(
+              builder,
+              body,
+              pointer,
+              byte,
+              word,
+              yield* LlvmValue.argument(body, 0),
+              yield* LlvmValue.argument(body, 1),
+            )
+            yield* LlvmFunctionBody.returnValue(
+              body,
+              yield* NativeDiagnosticContext.unhandled(context),
+            )
+          }),
+        )
+        const ir = yield* LlvmIrText.render(builder)
+        assert.include(
+          ir,
+          `%unhandled_selected_observer = icmp eq i${bits} %unhandled_cause_owner_address, %unhandled_current_observer_address`,
+        )
+        assert.include(
+          ir,
+          '%unhandled_observer = select i1 %unhandled_selected_observer, ptr %diagnostic_failure0, ptr null',
+        )
+        assert.include(ir, `icmp ne i${bits} %diagnostic_observer_address, 0`)
+        assert.include(ir, `i8 5, i${bits} %diagnostic_failure1, i${bits} 0`)
+        assert.match(ir, /phi i(?:32|64).*\[ 0, %diagnostic_disabled \]/)
+        assert.lengthOf(ir.match(/load ptr, ptr %diagnostic_observer_slot/g) ?? [], 1)
+        assert.lengthOf(ir.match(/call i(?:32|64) /g) ?? [], 1)
+      }
+    }),
+  ),
+)
+
+it.effect('guards fatal cause handles by their originating observer', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      for (const bits of [32, 64]) {
+        const builder = yield* LlvmBuilder.make()
+        const pointer = yield* LlvmType.pointer(builder)
+        const byte = yield* LlvmType.integer(builder, 8)
+        const word = yield* LlvmType.integer(builder, bits)
+        const causeType = yield* NativeDiagnosticFailure.type({ builder, pointer, word })
+        const signature = yield* LlvmType.functionType(builder, word, [pointer, causeType, pointer])
+        const caller = yield* LlvmFunction.declare(builder, 'fatal_cause', signature)
+        yield* LlvmFunction.buildBody(
+          builder,
+          caller,
+          Effect.fnUntraced(function* (body) {
+            yield* LlvmBlock.make(body, 'entry')
+            const diagnostic = yield* NativeDiagnosticContext.make(
+              builder,
+              body,
+              pointer,
+              byte,
+              word,
+              yield* LlvmValue.argument(body, 0),
+              yield* LlvmValue.argument(body, 1),
+            )
+            const text = Object.freeze([
+              yield* LlvmValue.argument(body, 2),
+              yield* LlvmConstant.integerUnsigned(builder, word, 7n),
+            ] as const)
+            yield* LlvmFunctionBody.returnValue(
+              body,
+              yield* NativeDiagnosticContext.fatal(diagnostic, text, text),
+            )
+          }),
+        )
+        const ir = yield* LlvmIrText.render(builder)
+        assert.include(
+          ir,
+          `%fatal_cause_owner_matches = icmp eq i${bits} %fatal_observer_address, %fatal_cause_owner_address`,
+        )
+        assert.include(
+          ir,
+          `%fatal_cause_handle = select i1 %fatal_cause_owner_matches, i${bits} %diagnostic_failure1, i${bits} 0`,
+        )
+        assert.include(ir, `i8 6, i${bits} %fatal_cause_handle, i${bits} 0`)
+        assert.lengthOf(ir.match(/load ptr, ptr %diagnostic_observer_slot/g) ?? [], 1)
+        assert.lengthOf(ir.match(/call i(?:32|64) /g) ?? [], 1)
+      }
+    }),
+  ),
+)
+
+it.effect('keeps private return metadata separate from source result lanes', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      for (const bits of [32, 64]) {
+        const builder = yield* LlvmBuilder.make()
+        const pointer = yield* LlvmType.pointer(builder)
+        const word = yield* LlvmType.integer(builder, bits)
+        const payloadType = yield* LlvmType.integer(builder, 32)
+        const diagnosticType = yield* NativeDiagnosticFailure.type({ builder, pointer, word })
+        const resultType = yield* LlvmType.structure(builder, [payloadType, diagnosticType])
+        const signature = yield* LlvmType.functionType(builder, resultType, [
+          payloadType,
+          diagnosticType,
+        ])
+        const receiver = yield* LlvmFunction.declare(builder, 'result_receiver', signature)
+        const producer = yield* LlvmFunction.declare(builder, 'result_producer', signature)
+        const stepReceiver = yield* LlvmFunction.declare(
+          builder,
+          'result_step_receiver',
+          yield* LlvmType.functionType(
+            builder,
+            yield* LlvmType.structure(builder, [payloadType, payloadType, diagnosticType]),
+            [payloadType, diagnosticType],
+          ),
+        )
+        const shape = { resultLaneCount: 1, diagnosticResult: true }
+        yield* LlvmFunction.buildBody(
+          builder,
+          producer,
+          Effect.fnUntraced(function* (body) {
+            yield* LlvmBlock.make(body, 'entry')
+            const values = [yield* LlvmValue.argument(body, 0)]
+            const diagnostic = yield* LlvmValue.argument(body, 1)
+            assert.throws(() => NativeResult.sourceValues({ values, diagnostic }), /cannot discard/)
+            assert.throws(
+              () => NativeResult.fields({ values }, shape),
+              /diagnostic ownership shape/,
+            )
+            assert.throws(
+              () =>
+                NativeResult.fields({ values, diagnostic }, { ...shape, diagnosticResult: false }),
+              /diagnostic ownership shape/,
+            )
+            assert.throws(
+              () => NativeResult.fields({ values: [], diagnostic }, shape),
+              /source lane count/,
+            )
+            const called = yield* LlvmFunctionBody.callDirect(
+              body,
+              receiver,
+              NativeResult.fields({ values, diagnostic }, shape),
+              'returned',
+            )
+            const unpacked = yield* NativeResult.unpack(body, shape, called, 'returned')
+            const stepped = yield* LlvmFunctionBody.callDirect(
+              body,
+              stepReceiver,
+              NativeResult.fields(unpacked, shape),
+              'stepped',
+            )
+            const resumed = yield* NativeResult.unpack(
+              body,
+              shape,
+              stepped,
+              'resumed',
+              'SuspensionStep',
+            )
+            const transfer = {
+              builder,
+              body,
+              wordSize: bits / 8,
+              transfer: yield* LlvmFunctionBody.alloca(
+                body,
+                yield* LlvmType.integer(builder, 8),
+                'transfer',
+                {
+                  count: yield* LlvmConstant.integerUnsigned(
+                    builder,
+                    payloadType,
+                    BigInt((ContinuationTransfer.headerWords * bits) / 8),
+                  ),
+                },
+              ),
+            }
+            yield* NativeDiagnosticTransfer.publish(
+              transfer,
+              resumed.diagnostic ?? unreachable('expected resumed metadata'),
+            )
+            const packed = yield* NativeResult.pack(
+              {
+                ...resumed,
+                diagnostic: yield* NativeDiagnosticTransfer.take(transfer, diagnosticType),
+              },
+              { body },
+              shape,
+              resultType,
+              'forwarded',
+            )
+            yield* LlvmFunctionBody.returnValue(
+              body,
+              packed ?? unreachable('expected private return aggregate'),
+            )
+          }),
+        )
+        const ir = yield* LlvmIrText.render(builder)
+        const metadata = `{ ptr, i${bits}, ptr, i${bits}, ptr, i${bits} }`
+        assert.include(ir, `@result_receiver(i32 %v0, ${metadata} %v1)`)
+        assert.include(ir, `%returned_0 = extractvalue { i32, ${metadata} } %returned, 0`)
+        assert.include(ir, `%returned_diagnostic = extractvalue { i32, ${metadata} } %returned, 1`)
+        assert.include(ir, `%resumed_0 = extractvalue { i32, i32, ${metadata} } %stepped, 1`)
+        assert.include(
+          ir,
+          `%resumed_diagnostic = extractvalue { i32, i32, ${metadata} } %stepped, 2`,
+        )
+        assert.include(ir, `ret { i32, ${metadata} } %forwarded`)
+        assert.include(ir, `store ${metadata} %resumed_diagnostic, ptr %transfer_diagnostic_ptr`)
+        assert.include(ir, `load ${metadata}, ptr %transfer_diagnostic_ptr`)
+        assert.include(ir, `store ${metadata} zeroinitializer, ptr %transfer_diagnostic_ptr`)
+      }
+    }),
+  ),
+)
+
+it.effect('moves outcome metadata before invoking a replaced owner callback', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      for (const bits of [32, 64]) {
+        const builder = yield* LlvmBuilder.make()
+        const pointer = yield* LlvmType.pointer(builder)
+        const byte = yield* LlvmType.integer(builder, 8)
+        const word = yield* LlvmType.integer(builder, bits)
+        const metadata = yield* NativeDiagnosticFailure.type({ builder, pointer, word })
+        const signature = yield* LlvmType.functionType(builder, metadata, [pointer, metadata])
+        const fn = yield* LlvmFunction.declare(builder, 'replace_outcome', signature)
+        yield* LlvmFunction.buildBody(
+          builder,
+          fn,
+          Effect.fnUntraced(function* (body) {
+            yield* LlvmBlock.make(body, 'entry')
+            const context = yield* NativeDiagnosticContext.make(
+              builder,
+              body,
+              pointer,
+              byte,
+              word,
+              yield* LlvmConstant.nullValue(builder, pointer),
+            )
+            const slot = { storage: yield* LlvmValue.argument(body, 0) }
+            const incoming = yield* LlvmValue.argument(body, 1)
+            context.outcomes.set(0, slot)
+            yield* NativeDiagnosticOutcome.accept(
+              context,
+              { _tag: 'Local', ordinal: 0 },
+              {
+                values: [],
+                diagnostic: incoming,
+              },
+            )
+            yield* LlvmFunctionBody.returnValue(
+              body,
+              yield* NativeDiagnosticOutcome.take(slot, context),
+            )
+          }),
+        )
+        const releaseOwner = yield* LlvmFunction.declare(
+          builder,
+          'release_owned_outcome',
+          yield* LlvmType.functionType(builder, yield* LlvmType.voidType(builder), [
+            pointer,
+            pointer,
+          ]),
+        )
+        yield* LlvmFunction.buildBody(
+          builder,
+          releaseOwner,
+          Effect.fnUntraced(function* (body) {
+            yield* LlvmBlock.make(body, 'entry')
+            const context = yield* NativeDiagnosticContext.make(
+              builder,
+              body,
+              pointer,
+              byte,
+              word,
+              yield* LlvmConstant.nullValue(builder, pointer),
+            )
+            yield* NativeDiagnosticOutcome.releaseForObserver(
+              { storage: yield* LlvmValue.argument(body, 0) },
+              context,
+              yield* LlvmValue.argument(body, 1),
+            )
+            yield* LlvmFunctionBody.returnVoid(body)
+          }),
+        )
+        const ir = yield* LlvmIrText.render(builder)
+        const aggregate = `{ ptr, i${bits}, ptr, i${bits}, ptr, i${bits} }`
+        const emptied = ir.indexOf(`store ${aggregate} zeroinitializer, ptr %v0`)
+        const published = ir.indexOf(`store ${aggregate} %v1, ptr %v0`)
+        const released = ir.indexOf(`i8 4, i${bits} %diagnostic_failure1`)
+        assert.isAtLeast(emptied, 0)
+        assert.isAbove(published, emptied)
+        assert.isAbove(released, published)
+        assert.isAbove(ir.lastIndexOf(`store ${aggregate} zeroinitializer, ptr %v0`), released)
+        assert.lengthOf(ir.match(/call i(?:32|64) /g) ?? [], 2)
+        assert.include(ir, `icmp eq i${bits} %outcome_owner_address, %outcome_scope_address`)
+        assert.include(ir, 'label %outcome_release_selected, label %outcome_release_following')
+        assert.notInclude(ir, 'load ptr, ptr %diagnostic_observer_slot')
+      }
+    }),
+  ),
 )

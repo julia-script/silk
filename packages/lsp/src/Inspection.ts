@@ -6,8 +6,8 @@
  * The committed `ProjectAnalysis.View` is a frontend snapshot, and the compiler only accepts a
  * true single-root snapshot for runtime realization (layout, MIR, backend). So every request
  * realizes a single-root snapshot rooted at the requested document, rebuilt from the committed
- * closure's exact sources and cached on the committed view's identity — a new commit drops the
- * whole cache with the view it belonged to.
+ * closure's exact sources, selected profile, composition and parameter bindings. It is cached
+ * on the committed view's identity — a new commit drops the cache with its owning view.
  */
 
 import * as Analysis from '@silklang/compiler/Analysis'
@@ -17,6 +17,7 @@ import type { RowModel } from '@silklang/compiler/InspectorRow'
 import type * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as SourceResolver from '@silklang/compiler/SourceResolver'
+import * as ToolchainPlan from '@silklang/compiler/ToolchainPlan'
 import * as Effect from 'effect/Effect'
 import type * as ProjectSnapshot from './ProjectSnapshot.js'
 
@@ -109,7 +110,12 @@ const realizedFor = (session: ProjectSnapshot.DocumentSnapshot): Analysis.Snapsh
   )
   const rootFile = sources.get(root) ?? SourceFile.make(root, session.document.bytes)
   const realized = Effect.runSync(
-    Analysis.makeRealized({ root: rootFile }).pipe(Effect.provide(SourceResolver.memory(bytes))),
+    Analysis.makeRealized({
+      root: rootFile,
+      ...(session.snapshot.configuration === undefined
+        ? {}
+        : { configuration: session.snapshot.configuration }),
+    }).pipe(Effect.provide(SourceResolver.memory(bytes))),
   )
   byRoot.set(root, realized)
   return realized
@@ -131,12 +137,13 @@ export const project = (
       ([name, file]) => [name, decoder.decode(Uint8Array.from(file.bytes))] as const,
     ),
   )
+  const profile = ToolchainPlan.optimizationFor(snapshot.profile ?? {})
   const result = definition.project({
     snapshot,
     modules,
     root: session.document.module,
-    mode: 'release',
-    profile: 'release',
+    mode: ToolchainPlan.codegenModeFor(profile),
+    profile,
     filter: parameters.filter ?? '',
     showTrivia: parameters.showTrivia ?? false,
   })

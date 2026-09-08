@@ -18,12 +18,49 @@
 //! channel.
 //!
 //! # Examples
-//! ## Wait for one fixed duration on the active provider
+//! ## Advance a virtual clock through lexical provision
 //! ```silk
-//! import silk.monotonic_clock { MonotonicClock }
+//! import silk.effect {Effect}
 //!
-//! effect fn pause() -> () ? &mut MonotonicClock {
-//!   return run MonotonicClock.waitFor(300ms)
+//! import silk.monotonic_clock {MonotonicClock}
+//!
+//! import silk.system_clock {SystemClock, Instant}
+//!
+//! struct VirtualClock {
+//!   mark: Instant
+//! }
+//!
+//! impl MonotonicClock for VirtualClock {
+//!   effect fn now(self: &mut Self) -> Instant {
+//!     return SystemClock.make(SystemClock.seconds(&self.mark), SystemClock.nanoseconds(&self.mark))
+//!   }
+//!   effect fn getResolution(self: &mut Self) -> u64 {
+//!     return 1
+//!   }
+//!   effect fn waitUntil(self: &mut Self, when: Instant) -> () {
+//!     let seconds = SystemClock.seconds(&when)
+//!     let currentSeconds = SystemClock.seconds(&self.mark)
+//!     if seconds > currentSeconds || (seconds == currentSeconds && SystemClock.nanoseconds(&when) > SystemClock.nanoseconds(
+//!       &self.mark,
+//!     )) {
+//!       self.mark = move when
+//!     }
+//!     return ()
+//!   }
+//!   effect fn waitFor(self: &mut Self, howLong: u64) -> () {
+//!     self.mark = MonotonicClock.deadlineAfter(&self.mark, howLong)
+//!     return ()
+//!   }
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   let mut clock = VirtualClock {mark: SystemClock.make(0, 0)}
+//!   run MonotonicClock.waitFor(300ms)
+//!     |> Effect.provideMut<MonotonicClock>(&mut clock)
+//!   if SystemClock.nanoseconds(&clock.mark) == 300000000 {
+//!     return 42
+//!   }
+//!   return 0
 //! }
 //! ```
 

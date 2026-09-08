@@ -1,0 +1,47 @@
+import silk.execution_storage {ExecutionStorage}
+
+import silk.allocator {OutOfMemoryError}
+
+import silk.pointer {Pointer}
+
+import silk.effect {Effect}
+
+effect fn exercise() -> i32 ! OutOfMemoryError {
+  let mut first = run ExecutionStorage.make(4096)
+  let mut second = run ExecutionStorage.make(0)
+  unsafe {
+    let frame = ExecutionStorage.acquire(&mut first, 64, 256)
+    if Pointer.isNull<u8>(frame) {
+      return 1
+    }
+    if Pointer.address<u8>(frame) % 256 != 0 {
+      return 2
+    }
+    let used = ExecutionStorage.used(&first)
+    if used < 64 || ExecutionStorage.used(&second) != 0 {
+      return 3
+    }
+    let refused = ExecutionStorage.acquire(&mut second, 1, 1)
+    if Pointer.isNull<u8>(refused) == false {
+      return 4
+    }
+    let typed = Intrinsic.pointerReinterpret<?*mut u8, ?*mut i32>(frame)
+    let writable = Intrinsic.pointerRequalify<?*mut i32, *mut i32>(typed)
+    Pointer.write<i32>(writable, 42)
+    let value = Pointer.read<i32>(writable)
+    ExecutionStorage.release(&mut first, frame)
+    if ExecutionStorage.used(&first) != 0 {
+      return 5
+    }
+    return value
+  }
+  return 6
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 {
+  return 7
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(exercise(), recover)
+}

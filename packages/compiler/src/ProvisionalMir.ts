@@ -1048,8 +1048,10 @@ const controlsOfCatch = (
     outcome: handlerRunner.outcome,
     failureMappings: Object.freeze(mappings),
   })
-  const id = controlId(execution, expression.span, ordinalOffset + 1, 'Invoke')
-  const complete = controlId(execution, expression.span, ordinalOffset + 1, 'Complete')
+  // The selected handler executes at the enclosing Run span. CatchEffect itself uses the
+  // protected expression span; conflating them loses the handler's exact ownership control.
+  const id = controlId(execution, runSpan, ordinalOffset + 1, 'Invoke')
+  const complete = controlId(execution, runSpan, ordinalOffset + 1, 'Complete')
   regions.push(
     Object.freeze({
       _tag: 'ProvisionalRegion',
@@ -1063,7 +1065,7 @@ const controlsOfCatch = (
           _tag: 'RelayExistingTransfer',
           preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
         }),
-        span: expression.span,
+        span: runSpan,
       }),
     }),
     Object.freeze({
@@ -1093,13 +1095,61 @@ const controlsOfExpressions = (
     if (expression._tag === 'Run') {
       const idOrdinal = ordinal
       ordinal += 1
+      if (
+        expression.subject._tag === 'BuiltinCall' &&
+        expression.subject.operation === 'EffectFinalize'
+      ) {
+        for (const [inputOrdinal, argument] of expression.subject.arguments.entries()) {
+          const runner = runnerOf(argument, context)
+          if (runner.classification === 'Synchronous') continue
+          const policy =
+            inputOrdinal === 0 && Type.failureMembers(runner.outcome).length > 0
+              ? reifyPolicy(runner.outcome, context)
+              : Object.freeze({
+                  _tag: 'Propagate' as const,
+                  outcome: runner.outcome,
+                  failureMappings: Object.freeze([]),
+                })
+          if (policy === undefined) continue
+          const id = controlId(execution, argument.span, idOrdinal + inputOrdinal, 'Invoke')
+          const complete = controlId(execution, argument.span, idOrdinal + inputOrdinal, 'Complete')
+          regions.push(
+            Object.freeze({
+              _tag: 'ProvisionalRegion',
+              id,
+              outcome: Object.freeze({
+                _tag: 'RunSuspendableEffect',
+                runner,
+                completion: policy,
+                complete,
+                relay: Object.freeze({
+                  _tag: 'RelayExistingTransfer',
+                  preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
+                }),
+                span: argument.span,
+              }),
+            }),
+            Object.freeze({
+              _tag: 'ProvisionalRegion',
+              id: complete,
+              outcome: Object.freeze({ _tag: 'Complete', policy }),
+            }),
+          )
+        }
+        ordinal += 1
+        for (const child of Hir.expressionChildren(expression.subject)) visit(child)
+        return
+      }
       const caught = effectCatchOf(expression.subject, context)
       if (caught !== undefined) {
         regions.push(...controlsOfCatch(caught, execution, context, idOrdinal, expression.span))
         ordinal += 1
         return
       }
-      if (isSuspendOrigin(expression.subject, context)) {
+      if (
+        execution._tag === 'BuiltinEffectRunnerExecution' &&
+        isSuspendOrigin(expression.subject, context)
+      ) {
         const deferred = deferredOf(expression.subject, context)
         if (deferred !== undefined) {
           const id = controlId(execution, expression.span, idOrdinal, 'Origin')
@@ -1428,8 +1478,8 @@ export const build = (
       const expressions = instance.function.statements
         .flatMap(Hir.statementExpressions)
         .flatMap(Hir.expressionTree)
-      // A directly run intrinsic is executed in its caller. Only first-class builtin
-      // values acquire the separate generated runner and its own control authority.
+      // Suspension always owns a generated runner: its terminal origin must not
+      // discard the caller's continuation. Other directly run builtins stay inline.
       const directlyRunBuiltins = new Set(
         expressions.flatMap((expression) =>
           expression._tag === 'Run' && expression.subject._tag === 'BuiltinCall'
@@ -1447,7 +1497,8 @@ export const build = (
           continue
         }
         if (expression._tag === 'BuiltinCall') {
-          if (directlyRunBuiltins.has(expression)) continue
+          if (directlyRunBuiltins.has(expression) && expression.operation !== 'EffectSuspend')
+            continue
           const execution = builtinExecution(expression, context)
           if (execution !== undefined) executions.push(execution)
           continue

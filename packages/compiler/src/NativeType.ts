@@ -1,6 +1,7 @@
 import type * as LlvmType from '@silklang/llvm/Type'
 import { alignUp } from './internal/Align.js'
 import * as Layout from './Layout.js'
+import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
 import * as Scalar from './Scalar.js'
 import type * as Target from './Target.js'
@@ -14,6 +15,54 @@ export interface LoweringContext {
   readonly f64: LlvmType.Type
   readonly pointer: LlvmType.Type
   readonly integerTypes: ReadonlyMap<number, LlvmType.Type>
+}
+
+/** Addressable storage follows concrete executable environments, not erased public types. */
+export const addressLayout = (
+  layout: Layout.Plan,
+  type: Mir.Type,
+): { readonly size: number; readonly alignment: number } | undefined => {
+  if (type._tag === 'EffectValue')
+    return type.storage === undefined ? type.environment : Layout.entry(layout, type.storage.type)
+  if (type._tag === 'CallableValue')
+    return type.storage === undefined
+      ? (type.environment?.view ?? { size: 0, alignment: 1 })
+      : Layout.entry(layout, type.storage.type)
+  return Layout.entry(layout, Mir.semanticType(type))
+}
+
+/** Resolves an addressable lane through nested concrete captures and ordinary field paths. */
+export const addressLaneOffset = (
+  layout: Layout.Plan,
+  type: Mir.Type,
+  lane: Layout.CallingLane,
+  ordinal: number,
+): number | undefined => {
+  let placements: ReadonlyArray<Layout.EnvironmentLanePlacement> | undefined
+  if (type._tag === 'EffectValue' && type.storage === undefined)
+    placements = Layout.effectEnvironmentLanePlacements(layout, type.environment)
+  else if (
+    type._tag === 'CallableValue' &&
+    type.storage === undefined &&
+    type.environment !== undefined
+  )
+    placements = Layout.callableEnvironmentLanePlacements(layout, type.environment)
+  if (placements !== undefined) {
+    const placement = placements.at(ordinal)
+    if (placement === undefined) return undefined
+    const offset =
+      placement.root === undefined
+        ? 0
+        : LayoutVerify.laneOffset(layout, placement.root, placement.lane.path)
+    return offset === undefined ? undefined : placement.byteOffset + offset
+  }
+  return LayoutVerify.laneOffset(
+    layout,
+    (type._tag === 'EffectValue' || type._tag === 'CallableValue') && type.storage !== undefined
+      ? type.storage.type
+      : Mir.semanticType(type),
+    lane.path,
+  )
 }
 
 /** Resolves the physical ABI lanes of one MIR value. */
