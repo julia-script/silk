@@ -1,4 +1,5 @@
 import * as NativePlace from './NativePlace.js'
+import * as NativeArgument from './NativeArgument.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import * as NativePayload from './NativePayload.js'
 import * as NativeDiagnosticTransfer from './NativeDiagnosticTransfer.js'
@@ -111,7 +112,7 @@ const applyCallable = Effect.fnUntraced(function* (
     yield* NativeCall.callValues(
       context.call,
       target,
-      Mir.applyOperands(captures, arguments_),
+      NativeArgument.fromValues(Mir.applyOperands(captures, arguments_)),
       tag,
     ),
   )
@@ -335,7 +336,7 @@ const notifyReady = Effect.fnUntraced(function* (
     yield* NativeCall.callValues(
       context.call,
       target,
-      Mir.applyOperands(captures, [[endpoint]]),
+      NativeArgument.fromValues(Mir.applyOperands(captures, [[endpoint]])),
       tag,
     ),
   )
@@ -1291,6 +1292,12 @@ export const declareReleaseHelper = Effect.fnUntraced(function* (
     resultLaneCount: 0,
     suspendable: false,
     parameterTypes: Object.freeze(parameters),
+    argumentParameters: NativeArgument.parameters(program.layout, fn, (type) => {
+      const shape = Layout.callingShape(program.layout, Mir.semanticType(type))
+      if (shape === undefined)
+        throw new RangeError('Release helper lost its source parameter shape')
+      return shape.lanes
+    }),
     ...(diagnostics ? { diagnosticParameter: 1 } : {}),
     linear: Object.freeze([]),
   })
@@ -1365,6 +1372,7 @@ export const emitReleaseHelper = Effect.fnUntraced(function* (context: ReleaseHe
         mutableStorage: new Map<number, ReadonlyArray<Value.Input>>(),
         addressRoots: new Set<number>(),
         addressStorage: new Map<number, Value.Input>(),
+        transientOutcomes: new Set<number>(),
         locals: new Map<number, NativeValue.NativeValue>(),
         types,
         lanePointers,
@@ -1955,10 +1963,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const started = yield* FunctionBody.callDirect(
           body,
           executable.target.handle,
-          yield* NativeCall.argumentsFor(
+          yield* NativeCall.lowerArguments(
             context.call.synchronous,
             executable.target,
-            executable.values,
+            NativeArgument.fromValues(executable.values),
             'Independent',
           ),
           `drive${operation.destination.ordinal}_direct_started`,
@@ -2263,10 +2271,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               body,
               executable.target.handle,
               [
-                ...(yield* NativeCall.argumentsFor(
+                ...(yield* NativeCall.lowerArguments(
                   context.call.synchronous,
                   executable.target,
-                  executable.values,
+                  NativeArgument.fromValues(executable.values),
                   'Independent',
                 )),
                 transfer,
@@ -2278,10 +2286,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           : yield* FunctionBody.callDirect(
               body,
               executable.target.handle,
-              yield* NativeCall.argumentsFor(
+              yield* NativeCall.lowerArguments(
                 context.call.synchronous,
                 executable.target,
-                executable.values,
+                NativeArgument.fromValues(executable.values),
                 'Independent',
               ),
               `drive${operation.destination.ordinal}_started`,

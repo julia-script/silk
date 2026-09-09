@@ -1,0 +1,1081 @@
+{
+  "paired": {
+    "command": "packages/cli/dist/bin.js build-exe compiler/src/main.silk --source-root compiler/src --optimization debug --timings",
+    "control": "Read-only loader substitutes initial compiler dist, which already includes the preceding transient-outcome optimization. Both modes use unchanged LLVM; only adjacent success-return emission is fused in the after compiler.",
+    "node": "v26.7.0",
+    "cpu": "Apple M1 Max",
+    "fingerprint": "92f78a31310f5ca6da64576b436599e6d7bdd96bd1d42a727af584a0fd0016a7",
+    "samples": [
+      {
+        "index": 0,
+        "mode": "before",
+        "wallMs": 40562.757583,
+        "cpuSeconds": 51.82,
+        "peakRssBytes": 2576056320,
+        "phases": [
+          {
+            "name": "toolchain-integrity",
+            "wallMs": 91.5,
+            "inputs": 2783,
+            "outputs": 2783,
+            "diagnostics": 0
+          },
+          {
+            "name": "closure",
+            "wallMs": 325.3,
+            "inputs": 1,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 131.4,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 143.2,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 4.3,
+            "inputs": 61,
+            "outputs": 1971,
+            "diagnostics": 2
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 44.6,
+            "inputs": 61,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 137.4,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 132.3,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 3,
+            "inputs": 70,
+            "outputs": 2324,
+            "diagnostics": 0
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 20.1,
+            "inputs": 70,
+            "outputs": 70,
+            "diagnostics": 0
+          },
+          {
+            "name": "elaboration",
+            "wallMs": 3307.8,
+            "inputs": 70,
+            "outputs": 1378,
+            "diagnostics": 0
+          },
+          {
+            "name": "ownership",
+            "wallMs": 1517.6,
+            "inputs": 70,
+            "outputs": 1344,
+            "diagnostics": 0
+          },
+          {
+            "name": "opaque-realization",
+            "wallMs": 0.4,
+            "inputs": 70,
+            "outputs": 0,
+            "diagnostics": 0
+          },
+          {
+            "name": "instance-discovery",
+            "wallMs": 2397.9,
+            "inputs": 70,
+            "outputs": 641,
+            "diagnostics": 0
+          },
+          {
+            "name": "target-layout",
+            "wallMs": 986,
+            "inputs": 641,
+            "outputs": 267,
+            "diagnostics": 0
+          },
+          {
+            "name": "mir-lowering",
+            "wallMs": 5826,
+            "inputs": 641,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "toolchain-target",
+            "wallMs": 39.8,
+            "inputs": 1010,
+            "outputs": 84,
+            "diagnostics": 0
+          },
+          {
+            "name": "backend",
+            "wallMs": 16080.6,
+            "inputs": 878,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "object",
+            "wallMs": 2397.9,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "runtime",
+            "wallMs": 80.5,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "link",
+            "wallMs": 82,
+            "inputs": 2,
+            "outputs": 1,
+            "diagnostics": 0
+          }
+        ],
+        "loadBefore": [8.8564453125, 8.95263671875, 9.13330078125],
+        "loadAfter": [8.29833984375, 8.7998046875, 9.06689453125],
+        "astSha256": "8509b5f5dea4b6bcb861ef88c2efc64119447357d2d454636dac4a510726c6aa",
+        "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/compiler/src/main.silk -> /tmp/silk-materialization.42ovcr/paired-0-before (llvm, aarch64-apple-darwin, 878 symbols)\nPhases:\n  toolchain-integrity       91.5ms  2783 in / 2783 out  0 diag  heap 81.9MB\n  closure                  325.3ms  1 in / 61 out  0 diag  heap 142.9MB\n  declaration-collection   131.4ms  61 in / 1358 out  0 diag  heap 131.5MB\n  declaration-index        143.2ms  61 in / 1358 out  0 diag  heap 160.1MB\n  name-resolution            4.3ms  61 in / 1971 out  2 diag  heap 137.5MB\n  module-surface            44.6ms  61 in / 61 out  0 diag  heap 134.0MB\n  declaration-collection   137.4ms  70 in / 1603 out  0 diag  heap 214.7MB\n  declaration-index        132.3ms  70 in / 1603 out  0 diag  heap 217.8MB\n  name-resolution            3.0ms  70 in / 2324 out  0 diag  heap 220.7MB\n  module-surface            20.1ms  70 in / 70 out  0 diag  heap 209.2MB\n  elaboration             3307.8ms  70 in / 1378 out  0 diag  heap 501.7MB\n  ownership               1517.6ms  70 in / 1344 out  0 diag  heap 279.5MB\n  opaque-realization         0.4ms  70 in / 0 out  0 diag  heap 279.6MB\n  instance-discovery      2397.9ms  70 in / 641 out  0 diag  heap 423.6MB\n  target-layout            986.0ms  641 in / 267 out  0 diag  heap 423.0MB\n  mir-lowering            5826.0ms  641 in / 878 out  0 diag  heap 508.5MB\n  toolchain-target          39.8ms  1010 in / 84 out  0 diag  heap 513.6MB\n  backend                 16080.6ms  878 in / 878 out  0 diag  heap 1703.7MB\n  object                  2397.9ms  1 in / 1 out  0 diag  heap 1716.3MB\n  runtime                   80.5ms  1 in / 1 out  0 diag  heap 1814.2MB\n  link                      82.0ms  2 in / 1 out  0 diag  heap 847.3MB\nLink plan: /tmp/silk-materialization.42ovcr/paired-0-before.link.json\n",
+        "stderr": "       40.55 real        49.34 user         2.48 sys\n          2576056320  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              274459  page reclaims\n                4160  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 828  messages sent\n                  36  messages received\n                   0  signals received\n                2172  voluntary context switches\n               91583  involuntary context switches\n        504209677973  instructions retired\n        155326551073  cycles elapsed\n          2689123584  peak memory footprint\n"
+      },
+      {
+        "index": 1,
+        "mode": "after",
+        "wallMs": 40765.778292,
+        "cpuSeconds": 51.81999999999999,
+        "peakRssBytes": 2605301760,
+        "phases": [
+          {
+            "name": "toolchain-integrity",
+            "wallMs": 91.3,
+            "inputs": 2783,
+            "outputs": 2783,
+            "diagnostics": 0
+          },
+          {
+            "name": "closure",
+            "wallMs": 334.9,
+            "inputs": 1,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 133.5,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 153.3,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 3.7,
+            "inputs": 61,
+            "outputs": 1971,
+            "diagnostics": 2
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 40.9,
+            "inputs": 61,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 140.1,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 131.7,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 2.7,
+            "inputs": 70,
+            "outputs": 2324,
+            "diagnostics": 0
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 19.6,
+            "inputs": 70,
+            "outputs": 70,
+            "diagnostics": 0
+          },
+          {
+            "name": "elaboration",
+            "wallMs": 3292.7,
+            "inputs": 70,
+            "outputs": 1378,
+            "diagnostics": 0
+          },
+          {
+            "name": "ownership",
+            "wallMs": 1575.8,
+            "inputs": 70,
+            "outputs": 1344,
+            "diagnostics": 0
+          },
+          {
+            "name": "opaque-realization",
+            "wallMs": 0.4,
+            "inputs": 70,
+            "outputs": 0,
+            "diagnostics": 0
+          },
+          {
+            "name": "instance-discovery",
+            "wallMs": 2502.2,
+            "inputs": 70,
+            "outputs": 641,
+            "diagnostics": 0
+          },
+          {
+            "name": "target-layout",
+            "wallMs": 1022.4,
+            "inputs": 641,
+            "outputs": 267,
+            "diagnostics": 0
+          },
+          {
+            "name": "mir-lowering",
+            "wallMs": 5988.8,
+            "inputs": 641,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "toolchain-target",
+            "wallMs": 41.6,
+            "inputs": 1010,
+            "outputs": 84,
+            "diagnostics": 0
+          },
+          {
+            "name": "backend",
+            "wallMs": 16198.4,
+            "inputs": 878,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "object",
+            "wallMs": 2436,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "runtime",
+            "wallMs": 81.1,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "link",
+            "wallMs": 83,
+            "inputs": 2,
+            "outputs": 1,
+            "diagnostics": 0
+          }
+        ],
+        "loadBefore": [8.29833984375, 8.7998046875, 9.06689453125],
+        "loadAfter": [7.35302734375, 8.419921875, 8.90869140625],
+        "astSha256": "8509b5f5dea4b6bcb861ef88c2efc64119447357d2d454636dac4a510726c6aa",
+        "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/compiler/src/main.silk -> /tmp/silk-materialization.42ovcr/paired-1-after (llvm, aarch64-apple-darwin, 878 symbols)\nPhases:\n  toolchain-integrity       91.3ms  2783 in / 2783 out  0 diag  heap 82.5MB\n  closure                  334.9ms  1 in / 61 out  0 diag  heap 143.6MB\n  declaration-collection   133.5ms  61 in / 1358 out  0 diag  heap 132.2MB\n  declaration-index        153.3ms  61 in / 1358 out  0 diag  heap 161.3MB\n  name-resolution            3.7ms  61 in / 1971 out  2 diag  heap 163.9MB\n  module-surface            40.9ms  61 in / 61 out  0 diag  heap 137.3MB\n  declaration-collection   140.1ms  70 in / 1603 out  0 diag  heap 187.6MB\n  declaration-index        131.7ms  70 in / 1603 out  0 diag  heap 219.5MB\n  name-resolution            2.7ms  70 in / 2324 out  0 diag  heap 197.6MB\n  module-surface            19.6ms  70 in / 70 out  0 diag  heap 216.0MB\n  elaboration             3292.7ms  70 in / 1378 out  0 diag  heap 496.9MB\n  ownership               1575.8ms  70 in / 1344 out  0 diag  heap 281.6MB\n  opaque-realization         0.4ms  70 in / 0 out  0 diag  heap 281.7MB\n  instance-discovery      2502.2ms  70 in / 641 out  0 diag  heap 427.5MB\n  target-layout           1022.4ms  641 in / 267 out  0 diag  heap 426.5MB\n  mir-lowering            5988.8ms  641 in / 878 out  0 diag  heap 513.8MB\n  toolchain-target          41.6ms  1010 in / 84 out  0 diag  heap 520.0MB\n  backend                 16198.4ms  878 in / 878 out  0 diag  heap 1609.8MB\n  object                  2436.0ms  1 in / 1 out  0 diag  heap 1618.9MB\n  runtime                   81.1ms  1 in / 1 out  0 diag  heap 1725.1MB\n  link                      83.0ms  2 in / 1 out  0 diag  heap 827.3MB\nLink plan: /tmp/silk-materialization.42ovcr/paired-1-after.link.json\n",
+        "stderr": "       40.76 real        49.41 user         2.41 sys\n          2605301760  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              248228  page reclaims\n                4228  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 828  messages sent\n                  37  messages received\n                   0  signals received\n                2845  voluntary context switches\n               97293  involuntary context switches\n        498511464456  instructions retired\n        154652414781  cycles elapsed\n          2638550336  peak memory footprint\n"
+      },
+      {
+        "index": 2,
+        "mode": "after",
+        "wallMs": 41908.90212500001,
+        "cpuSeconds": 52.97,
+        "peakRssBytes": 2548482048,
+        "phases": [
+          {
+            "name": "toolchain-integrity",
+            "wallMs": 92.1,
+            "inputs": 2783,
+            "outputs": 2783,
+            "diagnostics": 0
+          },
+          {
+            "name": "closure",
+            "wallMs": 335.7,
+            "inputs": 1,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 137.8,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 143.7,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 4.2,
+            "inputs": 61,
+            "outputs": 1971,
+            "diagnostics": 2
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 40.8,
+            "inputs": 61,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 141.1,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 135.7,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 2.7,
+            "inputs": 70,
+            "outputs": 2324,
+            "diagnostics": 0
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 21,
+            "inputs": 70,
+            "outputs": 70,
+            "diagnostics": 0
+          },
+          {
+            "name": "elaboration",
+            "wallMs": 3410.9,
+            "inputs": 70,
+            "outputs": 1378,
+            "diagnostics": 0
+          },
+          {
+            "name": "ownership",
+            "wallMs": 1647.2,
+            "inputs": 70,
+            "outputs": 1344,
+            "diagnostics": 0
+          },
+          {
+            "name": "opaque-realization",
+            "wallMs": 0.5,
+            "inputs": 70,
+            "outputs": 0,
+            "diagnostics": 0
+          },
+          {
+            "name": "instance-discovery",
+            "wallMs": 2470.1,
+            "inputs": 70,
+            "outputs": 641,
+            "diagnostics": 0
+          },
+          {
+            "name": "target-layout",
+            "wallMs": 1011,
+            "inputs": 641,
+            "outputs": 267,
+            "diagnostics": 0
+          },
+          {
+            "name": "mir-lowering",
+            "wallMs": 5980.4,
+            "inputs": 641,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "toolchain-target",
+            "wallMs": 38.7,
+            "inputs": 1010,
+            "outputs": 84,
+            "diagnostics": 0
+          },
+          {
+            "name": "backend",
+            "wallMs": 16943.2,
+            "inputs": 878,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "object",
+            "wallMs": 2367.5,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "runtime",
+            "wallMs": 83.8,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "link",
+            "wallMs": 90,
+            "inputs": 2,
+            "outputs": 1,
+            "diagnostics": 0
+          }
+        ],
+        "loadBefore": [7.35302734375, 8.419921875, 8.90869140625],
+        "loadAfter": [6.68994140625, 8.11474609375, 8.7734375],
+        "astSha256": "8509b5f5dea4b6bcb861ef88c2efc64119447357d2d454636dac4a510726c6aa",
+        "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/compiler/src/main.silk -> /tmp/silk-materialization.42ovcr/paired-2-after (llvm, aarch64-apple-darwin, 878 symbols)\nPhases:\n  toolchain-integrity       92.1ms  2783 in / 2783 out  0 diag  heap 82.5MB\n  closure                  335.7ms  1 in / 61 out  0 diag  heap 143.6MB\n  declaration-collection   137.8ms  61 in / 1358 out  0 diag  heap 132.1MB\n  declaration-index        143.7ms  61 in / 1358 out  0 diag  heap 161.0MB\n  name-resolution            4.2ms  61 in / 1971 out  2 diag  heap 163.6MB\n  module-surface            40.8ms  61 in / 61 out  0 diag  heap 137.5MB\n  declaration-collection   141.1ms  70 in / 1603 out  0 diag  heap 187.6MB\n  declaration-index        135.7ms  70 in / 1603 out  0 diag  heap 219.7MB\n  name-resolution            2.7ms  70 in / 2324 out  0 diag  heap 197.8MB\n  module-surface            21.0ms  70 in / 70 out  0 diag  heap 216.1MB\n  elaboration             3410.9ms  70 in / 1378 out  0 diag  heap 486.3MB\n  ownership               1647.2ms  70 in / 1344 out  0 diag  heap 277.2MB\n  opaque-realization         0.5ms  70 in / 0 out  0 diag  heap 277.3MB\n  instance-discovery      2470.1ms  70 in / 641 out  0 diag  heap 422.7MB\n  target-layout           1011.0ms  641 in / 267 out  0 diag  heap 422.1MB\n  mir-lowering            5980.4ms  641 in / 878 out  0 diag  heap 510.0MB\n  toolchain-target          38.7ms  1010 in / 84 out  0 diag  heap 515.0MB\n  backend                 16943.2ms  878 in / 878 out  0 diag  heap 1599.7MB\n  object                  2367.5ms  1 in / 1 out  0 diag  heap 1608.8MB\n  runtime                   83.8ms  1 in / 1 out  0 diag  heap 1715.3MB\n  link                      90.0ms  2 in / 1 out  0 diag  heap 829.1MB\nLink plan: /tmp/silk-materialization.42ovcr/paired-2-after.link.json\n",
+        "stderr": "       41.90 real        50.10 user         2.87 sys\n          2548482048  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              308943  page reclaims\n                4208  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 828  messages sent\n                  36  messages received\n                   0  signals received\n                2811  voluntary context switches\n              101093  involuntary context switches\n        499045618794  instructions retired\n        158435426801  cycles elapsed\n          2671504064  peak memory footprint\n"
+      },
+      {
+        "index": 3,
+        "mode": "before",
+        "wallMs": 41093.686667,
+        "cpuSeconds": 52.34,
+        "peakRssBytes": 2543747072,
+        "phases": [
+          {
+            "name": "toolchain-integrity",
+            "wallMs": 95,
+            "inputs": 2783,
+            "outputs": 2783,
+            "diagnostics": 0
+          },
+          {
+            "name": "closure",
+            "wallMs": 329.8,
+            "inputs": 1,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 129,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 152.7,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 4,
+            "inputs": 61,
+            "outputs": 1971,
+            "diagnostics": 2
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 45.6,
+            "inputs": 61,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 139.9,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 133.5,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 3.1,
+            "inputs": 70,
+            "outputs": 2324,
+            "diagnostics": 0
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 19.7,
+            "inputs": 70,
+            "outputs": 70,
+            "diagnostics": 0
+          },
+          {
+            "name": "elaboration",
+            "wallMs": 3261,
+            "inputs": 70,
+            "outputs": 1378,
+            "diagnostics": 0
+          },
+          {
+            "name": "ownership",
+            "wallMs": 1507.8,
+            "inputs": 70,
+            "outputs": 1344,
+            "diagnostics": 0
+          },
+          {
+            "name": "opaque-realization",
+            "wallMs": 0.3,
+            "inputs": 70,
+            "outputs": 0,
+            "diagnostics": 0
+          },
+          {
+            "name": "instance-discovery",
+            "wallMs": 2506.3,
+            "inputs": 70,
+            "outputs": 641,
+            "diagnostics": 0
+          },
+          {
+            "name": "target-layout",
+            "wallMs": 992.8,
+            "inputs": 641,
+            "outputs": 267,
+            "diagnostics": 0
+          },
+          {
+            "name": "mir-lowering",
+            "wallMs": 5999.1,
+            "inputs": 641,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "toolchain-target",
+            "wallMs": 41.2,
+            "inputs": 1010,
+            "outputs": 84,
+            "diagnostics": 0
+          },
+          {
+            "name": "backend",
+            "wallMs": 16243.1,
+            "inputs": 878,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "object",
+            "wallMs": 2424.9,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "runtime",
+            "wallMs": 83.7,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "link",
+            "wallMs": 1305.7,
+            "inputs": 2,
+            "outputs": 1,
+            "diagnostics": 0
+          }
+        ],
+        "loadBefore": [6.68994140625, 8.11474609375, 8.7734375],
+        "loadAfter": [7.396484375, 8.09033203125, 8.73095703125],
+        "astSha256": "8509b5f5dea4b6bcb861ef88c2efc64119447357d2d454636dac4a510726c6aa",
+        "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/compiler/src/main.silk -> /tmp/silk-materialization.42ovcr/paired-3-before (llvm, aarch64-apple-darwin, 878 symbols)\nPhases:\n  toolchain-integrity       95.0ms  2783 in / 2783 out  0 diag  heap 82.1MB\n  closure                  329.8ms  1 in / 61 out  0 diag  heap 143.0MB\n  declaration-collection   129.0ms  61 in / 1358 out  0 diag  heap 131.5MB\n  declaration-index        152.7ms  61 in / 1358 out  0 diag  heap 160.1MB\n  name-resolution            4.0ms  61 in / 1971 out  2 diag  heap 162.9MB\n  module-surface            45.6ms  61 in / 61 out  0 diag  heap 136.0MB\n  declaration-collection   139.9ms  70 in / 1603 out  0 diag  heap 189.7MB\n  declaration-index        133.5ms  70 in / 1603 out  0 diag  heap 221.7MB\n  name-resolution            3.1ms  70 in / 2324 out  0 diag  heap 199.8MB\n  module-surface            19.7ms  70 in / 70 out  0 diag  heap 218.2MB\n  elaboration             3261.0ms  70 in / 1378 out  0 diag  heap 499.1MB\n  ownership               1507.8ms  70 in / 1344 out  0 diag  heap 281.0MB\n  opaque-realization         0.3ms  70 in / 0 out  0 diag  heap 281.1MB\n  instance-discovery      2506.3ms  70 in / 641 out  0 diag  heap 427.3MB\n  target-layout            992.8ms  641 in / 267 out  0 diag  heap 426.4MB\n  mir-lowering            5999.1ms  641 in / 878 out  0 diag  heap 513.6MB\n  toolchain-target          41.2ms  1010 in / 84 out  0 diag  heap 519.7MB\n  backend                 16243.1ms  878 in / 878 out  0 diag  heap 1720.4MB\n  object                  2424.9ms  1 in / 1 out  0 diag  heap 1733.4MB\n  runtime                   83.7ms  1 in / 1 out  0 diag  heap 1831.6MB\n  link                    1305.7ms  2 in / 1 out  0 diag  heap 845.4MB\nLink plan: /tmp/silk-materialization.42ovcr/paired-3-before.link.json\n",
+        "stderr": "       41.09 real        49.93 user         2.41 sys\n          2543747072  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              253984  page reclaims\n                4148  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 828  messages sent\n                  25  messages received\n                   0  signals received\n                2958  voluntary context switches\n               96511  involuntary context switches\n        504399387475  instructions retired\n        156168055590  cycles elapsed\n          2641567936  peak memory footprint\n"
+      },
+      {
+        "index": 4,
+        "mode": "before",
+        "wallMs": 41118.23475,
+        "cpuSeconds": 52.410000000000004,
+        "peakRssBytes": 2633940992,
+        "phases": [
+          {
+            "name": "toolchain-integrity",
+            "wallMs": 93.6,
+            "inputs": 2783,
+            "outputs": 2783,
+            "diagnostics": 0
+          },
+          {
+            "name": "closure",
+            "wallMs": 329.6,
+            "inputs": 1,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 128.4,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 137.3,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 3.8,
+            "inputs": 61,
+            "outputs": 1971,
+            "diagnostics": 2
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 42.3,
+            "inputs": 61,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 138,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 134.8,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 3,
+            "inputs": 70,
+            "outputs": 2324,
+            "diagnostics": 0
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 18.9,
+            "inputs": 70,
+            "outputs": 70,
+            "diagnostics": 0
+          },
+          {
+            "name": "elaboration",
+            "wallMs": 3234,
+            "inputs": 70,
+            "outputs": 1378,
+            "diagnostics": 0
+          },
+          {
+            "name": "ownership",
+            "wallMs": 1525.3,
+            "inputs": 70,
+            "outputs": 1344,
+            "diagnostics": 0
+          },
+          {
+            "name": "opaque-realization",
+            "wallMs": 0.3,
+            "inputs": 70,
+            "outputs": 0,
+            "diagnostics": 0
+          },
+          {
+            "name": "instance-discovery",
+            "wallMs": 2433.8,
+            "inputs": 70,
+            "outputs": 641,
+            "diagnostics": 0
+          },
+          {
+            "name": "target-layout",
+            "wallMs": 975.6,
+            "inputs": 641,
+            "outputs": 267,
+            "diagnostics": 0
+          },
+          {
+            "name": "mir-lowering",
+            "wallMs": 5940.2,
+            "inputs": 641,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "toolchain-target",
+            "wallMs": 41.3,
+            "inputs": 1010,
+            "outputs": 84,
+            "diagnostics": 0
+          },
+          {
+            "name": "backend",
+            "wallMs": 16579.2,
+            "inputs": 878,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "object",
+            "wallMs": 2418.3,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "runtime",
+            "wallMs": 84.5,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "link",
+            "wallMs": 1265.1,
+            "inputs": 2,
+            "outputs": 1,
+            "diagnostics": 0
+          }
+        ],
+        "loadBefore": [7.396484375, 8.09033203125, 8.73095703125],
+        "loadAfter": [6.69140625, 7.82177734375, 8.59912109375],
+        "astSha256": "8509b5f5dea4b6bcb861ef88c2efc64119447357d2d454636dac4a510726c6aa",
+        "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/compiler/src/main.silk -> /tmp/silk-materialization.42ovcr/paired-4-before (llvm, aarch64-apple-darwin, 878 symbols)\nPhases:\n  toolchain-integrity       93.6ms  2783 in / 2783 out  0 diag  heap 82.1MB\n  closure                  329.6ms  1 in / 61 out  0 diag  heap 143.6MB\n  declaration-collection   128.4ms  61 in / 1358 out  0 diag  heap 131.8MB\n  declaration-index        137.3ms  61 in / 1358 out  0 diag  heap 160.4MB\n  name-resolution            3.8ms  61 in / 1971 out  2 diag  heap 163.2MB\n  module-surface            42.3ms  61 in / 61 out  0 diag  heap 136.3MB\n  declaration-collection   138.0ms  70 in / 1603 out  0 diag  heap 190.0MB\n  declaration-index        134.8ms  70 in / 1603 out  0 diag  heap 222.0MB\n  name-resolution            3.0ms  70 in / 2324 out  0 diag  heap 199.2MB\n  module-surface            18.9ms  70 in / 70 out  0 diag  heap 217.8MB\n  elaboration             3234.0ms  70 in / 1378 out  0 diag  heap 497.4MB\n  ownership               1525.3ms  70 in / 1344 out  0 diag  heap 280.3MB\n  opaque-realization         0.3ms  70 in / 0 out  0 diag  heap 280.5MB\n  instance-discovery      2433.8ms  70 in / 641 out  0 diag  heap 426.3MB\n  target-layout            975.6ms  641 in / 267 out  0 diag  heap 425.3MB\n  mir-lowering            5940.2ms  641 in / 878 out  0 diag  heap 512.6MB\n  toolchain-target          41.3ms  1010 in / 84 out  0 diag  heap 518.7MB\n  backend                 16579.2ms  878 in / 878 out  0 diag  heap 1698.2MB\n  object                  2418.3ms  1 in / 1 out  0 diag  heap 1710.8MB\n  runtime                   84.5ms  1 in / 1 out  0 diag  heap 1808.8MB\n  link                    1265.1ms  2 in / 1 out  0 diag  heap 845.6MB\nLink plan: /tmp/silk-materialization.42ovcr/paired-4-before.link.json\n",
+        "stderr": "       41.11 real        49.88 user         2.53 sys\n          2633940992  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              282344  page reclaims\n                4223  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 828  messages sent\n                  44  messages received\n                   0  signals received\n                2831  voluntary context switches\n               92106  involuntary context switches\n        504315551978  instructions retired\n        156433215730  cycles elapsed\n          2703277568  peak memory footprint\n"
+      },
+      {
+        "index": 5,
+        "mode": "after",
+        "wallMs": 41408.038541999995,
+        "cpuSeconds": 52.21,
+        "peakRssBytes": 2528444416,
+        "phases": [
+          {
+            "name": "toolchain-integrity",
+            "wallMs": 92.5,
+            "inputs": 2783,
+            "outputs": 2783,
+            "diagnostics": 0
+          },
+          {
+            "name": "closure",
+            "wallMs": 382.1,
+            "inputs": 1,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 131.9,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 144.8,
+            "inputs": 61,
+            "outputs": 1358,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 4.2,
+            "inputs": 61,
+            "outputs": 1971,
+            "diagnostics": 2
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 45.8,
+            "inputs": 61,
+            "outputs": 61,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-collection",
+            "wallMs": 139.6,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "declaration-index",
+            "wallMs": 139.9,
+            "inputs": 70,
+            "outputs": 1603,
+            "diagnostics": 0
+          },
+          {
+            "name": "name-resolution",
+            "wallMs": 3,
+            "inputs": 70,
+            "outputs": 2324,
+            "diagnostics": 0
+          },
+          {
+            "name": "module-surface",
+            "wallMs": 20.3,
+            "inputs": 70,
+            "outputs": 70,
+            "diagnostics": 0
+          },
+          {
+            "name": "elaboration",
+            "wallMs": 3423.9,
+            "inputs": 70,
+            "outputs": 1378,
+            "diagnostics": 0
+          },
+          {
+            "name": "ownership",
+            "wallMs": 1531.4,
+            "inputs": 70,
+            "outputs": 1344,
+            "diagnostics": 0
+          },
+          {
+            "name": "opaque-realization",
+            "wallMs": 0.4,
+            "inputs": 70,
+            "outputs": 0,
+            "diagnostics": 0
+          },
+          {
+            "name": "instance-discovery",
+            "wallMs": 2511.7,
+            "inputs": 70,
+            "outputs": 641,
+            "diagnostics": 0
+          },
+          {
+            "name": "target-layout",
+            "wallMs": 995.9,
+            "inputs": 641,
+            "outputs": 267,
+            "diagnostics": 0
+          },
+          {
+            "name": "mir-lowering",
+            "wallMs": 6145,
+            "inputs": 641,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "toolchain-target",
+            "wallMs": 41,
+            "inputs": 1010,
+            "outputs": 84,
+            "diagnostics": 0
+          },
+          {
+            "name": "backend",
+            "wallMs": 16415.7,
+            "inputs": 878,
+            "outputs": 878,
+            "diagnostics": 0
+          },
+          {
+            "name": "object",
+            "wallMs": 2483.8,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "runtime",
+            "wallMs": 82.3,
+            "inputs": 1,
+            "outputs": 1,
+            "diagnostics": 0
+          },
+          {
+            "name": "link",
+            "wallMs": 107.5,
+            "inputs": 2,
+            "outputs": 1,
+            "diagnostics": 0
+          }
+        ],
+        "loadBefore": [6.69140625, 7.82177734375, 8.59912109375],
+        "loadAfter": [6.96533203125, 7.79931640625, 8.55615234375],
+        "astSha256": "8509b5f5dea4b6bcb861ef88c2efc64119447357d2d454636dac4a510726c6aa",
+        "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/compiler/src/main.silk -> /tmp/silk-materialization.42ovcr/paired-5-after (llvm, aarch64-apple-darwin, 878 symbols)\nPhases:\n  toolchain-integrity       92.5ms  2783 in / 2783 out  0 diag  heap 82.5MB\n  closure                  382.1ms  1 in / 61 out  0 diag  heap 143.5MB\n  declaration-collection   131.9ms  61 in / 1358 out  0 diag  heap 132.0MB\n  declaration-index        144.8ms  61 in / 1358 out  0 diag  heap 160.6MB\n  name-resolution            4.2ms  61 in / 1971 out  2 diag  heap 163.4MB\n  module-surface            45.8ms  61 in / 61 out  0 diag  heap 135.7MB\n  declaration-collection   139.6ms  70 in / 1603 out  0 diag  heap 190.4MB\n  declaration-index        139.9ms  70 in / 1603 out  0 diag  heap 222.4MB\n  name-resolution            3.0ms  70 in / 2324 out  0 diag  heap 199.7MB\n  module-surface            20.3ms  70 in / 70 out  0 diag  heap 218.3MB\n  elaboration             3423.9ms  70 in / 1378 out  0 diag  heap 488.6MB\n  ownership               1531.4ms  70 in / 1344 out  0 diag  heap 280.2MB\n  opaque-realization         0.4ms  70 in / 0 out  0 diag  heap 280.3MB\n  instance-discovery      2511.7ms  70 in / 641 out  0 diag  heap 426.8MB\n  target-layout            995.9ms  641 in / 267 out  0 diag  heap 425.8MB\n  mir-lowering            6145.0ms  641 in / 878 out  0 diag  heap 513.0MB\n  toolchain-target          41.0ms  1010 in / 84 out  0 diag  heap 519.5MB\n  backend                 16415.7ms  878 in / 878 out  0 diag  heap 1608.2MB\n  object                  2483.8ms  1 in / 1 out  0 diag  heap 1617.0MB\n  runtime                   82.3ms  1 in / 1 out  0 diag  heap 1723.5MB\n  link                     107.5ms  2 in / 1 out  0 diag  heap 827.2MB\nLink plan: /tmp/silk-materialization.42ovcr/paired-5-after.link.json\n",
+        "stderr": "       41.40 real        49.64 user         2.57 sys\n          2528444416  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              268024  page reclaims\n                4222  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 828  messages sent\n                  40  messages received\n                   0  signals received\n                2691  voluntary context switches\n               93272  involuntary context switches\n        497919541151  instructions retired\n        156020685627  cycles elapsed\n          2655228416  peak memory footprint\n"
+      }
+    ],
+    "fingerprintVerified": true
+  },
+  "instructions": {
+    "before": [
+      {
+        "functionCount": 900,
+        "instructions": 717180,
+        "opcodes": {
+          "Call": 14710,
+          "Unreachable": 1069,
+          "Invoke": 18,
+          "Return": 1087,
+          "LandingPad": 18,
+          "ReturnVoid": 88,
+          "Alloca": 11358,
+          "Store": 103947,
+          "Branch": 45686,
+          "Load": 133739,
+          "ExtractValue": 89916,
+          "Cast": 10938,
+          "Compare": 14863,
+          "Select": 3324,
+          "ConditionalBranch": 10926,
+          "GetElementPtr": 185216,
+          "Phi": 55724,
+          "Switch": 13143,
+          "Binary": 493,
+          "InsertValue": 20917
+        }
+      },
+      {
+        "functionCount": 7,
+        "instructions": 112,
+        "opcodes": {
+          "Alloca": 4,
+          "Branch": 25,
+          "Compare": 8,
+          "Cast": 5,
+          "ConditionalBranch": 6,
+          "Return": 8,
+          "Call": 20,
+          "Store": 7,
+          "Load": 11,
+          "ExtractValue": 4,
+          "Unreachable": 7,
+          "GetElementPtr": 4,
+          "Binary": 2,
+          "ReturnVoid": 1
+        }
+      }
+    ],
+    "after": [
+      {
+        "functionCount": 900,
+        "instructions": 686353,
+        "opcodes": {
+          "Call": 14710,
+          "Unreachable": 1069,
+          "Invoke": 18,
+          "Return": 1087,
+          "LandingPad": 18,
+          "ReturnVoid": 88,
+          "Alloca": 11358,
+          "Store": 97311,
+          "Branch": 44709,
+          "Load": 126517,
+          "ExtractValue": 89916,
+          "Cast": 10936,
+          "Compare": 14863,
+          "Select": 3324,
+          "ConditionalBranch": 10926,
+          "GetElementPtr": 171866,
+          "Phi": 53672,
+          "Switch": 12555,
+          "Binary": 493,
+          "InsertValue": 20917
+        }
+      },
+      {
+        "functionCount": 7,
+        "instructions": 112,
+        "opcodes": {
+          "Alloca": 4,
+          "Branch": 25,
+          "Compare": 8,
+          "Cast": 5,
+          "ConditionalBranch": 6,
+          "Return": 8,
+          "Call": 20,
+          "Store": 7,
+          "Load": 11,
+          "ExtractValue": 4,
+          "Unreachable": 7,
+          "GetElementPtr": 4,
+          "Binary": 2,
+          "ReturnVoid": 1
+        }
+      }
+    ]
+  },
+  "conclusion": "Rejected: adjacent success-return fusion reduces main-module IR by 4.3% but shows no cold-build speedup. Production source restored; preceding transient-outcome optimization preserved.",
+  "scope": "Non-suspendable adjacent RunEffectValue/RunStaticEffect -> PackEffectOutcome(tag 0) -> Return; no addressed or redefined intermediate roots; existing ABI and failure cleanup retained.",
+  "methodology": "Six alternating fresh Node builds, caches disabled, before/after/after/before/before/after, no task builds or tests overlap timings. Shared host; no OS page-cache flush. Attribution ran separately. All six AST hashes match. Before binary byte-identical to prior experiment baseline.",
+  "scratch": "/tmp/silk-materialization.42ovcr",
+  "correctness": "Targeted Backend forwarding regression failed before implementation and passed after. All six binaries produced identical AST for compiler/src/main.silk. Experimental implementation rejected before full native acceptance validation; not claimed generally correct."
+}

@@ -1807,19 +1807,26 @@ pub fn main() -> i32 { return run choose(First {}) }`,
   },
   // Alternatives with different capture arities exercise the composite's unified payload lanes:
   // every executor must place and read alternative captures through the registered calling shape.
+  // The aggregate alternative also crosses the private address ABI from composite payload lanes;
+  // changing the original Copy value after construction must not change its captured snapshot.
   {
     name: 'finite-effect-join-capture-arity',
     source: `struct First {}
 struct Second {}
-fn choose(input: First | Second, a: i32, b: i32, c: i32) -> Effect<'static; i32> {
+struct Payload { a: i32 b: i32 c: i32 }
+impl Copy for Payload {}
+fn choose(input: First | Second, payload: Payload) -> Effect<'static; i32> {
   return match move input {
-    First {} => effect { return a + b + c }
-    Second {} => effect { return c }
+    First {} => effect { return payload.a + payload.b + payload.c }
+    Second {} => effect { return 2 }
   }
 }
 pub fn main() -> i32 {
-  let wide = run choose(First {}, 11, 13, 16)
-  let narrow = run choose(Second {}, 11, 13, 2)
+  let mut payload = Payload { a: 11, b: 13, c: 16 }
+  let captured = choose(First {}, payload)
+  payload.a = 100
+  let wide = run captured
+  let narrow = run choose(Second {}, payload)
   return wide + narrow
 }`,
     expected: { _tag: 'Completes', result: 42 },

@@ -1,4 +1,5 @@
 import * as NativeExecutionStorage from './NativeExecutionStorage.js'
+import * as NativeArgument from './NativeArgument.js'
 import * as Alignment from '@silklang/llvm/Alignment'
 import * as LlvmBlock from '@silklang/llvm/Block'
 import type * as Builder from '@silklang/llvm/Builder'
@@ -305,7 +306,7 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
             suspendable: false,
             ...(Mir.hasDiagnosticObservation(program) ? { diagnosticParameter: 1 } : {}),
           },
-          [base],
+          NativeArgument.fromValues([base]),
           `${tag}_release`,
         ),
       )
@@ -526,7 +527,9 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
       yield* NativeCall.callValues(
         call,
         helper,
-        yield* loadLanes(plan.element, block.valueOffset, `${tag}_value`),
+        NativeArgument.fromValues(
+          yield* loadLanes(plan.element, block.valueOffset, `${tag}_value`),
+        ),
         `${tag}_value_cleanup`,
       )
       yield* dropThroughPlan(
@@ -583,7 +586,14 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
         yield* NativePayload.materialize(values, context, `${tag}_source`),
         `${tag}_store`,
       )
-      NativeResult.sourceValues(yield* NativeCall.callValues(call, target, [base], `${tag}_hook`))
+      NativeResult.sourceValues(
+        yield* NativeCall.callValues(
+          call,
+          target,
+          NativeArgument.fromValues([base]),
+          `${tag}_hook`,
+        ),
+      )
       yield* dropThroughPlan(
         context,
         plan.inner,

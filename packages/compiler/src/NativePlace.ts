@@ -103,6 +103,7 @@ export const allocate = Effect.fnUntraced(function* (
   context: Context,
   type: Mir.Type,
   tag: string,
+  placement: 'current' | 'entry' = 'current',
 ) {
   const layout = NativeType.addressLayout(context.types.program.layout, type)
   if (layout === undefined) throw new RangeError('Cannot allocate an unavailable value layout')
@@ -113,6 +114,7 @@ export const allocate = Effect.fnUntraced(function* (
       BigInt(layout.size),
     ),
     alignment: yield* Alignment.fromByteUnits(layout.alignment),
+    placement,
   })
   return make(context.types.program.layout, type, base)
 })

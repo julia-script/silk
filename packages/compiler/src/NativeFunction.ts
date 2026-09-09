@@ -42,6 +42,7 @@ import * as NativeValue from './NativeValue.js'
 import * as ValueStorage from './ValueStorage.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
 import * as NativeDiagnosticScope from './NativeDiagnosticScope.js'
+import * as NativeOutcomeStorage from './NativeOutcomeStorage.js'
 
 export interface MutableRoots {
   readonly mutable: ReadonlySet<number>
@@ -559,8 +560,11 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           integerTypes,
         })
         const addressStorage = new Map<number, Value.Input>()
+        const transientOutcomes = NativeOutcomeStorage.transientLocals(entry.fn, entry.linear)
         const placeRoots = entry.fn.localTypes.flatMap((type, ordinal) =>
-          NativeValue.classify(program.layout, type) === 'Place' ? [ordinal] : [],
+          NativeValue.classify(program.layout, type) === 'Place' && !transientOutcomes.has(ordinal)
+            ? [ordinal]
+            : [],
         )
         for (const root of [...new Set([...addressRoots, ...placeRoots])].sort(
           (left, right) => left - right,
@@ -623,6 +627,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           mutableStorage: loweringContext.mutableStorage,
           addressRoots,
           addressStorage,
+          transientOutcomes,
           locals,
           types: nativeTypes,
           lanePointers,
@@ -664,6 +669,18 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           const logicalType = entry.fn.localTypes.at(ordinal)
           if (logicalType === undefined) {
             throw new RangeError(`Backend lost parameter type %${ordinal}`)
+          }
+          if (entry.argumentParameters.at(ordinal)?.indirect) {
+            const incoming = yield* Value.argument(body, physicalParameter++)
+            const destination = NativeStorage.readLocal(storageContext, { _tag: 'Local', ordinal })
+            if (destination._tag !== 'NativePlace')
+              throw new RangeError('Canonical parameter lost its local storage')
+            yield* NativePlace.copy(
+              destination,
+              storageContext,
+              NativePlace.make(program.layout, logicalType, incoming),
+            )
+            continue
           }
           const values: Array<Value.Input> = []
           for (let lane = 0; lane < lanesFor(logicalType).length; lane += 1) {

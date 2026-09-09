@@ -4,7 +4,7 @@ import * as AddrSpace from '../AddrSpace.js'
 import * as Alignment from '../Alignment.js'
 import * as ByteString from '../ByteString.js'
 import * as Constant from '../Constant.js'
-import type * as FunctionBodyDescription from '../internal/FunctionBodyDescription.js'
+import * as FunctionBodyDescription from '../internal/FunctionBodyDescription.js'
 import * as FunctionBodyState from '../internal/FunctionBodyState.js'
 import * as Handle from '../internal/Handle.js'
 import { invalidInput, invalidState, type LlvmError } from '../LlvmError.js'
@@ -24,6 +24,8 @@ export interface AllocaOptions {
   readonly alignment?: Alignment.Alignment
   readonly addressSpace?: AddrSpace.AddrSpace
   readonly inAlloca?: boolean
+  /** Fixed-size function-lifetime storage. Requires a constant count and excludes `inalloca`. */
+  readonly placement?: 'current' | 'entry'
 }
 
 /**
@@ -64,6 +66,10 @@ const accessInfo = (input: MemoryAccess.Input): FunctionBodyDescription.MemoryIn
 
 /**
  * Appends stack allocation for a sized element type and optional integer count.
+ *
+ * With `placement: 'entry'`, inserts the allocation before the entry block's terminator
+ * without moving the active insertion point. This keeps fixed-size call-boundary storage
+ * outside loops. Its count must be constant; `inalloca` retains its current-block lifetime.
  *
  * @category instructions
  * @since 0.0.0
@@ -138,18 +144,55 @@ export const alloca = Effect.fnUntraced(function* (
         'Type',
         'FunctionBody.alloca',
       )
-      return (yield* FunctionBodyState.appendResult(draft, resultType, name, (result, finalName) =>
-        Object.freeze({
-          _tag: 'Alloca',
-          allocationType: allocationTypeIndex,
-          count: countValue.operand,
-          addressSpace: addressSpace.value,
-          alignment: options.alignment ?? Alignment.defaultAlignment,
-          inAlloca: options.inAlloca ?? false,
-          result,
-          name: finalName,
-        }),
-      )).value
+      if (
+        options.placement === 'entry' &&
+        (countValue.operand._tag !== 'Constant' || options.inAlloca === true)
+      )
+        return yield* Result.fail(
+          invalidInput({
+            operation: 'FunctionBody.alloca',
+            message: 'Entry allocation requires a constant count and cannot use inalloca',
+            input: options,
+          }),
+        )
+      const allocated = yield* FunctionBodyState.appendResult(
+        draft,
+        resultType,
+        name,
+        (result, finalName) =>
+          Object.freeze({
+            _tag: 'Alloca',
+            allocationType: allocationTypeIndex,
+            count: countValue.operand,
+            addressSpace: addressSpace.value,
+            alignment: options.alignment ?? Alignment.defaultAlignment,
+            inAlloca: options.inAlloca ?? false,
+            result,
+            name: finalName,
+          }),
+      )
+      if (options.placement === 'entry' && draft.cursor !== 0) {
+        const current = draft.cursor === undefined ? undefined : draft.blocks.at(draft.cursor)
+        const entry = draft.blocks.at(0)
+        const index = current?.instructions.pop()
+        if (entry === undefined || index === undefined)
+          return yield* Result.fail(
+            invalidState({
+              operation: 'FunctionBody.alloca',
+              message: 'Entry allocation lost its block',
+              state: draft.cursor,
+            }),
+          )
+        const last = entry.instructions.at(-1)
+        const terminator = last === undefined ? undefined : draft.instructions.at(last)
+        entry.instructions.splice(
+          entry.instructions.length -
+            (terminator !== undefined && FunctionBodyDescription.isTerminator(terminator) ? 1 : 0),
+          0,
+          index,
+        )
+      }
+      return allocated.value
     }),
   )
 })

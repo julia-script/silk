@@ -17,8 +17,11 @@ import * as NativeSuspension from './NativeSuspension.js'
 import * as NativeType from './NativeType.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
 import * as NativeResult from './NativeResult.js'
+import * as NativeArgument from './NativeArgument.js'
 
 export interface DeclaredTarget {
+  /** Absent only for compiler-synthesized LLVM helpers with already-physical scalar inputs. */
+  readonly argumentParameters?: ReadonlyArray<NativeArgument.Parameter>
   readonly handle: FunctionActor.Function
   readonly resultLaneCount: number
   readonly diagnosticResult?: LlvmType.Type
@@ -55,11 +58,30 @@ export const argumentsFor = Effect.fnUntraced(function* (
   ])
 })
 
+/** Resolves logical arguments before appending the separately borrowed diagnostic context. */
+export const lowerArguments = Effect.fnUntraced(function* (
+  context: SynchronousContext,
+  target: Pick<DeclaredTarget, 'diagnosticParameter' | 'argumentParameters'>,
+  inputs: NativeArgument.NativeArgument,
+  observation: 'Inherited' | 'Independent' = 'Inherited',
+) {
+  const arguments_ =
+    target.argumentParameters === undefined
+      ? yield* NativeArgument.materialize(context.storage, inputs, 'native_helper_arguments')
+      : yield* NativeArgument.lower(
+          context.storage,
+          target.argumentParameters,
+          inputs,
+          `call_argument${context.storage.sequences.materialize++}`,
+        )
+  return yield* argumentsFor(context, target, arguments_, observation)
+})
+
 /** Calls one synchronous native target and unpacks its ABI result lanes. */
 export const callSynchronous = Effect.fnUntraced(function* (
   context: SynchronousContext,
   target: DeclaredTarget,
-  arguments_: ReadonlyArray<Value.Input>,
+  arguments_: NativeArgument.NativeArgument,
   name: string,
 ): Effect.fn.Return<NativeResult.NativeResult, LlvmError.LlvmError> {
   if (target.suspendable)
@@ -67,7 +89,7 @@ export const callSynchronous = Effect.fnUntraced(function* (
   const result = yield* FunctionBody.callDirect(
     context.body,
     target.handle,
-    yield* argumentsFor(context, target, arguments_),
+    yield* lowerArguments(context, target, arguments_),
     name,
   )
   for (const root of [...context.storage.addressRoots].sort((left, right) => left - right))
@@ -238,7 +260,7 @@ export const retainRelay = Effect.fnUntraced(function* (
 export const callValues = Effect.fnUntraced(function* (
   context: Context,
   target: NativeLoweringContext.DeclaredFunction,
-  arguments_: ReadonlyArray<Value.Input>,
+  arguments_: NativeArgument.NativeArgument,
   name: string,
   suspension?: Mir.RunSuspendableEffectRegion,
 ) {
@@ -254,7 +276,7 @@ export const callValues = Effect.fnUntraced(function* (
     body,
     target.handle,
     [
-      ...(yield* argumentsFor(context.synchronous, target, arguments_)),
+      ...(yield* lowerArguments(context.synchronous, target, arguments_)),
       transferPointer,
       nullPointer,
       yield* Constant.integerUnsigned(builder, i32, 0n),

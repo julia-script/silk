@@ -593,3 +593,346 @@ pre-existing `.zuse/settings.toml` formatting issue, left untouched. Diagnostic 
 and temporary executables are outside the repository under `/tmp/silk-small-wins.3eqhvx`;
 the diagnostic scaling generator is `/tmp/silk-perf-hypotheses.uPqhbt/scaling.mjs` (temporary,
 not a shipped benchmark interface). The real-parser benchmark remains reproducible with `run.py`.
+
+## Transient Effect-outcome storage — 2026-09-09
+
+This experiment removes a redundant local home for single-definition `RunEffectValue` and
+`RunStaticEffect` outcomes whose payload is consumed entirely inside the producing operation.
+Their returned lanes already supply success extraction and failure propagation. Diagnostic
+ownership lives in separate slots and is preserved. Any later value reference, address use,
+redefinition, cleanup dependency, or suspension dependency keeps ordinary payload storage.
+This is dead-storage elimination, not an aggregate calling-convention change or an SSA cache.
+
+The [raw results](results/2026-09-09-transient-outcome-storage.json) include an isolated,
+alternating six-build comparison of the actual `compiler/src/main.silk` CLI. Each sample uses
+a fresh Node process with persistent compilation caches disabled. A temporary read-only loader
+returns an empty transient-local set for the eager-storage control; both modes use the same
+loader and otherwise identical compiled sources. The source/dist fingerprint is checked before
+and after the batch. The eager-control binary is byte-identical to the pre-change binary at
+`1f41c8cb`, and the optimized binary is byte-identical to its instruction-attribution build.
+All six binaries produce the same AST output. No tests or other task builds overlap this batch.
+
+| Metric                            | Eager storage | Transient outcomes |
+| --------------------------------- | ------------: | -----------------: |
+| Cold wall median                  |        42.55s |             40.55s |
+| Cold wall range                   |  41.90–44.00s |       39.50–41.50s |
+| CPU median                        |        54.77s |             52.29s |
+| Backend median                    |        17.25s |             16.26s |
+| Main-module LLVM instructions     |       800,774 |            717,180 |
+| Parser-prefixed LLVM instructions |       642,402 |            562,036 |
+
+The measured wall reduction is **4.7%**, CPU reduction **4.5%**, and main-module IR reduction
+**10.4%**. This is a shared-host experiment with three samples per mode, not a universal speedup
+guarantee. Startup load averages vary substantially; phase differences cannot be added as
+independent savings. Peak RSS is essentially flat at these sample sizes.
+
+Instruction attribution reconciles every function with its immutable final bitcode snapshot.
+The exact difference is 1,236 allocations, 41,797 stores, and 40,561 address calculations.
+Calls, loads, control-flow instructions, returns, casts, and all other opcode totals are
+unchanged. The largest `primaryInner` runner falls from 31,126 to 27,284 instructions.
+The remaining capture/result scalarization is not addressed by this patch.
+
+The raw artifact also retains the earlier non-interleaved parser/CLI pilot batches, including
+the 40.09s parser outlier. They are not the primary timing comparison: the failing regression
+test overlapped one before sample, and the full parser oracle overlapped the start of the after
+batch. Those runs motivated the isolated paired experiment rather than being selectively
+discarded. Temporary controls and executables are under `/tmp/silk-effect-result.IuDji7`;
+no measurement switch or loader is installed in production code.
+
+The rebuilt parser passes all 113 source fixtures. Focused Effect, diagnostic, and suspension
+tests pass; the regression first failed with eager storage and passes with the analysis.
+
+Final validation passes all 2,444 compiler tests, native acceptance shards (112/111/111),
+53 standard-library doctests, 20 release-candidate checks, and 19 script tests. The remaining
+workspace run passes all 21 tasks, including 160 LSP and 87 CLI tests. Unchanged dependencies
+reuse their valid Turbo results, including LLVM's 78 tests and parity checks.
+
+Validation was completed in parts: Turbo's strict environment filtering stripped
+`SILK_NATIVE_SHARD` from the initial root test command, so its redundant unsharded native runner
+was interrupted. All three shards were run directly with their shard setting preserved; a
+successful monolithic `pnpm test` exit is not claimed. Typechecking and lint pass. Root
+`pnpm check` and formatting stop at the pre-existing `.zuse/settings.toml` formatting issue,
+left untouched. No OpenSpec artifacts were added for this experiment.
+
+## Caller-provided result storage experiment — 2026-09-09
+
+**Rejected:** changing native result transport did not demonstrate a cold-compilation gain.
+The experimental implementation and its ABI-specific tests were removed; the preceding
+transient-outcome optimization remains unchanged. The rebuilt compiler's entire `dist`
+directory is byte-identical to the pre-experiment snapshot.
+
+The experiment kept scalar returns direct and moved aggregate results into caller-provided
+stack storage. Suspension returned its status separately, with result storage confined to an
+invocation rather than retained in continuation frames. Diagnostic ownership remained separate.
+Four variants tested flat result fields, coalesced zero initialization, canonical byte-layout
+transfers, and finally batched success projection plus direct construction of a single safe
+return-only local in the caller's buffer. The first three single-build pilots were slower;
+the final variant received the alternating comparison below.
+
+| Metric                        | Existing ABI | Experimental ABI |
+| ----------------------------- | -----------: | ---------------: |
+| Cold wall median              |       38.28s |           38.60s |
+| Cold wall range               | 37.93–45.07s |     37.98–38.62s |
+| CPU median                    |       50.13s |           50.42s |
+| Backend median                |       14.75s |           14.66s |
+| Object-generation median      |        3.26s |            3.47s |
+| Main-module LLVM instructions |      717,180 |          686,830 |
+
+This is three fresh-process samples per mode, with persistent compilation caches disabled.
+Both modes use the same read-only loader: the control loads the initial compiled compiler
+snapshot, which already includes transient-outcome storage elimination. LLVM is identical in
+both modes; the experimental fixed-size entry-allocation option defaults to its old behavior.
+Source/dist fingerprints agree before and after the batch. No tests or other task builds overlap
+the timing samples. All six binaries produce identical real-input AST output, and the final
+experimental binary passes all 113 parser differential fixtures.
+
+The fifth attempted sample timed out after reporting compilation complete but before emitting
+its timing breakdown. It is retained as an excluded attempt and was retried before the final
+after sample. The initial control's 45.07s remains in the batch; its apparent advantage over the
+first after sample did not reproduce. Medians are effectively neutral, not evidence of a win.
+
+Separate instruction-attribution runs reconcile every function with its final LLVM snapshot.
+The final variant removes 47,792 `extractvalue`, 13,597 `insertvalue`, and 9,079 phi instructions,
+but adds 23,900 loads, 20,988 address calculations, 1,252 allocations, and 884 calls. Total IR
+shrinks only **4.2%**. Backend emission improves **0.6%**, object generation regresses **6.5%**,
+and total wall time regresses **0.8%**. Lower instruction count alone was not an adequate proxy
+for compilation time.
+
+The [raw record](results/2026-09-09-result-transport-experiment.json) includes all six samples,
+phase timings, fingerprints, opcode totals, negative pilot logs, and the excluded attempt.
+The recoverable experimental diff and binaries remain under `/tmp/silk-result-transport.MoglOG`;
+no alternate ABI, benchmark switch, or compatibility path remains in production.
+
+The next hypothesis should target materialization across complete producer/consumer paths,
+especially successful Effect payload forwarding, rather than change only the return boundary.
+This experiment does not establish that caller-provided result storage is intrinsically worse;
+it establishes that this implementation is not a demonstrated fix for this cold-build workload.
+
+After restoration, typechecking and lint pass, 32 focused compiler tests pass, and the
+non-compiler workspace test run passes all 21 tasks using their valid cached results.
+The full root test command was stopped rather than repeat the unchanged compiler's complete
+native corpus; its successful monolithic exit is not claimed. The preceding section records
+that implementation's full validation. Root formatting and `pnpm check` still stop only at the
+pre-existing `.zuse/settings.toml` formatting issue, which was left untouched.
+
+## Adjacent success-return fusion experiment — 2026-09-09
+
+**Rejected:** removing intermediate materialization from successful Effect forwarding did not
+demonstrate a cold-build improvement. The implementation and experimental assertion were
+reverted. The preceding transient-outcome optimization remains intact, and the rebuilt compiler
+`dist` is byte-identical to the pre-experiment snapshot.
+
+The experiment fused adjacent `RunEffectValue` / `RunStaticEffect` → `PackEffectOutcome(tag 0)`
+→ `Return` chains, passing successful payload fields directly to return packing. It retained the
+existing native ABI and failure cleanup. Fusion excluded suspendable functions and addressed or
+redefined intermediate roots; it did not retain a value cache across joins or other operations.
+An initial scan found 102 syntactic candidate chains before those safety filters.
+
+| Metric                        | Existing emitter | Fused emitter |
+| ----------------------------- | ---------------: | ------------: |
+| Cold wall median              |           41.09s |        41.41s |
+| Cold wall range               |     40.56–41.12s |  40.77–41.91s |
+| CPU median                    |           52.34s |        52.21s |
+| Backend median                |           16.24s |        16.42s |
+| Object-generation median      |            2.42s |         2.44s |
+| Main-module LLVM instructions |          717,180 |       686,353 |
+
+The six fresh-process builds alternate before/after/after/before/before/after, with persistent
+compilation caches disabled. Both modes use the same read-only loader, which selects the
+pre-experiment compiler snapshot for the control. Source/dist fingerprints agree before and
+after the batch, LLVM is unchanged, and no task tests or builds overlap timing samples. This
+is a shared-host measurement, not an OS-page-cache-cold benchmark. All six binaries produce
+identical AST output for `compiler/src/main.silk`.
+
+Separate instruction attribution reconciles every function with its final LLVM snapshot.
+Fusion removes 6,636 stores, 7,222 loads, 13,350 address calculations, 2,052 phi instructions,
+977 branches, 588 switches, and two casts. Other opcode totals are unchanged. The **4.3% IR
+reduction** does not translate into a demonstrated timing gain: wall time is 0.8% higher,
+CPU time is effectively flat, and backend time is 1.1% higher. These differences do not establish
+a reliable regression either. The narrower forwarding chains are not a demonstrated fix for
+this workload; this does not rule out broader producer/consumer materialization elimination.
+
+The targeted structural regression failed before fusion and passed afterward. Full native
+acceptance was not run for the rejected implementation, so the AST comparison is not a claim
+of general semantic equivalence. The [raw record](results/2026-09-09-success-return-fusion-experiment.json)
+retains all samples, phase timings, fingerprints, and opcode totals. The recoverable patch,
+before/after source files, binaries, and probe scripts remain under
+`/tmp/silk-materialization.42ovcr`; no experimental path remains in production.
+
+A next measurement can separate Effect capture materialization from result materialization.
+The existing `MirNormalization` direct-run conversion deliberately excludes affine or borrowed
+captures. Measure how much work those excluded cases account for before changing their
+ownership-sensitive representation; simply relaxing that guard would not be justified.
+
+After restoration, typechecking and lint pass, all 32 tests in `Backend.test.ts` and
+`StoredEffectMir.test.ts` pass, and the non-compiler workspace run passes all 21 tasks using
+their valid cached results. The unchanged compiler's full native corpus was not rerun; its
+preceding validation is recorded above. Root `pnpm check` stops at the pre-existing
+`.zuse/settings.toml` formatting issue, left untouched. The experiment's Markdown and JSON
+records pass targeted formatting, and `git diff --check` passes.
+
+## Effect capture materialization probe — 2026-09-09
+
+**Positive headroom measurement, not an implemented optimization.** Separating capture loads
+from the rest of Effect execution identifies a larger target than capture-container construction.
+No production source, ABI, or ownership behavior was changed.
+
+A read-only instruction probe labels the exact `NativeStorage.materialize` calls that unpack
+the environment for `RunEffectValue` and `CatchEffect`. Its binary is byte-identical to the
+uninstrumented baseline. Every function's instruction attribution reconciles with its final
+LLVM snapshot. In the 717,180-instruction main module:
+
+| Emission work                       | Instructions | Main-module share |
+| ----------------------------------- | -----------: | ----------------: |
+| Capture construction (`MakeEffect`) |        4,510 |              0.6% |
+| Capture loads for `RunEffectValue`  |      127,514 |             17.8% |
+| Capture loads for `CatchEffect`     |           23 |            <0.01% |
+
+Capture construction already uses canonical byte transfers for aggregate fields. The costly
+step is translating their stored representation into flattened call arguments. `NativePlace`
+must emit loads, tag dispatch, and joins for nested union representations. The callee then
+stores its incoming parameters again. Removing `MakeEffect` alone would retain the argument
+conversion and therefore miss most of the measured work.
+
+The declared main module contains 1,229 `MakeEffect` sites and 1,023 `RunEffectValue` sites;
+973 constructions are immediately followed by a run of the constructed value. Captures are
+not predominantly borrowed-pointer fields: the construction scan includes 1,382 `Take:Value`
+fields. Common parser captures are `State` (336 bytes), `NodeResult` (344 bytes), and
+`ElementsResult` (416 bytes). These are static site/layout observations, not runtime execution
+counts or live-memory measurements. The parser intentionally threads state by ownership;
+this result does not require changing that source-level protocol.
+
+### Deliberately invalid omission experiment
+
+To test compilation-time headroom before an argument-transport rewrite, a temporary loader
+replaces only those two capture materializations with correctly typed null argument values.
+**The omission outputs are semantically invalid, were never executed, and have executable
+permissions removed. They are not usable compiler artifacts.** This is a diagnostic knockout,
+not a candidate optimization or a correctness test.
+
+| Metric                   | Normal capture loads | Loads omitted |
+| ------------------------ | -------------------: | ------------: |
+| Cold wall median         |               40.13s |        37.64s |
+| Cold wall range          |         39.98–41.45s |  37.01–38.40s |
+| CPU median               |               51.02s |        49.17s |
+| Backend median           |               16.06s |        13.89s |
+| Object-generation median |                2.41s |         2.52s |
+
+The omitted main module has 589,643 instructions, exactly 127,537 fewer than the control.
+The difference consists of 45,356 loads, 43,499 address calculations, 27,040 phi instructions,
+7,748 branches, 3,868 switches, and 26 casts. Other opcode totals are unchanged, and the separate
+runtime module remains at 112 instructions. This confirms that the measured capture conversion
+includes substantial control-flow expansion, not only ordinary scalar loads.
+
+Six fresh-process samples alternate control/omit/omit/control/control/omit. Persistent
+compilation caches are disabled; both modes use the same loader and identical compiler/LLVM
+source and dist files. The source/dist fingerprint agrees before and after the batch, and all
+three control binaries are byte-identical to the uninstrumented baseline. No task tests or
+other builds overlap the timing samples. This is a shared host without an OS page-cache flush.
+Separate instruction-attribution builds are excluded from timings.
+
+The omission probe saves **2.50s (6.2%)** in median wall time and **2.17s (13.5%)** in backend
+time. It does not predict a guaranteed implementation gain: a real transport scheme must do
+replacement work, and constant arguments can affect downstream code generation. Nor is this
+a strict bound for a different ABI that might also remove callee-side reconstruction. The
+earlier single-build pilot (40.39s versus 37.61s) is retained separately from the paired result.
+
+The next justified prototype is canonical-memory transport for large internal aggregate
+arguments: pass their stored address and preserve value/ownership semantics with a byte copy
+or a proven ownership transfer, rather than unpacking and repacking every scalar field. It must
+preserve capture-time snapshots, reusable Effects, borrows, diagnostic cleanup, and suspension
+lifetimes. Do not simply relax `MirNormalization`'s affine-capture guard or move ordinary reads
+across capture construction.
+
+The [raw record](results/2026-09-09-capture-materialization-probe.json) retains the samples,
+phase timings, fingerprints, instruction attribution, static capture-shape summary, and the
+omission loader/harness. Scratch probes and clearly marked non-runnable outputs are under
+`/tmp/silk-captures.oUGJGc`. No OpenSpec or production benchmark switch was added.
+
+Validation checks the six-sample record, matching control hashes, source/dist fingerprint,
+reconciled opcode/bucket totals, and non-executable omission artifacts. Compiler `dist` remains
+byte-identical to the pre-experiment snapshot. Typechecking and lint pass; the non-compiler
+workspace test run passes all 21 tasks using valid cached results. Compiler correctness/native
+suites were not rerun for this measurement-only change. Root formatting and `pnpm check` stop
+at the pre-existing `.zuse/settings.toml` formatting issue, left untouched. The new records pass
+targeted formatting and `git diff --check`.
+
+## Canonical aggregate arguments — 2026-09-09
+
+**Implemented and kept.** The runnable argument-transport change saves **3.18s (7.4%)** in
+median cold compilation of `compiler/src/main.silk` and removes **136,497 LLVM instructions
+(19.0%)** from its main module. This follows the capture-materialization probe above; it does
+not omit capture values or change the source program.
+
+Synchronous Effect runners now accept canonical aggregate addresses rather than flattened
+field lanes. The caller retains the aggregate's stored representation, and the callee copies
+its bytes into its own local storage on entry. Capture arguments are projected from the
+stored capture-time environment, never reread from the original source locals. Value isolation
+and ownership behavior are therefore preserved without requiring copy-elision proofs.
+
+The policy uses the existing semantic `Place` classification, not a size threshold tuned to
+this benchmark. Results, machine/C ABI, scalar arguments, suspension frames, and persistent
+continuation payloads retain their respective representations. Already-materialized composite
+and continuation arguments are lowered through the same declared parameter plan. When they
+need a temporary canonical slot, its allocation is placed in the LLVM entry block so calls in
+loops do not repeatedly grow the stack. No production benchmark switch or OpenSpec was added.
+
+### Final paired measurement
+
+| Metric                   |       Before |        After |
+| ------------------------ | -----------: | -----------: |
+| Cold wall median         |       42.78s |       39.61s |
+| Cold wall range          | 42.17–43.32s | 37.36–42.29s |
+| CPU median               |       54.75s |       50.12s |
+| Backend median           |       16.76s |       14.77s |
+| Object-generation median |        4.11s |        2.32s |
+| Main LLVM instructions   |      717,180 |      580,683 |
+
+The CPU reduction is **8.5%** and the backend reduction is **11.8%**. The initial runnable
+prototype independently measured **40.08s → 37.19s (7.2%)** across another six-build batch,
+before entry-allocation lifetime and zero-capture-path refinements. Its object-generation
+median was essentially flat (2.43s → 2.47s), so the larger final-batch object-time difference
+should not be treated as a stable separate gain. The batches are recorded separately, not
+pooled. Wall-time variability remains visible; these are small paired samples on a shared host.
+
+Both batches alternate before/after/after/before/before/after, use fresh Node processes, and
+disable persistent compilation caches. No task tests or other builds overlap included timing
+samples; there is no OS page-cache flush. A read-only loader supplies the pre-change compiler
+snapshot, which already includes the preceding transient-outcome optimization. Both final-batch
+modes use the final LLVM library; entry placement is opt-in. Every control binary is byte-identical
+to the original baseline, and every candidate binary is byte-identical to the separately
+instrumented candidate. All six final AST outputs match the reference, and the source/dist
+fingerprint agrees before and after the batch.
+
+The instruction attribution reconciles every emitted function. Main-module function count stays
+at 900; the separate seven-function runtime stays at 112 instructions. Capture-load instructions
+under `RunEffectValue` and `CatchEffect` fall from 127,537 to 935. Field-by-field parameter ingress
+falls from 24,929 to 13,421 instructions, with 169 copy instructions on the new entry path.
+Overall opcode reductions include 45,251 loads, 46,854 address calculations, 27,040 phi nodes,
+8,210 branches, 4,328 switches, 4,952 stores, and 32 casts; there are 169 additional calls and
+one additional allocation. This is a structural reduction, not a JavaScript-specific shortcut.
+
+### Correctness and validation
+
+The new structural regression proves the aggregate pointer signature and callee-owned copy;
+it fails under the original transport. The LLVM allocation regression proves that fixed call
+storage is placed in entry without moving the loop insertion point. The existing composite
+capture-arity corpus case now also checks an aggregate snapshot after the original Copy value
+has been changed.
+
+All 2,445 compiler tests, 79 LLVM tests plus parity, 319 native corpus cases plus five shared
+native checks, 113 parser inputs, 53 stdlib doctests, 68 docgen tests, 20 release-candidate checks,
+and 19 script tests have passing coverage. The remaining workspace run passes all 20 tasks
+with compiler and docgen validated separately.
+
+The initial validation jobs were over-parallelized. Two compiler tests, the shared archive-relink
+check in each native shard, one parser input, one docgen test, and six release checks timed out;
+all passed unchanged on retries with reduced contention. No timeout or assertion was relaxed.
+These validation timings are not performance samples. Final typechecking and lint pass.
+Root formatting and `pnpm check` remain blocked solely by the pre-existing user-owned
+`.zuse/settings.toml` formatting issue, left untouched; the changed files pass targeted formatting
+and `git diff --check`.
+
+The [raw record](results/2026-09-09-canonical-argument-transport.json) retains both timing batches,
+phase data, fingerprints, reconciled instruction totals, harnesses, and validation outcomes.
+Before-source snapshots, logs, and runnable binaries remain in `/tmp/silk-arguments.abqEOK`.

@@ -1,4 +1,5 @@
 import * as NativeDiagnosticTransfer from './NativeDiagnosticTransfer.js'
+import * as NativeArgument from './NativeArgument.js'
 import * as NativeResult from './NativeResult.js'
 import type * as NativeReturn from './NativeReturn.js'
 import * as NativeDiagnosticOutcome from './NativeDiagnosticOutcome.js'
@@ -232,12 +233,18 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
             ),
           )
         }
+        const physicalArguments = yield* NativeArgument.lower(
+          { body, types, lanePointers },
+          target.argumentParameters,
+          NativeArgument.fromValues(arguments_),
+          'child_arguments',
+        )
         if (target.diagnosticParameter !== undefined) {
-          if (arguments_.length !== target.diagnosticParameter)
+          if (physicalArguments.length !== target.diagnosticParameter)
             throw new RangeError('Child observer argument lost its source lane position')
           const causeType = target.parameterTypes.at(target.diagnosticParameter + 1)
           if (causeType === undefined) throw new RangeError('Child call lost diagnostic cause type')
-          arguments_.push(
+          physicalArguments.push(
             yield* FunctionBody.load(
               body,
               pointer,
@@ -269,12 +276,12 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
           target.handle,
           target.suspendable
             ? [
-                ...arguments_,
+                ...physicalArguments,
                 transfer,
                 yield* Constant.nullValue(builder, pointer),
                 yield* Constant.integerUnsigned(builder, i32, 0n),
               ]
-            : arguments_,
+            : physicalArguments,
           'child_step',
         )
         if (target.resultLaneCount > 0 && result === undefined)
@@ -865,13 +872,18 @@ export const emitOrigin = Effect.fnUntraced(function* (
     Mir.Operation,
     { readonly _tag: 'RunEffect' | 'RunEffectValue' | 'CatchEffect' }
   >,
-  arguments_: ReadonlyArray<Value.Input>,
+  arguments_: NativeArgument.NativeArgument,
   name: string,
 ) {
   const { body, builder, storage: nativeStorage, suspensionRegions, types } = context
   const suspension = suspensionRegions.get(operation)
   if (suspension?._tag !== 'SuspendEffectRegion') return false
-  yield* originateTransfer(context, suspension, arguments_, name)
+  yield* originateTransfer(
+    context,
+    suspension,
+    yield* NativeArgument.materialize(nativeStorage, arguments_, name),
+    name,
+  )
   yield* LlvmBlock.setInsertionPoint(
     body,
     yield* LlvmBlock.make(body, `${name}_unreachable_continuation`),

@@ -9,6 +9,8 @@ import * as Layout from '../src/Layout.js'
 import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirNormalization from '../src/MirNormalization.js'
+import * as MirLinearization from '../src/MirLinearization.js'
+import * as NativeOutcomeStorage from '../src/NativeOutcomeStorage.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as SourceFile from '../src/SourceFile.js'
@@ -181,6 +183,56 @@ pub fn main() -> i32 {
     )
     assert.strictEqual(run?._tag, 'RunEffectValue')
     if (run?._tag !== 'RunEffectValue' || stored?._tag !== 'StoredEffectField') return
+    const owner =
+      module.functions.find((fn) => MirVerification.operations(fn).includes(run)) ??
+      unreachable('expected the stored Effect runner owner')
+    const blocks = MirLinearization.linearize(owner)
+    assert.isTrue(NativeOutcomeStorage.transientLocals(owner, blocks).has(run.outcome.ordinal))
+    const diagnosticOnly = blocks.map((block) => ({
+      ...block,
+      recoveryOutcomes: [run.outcome],
+      operations: [
+        ...block.operations,
+        {
+          _tag: 'ReleaseDiagnosticOutcome' as const,
+          outcome: run.outcome,
+          provenance: run.provenance,
+        },
+      ],
+    }))
+    assert.isTrue(
+      NativeOutcomeStorage.transientLocals(owner, diagnosticOnly).has(run.outcome.ordinal),
+    )
+    const repeatedDefinition = blocks.map((block) => ({
+      ...block,
+      operations: block.operations.flatMap((operation) =>
+        operation === run ? [operation, operation] : [operation],
+      ),
+    }))
+    assert.isFalse(
+      NativeOutcomeStorage.transientLocals(owner, repeatedDefinition).has(run.outcome.ordinal),
+    )
+    const returnedOutcome = blocks.map((block) => ({
+      ...block,
+      terminator:
+        block.terminator._tag === 'Return'
+          ? { ...block.terminator, value: run.outcome }
+          : block.terminator,
+    }))
+    assert.isFalse(
+      NativeOutcomeStorage.transientLocals(owner, returnedOutcome).has(run.outcome.ordinal),
+    )
+    const borrowedOutcome = blocks.map((block) => ({
+      ...block,
+      operations: block.operations.map((operation) =>
+        operation === run
+          ? { ...operation, arguments: [...operation.arguments, run.outcome] }
+          : operation,
+      ),
+    }))
+    assert.isFalse(
+      NativeOutcomeStorage.transientLocals(owner, borrowedOutcome).has(run.outcome.ordinal),
+    )
     assert.deepEqual(run.runner, stored.realization.runner)
     assert.deepEqual(run.runnerTypeArguments, stored.realization.runnerArguments)
     assert.deepEqual(Type.failureMembers(run.outcomeType.type), stored.realization.rows.failures)
@@ -458,6 +510,18 @@ pub fn main() -> i32 {
       .flatMap(MirVerification.operations)
       .find((operation) => operation._tag === 'RunEffectValue')
     const suspension = module.functions.flatMap((fn) => fn.suspension?.regions ?? [])
+    for (const fn of module.functions) {
+      const transient = NativeOutcomeStorage.transientLocals(fn, MirLinearization.linearize(fn))
+      for (const region of fn.suspension?.regions ?? []) {
+        if (region.operation._tag !== 'ExecutionPark')
+          assert.isFalse(transient.has(region.operation.outcome.ordinal))
+        if (region._tag === 'RunSuspendableEffectRegion') {
+          for (const local of region.liveLocals) assert.isFalse(transient.has(local.ordinal))
+          for (const slot of region.relay.state?.slots ?? [])
+            assert.isFalse(transient.has(slot.local.ordinal))
+        }
+      }
+    }
 
     assert.strictEqual(run?._tag, 'RunEffectValue')
     assert.include(

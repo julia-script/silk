@@ -50,6 +50,40 @@ it.effect('commits a valid body once and closes its scoped draft', () =>
   }),
 )
 
+it.effect('places fixed call storage in entry without moving the loop insertion point', () =>
+  Effect.gen(function* () {
+    const builder = yield* Builder.make()
+    const i32 = yield* Type.integer(builder, 32)
+    const fn = yield* FunctionActor.declare(
+      builder,
+      'entry_storage',
+      yield* Type.functionType(builder, i32, [i32]),
+    )
+    yield* FunctionActor.buildBody(
+      builder,
+      fn,
+      Effect.fnUntraced(function* (body) {
+        yield* Block.make(body, 'entry')
+        const loop = yield* Block.make(body, 'loop')
+        yield* FunctionBody.branch(body, loop)
+        yield* Block.setInsertionPoint(body, loop)
+        const argument = yield* Value.argument(body, 0)
+        const rejected = yield* Effect.flip(
+          FunctionBody.alloca(body, i32, 'dynamic', { placement: 'entry', count: argument }),
+        )
+        assert.instanceOf(rejected, LlvmError)
+        const slot = yield* FunctionBody.alloca(body, i32, 'result', { placement: 'entry' })
+        yield* FunctionBody.store(body, argument, slot)
+        yield* FunctionBody.returnValue(body, yield* FunctionBody.load(body, i32, slot, 'read'))
+      }),
+    )
+    const ir = yield* IrText.render(builder)
+    assert.match(ir, /entry:\n\s+%result = alloca i32[^]*?br label %loop/)
+    assert.match(ir, /loop:\n\s+store i32 %v0, ptr %result/)
+    assert.notMatch(ir, /loop:[^]*?alloca/)
+  }),
+)
+
 it.effect('local handles retain an owner identity, not the function construction graph', () =>
   Effect.gen(function* () {
     const builder = yield* Builder.make()

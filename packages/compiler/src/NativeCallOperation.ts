@@ -1,4 +1,5 @@
 import * as NativeResult from './NativeResult.js'
+import * as NativeArgument from './NativeArgument.js'
 import * as NativeCallable from './NativeCallable.js'
 import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
@@ -302,7 +303,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const called = yield* FunctionBody.callDirect(
         body,
         handle,
-        yield* NativeCall.argumentsFor(call.synchronous, callableTarget, operands),
+        yield* NativeCall.lowerArguments(
+          call.synchronous,
+          callableTarget,
+          NativeArgument.fromValues(operands),
+        ),
         `callable${operation.destination.ordinal}`,
       )
       // A never-returning callback may inhabit a wider join result type. It produces no
@@ -353,10 +358,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const result = yield* FunctionBody.callDirect(
         body,
         handle,
-        yield* NativeCall.argumentsFor(
+        yield* NativeCall.lowerArguments(
           call.synchronous,
           target,
-          (yield* NativeStorage.materializeArguments(nativeStorage, operation.arguments)).flat(),
+          NativeArgument.fromLocals(nativeStorage, operation.arguments),
         ),
         `t${operation.destination.ordinal}`,
       )

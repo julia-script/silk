@@ -468,6 +468,29 @@ it.effect('does not reload unrelated mutable locals at a later control-flow join
   }),
 )
 
+it.effect('passes aggregate Effect arguments through canonical storage', () =>
+  Effect.gen(function* () {
+    const artifact = yield* emit(
+      `struct Payload {
+  first: i32
+  second: i32
+  third: i32
+  fourth: i32
+}
+effect fn inspect(value: Payload) -> i32 { return value.third }
+pub effect fn main() -> i32 {
+  return run inspect(Payload { first: 1, second: 2, third: 42, fourth: 4 })
+}`,
+      { mode: 'release' },
+    )
+    const runner =
+      artifact.ir.match(/define hidden [^\n]+@silk_golden_program_inspect_effect[^]*?\n}/)?.[0] ??
+      unreachable('expected the aggregate Effect runner')
+    assert.match(runner, /@silk_golden_program_inspect_effect[^\n(]*\(ptr /)
+    assert.include(runner, '@llvm.memmove')
+  }),
+)
+
 it.effect('avoids redundant failure payload selections and duplicate Effect result reloads', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(

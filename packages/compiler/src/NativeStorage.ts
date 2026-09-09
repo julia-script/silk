@@ -27,6 +27,8 @@ export interface Context {
   readonly mutableStorage: ReadonlyMap<number, ReadonlyArray<Value.Input>>
   readonly addressRoots: ReadonlySet<number>
   readonly addressStorage: Map<number, Value.Input>
+  /** Run outcomes with no payload consumer; their diagnostic slots remain independently live. */
+  readonly transientOutcomes: ReadonlySet<number>
   readonly locals: Map<number, NativeValue.NativeValue>
   readonly types: NativeType.LoweringContext
   readonly lanePointers: NativeLanePointer.Context
@@ -206,6 +208,7 @@ export const writeLocal = Effect.fnUntraced(function* (
   root: number,
   values: ReadonlyArray<Value.Input>,
 ) {
+  if (context.transientOutcomes.has(root)) return
   const type = context.fn.localTypes.at(root)
   if (type === undefined) throw new RangeError('Local write lost its type')
   const kind = NativeValue.classify(context.layout, type)

@@ -1,4 +1,5 @@
 import * as NativePayload from './NativePayload.js'
+import * as NativeArgument from './NativeArgument.js'
 import * as ValueStorage from './ValueStorage.js'
 import * as LlvmBlock from '@silklang/llvm/Block'
 import * as Constant from '@silklang/llvm/Constant'
@@ -460,10 +461,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       if (target === undefined)
         throw new RangeError('Backend cannot resolve propagated effect target')
-      const runArguments = (yield* NativeStorage.materializeArguments(
-        nativeStorage,
-        operation.arguments,
-      )).flat()
+      const runArguments = NativeArgument.fromLocals(nativeStorage, operation.arguments)
       if (
         yield* NativeSuspension.emitOrigin(
           suspension,
@@ -650,7 +648,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const called = yield* NativeCall.callValues(
           call,
           target,
-          effectArguments,
+          NativeArgument.fromValues(effectArguments),
           `effect_composite${operation.destination.ordinal}_${alternativeOrdinal}`,
         )
         const sourceOutcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> =
@@ -865,15 +863,18 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         throw new RangeError(
           `Backend cannot resolve Effect value runner ${operation.runner.module}.${operation.runner.name}<${operation.runnerTypeArguments.map(SilkType.encodeGenericArgument).join(', ')}>`,
         )
-      const effectArguments = [
-        ...(operation._tag === 'RunEffectValue'
-          ? yield* NativeStorage.materialize(nativeStorage, operation.effect)
-          : (yield* NativeStorage.materializeArguments(
+      const effectArguments =
+        operation._tag === 'RunEffectValue'
+          ? yield* NativeArgument.captures(
               nativeStorage,
-              operation.captures.map((capture) => capture.source),
-            )).flat()),
-        ...(yield* NativeStorage.materializeArguments(nativeStorage, operation.arguments)).flat(),
-      ]
+              target.argumentParameters,
+              operation.effect,
+              operation.arguments,
+            )
+          : NativeArgument.fromLocals(nativeStorage, [
+              ...operation.captures.map((capture) => capture.source),
+              ...operation.arguments,
+            ])
       if (operation._tag !== 'RunStaticEffect') {
         if (
           yield* NativeSuspension.emitOrigin(
@@ -1033,10 +1034,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         Mir.matchesInstance(candidate.fn, operation.runner, operation.runnerTypeArguments),
       )
       if (target === undefined) throw new RangeError('Backend cannot resolve Effect result runner')
-      const reifyArguments = [
-        ...(yield* NativeStorage.materialize(nativeStorage, operation.effect)),
-        ...(yield* NativeStorage.materializeArguments(nativeStorage, operation.arguments)).flat(),
-      ]
+      const reifyArguments = yield* NativeArgument.captures(
+        nativeStorage,
+        target.argumentParameters,
+        operation.effect,
+        operation.arguments,
+      )
       if (
         yield* NativeSuspension.emitOrigin(
           suspension,
