@@ -91,35 +91,31 @@ const encodeFoundation = (state: BuilderState.Snapshot, producer: Producer): Uin
 }
 
 /** @internal */
-const activeGlobal = (
-  state: BuilderState.Snapshot,
-  kind: GlobalDescription.GlobalDescription['kind'],
-  actorIndex: number,
-): GlobalDescription.GlobalDescription | undefined =>
-  state.globals.find(
-    (global) =>
-      !global.deleted &&
-      global.replacement === undefined &&
-      global.kind === kind &&
-      global.actorIndex === actorIndex,
-  )
-
-/** @internal */
 const buildGlobalOrder = (state: BuilderState.Snapshot): GlobalOrder => {
   const entries: Array<GlobalOrder['entries'][number]> = []
-  const add = (global: GlobalDescription.GlobalDescription | undefined): void => {
-    if (global === undefined) return
-    const globalIndex = state.globals.indexOf(global)
-    if (globalIndex >= 0) entries.push({ global, globalIndex })
+  const active: Record<
+    GlobalDescription.GlobalDescription['kind'],
+    Map<number, GlobalOrder['entries'][number]>
+  > = { Variable: new Map(), Function: new Map(), Alias: new Map() }
+  // Per-actor global searches made declaration-only encoding quadratic. Index the active
+  // entries once, retaining global indices for references. Category conversion keeps a
+  // global's position but appends its new actor, so emission still follows actor-table order.
+  state.globals.forEach((global, globalIndex) => {
+    if (global.deleted || global.replacement !== undefined) return
+    const actors = active[global.kind]
+    if (!actors.has(global.actorIndex)) actors.set(global.actorIndex, { global, globalIndex })
+  })
+  const add = (entry: GlobalOrder['entries'][number] | undefined): void => {
+    if (entry !== undefined) entries.push(entry)
   }
   state.variables.forEach((_value, index) => {
-    add(activeGlobal(state, 'Variable', index))
+    add(active.Variable.get(index))
   })
   state.functions.forEach((_value, index) => {
-    add(activeGlobal(state, 'Function', index))
+    add(active.Function.get(index))
   })
   state.aliases.forEach((_value, index) => {
-    add(activeGlobal(state, 'Alias', index))
+    add(active.Alias.get(index))
   })
   const valueIndex = new Map<number, number>()
   const strtab = new Map<number, { readonly offset: number; readonly size: number }>()

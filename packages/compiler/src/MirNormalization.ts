@@ -159,62 +159,95 @@ const foldConstructor = (
   })
 }
 
-const containsLocal = (value: unknown, ordinal: number, seen = new Set<object>()): boolean => {
-  if (typeof value !== 'object' || value === null) return false
-  if (seen.has(value)) return false
-  seen.add(value)
-  if ('_tag' in value && value._tag === 'Local' && 'ordinal' in value && value.ordinal === ordinal)
-    return true
-  return Object.values(value).some((entry) => containsLocal(entry, ordinal, seen))
+interface LocalUse {
+  readonly region: Mir.Region
+  readonly operation?: Mir.Operation
 }
 
-const usesOf = (
-  fn: Mir.MirFunction,
-  definition: Extract<Mir.Operation, { readonly _tag: 'MakeEffect' }>,
-): ReadonlyArray<{ readonly region: Mir.Region; readonly operation?: Mir.Operation }> => {
-  const uses: Array<{ readonly region: Mir.Region; readonly operation?: Mir.Operation }> = []
+type LocalUseIndex = ReadonlyMap<number, ReadonlyArray<LocalUse>>
+
+/**
+ * Collect all local identities in one attribution entry, including metadata. Identity tracking
+ * deduplicates shared subgraphs and terminates cycles; it must not be shared between entries,
+ * because the same object used by two operations represents two uses.
+ */
+const localOrdinals = (value: unknown): Set<number> => {
+  const ordinals = new Set<number>()
+  const seen = new Set<object>()
+  const pending: Array<unknown> = [value]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    if (typeof current !== 'object' || current === null || seen.has(current)) continue
+    seen.add(current)
+    if (
+      '_tag' in current &&
+      current._tag === 'Local' &&
+      'ordinal' in current &&
+      typeof current.ordinal === 'number'
+    )
+      ordinals.add(current.ordinal)
+    for (const entry of Object.values(current)) pending.push(entry)
+  }
+  return ordinals
+}
+
+/**
+ * One index belongs to the immutable, constructor-folded function, before any direct-run
+ * replacements. The measured parser workload scanned 141,151 operations for 1,444 construction
+ * queries although those functions contain only 10,191 operations. This operation/reference
+ * loop indexes each attribution entry once; queries only filter out their own definition.
+ *
+ * Nested executions are visited separately by regionsTree. Their enclosing composite operation
+ * owns only its explicit input/result references, not all references in its nested regions.
+ */
+const indexLocalUses = (fn: Mir.MirFunction): LocalUseIndex => {
+  const index = new Map<number, Array<LocalUse>>()
+  const record = (ordinals: Iterable<number>, use: LocalUse): void => {
+    for (const ordinal of ordinals) {
+      const uses = index.get(ordinal)
+      if (uses === undefined) index.set(ordinal, [use])
+      else uses.push(use)
+    }
+  }
   for (const region of Mir.regionsTree(fn.regions)) {
     if (region._tag === 'OperationRegion') {
       for (const operation of region.operations) {
-        let directlyUses: boolean
-        if (operation._tag === 'Match')
-          directlyUses =
-            operation.scrutinee.ordinal === definition.destination.ordinal ||
-            operation.arms.some(
-              (arm) =>
-                arm.guard?.execution.result?.ordinal === definition.destination.ordinal ||
-                arm.selected.execution.result?.ordinal === definition.destination.ordinal,
-            )
-        else if (operation._tag === 'Conditional')
-          directlyUses = [
-            operation.condition,
-            operation.taken.result,
-            operation.otherwise.result,
-          ].some((local) => local?.ordinal === definition.destination.ordinal)
-        else if (operation._tag === 'ShortCircuit')
-          directlyUses = [operation.left, operation.right.result].some(
-            (local) => local?.ordinal === definition.destination.ordinal,
-          )
-        else directlyUses = containsLocal(operation, definition.destination.ordinal)
-        if (operation !== definition && directlyUses)
-          uses.push(Object.freeze({ region, operation }))
+        let ordinals: Set<number>
+        if (operation._tag === 'Match') {
+          ordinals = new Set([operation.scrutinee.ordinal])
+          for (const arm of operation.arms) {
+            const guard = arm.guard?.execution.result
+            const selected = arm.selected.execution.result
+            if (guard !== undefined) ordinals.add(guard.ordinal)
+            if (selected !== undefined) ordinals.add(selected.ordinal)
+          }
+        } else if (operation._tag === 'Conditional') {
+          ordinals = new Set([operation.condition.ordinal])
+          if (operation.taken.result !== undefined) ordinals.add(operation.taken.result.ordinal)
+          if (operation.otherwise.result !== undefined)
+            ordinals.add(operation.otherwise.result.ordinal)
+        } else if (operation._tag === 'ShortCircuit') {
+          ordinals = new Set([operation.left.ordinal])
+          if (operation.right.result !== undefined) ordinals.add(operation.right.result.ordinal)
+        } else ordinals = localOrdinals(operation)
+        record(ordinals, Object.freeze({ region, operation }))
       }
-      if (containsLocal(region.outcome, definition.destination.ordinal))
-        uses.push(Object.freeze({ region }))
+      record(localOrdinals(region.outcome), Object.freeze({ region }))
     } else if (region._tag === 'CleanupRegion') {
-      if (
-        region.releases.some((operation) =>
-          containsLocal(operation, definition.destination.ordinal),
-        ) ||
-        containsLocal(region.outcome, definition.destination.ordinal)
-      )
-        uses.push(Object.freeze({ region }))
-    } else if (containsLocal(region, definition.destination.ordinal)) {
-      uses.push(Object.freeze({ region }))
-    }
+      record(localOrdinals([region.releases, region.outcome]), Object.freeze({ region }))
+    } else record(localOrdinals(region), Object.freeze({ region }))
   }
-  return Object.freeze(uses)
+  for (const uses of index.values()) Object.freeze(uses)
+  return index
 }
+
+const usesOf = (
+  index: LocalUseIndex,
+  definition: Extract<Mir.Operation, { readonly _tag: 'MakeEffect' }>,
+): ReadonlyArray<LocalUse> =>
+  Object.freeze(
+    (index.get(definition.destination.ordinal) ?? []).filter((use) => use.operation !== definition),
+  )
 
 const rejection = (
   fn: Mir.MirFunction,
@@ -390,13 +423,14 @@ export const normalize = (program: Mir.Module, provisional: ProvisionalMir.Modul
       }
     }
     let directChanged = false
+    let useIndex: LocalUseIndex | undefined
     const directRegions = mapRegions(folded.regions, (region) => {
       if (region._tag !== 'OperationRegion') return region
       const removed = new Set<Mir.Operation>()
       const replacements = new Map<Mir.Operation, Mir.Operation>()
       for (const construction of region.operations) {
         if (construction._tag !== 'MakeEffect') continue
-        const uses = usesOf(folded, construction)
+        const uses = usesOf((useIndex ??= indexLocalUses(folded)), construction)
         const use = uses.at(0)
         const run = use?.operation
         const runSuspension =

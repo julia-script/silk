@@ -5,6 +5,7 @@ import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Elaboration from './Elaboration.js'
 import * as Hir from './Hir.js'
+import * as FunctionIndex from './internal/FunctionIndex.js'
 import type * as Instances from './Instances.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as Lifetime from './Lifetime.js'
@@ -2316,13 +2317,7 @@ export const make = (operations: Operations) => {
     results: ReadonlyMap<string, Elaboration.Result>,
     target: DeclarationFacts.CanonicalId,
   ): Hir.HirFunction | undefined {
-    return results
-      .get(target.module)
-      ?.hir.functions.find(
-        (candidate) =>
-          candidate.declaration.canonical._tag === 'Canonical' &&
-          candidate.declaration.canonical.id.name === target.name,
-      )
+    return FunctionIndex.hirByName(results.get(target.module)?.hir, target.name)
   }
 
   // A quantified function item omits its invocation regions; those universal proofs do not
@@ -3157,13 +3152,7 @@ export const make = (operations: Operations) => {
     results: ReadonlyMap<string, Elaboration.Result>,
     key: InstanceKey,
   ): Hir.HirFunction | undefined =>
-    results
-      .get(key.declaration.module)
-      ?.hir.functions.find(
-        (fn) =>
-          fn.declaration.canonical._tag === 'Canonical' &&
-          fn.declaration.canonical.id.name === key.declaration.name,
-      )
+    FunctionIndex.hirByName(results.get(key.declaration.module)?.hir, key.declaration.name)
 
   const instanceNode = (key: InstanceKey): string => `instance\u0000${keyText(key)}`
 

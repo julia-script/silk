@@ -6,6 +6,7 @@ import * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import * as Hir from './Hir.js'
 import * as Mir from './Mir.js'
+import * as FunctionIndex from './internal/FunctionIndex.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
@@ -286,8 +287,9 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
         break
       }
-      const callableTarget = declared.find((candidate) =>
-        Mir.matchesInstance(candidate.fn, target.declaration, operation.typeArguments),
+      const callableTarget = FunctionIndex.nativeCandidates(declared, target.declaration).find(
+        (candidate) =>
+          Mir.matchesInstance(candidate.fn, target.declaration, operation.typeArguments),
       )
       if (callableTarget === undefined)
         throw new RangeError(
@@ -330,7 +332,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'Call': {
-      const target = declared.find((candidate) =>
+      const target = FunctionIndex.nativeCandidates(declared, operation.target).find((candidate) =>
         Mir.matchesInstance(
           candidate.fn,
           operation.target,

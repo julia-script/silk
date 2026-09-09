@@ -15,6 +15,7 @@ import * as Backend from '../src/Backend.js'
 import * as Layout from '../src/Layout.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as Hir from '../src/Hir.js'
+import * as FunctionIndex from '../src/internal/FunctionIndex.js'
 import * as Instances from '../src/Instances.js'
 import * as LlvmBackend from '../src/LlvmBackend.js'
 import * as Match from '../src/Match.js'
@@ -39,9 +40,39 @@ const golden = (name: string): string =>
 const nestedSource = `pub fn identity(value: i32) -> i32 { return value }
 pub fn main() -> i32 { return identity(identity(42)) }`
 
+it('indexes canonical functions in source order without admitting unresolved declarations', () => {
+  const first = { _tag: 'CanonicalDeclarationId', module: 'one', name: 'same' } as const
+  const second = { ...first, module: 'two' }
+  const duplicate = { ...first }
+  const entries = [undefined, first, second, duplicate]
+  const index = FunctionIndex.make(entries, (entry) => entry)
+  assert.deepEqual(index.names.get('same'), [first, second, duplicate])
+  assert.strictEqual(index.names.get('same')?.at(0), first)
+  assert.deepEqual(FunctionIndex.candidates(index, first), [first, duplicate])
+  assert.strictEqual(FunctionIndex.candidates(index, first).at(0), first)
+  assert.deepEqual(FunctionIndex.candidates(index, second), [second])
+  assert.deepEqual(FunctionIndex.candidates(index, { ...first, module: 'missing' }), [])
+})
+
 it.effect('discovers reachable call chains once and terminates recursion', () =>
   Effect.gen(function* () {
-    const nested = Analysis.instancesOf(yield* snapshot(nestedSource))
+    const analyzedNested = yield* snapshot(nestedSource)
+    const nested = Analysis.instancesOf(analyzedNested)
+    const hir = Analysis.rootAnalysis(analyzedNested).hir
+    for (const fn of hir.functions) {
+      if (fn.declaration.canonical._tag !== 'Canonical') continue
+      const declaration = fn.declaration.canonical.id
+      assert.strictEqual(FunctionIndex.hirByName(hir, declaration.name), fn)
+      assert.strictEqual(FunctionIndex.hirByCanonical(hir, declaration), fn)
+      assert.strictEqual(
+        FunctionIndex.hirByCanonical(hir, { ...declaration, module: 'missing' }),
+        undefined,
+      )
+    }
+    assert.strictEqual(FunctionIndex.hirByName(hir, 'missing'), undefined)
+    assert.strictEqual(FunctionIndex.hirByName(undefined, 'main'), undefined)
+    // A changed immutable snapshot must not inherit the old module's cached entries.
+    assert.strictEqual(FunctionIndex.hirByName({ ...hir, functions: [] }, 'main'), undefined)
     const direct = Analysis.instancesOf(yield* snapshot('pub fn main() -> i32 { return main() }'))
     const mutual = Analysis.instancesOf(
       yield* snapshot(`pub fn main() -> i32 { return other() }
@@ -384,7 +415,53 @@ pub fn main() -> () { return run Intrinsic.catchFailure<SomeError>(failWithOwned
 
 it.effect('lowers discovered instances deterministically to verifier-clean MIR', () =>
   Effect.gen(function* () {
-    const first = MirEncoding.encode(Analysis.loweredMir(yield* snapshot(nestedSource)))
+    const program = Analysis.loweredMir(yield* snapshot(nestedSource))
+    const original = program.functions.at(0) ?? unreachable('expected main function')
+    const generic: Mir.MirFunction = {
+      ...original,
+      instance: { ...original.instance, typeArguments: ['bool'] },
+    }
+    const specialized: Mir.MirFunction = {
+      ...original,
+      instance: {
+        ...original.instance,
+        staticArguments: [{ _tag: 'IntegerValue', type: 'i32', value: 42n }],
+      },
+    }
+    const otherModule: Mir.MirFunction = {
+      ...original,
+      id: { ...original.id, module: 'other' },
+    }
+    const duplicate = { ...original }
+    const functions = [original, generic, specialized, otherModule, duplicate]
+    const index = FunctionIndex.make(functions, (fn) => fn.id)
+    assert.deepEqual(FunctionIndex.candidates(index, original.id), [
+      original,
+      generic,
+      specialized,
+      duplicate,
+    ])
+    for (const fn of functions) {
+      const matches = (candidate: Mir.MirFunction) =>
+        Mir.matchesInstance(
+          candidate,
+          fn.id,
+          fn.instance.typeArguments,
+          fn.instance.staticArguments,
+        )
+      assert.strictEqual(
+        FunctionIndex.candidates(index, fn.id).find(matches),
+        functions.find(matches),
+      )
+    }
+    assert.deepEqual(FunctionIndex.candidates(index, { ...original.id, name: 'missing' }), [])
+    assert.strictEqual(
+      FunctionIndex.candidates(index, original.id).find((fn) =>
+        Mir.matchesInstance(fn, original.id, ['i32']),
+      ),
+      undefined,
+    )
+    const first = MirEncoding.encode(program)
     const second = MirEncoding.encode(Analysis.loweredMir(yield* snapshot(nestedSource)))
     assert.strictEqual(first, golden('lowered.mir.txt'))
     assert.strictEqual(first, second)

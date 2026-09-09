@@ -501,3 +501,95 @@ monolithic `pnpm test` exit is not claimed. `pnpm check` and root formatting sti
 the pre-existing `.zuse/settings.toml` formatting issue, which was left untouched. Detailed
 commands and integration repairs are in the
 [implementation record](../../openspec/changes/archive/2026-09-08-lower-aggregates-through-typed-places/implementation-notes.md).
+
+## Snapshot facts and lookup indexes — 2026-09-08
+
+Four structural changes remove repeated searches without changing the parser, language, or ABI:
+
+- Derive diagnostic-observer presence once per immutable MIR module, including negative results.
+- Share HIR function indexes across resolution stages; narrow native candidates by canonical
+  declaration, then apply the unchanged generic/static instance matcher.
+- Build one lazy local-use index per constructor-folded function, preserving ordered attribution
+  to operations, outcomes, cleanup, and nested executions.
+- Index active LLVM globals once, then emit in variable/function/alias actor order with original
+  global indices. Deleted, replaced, and category-rebound globals retain their existing semantics.
+
+Weak ownership ties the JavaScript caches to immutable compilation snapshots, not persistent
+build caches. Transformations publish new snapshots and therefore derive new facts/indexes.
+
+### Real parser workload: no established total-build speedup
+
+The [new raw results](results/2026-09-08-small-wins.json) contain three cold samples per stage.
+The comparison uses the six typed-place after-samples above. Source hashes, embedded input,
+CLI AST bytes, toolchain versions, and cache policy match; all six new runtime oracles and the
+bootstrap differential pass. No builds/tests or instrumentation overlapped these timing runs.
+
+| Stage       | Previous wall median | New wall median (range) | Previous CPU median | New CPU median |
+| ----------- | -------------------: | ----------------------: | ------------------: | -------------: |
+| Parser only |               32.61s |    33.03s (31.66–33.99) |              42.81s |         43.12s |
+| Full CLI    |               43.26s |    43.72s (43.22–50.57) |              56.00s |         55.16s |
+
+**The earlier estimate of 2–3 seconds saved on this workload is not established.** The total
+wall medians are effectively flat within observed variation. MIR lowering improves from
+3.04s to 2.24s for the parser and 6.97s to 6.22s for the CLI, but other phases offset that gain.
+Phase differences are not independently additive. The 50.57s sample is retained, not discarded.
+One-minute load averages at sample start ranged from 7.3 to 13.7, versus 4.3 to 9.7 in the
+earlier batch. This is a shared-host, non-interleaved comparison, not a controlled causal estimate.
+
+### Function-count scaling: substantially better, still not fully linear
+
+The diagnostic sweep uses constant-sized scalar functions in a balanced call tree: N leaf
+functions, N−1 joining functions, and a checksum-checking main. N is 0, 16, 64, 256, or 1,024;
+the zero case is just a main returning zero. Leaves return their argument plus their ordinal;
+joins add their two children, and main checks the result at argument 1 against N(N+1)/2.
+Every function stays reachable. Aggregate width, effect density, and stdin are not varied.
+
+Both the [before](../cold-compilation/results/2026-09-08-scaling-before-small-wins.json) and
+[after](../cold-compilation/results/2026-09-08-scaling-after-small-wins.json) data retain three
+serial fresh-process builds at each size, rotating size order. Fixture content hashes match.
+Compiler source/dist fingerprints stayed fixed within each batch. All 30 runtime checks pass.
+OS caches were retained; native and Node persistent compilation caches were disabled.
+
+| Added functions | Before cold median | After cold median | Before CPU median | After CPU median |
+| --------------- | -----------------: | ----------------: | ----------------: | ---------------: |
+| 0               |              7.20s |             6.73s |            10.10s |            9.94s |
+| 31              |              6.92s |             6.64s |            10.08s |            9.84s |
+| 127             |              7.53s |             6.90s |            10.76s |           10.11s |
+| 511             |              8.96s |             8.04s |            12.78s |           11.90s |
+| 2,047           |             19.17s |            13.35s |            24.13s |           18.46s |
+
+The largest case improves by 30.3% in wall time and 23.5% in CPU time. Its backend median
+falls from 7.00s to 3.09s and instance discovery from 2.11s to 0.81s. However, increasing
+added functions roughly 4× from 511 to 2,047 still increases baseline-subtracted wall time
+about 5.1× (previously 6.8×). This improves scaling; it does not prove global linearity.
+Tiny baseline-subtracted differences are dominated by noise, including the negative 31-function
+difference in both batches. The synthetic gain must not be substituted for the real parser result.
+
+### Structural and correctness checks
+
+An instrumented real CLI build compared every new local-use query against the previous
+implementation: all 1,444 queries across 430 functions matched in length and ordered
+region/operation identity. A separate synthetic attribution probe covers composite operations,
+shared/cyclic metadata, cleanup, outcomes, and repeated operation objects. Its operation visits
+grow as 4/16/64/256 rather than 16/256/4,096/65,536. No legacy scan remains in production.
+
+The real CLI queries diagnostic observation 881 times on the same 878-function MIR module;
+the module is now scanned once, visiting 707 functions before finding an observer. The separate
+support module is also scanned once. HIR lookup tests cover new snapshots, missing/unresolved
+declarations, and module/name collisions; native lookup tests retain generic/static distinctions.
+The LLVM ordering regression reproduces a byte golden captured before the implementation.
+
+All 2,444 compiler tests, native acceptance shards (112/111/111), 78 LLVM tests plus parity,
+20 release-candidate checks, and 19 script tests pass. The rebuilt CLI also passes all 113
+parser/stdlib files. Validation was completed in parts; the redundant serial native runner was
+interrupted, so a successful monolithic `pnpm test` exit is not claimed. All 160 LSP tests and
+the remaining workspace tasks pass on the final rerun without competing native jobs. An LSP
+inspector test initially failed during concurrent validation and passed unchanged in isolation.
+Its misleading missing-project response can also represent a query deadline; even token inspection triggers
+full realization. That separate issue was not changed by this patch.
+
+Workspace typechecking and lint pass. Root `pnpm check` and formatting still stop at the
+pre-existing `.zuse/settings.toml` formatting issue, left untouched. Diagnostic instrumentation
+and temporary executables are outside the repository under `/tmp/silk-small-wins.3eqhvx`;
+the diagnostic scaling generator is `/tmp/silk-perf-hypotheses.uPqhbt/scaling.mjs` (temporary,
+not a shipped benchmark interface). The real-parser benchmark remains reproducible with `run.py`.

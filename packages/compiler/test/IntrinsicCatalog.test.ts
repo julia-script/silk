@@ -1017,6 +1017,18 @@ pub fn main() -> i32 { return run observing(Observer { value: 7 }, observer(11),
     )
     assert.strictEqual(relay?._tag, 'RunSuspendableEffectRegion')
     const module = Analysis.loweredMir(snapshot)
+    assert.isTrue(Mir.hasDiagnosticObservation(module))
+    const withoutObservation = Object.freeze({ ...module, functions: Object.freeze([]) })
+    assert.isFalse(Mir.hasDiagnosticObservation(withoutObservation))
+    assert.deepEqual(Mir.coroutineFrameHeaderRoles(withoutObservation), ['Parent', 'State'])
+    assert.deepEqual(Mir.diagnosticOutcomeLocals(withoutObservation, fn), [])
+    const restoredObservation = Object.freeze({
+      ...withoutObservation,
+      functions: module.functions,
+    })
+    assert.isTrue(Mir.hasDiagnosticObservation(restoredObservation))
+    assert.isFalse(Mir.hasDiagnosticObservation(withoutObservation))
+    assert.isTrue(Mir.hasDiagnosticObservation(module))
     assert.deepEqual(MirVerification.verify(module), [])
     const frames = module.coroutineFrames ?? unreachable('expected observer continuation frames')
     for (const frame of frames.entries) {

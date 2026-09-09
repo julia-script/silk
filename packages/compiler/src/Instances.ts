@@ -12,6 +12,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as ExecutableOrigin from './ExecutableOrigin.js'
 import * as Hir from './Hir.js'
+import * as FunctionIndex from './internal/FunctionIndex.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import type * as NameResolution from './NameResolution.js'
@@ -1455,13 +1456,7 @@ export const discover = (
       }
       for (const call of calls.values()) {
         const target = call.declaration
-        const targetFunction = results
-          .get(target.module)
-          ?.hir.functions.find(
-            (candidate) =>
-              candidate.declaration.canonical._tag === 'Canonical' &&
-              candidate.declaration.canonical.id.name === target.name,
-          )
+        const targetFunction = FunctionIndex.hirByName(results.get(target.module)?.hir, target.name)
         if (targetFunction === undefined) continue
         const targetArguments = call.typeArguments.map((argument) =>
           Type.substituteGenericArgument(argument, substitution),
