@@ -1,4 +1,5 @@
 import * as ContinuationTransfer from './ContinuationTransfer.js'
+import * as NativeArgument from './NativeArgument.js'
 import * as ByteString from '@silklang/llvm/ByteString'
 import * as NativeForeignGuard from './NativeForeignGuard.js'
 import * as NativeCAbi from './NativeCAbi.js'
@@ -48,6 +49,7 @@ import * as NativeSuspension from './NativeSuspension.js'
 import * as NativeSymbol from './NativeSymbol.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
+import * as ValueStorage from './ValueStorage.js'
 import type * as Scalar from './Scalar.js'
 
 export const emit = Effect.fn('NativeProgram.emit')(function* (
@@ -141,8 +143,13 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
         environment._tag === 'CallableEnvironment' &&
         environment.fields.some((field) => field.representation === 'Borrow'),
     )
-  const i8 = hasAddressLane ? yield* LlvmType.integer(builder, 8) : i32
-  const pointer = hasAddressLane ? yield* LlvmType.pointer(builder) : i32
+  const hasIndirectArguments = program.functions.some((fn) =>
+    fn.localTypes
+      .slice(0, fn.parameterCount)
+      .some((type) => NativeArgument.isIndirect(program.layout, fn, type)),
+  )
+  const i8 = hasAddressLane || hasIndirectArguments ? yield* LlvmType.integer(builder, 8) : i32
+  const pointer = hasAddressLane || hasIndirectArguments ? yield* LlvmType.pointer(builder) : i32
   const lanePointers: NativeLanePointer.Context = Object.freeze({
     builder,
     byteType: i8,
@@ -194,7 +201,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     ),
   )
   const transferArgumentSize = originArgumentLanes.reduce(
-    (maximum, lanes) => Math.max(maximum, NativeType.packLanes(program.layout.target, lanes).end),
+    (maximum, lanes) => Math.max(maximum, ValueStorage.transport(program.layout.target, lanes).end),
     0,
   )
   const transferResultOffset = alignUp(
@@ -203,7 +210,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   )
   const transferResultSize = program.functions.reduce(
     (maximum, fn) =>
-      Math.max(maximum, NativeType.packLanes(program.layout.target, lanesFor(fn.result)).end),
+      Math.max(maximum, ValueStorage.transport(program.layout.target, lanesFor(fn.result)).end),
     0,
   )
   const transferStorageSize = alignUp(

@@ -33,6 +33,7 @@ import {
 import * as Scalar from './Scalar.js'
 import * as Target from './Target.js'
 import * as Type from './Type.js'
+import * as ValueStorage from './ValueStorage.js'
 
 const cleanupHooksEqual = (
   leftHook: Extract<Representation, { readonly _tag: 'Aggregate' }>['cleanupHook'],
@@ -1418,6 +1419,7 @@ export const verify = (self: Plan): ReadonlyArray<Violation> =>
   Object.freeze([
     ...commonViolations(self.target, self.entries),
     ...verifyCallingShapes(self),
+    ...ValueStorage.verify(self),
     ...verifyLiteralVerdicts(self),
     ...verifyStaticData(self),
   ])

@@ -17,9 +17,10 @@ import type * as Backend from './Backend.js'
 import { type lineTable, positionOf, suspensionPointKey } from './Backend.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
-import * as LayoutVerify from './LayoutVerify.js'
+import * as NativeFrame from './NativeFrame.js'
 import * as Mir from './Mir.js'
 import { destinationOf, type LinearBlock, opensRuntimeContinuation } from './MirLinearization.js'
+import * as MirVerification from './MirVerification.js'
 import type * as NativeAggregate from './NativeAggregate.js'
 import type * as NativeArith from './NativeArith.js'
 import type * as NativeCall from './NativeCall.js'
@@ -32,11 +33,16 @@ import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeOperation from './NativeOperation.js'
 import type * as NativeOperationContext from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
+import * as NativePlace from './NativePlace.js'
+import * as NativeReturn from './NativeReturn.js'
 import type * as NativeSuspension from './NativeSuspension.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
+import * as NativeValue from './NativeValue.js'
+import * as ValueStorage from './ValueStorage.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
 import * as NativeDiagnosticScope from './NativeDiagnosticScope.js'
+import * as NativeOutcomeStorage from './NativeOutcomeStorage.js'
 
 export interface MutableRoots {
   readonly mutable: ReadonlySet<number>
@@ -165,6 +171,106 @@ export const discoverRoots = (
   ])
   for (const root of address) mutable.add(root)
   return Object.freeze({ mutable, address })
+}
+
+/**
+ * Reference intervals within a linear block, including lowering-only cleanup inputs.
+ * Inputs are active from block entry; a root first mentioned only as a destination starts
+ * at that definition instead. A destination also appearing as an operand is an input.
+ * All roots stay active through their last reference, including destination writes:
+ * an operation's internal joins may read back its result. This is conservative local
+ * interval tracking, not SSA liveness or dead-store elimination. Later blocks reload
+ * their own inputs from canonical storage. Keeping the whole block's set at every join left
+ * 320,044 unused root loads in the self-hosted CLI after storage sharing was introduced.
+ * Bucketing by operation makes activation/retirement linear in references, not
+ * roots × operations. Suspension payload roots are pinned separately by the emitter.
+ */
+const blockLocalReferences = (block: LinearBlock) => {
+  const locals = new Map<number, number>()
+  const firstDefinitions = new Map<number, number>()
+  let position = 0
+  let destination: number | undefined
+  const add = (values: ReadonlyArray<Mir.LocalId>): void => {
+    for (const value of values) {
+      const root = value.ordinal
+      if (!locals.has(root) && root === destination) firstDefinitions.set(root, position)
+      // A second occurrence in the defining operation is an input, including an
+      // in-place assignment or a lowering-only cleanup/selector dependency.
+      else if (firstDefinitions.get(root) === position) firstDefinitions.delete(root)
+      locals.set(root, position)
+    }
+  }
+  const selectors = (values: ReadonlyArray<Mir.PlaceSelector>): void => {
+    for (const selector of values) {
+      if (selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime')
+        add([selector.index.local])
+      if (selector._tag === 'SliceElementSelector') add([selector.index])
+    }
+  }
+  const releases = (values: ReadonlyArray<Mir.CoroutineFrameRelease>): void => {
+    for (const release of values) {
+      add([release.local])
+      add(release.initialization?.flags.map((flag) => flag.local) ?? [])
+    }
+  }
+  for (const [ordinal, operation] of block.operations.entries()) {
+    position = ordinal
+    destination = destinationOf(operation)?.ordinal
+    if (operation._tag === 'BindMatch') {
+      add([operation.scrutinee, operation.destination])
+      selectors(operation.selectors ?? [])
+    } else if (operation._tag === 'CheckedScalarOutcome') {
+      add([operation.valid, operation.value, ...operation.operands])
+    } else if (operation._tag === 'EnterDiagnosticScope') {
+      add([operation.state, operation.observer])
+    } else if (operation._tag === 'LeaveDiagnosticScope') {
+      // The scope ID selects a preallocated descriptor; it is not a cached SSA value.
+      continue
+    } else if (operation._tag === 'ReleaseDiagnosticOutcome') {
+      add([operation.outcome])
+    } else {
+      add(MirVerification.operationLocals(operation))
+    }
+    if ('releases' in operation) releases(operation.releases ?? [])
+  }
+  position = block.operations.length
+  destination = undefined
+  const terminator = block.terminator
+  switch (terminator._tag) {
+    case 'Return':
+      add([terminator.value])
+      break
+    case 'Branch':
+      add([terminator.condition])
+      break
+    case 'MatchBranch':
+    case 'EnumMatchBranch':
+      add([terminator.scrutinee])
+      selectors(terminator.selectors ?? [])
+      break
+    case 'PropagateEffectFailure':
+      add([terminator.source])
+      releases(terminator.releases ?? [])
+      break
+    case 'Jump':
+    case 'Trap':
+      break
+  }
+  const initial = new Set<number>()
+  const starting = new Map<number, Array<number>>()
+  const ending = new Map<number, Array<number>>()
+  const bucket = (target: Map<number, Array<number>>, at: number, root: number): void => {
+    const found = target.get(at)
+    if (found === undefined) target.set(at, [root])
+    else found.push(root)
+  }
+  for (const [root, last] of locals) {
+    const definition = firstDefinitions.get(root)
+    if (definition === undefined) initial.add(root)
+    else bucket(starting, definition, root)
+    bucket(ending, last, root)
+  }
+  return { initial, starting, ending }
 }
 
 export interface EmissionContext {
@@ -411,15 +517,16 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           state: operationState,
           ...(diagnostic === undefined ? {} : { diagnostic }),
         })
-        const locals = new Map<number, ReadonlyArray<Value.Input>>()
+        const locals = new Map<number, NativeValue.NativeValue>()
         const roots = discoverRoots(entry.fn, entry.linear)
         const mutableRoots = roots.mutable
         const addressRoots = roots.address
         const mutableStorage = new Map<number, ReadonlyArray<Value.Input>>()
         for (const root of [...mutableRoots].sort((left, right) => left - right)) {
+          if (addressRoots.has(root)) continue
           const logicalType = entry.fn.localTypes.at(root)
           if (logicalType === undefined) throw new RangeError(`Backend lost mutable root %${root}`)
-          if (logicalType._tag === 'EnvironmentBorrow') continue
+          if (NativeValue.classify(program.layout, logicalType) !== 'Direct') continue
           const storage: Array<Value.Input> = []
           for (const [lane, callingLane] of valueLanesFor(logicalType).entries()) {
             storage.push(
@@ -439,7 +546,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           valueLanesFor,
           laneType,
           packedLanes: (lanes: ReadonlyArray<Layout.CallingLane>, start?: number) =>
-            NativeType.packLanes(program.layout.target, lanes, start),
+            ValueStorage.transport(program.layout.target, lanes, start),
           declared,
           entry,
           mutableStorage,
@@ -453,8 +560,29 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           integerTypes,
         })
         const addressStorage = new Map<number, Value.Input>()
-        for (const root of [...addressRoots].sort((left, right) => left - right)) {
+        const transientOutcomes = NativeOutcomeStorage.transientLocals(entry.fn, entry.linear)
+        const placeRoots = entry.fn.localTypes.flatMap((type, ordinal) =>
+          NativeValue.classify(program.layout, type) === 'Place' && !transientOutcomes.has(ordinal)
+            ? [ordinal]
+            : [],
+        )
+        for (const root of [...new Set([...addressRoots, ...placeRoots])].sort(
+          (left, right) => left - right,
+        )) {
           const logicalType = entry.fn.localTypes.at(root)
+          if (logicalType?._tag === 'EnvironmentBorrow') continue
+          if (
+            logicalType !== undefined &&
+            NativeValue.classify(program.layout, logicalType) === 'Place'
+          ) {
+            const place = yield* NativePlace.allocate(
+              { body, types: nativeTypes, lanePointers },
+              logicalType,
+              `addr${root}`,
+            )
+            addressStorage.set(root, place.base)
+            continue
+          }
           const layout =
             logicalType === undefined
               ? undefined
@@ -495,9 +623,11 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           fn: loweringContext.entry.fn,
           layout: loweringContext.layout,
           mutableRoots,
+          blockRoots: new Set<number>(),
           mutableStorage: loweringContext.mutableStorage,
           addressRoots,
           addressStorage,
+          transientOutcomes,
           locals,
           types: nativeTypes,
           lanePointers,
@@ -506,6 +636,8 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
         for (const root of [...addressRoots].sort((left, right) => left - right)) {
           const logicalType = entry.fn.localTypes.at(root)
           if (logicalType === undefined) throw new RangeError(`Backend lost address root %${root}`)
+          if (NativeValue.classify(program.layout, logicalType) !== 'Direct') continue
+          mutableStorage.set(root, yield* NativeStorage.addressLanes(storageContext, root))
           yield* NativeStorage.storeAddressValues(
             storageContext,
             root,
@@ -538,6 +670,18 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           if (logicalType === undefined) {
             throw new RangeError(`Backend lost parameter type %${ordinal}`)
           }
+          if (entry.argumentParameters.at(ordinal)?.indirect) {
+            const incoming = yield* Value.argument(body, physicalParameter++)
+            const destination = NativeStorage.readLocal(storageContext, { _tag: 'Local', ordinal })
+            if (destination._tag !== 'NativePlace')
+              throw new RangeError('Canonical parameter lost its local storage')
+            yield* NativePlace.copy(
+              destination,
+              storageContext,
+              NativePlace.make(program.layout, logicalType, incoming),
+            )
+            continue
+          }
           const values: Array<Value.Input> = []
           for (let lane = 0; lane < lanesFor(logicalType).length; lane += 1) {
             values.push(yield* Value.argument(body, physicalParameter))
@@ -547,39 +691,12 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
             const base = values.at(0)
             if (base === undefined)
               throw new RangeError(`Backend lost environment borrow %${ordinal}`)
-            addressStorage.set(ordinal, base)
-            const storage: Array<Value.Input> = []
-            const loaded: Array<Value.Input> = []
-            for (const [lane, callingLane] of valueLanesFor(logicalType).entries()) {
-              const offset = LayoutVerify.laneOffset(
-                program.layout,
-                logicalType.type,
-                callingLane.path,
-              )
-              if (offset === undefined)
-                throw new RangeError(`Backend lost environment borrow lane ${lane}`)
-              const pointer = yield* FunctionBody.getElementPtr(
-                body,
-                i8,
-                base,
-                [yield* Constant.integerUnsigned(builder, i32, BigInt(offset))],
-                `borrow${ordinal}_${lane}_ptr`,
-              )
-              storage.push(pointer)
-              loaded.push(
-                yield* FunctionBody.load(
-                  body,
-                  laneType(callingLane),
-                  pointer,
-                  `borrow${ordinal}_${lane}`,
-                ),
-              )
-            }
-            mutableStorage.set(ordinal, Object.freeze(storage))
-            locals.set(ordinal, Object.freeze(loaded))
+            const slot = yield* FunctionBody.alloca(body, pointer, `borrow${ordinal}_slot`)
+            yield* FunctionBody.store(body, base, slot)
+            addressStorage.set(ordinal, slot)
             continue
           }
-          locals.set(ordinal, Object.freeze(values))
+          yield* NativeStorage.writeLocal(storageContext, ordinal, Object.freeze(values))
           const storage = mutableStorage.get(ordinal)
           if (storage !== undefined) {
             for (const [lane, pointer] of storage.entries()) {
@@ -587,7 +704,10 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
               if (stored !== undefined) yield* FunctionBody.store(body, stored, pointer)
             }
           }
-          if (addressRoots.has(ordinal)) {
+          if (
+            addressRoots.has(ordinal) &&
+            NativeValue.classify(program.layout, logicalType) === 'Direct'
+          ) {
             yield* NativeStorage.storeAddressValues(
               storageContext,
               ordinal,
@@ -729,41 +849,12 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
             }
             for (const [root, field] of stableAddressFields) {
               if (root >= entry.fn.parameterCount) continue
-              const logicalType = entry.fn.localTypes.at(root)
-              const values = locals.get(root)
-              if (logicalType === undefined || values === undefined)
-                throw new RangeError(`LLVM coroutine frame lost parameter root %${root}`)
-              const base = yield* FunctionBody.getElementPtr(
-                body,
-                i8,
+              yield* NativeFrame.retain(
+                storageContext,
                 pushedFrame,
-                [yield* Constant.integerUnsigned(builder, i32, BigInt(field.offset))],
+                field,
                 `suspend_parameter_root${root}`,
               )
-              for (const [ordinal, lane] of valueLanesFor(logicalType).entries()) {
-                const offset = NativeType.addressLaneOffset(
-                  program.layout,
-                  logicalType,
-                  lane,
-                  ordinal,
-                )
-                const value = values.at(ordinal)
-                if (offset === undefined || value === undefined)
-                  throw new RangeError(
-                    `LLVM coroutine parameter root %${root} lost lane ${ordinal} in ${entry.fn.id.module}.${entry.fn.id.name}: offset=${offset}, values=${values.length}, type=${logicalType._tag}`,
-                  )
-                yield* FunctionBody.store(
-                  body,
-                  value,
-                  yield* FunctionBody.getElementPtr(
-                    body,
-                    i8,
-                    base,
-                    [yield* Constant.integerUnsigned(builder, i32, BigInt(offset))],
-                    `suspend_parameter_root${root}_${ordinal}`,
-                  ),
-                )
-              }
             }
             yield* FunctionBody.branch(body, frameAcquiredBlock)
             yield* LlvmBlock.setInsertionPoint(body, frameAcquiredBlock)
@@ -818,6 +909,12 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
                   `suspend_stable_root${root}`,
                 ),
               )
+              const rootType = entry.fn.localTypes.at(root)
+              if (
+                rootType !== undefined &&
+                NativeValue.classify(program.layout, rootType) === 'Direct'
+              )
+                mutableStorage.set(root, yield* NativeStorage.addressLanes(storageContext, root))
             }
           }
           const dispatch = yield* FunctionBody.switchTerminator(body, resumePath, entryBlock)
@@ -857,6 +954,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
         })
 
         const suspensionReturnContext: NativeSuspension.ReturnContext = Object.freeze({
+          ...(diagnostic === undefined || diagnostic.outcomes.size === 0
+            ? {}
+            : { completion: { block: yield* LlvmBlock.make(body, 'completion'), exits: [] } }),
           builder,
           body,
           i32,
@@ -1005,9 +1105,23 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           execution: actorContext,
           call: actorContext,
         })
+        // Frame payloads are implicit operands of suspension lowering. They must survive
+        // reference retirement even when absent from the remaining explicit operations.
+        const frameRoots = new Set<number>()
+        for (const resume of resumeControls) {
+          for (const field of resume.layout.payload) {
+            if (mutableRoots.has(field.local.ordinal)) frameRoots.add(field.local.ordinal)
+          }
+        }
         for (const [blockOrdinal, block] of entry.linear.entries()) {
           const blockHandle = blocks.get(block.id.ordinal)
           if (blockHandle === undefined) continue
+          const references = blockLocalReferences(block)
+          storageContext.blockRoots.clear()
+          for (const root of references.initial) {
+            if (mutableRoots.has(root)) storageContext.blockRoots.add(root)
+          }
+          for (const root of frameRoots) storageContext.blockRoots.add(root)
           yield* LlvmBlock.setInsertionPoint(body, blockHandle)
           if (diagnostic !== undefined) {
             const recovered = block.recoveryOutcomes?.at(-1)
@@ -1024,27 +1138,21 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           }
           if (blockOrdinal > 0)
             yield* NativeStorage.reloadRoots(storageContext, `b${block.id.ordinal}`)
-          for (const operation of block.operations) {
+          for (const [operationOrdinal, operation] of block.operations.entries()) {
+            for (const root of references.starting.get(operationOrdinal) ?? []) {
+              if (mutableRoots.has(root)) storageContext.blockRoots.add(root)
+            }
             yield* NativeOperation.emit(operationContext, operation)
             const destination = destinationOf(operation)
             if (destination !== undefined && mutableRoots.has(destination.ordinal)) {
-              yield* NativeStorage.storeMutable(
-                storageContext,
-                destination,
-                NativeStorage.readLocal(storageContext, destination),
-              )
-            }
-            if (destination !== undefined && addressRoots.has(destination.ordinal)) {
-              yield* NativeStorage.storeAddressValues(
-                storageContext,
-                destination.ordinal,
-                NativeStorage.readLocal(storageContext, destination),
-                `addr${destination.ordinal}_defined`,
-              )
+              yield* NativeStorage.commitLocal(storageContext, destination)
             }
             if (diagnostic?.sourceState.dirty === true) {
               yield* NativeStorage.reloadAddressRoots(storageContext)
               diagnostic.sourceState.dirty = false
+            }
+            for (const root of references.ending.get(operationOrdinal) ?? []) {
+              if (!frameRoots.has(root)) storageContext.blockRoots.delete(root)
             }
           }
           const terminalAssembly = block.operations.at(-1)
@@ -1059,7 +1167,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
               i32,
               types: nativeTypes,
               blocks,
-              locals,
+              storage: storageContext,
               entry,
               cleanup: cleanupContext,
               failure: failureContext,
@@ -1074,6 +1182,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
         }
 
         yield* NativeTermination.emitTrapBlocks(terminationContext)
+        yield* NativeReturn.emitCompletion(suspensionReturnContext)
       }),
     )
   }

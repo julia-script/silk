@@ -1,0 +1,542 @@
+//! Ownership-threaded state and primitive operations for the flat parser.
+//!
+//! # When to use
+//!
+//! Use [`State`] in a grammar module that consumes tokens and builds nodes. Start one unfinished
+//! node with [`begin`]. Add token elements with [`consume`] or [`expect`]. Complete the node with
+//! [`finish`].
+//!
+//! # Details
+//!
+//! Each grammar operation consumes its state and returns the new state. This ownership protocol
+//! avoids a long-lived mutable reference across nested grammar calls.
+//!
+//! The token cursor addresses the original token array. Lookups skip trivia, but the state keeps
+//! all tokens. Completed nodes stay in one array. A completed node never changes its index.
+//!
+//! [`ElementsResult`] represents a node that is not complete. [`NodeResult`] represents a node that
+//! is complete and already present in the node array.
+//!
+//! # Gotchas
+//!
+//! [`consume`] and [`unexpected`] require a current source token. Use [`hasCurrent`] when the input
+//! can end before that operation. [`expect`] is safe at conceptual end-of-file because it inserts a
+//! missing-token element.
+
+import lexer.Span {Span}
+import lexer.Token {Token, TokenKind, kind, span}
+import parser.Diagnostic {Diagnostic}
+import parser.Element {Element, TokenId}
+import parser.Node {Node, NodeKind}
+import parser.NodeId {NodeId}
+import parser.SyntaxTree {SyntaxTree}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.string {String}
+import silk.usize as Usize
+import silk.vector {Vector}
+
+/// All mutable data for one parse, passed by ownership between grammar operations.
+///
+/// # Details
+///
+/// The token array does not change after construction. The node and diagnostic arrays grow in
+/// discovery order. The cursor can point to trivia because significant-token operations skip
+/// trivia when they read it.
+pub struct State {
+  /// Original bytes used to recognize contextual identifiers without allocating strings.
+  pub source: Bytes
+  /// The complete lexer output in source order, including trivia and an optional end token.
+  pub tokens: Vector<Token>
+  /// Completed nodes in append order, where each array index is a stable node identity.
+  pub nodes: Vector<Node>
+  /// Syntax diagnostics in the order in which grammar operations detect them.
+  pub diagnostics: Vector<Diagnostic>
+  /// The raw token position from which the next significant-token search starts.
+  pub index: usize
+  /// Active recursive grammar depth; siblings restore their parent's depth on return.
+  pub depth: usize
+}
+
+/// Parser state paired with the source-ordered elements of one unfinished node.
+///
+/// # Details
+///
+/// Grammar operations consume this value so the state and element list cannot diverge. A nested
+/// grammar returns a [`NodeResult`], and its node identity can then become one of these elements.
+pub struct ElementsResult {
+  /// Parser state after all operations represented by this result.
+  pub state: State
+  /// Direct child nodes, significant tokens, and missing tokens collected for the node.
+  pub elements: Vector<Element>
+}
+
+/// Parser state paired with the stable identity of one completed node.
+///
+/// # Details
+///
+/// The node is already present in `state.nodes`. Its identity can be appended to the direct
+/// elements of a parent node.
+pub struct NodeResult {
+  /// Parser state after the completed node was appended.
+  pub state: State
+  /// The index of the completed node in `state.nodes`.
+  pub node: NodeId
+}
+
+fn isTrivia(tokenKind: TokenKind) -> bool {
+  return match tokenKind {
+    TokenKind.Whitespace => true
+    TokenKind.LineComment => true
+    TokenKind.DocComment => true
+    TokenKind.ModuleDocComment => true
+    _ => false
+  }
+}
+
+fn significantIndex(state: &State) -> usize {
+  let mut index = state.index
+  while index < Vector.length<Token>(&state.tokens) {
+    let token = Vector.get<Token>(&state.tokens, index)
+    if !isTrivia(kind(token)) {
+      return index
+    }
+    index = Usize.add(index, Usize.ONE)
+  }
+  return index
+}
+
+fn elementSpan(state: &State, element: Element) -> Span {
+  return match move element {
+    Element.Node {id} => Vector.asSlice<Node>(&state.nodes)[id.index].span
+    Element.Token {id} => span(Vector.get<Token>(&state.tokens, id.index))
+    Element.MissingToken {expected: ignoredExpected, span} => span
+  }
+}
+
+/// Creates empty parser state at the start of one token array.
+///
+/// # Details
+///
+/// The returned state owns `tokens`. Its node and diagnostic arrays are empty. Its raw token cursor
+/// is zero.
+pub fn make(source: Bytes, tokens: Vector<Token>) -> State {
+  return State {
+    source: move source,
+    tokens: move tokens,
+    nodes: Vector.make<Node>(),
+    diagnostics: Vector.make<Diagnostic>(),
+    index: Usize.ZERO,
+    depth: 0,
+  }
+}
+
+/// Starts an empty direct-element list without changing parser state.
+///
+/// # When to use
+///
+/// Use at the start of each grammar rule that creates one node. Pass the result through token and
+/// recovery operations, then pass it to [`finish`].
+pub fn begin(state: State) -> ElementsResult {
+  return ElementsResult {state: move state, elements: Vector.make<Element>()}
+}
+
+/// Reports whether a significant token exists at or after the raw cursor.
+///
+/// # Details
+///
+/// The search skips whitespace and comment tokens. An explicit end-of-file token counts as a
+/// current significant token.
+pub fn hasCurrent(state: &State) -> bool {
+  return significantIndex(state) < Vector.length<Token>(&state.tokens)
+}
+
+/// Returns the next significant token kind, or conceptual end-of-file when none remains.
+///
+/// # Details
+///
+/// The operation does not change the cursor. It skips whitespace and comments during the lookup.
+/// If the token array has no next significant token, it returns `TokenKind.EndOfFile`.
+pub fn currentKind(state: &State) -> TokenKind {
+  let index = significantIndex(state)
+  if Vector.length<Token>(&state.tokens) <= index {
+    return TokenKind.EndOfFile
+  }
+  return kind(Vector.get<Token>(&state.tokens, index))
+}
+
+/// Returns the zero-width source span for a missing token at the current position.
+///
+/// # Details
+///
+/// If a significant token remains, the span is at that token's start. At physical input end, the
+/// span is at the final token's end. An empty token array produces the span `0..0`.
+///
+/// The operation does not change parser state.
+pub fn insertionSpan(state: &State) -> Span {
+  let index = significantIndex(state)
+  if index < Vector.length<Token>(&state.tokens) {
+    let tokenSpan = span(Vector.get<Token>(&state.tokens, index))
+    return Span.make(tokenSpan.start, tokenSpan.start)
+  }
+  let length = Vector.length<Token>(&state.tokens)
+  if length == Usize.ZERO {
+    return Span.make(Usize.ZERO, Usize.ZERO)
+  }
+  let finalSpan = span(Vector.get<Token>(&state.tokens, Usize.subtract(length, Usize.ONE)))
+  return Span.make(finalSpan.end, finalSpan.end)
+}
+
+/// Consumes the next significant token and appends its token identity to an unfinished node.
+///
+/// # Details
+///
+/// The cursor moves to one position after the consumed token. Skipped trivia stays in the token
+/// array and does not become an element of this node.
+///
+/// # Gotchas
+///
+/// A source token must exist at or after the cursor. If physical input can end, call [`hasCurrent`]
+/// before this operation or use [`expect`].
+pub effect fn consume(initial: ElementsResult) -> ElementsResult ! OutOfMemoryError ? &mut Allocator {
+  let ElementsResult {state: initialState, elements: initialElements} = move initial
+  let mut state = move initialState
+  let mut elements = move initialElements
+  let index = significantIndex(&state)
+  state.index = Usize.add(index, Usize.ONE)
+  run Vector.append<Element>(&mut elements, Element.Token {id: TokenId {index: index}})
+  return ElementsResult {state: move state, elements: move elements}
+}
+
+/// Appends one missing-token element and its matching diagnostic without consuming input.
+///
+/// # Details
+///
+/// The element and diagnostic use the same expected token kind and zero-width insertion span. The
+/// parser cursor does not move, so the current source token remains available for recovery.
+pub effect fn missing(initial: ElementsResult, expected: TokenKind) -> ElementsResult
+! OutOfMemoryError
+? &mut Allocator {
+  let ElementsResult {state: initialState, elements: initialElements} = move initial
+  let mut state = move initialState
+  let mut elements = move initialElements
+  let missingSpan = insertionSpan(&state)
+  run Vector.append<Diagnostic>(
+    &mut state.diagnostics,
+    Diagnostic.MissingToken {expected: expected, span: missingSpan},
+  )
+  run Vector.append<Element>(
+    &mut elements,
+    Element.MissingToken {expected: expected, span: missingSpan},
+  )
+  return ElementsResult {state: move state, elements: move elements}
+}
+
+/// Consumes the expected token, or inserts a missing-token element at the current position.
+///
+/// # Details
+///
+/// If the current significant token has `expected`, this operation behaves like [`consume`]. In all
+/// other cases, it behaves like [`missing`] and does not consume the current token.
+///
+/// # Gotchas
+///
+/// A mismatched source token stays current. The calling grammar must consume it or select another
+/// recovery action before a loop repeats.
+pub effect fn expect(initial: ElementsResult, expected: TokenKind) -> ElementsResult
+! OutOfMemoryError
+? &mut Allocator {
+  if hasCurrent(&initial.state) && currentKind(&initial.state) == expected {
+    return run consume(move initial)
+  }
+  return run missing(move initial, expected)
+}
+
+/// Consumes one significant token and records it as unexpected syntax.
+///
+/// # When to use
+///
+/// Use for recovery when the current token cannot belong to the active grammar rule. The cursor
+/// advances by one significant token, which gives a recovery loop forward progress.
+///
+/// # Details
+///
+/// The operation adds an unexpected-token diagnostic and a normal token element. The element keeps
+/// the damaged source available in the resulting tree.
+///
+/// # Gotchas
+///
+/// A source token must exist at or after the cursor. Call [`hasCurrent`] first when physical input
+/// can end.
+pub effect fn unexpected(initial: ElementsResult) -> ElementsResult
+! OutOfMemoryError
+? &mut Allocator {
+  let ElementsResult {state: initialState, elements: initialElements} = move initial
+  let mut state = move initialState
+  let mut elements = move initialElements
+  let index = significantIndex(&state)
+  let token = Vector.get<Token>(&state.tokens, index)
+  run Vector.append<Diagnostic>(
+    &mut state.diagnostics,
+    Diagnostic.UnexpectedToken {actual: kind(token), span: span(token)},
+  )
+  state.index = Usize.add(index, Usize.ONE)
+  run Vector.append<Element>(&mut elements, Element.Token {id: TokenId {index: index}})
+  return ElementsResult {state: move state, elements: move elements}
+}
+
+/// Appends one completed node and returns its stable array identity.
+///
+/// # Details
+///
+/// The operation stores the node after all child nodes that are already in `elements`. The new
+/// node identity is the node array length before the append.
+///
+/// For a nonempty element list, the node span starts at the first element and ends at the last
+/// element. For an empty list, the node uses `emptySpan`.
+///
+/// # Gotchas
+///
+/// Elements must occur in source order. Each child node and token identity must belong to the
+/// returned state. This operation does not validate those conditions.
+pub effect fn finish(initial: ElementsResult, nodeKind: NodeKind, emptySpan: Span) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  let ElementsResult {state: initialState, elements} = move initial
+  let mut state = move initialState
+  let length = Vector.length<Element>(&elements)
+  let mut nodeSpan = emptySpan
+  if Usize.ZERO < length {
+    let first = elementSpan(&state, Vector.get<Element>(&elements, Usize.ZERO))
+    let last = elementSpan(
+      &state,
+      Vector.get<Element>(&elements, Usize.subtract(length, Usize.ONE)),
+    )
+    nodeSpan = Span.make(first.start, last.end)
+  }
+  let node = NodeId {index: Vector.length<Node>(&state.nodes)}
+  run Vector.append<Node>(
+    &mut state.nodes,
+    Node {kind: nodeKind, span: nodeSpan, elements: move elements},
+  )
+  return NodeResult {state: move state, node: node}
+}
+
+/// Appends the source-file root for a completed top-level element list.
+///
+/// # Details
+///
+/// The root starts at byte zero and ends at the current insertion position. Its kind is
+/// `NodeKind.SourceFile`. The returned identity is the root's index in the node array.
+///
+/// # Gotchas
+///
+/// Call this operation after the top-level grammar has represented end-of-file in `elements`.
+/// This operation does not add or validate an end-of-file element.
+pub effect fn finishSourceFile(initial: ElementsResult) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  let ElementsResult {state: initialState, elements} = move initial
+  let mut state = move initialState
+  let node = NodeId {index: Vector.length<Node>(&state.nodes)}
+  let sourceEnd = insertionSpan(&state).end
+  run Vector.append<Node>(
+    &mut state.nodes,
+    Node {
+      kind: NodeKind.SourceFile,
+      span: Span.make(Usize.ZERO, sourceEnd),
+      elements: move elements,
+    },
+  )
+  return NodeResult {state: move state, node: node}
+}
+
+/// Converts completed parser state and a source-file node identity into the final syntax tree.
+///
+/// # Details
+///
+/// The result takes ownership of the token, node, and diagnostic arrays. It uses `result.node` as
+/// the root identity. The parser cursor is no longer part of the result.
+///
+/// # Gotchas
+///
+/// The operation does not verify that `result.node` identifies a source-file node. Call
+/// [`finishSourceFile`] before this operation.
+pub fn intoSyntaxTree(result: NodeResult) -> SyntaxTree {
+  let NodeResult {state, node} = move result
+  let State {source, tokens, nodes, diagnostics, index: ignoredIndex, depth: ignoredDepth} = move state
+  return SyntaxTree {
+    source: move source,
+    tokens: move tokens,
+    nodes: move nodes,
+    root: node,
+    diagnostics: move diagnostics,
+  }
+}
+
+/// Peeks by a zero-based significant-token offset without consuming source or allocating.
+///
+/// Trivia never contributes to the offset. Positions past the token array return end-of-file.
+pub fn peek(state: &State, offset: usize) -> TokenKind {
+  let mut index = significantIndex(state)
+  let mut remaining = offset
+  while index < Vector.length<Token>(&state.tokens) {
+    let candidate = kind(Vector.get<Token>(&state.tokens, index))
+    if !isTrivia(candidate) {
+      if remaining == 0 {
+        return candidate
+      }
+      remaining = Usize.subtract(remaining, 1)
+    }
+    index = Usize.add(index, 1)
+  }
+  return TokenKind.EndOfFile
+}
+
+/// Tests a contextual identifier against its exact source spelling.
+///
+/// Keywords remain lexer tokens; words such as `where` are identifiers outside their grammar slot.
+/// The supplied source and token spans must describe the same file.
+pub fn word(state: &State, expected: string) -> bool {
+  if currentKind(state) != TokenKind.Identifier {
+    return false
+  }
+  let tokenIndex = significantIndex(state)
+  let location = span(Vector.get<Token>(&state.tokens, tokenIndex))
+  let bytes = Bytes.asSlice(&state.source)
+  let text = String.utf8Bytes(expected)
+  if location.end > bytes.length || Usize.subtract(location.end, location.start) != text.length {
+    return false
+  }
+  let mut index: usize = 0
+  while index < text.length {
+    if bytes[Usize.add(location.start, index)] != text[index] {
+      return false
+    }
+    index = Usize.add(index, 1)
+  }
+  return true
+}
+
+/// Reports whether skipped trivia contains a line feed before the next significant token.
+///
+/// Index projections use this boundary to avoid consuming a following array pattern as a suffix.
+pub fn lineBreakBefore(state: &State) -> bool {
+  let end = insertionSpan(state).start
+  let mut index = end
+  if state.index < Vector.length<Token>(&state.tokens) {
+    let tokenIndex = state.index
+    index = span(Vector.get<Token>(&state.tokens, tokenIndex)).start
+  }
+  let bytes = Bytes.asSlice(&state.source)
+  while index < end && index < bytes.length {
+    if bytes[index] == 10 {
+      return true
+    }
+    index = Usize.add(index, 1)
+  }
+  return false
+}
+
+/// Attaches an already completed child to a saved parent element list.
+///
+/// The child's state becomes the parent's state. No node or token payload is copied.
+pub effect fn attach(elements: Vector<Element>, result: NodeResult) -> ElementsResult
+! OutOfMemoryError
+? &mut Allocator {
+  let NodeResult {state, node} = move result
+  let mut children = move elements
+  run Vector.append<Element>(&mut children, Element.Node {id: node})
+  return ElementsResult {state: move state, elements: move children}
+}
+
+/// Starts a parent whose first element is an existing completed node.
+pub effect fn wrap(result: NodeResult) -> ElementsResult ! OutOfMemoryError ? &mut Allocator {
+  return run attach(Vector.make<Element>(), move result)
+}
+
+/// Consumes an optional token, leaving the unfinished node unchanged when it is absent.
+pub effect fn optional(initial: ElementsResult, expected: TokenKind) -> ElementsResult
+! OutOfMemoryError
+? &mut Allocator {
+  if currentKind(&initial.state) == expected {
+    return run consume(move initial)
+  }
+  return move initial
+}
+
+/// Completes a node, using the current insertion point only when its element list is empty.
+pub effect fn complete(initial: ElementsResult, kind: NodeKind) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  let empty = insertionSpan(&initial.state)
+  return run finish(move initial, kind, empty)
+}
+
+/// Reads the kind of a completed node without moving its element storage.
+pub fn nodeKind(result: &NodeResult) -> NodeKind {
+  return Vector.asSlice<Node>(&result.state.nodes)[result.node.index].kind
+}
+
+/// Appends a fragment's direct elements to a saved parent without introducing a wrapper node.
+pub effect fn extend(elements: Vector<Element>, fragment: ElementsResult) -> ElementsResult
+! OutOfMemoryError
+? &mut Allocator {
+  let ElementsResult {state, elements: children} = move fragment
+  let mut parent = move elements
+  let mut index: usize = 0
+  while index < Vector.length<Element>(&children) {
+    run Vector.append<Element>(&mut parent, Vector.get<Element>(&children, index))
+    index = Usize.add(index, 1)
+  }
+  return ElementsResult {state: move state, elements: move parent}
+}
+
+/// Expects a contextual word without accepting an unrelated identifier in that grammar slot.
+pub effect fn contextual(initial: ElementsResult, expected: string) -> ElementsResult
+! OutOfMemoryError
+? &mut Allocator {
+  if word(&initial.state, expected) {
+    return run consume(move initial)
+  }
+  return run missing(move initial, TokenKind.Identifier)
+}
+
+/// Skips an over-deep branch iteratively, leaving unmatched enclosing delimiters untouched.
+///
+/// The error node owns every skipped significant token. This recovery path never recursively
+/// invokes grammar rules, even when the input contains thousands of nested delimiters.
+pub effect fn nestingError(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = begin(move initial)
+  let location = insertionSpan(&p.state)
+  run Vector.append<Diagnostic>(
+    &mut p.state.diagnostics,
+    Diagnostic.NestingLimit {limit: 256, span: location},
+  )
+  let mut closing = Vector.make<TokenKind>()
+  while currentKind(&p.state) != TokenKind.EndOfFile {
+    let kind = currentKind(&p.state)
+    let length = Vector.length<TokenKind>(&closing)
+    if length == 0 && (kind == TokenKind.RightParenthesis || kind == TokenKind.RightBracket || kind == TokenKind.RightBrace || kind == TokenKind.Comma || kind == TokenKind.FatArrow || kind == TokenKind.LetKeyword || kind == TokenKind.ReturnKeyword || kind == TokenKind.PubKeyword) {
+      break
+    }
+    if kind == TokenKind.LeftParenthesis {
+      run Vector.append<TokenKind>(&mut closing, TokenKind.RightParenthesis)
+    } else if kind == TokenKind.LeftBracket {
+      run Vector.append<TokenKind>(&mut closing, TokenKind.RightBracket)
+    } else if kind == TokenKind.LeftBrace {
+      run Vector.append<TokenKind>(&mut closing, TokenKind.RightBrace)
+    } else if kind == TokenKind.RightParenthesis || kind == TokenKind.RightBracket || kind == TokenKind.RightBrace {
+      if length == 0 || Vector.get<TokenKind>(&closing, Usize.subtract(length, 1)) != kind {
+        break
+      }
+      Vector.truncate<TokenKind>(&mut closing, Usize.subtract(length, 1))
+    }
+    let next = run consume(move p)
+    p = move next
+    if Vector.length<TokenKind>(&closing) == 0 {
+      break
+    }
+  }
+  return run complete(move p, NodeKind.Error)
+}

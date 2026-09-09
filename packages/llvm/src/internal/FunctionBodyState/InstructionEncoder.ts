@@ -51,7 +51,7 @@ export const appendInstruction = (
   draft.debugLocations.push(undefined)
   draft.instructionHandles.push(handle)
   cursor.success.block.instructions.push(index)
-  instructionEntries.set(handle, { draft, index })
+  instructionEntries.set(handle, { owner: draft.owner, index })
   return Result.succeed(handle)
 }
 
@@ -81,13 +81,13 @@ export const appendResult = (
     source: { _tag: 'Instruction', instruction: instructionIndex },
   })
   draft.valueHandles.push(value)
-  valueEntries.set(value, { draft, index: result })
+  valueEntries.set(value, { owner: draft.owner, index: result })
   draft.instructions.push(makeInstruction(result, finalName))
   draft.metadata.push([])
   draft.debugLocations.push(undefined)
   draft.instructionHandles.push(instruction)
   cursor.success.block.instructions.push(instructionIndex)
-  instructionEntries.set(instruction, { draft, index: instructionIndex })
+  instructionEntries.set(instruction, { owner: draft.owner, index: instructionIndex })
   return Result.succeed({ value, instruction })
 }
 

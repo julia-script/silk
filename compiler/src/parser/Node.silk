@@ -1,0 +1,316 @@
+//! Flat parser nodes, their syntax categories, and their direct element order.
+//!
+//! # When to use
+//!
+//! Use [`Node`] for structural syntax after lexing. Use [`NodeKind`] to select grammar constructs
+//! without inspecting token spellings.
+//!
+//! # Details
+//!
+//! Each node owns only its kind, byte span, and direct elements. A child element contains a stable
+//! index into the syntax tree's shared node array. A token element contains an index into the
+//! shared token array.
+//!
+//! The parser stores elements in source order. It appends a node after all child nodes are
+//! complete. This postorder layout makes each child index lower than its parent index.
+//!
+//! Error nodes and missing-token elements use the same representation as valid syntax. A consumer
+//! can process valid siblings without a separate error tree.
+//!
+//! # Gotchas
+//!
+//! A node does not own the node or token arrays that resolve its elements. Resolve each identity
+//! only against the syntax tree that owns this node.
+
+import lexer.Span {Span}
+import parser.Element {Element}
+import silk.vector {Vector}
+
+/// The grammar category of one structural parser node.
+///
+/// # Details
+///
+/// Categories distinguish declarations, types, statements, expressions, patterns, and recovery.
+/// Child identities retain structure without embedding or copying another node value.
+pub enum NodeKind {
+  /// The root of one parsed source file.
+  SourceFile,
+  /// An import declaration.
+  ImportDeclaration,
+  /// A declaration selected during static evaluation.
+  StaticConditionalDeclaration,
+  /// A group of declarations.
+  DeclarationGroup,
+  /// The module path in an import declaration.
+  ImportPath,
+  /// The alias in an import declaration.
+  ImportAlias,
+  /// The selected members in an import declaration.
+  ImportMemberList,
+  /// One selected import member.
+  ImportMember,
+  /// A struct declaration.
+  StructDeclaration,
+  /// A tuple declaration.
+  TupleDeclaration,
+  /// An enum declaration.
+  EnumDeclaration,
+  /// One member of an enum declaration.
+  EnumMember,
+  /// A union declaration.
+  UnionDeclaration,
+  /// One variant of a union declaration.
+  UnionVariant,
+  /// One field of a union variant.
+  UnionVariantField,
+  /// The selected member in an applied member operation.
+  AppliedMemberSelector,
+  /// An expression that applies a member operation.
+  AppliedMemberExpression,
+  /// A pattern that selects a union variant.
+  UnionVariantPattern,
+  /// A service declaration.
+  ServiceDeclaration,
+  /// An interface declaration.
+  InterfaceDeclaration,
+  /// A role declaration.
+  RoleDeclaration,
+  /// The selected requirement in a requirement operation.
+  RequirementSelector,
+  /// One operation in a service declaration.
+  ServiceOperation,
+  /// An operator marker on a declaration.
+  OperatorMarker,
+  /// An invalid member in a service or interface declaration.
+  ServiceInvalidMember,
+  /// A constant declaration.
+  ConstantDeclaration,
+  /// A package parameter declaration.
+  PackageParameterDeclaration,
+  /// The validation expression for a package parameter.
+  PackageParameterValidation,
+  /// A type alias declaration.
+  TypeAliasDeclaration,
+  /// One field in a struct declaration.
+  StructField,
+  /// An implementation declaration.
+  ImplDeclaration,
+  /// One operation in an implementation declaration.
+  ImplOperation,
+  /// A list of type and lifetime parameters.
+  TypeParameterList,
+  /// One type parameter.
+  TypeParameter,
+  /// One lifetime parameter.
+  LifetimeParameter,
+  /// A lifetime used as a type component.
+  LifetimeType,
+  /// A list of bound lifetimes.
+  LifetimeBinderList,
+  /// The requirement environment of an Effect type.
+  EffectEnvironment,
+  /// The environment of a callable type.
+  CallableEnvironment,
+  /// A path that names a type.
+  TypePath,
+  /// A type with explicit type arguments.
+  AppliedType,
+  /// A list of type arguments.
+  TypeArgumentList,
+  /// A fixed-length array type.
+  FixedArrayType,
+  /// A slice type.
+  SliceType,
+  /// A reference type.
+  ReferenceType,
+  /// A pointer type.
+  PointerType,
+  /// A qualifier on a pointer type.
+  PointerQualifier,
+  /// A callable type.
+  CallableType,
+  /// A foreign function type.
+  ForeignFunctionType,
+  /// A type with an exact representation requirement.
+  ExactRepresentationType,
+  /// An opaque function result type.
+  OpaqueResultType,
+  /// The unit type.
+  UnitType,
+  /// A parenthesized type.
+  ParenthesizedType,
+  /// A union type expression.
+  UnionType,
+  /// A function declaration.
+  FunctionDeclaration,
+  /// A foreign function declaration.
+  ForeignFunctionDeclaration,
+  /// A declaration that defines a module property.
+  ModulePropertyDeclaration,
+  /// One clause of a function property declaration.
+  FunctionPropertyClause,
+  /// One function property.
+  FunctionProperty,
+  /// A foreign static declaration.
+  ForeignStaticDeclaration,
+  /// An exported static declaration.
+  ExportStaticDeclaration,
+  /// The failure row of an Effect type.
+  FailureRow,
+  /// The requirement row of an Effect type.
+  RequirementRow,
+  /// One requirement in a requirement row.
+  Requirement,
+  /// A row exclusion.
+  RowWithout,
+  /// A `where` clause.
+  WhereClause,
+  /// An interface membership constraint.
+  MembershipConstraint,
+  /// A provider constraint.
+  ProviderConstraint,
+  /// A function parameter list.
+  ParameterList,
+  /// One function parameter declaration.
+  ParameterDeclaration,
+  /// A declared function result type.
+  ReturnType,
+  /// A brace-delimited block.
+  Block,
+  /// A statement that evaluates an expression.
+  ExpressionStatement,
+  /// A damaged statement region.
+  ErrorStatement,
+  /// A binding statement.
+  BindingStatement,
+  /// A statement that binds a pattern.
+  PatternBindingStatement,
+  /// An assignment statement.
+  AssignmentStatement,
+  /// A runtime conditional statement.
+  ConditionalStatement,
+  /// A static conditional statement.
+  StaticConditionalStatement,
+  /// A static iteration statement.
+  StaticForStatement,
+  /// A conditional statement that binds a pattern.
+  PatternConditionalStatement,
+  /// A `while` statement.
+  WhileStatement,
+  /// A `break` statement.
+  BreakStatement,
+  /// A `continue` statement.
+  ContinueStatement,
+  /// A `return` statement.
+  ReturnStatement,
+  /// A `fail` statement.
+  FailStatement,
+  /// A `drop` statement.
+  DropStatement,
+  /// An `unsafe` statement.
+  UnsafeStatement,
+  /// An `unsafe` expression.
+  UnsafeExpression,
+  /// A `compileError` expression.
+  CompileErrorExpression,
+  /// A decimal integer literal expression.
+  IntegerLiteralExpression,
+  /// A duration literal expression.
+  DurationLiteralExpression,
+  /// A decimal floating-point literal expression.
+  FloatingLiteralExpression,
+  /// A static text literal expression.
+  StaticTextLiteralExpression,
+  /// A character literal expression.
+  CharacterLiteralExpression,
+  /// The unit expression.
+  UnitExpression,
+  /// A Boolean literal expression.
+  BooleanLiteralExpression,
+  /// An identifier expression.
+  IdentifierExpression,
+  /// A `move` expression.
+  MoveExpression,
+  /// An anonymous callable expression.
+  AnonymousCallableExpression,
+  /// An Effect construction expression.
+  EffectExpression,
+  /// A `run` expression.
+  RunExpression,
+  /// A borrow expression.
+  BorrowExpression,
+  /// A `match` expression.
+  MatchExpression,
+  /// The value selection in a `match` expression.
+  MatchAccess,
+  /// One arm of a `match` expression.
+  MatchArm,
+  /// A damaged pattern region.
+  ErrorPattern,
+  /// A pattern that selects an enum member.
+  EnumMemberPattern,
+  /// An integer literal pattern.
+  IntegerPattern,
+  /// A pattern for a nominal value.
+  NominalPattern,
+  /// A pattern that introduces a binding.
+  BindingPattern,
+  /// A pattern that accepts each value.
+  UniversalPattern,
+  /// One field in a record pattern.
+  PatternField,
+  /// A pattern that accepts the remaining fields or elements.
+  RestPattern,
+  /// A struct literal expression.
+  StructLiteralExpression,
+  /// A tuple literal expression.
+  TupleLiteralExpression,
+  /// A record literal whose type comes from its context.
+  ContextualRecordLiteralExpression,
+  /// An array literal expression.
+  ArrayLiteralExpression,
+  /// One field initializer in a struct literal.
+  StructFieldInitializer,
+  /// An expression that projects a named field.
+  FieldProjectionExpression,
+  /// An expression that projects an ordinal field.
+  OrdinalProjectionExpression,
+  /// An expression that projects through a referent.
+  ReferentProjectionExpression,
+  /// An expression that projects an indexed element.
+  IndexProjectionExpression,
+  /// A call expression.
+  CallExpression,
+  /// The type arguments of a call expression.
+  CallTypeArgumentList,
+  /// A grouped expression.
+  GroupedExpression,
+  /// A prefix operator expression.
+  PrefixExpression,
+  /// An infix operator expression.
+  InfixExpression,
+  /// A pipeline operator expression.
+  PipelineExpression,
+  /// The arguments of a call expression.
+  ArgumentList,
+  /// A syntax region that the parser cannot classify.
+  Error,
+}
+
+/// One structural syntax node stored independently in a flat node array.
+///
+/// # Details
+///
+/// The span covers the node from its first direct element through its last direct element. An
+/// empty node uses the insertion span supplied by its grammar rule.
+///
+/// Elements occur in source order. They include direct child nodes, significant source tokens, and
+/// conceptual missing tokens. Trivia remains in the syntax tree's token array.
+pub struct Node {
+  /// The grammar category that determines how consumers interpret the elements.
+  pub kind: NodeKind
+  /// The half-open source byte range covered by the node.
+  pub span: Span
+  /// The direct child nodes, significant source tokens, and inserted tokens in source order.
+  pub elements: Vector<Element>
+}

@@ -1,12 +1,192 @@
 import lexer.LexicalDiagnostic {LexicalDiagnostic}
-
 import lexer.LexicalDiagnostic as Diagnostic
-
 import lexer.Span {Span}
-
 import silk.format {Format}
-
 import silk.writer {Writer, WriterError}
+
+/// The lexical category of one token.
+pub enum TokenKind {
+  /// Whitespace between significant tokens.
+  Whitespace,
+  /// A non-documentation line comment.
+  LineComment,
+  /// A documentation comment for the next declaration.
+  DocComment,
+  /// A documentation comment for the current module.
+  ModuleDocComment,
+  /// An identifier.
+  Identifier,
+  /// A lifetime name.
+  Lifetime,
+  /// A decimal integer literal.
+  DecimalInteger,
+  /// A decimal floating-point literal.
+  DecimalFloat,
+  /// A duration literal.
+  DurationLiteral,
+  /// An invalid duration literal.
+  InvalidDurationLiteral,
+  /// A text literal.
+  TextLiteral,
+  /// A byte-string literal.
+  ByteStringLiteral,
+  /// A character literal.
+  CharLiteral,
+  /// An invalid static literal.
+  InvalidStaticLiteral,
+  /// The `static` keyword.
+  StaticKeyword,
+  /// The `compileError` keyword.
+  CompileErrorKeyword,
+  /// The `pub` keyword.
+  PubKeyword,
+  /// The `struct` keyword.
+  StructKeyword,
+  /// The `tuple` keyword.
+  TupleKeyword,
+  /// The `enum` keyword.
+  EnumKeyword,
+  /// The `union` keyword.
+  UnionKeyword,
+  /// The `type` keyword.
+  TypeKeyword,
+  /// The `service` keyword.
+  ServiceKeyword,
+  /// The `interface` keyword.
+  InterfaceKeyword,
+  /// The `role` keyword.
+  RoleKeyword,
+  /// The `Effect` keyword.
+  EffectKeyword,
+  /// The `fn` keyword.
+  FnKeyword,
+  /// The `run` keyword.
+  RunKeyword,
+  /// The `fail` keyword.
+  FailKeyword,
+  /// The `drop` keyword.
+  DropKeyword,
+  /// The `unsafe` keyword.
+  UnsafeKeyword,
+  /// The `extern` keyword.
+  ExternKeyword,
+  /// The `export` keyword.
+  ExportKeyword,
+  /// The `impl` keyword.
+  ImplKeyword,
+  /// The `for` keyword.
+  ForKeyword,
+  /// The `return` keyword.
+  ReturnKeyword,
+  /// The `import` keyword.
+  ImportKeyword,
+  /// The `as` keyword.
+  AsKeyword,
+  /// The `let` keyword.
+  LetKeyword,
+  /// The `const` keyword.
+  ConstKeyword,
+  /// The `param` keyword.
+  ParamKeyword,
+  /// The `mut` keyword.
+  MutKeyword,
+  /// The `once` keyword.
+  OnceKeyword,
+  /// The `move` keyword.
+  MoveKeyword,
+  /// The `match` keyword.
+  MatchKeyword,
+  /// The `if` keyword.
+  IfKeyword,
+  /// The `else` keyword.
+  ElseKeyword,
+  /// The `while` keyword.
+  WhileKeyword,
+  /// The `break` keyword.
+  BreakKeyword,
+  /// The `continue` keyword.
+  ContinueKeyword,
+  /// The `true` keyword.
+  TrueKeyword,
+  /// The `false` keyword.
+  FalseKeyword,
+  /// A left parenthesis.
+  LeftParenthesis,
+  /// A right parenthesis.
+  RightParenthesis,
+  /// A left brace.
+  LeftBrace,
+  /// A right brace.
+  RightBrace,
+  /// A left bracket.
+  LeftBracket,
+  /// A right bracket.
+  RightBracket,
+  /// A colon.
+  Colon,
+  /// A semicolon.
+  Semicolon,
+  /// A comma.
+  Comma,
+  /// An equals sign.
+  Equals,
+  /// An equality operator.
+  EqualEqual,
+  /// A fat arrow.
+  FatArrow,
+  /// A minus sign.
+  Minus,
+  /// A plus sign.
+  Plus,
+  /// A star.
+  Star,
+  /// A slash.
+  Slash,
+  /// A percent sign.
+  Percent,
+  /// An exclamation mark.
+  Bang,
+  /// An inequality operator.
+  BangEqual,
+  /// A question mark.
+  Question,
+  /// An at sign.
+  At,
+  /// A less-than sign.
+  Less,
+  /// A less-than-or-equal operator.
+  LessEqual,
+  /// A greater-than sign.
+  Greater,
+  /// A greater-than-or-equal operator.
+  GreaterEqual,
+  /// A pipe.
+  Pipe,
+  /// A pipeline operator.
+  PipeGreater,
+  /// A logical-or operator.
+  PipePipe,
+  /// An ampersand.
+  Ampersand,
+  /// A logical-and operator.
+  AmpersandAmpersand,
+  /// A caret.
+  Caret,
+  /// A tilde.
+  Tilde,
+  /// A dot.
+  Dot,
+  /// Two dots.
+  DotDot,
+  /// An ellipsis.
+  Ellipsis,
+  /// A thin arrow.
+  Arrow,
+  /// An invalid token.
+  Invalid,
+  /// The end of the source file.
+  EndOfFile,
+}
 
 /// One lossless lexical item. Every variant carries its half-open byte span.
 pub union Token {
@@ -100,6 +280,200 @@ pub union Token {
   Arrow {pub span: Span},
   Invalid {pub span: Span, pub diagnostic: LexicalDiagnostic},
   EndOfFile {pub span: Span},
+}
+
+impl Copy for Token {}
+
+/// Returns the lexical category of a token.
+pub fn kind(token: Token) -> TokenKind {
+  return match move token {
+    Token.Whitespace {span: _} => TokenKind.Whitespace
+    Token.LineComment {span: _} => TokenKind.LineComment
+    Token.DocComment {span: _} => TokenKind.DocComment
+    Token.ModuleDocComment {span: _} => TokenKind.ModuleDocComment
+    Token.Identifier {span: _} => TokenKind.Identifier
+    Token.Lifetime {span: _} => TokenKind.Lifetime
+    Token.DecimalInteger {span: _} => TokenKind.DecimalInteger
+    Token.DecimalFloat {span: _} => TokenKind.DecimalFloat
+    Token.DurationLiteral {span: _} => TokenKind.DurationLiteral
+    Token.InvalidDurationLiteral {span: ignoredSpan, diagnostic: ignoredDiagnostic} => TokenKind.InvalidDurationLiteral
+    Token.TextLiteral {span: _} => TokenKind.TextLiteral
+    Token.ByteStringLiteral {span: _} => TokenKind.ByteStringLiteral
+    Token.CharLiteral {span: _} => TokenKind.CharLiteral
+    Token.InvalidStaticLiteral {span: ignoredSpan, diagnostic: ignoredDiagnostic} => TokenKind.InvalidStaticLiteral
+    Token.StaticKeyword {span: _} => TokenKind.StaticKeyword
+    Token.CompileErrorKeyword {span: _} => TokenKind.CompileErrorKeyword
+    Token.PubKeyword {span: _} => TokenKind.PubKeyword
+    Token.StructKeyword {span: _} => TokenKind.StructKeyword
+    Token.TupleKeyword {span: _} => TokenKind.TupleKeyword
+    Token.EnumKeyword {span: _} => TokenKind.EnumKeyword
+    Token.UnionKeyword {span: _} => TokenKind.UnionKeyword
+    Token.TypeKeyword {span: _} => TokenKind.TypeKeyword
+    Token.ServiceKeyword {span: _} => TokenKind.ServiceKeyword
+    Token.InterfaceKeyword {span: _} => TokenKind.InterfaceKeyword
+    Token.RoleKeyword {span: _} => TokenKind.RoleKeyword
+    Token.EffectKeyword {span: _} => TokenKind.EffectKeyword
+    Token.FnKeyword {span: _} => TokenKind.FnKeyword
+    Token.RunKeyword {span: _} => TokenKind.RunKeyword
+    Token.FailKeyword {span: _} => TokenKind.FailKeyword
+    Token.DropKeyword {span: _} => TokenKind.DropKeyword
+    Token.UnsafeKeyword {span: _} => TokenKind.UnsafeKeyword
+    Token.ExternKeyword {span: _} => TokenKind.ExternKeyword
+    Token.ExportKeyword {span: _} => TokenKind.ExportKeyword
+    Token.ImplKeyword {span: _} => TokenKind.ImplKeyword
+    Token.ForKeyword {span: _} => TokenKind.ForKeyword
+    Token.ReturnKeyword {span: _} => TokenKind.ReturnKeyword
+    Token.ImportKeyword {span: _} => TokenKind.ImportKeyword
+    Token.AsKeyword {span: _} => TokenKind.AsKeyword
+    Token.LetKeyword {span: _} => TokenKind.LetKeyword
+    Token.ConstKeyword {span: _} => TokenKind.ConstKeyword
+    Token.ParamKeyword {span: _} => TokenKind.ParamKeyword
+    Token.MutKeyword {span: _} => TokenKind.MutKeyword
+    Token.OnceKeyword {span: _} => TokenKind.OnceKeyword
+    Token.MoveKeyword {span: _} => TokenKind.MoveKeyword
+    Token.MatchKeyword {span: _} => TokenKind.MatchKeyword
+    Token.IfKeyword {span: _} => TokenKind.IfKeyword
+    Token.ElseKeyword {span: _} => TokenKind.ElseKeyword
+    Token.WhileKeyword {span: _} => TokenKind.WhileKeyword
+    Token.BreakKeyword {span: _} => TokenKind.BreakKeyword
+    Token.ContinueKeyword {span: _} => TokenKind.ContinueKeyword
+    Token.TrueKeyword {span: _} => TokenKind.TrueKeyword
+    Token.FalseKeyword {span: _} => TokenKind.FalseKeyword
+    Token.LeftParenthesis {span: _} => TokenKind.LeftParenthesis
+    Token.RightParenthesis {span: _} => TokenKind.RightParenthesis
+    Token.LeftBrace {span: _} => TokenKind.LeftBrace
+    Token.RightBrace {span: _} => TokenKind.RightBrace
+    Token.LeftBracket {span: _} => TokenKind.LeftBracket
+    Token.RightBracket {span: _} => TokenKind.RightBracket
+    Token.Colon {span: _} => TokenKind.Colon
+    Token.Semicolon {span: _} => TokenKind.Semicolon
+    Token.Comma {span: _} => TokenKind.Comma
+    Token.Equals {span: _} => TokenKind.Equals
+    Token.EqualEqual {span: _} => TokenKind.EqualEqual
+    Token.FatArrow {span: _} => TokenKind.FatArrow
+    Token.Minus {span: _} => TokenKind.Minus
+    Token.Plus {span: _} => TokenKind.Plus
+    Token.Star {span: _} => TokenKind.Star
+    Token.Slash {span: _} => TokenKind.Slash
+    Token.Percent {span: _} => TokenKind.Percent
+    Token.Bang {span: _} => TokenKind.Bang
+    Token.BangEqual {span: _} => TokenKind.BangEqual
+    Token.Question {span: _} => TokenKind.Question
+    Token.At {span: _} => TokenKind.At
+    Token.Less {span: _} => TokenKind.Less
+    Token.LessEqual {span: _} => TokenKind.LessEqual
+    Token.Greater {span: _} => TokenKind.Greater
+    Token.GreaterEqual {span: _} => TokenKind.GreaterEqual
+    Token.Pipe {span: _} => TokenKind.Pipe
+    Token.PipeGreater {span: _} => TokenKind.PipeGreater
+    Token.PipePipe {span: _} => TokenKind.PipePipe
+    Token.Ampersand {span: _} => TokenKind.Ampersand
+    Token.AmpersandAmpersand {span: _} => TokenKind.AmpersandAmpersand
+    Token.Caret {span: _} => TokenKind.Caret
+    Token.Tilde {span: _} => TokenKind.Tilde
+    Token.Dot {span: _} => TokenKind.Dot
+    Token.DotDot {span: _} => TokenKind.DotDot
+    Token.Ellipsis {span: _} => TokenKind.Ellipsis
+    Token.Arrow {span: _} => TokenKind.Arrow
+    Token.Invalid {span: ignoredSpan, diagnostic: ignoredDiagnostic} => TokenKind.Invalid
+    Token.EndOfFile {span: _} => TokenKind.EndOfFile
+  }
+}
+
+/// Returns the half-open source byte range of a token.
+pub fn span(token: Token) -> Span {
+  return match move token {
+    Token.Whitespace {span} => span
+    Token.LineComment {span} => span
+    Token.DocComment {span} => span
+    Token.ModuleDocComment {span} => span
+    Token.Identifier {span} => span
+    Token.Lifetime {span} => span
+    Token.DecimalInteger {span} => span
+    Token.DecimalFloat {span} => span
+    Token.DurationLiteral {span} => span
+    Token.InvalidDurationLiteral {span, diagnostic: ignoredDiagnostic} => span
+    Token.TextLiteral {span} => span
+    Token.ByteStringLiteral {span} => span
+    Token.CharLiteral {span} => span
+    Token.InvalidStaticLiteral {span, diagnostic: ignoredDiagnostic} => span
+    Token.StaticKeyword {span} => span
+    Token.CompileErrorKeyword {span} => span
+    Token.PubKeyword {span} => span
+    Token.StructKeyword {span} => span
+    Token.TupleKeyword {span} => span
+    Token.EnumKeyword {span} => span
+    Token.UnionKeyword {span} => span
+    Token.TypeKeyword {span} => span
+    Token.ServiceKeyword {span} => span
+    Token.InterfaceKeyword {span} => span
+    Token.RoleKeyword {span} => span
+    Token.EffectKeyword {span} => span
+    Token.FnKeyword {span} => span
+    Token.RunKeyword {span} => span
+    Token.FailKeyword {span} => span
+    Token.DropKeyword {span} => span
+    Token.UnsafeKeyword {span} => span
+    Token.ExternKeyword {span} => span
+    Token.ExportKeyword {span} => span
+    Token.ImplKeyword {span} => span
+    Token.ForKeyword {span} => span
+    Token.ReturnKeyword {span} => span
+    Token.ImportKeyword {span} => span
+    Token.AsKeyword {span} => span
+    Token.LetKeyword {span} => span
+    Token.ConstKeyword {span} => span
+    Token.ParamKeyword {span} => span
+    Token.MutKeyword {span} => span
+    Token.OnceKeyword {span} => span
+    Token.MoveKeyword {span} => span
+    Token.MatchKeyword {span} => span
+    Token.IfKeyword {span} => span
+    Token.ElseKeyword {span} => span
+    Token.WhileKeyword {span} => span
+    Token.BreakKeyword {span} => span
+    Token.ContinueKeyword {span} => span
+    Token.TrueKeyword {span} => span
+    Token.FalseKeyword {span} => span
+    Token.LeftParenthesis {span} => span
+    Token.RightParenthesis {span} => span
+    Token.LeftBrace {span} => span
+    Token.RightBrace {span} => span
+    Token.LeftBracket {span} => span
+    Token.RightBracket {span} => span
+    Token.Colon {span} => span
+    Token.Semicolon {span} => span
+    Token.Comma {span} => span
+    Token.Equals {span} => span
+    Token.EqualEqual {span} => span
+    Token.FatArrow {span} => span
+    Token.Minus {span} => span
+    Token.Plus {span} => span
+    Token.Star {span} => span
+    Token.Slash {span} => span
+    Token.Percent {span} => span
+    Token.Bang {span} => span
+    Token.BangEqual {span} => span
+    Token.Question {span} => span
+    Token.At {span} => span
+    Token.Less {span} => span
+    Token.LessEqual {span} => span
+    Token.Greater {span} => span
+    Token.GreaterEqual {span} => span
+    Token.Pipe {span} => span
+    Token.PipeGreater {span} => span
+    Token.PipePipe {span} => span
+    Token.Ampersand {span} => span
+    Token.AmpersandAmpersand {span} => span
+    Token.Caret {span} => span
+    Token.Tilde {span} => span
+    Token.Dot {span} => span
+    Token.DotDot {span} => span
+    Token.Ellipsis {span} => span
+    Token.Arrow {span} => span
+    Token.Invalid {span, diagnostic: ignoredDiagnostic} => span
+    Token.EndOfFile {span} => span
+  }
 }
 
 effect fn writeLine(name: string, span: Span) -> () ! WriterError ? &mut Writer {

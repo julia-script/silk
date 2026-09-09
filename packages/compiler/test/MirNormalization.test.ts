@@ -9,6 +9,7 @@ import * as MirNormalization from '../src/MirNormalization.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as ProvisionalMir from '../src/ProvisionalMir.js'
 import * as Projections from './support/projections.js'
+import { unreachable } from './support/raise.js'
 
 const encoder = new TextEncoder()
 const source = `import silk.effect { Effect }
@@ -45,6 +46,97 @@ const provisionalOf = (self: Analysis.Snapshot): ProvisionalMir.Module => {
   if (provisional._tag === 'Unavailable') throw provisional.error
   return provisional.value
 }
+
+it.effect(
+  'attributes Effect uses to operations and outcomes without counting repeated references',
+  () =>
+    Effect.gen(function* () {
+      const raw = yield* AnalysisFixture.retainingMain(
+        'test/mir-normalization-use-attribution',
+        encoder.encode(`effect fn succeed(value: i32) -> i32 { return value }
+pub fn main() -> i32 {
+  return run succeed(42)
+}`),
+        'wasm32-unknown-unknown',
+        { normalizeMir: false },
+      )
+      assert.deepEqual(Analysis.diagnostics(raw), [])
+      const program = Analysis.loweredMir(raw)
+      const provisional = provisionalOf(raw)
+      const main = program.functions.find((fn) => fn.id.name === 'main') ?? unreachable()
+      const region =
+        main.regions.find((candidate) => candidate._tag === 'OperationRegion') ?? unreachable()
+      const call =
+        region.operations.find((operation) => operation._tag === 'Call') ??
+        unreachable(MirEncoding.encode(program))
+      const constructor = program.functions.find((fn) => fn.id === call.target) ?? unreachable()
+      const definition =
+        MirVerification.operations(constructor).find(
+          (operation) => operation._tag === 'MakeEffect',
+        ) ?? unreachable()
+      const construction = { ...definition, destination: call.destination }
+      const run =
+        region.operations.find((operation) => operation._tag === 'RunEffectValue') ??
+        unreachable(MirEncoding.encode(program))
+      const verdicts = (regions: ReadonlyArray<Mir.Region>) =>
+        MirNormalization.normalize(
+          {
+            ...program,
+            functions: program.functions.map((fn) => (fn === main ? { ...fn, regions } : fn)),
+          },
+          provisional,
+        ).normalization?.filter((verdict) => verdict.function === main.id) ?? []
+
+      // Repeated references inside one object graph are one use, including cycles and metadata.
+      const references: Array<unknown> = [construction.destination, construction.destination]
+      references.push(references)
+      const repeatedReferences = { ...run, references }
+      const singleUse = verdicts([{ ...region, operations: [construction, repeatedReferences] }])
+      assert.isTrue(
+        singleUse.some(
+          (verdict) => verdict._tag === 'Normalized' && verdict.kind === 'DirectStaticRun',
+        ),
+      )
+
+      // Two appearances of the same operation object remain two separate uses.
+      const reused = verdicts([{ ...region, operations: [construction, run, run] }])
+      assert.isTrue(
+        reused.some((verdict) => verdict._tag === 'Rejected' && verdict.reason === 'EffectReused'),
+      )
+
+      const escaped = verdicts([
+        {
+          ...region,
+          operations: [construction],
+          outcome: { _tag: 'Return', value: construction.destination, provenance: run.provenance },
+        },
+      ])
+      assert.isTrue(
+        escaped.some(
+          (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'EffectEscapes',
+        ),
+      )
+
+      const cleanup = verdicts([
+        {
+          ...region,
+          operations: [construction],
+          outcome: { _tag: 'Complete', provenance: run.provenance },
+        },
+        {
+          _tag: 'CleanupRegion',
+          id: { _tag: 'Region', ordinal: 1000 },
+          releases: [],
+          outcome: { _tag: 'Return', value: construction.destination, provenance: run.provenance },
+        },
+      ])
+      assert.isTrue(
+        cleanup.some(
+          (verdict) => verdict._tag === 'Rejected' && verdict.reason === 'CrossRegionUse',
+        ),
+      )
+    }),
+)
 
 it.effect('retains concrete suspendable runs without a global suspension mode', () =>
   Effect.gen(function* () {

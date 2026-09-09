@@ -1,11 +1,10 @@
 import type * as LlvmType from '@silklang/llvm/Type'
-import { alignUp } from './internal/Align.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import * as Mir from './Mir.js'
 import * as Scalar from './Scalar.js'
-import type * as Target from './Target.js'
 import * as SilkType from './Type.js'
+import * as ValueStorage from './ValueStorage.js'
 
 /** LLVM types and target plan needed to lower one MIR type without closure capture. */
 export interface LoweringContext {
@@ -22,11 +21,14 @@ export const addressLayout = (
   layout: Layout.Plan,
   type: Mir.Type,
 ): { readonly size: number; readonly alignment: number } | undefined => {
+  if (type._tag === 'EffectOutcome') return ValueStorage.find(layout, 'Outcome', type.type)
+  if (type._tag === 'EffectComposite')
+    return ValueStorage.find(layout, 'CompositeCarrier', type.type)
   if (type._tag === 'EffectValue')
     return type.storage === undefined ? type.environment : Layout.entry(layout, type.storage.type)
   if (type._tag === 'CallableValue')
     return type.storage === undefined
-      ? (type.environment?.view ?? { size: 0, alignment: 1 })
+      ? (type.environment ?? { size: 0, alignment: 1 })
       : Layout.entry(layout, type.storage.type)
   return Layout.entry(layout, Mir.semanticType(type))
 }
@@ -38,6 +40,10 @@ export const addressLaneOffset = (
   lane: Layout.CallingLane,
   ordinal: number,
 ): number | undefined => {
+  if (type._tag === 'EffectOutcome')
+    return ValueStorage.find(layout, 'Outcome', type.type)?.slots.at(ordinal)?.offset
+  if (type._tag === 'EffectComposite')
+    return ValueStorage.find(layout, 'CompositeCarrier', type.type)?.slots.at(ordinal)?.offset
   let placements: ReadonlyArray<Layout.EnvironmentLanePlacement> | undefined
   if (type._tag === 'EffectValue' && type.storage === undefined)
     placements = Layout.effectEnvironmentLanePlacements(layout, type.environment)
@@ -65,34 +71,52 @@ export const addressLaneOffset = (
   )
 }
 
+/** Selects a stored slot or a planner-owned active-alternative conversion. */
+export const addressLocation = (
+  layout: Layout.Plan,
+  type: Mir.Type,
+  lane: Layout.CallingLane,
+  ordinal: number,
+): ValueStorage.Location | undefined => {
+  if (type._tag === 'EffectOutcome' || type._tag === 'EffectComposite') {
+    const offset = addressLaneOffset(layout, type, lane, ordinal)
+    return offset === undefined ? undefined : { _tag: 'Slot', lane, offset }
+  }
+  let placements: ReadonlyArray<Layout.EnvironmentLanePlacement> | undefined
+  if (type._tag === 'EffectValue' && type.storage === undefined)
+    placements = Layout.effectEnvironmentLanePlacements(layout, type.environment)
+  else if (
+    type._tag === 'CallableValue' &&
+    type.storage === undefined &&
+    type.environment !== undefined
+  )
+    placements = Layout.callableEnvironmentLanePlacements(layout, type.environment)
+  if (placements !== undefined) {
+    const placement = placements.at(ordinal)
+    if (placement === undefined) return undefined
+    return placement.root === undefined
+      ? { _tag: 'Slot', lane: placement.lane, offset: placement.byteOffset }
+      : ValueStorage.location(layout, placement.root, placement.lane, placement.byteOffset)
+  }
+  return ValueStorage.location(
+    layout,
+    (type._tag === 'EffectValue' || type._tag === 'CallableValue') && type.storage !== undefined
+      ? type.storage.type
+      : Mir.semanticType(type),
+    lane,
+  )
+}
+
 /** Resolves the physical ABI lanes of one MIR value. */
 export const lanesFor = (
   context: LoweringContext,
   type: Mir.Type,
 ): ReadonlyArray<Layout.CallingLane> => {
   if (type._tag === 'EffectComposite') {
-    // The registered shape overlaps alternatives into unified payload lanes; every consumer must
-    // agree with it for all LLVM targets. The
-    // concatenating fallback below only covers composites the plan never registered.
     const registered = Layout.callingShape(context.program.layout, type.type)
-    if (registered !== undefined) return registered.lanes
-    const payloadTypes = type.alternatives.flatMap((alternative) =>
-      lanesFor(context, alternative).map((lane) => lane.type),
-    )
-    return Object.freeze([
-      Object.freeze({
-        _tag: 'CallingLane' as const,
-        path: Object.freeze([Object.freeze({ _tag: 'UnionTagSelector' as const })]),
-        type: 'i32' as const,
-      }),
-      ...payloadTypes.map((laneType, slot) =>
-        Object.freeze({
-          _tag: 'CallingLane' as const,
-          path: Object.freeze([Object.freeze({ _tag: 'UnionPayloadSelector' as const, slot })]),
-          type: laneType,
-        }),
-      ),
-    ])
+    if (registered?.tree._tag !== 'EffectCompositeShape')
+      throw new RangeError('LLVM backend lost a planned composite calling shape')
+    return registered.lanes
   }
   if (type._tag === 'EnvironmentBorrow')
     return Object.freeze([
@@ -153,38 +177,4 @@ export const laneType = (context: LoweringContext, lane: Layout.CallingLane): Ll
   const type = context.integerTypes.get(physical.size * 8)
   if (type === undefined) throw new RangeError('LLVM calling lane lost its planned integer type')
   return type
-}
-
-export const laneStorage = (
-  target: Target.Target,
-  lane: Layout.CallingLane,
-): { readonly size: number; readonly alignment: number } => {
-  if (typeof lane.type !== 'string')
-    return Object.freeze({ size: target.pointerSize, alignment: target.pointerAlignment })
-  const scalar = Scalar.find(lane.type)
-  if (scalar === undefined) throw new RangeError('LLVM lane storage has no semantic scalar')
-  return Scalar.resolveLayout(scalar, target)
-}
-
-/** Packs native calling lanes using their target ABI storage. */
-export const packLanes = (
-  target: Target.Target,
-  lanes: ReadonlyArray<Layout.CallingLane>,
-  start = 0,
-): {
-  readonly entries: ReadonlyArray<{ readonly lane: Layout.CallingLane; readonly offset: number }>
-  readonly end: number
-  readonly alignment: number
-} => {
-  let cursor = start
-  let alignment = 1
-  const entries = lanes.map((lane) => {
-    const storage = laneStorage(target, lane)
-    cursor = alignUp(cursor, storage.alignment)
-    const entry = Object.freeze({ lane, offset: cursor })
-    cursor += storage.size
-    alignment = Math.max(alignment, storage.alignment)
-    return entry
-  })
-  return Object.freeze({ entries: Object.freeze(entries), end: cursor, alignment })
 }

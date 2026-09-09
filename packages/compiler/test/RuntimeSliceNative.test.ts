@@ -65,6 +65,13 @@ pub fn main() -> i32 {
     assert.match(artifact.ir, /slice[0-9]+_in_bounds = icmp ult i64/)
     assert.match(artifact.ir, /br i1 .*slice[0-9]+_in_bounds/)
     assert.match(artifact.ir, /slice[0-9]+_element_offset = mul i64 .*, 8/)
-    assert.match(artifact.ir, /slice[0-9]+_0_offset = add i64 .*element_offset, 4/)
+    assert.match(
+      artifact.ir,
+      /%slice(\d+)_element = getelementptr i8, ptr %\w+, i64 %slice\1_element_offset/,
+    )
+    assert.match(
+      artifact.ir,
+      /%slice(\d+)_selected = getelementptr i8, ptr %slice\1_element, i32 4\n\s+%\w+ = load i32, ptr %slice\1_selected/,
+    )
   }),
 )

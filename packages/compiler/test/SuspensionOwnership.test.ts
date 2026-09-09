@@ -1,4 +1,9 @@
 import * as OpaqueRealization from '../src/OpaqueRealization.js'
+import * as CoroutineFrame from '../src/CoroutineFrame.js'
+import * as Layout from '../src/Layout.js'
+import * as Lifetime from '../src/Lifetime.js'
+import * as Target from '../src/Target.js'
+import * as Type from '../src/Type.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { unreachable } from './support/raise.js'
 import { partialSuspension } from './support/partialSuspension.js'
@@ -157,6 +162,39 @@ it.effect('classifies exact post-normalization MIR locals across relay', () =>
       SuspensionOwnership.encode(ownership),
     )
     const affine = owned.slots.filter((slot) => slot.access._tag === 'AffineTransfer')
+    const dependency =
+      borrowed.slots.find((slot) => slot.access._tag === 'BorrowedDependency') ??
+      unreachable('expected borrowed dependency')
+    const module = Analysis.loweredMir(self)
+    // Lifetime authority cannot truncate the transported descriptor to one pointer.
+    for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
+      const slice = Type.slice('Shared', 'i32', Lifetime.staticLifetime)
+      const layout = {
+        ...module.layout,
+        target,
+        entries: [Layout.sliceEntry(target, slice, Layout.scalarEntry(target, 'i32'))],
+      }
+      assert.deepEqual(
+        CoroutineFrame.storageOf(
+          { ...module, layout },
+          { ...dependency, type: { _tag: 'Slice', type: slice } },
+        ),
+        {
+          size: target.pointerSize * 2,
+          alignment: target.pointerAlignment,
+        },
+      )
+      assert.deepEqual(
+        CoroutineFrame.storageOf(
+          { ...module, layout },
+          { ...dependency, type: { _tag: 'EnvironmentBorrow', type: slice, access: 'Shared' } },
+        ),
+        {
+          size: target.pointerSize,
+          alignment: target.pointerAlignment,
+        },
+      )
+    }
     assert.lengthOf(affine, 2)
     const affineLocals = affine.map((slot) => slot.local.ordinal)
     assert.deepEqual(

@@ -32,6 +32,7 @@ import type * as StaticText from './StaticText.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
+import * as ValueStorage from './ValueStorage.js'
 
 const compareRuntimeTypes = (left: Type.Type, right: Type.Type): number => {
   const leftKey = Type.runtimeKey(left)
@@ -297,6 +298,7 @@ export interface Plan {
   readonly effectEnvironments: ReadonlyArray<EffectEnvironment>
   readonly callableEnvironments: ReadonlyArray<CallableEnvironment>
   readonly callingShapes: ReadonlyArray<CallingShape>
+  readonly valueStorage: ReadonlyArray<ValueStorage.Selection>
   readonly staticData?: ReadonlyArray<StaticDataPlacement>
   readonly literalVerdicts: ReadonlyArray<WordLiteralVerdict>
   readonly localSharedAllocationProvenance: LocalSharedAllocationProvenance.Plan
@@ -524,6 +526,7 @@ export interface Violation {
     | 'InvalidAggregate'
     | 'InvalidCLayout'
     | 'InvalidCallingShape'
+    | 'InvalidValueStorage'
     | 'InvalidLiteralVerdict'
     | 'CatalogMismatch'
   readonly type?: DeclarationFacts.SemanticType
@@ -3479,19 +3482,21 @@ export const plan = (
   )
   for (const environment of effectPlans)
     specializedShapeTypes.set(Type.runtimeKey(environment.effect), environment.effect)
-  return Object.freeze({
+  const plannedShapes = callingShapes(
+    self.target,
+    orderedEntries,
+    [...specializedShapeTypes.values()].sort(compareRuntimeTypes),
+    effectPlans,
+    callablePlans,
+  )
+  const base: Plan = Object.freeze({
     _tag: 'LayoutPlan',
     target: self.target,
     entries: orderedEntries,
     effectEnvironments: effectPlans,
     callableEnvironments: callablePlans,
-    callingShapes: callingShapes(
-      self.target,
-      orderedEntries,
-      [...specializedShapeTypes.values()].sort(compareRuntimeTypes),
-      effectPlans,
-      callablePlans,
-    ),
+    callingShapes: plannedShapes,
+    valueStorage: Object.freeze([]),
     staticData,
     literalVerdicts: literals.verdicts,
     localSharedAllocationProvenance,
@@ -3503,6 +3508,7 @@ export const plan = (
       ...executionDiagnostics,
     ]),
   })
+  return Object.freeze({ ...base, valueStorage: ValueStorage.plan(base) })
 }
 
 /** Constructs a scalar plan for hand-built MIR samples and focused tests. */
@@ -3518,6 +3524,7 @@ export const make = (target: Target.Target, types: ReadonlyArray<Type.Builtin>):
     effectEnvironments: Object.freeze([]),
     callableEnvironments: Object.freeze([]),
     callingShapes: callingShapes(target, orderedEntries),
+    valueStorage: Object.freeze([]),
     staticData: Object.freeze([]),
     literalVerdicts: Object.freeze([]),
     localSharedAllocationProvenance: LocalSharedAllocationProvenance.empty(),

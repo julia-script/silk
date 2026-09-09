@@ -49,7 +49,10 @@ export interface Draft {
 }
 
 export interface LocalEntry {
-  readonly draft: Draft
+  // Never retain the draft here: one escaped value would keep all sibling handles and
+  // their weak-registry entries alive. The construction benchmark exposes the resulting
+  // GC cost; ownership needs only this small identity with no back-reference to the draft.
+  readonly owner: OwnedHandle.Owner
   readonly index: number
 }
 
@@ -111,7 +114,7 @@ export const localEntry = <A extends object>(
 ): Result.Result<LocalEntry, LlvmError> => {
   const entry = entries.get(handle)
   if (entry === undefined) return fail(operation, `Unknown ${kind} handle`, handle)
-  if (entry.draft !== draft) {
+  if (entry.owner !== draft.owner) {
     return fail(operation, `The ${kind} handle belongs to a different function body`, handle)
   }
   return Result.succeed(entry)

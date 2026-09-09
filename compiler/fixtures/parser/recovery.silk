@@ -1,0 +1,10 @@
+pub struct Damaged {
+  pub missingType:
+  valid: i32
+}
+fn damaged(first: i32 second: i32) -> i32 {
+  let missing =
+  let valid = 42
+  return valid
+}
+fn following() -> i32 { return 7 }

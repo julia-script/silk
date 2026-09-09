@@ -1,0 +1,138 @@
+//! Token predicates shared by grammar rules and local error recovery.
+//!
+//! These predicates recognize syntax boundaries, not semantic validity. In particular, `pub`
+//! starts a declaration only when its next token names a declaration; a public field is different.
+import lexer.Token {TokenKind}
+import parser.ParseState {State}
+import parser.ParseState as P
+
+/// Reports whether the current position starts a declaration rather than a public field.
+pub fn declarationStart(state: &State) -> bool {
+  let mut offset: usize = 0
+  if P.currentKind(state) == TokenKind.PubKeyword {
+    offset = 1
+  }
+  return match P.peek(state, offset) {
+    TokenKind.ImportKeyword => true
+    TokenKind.ConstKeyword => true
+    TokenKind.ParamKeyword => true
+    TokenKind.StructKeyword => true
+    TokenKind.TupleKeyword => true
+    TokenKind.EnumKeyword => true
+    TokenKind.UnionKeyword => true
+    TokenKind.TypeKeyword => true
+    TokenKind.ServiceKeyword => true
+    TokenKind.InterfaceKeyword => true
+    TokenKind.RoleKeyword => true
+    TokenKind.ImplKeyword => true
+    TokenKind.ExternKeyword => true
+    TokenKind.ExportKeyword => true
+    TokenKind.StaticKeyword => true
+    TokenKind.UnsafeKeyword => true
+    TokenKind.FnKeyword => true
+    TokenKind.EffectKeyword => true
+    _ => P.word(state, "module")
+  }
+}
+
+/// Reports whether a token can begin an expression, including recoverable literal tokens.
+pub fn expressionStart(kind: TokenKind) -> bool {
+  return match kind {
+    TokenKind.Identifier => true
+    TokenKind.DecimalInteger => true
+    TokenKind.DecimalFloat => true
+    TokenKind.DurationLiteral => true
+    TokenKind.InvalidDurationLiteral => true
+    TokenKind.TextLiteral => true
+    TokenKind.ByteStringLiteral => true
+    TokenKind.CharLiteral => true
+    TokenKind.InvalidStaticLiteral => true
+    TokenKind.TrueKeyword => true
+    TokenKind.FalseKeyword => true
+    TokenKind.MoveKeyword => true
+    TokenKind.RunKeyword => true
+    TokenKind.EffectKeyword => true
+    TokenKind.FnKeyword => true
+    TokenKind.UnsafeKeyword => true
+    TokenKind.CompileErrorKeyword => true
+    TokenKind.MatchKeyword => true
+    TokenKind.Ampersand => true
+    TokenKind.Minus => true
+    TokenKind.Bang => true
+    TokenKind.Tilde => true
+    TokenKind.LeftParenthesis => true
+    TokenKind.LeftBracket => true
+    TokenKind.LeftBrace => true
+    TokenKind.Dot => true
+    _ => false
+  }
+}
+
+/// Reports whether a token can begin a type, including nullable native pointers.
+pub fn typeStart(kind: TokenKind) -> bool {
+  return match kind {
+    TokenKind.Identifier => true
+    TokenKind.ForKeyword => true
+    TokenKind.ExternKeyword => true
+    TokenKind.UnsafeKeyword => true
+    TokenKind.FnKeyword => true
+    TokenKind.MutKeyword => true
+    TokenKind.OnceKeyword => true
+    TokenKind.LeftParenthesis => true
+    TokenKind.LeftBracket => true
+    TokenKind.Ampersand => true
+    TokenKind.Star => true
+    TokenKind.Question => true
+    _ => false
+  }
+}
+
+/// Reports boundaries owned by the enclosing statement or declaration.
+///
+/// An anonymous callable is an expression, whereas a named callable starts a new declaration.
+pub fn blockEnd(state: &State) -> bool {
+  let kind = P.currentKind(state)
+  if kind == TokenKind.RightBrace || kind == TokenKind.EndOfFile || kind == TokenKind.ElseKeyword {
+    return true
+  }
+  if kind == TokenKind.FnKeyword {
+    return P.peek(state, 1) == TokenKind.Identifier
+  }
+  if kind == TokenKind.EffectKeyword {
+    return P.peek(state, 1) == TokenKind.FnKeyword && P.peek(state, 2) == TokenKind.Identifier
+  }
+  if kind == TokenKind.StaticKeyword {
+    return P.peek(state, 1) == TokenKind.FnKeyword
+  }
+  if kind == TokenKind.UnsafeKeyword {
+    return false
+  }
+  return declarationStart(state)
+}
+
+/// Returns operator precedence, or zero for a token that is not an infix operator.
+///
+/// Pipeline is weakest. Comparisons and equality are non-associative; the expression parser
+/// rejects a second operator at the same non-associative level instead of silently grouping it.
+pub fn precedence(kind: TokenKind) -> usize {
+  return match kind {
+    TokenKind.PipeGreater => 1
+    TokenKind.PipePipe => 2
+    TokenKind.AmpersandAmpersand => 3
+    TokenKind.EqualEqual => 4
+    TokenKind.BangEqual => 4
+    TokenKind.Less => 5
+    TokenKind.LessEqual => 5
+    TokenKind.Greater => 5
+    TokenKind.GreaterEqual => 5
+    TokenKind.Pipe => 6
+    TokenKind.Caret => 7
+    TokenKind.Ampersand => 8
+    TokenKind.Plus => 9
+    TokenKind.Minus => 9
+    TokenKind.Star => 10
+    TokenKind.Slash => 10
+    TokenKind.Percent => 10
+    _ => 0
+  }
+}

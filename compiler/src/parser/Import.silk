@@ -1,0 +1,248 @@
+//! Recoverable import-declaration grammar for the self-hosted parser.
+//!
+//! # When to use
+//!
+//! Use [`parseImportDeclaration`] when the current significant token starts `import` or
+//! `pub import` syntax.
+//!
+//! # Details
+//!
+//! An import declaration contains a dotted path. It can also contain a declaration alias, a member
+//! list, or both. A member can have its own alias. A trailing comma is valid in a member list.
+//!
+//! Path segments accept identifiers and keyword spellings because module path segments are
+//! contextual. Member names and alias names require identifier tokens.
+//!
+//! Each grammar rule appends its child nodes before its parent node. The declaration result
+//! therefore contains stable identities into the shared flat node array.
+//!
+//! # Gotchas
+//!
+//! A public import requires a member list. If that list is absent, the parser inserts a missing
+//! left-brace element and reports a diagnostic.
+
+import lexer.Token {TokenKind}
+import parser.Element {Element}
+import parser.Node {NodeKind}
+import parser.Grammar as G
+import parser.ParseState {ElementsResult, NodeResult, State}
+import parser.ParseState as Parsing
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.vector {Vector}
+
+fn isImportSegment(tokenKind: TokenKind) -> bool {
+  return match tokenKind {
+    TokenKind.Identifier => true
+    TokenKind.PubKeyword => true
+    TokenKind.StructKeyword => true
+    TokenKind.EnumKeyword => true
+    TokenKind.UnionKeyword => true
+    TokenKind.TypeKeyword => true
+    TokenKind.ServiceKeyword => true
+    TokenKind.InterfaceKeyword => true
+    TokenKind.RoleKeyword => true
+    TokenKind.EffectKeyword => true
+    TokenKind.FnKeyword => true
+    TokenKind.RunKeyword => true
+    TokenKind.FailKeyword => true
+    TokenKind.DropKeyword => true
+    TokenKind.UnsafeKeyword => true
+    TokenKind.ImplKeyword => true
+    TokenKind.ForKeyword => true
+    TokenKind.ReturnKeyword => true
+    TokenKind.ImportKeyword => true
+    TokenKind.AsKeyword => true
+    TokenKind.LetKeyword => true
+    TokenKind.ConstKeyword => true
+    TokenKind.MutKeyword => true
+    TokenKind.OnceKeyword => true
+    TokenKind.MoveKeyword => true
+    TokenKind.MatchKeyword => true
+    TokenKind.IfKeyword => true
+    TokenKind.ElseKeyword => true
+    TokenKind.WhileKeyword => true
+    TokenKind.BreakKeyword => true
+    TokenKind.ContinueKeyword => true
+    TokenKind.TrueKeyword => true
+    TokenKind.FalseKeyword => true
+    _ => false
+  }
+}
+
+effect fn attach(elements: Vector<Element>, result: NodeResult) -> ElementsResult
+! OutOfMemoryError
+? &mut Allocator {
+  let NodeResult {state, node} = move result
+  let mut parentElements = move elements
+  run Vector.append<Element>(&mut parentElements, Element.Node {id: node})
+  return ElementsResult {state: move state, elements: move parentElements}
+}
+
+effect fn parseImportAlias(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let start = Parsing.insertionSpan(&initial)
+  let keyword = run Parsing.expect(Parsing.begin(move initial), TokenKind.AsKeyword)
+  let name = run Parsing.expect(move keyword, TokenKind.Identifier)
+  return run Parsing.finish(move name, NodeKind.ImportAlias, start)
+}
+
+effect fn parseImportPath(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let start = Parsing.insertionSpan(&initial)
+  let mut path = Parsing.begin(move initial)
+  let following = Parsing.peek(&path.state, 1)
+  let startsNextDeclaration = G.declarationStart(&path.state) && following != TokenKind.Dot && following != TokenKind.AsKeyword && following != TokenKind.LeftBrace && following != TokenKind.EndOfFile
+  if Parsing.hasCurrent(&path.state) && isImportSegment(Parsing.currentKind(&path.state)) && !startsNextDeclaration {
+    let consumed = run Parsing.consume(move path)
+    path = move consumed
+  } else {
+    let missing = run Parsing.missing(move path, TokenKind.Identifier)
+    path = move missing
+  }
+  while Parsing.currentKind(&path.state) == TokenKind.Dot {
+    let withDot = run Parsing.consume(move path)
+    path = move withDot
+    if Parsing.hasCurrent(&path.state) && isImportSegment(Parsing.currentKind(&path.state)) {
+      let withSegment = run Parsing.consume(move path)
+      path = move withSegment
+    } else {
+      let missing = run Parsing.missing(move path, TokenKind.Identifier)
+      path = move missing
+      break
+    }
+  }
+  return run Parsing.finish(move path, NodeKind.ImportPath, start)
+}
+
+effect fn parseImportMember(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let start = Parsing.insertionSpan(&initial)
+  let named = run Parsing.expect(Parsing.begin(move initial), TokenKind.Identifier)
+  let hasAlias = Parsing.currentKind(&named.state) == TokenKind.AsKeyword
+  let mut member = move named
+  if hasAlias {
+    let ElementsResult {state, elements} = move member
+    let alias = run parseImportAlias(move state)
+    let attached = run attach(move elements, move alias)
+    member = move attached
+  }
+  return run Parsing.finish(move member, NodeKind.ImportMember, start)
+}
+
+effect fn parseImportMemberList(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let start = Parsing.insertionSpan(&initial)
+  let left = run Parsing.expect(Parsing.begin(move initial), TokenKind.LeftBrace)
+  let ElementsResult {state: afterLeft, elements: initialElements} = move left
+  let mut state = move afterLeft
+  let mut elements = move initialElements
+  let mut parsedMember = false
+
+  while Parsing.currentKind(&state) != TokenKind.RightBrace && Parsing.currentKind(&state) != TokenKind.EndOfFile && !G.declarationStart(
+    &state,
+  ) {
+    if Parsing.currentKind(&state) == TokenKind.Identifier {
+      let result = run parseImportMember(move state)
+      let NodeResult {state: afterMember, node} = move result
+      state = move afterMember
+      run Vector.append<Element>(&mut elements, Element.Node {id: node})
+      parsedMember = true
+    } else {
+      let errorStart = Parsing.insertionSpan(&state)
+      let unexpected = run Parsing.unexpected(Parsing.begin(move state))
+      let result = run Parsing.finish(move unexpected, NodeKind.Error, errorStart)
+      let NodeResult {state: afterError, node} = move result
+      state = move afterError
+      run Vector.append<Element>(&mut elements, Element.Node {id: node})
+    }
+
+    if Parsing.currentKind(&state) == TokenKind.Comma {
+      let withComma = run Parsing.consume(
+        ElementsResult {state: move state, elements: move elements},
+      )
+      let ElementsResult {state: afterComma, elements: withCommaElements} = move withComma
+      state = move afterComma
+      elements = move withCommaElements
+      if Parsing.currentKind(&state) == TokenKind.RightBrace {
+        break
+      }
+    } else if Parsing.currentKind(&state) == TokenKind.Identifier {
+      let missing = run Parsing.missing(
+        ElementsResult {state: move state, elements: move elements},
+        TokenKind.Comma,
+      )
+      let ElementsResult {state: afterMissing, elements: withMissing} = move missing
+      state = move afterMissing
+      elements = move withMissing
+    } else {
+      break
+    }
+  }
+
+  let mut list = ElementsResult {state: move state, elements: move elements}
+  if !parsedMember {
+    let ElementsResult {state: emptyState, elements: emptyElements} = move list
+    let missingMember = run parseImportMember(move emptyState)
+    let withMember = run Parsing.attach(move emptyElements, move missingMember)
+    list = move withMember
+  }
+  let right = run Parsing.expect(move list, TokenKind.RightBrace)
+  return run Parsing.finish(move right, NodeKind.ImportMemberList, start)
+}
+
+/// Parses one import declaration and appends its nodes to the shared flat node array.
+///
+/// # When to use
+///
+/// Use when the current significant tokens start `import` or `pub import`. The returned node identity can
+/// become a direct element of the source-file root.
+///
+/// # Details
+///
+/// The operation parses the import keyword and one dotted path. It then parses an optional
+/// declaration alias and an optional member list. Each member can contain an optional alias.
+///
+/// Child nodes are complete before the import-declaration node is appended. Syntax problems add
+/// diagnostics and missing-token or error elements to the returned state.
+///
+/// # Gotchas
+///
+/// If the declaration starts with `pub` and has no member list, the result contains a missing
+/// left-brace element. The operation does not consume a token for that inserted element.
+pub effect fn parseImportDeclaration(initial: State) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  let start = Parsing.insertionSpan(&initial)
+  let mut declaration = Parsing.begin(move initial)
+  let mut isPublic = false
+  let mut hasMembers = false
+
+  if Parsing.currentKind(&declaration.state) == TokenKind.PubKeyword {
+    isPublic = true
+    let consumed = run Parsing.consume(move declaration)
+    declaration = move consumed
+  }
+  let keyword = run Parsing.expect(move declaration, TokenKind.ImportKeyword)
+  let ElementsResult {state: afterKeyword, elements: keywordElements} = move keyword
+  let path = run parseImportPath(move afterKeyword)
+  let withPath = run attach(move keywordElements, move path)
+  declaration = move withPath
+
+  if Parsing.currentKind(&declaration.state) == TokenKind.AsKeyword {
+    let ElementsResult {state: beforeAlias, elements: beforeAliasElements} = move declaration
+    let alias = run parseImportAlias(move beforeAlias)
+    let withAlias = run attach(move beforeAliasElements, move alias)
+    declaration = move withAlias
+  }
+
+  if Parsing.currentKind(&declaration.state) == TokenKind.LeftBrace {
+    hasMembers = true
+    let ElementsResult {state: beforeMembers, elements: beforeMemberElements} = move declaration
+    let members = run parseImportMemberList(move beforeMembers)
+    let withMembers = run attach(move beforeMemberElements, move members)
+    declaration = move withMembers
+  }
+
+  if isPublic && !hasMembers {
+    let missing = run Parsing.missing(move declaration, TokenKind.LeftBrace)
+    declaration = move missing
+  }
+
+  return run Parsing.finish(move declaration, NodeKind.ImportDeclaration, start)
+}

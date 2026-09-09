@@ -1,54 +1,98 @@
-# Streamed self-hosted lexer experiment
+# Self-hosted Silk frontend
 
-This directory is an experimental native Silk program that lexes one Silk source file and writes
-each token directly to stdout. It is deliberately separate from the official bootstrap compiler.
-The experiment is meant to exercise the language and standard library while developing a reusable
-pull-based `Stream` shape.
+This directory contains the self-hosted lexer and parser. The current executable reads one Silk
+file and prints its flat AST and syntax diagnostics. It does not yet perform name resolution,
+type checking, lowering, or code generation on that input. The TypeScript bootstrap compiler
+still builds this executable.
 
-From the repository root, run:
+## Inspect a source file
 
-```sh
-silk run --manifest-path compiler/silk.toml -- compiler/fixtures/keywords.silk
-```
-
-The source path must be one normalized relative path beneath the directory where the command is
-launched. Missing arguments, extra arguments, absolute paths, `.` or `..` components, unreadable
-files, allocation failures, host-input failures, and writer failures remain typed failures and
-propagate from `main`.
-
-The lexer implementation lives under `src/lexer/` and borrows the file-owned `Bytes` slice.
-`Stream.take` scans and returns one nominal `Token` at a time, so `main` can print it immediately
-without retaining a token vector. Token lines use
-`<Variant> <start>..<end>`. Invalid variants are followed by
-`diagnostic <code> <reason> <start>..<end>`. Spans are half-open byte offsets. EOF is emitted once
-at `source.length`; the next pull returns `Option.None` and ends the loop.
-
-The scanner uses short-circuit byte predicates and contextually typed integer literals for cursor
-arithmetic. Literal categories form an exhaustively matched enum; duration-unit membership uses
-one bit per checked unit rank. Each pull destructures its scanned token and end offset directly.
-
-The bootstrap lexer at revision `dd4510fa` is the compatibility authority for this experiment.
-The fixtures in `fixtures/` cover keywords, trivia, punctuation, numbers, durations, static
-literals, lifetimes, unsupported bytes, and empty input. Their token kinds, spans, diagnostic codes,
-reason tags, and focused spans were compared byte-for-byte with the bootstrap lexer.
-
-| Finding                     | Result                                                                                                                                                                                                                 |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Keyword vocabulary          | The running compiler also reserves `static`, `compileError`, `tuple`, `type`, `extern`, and `export`; the lexical reference's current closed list omits them. This lexer follows the running compiler.                 |
-| Contextual spellings        | `where` and `place` remain `Identifier` tokens.                                                                                                                                                                        |
-| Contextual integer literals | An integer literal such as `44` is selected as `u8` when compared with a `u8`; an explicit `u8.toU8(44)` conversion is unnecessary.                                                                                    |
-| Character literals          | Character literals default to `char`; an immediate `u8` context selects their scalar value. The byte-oriented lexer uses ASCII character literals for byte comparisons.                                                |
-| Stream receiver             | A caller that already has `&mut Lexer` passes that reference as `Stream.take(lexer)`. Taking `&mut lexer` again requests a mutable reference to the reference binding.                                                 |
-| Storage                     | Scanning is byte-oriented and allocation-free after the source file has been read. Tokens are printed as they are pulled.                                                                                              |
-| Ownership across suspension | The original compiler rejected the straight-line CLI flow with `OWN0020`. The repair tracked by JUL-152 is now on `main`, and the sequential `program` body checks without helper splitting. See [`BUGS.md`](BUGS.md). |
-
-Focused checks:
+From the repository root:
 
 ```sh
-silk check --manifest-path compiler/silk.toml
-silk run --manifest-path compiler/silk.toml -- compiler/fixtures/empty.silk
-silk run --manifest-path compiler/silk.toml -- compiler/fixtures/numbers-durations.silk
-silk run --manifest-path compiler/silk.toml -- compiler/fixtures/literals-lifetimes.silk
+pnpm exec silk run --manifest-path compiler/silk.toml -- compiler/src/main.silk
 ```
 
-This first slice does not decode literal values, retain tokens, or integrate with the parser.
+Pass one normalized relative path beneath the working directory. Absolute paths and `.`/`..`
+components are rejected. File, allocation, host-input, and writer failures propagate from `main`.
+
+The dump starts with `root #<id>`, then lists nodes in array order. Each node reports its kind and
+half-open byte span. Indented lines contain child node IDs, token IDs with their kinds and spans,
+or missing-token placeholders. The final section lists syntax diagnostics. Lexical diagnostics
+are printed alongside invalid tokens. IDs belong to this tree only.
+
+After a successful build, running the executable directly avoids rebuilding it. For example, on
+Apple Silicon with the debug LLVM target:
+
+```sh
+compiler/build/llvm/aarch64-apple-darwin/debug/silk-compiler compiler/src/main.silk
+```
+
+## Representation and recovery
+
+`SyntaxTree` owns the source `Bytes`, the complete token vector (including trivia), a flat node
+vector, the root ID, and syntax diagnostics. A `NodeId` is exactly an index into that node vector.
+Children are appended before parents; the source-file root is last. Nodes contain only their
+kind, span, and direct `Element` vector. No child node or token payload is copied into a parent.
+
+The parser reads significant tokens but retains trivia in the original token vector. Source bytes
+allow contextual identifiers such as `where`, `with`, and `operator` to remain ordinary identifiers
+elsewhere. `Parser.parse` takes ownership of both the bytes and their corresponding token vector;
+those inputs must describe the same file.
+
+Missing tokens produce zero-width placeholders and diagnostics. Unexpected source is retained in
+error nodes. List and block loops enforce cursor progress, and recursive rules have a stack-safety
+bound with iterative recovery. A malformed child does not invalidate valid siblings. Syntax
+problems are result values, not effect failures; allocation failure is still an effect failure.
+The AST inspection executable intentionally prints the recovered result instead of stopping at
+its first syntax diagnostic. A future compilation driver can stop on that diagnostic.
+
+CST construction remains postponed. The token vector retains source information, but there is no
+second concrete-syntax tree to maintain.
+
+## Grammar modules
+
+| Module                                         | Responsibility                                                                                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/lexer/`                                   | Pull-based byte scanner, tokens, spans, and lexical diagnostics                                                                             |
+| `parser/ParseState.silk`                       | Ownership-threaded cursor, node construction, contextual spelling, and recovery primitives                                                  |
+| `parser/Parser.silk`                           | Source-file loop and final tree assembly                                                                                                    |
+| `parser/Import.silk`                           | Module paths, aliases, selected members, and public imports                                                                                 |
+| `parser/Declaration.silk`                      | Nominal declarations, functions, constants, parameters, services/interfaces, implementations, native headers, and static declaration groups |
+| `parser/Type.silk`                             | Type paths, generics, lifetimes, references, arrays, pointers, callable types, effect rows, and constraints                                 |
+| `parser/Expression.silk`                       | Literals, constructors, calls, projections, prefix/infix precedence, pipelines, effects, anonymous callables, and matches                   |
+| `parser/Pattern.silk`                          | Nominal/applied patterns, whole-value bindings, field shorthand/rest, enum/integer cases, and wildcards                                     |
+| `parser/Statement.silk`                        | Bindings, assignments, control flow, transfers, static loops, unsafe blocks, and block recovery                                             |
+| `parser/Property.silk`                         | Sealed function/module property syntax                                                                                                      |
+| `parser/Grammar.silk`, `parser/Lookahead.silk` | Shared boundaries, precedence, and non-consuming ambiguity checks                                                                           |
+| `parser/SyntaxTree.silk`                       | Tree ownership and flat AST printing                                                                                                        |
+
+Grammar rules are ordinary Silk functions. They consume `State` and return it with either an
+unfinished element list or a completed node ID. Replacement values are evaluated before assigning
+them back to a local owner, as required by Silk's ownership rules.
+
+## Verification
+
+Check the self-hosted program with the bootstrap compiler:
+
+```sh
+pnpm exec silk check --manifest-path compiler/silk.toml
+```
+
+After building the executable, run the parser corpus with its path:
+
+```sh
+node compiler/scripts/test-parser.mjs compiler/build/llvm/aarch64-apple-darwin/debug/silk-compiler
+```
+
+The harness reuses one built executable. It compares significant AST structure with the bootstrap
+parser across grammar fixtures, the self-hosted sources, and the standard library. It also checks
+postorder IDs, source spans, reachability, unique token ownership, and preservation of following
+declarations after malformed syntax. Extra file paths after the executable select a smaller corpus.
+The JavaScript harness imports the bootstrap package's built `dist` modules.
+
+`fixtures/parser/` contains syntax-only programs: names need not resolve and operations need not
+typecheck. `recovery.silk` deliberately contains syntax errors. The other files directly under
+`fixtures/` exercise lexical categories and are not necessarily complete Silk programs.
+
+Bootstrap issues encountered while developing this frontend are recorded in [BUGS.md](BUGS.md).

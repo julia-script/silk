@@ -23,6 +23,29 @@ const detached: Type.ExecutableLifetimes = Object.freeze({
 })
 const staticText = Type.string(Lifetime.staticLifetime)
 
+it('reuses the runtime identity of an immutable type across nested layout queries', () => {
+  let argumentReads = 0
+  const arguments_ = Object.freeze(['i32'] as const)
+  const nominal: Type.Nominal = Object.freeze({
+    _tag: 'NominalType',
+    module: 'runtime-key',
+    name: 'Box',
+    get arguments() {
+      argumentReads += 1
+      return arguments_
+    },
+  })
+  const first = Type.runtimeKey(nominal)
+  const readsAfterFirst = argumentReads
+  assert.isAbove(readsAfterFirst, 0)
+  assert.strictEqual(Type.runtimeKey(nominal), first)
+  assert.strictEqual(
+    Type.runtimeKey(Type.fixedArray(nominal, 2)),
+    Type.runtimeKey(Type.fixedArray(Type.nominal('runtime-key', 'Box', arguments_), 2)),
+  )
+  assert.strictEqual(argumentReads, readsAfterFirst)
+})
+
 const span = (sourceId: string, start: number, end: number): SourceSpan.SourceSpan =>
   SourceSpan.fromOffsets(sourceId, start, end) ?? unreachable('expected a valid source span')
 

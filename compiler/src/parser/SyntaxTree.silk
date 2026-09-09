@@ -1,0 +1,404 @@
+//! One recoverable syntax result backed by separate flat token and node arrays.
+//!
+//! # When to use
+//!
+//! Use [`SyntaxTree`] as the parser output for semantic analysis, compiler diagnostics, and source
+//! tools that must continue after malformed syntax.
+//!
+//! # Details
+//!
+//! Tokens remain in their original lexer order, including whitespace and comments. Node elements
+//! refer to significant tokens by token index. The parser does not copy token payloads into nodes.
+//!
+//! Nodes occupy one postorder array. A child node has a lower index than its parent. The root
+//! identity selects the source-file node, which is the final node appended by the parser.
+//!
+//! Diagnostics and recovered syntax exist in the same result. Missing tokens are conceptual node
+//! elements. Unexpected source remains available through error nodes and token identities.
+//!
+//! # Gotchas
+//!
+//! Every node and token identity is local to this value. Copying an identity into another syntax
+//! tree does not preserve its meaning.
+
+import lexer.Span {Span}
+import lexer.Token {Token, TokenKind}
+import lexer.Token as LexicalToken
+import parser.Diagnostic {Diagnostic}
+import parser.Element {Element}
+import parser.Node {Node, NodeKind}
+import parser.NodeId {NodeId}
+import silk.format {Format}
+import silk.bytes {Bytes}
+import silk.usize
+import silk.vector {Vector}
+import silk.writer {Writer, WriterError}
+
+/// Owns all token storage, node storage, root identity, and diagnostics for one source file.
+///
+/// # Details
+///
+/// Consumers resolve a node identity by indexing `nodes`. They resolve a token identity by
+/// indexing `tokens`. A diagnostic does not invalidate an unrelated node or token.
+pub struct SyntaxTree {
+  /// Original source bytes addressed by token and node spans.
+  pub source: Bytes
+  /// The complete lexer output in source order, including trivia.
+  pub tokens: Vector<Token>
+  /// The postorder flat node storage addressed by [`NodeId`].
+  pub nodes: Vector<Node>
+  /// The identity of the source-file node that owns all top-level elements.
+  pub root: NodeId
+  /// Syntax diagnostics in parser discovery order.
+  pub diagnostics: Vector<Diagnostic>
+}
+
+fn nodeKindName(kind: NodeKind) -> string<'static> {
+  return match kind {
+    NodeKind.SourceFile => "SourceFile"
+    NodeKind.ImportDeclaration => "ImportDeclaration"
+    NodeKind.StaticConditionalDeclaration => "StaticConditionalDeclaration"
+    NodeKind.DeclarationGroup => "DeclarationGroup"
+    NodeKind.ImportPath => "ImportPath"
+    NodeKind.ImportAlias => "ImportAlias"
+    NodeKind.ImportMemberList => "ImportMemberList"
+    NodeKind.ImportMember => "ImportMember"
+    NodeKind.StructDeclaration => "StructDeclaration"
+    NodeKind.TupleDeclaration => "TupleDeclaration"
+    NodeKind.EnumDeclaration => "EnumDeclaration"
+    NodeKind.EnumMember => "EnumMember"
+    NodeKind.UnionDeclaration => "UnionDeclaration"
+    NodeKind.UnionVariant => "UnionVariant"
+    NodeKind.UnionVariantField => "UnionVariantField"
+    NodeKind.AppliedMemberSelector => "AppliedMemberSelector"
+    NodeKind.AppliedMemberExpression => "AppliedMemberExpression"
+    NodeKind.UnionVariantPattern => "UnionVariantPattern"
+    NodeKind.ServiceDeclaration => "ServiceDeclaration"
+    NodeKind.InterfaceDeclaration => "InterfaceDeclaration"
+    NodeKind.RoleDeclaration => "RoleDeclaration"
+    NodeKind.RequirementSelector => "RequirementSelector"
+    NodeKind.ServiceOperation => "ServiceOperation"
+    NodeKind.OperatorMarker => "OperatorMarker"
+    NodeKind.ServiceInvalidMember => "ServiceInvalidMember"
+    NodeKind.ConstantDeclaration => "ConstantDeclaration"
+    NodeKind.PackageParameterDeclaration => "PackageParameterDeclaration"
+    NodeKind.PackageParameterValidation => "PackageParameterValidation"
+    NodeKind.TypeAliasDeclaration => "TypeAliasDeclaration"
+    NodeKind.StructField => "StructField"
+    NodeKind.ImplDeclaration => "ImplDeclaration"
+    NodeKind.ImplOperation => "ImplOperation"
+    NodeKind.TypeParameterList => "TypeParameterList"
+    NodeKind.TypeParameter => "TypeParameter"
+    NodeKind.LifetimeParameter => "LifetimeParameter"
+    NodeKind.LifetimeType => "LifetimeType"
+    NodeKind.LifetimeBinderList => "LifetimeBinderList"
+    NodeKind.EffectEnvironment => "EffectEnvironment"
+    NodeKind.CallableEnvironment => "CallableEnvironment"
+    NodeKind.TypePath => "TypePath"
+    NodeKind.AppliedType => "AppliedType"
+    NodeKind.TypeArgumentList => "TypeArgumentList"
+    NodeKind.FixedArrayType => "FixedArrayType"
+    NodeKind.SliceType => "SliceType"
+    NodeKind.ReferenceType => "ReferenceType"
+    NodeKind.PointerType => "PointerType"
+    NodeKind.PointerQualifier => "PointerQualifier"
+    NodeKind.CallableType => "CallableType"
+    NodeKind.ForeignFunctionType => "ForeignFunctionType"
+    NodeKind.ExactRepresentationType => "ExactRepresentationType"
+    NodeKind.OpaqueResultType => "OpaqueResultType"
+    NodeKind.UnitType => "UnitType"
+    NodeKind.ParenthesizedType => "ParenthesizedType"
+    NodeKind.UnionType => "UnionType"
+    NodeKind.FunctionDeclaration => "FunctionDeclaration"
+    NodeKind.ForeignFunctionDeclaration => "ForeignFunctionDeclaration"
+    NodeKind.ModulePropertyDeclaration => "ModulePropertyDeclaration"
+    NodeKind.FunctionPropertyClause => "FunctionPropertyClause"
+    NodeKind.FunctionProperty => "FunctionProperty"
+    NodeKind.ForeignStaticDeclaration => "ForeignStaticDeclaration"
+    NodeKind.ExportStaticDeclaration => "ExportStaticDeclaration"
+    NodeKind.FailureRow => "FailureRow"
+    NodeKind.RequirementRow => "RequirementRow"
+    NodeKind.Requirement => "Requirement"
+    NodeKind.RowWithout => "RowWithout"
+    NodeKind.WhereClause => "WhereClause"
+    NodeKind.MembershipConstraint => "MembershipConstraint"
+    NodeKind.ProviderConstraint => "ProviderConstraint"
+    NodeKind.ParameterList => "ParameterList"
+    NodeKind.ParameterDeclaration => "ParameterDeclaration"
+    NodeKind.ReturnType => "ReturnType"
+    NodeKind.Block => "Block"
+    NodeKind.ExpressionStatement => "ExpressionStatement"
+    NodeKind.ErrorStatement => "ErrorStatement"
+    NodeKind.BindingStatement => "BindingStatement"
+    NodeKind.PatternBindingStatement => "PatternBindingStatement"
+    NodeKind.AssignmentStatement => "AssignmentStatement"
+    NodeKind.ConditionalStatement => "ConditionalStatement"
+    NodeKind.StaticConditionalStatement => "StaticConditionalStatement"
+    NodeKind.StaticForStatement => "StaticForStatement"
+    NodeKind.PatternConditionalStatement => "PatternConditionalStatement"
+    NodeKind.WhileStatement => "WhileStatement"
+    NodeKind.BreakStatement => "BreakStatement"
+    NodeKind.ContinueStatement => "ContinueStatement"
+    NodeKind.ReturnStatement => "ReturnStatement"
+    NodeKind.FailStatement => "FailStatement"
+    NodeKind.DropStatement => "DropStatement"
+    NodeKind.UnsafeStatement => "UnsafeStatement"
+    NodeKind.UnsafeExpression => "UnsafeExpression"
+    NodeKind.CompileErrorExpression => "CompileErrorExpression"
+    NodeKind.IntegerLiteralExpression => "IntegerLiteralExpression"
+    NodeKind.DurationLiteralExpression => "DurationLiteralExpression"
+    NodeKind.FloatingLiteralExpression => "FloatingLiteralExpression"
+    NodeKind.StaticTextLiteralExpression => "StaticTextLiteralExpression"
+    NodeKind.CharacterLiteralExpression => "CharacterLiteralExpression"
+    NodeKind.UnitExpression => "UnitExpression"
+    NodeKind.BooleanLiteralExpression => "BooleanLiteralExpression"
+    NodeKind.IdentifierExpression => "IdentifierExpression"
+    NodeKind.MoveExpression => "MoveExpression"
+    NodeKind.AnonymousCallableExpression => "AnonymousCallableExpression"
+    NodeKind.EffectExpression => "EffectExpression"
+    NodeKind.RunExpression => "RunExpression"
+    NodeKind.BorrowExpression => "BorrowExpression"
+    NodeKind.MatchExpression => "MatchExpression"
+    NodeKind.MatchAccess => "MatchAccess"
+    NodeKind.MatchArm => "MatchArm"
+    NodeKind.ErrorPattern => "ErrorPattern"
+    NodeKind.EnumMemberPattern => "EnumMemberPattern"
+    NodeKind.IntegerPattern => "IntegerPattern"
+    NodeKind.NominalPattern => "NominalPattern"
+    NodeKind.BindingPattern => "BindingPattern"
+    NodeKind.UniversalPattern => "UniversalPattern"
+    NodeKind.PatternField => "PatternField"
+    NodeKind.RestPattern => "RestPattern"
+    NodeKind.StructLiteralExpression => "StructLiteralExpression"
+    NodeKind.TupleLiteralExpression => "TupleLiteralExpression"
+    NodeKind.ContextualRecordLiteralExpression => "ContextualRecordLiteralExpression"
+    NodeKind.ArrayLiteralExpression => "ArrayLiteralExpression"
+    NodeKind.StructFieldInitializer => "StructFieldInitializer"
+    NodeKind.FieldProjectionExpression => "FieldProjectionExpression"
+    NodeKind.OrdinalProjectionExpression => "OrdinalProjectionExpression"
+    NodeKind.ReferentProjectionExpression => "ReferentProjectionExpression"
+    NodeKind.IndexProjectionExpression => "IndexProjectionExpression"
+    NodeKind.CallExpression => "CallExpression"
+    NodeKind.CallTypeArgumentList => "CallTypeArgumentList"
+    NodeKind.GroupedExpression => "GroupedExpression"
+    NodeKind.PrefixExpression => "PrefixExpression"
+    NodeKind.InfixExpression => "InfixExpression"
+    NodeKind.PipelineExpression => "PipelineExpression"
+    NodeKind.ArgumentList => "ArgumentList"
+    NodeKind.Error => "Error"
+  }
+}
+
+fn expectedTokenName(kind: TokenKind) -> string<'static> {
+  return match kind {
+    TokenKind.Whitespace => "Whitespace"
+    TokenKind.LineComment => "LineComment"
+    TokenKind.DocComment => "DocComment"
+    TokenKind.ModuleDocComment => "ModuleDocComment"
+    TokenKind.Identifier => "Identifier"
+    TokenKind.Lifetime => "Lifetime"
+    TokenKind.DecimalInteger => "DecimalInteger"
+    TokenKind.DecimalFloat => "DecimalFloat"
+    TokenKind.DurationLiteral => "DurationLiteral"
+    TokenKind.InvalidDurationLiteral => "InvalidDurationLiteral"
+    TokenKind.TextLiteral => "TextLiteral"
+    TokenKind.ByteStringLiteral => "ByteStringLiteral"
+    TokenKind.CharLiteral => "CharLiteral"
+    TokenKind.InvalidStaticLiteral => "InvalidStaticLiteral"
+    TokenKind.StaticKeyword => "StaticKeyword"
+    TokenKind.CompileErrorKeyword => "CompileErrorKeyword"
+    TokenKind.PubKeyword => "PubKeyword"
+    TokenKind.StructKeyword => "StructKeyword"
+    TokenKind.TupleKeyword => "TupleKeyword"
+    TokenKind.EnumKeyword => "EnumKeyword"
+    TokenKind.UnionKeyword => "UnionKeyword"
+    TokenKind.TypeKeyword => "TypeKeyword"
+    TokenKind.ServiceKeyword => "ServiceKeyword"
+    TokenKind.InterfaceKeyword => "InterfaceKeyword"
+    TokenKind.RoleKeyword => "RoleKeyword"
+    TokenKind.EffectKeyword => "EffectKeyword"
+    TokenKind.FnKeyword => "FnKeyword"
+    TokenKind.RunKeyword => "RunKeyword"
+    TokenKind.FailKeyword => "FailKeyword"
+    TokenKind.DropKeyword => "DropKeyword"
+    TokenKind.UnsafeKeyword => "UnsafeKeyword"
+    TokenKind.ExternKeyword => "ExternKeyword"
+    TokenKind.ExportKeyword => "ExportKeyword"
+    TokenKind.ImplKeyword => "ImplKeyword"
+    TokenKind.ForKeyword => "ForKeyword"
+    TokenKind.ReturnKeyword => "ReturnKeyword"
+    TokenKind.ImportKeyword => "ImportKeyword"
+    TokenKind.AsKeyword => "AsKeyword"
+    TokenKind.LetKeyword => "LetKeyword"
+    TokenKind.ConstKeyword => "ConstKeyword"
+    TokenKind.ParamKeyword => "ParamKeyword"
+    TokenKind.MutKeyword => "MutKeyword"
+    TokenKind.OnceKeyword => "OnceKeyword"
+    TokenKind.MoveKeyword => "MoveKeyword"
+    TokenKind.MatchKeyword => "MatchKeyword"
+    TokenKind.IfKeyword => "IfKeyword"
+    TokenKind.ElseKeyword => "ElseKeyword"
+    TokenKind.WhileKeyword => "WhileKeyword"
+    TokenKind.BreakKeyword => "BreakKeyword"
+    TokenKind.ContinueKeyword => "ContinueKeyword"
+    TokenKind.TrueKeyword => "TrueKeyword"
+    TokenKind.FalseKeyword => "FalseKeyword"
+    TokenKind.LeftParenthesis => "LeftParenthesis"
+    TokenKind.RightParenthesis => "RightParenthesis"
+    TokenKind.LeftBrace => "LeftBrace"
+    TokenKind.RightBrace => "RightBrace"
+    TokenKind.LeftBracket => "LeftBracket"
+    TokenKind.RightBracket => "RightBracket"
+    TokenKind.Colon => "Colon"
+    TokenKind.Semicolon => "Semicolon"
+    TokenKind.Comma => "Comma"
+    TokenKind.Equals => "Equals"
+    TokenKind.EqualEqual => "EqualEqual"
+    TokenKind.FatArrow => "FatArrow"
+    TokenKind.Minus => "Minus"
+    TokenKind.Plus => "Plus"
+    TokenKind.Star => "Star"
+    TokenKind.Slash => "Slash"
+    TokenKind.Percent => "Percent"
+    TokenKind.Bang => "Bang"
+    TokenKind.BangEqual => "BangEqual"
+    TokenKind.Question => "Question"
+    TokenKind.At => "At"
+    TokenKind.Less => "Less"
+    TokenKind.LessEqual => "LessEqual"
+    TokenKind.Greater => "Greater"
+    TokenKind.GreaterEqual => "GreaterEqual"
+    TokenKind.Pipe => "Pipe"
+    TokenKind.PipeGreater => "PipeGreater"
+    TokenKind.PipePipe => "PipePipe"
+    TokenKind.Ampersand => "Ampersand"
+    TokenKind.AmpersandAmpersand => "AmpersandAmpersand"
+    TokenKind.Caret => "Caret"
+    TokenKind.Tilde => "Tilde"
+    TokenKind.Dot => "Dot"
+    TokenKind.DotDot => "DotDot"
+    TokenKind.Ellipsis => "Ellipsis"
+    TokenKind.Arrow => "Arrow"
+    TokenKind.Invalid => "Invalid"
+    TokenKind.EndOfFile => "EndOfFile"
+  }
+}
+
+effect fn writeSpan(span: Span) -> () ! WriterError ? &mut Writer {
+  run Format.display(&span.start)
+  run Writer.writeString("..")
+  return run Format.display(&span.end)
+}
+
+effect fn writeElement(tree: &SyntaxTree, element: Element) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString("  ")
+  return match move element {
+    Element.Node {id} => {
+      run Writer.writeString("node #")
+      run Format.display(&id.index)
+      run Writer.writeString("\n")
+    }
+    Element.Token {id} => {
+      run Writer.writeString("token #")
+      run Format.display(&id.index)
+      run Writer.writeString(" ")
+      run LexicalToken.write(Vector.get<Token>(&tree.tokens, id.index))
+    }
+    Element.MissingToken {expected, span} => {
+      run Writer.writeString("missing ")
+      run Writer.writeString(expectedTokenName(expected))
+      run Writer.writeString(" ")
+      run writeSpan(span)
+      run Writer.writeString("\n")
+    }
+  }
+}
+
+effect fn writeNode(tree: &SyntaxTree, index: usize) -> () ! WriterError ? &mut Writer {
+  let nodes = Vector.asSlice<Node>(&tree.nodes)
+  let node = &nodes[index]
+  run Writer.writeString("#")
+  run Format.display(&index)
+  run Writer.writeString(" ")
+  run Writer.writeString(nodeKindName(node.kind))
+  run Writer.writeString(" ")
+  run writeSpan(node.span)
+  run Writer.writeString("\n")
+  let elements = Vector.asSlice<Element>(&node.elements)
+  let mut elementIndex = usize.ZERO
+  while elementIndex < elements.length {
+    run writeElement(tree, elements[elementIndex])
+    elementIndex = usize.add(elementIndex, usize.ONE)
+  }
+  return ()
+}
+
+effect fn writeDiagnostic(diagnostic: Diagnostic, index: usize) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString("#")
+  run Format.display(&index)
+  run Writer.writeString(" ")
+  return match move diagnostic {
+    Diagnostic.MissingToken {expected, span} => {
+      run Writer.writeString("MissingToken ")
+      run Writer.writeString(expectedTokenName(expected))
+      run Writer.writeString(" ")
+      run writeSpan(span)
+      run Writer.writeString("\n")
+    }
+    Diagnostic.UnexpectedToken {actual, span} => {
+      run Writer.writeString("UnexpectedToken ")
+      run Writer.writeString(expectedTokenName(actual))
+      run Writer.writeString(" ")
+      run writeSpan(span)
+      run Writer.writeString("\n")
+    }
+    Diagnostic.NestingLimit {limit, span} => {
+      run Writer.writeString("NestingLimit ")
+      run Format.display(&limit)
+      run Writer.writeString(" ")
+      run writeSpan(span)
+      run Writer.writeString("\n")
+    }
+  }
+}
+
+/// Writes the flat node array, its element identities, and syntax diagnostics.
+///
+/// # When to use
+///
+/// Use to inspect parser output during self-hosted compiler development. The output makes array
+/// identities and child references visible.
+///
+/// # Details
+///
+/// The first line identifies the source-file root. The node section then writes every node in
+/// array order. Each indented line writes one direct element.
+///
+/// A token element includes its token identity, kind, and byte span. A missing-token element
+/// includes its expected kind and zero-width span. The final section writes parser diagnostics.
+///
+/// # Gotchas
+///
+/// This diagnostic format is for humans and is not a stable serialization format. A writer failure
+/// preserves any output prefix that the writer accepted.
+pub effect fn write(tree: &SyntaxTree) -> () ! WriterError ? &mut Writer {
+  run Writer.writeString("root #")
+  run Format.display(&tree.root.index)
+  run Writer.writeString("\n\nnodes ")
+  run Format.display(&Vector.length<Node>(&tree.nodes))
+  run Writer.writeString("\n")
+  let mut nodeIndex = usize.ZERO
+  while nodeIndex < Vector.length<Node>(&tree.nodes) {
+    run writeNode(tree, nodeIndex)
+    nodeIndex = usize.add(nodeIndex, usize.ONE)
+  }
+  run Writer.writeString("\ndiagnostics ")
+  run Format.display(&Vector.length<Diagnostic>(&tree.diagnostics))
+  run Writer.writeString("\n")
+  let mut diagnosticIndex = usize.ZERO
+  while diagnosticIndex < Vector.length<Diagnostic>(&tree.diagnostics) {
+    run writeDiagnostic(Vector.get<Diagnostic>(&tree.diagnostics, diagnosticIndex), diagnosticIndex)
+    diagnosticIndex = usize.add(diagnosticIndex, usize.ONE)
+  }
+  return ()
+}

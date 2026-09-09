@@ -45,6 +45,43 @@ effect fn recoverB(problem: B) -> i32 { return problem.code + 2 }
 effect fn recoverRow(problem: A | B) -> i32 { return 99 }
 `
 
+it.effect('uses nominal variant coverage when catching a mixed failure row', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`import silk.effect { Effect }
+pub union Problem { Detailed { pub code: i32 }, Empty }
+pub struct Other { pub value: usize }
+effect fn risky(flag: bool) -> i32 ! Problem | Other {
+  if flag { fail Problem.Detailed { code: 7 } }
+  fail Other { value: 1 }
+}
+effect fn recoverProblem(error: Problem) -> i32 { drop error return 20 }
+effect fn recoverOther(error: Other) -> i32 { return 22 }
+effect fn recoverAll(error: Problem | Other) -> i32 { drop error return 42 }
+effect fn selective(flag: bool) -> i32 ! Other {
+  return run Effect.catch<Problem>(risky(flag), recoverProblem)
+}
+pub fn main() -> i32 {
+  let all = run Effect.catchAll(risky(true), recoverAll)
+  let selected = run Effect.catchAll(selective(false), recoverOther)
+  return all + selected
+}`)
+    assert.deepEqual(codes(self), [])
+    const module = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(module), [])
+    const matches = module.functions.flatMap((fn) =>
+      MirVerification.operations(fn).filter(
+        (operation) =>
+          operation._tag === 'Match' &&
+          operation.members.some((member) => member._tag === 'NominalUnionVariant'),
+      ),
+    )
+    assert.isNotEmpty(matches)
+    // The Other payload widens the shared carrier containing Problem's i32 variant tag.
+    const artifact = yield* Analysis.codegen(self, { mode: 'release' })
+    assert.match(artifact.ir, /trunc i64 %[^\n]+ to i32/)
+  }),
+)
+
 it.effect('lowers fully handled intrinsic catches in ordinary functions and destructors', () =>
   Effect.gen(function* () {
     const self = yield* analyze(`${preamble}

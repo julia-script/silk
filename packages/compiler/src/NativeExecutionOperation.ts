@@ -1,4 +1,9 @@
+import * as NativePlace from './NativePlace.js'
+import * as NativeArgument from './NativeArgument.js'
+import * as CleanupPlan from './CleanupPlan.js'
+import * as NativePayload from './NativePayload.js'
 import * as NativeDiagnosticTransfer from './NativeDiagnosticTransfer.js'
+import * as NativeFrame from './NativeFrame.js'
 import * as NativeDiagnosticOutcome from './NativeDiagnosticOutcome.js'
 import * as NativeDiagnosticFailure from './NativeDiagnosticFailure.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
@@ -34,6 +39,8 @@ import * as NativeStorage from './NativeStorage.js'
 import * as NativeSuspension from './NativeSuspension.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
+import type * as NativeValue from './NativeValue.js'
+import * as ValueStorage from './ValueStorage.js'
 import * as SilkType from './Type.js'
 
 type Operation = Extract<
@@ -93,7 +100,7 @@ const applyCallable = Effect.fnUntraced(function* (
   tag: string,
 ) {
   const { type, target } = targetForCallable(context, local, typeArguments)
-  const values = NativeStorage.readLocal(context.storage, local)
+  const values = yield* NativeStorage.materialize(context.storage, local)
   let cursor = 0
   const captures = (type.environment?.fields ?? []).map((field) => {
     const lanes = Layout.callableFieldLanes(context.program.layout, field)
@@ -105,7 +112,7 @@ const applyCallable = Effect.fnUntraced(function* (
     yield* NativeCall.callValues(
       context.call,
       target,
-      Mir.applyOperands(captures, arguments_),
+      NativeArgument.fromValues(Mir.applyOperands(captures, arguments_)),
       tag,
     ),
   )
@@ -119,98 +126,19 @@ const storePackageValue = Effect.fnUntraced(function* (
   byteOffset: number,
   tag: string,
 ) {
-  const values = NativeStorage.readLocal(context.storage, local)
-  const localType = context.entry.fn.localTypes.at(local.ordinal)
-  const placements: Array<{
-    readonly value: Value.Input
-    readonly lane: Layout.CallingLane
-    readonly offset: number
-  }> = []
-  let cursor = 0
-  const representation = SilkType.isRepresented(type) ? type.representation.argument : undefined
-  const identity =
-    representation !== undefined && SilkType.isExactRepresentationArgument(representation)
-      ? representation.identity
-      : undefined
-  if (localType?._tag === 'CallableValue') {
-    for (const placement of localType.environment === undefined
-      ? []
-      : Layout.callableEnvironmentLanePlacements(
-          context.program.layout,
-          identity !== undefined &&
-            SilkType.isCallableIdentityArgument(identity) &&
-            identity.environment !== undefined
-            ? (Layout.callableEnvironmentByIdentity(context.program.layout, identity.environment) ??
-                localType.environment)
-            : localType.environment,
-        )) {
-      const value = values.at(cursor)
-      const laneOffset =
-        placement.root === undefined
-          ? 0
-          : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
-      if (value === undefined || laneOffset === undefined)
-        throw new RangeError('LLVM execution package environment lost a lane')
-      placements.push(
-        Object.freeze({
-          value,
-          lane: placement.lane,
-          offset: placement.byteOffset + laneOffset,
-        }),
-      )
-      cursor += 1
-    }
-  } else if (localType?._tag === 'EffectValue') {
-    for (const placement of Layout.effectEnvironmentLanePlacements(
-      context.program.layout,
-      identity !== undefined && SilkType.isEffectIdentityArgument(identity)
-        ? (Layout.effectEnvironmentByIdentity(
-            context.program.layout.effectEnvironments,
-            identity,
-          ) ?? localType.environment)
-        : localType.environment,
-    )) {
-      const value = values.at(cursor)
-      const laneOffset =
-        placement.root === undefined
-          ? 0
-          : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
-      if (value === undefined || laneOffset === undefined)
-        throw new RangeError('LLVM execution package environment lost a lane')
-      placements.push(
-        Object.freeze({
-          value,
-          lane: placement.lane,
-          offset: placement.byteOffset + laneOffset,
-        }),
-      )
-      cursor += 1
-    }
-  } else {
-    for (const lane of Layout.callingShape(context.program.layout, type)?.lanes ?? []) {
-      const value = values.at(cursor)
-      const offset = LayoutVerify.laneOffset(context.program.layout, type, lane.path)
-      if (value === undefined || offset === undefined)
-        throw new RangeError('LLVM execution package value lost a lane')
-      placements.push(Object.freeze({ value, lane, offset }))
-      cursor += 1
-    }
-  }
-  if (cursor !== values.length)
-    throw new RangeError('LLVM execution package value retained a stale lane')
-  for (const [ordinal, placement] of placements.entries()) {
-    yield* FunctionBody.store(
-      context.body,
-      placement.value,
-      yield* NativeLanePointer.lanePointer(
-        context.lanePointers,
-        context.body,
-        base,
-        byteOffset + placement.offset,
-        `${tag}_${ordinal}_ptr`,
-      ),
-    )
-  }
+  if (NativeStorage.readLocal(context.storage, local)._tag === 'Empty') return
+  const selected = yield* NativeLanePointer.lanePointer(
+    context.lanePointers,
+    context.body,
+    base,
+    byteOffset,
+    tag,
+  )
+  yield* NativeStorage.sendPlace(
+    context.storage,
+    NativePlace.stored(context.program.layout, type, selected),
+    local,
+  )
 })
 
 interface PackageReadContext {
@@ -220,84 +148,25 @@ interface PackageReadContext {
   readonly types: Context['types']
 }
 
-const packageValuePlacements = (
-  context: PackageReadContext,
-  type: SilkType.Type,
-): ReadonlyArray<{ readonly lane: Layout.CallingLane; readonly offset: number }> => {
-  const argument = SilkType.isRepresented(type) ? type.representation.argument : undefined
-  const identity =
-    argument !== undefined && SilkType.isExactRepresentationArgument(argument)
-      ? argument.identity
-      : undefined
-  let placements: ReadonlyArray<Layout.EnvironmentLanePlacement>
-  if (identity !== undefined && SilkType.isEffectIdentityArgument(identity)) {
-    const environment = Layout.effectEnvironmentByIdentity(
-      context.program.layout.effectEnvironments,
-      identity,
-    )
-    if (environment === undefined)
-      throw new RangeError('LLVM execution package lost its represented Effect environment')
-    placements = Layout.effectEnvironmentLanePlacements(context.program.layout, environment)
-  } else if (identity !== undefined && SilkType.isCallableIdentityArgument(identity)) {
-    if (identity.environment === undefined) return Object.freeze([])
-    const environment = Layout.callableEnvironmentByIdentity(
-      context.program.layout,
-      identity.environment,
-    )
-    if (environment === undefined)
-      throw new RangeError('LLVM execution package lost its represented callable environment')
-    placements = Layout.callableEnvironmentLanePlacements(context.program.layout, environment)
-  } else {
-    return Object.freeze(
-      (Layout.callingShape(context.program.layout, type)?.lanes ?? []).map((lane) => {
-        const offset = LayoutVerify.laneOffset(context.program.layout, type, lane.path)
-        if (offset === undefined) throw new RangeError('LLVM execution package lost a value lane')
-        return Object.freeze({ lane, offset })
-      }),
-    )
-  }
-  return Object.freeze(
-    placements.map((placement) => {
-      const laneOffset =
-        placement.root === undefined
-          ? 0
-          : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
-      if (laneOffset === undefined)
-        throw new RangeError('LLVM execution package lost an environment lane')
-      return Object.freeze({
-        lane: placement.lane,
-        offset: placement.byteOffset + laneOffset,
-      })
-    }),
-  )
-}
-
-const loadPackageValue = Effect.fnUntraced(function* (
+/** Keeps package cleanup lazy until the owning lifecycle selects this component. */
+const packagePayload = Effect.fnUntraced(function* (
   context: PackageReadContext,
   base: Value.Input,
   type: SilkType.Type,
   byteOffset: number,
   tag: string,
 ) {
-  const values: Array<Value.Input> = []
-  const placements = packageValuePlacements(context, type)
-  for (const [ordinal, placement] of placements.entries()) {
-    values.push(
-      yield* FunctionBody.load(
-        context.body,
-        NativeType.laneType(context.types, placement.lane),
-        yield* NativeLanePointer.lanePointer(
-          context.lanePointers,
-          context.body,
-          base,
-          byteOffset + placement.offset,
-          `${tag}_${ordinal}_ptr`,
-        ),
-        `${tag}_${ordinal}`,
-      ),
-    )
-  }
-  return Object.freeze(values)
+  const selected = yield* NativeLanePointer.lanePointer(
+    context.lanePointers,
+    context.body,
+    base,
+    byteOffset,
+    tag,
+  )
+  return NativePayload.place(
+    context.types,
+    NativePlace.stored(context.program.layout, type, selected),
+  )
 })
 
 const exactEffect = (context: Context, package_: ExecutionPackage.Plan) => {
@@ -467,7 +336,7 @@ const notifyReady = Effect.fnUntraced(function* (
     yield* NativeCall.callValues(
       context.call,
       target,
-      Mir.applyOperands(captures, [[endpoint]]),
+      NativeArgument.fromValues(Mir.applyOperands(captures, [[endpoint]])),
       tag,
     ),
   )
@@ -484,11 +353,11 @@ const releasePackage = Effect.fnUntraced(function* (
   if (cleanup === undefined || allocationOffset === undefined)
     throw new RangeError('LLVM execution cleanup lost package metadata')
   const callbackOffset = componentOffset(package_, 'EndpointCallback')
-  if (callbackOffset !== undefined)
+  if (callbackOffset !== undefined && CleanupPlan.hasEffect(cleanup.callback))
     yield* NativeAggregate.dropThroughPlan(
       context.cleanup,
       cleanup.callback,
-      yield* loadPackageValue(
+      yield* packagePayload(
         context,
         base,
         package_.specialization.callback,
@@ -498,11 +367,11 @@ const releasePackage = Effect.fnUntraced(function* (
       `${tag}_callback`,
     )
   const endpointOffset = componentOffset(package_, 'EndpointState')
-  if (endpointOffset !== undefined)
+  if (endpointOffset !== undefined && CleanupPlan.hasEffect(cleanup.endpoint))
     yield* NativeAggregate.dropThroughPlan(
       context.cleanup,
       cleanup.endpoint,
-      yield* loadPackageValue(
+      yield* packagePayload(
         context,
         base,
         package_.specialization.endpoint,
@@ -518,7 +387,7 @@ const releasePackage = Effect.fnUntraced(function* (
       type: SilkType.allocation,
       ticket: 'ActiveReclaimTicket' as const,
     }),
-    yield* loadPackageValue(
+    yield* packagePayload(
       context,
       base,
       SilkType.allocation,
@@ -545,14 +414,14 @@ const releaseAllocation = Effect.fnUntraced(function* (
       type: SilkType.allocation,
       ticket: 'ActiveReclaimTicket' as const,
     }),
-    yield* loadPackageValue(context, base, SilkType.allocation, allocationOffset, `${tag}_load`),
+    yield* packagePayload(context, base, SilkType.allocation, allocationOffset, `${tag}_load`),
     tag,
   )
 })
 
 interface StoredEndpoints {
-  readonly callback?: ReadonlyArray<Value.Input>
-  readonly endpoint?: ReadonlyArray<Value.Input>
+  readonly callback?: NativePayload.NativePayload
+  readonly endpoint?: NativePayload.NativePayload
 }
 
 const loadStoredEndpoints = Effect.fnUntraced(function* (
@@ -564,10 +433,12 @@ const loadStoredEndpoints = Effect.fnUntraced(function* (
   const callbackOffset = componentOffset(package_, 'EndpointCallback')
   const endpointOffset = componentOffset(package_, 'EndpointState')
   return Object.freeze({
-    ...(callbackOffset === undefined
+    ...(callbackOffset === undefined ||
+    package_.cleanup === undefined ||
+    !CleanupPlan.hasEffect(package_.cleanup.callback)
       ? {}
       : {
-          callback: yield* loadPackageValue(
+          callback: yield* packagePayload(
             context,
             base,
             package_.specialization.callback,
@@ -575,10 +446,12 @@ const loadStoredEndpoints = Effect.fnUntraced(function* (
             `${tag}_callback_load`,
           ),
         }),
-    ...(endpointOffset === undefined
+    ...(endpointOffset === undefined ||
+    package_.cleanup === undefined ||
+    !CleanupPlan.hasEffect(package_.cleanup.endpoint)
       ? {}
       : {
-          endpoint: yield* loadPackageValue(
+          endpoint: yield* packagePayload(
             context,
             base,
             package_.specialization.endpoint,
@@ -633,13 +506,13 @@ const dropStoredPackage = Effect.fnUntraced(function* (
       yield* loadStoredEndpoints(context, package_, base, tag),
       tag,
     )
-  if (options.body) {
+  if (options.body && CleanupPlan.hasEffect(cleanup.body)) {
     const offset = componentOffset(package_, 'BodyEnvironment')
     if (offset === undefined) throw new RangeError('LLVM execution drop lost body storage')
     yield* NativeAggregate.dropThroughPlan(
       context,
       cleanup.body,
-      yield* loadPackageValue(
+      yield* packagePayload(
         context,
         base,
         package_.specialization.body,
@@ -660,7 +533,7 @@ const dropStoredPackage = Effect.fnUntraced(function* (
         type: SilkType.allocation,
         ticket: 'ActiveReclaimTicket' as const,
       }),
-      yield* loadPackageValue(
+      yield* packagePayload(
         context,
         base,
         SilkType.allocation,
@@ -833,7 +706,7 @@ const dropFrames = Effect.fnUntraced(function* (
       const field = generated.layout.payload.find((field) => field.local.ordinal === ordinal)
       if (field === undefined || field.type._tag !== 'bool')
         throw new RangeError('LLVM cancellation lost a retained initialization flag')
-      const lanes = NativeType.packLanes(
+      const lanes = ValueStorage.transport(
         program.layout.target,
         NativeType.lanesFor(context.types, field.type),
         field.offset,
@@ -938,31 +811,13 @@ const dropFrames = Effect.fnUntraced(function* (
         }
       }
 
-      const values: Array<Value.Input> = []
-      const packed = NativeType.packLanes(
-        program.layout.target,
-        NativeType.lanesFor(context.types, field.type),
-        field.offset,
-      )
-      for (const [laneOrdinal, lane] of packed.entries.entries())
-        values.push(
-          yield* FunctionBody.load(
-            body,
-            NativeType.laneType(context.types, lane.lane),
-            yield* NativeLanePointer.lanePointer(
-              lanePointers,
-              body,
-              head,
-              lane.offset,
-              `${tag}_frame_${ordinal}_${laneOrdinal}_ptr`,
-            ),
-            `${tag}_frame_${ordinal}_${laneOrdinal}`,
-          ),
-        )
       yield* NativeAggregate.dropThroughPlan(
         { ...context, initializationValues },
         field.access.cleanup,
-        Object.freeze(values),
+        NativePayload.place(
+          context.types,
+          yield* NativeFrame.place(context.storage, head, field, `${tag}_frame_${ordinal}`),
+        ),
         `${tag}_frame_${ordinal}_slot${field.slot}`,
         undefined,
         field.initialization,
@@ -1437,6 +1292,12 @@ export const declareReleaseHelper = Effect.fnUntraced(function* (
     resultLaneCount: 0,
     suspendable: false,
     parameterTypes: Object.freeze(parameters),
+    argumentParameters: NativeArgument.parameters(program.layout, fn, (type) => {
+      const shape = Layout.callingShape(program.layout, Mir.semanticType(type))
+      if (shape === undefined)
+        throw new RangeError('Release helper lost its source parameter shape')
+      return shape.lanes
+    }),
     ...(diagnostics ? { diagnosticParameter: 1 } : {}),
     linear: Object.freeze([]),
   })
@@ -1507,10 +1368,12 @@ export const emitReleaseHelper = Effect.fnUntraced(function* (context: ReleaseHe
         fn: helper.fn,
         layout: program.layout,
         mutableRoots: new Set<number>(),
+        blockRoots: new Set<number>(),
         mutableStorage: new Map<number, ReadonlyArray<Value.Input>>(),
         addressRoots: new Set<number>(),
         addressStorage: new Map<number, Value.Input>(),
-        locals: new Map<number, ReadonlyArray<Value.Input>>(),
+        transientOutcomes: new Set<number>(),
+        locals: new Map<number, NativeValue.NativeValue>(),
         types,
         lanePointers,
         sequences: { materialize: 0, reload: 0 },
@@ -1646,7 +1509,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     case 'ExecutionFromAllocation': {
       context.runtimeFeatures.add('ExecutionPackage')
       if (operation.plan.readinessStorage) context.runtimeFeatures.add('ExternalWakeCell')
-      const allocation = NativeStorage.readLocal(storage, operation.allocation)
+      const allocation = yield* NativeStorage.materialize(storage, operation.allocation)
       const baseAddress = allocation.at(0)
       const bytes = allocation.at(1)
       const alignment = allocation.at(2)
@@ -1763,7 +1626,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           callbackOffset,
           `execution${operation.destination.ordinal}_callback`,
         )
-      storage.locals.set(operation.destination.ordinal, Object.freeze([base]))
+      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, Object.freeze([base]))
       return
     }
     case 'ExecutionPark': {
@@ -1912,7 +1775,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         [[base]],
         `park${operation.destination.ordinal}_register`,
       )
-      storage.locals.set(operation.guard.ordinal, guard)
+      yield* NativeStorage.writeLocal(storage, operation.guard.ordinal, guard)
       const phase = yield* FunctionBody.load(
         body,
         usizeType,
@@ -1965,10 +1828,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       yield* NativeAggregate.dropThroughPlan(
         context.cleanup,
         operation.guardCleanup,
-        NativeStorage.readLocal(storage, operation.guard),
+        NativePayload.local(storage, operation.guard),
         `park${operation.destination.ordinal}_guard`,
       )
-      storage.locals.set(operation.destination.ordinal, Object.freeze([]))
+      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, Object.freeze([]))
       return
     }
     case 'ExecutionDrive': {
@@ -1985,7 +1848,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )
       if (matchingPackages.length === 0)
         throw new RangeError('LLVM execution drive lost every result package specialization')
-      const base = NativeStorage.readLocal(storage, operation.execution).at(0)
+      const base = (yield* NativeStorage.materialize(storage, operation.execution)).at(0)
       if (base === undefined)
         throw new RangeError('LLVM execution drive lost its package reference')
       const emitDirectPackage = Effect.fnUntraced(function* (package_: ExecutionPackage.Plan) {
@@ -2100,10 +1963,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const started = yield* FunctionBody.callDirect(
           body,
           executable.target.handle,
-          yield* NativeCall.argumentsFor(
+          yield* NativeCall.lowerArguments(
             context.call.synchronous,
             executable.target,
-            executable.values,
+            NativeArgument.fromValues(executable.values),
             'Independent',
           ),
           `drive${operation.destination.ordinal}_direct_started`,
@@ -2148,11 +2011,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* FunctionBody.unreachable(body)
         yield* LlvmBlock.setInsertionPoint(body, succeeded)
         const resultValues = Object.freeze(outcome.slice(1))
-        storage.locals.set(operation.result.ordinal, resultValues)
+        yield* NativeStorage.writeLocal(storage, operation.result.ordinal, resultValues)
         yield* NativeAggregate.dropThroughPlan(
           context.cleanup,
           operation.suspensionCleanup,
-          NativeStorage.readLocal(storage, operation.onSuspend),
+          NativePayload.local(storage, operation.onSuspend),
           `drive${operation.destination.ordinal}_direct_unused_suspend`,
         )
         yield* FunctionBody.store(
@@ -2170,13 +2033,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           base,
           `drive${operation.destination.ordinal}_direct_complete`,
         )
-        storage.locals.set(
+        yield* NativeStorage.writeLocal(
+          storage,
           operation.destination.ordinal,
           yield* applyCallable(
             context,
             operation.onComplete,
             operation.completionTypeArguments,
-            [NativeStorage.readLocal(storage, operation.branch), resultValues],
+            [yield* NativeStorage.materialize(storage, operation.branch), resultValues],
             `drive${operation.destination.ordinal}_direct_on_complete`,
           ),
         )
@@ -2407,10 +2271,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               body,
               executable.target.handle,
               [
-                ...(yield* NativeCall.argumentsFor(
+                ...(yield* NativeCall.lowerArguments(
                   context.call.synchronous,
                   executable.target,
-                  executable.values,
+                  NativeArgument.fromValues(executable.values),
                   'Independent',
                 )),
                 transfer,
@@ -2422,10 +2286,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           : yield* FunctionBody.callDirect(
               body,
               executable.target.handle,
-              yield* NativeCall.argumentsFor(
+              yield* NativeCall.lowerArguments(
                 context.call.synchronous,
                 executable.target,
-                executable.values,
+                NativeArgument.fromValues(executable.values),
                 'Independent',
               ),
               `drive${operation.destination.ordinal}_started`,
@@ -2447,7 +2311,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             { builder, body, wordSize: program.layout.target.pointerSize, transfer },
             initialResult.diagnostic,
           )
-        const packedOutcome = NativeType.packLanes(
+        const packedOutcome = ValueStorage.transport(
           program.layout.target,
           outcomeLanes,
           context.suspension.transferResultOffset,
@@ -2716,11 +2580,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* FunctionBody.unreachable(body)
         yield* LlvmBlock.setInsertionPoint(body, succeeded)
         const resultValues = Object.freeze(outcome.slice(1))
-        storage.locals.set(operation.result.ordinal, resultValues)
+        yield* NativeStorage.writeLocal(storage, operation.result.ordinal, resultValues)
         yield* NativeAggregate.dropThroughPlan(
           context.cleanup,
           operation.suspensionCleanup,
-          NativeStorage.readLocal(storage, operation.onSuspend),
+          NativePayload.local(storage, operation.onSuspend),
           `drive${operation.destination.ordinal}_unused_suspend`,
         )
         yield* FunctionBody.store(
@@ -2734,13 +2598,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           base,
           `drive${operation.destination.ordinal}_complete`,
         )
-        storage.locals.set(
+        yield* NativeStorage.writeLocal(
+          storage,
           operation.destination.ordinal,
           yield* applyCallable(
             context,
             operation.onComplete,
             operation.completionTypeArguments,
-            [NativeStorage.readLocal(storage, operation.branch), resultValues],
+            [yield* NativeStorage.materialize(storage, operation.branch), resultValues],
             `drive${operation.destination.ordinal}_on_complete`,
           ),
         )
@@ -2794,14 +2659,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* NativeAggregate.dropThroughPlan(
           context.cleanup,
           operation.completionCleanup,
-          NativeStorage.readLocal(storage, operation.onComplete),
+          NativePayload.local(storage, operation.onComplete),
           `drive${operation.destination.ordinal}_unused_complete`,
         )
         const suspendedResult = yield* applyCallable(
           context,
           operation.onSuspend,
           operation.suspensionTypeArguments,
-          [NativeStorage.readLocal(storage, operation.branch), [base]],
+          [yield* NativeStorage.materialize(storage, operation.branch), [base]],
           `drive${operation.destination.ordinal}_on_suspend`,
         )
         const controlOffset = componentOffset(package_, 'WakeControl')
@@ -2955,7 +2820,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           yield* FunctionBody.branch(body, following)
           yield* LlvmBlock.setInsertionPoint(body, following)
         }
-        storage.locals.set(operation.destination.ordinal, suspendedResult)
+        yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, suspendedResult)
         yield* FunctionBody.branch(body, operationFollowing)
         yield* LlvmBlock.setInsertionPoint(body, operationFollowing)
       })
@@ -2976,7 +2841,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     }
     case 'ExecutionNotifyInitial': {
       context.runtimeFeatures.add('ReadinessNotification')
-      const reference = NativeStorage.readLocal(storage, operation.execution).at(0)
+      const reference = (yield* NativeStorage.materialize(storage, operation.execution)).at(0)
       if (reference === undefined)
         throw new RangeError('LLVM initial readiness lost its Execution reference')
       const baseAddress = yield* FunctionBody.load(
@@ -3055,7 +2920,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             )
           }),
       )
-      storage.locals.set(operation.destination.ordinal, Object.freeze([]))
+      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, Object.freeze([]))
       return
     }
     case 'ExecutionWake': {
@@ -3063,7 +2928,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const packages = program.layout.executionPackages.plans.filter(
         (candidate) => candidate.readinessStorage,
       )
-      const base = NativeStorage.readLocal(storage, operation.wake).at(0)
+      const base = (yield* NativeStorage.materialize(storage, operation.wake)).at(0)
       if (packages.length === 0 || base === undefined)
         throw new RangeError('LLVM Wake lost its exact package authority')
       const emitPackage = Effect.fnUntraced(function* (package_: ExecutionPackage.Plan) {
@@ -3268,7 +3133,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           emitPackage,
         )
       }
-      storage.locals.set(operation.destination.ordinal, Object.freeze([]))
+      yield* NativeStorage.writeLocal(storage, operation.destination.ordinal, Object.freeze([]))
       return
     }
   }

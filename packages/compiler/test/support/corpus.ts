@@ -105,6 +105,12 @@ ${transcendentalVectors
   return 42
 }`
 
+/** Process invocations that share one compiled corpus artifact and its expected outcome. */
+export interface NativeRun {
+  readonly arguments?: ReadonlyArray<string>
+  readonly closeStderr?: boolean
+}
+
 export interface CorpusProgram {
   readonly name: string
   readonly source: string
@@ -116,6 +122,7 @@ export interface CorpusProgram {
   readonly nativeDynamicLibraries?: ReadonlyArray<string>
   readonly nativeStdout?: string
   readonly nativeStderr?: string
+  readonly nativeRuns?: ReadonlyArray<NativeRun>
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
     | { readonly _tag: 'Trap' }
@@ -1807,19 +1814,26 @@ pub fn main() -> i32 { return run choose(First {}) }`,
   },
   // Alternatives with different capture arities exercise the composite's unified payload lanes:
   // every executor must place and read alternative captures through the registered calling shape.
+  // The aggregate alternative also crosses the private address ABI from composite payload lanes;
+  // changing the original Copy value after construction must not change its captured snapshot.
   {
     name: 'finite-effect-join-capture-arity',
     source: `struct First {}
 struct Second {}
-fn choose(input: First | Second, a: i32, b: i32, c: i32) -> Effect<'static; i32> {
+struct Payload { a: i32 b: i32 c: i32 }
+impl Copy for Payload {}
+fn choose(input: First | Second, payload: Payload) -> Effect<'static; i32> {
   return match move input {
-    First {} => effect { return a + b + c }
-    Second {} => effect { return c }
+    First {} => effect { return payload.a + payload.b + payload.c }
+    Second {} => effect { return 2 }
   }
 }
 pub fn main() -> i32 {
-  let wide = run choose(First {}, 11, 13, 16)
-  let narrow = run choose(Second {}, 11, 13, 2)
+  let mut payload = Payload { a: 11, b: 13, c: 16 }
+  let captured = choose(First {}, payload)
+  payload.a = 100
+  let wide = run captured
+  let narrow = run choose(Second {}, payload)
   return wide + narrow
 }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -7858,14 +7872,30 @@ int32_t silk_test_libm_order(double value) { return (int32_t)fmod(value, 43.0); 
   {
     name: 'native-termination-active-union-member',
     source: `pub struct NotFoundError {}
-pub struct OfflineError {}
+pub struct OfflineError { code: i32 }
 
 pub effect fn main() ! NotFoundError | OfflineError {
-  fail OfflineError {}
+  fail OfflineError { code: 42 }
 }`,
     nativeStderr:
       'unhandled error: memory/driver.OfflineError\n  at memory/driver.main (memory/driver:4:54)\n  at silk/effect.Effect.flatMap (silk/effect:294:18)\n',
-    expected: { _tag: 'Trap' },
+    // A failed Effect entry must exit with status 1 even when reporting cannot write to fd 2.
+    // Unused process arguments must not change either its status or its diagnostic trace.
+    nativeRuns: [
+      {},
+      { closeStderr: true },
+      { arguments: ['one', 'two', 'three'] },
+      { arguments: ['one', 'two'], closeStderr: true },
+    ],
+    expected: { _tag: 'Completes', result: 1 },
+  },
+  {
+    name: 'native-effect-entry-success',
+    source: `pub struct SomeError { code: i32 }
+pub effect fn main() -> () ! SomeError { return () }`,
+    nativeStderr: '',
+    nativeRuns: [{}, { arguments: ['one', 'two'] }],
+    expected: { _tag: 'Completes', result: 0 },
   },
   {
     name: 'native-termination-logical-path',

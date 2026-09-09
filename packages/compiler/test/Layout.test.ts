@@ -17,9 +17,273 @@ import * as LocalSharedLifecycle from '../src/LocalSharedLifecycle.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
+import * as ValueStorage from '../src/ValueStorage.js'
+import * as NativeType from '../src/NativeType.js'
+import * as NativeValue from '../src/NativeValue.js'
+import { unreachable } from './support/raise.js'
+import * as Lifetime from '../src/Lifetime.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+it.effect('plans outcome storage separately from the concrete captured environment', () =>
+  Effect.gen(function* () {
+    for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        'layout/outcome-storage',
+        ascii('effect fn value() -> i32 { return 42 } pub fn main() -> i32 { return run value() }'),
+        target.id,
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const module = Analysis.loweredMir(snapshot)
+      const outcome =
+        module.functions
+          .flatMap((fn) => fn.localTypes)
+          .find((type) => type._tag === 'EffectOutcome') ?? unreachable('expected outcome')
+      if (outcome._tag !== 'EffectOutcome') return unreachable('expected outcome')
+      const view =
+        ValueStorage.find(module.layout, 'Outcome', outcome.type) ??
+        unreachable('expected outcome storage')
+      assert.strictEqual(NativeType.addressLayout(module.layout, outcome), view)
+      assert.strictEqual(NativeValue.classify(module.layout, outcome), 'Place')
+      assert.isUndefined(Layout.entry(module.layout, outcome.type))
+      for (const environment of module.layout.effectEnvironments) {
+        if (environment._tag === 'EffectEnvironment')
+          assert.notStrictEqual(view.key, ValueStorage.captureKey(environment))
+      }
+      assert.deepEqual(
+        view.slots.map((slot) => [slot.lane.type, slot.offset, slot.size]),
+        [
+          ['i32', 0, 4],
+          ['i32', 4, 4],
+        ],
+      )
+      assert.deepEqual(
+        view.members.map((member) => [member.tag, member.lanes.map((lane) => lane.slot)]),
+        [[0, [1]]],
+      )
+      assert.deepEqual(ValueStorage.verify(module.layout), [])
+      const shape =
+        Layout.callingShape(module.layout, outcome.type) ?? unreachable('expected shape')
+      const overflow = ValueStorage.carrier(target, 'Outcome', shape, view.members, 7)
+      assert.strictEqual(overflow._tag, 'UnavailableValueStorage')
+      if (overflow._tag === 'UnavailableValueStorage')
+        assert.strictEqual(overflow.reason, 'Overflow')
+      const member = view.members.at(0) ?? unreachable('expected success member')
+      const lane = member.lanes.at(0) ?? unreachable('expected success lane')
+      for (const slot of [0, -1, 1.5, Number.MAX_SAFE_INTEGER]) {
+        const invalid = ValueStorage.carrier(target, 'Outcome', shape, [
+          { ...member, lanes: [{ ...lane, slot }] },
+        ])
+        assert.strictEqual(invalid._tag, 'UnavailableValueStorage')
+        if (invalid._tag === 'UnavailableValueStorage')
+          assert.strictEqual(invalid.reason, 'InvalidMapping')
+      }
+      const binding = ValueStorage.bind(view, target, 3)
+      assert.isFalse(binding.identicalOffsets)
+      assert.deepEqual(
+        binding.slots.map((slot) => [slot.storageOffset, slot.transportOffset]),
+        [
+          [0, 4],
+          [4, 8],
+        ],
+      )
+      assert.isTrue(ValueStorage.bind(view, target, 8).identicalOffsets)
+      assert.deepEqual(
+        ValueStorage.verify({ ...module.layout, valueStorage: [] }).map(
+          (violation) => violation.rule,
+        ),
+        ['InvalidValueStorage'],
+      )
+      assert.deepEqual(
+        ValueStorage.verify({
+          ...module.layout,
+          valueStorage: module.layout.valueStorage.map((candidate) =>
+            candidate === view ? { ...view, size: view.size + 4 } : candidate,
+          ),
+        }).map((violation) => violation.rule),
+        ['InvalidValueStorage'],
+      )
+    }
+  }),
+)
+
+it.effect(
+  'classifies concrete places and maps padded union alternatives within their stored extents',
+  () =>
+    Effect.gen(function* () {
+      for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
+        const snapshot = yield* AnalysisFixture.retainingMain(
+          'layout/places',
+          ascii(`
+struct Wide { marker: u8 wide: i64 items: [i32; 2] }
+struct Small { value: i32 }
+struct Empty {}
+fn choose(flag: bool) -> Wide | Small {
+  if flag { return Wide { marker: 1, wide: 2, items: [3, 4] } }
+  return Small { value: 42 }
+}
+pub fn main() -> i32 {
+  let empty = Empty {}
+  drop empty
+  let candidate = choose(false)
+  return match move candidate { Wide { marker, wide, items } => items[0] Small { value } => value }
+}`),
+          target.id,
+        )
+        assert.deepEqual(Analysis.diagnostics(snapshot), [])
+        const module = Analysis.loweredMir(snapshot)
+        assert.strictEqual(NativeValue.classify(module.layout, { _tag: 'i32' }), 'Direct')
+        assert.strictEqual(
+          NativeValue.classify(module.layout, {
+            _tag: 'String',
+            type: Type.string(Lifetime.staticLifetime),
+          }),
+          'Direct',
+        )
+        assert.strictEqual(
+          NativeValue.classify(module.layout, {
+            _tag: 'Nominal',
+            type: Type.nominal('layout/places', 'Empty'),
+          }),
+          'Empty',
+        )
+        assert.strictEqual(
+          NativeValue.classify(module.layout, {
+            _tag: 'Nominal',
+            type: Type.nominal('layout/places', 'Wide'),
+          }),
+          'Place',
+        )
+        assert.strictEqual(
+          NativeValue.classify(module.layout, {
+            _tag: 'FixedArray',
+            type: Type.fixedArray('i32', 2),
+          }),
+          'Place',
+        )
+        assert.strictEqual(
+          NativeValue.classify(module.layout, {
+            _tag: 'EnvironmentBorrow',
+            type: 'i32',
+            access: 'Shared',
+          }),
+          'BorrowedPlace',
+        )
+        const union =
+          module.functions.flatMap((fn) => fn.localTypes).find((type) => type._tag === 'Union') ??
+          unreachable('expected union')
+        assert.strictEqual(NativeValue.classify(module.layout, union), 'Place')
+        if (union._tag !== 'Union') return unreachable('expected union')
+        const stored =
+          Layout.entry(module.layout, union.type) ?? unreachable('expected stored union')
+        const shape =
+          Layout.callingShape(module.layout, union.type) ?? unreachable('expected carrier')
+        const locations = shape.lanes.map(
+          (lane) =>
+            ValueStorage.location(module.layout, union.type, lane) ??
+            unreachable('expected mapped lane'),
+        )
+        const check = (location: ValueStorage.Location): void => {
+          if (location._tag === 'Slot') {
+            const physical = ValueStorage.scalarLayout(target, location.lane)
+            assert.strictEqual(location.offset % physical.alignment, 0)
+            assert.isAtMost(location.offset + physical.size, stored.size)
+          } else {
+            assert.isAtMost(location.tagOffset + 4, stored.size)
+            for (const alternative of location.alternatives) check(alternative.location)
+          }
+        }
+        for (const location of locations) check(location)
+        assert.isTrue(
+          locations.some(
+            (location) => location._tag === 'Choice' && location.alternatives.length === 2,
+          ),
+        )
+      }
+    }),
+)
+
+it('plans transport from its actual start without treating tail padding as payload', () => {
+  const lanes: ReadonlyArray<Layout.CallingLane> = [
+    { _tag: 'CallingLane', path: [], type: 'u8' },
+    { _tag: 'CallingLane', path: [], type: 'f64' },
+    { _tag: 'CallingLane', path: [], type: { _tag: 'Address', element: 'u8', bits: 64 } },
+  ]
+  const packed = ValueStorage.transport(Target.aarch64AppleDarwin, lanes, 3)
+  assert.deepEqual(
+    packed.entries.map((slot) => slot.offset),
+    [3, 8, 16],
+  )
+  assert.strictEqual(packed.end, 24)
+  assert.notDeepEqual(
+    packed.entries.map((slot) => slot.offset - 3),
+    ValueStorage.transport(Target.aarch64AppleDarwin, lanes).entries.map((slot) => slot.offset),
+  )
+  assert.isUndefined(ValueStorage.transportWithin(Target.aarch64AppleDarwin, lanes, 3, 23))
+  assert.isUndefined(ValueStorage.transportWithin(Target.wasm32UnknownUnknown, lanes, -1, 24))
+  assert.isUndefined(
+    ValueStorage.transportWithin(
+      Target.aarch64AppleDarwin,
+      lanes,
+      Number.MAX_SAFE_INTEGER,
+      Number.MAX_SAFE_INTEGER,
+    ),
+  )
+})
+
+it('retains typed address and floating carriers and zero-byte outcome members', () => {
+  const string = Type.string(Lifetime.staticLifetime)
+  for (const target of [Target.wasm32UnknownUnknown, Target.aarch64AppleDarwin]) {
+    for (const success of ['u8', 'f64', string, Layout.neverEntry().type] as const) {
+      const effect = Type.effect(success, [], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      })
+      const entries = [
+        Layout.scalarEntry(target, 'u8'),
+        Layout.scalarEntry(target, 'f64'),
+        Layout.stringEntry(target, string),
+        Layout.neverEntry(),
+      ]
+      const base = {
+        ...Layout.make(target, ['i32']),
+        entries,
+        callingShapes: Layout.callingShapes(target, entries, [
+          ...entries.map((entry) => entry.type),
+          effect,
+        ]),
+      }
+      const views = ValueStorage.plan(base)
+      const view = views.find((view) => view.role === 'Outcome') ?? unreachable('expected outcome')
+      assert.strictEqual(view._tag, 'ValueStorage')
+      if (view._tag !== 'ValueStorage') continue
+      assert.deepEqual(ValueStorage.verify({ ...base, valueStorage: views }), [])
+      const member = view.members.at(0) ?? unreachable('expected success member')
+      assert.deepEqual(
+        member.lanes.map((mapping) => mapping.lane),
+        Layout.callingShape(base, success)?.lanes,
+      )
+      for (const slot of view.slots) {
+        assert.strictEqual(slot.offset % slot.alignment, 0)
+        assert.isAtMost(slot.offset + slot.size, view.size)
+      }
+      if (Type.isNever(success)) {
+        assert.deepEqual(member.lanes, [])
+        assert.strictEqual(view.size, 4)
+      }
+      if (Type.isString(success)) assert.strictEqual(typeof member.lanes.at(0)?.lane.type, 'object')
+      if (success === 'f64') assert.strictEqual(view.slots.at(1)?.lane.type, 'f64')
+      assert.strictEqual(
+        ValueStorage.encode(view),
+        ValueStorage.encode(
+          ValueStorage.plan(base).find((candidate) => candidate.key === view.key) ??
+            unreachable('expected repeat'),
+        ),
+      )
+    }
+  }
+})
 
 class CLayoutOracleError extends Data.TaggedError('CLayoutOracleError')<{
   readonly message: string
@@ -913,6 +1177,7 @@ it.effect('reports malformed aggregate facts and divergence from the catalog', (
       effectEnvironments: [],
       callableEnvironments: [],
       callingShapes: [],
+      valueStorage: [],
       literalVerdicts: [],
       localSharedAllocationProvenance: LocalSharedAllocationProvenance.empty(),
       executionPackages: ExecutionPackage.empty(),

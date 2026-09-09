@@ -12,6 +12,7 @@ import * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import * as ExecutableOrigin from './ExecutableOrigin.js'
 import * as Hir from './Hir.js'
+import * as FunctionIndex from './internal/FunctionIndex.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import type * as NameResolution from './NameResolution.js'
@@ -1131,7 +1132,7 @@ export const discover = (
   }
   const recordedCalls = new Map<string, CallInstance>()
   const providerCalls = new Map<string, CallInstance>()
-  const scannedContexts = new Set<string>()
+  const scheduledContexts = new Set<string>()
   interface Ancestor {
     readonly key: InstanceKey
     readonly structuralProvider?: Type.Type
@@ -1144,6 +1145,36 @@ export const discover = (
   }
   const declarationText = (key: InstanceKey): string =>
     `${key.declaration.module}\u0000${key.declaration.name}`
+  const variableArguments = new Map<string, boolean>()
+  const emptySubstitution: Type.Substitution = new Map()
+  /**
+   * The recursion guard compares type arguments, not the route taken through ordinary functions.
+   * A declaration with no binders or hidden executable parameters always has the same arguments,
+   * so remembering its presence cannot affect that guard. Retain unknown declarations and all
+   * specialization-bearing declarations conservatively, including nongeneric functions accepting
+   * callable/Effect values: those acquire hidden identity arguments at their call sites.
+   */
+  const needsAncestor = (key: InstanceKey): boolean => {
+    if (key.typeArguments.length > 0) return true
+    const declaration = declarationText(key)
+    const known = variableArguments.get(declaration)
+    if (known !== undefined) return known
+    const fn = functionByKey(results, key)
+    const needed =
+      fn === undefined ||
+      fn.declaration.typeParameters.length > 0 ||
+      effectParameterOrdinals(fn, emptySubstitution).length > 0 ||
+      callableParameterOrdinals(fn, emptySubstitution).length > 0
+    variableArguments.set(declaration, needed)
+    return needed
+  }
+  const withAncestor = (
+    ancestors: ReadonlyMap<string, Ancestor>,
+    ancestor: Ancestor,
+  ): ReadonlyMap<string, Ancestor> =>
+    ancestor.structuralProvider === undefined && !needsAncestor(ancestor.key)
+      ? ancestors
+      : new Map(ancestors).set(declarationText(ancestor.key), ancestor)
   const sameArguments = (left: InstanceKey, right: InstanceKey): boolean =>
     left.typeArguments.length === right.typeArguments.length &&
     left.typeArguments.every((argument, index) => {
@@ -1174,13 +1205,13 @@ export const discover = (
   const rootItem = (key: InstanceKey): WorkItem =>
     Object.freeze({
       key,
-      ancestors: new Map([[declarationText(key), Object.freeze({ key })]]),
+      ancestors: withAncestor(new Map(), Object.freeze({ key })),
       cleanupReachable: false,
     })
-  const pending: Array<WorkItem> = retention.map(rootItem)
+  const roots: Array<WorkItem> = retention.map(rootItem)
   // Retain exactly the export implementations admitted by the selected target's C contract.
   for (const record of foreignExports)
-    if (CAbi.available(target, record.signature)) pending.push(rootItem(record.key))
+    if (CAbi.available(target, record.signature)) roots.push(rootItem(record.key))
   const violations: Array<PolymorphicRecursion> = []
   const violationKeys = new Set<string>()
   const specializationFailures = new Map<string, NonConcreteSpecialization>()
@@ -1199,6 +1230,17 @@ export const discover = (
           `${declaration}\u0002${keyText(ancestor.key)}\u0002${ancestor.structuralProvider === undefined ? '' : Type.key(ancestor.structuralProvider)}`,
       )
       .join('\u0003')}`
+  const pending: Array<{ readonly item: WorkItem; readonly context: string }> = []
+  // Deduplicate when scheduling, not when draining: shared callees must not fill the queue with
+  // identical work. A cursor keeps FIFO instance order without shifting the remaining array.
+  const schedule = (item: WorkItem): boolean => {
+    const context = contextText(item)
+    if (scheduledContexts.has(context)) return false
+    scheduledContexts.add(context)
+    pending.push({ item, context })
+    return true
+  }
+  for (const item of roots) schedule(item)
   const cleanupPrepassTargets = (
     fn: Hir.HirFunction,
     fact: Elaboration.FunctionFact,
@@ -1222,12 +1264,10 @@ export const discover = (
     )
   }
   while (true) {
-    while (pending.length > 0) {
-      const item = pending.shift()
-      if (item === undefined) continue
-      const context = contextText(item)
-      if (scannedContexts.has(context)) continue
-      scannedContexts.add(context)
+    for (let cursor = 0; cursor < pending.length; cursor += 1) {
+      const queued = pending[cursor]
+      if (queued === undefined) continue
+      const { item, context } = queued
       const key = item.key
       const ownerContexts = recordedContexts.get(keyText(key)) ?? new Map<string, WorkItem>()
       ownerContexts.set(context, item)
@@ -1416,13 +1456,7 @@ export const discover = (
       }
       for (const call of calls.values()) {
         const target = call.declaration
-        const targetFunction = results
-          .get(target.module)
-          ?.hir.functions.find(
-            (candidate) =>
-              candidate.declaration.canonical._tag === 'Canonical' &&
-              candidate.declaration.canonical.id.name === target.name,
-          )
+        const targetFunction = FunctionIndex.hirByName(results.get(target.module)?.hir, target.name)
         if (targetFunction === undefined) continue
         const targetArguments = call.typeArguments.map((argument) =>
           Type.substituteGenericArgument(argument, substitution),
@@ -1469,14 +1503,14 @@ export const discover = (
           }
           continue
         }
-        pending.push(
+        schedule(
           Object.freeze({
             key: targetKey,
             ...(call.staticArgumentOrigins === undefined
               ? {}
               : { staticArgumentOrigins: call.staticArgumentOrigins }),
-            ancestors: new Map(item.ancestors).set(
-              declarationText(targetKey),
+            ancestors: withAncestor(
+              item.ancestors,
               Object.freeze({
                 key: targetKey,
                 ...(call.structuralProvider === undefined
@@ -1489,6 +1523,7 @@ export const discover = (
         )
       }
     }
+    pending.length = 0
 
     const currentInstances = Object.freeze(
       [...prepared.values()].map((candidate) => candidate.instance),
@@ -1519,9 +1554,8 @@ export const discover = (
     let scheduledProvided = false
     for (const provided of currentGraph.providedTargets) {
       for (const ownerContext of recordedContexts.get(keyText(provided.owner))?.values() ?? []) {
-        const ancestors = new Map(ownerContext.ancestors)
         const declaration = declarationText(provided.target)
-        const ancestor = ancestors.get(declaration)
+        const ancestor = ownerContext.ancestors.get(declaration)
         if (ancestor !== undefined && !sameArguments(ancestor.key, provided.target)) {
           const violationKey = `${keyText(provided.owner)}\u0000${keyText(provided.target)}`
           if (!violationKeys.has(violationKey)) {
@@ -1536,15 +1570,12 @@ export const discover = (
           }
           continue
         }
-        ancestors.set(declaration, Object.freeze({ key: provided.target }))
         const item = Object.freeze({
           key: provided.target,
-          ancestors,
+          ancestors: withAncestor(ownerContext.ancestors, Object.freeze({ key: provided.target })),
           cleanupReachable: ownerContext.cleanupReachable,
         })
-        if (scannedContexts.has(contextText(item))) continue
-        pending.push(item)
-        scheduledProvided = true
+        if (schedule(item)) scheduledProvided = true
       }
     }
     if (!scheduledProvided) {

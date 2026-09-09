@@ -19,6 +19,7 @@ import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeDiagnosticFailure from './NativeDiagnosticFailure.js'
 import * as NativeSymbol from './NativeSymbol.js'
 import * as SilkType from './Type.js'
+import * as NativeArgument from './NativeArgument.js'
 
 export interface DeclarationContext {
   readonly support?: boolean
@@ -77,12 +78,14 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
     } else {
       resultType = yield* LlvmType.structure(context.builder, resultLanes.map(context.laneType))
     }
-    const sourceParameters =
-      fn.regions.length === 0
-        ? []
-        : fn.localTypes
-            .slice(0, fn.parameterCount)
-            .flatMap((type) => context.lanesFor(type).map(context.laneType))
+    const argumentParameters = NativeArgument.parameters(
+      context.program.layout,
+      fn,
+      context.lanesFor,
+    )
+    const sourceParameters = argumentParameters.flatMap((parameter) =>
+      parameter.indirect ? [context.pointer] : parameter.lanes.map(context.laneType),
+    )
     const diagnosticParameter =
       diagnostics && fn.machine === undefined ? sourceParameters.length : undefined
     const parameters =
@@ -151,6 +154,7 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
         suspendable,
         ...(driver === undefined ? {} : { driver }),
         parameterTypes,
+        argumentParameters,
         ...(diagnosticParameter === undefined ? {} : { diagnosticParameter }),
         linear: linearize(fn),
       }),

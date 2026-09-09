@@ -1,0 +1,81 @@
+//! Recoverable parsing from lexer tokens into one flat abstract syntax tree.
+//!
+//! # When to use
+//!
+//! Use [`parse`] after lexing one complete source file. The result supports later compiler passes
+//! and tools that must inspect valid regions after a syntax problem.
+//!
+//! # Details
+//!
+//! The parser retains the complete token array. It stores significant tokens in node elements by
+//! token index. Whitespace and comments stay in the token array for source-oriented tools.
+//!
+//! The parser appends each child node before its parent node. Each node identity is its index in
+//! the final node array. The source-file root is the last node.
+//!
+//! Syntax problems do not fail the parse effect. The parser records diagnostics and inserts error
+//! nodes or missing-token elements. The allocator can still fail while the parser grows an array.
+//!
+
+import lexer.Token {Token, TokenKind}
+import parser.Element {Element}
+import parser.Declaration as Declarations
+import parser.ParseState {ElementsResult, NodeResult}
+import parser.ParseState as Parsing
+import parser.SyntaxTree {SyntaxTree}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.vector {Vector}
+
+/// Parses one complete token array into a recoverable flat abstract syntax tree.
+///
+/// # When to use
+///
+/// Use after the lexer has produced the tokens for one source file. Use the returned diagnostics
+/// to decide whether compilation can continue.
+///
+/// # Details
+///
+/// The result owns the source bytes and input tokens. It also owns a flat node array, one source-file root, and all
+/// syntax diagnostics. Child node identities refer to earlier entries in the node array.
+///
+/// The parser skips trivia when it applies grammar rules. It does not remove trivia from the token
+/// array. Elements for significant source tokens refer to their original token indices.
+///
+/// A missing token adds a zero-width element and a diagnostic. An unexpected top-level region adds
+/// an error node. Parsing continues through the remaining declarations and valid child regions.
+///
+/// # Gotchas
+///
+/// Syntax problems are values in the result, not effect failures. Allocation failure is the only
+/// declared effect failure.
+///
+/// The token spans must address `source`, and tokens must occur in source order. The parser does
+/// not re-lex the input or accept token arrays assembled from different files.
+pub effect fn parse(source: Bytes, tokens: Vector<Token>) -> SyntaxTree
+! OutOfMemoryError
+? &mut Allocator {
+  let mut state = Parsing.make(move source, move tokens)
+  let mut elements = Vector.make<Element>()
+  while Parsing.currentKind(&state) != TokenKind.EndOfFile {
+    let before = state.index
+    let result = run Declarations.parse(move state)
+    let NodeResult {state: afterDeclaration, node} = move result
+    state = move afterDeclaration
+    run Vector.append<Element>(&mut elements, Element.Node {id: node})
+    if state.index == before {
+      let advanced = run Parsing.unexpected(
+        ElementsResult {state: move state, elements: move elements},
+      )
+      let ElementsResult {state: nextState, elements: nextElements} = move advanced
+      state = move nextState
+      elements = move nextElements
+    }
+  }
+  let endOfFile = run Parsing.expect(
+    ElementsResult {state: move state, elements: move elements},
+    TokenKind.EndOfFile,
+  )
+  let sourceFile = run Parsing.finishSourceFile(move endOfFile)
+  return Parsing.intoSyntaxTree(move sourceFile)
+}

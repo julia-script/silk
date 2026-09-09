@@ -1,4 +1,4 @@
-import type * as DeclarationFacts from './DeclarationFacts.js'
+import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as TypeInference from './internal/TypeInference.js'
 import type * as SourceSpan from './SourceSpan.js'
@@ -119,6 +119,19 @@ interface SymbolicUse {
   readonly requiredBound: Type.RepresentationBound
 }
 
+// Cold-build profiling attributed 3.9s of sampled self-time to this actor, chiefly
+// whole-program declaration flattening. Use the owning module's member lookup;
+// nested planning and provenance must not enumerate unrelated aggregate fields.
+const declarationOf = (
+  declarations: DeclarationIndex.Index,
+  nominal: DeclarationFacts.CanonicalId | Type.Nominal,
+): DeclarationFacts.StructFact | DeclarationFacts.UnionFact | undefined => {
+  const declaration = DeclarationFacts.byCanonical(declarations, canonicalOf(nominal))
+  return declaration?._tag === 'StructDeclaration' || declaration?._tag === 'UnionDeclaration'
+    ? declaration
+    : undefined
+}
+
 const plansOfInternal = (
   declarations: DeclarationIndex.Index,
   nominal: DeclarationFacts.CanonicalId | Type.Nominal,
@@ -127,14 +140,7 @@ const plansOfInternal = (
   const canonical = canonicalOf(nominal)
   const canonicalKey = `${canonical.module}.${canonical.name}`
   if (seen.has(canonicalKey)) return Object.freeze([])
-  const declaration = declarations.modules
-    .flatMap((module) => [...module.structs, ...module.unions])
-    .find(
-      (candidate) =>
-        candidate.canonical._tag === 'Canonical' &&
-        candidate.canonical.id.module === canonical.module &&
-        candidate.canonical.id.name === canonical.name,
-    )
+  const declaration = declarationOf(declarations, canonical)
   if (declaration === undefined) return Object.freeze([])
   const next = new Set(seen).add(canonicalKey)
   const symbolicUses = (type: Type.Type): ReadonlyArray<SymbolicUse> => {
@@ -152,14 +158,7 @@ const plansOfInternal = (
     if (Type.isFixedArray(type) || Type.isSlice(type)) return symbolicUses(type.element)
     if (Type.isUnion(type)) return Object.freeze(type.members.flatMap(symbolicUses))
     if (!Type.isNominal(type) || Type.isIntrinsicNominal(type)) return Object.freeze([])
-    const nested = declarations.modules
-      .flatMap((module) => [...module.structs, ...module.unions])
-      .find(
-        (candidate) =>
-          candidate.canonical._tag === 'Canonical' &&
-          candidate.canonical.id.module === type.module &&
-          candidate.canonical.id.name === type.name,
-      )
+    const nested = declarationOf(declarations, type)
     if (nested === undefined) return Object.freeze([])
     const substitution = TypeInference.substitution(
       nested.typeParameters.map((parameter) => parameter.type),
@@ -211,14 +210,7 @@ export const plansOf = (
 ): ReadonlyArray<Plan> => plansOfInternal(declarations, nominal, new Set())
 
 const provenanceOf = (declarations: DeclarationIndex.Index, plan: Plan): Provenance | undefined => {
-  const declaration = declarations.modules
-    .flatMap((module) => [...module.structs, ...module.unions])
-    .find(
-      (candidate) =>
-        candidate.canonical._tag === 'Canonical' &&
-        candidate.canonical.id.module === plan.id.nominal.module &&
-        candidate.canonical.id.name === plan.id.nominal.name,
-    )
+  const declaration = declarationOf(declarations, plan.id.nominal)
   const field =
     declaration?._tag === 'StructDeclaration'
       ? declaration.fields.at(plan.id.ordinal)
@@ -294,14 +286,7 @@ export const resolveFields = (
 ): Index => {
   const resolutions = new Map<string, Resolution>()
   for (const instance of instances) {
-    const declaration = declarations.modules
-      .flatMap((module) => [...module.structs, ...module.unions])
-      .find(
-        (candidate) =>
-          candidate.canonical._tag === 'Canonical' &&
-          candidate.canonical.id.module === instance.module &&
-          candidate.canonical.id.name === instance.name,
-      )
+    const declaration = declarationOf(declarations, instance)
     if (declaration === undefined) continue
     for (const plan of plansOf(declarations, instance)) {
       const provenance = provenanceOf(declarations, plan)

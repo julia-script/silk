@@ -16,6 +16,7 @@ import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
+import * as NativePlace from './NativePlace.js'
 import * as SilkType from './Type.js'
 
 type Operation = Extract<
@@ -53,7 +54,7 @@ const candidateCondition = Effect.fnUntraced(function* (
     const equal = yield* FunctionBody.integerCompare(
       context.body,
       'eq',
-      NativeStorage.readScalar(context.storage, index.local),
+      yield* NativeStorage.readScalar(context.storage, index.local),
       expected,
       `${tag}_${ordinal}_index`,
     )
@@ -63,6 +64,98 @@ const candidateCondition = Effect.fnUntraced(function* (
         : yield* FunctionBody.binary(context.body, 'and', condition, equal, `${tag}_${ordinal}_all`)
   }
   return condition
+})
+
+/** Ordinary owned indexing is a checked byte projection, independent of the array's lane width. */
+const ownedAddress = Effect.fnUntraced(function* (
+  context: Context,
+  root: Mir.LocalId,
+  selectors: ReadonlyArray<Mir.PlaceSelector>,
+  tag: string,
+) {
+  const value = NativeStorage.readLocal(context.storage, root)
+  if (value._tag !== 'NativePlace') throw new RangeError('Owned address lost its canonical storage')
+  let type = Mir.semanticType(value.type)
+  let base = yield* NativePlace.base(value, context.storage, `${tag}_root`)
+  let runtime = 0
+  for (const selector of selectors) {
+    const entry = Layout.entry(context.program.layout, type)
+    if (selector._tag === 'FieldSelector' && entry?.representation._tag === 'Aggregate') {
+      const field = entry.representation.fields.find((field) =>
+        DeclarationFacts.sameFieldId(field.id, selector.field),
+      )
+      if (field === undefined) throw new RangeError('Owned address lost a field')
+      base = yield* NativeLanePointer.lanePointer(
+        context.lanePointers,
+        context.body,
+        base,
+        field.offset,
+        `${tag}_field`,
+      )
+      type = field.type
+      continue
+    }
+    if (selector._tag !== 'ElementSelector' || entry?.representation._tag !== 'Repeated')
+      throw new RangeError('Owned address requires an ordinary field or element')
+    let offset: Value.Input | number
+    if (selector.index._tag === 'Proven')
+      offset = selector.index.value * entry.representation.stride
+    else {
+      const index = yield* NativeStorage.readScalar(context.storage, selector.index.local)
+      const inBounds = yield* FunctionBody.integerCompare(
+        context.body,
+        'ult',
+        index,
+        yield* Constant.integerUnsigned(
+          context.builder,
+          context.usizeType ?? context.i32,
+          BigInt(entry.representation.length),
+        ),
+        `index${context.state.checkOrdinal}_${runtime}_in_bounds`,
+      )
+      yield* NativeDebug.locate(
+        context.debug,
+        selector.provenance.span,
+        yield* Value.instruction(context.body, inBounds),
+      )
+      const continuation = yield* LlvmBlock.make(
+        context.body,
+        `index${context.state.checkOrdinal}_${runtime}_ok`,
+      )
+      yield* FunctionBody.conditionalBranch(
+        context.body,
+        inBounds,
+        continuation,
+        yield* NativeTermination.trapBlock(
+          context.termination,
+          'index out of bounds',
+          selector.provenance.span,
+        ),
+      )
+      yield* LlvmBlock.setInsertionPoint(context.body, continuation)
+      offset = yield* FunctionBody.binary(
+        context.body,
+        'mul',
+        index,
+        yield* Constant.integerUnsigned(
+          context.builder,
+          context.usizeType ?? context.i32,
+          BigInt(entry.representation.stride),
+        ),
+        `${tag}_stride${runtime}`,
+      )
+      runtime += 1
+    }
+    base = yield* NativeLanePointer.lanePointer(
+      context.lanePointers,
+      context.body,
+      base,
+      offset,
+      `${tag}_element`,
+    )
+    type = entry.representation.element
+  }
+  return base
 })
 
 export const emit = Effect.fnUntraced(function* (context: Context, operation: Operation) {
@@ -94,7 +187,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         operation.initialized ? 1n : 0n,
       )
       const values = Object.freeze([value])
-      nativeStorage.locals.set(operation.flag.ordinal, values)
+      yield* NativeStorage.writeLocal(nativeStorage, operation.flag.ordinal, values)
       yield* NativeStorage.storeMutable(nativeStorage, operation.flag, values)
       break
     }
@@ -108,21 +201,23 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         for (const lane of NativeType.lanesFor(types, destinationType)) {
           placeholders.push(yield* Constant.nullValue(builder, NativeType.laneType(types, lane)))
         }
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(placeholders))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze(placeholders),
+        )
         break
       }
-      nativeStorage.locals.set(
-        operation.destination.ordinal,
-        NativeStorage.readLocal(nativeStorage, operation.source),
-      )
+      yield* NativeStorage.copyLocal(nativeStorage, operation.destination, operation.source)
       break
     }
     case 'BeginLoan': {
       const descriptor = Mir.borrowsDescriptor(operation)
       if (!descriptor && operation.sourceType._tag === 'Slice') {
-        nativeStorage.locals.set(
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
           operation.destination.ordinal,
-          NativeStorage.readLocal(nativeStorage, operation.root),
+          yield* NativeStorage.materialize(nativeStorage, operation.root),
         )
         break
       }
@@ -132,7 +227,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         throw new RangeError('LLVM borrow formation lost its root type')
       if (!descriptor && SilkType.isSlice(rootSemantic)) {
         const [selector, ...suffixSelectors] = operation.selectors
-        const [base, length] = NativeStorage.readLocal(nativeStorage, operation.root)
+        const [base, length] = yield* NativeStorage.materialize(nativeStorage, operation.root)
         if (
           selector?._tag !== 'SliceElementSelector' ||
           base === undefined ||
@@ -146,7 +241,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           'index out of bounds',
           selector.provenance.span,
         )
-        const index = NativeStorage.readScalar(nativeStorage, selector.index)
+        const index = yield* NativeStorage.readScalar(nativeStorage, selector.index)
         const inBounds = yield* FunctionBody.integerCompare(
           body,
           'ult',
@@ -217,7 +312,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           offset,
           `borrow${operation.destination.ordinal}_projected`,
         )
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([projected]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([projected]),
+        )
         checkOrdinal += 1
         break
       }
@@ -225,7 +324,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         !descriptor && SilkType.isReference(rootSemantic) ? rootSemantic.target : rootSemantic
       let rootBase: Value.Input | undefined
       if (!descriptor && SilkType.isReference(rootSemantic)) {
-        const address = NativeStorage.readLocal(nativeStorage, operation.root).at(0)
+        const address = (yield* NativeStorage.materialize(nativeStorage, operation.root)).at(0)
         if (address === undefined)
           throw new RangeError('LLVM rootBase borrow lost its reference address')
         rootBase = yield* FunctionBody.cast(
@@ -237,7 +336,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
       } else {
         yield* NativeStorage.materializeAddressRoot(nativeStorage, operation.root)
-        rootBase = nativeStorage.addressStorage.get(operation.root.ordinal)
+        rootBase = yield* NativeStorage.addressOf(nativeStorage, operation.root)
       }
       if (rootBase === undefined) throw new RangeError('LLVM borrow formation lost its root')
       let projected: Value.Input = rootBase
@@ -289,7 +388,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             `${tag}_length`,
           )
           projected = base
-          index = NativeStorage.readScalar(nativeStorage, selector.index)
+          index = yield* NativeStorage.readScalar(nativeStorage, selector.index)
           stride = descriptorLayout.stride
           selected = descriptorLayout.element
         } else {
@@ -311,7 +410,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             )
             continue
           }
-          index = NativeStorage.readScalar(nativeStorage, selector.index.local)
+          index = yield* NativeStorage.readScalar(nativeStorage, selector.index.local)
           length = yield* Constant.integerUnsigned(
             builder,
             usizeType ?? i32,
@@ -355,13 +454,18 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         checkOrdinal += 1
       }
       if (operation.type._tag === 'Reference') {
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([projected]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([projected]),
+        )
         break
       }
       if (operation.sourceType._tag !== 'FixedArray') {
         throw new RangeError('LLVM slice formation requires an array root')
       }
-      nativeStorage.locals.set(
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
         operation.destination.ordinal,
         Object.freeze([
           projected,
@@ -377,46 +481,48 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     case 'EndLoan':
       break
     case 'SliceLength': {
-      const length = NativeStorage.readLocal(nativeStorage, operation.slice).at(1)
+      const length = (yield* NativeStorage.materialize(nativeStorage, operation.slice)).at(1)
       if (length === undefined) throw new RangeError('LLVM slice lost its length lane')
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([length]))
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
+        operation.destination.ordinal,
+        Object.freeze([length]),
+      )
       break
     }
     case 'ConvertUnion': {
-      const source = NativeStorage.readLocal(nativeStorage, operation.source)
+      if (operation.conversion === 'Inject') {
+        const layout = Layout.entry(program.layout, operation.targetType.type)
+        const mapping = operation.mappings.at(0)
+        const destination = NativeStorage.readLocal(nativeStorage, operation.destination)
+        if (
+          layout?.representation._tag !== 'Union' ||
+          mapping === undefined ||
+          destination._tag !== 'NativePlace'
+        )
+          throw new RangeError('Union injection lost its planned member place')
+        yield* NativeStorage.writeLane(
+          nativeStorage,
+          operation.destination,
+          0,
+          yield* Constant.integerSigned(builder, i32, BigInt(mapping.targetOrdinal)),
+        )
+        const member = yield* NativePlace.project(
+          destination,
+          nativeStorage,
+          operation.sourceType,
+          layout.representation.payloadOffset,
+          `union${operation.destination.ordinal}_member`,
+          operation.sourceType._tag === 'EffectComposite' ? 'StoredComposite' : 'Value',
+        )
+        yield* NativeStorage.sendPlace(nativeStorage, member, operation.source)
+        break
+      }
+      const source = yield* NativeStorage.materialize(nativeStorage, operation.source)
       const targetWidth = operation.targetShape.laneCount
       const zero = yield* Constant.integerSigned(builder, i32, 0n)
       const sourceLanes = operation.sourceShape.lanes
       const targetLanes = operation.targetShape.lanes
-      if (operation.conversion === 'Inject') {
-        const mapping = operation.mappings.at(0)
-        if (mapping === undefined) {
-          throw new RangeError('LLVM union injection has no member map')
-        }
-        const tag = yield* Constant.integerSigned(builder, i32, BigInt(mapping.targetOrdinal))
-        const payload: Array<Value.Input> = []
-        for (let ordinal = 0; ordinal < Math.max(0, targetWidth - 1); ordinal += 1) {
-          const targetLane = targetLanes.at(ordinal + 1)
-          if (targetLane === undefined) {
-            throw new RangeError('LLVM union injection lost a target payload lane')
-          }
-          const input = source.at(ordinal)
-          const sourceLane = sourceLanes.at(ordinal)
-          payload.push(
-            input === undefined || sourceLane === undefined
-              ? yield* Constant.nullValue(builder, NativeType.laneType(types, targetLane))
-              : yield* NativeArith.coerceLane(
-                  arith.lane,
-                  input,
-                  sourceLane,
-                  targetLane,
-                  `union${operation.destination.ordinal}_${ordinal}_inject`,
-                ),
-          )
-        }
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([tag, ...payload]))
-        break
-      }
       const sourceTag = source.at(0)
       if (sourceTag === undefined) {
         throw new RangeError('LLVM union widening has no source tag')
@@ -468,27 +574,41 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               ),
         )
       }
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([tag, ...payload]))
-      break
-    }
-    case 'Construct':
-      nativeStorage.locals.set(
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
         operation.destination.ordinal,
-        Object.freeze(
-          operation.fields.flatMap((field) => [
-            ...NativeStorage.readLocal(nativeStorage, field.value),
-          ]),
-        ),
+        Object.freeze([tag, ...payload]),
       )
       break
+    }
+    case 'Construct': {
+      const planned = Layout.entry(program.layout, Mir.semanticType(operation.type))
+      if (planned?.representation._tag !== 'Aggregate')
+        throw new RangeError('Construction lost its aggregate layout')
+      for (const input of operation.fields) {
+        const field = planned.representation.fields.find((field) =>
+          DeclarationFacts.sameFieldId(field.id, input.field),
+        )
+        if (field === undefined) throw new RangeError('Construction lost its field layout')
+        yield* NativeStorage.constructField(
+          nativeStorage,
+          operation.destination,
+          input.value,
+          field.offset,
+          input.stored,
+        )
+      }
+      break
+    }
     case 'ConstructUnionVariant': {
       const targetLanes = NativeType.lanesFor(types, operation.type)
       const tagLane = targetLanes.at(0)
       if (tagLane === undefined) throw new RangeError('LLVM nominal union lost its tag lane')
       const tag = yield* Constant.integerSigned(builder, i32, BigInt(operation.variantOrdinal))
-      const sourceValues = operation.fields.flatMap((field) => [
-        ...NativeStorage.readLocal(nativeStorage, field.value),
-      ])
+      const sourceValues = (yield* NativeStorage.materializeArguments(
+        nativeStorage,
+        operation.fields.map((field) => field.value),
+      )).flat()
       const sourceLanes = operation.fields.flatMap((field) => {
         const fieldType = entry.fn.localTypes.at(field.value.ordinal)
         return fieldType === undefined ? [] : [...NativeType.lanesFor(types, fieldType)]
@@ -511,37 +631,44 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               ),
         )
       }
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([tag, ...payload]))
-      break
-    }
-    case 'ConstructArray':
-      nativeStorage.locals.set(
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
         operation.destination.ordinal,
-        Object.freeze(
-          operation.elements.flatMap((element) => [
-            ...NativeStorage.readLocal(nativeStorage, element),
-          ]),
-        ),
+        Object.freeze([tag, ...payload]),
       )
       break
+    }
+    case 'ConstructArray': {
+      const planned = Layout.entry(program.layout, Mir.semanticType(operation.type))
+      if (planned?.representation._tag !== 'Repeated')
+        throw new RangeError('Construction lost its array layout')
+      for (const [ordinal, value] of operation.elements.entries())
+        yield* NativeStorage.constructField(
+          nativeStorage,
+          operation.destination,
+          value,
+          ordinal * planned.representation.stride,
+        )
+      break
+    }
     case 'Project': {
       const sourceType = entry.fn.localTypes.at(operation.source.ordinal)
       if (sourceType === undefined) {
         throw new RangeError('Backend projection lost its source type')
       }
-      const sourceLanes = NativeType.valueLanesFor(types, sourceType)
-      const sourceValues = NativeStorage.readLocal(nativeStorage, operation.source)
-      const projected = sourceLanes.flatMap((lane, index) => {
-        const first = lane.path.at(0)
-        const selected = sourceValues.at(index)
-        return first !== undefined &&
-          first._tag === 'FieldId' &&
-          selected !== undefined &&
-          DeclarationFacts.sameFieldId(first, operation.field)
-          ? [selected]
-          : []
-      })
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(projected))
+      const planned = Layout.entry(program.layout, Mir.semanticType(sourceType))
+      if (planned?.representation._tag !== 'Aggregate')
+        throw new RangeError('Projection lost its aggregate layout')
+      const field = planned.representation.fields.find((field) =>
+        DeclarationFacts.sameFieldId(field.id, operation.field),
+      )
+      if (field === undefined) throw new RangeError('Projection lost its field layout')
+      yield* NativeStorage.projectLocal(
+        nativeStorage,
+        operation.destination,
+        operation.source,
+        field.offset,
+      )
       break
     }
     case 'ReadPlace': {
@@ -553,6 +680,31 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       if (
         !SilkType.isReference(sourceSemantic) &&
         !SilkType.isSlice(sourceSemantic) &&
+        NativeStorage.readLocal(nativeStorage, operation.root)._tag === 'NativePlace' &&
+        operation.selectors.some(
+          (selector) => selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime',
+        ) &&
+        operation.selectors.every(
+          (selector) => selector._tag === 'FieldSelector' || selector._tag === 'ElementSelector',
+        )
+      ) {
+        const base = yield* ownedAddress(
+          context,
+          operation.root,
+          operation.selectors,
+          `owned_read${operation.destination.ordinal}`,
+        )
+        yield* NativeStorage.receivePlace(
+          nativeStorage,
+          operation.destination,
+          NativePlace.make(program.layout, operation.type, base),
+        )
+        checkOrdinal += 1
+        break
+      }
+      if (
+        !SilkType.isReference(sourceSemantic) &&
+        !SilkType.isSlice(sourceSemantic) &&
         operation.selectors.every(
           (selector) =>
             selector._tag === 'FieldSelector' ||
@@ -560,20 +712,42 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             (selector._tag === 'ElementSelector' && selector.index._tag === 'Proven'),
         )
       ) {
+        if (!operation.selectors.some((selector) => selector._tag === 'VariantSelector')) {
+          if (operation.selectors.length === 0) {
+            yield* NativeStorage.copyLocal(nativeStorage, operation.destination, operation.root)
+            break
+          }
+          const path: Array<Layout.Selector> = []
+          for (const selector of operation.selectors) {
+            if (selector._tag === 'FieldSelector') path.push(selector.field)
+            else if (selector._tag === 'ElementSelector' && selector.index._tag === 'Proven')
+              path.push({ _tag: 'ElementSelector', index: selector.index.value })
+          }
+          const offset = LayoutVerify.laneOffset(program.layout, sourceSemantic, path)
+          if (offset === undefined)
+            throw new RangeError('Owned projection lost its canonical offset')
+          yield* NativeStorage.projectLocal(
+            nativeStorage,
+            operation.destination,
+            operation.root,
+            offset,
+          )
+          break
+        }
         const place = NativeOwnedPlace.make(program.layout, sourceSemantic, operation.selectors)
         if (place === undefined) throw new RangeError('Owned read lost its verified projection')
         const selected = yield* NativeOwnedPlace.read(
           place,
           arith.lane,
-          NativeStorage.readLocal(nativeStorage, operation.root),
+          (ordinal) => NativeStorage.readLane(nativeStorage, operation.root, ordinal),
           `owned_read${operation.destination.ordinal}`,
         )
-        nativeStorage.locals.set(operation.destination.ordinal, selected)
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, selected)
         break
       }
       if (SilkType.isReference(sourceSemantic)) {
         // Resolve the selected value to one checked address, then load each calling lane.
-        const address = NativeStorage.readLocal(nativeStorage, operation.root).at(0)
+        const address = (yield* NativeStorage.materialize(nativeStorage, operation.root)).at(0)
         if (address === undefined) throw new RangeError('LLVM reference read lost its address')
         const base = yield* FunctionBody.cast(
           body,
@@ -608,7 +782,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           if (selector.index._tag === 'Proven') {
             staticOffset += selector.index.value * selectedLayout.representation.stride
           } else {
-            const index = NativeStorage.readScalar(nativeStorage, selector.index.local)
+            const index = yield* NativeStorage.readScalar(nativeStorage, selector.index.local)
             const length = yield* Constant.integerUnsigned(
               builder,
               usizeType ?? i32,
@@ -689,26 +863,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
                 dynamicOffset,
                 `reference_read${operation.destination.ordinal}_projected`,
               )
-        const values: Array<Value.Input> = []
-        for (const [ordinal, lane] of NativeType.lanesFor(types, operation.type).entries()) {
-          const offset = LayoutVerify.laneOffset(program.layout, selected, lane.path)
-          if (offset === undefined) throw new RangeError('LLVM reference read lost a lane offset')
-          values.push(
-            yield* FunctionBody.load(
-              body,
-              NativeType.laneType(types, lane),
-              yield* NativeLanePointer.lanePointer(
-                lanePointers,
-                body,
-                projected,
-                offset,
-                `reference_read${operation.destination.ordinal}_${ordinal}_ptr`,
-              ),
-              `reference_read${operation.destination.ordinal}_${ordinal}`,
-            ),
-          )
-        }
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(values))
+        yield* NativeStorage.receivePlace(
+          nativeStorage,
+          operation.destination,
+          NativePlace.make(
+            program.layout,
+            operation.type,
+            projected,
+            operation.type._tag === 'EffectComposite' ? 'StoredComposite' : 'Value',
+          ),
+        )
         if (runtimeOrdinal > 0) checkOrdinal += 1
         break
       }
@@ -717,7 +881,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         if (selector?._tag !== 'SliceElementSelector') {
           throw new RangeError('LLVM slice read lost its runtime element selector')
         }
-        const [base, length] = NativeStorage.readLocal(nativeStorage, operation.root)
+        const [base, length] = yield* NativeStorage.materialize(nativeStorage, operation.root)
         if (base === undefined || length === undefined) {
           throw new RangeError('LLVM slice read lost its address or length lane')
         }
@@ -726,7 +890,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           'index out of bounds',
           selector.provenance.span,
         )
-        const index = NativeStorage.readScalar(nativeStorage, selector.index)
+        const index = yield* NativeStorage.readScalar(nativeStorage, selector.index)
         const inBounds = yield* FunctionBody.integerCompare(
           body,
           'ult',
@@ -773,47 +937,40 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             throw new RangeError('LLVM nested runtime slice place is not canonical')
           }
         }
-        const selectedValues: Array<Value.Input> = []
-        for (const [laneOrdinal, lane] of NativeType.lanesFor(types, operation.type).entries()) {
-          const staticOffset = LayoutVerify.laneOffset(
+        const staticOffset = LayoutVerify.laneOffset(
+          program.layout,
+          sourceSemantic.element,
+          staticSelectors,
+        )
+        if (staticOffset === undefined)
+          throw new RangeError('Slice projection lost its stored offset')
+        const element = yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
+          base,
+          elementOffset,
+          `slice${checkOrdinal}_element`,
+        )
+        const selected = yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
+          element,
+          staticOffset,
+          `slice${checkOrdinal}_selected`,
+        )
+        yield* NativeStorage.receivePlace(
+          nativeStorage,
+          operation.destination,
+          NativePlace.make(
             program.layout,
-            sourceSemantic.element,
-            Object.freeze([...staticSelectors, ...lane.path]),
-          )
-          if (staticOffset === undefined) {
-            throw new RangeError(`LLVM slice read lost lane ${laneOrdinal}`)
-          }
-          const offset =
-            staticOffset === 0
-              ? elementOffset
-              : yield* FunctionBody.binary(
-                  body,
-                  'add',
-                  elementOffset,
-                  yield* Constant.integerUnsigned(builder, usizeType ?? i32, BigInt(staticOffset)),
-                  `slice${checkOrdinal}_${laneOrdinal}_offset`,
-                )
-          const address = yield* NativeLanePointer.lanePointer(
-            lanePointers,
-            body,
-            base,
-            offset,
-            `slice${checkOrdinal}_${laneOrdinal}_ptr`,
-          )
-          selectedValues.push(
-            yield* FunctionBody.load(
-              body,
-              NativeType.laneType(types, lane),
-              address,
-              `slice${checkOrdinal}_${laneOrdinal}`,
-            ),
-          )
-        }
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(selectedValues))
+            operation.type,
+            selected,
+            operation.type._tag === 'EffectComposite' ? 'StoredComposite' : 'Value',
+          ),
+        )
         checkOrdinal += 1
         break
       }
-      const sourceValues = NativeStorage.readLocal(nativeStorage, operation.root)
       const runtimeSelectors = operation.selectors.flatMap((selector, ordinal) =>
         selector._tag === 'ElementSelector' && selector.index._tag === 'Runtime'
           ? [
@@ -840,7 +997,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const inBounds = yield* FunctionBody.integerCompare(
           body,
           'ult',
-          NativeStorage.readScalar(nativeStorage, selector.local),
+          yield* NativeStorage.readScalar(nativeStorage, selector.local),
           limit,
           `index${checkOrdinal}_${runtimeOrdinal}_in_bounds`,
         )
@@ -864,7 +1021,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const values = yield* NativeOwnedPlace.read(
           candidate.place,
           arith.lane,
-          sourceValues,
+          (slot) => NativeStorage.readLane(nativeStorage, operation.root, slot),
           `read${checkOrdinal}_${ordinal}`,
         )
         const condition = yield* candidateCondition(
@@ -901,14 +1058,18 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         selectedValues = empty
       }
       checkOrdinal += 1
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze(selectedValues))
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
+        operation.destination.ordinal,
+        Object.freeze(selectedValues),
+      )
       break
     }
     case 'CheckPlace': {
       const rootType = entry.fn.localTypes.at(operation.root.ordinal)
       if (rootType?._tag === 'Slice') {
         const selector = operation.selectors.at(0)
-        const length = NativeStorage.readLocal(nativeStorage, operation.root).at(1)
+        const length = (yield* NativeStorage.materialize(nativeStorage, operation.root)).at(1)
         if (selector?._tag !== 'SliceElementSelector' || length === undefined) {
           throw new RangeError('LLVM slice write check lost its canonical lanes')
         }
@@ -920,7 +1081,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const inBounds = yield* FunctionBody.integerCompare(
           body,
           'ult',
-          NativeStorage.readScalar(nativeStorage, selector.index),
+          yield* NativeStorage.readScalar(nativeStorage, selector.index),
           length,
           `write_slice${checkOrdinal}_in_bounds`,
         )
@@ -961,7 +1122,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const inBounds = yield* FunctionBody.integerCompare(
           body,
           'ult',
-          NativeStorage.readScalar(nativeStorage, selector.local),
+          yield* NativeStorage.readScalar(nativeStorage, selector.local),
           limit,
           `write_index${checkOrdinal}_${runtimeOrdinal}_in_bounds`,
         )
@@ -978,11 +1139,38 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'WritePlace': {
+      if (
+        operation.rootType._tag !== 'Reference' &&
+        operation.rootType._tag !== 'Slice' &&
+        NativeStorage.readLocal(nativeStorage, operation.root)._tag === 'NativePlace' &&
+        operation.selectors.every(
+          (selector) => selector._tag === 'FieldSelector' || selector._tag === 'ElementSelector',
+        )
+      ) {
+        const base = yield* ownedAddress(
+          context,
+          operation.root,
+          operation.selectors,
+          `owned_write${operation.source.ordinal}`,
+        )
+        yield* NativeStorage.sendPlace(
+          nativeStorage,
+          NativePlace.make(
+            program.layout,
+            operation.type,
+            base,
+            operation.type._tag === 'EffectComposite' ? 'StoredComposite' : 'Value',
+          ),
+          operation.source,
+        )
+        checkOrdinal += 1
+        break
+      }
       if (operation.rootType._tag === 'Reference') {
         if (operation.rootType.type.access !== 'Exclusive')
           throw new RangeError('LLVM reference write requires exclusive access')
         // Resolve the selected value address once, then store each calling lane.
-        const address = NativeStorage.readLocal(nativeStorage, operation.root).at(0)
+        const address = (yield* NativeStorage.materialize(nativeStorage, operation.root)).at(0)
         if (address === undefined) throw new RangeError('LLVM reference write lost its address')
         const base = yield* FunctionBody.cast(
           body,
@@ -1020,7 +1208,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             const scaled = yield* FunctionBody.binary(
               body,
               'mul',
-              NativeStorage.readScalar(nativeStorage, selector.index.local),
+              yield* NativeStorage.readScalar(nativeStorage, selector.index.local),
               yield* Constant.integerUnsigned(
                 builder,
                 usizeType ?? i32,
@@ -1069,30 +1257,22 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
                 dynamicOffset,
                 `reference_write${operation.source.ordinal}_projected`,
               )
-        const values = NativeStorage.readLocal(nativeStorage, operation.source)
-        for (const [ordinal, lane] of NativeType.lanesFor(types, operation.type).entries()) {
-          const value = values.at(ordinal)
-          const offset = LayoutVerify.laneOffset(program.layout, selected, lane.path)
-          if (value === undefined || offset === undefined)
-            throw new RangeError('LLVM reference write lost a lane offset')
-          yield* FunctionBody.store(
-            body,
-            value,
-            yield* NativeLanePointer.lanePointer(
-              lanePointers,
-              body,
-              projected,
-              offset,
-              `reference_write${operation.source.ordinal}_${ordinal}_ptr`,
-            ),
-          )
-        }
+        yield* NativeStorage.sendPlace(
+          nativeStorage,
+          NativePlace.make(
+            program.layout,
+            operation.type,
+            projected,
+            operation.type._tag === 'EffectComposite' ? 'StoredComposite' : 'Value',
+          ),
+          operation.source,
+        )
         yield* NativeStorage.reloadAddressRoots(nativeStorage)
         break
       }
       if (operation.rootType._tag === 'Slice') {
         const [selector, ...suffixSelectors] = operation.selectors
-        const [base] = NativeStorage.readLocal(nativeStorage, operation.root)
+        const [base] = yield* NativeStorage.materialize(nativeStorage, operation.root)
         if (selector?._tag !== 'SliceElementSelector' || base === undefined) {
           throw new RangeError('LLVM slice write lost its canonical address lane')
         }
@@ -1108,7 +1288,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const elementOffset = yield* FunctionBody.binary(
           body,
           'mul',
-          NativeStorage.readScalar(nativeStorage, selector.index),
+          yield* NativeStorage.readScalar(nativeStorage, selector.index),
           stride,
           `write_slice${checkOrdinal}_element_offset`,
         )
@@ -1127,95 +1307,72 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             throw new RangeError('LLVM nested runtime slice write is not canonical')
           }
         }
-        const sourceValues = NativeStorage.readLocal(nativeStorage, operation.source)
-        for (const [laneOrdinal, lane] of NativeType.lanesFor(types, operation.type).entries()) {
-          const staticOffset = LayoutVerify.laneOffset(
+        const staticOffset = LayoutVerify.laneOffset(
+          program.layout,
+          operation.rootType.type.element,
+          staticSelectors,
+        )
+        if (staticOffset === undefined)
+          throw new RangeError('Slice projection lost its stored offset')
+        const element = yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
+          base,
+          elementOffset,
+          `write_slice${checkOrdinal}_element`,
+        )
+        const selected = yield* NativeLanePointer.lanePointer(
+          lanePointers,
+          body,
+          element,
+          staticOffset,
+          `write_slice${checkOrdinal}_selected`,
+        )
+        yield* NativeStorage.sendPlace(
+          nativeStorage,
+          NativePlace.make(
             program.layout,
-            operation.rootType.type.element,
-            Object.freeze([...staticSelectors, ...lane.path]),
-          )
-          const stored = sourceValues.at(laneOrdinal)
-          if (staticOffset === undefined || stored === undefined) {
-            throw new RangeError(`LLVM slice write lost lane ${laneOrdinal}`)
-          }
-          const offset =
-            staticOffset === 0
-              ? elementOffset
-              : yield* FunctionBody.binary(
-                  body,
-                  'add',
-                  elementOffset,
-                  yield* Constant.integerUnsigned(builder, usizeType ?? i32, BigInt(staticOffset)),
-                  `write_slice${checkOrdinal}_${laneOrdinal}_offset`,
-                )
-          yield* FunctionBody.store(
-            body,
-            stored,
-            yield* NativeLanePointer.lanePointer(
-              lanePointers,
-              body,
-              base,
-              offset,
-              `write_slice${checkOrdinal}_${laneOrdinal}_ptr`,
-            ),
-          )
-        }
+            operation.type,
+            selected,
+            operation.type._tag === 'EffectComposite' ? 'StoredComposite' : 'Value',
+          ),
+          operation.source,
+        )
         checkOrdinal += 1
         yield* NativeStorage.reloadAddressRoots(nativeStorage)
         break
       }
-      const rootValues = NativeStorage.readLocal(nativeStorage, operation.root)
-      const sourceValues = NativeStorage.readLocal(nativeStorage, operation.source)
       const candidates = NativeOwnedPlace.candidates(
         program.layout,
         Mir.semanticType(operation.rootType),
         operation.selectors,
       )
-      let updated = rootValues
       for (const [ordinal, candidate] of candidates.entries()) {
-        const values = yield* NativeOwnedPlace.write(
-          candidate.place,
-          arith.lane,
-          updated,
-          sourceValues,
-          `write${checkOrdinal}_${ordinal}`,
-        )
         const condition = yield* candidateCondition(
           context,
           candidate.indices,
           `write${checkOrdinal}_${ordinal}`,
         )
-        if (condition === undefined) updated = values
-        else {
-          const selected = [...updated]
-          for (const slot of candidate.place.slots) {
-            const previous = updated.at(slot)
-            const value = values.at(slot)
-            if (previous === undefined || value === undefined)
-              throw new RangeError('Owned write lost its original lane')
-            selected[slot] = yield* FunctionBody.select(
-              body,
-              condition,
-              value,
-              previous,
-              `write${checkOrdinal}_${ordinal}_${slot}`,
-            )
-          }
-          updated = selected
+        let done: LlvmBlock.Block | undefined
+        if (condition !== undefined) {
+          const selected = yield* LlvmBlock.make(body, `write${checkOrdinal}_${ordinal}_selected`)
+          done = yield* LlvmBlock.make(body, `write${checkOrdinal}_${ordinal}_done`)
+          yield* FunctionBody.conditionalBranch(body, condition, selected, done)
+          yield* LlvmBlock.setInsertionPoint(body, selected)
+        }
+        yield* NativeOwnedPlace.write(
+          candidate.place,
+          arith.lane,
+          (slot) => NativeStorage.readLane(nativeStorage, operation.source, slot),
+          (slot, value) => NativeStorage.writeLane(nativeStorage, operation.root, slot, value),
+          `write${checkOrdinal}_${ordinal}`,
+        )
+        if (done !== undefined) {
+          yield* FunctionBody.branch(body, done)
+          yield* LlvmBlock.setInsertionPoint(body, done)
         }
       }
       checkOrdinal += 1
-      const frozen = Object.freeze(updated)
-      nativeStorage.locals.set(operation.root.ordinal, frozen)
-      yield* NativeStorage.storeMutable(nativeStorage, operation.root, frozen)
-      if (nativeStorage.addressRoots.has(operation.root.ordinal)) {
-        yield* NativeStorage.storeAddressValues(
-          nativeStorage,
-          operation.root.ordinal,
-          frozen,
-          `write_addr${operation.root.ordinal}`,
-        )
-      }
       break
     }
   }

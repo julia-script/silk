@@ -1,4 +1,5 @@
 import * as NativeResult from './NativeResult.js'
+import * as NativeArgument from './NativeArgument.js'
 import * as NativeCallable from './NativeCallable.js'
 import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
@@ -6,6 +7,7 @@ import * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import * as Hir from './Hir.js'
 import * as Mir from './Mir.js'
+import * as FunctionIndex from './internal/FunctionIndex.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeCall from './NativeCall.js'
@@ -61,7 +63,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           ...(yield* NativeCallable.capturedArguments(
             context,
             sourceType,
-            NativeStorage.readLocal(nativeStorage, operation.callable),
+            yield* NativeStorage.materialize(nativeStorage, operation.callable),
             `callable${operation.destination.ordinal}`,
           )),
         )
@@ -73,12 +75,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             (capture.access === 'Shared' || capture.access === 'Exclusive')
           ) {
             yield* NativeStorage.ensureAddressRoot(nativeStorage, capture.source)
-            const base = nativeStorage.addressStorage.get(capture.source.ordinal)
-            if (base === undefined)
-              throw new RangeError('Callable borrowed capture lost its address root')
+            const base = yield* NativeStorage.addressOf(nativeStorage, capture.source)
             values = Object.freeze([base])
           } else {
-            values = NativeStorage.readLocal(nativeStorage, capture.source)
+            values = yield* NativeStorage.materialize(nativeStorage, capture.source)
           }
           captureGroups.push(
             Object.freeze({
@@ -92,7 +92,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         captureGroups.map((capture) =>
           Object.freeze({ parameterOrdinal: capture.parameterOrdinal, items: capture.values }),
         ),
-        operation.arguments.map((argument) => NativeStorage.readLocal(nativeStorage, argument)),
+        yield* NativeStorage.materializeArguments(nativeStorage, operation.arguments),
       )
       if (target._tag === 'BuiltinCallableTarget') {
         const supplied = operands
@@ -125,7 +125,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               destination,
               `callable_convert${operation.destination.ordinal}`,
             )
-            nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+            yield* NativeStorage.writeLocal(
+              nativeStorage,
+              operation.destination.ordinal,
+              Object.freeze([result]),
+            )
             break
           }
           if (sourceScalar?.category !== 'Integer')
@@ -138,7 +142,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             `callable_convert${operation.destination.ordinal}`,
             operation.provenance.span,
           )
-          nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+          yield* NativeStorage.writeLocal(
+            nativeStorage,
+            operation.destination.ordinal,
+            Object.freeze([result]),
+          )
           break
         }
         const floatTarget = Scalar.floatConversionTarget(target.operation)
@@ -169,7 +177,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               `callable_convert${operation.destination.ordinal}`,
             )
           }
-          nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+          yield* NativeStorage.writeLocal(
+            nativeStorage,
+            operation.destination.ordinal,
+            Object.freeze([result]),
+          )
           break
         }
         if (target.operation === 'Negate' && Scalar.find(firstType._tag)?.category === 'Floating') {
@@ -179,7 +191,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             first,
             `callable_fneg${operation.destination.ordinal}`,
           )
-          nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+          yield* NativeStorage.writeLocal(
+            nativeStorage,
+            operation.destination.ordinal,
+            Object.freeze([result]),
+          )
           break
         }
         if (
@@ -225,7 +241,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
                 operation.destination.ordinal,
               ),
             ])
-            nativeStorage.locals.set(operation.destination.ordinal, values)
+            yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
             break
           }
           const boolZero = yield* Constant.integerSigned(builder, i32, 0n)
@@ -245,7 +261,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               `callable_not${operation.destination.ordinal}`,
             ),
           ])
-          nativeStorage.locals.set(operation.destination.ordinal, values)
+          yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
           break
         }
         const second = supplied.at(1)
@@ -269,11 +285,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             operation.destination.ordinal,
           ),
         ])
-        nativeStorage.locals.set(operation.destination.ordinal, values)
+        yield* NativeStorage.writeLocal(nativeStorage, operation.destination.ordinal, values)
         break
       }
-      const callableTarget = declared.find((candidate) =>
-        Mir.matchesInstance(candidate.fn, target.declaration, operation.typeArguments),
+      const callableTarget = FunctionIndex.nativeCandidates(declared, target.declaration).find(
+        (candidate) =>
+          Mir.matchesInstance(candidate.fn, target.declaration, operation.typeArguments),
       )
       if (callableTarget === undefined)
         throw new RangeError(
@@ -286,9 +303,16 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const called = yield* FunctionBody.callDirect(
         body,
         handle,
-        yield* NativeCall.argumentsFor(call.synchronous, callableTarget, operands),
+        yield* NativeCall.lowerArguments(
+          call.synchronous,
+          callableTarget,
+          NativeArgument.fromValues(operands),
+        ),
         `callable${operation.destination.ordinal}`,
       )
+      // A never-returning callback may inhabit a wider join result type. It produces no
+      // payload to store; the enclosing MIR control flow owns its unreachable terminator.
+      if (callableTarget.fn.result._tag === 'Bottom') break
       const result = yield* NativeResult.unpack(
         body,
         {
@@ -301,7 +325,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
         yield* NativeStorage.reloadAddressRoot(nativeStorage, root)
       }
-      nativeStorage.locals.set(
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
         operation.destination.ordinal,
         yield* NativeDiagnosticOutcome.accept(
           call.synchronous.diagnostic,
@@ -312,7 +337,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'Call': {
-      const target = declared.find((candidate) =>
+      const target = FunctionIndex.nativeCandidates(declared, operation.target).find((candidate) =>
         Mir.matchesInstance(
           candidate.fn,
           operation.target,
@@ -333,20 +358,23 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const result = yield* FunctionBody.callDirect(
         body,
         handle,
-        yield* NativeCall.argumentsFor(
+        yield* NativeCall.lowerArguments(
           call.synchronous,
           target,
-          operation.arguments.flatMap((argument) => [
-            ...NativeStorage.readLocal(nativeStorage, argument),
-          ]),
+          NativeArgument.fromLocals(nativeStorage, operation.arguments),
         ),
         `t${operation.destination.ordinal}`,
       )
+      if (target.fn.result._tag === 'Bottom') break
       for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
         yield* NativeStorage.reloadAddressRoot(nativeStorage, root)
       }
       if (target.resultLaneCount === 0) {
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([]),
+        )
         break
       }
       if (result === undefined) {
@@ -363,7 +391,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         result,
         `t${operation.destination.ordinal}`,
       )
-      nativeStorage.locals.set(
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
         operation.destination.ordinal,
         yield* NativeDiagnosticOutcome.accept(
           call.synchronous.diagnostic,

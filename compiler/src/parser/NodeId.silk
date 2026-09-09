@@ -1,0 +1,34 @@
+//! Stable array identities for nodes in one flat parser result.
+//!
+//! # When to use
+//!
+//! Use [`NodeId`] instead of embedding a child [`Node`](parser.Node.Node) in its parent. Resolve the
+//! identity against the node array in the same syntax tree.
+//!
+//! # Details
+//!
+//! The parser assigns a node identity when it appends the completed node. Children are appended
+//! before their parents, so a child identity has a lower index than its parent identity.
+//!
+//! # Gotchas
+//!
+//! An identity does not carry ownership or tree information. The same numeric index can identify
+//! unrelated nodes in two different syntax trees.
+
+/// The stable zero-based index of one node in a syntax tree's node array.
+///
+/// # Details
+///
+/// The parser does not move or remove completed nodes. The index stays valid while the owning
+/// syntax tree exists.
+///
+/// # Gotchas
+///
+/// The index is valid only for the syntax tree that created it. This type does not check that an
+/// index and a tree belong together.
+pub struct NodeId {
+  /// The zero-based position of the node in its owning syntax tree's node array.
+  pub index: usize
+}
+
+impl Copy for NodeId {}

@@ -8,6 +8,7 @@ import type * as Diagnostic from './Diagnostic.js'
 import * as Elaboration from './Elaboration.js'
 import { analyzeExpression } from './ExpressionAnalysis.js'
 import type * as Hir from './Hir.js'
+import * as FunctionIndex from './internal/FunctionIndex.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Canonical from './internal/Canonical.js'
 import * as NameResolution from './NameResolution.js'
@@ -344,14 +345,8 @@ const declarationOf = (
 ): DeclarationFacts.DeclarationFact | undefined => {
   const declaration = DeclarationFacts.byCanonical(self[stateSymbol].index, identity)
   if (declaration?._tag === 'FunctionDeclaration') return declaration
-  return self[stateSymbol].results
-    .get(identity.module)
-    ?.hir.functions.find(
-      (candidate) =>
-        candidate.declaration.canonical._tag === 'Canonical' &&
-        candidate.declaration.canonical.id.module === identity.module &&
-        candidate.declaration.canonical.id.name === identity.name,
-    )?.declaration
+  return FunctionIndex.hirByCanonical(self[stateSymbol].results.get(identity.module)?.hir, identity)
+    ?.declaration
 }
 
 const moduleInput = (
@@ -1081,12 +1076,7 @@ export const residualize = (self: Coordinator, key: ApplicationKey): Result => {
     const fact = Elaboration.executableFunctions(input.result).find(
       (candidate) => candidate.declaration.id.ordinal === declaration.id.ordinal,
     )
-    const fn = input.result.hir.functions.find(
-      (candidate) =>
-        candidate.declaration.canonical._tag === 'Canonical' &&
-        candidate.declaration.canonical.id.module === key.declaration.module &&
-        candidate.declaration.canonical.id.name === key.declaration.name,
-    )
+    const fn = FunctionIndex.hirByCanonical(input.result.hir, key.declaration)
     if (fact !== undefined && fn !== undefined) {
       record(self, key.declaration, 'UnchangedBody', 'sourceReused', false)
       return Object.freeze({

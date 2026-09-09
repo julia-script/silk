@@ -1,0 +1,29 @@
+module with Intrinsic.functionContract(cVariadic: true)
+import silk.option {Option as Maybe}
+pub import silk.result {Result}
+pub role Primary
+pub const LIMIT: usize = 12
+pub param enabled: bool = true where enabled == true
+pub type Number = i32 | i64
+pub struct Pair<T> {
+  pub first: T
+  second: T
+}
+extern "C" struct Native { pub pointer: ?[*]const align(8) addrspace(0) u8 }
+pub tuple Coordinates(i32, i32)
+pub enum(u8) Choice { First = 0, Second = 1, }
+pub union Outcome<T> { Value { pub item: T }, Empty, }
+pub service Clock { effect fn now(self: &Self) -> i64 ! Error ? &mut Writer }
+pub interface Add<T> { operator + fn add(left: T, right: T) -> T }
+impl<T> Pair<T> {
+  pub fn first(self: &Self) -> T { return self.first }
+}
+impl Add<i32> for i32 { add: Integer.add }
+unsafe extern "C" fn puts(value: [*]const u8, ...) -> i32 as "puts"
+unsafe extern "C" static errno: i32 as "errno"
+export "C" static exported: i32 = 2
+export "C" fn entry() -> i32 as "entry" { return 0 }
+static fn compute(static value: i32) -> i32 { return value * 2 }
+static if enabled { const selected: i32 = 1 } else static if false {
+  const selected: i32 = 2
+} else { const selected: i32 = 3 }

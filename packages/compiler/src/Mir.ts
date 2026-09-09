@@ -2034,13 +2034,29 @@ export const operationTree = (operation: Operation): ReadonlyArray<Operation> =>
   return Object.freeze(walk(operation))
 }
 
-/** Whether internal invocations carry a lexical diagnostic observer. */
-export const hasDiagnosticObservation = (module: Module): boolean =>
-  module.functions.some((fn) =>
+const diagnosticObservationByModule = new WeakMap<Module, boolean>()
+
+/**
+ * Whether internal invocations carry a lexical diagnostic observer.
+ *
+ * This is a module-wide fact, shared by every function's ABI and frame planning.
+ * Compute it once per immutable MIR snapshot: repeated scans accounted for 1.3s
+ * in the self-hosted compiler's cold-build profile. A transformed module has a
+ * new identity and therefore derives its own fact; weak ownership does not keep
+ * completed compilation snapshots alive. Both positive and negative results are
+ * retained.
+ */
+export const hasDiagnosticObservation = (module: Module): boolean => {
+  const known = diagnosticObservationByModule.get(module)
+  if (known !== undefined) return known
+  const observed = module.functions.some((fn) =>
     regionsTree(fn.regions).some((region) =>
       operationsOf(region).some((operation) => operation._tag === 'DiagnosticScope'),
     ),
   )
+  diagnosticObservationByModule.set(module, observed)
+  return observed
+}
 
 /** Four descriptor pointers followed by the six-field enclosing cause. */
 export const diagnosticScopeWords = 10

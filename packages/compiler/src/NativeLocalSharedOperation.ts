@@ -1,3 +1,4 @@
+import * as NativePayload from './NativePayload.js'
 import * as LlvmBlock from '@silklang/llvm/Block'
 import * as Constant from '@silklang/llvm/Constant'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
@@ -38,7 +39,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     storage: nativeStorage,
     usizeType,
   } = context
-  const self = NativeStorage.readLocal(nativeStorage, operation.self).at(0)
+  const self = (yield* NativeStorage.materialize(nativeStorage, operation.self)).at(0)
   if (self === undefined || usizeType === undefined)
     throw new RangeError('LLVM local-shared access lost its borrowed handle')
   const baseAddress = yield* FunctionBody.load(
@@ -108,12 +109,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     const realizedCallable = context.entry.fn.localTypes.at(callable.ordinal)
     const diverges =
       realizedCallable?._tag === 'CallableValue' && SilkType.isNever(realizedCallable.type.result)
-    if (!diverges)
-      yield* NativeStorage.storeMutable(
-        nativeStorage,
-        operation.destination,
-        NativeStorage.readLocal(nativeStorage, operation.destination),
-      )
+    if (!diverges) yield* NativeStorage.commitLocal(nativeStorage, operation.destination)
     return diverges
   })
 
@@ -125,7 +121,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     yield* Constant.integerUnsigned(builder, usizeType, 1n),
     accessPointer,
   )
-  nativeStorage.locals.set(
+  yield* NativeStorage.writeLocal(
+    nativeStorage,
     operation.payload.ordinal,
     Object.freeze([
       yield* NativeLanePointer.lanePointer(
@@ -153,7 +150,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     yield* NativeAggregate.dropThroughPlan(
       cleanup,
       operation.conflictCleanup,
-      NativeStorage.readLocal(nativeStorage, operation.onConflict),
+      NativePayload.local(nativeStorage, operation.onConflict),
       `shared${operation.destination.ordinal}_unused_conflict`,
     )
     yield* FunctionBody.branch(body, following)
@@ -173,7 +170,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     yield* NativeAggregate.dropThroughPlan(
       cleanup,
       operation.useCleanup,
-      NativeStorage.readLocal(nativeStorage, operation.use),
+      NativePayload.local(nativeStorage, operation.use),
       `shared${operation.destination.ordinal}_unused_use`,
     )
     yield* FunctionBody.branch(body, following)

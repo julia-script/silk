@@ -1,6 +1,7 @@
 import * as Instances from './Instances.js'
 import { alignUp } from './internal/Align.js'
 import * as Layout from './Layout.js'
+import * as ValueStorage from './ValueStorage.js'
 import * as Mir from './Mir.js'
 import * as SilkType from './Type.js'
 
@@ -16,25 +17,37 @@ const pointKey = (point: Mir.SuspensionPointId): string =>
     point.ordinal,
   ].join('\u0000')
 
-const storageOf = (
+/** Canonical payload extent shared by planning, verification, and frame lowering. */
+export const storageOf = (
   program: Mir.Module,
   slot: Mir.CoroutineFrameSlot,
 ): { readonly size: number; readonly alignment: number } | undefined => {
-  if (slot.access._tag === 'BorrowedDependency' || slot.type._tag === 'EnvironmentBorrow')
+  // BorrowedDependency describes lifetime authority, not the descriptor's width.
+  // A slice retains both address and length; only EnvironmentBorrow is one pointer.
+  if (slot.type._tag === 'EnvironmentBorrow')
     return Object.freeze({
       size: program.layout.target.pointerSize,
       alignment: program.layout.target.pointerAlignment,
     })
+  if (slot.type._tag === 'EffectOutcome')
+    return ValueStorage.find(program.layout, 'Outcome', slot.type.type)
+  if (slot.type._tag === 'EffectComposite')
+    return ValueStorage.find(program.layout, 'CompositeCarrier', slot.type.type)
+  if (
+    (slot.type._tag === 'EffectValue' || slot.type._tag === 'CallableValue') &&
+    slot.type.storage !== undefined
+  )
+    return Layout.entry(program.layout, slot.type.storage.type)
   if (slot.type._tag === 'EffectValue')
     return Object.freeze({
       size: slot.type.environment.size,
       alignment: slot.type.environment.alignment,
     })
   if (slot.type._tag === 'CallableValue') {
-    const view = slot.type.environment?.view
+    const view = slot.type.environment
     return Object.freeze({
-      size: view?.size ?? program.layout.target.pointerSize * 2,
-      alignment: view?.alignment ?? program.layout.target.pointerAlignment,
+      size: view?.size ?? 0,
+      alignment: view?.alignment ?? 1,
     })
   }
   const entry = Layout.entry(program.layout, Mir.semanticType(slot.type))
