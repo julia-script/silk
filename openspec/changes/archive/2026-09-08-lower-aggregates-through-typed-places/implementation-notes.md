@@ -9,9 +9,12 @@ established. The initial investigation below is retained as history.
 Archived on 2026-09-08 with all 25 tasks complete. This implementation-only change
 declared `skip_specs: true`; no delta specifications existed to sync into main specs.
 
+Benchmark workloads, harnesses, and raw reports are retained locally, outside this pull request.
+Benchmark paths in this archive identify historical inputs, not files shipped in the repository.
+
 ## Fresh baseline
 
-[Raw results](../../../../benchmarks/selfhost-stages/results/2026-09-08-typed-places-before.json)
+The locally retained raw results (`2026-09-08-typed-places-before.json`)
 retain all three fresh-process samples per stage, phase timing, CPU/RSS, load averages,
 source identities, and runtime oracles. No builds/tests from this work overlapped the batch;
 unrelated host activity was not stopped. Native/Node compilation caches were disabled;
@@ -135,7 +138,7 @@ representation migration. No artifact scope or task was silently narrowed to byp
   two-word slice descriptor, and a callable environment is not its two-word invocation view.
   Frame planning/verification now share the concrete payload extent. This intentionally fixes
   affected private frame offsets, while preserving call signatures and transfer packing.
-- The final [census](../../../../benchmarks/selfhost-stages/results/2026-09-08-typed-places-census.json)
+- The locally retained final census (`2026-09-08-typed-places-census.json`)
   reconciles 800,774 LLVM instructions, with 133,739 loads, 145,744 stores, and 760 unused loads.
   Baseline: 802,864 instructions, 246,523 loads, 204,060 stores, 100,437 unused loads.
   Loads fall 45.8%, stores 28.6%, unused loads 99.2%, and allocas 83.9%. Total instructions
@@ -214,5 +217,5 @@ instructions almost constant. An indirect aggregate calling convention remains a
 separate follow-up, not an unimplemented part of this migration or a promised speedup.
 The scalar and string/slice controls passed all six executions at 6.68s/6.44s medians.
 
-The [benchmark report](../../../../benchmarks/selfhost-stages/README.md#typed-aggregate-places--2026-09-08)
+The locally retained benchmark report (`benchmarks/selfhost-stages/README.md`)
 links every sample, phase/CPU/RSS observation, fingerprint, census, and profile summary.

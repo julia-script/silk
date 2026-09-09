@@ -130,21 +130,15 @@ not controlled medians or directly comparable to the earlier unprofiled 43.77-se
 The two native executables are byte-for-byte identical, and the new one passes all 102 parser
 corpus inputs. LLVM backend emission still accounts for about 21 seconds of the profiled build.
 
-The opt-in representation-field probe below uses 1,500 unrelated declarations and 2,000 planning
+The local representation-field probe used 1,500 unrelated declarations and 2,000 planning
 queries. Its query loop decreased from 967 ms to 95 ms with an identical result SHA-256; its first
 query decreased from 1.59 ms to 0.87 ms. Those loop timings include JIT warmup, so they establish the
 local scaling improvement rather than claiming a cold-build speedup by themselves.
 
 Regression assertions live in `packages/compiler/test/Backend.test.ts` and
 `packages/llvm/test/FunctionBody.test.ts`; `packages/compiler/test/RepresentationField.test.ts`
-also rejects lookup attempts that enumerate unrelated aggregate collections. Reproducible, opt-in performance probes (after building
-the workspace) are:
-
-```sh
-node packages/compiler/scripts/benchmark-native-reloads.mjs 40
-node packages/compiler/scripts/benchmark-representation-fields.mjs 1500 2000
-node --expose-gc packages/llvm/scripts/construction-benchmark.mjs 100 10000
-```
+also rejects lookup attempts that enumerate unrelated aggregate collections. The performance
+probes and their raw results are retained locally, outside this pull request.
 
 The earlier lexer-only measurements below describe the smaller workload that first exposed
 construction and cache costs; they are not timings for the full parser.

@@ -1,4 +1,0 @@
-[package]
-name = "cold-compilation"
-version = "0.1.0"
-root = "ast.silk"

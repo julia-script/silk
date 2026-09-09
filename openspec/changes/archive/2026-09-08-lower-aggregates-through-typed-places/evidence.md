@@ -1,5 +1,9 @@
 # Aggregate expansion census — 2026-09-08
 
+Benchmark workloads, harnesses, and raw reports are retained locally, outside this pull request.
+Benchmark paths and commands below record the historical experiment; they require those local
+artifacts and are not runnable from this repository alone.
+
 ## Finding
 
 The strongest measured target is the ownership-threaded parser result, not stdin or
