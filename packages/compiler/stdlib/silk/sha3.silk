@@ -1,0 +1,568 @@
+//! Portable fixed-output SHA-3 digests with allocation-free streaming states.
+//!
+//! # When to use
+//! Use [`Sha3_224`], [`Sha3_256`], [`Sha3_384`], or [`Sha3_512`] when a protocol
+//! requires the related fixed-output SHA-3 algorithm. Use `silk.hash` for collection keys.
+//!
+//! # Details
+//! The actors return 28-byte, 32-byte, 48-byte, and 64-byte digests. Each actor supports
+//! incremental `update`, consuming `finish`, and one-shot `hash` operations without allocation.
+//!
+//! # Gotchas
+//! These actors implement fixed-output SHA-3. They do not implement SHAKE or another
+//! extendable-output function.
+//!
+//! # Examples
+//! ## Compare segmented and one-shot SHA3-256 input
+//! ```silk
+//! import silk.sha3 {Sha3_256}
+//!
+//! pub fn main() -> i32 {
+//!   let mut state = Sha3_256.make()
+//!   state.update(b"a")
+//!   state.update(b"bc")
+//!   let segmented = state.finish()
+//!   let oneShot = Sha3_256.hash(b"abc")
+//!   let mut index: usize = 0
+//!   while index < 32 {
+//!     if segmented[index] != oneShot[index] {
+//!       return 1
+//!     }
+//!     index = index + 1
+//!   }
+//!   if segmented[0] != 58 {
+//!     return 2
+//!   }
+//!   return 0
+//! }
+//! ```
+
+import silk.u64 as u64
+import silk.u8 as u8
+import silk.usize as usize
+
+struct Sponge {
+  lanes: [u64; 25]
+  offset: usize
+}
+
+fn emptyLanes() -> [u64; 25] {
+  return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+fn makeSponge() -> Sponge {
+  return Sponge {lanes: emptyLanes(), offset: usize.ZERO}
+}
+
+fn roundConstants() -> [u64; 24] {
+  return [
+    0x0000000000000001,
+    0x0000000000008082,
+    0x800000000000808a,
+    0x8000000080008000,
+    0x000000000000808b,
+    0x0000000080000001,
+    0x8000000080008081,
+    0x8000000000008009,
+    0x000000000000008a,
+    0x0000000000000088,
+    0x0000000080008009,
+    0x000000008000000a,
+    0x000000008000808b,
+    0x800000000000008b,
+    0x8000000000008089,
+    0x8000000000008003,
+    0x8000000000008002,
+    0x8000000000000080,
+    0x000000000000800a,
+    0x800000008000000a,
+    0x8000000080008081,
+    0x8000000000008080,
+    0x0000000080000001,
+    0x8000000080008008,
+  ]
+}
+
+fn permute(state: &mut Sponge) -> () {
+  let constants = roundConstants()
+  let mut round = usize.ZERO
+  while round < 24 {
+    let mut columns: [u64; 5] = [0, 0, 0, 0, 0]
+    let mut x = usize.ZERO
+    while x < 5 {
+      columns[x] = u64.bitXor(
+        u64.bitXor(
+          u64.bitXor(state.lanes[x], state.lanes[x + 5]),
+          u64.bitXor(state.lanes[x + 10], state.lanes[x + 15]),
+        ),
+        state.lanes[x + 20],
+      )
+      x = x + 1
+    }
+
+    x = usize.ZERO
+    while x < 5 {
+      let previous = (x + 4) % 5
+      let next = (x + 1) % 5
+      let difference = u64.bitXor(columns[previous], u64.rotateLeft(columns[next], 1))
+      let mut y = usize.ZERO
+      while y < 5 {
+        let index = y * 5 + x
+        state.lanes[index] = u64.bitXor(state.lanes[index], difference)
+        y = y + 1
+      }
+      x = x + 1
+    }
+
+    let mut current = state.lanes[1]
+    x = 1
+    let mut y = usize.ZERO
+    let mut step = usize.ZERO
+    while step < 24 {
+      let nextX = y
+      let nextY = (x * 2 + y * 3) % 5
+      let target = nextY * 5 + nextX
+      let displaced = state.lanes[target]
+      let rotation = ((step + 1) * (step + 2) / 2) % 64
+      state.lanes[target] = u64.rotateLeft(current, usize.toU64(rotation))
+      current = displaced
+      x = nextX
+      y = nextY
+      step = step + 1
+    }
+
+    y = usize.ZERO
+    while y < 5 {
+      let base = y * 5
+      let row: [u64; 5] = [
+        state.lanes[base],
+        state.lanes[base + 1],
+        state.lanes[base + 2],
+        state.lanes[base + 3],
+        state.lanes[base + 4],
+      ]
+      x = usize.ZERO
+      while x < 5 {
+        let next = (x + 1) % 5
+        let afterNext = (x + 2) % 5
+        let selected = u64.bitAnd(u64.bitNot(row[next]), row[afterNext])
+        state.lanes[base + x] = u64.bitXor(row[x], selected)
+        x = x + 1
+      }
+      y = y + 1
+    }
+
+    state.lanes[0] = u64.bitXor(state.lanes[0], constants[round])
+    round = round + 1
+  }
+}
+
+fn absorbByte(state: &mut Sponge, value: u8, offset: usize) -> () {
+  let lane = offset / 8
+  let shift = usize.toU64((offset % 8) * 8)
+  let positioned = u64.shiftLeft(u8.toU64(value), shift)
+  state.lanes[lane] = u64.bitXor(state.lanes[lane], positioned)
+}
+
+fn absorb(state: &mut Sponge, bytes: &[u8], rate: usize) -> () {
+  let mut index = usize.ZERO
+  while index < bytes.length {
+    let offset = state.offset
+    absorbByte(&mut state.*, bytes[index], offset)
+    state.offset = state.offset + 1
+    if state.offset == rate {
+      permute(&mut state.*)
+      state.offset = usize.ZERO
+    }
+    index = index + 1
+  }
+}
+
+fn finalize(state: &mut Sponge, rate: usize) -> () {
+  let offset = state.offset
+  absorbByte(&mut state.*, u8.toU8(0x06), offset)
+  absorbByte(&mut state.*, u8.toU8(0x80), rate - 1)
+  permute(&mut state.*)
+  state.offset = usize.ZERO
+}
+
+fn outputByte(state: &Sponge, offset: usize) -> u8 {
+  let lane = offset / 8
+  let shift = usize.toU64((offset % 8) * 8)
+  return u64.toU8(u64.bitAnd(u64.shiftRight(state.lanes[lane], shift), 0xff))
+}
+
+fn emptyOutput28() -> [u8; 28] {
+  return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+fn emptyOutput32() -> [u8; 32] {
+  return [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+  ]
+}
+
+fn emptyOutput48() -> [u8; 48] {
+  return [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+  ]
+}
+
+fn emptyOutput64() -> [u8; 64] {
+  return [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+  ]
+}
+
+fn output28(state: &Sponge) -> [u8; 28] {
+  let mut output = emptyOutput28()
+  let mut index = usize.ZERO
+  while index < 28 {
+    output[index] = outputByte(state, index)
+    index = index + 1
+  }
+  return output
+}
+
+fn output32(state: &Sponge) -> [u8; 32] {
+  let mut output = emptyOutput32()
+  let mut index = usize.ZERO
+  while index < 32 {
+    output[index] = outputByte(state, index)
+    index = index + 1
+  }
+  return output
+}
+
+fn output48(state: &Sponge) -> [u8; 48] {
+  let mut output = emptyOutput48()
+  let mut index = usize.ZERO
+  while index < 48 {
+    output[index] = outputByte(state, index)
+    index = index + 1
+  }
+  return output
+}
+
+fn output64(state: &Sponge) -> [u8; 64] {
+  let mut output = emptyOutput64()
+  let mut index = usize.ZERO
+  while index < 64 {
+    output[index] = outputByte(state, index)
+    index = index + 1
+  }
+  return output
+}
+
+/// An allocation-free streaming SHA3-224 state with a 28-byte fixed digest.
+///
+/// # Details
+///
+/// Call `update` zero or more times, then call `finish` one time. Use `hash` for one complete
+/// borrowed byte sequence. Finalization consumes the state.
+pub struct Sha3_224 {
+  sponge: Sponge
+}
+
+impl Sha3_224 {
+  /// Creates an empty SHA3-224 streaming state without allocation.
+  pub fn make() -> Sha3_224 {
+    return Sha3_224 {sponge: makeSponge()}
+  }
+  /// Absorbs `bytes` in order into this SHA3-224 state.
+  ///
+  /// # Details
+  ///
+  /// An empty slice does not change the digest. Any chunking of the same byte sequence gives the
+  /// same digest.
+  pub fn update(self: &mut Self, bytes: &[u8]) -> () {
+    return absorb(&mut self.sponge, bytes, 144)
+  }
+  /// Consumes this state and returns its standardized 28-byte SHA3-224 digest.
+  pub fn finish(self: Self) -> [u8; 28] {
+    let mut state = move self.sponge
+    finalize(&mut state, 144)
+    return output28(&state)
+  }
+  /// Returns the standardized 28-byte SHA3-224 digest of `bytes`.
+  ///
+  /// # Details
+  ///
+  /// This function uses the same `make`, `update`, and consuming `finish` lifecycle as streaming
+  /// use. It does not allocate.
+  pub fn hash(bytes: &[u8]) -> [u8; 28] {
+    let mut state = Sha3_224.make()
+    state.update(bytes)
+    return state.finish()
+  }
+}
+
+/// An allocation-free streaming SHA3-256 state with a 32-byte fixed digest.
+///
+/// # Details
+///
+/// Call `update` zero or more times, then call `finish` one time. Use `hash` for one complete
+/// borrowed byte sequence. Finalization consumes the state.
+pub struct Sha3_256 {
+  sponge: Sponge
+}
+
+impl Sha3_256 {
+  /// Creates an empty SHA3-256 streaming state without allocation.
+  pub fn make() -> Sha3_256 {
+    return Sha3_256 {sponge: makeSponge()}
+  }
+  /// Absorbs `bytes` in order into this SHA3-256 state.
+  ///
+  /// # Details
+  ///
+  /// An empty slice does not change the digest. Any chunking of the same byte sequence gives the
+  /// same digest.
+  pub fn update(self: &mut Self, bytes: &[u8]) -> () {
+    return absorb(&mut self.sponge, bytes, 136)
+  }
+  /// Consumes this state and returns its standardized 32-byte SHA3-256 digest.
+  pub fn finish(self: Self) -> [u8; 32] {
+    let mut state = move self.sponge
+    finalize(&mut state, 136)
+    return output32(&state)
+  }
+  /// Returns the standardized 32-byte SHA3-256 digest of `bytes`.
+  ///
+  /// # Details
+  ///
+  /// This function uses the same `make`, `update`, and consuming `finish` lifecycle as streaming
+  /// use. It does not allocate.
+  pub fn hash(bytes: &[u8]) -> [u8; 32] {
+    let mut state = Sha3_256.make()
+    state.update(bytes)
+    return state.finish()
+  }
+}
+
+/// An allocation-free streaming SHA3-384 state with a 48-byte fixed digest.
+///
+/// # Details
+///
+/// Call `update` zero or more times, then call `finish` one time. Use `hash` for one complete
+/// borrowed byte sequence. Finalization consumes the state.
+pub struct Sha3_384 {
+  sponge: Sponge
+}
+
+impl Sha3_384 {
+  /// Creates an empty SHA3-384 streaming state without allocation.
+  pub fn make() -> Sha3_384 {
+    return Sha3_384 {sponge: makeSponge()}
+  }
+  /// Absorbs `bytes` in order into this SHA3-384 state.
+  ///
+  /// # Details
+  ///
+  /// An empty slice does not change the digest. Any chunking of the same byte sequence gives the
+  /// same digest.
+  pub fn update(self: &mut Self, bytes: &[u8]) -> () {
+    return absorb(&mut self.sponge, bytes, 104)
+  }
+  /// Consumes this state and returns its standardized 48-byte SHA3-384 digest.
+  pub fn finish(self: Self) -> [u8; 48] {
+    let mut state = move self.sponge
+    finalize(&mut state, 104)
+    return output48(&state)
+  }
+  /// Returns the standardized 48-byte SHA3-384 digest of `bytes`.
+  ///
+  /// # Details
+  ///
+  /// This function uses the same `make`, `update`, and consuming `finish` lifecycle as streaming
+  /// use. It does not allocate.
+  pub fn hash(bytes: &[u8]) -> [u8; 48] {
+    let mut state = Sha3_384.make()
+    state.update(bytes)
+    return state.finish()
+  }
+}
+
+/// An allocation-free streaming SHA3-512 state with a 64-byte fixed digest.
+///
+/// # Details
+///
+/// Call `update` zero or more times, then call `finish` one time. Use `hash` for one complete
+/// borrowed byte sequence. Finalization consumes the state.
+pub struct Sha3_512 {
+  sponge: Sponge
+}
+
+impl Sha3_512 {
+  /// Creates an empty SHA3-512 streaming state without allocation.
+  pub fn make() -> Sha3_512 {
+    return Sha3_512 {sponge: makeSponge()}
+  }
+  /// Absorbs `bytes` in order into this SHA3-512 state.
+  ///
+  /// # Details
+  ///
+  /// An empty slice does not change the digest. Any chunking of the same byte sequence gives the
+  /// same digest.
+  pub fn update(self: &mut Self, bytes: &[u8]) -> () {
+    return absorb(&mut self.sponge, bytes, 72)
+  }
+  /// Consumes this state and returns its standardized 64-byte SHA3-512 digest.
+  pub fn finish(self: Self) -> [u8; 64] {
+    let mut state = move self.sponge
+    finalize(&mut state, 72)
+    return output64(&state)
+  }
+  /// Returns the standardized 64-byte SHA3-512 digest of `bytes`.
+  ///
+  /// # Details
+  ///
+  /// This function uses the same `make`, `update`, and consuming `finish` lifecycle as streaming
+  /// use. It does not allocate.
+  pub fn hash(bytes: &[u8]) -> [u8; 64] {
+    let mut state = Sha3_512.make()
+    state.update(bytes)
+    return state.finish()
+  }
+}

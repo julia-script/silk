@@ -143,7 +143,10 @@ it('keeps the ordinary target actor manifest entry, syntax, and intrinsic phase 
   assert.deepEqual(syntax.parserDiagnostics, [])
 
   const generator = fileURLToPath(new URL('../scripts/generate-stdlib.mjs', import.meta.url))
-  const generated = spawnSync(process.execPath, [generator, '--stdout'], { encoding: 'utf8' })
+  const generated = spawnSync(process.execPath, [generator, '--stdout'], {
+    encoding: 'utf8',
+    maxBuffer: 4 * 1024 * 1024,
+  })
   assert.strictEqual(generated.status, 0, generated.stderr)
   const targetEntry = generated.stdout.slice(
     generated.stdout.indexOf("module: 'silk/target'"),

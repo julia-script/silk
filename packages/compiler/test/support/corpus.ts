@@ -17,6 +17,7 @@ import {
 } from './ownedAllocatorSuspension.js'
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
+import { shaAcceptanceSource } from './shaAcceptance.js'
 import {
   borrowedBox,
   borrowedStream,
@@ -7738,6 +7739,11 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     nativeSource: replaceDropProgram,
     nativeStdout: '1243',
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'fixed-output-sha',
+    source: shaAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
   },
   ...corpus,
   ...algorithmExamples,
