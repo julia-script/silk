@@ -63,7 +63,7 @@ effect fn fields(initial: ElementsResult, kind: NodeKind) -> NodeResult
 /// Invalid starts become error patterns. A missing pattern does not consume the delimiter owned
 /// by its enclosing rule, allowing the remainder of the arm or binding to stay navigable.
 pub effect fn parse(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  if initial.depth >= 256 {
+  if initial.depth >= P.NESTING_LIMIT {
     return run P.nestingError(move initial)
   }
   let depth = initial.depth

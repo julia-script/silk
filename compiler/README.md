@@ -50,6 +50,13 @@ its first syntax diagnostic. A future compilation driver can stop on that diagno
 CST construction remains postponed. The token vector retains source information, but there is no
 second concrete-syntax tree to maintain.
 
+Recursive rules share a budget of 32 active grammar operations. This counts parser operations,
+not just parentheses: nested blocks, types, patterns, and expressions share the same budget.
+Siblings restore their parent's depth. Exceeding the budget reports `NestingLimit` and skips the
+damaged branch without recursive recovery. The budget is an implementation resource limit, not
+a Silk grammar restriction or a limit on file size. The previous value of 256 exceeded the
+available stack in the bootstrap-generated debug executable before recovery could run.
+
 ## Grammar modules
 
 | Module                                         | Responsibility                                                                                                                              |
@@ -90,6 +97,26 @@ parser across grammar fixtures, the self-hosted sources, and the standard librar
 postorder IDs, source spans, reachability, unique token ownership, and preservation of following
 declarations after malformed syntax. Extra file paths after the executable select a smaller corpus.
 The JavaScript harness imports the bootstrap package's built `dist` modules.
+
+The default run also executes the behavioral cases in `scripts/parser-cases.mjs`, adapted from
+the bootstrap parser tests. These compare acceptance and require specific valid constructs to
+survive damage in both parsers. They do not compare diagnostic wording, diagnostic counts, error
+tree shapes, or the two implementations' numerical resource budgets. Every native tree must
+still satisfy the flat-tree invariants, and every diagnostic must address a valid source span.
+The existing valid-file corpus retains its significant-tree comparison as a separate regression
+check; a representation change can update that check without changing the behavioral cases.
+
+Run only the behavioral cases, or select individual cases by name:
+
+```sh
+node compiler/scripts/test-parser.mjs compiler/build/llvm/aarch64-apple-darwin/debug/silk-compiler --cases
+node compiler/scripts/test-parser.mjs compiler/build/llvm/aarch64-apple-darwin/debug/silk-compiler --cases missing-parameter-comma overdeep-call
+```
+
+Each case uses a temporary source file beneath `compiler/fixtures/`, which the harness removes
+after success or failure. The native executable is built once, not once per test. The nesting
+cases exercise both accepted inputs and diagnostic recovery, including depth-budget reuse by
+sibling expressions and a following declaration after unclosed delimiters.
 
 `fixtures/parser/` contains syntax-only programs: names need not resolve and operations need not
 typecheck. `recovery.silk` deliberately contains syntax errors. The other files directly under

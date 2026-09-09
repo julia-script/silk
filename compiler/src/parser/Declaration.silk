@@ -497,7 +497,7 @@ effect fn group(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocato
 }
 
 effect fn staticConditional(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  if initial.depth >= 256 {
+  if initial.depth >= P.NESTING_LIMIT {
     return run P.nestingError(move initial)
   }
   let depth = initial.depth

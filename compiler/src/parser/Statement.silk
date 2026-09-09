@@ -57,7 +57,7 @@ effect fn binding(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Alloca
 effect fn conditional(initial: State, isStatic: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  if initial.depth >= 256 {
+  if initial.depth >= P.NESTING_LIMIT {
     return run P.nestingError(move initial)
   }
   let depth = initial.depth
@@ -270,7 +270,7 @@ fn terminates(state: &State, id: NodeId) -> bool {
 pub effect fn block(initial: State, terminal: bool, matchArm: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  if initial.depth >= 256 {
+  if initial.depth >= P.NESTING_LIMIT {
     return run P.nestingError(move initial)
   }
   let depth = initial.depth

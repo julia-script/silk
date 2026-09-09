@@ -1,16 +1,17 @@
 // One prebuilt native parser, many syntax-only inputs. No per-fixture compiler invocations.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
 import * as Lexer from '../../packages/compiler/dist/Lexer.js'
 import * as Parser from '../../packages/compiler/dist/Parser.js'
 import * as SourceFile from '../../packages/compiler/dist/SourceFile.js'
 import * as SyntaxTree from '../../packages/compiler/dist/SyntaxTree.js'
+import { cases } from './parser-cases.mjs'
 
 assert.ok(
   process.argv[2],
-  'Usage: node compiler/scripts/test-parser.mjs <built-executable> [source-files...]',
+  'Usage: node compiler/scripts/test-parser.mjs <built-executable> [source-files... | --cases [names...]]',
 )
 const executable = resolve(process.argv[2])
 const trivia = new Set(['Whitespace', 'LineComment', 'DocComment', 'ModuleDocComment'])
@@ -26,11 +27,24 @@ function decode(output, sourceLength) {
   let root
   let diagnosticCount
   let current
+  const diagnostics = []
   for (const line of output.split('\n')) {
     let match
     if ((match = /^root #(\d+)$/.exec(line))) root = Number(match[1])
     else if ((match = /^diagnostics (\d+)$/.exec(line))) diagnosticCount = Number(match[1])
     else if (
+      diagnosticCount !== undefined &&
+      (match = /^#(\d+) (MissingToken|UnexpectedToken|NestingLimit) (\w+) (\d+)\.\.(\d+)$/.exec(
+        line,
+      ))
+    ) {
+      assert.equal(Number(match[1]), diagnostics.length)
+      const start = Number(match[4])
+      const end = Number(match[5])
+      assert.ok(start <= end && end <= sourceLength, 'diagnostic spans address source bytes')
+      if (match[2] === 'MissingToken') assert.equal(start, end)
+      diagnostics.push({ kind: match[2], detail: match[3], start, end })
+    } else if (
       diagnosticCount === undefined &&
       (match = /^#(\d+) (\w+) (\d+)\.\.(\d+)$/.exec(line))
     ) {
@@ -62,6 +76,7 @@ function decode(output, sourceLength) {
   assert.equal(nodes[root]?.start, 0)
   assert.equal(nodes[root]?.end, sourceLength)
   assert.notEqual(diagnosticCount, undefined)
+  assert.equal(diagnostics.length, diagnosticCount, 'decode every diagnostic')
   const reached = new Set()
   const tokens = new Set()
   const visit = (id) => {
@@ -90,7 +105,7 @@ function decode(output, sourceLength) {
       return element.kind
     }),
   })
-  return { nodes, diagnosticCount, shape: shape(root), tokens }
+  return { nodes, diagnosticCount, diagnostics, shape: shape(root), tokens }
 }
 
 function bootstrapShape(node) {
@@ -122,15 +137,17 @@ function shapeDifferences(actual, expected, path) {
 
 let checked = 0
 let failed = 0
-const files =
-  process.argv.length > 3
-    ? process.argv.slice(3)
-    : [
-        ...filesUnder('compiler/fixtures/parser'),
-        ...filesUnder('compiler/src'),
-        ...filesUnder('packages/compiler/stdlib/silk'),
-      ]
-function checkFile(file) {
+function sourceFiles() {
+  if (process.argv[3] === '--cases') return []
+  if (process.argv.length > 3) return process.argv.slice(3)
+  return [
+    ...filesUnder('compiler/fixtures/parser'),
+    ...filesUnder('compiler/src'),
+    ...filesUnder('packages/compiler/stdlib/silk'),
+  ]
+}
+const files = sourceFiles()
+function checkFile(file, testCase) {
   const bytes = readFileSync(file)
   const lexical = Lexer.lex(SourceFile.make(file, bytes))
   const bootstrap = Parser.parse(lexical)
@@ -143,7 +160,52 @@ function checkFile(file) {
   for (const [id, token] of lexical.tokens.entries()) {
     if (!trivia.has(token.kind)) assert.ok(actual.tokens.has(id), `${file}: missing token #${id}`)
   }
-  if (file.endsWith('/recovery.silk')) {
+  for (const node of actual.nodes) {
+    for (const element of node.elements) {
+      if (element.token === undefined) continue
+      const token = lexical.tokens[element.token]
+      assert.ok(token, 'token IDs address the lexer array')
+      assert.deepEqual(
+        { kind: element.kind, start: element.start, end: element.end },
+        { kind: token.kind, start: token.span.start, end: token.span.end },
+        'token identities retain their kind and source span',
+      )
+    }
+  }
+  if (testCase !== undefined) {
+    assert.equal(
+      bootstrap.parserDiagnostics.length > 0,
+      testCase.bootstrapInvalid ?? testCase.invalid ?? false,
+      'bootstrap acceptance',
+    )
+    assert.equal(actual.diagnosticCount > 0, testCase.invalid ?? false, 'self-hosted acceptance')
+    if (testCase.diagnostic !== undefined) {
+      assert.ok(
+        actual.diagnostics.some((d) => d.kind === testCase.diagnostic),
+        testCase.diagnostic,
+      )
+    }
+    if (testCase.missing !== undefined) {
+      const offset = bytes.indexOf(testCase.missing.before)
+      assert.ok(offset >= 0, 'diagnostic anchor occurs in source')
+      assert.ok(
+        actual.diagnostics.some(
+          (d) =>
+            d.kind === 'MissingToken' &&
+            d.detail === testCase.missing.token &&
+            d.start === offset &&
+            d.end === offset,
+        ),
+        `missing ${testCase.missing.token} at byte ${offset}`,
+      )
+    }
+    checkWitnesses(actual, bytes, testCase.witnesses)
+    checkBootstrapWitnesses(
+      bootstrap.root,
+      bytes,
+      testCase.bootstrapWitnesses ?? testCase.witnesses,
+    )
+  } else if (file.endsWith('/recovery.silk')) {
     assert.ok(actual.diagnosticCount > 0)
     assert.ok(
       actual.nodes.filter((node) => node.kind === 'FunctionDeclaration').length >= 2,
@@ -165,6 +227,86 @@ function checkFile(file) {
       [],
       `${file}: significant AST structure must agree`,
     )
+  }
+}
+
+function checkWitnesses(actual, bytes, witnesses) {
+  const intact = (node) =>
+    !node.kind.startsWith('Error') &&
+    node.elements.every((element) =>
+      element.node === undefined
+        ? element.missing === undefined
+        : intact(actual.nodes[element.node]),
+    )
+  for (const { kind, text } of witnesses) {
+    const candidates = actual.nodes.filter(
+      (node) =>
+        node.kind === kind && bytes.subarray(node.start, node.end).toString().trim() === text,
+    )
+    assert.ok(candidates.length > 0, `preserve ${kind}: ${text}`)
+    assert.ok(
+      candidates.some(
+        (node) =>
+          intact(node) &&
+          !actual.diagnostics.some((d) => d.start > node.start && d.start < node.end),
+      ),
+      `undamaged ${kind}: ${text}`,
+    )
+  }
+}
+
+function checkBootstrapWitnesses(root, bytes, witnesses) {
+  const nodes = []
+  const visit = (node) => {
+    const childrenIntact = node.children
+      .map((child) => {
+        if (SyntaxTree.isNode(child)) return visit(child)
+        return SyntaxTree.isToken(child)
+      })
+      .every(Boolean)
+    const intact = childrenIntact && !node.kind.startsWith('Error')
+    nodes.push({
+      kind: node.kind,
+      text: bytes.subarray(node.span.start, node.span.end).toString().trim(),
+      intact,
+    })
+    return intact
+  }
+  visit(root)
+  for (const { kind, text } of witnesses) {
+    assert.ok(
+      nodes.some((node) => node.kind === kind && node.text === text && node.intact),
+      `bootstrap preserves ${kind}: ${text}`,
+    )
+  }
+}
+if (process.argv.length === 3 || process.argv[3] === '--cases') {
+  const names = process.argv.slice(4)
+  for (const name of names)
+    assert.ok(
+      cases.some((testCase) => testCase.name === name),
+      `unknown case: ${name}`,
+    )
+  const directory = mkdtempSync('compiler/fixtures/.parser-cases-')
+  try {
+    for (const testCase of cases.filter(
+      (testCase) => names.length === 0 || names.includes(testCase.name),
+    )) {
+      const file = `${directory}/${testCase.name}.silk`
+      writeFileSync(file, testCase.source)
+      try {
+        checkFile(file, testCase)
+        checked++
+        process.stdout.write(`ok case:${testCase.name}\n`)
+      } catch (error) {
+        failed++
+        process.stderr.write(
+          `FAIL case:${testCase.name}: ${error.message}${error.signal ? ` (signal ${error.signal})` : ''}\n`,
+        )
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true })
   }
 }
 for (const file of files) {

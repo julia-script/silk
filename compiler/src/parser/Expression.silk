@@ -306,20 +306,6 @@ effect fn compileErrorExpression(initial: State) -> NodeResult ! OutOfMemoryErro
 effect fn primary(initial: State, allowRecord: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  if initial.depth >= 256 {
-    return run P.nestingError(move initial)
-  }
-  let depth = initial.depth
-  let mut state = move initial
-  state.depth = Usize.add(depth, 1)
-  let mut result = run primaryInner(move state, allowRecord)
-  result.state.depth = depth
-  return move result
-}
-
-effect fn primaryInner(initial: State, allowRecord: bool) -> NodeResult
-! OutOfMemoryError
-? &mut Allocator {
   let kind = P.currentKind(&initial)
   if kind == TokenKind.Identifier {
     return run identifier(move initial, allowRecord)
@@ -398,19 +384,13 @@ effect fn primaryInner(initial: State, allowRecord: bool) -> NodeResult
     } else if kind == TokenKind.UnsafeKeyword {
       nodeKind = NodeKind.UnsafeExpression
     }
-    let attached2 = run P.attach(
-      move p.elements,
-      run postfix(run primary(move p.state, allowRecord)),
-    )
+    let attached2 = run P.attach(move p.elements, run infix(move p.state, 11, allowRecord))
     p = move attached2
     return run P.complete(move p, nodeKind)
   }
   if kind == TokenKind.Minus || kind == TokenKind.Bang || kind == TokenKind.Tilde {
     let mut p = run P.consume(P.begin(move initial))
-    let attached3 = run P.attach(
-      move p.elements,
-      run postfix(run primary(move p.state, allowRecord)),
-    )
+    let attached3 = run P.attach(move p.elements, run infix(move p.state, 11, allowRecord))
     p = move attached3
     return run P.complete(move p, NodeKind.PrefixExpression)
   }
@@ -426,6 +406,20 @@ effect fn primaryInner(initial: State, allowRecord: bool) -> NodeResult
 }
 
 effect fn infix(initial: State, minimum: usize, allowRecord: bool) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  if initial.depth >= P.NESTING_LIMIT {
+    return run P.nestingError(move initial)
+  }
+  let depth = initial.depth
+  let mut state = move initial
+  state.depth = Usize.add(depth, 1)
+  let mut result = run infixInner(move state, minimum, allowRecord)
+  result.state.depth = depth
+  return move result
+}
+
+effect fn infixInner(initial: State, minimum: usize, allowRecord: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
   let mut left = run postfix(run primary(move initial, allowRecord))
