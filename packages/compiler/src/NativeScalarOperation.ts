@@ -108,13 +108,17 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     case 'ConvertInteger': {
       const result = yield* NativeArith.emitIntegerConversion(
         arith,
-        NativeStorage.readScalar(nativeStorage, operation.source),
+        yield* NativeStorage.readScalar(nativeStorage, operation.source),
         operation.sourceType,
         operation.type,
         `convert${operation.destination.ordinal}`,
         operation.provenance.span,
       )
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
+        operation.destination.ordinal,
+        Object.freeze([result]),
+      )
       break
     }
     case 'ConvertScalar': {
@@ -127,9 +131,13 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         target.category === 'Boolean'
       )
         throw new RangeError('LLVM scalar conversion lost its types')
-      const sourceValue = NativeStorage.readScalar(nativeStorage, operation.source)
+      const sourceValue = yield* NativeStorage.readScalar(nativeStorage, operation.source)
       if (source.category === 'Character' && target.spelling === 'u32') {
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([sourceValue]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([sourceValue]),
+        )
         break
       }
       let destinationType: LlvmType.Type
@@ -182,7 +190,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         destinationType,
         `convert${operation.destination.ordinal}`,
       )
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
+        operation.destination.ordinal,
+        Object.freeze([result]),
+      )
       break
     }
     case 'ReinterpretScalar': {
@@ -191,18 +203,22 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const result = yield* FunctionBody.cast(
         body,
         'bitcast',
-        NativeStorage.readScalar(nativeStorage, operation.source),
+        yield* NativeStorage.readScalar(nativeStorage, operation.source),
         NativeType.laneType(types, targetLane),
         `reinterpret${operation.destination.ordinal}`,
       )
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
+        operation.destination.ordinal,
+        Object.freeze([result]),
+      )
       break
     }
     case 'FloatUnary': {
       const source = Scalar.find(operation.sourceType._tag)
       if (source?.category !== 'Floating')
         throw new RangeError('LLVM float unary lost its source type')
-      const subject = NativeStorage.readScalar(nativeStorage, operation.source)
+      const subject = yield* NativeStorage.readScalar(nativeStorage, operation.source)
       if (operation.operation === 'Negate') {
         const result = yield* FunctionBody.unary(
           body,
@@ -210,7 +226,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           subject,
           `fneg${operation.destination.ordinal}`,
         )
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([result]),
+        )
         break
       }
       if (operation.operation === 'Sqrt') {
@@ -235,7 +255,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([result]),
+        )
         break
       }
       const width = source.spelling === 'f32' ? 32 : 64
@@ -374,7 +398,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         i32,
         `fclass${operation.destination.ordinal}`,
       )
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
+        operation.destination.ordinal,
+        Object.freeze([result]),
+      )
       break
     }
     case 'FloatTranscendental': {
@@ -383,14 +411,18 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         { builder, i32, ...(i64Type === undefined ? {} : { i64: i64Type }), f32, f64 },
         body,
         operation,
-        NativeStorage.readScalar(nativeStorage, operation.source),
+        yield* NativeStorage.readScalar(nativeStorage, operation.source),
       )
       yield* NativeDebug.locate(
         debug,
         operation.provenance.span,
         yield* Value.instruction(body, result),
       )
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
+        operation.destination.ordinal,
+        Object.freeze([result]),
+      )
       break
     }
     case 'CheckedScalarOutcome': {
@@ -408,9 +440,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         (target?.category !== 'Integer' && !characterConversion)
       )
         throw new RangeError('LLVM checked scalar operation lost its scalar types')
-      const left = NativeStorage.readScalar(nativeStorage, leftLocal)
+      const left = yield* NativeStorage.readScalar(nativeStorage, leftLocal)
       const right =
-        rightLocal === undefined ? undefined : NativeStorage.readScalar(nativeStorage, rightLocal)
+        rightLocal === undefined
+          ? undefined
+          : yield* NativeStorage.readScalar(nativeStorage, rightLocal)
       const pointerBits = program.layout.target.pointerSize === 4 ? 32 : 64
       const sourceBits = Scalar.bits(source, pointerBits)
       const targetBits = Scalar.bits(target, pointerBits)
@@ -597,13 +631,21 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const zero = yield* Constant.integerUnsigned(builder, i32, 0n)
       const one = yield* Constant.integerUnsigned(builder, i32, 1n)
       const valid = yield* FunctionBody.select(body, invalid, zero, one, `${name}_valid`)
-      nativeStorage.locals.set(operation.valid.ordinal, Object.freeze([valid]))
-      nativeStorage.locals.set(operation.value.ordinal, Object.freeze([result]))
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
+        operation.valid.ordinal,
+        Object.freeze([valid]),
+      )
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
+        operation.value.ordinal,
+        Object.freeze([result]),
+      )
       break
     }
     case 'Binary': {
-      const left = NativeStorage.readScalar(nativeStorage, operation.left)
-      const right = NativeStorage.readScalar(nativeStorage, operation.right)
+      const left = yield* NativeStorage.readScalar(nativeStorage, operation.left)
+      const right = yield* NativeStorage.readScalar(nativeStorage, operation.right)
       const leftType = entry.fn.localTypes.at(operation.left.ordinal)
       const leftLane =
         leftType === undefined ? undefined : NativeType.valueLanesFor(types, leftType).at(0)
@@ -678,7 +720,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             `total${ordinal}_flag`,
           )
           const result = yield* FunctionBody.cast(body, 'zext', flag, i32, `total${ordinal}`)
-          nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+          yield* NativeStorage.writeLocal(
+            nativeStorage,
+            operation.destination.ordinal,
+            Object.freeze([result]),
+          )
           break
         }
         let predicate: FunctionBody.FloatingPredicate | undefined
@@ -714,7 +760,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             `fcmp${ordinal}_flag`,
           )
           const result = yield* FunctionBody.cast(body, 'zext', flag, i32, `fcmp${ordinal}`)
-          nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+          yield* NativeStorage.writeLocal(
+            nativeStorage,
+            operation.destination.ordinal,
+            Object.freeze([result]),
+          )
           break
         }
         let mnemonic: FunctionBody.FloatingBinaryKind | undefined
@@ -746,7 +796,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([result]),
+        )
         break
       }
       const predicate = NativeArith.comparisonPredicate(operation.operator, unsigned)
@@ -761,7 +815,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         const widened = yield* FunctionBody.cast(body, 'zext', flag, i32, `cmp${ordinal}`)
         const instruction = yield* Value.instruction(body, flag)
         yield* NativeDebug.locate(debug, operation.provenance.span, instruction)
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([widened]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([widened]),
+        )
         break
       }
       if (
@@ -799,7 +857,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([result]),
+        )
         break
       }
       if (operation.operator === 'ShiftLeft' || operation.operator === 'ShiftRight') {
@@ -834,7 +896,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([result]),
+        )
         break
       }
       if (operation.operator === 'RotateLeft' || operation.operator === 'RotateRight') {
@@ -856,7 +922,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([result]),
+        )
         break
       }
       if (operation.operator === 'SaturatingAdd' || operation.operator === 'SaturatingSubtract') {
@@ -888,7 +958,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([result]),
+        )
         break
       }
       if (operation.operator === 'SaturatingMultiply') {
@@ -976,7 +1050,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           operation.provenance.span,
           yield* Value.instruction(body, result),
         )
-        nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+        yield* NativeStorage.writeLocal(
+          nativeStorage,
+          operation.destination.ordinal,
+          Object.freeze([result]),
+        )
         break
       }
       let result: Value.Value
@@ -1112,7 +1190,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       }
       const instruction = yield* Value.instruction(body, result)
       yield* NativeDebug.locate(debug, operation.provenance.span, instruction)
-      nativeStorage.locals.set(operation.destination.ordinal, Object.freeze([result]))
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
+        operation.destination.ordinal,
+        Object.freeze([result]),
+      )
       break
     }
   }

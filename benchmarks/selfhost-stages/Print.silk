@@ -1,0 +1,27 @@
+import bench.Support
+import bench.Support {CheckFailure}
+import bench.TreeCheck
+import parser.Parser
+import parser.SyntaxTree
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.effect {Effect}
+import silk.os_writer {StdoutWriter}
+import silk.writer {Writer, WriterError}
+
+effect fn program() -> ()
+! OutOfMemoryError | CheckFailure | WriterError
+? &mut Allocator | &mut Writer {
+  let source = run Support.source()
+  let tokens = run Support.lex(&source)
+  let tree = run Parser.parse(move source, move tokens)
+  run TreeCheck.check(&tree)
+  return run SyntaxTree.write(&tree)
+}
+
+pub effect fn main() -> () ! OutOfMemoryError | CheckFailure | WriterError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut output = StdoutWriter.make()
+  return run program()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+    |> Effect.provideMut<Writer>(&mut output)
+}

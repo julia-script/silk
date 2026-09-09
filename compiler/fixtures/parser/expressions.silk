@@ -1,0 +1,29 @@
+fn expressions(value: i32) -> i32 {
+  let arithmetic = -1 + 2 * 3 - ~value
+  let logical = !false && value < 10 || value == 12
+  let bits = value & 3 ^ 4 | 8
+  let floating = -1.5
+  let duration = 1s
+  let text = "hello"
+  let bytes = b"hello"
+  let character = 'x'
+  let unit = ()
+  let tupleValue = (value, 2,)
+  let arrayValue = [1, 2, 3]
+  let grouped = (value + 1)
+  let record = Pair<i32> { first: value, second: 2 }
+  let contextual = .{ first: 1, second: 2 }
+  let variant = Option<i32>.Some { value: 1 }
+  let selected = Option<i32>.None
+  let call = Fn.make<i32>(value)(2).field[0].0
+  let nested = Option<i32>.map<i64>(value)
+  let borrowed = &mut record.first
+  let moved = move record.second
+  let native = unsafe Native.call(value)
+  let referent = pointer.*
+  let deferred = effect { return value }
+  let closure = fn(item: i32) -> i32 { return item }
+  let effectClosure = effect fn(item: i32) -> i32 ! Error ? &Clock { return item }
+  let executed = run deferred |> Effect.provide<Clock>(clock)
+  return value |> Integer.add(2)
+}

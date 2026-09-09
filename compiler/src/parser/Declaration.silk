@@ -1,0 +1,609 @@
+//! Top-level and member declarations for the self-hosted compiler.
+//!
+//! Dispatch examines complete modifier prefixes: `pub` by itself never implies an import.
+//! Related nominal declarations share header parsing while their member grammars remain separate.
+//! Native headers and sealed properties are retained for semantic validation, not interpreted here.
+import lexer.Token {TokenKind}
+import parser.Node {NodeKind}
+import parser.ParseState {State, ElementsResult, NodeResult}
+import parser.ParseState as P
+import parser.Import {parseImportDeclaration}
+import parser.Type as Types
+import parser.Expression as Expressions
+import parser.Statement as Statements
+import parser.Property as Properties
+import parser.Grammar as G
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.usize as Usize
+
+effect fn nominalHeader(initial: State, keyword: TokenKind) -> ElementsResult
+! OutOfMemoryError
+? &mut Allocator {
+  let mut p = run P.optional(P.begin(move initial), TokenKind.PubKeyword)
+  if keyword == TokenKind.StructKeyword && P.currentKind(&p.state) == TokenKind.ExternKeyword {
+    let consumed = run P.consume(move p)
+    p = move consumed
+    let afterTextLiteral = run P.expect(move p, TokenKind.TextLiteral)
+    p = move afterTextLiteral
+  }
+  let advanced = run P.expect(move p, keyword)
+  p = move advanced
+  if keyword == TokenKind.EnumKeyword && P.currentKind(&p.state) == TokenKind.LeftParenthesis {
+    let consumed2 = run P.consume(move p)
+    p = move consumed2
+    let withTypesParse = run P.attach(move p.elements, run Types.parse(move p.state))
+    p = move withTypesParse
+    let afterRightParenthesis = run P.expect(move p, TokenKind.RightParenthesis)
+    p = move afterRightParenthesis
+  }
+  let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+  p = move afterIdentifier
+  if P.currentKind(&p.state) == TokenKind.Less {
+    let withTypesParameters = run P.attach(
+      move p.elements,
+      run Types.parameters(move p.state, false),
+    )
+    p = move withTypesParameters
+  }
+  return move p
+}
+
+effect fn field(initial: State, kind: NodeKind) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run P.optional(P.begin(move initial), TokenKind.PubKeyword)
+  let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+  p = move afterIdentifier
+  let afterColon = run P.expect(move p, TokenKind.Colon)
+  p = move afterColon
+  if P.currentKind(&p.state) == TokenKind.Identifier && P.peek(&p.state, 1) == TokenKind.Colon {
+    let missing = run P.complete(
+      run P.missing(P.begin(move p.state), TokenKind.Identifier),
+      NodeKind.TypePath,
+    )
+    let attached = run P.attach(move p.elements, move missing)
+    p = move attached
+  } else {
+    let withTypesParse = run P.attach(move p.elements, run Types.parse(move p.state))
+    p = move withTypesParse
+  }
+  return run P.complete(move p, kind)
+}
+
+effect fn structDeclaration(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run nominalHeader(move initial, TokenKind.StructKeyword)
+  let afterLeftBrace = run P.expect(move p, TokenKind.LeftBrace)
+  p = move afterLeftBrace
+  while !G.declarationStart(&p.state) && (P.currentKind(&p.state) == TokenKind.Identifier || P.currentKind(
+    &p.state,
+  ) == TokenKind.PubKeyword) {
+    let attached = run P.attach(move p.elements, run field(move p.state, NodeKind.StructField))
+    p = move attached
+  }
+  let afterRightBrace = run P.expect(move p, TokenKind.RightBrace)
+  p = move afterRightBrace
+  return run P.complete(move p, NodeKind.StructDeclaration)
+}
+
+effect fn tupleDeclaration(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run nominalHeader(move initial, TokenKind.TupleKeyword)
+  let afterLeftParenthesis = run P.expect(move p, TokenKind.LeftParenthesis)
+  p = move afterLeftParenthesis
+  while G.typeStart(P.currentKind(&p.state)) {
+    let before = p.state.index
+    let withTypesParse = run P.attach(move p.elements, run Types.parse(move p.state))
+    p = move withTypesParse
+    if p.state.index == before || P.currentKind(&p.state) == TokenKind.RightParenthesis {
+      break
+    }
+    let afterComma = run P.expect(move p, TokenKind.Comma)
+    p = move afterComma
+  }
+  let afterRightParenthesis = run P.expect(move p, TokenKind.RightParenthesis)
+  p = move afterRightParenthesis
+  return run P.complete(move p, NodeKind.TupleDeclaration)
+}
+
+effect fn enumMember(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run P.expect(P.begin(move initial), TokenKind.Identifier)
+  if P.currentKind(&p.state) == TokenKind.Equals {
+    let consumed = run P.consume(move p)
+    p = move consumed
+    let mut literal = run P.optional(P.begin(move p.state), TokenKind.Minus)
+    let afterDecimalInteger = run P.expect(move literal, TokenKind.DecimalInteger)
+    literal = move afterDecimalInteger
+    let attached = run P.attach(
+      move p.elements,
+      run P.complete(move literal, NodeKind.IntegerLiteralExpression),
+    )
+    p = move attached
+  }
+  return run P.complete(move p, NodeKind.EnumMember)
+}
+
+effect fn variant(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run P.expect(P.begin(move initial), TokenKind.Identifier)
+  if P.currentKind(&p.state) == TokenKind.LeftBrace {
+    let consumed = run P.consume(move p)
+    p = move consumed
+    if P.currentKind(&p.state) == TokenKind.RightBrace {
+      let attached = run P.attach(
+        move p.elements,
+        run field(move p.state, NodeKind.UnionVariantField),
+      )
+      p = move attached
+    } else {
+      while !G.declarationStart(&p.state) && (P.currentKind(&p.state) == TokenKind.Identifier || P.currentKind(
+        &p.state,
+      ) == TokenKind.PubKeyword) {
+        let attached2 = run P.attach(
+          move p.elements,
+          run field(move p.state, NodeKind.UnionVariantField),
+        )
+        p = move attached2
+        if P.currentKind(&p.state) == TokenKind.RightBrace {
+          break
+        }
+        let afterComma = run P.expect(move p, TokenKind.Comma)
+        p = move afterComma
+      }
+    }
+    let afterRightBrace = run P.expect(move p, TokenKind.RightBrace)
+    p = move afterRightBrace
+  }
+  return run P.complete(move p, NodeKind.UnionVariant)
+}
+
+effect fn sumDeclaration(initial: State, isUnion: bool) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  let mut keyword = TokenKind.EnumKeyword
+  if isUnion {
+    keyword = TokenKind.UnionKeyword
+  }
+  let mut p = run nominalHeader(move initial, keyword)
+  let afterLeftBrace = run P.expect(move p, TokenKind.LeftBrace)
+  p = move afterLeftBrace
+  while P.currentKind(&p.state) == TokenKind.Identifier {
+    if isUnion {
+      let attached = run P.attach(move p.elements, run variant(move p.state))
+      p = move attached
+    } else {
+      let attached2 = run P.attach(move p.elements, run enumMember(move p.state))
+      p = move attached2
+    }
+    if P.currentKind(&p.state) == TokenKind.RightBrace {
+      break
+    }
+    let afterComma = run P.expect(move p, TokenKind.Comma)
+    p = move afterComma
+  }
+  let afterRightBrace = run P.expect(move p, TokenKind.RightBrace)
+  p = move afterRightBrace
+  if isUnion {
+    return run P.complete(move p, NodeKind.UnionDeclaration)
+  }
+  return run P.complete(move p, NodeKind.EnumDeclaration)
+}
+
+effect fn alias(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run nominalHeader(move initial, TokenKind.TypeKeyword)
+  let afterEquals = run P.expect(move p, TokenKind.Equals)
+  p = move afterEquals
+  let withTypesParse = run P.attach(move p.elements, run Types.parse(move p.state))
+  p = move withTypesParse
+  return run P.complete(move p, NodeKind.TypeAliasDeclaration)
+}
+
+effect fn constant(initial: State, parameter: bool) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  let mut keyword = TokenKind.ConstKeyword
+  if parameter {
+    keyword = TokenKind.ParamKeyword
+  }
+  let mut p = run P.optional(P.begin(move initial), TokenKind.PubKeyword)
+  let advanced = run P.expect(move p, keyword)
+  p = move advanced
+  let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+  p = move afterIdentifier
+  let afterColon = run P.expect(move p, TokenKind.Colon)
+  p = move afterColon
+  let withTypesParse = run P.attach(move p.elements, run Types.parse(move p.state))
+  p = move withTypesParse
+  if !parameter || P.currentKind(&p.state) == TokenKind.Equals {
+    let afterEquals = run P.expect(move p, TokenKind.Equals)
+    p = move afterEquals
+    let withExpressionsParse = run P.attach(
+      move p.elements,
+      run Expressions.parse(move p.state, false),
+    )
+    p = move withExpressionsParse
+  }
+  if parameter && P.word(&p.state, "where") {
+    let mut validation = run P.consume(P.begin(move p.state))
+    let attached = run P.attach(
+      move validation.elements,
+      run Expressions.parse(move validation.state, false),
+    )
+    validation = move attached
+    let attached2 = run P.attach(
+      move p.elements,
+      run P.complete(move validation, NodeKind.PackageParameterValidation),
+    )
+    p = move attached2
+  }
+  if parameter {
+    return run P.complete(move p, NodeKind.PackageParameterDeclaration)
+  }
+  return run P.complete(move p, NodeKind.ConstantDeclaration)
+}
+
+effect fn operator(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run P.consume(P.begin(move initial))
+  let kind = P.currentKind(&p.state)
+  if G.precedence(kind) > 0 || kind == TokenKind.Bang || kind == TokenKind.Tilde || kind == TokenKind.Equals || kind == TokenKind.RunKeyword {
+    let consumed = run P.consume(move p)
+    p = move consumed
+  } else {
+    let afterStar = run P.missing(move p, TokenKind.Star)
+    p = move afterStar
+  }
+  return run P.complete(move p, NodeKind.OperatorMarker)
+}
+
+effect fn functionPrefix(initial: State, operation: bool) -> ElementsResult
+! OutOfMemoryError
+? &mut Allocator {
+  let mut p = P.begin(move initial)
+  if operation && P.word(&p.state, "operator") {
+    let attached = run P.attach(move p.elements, run operator(move p.state))
+    p = move attached
+  }
+  let afterPubKeyword = run P.optional(move p, TokenKind.PubKeyword)
+  p = move afterPubKeyword
+  let afterStaticKeyword = run P.optional(move p, TokenKind.StaticKeyword)
+  p = move afterStaticKeyword
+  let afterUnsafeKeyword = run P.optional(move p, TokenKind.UnsafeKeyword)
+  p = move afterUnsafeKeyword
+  return move p
+}
+
+effect fn functionName(initial: ElementsResult, allowDrop: bool) -> ElementsResult
+! OutOfMemoryError
+? &mut Allocator {
+  let mut p = move initial
+  if P.currentKind(&p.state) == TokenKind.EffectKeyword {
+    let consumed = run P.consume(move p)
+    p = move consumed
+    if P.currentKind(&p.state) == TokenKind.Less {
+      let withTypesEnvironment = run P.attach(
+        move p.elements,
+        run Types.environment(move p.state, true),
+      )
+      p = move withTypesEnvironment
+    }
+  }
+  let afterFnKeyword = run P.expect(move p, TokenKind.FnKeyword)
+  p = move afterFnKeyword
+  if allowDrop && P.currentKind(&p.state) == TokenKind.DropKeyword {
+    let consumed2 = run P.consume(move p)
+    p = move consumed2
+  } else {
+    let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+    p = move afterIdentifier
+  }
+  return run Types.contract(move p)
+}
+
+effect fn symbol(initial: ElementsResult) -> ElementsResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = move initial
+  if P.currentKind(&p.state) == TokenKind.AsKeyword {
+    let consumed = run P.consume(move p)
+    p = move consumed
+    let afterTextLiteral = run P.expect(move p, TokenKind.TextLiteral)
+    p = move afterTextLiteral
+  }
+  return move p
+}
+
+effect fn functionDeclaration(initial: State, operation: bool, allowDrop: bool) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  let mut p = run functionPrefix(move initial, operation)
+  let marker = P.currentKind(&p.state)
+  let foreign = marker == TokenKind.ExternKeyword
+  let exported = marker == TokenKind.ExportKeyword
+  if foreign || exported {
+    let consumed = run P.consume(move p)
+    p = move consumed
+    let afterTextLiteral = run P.expect(move p, TokenKind.TextLiteral)
+    p = move afterTextLiteral
+  }
+  let advanced = run functionName(move p, allowDrop)
+  p = move advanced
+  if foreign || exported {
+    let advanced2 = run symbol(move p)
+    p = move advanced2
+  }
+  let advanced3 = run Properties.list(move p)
+  p = move advanced3
+  if (!foreign && !operation) || P.currentKind(&p.state) == TokenKind.LeftBrace {
+    let attached = run P.attach(
+      move p.elements,
+      run Statements.block(move p.state, !operation, false),
+    )
+    p = move attached
+  }
+  if operation {
+    return run P.complete(move p, NodeKind.ServiceOperation)
+  }
+  if foreign {
+    return run P.complete(move p, NodeKind.ForeignFunctionDeclaration)
+  }
+  return run P.complete(move p, NodeKind.FunctionDeclaration)
+}
+
+fn operationStart(state: &State) -> bool {
+  let kind = P.currentKind(state)
+  return kind == TokenKind.FnKeyword || kind == TokenKind.EffectKeyword || kind == TokenKind.UnsafeKeyword || P.word(
+    state,
+    "operator",
+  )
+}
+
+effect fn serviceDeclaration(initial: State, isInterface: bool) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  let mut keyword = TokenKind.ServiceKeyword
+  if isInterface {
+    keyword = TokenKind.InterfaceKeyword
+  }
+  let mut p = run nominalHeader(move initial, keyword)
+  let afterLeftBrace = run P.expect(move p, TokenKind.LeftBrace)
+  p = move afterLeftBrace
+  while P.currentKind(&p.state) != TokenKind.RightBrace && P.currentKind(&p.state) != TokenKind.EndOfFile {
+    if operationStart(&p.state) {
+      let attached = run P.attach(
+        move p.elements,
+        run functionDeclaration(move p.state, true, false),
+      )
+      p = move attached
+    } else {
+      if G.declarationStart(&p.state) {
+        break
+      }
+      let error = run P.complete(
+        run P.unexpected(P.begin(move p.state)),
+        NodeKind.ServiceInvalidMember,
+      )
+      let attached2 = run P.attach(move p.elements, move error)
+      p = move attached2
+    }
+  }
+  let afterRightBrace = run P.expect(move p, TokenKind.RightBrace)
+  p = move afterRightBrace
+  if isInterface {
+    return run P.complete(move p, NodeKind.InterfaceDeclaration)
+  }
+  return run P.complete(move p, NodeKind.ServiceDeclaration)
+}
+
+effect fn implOperation(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run P.expect(P.begin(move initial), TokenKind.Identifier)
+  let afterColon = run P.expect(move p, TokenKind.Colon)
+  p = move afterColon
+  let withTypesPath = run P.attach(move p.elements, run Types.path(move p.state))
+  p = move withTypesPath
+  return run P.complete(move p, NodeKind.ImplOperation)
+}
+
+effect fn implementation(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run P.consume(P.begin(move initial))
+  if P.currentKind(&p.state) == TokenKind.Less {
+    let withTypesParameters = run P.attach(
+      move p.elements,
+      run Types.parameters(move p.state, false),
+    )
+    p = move withTypesParameters
+  }
+  let withTypesParse = run P.attach(move p.elements, run Types.parse(move p.state))
+  p = move withTypesParse
+  if P.currentKind(&p.state) == TokenKind.ForKeyword {
+    let consumed = run P.consume(move p)
+    p = move consumed
+    let withTypesParse2 = run P.attach(move p.elements, run Types.parse(move p.state))
+    p = move withTypesParse2
+  }
+  let afterLeftBrace = run P.expect(move p, TokenKind.LeftBrace)
+  p = move afterLeftBrace
+  while P.currentKind(&p.state) == TokenKind.Identifier || P.currentKind(&p.state) == TokenKind.PubKeyword || P.currentKind(
+    &p.state,
+  ) == TokenKind.StaticKeyword || operationStart(&p.state) {
+    if P.currentKind(&p.state) == TokenKind.Identifier {
+      let attached = run P.attach(move p.elements, run implOperation(move p.state))
+      p = move attached
+    } else {
+      let before = p.state.index
+      let attached2 = run P.attach(
+        move p.elements,
+        run functionDeclaration(move p.state, false, true),
+      )
+      p = move attached2
+      if p.state.index == before {
+        break
+      }
+    }
+  }
+  let afterRightBrace = run P.expect(move p, TokenKind.RightBrace)
+  p = move afterRightBrace
+  return run P.complete(move p, NodeKind.ImplDeclaration)
+}
+
+effect fn foreignStatic(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let imported = P.currentKind(&initial) == TokenKind.UnsafeKeyword
+  let mut p = run P.optional(P.begin(move initial), TokenKind.UnsafeKeyword)
+  if imported {
+    let afterExternKeyword = run P.expect(move p, TokenKind.ExternKeyword)
+    p = move afterExternKeyword
+  } else {
+    let afterExportKeyword = run P.expect(move p, TokenKind.ExportKeyword)
+    p = move afterExportKeyword
+  }
+  let afterTextLiteral = run P.expect(move p, TokenKind.TextLiteral)
+  p = move afterTextLiteral
+  let afterStaticKeyword = run P.expect(move p, TokenKind.StaticKeyword)
+  p = move afterStaticKeyword
+  let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+  p = move afterIdentifier
+  let afterColon = run P.expect(move p, TokenKind.Colon)
+  p = move afterColon
+  let withTypesParse = run P.attach(move p.elements, run Types.parse(move p.state))
+  p = move withTypesParse
+  let advanced = run symbol(move p)
+  p = move advanced
+  if imported {
+    let advanced2 = run Properties.list(move p)
+    p = move advanced2
+    return run P.complete(move p, NodeKind.ForeignStaticDeclaration)
+  }
+  let afterEquals = run P.expect(move p, TokenKind.Equals)
+  p = move afterEquals
+  let withExpressionsParse = run P.attach(
+    move p.elements,
+    run Expressions.parse(move p.state, false),
+  )
+  p = move withExpressionsParse
+  return run P.complete(move p, NodeKind.ExportStaticDeclaration)
+}
+
+effect fn group(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let opened = P.currentKind(&initial) == TokenKind.LeftBrace
+  let mut p = run P.expect(P.begin(move initial), TokenKind.LeftBrace)
+  if opened {
+    while P.currentKind(&p.state) != TokenKind.RightBrace && P.currentKind(&p.state) != TokenKind.ElseKeyword && P.currentKind(
+      &p.state,
+    ) != TokenKind.EndOfFile {
+      let before = p.state.index
+      let attached = run P.attach(move p.elements, run parse(move p.state))
+      p = move attached
+      if p.state.index == before {
+        let advanced = run P.unexpected(move p)
+        p = move advanced
+      }
+    }
+  }
+  let afterRightBrace = run P.expect(move p, TokenKind.RightBrace)
+  p = move afterRightBrace
+  return run P.complete(move p, NodeKind.DeclarationGroup)
+}
+
+effect fn staticConditional(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  if initial.depth >= 256 {
+    return run P.nestingError(move initial)
+  }
+  let depth = initial.depth
+  let mut state = move initial
+  state.depth = Usize.add(depth, 1)
+  let mut result = run staticConditionalInner(move state)
+  result.state.depth = depth
+  return move result
+}
+
+effect fn staticConditionalInner(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run P.consume(P.begin(move initial))
+  let afterIfKeyword = run P.expect(move p, TokenKind.IfKeyword)
+  p = move afterIfKeyword
+  let withExpressionsParse = run P.attach(
+    move p.elements,
+    run Expressions.parse(move p.state, false),
+  )
+  p = move withExpressionsParse
+  let attached = run P.attach(move p.elements, run group(move p.state))
+  p = move attached
+  if P.currentKind(&p.state) == TokenKind.ElseKeyword {
+    let consumed = run P.consume(move p)
+    p = move consumed
+    if P.currentKind(&p.state) == TokenKind.StaticKeyword {
+      let attached2 = run P.attach(move p.elements, run staticConditional(move p.state))
+      p = move attached2
+    } else {
+      let attached3 = run P.attach(move p.elements, run group(move p.state))
+      p = move attached3
+    }
+  }
+  return run P.complete(move p, NodeKind.StaticConditionalDeclaration)
+}
+
+/// Parses a declaration selected from its significant-token prefix, preserving damaged regions.
+///
+/// Public fields are not declaration starts. Foreign static headers are recognized before
+/// ordinary function headers, and static conditionals own nested declaration groups.
+pub effect fn parse(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let kind = P.currentKind(&initial)
+  let mut head = kind
+  let mut offset: usize = 0
+  if kind == TokenKind.PubKeyword {
+    head = P.peek(&initial, 1)
+    offset = 1
+  }
+  if kind == TokenKind.StaticKeyword && P.peek(&initial, 1) == TokenKind.IfKeyword {
+    return run staticConditional(move initial)
+  }
+  if (kind == TokenKind.UnsafeKeyword && P.peek(&initial, 1) == TokenKind.ExternKeyword && P.peek(
+    &initial,
+    3,
+  ) == TokenKind.StaticKeyword) || (kind == TokenKind.ExportKeyword && P.peek(&initial, 2) == TokenKind.StaticKeyword) {
+    return run foreignStatic(move initial)
+  }
+  if head == TokenKind.ImportKeyword {
+    return run parseImportDeclaration(move initial)
+  }
+  if head == TokenKind.ConstKeyword {
+    return run constant(move initial, false)
+  }
+  if head == TokenKind.ParamKeyword {
+    return run constant(move initial, true)
+  }
+  if head == TokenKind.StructKeyword || (head == TokenKind.ExternKeyword && ((offset == 0 && P.peek(
+    &initial,
+    2,
+  ) == TokenKind.StructKeyword) || (offset == 1 && P.peek(&initial, 3) == TokenKind.StructKeyword))) {
+    return run structDeclaration(move initial)
+  }
+  if head == TokenKind.TupleKeyword {
+    return run tupleDeclaration(move initial)
+  }
+  if head == TokenKind.EnumKeyword {
+    return run sumDeclaration(move initial, false)
+  }
+  if head == TokenKind.UnionKeyword {
+    return run sumDeclaration(move initial, true)
+  }
+  if head == TokenKind.TypeKeyword {
+    return run alias(move initial)
+  }
+  if head == TokenKind.ServiceKeyword {
+    return run serviceDeclaration(move initial, false)
+  }
+  if head == TokenKind.InterfaceKeyword {
+    return run serviceDeclaration(move initial, true)
+  }
+  if head == TokenKind.RoleKeyword {
+    return run P.complete(
+      run nominalHeader(move initial, TokenKind.RoleKeyword),
+      NodeKind.RoleDeclaration,
+    )
+  }
+  if head == TokenKind.ImplKeyword {
+    return run implementation(move initial)
+  }
+  if P.word(&initial, "module") {
+    let mut p = run P.consume(P.begin(move initial))
+    let withPropertiesClause = run P.attach(move p.elements, run Properties.clause(move p.state))
+    p = move withPropertiesClause
+    return run P.complete(move p, NodeKind.ModulePropertyDeclaration)
+  }
+  if head == TokenKind.FnKeyword || head == TokenKind.EffectKeyword || head == TokenKind.UnsafeKeyword || head == TokenKind.ExternKeyword || head == TokenKind.ExportKeyword || head == TokenKind.StaticKeyword {
+    return run functionDeclaration(move initial, false, false)
+  }
+  return run P.complete(run P.unexpected(P.begin(move initial)), NodeKind.Error)
+}

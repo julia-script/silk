@@ -1,0 +1,14 @@
+import bench.Support
+import bench.Support {CheckFailure}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.effect {Effect}
+
+effect fn program() -> () ! OutOfMemoryError | CheckFailure ? &mut Allocator {
+  let source = run Support.source()
+  let tokens = run Support.lex(&source)
+}
+
+pub effect fn main() -> () ! OutOfMemoryError | CheckFailure {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run program() |> Effect.provideMut<Allocator>(&mut allocator)
+}

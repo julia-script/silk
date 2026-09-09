@@ -1,3 +1,4 @@
+import * as NativePayload from './NativePayload.js'
 import type * as LlvmBlock from '@silklang/llvm/Block'
 import type * as Builder from '@silklang/llvm/Builder'
 import * as Constant from '@silklang/llvm/Constant'
@@ -11,6 +12,7 @@ import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import type { LinearTerminator } from './MirLinearization.js'
 import * as NativeAggregate from './NativeAggregate.js'
+import * as NativeArith from './NativeArith.js'
 import * as NativeDebug from './NativeDebug.js'
 import * as NativeOwnedPlace from './NativeOwnedPlace.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
@@ -18,6 +20,7 @@ import type * as NativeSuspension from './NativeSuspension.js'
 import * as NativeReturn from './NativeReturn.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
+import * as NativeStorage from './NativeStorage.js'
 import * as SilkType from './Type.js'
 
 export interface Context {
@@ -26,7 +29,7 @@ export interface Context {
   readonly i32: LlvmType.Type
   readonly types: NativeType.LoweringContext
   readonly blocks: ReadonlyMap<number, LlvmBlock.Block>
-  readonly locals: ReadonlyMap<number, ReadonlyArray<Value.Input>>
+  readonly storage: NativeStorage.Context
   readonly entry: NativeLoweringContext.DeclaredFunction
   readonly cleanup: NativeAggregate.Context
   readonly failure: NativeAggregate.FailureContext
@@ -35,19 +38,8 @@ export interface Context {
   readonly termination: NativeTermination.FunctionContext
 }
 
-const read = (context: Context, local: Mir.LocalId): ReadonlyArray<Value.Input> => {
-  const found = context.locals.get(local.ordinal)
-  if (found === undefined) throw new RangeError(`Backend read undefined local %${local.ordinal}`)
-  return found
-}
-
-const scalar = (context: Context, local: Mir.LocalId): Value.Input => {
-  const values = read(context, local)
-  const first = values.at(0)
-  if (values.length !== 1 || first === undefined)
-    throw new RangeError(`Backend expected scalar local %${local.ordinal}`)
-  return first
-}
+const read = (context: Context, local: Mir.LocalId) =>
+  NativeStorage.materialize(context.storage, local)
 
 const discriminants = Effect.fnUntraced(function* (
   context: Context,
@@ -56,8 +48,12 @@ const discriminants = Effect.fnUntraced(function* (
   count: number,
   tag: string,
 ) {
-  const values = read(context, local)
-  if (selectors.length === 0) return values.slice(0, count)
+  if (selectors.length === 0) {
+    const values: Array<Value.Input> = []
+    for (let ordinal = 0; ordinal < count; ordinal += 1)
+      values.push(yield* NativeStorage.readLane(context.storage, local, ordinal))
+    return values
+  }
   const root = context.entry.fn.localTypes.at(local.ordinal)
   const place =
     root === undefined
@@ -67,7 +63,7 @@ const discriminants = Effect.fnUntraced(function* (
   return yield* NativeOwnedPlace.read(
     place,
     context.cleanup.arith,
-    values,
+    (ordinal) => NativeStorage.readLane(context.storage, local, ordinal),
     tag,
     Array.from({ length: count }, (_, ordinal) => ordinal),
   )
@@ -99,7 +95,7 @@ export const branch = Effect.fnUntraced(function* (
   const condition = yield* FunctionBody.integerCompare(
     context.body,
     'ne',
-    scalar(context, terminator.condition),
+    yield* NativeStorage.readScalar(context.storage, terminator.condition),
     zero,
     `c${ordinal}`,
   )
@@ -169,11 +165,23 @@ export const matchBranch = Effect.fnUntraced(function* (
     const member = terminator.member
     const nested = terminator.shape.tree._tag === 'SumShape'
     const variantTag = values.at(nested ? 1 : 0)
-    if (variantTag === undefined) throw new RangeError('LLVM nominal union match has no tag lane')
+    const carrierLane = terminator.shape.lanes.at(nested ? 1 : 0)
+    const tagLane = terminator.shape.lanes.at(0)
+    if (variantTag === undefined || carrierLane === undefined || tagLane === undefined)
+      throw new RangeError('LLVM nominal union match has no tag lane')
+    // A structural union shares payload carriers across members. Recover the nominal i32
+    // tag from that carrier, which another member may have widened or made floating-point.
+    const discriminant = yield* NativeArith.coerceLane(
+      context.cleanup.arith,
+      variantTag,
+      carrierLane,
+      tagLane,
+      `match${blockOrdinal}_variant_tag`,
+    )
     const variantMatches = yield* FunctionBody.integerCompare(
       context.body,
       'eq',
-      variantTag,
+      discriminant,
       yield* Constant.integerSigned(context.builder, context.i32, BigInt(member.variantOrdinal)),
       `match${blockOrdinal}_variant`,
     )
@@ -244,7 +252,7 @@ export const emit = Effect.fnUntraced(function* (
         terminator.outcome,
         terminator.provenance.span,
       )
-      const source = readLocal(terminator.source)
+      const source = yield* readLocal(terminator.source)
       const sourceTag = terminator.sourceType._tag === 'Union' ? source.at(0) : undefined
       let mappedTag: Value.Input
       if (terminator.sourceType._tag === 'Nominal') {
@@ -279,7 +287,7 @@ export const emit = Effect.fnUntraced(function* (
         yield* NativeAggregate.dropThroughPlan(
           context.cleanup,
           release.cleanup,
-          readLocal(release.local),
+          NativePayload.local(context.storage, release.local),
           `propagation_release${release.local.ordinal}`,
         )
       }
@@ -304,7 +312,7 @@ export const emit = Effect.fnUntraced(function* (
       break
     }
     case 'Return': {
-      const returned = readLocal(terminator.value)
+      const returned = yield* readLocal(terminator.value)
       const instruction = yield* NativeReturn.complete(
         context.suspension,
         returned,

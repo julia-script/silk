@@ -7,7 +7,7 @@
 //!
 //! # Details
 //!
-//! A diagnostic describes either an absent required token or one unexpected source token. Parser
+//! A diagnostic describes an absent required token, unexpected source, or excessive nesting. Parser
 //! operations append diagnostics in discovery order. Each diagnostic owns the token kind and span
 //! needed for a source report.
 //!
@@ -17,7 +17,7 @@
 import lexer.Span {Span}
 import lexer.Token {TokenKind}
 
-/// One missing or unexpected token problem attached to a parser result.
+/// One syntax or stack-safety problem attached to a parser result.
 ///
 /// # Details
 ///
@@ -36,6 +36,13 @@ pub union Diagnostic {
     /// The kind of the source token that recovery consumed.
     pub actual: TokenKind,
     /// The half-open byte span of the consumed source token.
+    pub span: Span,
+  },
+  /// Recursive grammar nesting exceeded the parser's stack-safety bound.
+  NestingLimit {
+    /// Maximum number of simultaneously active recursive grammar rules.
+    pub limit: usize,
+    /// Source position at which the over-deep branch began.
     pub span: Span,
   },
 }

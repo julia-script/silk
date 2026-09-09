@@ -12,6 +12,7 @@ import type * as Mir from './Mir.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import * as NativeStorage from './NativeStorage.js'
+import * as NativeFrame from './NativeFrame.js'
 import * as NativeSuspension from './NativeSuspension.js'
 import * as NativeType from './NativeType.js'
 import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
@@ -142,7 +143,6 @@ export const retainRelay = Effect.fnUntraced(function* (
     resumeThunks,
     storage,
     transferPointer,
-    types,
   } = context
   const continuation = suspension.relay.state
   if (continuation === undefined) return
@@ -225,29 +225,7 @@ export const retainRelay = Effect.fnUntraced(function* (
     )
   }
   for (const field of generated.layout.payload) {
-    const values = NativeStorage.readLocal(storage, field.local)
-    const type = entry.fn.localTypes.at(field.local.ordinal)
-    if (type === undefined) throw new RangeError('LLVM frame payload lost its type')
-    const packed = NativeType.packLanes(
-      program.layout.target,
-      NativeType.lanesFor(types, type),
-      field.offset,
-    )
-    for (const [ordinal, lane] of packed.entries.entries()) {
-      const value = values.at(ordinal)
-      if (value === undefined) throw new RangeError('LLVM frame payload lost a lane')
-      yield* FunctionBody.store(
-        body,
-        value,
-        yield* NativeLanePointer.lanePointer(
-          lanePointers,
-          body,
-          frame,
-          lane.offset,
-          `${name}_payload${field.slot}_${ordinal}`,
-        ),
-      )
-    }
+    yield* NativeFrame.retain(storage, frame, field, `${name}_payload${field.slot}`)
   }
   yield* FunctionBody.store(body, frame, appendPointer)
   yield* FunctionBody.store(

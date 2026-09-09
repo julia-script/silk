@@ -74,6 +74,46 @@ pub fn main() -> i32 {
       aggregate.instances.map((instance) => instance.key.declaration.name),
       ['main', 'build'],
     )
+    for (const discovery of [nested, direct, mutual, aggregate])
+      assert.strictEqual(discovery.counters.residualBodies.requests, discovery.instances.length)
+  }),
+)
+
+it.effect('shares monomorphic discovery across converging call paths', () =>
+  Effect.gen(function* () {
+    const analyzed = yield* snapshot(`fn leaf(value: i32) -> i32 { return value }
+fn left(value: i32) -> i32 { return leaf(value) }
+fn right(value: i32) -> i32 { return leaf(value) }
+pub fn main() -> i32 { return left(1) + right(2) }`)
+    assert.deepEqual(Analysis.diagnostics(analyzed), [])
+    const discovery = Analysis.instancesOf(analyzed)
+    assert.deepEqual(
+      discovery.instances.map((instance) => instance.key.declaration.name),
+      ['main', 'left', 'right', 'leaf'],
+    )
+    // These are semantic body requests, not timings: different monomorphic paths must share
+    // the same discovery context, rather than asking residualization to cache duplicate work.
+    assert.strictEqual(discovery.counters.residualBodies.requests, discovery.instances.length)
+  }),
+)
+
+it.effect('retains generic ancestors across shared monomorphic helpers', () =>
+  Effect.gen(function* () {
+    const analyzed = yield* snapshot(`fn generic<T>() -> i32 { return helper() }
+fn helper() -> i32 { return generic<bool>() }
+pub fn main() -> i32 { return helper() + generic<i32>() }`)
+    assert.deepEqual(
+      Analysis.diagnostics(analyzed).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    const discovery = Analysis.instancesOf(analyzed)
+    assert.deepEqual(
+      discovery.violations.map((violation) => ({
+        caller: violation.caller.declaration.name,
+        target: violation.target.typeArguments.map(Type.encodeGenericArgument),
+      })),
+      [{ caller: 'helper', target: ['bool'] }],
+    )
   }),
 )
 

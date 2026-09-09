@@ -30,8 +30,8 @@ import silk.vector {Vector}
 ///
 /// # Details
 ///
-/// Categories cover the full planned parser vocabulary. The current grammar can produce only the
-/// categories for source files, imports, and error recovery.
+/// Categories distinguish declarations, types, statements, expressions, patterns, and recovery.
+/// Child identities retain structure without embedding or copying another node value.
 pub enum NodeKind {
   /// The root of one parsed source file.
   SourceFile,

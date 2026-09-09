@@ -1,0 +1,29 @@
+fn statements(value: Option<i32>) -> i32 {
+  let mut counter: i32 = 0
+  counter = counter + 1
+  let Pair { first, second: renamed, .. } = move pair
+  let _ = counter
+  if let Option<i32>.Some { value: found } = move value {
+    counter = found
+  } else if counter == 0 { return 0 } else { counter = 2 }
+  while counter < 10 {
+    if counter == 4 { break }
+    counter = counter + 1
+    continue
+  }
+  static if true { counter = 2 } else { counter = 3 }
+  static for item in items { consume(item) }
+  unsafe { Native.call(counter) }
+  drop resource
+  return match move value {
+    Option<i32>.Some { value: found } if found > 0 => { return found }
+    Option<i32>.None => 0
+    Choice.First => 1
+    Pair { first: Pair { first, second }, second: _, .. } => 2
+    i32 integer => integer
+    [u8; 4] arrayValue => { return 4 }
+    -1 => 5
+    _ => { fail move error }
+  }
+}
+fn failure() -> i32 { return compileError("unavailable") }

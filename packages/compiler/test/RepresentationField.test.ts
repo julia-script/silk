@@ -120,11 +120,31 @@ struct Parser<F: fn<'static>(i32) -> i32> {
 it.effect('resolves nested repeated fields once per complete nominal instance', () =>
   Effect.gen(function* () {
     const module = 'representation-field/nested'
-    const index = yield* declarations(
+    const sourceIndex = yield* declarations(
       module,
       `struct Inner<F: fn<'static>(i32) -> i32> { operation: F }
 struct Outer<F: fn<'static>(i32) -> i32> { first: Inner<F> second: Inner<F> }`,
     )
+    const owner = sourceIndex.modules.at(0)
+    assert.ok(owner)
+    // Lookup must stay within the nominal's module, even during nested planning and
+    // provenance resolution. Unrelated field collections are not lookup inputs.
+    const index = {
+      ...sourceIndex,
+      modules: [
+        {
+          ...owner,
+          module: 'representation-field/unrelated',
+          get structs(): typeof owner.structs {
+            return assert.fail('representation lookup enumerated unrelated structs')
+          },
+          get unions(): typeof owner.unions {
+            return assert.fail('representation lookup enumerated unrelated unions')
+          },
+        },
+        ...sourceIndex.modules,
+      ],
+    }
     const argument = exactCallable(module)
     const instance = Type.nominal(module, 'Outer', [argument])
     const plans = RepresentationField.plansOf(index, instance)

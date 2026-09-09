@@ -6,6 +6,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
+import { unreachable } from './support/raise.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -59,6 +60,108 @@ const emit = Effect.fnUntraced(function* (text: string, request: Backend.Codegen
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/${name}`, import.meta.url), 'utf8')
+
+it.effect('uses addressable storage as the mutable local backing store', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'golden/program',
+      ascii(`fn update(value: &mut i32) { value.* = 42 }
+pub fn main() -> i32 {
+  let mut value = 0
+  update(&mut value)
+  if value == 42 { return value }
+  return 1
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    const address = artifact.ir.match(/%addr(\d+) = alloca/)
+    const root = address?.at(1) ?? unreachable('expected address-taken local storage')
+    assert.notMatch(artifact.ir, new RegExp(`%mut${root}_\\d+ = alloca`))
+    assert.match(artifact.ir, new RegExp(`load i32, ptr %addr${root}_lane0`))
+  }),
+)
+
+it.effect('limits borrowed-local refreshes to their referenced lifetime within a block', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'golden/program',
+      ascii(`fn update(value: &mut i32) { value.* = 21 }
+fn finish(saved: i32, ignored: ()) -> i32 { return saved }
+pub fn main() -> i32 {
+  let mut first = 0
+  update(&mut first)
+  let mut second = 0
+  let saved = finish(first + 0, update(&mut second))
+  return saved + second
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    const root =
+      artifact.ir.match(/%addr(\d+) = alloca/)?.at(1) ??
+      unreachable('expected the first borrowed local')
+    const calls = [...artifact.ir.matchAll(/call void @silk_golden_program_update[^\n]+/g)]
+    const lastCall = calls.at(-1) ?? unreachable('expected update calls')
+    const before = artifact.ir.slice(0, lastCall.index)
+    const after = artifact.ir.slice(lastCall.index)
+    assert.match(before, new RegExp(`load i32, ptr %addr${root}_lane0`))
+    assert.notMatch(after, new RegExp(`load i32, ptr %addr${root}_lane0`))
+    const second =
+      [...artifact.ir.matchAll(/%addr(\d+) = alloca/g)].at(1)?.at(1) ??
+      unreachable('expected the second borrowed local')
+    assert.notMatch(
+      artifact.ir,
+      new RegExp(`load i32, ptr %addr${second}_lane0\\n\\s*store i32 0, ptr %addr${second}_lane0`),
+    )
+  }),
+)
+
+it.effect('joins return payloads before releasing diagnostic outcomes', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'golden/program',
+      ascii(`import silk.effect { Effect }
+struct Problem {}
+fn observing<'env, S, A, ?R, F: fn<'static>(&mut S, u8, usize, usize, string<'static>, string<'static>) -> usize + Intrinsic.NonParking>(state: S, observer: F, body: once Effect<'env; A ? R>) -> once Effect<'env; A ? R> {
+  return Intrinsic.observeDiagnostics<S, A, R, F>(move state, move observer, move body)
+}
+fn observer(state: &mut (), event: u8, first: usize, second: usize, identity: string<'static>, origin: string<'static>) -> usize { return 0 }
+effect fn risky() -> i32 ! Problem { fail Problem {} }
+effect fn recover(error: Problem) -> i32 { return 42 }
+effect fn choose(flag: bool) -> i32 ! Problem {
+  let value = run risky()
+  if flag { return value }
+  return 7
+}
+pub fn main() -> i32 { return run observing((), observer, Effect.catchAll(choose(false), recover)) }`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+    const choose =
+      artifact.ir.match(/define hidden [^\n]+@silk_golden_program_choose_effect[^]*?\n}/)?.at(0) ??
+      unreachable('expected effect runner')
+    assert.match(choose, /completion:\n\s+%completion_lane0 = phi/)
+    const stored =
+      choose.match(/store i32 7, ptr (%place\w+)/)?.at(1) ??
+      unreachable('expected the return payload in canonical storage')
+    const address =
+      choose.match(new RegExp(`${stored} = getelementptr i8, ptr (%addr\\d+), i32 (\\d+)`)) ??
+      unreachable('expected a planned payload offset')
+    const projection =
+      choose
+        .match(
+          new RegExp(`(%place\\w+) = getelementptr i8, ptr ${address.at(1)}, i32 ${address.at(2)}`),
+        )
+        ?.at(1) ?? unreachable('expected the returned payload projection')
+    assert.include(choose, `ptr ${projection}`)
+    assert.match(choose, /phi i32[^\n]+\[ %place[^,]+, %completion_exit/)
+    assert.match(choose, /insertvalue [^\n]+%completion_lane/)
+  }),
+)
 
 it.effect('lowers scalar enums to exact native integer lanes and declared discriminants', () =>
   Effect.gen(function* () {
@@ -273,7 +376,7 @@ it.effect('privately flattens structured match regions with deterministic member
   }),
 )
 
-it.effect('realizes fixed arrays and checked mixed place reads from compiler-owned lanes', () =>
+it.effect('projects a checked array element before loading only its selected field', () =>
   Effect.gen(function* () {
     const source = `struct Pair { left: i32 right: i32 }
 fn choose(values: [Pair; 2], index: usize) -> i32 { return values[index].left }
@@ -282,7 +385,10 @@ pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left:
     const second = yield* emit(source, { mode: 'release' })
 
     assert.include(first.ir, 'icmp ult')
-    assert.include(first.ir, 'select i1')
+    assert.notInclude(first.ir, 'select i1')
+    assert.match(first.ir, /%owned_read\d+_stride0 = mul i64 %\w+, 8/)
+    assert.match(first.ir, /getelementptr i32, ptr %addr0, i64 %owned_read\d+_stride0/)
+    assert.match(first.ir, /%project\w+ = load i32, ptr %owned_read\d+_field/)
     assert.include(first.ir, '@llvm.trap()')
     assert.deepEqual(first.bitcode, second.bitcode)
     assert.strictEqual(first.ir, second.ir)
@@ -332,6 +438,68 @@ it.effect('publishes native branch provenance back to canonical loop regions', (
       ),
       true,
     )
+  }),
+)
+
+it.effect('does not reload unrelated mutable locals at a later control-flow join', () =>
+  Effect.gen(function* () {
+    const artifact = yield* emit(
+      `pub fn main() -> i32 {
+      let mut discarded = 17
+      discarded = discarded + 1
+      drop discarded
+      let mut result = 0
+      while result < 2 { result = result + 1 }
+      return result
+    }`,
+      { mode: 'release' },
+    )
+    const discardedStorage =
+      artifact.ir.match(/store i32 17, ptr (%mut\d+_0)/)?.[1] ??
+      unreachable('expected discarded local storage')
+    const resultStorage =
+      artifact.ir.match(/store i32 0, ptr (%mut\d+_0)/)?.[1] ??
+      unreachable('expected result storage')
+    const returnBlock =
+      artifact.ir.split(/\n(?=[\w.]+:)/).find((block) => /ret i32 %/.test(block)) ??
+      unreachable('expected a return block')
+    assert.notInclude(returnBlock, `ptr ${discardedStorage}`)
+    assert.include(returnBlock, `load i32, ptr ${resultStorage}`)
+  }),
+)
+
+it.effect('avoids redundant failure payload selections and duplicate Effect result reloads', () =>
+  Effect.gen(function* () {
+    const artifact = yield* emit(
+      `pub struct Problem {}
+struct Payload {
+  first: i32
+  second: i32
+  third: i32
+}
+effect fn attempt(flag: bool) -> Payload ! Problem {
+  if flag { fail Problem {} }
+  return Payload { first: 1, second: 2, third: 3 }
+}
+effect fn forward(flag: bool) -> Payload ! Problem {
+  return run attempt(flag)
+}
+pub effect fn main() -> () ! Problem {
+  let payload = run forward(false)
+  drop payload
+}`,
+      { mode: 'release' },
+    )
+    assert.include(artifact.ir, 'icmp eq i32')
+    assert.notMatch(artifact.ir, /select i1 %[^,]+, i32 0, i32 0/)
+    const joins = artifact.ir
+      .split(/\n(?=[\w.]+:)/)
+      .filter((block) => /^effect_value\d+_following:/.test(block))
+    assert.isNotEmpty(joins)
+    for (const join of joins) {
+      assert.notMatch(join, /%effect_value\d+_\d+ = load /)
+      assert.notMatch(join, /%mut\d+_\d+_load_/)
+    }
   }),
 )
 
@@ -496,10 +664,11 @@ pub fn main() -> i32 {
     const call = lines.findIndex((line) => /call void @__silk_foreign_guard\.0\(ptr %/.test(line))
     assert.notStrictEqual(call, -1, artifact.ir)
     const reload = lines.findIndex(
-      (line, index) =>
-        index > call && /%reload\d+_0_\d+ = load i32, ptr %reload\d+_0_\d+_ptr/.test(line),
+      (line, index) => index > call && / = load i32, ptr %addr\d+_lane0/.test(line),
     )
     assert.notStrictEqual(reload, -1, artifact.ir)
+    const loaded = lines.at(reload)?.trim().split(' = ')[0]
+    assert.include(lines.slice(reload + 1), `  ret i32 ${loaded}`)
     assert.deepEqual(artifact.foreignImports, [
       {
         variadic: false,

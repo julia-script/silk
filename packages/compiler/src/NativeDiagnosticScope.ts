@@ -169,11 +169,9 @@ export const emit = Effect.fnUntraced(function* (
     return
   }
   yield* NativeStorage.ensureAddressRoot(context.storage, operation.state)
-  const state = context.storage.addressStorage.get(operation.state.ordinal)
-  if (state === undefined) throw new RangeError('Diagnostic state lost its stable address')
+  const state = yield* NativeStorage.addressOf(context.storage, operation.state)
   yield* NativeStorage.ensureAddressRoot(context.storage, operation.observer)
-  const captures = context.storage.addressStorage.get(operation.observer.ordinal)
-  if (captures === undefined) throw new RangeError('Diagnostic callback lost its stable address')
+  const captures = yield* NativeStorage.addressOf(context.storage, operation.observer)
   const fields = [
     yield* Constant.fromGlobal(builder, yield* FunctionActor.global(builder, scope.callback)),
     state,

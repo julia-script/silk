@@ -48,6 +48,7 @@ import * as NativeSuspension from './NativeSuspension.js'
 import * as NativeSymbol from './NativeSymbol.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
+import * as ValueStorage from './ValueStorage.js'
 import type * as Scalar from './Scalar.js'
 
 export const emit = Effect.fn('NativeProgram.emit')(function* (
@@ -194,7 +195,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
     ),
   )
   const transferArgumentSize = originArgumentLanes.reduce(
-    (maximum, lanes) => Math.max(maximum, NativeType.packLanes(program.layout.target, lanes).end),
+    (maximum, lanes) => Math.max(maximum, ValueStorage.transport(program.layout.target, lanes).end),
     0,
   )
   const transferResultOffset = alignUp(
@@ -203,7 +204,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   )
   const transferResultSize = program.functions.reduce(
     (maximum, fn) =>
-      Math.max(maximum, NativeType.packLanes(program.layout.target, lanesFor(fn.result)).end),
+      Math.max(maximum, ValueStorage.transport(program.layout.target, lanesFor(fn.result)).end),
     0,
   )
   const transferStorageSize = alignUp(

@@ -410,7 +410,7 @@ for (const program of shardedCorpus.filter(
           assert.strictEqual(
             nativeStatus,
             expectedStatus,
-            `unexpected native result for ${program.name}: expected ${program.expected.result}, native ${run.status}`,
+            `unexpected native result for ${program.name}: expected ${program.expected.result}, native ${run.status}; ${Json.stringify({ signal: run.signal, stderr: run.stderr })}`,
           )
           return
         }

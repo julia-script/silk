@@ -1,0 +1,2120 @@
+{
+  "metadata": {
+    "startedAt": "2026-09-08T17:28:09.622441+00:00",
+    "host": "macOS-15.5-arm64-arm-64bit-Mach-O",
+    "cpu": "Apple M1 Max",
+    "node": "v26.7.0",
+    "clang": "Homebrew clang version 22.1.8\nTarget: arm64-apple-darwin24.5.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/22.1.8/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/22.1.8/etc/clang/arm64-apple-darwin24.cfg",
+    "revision": "e296bf7078ebdaa2a5d3c9fed9362b3a69db7b0f",
+    "compilerDiffSha256": "c2bab5e42c5d314709f7a3f30503e84bf8f3a1549f2df564bf824bc874ce5854",
+    "cliSha256": "db49c23cd2a9d78594d86450432ce9743d04540f00808199b6cf594a8ba4b2f3",
+    "toolchainIdentitySha256": "0206378c3016986d1d1ac5ee29d268ea08f5f1253f08aab4e21d157127a6485d",
+    "sourceHashes": {
+      "compiler/src/Stream.silk": "902feda55b96f32b97841186b9a451928255306549a60876e4867c07ef16a882",
+      "compiler/src/lexer/Lexer.silk": "ac847414348d4c42d456692905548fdbe4b6a760ccc768ee46c797262ffe69b8",
+      "compiler/src/lexer/LexicalDiagnostic.silk": "03c04cd6cd2b9671f64f15a7f0077be4834413e01e5908e911552ccec3d31ebe",
+      "compiler/src/lexer/Span.silk": "f040c37030ad3954c55ea30edc9df164e83831b3c0dc5e3102fce91b81f24536",
+      "compiler/src/lexer/Token.silk": "4ef1d5279024ea418f02a77eec7f209441cace0775f1981191b5452a5cf9a889",
+      "compiler/src/main.silk": "772270ead6d3692a16572a47110ff57573951eda587c85680abe539b5dff3022",
+      "compiler/src/parser/Declaration.silk": "3446d61fe087655ab6741db1099b3f225cebe6b0fe53996dfcdd6ede4aa14fc2",
+      "compiler/src/parser/Diagnostic.silk": "a3dcf4d8fa1a626a99d87c59ad4887ec6c265d58bf68dc31063bf15326675f1f",
+      "compiler/src/parser/Element.silk": "590f4bc0b39f6bc10f50273e576488115dedbe29b167efa12b7844593272eb40",
+      "compiler/src/parser/Expression.silk": "0aa1d38d143dbe0ba3262ea0f95cd080b630981cb77c3bf279fd7af7f6318083",
+      "compiler/src/parser/Grammar.silk": "1241dc92e0345678d47f918a815f6a1edeaeae62cbb164ede17c2204e292b64b",
+      "compiler/src/parser/Import.silk": "9781303b9f0516d053065750356848a623cfbdb00d7a6895b0cd99d0dc59e589",
+      "compiler/src/parser/Lookahead.silk": "d888eea655570f7b2452c5b240df6f7aacc9fdabbce9a4f562fb85fd4052f5c0",
+      "compiler/src/parser/Node.silk": "f6b99bcf3ee99573b3bfa9460226a6cf0816284de6bb7c751b8c13ff9d6fa9ef",
+      "compiler/src/parser/NodeId.silk": "bcab2e987a412dc575817d93c2a21d3d38b60cc74c62024daca990d8bbb9546e",
+      "compiler/src/parser/ParseState.silk": "54849f763dfb5ea17c6b9da7f602df82bbc174ace91ff29a95b5ef8c004a2cc2",
+      "compiler/src/parser/Parser.silk": "4695918cd635ceb925a8027d8aa08514c79d32c440b4b522c315a6b3dea0a4aa",
+      "compiler/src/parser/Pattern.silk": "c42de972aa0f1a6b227527423dc73f3571b75822ea81e31e8accb1c92636397b",
+      "compiler/src/parser/Property.silk": "7897877fe928c399b6c53e25d7b6b7478b3dc99898587f411557219d55b56f2d",
+      "compiler/src/parser/Statement.silk": "3d0e2317ac51f75242ee8861c5b923dd528fee639fb018afc66cf6308b224fc1",
+      "compiler/src/parser/SyntaxTree.silk": "543768f19f0fcade34147e43fcc120eb88972788bb603ac58c759555bae0d15b",
+      "compiler/src/parser/Type.silk": "e8abd6f0e84bb721ecc2eda823defae7697947a13955a28ae2bef2c8cd0ad8fb",
+      "benchmarks/selfhost-stages/Lex.silk": "f48ad78a0e4f359098083a2c7ec38d2a5d11a06531b36fa195552ed0fa16bea7",
+      "benchmarks/selfhost-stages/Parse.silk": "cf7a93dccd2afc387f90d7182531a7b1741a017021be5e2346cadc85b334295a",
+      "benchmarks/selfhost-stages/Print.silk": "a295b8815ee65c6a619250ebabb3b5693a61797bed993b2701ed35d17bcb5352",
+      "benchmarks/selfhost-stages/Support.silk": "0ce65a5fafd7e11755e579780f64e1786fa3d283d4c79f37c57490229dc9f704",
+      "benchmarks/selfhost-stages/TreeCheck.silk": "517987408d09e89ff5b024a32af6072245e9686cc7a29933afa41e9941353039",
+      "benchmarks/selfhost-stages/run.py": "4063829936a9f855fb12479c052da453615d6941a5558ff5bcb7fe13f6409233"
+    },
+    "samples": 3,
+    "stages": ["lexer", "parser", "print", "cli"],
+    "policy": "fresh Node and output per sample; native and Node compile caches disabled; OS page cache not flushed; serial rotating stage order; --timings included; snapshot/oracle/execution excluded",
+    "oracle": {
+      "tokens": 1027,
+      "nodes": 452
+    },
+    "generatedInputSha256": "147a0bce982461a2a3031259d7034ff6e954a6ad13ec868a718205d3f3e06602",
+    "differentialCheck": "ok /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/input.silk\nVerified 1 source files; 0 failed: flat-tree invariants, token ownership, grammar, and recovery.\n"
+  },
+  "summaries": [
+    {
+      "stage": "lexer",
+      "medianMs": 8007.333416,
+      "minMs": 7250.666625,
+      "maxMs": 8203.803208,
+      "medianPeakRssBytes": 749240320,
+      "symbols": [122],
+      "phaseMediansMs": {
+        "backend": 465.7,
+        "closure": 219.5,
+        "declaration-collection": 96.6,
+        "declaration-index": 106.0,
+        "elaboration": 1045.0,
+        "instance-discovery": 132.9,
+        "link": 39.9,
+        "mir-lowering": 121.8,
+        "module-surface": 16.5,
+        "name-resolution": 2.1,
+        "object": 67.0,
+        "opaque-realization": 0.5,
+        "ownership": 562.6,
+        "runtime": 106.2,
+        "target-layout": 190.4,
+        "toolchain-integrity": 84.0,
+        "toolchain-target": 32.5
+      }
+    },
+    {
+      "stage": "parser",
+      "medianMs": 33576.486125,
+      "minMs": 31458.547084,
+      "maxMs": 34776.203209,
+      "medianPeakRssBytes": 2953641984,
+      "symbols": [469],
+      "phaseMediansMs": {
+        "backend": 17393.8,
+        "closure": 287.4,
+        "declaration-collection": 117.5,
+        "declaration-index": 124.8,
+        "elaboration": 1742.2,
+        "instance-discovery": 637.1,
+        "link": 66.0,
+        "mir-lowering": 2592.0,
+        "module-surface": 17.0,
+        "name-resolution": 2.8,
+        "object": 2602.1,
+        "opaque-realization": 0.5,
+        "ownership": 1229.0,
+        "runtime": 170.7,
+        "target-layout": 654.1,
+        "toolchain-integrity": 80.1,
+        "toolchain-target": 33.2
+      }
+    },
+    {
+      "stage": "print",
+      "medianMs": 37194.263375,
+      "minMs": 36282.624875,
+      "maxMs": 41176.137458,
+      "medianPeakRssBytes": 3109404672,
+      "symbols": [553],
+      "phaseMediansMs": {
+        "backend": 17901.3,
+        "closure": 291.8,
+        "declaration-collection": 223.0,
+        "declaration-index": 220.5,
+        "elaboration": 1788.7,
+        "instance-discovery": 888.5,
+        "link": 74.5,
+        "mir-lowering": 3483.9,
+        "module-surface": 31.8,
+        "name-resolution": 5.4,
+        "object": 2428.5,
+        "opaque-realization": 0.2,
+        "ownership": 1245.7,
+        "runtime": 173.3,
+        "target-layout": 756.2,
+        "toolchain-integrity": 88.4,
+        "toolchain-target": 34.1
+      }
+    },
+    {
+      "stage": "cli",
+      "medianMs": 44175.344417,
+      "minMs": 39971.196958,
+      "maxMs": 45611.215417,
+      "medianPeakRssBytes": 3143778304,
+      "symbols": [720],
+      "phaseMediansMs": {
+        "backend": 19425.7,
+        "closure": 326.6,
+        "declaration-collection": 262.3,
+        "declaration-index": 258.8,
+        "elaboration": 3265.6,
+        "instance-discovery": 1425.1,
+        "link": 60.2,
+        "mir-lowering": 5450.0,
+        "module-surface": 41.6,
+        "name-resolution": 6.1,
+        "object": 2359.3,
+        "opaque-realization": 0.3,
+        "ownership": 1386.4,
+        "runtime": 169.8,
+        "target-layout": 1109.0,
+        "toolchain-integrity": 86.4,
+        "toolchain-target": 33.2
+      }
+    }
+  ],
+  "rows": [
+    {
+      "stage": "lexer",
+      "round": 0,
+      "position": 0,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Lex.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-lexer/program",
+        "--timings"
+      ],
+      "wallMs": 8203.803208,
+      "peakRssBytes": 727138304,
+      "symbols": 122,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 92.5,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 223.7,
+          "inputs": 1,
+          "outputs": 42,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 97.2,
+          "inputs": 42,
+          "outputs": 1116,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 107.1,
+          "inputs": 42,
+          "outputs": 1116,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 2.1,
+          "inputs": 42,
+          "outputs": 1511,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 16.8,
+          "inputs": 42,
+          "outputs": 42,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 1052.6,
+          "inputs": 42,
+          "outputs": 984,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 571.3,
+          "inputs": 42,
+          "outputs": 949,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.5,
+          "inputs": 42,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 132.9,
+          "inputs": 42,
+          "outputs": 105,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 221.4,
+          "inputs": 105,
+          "outputs": 56,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 210.5,
+          "inputs": 105,
+          "outputs": 122,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 32.5,
+          "inputs": 287,
+          "outputs": 37,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 527.6,
+          "inputs": 122,
+          "outputs": 122,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 85.1,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 114.6,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 47.0,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Lex.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-lexer/program (llvm, aarch64-apple-darwin, 122 symbols)\nPhases:\n  toolchain-integrity       92.5ms  2774 in / 2774 out  0 diag  heap 76.0MB\n  closure                  223.7ms  1 in / 42 out  0 diag  heap 107.6MB\n  declaration-collection    97.2ms  42 in / 1116 out  0 diag  heap 127.8MB\n  declaration-index        107.1ms  42 in / 1116 out  0 diag  heap 120.3MB\n  name-resolution            2.1ms  42 in / 1511 out  0 diag  heap 122.2MB\n  module-surface            16.8ms  42 in / 42 out  0 diag  heap 122.8MB\n  elaboration             1052.6ms  42 in / 984 out  0 diag  heap 186.5MB\n  ownership                571.3ms  42 in / 949 out  0 diag  heap 206.3MB\n  opaque-realization         0.5ms  42 in / 0 out  0 diag  heap 206.4MB\n  instance-discovery       132.9ms  42 in / 105 out  0 diag  heap 191.7MB\n  target-layout            221.4ms  105 in / 56 out  0 diag  heap 222.5MB\n  mir-lowering             210.5ms  105 in / 122 out  0 diag  heap 212.9MB\n  toolchain-target          32.5ms  287 in / 37 out  0 diag  heap 224.2MB\n  backend                  527.6ms  122 in / 122 out  0 diag  heap 274.3MB\n  object                    85.1ms  1 in / 1 out  0 diag  heap 284.2MB\n  runtime                  114.6ms  1 in / 1 out  0 diag  heap 360.2MB\n  link                      47.0ms  2 in / 1 out  0 diag  heap 367.5MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-lexer/program.link.json\n",
+      "stderr": "        8.20 real        10.89 user         0.53 sys\n           727138304  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               75589  page reclaims\n                 974  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 927  messages sent\n                  37  messages received\n                   0  signals received\n                 194  voluntary context switches\n               31622  involuntary context switches\n        114778462914  instructions retired\n         33753845604  cycles elapsed\n           674075328  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeStdoutBytes": 0,
+      "loadAverageBefore": [18.73828125, 21.13232421875, 16.78125],
+      "loadAverageAfter": [18.255859375, 20.947265625, 16.765625]
+    },
+    {
+      "stage": "parser",
+      "round": 0,
+      "position": 1,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Parse.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-parser/program",
+        "--timings"
+      ],
+      "wallMs": 33576.486125,
+      "peakRssBytes": 2953641984,
+      "symbols": 469,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 80.1,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 287.4,
+          "inputs": 1,
+          "outputs": 59,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 118.6,
+          "inputs": 59,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 126.6,
+          "inputs": 59,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 2.7,
+          "inputs": 59,
+          "outputs": 1856,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 17.1,
+          "inputs": 59,
+          "outputs": 59,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 1742.2,
+          "inputs": 59,
+          "outputs": 1126,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 1285.1,
+          "inputs": 59,
+          "outputs": 1091,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.5,
+          "inputs": 59,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 637.1,
+          "inputs": 59,
+          "outputs": 341,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 654.1,
+          "inputs": 341,
+          "outputs": 121,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 2613.7,
+          "inputs": 341,
+          "outputs": 469,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 33.6,
+          "inputs": 391,
+          "outputs": 39,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 17609.7,
+          "inputs": 469,
+          "outputs": 469,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 2602.1,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 259.5,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 66.0,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Parse.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-parser/program (llvm, aarch64-apple-darwin, 469 symbols)\nPhases:\n  toolchain-integrity       80.1ms  2774 in / 2774 out  0 diag  heap 77.6MB\n  closure                  287.4ms  1 in / 59 out  0 diag  heap 128.5MB\n  declaration-collection   118.6ms  59 in / 1268 out  0 diag  heap 134.8MB\n  declaration-index        126.6ms  59 in / 1268 out  0 diag  heap 122.7MB\n  name-resolution            2.7ms  59 in / 1856 out  0 diag  heap 125.4MB\n  module-surface            17.1ms  59 in / 59 out  0 diag  heap 132.2MB\n  elaboration             1742.2ms  59 in / 1126 out  0 diag  heap 243.1MB\n  ownership               1285.1ms  59 in / 1091 out  0 diag  heap 299.6MB\n  opaque-realization         0.5ms  59 in / 0 out  0 diag  heap 299.7MB\n  instance-discovery       637.1ms  59 in / 341 out  0 diag  heap 308.8MB\n  target-layout            654.1ms  341 in / 121 out  0 diag  heap 330.4MB\n  mir-lowering            2613.7ms  341 in / 469 out  0 diag  heap 364.3MB\n  toolchain-target          33.6ms  391 in / 39 out  0 diag  heap 357.4MB\n  backend                 17609.7ms  469 in / 469 out  0 diag  heap 1377.9MB\n  object                  2602.1ms  1 in / 1 out  0 diag  heap 919.3MB\n  runtime                  259.5ms  1 in / 1 out  0 diag  heap 1095.8MB\n  link                      66.0ms  2 in / 1 out  0 diag  heap 1103.1MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-parser/program.link.json\n",
+      "stderr": "       33.57 real        41.05 user         2.04 sys\n          2953641984  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              241467  page reclaims\n                4701  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 928  messages sent\n                  37  messages received\n                   0  signals received\n                1159  voluntary context switches\n               58282  involuntary context switches\n        389544438473  instructions retired\n        125538636907  cycles elapsed\n          2768425024  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeStdoutBytes": 0,
+      "loadAverageBefore": [18.255859375, 20.947265625, 16.765625],
+      "loadAverageAfter": [18.40966796875, 20.8837890625, 16.92236328125]
+    },
+    {
+      "stage": "print",
+      "round": 0,
+      "position": 2,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Print.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-print/program",
+        "--timings"
+      ],
+      "wallMs": 37194.263375,
+      "peakRssBytes": 3109404672,
+      "symbols": 553,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 88.4,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 291.8,
+          "inputs": 1,
+          "outputs": 60,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 116.0,
+          "inputs": 60,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 126.5,
+          "inputs": 60,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 2.8,
+          "inputs": 60,
+          "outputs": 1862,
+          "diagnostics": 1
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 17.0,
+          "inputs": 60,
+          "outputs": 60,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 99.8,
+          "inputs": 62,
+          "outputs": 1308,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 92.0,
+          "inputs": 62,
+          "outputs": 1308,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 2.2,
+          "inputs": 62,
+          "outputs": 1912,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 13.9,
+          "inputs": 62,
+          "outputs": 62,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 1788.7,
+          "inputs": 62,
+          "outputs": 1159,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 1239.5,
+          "inputs": 62,
+          "outputs": 1124,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.2,
+          "inputs": 62,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 888.5,
+          "inputs": 62,
+          "outputs": 398,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 756.2,
+          "inputs": 398,
+          "outputs": 164,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 3483.9,
+          "inputs": 398,
+          "outputs": 553,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 35.8,
+          "inputs": 694,
+          "outputs": 59,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 17901.3,
+          "inputs": 553,
+          "outputs": 553,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 2428.5,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 270.9,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 74.5,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Print.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-print/program (llvm, aarch64-apple-darwin, 553 symbols)\nPhases:\n  toolchain-integrity       88.4ms  2774 in / 2774 out  0 diag  heap 76.1MB\n  closure                  291.8ms  1 in / 60 out  0 diag  heap 129.2MB\n  declaration-collection   116.0ms  60 in / 1268 out  0 diag  heap 111.6MB\n  declaration-index        126.5ms  60 in / 1268 out  0 diag  heap 124.4MB\n  name-resolution            2.8ms  60 in / 1862 out  1 diag  heap 127.0MB\n  module-surface            17.0ms  60 in / 60 out  0 diag  heap 133.7MB\n  declaration-collection    99.8ms  62 in / 1308 out  0 diag  heap 173.5MB\n  declaration-index         92.0ms  62 in / 1308 out  0 diag  heap 182.7MB\n  name-resolution            2.2ms  62 in / 1912 out  0 diag  heap 185.3MB\n  module-surface            13.9ms  62 in / 62 out  0 diag  heap 192.5MB\n  elaboration             1788.7ms  62 in / 1159 out  0 diag  heap 327.8MB\n  ownership               1239.5ms  62 in / 1124 out  0 diag  heap 384.8MB\n  opaque-realization         0.2ms  62 in / 0 out  0 diag  heap 384.9MB\n  instance-discovery       888.5ms  62 in / 398 out  0 diag  heap 414.3MB\n  target-layout            756.2ms  398 in / 164 out  0 diag  heap 442.6MB\n  mir-lowering            3483.9ms  398 in / 553 out  0 diag  heap 498.7MB\n  toolchain-target          35.8ms  694 in / 59 out  0 diag  heap 494.8MB\n  backend                 17901.3ms  553 in / 553 out  0 diag  heap 1628.9MB\n  object                  2428.5ms  1 in / 1 out  0 diag  heap 1626.5MB\n  runtime                  270.9ms  1 in / 1 out  0 diag  heap 1824.0MB\n  link                      74.5ms  2 in / 1 out  0 diag  heap 935.2MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-print/program.link.json\n",
+      "stderr": "       37.19 real        45.71 user         2.17 sys\n          3109404672  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              249193  page reclaims\n                4910  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 929  messages sent\n                  30  messages received\n                   0  signals received\n                2381  voluntary context switches\n               62286  involuntary context switches\n        445603237254  instructions retired\n        139755665843  cycles elapsed\n          2903075392  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "59ba208c78a4bdabb0e9fc666f42df5b17b5541e94a791fe8d8324413ff5df00",
+      "runtimeStdoutBytes": 42324,
+      "loadAverageBefore": [18.40966796875, 20.8837890625, 16.92236328125],
+      "loadAverageAfter": [16.81591796875, 20.17529296875, 16.82080078125]
+    },
+    {
+      "stage": "cli",
+      "round": 0,
+      "position": 3,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/main.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-cli/program",
+        "--timings"
+      ],
+      "wallMs": 44175.344417,
+      "peakRssBytes": 3137503232,
+      "symbols": 720,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 86.4,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 326.6,
+          "inputs": 1,
+          "outputs": 61,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 129.3,
+          "inputs": 61,
+          "outputs": 1358,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 138.8,
+          "inputs": 61,
+          "outputs": 1358,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 3.3,
+          "inputs": 61,
+          "outputs": 1972,
+          "diagnostics": 3
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 21.0,
+          "inputs": 61,
+          "outputs": 61,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 133.0,
+          "inputs": 64,
+          "outputs": 1508,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 120.0,
+          "inputs": 64,
+          "outputs": 1508,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 2.8,
+          "inputs": 64,
+          "outputs": 2186,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 20.6,
+          "inputs": 64,
+          "outputs": 64,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 3265.6,
+          "inputs": 64,
+          "outputs": 1303,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 1406.5,
+          "inputs": 64,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.4,
+          "inputs": 64,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 1425.1,
+          "inputs": 64,
+          "outputs": 514,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 1109.0,
+          "inputs": 514,
+          "outputs": 198,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 5450.0,
+          "inputs": 514,
+          "outputs": 720,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 33.2,
+          "inputs": 868,
+          "outputs": 73,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 19732.0,
+          "inputs": 720,
+          "outputs": 720,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 2443.3,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 169.8,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 87.3,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/main.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-cli/program (llvm, aarch64-apple-darwin, 720 symbols)\nPhases:\n  toolchain-integrity       86.4ms  2774 in / 2774 out  0 diag  heap 76.1MB\n  closure                  326.6ms  1 in / 61 out  0 diag  heap 133.1MB\n  declaration-collection   129.3ms  61 in / 1358 out  0 diag  heap 124.2MB\n  declaration-index        138.8ms  61 in / 1358 out  0 diag  heap 152.8MB\n  name-resolution            3.3ms  61 in / 1972 out  3 diag  heap 130.0MB\n  module-surface            21.0ms  61 in / 61 out  0 diag  heap 139.6MB\n  declaration-collection   133.0ms  64 in / 1508 out  0 diag  heap 186.0MB\n  declaration-index        120.0ms  64 in / 1508 out  0 diag  heap 196.5MB\n  name-resolution            2.8ms  64 in / 2186 out  0 diag  heap 199.5MB\n  module-surface            20.6ms  64 in / 64 out  0 diag  heap 184.9MB\n  elaboration             3265.6ms  64 in / 1303 out  0 diag  heap 444.0MB\n  ownership               1406.5ms  64 in / 1268 out  0 diag  heap 504.6MB\n  opaque-realization         0.4ms  64 in / 0 out  0 diag  heap 504.7MB\n  instance-discovery      1425.1ms  64 in / 514 out  0 diag  heap 326.8MB\n  target-layout           1109.0ms  514 in / 198 out  0 diag  heap 339.4MB\n  mir-lowering            5450.0ms  514 in / 720 out  0 diag  heap 413.9MB\n  toolchain-target          33.2ms  868 in / 73 out  0 diag  heap 415.0MB\n  backend                 19732.0ms  720 in / 720 out  0 diag  heap 1871.4MB\n  object                  2443.3ms  1 in / 1 out  0 diag  heap 1880.0MB\n  runtime                  169.8ms  1 in / 1 out  0 diag  heap 2057.6MB\n  link                      87.3ms  2 in / 1 out  0 diag  heap 997.9MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/0-cli/program.link.json\n",
+      "stderr": "       44.15 real        53.63 user         2.22 sys\n          3137503232  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              255955  page reclaims\n                1780  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 929  messages sent\n                  31  messages received\n                   0  signals received\n                3246  voluntary context switches\n               70577  involuntary context switches\n        523111495594  instructions retired\n        164122405566  cycles elapsed\n          2920787328  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "59ba208c78a4bdabb0e9fc666f42df5b17b5541e94a791fe8d8324413ff5df00",
+      "runtimeStdoutBytes": 42324,
+      "loadAverageBefore": [16.81591796875, 20.17529296875, 16.82080078125],
+      "loadAverageAfter": [15.3583984375, 19.32421875, 16.67822265625]
+    },
+    {
+      "stage": "parser",
+      "round": 1,
+      "position": 0,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Parse.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-parser/program",
+        "--timings"
+      ],
+      "wallMs": 34776.203209,
+      "peakRssBytes": 2949906432,
+      "symbols": 469,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 86.7,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 290.2,
+          "inputs": 1,
+          "outputs": 59,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 117.5,
+          "inputs": 59,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 124.8,
+          "inputs": 59,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 2.8,
+          "inputs": 59,
+          "outputs": 1856,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 17.0,
+          "inputs": 59,
+          "outputs": 59,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 1753.3,
+          "inputs": 59,
+          "outputs": 1126,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 1229.0,
+          "inputs": 59,
+          "outputs": 1091,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.5,
+          "inputs": 59,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 633.1,
+          "inputs": 59,
+          "outputs": 341,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 636.0,
+          "inputs": 341,
+          "outputs": 121,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 2592.0,
+          "inputs": 341,
+          "outputs": 469,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 33.2,
+          "inputs": 391,
+          "outputs": 39,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 17393.8,
+          "inputs": 469,
+          "outputs": 469,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 2880.8,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 170.7,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 82.7,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Parse.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-parser/program (llvm, aarch64-apple-darwin, 469 symbols)\nPhases:\n  toolchain-integrity       86.7ms  2774 in / 2774 out  0 diag  heap 75.7MB\n  closure                  290.2ms  1 in / 59 out  0 diag  heap 127.7MB\n  declaration-collection   117.5ms  59 in / 1268 out  0 diag  heap 134.0MB\n  declaration-index        124.8ms  59 in / 1268 out  0 diag  heap 122.1MB\n  name-resolution            2.8ms  59 in / 1856 out  0 diag  heap 124.7MB\n  module-surface            17.0ms  59 in / 59 out  0 diag  heap 131.5MB\n  elaboration             1753.3ms  59 in / 1126 out  0 diag  heap 242.4MB\n  ownership               1229.0ms  59 in / 1091 out  0 diag  heap 298.9MB\n  opaque-realization         0.5ms  59 in / 0 out  0 diag  heap 299.0MB\n  instance-discovery       633.1ms  59 in / 341 out  0 diag  heap 308.3MB\n  target-layout            636.0ms  341 in / 121 out  0 diag  heap 329.8MB\n  mir-lowering            2592.0ms  341 in / 469 out  0 diag  heap 364.0MB\n  toolchain-target          33.2ms  391 in / 39 out  0 diag  heap 357.3MB\n  backend                 17393.8ms  469 in / 469 out  0 diag  heap 1296.6MB\n  object                  2880.8ms  1 in / 1 out  0 diag  heap 911.1MB\n  runtime                  170.7ms  1 in / 1 out  0 diag  heap 1096.2MB\n  link                      82.7ms  2 in / 1 out  0 diag  heap 1103.4MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-parser/program.link.json\n",
+      "stderr": "       34.77 real        42.20 user         2.12 sys\n          2949906432  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              255796  page reclaims\n                1296  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 928  messages sent\n                  46  messages received\n                   0  signals received\n                2717  voluntary context switches\n               62256  involuntary context switches\n        389935521150  instructions retired\n        128302443348  cycles elapsed\n          2772026496  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeStdoutBytes": 0,
+      "loadAverageBefore": [15.3583984375, 19.32421875, 16.67822265625],
+      "loadAverageAfter": [17.25244140625, 19.19775390625, 16.728515625]
+    },
+    {
+      "stage": "print",
+      "round": 1,
+      "position": 1,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Print.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-print/program",
+        "--timings"
+      ],
+      "wallMs": 41176.137458,
+      "peakRssBytes": 3224633344,
+      "symbols": 553,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 90.1,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 336.3,
+          "inputs": 1,
+          "outputs": 60,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 134.6,
+          "inputs": 60,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 144.2,
+          "inputs": 60,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 3.2,
+          "inputs": 60,
+          "outputs": 1862,
+          "diagnostics": 1
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 21.2,
+          "inputs": 60,
+          "outputs": 60,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 101.1,
+          "inputs": 62,
+          "outputs": 1308,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 93.8,
+          "inputs": 62,
+          "outputs": 1308,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 2.3,
+          "inputs": 62,
+          "outputs": 1912,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 15.4,
+          "inputs": 62,
+          "outputs": 62,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 1957.1,
+          "inputs": 62,
+          "outputs": 1159,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 1724.8,
+          "inputs": 62,
+          "outputs": 1124,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.3,
+          "inputs": 62,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 1065.4,
+          "inputs": 62,
+          "outputs": 398,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 931.6,
+          "inputs": 398,
+          "outputs": 164,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 3827.8,
+          "inputs": 398,
+          "outputs": 553,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 34.1,
+          "inputs": 694,
+          "outputs": 59,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 20280.0,
+          "inputs": 553,
+          "outputs": 553,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 2710.9,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 173.3,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 80.4,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Print.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-print/program (llvm, aarch64-apple-darwin, 553 symbols)\nPhases:\n  toolchain-integrity       90.1ms  2774 in / 2774 out  0 diag  heap 75.5MB\n  closure                  336.3ms  1 in / 60 out  0 diag  heap 129.4MB\n  declaration-collection   134.6ms  60 in / 1268 out  0 diag  heap 111.7MB\n  declaration-index        144.2ms  60 in / 1268 out  0 diag  heap 124.6MB\n  name-resolution            3.2ms  60 in / 1862 out  1 diag  heap 127.3MB\n  module-surface            21.2ms  60 in / 60 out  0 diag  heap 134.0MB\n  declaration-collection   101.1ms  62 in / 1308 out  0 diag  heap 173.0MB\n  declaration-index         93.8ms  62 in / 1308 out  0 diag  heap 182.4MB\n  name-resolution            2.3ms  62 in / 1912 out  0 diag  heap 185.0MB\n  module-surface            15.4ms  62 in / 62 out  0 diag  heap 192.2MB\n  elaboration             1957.1ms  62 in / 1159 out  0 diag  heap 326.8MB\n  ownership               1724.8ms  62 in / 1124 out  0 diag  heap 383.9MB\n  opaque-realization         0.3ms  62 in / 0 out  0 diag  heap 384.1MB\n  instance-discovery      1065.4ms  62 in / 398 out  0 diag  heap 413.2MB\n  target-layout            931.6ms  398 in / 164 out  0 diag  heap 441.6MB\n  mir-lowering            3827.8ms  398 in / 553 out  0 diag  heap 497.3MB\n  toolchain-target          34.1ms  694 in / 59 out  0 diag  heap 493.2MB\n  backend                 20280.0ms  553 in / 553 out  0 diag  heap 1254.4MB\n  object                  2710.9ms  1 in / 1 out  0 diag  heap 1258.4MB\n  runtime                  173.3ms  1 in / 1 out  0 diag  heap 1446.2MB\n  link                      80.4ms  2 in / 1 out  0 diag  heap 1453.4MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-print/program.link.json\n",
+      "stderr": "       41.17 real        50.42 user         2.25 sys\n          3224633344  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              266146  page reclaims\n                4489  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 929  messages sent\n                  47  messages received\n                   0  signals received\n                1971  voluntary context switches\n               72740  involuntary context switches\n        454225790711  instructions retired\n        152106313704  cycles elapsed\n          3008470656  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "59ba208c78a4bdabb0e9fc666f42df5b17b5541e94a791fe8d8324413ff5df00",
+      "runtimeStdoutBytes": 42324,
+      "loadAverageBefore": [17.25244140625, 19.19775390625, 16.728515625],
+      "loadAverageAfter": [18.97705078125, 19.21240234375, 16.8359375]
+    },
+    {
+      "stage": "cli",
+      "round": 1,
+      "position": 2,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/main.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-cli/program",
+        "--timings"
+      ],
+      "wallMs": 45611.215417,
+      "peakRssBytes": 3230515200,
+      "symbols": 720,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 178.3,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 540.7,
+          "inputs": 1,
+          "outputs": 61,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 171.9,
+          "inputs": 61,
+          "outputs": 1358,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 192.5,
+          "inputs": 61,
+          "outputs": 1358,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 10.4,
+          "inputs": 61,
+          "outputs": 1972,
+          "diagnostics": 3
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 24.3,
+          "inputs": 61,
+          "outputs": 61,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 160.1,
+          "inputs": 64,
+          "outputs": 1508,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 140.8,
+          "inputs": 64,
+          "outputs": 1508,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 3.5,
+          "inputs": 64,
+          "outputs": 2186,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 20.1,
+          "inputs": 64,
+          "outputs": 64,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 3291.0,
+          "inputs": 64,
+          "outputs": 1303,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 1386.4,
+          "inputs": 64,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.3,
+          "inputs": 64,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 1476.6,
+          "inputs": 64,
+          "outputs": 514,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 1185.0,
+          "inputs": 514,
+          "outputs": 198,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 5896.5,
+          "inputs": 514,
+          "outputs": 720,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 34.6,
+          "inputs": 868,
+          "outputs": 73,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 19425.7,
+          "inputs": 720,
+          "outputs": 720,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 2359.3,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 201.0,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 60.2,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/main.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-cli/program (llvm, aarch64-apple-darwin, 720 symbols)\nPhases:\n  toolchain-integrity      178.3ms  2774 in / 2774 out  0 diag  heap 74.3MB\n  closure                  540.7ms  1 in / 61 out  0 diag  heap 132.9MB\n  declaration-collection   171.9ms  61 in / 1358 out  0 diag  heap 124.0MB\n  declaration-index        192.5ms  61 in / 1358 out  0 diag  heap 153.2MB\n  name-resolution           10.4ms  61 in / 1972 out  3 diag  heap 129.7MB\n  module-surface            24.3ms  61 in / 61 out  0 diag  heap 139.2MB\n  declaration-collection   160.1ms  64 in / 1508 out  0 diag  heap 183.1MB\n  declaration-index        140.8ms  64 in / 1508 out  0 diag  heap 193.8MB\n  name-resolution            3.5ms  64 in / 2186 out  0 diag  heap 196.8MB\n  module-surface            20.1ms  64 in / 64 out  0 diag  heap 182.5MB\n  elaboration             3291.0ms  64 in / 1303 out  0 diag  heap 427.7MB\n  ownership               1386.4ms  64 in / 1268 out  0 diag  heap 500.4MB\n  opaque-realization         0.3ms  64 in / 0 out  0 diag  heap 500.6MB\n  instance-discovery      1476.6ms  64 in / 514 out  0 diag  heap 335.6MB\n  target-layout           1185.0ms  514 in / 198 out  0 diag  heap 377.8MB\n  mir-lowering            5896.5ms  514 in / 720 out  0 diag  heap 422.1MB\n  toolchain-target          34.6ms  868 in / 73 out  0 diag  heap 422.8MB\n  backend                 19425.7ms  720 in / 720 out  0 diag  heap 1756.4MB\n  object                  2359.3ms  1 in / 1 out  0 diag  heap 1768.8MB\n  runtime                  201.0ms  1 in / 1 out  0 diag  heap 1967.7MB\n  link                      60.2ms  2 in / 1 out  0 diag  heap 1005.2MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-cli/program.link.json\n",
+      "stderr": "       45.60 real        54.33 user         2.42 sys\n          3230515200  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              267662  page reclaims\n                4566  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 929  messages sent\n                  51  messages received\n                   0  signals received\n                2005  voluntary context switches\n               71771  involuntary context switches\n        523605219672  instructions retired\n        164848550887  cycles elapsed\n          3036107520  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "59ba208c78a4bdabb0e9fc666f42df5b17b5541e94a791fe8d8324413ff5df00",
+      "runtimeStdoutBytes": 42324,
+      "loadAverageBefore": [18.97705078125, 19.21240234375, 16.8359375],
+      "loadAverageAfter": [17.525390625, 18.927734375, 16.8603515625]
+    },
+    {
+      "stage": "lexer",
+      "round": 1,
+      "position": 3,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Lex.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-lexer/program",
+        "--timings"
+      ],
+      "wallMs": 8007.333416,
+      "peakRssBytes": 749240320,
+      "symbols": 122,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 84.0,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 219.5,
+          "inputs": 1,
+          "outputs": 42,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 96.6,
+          "inputs": 42,
+          "outputs": 1116,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 106.0,
+          "inputs": 42,
+          "outputs": 1116,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 2.1,
+          "inputs": 42,
+          "outputs": 1511,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 16.5,
+          "inputs": 42,
+          "outputs": 42,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 1045.0,
+          "inputs": 42,
+          "outputs": 984,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 562.6,
+          "inputs": 42,
+          "outputs": 949,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.6,
+          "inputs": 42,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 134.2,
+          "inputs": 42,
+          "outputs": 105,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 190.4,
+          "inputs": 105,
+          "outputs": 56,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 121.8,
+          "inputs": 105,
+          "outputs": 122,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 35.6,
+          "inputs": 287,
+          "outputs": 37,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 465.7,
+          "inputs": 122,
+          "outputs": 122,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 67.0,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 106.2,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 39.9,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Lex.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-lexer/program (llvm, aarch64-apple-darwin, 122 symbols)\nPhases:\n  toolchain-integrity       84.0ms  2774 in / 2774 out  0 diag  heap 75.5MB\n  closure                  219.5ms  1 in / 42 out  0 diag  heap 106.7MB\n  declaration-collection    96.6ms  42 in / 1116 out  0 diag  heap 126.9MB\n  declaration-index        106.0ms  42 in / 1116 out  0 diag  heap 119.8MB\n  name-resolution            2.1ms  42 in / 1511 out  0 diag  heap 121.7MB\n  module-surface            16.5ms  42 in / 42 out  0 diag  heap 122.2MB\n  elaboration             1045.0ms  42 in / 984 out  0 diag  heap 182.7MB\n  ownership                562.6ms  42 in / 949 out  0 diag  heap 204.4MB\n  opaque-realization         0.6ms  42 in / 0 out  0 diag  heap 204.6MB\n  instance-discovery       134.2ms  42 in / 105 out  0 diag  heap 213.4MB\n  target-layout            190.4ms  105 in / 56 out  0 diag  heap 213.3MB\n  mir-lowering             121.8ms  105 in / 122 out  0 diag  heap 203.0MB\n  toolchain-target          35.6ms  287 in / 37 out  0 diag  heap 214.3MB\n  backend                  465.7ms  122 in / 122 out  0 diag  heap 295.6MB\n  object                    67.0ms  1 in / 1 out  0 diag  heap 274.0MB\n  runtime                  106.2ms  1 in / 1 out  0 diag  heap 343.2MB\n  link                      39.9ms  2 in / 1 out  0 diag  heap 350.5MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/1-lexer/program.link.json\n",
+      "stderr": "        8.00 real        10.60 user         0.51 sys\n           749240320  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               76448  page reclaims\n                 968  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 927  messages sent\n                  33  messages received\n                   0  signals received\n                1665  voluntary context switches\n               19662  involuntary context switches\n        114457560938  instructions retired\n         33123183693  cycles elapsed\n           689007744  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeStdoutBytes": 0,
+      "loadAverageBefore": [17.525390625, 18.927734375, 16.8603515625],
+      "loadAverageAfter": [15.8330078125, 18.51806640625, 16.73876953125]
+    },
+    {
+      "stage": "print",
+      "round": 2,
+      "position": 0,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Print.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-print/program",
+        "--timings"
+      ],
+      "wallMs": 36282.624875,
+      "peakRssBytes": 3093037056,
+      "symbols": 553,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 76.2,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 288.9,
+          "inputs": 1,
+          "outputs": 60,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 122.5,
+          "inputs": 60,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 129.6,
+          "inputs": 60,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 3.2,
+          "inputs": 60,
+          "outputs": 1862,
+          "diagnostics": 1
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 16.6,
+          "inputs": 60,
+          "outputs": 60,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 100.5,
+          "inputs": 62,
+          "outputs": 1308,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 90.9,
+          "inputs": 62,
+          "outputs": 1308,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 2.2,
+          "inputs": 62,
+          "outputs": 1912,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 15.2,
+          "inputs": 62,
+          "outputs": 62,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 1785.2,
+          "inputs": 62,
+          "outputs": 1159,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 1245.7,
+          "inputs": 62,
+          "outputs": 1124,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.2,
+          "inputs": 62,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 887.0,
+          "inputs": 62,
+          "outputs": 398,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 739.2,
+          "inputs": 398,
+          "outputs": 164,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 3421.5,
+          "inputs": 398,
+          "outputs": 553,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 31.5,
+          "inputs": 694,
+          "outputs": 59,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 16850.7,
+          "inputs": 553,
+          "outputs": 553,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 2139.7,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 105.6,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 55.4,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Print.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-print/program (llvm, aarch64-apple-darwin, 553 symbols)\nPhases:\n  toolchain-integrity       76.2ms  2774 in / 2774 out  0 diag  heap 75.6MB\n  closure                  288.9ms  1 in / 60 out  0 diag  heap 129.2MB\n  declaration-collection   122.5ms  60 in / 1268 out  0 diag  heap 111.5MB\n  declaration-index        129.6ms  60 in / 1268 out  0 diag  heap 124.5MB\n  name-resolution            3.2ms  60 in / 1862 out  1 diag  heap 127.1MB\n  module-surface            16.6ms  60 in / 60 out  0 diag  heap 133.7MB\n  declaration-collection   100.5ms  62 in / 1308 out  0 diag  heap 173.4MB\n  declaration-index         90.9ms  62 in / 1308 out  0 diag  heap 182.7MB\n  name-resolution            2.2ms  62 in / 1912 out  0 diag  heap 185.3MB\n  module-surface            15.2ms  62 in / 62 out  0 diag  heap 192.5MB\n  elaboration             1785.2ms  62 in / 1159 out  0 diag  heap 340.6MB\n  ownership               1245.7ms  62 in / 1124 out  0 diag  heap 392.2MB\n  opaque-realization         0.2ms  62 in / 0 out  0 diag  heap 392.4MB\n  instance-discovery       887.0ms  62 in / 398 out  0 diag  heap 425.9MB\n  target-layout            739.2ms  398 in / 164 out  0 diag  heap 454.1MB\n  mir-lowering            3421.5ms  398 in / 553 out  0 diag  heap 509.6MB\n  toolchain-target          31.5ms  694 in / 59 out  0 diag  heap 506.2MB\n  backend                 16850.7ms  553 in / 553 out  0 diag  heap 2285.4MB\n  object                  2139.7ms  1 in / 1 out  0 diag  heap 2314.3MB\n  runtime                  105.6ms  1 in / 1 out  0 diag  heap 1131.7MB\n  link                      55.4ms  2 in / 1 out  0 diag  heap 1139.0MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-print/program.link.json\n",
+      "stderr": "       36.28 real        44.78 user         1.87 sys\n          3093037056  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              254156  page reclaims\n                 962  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 929  messages sent\n                  43  messages received\n                   0  signals received\n                  47  voluntary context switches\n               51145  involuntary context switches\n        444784869473  instructions retired\n        138261066132  cycles elapsed\n          2963826624  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "59ba208c78a4bdabb0e9fc666f42df5b17b5541e94a791fe8d8324413ff5df00",
+      "runtimeStdoutBytes": 42324,
+      "loadAverageBefore": [15.8330078125, 18.51806640625, 16.73876953125],
+      "loadAverageAfter": [12.93017578125, 17.482421875, 16.431640625]
+    },
+    {
+      "stage": "cli",
+      "round": 2,
+      "position": 1,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/main.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-cli/program",
+        "--timings"
+      ],
+      "wallMs": 39971.196958,
+      "peakRssBytes": 3143778304,
+      "symbols": 720,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 75.8,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 311.3,
+          "inputs": 1,
+          "outputs": 61,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 125.7,
+          "inputs": 61,
+          "outputs": 1358,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 133.2,
+          "inputs": 61,
+          "outputs": 1358,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 3.0,
+          "inputs": 61,
+          "outputs": 1972,
+          "diagnostics": 3
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 18.2,
+          "inputs": 61,
+          "outputs": 61,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 125.0,
+          "inputs": 64,
+          "outputs": 1508,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 115.4,
+          "inputs": 64,
+          "outputs": 1508,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 2.7,
+          "inputs": 64,
+          "outputs": 2186,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 18.7,
+          "inputs": 64,
+          "outputs": 64,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 2879.4,
+          "inputs": 64,
+          "outputs": 1303,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 1330.1,
+          "inputs": 64,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.3,
+          "inputs": 64,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 1326.7,
+          "inputs": 64,
+          "outputs": 514,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 1025.2,
+          "inputs": 514,
+          "outputs": 198,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 5087.7,
+          "inputs": 514,
+          "outputs": 720,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 33.2,
+          "inputs": 868,
+          "outputs": 73,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 17792.8,
+          "inputs": 720,
+          "outputs": 720,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 2223.3,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 123.6,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 49.0,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/main.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-cli/program (llvm, aarch64-apple-darwin, 720 symbols)\nPhases:\n  toolchain-integrity       75.8ms  2774 in / 2774 out  0 diag  heap 76.4MB\n  closure                  311.3ms  1 in / 61 out  0 diag  heap 133.4MB\n  declaration-collection   125.7ms  61 in / 1358 out  0 diag  heap 124.3MB\n  declaration-index        133.2ms  61 in / 1358 out  0 diag  heap 152.8MB\n  name-resolution            3.0ms  61 in / 1972 out  3 diag  heap 130.1MB\n  module-surface            18.2ms  61 in / 61 out  0 diag  heap 139.7MB\n  declaration-collection   125.0ms  64 in / 1508 out  0 diag  heap 186.1MB\n  declaration-index        115.4ms  64 in / 1508 out  0 diag  heap 196.6MB\n  name-resolution            2.7ms  64 in / 2186 out  0 diag  heap 199.6MB\n  module-surface            18.7ms  64 in / 64 out  0 diag  heap 184.9MB\n  elaboration             2879.4ms  64 in / 1303 out  0 diag  heap 436.5MB\n  ownership               1330.1ms  64 in / 1268 out  0 diag  heap 500.6MB\n  opaque-realization         0.3ms  64 in / 0 out  0 diag  heap 500.7MB\n  instance-discovery      1326.7ms  64 in / 514 out  0 diag  heap 352.6MB\n  target-layout           1025.2ms  514 in / 198 out  0 diag  heap 364.2MB\n  mir-lowering            5087.7ms  514 in / 720 out  0 diag  heap 408.6MB\n  toolchain-target          33.2ms  868 in / 73 out  0 diag  heap 409.5MB\n  backend                 17792.8ms  720 in / 720 out  0 diag  heap 1836.8MB\n  object                  2223.3ms  1 in / 1 out  0 diag  heap 1846.0MB\n  runtime                  123.6ms  1 in / 1 out  0 diag  heap 2022.1MB\n  link                      49.0ms  2 in / 1 out  0 diag  heap 998.6MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-cli/program.link.json\n",
+      "stderr": "       39.96 real        49.75 user         1.89 sys\n          3143778304  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              258616  page reclaims\n                 965  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 929  messages sent\n                  45  messages received\n                   0  signals received\n                  11  voluntary context switches\n               54794  involuntary context switches\n        522421428503  instructions retired\n        154572941261  cycles elapsed\n          2978651456  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "59ba208c78a4bdabb0e9fc666f42df5b17b5541e94a791fe8d8324413ff5df00",
+      "runtimeStdoutBytes": 42324,
+      "loadAverageBefore": [12.93017578125, 17.482421875, 16.431640625],
+      "loadAverageAfter": [9.7177734375, 16.0615234375, 15.95703125]
+    },
+    {
+      "stage": "lexer",
+      "round": 2,
+      "position": 2,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Lex.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-lexer/program",
+        "--timings"
+      ],
+      "wallMs": 7250.666625,
+      "peakRssBytes": 767524864,
+      "symbols": 122,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 77.3,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 209.6,
+          "inputs": 1,
+          "outputs": 42,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 96.0,
+          "inputs": 42,
+          "outputs": 1116,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 100.5,
+          "inputs": 42,
+          "outputs": 1116,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 1.9,
+          "inputs": 42,
+          "outputs": 1511,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 14.4,
+          "inputs": 42,
+          "outputs": 42,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 978.8,
+          "inputs": 42,
+          "outputs": 984,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 519.3,
+          "inputs": 42,
+          "outputs": 949,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.5,
+          "inputs": 42,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 122.2,
+          "inputs": 42,
+          "outputs": 105,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 178.2,
+          "inputs": 105,
+          "outputs": 56,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 114.0,
+          "inputs": 105,
+          "outputs": 122,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 32.1,
+          "inputs": 287,
+          "outputs": 37,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 429.7,
+          "inputs": 122,
+          "outputs": 122,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 64.3,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 98.1,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 34.6,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Lex.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-lexer/program (llvm, aarch64-apple-darwin, 122 symbols)\nPhases:\n  toolchain-integrity       77.3ms  2774 in / 2774 out  0 diag  heap 76.3MB\n  closure                  209.6ms  1 in / 42 out  0 diag  heap 107.8MB\n  declaration-collection    96.0ms  42 in / 1116 out  0 diag  heap 98.8MB\n  declaration-index        100.5ms  42 in / 1116 out  0 diag  heap 120.3MB\n  name-resolution            1.9ms  42 in / 1511 out  0 diag  heap 122.1MB\n  module-surface            14.4ms  42 in / 42 out  0 diag  heap 122.7MB\n  elaboration              978.8ms  42 in / 984 out  0 diag  heap 184.0MB\n  ownership                519.3ms  42 in / 949 out  0 diag  heap 205.1MB\n  opaque-realization         0.5ms  42 in / 0 out  0 diag  heap 205.9MB\n  instance-discovery       122.2ms  42 in / 105 out  0 diag  heap 213.1MB\n  target-layout            178.2ms  105 in / 56 out  0 diag  heap 213.0MB\n  mir-lowering             114.0ms  105 in / 122 out  0 diag  heap 202.8MB\n  toolchain-target          32.1ms  287 in / 37 out  0 diag  heap 213.9MB\n  backend                  429.7ms  122 in / 122 out  0 diag  heap 295.6MB\n  object                    64.3ms  1 in / 1 out  0 diag  heap 274.0MB\n  runtime                   98.1ms  1 in / 1 out  0 diag  heap 384.9MB\n  link                      34.6ms  2 in / 1 out  0 diag  heap 392.1MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-lexer/program.link.json\n",
+      "stderr": "        7.24 real        10.04 user         0.43 sys\n           767524864  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               77536  page reclaims\n                 962  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 927  messages sent\n                  38  messages received\n                   0  signals received\n                   2  voluntary context switches\n               18942  involuntary context switches\n        114690051150  instructions retired\n         31523866945  cycles elapsed\n           708572672  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeStdoutBytes": 0,
+      "loadAverageBefore": [9.7177734375, 16.0615234375, 15.95703125],
+      "loadAverageAfter": [8.9921875, 15.69677734375, 15.82861328125]
+    },
+    {
+      "stage": "parser",
+      "round": 2,
+      "position": 3,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Parse.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src",
+        "--optimization",
+        "debug",
+        "--output",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-parser/program",
+        "--timings"
+      ],
+      "wallMs": 31458.547084,
+      "peakRssBytes": 3076718592,
+      "symbols": 469,
+      "phases": [
+        {
+          "name": "toolchain-integrity",
+          "wallMs": 75.6,
+          "inputs": 2774,
+          "outputs": 2774,
+          "diagnostics": 0
+        },
+        {
+          "name": "closure",
+          "wallMs": 277.0,
+          "inputs": 1,
+          "outputs": 59,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-collection",
+          "wallMs": 112.1,
+          "inputs": 59,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "declaration-index",
+          "wallMs": 123.0,
+          "inputs": 59,
+          "outputs": 1268,
+          "diagnostics": 0
+        },
+        {
+          "name": "name-resolution",
+          "wallMs": 2.8,
+          "inputs": 59,
+          "outputs": 1856,
+          "diagnostics": 0
+        },
+        {
+          "name": "module-surface",
+          "wallMs": 17.0,
+          "inputs": 59,
+          "outputs": 59,
+          "diagnostics": 0
+        },
+        {
+          "name": "elaboration",
+          "wallMs": 1659.6,
+          "inputs": 59,
+          "outputs": 1126,
+          "diagnostics": 0
+        },
+        {
+          "name": "ownership",
+          "wallMs": 1202.7,
+          "inputs": 59,
+          "outputs": 1091,
+          "diagnostics": 0
+        },
+        {
+          "name": "opaque-realization",
+          "wallMs": 0.5,
+          "inputs": 59,
+          "outputs": 0,
+          "diagnostics": 0
+        },
+        {
+          "name": "instance-discovery",
+          "wallMs": 637.7,
+          "inputs": 59,
+          "outputs": 341,
+          "diagnostics": 0
+        },
+        {
+          "name": "target-layout",
+          "wallMs": 670.5,
+          "inputs": 341,
+          "outputs": 121,
+          "diagnostics": 0
+        },
+        {
+          "name": "mir-lowering",
+          "wallMs": 2538.1,
+          "inputs": 341,
+          "outputs": 469,
+          "diagnostics": 0
+        },
+        {
+          "name": "toolchain-target",
+          "wallMs": 32.8,
+          "inputs": 391,
+          "outputs": 39,
+          "diagnostics": 0
+        },
+        {
+          "name": "backend",
+          "wallMs": 16257.6,
+          "inputs": 469,
+          "outputs": 469,
+          "diagnostics": 0
+        },
+        {
+          "name": "object",
+          "wallMs": 2200.5,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "runtime",
+          "wallMs": 99.9,
+          "inputs": 1,
+          "outputs": 1,
+          "diagnostics": 0
+        },
+        {
+          "name": "link",
+          "wallMs": 50.4,
+          "inputs": 2,
+          "outputs": 1,
+          "diagnostics": 0
+        }
+      ],
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/src/Parse.silk -> /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-parser/program (llvm, aarch64-apple-darwin, 469 symbols)\nPhases:\n  toolchain-integrity       75.6ms  2774 in / 2774 out  0 diag  heap 76.2MB\n  closure                  277.0ms  1 in / 59 out  0 diag  heap 127.9MB\n  declaration-collection   112.1ms  59 in / 1268 out  0 diag  heap 134.1MB\n  declaration-index        123.0ms  59 in / 1268 out  0 diag  heap 122.1MB\n  name-resolution            2.8ms  59 in / 1856 out  0 diag  heap 124.8MB\n  module-surface            17.0ms  59 in / 59 out  0 diag  heap 131.6MB\n  elaboration             1659.6ms  59 in / 1126 out  0 diag  heap 242.1MB\n  ownership               1202.7ms  59 in / 1091 out  0 diag  heap 298.5MB\n  opaque-realization         0.5ms  59 in / 0 out  0 diag  heap 298.7MB\n  instance-discovery       637.7ms  59 in / 341 out  0 diag  heap 307.9MB\n  target-layout            670.5ms  341 in / 121 out  0 diag  heap 329.3MB\n  mir-lowering            2538.1ms  341 in / 469 out  0 diag  heap 363.2MB\n  toolchain-target          32.8ms  391 in / 39 out  0 diag  heap 356.7MB\n  backend                 16257.6ms  469 in / 469 out  0 diag  heap 1322.0MB\n  object                  2200.5ms  1 in / 1 out  0 diag  heap 1342.2MB\n  runtime                   99.9ms  1 in / 1 out  0 diag  heap 1515.3MB\n  link                      50.4ms  2 in / 1 out  0 diag  heap 906.3MB\nLink plan: /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/.selfhost-stages-v7nhkjny/2-parser/program.link.json\n",
+      "stderr": "       31.45 real        39.52 user         1.71 sys\n          3076718592  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n              250223  page reclaims\n                1173  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 928  messages sent\n                  44  messages received\n                   0  signals received\n                  17  voluntary context switches\n               46992  involuntary context switches\n        389271443744  instructions retired\n        121620074156  cycles elapsed\n          2935407232  peak memory footprint\n",
+      "verifiedExitCode": 0,
+      "runtimeStdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtimeStdoutBytes": 0,
+      "loadAverageBefore": [8.9921875, 15.69677734375, 15.82861328125],
+      "loadAverageAfter": [8.30322265625, 14.89453125, 15.53271484375]
+    }
+  ]
+}

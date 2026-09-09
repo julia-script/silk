@@ -1,0 +1,315 @@
+//! Statement and block grammar, including local recovery at declaration and match-arm boundaries.
+//!
+//! Each block owns its braces and direct statements. Conditions disable unparenthesized nominal
+//! records so the following brace stays with the block. Function/effect bodies receive an implicit
+//! unit return when no syntactic terminal is present; ordinary nested blocks do not.
+import lexer.Token {TokenKind}
+import parser.Node {Node, NodeKind}
+import parser.NodeId {NodeId}
+import parser.Element {Element}
+import parser.ParseState {State, NodeResult}
+import parser.ParseState as P
+import parser.Grammar as G
+import parser.Type as Types
+import parser.Expression as Expressions
+import parser.Pattern as Patterns
+import parser.Lookahead as Look
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.vector {Vector}
+import silk.usize as Usize
+
+effect fn binding(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run P.consume(P.begin(move initial))
+  let mut nodeKind = NodeKind.BindingStatement
+  let kind = P.currentKind(&p.state)
+  let ordinary = kind == TokenKind.MutKeyword || kind == TokenKind.StaticKeyword || kind == TokenKind.Equals || (kind == TokenKind.Identifier && !P.word(
+    &p.state,
+    "_",
+  ) && (P.peek(&p.state, 1) == TokenKind.Colon || P.peek(&p.state, 1) == TokenKind.Equals))
+  if ordinary {
+    if kind == TokenKind.MutKeyword || kind == TokenKind.StaticKeyword {
+      let consumed = run P.consume(move p)
+      p = move consumed
+    }
+    let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+    p = move afterIdentifier
+    if P.currentKind(&p.state) == TokenKind.Colon {
+      let consumed2 = run P.consume(move p)
+      p = move consumed2
+      let withTypesParse = run P.attach(move p.elements, run Types.parse(move p.state))
+      p = move withTypesParse
+    }
+  } else {
+    let withPatternsParse = run P.attach(move p.elements, run Patterns.parse(move p.state))
+    p = move withPatternsParse
+    nodeKind = NodeKind.PatternBindingStatement
+  }
+  let afterEquals = run P.expect(move p, TokenKind.Equals)
+  p = move afterEquals
+  let withExpressionsParse = run P.attach(
+    move p.elements,
+    run Expressions.parse(move p.state, true),
+  )
+  p = move withExpressionsParse
+  return run P.complete(move p, nodeKind)
+}
+
+effect fn conditional(initial: State, isStatic: bool) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  if initial.depth >= 256 {
+    return run P.nestingError(move initial)
+  }
+  let depth = initial.depth
+  let mut state = move initial
+  state.depth = Usize.add(depth, 1)
+  let mut result = run conditionalInner(move state, isStatic)
+  result.state.depth = depth
+  return move result
+}
+
+effect fn conditionalInner(initial: State, isStatic: bool) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  let mut p = P.begin(move initial)
+  if isStatic {
+    let afterStaticKeyword = run P.expect(move p, TokenKind.StaticKeyword)
+    p = move afterStaticKeyword
+  }
+  let afterIfKeyword = run P.expect(move p, TokenKind.IfKeyword)
+  p = move afterIfKeyword
+  let pattern = !isStatic && P.currentKind(&p.state) == TokenKind.LetKeyword
+  if pattern {
+    let consumed = run P.consume(move p)
+    p = move consumed
+    let withPatternsParse = run P.attach(move p.elements, run Patterns.parse(move p.state))
+    p = move withPatternsParse
+    let afterEquals = run P.expect(move p, TokenKind.Equals)
+    p = move afterEquals
+  }
+  let withExpressionsParse = run P.attach(
+    move p.elements,
+    run Expressions.parse(move p.state, false),
+  )
+  p = move withExpressionsParse
+  let attached = run P.attach(move p.elements, run block(move p.state, false, false))
+  p = move attached
+  if P.currentKind(&p.state) == TokenKind.ElseKeyword {
+    let consumed2 = run P.consume(move p)
+    p = move consumed2
+    if !isStatic && P.currentKind(&p.state) == TokenKind.IfKeyword {
+      let attached2 = run P.attach(move p.elements, run conditional(move p.state, false))
+      p = move attached2
+    } else {
+      let attached3 = run P.attach(move p.elements, run block(move p.state, false, false))
+      p = move attached3
+    }
+  }
+  if isStatic {
+    return run P.complete(move p, NodeKind.StaticConditionalStatement)
+  }
+  if pattern {
+    return run P.complete(move p, NodeKind.PatternConditionalStatement)
+  }
+  return run P.complete(move p, NodeKind.ConditionalStatement)
+}
+
+effect fn staticFor(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run P.consume(P.begin(move initial))
+  let afterForKeyword = run P.expect(move p, TokenKind.ForKeyword)
+  p = move afterForKeyword
+  if P.word(&p.state, "in") {
+    let afterIdentifier = run P.missing(move p, TokenKind.Identifier)
+    p = move afterIdentifier
+  } else {
+    let afterIdentifier2 = run P.expect(move p, TokenKind.Identifier)
+    p = move afterIdentifier2
+  }
+  let advanced = run P.contextual(move p, "in")
+  p = move advanced
+  let withExpressionsParse = run P.attach(
+    move p.elements,
+    run Expressions.parse(move p.state, false),
+  )
+  p = move withExpressionsParse
+  let attached = run P.attach(move p.elements, run block(move p.state, false, false))
+  p = move attached
+  return run P.complete(move p, NodeKind.StaticForStatement)
+}
+
+effect fn whileStatement(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let mut p = run P.consume(P.begin(move initial))
+  let withExpressionsParse = run P.attach(
+    move p.elements,
+    run Expressions.parse(move p.state, false),
+  )
+  p = move withExpressionsParse
+  let attached = run P.attach(move p.elements, run block(move p.state, false, false))
+  p = move attached
+  return run P.complete(move p, NodeKind.WhileStatement)
+}
+
+effect fn transfer(initial: State, kind: NodeKind) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  return run P.complete(run P.consume(P.begin(move initial)), kind)
+}
+
+effect fn valueStatement(initial: State, kind: NodeKind) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  let mut p = run P.consume(P.begin(move initial))
+  if kind == NodeKind.ReturnStatement && P.currentKind(&p.state) == TokenKind.RightBrace {
+    let attached = run P.attach(
+      move p.elements,
+      run P.complete(P.begin(move p.state), NodeKind.UnitExpression),
+    )
+    p = move attached
+  } else {
+    if kind == NodeKind.FailStatement {
+      let afterMoveKeyword = run P.optional(move p, TokenKind.MoveKeyword)
+      p = move afterMoveKeyword
+    }
+    let withExpressionsParse = run P.attach(
+      move p.elements,
+      run Expressions.parse(move p.state, true),
+    )
+    p = move withExpressionsParse
+  }
+  return run P.complete(move p, kind)
+}
+
+/// Parses one ordinary statement; an expression followed by `=` becomes an assignment.
+///
+/// Assignment-place legality belongs to semantic analysis. Parsing the left side once avoids
+/// speculative state copies and discarded node allocations.
+pub effect fn parse(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
+  let kind = P.currentKind(&initial)
+  if kind == TokenKind.LetKeyword {
+    return run binding(move initial)
+  }
+  if kind == TokenKind.IfKeyword {
+    return run conditional(move initial, false)
+  }
+  if kind == TokenKind.StaticKeyword && P.peek(&initial, 1) == TokenKind.IfKeyword {
+    return run conditional(move initial, true)
+  }
+  if kind == TokenKind.StaticKeyword && P.peek(&initial, 1) == TokenKind.ForKeyword {
+    return run staticFor(move initial)
+  }
+  if kind == TokenKind.WhileKeyword {
+    return run whileStatement(move initial)
+  }
+  if kind == TokenKind.BreakKeyword {
+    return run transfer(move initial, NodeKind.BreakStatement)
+  }
+  if kind == TokenKind.ContinueKeyword {
+    return run transfer(move initial, NodeKind.ContinueStatement)
+  }
+  if kind == TokenKind.ReturnKeyword {
+    return run valueStatement(move initial, NodeKind.ReturnStatement)
+  }
+  if kind == TokenKind.FailKeyword {
+    return run valueStatement(move initial, NodeKind.FailStatement)
+  }
+  if kind == TokenKind.DropKeyword {
+    return run valueStatement(move initial, NodeKind.DropStatement)
+  }
+  if kind == TokenKind.UnsafeKeyword && P.peek(&initial, 1) == TokenKind.LeftBrace {
+    let mut p = run P.consume(P.begin(move initial))
+    let attached = run P.attach(move p.elements, run block(move p.state, false, false))
+    p = move attached
+    return run P.complete(move p, NodeKind.UnsafeStatement)
+  }
+  if G.expressionStart(kind) {
+    let mut p = run P.wrap(run Expressions.parse(move initial, true))
+    if P.currentKind(&p.state) == TokenKind.Equals {
+      let consumed = run P.consume(move p)
+      p = move consumed
+      let withExpressionsParse = run P.attach(
+        move p.elements,
+        run Expressions.parse(move p.state, true),
+      )
+      p = move withExpressionsParse
+      return run P.complete(move p, NodeKind.AssignmentStatement)
+    }
+    return run P.complete(move p, NodeKind.ExpressionStatement)
+  }
+  let error = run P.complete(run P.unexpected(P.begin(move initial)), NodeKind.Error)
+  return run P.complete(run P.wrap(move error), NodeKind.ErrorStatement)
+}
+
+fn terminates(state: &State, id: NodeId) -> bool {
+  let nodes = Vector.asSlice<Node>(&state.nodes)
+  let node = &nodes[id.index]
+  if node.kind == NodeKind.ReturnStatement || node.kind == NodeKind.FailStatement {
+    return true
+  }
+  if node.kind != NodeKind.Block && node.kind != NodeKind.UnsafeStatement && node.kind != NodeKind.ConditionalStatement {
+    return false
+  }
+  let mut branches: usize = 0
+  let mut index: usize = 0
+  while index < Vector.length<Element>(&node.elements) {
+    if let Element.Node {id: child} = Vector.get<Element>(&node.elements, index) {
+      if terminates(state, child) {
+        if node.kind != NodeKind.ConditionalStatement {
+          return true
+        }
+        branches = Usize.add(branches, 1)
+      }
+    }
+    index = Usize.add(index, 1)
+  }
+  return branches == 2
+}
+
+/// Parses a brace-delimited statement block with bounded, local recovery.
+///
+/// `terminal` requests an implicit unit return when needed. `matchArm` preserves a recognizable
+/// following arm when this block is missing its closing brace. Missing opening braces produce an
+/// empty recovered block and leave the next declaration/statement for its owner.
+pub effect fn block(initial: State, terminal: bool, matchArm: bool) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  if initial.depth >= 256 {
+    return run P.nestingError(move initial)
+  }
+  let depth = initial.depth
+  let mut state = move initial
+  state.depth = Usize.add(depth, 1)
+  let mut result = run blockInner(move state, terminal, matchArm)
+  result.state.depth = depth
+  return move result
+}
+
+effect fn blockInner(initial: State, terminal: bool, matchArm: bool) -> NodeResult
+! OutOfMemoryError
+? &mut Allocator {
+  let opened = P.currentKind(&initial) == TokenKind.LeftBrace
+  let mut p = run P.expect(P.begin(move initial), TokenKind.LeftBrace)
+  let mut terminated = false
+  if opened {
+    while !G.blockEnd(&p.state) && !(matchArm && Look.arm(&p.state)) {
+      let before = p.state.index
+      let statement = run parse(move p.state)
+      let statementId = statement.node
+      if terminates(&statement.state, statementId) {
+        terminated = true
+      }
+      let attached = run P.attach(move p.elements, move statement)
+      p = move attached
+      if p.state.index == before {
+        let advanced = run P.unexpected(move p)
+        p = move advanced
+      }
+    }
+  }
+  if terminal && !terminated {
+    let unit = run P.complete(P.begin(move p.state), NodeKind.UnitExpression)
+    let statement = run P.complete(run P.wrap(move unit), NodeKind.ReturnStatement)
+    let attached2 = run P.attach(move p.elements, move statement)
+    p = move attached2
+  }
+  let afterRightBrace = run P.expect(move p, TokenKind.RightBrace)
+  p = move afterRightBrace
+  return run P.complete(move p, NodeKind.Block)
+}

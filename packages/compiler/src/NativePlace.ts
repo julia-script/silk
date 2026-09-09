@@ -1,0 +1,640 @@
+import * as Alignment from '@silklang/llvm/Alignment'
+import * as Block from '@silklang/llvm/Block'
+import type * as LlvmError from '@silklang/llvm/LlvmError'
+import * as Constant from '@silklang/llvm/Constant'
+import * as FunctionBody from '@silklang/llvm/FunctionBody'
+import * as Intrinsic from '@silklang/llvm/Intrinsic'
+import type * as Value from '@silklang/llvm/Value'
+import * as Effect from 'effect/Effect'
+import * as Layout from './Layout.js'
+import * as Mir from './Mir.js'
+import * as NativeLanePointer from './NativeLanePointer.js'
+import * as NativeType from './NativeType.js'
+import * as NativeArith from './NativeArith.js'
+import * as Type from './Type.js'
+import * as ValueStorage from './ValueStorage.js'
+import * as ValueType from './ValueType.js'
+
+/** A typed storage location. Projection never stores a vector of cached payload values. */
+export interface NativePlace {
+  readonly _tag: 'NativePlace'
+  readonly type: Mir.Type
+  readonly view: string
+  readonly base: Value.Input
+  readonly size: number
+  readonly alignment: number
+  readonly representation: 'Value' | 'StoredComposite'
+  readonly indirect: boolean
+}
+
+export interface Context {
+  readonly body: FunctionBody.FunctionBody
+  readonly types: NativeType.LoweringContext
+  readonly lanePointers: NativeLanePointer.Context
+}
+
+/** Selects a compiler-owned storage view, including the exact identity of hidden captures. */
+export const make = (
+  layout: Layout.Plan,
+  type: Mir.Type,
+  base: Value.Input,
+  representation: NativePlace['representation'] = 'Value',
+): NativePlace => {
+  const stored =
+    representation === 'StoredComposite'
+      ? ValueStorage.find(layout, 'CompositeCarrier', Mir.semanticType(type))?.stored
+      : undefined
+  const physical =
+    representation === 'StoredComposite' ? stored : NativeType.addressLayout(layout, type)
+  if (physical === undefined)
+    throw new RangeError(`Missing planned place for ${Mir.typeText(type)}`)
+  let view: string
+  if (type._tag === 'EffectOutcome') view = ValueStorage.key('Outcome', type.type)
+  else if (type._tag === 'EffectComposite') view = ValueStorage.key('CompositeCarrier', type.type)
+  else if (type._tag === 'EffectValue' && type.storage === undefined)
+    view = ValueStorage.captureKey(type.environment)
+  else if (
+    type._tag === 'CallableValue' &&
+    type.storage === undefined &&
+    type.environment !== undefined
+  )
+    view = ValueStorage.captureKey(type.environment)
+  else view = `Value:${Type.runtimeKey(Mir.semanticType(type))}`
+  if (stored !== undefined) view = stored.key
+  return Object.freeze({
+    _tag: 'NativePlace',
+    type,
+    view,
+    base,
+    size: physical.size,
+    alignment: physical.alignment,
+    representation,
+    indirect: false,
+  })
+}
+
+/** Borrows a semantic value already stored by the compiler's canonical memory layout. */
+export const stored = (layout: Layout.Plan, type: Type.Type, base: Value.Input): NativePlace => {
+  if (
+    Type.isRepresented(type) &&
+    Type.isExactRepresentationArgument(type.representation.argument)
+  ) {
+    const identity = type.representation.argument.identity
+    let concrete: Mir.Type | undefined
+    if (Type.isEffectIdentityArgument(identity))
+      concrete = ValueType.effectValueByIdentity(layout, identity.identity, identity.owner)
+    else if (Type.isCallableIdentityArgument(identity) && Type.isCallable(type.contract))
+      concrete = ValueType.callableValueByIdentity(layout, identity, type.contract)
+    if (concrete === undefined) throw new RangeError('Stored executable lost its exact environment')
+    return make(layout, concrete, base)
+  }
+  return make(
+    layout,
+    { _tag: 'EnvironmentBorrow', type, access: 'Shared' },
+    base,
+    ValueStorage.find(layout, 'CompositeCarrier', type)?.stored === undefined
+      ? 'Value'
+      : 'StoredComposite',
+  )
+}
+
+/** Allocates one aligned byte extent; unlike scalarization this does not allocate per-field slots. */
+export const allocate = Effect.fnUntraced(function* (
+  context: Context,
+  type: Mir.Type,
+  tag: string,
+) {
+  const layout = NativeType.addressLayout(context.types.program.layout, type)
+  if (layout === undefined) throw new RangeError('Cannot allocate an unavailable value layout')
+  const base = yield* FunctionBody.alloca(context.body, context.lanePointers.byteType, tag, {
+    count: yield* Constant.integerUnsigned(
+      context.lanePointers.builder,
+      context.lanePointers.offsetType,
+      BigInt(layout.size),
+    ),
+    alignment: yield* Alignment.fromByteUnits(layout.alignment),
+  })
+  return make(context.types.program.layout, type, base)
+})
+
+/** Resolves one lane on demand from the current base; frame rebinding cannot leave stale addresses. */
+export const lanePointer = Effect.fnUntraced(function* (
+  self: NativePlace,
+  context: Context,
+  ordinal: number,
+  tag: string,
+) {
+  const lane = NativeType.valueLanesFor(context.types, self.type).at(ordinal)
+  const offset =
+    lane === undefined
+      ? undefined
+      : NativeType.addressLaneOffset(context.types.program.layout, self.type, lane, ordinal)
+  if (lane === undefined || offset === undefined)
+    throw new RangeError(`Place lost lane ${ordinal} for ${Mir.typeText(self.type)}`)
+  const physical = ValueStorage.scalarLayout(context.types.program.layout.target, lane)
+  if (offset < 0 || offset + physical.size > self.size)
+    throw new RangeError(
+      `Place lane ${ordinal} at ${offset}+${physical.size} exceeds ${self.size} bytes for ${Mir.typeText(self.type)}`,
+    )
+  return yield* NativeLanePointer.lanePointer(
+    context.lanePointers,
+    context.body,
+    yield* base(self, context, `${tag}_base`),
+    offset,
+    tag,
+  )
+})
+
+/** A borrowed environment's pointer slot survives joins; its referent is resolved at each use. */
+export const base = Effect.fnUntraced(function* (self: NativePlace, context: Context, tag: string) {
+  return self.indirect
+    ? yield* FunctionBody.load(context.body, context.types.pointer, self.base, tag)
+    : self.base
+})
+
+/** Reads exactly one selected slot. The result must not survive a possible alias write. */
+export const loadLane = Effect.fnUntraced(function* (
+  self: NativePlace,
+  context: Context,
+  ordinal: number,
+  tag: string,
+) {
+  const lane = NativeType.valueLanesFor(context.types, self.type).at(ordinal)
+  if (lane === undefined) throw new RangeError('Place read lost its lane type')
+  const location =
+    self.representation === 'StoredComposite'
+      ? ValueStorage.location(context.types.program.layout, Mir.semanticType(self.type), lane)
+      : NativeType.addressLocation(context.types.program.layout, self.type, lane, ordinal)
+  if (location === undefined)
+    throw new RangeError(`Place lost read location for ${Mir.typeText(self.type)}`)
+  const value = (yield* readLocations(self, context, [{ lane, location }], tag)).at(0)
+  if (value === undefined) throw new RangeError('Selected storage read lost its value')
+  return value
+})
+
+/** Writes one slot without loading or reconstructing any of its siblings. */
+export const storeLane = Effect.fnUntraced(function* (
+  self: NativePlace,
+  context: Context,
+  ordinal: number,
+  value: Value.Input,
+  tag: string,
+) {
+  const lane = NativeType.valueLanesFor(context.types, self.type).at(ordinal)
+  if (lane === undefined) throw new RangeError('Place write lost its calling lane')
+  const location =
+    self.representation === 'StoredComposite'
+      ? ValueStorage.location(context.types.program.layout, Mir.semanticType(self.type), lane)
+      : NativeType.addressLocation(context.types.program.layout, self.type, lane, ordinal)
+  if (location === undefined)
+    throw new RangeError(`Place lost write location for ${Mir.typeText(self.type)}`)
+  yield* writeLocations(self, context, [{ lane, location, value }], tag)
+})
+
+const arithmetic = (context: Context): NativeArith.LaneContext => ({
+  body: context.body,
+  pointerBits: context.types.program.layout.target.pointerSize === 4 ? 32 : 64,
+  i32: context.types.i32,
+  integerTypes: context.types.integerTypes,
+  types: context.types,
+})
+
+const storedPointer = Effect.fnUntraced(function* (
+  self: NativePlace,
+  context: Context,
+  offset: number,
+  tag: string,
+) {
+  if (offset === 0) return yield* base(self, context, `${tag}_base`)
+  return yield* NativeLanePointer.lanePointer(
+    context.lanePointers,
+    context.body,
+    yield* base(self, context, `${tag}_base`),
+    offset,
+    tag,
+  )
+})
+
+interface ReadRequest {
+  readonly lane: Layout.CallingLane
+  readonly location?: ValueStorage.Location
+}
+
+/** The place proves an extent, not stronger alignment than the address actually carries. */
+const access = Effect.fnUntraced(function* (
+  self: NativePlace,
+  context: Context,
+  offset: number,
+  lane: Layout.CallingLane,
+) {
+  const physical = ValueStorage.scalarLayout(context.types.program.layout.target, lane)
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset + physical.size > self.size)
+    throw new RangeError('Selected lane exceeds its planned place extent')
+  let alignment = Math.min(self.alignment, physical.alignment)
+  while (offset % alignment !== 0) alignment /= 2
+  return { alignment: yield* Alignment.fromByteUnits(alignment) }
+})
+interface WriteRequest extends ReadRequest {
+  readonly value: Value.Input
+}
+
+/** Groups lanes by their enclosing stored union, so a boundary dispatches once per alternative. */
+const choices = (requests: ReadonlyArray<ReadRequest>) => {
+  const groups = new Map<
+    number,
+    Array<{
+      readonly ordinal: number
+      readonly location: Extract<ValueStorage.Location, { readonly _tag: 'Choice' }>
+    }>
+  >()
+  for (const [ordinal, request] of requests.entries()) {
+    if (request.location?._tag !== 'Choice') continue
+    const group = groups.get(request.location.tagOffset) ?? []
+    group.push({ ordinal, location: request.location })
+    groups.set(request.location.tagOffset, group)
+  }
+  return groups
+}
+
+const readLocations = Effect.fnUntraced(function* (
+  self: NativePlace,
+  context: Context,
+  requests: ReadonlyArray<ReadRequest>,
+  tag: string,
+): Effect.fn.Return<ReadonlyArray<Value.Input>, LlvmError.LlvmError> {
+  const values: Array<Value.Input | undefined> = Array.from(
+    { length: requests.length },
+    () => undefined,
+  )
+  for (const [ordinal, request] of requests.entries()) {
+    if (request.location === undefined)
+      values[ordinal] = yield* Constant.nullValue(
+        context.lanePointers.builder,
+        NativeType.laneType(context.types, request.lane),
+      )
+    else if (request.location._tag === 'Slot') {
+      const value = yield* FunctionBody.load(
+        context.body,
+        NativeType.laneType(context.types, request.location.lane),
+        yield* storedPointer(self, context, request.location.offset, `${tag}_${ordinal}_ptr`),
+        `${tag}_${ordinal}`,
+        yield* access(self, context, request.location.offset, request.location.lane),
+      )
+      values[ordinal] = yield* NativeArith.coerceLane(
+        arithmetic(context),
+        value,
+        request.location.lane,
+        request.lane,
+        `${tag}_${ordinal}_carrier`,
+      )
+    }
+  }
+  for (const [offset, group] of choices(requests)) {
+    const tags = [
+      ...new Set(
+        group.flatMap((item) => item.location.alternatives.map((alternative) => alternative.tag)),
+      ),
+    ]
+    const discriminant = yield* FunctionBody.load(
+      context.body,
+      context.types.i32,
+      yield* storedPointer(self, context, offset, `${tag}_${offset}_tag_ptr`),
+      `${tag}_${offset}_tag`,
+      yield* access(self, context, offset, { _tag: 'CallingLane', type: 'i32', path: [] }),
+    )
+    const done = yield* Block.make(context.body, `${tag}_${offset}_done`)
+    const incoming: Array<{
+      readonly block: Block.Block
+      readonly values: ReadonlyArray<Value.Input>
+    }> = []
+    const fallback = yield* Block.make(context.body, `${tag}_${offset}_zero`)
+    const dispatch = yield* FunctionBody.switchTerminator(context.body, discriminant, fallback)
+    for (const alternative of tags) {
+      const selected = yield* Block.make(context.body, `${tag}_${offset}_${alternative}_selected`)
+      yield* FunctionBody.addSwitchCase(
+        context.body,
+        dispatch,
+        yield* Constant.integerSigned(
+          context.lanePointers.builder,
+          context.types.i32,
+          BigInt(alternative),
+        ),
+        selected,
+      )
+      yield* Block.setInsertionPoint(context.body, selected)
+      const selectedRequests = group.map((item) => {
+        const request = requests.at(item.ordinal)
+        if (request === undefined) throw new RangeError('Union conversion lost a lane')
+        const location = item.location.alternatives.find(
+          (candidate) => candidate.tag === alternative,
+        )?.location
+        return { lane: request.lane, ...(location === undefined ? {} : { location }) }
+      })
+      const selectedValues = yield* readLocations(
+        self,
+        context,
+        selectedRequests,
+        `${tag}_${offset}_${alternative}`,
+      )
+      let exit = selected
+      if (selectedRequests.some((request) => request.location?._tag === 'Choice')) {
+        exit = yield* Block.make(context.body, `${tag}_${offset}_${alternative}_exit`)
+        yield* FunctionBody.branch(context.body, exit)
+        yield* Block.setInsertionPoint(context.body, exit)
+      }
+      yield* FunctionBody.branch(context.body, done)
+      incoming.push({ block: exit, values: selectedValues })
+    }
+    yield* FunctionBody.sealSwitch(context.body, dispatch)
+    yield* Block.setInsertionPoint(context.body, fallback)
+    const zero: Array<Value.Input> = []
+    for (const item of group) {
+      const request = requests.at(item.ordinal)
+      if (request === undefined) throw new RangeError('Union conversion lost a result lane')
+      zero.push(
+        yield* Constant.nullValue(
+          context.lanePointers.builder,
+          NativeType.laneType(context.types, request.lane),
+        ),
+      )
+    }
+    incoming.push({ block: fallback, values: zero })
+    yield* FunctionBody.branch(context.body, done)
+    yield* Block.setInsertionPoint(context.body, done)
+    for (const [index, item] of group.entries()) {
+      const request = requests.at(item.ordinal)
+      if (request === undefined) throw new RangeError('Union conversion lost its join type')
+      const phi = yield* FunctionBody.phi(
+        context.body,
+        NativeType.laneType(context.types, request.lane),
+        `${tag}_${item.ordinal}_result`,
+      )
+      for (const entry of incoming) {
+        const value = entry.values.at(index)
+        if (value === undefined) throw new RangeError('Union conversion lost a predecessor')
+        yield* FunctionBody.addPhiIncoming(context.body, phi, value, entry.block)
+      }
+      yield* FunctionBody.sealPhi(context.body, phi)
+      values[item.ordinal] = yield* FunctionBody.phiValue(context.body, phi)
+    }
+  }
+  return values.map((value) => {
+    if (value === undefined) throw new RangeError('Incomplete storage conversion')
+    return value
+  })
+})
+
+const writeLocations = Effect.fnUntraced(function* (
+  self: NativePlace,
+  context: Context,
+  requests: ReadonlyArray<WriteRequest>,
+  tag: string,
+): Effect.fn.Return<void, LlvmError.LlvmError> {
+  for (const [ordinal, request] of requests.entries()) {
+    if (request.location?._tag !== 'Slot') continue
+    const value = yield* NativeArith.coerceLane(
+      arithmetic(context),
+      request.value,
+      request.lane,
+      request.location.lane,
+      `${tag}_${ordinal}_stored`,
+    )
+    yield* FunctionBody.store(
+      context.body,
+      value,
+      yield* storedPointer(self, context, request.location.offset, `${tag}_${ordinal}`),
+      yield* access(self, context, request.location.offset, request.location.lane),
+    )
+  }
+  for (const [offset, group] of choices(requests)) {
+    const tags = [
+      ...new Set(
+        group.flatMap((item) => item.location.alternatives.map((alternative) => alternative.tag)),
+      ),
+    ]
+    const discriminant = yield* FunctionBody.load(
+      context.body,
+      context.types.i32,
+      yield* storedPointer(self, context, offset, `${tag}_${offset}_tag_ptr`),
+      `${tag}_${offset}_tag`,
+      yield* access(self, context, offset, { _tag: 'CallingLane', type: 'i32', path: [] }),
+    )
+    const done = yield* Block.make(context.body, `${tag}_${offset}_done`)
+    const dispatch = yield* FunctionBody.switchTerminator(context.body, discriminant, done)
+    for (const alternative of tags) {
+      const selected = yield* Block.make(context.body, `${tag}_${offset}_${alternative}_selected`)
+      yield* FunctionBody.addSwitchCase(
+        context.body,
+        dispatch,
+        yield* Constant.integerSigned(
+          context.lanePointers.builder,
+          context.types.i32,
+          BigInt(alternative),
+        ),
+        selected,
+      )
+      yield* Block.setInsertionPoint(context.body, selected)
+      yield* writeLocations(
+        self,
+        context,
+        group.flatMap((item) => {
+          const request = requests.at(item.ordinal)
+          const location = item.location.alternatives.find(
+            (candidate) => candidate.tag === alternative,
+          )?.location
+          if (request === undefined) throw new RangeError('Union conversion lost a source lane')
+          return location === undefined ? [] : [{ ...request, location }]
+        }),
+        `${tag}_${offset}_${alternative}`,
+      )
+      yield* FunctionBody.branch(context.body, done)
+    }
+    yield* FunctionBody.sealSwitch(context.body, dispatch)
+    yield* Block.setInsertionPoint(context.body, done)
+  }
+})
+
+const requests = (self: NativePlace, context: Context): ReadonlyArray<ReadRequest> =>
+  NativeType.valueLanesFor(context.types, self.type).map((lane, ordinal) => {
+    const location =
+      self.representation === 'StoredComposite'
+        ? ValueStorage.location(context.types.program.layout, Mir.semanticType(self.type), lane)
+        : NativeType.addressLocation(context.types.program.layout, self.type, lane, ordinal)
+    if (location === undefined) throw new RangeError('Boundary conversion lost its storage plan')
+    return { lane, location }
+  })
+
+/** One explicit storage-to-ABI conversion; no result is retained in the local map. */
+export const loadSelected = Effect.fnUntraced(function* (
+  self: NativePlace,
+  context: Context,
+  ordinals: ReadonlyArray<number>,
+  tag: string,
+) {
+  const lanes = NativeType.valueLanesFor(context.types, self.type)
+  return yield* readLocations(
+    self,
+    context,
+    ordinals.map((ordinal) => {
+      const lane = lanes.at(ordinal)
+      if (lane === undefined) throw new RangeError('Selected boundary lane is unavailable')
+      const location =
+        self.representation === 'StoredComposite'
+          ? ValueStorage.location(context.types.program.layout, Mir.semanticType(self.type), lane)
+          : NativeType.addressLocation(context.types.program.layout, self.type, lane, ordinal)
+      if (location === undefined) throw new RangeError('Selected boundary location is unavailable')
+      return { lane, location }
+    }),
+    tag,
+  )
+})
+
+/** One explicit storage-to-ABI conversion; no result is retained in the local map. */
+export const loadLanes = Effect.fnUntraced(function* (
+  self: NativePlace,
+  context: Context,
+  tag: string,
+) {
+  return yield* readLocations(self, context, requests(self, context), tag)
+})
+
+/** Initializes a boundary destination with one dispatch per stored union, not per lane. */
+export const storeLanes = Effect.fnUntraced(function* (
+  self: NativePlace,
+  context: Context,
+  values: ReadonlyArray<Value.Input>,
+  tag: string,
+) {
+  const planned = requests(self, context)
+  if (planned.length !== values.length)
+    throw new RangeError(
+      `Boundary ${tag} for ${Mir.typeText(self.type)} expected ${planned.length} lanes, received ${values.length}`,
+    )
+  yield* writeLocations(
+    self,
+    context,
+    planned.map((request, ordinal) => {
+      const value = values.at(ordinal)
+      if (value === undefined) throw new RangeError('Boundary conversion lost its source')
+      return { ...request, value }
+    }),
+    tag,
+  )
+})
+
+/** Projects a canonical field or element, retaining its own concrete view. */
+export const project = Effect.fnUntraced(function* (
+  self: NativePlace,
+  context: Context,
+  type: Mir.Type,
+  offset: number,
+  tag: string,
+  representation: NativePlace['representation'] = 'Value',
+) {
+  const layout = context.types.program.layout
+  const physical =
+    representation === 'StoredComposite' && type._tag === 'EffectComposite'
+      ? ValueStorage.find(layout, 'CompositeCarrier', type.type)?.stored
+      : NativeType.addressLayout(layout, type)
+  if (
+    physical === undefined ||
+    offset < 0 ||
+    offset + physical.size > self.size ||
+    offset % physical.alignment !== 0
+  )
+    throw new RangeError('Projection does not fit its selected parent layout')
+  return make(
+    context.types.program.layout,
+    type,
+    yield* NativeLanePointer.lanePointer(
+      context.lanePointers,
+      context.body,
+      yield* base(self, context, `${tag}_base`),
+      offset,
+      tag,
+    ),
+    representation,
+  )
+})
+
+/** Converts only a planner-admitted stored/carrier pair; equivalent views use a byte copy. */
+export const transfer = Effect.fnUntraced(function* (
+  destination: NativePlace,
+  context: Context,
+  source: NativePlace,
+) {
+  if (destination.representation === source.representation)
+    return yield* copy(destination, context, source)
+  if (
+    !Type.equals(Mir.semanticType(source.type), Mir.semanticType(destination.type)) ||
+    ValueStorage.find(
+      context.types.program.layout,
+      'CompositeCarrier',
+      Mir.semanticType(source.type),
+    ) === undefined
+  )
+    throw new RangeError('Place transfer has no planned representation binding')
+  yield* storeLanes(
+    destination,
+    context,
+    yield* loadLanes(source, context, 'transfer_load'),
+    'transfer_store',
+  )
+})
+
+/**
+ * Copies physical bytes between equivalent views, conservatively allowing overlap. This
+ * does not transfer MIR initialization/drop obligations, and never interprets padding or
+ * inactive payload bytes as scalar values. Ownership lowering remains their authority.
+ */
+export const copy = Effect.fnUntraced(function* (
+  destination: NativePlace,
+  context: Context,
+  source: NativePlace,
+) {
+  if (destination.size !== source.size)
+    throw new RangeError('Place copy requires equal planned extents')
+  if (destination.view !== source.view) {
+    // Exact captures and stored nominal fields have distinct identities. Prove their
+    // physical correspondence instead of assuming that ABI lane order implies layout.
+    const target = NativeType.valueLanesFor(context.types, destination.type)
+    const sourceLanes = NativeType.valueLanesFor(context.types, source.type)
+    if (
+      target.length !== sourceLanes.length ||
+      target.some((lane, ordinal) => {
+        const other = sourceLanes.at(ordinal)
+        return (
+          other === undefined ||
+          NativeType.laneType(context.types, lane) !== NativeType.laneType(context.types, other) ||
+          NativeType.addressLaneOffset(
+            context.types.program.layout,
+            destination.type,
+            lane,
+            ordinal,
+          ) !==
+            NativeType.addressLaneOffset(context.types.program.layout, source.type, other, ordinal)
+        )
+      })
+    )
+      throw new RangeError('Place transfer requires an explicit representation conversion')
+  }
+  if (
+    destination.size === 0 ||
+    (destination.base === source.base && destination.indirect === source.indirect)
+  )
+    return
+  yield* Intrinsic.memmove(
+    context.body,
+    yield* base(destination, context, 'copy_destination'),
+    yield* base(source, context, 'copy_source'),
+    yield* Constant.integerUnsigned(
+      context.lanePointers.builder,
+      context.lanePointers.offsetType,
+      BigInt(destination.size),
+    ),
+    {
+      destinationAlignment: yield* Alignment.fromByteUnits(destination.alignment),
+      sourceAlignment: yield* Alignment.fromByteUnits(source.alignment),
+    },
+  )
+})

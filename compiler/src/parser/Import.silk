@@ -24,6 +24,7 @@
 import lexer.Token {TokenKind}
 import parser.Element {Element}
 import parser.Node {NodeKind}
+import parser.Grammar as G
 import parser.ParseState {ElementsResult, NodeResult, State}
 import parser.ParseState as Parsing
 import silk.allocator {Allocator, OutOfMemoryError}
@@ -87,7 +88,9 @@ effect fn parseImportAlias(initial: State) -> NodeResult ! OutOfMemoryError ? &m
 effect fn parseImportPath(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let start = Parsing.insertionSpan(&initial)
   let mut path = Parsing.begin(move initial)
-  if Parsing.hasCurrent(&path.state) && isImportSegment(Parsing.currentKind(&path.state)) {
+  let following = Parsing.peek(&path.state, 1)
+  let startsNextDeclaration = G.declarationStart(&path.state) && following != TokenKind.Dot && following != TokenKind.AsKeyword && following != TokenKind.LeftBrace && following != TokenKind.EndOfFile
+  if Parsing.hasCurrent(&path.state) && isImportSegment(Parsing.currentKind(&path.state)) && !startsNextDeclaration {
     let consumed = run Parsing.consume(move path)
     path = move consumed
   } else {
@@ -131,7 +134,9 @@ effect fn parseImportMemberList(initial: State) -> NodeResult ! OutOfMemoryError
   let mut elements = move initialElements
   let mut parsedMember = false
 
-  while Parsing.currentKind(&state) != TokenKind.RightBrace && Parsing.currentKind(&state) != TokenKind.EndOfFile {
+  while Parsing.currentKind(&state) != TokenKind.RightBrace && Parsing.currentKind(&state) != TokenKind.EndOfFile && !G.declarationStart(
+    &state,
+  ) {
     if Parsing.currentKind(&state) == TokenKind.Identifier {
       let result = run parseImportMember(move state)
       let NodeResult {state: afterMember, node} = move result
@@ -157,6 +162,14 @@ effect fn parseImportMemberList(initial: State) -> NodeResult ! OutOfMemoryError
       if Parsing.currentKind(&state) == TokenKind.RightBrace {
         break
       }
+    } else if Parsing.currentKind(&state) == TokenKind.Identifier {
+      let missing = run Parsing.missing(
+        ElementsResult {state: move state, elements: move elements},
+        TokenKind.Comma,
+      )
+      let ElementsResult {state: afterMissing, elements: withMissing} = move missing
+      state = move afterMissing
+      elements = move withMissing
     } else {
       break
     }
@@ -164,8 +177,10 @@ effect fn parseImportMemberList(initial: State) -> NodeResult ! OutOfMemoryError
 
   let mut list = ElementsResult {state: move state, elements: move elements}
   if !parsedMember {
-    let missing = run Parsing.missing(move list, TokenKind.Identifier)
-    list = move missing
+    let ElementsResult {state: emptyState, elements: emptyElements} = move list
+    let missingMember = run parseImportMember(move emptyState)
+    let withMember = run Parsing.attach(move emptyElements, move missingMember)
+    list = move withMember
   }
   let right = run Parsing.expect(move list, TokenKind.RightBrace)
   return run Parsing.finish(move right, NodeKind.ImportMemberList, start)
@@ -175,7 +190,7 @@ effect fn parseImportMemberList(initial: State) -> NodeResult ! OutOfMemoryError
 ///
 /// # When to use
 ///
-/// Use when the current significant token is `import` or `pub`. The returned node identity can
+/// Use when the current significant tokens start `import` or `pub import`. The returned node identity can
 /// become a direct element of the source-file root.
 ///
 /// # Details

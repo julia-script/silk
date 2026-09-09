@@ -901,9 +901,24 @@ export const lowerEffectCatch = (
     function: declaration,
     span: innerSpan,
   })
-  const failureCoverage = Object.freeze(failureMembers.map(Match.structuralMember))
+  const failureShape = Layout.callingShape(fn.layout, caught.failureValueType)
+  if (failureShape === undefined) return undefined
+  // A failure-row member may itself be a nominal union. Layout expands its variants into
+  // distinct decisions, while the catch arm still binds and handles the entire member.
+  const failureCoverage = Layout.coverageMembers(failureShape)
+  const coverage = Match.cover(
+    failureCoverage,
+    failureMembers.map((member) => ({
+      member: Match.structuralMember(member),
+      universal: false,
+      guarded: false,
+    })),
+    'Runtime',
+  )
   const innerArms: Array<Mir.MatchArm> = []
   for (const [ordinal, member] of failureMembers.entries()) {
+    const transition = coverage.transitions.at(ordinal)
+    if (transition === undefined) return undefined
     const memberCoverage = Match.structuralMember(member)
     const armId: Match.ArmId = Object.freeze({
       _tag: 'MatchArmId',
@@ -1016,8 +1031,8 @@ export const lowerEffectCatch = (
         id: armId,
         member: memberCoverage,
         universal: false,
-        before: Object.freeze(failureCoverage.slice(ordinal)),
-        after: Object.freeze(failureCoverage.slice(ordinal + 1)),
+        before: transition.before,
+        after: transition.after,
         bindings: Object.freeze([
           Object.freeze({
             id: bindingId,
@@ -1048,15 +1063,21 @@ export const lowerEffectCatch = (
     destination: innerResult,
     scrutinee: caught.failure,
     scrutineeType: failureValueMir,
-    scrutineeShape: Layout.callingShape(fn.layout, caught.failureValueType) ?? successShape,
+    scrutineeShape: failureShape,
     access: 'Move',
     retainsBindings: false,
     members: failureCoverage,
     decisions: Object.freeze(
-      failureCoverage.map((member, ordinal) =>
+      failureCoverage.map((member) =>
         Object.freeze({
           member,
-          candidates: Object.freeze([innerArms.at(ordinal)?.id].flatMap((id) => id ?? [])),
+          candidates: Object.freeze(
+            innerArms
+              .filter(
+                (arm) => arm.member !== undefined && Match.selects(arm.member, member, 'Runtime'),
+              )
+              .map((arm) => arm.id),
+          ),
         }),
       ),
     ),

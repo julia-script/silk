@@ -1,0 +1,36 @@
+// Shared by the three embedded-input stages. No parser or output imports here.
+import bench.Input
+import lexer.Lexer {Lexer}
+import lexer.Token {Token}
+import Stream {Stream}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.option {Option}
+import silk.string {String}
+import silk.vector {Vector}
+
+/// An embedded-input benchmark failed its runtime correctness check.
+pub struct CheckFailure {}
+
+pub effect fn source() -> Bytes ! OutOfMemoryError ? &mut Allocator {
+  return run Bytes.copy(String.utf8Bytes(Input.source()))
+}
+
+pub effect fn lex(source: &Bytes) -> Vector<Token>
+! OutOfMemoryError | CheckFailure
+? &mut Allocator {
+  let mut lexer = Lexer.make(Bytes.asSlice(source))
+  let mut tokens = Vector.make<Token>()
+  while true {
+    let taken = run Stream.take(&mut lexer)
+    if let Option<Token>.Some {value} = move taken {
+      run Vector.append<Token>(&mut tokens, move value)
+    } else {
+      break
+    }
+  }
+  if Vector.length<Token>(&tokens) != Input.tokenCount() {
+    fail CheckFailure {}
+  }
+  return move tokens
+}

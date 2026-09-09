@@ -16,52 +16,16 @@
 //! Syntax problems do not fail the parse effect. The parser records diagnostics and inserts error
 //! nodes or missing-token elements. The allocator can still fail while the parser grows an array.
 //!
-//! # Gotchas
-//!
-//! This parser version recognizes import declarations only. Other top-level regions become error
-//! nodes until the parser finds the start of another import declaration.
 
 import lexer.Token {Token, TokenKind}
 import parser.Element {Element}
-import parser.Import {parseImportDeclaration}
-import parser.Node {NodeKind}
-import parser.ParseState {ElementsResult, NodeResult, State}
+import parser.Declaration as Declarations
+import parser.ParseState {ElementsResult, NodeResult}
 import parser.ParseState as Parsing
 import parser.SyntaxTree {SyntaxTree}
 import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
 import silk.vector {Vector}
-
-fn isImportStart(tokenKind: TokenKind) -> bool {
-  return tokenKind == TokenKind.ImportKeyword || tokenKind == TokenKind.PubKeyword
-}
-
-effect fn parseErrorRegion(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let start = Parsing.insertionSpan(&initial)
-  let first = run Parsing.unexpected(Parsing.begin(move initial))
-  let ElementsResult {state: afterFirst, elements: firstElements} = move first
-  let mut state = move afterFirst
-  let mut elements = move firstElements
-  while Parsing.currentKind(&state) != TokenKind.EndOfFile && !isImportStart(
-    Parsing.currentKind(&state),
-  ) {
-    let consumed = run Parsing.consume(ElementsResult {state: move state, elements: move elements})
-    let ElementsResult {state: afterToken, elements: afterTokenElements} = move consumed
-    state = move afterToken
-    elements = move afterTokenElements
-  }
-  return run Parsing.finish(
-    ElementsResult {state: move state, elements: move elements},
-    NodeKind.Error,
-    start,
-  )
-}
-
-effect fn parseTopLevelDeclaration(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  if isImportStart(Parsing.currentKind(&initial)) {
-    return run parseImportDeclaration(move initial)
-  }
-  return run parseErrorRegion(move initial)
-}
 
 /// Parses one complete token array into a recoverable flat abstract syntax tree.
 ///
@@ -72,30 +36,41 @@ effect fn parseTopLevelDeclaration(initial: State) -> NodeResult ! OutOfMemoryEr
 ///
 /// # Details
 ///
-/// The result owns the input tokens. It also owns a flat node array, one source-file root, and all
+/// The result owns the source bytes and input tokens. It also owns a flat node array, one source-file root, and all
 /// syntax diagnostics. Child node identities refer to earlier entries in the node array.
 ///
 /// The parser skips trivia when it applies grammar rules. It does not remove trivia from the token
 /// array. Elements for significant source tokens refer to their original token indices.
 ///
 /// A missing token adds a zero-width element and a diagnostic. An unexpected top-level region adds
-/// an error node. Parsing then continues at the next import start.
+/// an error node. Parsing continues through the remaining declarations and valid child regions.
 ///
 /// # Gotchas
 ///
 /// Syntax problems are values in the result, not effect failures. Allocation failure is the only
 /// declared effect failure.
 ///
-/// The current grammar recognizes `import` and `pub import` declarations only. It preserves other
-/// top-level source in error nodes.
-pub effect fn parse(tokens: Vector<Token>) -> SyntaxTree ! OutOfMemoryError ? &mut Allocator {
-  let mut state = Parsing.make(move tokens)
+/// The token spans must address `source`, and tokens must occur in source order. The parser does
+/// not re-lex the input or accept token arrays assembled from different files.
+pub effect fn parse(source: Bytes, tokens: Vector<Token>) -> SyntaxTree
+! OutOfMemoryError
+? &mut Allocator {
+  let mut state = Parsing.make(move source, move tokens)
   let mut elements = Vector.make<Element>()
   while Parsing.currentKind(&state) != TokenKind.EndOfFile {
-    let result = run parseTopLevelDeclaration(move state)
+    let before = state.index
+    let result = run Declarations.parse(move state)
     let NodeResult {state: afterDeclaration, node} = move result
     state = move afterDeclaration
     run Vector.append<Element>(&mut elements, Element.Node {id: node})
+    if state.index == before {
+      let advanced = run Parsing.unexpected(
+        ElementsResult {state: move state, elements: move elements},
+      )
+      let ElementsResult {state: nextState, elements: nextElements} = move advanced
+      state = move nextState
+      elements = move nextElements
+    }
   }
   let endOfFile = run Parsing.expect(
     ElementsResult {state: move state, elements: move elements},

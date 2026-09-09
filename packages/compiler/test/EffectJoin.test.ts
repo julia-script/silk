@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
+import * as ValueStorage from '../src/ValueStorage.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -91,6 +92,37 @@ pub fn main() -> i32 { return run Effect.catchAll(Effect.ensuring(choose(2), cho
     )
     const mir = Analysis.loweredMir(snapshot)
     assert.deepEqual(MirVerification.verify(mir), [])
+    const composites = mir.layout.valueStorage.filter((view) => view.role === 'CompositeCarrier')
+    assert.isNotEmpty(composites)
+    assert.deepEqual(ValueStorage.verify(mir.layout), [])
+    for (const view of composites) {
+      assert.strictEqual(view._tag, 'ValueStorage')
+      if (view._tag !== 'ValueStorage') continue
+      assert.isDefined(view.stored)
+      assert.notStrictEqual(view.key, view.stored?.key)
+      assert.deepEqual(
+        view.members.map((member) => member.tag),
+        view.stored?.alternatives.map((alternative) => alternative.tag),
+      )
+      for (const alternative of view.stored?.alternatives ?? []) {
+        for (const slot of alternative.slots)
+          assert.isAtMost(slot.offset + slot.size, alternative.size)
+        const missing = {
+          ...mir.layout,
+          entries: mir.layout.entries.filter((entry) => !Type.equals(entry.type, alternative.type)),
+        }
+        assert.isTrue(
+          ValueStorage.plan(missing).some(
+            (candidate) =>
+              candidate.key === view.key && candidate._tag === 'UnavailableValueStorage',
+          ),
+        )
+        assert.deepEqual(
+          ValueStorage.verify(missing).map((violation) => violation.rule),
+          ['InvalidValueStorage'],
+        )
+      }
+    }
     const operations = mir.functions.flatMap(MirVerification.operations)
     assert.isTrue(operations.some((operation) => operation._tag === 'UnpackEffectComposite'))
     assert.isTrue(

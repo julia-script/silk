@@ -1,3 +1,4 @@
+import * as CoroutineFrame from './CoroutineFrame.js'
 import * as NativeAssembly from './NativeAssembly.js'
 import * as MirInitialization from './MirInitialization.js'
 import * as MovePath from './MovePath.js'
@@ -2806,18 +2807,7 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
         layout.payload.every((field, ordinal) => {
           const slot = state.slots.at(ordinal)
           if (slot === undefined) return false
-          let physical: { readonly size: number; readonly alignment: number } | undefined
-          if (slot.access._tag === 'BorrowedDependency' || slot.type._tag === 'EnvironmentBorrow') {
-            physical = Object.freeze({ size: wordSize, alignment: wordAlignment })
-          } else if (slot.type._tag === 'EffectValue') {
-            physical = slot.type.environment
-          } else if (slot.type._tag === 'CallableValue') {
-            physical =
-              slot.type.environment?.view ??
-              Object.freeze({ size: wordSize * 2, alignment: wordAlignment })
-          } else {
-            physical = Layout.entry(self.layout, semanticType(slot.type))
-          }
+          const physical = CoroutineFrame.storageOf(self, slot)
           if (physical === undefined) return false
           const offset = Math.ceil(cursor / physical.alignment) * physical.alignment
           const valid =

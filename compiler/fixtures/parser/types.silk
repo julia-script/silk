@@ -1,0 +1,28 @@
+pub struct Types<'a, 'b: 'a, T: Copy + Order, ?R> {
+  named: Package.Value<T>
+  reference: &'a mut T
+  slice: &'a [T]
+  fixed: [u8; 4]
+  pointer: *mut T
+  nullable: ?[*]const align(8) u8
+  callable: once fn<'a>(T, &T) -> T
+  higher: for<'b> fn(&'b T) -> &'b T
+  foreign: extern "C" fn(i32) -> i32
+  exact: typeof(Package.function<T>)
+  effectValue: Effect<'a; T ! Error ? &mut Clock at Primary | R>
+  onceEffect: once Effect<'a; T ! Error ? &Clock>
+  mutableEffect: mut Package.Effect<T>
+  bareOnce: once Effect
+  bareMutable: mut Package.Effect
+  subtraction: Without<&mut Clock at Primary | R, Clock at Primary>
+  parentheses: (T | Error)
+  unit: ()
+}
+pub effect<'a> fn operation<'a, T, ?R>(mut value: T) -> T
+! Error | Other
+? &Clock at Primary | Without<R, Clock>
+where T in Result, Provider provides Clock from R {
+  return move value
+}
+fn opaque() -> some<F: fn() -> i32> F { return fn() -> i32 { return 1 } }
+effect fn rowUnion<S, ?R, ?Q>() -> () ? Without<R, S> | Q { return () }

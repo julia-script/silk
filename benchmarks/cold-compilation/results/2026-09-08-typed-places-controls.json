@@ -1,0 +1,198 @@
+{
+  "metadata": {
+    "startedAt": "2026-09-09T00:47:23.262876+00:00",
+    "cpu": "Apple M1 Max",
+    "node": "v26.7.0",
+    "clang": "Homebrew clang version 22.1.8\nTarget: arm64-apple-darwin24.5.0\nThread model: posix\nInstalledDir: /opt/homebrew/Cellar/llvm/22.1.8/bin\nConfiguration file: /opt/homebrew/Cellar/llvm/22.1.8/etc/clang/arm64-apple-darwin24.cfg",
+    "revision": "815e0986b91d0985b4d8400d98cad65024becff9",
+    "compilerSourcesSha256": "b1555f2aedfe2af66e4f5d402036c0aae897e8b2eabf1784a8d1d97f478ab70f",
+    "compilerModulesSha256": "629b8a2f215cf6c703befd34833f4a07e44a94bc47359fa16122eee925f9dcf3",
+    "compilerDiffSha256": "af786ae7182dd162821419f4580fff3670a9464eccb7837d17f4f03adca69b41",
+    "toolchainSha256": "1dc1f5e8979c731a2cdb7c131003c16cf996242de6fdae9058a1bed83e18bd9e",
+    "sourceHashes": {
+      "minimal": "346d461708a126b7d7f3f43bdbdc463cd7147289108ecd67543b7f051b8641b9",
+      "descriptor": "9020590954edfb8223f040961afd5214204427f5c35acb527d84e9a1466190bc"
+    },
+    "policy": "fresh Node process and output per sample; native and Node caches disabled; OS page cache retained; serial rotating order; debug; runtime oracle outside timing"
+  },
+  "summaries": [
+    {
+      "workload": "minimal",
+      "medianMs": 6678.517917,
+      "minMs": 6664.24475,
+      "maxMs": 6735.481334,
+      "medianPeakRssBytes": 653852672
+    },
+    {
+      "workload": "descriptor",
+      "medianMs": 6439.101542,
+      "minMs": 6417.278417,
+      "maxMs": 6749.771042,
+      "medianPeakRssBytes": 670695424
+    }
+  ],
+  "rows": [
+    {
+      "workload": "minimal",
+      "language": "silk",
+      "round": 0,
+      "position": 0,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/minimal.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation",
+        "--optimization",
+        "debug",
+        "--output",
+        "/var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-7bm8v0fy/program"
+      ],
+      "wallMs": 6735.481334,
+      "peakRssBytes": 664600576,
+      "binaryBytes": 561664,
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/minimal.silk -> /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-7bm8v0fy/program (llvm, aarch64-apple-darwin, 204 symbols)\nLink plan: /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-7bm8v0fy/program.link.json\n",
+      "stderr": "        6.73 real         9.40 user         0.42 sys\n           664600576  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               67809  page reclaims\n                 868  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 824  messages sent\n                  20  messages received\n                   0  signals received\n                   1  voluntary context switches\n               19753  involuntary context switches\n         97062553092  instructions retired\n         29522824443  cycles elapsed\n           578398848  peak memory footprint\n",
+      "toolchainSeedOutsideTiming": null,
+      "verifiedExitCode": 0,
+      "loadAverageBefore": [5.34814453125, 12.8642578125, 27.6533203125],
+      "loadAverageAfter": [5.39990234375, 12.75, 27.5263671875]
+    },
+    {
+      "workload": "descriptor",
+      "language": "silk",
+      "round": 0,
+      "position": 1,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/descriptor.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation",
+        "--optimization",
+        "debug",
+        "--output",
+        "/var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-_0_xygjm/program"
+      ],
+      "wallMs": 6417.278417,
+      "peakRssBytes": 663879680,
+      "binaryBytes": 578768,
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/descriptor.silk -> /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-_0_xygjm/program (llvm, aarch64-apple-darwin, 207 symbols)\nLink plan: /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-_0_xygjm/program.link.json\n",
+      "stderr": "        6.41 real         9.04 user         0.41 sys\n           663879680  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               67542  page reclaims\n                 843  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 824  messages sent\n                  29  messages received\n                   0  signals received\n                   0  voluntary context switches\n               17169  involuntary context switches\n         96982587651  instructions retired\n         28608494210  cycles elapsed\n           580186688  peak memory footprint\n",
+      "toolchainSeedOutsideTiming": null,
+      "verifiedExitCode": 0,
+      "loadAverageBefore": [5.39990234375, 12.75, 27.5263671875],
+      "loadAverageAfter": [5.12744140625, 12.5712890625, 27.37646484375]
+    },
+    {
+      "workload": "descriptor",
+      "language": "silk",
+      "round": 1,
+      "position": 0,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/descriptor.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation",
+        "--optimization",
+        "debug",
+        "--output",
+        "/var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-gfsrrcek/program"
+      ],
+      "wallMs": 6439.101542,
+      "peakRssBytes": 670695424,
+      "binaryBytes": 578768,
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/descriptor.silk -> /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-gfsrrcek/program (llvm, aarch64-apple-darwin, 207 symbols)\nLink plan: /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-gfsrrcek/program.link.json\n",
+      "stderr": "        6.43 real         9.13 user         0.42 sys\n           670695424  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               68302  page reclaims\n                 841  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 824  messages sent\n                  29  messages received\n                   0  signals received\n                   1  voluntary context switches\n               16887  involuntary context switches\n         97026923008  instructions retired\n         28799344871  cycles elapsed\n           583954048  peak memory footprint\n",
+      "toolchainSeedOutsideTiming": null,
+      "verifiedExitCode": 0,
+      "loadAverageBefore": [5.12744140625, 12.5712890625, 27.37646484375],
+      "loadAverageAfter": [5.11376953125, 12.32177734375, 27.11474609375]
+    },
+    {
+      "workload": "minimal",
+      "language": "silk",
+      "round": 1,
+      "position": 1,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/minimal.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation",
+        "--optimization",
+        "debug",
+        "--output",
+        "/var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-by3lqzt4/program"
+      ],
+      "wallMs": 6664.24475,
+      "peakRssBytes": 643858432,
+      "binaryBytes": 561664,
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/minimal.silk -> /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-by3lqzt4/program (llvm, aarch64-apple-darwin, 204 symbols)\nLink plan: /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-by3lqzt4/program.link.json\n",
+      "stderr": "        6.66 real         9.45 user         0.45 sys\n           643858432  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               66549  page reclaims\n                 841  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 824  messages sent\n                  27  messages received\n                   0  signals received\n                   0  voluntary context switches\n               19527  involuntary context switches\n         96995952466  instructions retired\n         29842822515  cycles elapsed\n           565716416  peak memory footprint\n",
+      "toolchainSeedOutsideTiming": null,
+      "verifiedExitCode": 0,
+      "loadAverageBefore": [5.11376953125, 12.32177734375, 27.11474609375],
+      "loadAverageAfter": [5.0244140625, 12.18359375, 26.97900390625]
+    },
+    {
+      "workload": "minimal",
+      "language": "silk",
+      "round": 2,
+      "position": 0,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/minimal.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation",
+        "--optimization",
+        "debug",
+        "--output",
+        "/var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-uzwug31o/program"
+      ],
+      "wallMs": 6678.517917,
+      "peakRssBytes": 653852672,
+      "binaryBytes": 561664,
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/minimal.silk -> /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-uzwug31o/program (llvm, aarch64-apple-darwin, 204 symbols)\nLink plan: /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-uzwug31o/program.link.json\n",
+      "stderr": "        6.67 real         9.33 user         0.48 sys\n           653852672  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               67286  page reclaims\n                 841  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 824  messages sent\n                  28  messages received\n                   0  signals received\n                   2  voluntary context switches\n               20177  involuntary context switches\n         96705245111  instructions retired\n         29608308344  cycles elapsed\n           566433856  peak memory footprint\n",
+      "toolchainSeedOutsideTiming": null,
+      "verifiedExitCode": 0,
+      "loadAverageBefore": [5.0244140625, 12.18359375, 26.97900390625],
+      "loadAverageAfter": [4.78173828125, 12.01416015625, 26.83251953125]
+    },
+    {
+      "workload": "descriptor",
+      "language": "silk",
+      "round": 2,
+      "position": 1,
+      "command": [
+        "/Users/juliaortiz/.local/bin/node",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/packages/cli/dist/bin.js",
+        "build-exe",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/descriptor.silk",
+        "--source-root",
+        "/Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation",
+        "--optimization",
+        "debug",
+        "--output",
+        "/var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-s32mogqd/program"
+      ],
+      "wallMs": 6749.771042,
+      "peakRssBytes": 691470336,
+      "binaryBytes": 578768,
+      "stdout": "Compiled /Users/juliaortiz/Documents/dev.nosync/silk/benchmarks/cold-compilation/descriptor.silk -> /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-s32mogqd/program (llvm, aarch64-apple-darwin, 207 symbols)\nLink plan: /var/folders/z4/gzl9m5fn221_mzc8ybkbhkyw0000gn/T/silk-cold-comparison-s32mogqd/program.link.json\n",
+      "stderr": "        6.74 real         9.43 user         0.46 sys\n           691470336  maximum resident set size\n                   0  average shared memory size\n                   0  average unshared data size\n                   0  average unshared stack size\n               69524  page reclaims\n                 841  page faults\n                   0  swaps\n                   0  block input operations\n                   0  block output operations\n                 824  messages sent\n                  28  messages received\n                   0  signals received\n                   0  voluntary context switches\n               18106  involuntary context switches\n         97190162092  instructions retired\n         29902678028  cycles elapsed\n           628169984  peak memory footprint\n",
+      "toolchainSeedOutsideTiming": null,
+      "verifiedExitCode": 0,
+      "loadAverageBefore": [4.78173828125, 12.01416015625, 26.83251953125],
+      "loadAverageAfter": [4.90771484375, 11.7998046875, 26.5830078125]
+    }
+  ]
+}

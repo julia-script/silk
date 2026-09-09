@@ -71,7 +71,7 @@ export const create = (
     })
     draft.valueHandles.push(handle)
     draft.arguments.push(valueIndex)
-    valueEntries.set(handle, { draft, index: valueIndex })
+    valueEntries.set(handle, { owner, index: valueIndex })
   }
   drafts.set(self, draft)
   return self
@@ -375,7 +375,7 @@ export const makeBlock = (
     predecessors: new Set(),
   })
   draft.blockHandles.push(handle)
-  blockEntries.set(handle, { draft, index })
+  blockEntries.set(handle, { owner: draft.owner, index })
   if (draft.cursor === undefined) draft.cursor = index
   return handle
 }
@@ -437,7 +437,7 @@ export const forward = (
     source: { _tag: 'Forward', resolved: undefined },
   })
   draft.valueHandles.push(handle)
-  valueEntries.set(handle, { draft, index })
+  valueEntries.set(handle, { owner: draft.owner, index })
   return handle
 }
 
@@ -577,7 +577,7 @@ export const makePhiHandle = (
   Result.gen(function* () {
     const index = yield* resolveInstruction(draft, instruction, 'FunctionBody.phi')
     const handle = Handle.make('Phi', draft.owner, index)
-    phiEntries.set(handle, { draft, index })
+    phiEntries.set(handle, { owner: draft.owner, index })
     return handle
   })
 
@@ -589,7 +589,7 @@ export const makeSwitchHandle = (
   Result.gen(function* () {
     const index = yield* resolveInstruction(draft, instruction, 'FunctionBody.switchTerminator')
     const handle = Handle.make('Switch', draft.owner, index)
-    switchEntries.set(handle, { draft, index })
+    switchEntries.set(handle, { owner: draft.owner, index })
     return handle
   })
 

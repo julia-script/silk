@@ -1,0 +1,11 @@
+fn identity(value: string) -> string { return value }
+fn length(value: string) -> usize { return Intrinsic.stringByteLength(value) }
+fn first(values: &[u8]) -> u8 { return values[0] }
+
+pub fn main() -> i32 {
+  let text = identity("hé")
+  let bytes = Intrinsic.stringUtf8Bytes(text)
+  if length(text) != 3 || bytes.length != 3 { return 1 }
+  if first(bytes) != 104 { return 2 }
+  return 0
+}

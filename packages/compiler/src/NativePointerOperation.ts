@@ -14,6 +14,8 @@ import * as NativeLanePointer from './NativeLanePointer.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeType from './NativeType.js'
+import * as NativePlace from './NativePlace.js'
+import * as NativeValue from './NativeValue.js'
 
 type Operation = Extract<
   LinearOperation,
@@ -51,7 +53,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   const destination = operation.destination.ordinal
   switch (operation._tag) {
     case 'PointerNull': {
-      storage.locals.set(destination, Object.freeze([yield* Constant.nullValue(builder, pointer)]))
+      yield* NativeStorage.writeLocal(
+        storage,
+        destination,
+        Object.freeze([yield* Constant.nullValue(builder, pointer)]),
+      )
       return
     }
     case 'PointerAddress': {
@@ -59,11 +65,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const address = yield* FunctionBody.cast(
         body,
         'ptrtoint',
-        NativeStorage.readScalar(storage, operation.pointer),
+        yield* NativeStorage.readScalar(storage, operation.pointer),
         addressType,
         `ptr_address${destination}`,
       )
-      storage.locals.set(destination, Object.freeze([address]))
+      yield* NativeStorage.writeLocal(storage, destination, Object.freeze([address]))
       return
     }
     case 'PointerIsNull': {
@@ -75,14 +81,15 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* FunctionBody.cast(
           body,
           'ptrtoint',
-          NativeStorage.readScalar(storage, operation.pointer),
+          yield* NativeStorage.readScalar(storage, operation.pointer),
           addressType,
           `ptr_is_null${destination}_address`,
         ),
         yield* Constant.integerUnsigned(builder, addressType, 0n),
         `ptr_is_null${destination}_flag`,
       )
-      storage.locals.set(
+      yield* NativeStorage.writeLocal(
+        storage,
         destination,
         Object.freeze([
           yield* FunctionBody.cast(body, 'zext', flag, i32, `ptr_is_null${destination}`),
@@ -95,7 +102,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     case 'PointerRequalify':
     case 'PointerFromStorage': {
       // A reference is its address lane; a slice is address then length.
-      const address = NativeStorage.readLocal(storage, operation.source).at(0)
+      const address = (yield* NativeStorage.materialize(storage, operation.source)).at(0)
       if (address === undefined)
         throw new RangeError('LLVM pointer formation lost its address lane')
       const sourceType = storage.fn.localTypes.at(operation.source.ordinal)
@@ -109,7 +116,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
               `slot_address${destination}`,
             )
           : address
-      storage.locals.set(destination, Object.freeze([pointerAddress]))
+      yield* NativeStorage.writeLocal(storage, destination, Object.freeze([pointerAddress]))
       return
     }
     case 'PointerAt': {
@@ -123,7 +130,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const bytes = yield* FunctionBody.binary(
         body,
         'mul',
-        NativeStorage.readScalar(storage, operation.count),
+        yield* NativeStorage.readScalar(storage, operation.count),
         yield* Constant.integerUnsigned(
           builder,
           NativeType.laneType(types, countLane),
@@ -131,13 +138,14 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         ),
         `ptr_offset${destination}_bytes`,
       )
-      storage.locals.set(
+      yield* NativeStorage.writeLocal(
+        storage,
         destination,
         Object.freeze([
           yield* NativeLanePointer.lanePointer(
             lanePointers,
             body,
-            NativeStorage.readScalar(storage, operation.pointer),
+            yield* NativeStorage.readScalar(storage, operation.pointer),
             bytes,
             `ptr_offset${destination}`,
           ),
@@ -146,7 +154,22 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       return
     }
     case 'PointerRead': {
-      const base = NativeStorage.readScalar(storage, operation.pointer)
+      const base = yield* NativeStorage.readScalar(storage, operation.pointer)
+      if (NativeValue.classify(program.layout, operation.type) === 'Place') {
+        const destination = NativeStorage.readLocal(storage, operation.destination)
+        if (destination._tag !== 'NativePlace')
+          throw new RangeError('Pointer read lost its aggregate destination')
+        yield* NativePlace.transfer(destination, storage, {
+          ...NativePlace.make(
+            program.layout,
+            operation.type,
+            base,
+            operation.type._tag === 'EffectComposite' ? 'StoredComposite' : 'Value',
+          ),
+          alignment: accessAlignment(context, operation.pointer, 0),
+        })
+        return
+      }
       const semantic = Mir.semanticType(operation.type)
       const values: Array<Value.Input> = []
       for (const [ordinal, lane] of NativeType.lanesFor(types, operation.type).entries()) {
@@ -172,15 +195,34 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           ),
         )
       }
-      storage.locals.set(destination, Object.freeze(values))
+      yield* NativeStorage.writeLocal(storage, destination, Object.freeze(values))
       return
     }
     case 'PointerWrite': {
-      const base = NativeStorage.readScalar(storage, operation.pointer)
+      const base = yield* NativeStorage.readScalar(storage, operation.pointer)
       const valueType = storage.fn.localTypes.at(operation.value.ordinal)
       if (valueType === undefined) throw new RangeError('LLVM pointer write lost its value type')
+      const source = NativeStorage.readLocal(storage, operation.value)
+      if (source._tag === 'NativePlace') {
+        yield* NativePlace.transfer(
+          {
+            ...NativePlace.make(
+              program.layout,
+              valueType,
+              base,
+              valueType._tag === 'EffectComposite' ? 'StoredComposite' : 'Value',
+            ),
+            alignment: accessAlignment(context, operation.pointer, 0),
+          },
+          storage,
+          source,
+        )
+        yield* NativeStorage.writeLocal(storage, destination, Object.freeze([]))
+        yield* NativeStorage.reloadAddressRoots(storage)
+        return
+      }
       const semantic = Mir.semanticType(valueType)
-      const values = NativeStorage.readLocal(storage, operation.value)
+      const values = yield* NativeStorage.materialize(storage, operation.value)
       for (const [ordinal, lane] of NativeType.lanesFor(types, valueType).entries()) {
         const offset = LayoutVerify.laneOffset(program.layout, semantic, lane.path)
         const value = values.at(ordinal)
@@ -203,7 +245,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           },
         )
       }
-      storage.locals.set(destination, Object.freeze([]))
+      yield* NativeStorage.writeLocal(storage, destination, Object.freeze([]))
       yield* NativeStorage.reloadAddressRoots(storage)
       return
     }

@@ -141,7 +141,7 @@ export const make = (
 export const read = Effect.fnUntraced(function* (
   self: NativeOwnedPlace,
   context: NativeArith.LaneContext,
-  values: ReadonlyArray<Value.Input>,
+  read: (ordinal: number) => Effect.Effect<Value.Input, LlvmError.LlvmError>,
   tag: string,
   ordinals: ReadonlyArray<number> = self.slots.map((_, ordinal) => ordinal),
 ): Effect.fn.Return<ReadonlyArray<Value.Input>, LlvmError.LlvmError> {
@@ -149,7 +149,7 @@ export const read = Effect.fnUntraced(function* (
   for (const ordinal of ordinals) {
     const slot = self.slots.at(ordinal)
     if (slot === undefined) throw new RangeError('Owned place lost a selected lane')
-    const value = values.at(slot)
+    const value = yield* read(slot)
     const source = self.source.lanes.at(slot)
     const target = self.target.lanes.at(ordinal)
     if (value === undefined || source === undefined || target === undefined)
@@ -165,24 +165,23 @@ export const read = Effect.fnUntraced(function* (
 export const write = Effect.fnUntraced(function* (
   self: NativeOwnedPlace,
   context: NativeArith.LaneContext,
-  original: ReadonlyArray<Value.Input>,
-  values: ReadonlyArray<Value.Input>,
+  read: (ordinal: number) => Effect.Effect<Value.Input, LlvmError.LlvmError>,
+  write: (ordinal: number, value: Value.Input) => Effect.Effect<void, LlvmError.LlvmError>,
   tag: string,
-): Effect.fn.Return<ReadonlyArray<Value.Input>, LlvmError.LlvmError> {
-  const updated = [...original]
+): Effect.fn.Return<void, LlvmError.LlvmError> {
   for (const [ordinal, slot] of self.slots.entries()) {
-    const value = values.at(ordinal)
+    const value = yield* read(ordinal)
     const target = self.source.lanes.at(slot)
     const source = self.target.lanes.at(ordinal)
     if (value === undefined || source === undefined || target === undefined)
       throw new RangeError('Owned place write lost a verified physical lane')
-    updated[slot] = yield* NativeArith.coerceLane(
+    const stored = yield* NativeArith.coerceLane(
       context,
       value,
       source,
       target,
       `${tag}_${ordinal}`,
     )
+    yield* write(slot, stored)
   }
-  return Object.freeze(updated)
 })

@@ -11,6 +11,7 @@ import type {
 } from './Layout.js'
 import * as Target from './Target.js'
 import * as Type from './Type.js'
+import * as ValueStorage from './ValueStorage.js'
 
 const representationText = (representation: Representation): string => {
   switch (representation._tag) {
@@ -154,6 +155,7 @@ export const encode = (self: Plan): string =>
   [
     `target ${Target.encode(self.target)}`,
     ...self.entries.flatMap(entryLines),
+    ...self.valueStorage.map((view) => `value-storage ${ValueStorage.encode(view)}`),
     ...self.executionPackages.plans.map(ExecutionPackage.encode),
     ...self.executionPackages.unavailable.map(
       (candidate) =>

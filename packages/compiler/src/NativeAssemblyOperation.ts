@@ -37,7 +37,9 @@ export const emit = Effect.fnUntraced(function* (
     yield* LlvmType.functionType(builder, resultType, parameters),
     operation.assembly.template,
     NativeAssembly.llvmConstraints(operation.assembly, program.layout.target),
-    operation.arguments.map((argument) => NativeStorage.readScalar(storage, argument)),
+    yield* Effect.forEach(operation.arguments, (argument) =>
+      NativeStorage.readScalar(storage, argument),
+    ),
     Type.equals(result, Type.unit) ? undefined : `assembly${operation.destination.ordinal}`,
     { sideEffect: operation.assembly.sideEffects, alignStack: false, canThrow: false },
     {
@@ -51,7 +53,11 @@ export const emit = Effect.fnUntraced(function* (
       yield* NativeStorage.reloadAddressRoot(storage, root)
   if (!Type.equals(result, Type.unit) && value === undefined)
     throw new RangeError('Assembly result was not emitted')
-  storage.locals.set(operation.destination.ordinal, value === undefined ? [] : [value])
+  yield* NativeStorage.writeLocal(
+    storage,
+    operation.destination.ordinal,
+    value === undefined ? [] : [value],
+  )
 })
 
 /** Emits the admitted naked body in one LLVM block, with no compiler-created control edges. */
