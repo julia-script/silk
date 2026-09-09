@@ -14,48 +14,60 @@ import silk.usize as Usize
 /// Parses the parent type and member name of an applied variant or operation selector.
 pub effect fn selector(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let mut p = run P.wrap(run Types.named(move initial))
-  let afterDot = run P.expect(move p, TokenKind.Dot)
+  let afterDot = run move p
+    |> P.expect(TokenKind.Dot)
   p = move afterDot
-  let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+  let afterIdentifier = run move p
+    |> P.expect(TokenKind.Identifier)
   p = move afterIdentifier
-  return run P.complete(move p, NodeKind.AppliedMemberSelector)
+  return run move p
+    |> P.complete(NodeKind.AppliedMemberSelector)
 }
 
 effect fn field(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   if P.currentKind(&initial) == TokenKind.DotDot {
     return run P.complete(run P.consume(P.begin(move initial)), NodeKind.RestPattern)
   }
-  let mut p = run P.expect(P.begin(move initial), TokenKind.Identifier)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Identifier)
   if P.currentKind(&p.state) == TokenKind.Colon {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
     if Look.record(&p.state) || Look.appliedMember(&p.state) {
       let attached = run P.attach(move p.elements, run parse(move p.state))
       p = move attached
     } else {
-      let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+      let afterIdentifier = run move p
+        |> P.expect(TokenKind.Identifier)
       p = move afterIdentifier
     }
   }
-  return run P.complete(move p, NodeKind.PatternField)
+  return run move p
+    |> P.complete(NodeKind.PatternField)
 }
 
 effect fn fields(initial: ElementsResult, kind: NodeKind) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  let mut p = run P.expect(move initial, TokenKind.LeftBrace)
+  let mut p = run move initial
+    |> P.expect(TokenKind.LeftBrace)
   while P.currentKind(&p.state) == TokenKind.Identifier || P.currentKind(&p.state) == TokenKind.DotDot {
     let attached = run P.attach(move p.elements, run field(move p.state))
     p = move attached
     if P.currentKind(&p.state) == TokenKind.RightBrace {
       break
     }
-    let afterComma = run P.expect(move p, TokenKind.Comma)
+    let afterComma = run move p
+      |> P.expect(TokenKind.Comma)
     p = move afterComma
   }
-  let afterRightBrace = run P.expect(move p, TokenKind.RightBrace)
+  let afterRightBrace = run move p
+    |> P.expect(TokenKind.RightBrace)
   p = move afterRightBrace
-  return run P.complete(move p, kind)
+  return run move p
+    |> P.complete(kind)
 }
 
 /// Parses one complete pattern, stopping before its guard, initializer, or arm separator.
@@ -64,7 +76,8 @@ effect fn fields(initial: ElementsResult, kind: NodeKind) -> NodeResult
 /// by its enclosing rule, allowing the remainder of the arm or binding to stay navigable.
 pub effect fn parse(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   if initial.depth >= P.NESTING_LIMIT {
-    return run P.nestingError(move initial)
+    return run move initial
+      |> P.nestingError
   }
   let depth = initial.depth
   let mut state = move initial
@@ -80,28 +93,38 @@ effect fn parseInner(initial: State) -> NodeResult ! OutOfMemoryError ? &mut All
     return run P.complete(run P.consume(P.begin(move initial)), NodeKind.UniversalPattern)
   }
   if kind == TokenKind.DecimalInteger || (kind == TokenKind.Minus && P.peek(&initial, 1) == TokenKind.DecimalInteger) {
-    let mut p = run P.optional(P.begin(move initial), TokenKind.Minus)
-    let afterDecimalInteger = run P.expect(move p, TokenKind.DecimalInteger)
+    let mut p = run move initial
+      |> P.begin
+      |> P.optional(TokenKind.Minus)
+    let afterDecimalInteger = run move p
+      |> P.expect(TokenKind.DecimalInteger)
     p = move afterDecimalInteger
-    return run P.complete(move p, NodeKind.IntegerPattern)
+    return run move p
+      |> P.complete(NodeKind.IntegerPattern)
   }
   if Look.appliedMember(&initial) {
     let p = run P.wrap(run selector(move initial))
     if P.currentKind(&p.state) == TokenKind.LeftBrace {
       return run fields(move p, NodeKind.UnionVariantPattern)
     }
-    return run P.complete(move p, NodeKind.UnionVariantPattern)
+    return run move p
+      |> P.complete(NodeKind.UnionVariantPattern)
   }
   if kind == TokenKind.Identifier && P.peek(&initial, 1) == TokenKind.Dot && P.peek(&initial, 2) == TokenKind.Identifier && P.peek(
     &initial,
     3,
   ) != TokenKind.LeftBrace && P.peek(&initial, 3) != TokenKind.Less && P.peek(&initial, 3) != TokenKind.Identifier {
-    let mut p = run P.consume(P.begin(move initial))
-    let consumed = run P.consume(move p)
+    let mut p = run move initial
+      |> P.begin
+      |> P.consume
+    let consumed = run move p
+      |> P.consume
     p = move consumed
-    let consumed2 = run P.consume(move p)
+    let consumed2 = run move p
+      |> P.consume
     p = move consumed2
-    return run P.complete(move p, NodeKind.EnumMemberPattern)
+    return run move p
+      |> P.complete(NodeKind.EnumMemberPattern)
   }
   if kind == TokenKind.Identifier || kind == TokenKind.LeftBracket || ((kind == TokenKind.MutKeyword || kind == TokenKind.OnceKeyword) && P.peek(
     &initial,
@@ -109,19 +132,24 @@ effect fn parseInner(initial: State) -> NodeResult ! OutOfMemoryError ? &mut All
   ) == TokenKind.Identifier) {
     let mut p = run P.wrap(run Types.primary(move initial))
     if P.currentKind(&p.state) == TokenKind.Identifier {
-      let consumed3 = run P.consume(move p)
+      let consumed3 = run move p
+        |> P.consume
       p = move consumed3
-      return run P.complete(move p, NodeKind.BindingPattern)
+      return run move p
+        |> P.complete(NodeKind.BindingPattern)
     }
     return run fields(move p, NodeKind.NominalPattern)
   }
   let mut p = P.begin(move initial)
   if kind == TokenKind.FatArrow || kind == TokenKind.Equals || kind == TokenKind.RightBrace || kind == TokenKind.EndOfFile || kind == TokenKind.IfKeyword {
-    let afterIdentifier = run P.missing(move p, TokenKind.Identifier)
+    let afterIdentifier = run move p
+      |> P.missing(TokenKind.Identifier)
     p = move afterIdentifier
   } else {
-    let advanced = run P.unexpected(move p)
+    let advanced = run move p
+      |> P.unexpected
     p = move advanced
   }
-  return run P.complete(move p, NodeKind.ErrorPattern)
+  return run move p
+    |> P.complete(NodeKind.ErrorPattern)
 }

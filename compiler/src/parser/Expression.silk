@@ -19,42 +19,55 @@ effect fn literal(initial: State, nodeKind: NodeKind) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
   let negative = P.currentKind(&initial) == TokenKind.Minus
-  let mut p = run P.consume(P.begin(move initial))
+  let mut p = run move initial
+    |> P.begin
+    |> P.consume
   if negative && nodeKind == NodeKind.IntegerLiteralExpression && P.currentKind(&p.state) == TokenKind.DecimalInteger {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
   } else if negative && nodeKind == NodeKind.FloatingLiteralExpression && P.currentKind(&p.state) == TokenKind.DecimalFloat {
-    let consumed2 = run P.consume(move p)
+    let consumed2 = run move p
+      |> P.consume
     p = move consumed2
   }
-  return run P.complete(move p, nodeKind)
+  return run move p
+    |> P.complete(nodeKind)
 }
 
 effect fn field(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.Identifier)
-  let afterColon = run P.expect(move p, TokenKind.Colon)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Identifier)
+  let afterColon = run move p
+    |> P.expect(TokenKind.Colon)
   p = move afterColon
   let attached = run P.attach(move p.elements, run parse(move p.state, true))
   p = move attached
-  return run P.complete(move p, NodeKind.StructFieldInitializer)
+  return run move p
+    |> P.complete(NodeKind.StructFieldInitializer)
 }
 
 effect fn recordFields(initial: ElementsResult, kind: NodeKind) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  let mut p = run P.expect(move initial, TokenKind.LeftBrace)
+  let mut p = run move initial
+    |> P.expect(TokenKind.LeftBrace)
   while P.currentKind(&p.state) == TokenKind.Identifier {
     let attached = run P.attach(move p.elements, run field(move p.state))
     p = move attached
     if P.currentKind(&p.state) == TokenKind.RightBrace {
       break
     }
-    let afterComma = run P.expect(move p, TokenKind.Comma)
+    let afterComma = run move p
+      |> P.expect(TokenKind.Comma)
     p = move afterComma
   }
-  let afterRightBrace = run P.expect(move p, TokenKind.RightBrace)
+  let afterRightBrace = run move p
+    |> P.expect(TokenKind.RightBrace)
   p = move afterRightBrace
-  return run P.complete(move p, kind)
+  return run move p
+    |> P.complete(kind)
 }
 
 effect fn identifier(initial: State, allowRecord: bool) -> NodeResult
@@ -65,7 +78,8 @@ effect fn identifier(initial: State, allowRecord: bool) -> NodeResult
     if allowRecord && P.currentKind(&p.state) == TokenKind.LeftBrace {
       return run recordFields(move p, NodeKind.AppliedMemberExpression)
     }
-    return run P.complete(move p, NodeKind.AppliedMemberExpression)
+    return run move p
+      |> P.complete(NodeKind.AppliedMemberExpression)
   }
   if allowRecord && Look.record(&initial) {
     return run recordFields(
@@ -73,14 +87,17 @@ effect fn identifier(initial: State, allowRecord: bool) -> NodeResult
       NodeKind.StructLiteralExpression,
     )
   }
-  return run P.complete(
-    run P.expect(P.begin(move initial), TokenKind.Identifier),
-    NodeKind.IdentifierExpression,
-  )
+  let identifier = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Identifier)
+  return run move identifier
+    |> P.complete(NodeKind.IdentifierExpression)
 }
 
 effect fn grouped(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.consume(P.begin(move initial))
+  let mut p = run move initial
+    |> P.begin
+    |> P.consume
   if P.currentKind(&p.state) == TokenKind.RightParenthesis {
     return run P.complete(run P.consume(move p), NodeKind.UnitExpression)
   }
@@ -88,7 +105,8 @@ effect fn grouped(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Alloca
   p = move attached
   let isTuple = P.currentKind(&p.state) == TokenKind.Comma
   while P.currentKind(&p.state) == TokenKind.Comma {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
     if P.currentKind(&p.state) == TokenKind.RightParenthesis {
       break
@@ -100,16 +118,21 @@ effect fn grouped(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Alloca
       break
     }
   }
-  let afterRightParenthesis = run P.expect(move p, TokenKind.RightParenthesis)
+  let afterRightParenthesis = run move p
+    |> P.expect(TokenKind.RightParenthesis)
   p = move afterRightParenthesis
   if isTuple {
-    return run P.complete(move p, NodeKind.TupleLiteralExpression)
+    return run move p
+      |> P.complete(NodeKind.TupleLiteralExpression)
   }
-  return run P.complete(move p, NodeKind.GroupedExpression)
+  return run move p
+    |> P.complete(NodeKind.GroupedExpression)
 }
 
 effect fn array(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.consume(P.begin(move initial))
+  let mut p = run move initial
+    |> P.begin
+    |> P.consume
   while G.expressionStart(P.currentKind(&p.state)) && !G.blockEnd(&p.state) {
     let before = p.state.index
     let attached = run P.attach(move p.elements, run parse(move p.state, true))
@@ -117,16 +140,21 @@ effect fn array(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocato
     if p.state.index == before || P.currentKind(&p.state) == TokenKind.RightBracket {
       break
     }
-    let afterComma = run P.expect(move p, TokenKind.Comma)
+    let afterComma = run move p
+      |> P.expect(TokenKind.Comma)
     p = move afterComma
   }
-  let afterRightBracket = run P.expect(move p, TokenKind.RightBracket)
+  let afterRightBracket = run move p
+    |> P.expect(TokenKind.RightBracket)
   p = move afterRightBracket
-  return run P.complete(move p, NodeKind.ArrayLiteralExpression)
+  return run move p
+    |> P.complete(NodeKind.ArrayLiteralExpression)
 }
 
 effect fn arguments(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.LeftParenthesis)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.LeftParenthesis)
   while G.expressionStart(P.currentKind(&p.state)) && !G.blockEnd(&p.state) {
     let before = p.state.index
     let attached = run P.attach(move p.elements, run parse(move p.state, true))
@@ -134,12 +162,15 @@ effect fn arguments(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allo
     if p.state.index == before || P.currentKind(&p.state) == TokenKind.RightParenthesis {
       break
     }
-    let afterComma = run P.expect(move p, TokenKind.Comma)
+    let afterComma = run move p
+      |> P.expect(TokenKind.Comma)
     p = move afterComma
   }
-  let afterRightParenthesis = run P.expect(move p, TokenKind.RightParenthesis)
+  let afterRightParenthesis = run move p
+    |> P.expect(TokenKind.RightParenthesis)
   p = move afterRightParenthesis
-  return run P.complete(move p, NodeKind.ArgumentList)
+  return run move p
+    |> P.complete(NodeKind.ArgumentList)
 }
 
 /// Extends a completed expression with calls and place projections without recursive left nesting.
@@ -151,7 +182,8 @@ pub effect fn postfix(initial: NodeResult) -> NodeResult ! OutOfMemoryError ? &m
   while true {
     let kind = P.currentKind(&result.state)
     if kind == TokenKind.Less && Look.afterAngles(&result.state, 0) == TokenKind.LeftParenthesis {
-      let mut p = run P.wrap(move result)
+      let mut p = run move result
+        |> P.wrap
       let withTypesArguments = run P.attach(
         move p.elements,
         run Types.arguments(move p.state, true),
@@ -159,42 +191,52 @@ pub effect fn postfix(initial: NodeResult) -> NodeResult ! OutOfMemoryError ? &m
       p = move withTypesArguments
       let attached = run P.attach(move p.elements, run arguments(move p.state))
       p = move attached
-      let completed = run P.complete(move p, NodeKind.CallExpression)
+      let completed = run move p
+        |> P.complete(NodeKind.CallExpression)
       result = move completed
     } else if kind == TokenKind.LeftParenthesis {
-      let mut p = run P.wrap(move result)
+      let mut p = run move result
+        |> P.wrap
       let attached2 = run P.attach(move p.elements, run arguments(move p.state))
       p = move attached2
-      let completed2 = run P.complete(move p, NodeKind.CallExpression)
+      let completed2 = run move p
+        |> P.complete(NodeKind.CallExpression)
       result = move completed2
     } else if kind == TokenKind.Dot {
       let mut p = run P.consume(run P.wrap(move result))
       let member = P.currentKind(&p.state)
       let mut nodeKind = NodeKind.FieldProjectionExpression
       if member == TokenKind.Star {
-        let consumed = run P.consume(move p)
+        let consumed = run move p
+          |> P.consume
         p = move consumed
         nodeKind = NodeKind.ReferentProjectionExpression
       } else if member == TokenKind.DecimalInteger {
-        let consumed2 = run P.consume(move p)
+        let consumed2 = run move p
+          |> P.consume
         p = move consumed2
         nodeKind = NodeKind.OrdinalProjectionExpression
       } else if member == TokenKind.DropKeyword {
-        let consumed3 = run P.consume(move p)
+        let consumed3 = run move p
+          |> P.consume
         p = move consumed3
       } else {
-        let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+        let afterIdentifier = run move p
+          |> P.expect(TokenKind.Identifier)
         p = move afterIdentifier
       }
-      let completed3 = run P.complete(move p, nodeKind)
+      let completed3 = run move p
+        |> P.complete(nodeKind)
       result = move completed3
     } else if kind == TokenKind.LeftBracket && !P.lineBreakBefore(&result.state) {
       let mut p = run P.consume(run P.wrap(move result))
       let attached3 = run P.attach(move p.elements, run parse(move p.state, true))
       p = move attached3
-      let afterRightBracket = run P.expect(move p, TokenKind.RightBracket)
+      let afterRightBracket = run move p
+        |> P.expect(TokenKind.RightBracket)
       p = move afterRightBracket
-      let completed4 = run P.complete(move p, NodeKind.IndexProjectionExpression)
+      let completed4 = run move p
+        |> P.complete(NodeKind.IndexProjectionExpression)
       result = move completed4
     } else {
       break
@@ -204,8 +246,11 @@ pub effect fn postfix(initial: NodeResult) -> NodeResult ! OutOfMemoryError ? &m
 }
 
 effect fn anonymous(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.optional(P.begin(move initial), TokenKind.EffectKeyword)
-  let afterFnKeyword = run P.expect(move p, TokenKind.FnKeyword)
+  let mut p = run move initial
+    |> P.begin
+    |> P.optional(TokenKind.EffectKeyword)
+  let afterFnKeyword = run move p
+    |> P.expect(TokenKind.FnKeyword)
   p = move afterFnKeyword
   let withTypesParameterList = run P.attach(move p.elements, run Types.parameterList(move p.state))
   p = move withTypesParameterList
@@ -227,35 +272,43 @@ effect fn anonymous(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allo
     run Statements.block(move p.state, true, false),
   )
   p = move withStatementsBlock
-  return run P.complete(move p, NodeKind.AnonymousCallableExpression)
+  return run move p
+    |> P.complete(NodeKind.AnonymousCallableExpression)
 }
 
 effect fn matchAccess(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let mut p = P.begin(move initial)
   if P.word(&p.state, "place") && P.peek(&p.state, 1) == TokenKind.Identifier {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
   } else if P.currentKind(&p.state) == TokenKind.MoveKeyword {
-    let consumed2 = run P.consume(move p)
+    let consumed2 = run move p
+      |> P.consume
     p = move consumed2
   } else if P.currentKind(&p.state) == TokenKind.Ampersand {
-    let consumed3 = run P.consume(move p)
+    let consumed3 = run move p
+      |> P.consume
     p = move consumed3
-    let afterMutKeyword = run P.optional(move p, TokenKind.MutKeyword)
+    let afterMutKeyword = run move p
+      |> P.optional(TokenKind.MutKeyword)
     p = move afterMutKeyword
   }
-  return run P.complete(move p, NodeKind.MatchAccess)
+  return run move p
+    |> P.complete(NodeKind.MatchAccess)
 }
 
 effect fn arm(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let mut p = run P.wrap(run Patterns.parse(move initial))
   if P.currentKind(&p.state) == TokenKind.IfKeyword {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
     let attached = run P.attach(move p.elements, run parse(move p.state, false))
     p = move attached
   }
-  let afterFatArrow = run P.expect(move p, TokenKind.FatArrow)
+  let afterFatArrow = run move p
+    |> P.expect(TokenKind.FatArrow)
   p = move afterFatArrow
   if P.currentKind(&p.state) == TokenKind.LeftBrace {
     let withStatementsBlock = run P.attach(
@@ -267,40 +320,52 @@ effect fn arm(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator 
     let attached2 = run P.attach(move p.elements, run parse(move p.state, true))
     p = move attached2
   }
-  return run P.complete(move p, NodeKind.MatchArm)
+  return run move p
+    |> P.complete(NodeKind.MatchArm)
 }
 
 effect fn matchExpression(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.consume(P.begin(move initial))
+  let mut p = run move initial
+    |> P.begin
+    |> P.consume
   let attached = run P.attach(move p.elements, run matchAccess(move p.state))
   p = move attached
   let attached2 = run P.attach(move p.elements, run parse(move p.state, false))
   p = move attached2
-  let afterLeftBrace = run P.expect(move p, TokenKind.LeftBrace)
+  let afterLeftBrace = run move p
+    |> P.expect(TokenKind.LeftBrace)
   p = move afterLeftBrace
   while !G.blockEnd(&p.state) {
     let before = p.state.index
     let attached3 = run P.attach(move p.elements, run arm(move p.state))
     p = move attached3
     if p.state.index == before {
-      let advanced = run P.unexpected(move p)
+      let advanced = run move p
+        |> P.unexpected
       p = move advanced
     }
   }
-  let afterRightBrace = run P.expect(move p, TokenKind.RightBrace)
+  let afterRightBrace = run move p
+    |> P.expect(TokenKind.RightBrace)
   p = move afterRightBrace
-  return run P.complete(move p, NodeKind.MatchExpression)
+  return run move p
+    |> P.complete(NodeKind.MatchExpression)
 }
 
 effect fn compileErrorExpression(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.consume(P.begin(move initial))
-  let afterLeftParenthesis = run P.expect(move p, TokenKind.LeftParenthesis)
+  let mut p = run move initial
+    |> P.begin
+    |> P.consume
+  let afterLeftParenthesis = run move p
+    |> P.expect(TokenKind.LeftParenthesis)
   p = move afterLeftParenthesis
   let attached = run P.attach(move p.elements, run parse(move p.state, true))
   p = move attached
-  let afterRightParenthesis = run P.expect(move p, TokenKind.RightParenthesis)
+  let afterRightParenthesis = run move p
+    |> P.expect(TokenKind.RightParenthesis)
   p = move afterRightParenthesis
-  return run P.complete(move p, NodeKind.CompileErrorExpression)
+  return run move p
+    |> P.complete(NodeKind.CompileErrorExpression)
 }
 
 effect fn primary(initial: State, allowRecord: bool) -> NodeResult
@@ -354,13 +419,16 @@ effect fn primary(initial: State, allowRecord: bool) -> NodeResult
     return run anonymous(move initial)
   }
   if kind == TokenKind.EffectKeyword {
-    let mut p = run P.consume(P.begin(move initial))
+    let mut p = run move initial
+      |> P.begin
+      |> P.consume
     let withStatementsBlock = run P.attach(
       move p.elements,
       run Statements.block(move p.state, true, false),
     )
     p = move withStatementsBlock
-    return run P.complete(move p, NodeKind.EffectExpression)
+    return run move p
+      |> P.complete(NodeKind.EffectExpression)
   }
   if kind == TokenKind.MatchKeyword {
     return run matchExpression(move initial)
@@ -369,16 +437,22 @@ effect fn primary(initial: State, allowRecord: bool) -> NodeResult
     return run compileErrorExpression(move initial)
   }
   if kind == TokenKind.RunKeyword {
-    let mut p = run P.consume(P.begin(move initial))
+    let mut p = run move initial
+      |> P.begin
+      |> P.consume
     let attached = run P.attach(move p.elements, run parse(move p.state, allowRecord))
     p = move attached
-    return run P.complete(move p, NodeKind.RunExpression)
+    return run move p
+      |> P.complete(NodeKind.RunExpression)
   }
   if kind == TokenKind.MoveKeyword || kind == TokenKind.Ampersand || kind == TokenKind.UnsafeKeyword {
-    let mut p = run P.consume(P.begin(move initial))
+    let mut p = run move initial
+      |> P.begin
+      |> P.consume
     let mut nodeKind = NodeKind.MoveExpression
     if kind == TokenKind.Ampersand {
-      let afterMutKeyword = run P.optional(move p, TokenKind.MutKeyword)
+      let afterMutKeyword = run move p
+        |> P.optional(TokenKind.MutKeyword)
       p = move afterMutKeyword
       nodeKind = NodeKind.BorrowExpression
     } else if kind == TokenKind.UnsafeKeyword {
@@ -386,30 +460,38 @@ effect fn primary(initial: State, allowRecord: bool) -> NodeResult
     }
     let attached2 = run P.attach(move p.elements, run infix(move p.state, 11, allowRecord))
     p = move attached2
-    return run P.complete(move p, nodeKind)
+    return run move p
+      |> P.complete(nodeKind)
   }
   if kind == TokenKind.Minus || kind == TokenKind.Bang || kind == TokenKind.Tilde {
-    let mut p = run P.consume(P.begin(move initial))
+    let mut p = run move initial
+      |> P.begin
+      |> P.consume
     let attached3 = run P.attach(move p.elements, run infix(move p.state, 11, allowRecord))
     p = move attached3
-    return run P.complete(move p, NodeKind.PrefixExpression)
+    return run move p
+      |> P.complete(NodeKind.PrefixExpression)
   }
   let mut p = P.begin(move initial)
   if kind == TokenKind.Invalid || kind == TokenKind.Less {
-    let advanced = run P.unexpected(move p)
+    let advanced = run move p
+      |> P.unexpected
     p = move advanced
   } else {
-    let afterIdentifier = run P.missing(move p, TokenKind.Identifier)
+    let afterIdentifier = run move p
+      |> P.missing(TokenKind.Identifier)
     p = move afterIdentifier
   }
-  return run P.complete(move p, NodeKind.Error)
+  return run move p
+    |> P.complete(NodeKind.Error)
 }
 
 effect fn infix(initial: State, minimum: usize, allowRecord: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
   if initial.depth >= P.NESTING_LIMIT {
-    return run P.nestingError(move initial)
+    return run move initial
+      |> P.nestingError
   }
   let depth = initial.depth
   let mut state = move initial
@@ -437,10 +519,12 @@ effect fn infixInner(initial: State, minimum: usize, allowRecord: bool) -> NodeR
     )
     p = move attached
     if kind == TokenKind.PipeGreater {
-      let completed = run P.complete(move p, NodeKind.PipelineExpression)
+      let completed = run move p
+        |> P.complete(NodeKind.PipelineExpression)
       left = move completed
     } else {
-      let completed2 = run P.complete(move p, NodeKind.InfixExpression)
+      let completed2 = run move p
+        |> P.complete(NodeKind.InfixExpression)
       left = move completed2
     }
     if precedence == 4 || precedence == 5 {

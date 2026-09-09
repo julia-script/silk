@@ -104,7 +104,9 @@ fn significantIndex(state: &State) -> usize {
   let mut index = state.index
   while index < Vector.length<Token>(&state.tokens) {
     let token = Vector.get<Token>(&state.tokens, index)
-    if !isTrivia(kind(token)) {
+    if !(token
+      |> kind
+      |> isTrivia) {
       return index
     }
     index = Usize.add(index, Usize.ONE)
@@ -115,7 +117,9 @@ fn significantIndex(state: &State) -> usize {
 fn elementSpan(state: &State, element: Element) -> Span {
   return match move element {
     Element.Node {id} => Vector.asSlice<Node>(&state.nodes)[id.index].span
-    Element.Token {id} => span(Vector.get<Token>(&state.tokens, id.index))
+    Element.Token {id} => &state.tokens
+      |> Vector.get<Token>(id.index)
+      |> span
     Element.MissingToken {expected: ignoredExpected, span} => span
   }
 }
@@ -168,7 +172,9 @@ pub fn currentKind(state: &State) -> TokenKind {
   if Vector.length<Token>(&state.tokens) <= index {
     return TokenKind.EndOfFile
   }
-  return kind(Vector.get<Token>(&state.tokens, index))
+  return &state.tokens
+    |> Vector.get<Token>(index)
+    |> kind
 }
 
 /// Returns the zero-width source span for a missing token at the current position.
@@ -182,14 +188,18 @@ pub fn currentKind(state: &State) -> TokenKind {
 pub fn insertionSpan(state: &State) -> Span {
   let index = significantIndex(state)
   if index < Vector.length<Token>(&state.tokens) {
-    let tokenSpan = span(Vector.get<Token>(&state.tokens, index))
+    let tokenSpan = &state.tokens
+      |> Vector.get<Token>(index)
+      |> span
     return Span.make(tokenSpan.start, tokenSpan.start)
   }
   let length = Vector.length<Token>(&state.tokens)
   if length == Usize.ZERO {
     return Span.make(Usize.ZERO, Usize.ZERO)
   }
-  let finalSpan = span(Vector.get<Token>(&state.tokens, Usize.subtract(length, Usize.ONE)))
+  let finalSpan = &state.tokens
+    |> Vector.get<Token>(Usize.subtract(length, Usize.ONE))
+    |> span
   return Span.make(finalSpan.end, finalSpan.end)
 }
 
@@ -387,7 +397,9 @@ pub fn peek(state: &State, offset: usize) -> TokenKind {
   let mut index = significantIndex(state)
   let mut remaining = offset
   while index < Vector.length<Token>(&state.tokens) {
-    let candidate = kind(Vector.get<Token>(&state.tokens, index))
+    let candidate = &state.tokens
+      |> Vector.get<Token>(index)
+      |> kind
     if !isTrivia(candidate) {
       if remaining == 0 {
         return candidate
@@ -408,7 +420,9 @@ pub fn word(state: &State, expected: string) -> bool {
     return false
   }
   let tokenIndex = significantIndex(state)
-  let location = span(Vector.get<Token>(&state.tokens, tokenIndex))
+  let location = &state.tokens
+    |> Vector.get<Token>(tokenIndex)
+    |> span
   let bytes = Bytes.asSlice(&state.source)
   let text = String.utf8Bytes(expected)
   if location.end > bytes.length || Usize.subtract(location.end, location.start) != text.length {
@@ -432,7 +446,10 @@ pub fn lineBreakBefore(state: &State) -> bool {
   let mut index = end
   if state.index < Vector.length<Token>(&state.tokens) {
     let tokenIndex = state.index
-    index = span(Vector.get<Token>(&state.tokens, tokenIndex)).start
+    let location = &state.tokens
+      |> Vector.get<Token>(tokenIndex)
+      |> span
+    index = location.start
   }
   let bytes = Bytes.asSlice(&state.source)
   while index < end && index < bytes.length {
