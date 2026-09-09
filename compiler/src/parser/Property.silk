@@ -7,27 +7,37 @@ import parser.Expression as Expressions
 import silk.allocator {Allocator, OutOfMemoryError}
 
 effect fn property(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.Identifier)
-  let afterColon = run P.expect(move p, TokenKind.Colon)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Identifier)
+  let afterColon = run move p
+    |> P.expect(TokenKind.Colon)
   p = move afterColon
   let withExpressionsParse = run P.attach(
     move p.elements,
     run Expressions.parse(move p.state, false),
   )
   p = move withExpressionsParse
-  return run P.complete(move p, NodeKind.FunctionProperty)
+  return run move p
+    |> P.complete(NodeKind.FunctionProperty)
 }
 
 /// Parses one `with Namespace.operation(name: value, ...)` clause without interpreting it.
 pub effect fn clause(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.contextual(P.begin(move initial), "with")
-  let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+  let mut p = run move initial
+    |> P.begin
+    |> P.contextual("with")
+  let afterIdentifier = run move p
+    |> P.expect(TokenKind.Identifier)
   p = move afterIdentifier
-  let afterDot = run P.expect(move p, TokenKind.Dot)
+  let afterDot = run move p
+    |> P.expect(TokenKind.Dot)
   p = move afterDot
-  let afterIdentifier2 = run P.expect(move p, TokenKind.Identifier)
+  let afterIdentifier2 = run move p
+    |> P.expect(TokenKind.Identifier)
   p = move afterIdentifier2
-  let afterLeftParenthesis = run P.expect(move p, TokenKind.LeftParenthesis)
+  let afterLeftParenthesis = run move p
+    |> P.expect(TokenKind.LeftParenthesis)
   p = move afterLeftParenthesis
   while P.currentKind(&p.state) == TokenKind.Identifier {
     let attached = run P.attach(move p.elements, run property(move p.state))
@@ -35,12 +45,15 @@ pub effect fn clause(initial: State) -> NodeResult ! OutOfMemoryError ? &mut All
     if P.currentKind(&p.state) != TokenKind.Comma {
       break
     }
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
   }
-  let afterRightParenthesis = run P.expect(move p, TokenKind.RightParenthesis)
+  let afterRightParenthesis = run move p
+    |> P.expect(TokenKind.RightParenthesis)
   p = move afterRightParenthesis
-  return run P.complete(move p, NodeKind.FunctionPropertyClause)
+  return run move p
+    |> P.complete(NodeKind.FunctionPropertyClause)
 }
 
 /// Appends all consecutive property clauses to an unfinished declaration or foreign type.

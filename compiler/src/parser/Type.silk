@@ -14,27 +14,35 @@ import silk.usize as Usize
 
 /// Parses a one- or two-segment nominal type path, without its generic arguments.
 pub effect fn path(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  return run P.complete(run pathElements(P.begin(move initial)), NodeKind.TypePath)
+  let path = run move initial
+    |> P.begin
+    |> pathElements
+  return run move path
+    |> P.complete(NodeKind.TypePath)
 }
 
 effect fn pathElements(initial: ElementsResult) -> ElementsResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  let mut p = run P.expect(move initial, TokenKind.Identifier)
+  let mut p = run move initial
+    |> P.expect(TokenKind.Identifier)
   if P.currentKind(&p.state) == TokenKind.Dot {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
-    let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+    let afterIdentifier = run move p
+      |> P.expect(TokenKind.Identifier)
     p = move afterIdentifier
   }
   return move p
 }
 
 effect fn lifetime(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  return run P.complete(
-    run P.expect(P.begin(move initial), TokenKind.Lifetime),
-    NodeKind.LifetimeType,
-  )
+  let lifetime = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Lifetime)
+  return run move lifetime
+    |> P.complete(NodeKind.LifetimeType)
 }
 
 /// Parses a named type and its optional type arguments.
@@ -43,10 +51,12 @@ pub effect fn named(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allo
   if P.currentKind(&result.state) != TokenKind.Less {
     return move result
   }
-  let mut p = run P.wrap(move result)
+  let mut p = run move result
+    |> P.wrap
   let attached = run P.attach(move p.elements, run arguments(move p.state, false))
   p = move attached
-  return run P.complete(move p, NodeKind.AppliedType)
+  return run move p
+    |> P.complete(NodeKind.AppliedType)
 }
 
 fn nullablePointer(state: &State) -> bool {
@@ -63,13 +73,18 @@ fn nullablePointer(state: &State) -> bool {
 pub effect fn arguments(initial: State, call: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.Less)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Less)
   if !call && (P.currentKind(&p.state) == TokenKind.Semicolon || (P.currentKind(&p.state) == TokenKind.Lifetime && P.peek(
     &p.state,
     1,
   ) == TokenKind.Semicolon)) {
-    let mut environment = run P.expect(P.begin(move p.state), TokenKind.Lifetime)
-    let afterSemicolon = run P.expect(move environment, TokenKind.Semicolon)
+    let mut environment = run move p.state
+      |> P.begin
+      |> P.expect(TokenKind.Lifetime)
+    let afterSemicolon = run move environment
+      |> P.expect(TokenKind.Semicolon)
     environment = move afterSemicolon
     let attached = run P.attach(
       move p.elements,
@@ -78,7 +93,8 @@ pub effect fn arguments(initial: State, call: bool) -> NodeResult
     p = move attached
   }
   if P.currentKind(&p.state) == TokenKind.Greater {
-    let afterIdentifier = run P.missing(move p, TokenKind.Identifier)
+    let afterIdentifier = run move p
+      |> P.missing(TokenKind.Identifier)
     p = move afterIdentifier
   }
   while P.currentKind(&p.state) != TokenKind.Greater && P.currentKind(&p.state) != TokenKind.EndOfFile {
@@ -99,7 +115,8 @@ pub effect fn arguments(initial: State, call: bool) -> NodeResult
       argument = move attached3
     }
     if call && P.word(&argument.state, "at") {
-      let consumed = run P.consume(move argument)
+      let consumed = run move argument
+        |> P.consume
       argument = move consumed
       let attached4 = run P.attach(move argument.elements, run path(move argument.state))
       argument = move attached4
@@ -119,7 +136,8 @@ pub effect fn arguments(initial: State, call: bool) -> NodeResult
     if P.currentKind(&p.state) != TokenKind.Comma {
       break
     }
-    let consumed2 = run P.consume(move p)
+    let consumed2 = run move p
+      |> P.consume
     p = move consumed2
   }
   if !call && P.currentKind(&p.state) == TokenKind.Bang {
@@ -130,27 +148,35 @@ pub effect fn arguments(initial: State, call: bool) -> NodeResult
     let attached7 = run P.attach(move p.elements, run requirementRow(move p.state))
     p = move attached7
   }
-  let afterGreater = run P.expect(move p, TokenKind.Greater)
+  let afterGreater = run move p
+    |> P.expect(TokenKind.Greater)
   p = move afterGreater
   if call {
-    return run P.complete(move p, NodeKind.CallTypeArgumentList)
+    return run move p
+      |> P.complete(NodeKind.CallTypeArgumentList)
   }
-  return run P.complete(move p, NodeKind.TypeArgumentList)
+  return run move p
+    |> P.complete(NodeKind.TypeArgumentList)
 }
 
 effect fn typeParameter(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let isLifetime = P.currentKind(&initial) == TokenKind.Lifetime
   let isRow = P.currentKind(&initial) == TokenKind.Question
-  let mut p = run P.optional(P.begin(move initial), TokenKind.Question)
+  let mut p = run move initial
+    |> P.begin
+    |> P.optional(TokenKind.Question)
   if isLifetime {
-    let afterLifetime = run P.expect(move p, TokenKind.Lifetime)
+    let afterLifetime = run move p
+      |> P.expect(TokenKind.Lifetime)
     p = move afterLifetime
   } else {
-    let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+    let afterIdentifier = run move p
+      |> P.expect(TokenKind.Identifier)
     p = move afterIdentifier
   }
   if !isRow && P.currentKind(&p.state) == TokenKind.Colon {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
     while true {
       if P.currentKind(&p.state) == TokenKind.Lifetime {
@@ -163,23 +189,29 @@ effect fn typeParameter(initial: State) -> NodeResult ! OutOfMemoryError ? &mut 
       if P.currentKind(&p.state) != TokenKind.Plus {
         break
       }
-      let consumed2 = run P.consume(move p)
+      let consumed2 = run move p
+        |> P.consume
       p = move consumed2
     }
   }
   if isLifetime {
-    return run P.complete(move p, NodeKind.LifetimeParameter)
+    return run move p
+      |> P.complete(NodeKind.LifetimeParameter)
   }
-  return run P.complete(move p, NodeKind.TypeParameter)
+  return run move p
+    |> P.complete(NodeKind.TypeParameter)
 }
 
 /// Parses declaration binders or a higher-ranked callable lifetime binder list.
 pub effect fn parameters(initial: State, binders: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.Less)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Less)
   if P.currentKind(&p.state) == TokenKind.Greater {
-    let afterIdentifier = run P.missing(move p, TokenKind.Identifier)
+    let afterIdentifier = run move p
+      |> P.missing(TokenKind.Identifier)
     p = move afterIdentifier
   }
   while P.currentKind(&p.state) == TokenKind.Identifier || P.currentKind(&p.state) == TokenKind.Lifetime || P.currentKind(
@@ -190,54 +222,71 @@ pub effect fn parameters(initial: State, binders: bool) -> NodeResult
     if P.currentKind(&p.state) != TokenKind.Comma {
       break
     }
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
   }
-  let afterGreater = run P.expect(move p, TokenKind.Greater)
+  let afterGreater = run move p
+    |> P.expect(TokenKind.Greater)
   p = move afterGreater
   if binders {
-    return run P.complete(move p, NodeKind.LifetimeBinderList)
+    return run move p
+      |> P.complete(NodeKind.LifetimeBinderList)
   }
-  return run P.complete(move p, NodeKind.TypeParameterList)
+  return run move p
+    |> P.complete(NodeKind.TypeParameterList)
 }
 
 /// Parses the explicit lifetime environment after `fn` or `effect`.
 pub effect fn environment(initial: State, effectEnvironment: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.Less)
-  let afterLifetime = run P.expect(move p, TokenKind.Lifetime)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Less)
+  let afterLifetime = run move p
+    |> P.expect(TokenKind.Lifetime)
   p = move afterLifetime
-  let afterGreater = run P.expect(move p, TokenKind.Greater)
+  let afterGreater = run move p
+    |> P.expect(TokenKind.Greater)
   p = move afterGreater
   if effectEnvironment {
-    return run P.complete(move p, NodeKind.EffectEnvironment)
+    return run move p
+      |> P.complete(NodeKind.EffectEnvironment)
   }
-  return run P.complete(move p, NodeKind.CallableEnvironment)
+  return run move p
+    |> P.complete(NodeKind.CallableEnvironment)
 }
 
 effect fn callable(initial: ElementsResult) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let foreign = P.currentKind(&initial.state) == TokenKind.ExternKeyword
   let mut p = move initial
   if foreign {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
-    let afterTextLiteral = run P.expect(move p, TokenKind.TextLiteral)
+    let afterTextLiteral = run move p
+      |> P.expect(TokenKind.TextLiteral)
     p = move afterTextLiteral
   }
-  let afterUnsafeKeyword = run P.optional(move p, TokenKind.UnsafeKeyword)
+  let afterUnsafeKeyword = run move p
+    |> P.optional(TokenKind.UnsafeKeyword)
   p = move afterUnsafeKeyword
-  let afterMutKeyword = run P.optional(move p, TokenKind.MutKeyword)
+  let afterMutKeyword = run move p
+    |> P.optional(TokenKind.MutKeyword)
   p = move afterMutKeyword
-  let afterOnceKeyword = run P.optional(move p, TokenKind.OnceKeyword)
+  let afterOnceKeyword = run move p
+    |> P.optional(TokenKind.OnceKeyword)
   p = move afterOnceKeyword
-  let afterFnKeyword = run P.expect(move p, TokenKind.FnKeyword)
+  let afterFnKeyword = run move p
+    |> P.expect(TokenKind.FnKeyword)
   p = move afterFnKeyword
   if P.currentKind(&p.state) == TokenKind.Less {
     let attached = run P.attach(move p.elements, run environment(move p.state, false))
     p = move attached
   }
-  let afterLeftParenthesis = run P.expect(move p, TokenKind.LeftParenthesis)
+  let afterLeftParenthesis = run move p
+    |> P.expect(TokenKind.LeftParenthesis)
   p = move afterLeftParenthesis
   while G.typeStart(P.currentKind(&p.state)) {
     let before = p.state.index
@@ -246,50 +295,67 @@ effect fn callable(initial: ElementsResult) -> NodeResult ! OutOfMemoryError ? &
     if p.state.index == before || P.currentKind(&p.state) != TokenKind.Comma {
       break
     }
-    let consumed2 = run P.consume(move p)
+    let consumed2 = run move p
+      |> P.consume
     p = move consumed2
   }
-  let afterRightParenthesis = run P.expect(move p, TokenKind.RightParenthesis)
+  let afterRightParenthesis = run move p
+    |> P.expect(TokenKind.RightParenthesis)
   p = move afterRightParenthesis
-  let afterArrow = run P.expect(move p, TokenKind.Arrow)
+  let afterArrow = run move p
+    |> P.expect(TokenKind.Arrow)
   p = move afterArrow
   let attached3 = run P.attach(move p.elements, run parse(move p.state))
   p = move attached3
   if foreign {
     let advanced = run Properties.list(move p)
     p = move advanced
-    return run P.complete(move p, NodeKind.ForeignFunctionType)
+    return run move p
+      |> P.complete(NodeKind.ForeignFunctionType)
   }
-  return run P.complete(move p, NodeKind.CallableType)
+  return run move p
+    |> P.complete(NodeKind.CallableType)
 }
 
 effect fn pointer(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.optional(P.begin(move initial), TokenKind.Question)
+  let mut p = run move initial
+    |> P.begin
+    |> P.optional(TokenKind.Question)
   let many = P.currentKind(&p.state) == TokenKind.LeftBracket
   if many {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
   }
-  let afterStar = run P.expect(move p, TokenKind.Star)
+  let afterStar = run move p
+    |> P.expect(TokenKind.Star)
   p = move afterStar
   if many {
-    let afterRightBracket = run P.expect(move p, TokenKind.RightBracket)
+    let afterRightBracket = run move p
+      |> P.expect(TokenKind.RightBracket)
     p = move afterRightBracket
   }
   if P.currentKind(&p.state) == TokenKind.MutKeyword {
-    let consumed2 = run P.consume(move p)
+    let consumed2 = run move p
+      |> P.consume
     p = move consumed2
   } else {
-    let afterConstKeyword = run P.expect(move p, TokenKind.ConstKeyword)
+    let afterConstKeyword = run move p
+      |> P.expect(TokenKind.ConstKeyword)
     p = move afterConstKeyword
   }
   while (P.word(&p.state, "align") || P.word(&p.state, "addrspace")) && P.peek(&p.state, 1) == TokenKind.LeftParenthesis {
-    let mut q = run P.consume(P.begin(move p.state))
-    let afterLeftParenthesis = run P.expect(move q, TokenKind.LeftParenthesis)
+    let mut q = run move p.state
+      |> P.begin
+      |> P.consume
+    let afterLeftParenthesis = run move q
+      |> P.expect(TokenKind.LeftParenthesis)
     q = move afterLeftParenthesis
-    let afterDecimalInteger = run P.expect(move q, TokenKind.DecimalInteger)
+    let afterDecimalInteger = run move q
+      |> P.expect(TokenKind.DecimalInteger)
     q = move afterDecimalInteger
-    let afterRightParenthesis = run P.expect(move q, TokenKind.RightParenthesis)
+    let afterRightParenthesis = run move q
+      |> P.expect(TokenKind.RightParenthesis)
     q = move afterRightParenthesis
     let withPComplete = run P.attach(
       move p.elements,
@@ -299,61 +365,83 @@ effect fn pointer(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Alloca
   }
   let attached = run P.attach(move p.elements, run primary(move p.state))
   p = move attached
-  return run P.complete(move p, NodeKind.PointerType)
+  return run move p
+    |> P.complete(NodeKind.PointerType)
 }
 
 effect fn reference(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.consume(P.begin(move initial))
-  let afterLifetime = run P.optional(move p, TokenKind.Lifetime)
+  let mut p = run move initial
+    |> P.begin
+    |> P.consume
+  let afterLifetime = run move p
+    |> P.optional(TokenKind.Lifetime)
   p = move afterLifetime
-  let afterMutKeyword = run P.optional(move p, TokenKind.MutKeyword)
+  let afterMutKeyword = run move p
+    |> P.optional(TokenKind.MutKeyword)
   p = move afterMutKeyword
   if P.currentKind(&p.state) == TokenKind.LeftBracket {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
     let attached = run P.attach(move p.elements, run parse(move p.state))
     p = move attached
-    let afterRightBracket = run P.expect(move p, TokenKind.RightBracket)
+    let afterRightBracket = run move p
+      |> P.expect(TokenKind.RightBracket)
     p = move afterRightBracket
-    return run P.complete(move p, NodeKind.SliceType)
+    return run move p
+      |> P.complete(NodeKind.SliceType)
   }
   let attached2 = run P.attach(move p.elements, run primary(move p.state))
   p = move attached2
   if P.currentKind(&p.state) == TokenKind.At {
-    let consumed2 = run P.consume(move p)
+    let consumed2 = run move p
+      |> P.consume
     p = move consumed2
-    let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+    let afterIdentifier = run move p
+      |> P.expect(TokenKind.Identifier)
     p = move afterIdentifier
   }
-  return run P.complete(move p, NodeKind.ReferenceType)
+  return run move p
+    |> P.complete(NodeKind.ReferenceType)
 }
 
 effect fn bracketed(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.consume(P.begin(move initial))
+  let mut p = run move initial
+    |> P.begin
+    |> P.consume
   let attached = run P.attach(move p.elements, run parse(move p.state))
   p = move attached
-  let afterSemicolon = run P.expect(move p, TokenKind.Semicolon)
+  let afterSemicolon = run move p
+    |> P.expect(TokenKind.Semicolon)
   p = move afterSemicolon
-  let afterDecimalInteger = run P.expect(move p, TokenKind.DecimalInteger)
+  let afterDecimalInteger = run move p
+    |> P.expect(TokenKind.DecimalInteger)
   p = move afterDecimalInteger
-  let afterRightBracket = run P.expect(move p, TokenKind.RightBracket)
+  let afterRightBracket = run move p
+    |> P.expect(TokenKind.RightBracket)
   p = move afterRightBracket
-  return run P.complete(move p, NodeKind.FixedArrayType)
+  return run move p
+    |> P.complete(NodeKind.FixedArrayType)
 }
 
 effect fn parenthesized(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.consume(P.begin(move initial))
+  let mut p = run move initial
+    |> P.begin
+    |> P.consume
   let unit = P.currentKind(&p.state) == TokenKind.RightParenthesis
   if !unit {
     let attached = run P.attach(move p.elements, run parse(move p.state))
     p = move attached
   }
-  let afterRightParenthesis = run P.expect(move p, TokenKind.RightParenthesis)
+  let afterRightParenthesis = run move p
+    |> P.expect(TokenKind.RightParenthesis)
   p = move afterRightParenthesis
   if unit {
-    return run P.complete(move p, NodeKind.UnitType)
+    return run move p
+      |> P.complete(NodeKind.UnitType)
   }
-  return run P.complete(move p, NodeKind.ParenthesizedType)
+  return run move p
+    |> P.complete(NodeKind.ParenthesizedType)
 }
 
 effect fn rowOperandMember(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
@@ -367,7 +455,8 @@ effect fn rowOperandMember(initial: State) -> NodeResult ! OutOfMemoryError ? &m
   let mut p = run P.consume(run P.wrap(move result))
   let attached = run P.attach(move p.elements, run path(move p.state))
   p = move attached
-  return run P.complete(move p, NodeKind.Requirement)
+  return run move p
+    |> P.complete(NodeKind.Requirement)
 }
 
 effect fn rowOperand(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
@@ -375,52 +464,66 @@ effect fn rowOperand(initial: State) -> NodeResult ! OutOfMemoryError ? &mut All
   if P.currentKind(&first.state) != TokenKind.Pipe {
     return move first
   }
-  let mut p = run P.wrap(move first)
+  let mut p = run move first
+    |> P.wrap
   while P.currentKind(&p.state) == TokenKind.Pipe {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
     let attached = run P.attach(move p.elements, run rowOperandMember(move p.state))
     p = move attached
   }
-  return run P.complete(move p, NodeKind.UnionType)
+  return run move p
+    |> P.complete(NodeKind.UnionType)
 }
 
 effect fn without(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.consume(P.begin(move initial))
-  let afterLess = run P.expect(move p, TokenKind.Less)
+  let mut p = run move initial
+    |> P.begin
+    |> P.consume
+  let afterLess = run move p
+    |> P.expect(TokenKind.Less)
   p = move afterLess
   let attached = run P.attach(move p.elements, run rowOperand(move p.state))
   p = move attached
-  let afterComma = run P.expect(move p, TokenKind.Comma)
+  let afterComma = run move p
+    |> P.expect(TokenKind.Comma)
   p = move afterComma
   let attached2 = run P.attach(move p.elements, run rowOperand(move p.state))
   p = move attached2
-  let afterGreater = run P.expect(move p, TokenKind.Greater)
+  let afterGreater = run move p
+    |> P.expect(TokenKind.Greater)
   p = move afterGreater
-  return run P.complete(move p, NodeKind.RowWithout)
+  return run move p
+    |> P.complete(NodeKind.RowWithout)
 }
 
 // An applied type owns its mode token; a bare path owns that token directly. Delay completing
 // the path until the following token selects the shape, so neither case leaves an orphan node.
 effect fn modeQualified(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.consume(P.begin(move initial))
+  let mut p = run move initial
+    |> P.begin
+    |> P.consume
   let subject = run pathElements(P.begin(move p.state))
   if P.currentKind(&subject.state) != TokenKind.Less {
     let combined = run P.extend(move p.elements, move subject)
-    return run P.complete(move combined, NodeKind.TypePath)
+    return run move combined
+      |> P.complete(NodeKind.TypePath)
   }
   let attached = run P.attach(move p.elements, run P.complete(move subject, NodeKind.TypePath))
   p = move attached
   let withArguments = run P.attach(move p.elements, run arguments(move p.state, false))
-  return run P.complete(move withArguments, NodeKind.AppliedType)
+  return run move withArguments
+    |> P.complete(NodeKind.AppliedType)
 }
 
 /// Parses a type without a following union separator.
 ///
 /// References and pointers bind to one primary. Parentheses explicitly admit a union subject.
 pub effect fn primary(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  if initial.depth >= 256 {
-    return run P.nestingError(move initial)
+  if initial.depth >= P.NESTING_LIMIT {
+    return run move initial
+      |> P.nestingError
   }
   let depth = initial.depth
   let mut state = move initial
@@ -433,7 +536,9 @@ pub effect fn primary(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Al
 effect fn primaryInner(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let kind = P.currentKind(&initial)
   if kind == TokenKind.ForKeyword {
-    let mut p = run P.consume(P.begin(move initial))
+    let mut p = run move initial
+      |> P.begin
+      |> P.consume
     let attached = run P.attach(move p.elements, run parameters(move p.state, true))
     p = move attached
     return run callable(move p)
@@ -442,14 +547,19 @@ effect fn primaryInner(initial: State) -> NodeResult ! OutOfMemoryError ? &mut A
     return run without(move initial)
   }
   if P.word(&initial, "typeof") && P.peek(&initial, 1) == TokenKind.LeftParenthesis {
-    let mut p = run P.consume(P.begin(move initial))
-    let consumed = run P.consume(move p)
+    let mut p = run move initial
+      |> P.begin
+      |> P.consume
+    let consumed = run move p
+      |> P.consume
     p = move consumed
     let attached2 = run P.attach(move p.elements, run named(move p.state))
     p = move attached2
-    let afterRightParenthesis = run P.expect(move p, TokenKind.RightParenthesis)
+    let afterRightParenthesis = run move p
+      |> P.expect(TokenKind.RightParenthesis)
     p = move afterRightParenthesis
-    return run P.complete(move p, NodeKind.ExactRepresentationType)
+    return run move p
+      |> P.complete(NodeKind.ExactRepresentationType)
   }
   if (kind == TokenKind.MutKeyword || kind == TokenKind.OnceKeyword) && P.peek(&initial, 1) == TokenKind.Identifier {
     return run modeQualified(move initial)
@@ -481,21 +591,28 @@ pub effect fn parse(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allo
   if P.currentKind(&first.state) != TokenKind.Pipe {
     return move first
   }
-  let mut p = run P.wrap(move first)
+  let mut p = run move first
+    |> P.wrap
   while P.currentKind(&p.state) == TokenKind.Pipe {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
     let attached = run P.attach(move p.elements, run primary(move p.state))
     p = move attached
   }
-  return run P.complete(move p, NodeKind.UnionType)
+  return run move p
+    |> P.complete(NodeKind.UnionType)
 }
 
 /// Parses an arrow and result type, including a contextual opaque result binder.
 pub effect fn result(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.Arrow)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Arrow)
   if P.word(&p.state, "some") && P.peek(&p.state, 1) == TokenKind.Less {
-    let mut opaque = run P.consume(P.begin(move p.state))
+    let mut opaque = run move p.state
+      |> P.begin
+      |> P.consume
     let attached = run P.attach(move opaque.elements, run parameters(move opaque.state, false))
     opaque = move attached
     let attached2 = run P.attach(move opaque.elements, run parse(move opaque.state))
@@ -509,35 +626,46 @@ pub effect fn result(initial: State) -> NodeResult ! OutOfMemoryError ? &mut All
     let attached4 = run P.attach(move p.elements, run parse(move p.state))
     p = move attached4
   }
-  return run P.complete(move p, NodeKind.ReturnType)
+  return run move p
+    |> P.complete(NodeKind.ReturnType)
 }
 
 /// Parses `!` followed by the failure union; semantic row validation happens later.
 pub effect fn failureRow(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.Bang)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Bang)
   let attached = run P.attach(move p.elements, run parse(move p.state))
   p = move attached
-  return run P.complete(move p, NodeKind.FailureRow)
+  return run move p
+    |> P.complete(NodeKind.FailureRow)
 }
 
 effect fn requirement(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.Ampersand)
-  let afterMutKeyword = run P.optional(move p, TokenKind.MutKeyword)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Ampersand)
+  let afterMutKeyword = run move p
+    |> P.optional(TokenKind.MutKeyword)
   p = move afterMutKeyword
   let attached = run P.attach(move p.elements, run primary(move p.state))
   p = move attached
   if P.word(&p.state, "at") {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
     let attached2 = run P.attach(move p.elements, run path(move p.state))
     p = move attached2
   }
-  return run P.complete(move p, NodeKind.Requirement)
+  return run move p
+    |> P.complete(NodeKind.Requirement)
 }
 
 /// Parses a requirement row containing borrowed services, row names, or `Without` expressions.
 pub effect fn requirementRow(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.Question)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Question)
   while true {
     if P.currentKind(&p.state) == TokenKind.Ampersand {
       let attached = run P.attach(move p.elements, run requirement(move p.state))
@@ -552,72 +680,90 @@ pub effect fn requirementRow(initial: State) -> NodeResult ! OutOfMemoryError ? 
     if P.currentKind(&p.state) != TokenKind.Pipe {
       break
     }
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
   }
-  return run P.complete(move p, NodeKind.RequirementRow)
+  return run move p
+    |> P.complete(NodeKind.RequirementRow)
 }
 
 effect fn constraint(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let mut p = run P.wrap(run parse(move initial))
   let membership = P.word(&p.state, "in")
   if membership {
-    let advanced = run P.contextual(move p, "in")
+    let advanced = run move p
+      |> P.contextual("in")
     p = move advanced
   } else {
-    let advanced2 = run P.contextual(move p, "provides")
+    let advanced2 = run move p
+      |> P.contextual("provides")
     p = move advanced2
   }
   let attached = run P.attach(move p.elements, run parse(move p.state))
   p = move attached
   if membership {
-    return run P.complete(move p, NodeKind.MembershipConstraint)
+    return run move p
+      |> P.complete(NodeKind.MembershipConstraint)
   }
-  let advanced3 = run P.contextual(move p, "from")
+  let advanced3 = run move p
+    |> P.contextual("from")
   p = move advanced3
   let attached2 = run P.attach(move p.elements, run parse(move p.state))
   p = move attached2
-  return run P.complete(move p, NodeKind.ProviderConstraint)
+  return run move p
+    |> P.complete(NodeKind.ProviderConstraint)
 }
 
 /// Parses a contextual `where` clause with comma-separated membership/provider constraints.
 pub effect fn whereClause(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.Identifier)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.Identifier)
   while true {
     let attached = run P.attach(move p.elements, run constraint(move p.state))
     p = move attached
     if P.currentKind(&p.state) != TokenKind.Comma {
       break
     }
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
   }
-  return run P.complete(move p, NodeKind.WhereClause)
+  return run move p
+    |> P.complete(NodeKind.WhereClause)
 }
 
 effect fn parameter(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let mut p = P.begin(move initial)
   if P.currentKind(&p.state) == TokenKind.StaticKeyword || P.currentKind(&p.state) == TokenKind.MutKeyword {
-    let consumed = run P.consume(move p)
+    let consumed = run move p
+      |> P.consume
     p = move consumed
   }
-  let afterIdentifier = run P.expect(move p, TokenKind.Identifier)
+  let afterIdentifier = run move p
+    |> P.expect(TokenKind.Identifier)
   p = move afterIdentifier
-  let afterColon = run P.expect(move p, TokenKind.Colon)
+  let afterColon = run move p
+    |> P.expect(TokenKind.Colon)
   p = move afterColon
   let attached = run P.attach(move p.elements, run parse(move p.state))
   p = move attached
-  return run P.complete(move p, NodeKind.ParameterDeclaration)
+  return run move p
+    |> P.complete(NodeKind.ParameterDeclaration)
 }
 
 /// Parses named callable parameters and the optional trailing C-variadic marker.
 pub effect fn parameterList(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let mut p = run P.expect(P.begin(move initial), TokenKind.LeftParenthesis)
+  let mut p = run move initial
+    |> P.begin
+    |> P.expect(TokenKind.LeftParenthesis)
   while P.currentKind(&p.state) == TokenKind.Identifier || P.currentKind(&p.state) == TokenKind.StaticKeyword || P.currentKind(
     &p.state,
   ) == TokenKind.MutKeyword || P.currentKind(&p.state) == TokenKind.Ellipsis {
     if P.currentKind(&p.state) == TokenKind.Ellipsis {
-      let consumed = run P.consume(move p)
+      let consumed = run move p
+        |> P.consume
       p = move consumed
       break
     }
@@ -629,12 +775,15 @@ pub effect fn parameterList(initial: State) -> NodeResult ! OutOfMemoryError ? &
     if P.currentKind(&p.state) == TokenKind.RightParenthesis {
       break
     }
-    let afterComma = run P.expect(move p, TokenKind.Comma)
+    let afterComma = run move p
+      |> P.expect(TokenKind.Comma)
     p = move afterComma
   }
-  let afterRightParenthesis = run P.expect(move p, TokenKind.RightParenthesis)
+  let afterRightParenthesis = run move p
+    |> P.expect(TokenKind.RightParenthesis)
   p = move afterRightParenthesis
-  return run P.complete(move p, NodeKind.ParameterList)
+  return run move p
+    |> P.complete(NodeKind.ParameterList)
 }
 
 /// Appends the shared generic/parameter/result/row/constraint suffix of a callable declaration.

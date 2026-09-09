@@ -746,7 +746,8 @@ fn amountExceeds(source: &[u8], start: usize, end: usize, maximum: usize) -> boo
       if value > maximum {
         return true
       }
-      value = value * 10 + u8.toUsize(byte - '0')
+      value = value * 10 + (byte - '0'
+        |> u8.toUsize)
     }
     index = index + 1
   }
@@ -824,7 +825,9 @@ fn parseDuration(source: &[u8], start: usize, end: usize) -> DurationResult {
       }
     }
     let amountEnd = index
-    if isAsciiLetter(byteAtOrZero(source, index)) == false {
+    if !(source
+      |> byteAtOrZero(index)
+      |> isAsciiLetter) {
       let span = tokenSpan(componentStart, invalidAmountEnd(source, componentStart, end))
       return DurationResult.Invalid {
         diagnostic: LexicalDiagnostic.InvalidDurationAmount {span: span},
@@ -931,8 +934,11 @@ fn scanNumber(source: &[u8], start: usize) -> Scanned {
   let base = baseAt(source, start)
   if base.radix != 10 {
     let digits = scanDigitRun(source, base.radix, start + base.width)
-    if isAsciiLetter(byteAtOrZero(source, digits.end)) {
-      return scanDuration(source, start, digits.end)
+    if (source
+      |> byteAtOrZero(digits.end)
+      |> isAsciiLetter) {
+      return source
+        |> scanDuration(start, digits.end)
     }
     let span = tokenSpan(start, digits.end)
     if !digits.digits {
@@ -973,8 +979,11 @@ fn scanNumber(source: &[u8], start: usize) -> Scanned {
     exponentDigits = exponentRun.digits
     separated = separated && exponentRun.separated
   }
-  if isAsciiLetter(byteAtOrZero(source, end)) {
-    return scanDuration(source, start, end)
+  if (source
+    |> byteAtOrZero(end)
+    |> isAsciiLetter) {
+    return source
+      |> scanDuration(start, end)
   }
   let span = tokenSpan(start, end)
   if !separated {
@@ -1020,15 +1029,19 @@ fn scanInvalid(source: &[u8], start: usize) -> Scanned {
 fn scanToken(source: &[u8], start: usize) -> Scanned {
   let byte = source[start]
   if isWhitespace(byte) {
-    return scanWhitespace(source, start)
+    return source
+      |> scanWhitespace(start)
   }
   if hasPair(source, start, '/', '/') {
-    return scanComment(source, start)
+    return source
+      |> scanComment(start)
   }
 
   // A closing apostrophe or backslash keeps this in character-literal recovery.
   // Otherwise the apostrophe and identifier form a lifetime token.
-  if byte == '\'' && isIdentifierStart(byteAtOrZero(source, start + 1)) {
+  if byte == '\'' && (source
+    |> byteAtOrZero(start + 1)
+    |> isIdentifierStart) {
     let lifetimeEnd = scanIdentifierEnd(source, start + 1)
     let boundary = byteAtOrZero(source, lifetimeEnd)
     if boundary != '\'' && boundary != '\\' {
@@ -1038,22 +1051,27 @@ fn scanToken(source: &[u8], start: usize) -> Scanned {
   }
 
   if isRecognizedLiteralStart(source, start) {
-    return scanRecognizedLiteral(source, start)
+    return source
+      |> scanRecognizedLiteral(start)
   }
   if isIdentifierStart(byte) {
     let end = scanIdentifierEnd(source, start)
     if byteAtOrZero(source, end) == '"' {
-      return scanUnknownLiteral(source, start, end)
+      return source
+        |> scanUnknownLiteral(start, end)
     }
     return Scanned {token: keywordToken(source, start, end), end: end}
   }
   if isDecimalDigit(byte) {
-    return scanNumber(source, start)
+    return source
+      |> scanNumber(start)
   }
   if isPunctuation(byte) {
-    return scanPunctuation(source, start)
+    return source
+      |> scanPunctuation(start)
   }
-  return scanInvalid(source, start)
+  return source
+    |> scanInvalid(start)
 }
 
 impl<'source> Stream<Token, never ? never> for Lexer<'source> {
@@ -1074,12 +1092,14 @@ impl<'source> Stream<Token, never ? never> for Lexer<'source> {
     if self.cursor < self.source.length {
       let Scanned {token, end} = move scanToken(self.source, self.cursor)
       self.cursor = end
-      return Option.some<Token>(move token)
+      return move token
+        |> Option.some
     }
     if !self.eofEmitted {
       self.eofEmitted = true
       let span = tokenSpan(self.source.length, self.source.length)
-      return Option.some<Token>(Token.EndOfFile {span: span})
+      return Token.EndOfFile {span: span}
+        |> Option.some
     }
     return Option.none<Token>()
   }

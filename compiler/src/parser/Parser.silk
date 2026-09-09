@@ -76,6 +76,8 @@ pub effect fn parse(source: Bytes, tokens: Vector<Token>) -> SyntaxTree
     ElementsResult {state: move state, elements: move elements},
     TokenKind.EndOfFile,
   )
-  let sourceFile = run Parsing.finishSourceFile(move endOfFile)
-  return Parsing.intoSyntaxTree(move sourceFile)
+  let sourceFile = run move endOfFile
+    |> Parsing.finishSourceFile
+  return move sourceFile
+    |> Parsing.intoSyntaxTree
 }
