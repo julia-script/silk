@@ -105,6 +105,12 @@ ${transcendentalVectors
   return 42
 }`
 
+/** Process invocations that share one compiled corpus artifact and its expected outcome. */
+export interface NativeRun {
+  readonly arguments?: ReadonlyArray<string>
+  readonly closeStderr?: boolean
+}
+
 export interface CorpusProgram {
   readonly name: string
   readonly source: string
@@ -116,6 +122,7 @@ export interface CorpusProgram {
   readonly nativeDynamicLibraries?: ReadonlyArray<string>
   readonly nativeStdout?: string
   readonly nativeStderr?: string
+  readonly nativeRuns?: ReadonlyArray<NativeRun>
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
     | { readonly _tag: 'Trap' }
@@ -7865,14 +7872,30 @@ int32_t silk_test_libm_order(double value) { return (int32_t)fmod(value, 43.0); 
   {
     name: 'native-termination-active-union-member',
     source: `pub struct NotFoundError {}
-pub struct OfflineError {}
+pub struct OfflineError { code: i32 }
 
 pub effect fn main() ! NotFoundError | OfflineError {
-  fail OfflineError {}
+  fail OfflineError { code: 42 }
 }`,
     nativeStderr:
       'unhandled error: memory/driver.OfflineError\n  at memory/driver.main (memory/driver:4:54)\n  at silk/effect.Effect.flatMap (silk/effect:294:18)\n',
-    expected: { _tag: 'Trap' },
+    // A failed Effect entry must exit with status 1 even when reporting cannot write to fd 2.
+    // Unused process arguments must not change either its status or its diagnostic trace.
+    nativeRuns: [
+      {},
+      { closeStderr: true },
+      { arguments: ['one', 'two', 'three'] },
+      { arguments: ['one', 'two'], closeStderr: true },
+    ],
+    expected: { _tag: 'Completes', result: 1 },
+  },
+  {
+    name: 'native-effect-entry-success',
+    source: `pub struct SomeError { code: i32 }
+pub effect fn main() -> () ! SomeError { return () }`,
+    nativeStderr: '',
+    nativeRuns: [{}, { arguments: ['one', 'two'] }],
+    expected: { _tag: 'Completes', result: 0 },
   },
   {
     name: 'native-termination-logical-path',

@@ -14,7 +14,7 @@ import * as NativeLinkInput from '../src/NativeLinkInput.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import { nativeCorpus } from './support/corpus.js'
+import { nativeCorpus, type NativeRun } from './support/corpus.js'
 import * as Driver from './support/TestDriver.js'
 
 const defaultClang = (): string => {
@@ -39,11 +39,15 @@ const toolchain: NativeToolchain.Toolchain = Object.freeze({
 const encoder = new TextEncoder()
 const ascii = (value: string): Uint8Array => encoder.encode(value)
 
-const runCompiled = Effect.fnUntraced(function* (path: string) {
+const runCompiled = Effect.fnUntraced(function* (path: string, run: NativeRun = {}) {
   return yield* Effect.sync(() =>
-    spawnSync(path, [], {
-      encoding: 'utf8',
-    }),
+    run.closeStderr
+      ? spawnSync(
+          '/bin/sh',
+          ['-c', 'exec 2>&-; exec "$@"', 'silk-native-corpus', path, ...(run.arguments ?? [])],
+          { encoding: 'utf8' },
+        )
+      : spawnSync(path, run.arguments ?? [], { encoding: 'utf8' }),
   )
 })
 
@@ -398,32 +402,29 @@ for (const program of shardedCorpus.filter(
         assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)
         if (outcome._tag !== 'Compiled') return
 
-        if (program.expected._tag === 'Completes') {
-          const run = yield* runCompiled(outcome.path)
+        // Invocation variants exercise startup policy without recompiling the same program.
+        for (const invocation of program.nativeRuns ?? [{}]) {
+          const run = yield* runCompiled(outcome.path, invocation)
           if (program.nativeStdout !== undefined)
             assert.strictEqual(run.stdout, program.nativeStdout, program.name)
-          if (program.nativeStderr !== undefined)
+          if (!invocation.closeStderr && program.nativeStderr !== undefined)
             assert.strictEqual(run.stderr, program.nativeStderr, program.name)
-          const nativeStatus = run.status === null ? null : BigInt(run.status)
-          // POSIX exposes only the low unsigned byte of a process exit value.
-          const expectedStatus = BigInt(program.expected.result) & 0xffn
-          assert.strictEqual(
-            nativeStatus,
-            expectedStatus,
-            `unexpected native result for ${program.name}: expected ${program.expected.result}, native ${run.status}; ${Json.stringify({ signal: run.signal, stderr: run.stderr })}`,
-          )
-          return
-        }
-
-        if (program.expected._tag === 'Trap') {
-          const run = yield* runCompiled(outcome.path)
-          if (program.nativeStderr !== undefined)
-            assert.strictEqual(run.stderr, program.nativeStderr, program.name)
-          assert.strictEqual(
-            run.signal !== null || (run.status !== null && run.status !== 0),
-            true,
-            `expected ${program.name} to trap, native exited ${run.status}`,
-          )
+          if (program.expected._tag === 'Completes') {
+            const nativeStatus = run.status === null ? null : BigInt(run.status)
+            // POSIX exposes only the low unsigned byte of a process exit value.
+            const expectedStatus = BigInt(program.expected.result) & 0xffn
+            assert.strictEqual(
+              nativeStatus,
+              expectedStatus,
+              `unexpected native result for ${program.name}: expected ${program.expected.result}, native ${run.status}; ${Json.stringify({ signal: run.signal, stderr: run.stderr })}`,
+            )
+          } else {
+            assert.strictEqual(
+              run.signal !== null || (run.status !== null && run.status !== 0),
+              true,
+              `expected ${program.name} to trap, native exited ${run.status}`,
+            )
+          }
         }
       }),
     1_500_000,
