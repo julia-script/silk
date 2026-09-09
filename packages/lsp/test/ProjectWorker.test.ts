@@ -275,37 +275,34 @@ it.effect('reports a failed generation and recovers from the last complete commi
   }),
 )
 
-it.effect(
-  'runs analysis and queries in a real worker thread and exits after shutdown',
-  () =>
-    Effect.gen(function* () {
-      const worker = yield* ProjectWorker.makeNode(
-        WorkerEpoch.initial,
-        new URL('../dist/ProjectWorkerMain.js', import.meta.url),
-      )
-      yield* initialize(worker)
-      assert.strictEqual((yield* take(worker, 'Ready'))._tag, 'Ready')
-      const generation = ProjectGeneration.next(ProjectGeneration.initial)
-      yield* worker.send(source(generation.value, 'pub fn main() -> i32 { return 42 }'))
-      yield* take(worker, 'Progress')
-      assert.strictEqual((yield* take(worker, 'Commit'))._tag, 'Commit')
-      const requestId = RequestId.next(RequestId.initial)
-      yield* worker.send({
-        protocolVersion: WorkerProtocol.version,
-        _tag: 'Query',
-        epoch: worker.epoch,
-        generation,
-        requestId,
-        query: { _tag: 'Hover', uri, parameters: { line: 0, character: 36 } },
-      })
-      const result = yield* take(worker, 'Result')
-      if (result._tag !== 'Result') return yield* Effect.die('expected worker query result')
-      assert.include(Inspectable.toStringUnknown(result.result), 'Ready')
-      yield* worker.shutdown
-      assert.strictEqual((yield* take(worker, 'Stopped'))._tag, 'Stopped')
-      assert.strictEqual(yield* worker.awaitExit, 0)
-    }).pipe(Effect.scoped),
-  30_000,
+it.effect('runs analysis and queries in a real worker thread and exits after shutdown', () =>
+  Effect.gen(function* () {
+    const worker = yield* ProjectWorker.makeNode(
+      WorkerEpoch.initial,
+      new URL('../dist/ProjectWorkerMain.js', import.meta.url),
+    )
+    yield* initialize(worker)
+    assert.strictEqual((yield* take(worker, 'Ready'))._tag, 'Ready')
+    const generation = ProjectGeneration.next(ProjectGeneration.initial)
+    yield* worker.send(source(generation.value, 'pub fn main() -> i32 { return 42 }'))
+    yield* take(worker, 'Progress')
+    assert.strictEqual((yield* take(worker, 'Commit'))._tag, 'Commit')
+    const requestId = RequestId.next(RequestId.initial)
+    yield* worker.send({
+      protocolVersion: WorkerProtocol.version,
+      _tag: 'Query',
+      epoch: worker.epoch,
+      generation,
+      requestId,
+      query: { _tag: 'Hover', uri, parameters: { line: 0, character: 36 } },
+    })
+    const result = yield* take(worker, 'Result')
+    if (result._tag !== 'Result') return yield* Effect.die('expected worker query result')
+    assert.include(Inspectable.toStringUnknown(result.result), 'Ready')
+    yield* worker.shutdown
+    assert.strictEqual((yield* take(worker, 'Stopped'))._tag, 'Stopped')
+    assert.strictEqual(yield* worker.awaitExit, 0)
+  }).pipe(Effect.scoped),
 )
 
 it.effect(

@@ -23,50 +23,51 @@ retain their exact source/tool/supply provenance. Missing or changed evidence fa
 
 ## Repository gates
 
-| Gate                     | Result | Log                                        |
-| ------------------------ | ------ | ------------------------------------------ |
-| `pnpm typecheck`         | Passed | `.scratch/migration-final11-typecheck.log` |
-| `pnpm format:check`      | Passed | `.scratch/migration-final11-format.log`    |
-| `pnpm lint`              | Passed | `.scratch/migration-final11-lint.log`      |
-| `pnpm test`              | Passed | `.scratch/migration-final11-test.log`      |
-| `pnpm check`             | Passed | `.scratch/migration-final11-check.log`     |
-| `pnpm release:candidate` | Passed | `.scratch/migration-final11-release.log`   |
+The final local sequence passed in the required order after the compiler/runtime,
+CI and LSP test repairs. The final test-only follow-up inherits the workspace's
+60-second deadline for real-worker analysis instead of overriding it with 30 seconds.
 
-The final11 sequence ran the gates in the required order. Turbo reused passing
-results for unchanged package inputs: all 2,420 compiler tests and all 324 native
-acceptance tests ran successfully in final9; the final snippet changes passed all
-47 editor tests and 18 docs app tests in final10. The full repository test set is
-3,372 passing tests. `pnpm check` additionally passed all 17 repository script tests,
-and release-candidate validation executed all 10 packed-package/consumer checks.
+| Gate                     | Result | Log                              |
+| ------------------------ | ------ | -------------------------------- |
+| `pnpm typecheck`         | Passed | `.scratch/ci-fix4-typecheck.log` |
+| `pnpm format:check`      | Passed | `.scratch/ci-fix4-format.log`    |
+| `pnpm lint`              | Passed | `.scratch/ci-fix4-lint.log`      |
+| `pnpm test`              | Passed | `.scratch/ci-fix4-test.log`      |
+| `pnpm check`             | Passed | `.scratch/ci-fix4-check.log`     |
+| `pnpm release:candidate` | Passed | `.scratch/ci-fix4-release.log`   |
 
-Earlier failures and owner-level repairs are recorded in [progress.md](progress.md),
-including the final10 stale export assertion corrected before the passing release
-run. No failed or interrupted run is presented as passing evidence. The source and
-artifact audit passed again in `.scratch/migration-final10-audit.log`.
+The package Vitest logs contain **3,283 passing tests**, including 2,429 compiler,
+324 native acceptance, 160 LSP and 87 CLI tests. Turbo reused the successful compiler
+and native results from `ci-fix3` because their inputs were unchanged; all 160 LSP
+tests ran again with the corrected real-worker deadline. `pnpm check` additionally
+passed all 19 repository script tests. Release validation ran all 10 packed-package
+and consumer checks. The 53 standard-library doctests passed without skips.
+
+The source and preserved artifact audit passed again in `.scratch/ci-fix4-audit.log`;
+strict OpenSpec validation passed in `.scratch/ci-fix4-openspec.log`. Earlier failed,
+interrupted and superseded verification runs are recorded in [progress.md](progress.md)
+and are not counted as passing gates. Preserved conformance receipts retain their
+actual source/tool/supply provenance rather than claiming a new execution revision.
 
 ## PR integration validation
 
-The implementation PR merges main at `7cc09e57`, preserving contextual character
-literals, compact import formatting, the lexer cleanup/documentation and generated
-untracked toolchain integrity. The merge preserves explicit module analysis in the
-landing-page verifier while adopting LSP diagnostic projection.
+Main at `7cc09e57` was integrated with contextual character literals, compact imports,
+lexer cleanup and generated untracked toolchain integrity. The source audit was
+refreshed for reviewed upstream changes and the matching C data-import repair.
 
-Post-merge type checking, formatting and linting pass. The focused character-literal,
-lexer and formatter suites pass all 129 tests. The source audit was refreshed for the
-six changed upstream compiler modules, and both source/artifact absence checks pass.
-The superseded local post-merge run was interrupted by a concurrent rebuild; it is
-not passing evidence. CI findings and their reproductions are recorded in
-[progress.md](progress.md). Fixes in `a4fde63a` freeze Debian indexes, select explicit
-filesystem execution storage, honor configured LLVM tools in native tests, and give
-the aggregate doctest sweep its measured CI allowance. Clean Linux supply builds,
-24 header checks, both Darwin filesystem lanes and eight native tests pass. The
-`ci-fix2` ordered typecheck/format/lint/test sequence passed, including 2,428 compiler
-and 324 native acceptance tests. Its following check was stopped to incorporate the
-remaining Linux data-import and LSP worker repairs in `58564933`. Those fixes pass
-55 ABI/planning tests, 24 workspace-engine tests, 16 stdio tests and exact GNU
-executable codegen. The replacement complete stack sequence runs in
-`.scratch/ci-fix3-{typecheck,format,lint,test,check,release}.log`; final results are pending. Earlier conformance receipts preserve their recorded source/tool/supply
-provenance and are not represented as newly executed on the merged revision.
+[Implementation CI run 34261542409](https://github.com/julia-script/silk/actions/runs/34261542409)
+passed on `d46071aa`, and
+[audit CI run 34261608202](https://github.com/julia-script/silk/actions/runs/34261608202)
+passed on `eff61c64`. Both runs passed all compiler and native shards, all three
+platform-supply lanes, browser/macOS checks and complete validation/release checks.
+Linux native shard 2 explicitly passed `foreign-libc-environ-static` and all 111
+shard tests. The native job limit is 60 minutes so cold shards can finish; individual
+test deadlines and assertions are preserved.
+
+PRs #387 and #388 were merged into `main` at `a67354bc` while the local gate was
+finishing. The follow-up contains only the final real-worker test deadline repair
+and this completed verification record. The remote runs above precede that test-only
+follow-up; its local validation is the complete passing `ci-fix4` sequence.
 
 ## Scope boundary
 
