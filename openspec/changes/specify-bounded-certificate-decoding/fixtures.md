@@ -1,7 +1,7 @@
 ## Status and authority
 
 [fixtures.json](fixtures.json) is the authoritative, byte-pinned fixture manifest for the
-implementation follow-up. It contains 60 inputs with exact expected outcome class/reason and
+implementation follow-up. It contains 65 inputs with exact expected outcome class/reason and
 retention observations where relevant. These are proposed decoder expectations, not results from
 a shipped parser. No executable parser tests or runtime benchmark are added by this design.
 
@@ -54,6 +54,9 @@ The baseline accounts for 73 visited TLVs at maximum depth 6, three extensions a
 primitive content length 72. Certificate and aggregate DER size are 560. The outer Certificate is
 depth 1; opaque key/signature bits and extension OCTET STRING payloads are not recursively visited.
 The 72-octet signature BIT STRING content includes its initial unused-bit count octet.
+A separate constructed-parameter fixture has an 80-octet SEQUENCE content with a 78-octet OCTET
+STRING child: fieldBytes 80 succeeds, while 79 fails at the constructed open field itself.
+All mutated ancestor lengths are repaired and pinned in the manifest patches.
 
 Important retained baseline spans, all half-open: TBSCertificate `[4,474)`, issuer `[28,155)`,
 validity `[155,187)`, subject `[187,314)`, SPKI `[314,405)`, inner signature AlgorithmIdentifier

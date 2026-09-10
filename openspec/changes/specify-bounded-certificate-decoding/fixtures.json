@@ -1093,6 +1093,107 @@
         "kind": "Malformed",
         "reason": "PemSyntax"
       }
+    },
+    {
+      "id": "primitive-sequence-parameter",
+      "api": "Certificate.decodeDer",
+      "baseline": "der",
+      "patches": [
+        {
+          "start": 3,
+          "end": 486,
+          "base64": "LjCCAdKgAwIBAgIBADAKBggqhkjOPQQDAjB9MQswCQYDVQQGEwJCRTEPMA0GA1UEChMGR251VExTMSUwIwYDVQQLExxHbnVUTFMgY2VydGlmaWNhdGUgYXV0aG9yaXR5MQ8wDQYDVQQIEwZMZXV2ZW4xJTAjBgNVBAMTHEdudVRMUyBjZXJ0aWZpY2F0ZSBhdXRob3JpdHkwHhcNMTEwNTIzMjAzODIxWhcNMTIxMjIyMDc0MTUxWjB9MQswCQYDVQQGEwJCRTEPMA0GA1UEChMGR251VExTMSUwIwYDVQQLExxHbnVUTFMgY2VydGlmaWNhdGUgYXV0aG9yaXR5MQ8wDQYDVQQIEwZMZXV2ZW4xJTAjBgNVBAMTHEdudVRMUyBjZXJ0aWZpY2F0ZSBhdXRob3JpdHkwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARS2I0jiuNn14Y2sSALCX3IybqiIJUvxUpj+oNfzngvj/Niyv2394BWnW4XuQ4RTEiywK87WRcWMGgJB5kX/t2no0MwQTAPBgNVHRMBAf8EBTADAQH/MA8GA1UdDwEB/wQFAwMHBgAwHQYDVR0OBBYEFPC0gf6YEr+1KLlkQAPLzB9mTigDMAwGCCqGSM49BAMCEAA="
+        }
+      ],
+      "byteLength": 562,
+      "sha256": "8bd439288fda11f843ebcb538e8f42b59199c7ae3bf0c3e853a3dd7956889244",
+      "limits": {},
+      "expected": {
+        "kind": "Malformed",
+        "reason": "Tag"
+      }
+    },
+    {
+      "id": "primitive-set-parameter",
+      "api": "Certificate.decodeDer",
+      "baseline": "der",
+      "patches": [
+        {
+          "start": 3,
+          "end": 486,
+          "base64": "LjCCAdKgAwIBAgIBADAKBggqhkjOPQQDAjB9MQswCQYDVQQGEwJCRTEPMA0GA1UEChMGR251VExTMSUwIwYDVQQLExxHbnVUTFMgY2VydGlmaWNhdGUgYXV0aG9yaXR5MQ8wDQYDVQQIEwZMZXV2ZW4xJTAjBgNVBAMTHEdudVRMUyBjZXJ0aWZpY2F0ZSBhdXRob3JpdHkwHhcNMTEwNTIzMjAzODIxWhcNMTIxMjIyMDc0MTUxWjB9MQswCQYDVQQGEwJCRTEPMA0GA1UEChMGR251VExTMSUwIwYDVQQLExxHbnVUTFMgY2VydGlmaWNhdGUgYXV0aG9yaXR5MQ8wDQYDVQQIEwZMZXV2ZW4xJTAjBgNVBAMTHEdudVRMUyBjZXJ0aWZpY2F0ZSBhdXRob3JpdHkwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARS2I0jiuNn14Y2sSALCX3IybqiIJUvxUpj+oNfzngvj/Niyv2394BWnW4XuQ4RTEiywK87WRcWMGgJB5kX/t2no0MwQTAPBgNVHRMBAf8EBTADAQH/MA8GA1UdDwEB/wQFAwMHBgAwHQYDVR0OBBYEFPC0gf6YEr+1KLlkQAPLzB9mTigDMAwGCCqGSM49BAMCEQA="
+        }
+      ],
+      "byteLength": 562,
+      "sha256": "103fc586a5345be8cb9ef925bf02acee631f0bfdaa2e0ac418f87cbbf414effd",
+      "limits": {},
+      "expected": {
+        "kind": "Malformed",
+        "reason": "Tag"
+      }
+    },
+    {
+      "id": "constructed-open-field-exact",
+      "api": "Certificate.decodeDer",
+      "baseline": "der",
+      "patches": [
+        {
+          "start": 3,
+          "end": 486,
+          "base64": "fjCCAdKgAwIBAgIBADAKBggqhkjOPQQDAjB9MQswCQYDVQQGEwJCRTEPMA0GA1UEChMGR251VExTMSUwIwYDVQQLExxHbnVUTFMgY2VydGlmaWNhdGUgYXV0aG9yaXR5MQ8wDQYDVQQIEwZMZXV2ZW4xJTAjBgNVBAMTHEdudVRMUyBjZXJ0aWZpY2F0ZSBhdXRob3JpdHkwHhcNMTEwNTIzMjAzODIxWhcNMTIxMjIyMDc0MTUxWjB9MQswCQYDVQQGEwJCRTEPMA0GA1UEChMGR251VExTMSUwIwYDVQQLExxHbnVUTFMgY2VydGlmaWNhdGUgYXV0aG9yaXR5MQ8wDQYDVQQIEwZMZXV2ZW4xJTAjBgNVBAMTHEdudVRMUyBjZXJ0aWZpY2F0ZSBhdXRob3JpdHkwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARS2I0jiuNn14Y2sSALCX3IybqiIJUvxUpj+oNfzngvj/Niyv2394BWnW4XuQ4RTEiywK87WRcWMGgJB5kX/t2no0MwQTAPBgNVHRMBAf8EBTADAQH/MA8GA1UdDwEB/wQFAwMHBgAwHQYDVR0OBBYEFPC0gf6YEr+1KLlkQAPLzB9mTigDMFwGCCqGSM49BAMCMFAETgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+        }
+      ],
+      "byteLength": 642,
+      "sha256": "fc7c32a774a75cfb369de34a7d003fe7b5f9225dc7b385304cf9136edeb5adb6",
+      "limits": {
+        "fieldBytes": 80
+      },
+      "expected": {
+        "kind": "Success",
+        "observations": [
+          "Outer signatureAlgorithm.parametersDer is SEQUENCE with content length80; its OCTET STRING child content length78 is opaque"
+        ]
+      }
+    },
+    {
+      "id": "constructed-open-field-one-below",
+      "api": "Certificate.decodeDer",
+      "baseline": "der",
+      "patches": [
+        {
+          "start": 3,
+          "end": 486,
+          "base64": "fjCCAdKgAwIBAgIBADAKBggqhkjOPQQDAjB9MQswCQYDVQQGEwJCRTEPMA0GA1UEChMGR251VExTMSUwIwYDVQQLExxHbnVUTFMgY2VydGlmaWNhdGUgYXV0aG9yaXR5MQ8wDQYDVQQIEwZMZXV2ZW4xJTAjBgNVBAMTHEdudVRMUyBjZXJ0aWZpY2F0ZSBhdXRob3JpdHkwHhcNMTEwNTIzMjAzODIxWhcNMTIxMjIyMDc0MTUxWjB9MQswCQYDVQQGEwJCRTEPMA0GA1UEChMGR251VExTMSUwIwYDVQQLExxHbnVUTFMgY2VydGlmaWNhdGUgYXV0aG9yaXR5MQ8wDQYDVQQIEwZMZXV2ZW4xJTAjBgNVBAMTHEdudVRMUyBjZXJ0aWZpY2F0ZSBhdXRob3JpdHkwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAARS2I0jiuNn14Y2sSALCX3IybqiIJUvxUpj+oNfzngvj/Niyv2394BWnW4XuQ4RTEiywK87WRcWMGgJB5kX/t2no0MwQTAPBgNVHRMBAf8EBTADAQH/MA8GA1UdDwEB/wQFAwMHBgAwHQYDVR0OBBYEFPC0gf6YEr+1KLlkQAPLzB9mTigDMFwGCCqGSM49BAMCMFAETgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+        }
+      ],
+      "byteLength": 642,
+      "sha256": "fc7c32a774a75cfb369de34a7d003fe7b5f9225dc7b385304cf9136edeb5adb6",
+      "limits": {
+        "fieldBytes": 79
+      },
+      "expected": {
+        "kind": "ResourceLimit",
+        "reason": "FieldBytes"
+      }
+    },
+    {
+      "id": "generalized-time-before-2050",
+      "api": "Certificate.decodeDer",
+      "baseline": "der",
+      "patches": [
+        {
+          "start": 3,
+          "end": 159,
+          "base64": "LjCCAdSgAwIBAgIBADAKBggqhkjOPQQDAjB9MQswCQYDVQQGEwJCRTEPMA0GA1UEChMGR251VExTMSUwIwYDVQQLExxHbnVUTFMgY2VydGlmaWNhdGUgYXV0aG9yaXR5MQ8wDQYDVQQIEwZMZXV2ZW4xJTAjBgNVBAMTHEdudVRMUyBjZXJ0aWZpY2F0ZSBhdXRob3JpdHkwIBgPMjA="
+        }
+      ],
+      "byteLength": 562,
+      "sha256": "622509660704e9503edf3784e810b44e50c99c6bbe0a6189e124bd9c603a5a20",
+      "limits": {},
+      "expected": {
+        "kind": "Success",
+        "observations": ["notBefore is 2011-05-23 20:38:21; GeneralizedTime before2050 is accepted"]
+      }
     }
   ]
 }
