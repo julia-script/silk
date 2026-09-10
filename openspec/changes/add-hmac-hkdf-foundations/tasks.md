@@ -11,7 +11,7 @@
 ## 3. Verification and handoff
 
 - [x] 3.1 Run typecheck, format:check, lint, test, check, and release:candidate in the required order and record results.
-- [ ] 3.2 Complete independent code review and mandatory test-economics review; resolve findings and obtain approval of the exact committed diff.
+- [x] 3.2 Complete independent code review and mandatory test-economics review; resolve findings and obtain approval of the exact committed diff.
       Draft PR publication and Linear handoff follow the silk-work delivery workflow after these implementation tasks pass.
 
 Verification passed: `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, `pnpm test`,
@@ -20,3 +20,7 @@ Verification passed: `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, `pnpm t
 2,445 semantic tests, 328 native acceptance tests, 91 documented modules, and 56 doctests; the LSP
 suite passed all 149 tests, and release-candidate validation passed all 10 tests. Earlier host-load
 timeouts and two tests interrupted by a confirmed macOS sleep interval passed in the final run.
+
+Independent code review and dedicated test-economics review approved the implementation with no
+remaining findings. The measured incremental default-suite test work is approximately 36.08 seconds:
+35.99 seconds for the shared native case and 0.09 seconds for the expanded ownership assertion.
