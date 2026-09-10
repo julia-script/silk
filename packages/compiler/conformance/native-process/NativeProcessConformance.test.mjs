@@ -3,7 +3,8 @@ import * as SourceFile from '../../dist/SourceFile.js'
 import * as SourceResolver from '../../dist/SourceResolver.js'
 import * as Layer from 'effect/Layer'
 import * as Schema from 'effect/Schema'
-import { NodeRuntime, NodeServices } from '@effect/platform-node'
+import { NodeServices } from '@effect/platform-node'
+import { it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Config from 'effect/Config'
 import * as Data from 'effect/Data'
@@ -21,121 +22,146 @@ import * as PlatformSupplyResolver from '../../dist/PlatformSupplyResolver.js'
 import * as NativeToolchain from '../../dist/NativeToolchain.js'
 
 class ConformanceError extends Data.TaggedError('ConformanceError') {}
-const program = Effect.gen(function* () {
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const faults = yield* Config.boolean('SILK_PROCESS_FAULTS').pipe(Config.withDefault(false))
-  const childFaults = yield* Config.boolean('SILK_PROCESS_CHILD_FAULTS').pipe(
-    Config.withDefault(false),
-  )
-  const target = yield* Config.string('SILK_SUPPLY_TARGET')
-  if (childFaults && (faults || !target.includes('linux')))
-    return yield* new ConformanceError({
-      message: 'Child fault admission requires a GNU target and excludes parent fault mode',
-    })
-  let fixture = {
+
+const fixtures = {
+  normal: {
     suffix: '',
     source: 'fixture.silk',
     receiver: 'receiver.c',
     claim: 'launch, capture, inputs, signal and exit distinctions',
-  }
-  if (childFaults)
-    fixture = {
-      suffix: '-child-faults',
-      source: 'child-fault-fixture.silk',
-      receiver: 'child-fault-receiver.c',
-      claim: 'real child startup failure cleanup',
-    }
-  else if (faults)
-    fixture = {
-      suffix: '-faults',
-      source: 'fault-fixture.silk',
-      receiver: 'fault-receiver.c',
-      claim: 'foreign failure cleanup',
-    }
-  const clang = yield* Config.string('SILK_SUPPLY_CLANG')
-  const llvmAr = yield* Config.string('SILK_SUPPLY_AR')
-  const linker = yield* Config.string('SILK_SUPPLY_LINKER')
-  const inspect = yield* Config.string('SILK_SUPPLY_READOBJ')
-  const root = yield* Config.string('SILK_SUPPLY_ROOT')
-  const gcc = yield* Config.string('SILK_SUPPLY_GCC').pipe(Config.withDefault(''))
-  const image = yield* Config.string('SILK_SUPPLY_IMAGE').pipe(Config.withDefault(''))
-  const output = path.resolve(
-    yield* Config.string('SILK_SUPPLY_OUTPUT').pipe(Config.withDefault('.scratch/native-process')),
-  )
-  yield* fs.makeDirectory(output, { recursive: true })
-  const run = Effect.fnUntraced(
-    /**
-     * @param {string} command
-     * @param {ReadonlyArray<string>} args
-     * @param {number} expected
-     */ function* (command, args, expected = 0) {
-      return yield* Effect.scoped(
-        Effect.gen(function* () {
-          const child = yield* spawner.spawn(
-            ChildProcess.make(command, args, { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }),
-          )
-          const [status, stdout, stderr] = yield* Effect.all(
-            [
-              child.exitCode,
-              Stream.mkString(Stream.decodeText(child.stdout)),
-              Stream.mkString(Stream.decodeText(child.stderr)),
-            ],
-            { concurrency: 'unbounded' },
-          )
-          if (status !== expected)
-            return yield* new ConformanceError({
-              message: `${command}: expected ${expected}, received ${status}\n${stdout}${stderr}`,
-            })
-          return { command, arguments: args, status, stdout, stderr }
-        }),
-      )
-    },
-  )
-  const versions = []
-  for (const tool of [clang, llvmAr, linker, inspect]) {
-    const result = yield* run(tool, ['--version'])
-    if (!(result.stdout + result.stderr).includes('22.1.8'))
-      return yield* new ConformanceError({ message: `Required LLVM 22.1.8 tool missing: ${tool}` })
-    versions.push(result)
-  }
-  const invalidLto = yield* Effect.result(CompilationProfile.decode({ target, lto: true }))
-  if (!Result.isFailure(invalidLto))
-    return yield* new ConformanceError({ message: 'Unverified LTO was accepted' })
-  const directory = path.dirname(fileURLToPath(import.meta.url))
-  const pins = yield* Schema.decodeEffect(
-    Schema.fromJsonString(
-      Schema.Struct({
-        headers: Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)),
-      }),
-    ),
-  )(
-    yield* fs.readFileString(
-      path.join(
-        directory,
-        childFaults
-          ? '../../../../openspec/changes/complete-native-runtime-migration/process-child-supplies.json'
-          : '../../../../openspec/changes/complete-native-runtime-migration/process-supplies.json',
+  },
+  'parent-fault': {
+    suffix: '-faults',
+    source: 'fault-fixture.silk',
+    receiver: 'fault-receiver.c',
+    claim: 'foreign failure cleanup',
+  },
+  'child-fault': {
+    suffix: '-child-faults',
+    source: 'child-fault-fixture.silk',
+    receiver: 'child-fault-receiver.c',
+    claim: 'real child startup failure cleanup',
+  },
+}
+
+/** @param {string} name @param {string} fallback */
+const configured = (name, fallback) =>
+  Effect.runSync(Config.string(name).pipe(Config.withDefault(fallback)))
+
+const requestedMode = configured('SILK_PROCESS_MODE', 'normal')
+const requestedOptimization = configured('SILK_PROCESS_OPTIMIZATION', 'all')
+const target = configured('SILK_SUPPLY_TARGET', '')
+const modes =
+  requestedMode === 'all'
+    ? Object.keys(fixtures).filter((mode) => mode !== 'child-fault' || target.includes('linux'))
+    : [requestedMode]
+const optimizations = requestedOptimization === 'all' ? ['none', 'speed'] : [requestedOptimization]
+const cases = modes.flatMap((mode) => optimizations.map((optimization) => ({ mode, optimization })))
+
+const runLane = Effect.fnUntraced(
+  /**
+   * @param {string} mode
+   * @param {string} optimization
+   */ function* (mode, optimization) {
+    const fixture = fixtures[mode]
+    if (fixture === undefined)
+      return yield* new ConformanceError({ message: `Unknown process conformance mode: ${mode}` })
+    if (optimization !== 'none' && optimization !== 'speed')
+      return yield* new ConformanceError({
+        message: `Unknown process conformance optimization: ${optimization}`,
+      })
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const target = yield* Config.string('SILK_SUPPLY_TARGET')
+    if (mode === 'child-fault' && !target.includes('linux'))
+      return yield* new ConformanceError({
+        message: 'Child fault admission requires a GNU target',
+      })
+    const clang = yield* Config.string('SILK_SUPPLY_CLANG')
+    const llvmAr = yield* Config.string('SILK_SUPPLY_AR')
+    const linker = yield* Config.string('SILK_SUPPLY_LINKER')
+    const inspect = yield* Config.string('SILK_SUPPLY_READOBJ')
+    const root = yield* Config.string('SILK_SUPPLY_ROOT')
+    const gcc = yield* Config.string('SILK_SUPPLY_GCC').pipe(Config.withDefault(''))
+    const image = yield* Config.string('SILK_SUPPLY_IMAGE').pipe(Config.withDefault(''))
+    const output = path.resolve(
+      yield* Config.string('SILK_SUPPLY_OUTPUT').pipe(
+        Config.withDefault('.scratch/native-process'),
       ),
-    ),
-  )
-  const headers = pins.headers[target]
-  if (headers === undefined)
-    return yield* new ConformanceError({ message: `Missing process header pins: ${target}` })
-  for (const [header, expected] of Object.entries(headers)) {
-    const actual = PlatformSupplyResolver.digest(yield* fs.readFile(path.join(root, header)))
-    if (actual !== expected)
-      return yield* new ConformanceError({ message: `Unpinned process header: ${header}` })
-  }
-  const source = yield* fs.readFile(path.join(directory, fixture.source))
-  const receiver =
-    (yield* fs.readFileString(path.join(directory, 'layout.c'))) +
-    '\n' +
-    (yield* fs.readFileString(path.join(directory, fixture.receiver)))
-  const objdump = path.join(path.dirname(inspect), 'llvm-objdump')
-  const report = { schema: 1, target, tools: versions, lto: 'rejected', headers, lanes: [] }
-  for (const optimization of ['none', 'speed']) {
+    )
+    yield* fs.makeDirectory(output, { recursive: true })
+    const run = Effect.fnUntraced(
+      /**
+       * @param {string} command
+       * @param {ReadonlyArray<string>} args
+       * @param {number} expected
+       */ function* (command, args, expected = 0) {
+        return yield* Effect.scoped(
+          Effect.gen(function* () {
+            const child = yield* spawner.spawn(
+              ChildProcess.make(command, args, { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }),
+            )
+            const [status, stdout, stderr] = yield* Effect.all(
+              [
+                child.exitCode,
+                Stream.mkString(Stream.decodeText(child.stdout)),
+                Stream.mkString(Stream.decodeText(child.stderr)),
+              ],
+              { concurrency: 'unbounded' },
+            )
+            if (status !== expected)
+              return yield* new ConformanceError({
+                message: `${command}: expected ${expected}, received ${status}\n${stdout}${stderr}`,
+              })
+            return { command, arguments: args, status, stdout, stderr }
+          }),
+        )
+      },
+    )
+    const versions = []
+    for (const tool of [clang, llvmAr, linker, inspect]) {
+      const result = yield* run(tool, ['--version'])
+      if (!(result.stdout + result.stderr).includes('22.1.8'))
+        return yield* new ConformanceError({
+          message: `Required LLVM 22.1.8 tool missing: ${tool}`,
+        })
+      versions.push(result)
+    }
+    const invalidLto = yield* Effect.result(CompilationProfile.decode({ target, lto: true }))
+    if (!Result.isFailure(invalidLto))
+      return yield* new ConformanceError({ message: 'Unverified LTO was accepted' })
+    const directory = path.dirname(fileURLToPath(import.meta.url))
+    const pins = yield* Schema.decodeEffect(
+      Schema.fromJsonString(
+        Schema.Struct({
+          headers: Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.String)),
+        }),
+      ),
+    )(
+      yield* fs.readFileString(
+        path.join(
+          directory,
+          mode === 'child-fault'
+            ? '../../../../openspec/changes/complete-native-runtime-migration/process-child-supplies.json'
+            : '../../../../openspec/changes/complete-native-runtime-migration/process-supplies.json',
+        ),
+      ),
+    )
+    const headers = pins.headers[target]
+    if (headers === undefined)
+      return yield* new ConformanceError({ message: `Missing process header pins: ${target}` })
+    for (const [header, expected] of Object.entries(headers)) {
+      const actual = PlatformSupplyResolver.digest(yield* fs.readFile(path.join(root, header)))
+      if (actual !== expected)
+        return yield* new ConformanceError({ message: `Unpinned process header: ${header}` })
+    }
+    const source = yield* fs.readFile(path.join(directory, fixture.source))
+    const receiver =
+      (yield* fs.readFileString(path.join(directory, 'layout.c'))) +
+      '\n' +
+      (yield* fs.readFileString(path.join(directory, fixture.receiver)))
+    const objdump = path.join(path.dirname(inspect), 'llvm-objdump')
     const input = {
       target,
       optimization,
@@ -301,20 +327,25 @@ const program = Effect.gen(function* () {
         }
       }),
     )
-    report.lanes.push(lane)
+    const report = { schema: 1, target, mode, tools: versions, lto: 'rejected', headers, lane }
     yield* Console.log(`${target} ${optimization}: source process ${fixture.claim} passed`)
-  }
-  const reportPath = path.join(output, `${target}${fixture.suffix}.json`)
-  yield* fs.writeFileString(
-    reportPath,
-    (yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(report).pipe(Effect.orDie)) +
-      '\n',
-  )
-  yield* Console.log(`Supply evidence: ${reportPath}`)
-})
-NodeRuntime.runMain(
-  program.pipe(
-    Effect.scoped,
-    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHeapObservation.layer)),
-  ),
+    const reportPath = path.join(output, `${target}${fixture.suffix}-${optimization}.json`)
+    yield* fs.writeFileString(
+      reportPath,
+      (yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(report).pipe(
+        Effect.orDie,
+      )) + '\n',
+    )
+    yield* Console.log(`Supply evidence: ${reportPath}`)
+  },
+)
+
+it.effect.each(cases)(
+  'admits $mode process behavior with $optimization optimization',
+  ({ mode, optimization }) =>
+    runLane(mode, optimization).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHeapObservation.layer)),
+    ),
+  1_500_000,
 )

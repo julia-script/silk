@@ -2,6 +2,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
+import { configDefaults } from 'vitest/config'
 import { defineSilkConfig, wholeMachineWorkers } from '../../vitest.shared.js'
 
 const nativeCacheDirectory = Effect.runSync(
@@ -12,6 +13,7 @@ const nativeCacheDirectory = Effect.runSync(
 
 export default defineSilkConfig({
   test: {
+    exclude: [...configDefaults.exclude, 'conformance/**'],
     /**
      * The one package that raises this, and the acceptance criterion of #173 asks for the reason
      * rather than for the raise to be removed.

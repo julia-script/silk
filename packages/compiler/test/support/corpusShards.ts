@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, describe, it } from '@effect/vitest'
+import * as Config from 'effect/Config'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import { llvmToolchain } from '../../../../test/support/llvmToolchain.js'
@@ -21,10 +22,16 @@ import { corpus } from './corpus.js'
 // bytes are identical.
 const encoder = new TextEncoder()
 const ascii = (value: string): Uint8Array => encoder.encode(value)
+const verificationLimit = Number.parseInt(
+  Effect.runSync(Config.string('SILK_VERIFY_CORPUS_LIMIT').pipe(Config.withDefault('0'))),
+  10,
+)
 
 /** Every `of`-th pinned corpus program starting at `shard` (1-based). */
-const corpusShard = (shard: number, of: number): typeof corpus =>
-  corpus.filter((_, index) => index % of === shard - 1)
+const corpusShard = (shard: number, of: number): typeof corpus => {
+  const programs = corpus.filter((_, index) => index % of === shard - 1)
+  return verificationLimit > 0 ? programs.slice(0, verificationLimit) : programs
+}
 
 /** How many shard files each sweep registers; the shard files pass their own 1-based index. */
 export const corpusShardCount = 4

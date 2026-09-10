@@ -512,7 +512,7 @@ All four debug/optimized GNU lanes passed with the extra pinned receiver headers
 A completely unwritten notice is indistinguishable from successful exec under the
 selected EOF protocol; the outcome then carries exit 127. Partial notices are
 rejected. OsChildProcess now documents this tested limit. The process conformance
-catalog includes the new local evidence; CI and test:native-process-child-faults run
+catalog includes the new local evidence; CI and `test:native-process:full` run
 the GNU mode. Detailed reports remain under .scratch/native-process/*-child-faults.json.
 
 Workspace typecheck passed 18 tasks and format check passed. Initial lint rejected

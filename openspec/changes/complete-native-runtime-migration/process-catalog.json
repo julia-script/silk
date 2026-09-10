@@ -1398,7 +1398,7 @@
       "version": "sha256:95d2ceb098ce496e0a06b7c12d0d5abaeed848f290536f891e66d408589b79e4"
     },
     {
-      "identity": "packages/compiler/conformance/native-process/run.mjs",
+      "identity": "packages/compiler/conformance/native-process/NativeProcessConformance.test.mjs",
       "version": "sha256:602d4e5e374d8299cc62de06c4ab09877bb100a1be854b834e38b85562576c55"
     },
     {

@@ -5,6 +5,9 @@ on:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron: '17 4 * * 1-5'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,6 +16,7 @@ jobs:
   # Spike (openspec/changes/spike-ci-test-sharding): the compiler vitest payload runs in the
   # compiler-tests matrix below; validate keeps everything else `pnpm check` ran.
   validate:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -56,10 +60,11 @@ jobs:
       - run: pnpm test:scripts
       - run: pnpm release:candidate
 
-  # The native corpus is one serial file, so it shards by corpus index (SILK_NATIVE_SHARD in
-  # DriverNativeAcceptance.test.ts) rather than by vitest --shard. The three scheduler-scale
-  # cases are adjacent in the corpus, so index-mod-3 places one per shard.
+  # Pull requests run a representative compile/link/execute smoke set. Main keeps the complete
+  # corpus, split by SILK_NATIVE_SHARD because every case lives in one Vitest file.
   native-acceptance:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    name: Native acceptance / ${{ matrix.name }}
     runs-on: ubuntu-latest
     # Cold source-runtime corpus shards exceed 30 minutes, including toolchain/build setup.
     # Each test still enforces its own bounded compile/run deadline.
@@ -67,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"smoke","cases":"literal,direct-recursion,effect-ensuring-outcomes-and-order,foreign-c-layout-clock,scheduler-fiber-semantics"}]' || '[{"name":"1-of-3","shard":"1/3"},{"name":"2-of-3","shard":"2/3"},{"name":"3-of-3","shard":"3/3"}]') }}
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -88,17 +93,20 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/silk-effect/native
-          key: silk-native-${{ runner.os }}-na${{ matrix.shard }}-${{ github.sha }}
+          key: silk-native-${{ runner.os }}-na-${{ matrix.name }}-${{ github.sha }}
           restore-keys: |
-            silk-native-${{ runner.os }}-na${{ matrix.shard }}-
+            silk-native-${{ runner.os }}-na-${{ matrix.name }}-
             silk-native-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: node scripts/turbo.mjs run build
       - run: pnpm --filter @silklang/compiler run test:native-acceptance
         env:
-          SILK_NATIVE_SHARD: ${{ matrix.shard }}/3
+          SILK_NATIVE_SHARD: ${{ matrix.shard }}
+          SILK_NATIVE_CORPUS_CASES: ${{ matrix.cases }}
+          SILK_NATIVE_FIXED_TESTS: ${{ github.event_name == 'pull_request' && 'false' || 'true' }}
 
   compiler-tests:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -137,6 +145,8 @@ jobs:
           --shard=${{ matrix.shard }}/4
           --reporter=default --reporter=json
           --outputFile.json=compiler-shard-${{ matrix.shard }}.json
+        env:
+          SILK_VERIFY_CORPUS_LIMIT: ${{ github.event_name == 'pull_request' && '1' || '' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -146,6 +156,7 @@ jobs:
           if-no-files-found: warn
 
   macos-native-os:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -186,12 +197,13 @@ jobs:
           pnpm --filter @silklang/compiler exec vitest run test/DriverNativeAcceptance.test.ts
           -t 'links and runs the native system and monotonic clock ABI' --maxWorkers=1
       - run: >
-          SILK_NATIVE_CORPUS_CASE=secure-random-provider
+          SILK_NATIVE_CORPUS_CASES=secure-random-provider
           pnpm --filter @silklang/compiler exec vitest run test/DriverNativeAcceptance.test.ts
-          -t 'runs the native corpus case secure-random-provider'
+          -t 'secure-random-provider'
           --maxWorkers=1
 
   webcontainer-browser:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -206,6 +218,7 @@ jobs:
       - run: pnpm --filter @silklang/platform-webcontainer test:browser
 
   platform-supplies:
+    if: github.event_name != 'pull_request'
     name: Platform supply / ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -291,11 +304,7 @@ jobs:
           node packages/compiler/conformance/native-clocks/run.mjs
           node packages/compiler/conformance/native-entropy/run.mjs
           node packages/compiler/conformance/native-filesystem/run.mjs
-          node packages/compiler/conformance/native-process/run.mjs
-          SILK_PROCESS_FAULTS=true node packages/compiler/conformance/native-process/run.mjs
-          if [[ "$SILK_SUPPLY_TARGET" == *linux* ]]; then
-            SILK_PROCESS_CHILD_FAULTS=true node packages/compiler/conformance/native-process/run.mjs
-          fi
+          pnpm --filter @silklang/compiler run test:native-process:full
           node packages/compiler/conformance/hosted-start/run.mjs
           SILK_STARTUP_FAULTS=true node packages/compiler/conformance/hosted-start/run.mjs
           node packages/compiler/conformance/native-host-input/run.mjs

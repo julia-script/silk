@@ -6,7 +6,7 @@ is tracked in JUL-129 and the active OpenSpec change.
 
 Build the compiler first. Native runs use the same explicit LLVM 22.1.8 tools,
 SDK/sysroot, GCC support directory and execution image variables as
-`conformance/native-process/run.mjs`. Header hashes are checked against
+`conformance/native-process/NativeProcessConformance.test.mjs`. Header hashes are checked against
 `openspec/changes/complete-native-runtime-migration/storage-supplies.json`.
 
 ```sh
