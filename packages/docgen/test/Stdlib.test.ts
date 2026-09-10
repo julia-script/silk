@@ -1,66 +1,9 @@
 import { assert, it } from '@effect/vitest'
 import * as CompilerStdlib from '@silklang/compiler/Stdlib'
 import * as Effect from 'effect/Effect'
-import * as Doctest from '../src/Doctest.js'
 import * as Example from '../src/Example.js'
 import * as Json from '../src/Json.js'
-import * as Report from '../src/Report.js'
-import * as Stdlib from '../src/Stdlib.js'
 import { documentation as stdlibDocumentation } from './support/doctestStdlibDocumentation.js'
-
-/**
- * Every example the standard library documents, opted out or not.
- *
- * The set is pinned rather than counted so an opt-out cannot be added quietly. A new
- * ```` ```silk,ignore ```` fence fails this test until someone writes it down here, which is the
- * only thing standing between a doctest gate and a gate that skips everything it is given.
- */
-const skipped: ReadonlyArray<string> = []
-
-/**
- * The live doctest sweep compiles every stdlib example and is by far this file's dominant cost, so
- * the two tests that need the same live report share one run instead of each paying for their own.
- */
-let liveReportOnce: Doctest.Report | undefined
-const liveReport = Effect.gen(function* () {
-  if (liveReportOnce === undefined) {
-    const documentation = yield* stdlibDocumentation
-    liveReportOnce = yield* Doctest.run({ documentation, sources: Stdlib.sources })
-  }
-  return liveReportOnce
-})
-
-it.effect(
-  'compiles every fenced Silk example in the standard library',
-  () =>
-    Effect.gen(function* () {
-      const report = yield* liveReport
-
-      assert.isAbove(
-        report.collected,
-        0,
-        'the standard library must carry fenced Silk examples for this gate to mean anything',
-      )
-      assert.isAbove(
-        report.passed,
-        0,
-        'at least one standard-library example must actually be compiled, or this gate compiles nothing',
-      )
-      assert.deepStrictEqual(report.failed, 0, Report.render(report))
-      assert.deepStrictEqual(
-        report.results
-          .filter((result) => result.outcome._tag === 'Skipped')
-          .map(
-            (result) =>
-              `${result.example.owner.module}::${result.example.owner.declaration ?? '<module>'}`,
-          ),
-        skipped,
-      )
-    }),
-  // This aggregate sweep checks 53 independent programs plus shared documentation analysis.
-  // Linux CI exceeds five minutes after source startup became part of each compilation.
-  600_000,
-)
 
 /**
  * Coverage follows the shipped manifest, so a module added to the library is doctested without this

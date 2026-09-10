@@ -35,30 +35,85 @@ jobs:
           restore-keys: |
             turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
             turbo-${{ runner.os }}-
-      - uses: actions/cache@v4
-        with:
-          path: ~/.cache/silk-effect/native
-          key: silk-native-${{ runner.os }}-${{ github.sha }}
-          restore-keys: silk-native-${{ runner.os }}-
-      # CLI integration tests also resolve complete native tool installations.
-      - uses: ./.github/actions/setup-linux-llvm
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: node scripts/turbo.mjs run build
       # Oxlint resolves public workspace subpaths through their emitted declaration files.
       - run: pnpm lint
       - run: node scripts/turbo.mjs run typecheck
-      - run: node scripts/turbo.mjs run test --filter='!@silklang/compiler'
-      # The non-vitest parts of @silklang/compiler#test (its vitest payload is sharded below).
-      - run: |
-          pnpm --filter @silklang/compiler run unicode:check
-          pnpm --filter @silklang/compiler run stdlib:check
-          pnpm --filter @silklang/compiler run toolchain:check
-          pnpm --filter @silklang/compiler run documentation:policy
-          pnpm --filter @silklang/compiler run documentation:check
-          pnpm --filter @silklang/compiler run documentation:examples
+      # Heavy compiler consumers have dedicated runners below. The remaining suites finish in
+      # roughly the time it takes the docs app to build.
+      - run: >
+          node scripts/turbo.mjs run test
+          --filter='!@silklang/compiler'
+          --filter='!@silklang/lsp'
+          --filter='!@silklang/cli'
       - run: pnpm test:scripts
       - run: pnpm release:candidate
+
+  package-tests:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    name: Package tests / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: lsp
+            package: '@silklang/lsp'
+            llvm: false
+          - name: cli
+            package: '@silklang/cli'
+            llvm: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}-${{ matrix.name }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
+            turbo-${{ runner.os }}-
+      - uses: actions/cache@v4
+        if: matrix.llvm
+        with:
+          path: ~/.cache/silk-effect/native
+          key: silk-native-${{ runner.os }}-package-${{ matrix.name }}-${{ github.sha }}
+          restore-keys: silk-native-${{ runner.os }}-
+      - uses: ./.github/actions/setup-linux-llvm
+        if: matrix.llvm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/turbo.mjs run test --filter=${{ matrix.package }}
+
+  compiler-documentation:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}-documentation
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
+            turbo-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @silklang/cli... run build
+      # Generation and maintained policy share one project-analysis pass.
+      - run: pnpm --filter @silklang/compiler run documentation:check
+      - run: pnpm --filter @silklang/compiler run documentation:examples
 
   # Pull requests run a representative compile/link/execute smoke set. Main keeps the complete
   # corpus, split by SILK_NATIVE_SHARD because every case lives in one Vitest file.

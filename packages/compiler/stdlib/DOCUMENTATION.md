@@ -14,10 +14,9 @@ editor hovers, policy validation, and doctests. Do not edit generated standard-l
 After a source comment changes, run:
 
 ```bash
-pnpm --filter @silklang/compiler documentation:policy
-pnpm --filter @silklang/compiler documentation:examples
 pnpm --filter @silklang/compiler documentation:generate
 pnpm --filter @silklang/compiler documentation:check
+pnpm --filter @silklang/compiler documentation:examples
 ```
 
 The full repository gate also runs these checks through `pnpm check`.
@@ -43,6 +42,6 @@ A standard-library documentation change is complete when:
 - each changed claim agrees with implementation and tests;
 - each required summary is locally owned by its declaration;
 - each symbol link resolves;
-- each example passes policy and doctest validation;
+- each example passes the generated-reference policy and doctest validation;
 - generated pages contain the intended heading structure; and
 - the full repository checks pass.

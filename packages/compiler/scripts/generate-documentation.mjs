@@ -12,6 +12,7 @@ import * as Console from 'effect/Console'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import { format } from 'oxfmt'
+import * as DocumentationPolicy from '../../docgen/dist/Policy.js'
 import * as DocumentationProject from '../../docgen/dist/Project.js'
 import * as DocumentationReference from '../../docgen/dist/Reference.js'
 import * as ProjectAnalysis from '../dist/ProjectAnalysis.js'
@@ -21,6 +22,7 @@ import * as Stdlib from '../dist/Stdlib.js'
 import { documentationProfiles } from './documentation-profiles.mjs'
 
 const logError = (...values) => Effect.runSync(Console.error(...values))
+const log = (...values) => Effect.runSync(Console.log(...values))
 
 const documentationRoot = fileURLToPath(
   new URL('../../../apps/docs/content/language/', import.meta.url),
@@ -35,6 +37,13 @@ const formatterConfig = JSON.parse(
 
 class DocumentationFormatError extends Data.TaggedError('DocumentationFormatError') {}
 
+const lineAt = (bytes, offset) => {
+  const limit = Math.max(0, Math.min(offset, bytes.length))
+  let line = 1
+  for (let index = 0; index < limit; index += 1) if (bytes[index] === 0x0a) line += 1
+  return line
+}
+
 const formatMarkdown = Effect.fnUntraced(
   function* (/** @type {string} */ path, /** @type {string} */ contents) {
     const result = yield* Effect.tryPromise({
@@ -48,7 +57,7 @@ const formatMarkdown = Effect.fnUntraced(
 )
 
 const stdlibTree = async () => {
-  const roots = []
+  const analyzed = []
   for (const module of Stdlib.manifest) {
     // Read the canonical source rather than the compiler's generated source map. Documentation is
     // commonly regenerated immediately after editing a .silk file, before compiler dist has been
@@ -56,20 +65,57 @@ const stdlibTree = async () => {
     const bytes = Uint8Array.from(
       readFileSync(new URL(`../stdlib/${module.path}`, import.meta.url)),
     )
-    roots.push(SourceFile.make(module.module, bytes))
+    analyzed.push({ manifest: module, bytes, root: SourceFile.make(module.module, bytes) })
   }
   const projects = []
+  const seen = new Set()
+  const violations = new Map()
   for (const selected of documentationProfiles) {
     const analysis = await Effect.runPromise(
-      ProjectAnalysis.make(roots, { configuration: { profile: selected.profile } }).pipe(
-        Effect.provide(SourceResolver.empty),
-      ),
+      ProjectAnalysis.make(
+        analyzed.map((entry) => entry.root),
+        { configuration: { profile: selected.profile } },
+      ).pipe(Effect.provide(SourceResolver.empty)),
     )
+    const project = DocumentationProject.fromProjectAnalysis(analysis)
     projects.push({
       name: selected.name,
-      project: DocumentationProject.fromProjectAnalysis(analysis),
+      project,
     })
+    for (const entry of analyzed) {
+      const documented = project.modules.find((module) => module.name === entry.manifest.module)
+      const snapshot = ProjectAnalysis.view(analysis, entry.manifest.module)
+      if (documented === undefined || snapshot === undefined) {
+        logError(`Missing documentation model: ${entry.manifest.module}`)
+        process.exit(1)
+      }
+      if (documented.documentation === undefined && documented.items.length === 0) continue
+      seen.add(entry.manifest.module)
+      for (const violation of DocumentationPolicy.check(documented, snapshot, project)) {
+        const key = `${violation.code}:${violation.identity}:${violation.source.start}`
+        violations.set(key, {
+          violation,
+          path: entry.manifest.path,
+          line: lineAt(entry.bytes, violation.source.start),
+        })
+      }
+    }
   }
+  for (const entry of analyzed) {
+    if (!seen.has(entry.manifest.module)) {
+      logError(`No admitted documentation profile exposes ${entry.manifest.module}`)
+      process.exit(1)
+    }
+  }
+  for (const { violation, path, line } of violations.values()) {
+    logError(`${path}:${line}: [${violation.code}] ${violation.identity}: ${violation.message}`)
+  }
+  log(
+    violations.size === 0
+      ? `Stdlib documentation policy: ${analyzed.length} modules checked, no violations.`
+      : `Stdlib documentation policy: ${analyzed.length} modules checked, ${violations.size} violations.`,
+  )
+  if (violations.size > 0) process.exit(1)
   const rendered = DocumentationReference.makeProfiles(Stdlib.manifest, projects)
   if (rendered._tag === 'Failure') {
     for (const error of rendered.errors) logError('Stdlib reference generation failed:', error)
