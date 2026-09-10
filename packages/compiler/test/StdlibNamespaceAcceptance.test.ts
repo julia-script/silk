@@ -85,9 +85,10 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('consumes a SHA state when finish finalizes it', () =>
+it.effect('consumes SHA and HMAC states when finish finalizes them', () =>
   Effect.gen(function* () {
     const source = `import silk.sha2 { Sha256 }
+import silk.hmac { HmacSha256, HmacSha384 }
 pub fn main() -> i32 {
   let empty: [u8; 0] = []
   let mut state = Sha256.make()
@@ -95,6 +96,15 @@ pub fn main() -> i32 {
   let digest = state.finish()
   state.update(&empty)
   drop digest
+  let mut hmac256 = HmacSha256.make(&empty)
+  let tag256 = hmac256.finish()
+  hmac256.update(&empty)
+  drop tag256
+  let hmac384 = HmacSha384.make(&empty)
+  let tag384 = hmac384.finish()
+  let again = hmac384.finish()
+  drop tag384
+  drop again
   return 42
 }`
     const snapshot = yield* AnalysisFixture.retainingMain(
@@ -103,7 +113,13 @@ pub fn main() -> i32 {
     )
     assert.deepEqual(
       Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-      ['OWN0001'],
+      ['OWN0001', 'OWN0001', 'OWN0001'],
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) =>
+        source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      ),
+      ['state', 'hmac256', 'hmac384'],
     )
   }),
 )

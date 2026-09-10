@@ -1,0 +1,389 @@
+//! Portable HMAC authentication with SHA-256 and SHA-384.
+//!
+//! # When to use
+//! Use [`HmacSha256`] or [`HmacSha384`] when a protocol requires a keyed authentication tag.
+//! Use `silk.hkdf` to derive keys from secret input material.
+//!
+//! # Details
+//! Each actor supports `make`, incremental `update`, consuming `finish`, and one-shot
+//! `authenticate`. Inputs are borrowed. States use fixed storage and allocate no memory.
+//!
+//! # Gotchas
+//! These actors compute tags but do not verify them or provide constant-time comparison.
+//! Secret state is not guaranteed to be erased. The SHA input limit includes the initial key pad.
+
+import silk.sha2 {Sha256, Sha384}
+import silk.u8 as u8
+import silk.usize as usize
+
+/// An incremental HMAC-SHA-256 state that returns a 32-byte authentication tag.
+///
+/// # Details
+///
+/// The state owns fixed storage. `finish` consumes the state. Secret state is not guaranteed to be erased.
+pub struct HmacSha256 {
+  inner: Sha256
+  outer: Sha256
+}
+
+impl HmacSha256 {
+  /// Creates an HMAC-SHA-256 state from a borrowed key. An empty key is valid.
+  ///
+  /// # Details
+  ///
+  /// Keys longer than 64 bytes are hashed before use. The state does not retain the input borrow.
+  ///
+  /// # Gotchas
+  ///
+  /// If the key exceeds the SHA-256 64-bit bit-length domain, the program traps.
+  pub fn make(key: &[u8]) -> HmacSha256 {
+    let mut pad: [u8; 64] = [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ]
+    let mut index = usize.ZERO
+    if key.length > 64 {
+      let digest = Sha256.hash(key)
+      while index < 32 {
+        pad[index] = digest[index]
+        index = index + usize.ONE
+      }
+    } else {
+      while index < key.length {
+        pad[index] = key[index]
+        index = index + usize.ONE
+      }
+    }
+    index = usize.ZERO
+    while index < 64 {
+      pad[index] = u8.bitXor(pad[index], 0x36)
+      index = index + usize.ONE
+    }
+    let mut inner = Sha256.make()
+    inner.update(&pad)
+    index = usize.ZERO
+    while index < 64 {
+      // Replace the inner pad with the outer pad: 0x36 XOR 0x5C = 0x6A.
+      pad[index] = u8.bitXor(pad[index], 0x6A)
+      index = index + usize.ONE
+    }
+    let mut outer = Sha256.make()
+    outer.update(&pad)
+    return HmacSha256 {inner: move inner, outer: move outer}
+  }
+  /// Adds borrowed bytes to the HMAC-SHA-256 message in order. An empty update has no effect.
+  ///
+  /// # Details
+  ///
+  /// Any segmentation of the same message produces the same tag.
+  ///
+  /// # Gotchas
+  ///
+  /// If the message plus the 64-byte key pad exceeds the 64-bit bit-length domain, the program traps.
+  pub fn update(self: &mut Self, bytes: &[u8]) -> () {
+    return Sha256.update(&mut self.inner, bytes)
+  }
+  /// Consumes the HMAC-SHA-256 state and returns its complete 32-byte authentication tag.
+  pub fn finish(self: Self) -> [u8; 32] {
+    let inner = move self.inner
+    let mut outer = move self.outer
+    let digest = inner.finish()
+    outer.update(&digest)
+    return outer.finish()
+  }
+  /// Returns the complete 32-byte HMAC-SHA-256 tag for a borrowed key and message.
+  ///
+  /// # Details
+  ///
+  /// Empty keys and messages are valid. This operation computes a tag; it does not verify a received tag.
+  ///
+  /// # Gotchas
+  ///
+  /// If the key exceeds the 64-bit bit-length domain, the program traps.
+  /// If the message plus the 64-byte key pad exceeds that domain, the program traps.
+  pub fn authenticate(key: &[u8], message: &[u8]) -> [u8; 32] {
+    let mut state = HmacSha256.make(key)
+    state.update(message)
+    return state.finish()
+  }
+}
+
+/// An incremental HMAC-SHA-384 state that returns a 48-byte authentication tag.
+///
+/// # Details
+///
+/// The state owns fixed storage. `finish` consumes the state. Secret state is not guaranteed to be erased.
+pub struct HmacSha384 {
+  inner: Sha384
+  outer: Sha384
+}
+
+impl HmacSha384 {
+  /// Creates an HMAC-SHA-384 state from a borrowed key. An empty key is valid.
+  ///
+  /// # Details
+  ///
+  /// Keys longer than 128 bytes are hashed before use. The state does not retain the input borrow.
+  ///
+  /// # Gotchas
+  ///
+  /// If the key exceeds the SHA-384 128-bit bit-length domain, the program traps.
+  pub fn make(key: &[u8]) -> HmacSha384 {
+    let mut pad: [u8; 128] = [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ]
+    let mut index = usize.ZERO
+    if key.length > 128 {
+      let digest = Sha384.hash(key)
+      while index < 48 {
+        pad[index] = digest[index]
+        index = index + usize.ONE
+      }
+    } else {
+      while index < key.length {
+        pad[index] = key[index]
+        index = index + usize.ONE
+      }
+    }
+    index = usize.ZERO
+    while index < 128 {
+      pad[index] = u8.bitXor(pad[index], 0x36)
+      index = index + usize.ONE
+    }
+    let mut inner = Sha384.make()
+    inner.update(&pad)
+    index = usize.ZERO
+    while index < 128 {
+      // Replace the inner pad with the outer pad: 0x36 XOR 0x5C = 0x6A.
+      pad[index] = u8.bitXor(pad[index], 0x6A)
+      index = index + usize.ONE
+    }
+    let mut outer = Sha384.make()
+    outer.update(&pad)
+    return HmacSha384 {inner: move inner, outer: move outer}
+  }
+  /// Adds borrowed bytes to the HMAC-SHA-384 message in order. An empty update has no effect.
+  ///
+  /// # Details
+  ///
+  /// Any segmentation of the same message produces the same tag.
+  ///
+  /// # Gotchas
+  ///
+  /// If the message plus the 128-byte key pad exceeds the 128-bit bit-length domain, the program traps.
+  pub fn update(self: &mut Self, bytes: &[u8]) -> () {
+    return Sha384.update(&mut self.inner, bytes)
+  }
+  /// Consumes the HMAC-SHA-384 state and returns its complete 48-byte authentication tag.
+  pub fn finish(self: Self) -> [u8; 48] {
+    let inner = move self.inner
+    let mut outer = move self.outer
+    let digest = inner.finish()
+    outer.update(&digest)
+    return outer.finish()
+  }
+  /// Returns the complete 48-byte HMAC-SHA-384 tag for a borrowed key and message.
+  ///
+  /// # Details
+  ///
+  /// Empty keys and messages are valid. This operation computes a tag; it does not verify a received tag.
+  ///
+  /// # Gotchas
+  ///
+  /// If the key exceeds the 128-bit bit-length domain, the program traps.
+  /// If the message plus the 128-byte key pad exceeds that domain, the program traps.
+  pub fn authenticate(key: &[u8], message: &[u8]) -> [u8; 48] {
+    let mut state = HmacSha384.make(key)
+    state.update(message)
+    return state.finish()
+  }
+}
