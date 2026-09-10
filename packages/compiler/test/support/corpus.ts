@@ -2064,7 +2064,7 @@ pub fn main() -> i32 { let value = 42 return identity(move value) }`,
   },
   {
     name: 'arithmetic',
-    source: 'import silk.i32n main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }',
+    source: 'import silk.i32\npub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -2156,7 +2156,7 @@ pub fn main() -> i32 {
   },
   {
     name: 'operator-pipeline',
-    source: 'import silk.i32n main() -> i32 { return 2 |> i32.add(40) }',
+    source: 'import silk.i32\npub fn main() -> i32 { return 2 |> i32.add(40) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -2247,17 +2247,17 @@ return (40 + 2) * 1
   },
   {
     name: 'unary-bool-pipeline',
-    source: 'import silk.bool main() -> i32 { if true |> bool.not { return 0 } return 42 }',
+    source: 'import silk.bool\npub fn main() -> i32 { if true |> bool.not { return 0 } return 42 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'signed-truncation',
-    source: 'import silk.i32n main() -> i32 { return i32.add(i32.divide(-7, 2), 45) }',
+    source: 'import silk.i32\npub fn main() -> i32 { return i32.add(i32.divide(-7, 2), 45) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'remainder-sign',
-    source: 'import silk.i32n main() -> i32 { return i32.add(i32.remainder(-7, 2), 43) }',
+    source: 'import silk.i32\npub fn main() -> i32 { return i32.add(i32.remainder(-7, 2), 43) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   // MIN % -1 traps identically everywhere: the quotient overflows even though the mathematical
@@ -2348,12 +2348,13 @@ pub fn main() -> i32 {
   },
   {
     name: 'overflow-trap',
-    source: 'import silk.i32n main() -> i32 { return i32.add(2147483647, 1) }',
+    source: 'import silk.i32\npub fn main() -> i32 { return i32.add(2147483647, 1) }',
     expected: { _tag: 'Trap' },
   },
   {
     name: 'float-to-subword-out-of-range-trap',
-    source: 'import silk.f64t silk.u8\npu.u8() -> i32 { return u8.toI32(f64.toU8(300.0)) }',
+    source:
+      'import silk.f64\nimport silk.u8\npub fn main() -> i32 { return u8.toI32(f64.toU8(300.0)) }',
     expected: { _tag: 'Trap' },
   },
   {
@@ -2363,34 +2364,34 @@ pub fn main() -> i32 {
   },
   {
     name: 'divide-by-zero-trap',
-    source: 'import silk.i32n main() -> i32 { return i32.divide(1, 0) }',
+    source: 'import silk.i32\npub fn main() -> i32 { return i32.divide(1, 0) }',
     expected: { _tag: 'Trap' },
   },
   {
     name: 'minimum-division-trap',
-    source: 'import silk.i32n main() -> i32 { return i32.divide(-2147483648, -1) }',
+    source: 'import silk.i32\npub fn main() -> i32 { return i32.divide(-2147483648, -1) }',
     expected: { _tag: 'Trap' },
   },
   {
     name: 'branch-taken',
-    source: 'import silk.i32n main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
+    source: 'import silk.i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'branch-otherwise',
-    source: 'import silk.i32n main() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }',
+    source: 'import silk.i32\npub fn main() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'branch-else',
     source:
-      'import silk.i32n main() -> i32 { if i32.lessThan(2, 1) { return 1 } else { return 42 } return 0 }',
+      'import silk.i32\npub fn main() -> i32 { if i32.lessThan(2, 1) { return 1 } else { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'bool-not',
     source:
-      'import silk.bool silk.i32\npu.i32 -> i32 { if bool.not(i32.equals(1, 2)) { return 42 } return 0 }',
+      'import silk.bool\nimport silk.i32\npub fn main() -> i32 { if bool.not(i32.equals(1, 2)) { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -2408,7 +2409,7 @@ pub fn main() -> i32 { return check(i32.greaterOrEqual(3, 3)) }`,
   {
     name: 'arm-binding',
     source:
-      'import silk.i32n main() -> i32 { let base = 40 if i32.equals(base, 40) { let bonus = 2 return i32.add(base, bonus) } return 0 }',
+      'import silk.i32\npub fn main() -> i32 { let base = 40 if i32.equals(base, 40) { let bonus = 2 return i32.add(base, bonus) } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
