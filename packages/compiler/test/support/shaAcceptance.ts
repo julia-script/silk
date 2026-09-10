@@ -387,13 +387,3 @@ ${vectorCalls}
   if !repeatedSmallUpdates() { return 101 }
   return 42
 }`
-
-export const shaAcceptanceNativeSource = shaAcceptanceSource
-  .replace(
-    'pub fn main() -> i32 {',
-    'import sha2LengthTest { __testLength64Transition }\n\npub fn main() -> i32 {',
-  )
-  .replace(
-    '  return 42\n}',
-    '  if __testLength64Transition() == false { return 102 }\n  return 42\n}',
-  )

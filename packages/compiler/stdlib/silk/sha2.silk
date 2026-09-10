@@ -229,6 +229,23 @@ struct Length64Transition {
   overflow: bool
 }
 
+fn length64Transition(high: u64, low: u64, byteLength: u64) -> Length64Transition {
+  let highIncrement = u64.shiftRight(byteLength, 61)
+  let lowIncrement = u64.shiftLeft(byteLength, 3)
+  if high > u64.MAX - highIncrement {
+    return Length64Transition {high: u64.MIN, low: u64.MIN, overflow: true}
+  }
+  let mut nextHigh = high + highIncrement
+  let nextLow = u64.wrappingAdd(low, lowIncrement)
+  if nextLow < low {
+    if nextHigh == u64.MAX {
+      return Length64Transition {high: u64.MIN, low: u64.MIN, overflow: true}
+    }
+    nextHigh = nextHigh + 1
+  }
+  return Length64Transition {high: nextHigh, low: nextLow, overflow: false}
+}
+
 fn makeState32(words: [u32; 8]) -> State32 {
   return State32 {words: words, buffer: zeroBlock32(), buffered: usize.ZERO, bitLength: u64.MIN}
 }
@@ -287,23 +304,6 @@ fn update64(state: &mut State64, bytes: &[u8]) -> () {
     }
   }
   return ()
-}
-
-fn length64Transition(high: u64, low: u64, byteLength: u64) -> Length64Transition {
-  let highIncrement = u64.shiftRight(byteLength, 61)
-  let lowIncrement = u64.shiftLeft(byteLength, 3)
-  if high > u64.MAX - highIncrement {
-    return Length64Transition {high: u64.MIN, low: u64.MIN, overflow: true}
-  }
-  let mut nextHigh = high + highIncrement
-  let nextLow = u64.wrappingAdd(low, lowIncrement)
-  if nextLow < low {
-    if nextHigh == u64.MAX {
-      return Length64Transition {high: u64.MIN, low: u64.MIN, overflow: true}
-    }
-    nextHigh = nextHigh + 1
-  }
-  return Length64Transition {high: nextHigh, low: nextLow, overflow: false}
 }
 
 fn finish32(mut state: State32) -> State32 {
