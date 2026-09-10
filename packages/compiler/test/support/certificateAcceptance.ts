@@ -835,7 +835,10 @@ const fixtureTable = cases
       nodes: 65536,
       ...entry.limits,
     }
-    return `Fixture { bytes: ${literal(input(entry.input))}, api: ${entry.api === 'Certificate.decodeDer' ? 0 : entry.api === 'Certificate.decodePem' ? 1 : 2}, success: ${entry.kind === 'Success'}, kind: DecodeClass.${entry.kind === 'Success' ? 'Malformed' : entry.kind}, reason: DecodeReason.${entry.reason}, limits: DecodeLimits { ${Object.entries(
+    let api = 2
+    if (entry.api === 'Certificate.decodeDer') api = 0
+    else if (entry.api === 'Certificate.decodePem') api = 1
+    return `Fixture { bytes: ${literal(input(entry.input))}, api: ${api}, success: ${entry.kind === 'Success'}, kind: DecodeClass.${entry.kind === 'Success' ? 'Malformed' : entry.kind}, reason: DecodeReason.${entry.reason}, limits: DecodeLimits { ${Object.entries(
       limits,
     )
       .map(([key, value]) => `${key}: ${value}`)
