@@ -17,7 +17,7 @@ import {
 } from './ownedAllocatorSuspension.js'
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
-import { shaAcceptanceSource } from './shaAcceptance.js'
+import { shaAcceptanceNativeSource, shaAcceptanceSource } from './shaAcceptance.js'
 import {
   borrowedBox,
   borrowedStream,
@@ -91,6 +91,25 @@ const localSchedulerImplementation = readFileSync(
   new URL('../../stdlib/silk/local_scheduler.silk', import.meta.url),
   'utf8',
 )
+
+const sha2LengthTestImplementation = `${readFileSync(
+  new URL('../../stdlib/silk/sha2.silk', import.meta.url),
+  'utf8',
+)}
+
+pub fn __testLength64Transition() -> bool {
+  let carry = length64Transition(7, u64.MAX - 7, 1)
+  if carry.overflow || carry.high != 8 || carry.low != 0 { return false }
+
+  let highEdge = length64Transition(u64.MAX - 7, 0, u64.MAX)
+  if highEdge.overflow || highEdge.high != u64.MAX || highEdge.low != u64.MAX - 7 {
+    return false
+  }
+
+  let directOverflow = length64Transition(u64.MAX - 6, 0, u64.MAX)
+  let carryOverflow = length64Transition(u64.MAX, u64.MAX - 7, 1)
+  return directOverflow.overflow && carryOverflow.overflow
+}`
 
 /** Canonical-bits transcendental program with independently committed native expectations. */
 export const transcendentalCanonicalBits = `import silk.f32 as f32
@@ -7743,6 +7762,8 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
   {
     name: 'fixed-output-sha',
     source: shaAcceptanceSource,
+    nativeSource: shaAcceptanceNativeSource,
+    nativeImports: { sha2LengthTest: sha2LengthTestImplementation },
     expected: { _tag: 'Completes', result: 42 },
   },
   ...corpus,

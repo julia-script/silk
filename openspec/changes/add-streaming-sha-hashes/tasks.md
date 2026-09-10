@@ -11,7 +11,7 @@
 
 - [x] 2.1 Add one consolidated shared native acceptance case covering all eleven empty and `abc` known-answer vectors, empty updates, repeated small updates, one-shot/segmented equivalence, SHA-1/SHA-2 padding boundaries, and SHA-3 rate boundaries; verify the focused native acceptance command passes.
 - [x] 2.2 Add only non-redundant structured analysis assertions needed to prove inherent method resolution and consuming finalization, and verify those focused compiler tests pass.
-- [x] 2.3 Confirm the implementation adds no compiler-known SHA operation, intrinsic, provider, service, Effect requirement, external crypto import, or heap allocation by reviewing the source/diff and running the relevant native and direct-WebAssembly checks.
+- [x] 2.3 Confirm the implementation adds no compiler-known SHA operation, intrinsic, provider, service, Effect requirement, external crypto import, or heap allocation by reviewing the source/diff, running native behavior checks, and running direct-WebAssembly analysis/codegen checks.
 
 ## 3. Public Documentation
 

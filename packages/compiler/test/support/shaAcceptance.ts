@@ -355,15 +355,30 @@ fn streaming() -> bool {
 fn repeatedSmallUpdates() -> bool {
   let a: [u8; 1] = [97]
   let expectedInput: [u8; 200] = ${silkArray(inputBytes(200))}
-  let expected = Sha256.hash(&expectedInput)
-  let mut state = Sha256.make()
+  let expectedSha1 = Sha1.hash(&expectedInput)
+  let expectedSha256 = Sha256.hash(&expectedInput)
+  let expectedSha512 = Sha512.hash(&expectedInput)
+  let expectedSha3 = Sha3_256.hash(&expectedInput)
+  let mut sha1 = Sha1.make()
+  let mut sha256 = Sha256.make()
+  let mut sha512 = Sha512.make()
+  let mut sha3 = Sha3_256.make()
   let mut index: usize = 0
   while index < 200 {
-    state.update(&a)
+    sha1.update(&a)
+    sha256.update(&a)
+    sha512.update(&a)
+    sha3.update(&a)
     index = index + 1
   }
-  let actual = state.finish()
-  return equalBytes(&actual, &expected)
+  let actualSha1 = sha1.finish()
+  let actualSha256 = sha256.finish()
+  let actualSha512 = sha512.finish()
+  let actualSha3 = sha3.finish()
+  return equalBytes(&actualSha1, &expectedSha1)
+    && equalBytes(&actualSha256, &expectedSha256)
+    && equalBytes(&actualSha512, &expectedSha512)
+    && equalBytes(&actualSha3, &expectedSha3)
 }
 
 pub fn main() -> i32 {
@@ -372,3 +387,13 @@ ${vectorCalls}
   if !repeatedSmallUpdates() { return 101 }
   return 42
 }`
+
+export const shaAcceptanceNativeSource = shaAcceptanceSource
+  .replace(
+    'pub fn main() -> i32 {',
+    'import sha2LengthTest { __testLength64Transition }\n\npub fn main() -> i32 {',
+  )
+  .replace(
+    '  return 42\n}',
+    '  if __testLength64Transition() == false { return 102 }\n  return 42\n}',
+  )

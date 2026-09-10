@@ -223,6 +223,12 @@ struct State64 {
   bitLengthLow: u64
 }
 
+struct Length64Transition {
+  high: u64
+  low: u64
+  overflow: bool
+}
+
 fn makeState32(words: [u32; 8]) -> State32 {
   return State32 {words: words, buffer: zeroBlock32(), buffered: usize.ZERO, bitLength: u64.MIN}
 }
@@ -263,21 +269,12 @@ fn update32(state: &mut State32, bytes: &[u8]) -> () {
 
 fn update64(state: &mut State64, bytes: &[u8]) -> () {
   let byteLength = usize.toU64(bytes.length)
-  let highIncrement = u64.shiftRight(byteLength, 61)
-  let lowIncrement = u64.shiftLeft(byteLength, 3)
-  if state.bitLengthHigh > u64.MAX - highIncrement {
+  let transition = length64Transition(state.bitLengthHigh, state.bitLengthLow, byteLength)
+  if transition.overflow {
     let overlong = 1 / 0
   }
-  let mut nextHigh = state.bitLengthHigh + highIncrement
-  let nextLow = u64.wrappingAdd(state.bitLengthLow, lowIncrement)
-  if nextLow < state.bitLengthLow {
-    if nextHigh == u64.MAX {
-      let overlong = 1 / 0
-    }
-    nextHigh = nextHigh + 1
-  }
-  state.bitLengthHigh = nextHigh
-  state.bitLengthLow = nextLow
+  state.bitLengthHigh = transition.high
+  state.bitLengthLow = transition.low
 
   let mut index = usize.ZERO
   while index < bytes.length {
@@ -290,6 +287,23 @@ fn update64(state: &mut State64, bytes: &[u8]) -> () {
     }
   }
   return ()
+}
+
+fn length64Transition(high: u64, low: u64, byteLength: u64) -> Length64Transition {
+  let highIncrement = u64.shiftRight(byteLength, 61)
+  let lowIncrement = u64.shiftLeft(byteLength, 3)
+  if high > u64.MAX - highIncrement {
+    return Length64Transition {high: u64.MIN, low: u64.MIN, overflow: true}
+  }
+  let mut nextHigh = high + highIncrement
+  let nextLow = u64.wrappingAdd(low, lowIncrement)
+  if nextLow < low {
+    if nextHigh == u64.MAX {
+      return Length64Transition {high: u64.MIN, low: u64.MIN, overflow: true}
+    }
+    nextHigh = nextHigh + 1
+  }
+  return Length64Transition {high: nextHigh, low: nextLow, overflow: false}
 }
 
 fn finish32(mut state: State32) -> State32 {

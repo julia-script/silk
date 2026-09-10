@@ -114,8 +114,8 @@ runtime claims.
 - **[Byte-wise updates may be slower than bulk block processing]** → Treat this release as the
   portable correctness baseline and optimize only behind the unchanged API after measurement.
 - **[Two-word SHA-512 length arithmetic is easy to get subtly wrong]** → Isolate the transition,
-  check both carry sites, expose no unchecked path, and add a focused structural test of the carry
-  calculation in addition to digest vectors where feasible.
+  check both carry sites, expose no unchecked path, and exercise normal carry plus both overflow
+  paths through a same-module test hook in addition to digest vectors.
 - **[Generated artifacts can drift from canonical source]** → Use the existing generators and run
   normal documentation, manifest-integrity, package, and release-candidate checks.
 - **[SHA-1 availability may encourage new insecure use]** → Put the legacy warning on the module,

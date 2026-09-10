@@ -88,10 +88,10 @@ requirement, operating-system API, native crypto library, or target-specific imp
 - **WHEN** tooling resolves a SHA constructor, update, finish, or one-shot hash operation
 - **THEN** go-to-definition opens its canonical `.silk` declaration and ordinary Silk implementation
 
-#### Scenario: Run one program on portable targets
+#### Scenario: Compile one program for portable targets
 
-- **WHEN** the same SHA program is compiled for LLVM-generated native and direct WebAssembly targets
-- **THEN** both artifacts compute byte-identical standardized digests without an external crypto import
+- **WHEN** the same SHA program is analyzed and emitted for LLVM-generated native and direct WebAssembly targets
+- **THEN** both targets use the same ordinary Silk implementation and the direct-WebAssembly artifact has no external crypto import
 
 ### Requirement: Validation covers every actor and incremental boundary class
 
