@@ -1,0 +1,304 @@
+//! Owned RFC 3986 URIs and strict relative-reference resolution.
+//!
+//! # When to use
+//!
+//! Use [`parse`] when a scheme is required. Use `silk.uri_reference` for references without a scheme.
+//! Use [`resolve`] to apply a reference to a parsed base URI.
+//!
+//! # Details
+//!
+//! [`Uri`] accepts the RFC `URI` production, including fragments. It does not restrict input to `absolute-URI`.
+//! Parsing and formatting preserve all component bytes. Resolution removes only literal path dot segments.
+//! These operations do not apply network, scheme, or normalization policy.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.option {Option}
+import silk.result {Result}
+import silk.string {String}
+import silk.uri_reference {UriReference, ParseError, ParseReason, Component, HostKind}
+import silk.usize as usize
+import silk.u8 as u8
+import silk.vector {Vector, appendBytes}
+
+/// An owned RFC 3986 URI with a required scheme and an optional fragment.
+///
+/// # Details
+///
+/// The value owns its original text. Component views borrow from this value and do not allocate.
+pub struct Uri {
+  reference: UriReference
+}
+
+impl Uri {
+  /// Validates a URI and copies its original text into owned storage.
+  ///
+  /// # Details
+  ///
+  /// A missing scheme returns `MissingScheme` at byte zero. Other syntax failures identify the invalid component and byte.
+  /// Invalid input does not allocate an owned result. Allocation failure uses the separate Effect failure channel.
+  pub effect fn parse(text: string) -> Result<Uri, ParseError> ! OutOfMemoryError ? &mut Allocator {
+    if hasScheme(text) == false {
+      return Result.failResult<Uri, ParseError>(
+        ParseError {
+          reason: ParseReason.MissingScheme,
+          component: Component.Scheme,
+          offset: usize.ZERO,
+        },
+      )
+    }
+    let parsed = run UriReference.parse(text)
+    return match move parsed {
+      Result<UriReference, ParseError>.Success {value} => Result.succeed<Uri, ParseError>(
+        Uri {reference: move value},
+      )
+      Result<UriReference, ParseError>.Failure {error} => Result.failResult<Uri, ParseError>(
+        move error,
+      )
+    }
+  }
+  /// Borrows the original URI text with all delimiters and escape spelling unchanged.
+  pub fn format(self: &Uri) -> string {
+    return UriReference.format(&self.reference)
+  }
+  /// Borrows the required scheme without its colon and preserves its letter case.
+  pub fn scheme(self: &Uri) -> string {
+    return Option.unwrapOr<string>(UriReference.scheme(&self.reference), "")
+  }
+  /// Borrows the authority without `//`, or returns `None` when absent. An empty authority remains present.
+  pub fn authority(self: &Uri) -> Option<string> {
+    return UriReference.authority(&self.reference)
+  }
+  /// Borrows userinfo without `@`, or returns `None` when absent. An empty userinfo remains present.
+  pub fn userinfo(self: &Uri) -> Option<string> {
+    return UriReference.userinfo(&self.reference)
+  }
+  /// Borrows the host, including IP-literal brackets, or returns `None` without authority. An empty host remains present.
+  pub fn host(self: &Uri) -> Option<string> {
+    return UriReference.host(&self.reference)
+  }
+  /// Returns the parsed host classification, or `None` when authority is absent.
+  pub fn hostKind(self: &Uri) -> Option<HostKind> {
+    return UriReference.hostKind(&self.reference)
+  }
+  /// Borrows the port digits without the colon, or returns `None` when absent. An empty port remains present.
+  pub fn port(self: &Uri) -> Option<string> {
+    return UriReference.port(&self.reference)
+  }
+  /// Borrows the path with its escape spelling unchanged. The path can be empty.
+  pub fn path(self: &Uri) -> string {
+    return UriReference.path(&self.reference)
+  }
+  /// Borrows the query without `?`, or returns `None` when absent. An empty query remains present.
+  pub fn query(self: &Uri) -> Option<string> {
+    return UriReference.query(&self.reference)
+  }
+  /// Borrows the fragment without `#`, or returns `None` when absent. An empty fragment remains present.
+  pub fn fragment(self: &Uri) -> Option<string> {
+    return UriReference.fragment(&self.reference)
+  }
+  /// Resolves a reference against a scheme-bearing base with the strict RFC 3986 section 5.2 algorithm.
+  ///
+  /// # Details
+  ///
+  /// The result owns its text. Copied components retain their spelling, including percent escape case.
+  /// Only literal path dot segments are removed. Query and fragment text are not processed as paths.
+  /// A reference with a scheme replaces the base even when both schemes match.
+  /// Allocation failure uses the Effect failure channel. The result is validated through [`parse`].
+  ///
+  /// # Gotchas
+  ///
+  /// Dot removal can expose a leading `//` in a path without authority. RFC recomposition then gives
+  /// those bytes authority syntax. Revalidation can return a syntax error even when both inputs are valid.
+  pub effect fn resolve(base: &Uri, reference: &UriReference) -> Result<Uri, ParseError>
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let mut output = String.make()
+    let referenceScheme = UriReference.scheme(reference)
+    let ownScheme = isPresent<string>(UriReference.scheme(reference))
+    let selectedScheme = Option.unwrapOr<string>(move referenceScheme, Uri.scheme(base))
+    let wroteScheme = run String.append(&mut output, selectedScheme)
+    let wroteColon = run String.append(&mut output, ":")
+    let referenceAuthority = UriReference.authority(reference)
+    let ownAuthority = isPresent<string>(UriReference.authority(reference))
+    let mut selectedAuthority = Uri.authority(base)
+    if ownScheme {
+      selectedAuthority = move referenceAuthority
+    } else {
+      if ownAuthority {
+        selectedAuthority = move referenceAuthority
+      }
+    }
+    let wroteAuthority = run appendOptional(&mut output, move selectedAuthority, "//")
+    let referencePath = UriReference.path(reference)
+    let mut selectedQuery = UriReference.query(reference)
+    if ownScheme || ownAuthority {
+      let normalized = run removeDots(referencePath)
+      let wrotePath = run String.append(&mut output, String.view(&normalized))
+    } else {
+      if String.byteLength(referencePath) == usize.ZERO {
+        let wrotePath = run String.append(&mut output, Uri.path(base))
+        if isPresent<string>(UriReference.query(reference)) == false {
+          selectedQuery = Uri.query(base)
+        }
+      } else {
+        let bytes = String.utf8Bytes(referencePath)
+        if bytes[usize.ZERO] == u8.toU8(47) {
+          let normalized = run removeDots(referencePath)
+          let wrotePath = run String.append(&mut output, String.view(&normalized))
+        } else {
+          let merged = run merge(base, referencePath)
+          let normalized = run removeDots(String.view(&merged))
+          let wrotePath = run String.append(&mut output, String.view(&normalized))
+        }
+      }
+    }
+    let wroteQuery = run appendOptional(&mut output, move selectedQuery, "?")
+    let wroteFragment = run appendOptional(&mut output, UriReference.fragment(reference), "#")
+    return run Uri.parse(String.view(&output))
+  }
+}
+
+fn hasScheme(text: string) -> bool {
+  let bytes = String.utf8Bytes(text)
+  let mut index = usize.ZERO
+  while index < bytes.length {
+    let value = bytes[index]
+    if value == u8.toU8(58) {
+      return true
+    }
+    if value == u8.toU8(47) || value == u8.toU8(63) || value == u8.toU8(35) {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return false
+}
+
+fn isPresent<T>(value: Option<T>) -> bool {
+  return match move value {
+    Option<T>.Some {value: text} => true
+    Option<T>.None => false
+  }
+}
+
+effect fn appendOptional(output: &mut String, value: Option<string>, delimiter: string) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  match move value {
+    Option<string>.Some {value: text} => {
+      let wroteDelimiter = run String.append(&mut output, delimiter)
+      let wroteValue = run String.append(&mut output, text)
+    }
+    Option<string>.None => {}
+  }
+  return ()
+}
+
+effect fn merge(base: &Uri, referencePath: string) -> String ! OutOfMemoryError ? &mut Allocator {
+  let basePath = Uri.path(base)
+  let bytes = String.utf8Bytes(basePath)
+  let mut output = Vector.make<u8>()
+  let baseAuthority = Uri.authority(base)
+  if isPresent<string>(move baseAuthority) && bytes.length == usize.ZERO {
+    let wroteSlash = run Vector.append<u8>(&mut output, u8.toU8(47))
+  } else {
+    let mut end = usize.ZERO
+    let mut index = usize.ZERO
+    while index < bytes.length {
+      if bytes[index] == u8.toU8(47) {
+        end = index + usize.ONE
+      }
+      index = index + usize.ONE
+    }
+    let wrotePrefix = run appendRange(&mut output, basePath, usize.ZERO, end)
+  }
+  let wroteReference = run appendBytes(&mut output, String.utf8Bytes(referencePath))
+  // Every byte comes from validated ASCII URI paths.
+  let text = unsafe String.fromUtf8Unchecked(Vector.asSlice<u8>(&output))
+  return run String.copy(text)
+}
+
+fn startsAt(text: string, index: usize, prefix: string) -> bool {
+  let bytes = String.utf8Bytes(text)
+  let expected = String.utf8Bytes(prefix)
+  if bytes.length - index < expected.length {
+    return false
+  }
+  let mut cursor = usize.ZERO
+  while cursor < expected.length {
+    if bytes[index + cursor] != expected[cursor] {
+      return false
+    }
+    cursor = cursor + usize.ONE
+  }
+  return true
+}
+
+fn removeLast(output: &mut Vector<u8>) -> () {
+  let bytes = Vector.asSlice<u8>(&output)
+  let mut end = bytes.length
+  while usize.ZERO < end {
+    end = end - usize.ONE
+    if bytes[end] == u8.toU8(47) {
+      break
+    }
+  }
+  return Vector.truncate<u8>(&mut output, end)
+}
+
+effect fn appendRange(output: &mut Vector<u8>, text: string, start: usize, end: usize) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let bytes = String.utf8Bytes(text)
+  let mut index = start
+  while index < end {
+    let appended = run Vector.append<u8>(&mut output, bytes[index])
+    index = index + usize.ONE
+  }
+  return ()
+}
+
+// Section 5.2.4 processes only literal ASCII dots; escaped bytes are copied unchanged.
+effect fn removeDots(text: string) -> String ! OutOfMemoryError ? &mut Allocator {
+  let bytes = String.utf8Bytes(text)
+  let mut output = Vector.make<u8>()
+  let mut index = usize.ZERO
+  while index < bytes.length {
+    if startsAt(text, index, "../") {
+      index = index + 3
+    } else if startsAt(text, index, "./") {
+      index = index + 2
+    } else if startsAt(text, index, "/./") {
+      index = index + 2
+    } else if startsAt(text, index, "/.") && bytes.length - index == 2 {
+      let appended = run Vector.append<u8>(&mut output, u8.toU8(47))
+      index = bytes.length
+    } else if startsAt(text, index, "/../") {
+      let removed = removeLast(&mut output)
+      index = index + 3
+    } else if startsAt(text, index, "/..") && bytes.length - index == 3 {
+      let removed = removeLast(&mut output)
+      let appended = run Vector.append<u8>(&mut output, u8.toU8(47))
+      index = bytes.length
+    } else if (startsAt(text, index, ".") && bytes.length - index == usize.ONE) || (startsAt(
+      text,
+      index,
+      "..",
+    ) && bytes.length - index == 2) {
+      index = bytes.length
+    } else {
+      let start = index
+      index = index + usize.ONE
+      while index < bytes.length {
+        if bytes[index] == u8.toU8(47) {
+          break
+        }
+        index = index + usize.ONE
+      }
+      let appended = run appendRange(&mut output, text, start, index)
+    }
+  }
+  // The input is a validated ASCII path, and removal only deletes complete ASCII bytes.
+  let normalized = unsafe String.fromUtf8Unchecked(Vector.asSlice<u8>(&output))
+  return run String.copy(normalized)
+}

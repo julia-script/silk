@@ -1,0 +1,182 @@
+//! Byte percent coding for individual RFC 3986 URI components.
+//!
+//! # When to use
+//! Use `encode` for raw component data and `decode` for escaped component text.
+//! Use `silk.string.String.fromUtf8` separately when decoded bytes must be text.
+//!
+//! # Details
+//! Encoding creates uppercase escapes and treats every input percent sign as data.
+//! Decoding preserves plus signs. Query coding follows generic URI syntax, not HTML form rules.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.result {Result}
+import silk.string {String}
+import silk.u8 as u8
+import silk.usize as usize
+
+/// The grammar context of raw bytes supplied to `encode`.
+pub enum Component {
+  /// User information; an at sign is escaped and a colon is retained.
+  Userinfo,
+  /// A registered host name; authority delimiters are escaped.
+  RegName,
+  /// One path segment; slash is escaped and colon is retained.
+  PathSegment,
+  /// The first relative path segment; slash and colon are escaped.
+  FirstPathSegment,
+  /// A complete generic query; slash and question mark are retained.
+  Query,
+  /// A complete fragment; slash and question mark are retained.
+  Fragment,
+}
+
+/// The position of a malformed percent escape in the supplied text.
+pub struct DecodeError {
+  /// The zero-based byte offset of the percent sign that starts the malformed escape.
+  pub offset: usize
+}
+
+/// The owner of byte percent encoding and decoding operations for URI components.
+pub struct UriPercent {}
+
+impl UriPercent {
+  /// Encodes raw bytes for one URI component into independently owned ASCII text.
+  ///
+  /// # Details
+  ///
+  /// Percent signs are always escaped. New escapes use uppercase hexadecimal digits.
+  /// `FirstPathSegment` prevents a colon from turning relative data into a scheme.
+  /// Allocation uses the supplied allocator and can fail with `OutOfMemoryError`.
+  ///
+  /// # Gotchas
+  ///
+  /// Supply raw data, not an already escaped component. Query and fragment retain their legal delimiters.
+  /// `Query` does not encode separate form keys or values.
+  pub effect fn encode(values: &[u8], component: Component) -> String
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let mut output = String.make()
+    let mut index = usize.ZERO
+    while index < values.length {
+      let value = values[index]
+      if allowed(value, component) {
+        let single = [value]
+        // The allowed set contains only ASCII, so this one-byte view is valid UTF-8.
+        let text = unsafe String.fromUtf8Unchecked(&single)
+        let appended = run String.append(&mut output, text)
+      } else {
+        let escaped = [u8.toU8(37), hex(value / u8.toU8(16)), hex(value % u8.toU8(16))]
+        // Percent and the hexadecimal digits are all ASCII.
+        let text = unsafe String.fromUtf8Unchecked(&escaped)
+        let appended = run String.append(&mut output, text)
+      }
+      index = index + usize.ONE
+    }
+    return move output
+  }
+  /// Decodes percent escapes into owned bytes without text validation or plus substitution.
+  ///
+  /// # Details
+  ///
+  /// A malformed escape returns `DecodeError` before allocation. Other bytes retain their values.
+  /// Allocation failure uses `OutOfMemoryError`; invalid UTF-8 is valid byte output.
+  pub effect fn decode(text: string) -> Result<Bytes, DecodeError>
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let source = String.utf8Bytes(text)
+    let mut index = usize.ZERO
+    let mut length = usize.ZERO
+    while index < source.length {
+      if source[index] == u8.toU8(37) {
+        if source.length - index < 3 {
+          return Result.failResult<Bytes, DecodeError>(DecodeError {offset: index})
+        }
+        if digit(source[index + usize.ONE]) > u8.toU8(15) || digit(source[index + 2]) > u8.toU8(15) {
+          return Result.failResult<Bytes, DecodeError>(DecodeError {offset: index})
+        }
+        index = index + 3
+      } else {
+        index = index + usize.ONE
+      }
+      length = length + usize.ONE
+    }
+    let mut output = run Bytes.zeroed(length)
+    let mut destination = Bytes.asMutSlice(&mut output)
+    index = usize.ZERO
+    let mut written = usize.ZERO
+    while index < source.length {
+      if source[index] == u8.toU8(37) {
+        destination[written] = digit(source[index + usize.ONE]) * u8.toU8(16) + digit(
+          source[index + 2],
+        )
+        index = index + 3
+      } else {
+        destination[written] = source[index]
+        index = index + usize.ONE
+      }
+      written = written + usize.ONE
+    }
+    return Result.succeed<Bytes, DecodeError>(move output)
+  }
+}
+
+fn hex(value: u8) -> u8 {
+  if value < u8.toU8(10) {
+    return value + u8.toU8(48)
+  }
+  return value + u8.toU8(55)
+}
+
+fn digit(value: u8) -> u8 {
+  if value >= u8.toU8(48) && value <= u8.toU8(57) {
+    return value - u8.toU8(48)
+  }
+  if value >= u8.toU8(65) && value <= u8.toU8(70) {
+    return value - u8.toU8(55)
+  }
+  if value >= u8.toU8(97) && value <= u8.toU8(102) {
+    return value - u8.toU8(87)
+  }
+  return u8.toU8(255)
+}
+
+fn allowed(value: u8, component: Component) -> bool {
+  if value >= u8.toU8(65) && value <= u8.toU8(90) {
+    return true
+  }
+  if value >= u8.toU8(97) && value <= u8.toU8(122) {
+    return true
+  }
+  if value >= u8.toU8(48) && value <= u8.toU8(57) {
+    return true
+  }
+  if value == u8.toU8(45) || value == u8.toU8(46) || value == u8.toU8(95) || value == u8.toU8(126) {
+    return true
+  }
+  if value == u8.toU8(33) || value == u8.toU8(36) || value == u8.toU8(38) || value == u8.toU8(39) {
+    return true
+  }
+  if value == u8.toU8(40) || value == u8.toU8(41) || value == u8.toU8(42) || value == u8.toU8(43) {
+    return true
+  }
+  if value == u8.toU8(44) || value == u8.toU8(59) || value == u8.toU8(61) {
+    return true
+  }
+  if component == Component.RegName {
+    return false
+  }
+  if value == u8.toU8(58) {
+    return component != Component.FirstPathSegment
+  }
+  if component == Component.Userinfo {
+    return false
+  }
+  if value == u8.toU8(64) {
+    return true
+  }
+  if component == Component.Query || component == Component.Fragment {
+    return value == u8.toU8(47) || value == u8.toU8(63)
+  }
+  return false
+}

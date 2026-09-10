@@ -507,6 +507,23 @@
     "aliases": ["Decomposition", "PairRecord"]
   },
   {
+    "module": "silk/uri",
+    "path": "silk/uri.silk",
+    "namespace": "Uri"
+  },
+  {
+    "module": "silk/uri_percent",
+    "path": "silk/uri_percent.silk",
+    "namespace": "UriPercent",
+    "aliases": ["Component", "DecodeError"]
+  },
+  {
+    "module": "silk/uri_reference",
+    "path": "silk/uri_reference.silk",
+    "namespace": "UriReference",
+    "aliases": ["HostKind", "Component", "ParseReason", "ParseError"]
+  },
+  {
     "module": "silk/usize",
     "path": "silk/usize.silk",
     "namespace": "usize"
