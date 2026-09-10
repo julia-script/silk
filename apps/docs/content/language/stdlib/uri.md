@@ -4,68 +4,98 @@
 
 Profiles: `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu-no-libc`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu-no-libc`.
 
-Owned RFC 3986 URIs and strict relative-reference resolution.
+Borrowed RFC 3986 URIs, explicit ownership, and reusable relative-reference resolution.
 
 ## When to use
 
-Use [`parse`](#declaration-73696c6b2f7572693a3a5572692e7061727365) when a scheme is required. Use `silk.uri_reference` for references without a scheme.
-Use [`resolve`](#declaration-73696c6b2f7572693a3a5572692e7265736f6c7665) to apply a reference to a parsed base URI.
+Use [`parse`](#declaration-73696c6b2f7572693a3a5572692e7061727365) when a scheme is required. Use `silk.uri_reference` for relative references.
+Use [`resolveInto`](#declaration-73696c6b2f7572693a3a5572692e7265736f6c7665496e746f) to reuse output storage, or [`resolveOwned`](#declaration-73696c6b2f7572693a3a5572692e7265736f6c76654f776e6564) for an independent owner.
 
 ## Details
 
-[`Uri`](#declaration-73696c6b2f7572693a3a557269) accepts the RFC `URI` production, including fragments. It does not restrict input to `absolute-URI`.
-Parsing and formatting preserve all component bytes. Resolution removes only literal path dot segments.
+[`Uri`](#declaration-73696c6b2f7572693a3a557269) accepts the RFC `URI` production, including fragments. Parsing allocates nothing.
+Resolution removes literal path dot segments and preserves copied component spelling.
 These operations do not apply network, scheme, or normalization policy.
 
 Import as `Uri` with `import silk.uri { Uri }`.
 
-Public declarations: 1.
+Public declarations: 2.
 
 <a id="declaration-73696c6b2f7572693a3a557269"></a>
 
 ## `Uri`
 
 ```silk
-pub struct Uri
+pub struct Uri<'text>
 ```
 
-An owned RFC 3986 URI with a required scheme and an optional fragment.
+A parsed URI borrowing input text, with a required scheme and an optional fragment.
 
 ### Details
 
-The value owns its original text. Component views borrow from this value and do not allocate.
+Parsing and component access allocate nothing. The value cannot outlive its input.
 
 <a id="declaration-73696c6b2f7572693a3a5572692e7061727365"></a>
 
 ### Associated function `Uri.parse`
 
 ```silk
-pub effect<'life0> fn parse<'life0>(text: string<'life0>) -> silk/result.Result<silk/uri.Uri, silk/uri_reference.ParseError> ! OutOfMemoryError ? &mut Allocator
+pub fn parse<'text>(text: string<'text>) -> silk/result.Result<silk/uri.Uri<'text>, silk/uri_reference.ParseError>
 ```
 
-Validates a URI and copies its original text into owned storage.
+Validates and borrows a scheme-bearing URI without allocating or normalizing.
 
 #### Details
 
-A missing scheme returns `MissingScheme` at byte zero. Other syntax failures identify the invalid component and byte.
-Invalid input does not allocate an owned result. Allocation failure uses the separate Effect failure channel.
+A missing scheme returns `MissingScheme` at byte zero. Other syntax errors identify their
+component and byte. The returned view retains the input lifetime.
+
+<a id="declaration-73696c6b2f7572693a3a5572692e636f7079"></a>
+
+### Method `Uri.copy`
+
+```silk
+pub effect<'env> fn copy<'text: 'env, 'life1: 'env, 'env>(self: &'life1 Uri<'text>) -> OwnedUri ! OutOfMemoryError ? &mut Allocator
+```
+
+Copies this parsed URI into independently owned storage with one allocation for its text.
+
+<a id="declaration-73696c6b2f7572693a3a5572692e70617273654f776e6564"></a>
+
+### Associated function `Uri.parseOwned`
+
+```silk
+pub effect<'text> fn parseOwned<'text>(text: string<'text>) -> silk/result.Result<silk/uri.OwnedUri, silk/uri_reference.ParseError> ! OutOfMemoryError ? &mut Allocator
+```
+
+Validates input and explicitly copies it into owned storage; invalid input does not allocate.
 
 <a id="declaration-73696c6b2f7572693a3a5572692e666f726d6174"></a>
 
 ### Method `Uri.format`
 
 ```silk
-pub fn format<'life0>(self: &'life0 silk/uri.Uri) -> string<'life0>
+pub fn format<'text, 'life1>(self: &'life1 Uri<'text>) -> string<'text>
 ```
 
-Borrows the original URI text with all delimiters and escape spelling unchanged.
+Borrows the original URI text with delimiters, letter case, and escape spelling unchanged.
+
+<a id="declaration-73696c6b2f7572693a3a5572692e61735265666572656e6365"></a>
+
+### Method `Uri.asReference`
+
+```silk
+pub fn asReference<'text, 'life1>(self: &'life1 Uri<'text>) -> silk/uri_reference.UriReference<'text>
+```
+
+Returns this scheme-bearing URI as a borrowed generic reference without validation or allocation.
 
 <a id="declaration-73696c6b2f7572693a3a5572692e736368656d65"></a>
 
 ### Method `Uri.scheme`
 
 ```silk
-pub fn scheme<'life0>(self: &'life0 silk/uri.Uri) -> string<'life0>
+pub fn scheme<'text, 'life1>(self: &'life1 Uri<'text>) -> string<'text>
 ```
 
 Borrows the required scheme without its colon and preserves its letter case.
@@ -75,7 +105,7 @@ Borrows the required scheme without its colon and preserves its letter case.
 ### Method `Uri.authority`
 
 ```silk
-pub fn authority<'life0>(self: &'life0 silk/uri.Uri) -> silk/option.Option<string<'life0>>
+pub fn authority<'text, 'life1>(self: &'life1 Uri<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows the authority without `//`, or returns `None` when absent. An empty authority remains present.
@@ -85,7 +115,7 @@ Borrows the authority without `//`, or returns `None` when absent. An empty auth
 ### Method `Uri.userinfo`
 
 ```silk
-pub fn userinfo<'life0>(self: &'life0 silk/uri.Uri) -> silk/option.Option<string<'life0>>
+pub fn userinfo<'text, 'life1>(self: &'life1 Uri<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows userinfo without `@`, or returns `None` when absent. An empty userinfo remains present.
@@ -95,7 +125,7 @@ Borrows userinfo without `@`, or returns `None` when absent. An empty userinfo r
 ### Method `Uri.host`
 
 ```silk
-pub fn host<'life0>(self: &'life0 silk/uri.Uri) -> silk/option.Option<string<'life0>>
+pub fn host<'text, 'life1>(self: &'life1 Uri<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows the host, including IP-literal brackets, or returns `None` without authority. An empty host remains present.
@@ -105,7 +135,7 @@ Borrows the host, including IP-literal brackets, or returns `None` without autho
 ### Method `Uri.hostKind`
 
 ```silk
-pub fn hostKind<'life0>(self: &'life0 silk/uri.Uri) -> silk/option.Option<silk/uri_reference.HostKind>
+pub fn hostKind<'text, 'life1>(self: &'life1 Uri<'text>) -> silk/option.Option<silk/uri_reference.HostKind>
 ```
 
 Returns the parsed host classification, or `None` when authority is absent.
@@ -115,7 +145,7 @@ Returns the parsed host classification, or `None` when authority is absent.
 ### Method `Uri.port`
 
 ```silk
-pub fn port<'life0>(self: &'life0 silk/uri.Uri) -> silk/option.Option<string<'life0>>
+pub fn port<'text, 'life1>(self: &'life1 Uri<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows the port digits without the colon, or returns `None` when absent. An empty port remains present.
@@ -125,7 +155,7 @@ Borrows the port digits without the colon, or returns `None` when absent. An emp
 ### Method `Uri.path`
 
 ```silk
-pub fn path<'life0>(self: &'life0 silk/uri.Uri) -> string<'life0>
+pub fn path<'text, 'life1>(self: &'life1 Uri<'text>) -> string<'text>
 ```
 
 Borrows the path with its escape spelling unchanged. The path can be empty.
@@ -135,7 +165,7 @@ Borrows the path with its escape spelling unchanged. The path can be empty.
 ### Method `Uri.query`
 
 ```silk
-pub fn query<'life0>(self: &'life0 silk/uri.Uri) -> silk/option.Option<string<'life0>>
+pub fn query<'text, 'life1>(self: &'life1 Uri<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows the query without `?`, or returns `None` when absent. An empty query remains present.
@@ -145,29 +175,97 @@ Borrows the query without `?`, or returns `None` when absent. An empty query rem
 ### Method `Uri.fragment`
 
 ```silk
-pub fn fragment<'life0>(self: &'life0 silk/uri.Uri) -> silk/option.Option<string<'life0>>
+pub fn fragment<'text, 'life1>(self: &'life1 Uri<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows the fragment without `#`, or returns `None` when absent. An empty fragment remains present.
 
-<a id="declaration-73696c6b2f7572693a3a5572692e7265736f6c7665"></a>
+<a id="declaration-73696c6b2f7572693a3a5572692e7265736f6c7665496e746f"></a>
 
-### Associated function `Uri.resolve`
+### Associated function `Uri.resolveInto`
 
 ```silk
-pub effect<'env> fn resolve<'life0: 'env, 'life1: 'env, 'env>(base: &'life0 silk/uri.Uri, reference: &'life1 silk/uri_reference.UriReference) -> silk/result.Result<silk/uri.Uri, silk/uri_reference.ParseError> ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn resolveInto<'life1: 'env, 'life2: 'env, 'life3: 'env, 'life4: 'env, 'life5: 'env, 'env>(output: &'life1 mut silk/bytes.Bytes, base: &'life2 silk/uri.Uri<'life3>, reference: &'life4 silk/uri_reference.UriReference<'life5>) -> silk/result.Result<(), silk/uri_reference.ParseError> ! OutOfMemoryError ? &mut Allocator
 ```
 
-Resolves a reference against a scheme-bearing base with the strict RFC 3986 section 5.2 algorithm.
+Resolves into reusable byte storage with strict RFC 3986 section 5.2 semantics.
 
 #### Details
 
-The result owns its text. Copied components retain their spelling, including percent escape case.
-Only literal path dot segments are removed. Query and fragment text are not processed as paths.
-A reference with a scheme replaces the base even when both schemes match.
-Allocation failure uses the Effect failure channel. The result is validated through [`parse`](#declaration-73696c6b2f7572693a3a5572692e7061727365).
+Replaces output after reserving sufficient capacity. A single backing buffer holds the selected
+components and the path is compacted directly in it. Existing sufficient capacity allocates
+nothing. Allocation failure leaves the destination unchanged. Success returns unit; parse
+its ASCII byte view with [`parse`](#declaration-73696c6b2f7572693a3a5572692e7061727365) to obtain a borrowed URI without allocating.
 
 #### Gotchas
 
-Dot removal can expose a leading `//` in a path without authority. RFC recomposition then gives
-those bytes authority syntax. Revalidation can return a syntax error even when both inputs are valid.
+Output cannot overlap the borrowed inputs. Dot removal may expose `//` as authority syntax;
+invalid recomposition returns a syntax error and leaves the attempted serialization in output.
+
+<a id="declaration-73696c6b2f7572693a3a5572692e7265736f6c76654f776e6564"></a>
+
+### Associated function `Uri.resolveOwned`
+
+```silk
+pub effect<'env> fn resolveOwned<'life1: 'env, 'life2: 'env, 'life3: 'env, 'life4: 'env, 'env>(base: &'life1 silk/uri.Uri<'life2>, reference: &'life3 silk/uri_reference.UriReference<'life4>) -> silk/result.Result<silk/uri.OwnedUri, silk/uri_reference.ParseError> ! OutOfMemoryError ? &mut Allocator
+```
+
+Resolves with one owned backing allocation and adopts the completed serialization without copying.
+
+#### Details
+
+Reserves a calculated upper bound once. The final allocation may have spare capacity after
+dot removal. Use [`resolveInto`](#declaration-73696c6b2f7572693a3a5572692e7265736f6c7665496e746f) when the caller already has reusable storage.
+Recomposition validation and its syntax-failure behavior are the same as `resolveInto`.
+
+<a id="declaration-73696c6b2f7572693a3a696d706c656d656e746174696f6e3a30"></a>
+
+## Implementation `Copy for silk/uri.Uri<'text>`
+
+```silk
+impl Copy for silk/uri.Uri<'text>
+```
+
+<a id="declaration-73696c6b2f7572693a3a4f776e6564557269"></a>
+
+## `OwnedUri`
+
+```silk
+pub struct OwnedUri
+```
+
+An immutable owned URI whose borrowed views cannot outlive its storage.
+
+<a id="declaration-73696c6b2f7572693a3a4f776e65645572692e66726f6d537472696e67"></a>
+
+### Associated function `OwnedUri.fromString`
+
+```silk
+pub fn fromString(text: String) -> silk/result.Result<silk/uri.OwnedUri, silk/uri_reference.ParseError>
+```
+
+Validates and adopts existing owned text without allocation or copying.
+
+#### Gotchas
+
+Consumes the supplied String on success and failure. A scheme is required.
+
+<a id="declaration-73696c6b2f7572693a3a4f776e65645572692e76696577"></a>
+
+### Method `OwnedUri.view`
+
+```silk
+pub fn view<'life0>(self: &'life0 OwnedUri) -> silk/uri.Uri<'life0>
+```
+
+Borrows a parsed URI directly from the stored ranges without reparsing or allocating.
+
+<a id="declaration-73696c6b2f7572693a3a4f776e65645572692e696e746f537472696e67"></a>
+
+### Method `OwnedUri.intoString`
+
+```silk
+pub fn intoString(self: OwnedUri) -> String
+```
+
+Transfers the owned serialization out of this URI without copying or allocating.

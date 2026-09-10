@@ -398,6 +398,19 @@ export type Operation =
       readonly provenance: Provenance
     }
   | {
+      /** Bounds-checked shared subrange retaining the source slice's backing storage. */
+      readonly _tag: 'SliceView'
+      readonly destination: LocalId
+      readonly slice: LocalId
+      readonly offset: LocalId
+      readonly length: LocalId
+      readonly element: DeclarationFacts.SemanticType
+      readonly stride: number
+      readonly heldLoans: ReadonlyArray<Hir.BorrowId>
+      readonly type: Extract<Type, { readonly _tag: 'Slice' }>
+      readonly provenance: Provenance
+    }
+  | {
       readonly _tag: 'StringUtf8Bytes'
       readonly destination: LocalId
       readonly string: LocalId

@@ -14,7 +14,8 @@ Use [`Bytes`](./bytes.md#declaration-73696c6b2f62797465733a3a4279746573) when ar
 ## Details
 
 [`fromUtf8`](#declaration-73696c6b2f737472696e673a3a537472696e672e66726f6d55746638) validates and borrows existing bytes without allocating; [`copyUtf8`](#declaration-73696c6b2f737472696e673a3a537472696e672e636f707955746638) validates and
-owns a copy. [`append`](#declaration-73696c6b2f737472696e673a3a537472696e672e617070656e64) and [`appendOwned`](#declaration-73696c6b2f737472696e673a3a537472696e672e617070656e644f776e6564) leave the original value unchanged if growth cannot
+owns a copy. [`fromBytes`](#declaration-73696c6b2f737472696e673a3a537472696e672e66726f6d4279746573) adopts owned bytes without copying; [`intoBytes`](#declaration-73696c6b2f737472696e673a3a537472696e672e696e746f4279746573) transfers them back.
+[`append`](#declaration-73696c6b2f737472696e673a3a537472696e672e617070656e64) and [`appendOwned`](#declaration-73696c6b2f737472696e673a3a537472696e672e617070656e644f776e6564) leave the original value unchanged if growth cannot
 allocate. Scalar cursors expose Unicode scalar values and byte offsets, not grapheme clusters.
 
 ## Gotchas
@@ -149,6 +150,60 @@ pub fn make() -> String
 ```
 
 Constructs an empty owned String without allocating.
+
+<a id="declaration-73696c6b2f737472696e673a3a537472696e672e66726f6d4279746573"></a>
+
+### Associated function `String.fromBytes`
+
+```silk
+pub fn fromBytes(values: Bytes) -> silk/result.Result<silk/string.String, silk/string.InvalidUtf8>
+```
+
+Validates owned bytes and transfers their storage into a String without allocation or copying.
+
+#### When to use
+
+Use when a byte buffer must become owned text. Use [`fromUtf8`](#declaration-73696c6b2f737472696e673a3a537472696e672e66726f6d55746638) to borrow bytes without consuming them.
+
+#### Details
+
+This function consumes `values`. Invalid UTF-8 returns the first invalid byte offset and releases
+the input storage. Success preserves the input allocation and its capacity.
+
+<a id="declaration-73696c6b2f737472696e673a3a537472696e672e66726f6d4279746573556e636865636b6564"></a>
+
+### Associated function `String.fromBytesUnchecked`
+
+```silk
+pub unsafe fn fromBytesUnchecked(values: Bytes) -> String
+```
+
+Transfers caller-validated UTF-8 storage into a String without validation, allocation, or copying.
+
+#### When to use
+
+Use when an earlier operation proves that every initialized byte forms valid UTF-8.
+Use [`fromBytes`](#declaration-73696c6b2f737472696e673a3a537472696e672e66726f6d4279746573) when that guarantee is not available.
+
+#### Gotchas
+
+The complete initialized contents of `values` must be valid UTF-8. Invalid bytes violate the safety contract.
+This function consumes `values` and preserves its allocation and capacity.
+
+<a id="declaration-73696c6b2f737472696e673a3a537472696e672e696e746f4279746573"></a>
+
+### Method `String.intoBytes`
+
+```silk
+pub fn intoBytes(self: String) -> Bytes
+```
+
+Consumes the String and returns its bytes without allocation or copying.
+
+#### Details
+
+The returned bytes retain the allocation, capacity, and complete UTF-8 contents.
+They can be modified as arbitrary bytes after this conversion.
 
 <a id="declaration-73696c6b2f737472696e673a3a537472696e672e636f7079"></a>
 

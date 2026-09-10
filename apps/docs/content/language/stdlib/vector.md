@@ -331,6 +331,26 @@ Grows capacity to hold at least `additional` more elements without another alloc
 This function does not change the length. If allocation fails, contents, length, and capacity
 remain unchanged.
 
+<a id="declaration-73696c6b2f766563746f723a3a566563746f722e726573657276654578616374"></a>
+
+### Method `Vector.reserveExact`
+
+```silk
+pub effect<'env> fn reserveExact<T: 'env, 'life1: 'env, 'env>(self: &'life1 mut Vector<T>, additional: usize) -> () ! OutOfMemoryError ? &mut Allocator
+```
+
+Reserves space for `additional` elements without geometric capacity growth.
+
+#### When to use
+
+Use when the complete output length is known. Use [`reserve`](#declaration-73696c6b2f766563746f723a3a566563746f722e72657365727665) for repeated growth.
+
+#### Details
+
+If the current capacity is sufficient, this function does not allocate or shrink storage.
+Otherwise, one allocation sets capacity to the current length plus `additional`.
+The length stays unchanged. Size overflow or allocation failure leaves all existing state unchanged.
+
 <a id="declaration-73696c6b2f766563746f723a3a566563746f722e736f7274"></a>
 
 ### Method `Vector.sort`

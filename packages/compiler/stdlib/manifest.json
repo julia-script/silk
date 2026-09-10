@@ -402,6 +402,11 @@
     "namespace": "Shared"
   },
   {
+    "module": "silk/slice",
+    "path": "silk/slice.silk",
+    "namespace": "Slice"
+  },
+  {
     "module": "silk/slot",
     "path": "silk/slot.silk",
     "namespace": "Slot"
@@ -509,19 +514,26 @@
   {
     "module": "silk/uri",
     "path": "silk/uri.silk",
-    "namespace": "Uri"
+    "namespace": "Uri",
+    "aliases": ["OwnedUri"]
+  },
+  {
+    "module": "silk/uri_components",
+    "path": "silk/uri_components.silk",
+    "namespace": "UriComponents",
+    "aliases": ["ComponentValue", "Host", "Authority", "Serialization"]
   },
   {
     "module": "silk/uri_percent",
     "path": "silk/uri_percent.silk",
     "namespace": "UriPercent",
-    "aliases": ["Component", "DecodeError"]
+    "aliases": ["Component", "DecodeError", "Decoded"]
   },
   {
     "module": "silk/uri_reference",
     "path": "silk/uri_reference.silk",
     "namespace": "UriReference",
-    "aliases": ["HostKind", "Component", "ParseReason", "ParseError"]
+    "aliases": ["OwnedUriReference", "HostKind", "Component", "ParseReason", "ParseError"]
   },
   {
     "module": "silk/usize",

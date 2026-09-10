@@ -4,7 +4,7 @@
 
 Profiles: `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu-no-libc`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu-no-libc`.
 
-Owned RFC 3986 URI references with lossless component views.
+Borrowed RFC 3986 URI references, explicit owned storage, and lossless component views.
 
 ## When to use
 
@@ -12,7 +12,7 @@ Use [`parse`](#declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666
 
 ## Details
 
-Each [`UriReference`](#declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e6365) owns its original text. Accessors borrow from that owner without allocation.
+[`parse`](#declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e7061727365) borrows its input without allocation. [`OwnedUriReference`](#declaration-73696c6b2f7572695f7265666572656e63653a3a4f776e65645572695265666572656e6365) provides explicit owned storage.
 Empty components remain distinct from absent components. Parsing does not decode percent escapes.
 
 ## Gotchas
@@ -22,7 +22,7 @@ Raw non-ASCII bytes and IPv6 zone identifiers are not RFC 3986 syntax.
 
 Import as `UriReference` with `import silk.uri_reference { UriReference }`.
 
-Public declarations: 5.
+Public declarations: 6.
 
 <a id="declaration-73696c6b2f7572695f7265666572656e63653a3a486f73744b696e64"></a>
 
@@ -287,48 +287,83 @@ impl Copy for ParseError
 ## `UriReference`
 
 ```silk
-pub struct UriReference
+pub struct UriReference<'text>
 ```
 
-An immutable owner of a validated URI or relative reference and its original serialization.
+An immutable parsed reference borrowing its original serialization.
 
 ### Details
 
-Use [`parse`](#declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e7061727365) to construct a value. Component views remain valid only while their owner lives.
-The owner preserves case, percent escapes, delimiters, and empty components exactly.
+Parsing allocates nothing. The result and its component views cannot outlive the input.
+Use [`copy`](#declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e636f7079) to retain the value independently, or [`OwnedUriReference.fromString`](#declaration-73696c6b2f7572695f7265666572656e63653a3a4f776e65645572695265666572656e63652e66726f6d537472696e67) to adopt text.
 
 <a id="declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e7061727365"></a>
 
 ### Associated function `UriReference.parse`
 
 ```silk
-pub effect<'life0> fn parse<'life0>(text: string<'life0>) -> silk/result.Result<silk/uri_reference.UriReference, silk/uri_reference.ParseError> ! OutOfMemoryError ? &mut Allocator
+pub fn parse<'text>(text: string<'text>) -> silk/result.Result<silk/uri_reference.UriReference<'text>, silk/uri_reference.ParseError>
 ```
 
-Validates a URI reference and owns an exact copy of valid input.
+Validates and borrows a URI reference without allocating or normalizing.
 
 #### Details
 
-Syntax failure returns [`ParseError`](#declaration-73696c6b2f7572695f7265666572656e63653a3a50617273654572726f72) without allocating output. Allocation failure uses the
-Effect failure channel. Schemes, ports, and hosts remain lexical text without normalization.
-Valid dotted decimal hosts take precedence over registered names.
+Syntax errors identify the failed component and byte. Valid dotted decimal hosts take
+precedence over registered names. The result retains the lifetime of `text`.
+
+<a id="declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e76616c6964617465436f6d706f6e656e74"></a>
+
+### Associated function `UriReference.validateComponent`
+
+```silk
+pub fn validateComponent<'life1>(text: string<'life1>, component: Component) -> silk/option.Option<silk/uri_reference.ParseError>
+```
+
+Validates the encoded grammar of one component without allocating.
+
+#### Details
+
+Errors are relative to the supplied component text. Path checks its allowed bytes; assembly
+must additionally check path form against the presence of scheme and authority. Host accepts
+bracketed literals or reg-names, never userinfo or a port. Empty ports and hosts are valid.
+
+<a id="declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e636f7079"></a>
+
+### Method `UriReference.copy`
+
+```silk
+pub effect<'env> fn copy<'text: 'env, 'life1: 'env, 'env>(self: &'life1 UriReference<'text>) -> OwnedUriReference ! OutOfMemoryError ? &mut Allocator
+```
+
+Copies a parsed reference into independent owned storage with one allocation for nonempty input.
+
+<a id="declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e70617273654f776e6564"></a>
+
+### Associated function `UriReference.parseOwned`
+
+```silk
+pub effect<'text> fn parseOwned<'text>(text: string<'text>) -> silk/result.Result<silk/uri_reference.OwnedUriReference, silk/uri_reference.ParseError> ! OutOfMemoryError ? &mut Allocator
+```
+
+Validates input and explicitly copies it into owned storage; invalid input does not allocate.
 
 <a id="declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e666f726d6174"></a>
 
 ### Method `UriReference.format`
 
 ```silk
-pub fn format<'life0>(self: &'life0 silk/uri_reference.UriReference) -> string<'life0>
+pub fn format<'text, 'life1>(self: &'life1 UriReference<'text>) -> string<'text>
 ```
 
-Borrows the exact original serialization from the owner without allocation.
+Returns the original borrowed serialization, preserving all delimiters and escape spelling.
 
 <a id="declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e736368656d65"></a>
 
 ### Method `UriReference.scheme`
 
 ```silk
-pub fn scheme<'life0>(self: &'life0 silk/uri_reference.UriReference) -> silk/option.Option<string<'life0>>
+pub fn scheme<'text, 'life1>(self: &'life1 UriReference<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows the scheme without its colon, or returns `None` for a relative reference.
@@ -338,7 +373,7 @@ Borrows the scheme without its colon, or returns `None` for a relative reference
 ### Method `UriReference.authority`
 
 ```silk
-pub fn authority<'life0>(self: &'life0 silk/uri_reference.UriReference) -> silk/option.Option<string<'life0>>
+pub fn authority<'text, 'life1>(self: &'life1 UriReference<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows the authority without its two slashes, including a present empty authority.
@@ -348,7 +383,7 @@ Borrows the authority without its two slashes, including a present empty authori
 ### Method `UriReference.userinfo`
 
 ```silk
-pub fn userinfo<'life0>(self: &'life0 silk/uri_reference.UriReference) -> silk/option.Option<string<'life0>>
+pub fn userinfo<'text, 'life1>(self: &'life1 UriReference<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows user information without its at sign, or returns `None` when absent.
@@ -362,21 +397,21 @@ An empty value is present. Colons remain part of the value; no username or passw
 ### Method `UriReference.host`
 
 ```silk
-pub fn host<'life0>(self: &'life0 silk/uri_reference.UriReference) -> silk/option.Option<string<'life0>>
+pub fn host<'text, 'life1>(self: &'life1 UriReference<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows the host with IP-literal brackets intact, or returns `None` when authority is absent.
 
 #### Details
 
-An empty authority has a present empty host. The view borrows from the owner without allocation.
+An empty authority has a present empty host. The view borrows from the input without allocation.
 
 <a id="declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e706f7274"></a>
 
 ### Method `UriReference.port`
 
 ```silk
-pub fn port<'life0>(self: &'life0 silk/uri_reference.UriReference) -> silk/option.Option<string<'life0>>
+pub fn port<'text, 'life1>(self: &'life1 UriReference<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows the decimal port without its colon, or returns `None` when the colon is absent.
@@ -390,17 +425,17 @@ An empty port is present. This operation does not convert the port to a number o
 ### Method `UriReference.path`
 
 ```silk
-pub fn path<'life0>(self: &'life0 silk/uri_reference.UriReference) -> string<'life0>
+pub fn path<'text, 'life1>(self: &'life1 UriReference<'text>) -> string<'text>
 ```
 
-Borrows the path from the owner without allocation; an empty path returns an empty string.
+Borrows the path from the input without allocation; an empty path returns an empty string.
 
 <a id="declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e7175657279"></a>
 
 ### Method `UriReference.query`
 
 ```silk
-pub fn query<'life0>(self: &'life0 silk/uri_reference.UriReference) -> silk/option.Option<string<'life0>>
+pub fn query<'text, 'life1>(self: &'life1 UriReference<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows the query without its question mark, including a present empty query.
@@ -410,7 +445,7 @@ Borrows the query without its question mark, including a present empty query.
 ### Method `UriReference.fragment`
 
 ```silk
-pub fn fragment<'life0>(self: &'life0 silk/uri_reference.UriReference) -> silk/option.Option<string<'life0>>
+pub fn fragment<'text, 'life1>(self: &'life1 UriReference<'text>) -> silk/option.Option<string<'text>>
 ```
 
 Borrows the fragment without its number sign, including a present empty fragment.
@@ -420,7 +455,64 @@ Borrows the fragment without its number sign, including a present empty fragment
 ### Method `UriReference.hostKind`
 
 ```silk
-pub fn hostKind<'life0>(self: &'life0 silk/uri_reference.UriReference) -> silk/option.Option<silk/uri_reference.HostKind>
+pub fn hostKind<'text, 'life1>(self: &'life1 UriReference<'text>) -> silk/option.Option<silk/uri_reference.HostKind>
 ```
 
 Returns the host grammar classification, or `None` when authority is absent.
+
+<a id="declaration-73696c6b2f7572695f7265666572656e63653a3a696d706c656d656e746174696f6e3a33"></a>
+
+## Implementation `Copy for silk/uri_reference.UriReference<'text>`
+
+```silk
+impl Copy for silk/uri_reference.UriReference<'text>
+```
+
+<a id="declaration-73696c6b2f7572695f7265666572656e63653a3a4f776e65645572695265666572656e6365"></a>
+
+## `OwnedUriReference`
+
+```silk
+pub struct OwnedUriReference
+```
+
+An immutable owner of validated URI-reference text and scalar component ranges.
+
+### Details
+
+Owns no references into itself. [`view`](#declaration-73696c6b2f7572695f7265666572656e63653a3a4f776e65645572695265666572656e63652e76696577) borrows existing storage without reparsing or allocating.
+Use [`fromString`](#declaration-73696c6b2f7572695f7265666572656e63653a3a4f776e65645572695265666572656e63652e66726f6d537472696e67) to transfer existing storage, or [`UriReference.parseOwned`](#declaration-73696c6b2f7572695f7265666572656e63653a3a5572695265666572656e63652e70617273654f776e6564) to copy input.
+
+<a id="declaration-73696c6b2f7572695f7265666572656e63653a3a4f776e65645572695265666572656e63652e66726f6d537472696e67"></a>
+
+### Associated function `OwnedUriReference.fromString`
+
+```silk
+pub fn fromString(text: String) -> silk/result.Result<silk/uri_reference.OwnedUriReference, silk/uri_reference.ParseError>
+```
+
+Validates and adopts an existing String without copying or allocating.
+
+#### Gotchas
+
+This operation consumes the String on both success and syntax failure.
+
+<a id="declaration-73696c6b2f7572695f7265666572656e63653a3a4f776e65645572695265666572656e63652e76696577"></a>
+
+### Method `OwnedUriReference.view`
+
+```silk
+pub fn view<'life0>(self: &'life0 OwnedUriReference) -> silk/uri_reference.UriReference<'life0>
+```
+
+Borrows a parsed reference from this owner's stored ranges without validation or allocation.
+
+<a id="declaration-73696c6b2f7572695f7265666572656e63653a3a4f776e65645572695265666572656e63652e696e746f537472696e67"></a>
+
+### Method `OwnedUriReference.intoString`
+
+```silk
+pub fn intoString(self: OwnedUriReference) -> String
+```
+
+Transfers the original owned serialization out of the parsed owner without copying.

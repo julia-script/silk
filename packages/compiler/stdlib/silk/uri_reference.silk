@@ -1,4 +1,4 @@
-//! Owned RFC 3986 URI references with lossless component views.
+//! Borrowed RFC 3986 URI references, explicit owned storage, and lossless component views.
 //!
 //! # When to use
 //!
@@ -6,7 +6,7 @@
 //!
 //! # Details
 //!
-//! Each [`UriReference`] owns its original text. Accessors borrow from that owner without allocation.
+//! [`parse`] borrows its input without allocation. [`OwnedUriReference`] provides explicit owned storage.
 //! Empty components remain distinct from absent components. Parsing does not decode percent escapes.
 //!
 //! # Gotchas
@@ -18,8 +18,7 @@ import silk.allocator {Allocator, OutOfMemoryError}
 import silk.option {Option}
 import silk.result {Result}
 import silk.string {String}
-import silk.raw_buffer {RawBuffer}
-import silk.layout {Layout}
+import silk.slice {Slice}
 import silk.usize as usize
 import silk.u8 as u8
 
@@ -105,61 +104,113 @@ struct Parts {
 
 impl Copy for Parts {}
 
-/// An immutable owner of a validated URI or relative reference and its original serialization.
+/// An immutable parsed reference borrowing its original serialization.
 ///
 /// # Details
 ///
-/// Use [`parse`] to construct a value. Component views remain valid only while their owner lives.
-/// The owner preserves case, percent escapes, delimiters, and empty components exactly.
-pub struct UriReference {
-  text: Option<RawBuffer<u8>>
-  length: usize
+/// Parsing allocates nothing. The result and its component views cannot outlive the input.
+/// Use [`copy`] to retain the value independently, or [`OwnedUriReference.fromString`] to adopt text.
+pub struct UriReference<'text> {
+  text: string<'text>
   parts: Parts
 }
 
-impl UriReference {
-  /// Validates a URI reference and owns an exact copy of valid input.
+impl<'text> Copy for UriReference<'text> {}
+
+impl<'text> UriReference<'text> {
+  /// Validates and borrows a URI reference without allocating or normalizing.
   ///
   /// # Details
   ///
-  /// Syntax failure returns [`ParseError`] without allocating output. Allocation failure uses the
-  /// Effect failure channel. Schemes, ports, and hosts remain lexical text without normalization.
-  /// Valid dotted decimal hosts take precedence over registered names.
-  pub effect fn parse(text: string) -> Result<UriReference, ParseError>
-  ! OutOfMemoryError
-  ? &mut Allocator {
+  /// Syntax errors identify the failed component and byte. Valid dotted decimal hosts take
+  /// precedence over registered names. The result retains the lifetime of `text`.
+  pub fn parse(text: string<'text>) -> Result<UriReference<'text>, ParseError> {
     let mut parts = emptyParts()
     let error = validate(text, &mut parts)
     match move error {
       Option<ParseError>.Some {value} => {
-        return Result.failResult<UriReference, ParseError>(value)
+        return Result.failResult<UriReference<'text>, ParseError>(value)
       }
       Option<ParseError>.None => {}
     }
-    let bytes = String.utf8Bytes(text)
-    let length = bytes.length
-    if length == 0 {
-      return Result.succeed<UriReference, ParseError>(
-        UriReference {text: Option.none<RawBuffer<u8>>(), length: length, parts: move parts},
-      )
-    }
-    let allocation = run Allocator.allocate(Layout {bytes: length, alignment: 1})
-    let mut owned = RawBuffer.from<u8>(move allocation, length)
-    let copied = RawBuffer.copy<u8>(&mut owned, 0, bytes, length)
-    return Result.succeed<UriReference, ParseError>(
-      UriReference {text: Option.some<RawBuffer<u8>>(move owned), length: length, parts: move parts},
+    return Result.succeed<UriReference<'text>, ParseError>(
+      UriReference<'text> {text: text, parts: parts},
     )
   }
-  /// Borrows the exact original serialization from the owner without allocation.
-  pub fn format(self: &UriReference) -> string {
-    return portion(self, range(0, self.length))
+  /// Validates the encoded grammar of one component without allocating.
+  ///
+  /// # Details
+  ///
+  /// Errors are relative to the supplied component text. Path checks its allowed bytes; assembly
+  /// must additionally check path form against the presence of scheme and authority. Host accepts
+  /// bracketed literals or reg-names, never userinfo or a port. Empty ports and hosts are valid.
+  pub fn validateComponent(text: string, component: Component) -> Option<ParseError> {
+    let bytes = String.utf8Bytes(text)
+    let length = bytes.length
+    if component == Component.Scheme {
+      return schemeError(bytes, 0, length)
+    }
+    if component == Component.Port {
+      let mut index: usize = 0
+      while index < length {
+        if !digit(bytes[index]) {
+          return failure(ParseReason.InvalidPort, component, index)
+        }
+        index = index + 1
+      }
+      return Option.none<ParseError>()
+    }
+    if component == Component.Authority {
+      let mut parts = emptyParts()
+      return authorityError(bytes, 0, length, &mut parts)
+    }
+    if component == Component.Host && length > 0 && bytes[0] == 91 {
+      let mut parts = emptyParts()
+      let error = authorityError(bytes, 0, length, &mut parts)
+      match move error {
+        Option<ParseError>.Some {value} => {
+          return Option.some<ParseError>(value)
+        }
+        Option<ParseError>.None => {}
+      }
+      if parts.port.present || parts.userinfo.present {
+        return failure(ParseReason.InvalidHost, component, parts.host.end)
+      }
+      return Option.none<ParseError>()
+    }
+    return componentError(bytes, 0, length, component)
+  }
+  /// Copies a parsed reference into independent owned storage with one allocation for nonempty input.
+  pub effect fn copy(self: &Self) -> OwnedUriReference ! OutOfMemoryError ? &mut Allocator {
+    let text = run String.copy(self.text)
+    return OwnedUriReference {text: move text, parts: self.parts}
+  }
+  /// Validates input and explicitly copies it into owned storage; invalid input does not allocate.
+  pub effect fn parseOwned(text: string<'text>) -> Result<OwnedUriReference, ParseError>
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let parsed = UriReference.parse(text)
+    return match move parsed {
+      Result<UriReference<'text>, ParseError>.Failure {error} => Result.failResult<
+        OwnedUriReference,
+        ParseError,
+      >(error)
+      Result<UriReference<'text>, ParseError>.Success {value} => {
+        let owned = run UriReference.copy(&value)
+        return Result.succeed<OwnedUriReference, ParseError>(move owned)
+      }
+    }
+  }
+  /// Returns the original borrowed serialization, preserving all delimiters and escape spelling.
+  pub fn format(self: &Self) -> string<'text> {
+    return self.text
   }
   /// Borrows the scheme without its colon, or returns `None` for a relative reference.
-  pub fn scheme(self: &UriReference) -> Option<string> {
+  pub fn scheme(self: &Self) -> Option<string<'text>> {
     return optional(self, self.parts.scheme)
   }
   /// Borrows the authority without its two slashes, including a present empty authority.
-  pub fn authority(self: &UriReference) -> Option<string> {
+  pub fn authority(self: &Self) -> Option<string<'text>> {
     return optional(self, self.parts.authority)
   }
   /// Borrows user information without its at sign, or returns `None` when absent.
@@ -167,15 +218,15 @@ impl UriReference {
   /// # Details
   ///
   /// An empty value is present. Colons remain part of the value; no username or password split occurs.
-  pub fn userinfo(self: &UriReference) -> Option<string> {
+  pub fn userinfo(self: &Self) -> Option<string<'text>> {
     return optional(self, self.parts.userinfo)
   }
   /// Borrows the host with IP-literal brackets intact, or returns `None` when authority is absent.
   ///
   /// # Details
   ///
-  /// An empty authority has a present empty host. The view borrows from the owner without allocation.
-  pub fn host(self: &UriReference) -> Option<string> {
+  /// An empty authority has a present empty host. The view borrows from the input without allocation.
+  pub fn host(self: &Self) -> Option<string<'text>> {
     return optional(self, self.parts.host)
   }
   /// Borrows the decimal port without its colon, or returns `None` when the colon is absent.
@@ -183,23 +234,23 @@ impl UriReference {
   /// # Details
   ///
   /// An empty port is present. This operation does not convert the port to a number or impose a limit.
-  pub fn port(self: &UriReference) -> Option<string> {
+  pub fn port(self: &Self) -> Option<string<'text>> {
     return optional(self, self.parts.port)
   }
-  /// Borrows the path from the owner without allocation; an empty path returns an empty string.
-  pub fn path(self: &UriReference) -> string {
+  /// Borrows the path from the input without allocation; an empty path returns an empty string.
+  pub fn path(self: &Self) -> string<'text> {
     return portion(self, self.parts.path)
   }
   /// Borrows the query without its question mark, including a present empty query.
-  pub fn query(self: &UriReference) -> Option<string> {
+  pub fn query(self: &Self) -> Option<string<'text>> {
     return optional(self, self.parts.query)
   }
   /// Borrows the fragment without its number sign, including a present empty fragment.
-  pub fn fragment(self: &UriReference) -> Option<string> {
+  pub fn fragment(self: &Self) -> Option<string<'text>> {
     return optional(self, self.parts.fragment)
   }
   /// Returns the host grammar classification, or `None` when authority is absent.
-  pub fn hostKind(self: &UriReference) -> Option<HostKind> {
+  pub fn hostKind(self: &Self) -> Option<HostKind> {
     if self.parts.authority.present {
       return Option.some<HostKind>(self.parts.hostKind)
     }
@@ -207,24 +258,60 @@ impl UriReference {
   }
 }
 
-fn portion(self: &UriReference, range: Range) -> string {
-  return match & self.text {
-    Option<RawBuffer<u8>>.None => ""
-    Option<RawBuffer<u8>>.Some {value} => fromRange(&value, range)
+/// An immutable owner of validated URI-reference text and scalar component ranges.
+///
+/// # Details
+///
+/// Owns no references into itself. [`view`] borrows existing storage without reparsing or allocating.
+/// Use [`fromString`] to transfer existing storage, or [`UriReference.parseOwned`] to copy input.
+pub struct OwnedUriReference {
+  text: String
+  parts: Parts
+}
+
+impl OwnedUriReference {
+  /// Validates and adopts an existing String without copying or allocating.
+  ///
+  /// # Gotchas
+  ///
+  /// This operation consumes the String on both success and syntax failure.
+  pub fn fromString(text: String) -> Result<OwnedUriReference, ParseError> {
+    let mut parts = emptyParts()
+    let error = validate(String.view(&text), &mut parts)
+    match move error {
+      Option<ParseError>.Some {value} => {
+        return Result.failResult<OwnedUriReference, ParseError>(value)
+      }
+      Option<ParseError>.None => {}
+    }
+    return Result.succeed<OwnedUriReference, ParseError>(
+      OwnedUriReference {text: move text, parts: parts},
+    )
+  }
+  /// Borrows a parsed reference from this owner's stored ranges without validation or allocation.
+  pub fn view(self: &Self) -> UriReference {
+    return UriReference {text: String.view(&self.text), parts: self.parts}
+  }
+  /// Transfers the original owned serialization out of the parsed owner without copying.
+  pub fn intoString(self: Self) -> String {
+    return match move self {
+      OwnedUriReference {text, parts} => move text
+    }
   }
 }
 
-// Validation limits all endpoints to ASCII boundaries in initialized immutable storage.
-fn fromRange(buffer: &RawBuffer<u8>, range: Range) -> string {
-  let bytes = RawBuffer.view<u8>(buffer, range.start, range.end - range.start)
-  return unsafe String.fromUtf8Unchecked(bytes)
+fn portion<'text>(self: &UriReference<'text>, range: Range) -> string<'text> {
+  let bytes = String.utf8Bytes(self.text)
+  let selected = Slice.view<u8>(bytes, range.start, range.end - range.start)
+  // Validation guarantees ASCII and ranges within the immutable original input.
+  return unsafe String.fromUtf8Unchecked(selected)
 }
 
-fn optional(self: &UriReference, range: Range) -> Option<string> {
+fn optional<'text>(self: &UriReference<'text>, range: Range) -> Option<string<'text>> {
   if range.present {
-    return Option.some<string>(portion(self, range))
+    return Option.some<string<'text>>(portion(self, range))
   }
-  return Option.none<string>()
+  return Option.none<string<'text>>()
 }
 
 fn absent() -> Range {
@@ -311,6 +398,21 @@ fn componentError(bytes: &[u8], start: usize, end: usize, component: Component) 
   return Option.none<ParseError>()
 }
 
+fn schemeError(bytes: &[u8], start: usize, end: usize) -> Option<ParseError> {
+  if start == end || !alpha(bytes[start]) {
+    return failure(ParseReason.InvalidScheme, Component.Scheme, start)
+  }
+  let mut index = start + 1
+  while index < end {
+    let c = bytes[index]
+    if !alpha(c) && !digit(c) && c != 43 && c != 45 && c != 46 {
+      return failure(ParseReason.InvalidScheme, Component.Scheme, index)
+    }
+    index = index + 1
+  }
+  return Option.none<ParseError>()
+}
+
 fn validate(text: string, parts: &mut Parts) -> Option<ParseError> {
   let bytes = String.utf8Bytes(text)
   let n = bytes.length
@@ -320,19 +422,12 @@ fn validate(text: string, parts: &mut Parts) -> Option<ParseError> {
   }
   let mut pathStart = usize.ZERO
   if i < n && bytes[i] == 58 {
-    if i == 0 {
-      return failure(ParseReason.InvalidScheme, Component.Scheme, 0)
-    }
-    if alpha(bytes[0]) == false {
-      return failure(ParseReason.InvalidScheme, Component.Scheme, 0)
-    }
-    let mut s = usize.ONE
-    while s < i {
-      let c = bytes[s]
-      if alpha(c) == false && digit(c) == false && c != 43 && c != 45 && c != 46 {
-        return failure(ParseReason.InvalidScheme, Component.Scheme, s)
+    let error = schemeError(bytes, 0, i)
+    match move error {
+      Option<ParseError>.Some {value} => {
+        return Option.some<ParseError>(value)
       }
-      s = s + 1
+      Option<ParseError>.None => {}
     }
     parts.scheme = range(0, i)
     pathStart = i + 1

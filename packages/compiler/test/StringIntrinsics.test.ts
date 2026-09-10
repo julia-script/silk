@@ -198,3 +198,88 @@ it.effect('rejects unchecked UTF-8 formation outside an unsafe boundary', () =>
     )
   }),
 )
+
+it('publishes a safe runtime shared subrange retaining only its source lifetime', () => {
+  const operation = Intrinsic.findOperation('Intrinsic', 'sliceView')
+  assert.isDefined(operation)
+  if (operation === undefined || operation.rule._tag !== 'BuiltinRule') return
+  assert.strictEqual(
+    Intrinsic.signature(operation),
+    'fn Intrinsic.sliceView<T>(values: &[T], offset: usize, length: usize) -> &[T]',
+  )
+  assert.isFalse(operation.unsafe)
+  assert.deepEqual(operation.targets, Intrinsic.runtimeTargets)
+  const parameter = operation.rule.parameters.at(0)
+  assert.isDefined(parameter)
+  if (parameter === undefined) return
+  assert.deepEqual(Type.storageLifetimes(parameter), Type.storageLifetimes(operation.rule.result))
+})
+
+it.effect('rejects escaping a subrange of local backing storage', () =>
+  Effect.gen(function* () {
+    const source = `pub fn escape(input: &[u8]) -> &[u8] {
+  let bytes: [u8; 2] = [1, 2]
+  return Intrinsic.sliceView(&bytes, 1, 1)
+}`
+    const snapshot = yield* Analysis.ofSource('slice/escape', encoder.encode(source))
+    const diagnostics = Analysis.diagnostics(snapshot)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0019', span: 'Intrinsic.sliceView(&bytes, 1, 1)' },
+        { code: 'OWN0019', span: 'Intrinsic.sliceView(&bytes, 1, 1)' },
+        { code: 'SEM0212', span: '&bytes' },
+      ],
+    )
+  }),
+)
+
+it.effect('rejects borrowed URI escape and mutation of its live backing bytes', () =>
+  Effect.gen(function* () {
+    const source = `import silk.uri { Uri }
+import silk.uri_reference { ParseError }
+import silk.result { Result }
+import silk.string { String }
+fn escape<'a>(input: string<'a>) -> Result<Uri<'a>, ParseError> {
+  let bytes: [u8; 3] = [120, 58, 97]
+  let text = unsafe String.fromUtf8Unchecked(&bytes)
+  return Uri.parse(text)
+}
+fn forwarded<'a>(input: string<'a>) -> Result<Uri<'a>, ParseError> {
+  return Uri.parse(input)
+}
+fn inspect<'a>(parsed: Result<Uri<'a>, ParseError>) -> bool {
+  return match move parsed {
+    Result<Uri<'a>, ParseError>.Success { value } => Uri.path(&value) == "a"
+    Result<Uri<'a>, ParseError>.Failure { error } => false
+  }
+}
+fn conflict() -> bool {
+  let mut bytes: [u8; 3] = [120, 58, 97]
+  unsafe {
+    let parsed = Uri.parse(String.fromUtf8Unchecked(&bytes))
+    bytes[2] = 98
+    return inspect(move parsed)
+  }
+  return false
+}`
+    const snapshot = yield* Analysis.ofSource('uri/borrowed-ownership', encoder.encode(source))
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'SEM0212', span: '&bytes' },
+        { code: 'OWN0019', span: 'Uri.parse(text)' },
+        { code: 'OWN0019', span: 'Uri.parse(text)' },
+        { code: 'OWN0011', span: 'bytes[2]' },
+        { code: 'OWN0019', span: 'move parsed' },
+        { code: 'OWN0019', span: 'parsed' },
+      ],
+    )
+  }),
+)

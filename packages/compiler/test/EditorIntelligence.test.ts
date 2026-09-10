@@ -714,7 +714,14 @@ pub fn main() -> i32 { return 0 }`
     Effect.map((snapshot) => {
       for (const [name, documentation] of [
         ['make', '/// Creates an empty `Bytes` value without allocating storage.'],
-        ['copy', '/// Copies a complete borrowed byte sequence into independently owned storage.'],
+        [
+          'copy',
+          `/// Copies a complete borrowed byte sequence into independently owned storage.
+///
+/// # Details
+///
+/// Empty input does not allocate. Nonempty input uses one allocation sized to its byte length.`,
+        ],
         [
           'append',
           `/// Appends a complete borrowed byte sequence in source order.

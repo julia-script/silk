@@ -184,6 +184,7 @@ export const destinationOf = (operation: LinearOperation): Mir.LocalId | undefin
     case 'RawBufferCount':
     case 'RawBufferSlot':
     case 'RawBufferRead':
+    case 'SliceView':
     case 'RawBufferView':
     case 'RawBufferCopy':
     case 'RawBufferFill':
@@ -231,6 +232,7 @@ export const opensRuntimeContinuation = (operation: LinearOperation): boolean =>
   operation._tag === 'SharedWithMut' ||
   operation._tag === 'RawBufferSlot' ||
   operation._tag === 'RawBufferRead' ||
+  operation._tag === 'SliceView' ||
   operation._tag === 'RawBufferView' ||
   operation._tag === 'RawBufferCopy' ||
   operation._tag === 'RawBufferFill' ||

@@ -4,21 +4,22 @@
 
 Profiles: `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu-no-libc`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu-no-libc`.
 
-Byte percent coding for individual RFC 3986 URI components.
+Byte percent coding with explicit ownership and caller-controlled storage.
 
 ## When to use
 
-Use `encode` for raw component data and `decode` for escaped component text.
-Use `silk.string.String.fromUtf8` separately when decoded bytes must be text.
+Use `encodeInto` and `decodeInto` to reuse a byte buffer, or `encodeToWriter` to stream output.
+Use `encodeOwned` and `decodeOwned` when the result needs independent storage.
 
 ## Details
 
 Encoding creates uppercase escapes and treats every input percent sign as data.
-Decoding preserves plus signs. Query coding follows generic URI syntax, not HTML form rules.
+Decoding preserves plus signs and arbitrary bytes. Validate UTF-8 separately with `String.fromUtf8`.
+Query coding follows generic URI syntax, not HTML form rules.
 
 Import as `UriPercent` with `import silk.uri_percent { UriPercent }`.
 
-Public declarations: 3.
+Public declarations: 4.
 
 <a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e74"></a>
 
@@ -28,7 +29,7 @@ Public declarations: 3.
 pub enum Component
 ```
 
-The grammar context of raw bytes supplied to `encode`.
+The grammar context of raw bytes supplied to percent encoding.
 
 <a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a30"></a>
 
@@ -72,20 +73,40 @@ The first relative path segment; slash and colon are escaped.
 
 <a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a34"></a>
 
+### `Path`
+
+```silk
+Path = 4
+```
+
+A whole path; slash is retained, but question mark and number sign are escaped.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a35"></a>
+
+### `Unreserved`
+
+```silk
+Unreserved = 5
+```
+
+Only ASCII letters, digits, hyphen, period, underscore, and tilde are retained.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a36"></a>
+
 ### `Query`
 
 ```silk
-Query = 4
+Query = 6
 ```
 
 A complete generic query; slash and question mark are retained.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a35"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a37"></a>
 
 ### `Fragment`
 
 ```silk
-Fragment = 5
+Fragment = 7
 ```
 
 A complete fragment; slash and question mark are retained.
@@ -98,7 +119,7 @@ A complete fragment; slash and question mark are retained.
 pub struct DecodeError
 ```
 
-The position of a malformed percent escape in the supplied text.
+The position of a malformed percent escape in the supplied text or bytes.
 
 <a id="declaration-73696c6b2f7572695f70657263656e743a3a4465636f64654572726f723a3a6669656c643a30"></a>
 
@@ -110,6 +131,60 @@ pub offset: usize
 
 The zero-based byte offset of the percent sign that starts the malformed escape.
 
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a4465636f646564"></a>
+
+## `Decoded`
+
+```silk
+pub union Decoded<'input>
+```
+
+Decoded bytes that borrow unchanged input or own the result of expanding escapes.
+
+### Details
+
+The borrowed variant cannot outlive its input. Neither variant guarantees valid UTF-8.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a4465636f6465643a3a76617269616e743a30"></a>
+
+### `Borrowed`
+
+```silk
+Decoded<'input>.Borrowed { values: &'input [u8] }: Decoded<'input>
+```
+
+Unchanged input without percent signs, requiring no allocation or copy.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a4465636f6465643a3a76617269616e743a303a3a6669656c643a30"></a>
+
+#### Field `values`
+
+```silk
+pub values: &'input [u8]
+```
+
+The original byte view, including any literal plus signs.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a4465636f6465643a3a76617269616e743a31"></a>
+
+### `Owned`
+
+```silk
+Decoded<'input>.Owned { value: Bytes }: Decoded<'input>
+```
+
+Independently owned bytes after percent escapes have been decoded.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a4465636f6465643a3a76617269616e743a313a3a6669656c643a30"></a>
+
+#### Field `value`
+
+```silk
+pub value: Bytes
+```
+
+The decoded bytes, which may contain invalid UTF-8.
+
 <a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e74"></a>
 
 ## `UriPercent`
@@ -120,38 +195,150 @@ pub struct UriPercent
 
 The owner of byte percent encoding and decoding operations for URI components.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e742e656e636f6465"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e742e656e636f64654f776e6564"></a>
 
-### Associated function `UriPercent.encode`
+### Associated function `UriPercent.encodeOwned`
 
 ```silk
-pub effect<'life0> fn encode<'life0>(values: &'life0 [u8], component: Component) -> String ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn encodeOwned<'life0>(values: &'life0 [u8], component: Component) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
-Encodes raw bytes for one URI component into independently owned ASCII text.
+Encodes raw bytes into independently owned ASCII text with one exact backing allocation.
 
 #### Details
 
-Percent signs are always escaped. New escapes use uppercase hexadecimal digits.
-`FirstPathSegment` prevents a colon from turning relative data into a scheme.
-Allocation uses the supplied allocator and can fail with `OutOfMemoryError`.
+Empty output does not allocate. Percent signs are always escaped using uppercase hexadecimal.
+Allocation or size overflow fails with `OutOfMemoryError`.
 
 #### Gotchas
 
-Supply raw data, not an already escaped component. Query and fragment retain their legal delimiters.
-`Query` does not encode separate form keys or values.
+Supply raw data, not already escaped text. Whole-path encoding retains slash and colon;
+use `FirstPathSegment` for data that must not become a relative reference's scheme.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e742e6465636f6465"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e742e656e636f6465496e746f"></a>
 
-### Associated function `UriPercent.decode`
+### Associated function `UriPercent.encodeInto`
 
 ```silk
-pub effect<'life0> fn decode<'life0>(text: string<'life0>) -> silk/result.Result<silk/bytes.Bytes, silk/uri_percent.DecodeError> ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn encodeInto<'life0: 'env, 'life1: 'env, 'env>(output: &'life0 mut silk/bytes.Bytes, values: &'life1 [u8], component: Component) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
-Decodes percent escapes into owned bytes without text validation or plus substitution.
+Replaces a reusable byte buffer with percent-encoded ASCII component data.
 
 #### Details
 
-A malformed escape returns `DecodeError` before allocation. Other bytes retain their values.
-Allocation failure uses `OutOfMemoryError`; invalid UTF-8 is valid byte output.
+Computes the size and reserves exact required capacity before changing the contents.
+Existing sufficient capacity requires no allocation. Failure leaves the original contents intact.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e742e656e636f6465644c656e677468"></a>
+
+### Associated function `UriPercent.encodedLength`
+
+```silk
+pub fn encodedLength<'life0>(values: &'life0 [u8], component: Component) -> silk/option.Option<usize>
+```
+
+Returns the encoded byte count without allocating, or `None` when the size exceeds `usize`.
+
+#### Details
+
+Counts raw data under the selected grammar context, including three bytes for each escape.
+Use this to reserve a combined serialization before appending its individual components.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e742e617070656e64456e636f646564"></a>
+
+### Associated function `UriPercent.appendEncoded`
+
+```silk
+pub effect<'env> fn appendEncoded<'life0: 'env, 'life1: 'env, 'env>(output: &'life0 mut silk/bytes.Bytes, values: &'life1 [u8], component: Component) -> () ! OutOfMemoryError ? &mut Allocator
+```
+
+Appends encoded component data while retaining all existing destination bytes.
+
+#### Details
+
+Computes the additional byte count and reserves exact capacity before mutation. Sufficient
+capacity requires no allocation. Size overflow or allocation failure leaves the output intact.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e742e656e636f6465546f577269746572"></a>
+
+### Associated function `UriPercent.encodeToWriter`
+
+```silk
+pub effect<'life0> fn encodeToWriter<'life0>(values: &'life0 [u8], component: Component) -> () ! WriterError ? &mut Writer
+```
+
+Streams percent encoding to a Writer without allocating intermediate output storage.
+
+#### Details
+
+Writes unchanged ASCII runs directly from input and each escape from a three-byte stack array.
+The Writer provider may allocate independently.
+
+#### Gotchas
+
+Writer failure may leave partial output. This operation does not flush the provider.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e742e6465636f64654f776e6564"></a>
+
+### Associated function `UriPercent.decodeOwned`
+
+```silk
+pub effect<'life0> fn decodeOwned<'life0>(text: string<'life0>) -> silk/result.Result<silk/bytes.Bytes, silk/uri_percent.DecodeError> ! OutOfMemoryError ? &mut Allocator
+```
+
+Decodes percent escapes into owned arbitrary bytes with one exact backing allocation.
+
+#### Details
+
+Malformed escapes fail before allocation. Empty output does not allocate. No bytes are
+zero-filled before being overwritten, and plus signs remain literal bytes.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e742e6465636f6465496e746f"></a>
+
+### Associated function `UriPercent.decodeInto`
+
+```silk
+pub effect<'env> fn decodeInto<'life0: 'env, 'life1: 'env, 'env>(output: &'life0 mut silk/bytes.Bytes, text: string<'life1>) -> silk/result.Result<(), silk/uri_percent.DecodeError> ! OutOfMemoryError ? &mut Allocator
+```
+
+Replaces reusable byte storage with strictly decoded bytes, preserving literal plus signs.
+
+#### Details
+
+Validates all escapes and reserves exact capacity before mutation. Malformed input and allocation
+failure leave existing contents intact. Sufficient capacity requires no allocation.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e742e6465636f6465496e506c616365"></a>
+
+### Associated function `UriPercent.decodeInPlace`
+
+```silk
+pub fn decodeInPlace<'life0>(values: &'life0 mut [u8]) -> silk/result.Result<usize, silk/uri_percent.DecodeError>
+```
+
+Strictly decodes a mutable byte slice in place and returns its initialized output-prefix length.
+
+#### Details
+
+Validates every escape before mutation, so malformed input leaves the slice unchanged.
+The operation allocates nothing. Output may contain arbitrary bytes, including invalid UTF-8.
+
+#### Gotchas
+
+Bytes after the returned prefix are unspecified; the slice's physical length does not change.
+
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a55726950657263656e742e6465636f64654f72426f72726f77"></a>
+
+### Associated function `UriPercent.decodeOrBorrow`
+
+```silk
+pub effect<'input> fn decodeOrBorrow<'input>(text: string<'input>) -> silk/result.Result<silk/uri_percent.Decoded<'input>, silk/uri_percent.DecodeError> ! OutOfMemoryError ? &mut Allocator
+```
+
+Borrows unchanged input bytes when no percent escapes occur, otherwise returns owned decoded bytes.
+
+#### Details
+
+The borrowed fast path performs no allocation or copy. Escaped input follows `decodeOwned`,
+including strict validation before allocation and preservation of literal plus signs.

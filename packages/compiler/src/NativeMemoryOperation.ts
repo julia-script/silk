@@ -31,6 +31,7 @@ type Operation = Extract<
       | 'RawBufferCount'
       | 'RawBufferSlot'
       | 'RawBufferRead'
+      | 'SliceView'
       | 'RawBufferView'
       | 'RawBufferCopy'
       | 'RawBufferFill'
@@ -643,6 +644,95 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         nativeStorage,
         operation.destination.ordinal,
         Object.freeze(values),
+      )
+      break
+    }
+    case 'SliceView': {
+      const lanes = yield* NativeStorage.materialize(nativeStorage, operation.slice)
+      const source = lanes.at(0)
+      const count = lanes.at(1)
+      const offset = (yield* NativeStorage.materialize(nativeStorage, operation.offset)).at(0)
+      const length = (yield* NativeStorage.materialize(nativeStorage, operation.length)).at(0)
+      if (
+        source === undefined ||
+        count === undefined ||
+        offset === undefined ||
+        length === undefined ||
+        usizeType === undefined
+      ) {
+        throw new RangeError('LLVM Slice.view lost its view lanes or bounds')
+      }
+      const offsetOutOfBounds = yield* FunctionBody.integerCompare(
+        body,
+        'ugt',
+        offset,
+        count,
+        `slice_view${operation.destination.ordinal}_offset_bounds`,
+      )
+      const remaining = yield* FunctionBody.binary(
+        body,
+        'sub',
+        count,
+        offset,
+        `slice_view${operation.destination.ordinal}_remaining`,
+      )
+      const lengthOutOfBounds = yield* FunctionBody.integerCompare(
+        body,
+        'ugt',
+        length,
+        remaining,
+        `slice_view${operation.destination.ordinal}_length_bounds`,
+      )
+      const invalid = yield* FunctionBody.binary(
+        body,
+        'or',
+        offsetOutOfBounds,
+        lengthOutOfBounds,
+        `slice_view${operation.destination.ordinal}_invalid`,
+      )
+      trapBlock = yield* NativeTermination.trapBlock(
+        context.termination,
+        'slice range out of bounds',
+        operation.provenance.span,
+      )
+      const accepted = yield* LlvmBlock.make(
+        body,
+        `slice_view${operation.destination.ordinal}_accepted`,
+      )
+      yield* FunctionBody.conditionalBranch(body, invalid, trapBlock, accepted)
+      yield* LlvmBlock.setInsertionPoint(body, accepted)
+      const baseAddress = yield* FunctionBody.cast(
+        body,
+        'ptrtoint',
+        source,
+        usizeType,
+        `slice_view${operation.destination.ordinal}_base`,
+      )
+      const byteOffset = yield* FunctionBody.binary(
+        body,
+        'mul',
+        offset,
+        yield* Constant.integerUnsigned(builder, usizeType, BigInt(operation.stride)),
+        `slice_view${operation.destination.ordinal}_byte_offset`,
+      )
+      const selected = yield* FunctionBody.binary(
+        body,
+        'add',
+        baseAddress,
+        byteOffset,
+        `slice_view${operation.destination.ordinal}_address`,
+      )
+      const base = yield* FunctionBody.cast(
+        body,
+        'inttoptr',
+        selected,
+        pointer,
+        `slice_view${operation.destination.ordinal}_ptr`,
+      )
+      yield* NativeStorage.writeLocal(
+        nativeStorage,
+        operation.destination.ordinal,
+        Object.freeze([base, length]),
       )
       break
     }

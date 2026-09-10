@@ -119,6 +119,49 @@ pub effect<'life0> fn copy<'life0>(values: &'life0 [u8]) -> Bytes ! OutOfMemoryE
 
 Copies a complete borrowed byte sequence into independently owned storage.
 
+#### Details
+
+Empty input does not allocate. Nonempty input uses one allocation sized to its byte length.
+
+<a id="declaration-73696c6b2f62797465733a3a42797465732e726573657276654578616374"></a>
+
+### Method `Bytes.reserveExact`
+
+```silk
+pub effect<'life0> fn reserveExact<'life0>(self: &'life0 mut Bytes, additional: usize) -> () ! OutOfMemoryError ? &mut Allocator
+```
+
+Reserves storage for `additional` bytes without changing the initialized length.
+
+#### Details
+
+Sufficient capacity is reused. Otherwise, one allocation provides the current length plus
+`additional` bytes of capacity. Size overflow or allocation failure leaves the value unchanged.
+
+<a id="declaration-73696c6b2f62797465733a3a42797465732e636c656172"></a>
+
+### Method `Bytes.clear`
+
+```silk
+pub fn clear<'life0>(self: &'life0 mut Bytes) -> ()
+```
+
+Removes all initialized bytes and keeps the allocation for reuse.
+
+<a id="declaration-73696c6b2f62797465733a3a42797465732e7472756e63617465"></a>
+
+### Method `Bytes.truncate`
+
+```silk
+pub fn truncate<'life0>(self: &'life0 mut Bytes, length: usize) -> ()
+```
+
+Removes bytes after `length` and keeps the allocation for reuse.
+
+#### Details
+
+A length greater than or equal to the current length leaves the value unchanged.
+
 <a id="declaration-73696c6b2f62797465733a3a42797465732e617070656e64"></a>
 
 ### Method `Bytes.append`

@@ -904,6 +904,8 @@ const operationLabel = (operation: Mir.Operation): string => {
       return `${localText(operation.destination)} = slot ${localText(operation.buffer)}[${localText(operation.index)}]`
     case 'RawBufferRead':
       return `${localText(operation.destination)} = read ${localText(operation.buffer)}[${localText(operation.index)}]`
+    case 'SliceView':
+      return `${localText(operation.destination)} = shared view ${localText(operation.slice)}[${localText(operation.offset)}..+${localText(operation.length)}]`
     case 'RawBufferView':
       return `${localText(operation.destination)} = ${operation.access.toLowerCase()} view ${localText(operation.buffer)}[${localText(operation.offset)}..+${localText(operation.length)}]`
     case 'RawBufferCopy':

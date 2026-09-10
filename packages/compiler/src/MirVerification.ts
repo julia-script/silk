@@ -1018,6 +1018,8 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'StaticView':
     case 'StaticString':
       return [operation.destination]
+    case 'SliceView':
+      return [operation.destination, operation.slice, operation.offset, operation.length]
     case 'StringFromUtf8Unchecked':
       return [operation.destination, operation.bytes]
     case 'StringUtf8Bytes':
@@ -2084,6 +2086,7 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
       return [semanticType(operation.type)]
     case 'RawBufferSlot':
     case 'RawBufferRead':
+    case 'SliceView':
     case 'RawBufferView':
     case 'RawBufferCopy':
     case 'SlotWrite':
@@ -2309,6 +2312,8 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
       return [operation.buffer, operation.index]
     case 'RawBufferRead':
       return [operation.buffer, operation.index]
+    case 'SliceView':
+      return [operation.slice, operation.offset, operation.length]
     case 'RawBufferView':
       return [operation.buffer, operation.offset, operation.length]
     case 'RawBufferCopy':
@@ -5284,6 +5289,38 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               }),
             )
         }
+        if (operation._tag === 'SliceView') {
+          const source = fn.localTypes.at(operation.slice.ordinal)
+          const destination = fn.localTypes.at(operation.destination.ordinal)
+          const elementLayout = Layout.entry(self.layout, operation.element)
+          const stride =
+            elementLayout === undefined
+              ? undefined
+              : Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment
+          if (
+            source?._tag !== 'Slice' ||
+            source.type.access !== 'Shared' ||
+            destination?._tag !== 'Slice' ||
+            !sameRuntimeType(source.type, operation.type.type) ||
+            !SilkType.equals(destination.type, operation.type.type) ||
+            !SilkType.equals(source.type.element, operation.element) ||
+            fn.localTypes.at(operation.offset.ordinal)?._tag !== 'usize' ||
+            fn.localTypes.at(operation.length.ordinal)?._tag !== 'usize' ||
+            operation.stride !== stride ||
+            !heldStringLoansValid(operation.heldLoans)
+          ) {
+            violations.push(
+              Object.freeze({
+                _tag: 'Violation',
+                rule: 'InvalidRawStorageOperation',
+                function: fn.id,
+                region: region.id,
+                detail:
+                  'Slice view lost its shared source shape, bounds, element layout, or backing loans',
+              }),
+            )
+          }
+        }
         if (operation._tag === 'RawBufferView') {
           const buffer = fn.localTypes.at(operation.buffer.ordinal)
           const offset = fn.localTypes.at(operation.offset.ordinal)
@@ -5852,7 +5889,9 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           )
           const cleanupTypeMatches =
             droppedSemantic !== undefined &&
-            (SilkType.equals(droppedSemantic, cleanup.type) ||
+            // Layout fields are shared by runtime shape and may retain another specialization's
+            // proof lifetime. Cleanup must agree on runtime ownership, not that cached lifetime.
+            (sameRuntimeType(droppedSemantic, cleanup.type) ||
               (dropped?._tag === 'CallableValue' &&
                 dropped.storage !== undefined &&
                 SilkType.equals(dropped.storage.realization.contract, cleanup.type)) ||

@@ -396,6 +396,44 @@ impl<T> Vector<T> {
     return ()
   }
 
+  /// Reserves space for `additional` elements without geometric capacity growth.
+  ///
+  /// # When to use
+  ///
+  /// Use when the complete output length is known. Use [`reserve`] for repeated growth.
+  ///
+  /// # Details
+  ///
+  /// If the current capacity is sufficient, this function does not allocate or shrink storage.
+  /// Otherwise, one allocation sets capacity to the current length plus `additional`.
+  /// The length stays unchanged. Size overflow or allocation failure leaves all existing state unchanged.
+  pub effect fn reserveExact(self: &mut Self, additional: usize) -> ()
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let needed = match move usize.checkedAdd(self.count, additional) {
+      Option<usize>.Some {value} => value
+      Option<usize>.None => run Allocator.outOfMemory()
+    }
+    if needed <= self.limit {
+      return ()
+    }
+    let element = Layout.of<T>()
+    let plan = Layout.repeat(move element, needed)
+    let layout = match move plan {
+      Layout ready => ready
+      LayoutOverflow overflow => run overflowed()
+    }
+    let allocation = run Allocator.allocate(move layout)
+    let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
+    let moved = match move storage {
+      Empty<T> nothing => Full<T> {buffer: freshBuffer<T>(move allocation, needed)}
+      Full<T> full => Full<T> {buffer: migrate<T>(move full, move allocation, self.count, needed)}
+    }
+    self.storage = move moved
+    self.limit = needed
+    return ()
+  }
+
   /// Orders the elements in place. Equal elements keep their input order.
   ///
   /// # Details
