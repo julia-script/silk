@@ -363,9 +363,22 @@ is checked before accepting the excess byte or member. `maxMemoryBytes` must cov
 caller buffers and allocator metadata. A larger allowance does not increase decoder storage.
 Memory and initial member limits are checked before history allocation.
 
+`Decoder.reset(self, format, limits) -> Result<(), DecodeError>` starts another independent stream
+after completion, failure, or abandonment. It preserves both allocations, requires no allocator,
+and has no allocation failure path. Success replaces the format and limits and restores fresh
+stream behavior: empty logical history, the selected format's window and checksum state, fresh
+cumulative counters with one member started, and no prior parser continuation or final-input
+obligation. Within a stream, calls and gzip members retain cumulative accounting.
+
+Reset checks `maxMemoryBytes >= MEMORY_BOUND` and then `maxMembers > 0` before any mutation.
+Rejection returns zero-progress `MemoryLimit` or `MemberLimit` and leaves the original decoder
+unchanged. The caller can continue that original stream. Reset does not validate, reclaim, or
+sanitize prior caller-owned output; output from failed or abandoned streams remains provisional.
+Reset does not securely erase decoder storage.
+
 **Boundary:** Output is provisional until `Finished`, because integrity checks follow the payload.
-Consumers must discard output after failure. A failed decoder rejects reuse with `InvalidUse`.
-A finished decoder returns `Finished` with zero progress. Empty output produces `NeedOutput` when
+Consumers must discard output after a step failure. Until explicit reset, a failed decoder rejects
+steps with zero-progress `InvalidUse`, and a finished decoder returns zero-progress `Finished`. Empty output produces `NeedOutput` when
 emission is required. The module neither detects formats nor provides encoders or preset dictionaries.
 
 **Diagnostics:** Typed errors distinguish malformed headers, block and Huffman coding, invalid

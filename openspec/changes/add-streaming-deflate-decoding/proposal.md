@@ -8,6 +8,7 @@ Silk HTTP and file consumers cannot decode DEFLATE content without a host depend
 - Validate block coding, wrapper headers and checksums, and concatenated gzip members.
 - Expose caller-owned output, exact progress, explicit final input, typed failures, and cumulative resource limits.
 - Add independently sourced fixtures, boundary coverage in the shared native acceptance corpus, generated stdlib surfaces, and prescriptive documentation.
+- Add JUL-174 independent-stream `Decoder.reset` so callers can reuse owned storage after success, failure, or abandonment without an allocator at stream boundaries.
 - Exclude encoders, preset dictionaries, zstd, and new compiler privileges.
 
 ## Capabilities

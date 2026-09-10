@@ -6,7 +6,7 @@ Define portable DEFLATE decoding with bounded storage, caller-owned output, and 
 
 ### Requirement: Decoding is resumable ordinary Silk
 
-`silk.inflate` SHALL expose an owned decoder, explicit `Raw`, `Zlib`, and `Gzip` formats, caller-configured limits, and a pure step over borrowed input and mutable caller-owned output. Construction SHALL acquire bounded storage through the ordinary allocator. Steps SHALL retain no input or output borrow and SHALL perform no allocation. Success SHALL report exact consumed and written byte counts and `NeedInput`, `NeedOutput`, or `Finished`. Failure SHALL report a typed reason and exact progress for that call. Failed state SHALL reject reuse; finished state SHALL return `Finished` with zero progress.
+`silk.inflate` SHALL expose an owned decoder, explicit `Raw`, `Zlib`, and `Gzip` formats, caller-configured limits, and a pure step over borrowed input and mutable caller-owned output. Construction SHALL acquire bounded storage through the ordinary allocator. Steps SHALL retain no input or output borrow and SHALL perform no allocation. Success SHALL report exact consumed and written byte counts and `NeedInput`, `NeedOutput`, or `Finished`. Failure SHALL report a typed reason and exact progress for that call. Until explicit reset, failed state SHALL reject steps with zero-progress `InvalidUse`; finished state SHALL return `Finished` with zero progress.
 
 #### Scenario: Suspend inside a field
 
@@ -62,7 +62,7 @@ Zlib SHALL validate RFC 1950 CMF/FLG, compression method, window declaration, an
 
 ### Requirement: Limits apply cumulatively
 
-Caller limits SHALL bound total consumed input bytes, emitted output bytes, members started, header bytes including optional fields, and decoder-owned state/table memory. All counters SHALL be overflow-safe and checked before the corresponding consumption, emission, member start, or allocation. Limits SHALL never reset across calls or gzip members. Raw and zlib SHALL each count as one member. Fixed state/table storage SHALL have a documented upper bound enforced at construction; increasing the configured bound SHALL not grow decoder storage. Limit failures SHALL identify the exceeded limit. Caller input/output storage and allocator metadata SHALL be excluded from the decoder memory bound and documented as such.
+Caller limits SHALL bound total consumed input bytes, emitted output bytes, members started, header bytes including optional fields, and decoder-owned state/table memory. All counters SHALL be overflow-safe and checked before the corresponding consumption, emission, member start, or allocation. Limits SHALL remain cumulative across calls or gzip members within one independent stream. Raw and zlib SHALL each count as one member. Fixed state/table storage SHALL have a documented upper bound enforced at construction; increasing the configured bound SHALL not grow decoder storage. Limit failures SHALL identify the exceeded limit. Caller input/output storage and allocator metadata SHALL be excluded from the decoder memory bound and documented as such.
 
 #### Scenario: Output limit across members
 
@@ -73,6 +73,36 @@ Caller limits SHALL bound total consumed input bytes, emitted output bytes, memb
 
 - **WHEN** an optional field exceeds remaining header allowance or the configured memory allowance cannot hold decoder storage
 - **THEN** decoding fails before consuming the excess header byte or allocating decoder storage respectively
+
+### Requirement: Independent streams reuse decoder storage explicitly
+
+`Decoder.reset(self: &mut Self, format: Format, limits: Limits) -> Result<(), DecodeError>` SHALL
+start a fresh independent stream after success, typed failure, or abandonment. It SHALL allow any
+raw, zlib, or gzip format and new limits. It SHALL require no allocator, acquire no storage, expose
+no allocation failure, and preserve decoder-owned buffer allocations. Successful reset SHALL be
+observably equivalent to fresh construction with those inputs, including empty logical history,
+full format-appropriate window, checksum seeds, first-member count, cumulative counters,
+final-input obligations, and all parser/Huffman continuations.
+
+Before mutation, reset SHALL check `maxMemoryBytes >= MEMORY_BOUND`, then `maxMembers > 0`.
+Rejection SHALL return `MemoryLimit` or `MemberLimit` with zero consumed and written progress and
+leave the original decoder unchanged. Reset SHALL neither reclaim caller-owned output nor securely
+erase prior bytes. Output from a failed or abandoned stream SHALL remain provisional.
+
+#### Scenario: Invalid reset preserves an in-progress stream
+
+- **WHEN** either invalid reset allowance is supplied after partial decoding
+- **THEN** reset returns the corresponding zero-progress error and the original stream can continue to validated completion
+
+#### Scenario: A different format follows a terminal stream
+
+- **WHEN** a successful or poisoned decoder is reset with a different format and fresh limits
+- **THEN** its next stream behaves like a fresh decoder and cannot refer to the previous history
+
+#### Scenario: Abandon a partial Huffman symbol or final input
+
+- **WHEN** reset succeeds while a symbol, match, header, checksum, or final-input suffix is pending
+- **THEN** the next stream starts without that continuation, checksum, counter, or final-input state
 
 ### Requirement: Conformance and documentation are reproducible
 

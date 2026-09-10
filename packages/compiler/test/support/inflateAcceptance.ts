@@ -242,6 +242,7 @@ import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.inflate { Decoder, Format, Status, Limits, Progress, DecodeError, ErrorKind }
 import silk.result { Result }
+import silk.slice { Slice }
 import silk.vector { Vector }
 import silk.usize
 
@@ -461,11 +462,152 @@ effect fn lifecycle() -> i32 ! OutOfMemoryError | DecodeError ? &mut Allocator {
   return 0
 }
 
+// These helpers are ordinary functions: reset and every subsequent step require no allocator.
+fn resetSucceeded(outcome: Result<(), DecodeError>) -> bool {
+  return match move outcome {
+    Result<(), DecodeError>.Success { value } => true
+    Result<(), DecodeError>.Failure { error } => false
+  }
+}
+
+fn resetRejected(outcome: Result<(), DecodeError>, kind: ErrorKind) -> bool {
+  return match move outcome {
+    Result<(), DecodeError>.Success { value } => false
+    Result<(), DecodeError>.Failure { error } => error.kind == kind && error.consumed == 0 && error.written == 0
+  }
+}
+
+// A single byte of output exercises continuation without allocating per-stream buffers.
+fn finishResetStream(decoder: &mut Decoder, input: &[u8], pattern: &[u8], length: usize) -> bool {
+  let mut output: [u8; 1] = [0]
+  let mut consumed: usize = 0
+  let mut written: usize = 0
+  let mut calls: usize = 0
+  while calls < input.length + length + 2 {
+    calls = calls + 1
+    let suffix = Slice.view<u8>(input, consumed, input.length - consumed)
+    let outcome = observation(Decoder.step(&mut decoder, suffix, &mut output, true))
+    if outcome.failed || outcome.consumed > suffix.length || outcome.written > 1 { return false }
+    consumed = consumed + outcome.consumed
+    if outcome.written == 1 {
+      if written >= length || pattern.length == 0 { return false }
+      if output[0] != pattern[usize.remainder(written, pattern.length)] { return false }
+      written = written + 1
+    }
+    if outcome.status == Status.Finished { return consumed == input.length && written == length }
+    if outcome.status != Status.NeedOutput { return false }
+  }
+  return false
+}
+
+fn rejectedResetContinuation(decoder: &mut Decoder) -> bool {
+  let mut attempt: usize = 0
+  while attempt < 2 {
+    if !resetSucceeded(Decoder.reset(&mut decoder, Format.Raw, limits())) { return false }
+    let mut output: [u8; 1] = [0]
+    // Fixed literal A crosses this byte boundary, leaving a partial Huffman traversal.
+    let first = observation(Decoder.step(&mut decoder, b"\\x73", &mut output, false))
+    if first.failed || first.status != Status.NeedInput || first.consumed != 1 || first.written != 0 { return false }
+    let mut invalid = limits()
+    let mut kind = ErrorKind.MemoryLimit
+    if attempt == 0 {
+      invalid.maxMemoryBytes = 65535
+    } else {
+      invalid.maxMembers = 0
+      kind = ErrorKind.MemberLimit
+    }
+    if !resetRejected(Decoder.reset(&mut decoder, Format.Gzip, move invalid), kind) { return false }
+    // Each rejected reset must preserve the original format, reservoir and symbol continuation.
+    if !finishResetStream(&mut decoder, b"\\x04\\x00", b"A", 1) { return false }
+    attempt = attempt + 1
+  }
+  return true
+}
+
+fn resetStreams(decoder: &mut Decoder) -> i32 {
+  if !rejectedResetContinuation(&mut decoder) { return 1 }
+
+  let zlib = ${byteLiteral(zlib.compressed)}
+  let hello = ${byteLiteral(zlib.expected ?? [])}
+  let gzip = ${byteLiteral(gzip.compressed)}
+  let greeting = ${byteLiteral(gzip.expected ?? [])}
+  let concatenated = ${byteLiteral(concatenated.compressed)}
+  let joined = ${byteLiteral(concatenated.expected ?? [])}
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Gzip, limits())) { return 2 }
+  if !finishResetStream(&mut decoder, concatenated, joined, ${concatenated.expected?.length ?? 0}) { return 3 }
+  // Starting at a completed multi-member stream makes cumulative member state observable.
+  let mut repetition: usize = 0
+  while repetition < 2 {
+    let cap = Limits { maxInputBytes: ${gzip.compressed.length}, maxOutputBytes: ${gzip.expected?.length ?? 0}, maxMembers: 1, maxHeaderBytes: 41, maxMemoryBytes: 65536 }
+    if !resetSucceeded(Decoder.reset(&mut decoder, Format.Gzip, move cap)) { return 4 }
+    // Exact limits and the optional-header fixture witness all counters, CRCs and member size.
+    if !finishResetStream(&mut decoder, gzip, greeting, ${gzip.expected?.length ?? 0}) { return 5 }
+    repetition = repetition + 1
+  }
+  repetition = 0
+  while repetition < 2 {
+    if !resetSucceeded(Decoder.reset(&mut decoder, Format.Zlib, limits())) { return 6 }
+    if !finishResetStream(&mut decoder, zlib, hello, ${zlib.expected?.length ?? 0}) { return 7 }
+    repetition = repetition + 1
+  }
+
+  let mut output: [u8; 2] = [0, 0]
+  // Old output must not become a dictionary for the next independent raw stream.
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Raw, limits())) { return 8 }
+  let stale = observation(Decoder.step(&mut decoder, b"\\x03\\x02", &mut output, true))
+  if !stale.failed || stale.kind != ErrorKind.InvalidDistance || stale.written != 0 { return 9 }
+  // Recover a poisoned decoder, then fail only after writing caller-owned provisional output.
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Raw, limits())) { return 10 }
+  let failed = observation(Decoder.step(&mut decoder, b"\\x01\\x02\\x00\\xfd\\xff\\x41", &mut output, true))
+  if !failed.failed || failed.kind != ErrorKind.TruncatedInput || failed.written != 1 || output[0] != 65 { return 11 }
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Zlib, limits())) { return 12 }
+  if output[0] != 65 { return 13 }
+  if !finishResetStream(&mut decoder, zlib, hello, ${zlib.expected?.length ?? 0}) { return 14 }
+
+  // Abandon a final-input stream while output is blocked; the final suffix latch must disappear.
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Raw, limits())) { return 15 }
+  let mut empty: [u8; 0] = []
+  let pending = observation(Decoder.step(&mut decoder, b"\\x01\\x01\\x00\\xfe\\xff\\x41", &mut empty, true))
+  if pending.failed || pending.status != Status.NeedOutput { return 16 }
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Zlib, limits())) { return 17 }
+  if !finishResetStream(&mut decoder, zlib, hello, ${zlib.expected?.length ?? 0}) { return 18 }
+
+  // Abandonment also preserves a prefix already written into caller storage.
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Raw, limits())) { return 27 }
+  let abandoned = observation(Decoder.step(&mut decoder, b"\\x01\\x02\\x00\\xfd\\xff\\x41", &mut output, false))
+  if abandoned.failed || abandoned.status != Status.NeedInput || abandoned.written != 1 || output[0] != 65 { return 28 }
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Raw, limits())) { return 29 }
+  if output[0] != 65 { return 30 }
+
+  // A partial fixed symbol leaves non-default Huffman continuation fields.
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Raw, limits())) { return 19 }
+  let partial = observation(Decoder.step(&mut decoder, b"\\x73", &mut output, false))
+  if partial.failed || partial.status != Status.NeedInput || partial.written != 0 { return 20 }
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Raw, limits())) { return 21 }
+  if !finishResetStream(&mut decoder, b"\\x73\\x04\\x00", b"A", 1) { return 22 }
+
+  // CINFO=0 narrows zlib history to 256. A fresh raw stream permits distance 257.
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Zlib, limits())) { return 23 }
+  let narrowed = observation(Decoder.step(&mut decoder, b"\\x08\\x1d", &mut output, false))
+  if narrowed.failed || narrowed.status != Status.NeedInput || narrowed.consumed != 2 { return 24 }
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Raw, limits())) { return 25 }
+  let wide = ${byteLiteral([0, 1, 1, 254, 254, ...Array.from({ length: 257 }, () => 65), 3, 6, 0, 0])}
+  if !finishResetStream(&mut decoder, wide, b"A", 260) { return 26 }
+  return 0
+}
+
+effect fn resetLifecycle() -> i32 ! OutOfMemoryError | DecodeError ? &mut Allocator {
+  let mut decoder = run Decoder.make(Format.Raw, limits())
+  return resetStreams(&mut decoder)
+}
+
 effect fn exercise() -> i32 ! OutOfMemoryError | DecodeError ? &mut Allocator {
   let checked = run suite()
   if checked != 0 { return checked }
   if (run constructionLimits()) != 0 { return 65 }
   if (run lifecycle()) != 0 { return 66 }
+  let reset = run resetLifecycle()
+  if reset != 0 { return 200 + reset }
   return 42
 }
 
