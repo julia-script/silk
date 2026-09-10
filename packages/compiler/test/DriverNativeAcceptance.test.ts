@@ -130,15 +130,36 @@ const compileCSources = Effect.fnUntraced(function* (
 })
 
 /**
- * `SILK_NATIVE_SHARD=k/n` selects every n-th corpus case starting at k (1-based), letting CI run
- * the corpus as a job matrix instead of one serial sweep. Unset runs everything.
+ * `SILK_NATIVE_SHARD=k/n` selects every n-th corpus case starting at k (1-based), and
+ * `SILK_NATIVE_CORPUS_CASES` selects a comma-separated smoke set. Fixed acceptance scenarios run
+ * only on shard one and can be disabled with `SILK_NATIVE_FIXED_TESTS=false`.
  */
 const shard = /^([1-9]\d*)\/([1-9]\d*)$/.exec(configured('SILK_NATIVE_SHARD'))
-const selectedNativeCase = configured('SILK_NATIVE_CORPUS_CASE')
+const runFixedTests =
+  configured('SILK_NATIVE_FIXED_TESTS', 'true') === 'true' &&
+  (shard === null || Number(shard[1]) === 1)
 const shardedCorpus =
   shard === null
     ? nativeCorpus
     : nativeCorpus.filter((_, index) => index % Number(shard[2]) === Number(shard[1]) - 1)
+const selectedNativeCases = new Set(
+  configured('SILK_NATIVE_CORPUS_CASES')
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name.length !== 0),
+)
+const selectedCorpus = shardedCorpus.filter(
+  (program) => selectedNativeCases.size === 0 || selectedNativeCases.has(program.name),
+)
+
+it('finds every requested native corpus case', () => {
+  assert.deepStrictEqual(
+    [...selectedNativeCases].filter(
+      (name) => !selectedCorpus.some((program) => program.name === name),
+    ),
+    [],
+  )
+})
 
 it('assigns every native corpus case to exactly one CI shard', () => {
   const assignments = Array.from({ length: 3 }, (_, shardIndex) =>
@@ -160,85 +181,87 @@ const consumerSource = `#include "answer.h"
 int main(void) { return increment(40) + (int32_t)silk_abi_version; }
 `
 
-it.effect('relinks named archives after content and search-resolution changes', () =>
-  NativeToolchain.withBuildScope('named-archive-cache', (scope) =>
-    Effect.gen(function* () {
-      const target = yield* NativeToolchain.hostTarget()
-      const earlier = join(scope.root, 'earlier')
-      const later = join(scope.root, 'later')
-      yield* Effect.sync(() => {
-        mkdirSync(earlier)
-        mkdirSync(later)
-      })
-      const archive = Effect.fnUntraced(function* (directory: string, value: number) {
-        const object = yield* NativeToolchain.compileCObject(
-          toolchain,
-          scope,
-          target,
-          'selected',
-          `int silk_cache_selected(void) { return ${value}; }`,
-        )
-        yield* NativeToolchain.NativeFinalizer.finalize(
-          yield* NativeToolchain.planNativeLink(
+it.effect.skipIf(!runFixedTests)(
+  'relinks named archives after content and search-resolution changes',
+  () =>
+    NativeToolchain.withBuildScope('named-archive-cache', (scope) =>
+      Effect.gen(function* () {
+        const target = yield* NativeToolchain.hostTarget()
+        const earlier = join(scope.root, 'earlier')
+        const later = join(scope.root, 'later')
+        yield* Effect.sync(() => {
+          mkdirSync(earlier)
+          mkdirSync(later)
+        })
+        const archive = Effect.fnUntraced(function* (directory: string, value: number) {
+          const object = yield* NativeToolchain.compileCObject(
             toolchain,
             scope,
+            target,
+            'selected',
+            `int silk_cache_selected(void) { return ${value}; }`,
+          )
+          yield* NativeToolchain.NativeFinalizer.finalize(
+            yield* NativeToolchain.planNativeLink(
+              toolchain,
+              scope,
+              'NativeStaticLibrary',
+              yield* CompilationProfile.normalize({ target: target.id }),
+              [object.artifact],
+              [],
+              join(directory, 'libsilk_cache_selected.a'),
+              {
+                request: { kind: 'default' },
+                composition: { kind: 'default' },
+                resolved: { kind: 'default' },
+              },
+            ),
             'NativeStaticLibrary',
-            yield* CompilationProfile.normalize({ target: target.id }),
-            [object.artifact],
-            [],
             join(directory, 'libsilk_cache_selected.a'),
-            {
-              request: { kind: 'default' },
-              composition: { kind: 'default' },
-              resolved: { kind: 'default' },
-            },
-          ),
-          'NativeStaticLibrary',
-          join(directory, 'libsilk_cache_selected.a'),
-        )
-      })
-      const source = `unsafe extern "C" fn silk_cache_selected() -> i32
+          )
+        })
+        const source = `unsafe extern "C" fn silk_cache_selected() -> i32
 pub fn main() -> i32 { return unsafe silk_cache_selected() }`
-      const options = {
-        cache: true,
-        artifactCache: NativeToolchain.defaultArtifactCache(join(scope.root, 'cache')),
-        nativeLinkInputs: [
-          NativeLinkInput.searchPath(earlier),
-          NativeLinkInput.searchPath(later),
-          // Darwin's ordinary -l selection falls back to the sole .a fixture.
-          NativeLinkInput.library(
-            'silk_cache_selected',
-            platform() === 'darwin' ? 'Dynamic' : 'Static',
-          ),
-        ],
-      }
-      const statuses: Array<number | null> = []
-      const phases: Array<ReadonlyArray<string>> = []
-      for (const [directory, value] of [
-        [later, 11],
-        [later, 22],
-        [earlier, 33],
-      ] as const) {
-        yield* archive(directory, value)
-        const outcome = yield* compileSource('named-archive-cache', source, undefined, options)
-        assert.strictEqual(outcome._tag, 'Compiled')
-        if (outcome._tag !== 'Compiled') return
-        const run = yield* runCompiled(outcome.path)
-        statuses.push(run.status)
-        phases.push(outcome.report.map((entry) => entry.phase))
-      }
-      assert.deepStrictEqual(statuses, [11, 22, 33])
-      for (const report of phases) {
-        assert.include(report, 'link')
-        assert.notInclude(report, 'artifact-cache')
-      }
-      assert.include(phases[1] ?? [], 'backend-cache')
-      assert.include(phases[2] ?? [], 'backend-cache')
-    }),
-  ),
+        const options = {
+          cache: true,
+          artifactCache: NativeToolchain.defaultArtifactCache(join(scope.root, 'cache')),
+          nativeLinkInputs: [
+            NativeLinkInput.searchPath(earlier),
+            NativeLinkInput.searchPath(later),
+            // Darwin's ordinary -l selection falls back to the sole .a fixture.
+            NativeLinkInput.library(
+              'silk_cache_selected',
+              platform() === 'darwin' ? 'Dynamic' : 'Static',
+            ),
+          ],
+        }
+        const statuses: Array<number | null> = []
+        const phases: Array<ReadonlyArray<string>> = []
+        for (const [directory, value] of [
+          [later, 11],
+          [later, 22],
+          [earlier, 33],
+        ] as const) {
+          yield* archive(directory, value)
+          const outcome = yield* compileSource('named-archive-cache', source, undefined, options)
+          assert.strictEqual(outcome._tag, 'Compiled')
+          if (outcome._tag !== 'Compiled') return
+          const run = yield* runCompiled(outcome.path)
+          statuses.push(run.status)
+          phases.push(outcome.report.map((entry) => entry.phase))
+        }
+        assert.deepStrictEqual(statuses, [11, 22, 33])
+        for (const report of phases) {
+          assert.include(report, 'link')
+          assert.notInclude(report, 'artifact-cache')
+        }
+        assert.include(phases[1] ?? [], 'backend-cache')
+        assert.include(phases[2] ?? [], 'backend-cache')
+      }),
+    ),
 )
 
-it.effect(
+it.effect.skipIf(!runFixedTests)(
   'builds loadable shared/static libraries with only C exports visible',
   () =>
     Effect.gen(function* () {
@@ -361,75 +384,72 @@ it.effect(
   60_000,
 )
 
-for (const program of shardedCorpus.filter(
-  (program) => selectedNativeCase.length === 0 || program.name === selectedNativeCase,
-))
-  it.effect(
-    `runs the native corpus case ${program.name}`,
-    () =>
-      Effect.gen(function* () {
-        // Driver compilation checks and lowers this program once. MIR structure is covered by
-        // the shared verifier suite; repeating that pipeline here adds no runtime oracle.
-        const compiledObjects =
-          program.nativeCSources === undefined
-            ? []
-            : yield* compileCSources(`corpus-${program.name}`, program.nativeCSources)
-        const outcome = yield* compileSource(
-          `corpus-${program.name}`,
-          program.nativeSource ?? program.source,
-          program.nativeImports,
-          {
-            ...(program.nativeComponents === undefined
-              ? {}
-              : { components: program.nativeComponents }),
-            nativeLinkInputs: [
-              ...compiledObjects.map(NativeLinkInput.object),
-              ...(program.nativeDynamicLibraries ?? []).map((name) =>
-                NativeLinkInput.library(name, 'Dynamic'),
-              ),
-            ],
-          },
-        )
+it.effect.each(selectedCorpus)(
+  'runs the native corpus case $name',
+  (program) =>
+    Effect.gen(function* () {
+      // Driver compilation checks and lowers this program once. MIR structure is covered by
+      // the shared verifier suite; repeating that pipeline here adds no runtime oracle.
+      const compiledObjects =
+        program.nativeCSources === undefined
+          ? []
+          : yield* compileCSources(`corpus-${program.name}`, program.nativeCSources)
+      const outcome = yield* compileSource(
+        `corpus-${program.name}`,
+        program.nativeSource ?? program.source,
+        program.nativeImports,
+        {
+          ...(program.nativeComponents === undefined
+            ? {}
+            : { components: program.nativeComponents }),
+          nativeLinkInputs: [
+            ...compiledObjects.map(NativeLinkInput.object),
+            ...(program.nativeDynamicLibraries ?? []).map((name) =>
+              NativeLinkInput.library(name, 'Dynamic'),
+            ),
+          ],
+        },
+      )
 
-        let compilationMessage = program.name
-        if (outcome._tag === 'BackendFailed') {
-          compilationMessage = `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
-        } else if (outcome._tag === 'Rejected') {
-          compilationMessage = `${program.name}: ${outcome.diagnostics
-            .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
-            .join('\n')}`
-        }
-        assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)
-        if (outcome._tag !== 'Compiled') return
+      let compilationMessage = program.name
+      if (outcome._tag === 'BackendFailed') {
+        compilationMessage = `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
+      } else if (outcome._tag === 'Rejected') {
+        compilationMessage = `${program.name}: ${outcome.diagnostics
+          .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+          .join('\n')}`
+      }
+      assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)
+      if (outcome._tag !== 'Compiled') return
 
-        // Invocation variants exercise startup policy without recompiling the same program.
-        for (const invocation of program.nativeRuns ?? [{}]) {
-          const run = yield* runCompiled(outcome.path, invocation)
-          if (program.nativeStdout !== undefined)
-            assert.strictEqual(run.stdout, program.nativeStdout, program.name)
-          if (!invocation.closeStderr && program.nativeStderr !== undefined)
-            assert.strictEqual(run.stderr, program.nativeStderr, program.name)
-          if (program.expected._tag === 'Completes') {
-            const nativeStatus = run.status === null ? null : BigInt(run.status)
-            // POSIX exposes only the low unsigned byte of a process exit value.
-            const expectedStatus = BigInt(program.expected.result) & 0xffn
-            assert.strictEqual(
-              nativeStatus,
-              expectedStatus,
-              `unexpected native result for ${program.name}: expected ${program.expected.result}, native ${run.status}; ${Json.stringify({ signal: run.signal, stderr: run.stderr })}`,
-            )
-          } else {
-            assert.strictEqual(
-              run.signal !== null || (run.status !== null && run.status !== 0),
-              true,
-              `expected ${program.name} to trap, native exited ${run.status}`,
-            )
-          }
+      // Invocation variants exercise startup policy without recompiling the same program.
+      for (const invocation of program.nativeRuns ?? [{}]) {
+        const run = yield* runCompiled(outcome.path, invocation)
+        if (program.nativeStdout !== undefined)
+          assert.strictEqual(run.stdout, program.nativeStdout, program.name)
+        if (!invocation.closeStderr && program.nativeStderr !== undefined)
+          assert.strictEqual(run.stderr, program.nativeStderr, program.name)
+        if (program.expected._tag === 'Completes') {
+          const nativeStatus = run.status === null ? null : BigInt(run.status)
+          // POSIX exposes only the low unsigned byte of a process exit value.
+          const expectedStatus = BigInt(program.expected.result) & 0xffn
+          assert.strictEqual(
+            nativeStatus,
+            expectedStatus,
+            `unexpected native result for ${program.name}: expected ${program.expected.result}, native ${run.status}; ${Json.stringify({ signal: run.signal, stderr: run.stderr })}`,
+          )
+        } else {
+          assert.strictEqual(
+            run.signal !== null || (run.status !== null && run.status !== 0),
+            true,
+            `expected ${program.name} to trap, native exited ${run.status}`,
+          )
         }
-      }),
-    1_500_000,
-  )
-it.effect(
+      }
+    }),
+  1_500_000,
+)
+it.effect.skipIf(!runFixedTests)(
   'fails to link a foreign symbol nothing defines and keeps the linker output',
   () =>
     Effect.gen(function* () {
@@ -452,7 +472,7 @@ pub fn main() -> i32 { return unsafe silk_test_missing_symbol(1) }`,
     }),
   120_000,
 )
-it.effect(
+it.effect.skipIf(!runFixedTests)(
   'links and runs the native system and monotonic clock ABI',
   () =>
     Effect.gen(function* () {
