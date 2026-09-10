@@ -44,7 +44,6 @@ it.effect('keeps decoded certificate owners move-only and their returned views b
   Effect.gen(function* () {
     const source = `import silk.certificate { Certificate }
 import silk.certificate_bundle { CertificateBundle }
-import silk.allocator { Allocator, OutOfMemoryError }
 import silk.usize
 fn moved(value: Certificate) -> usize {
   let next = move value
@@ -59,33 +58,41 @@ fn viewed(value: Certificate) -> usize {
   drop value
   return bytes.length
 }
-effect fn abandon(value: Certificate, bundle: CertificateBundle) -> () ! OutOfMemoryError {
-  return run Allocator.outOfMemory()
-}
 pub fn main() -> i32 { return 0 }`
     const ownership = yield* AnalysisFixture.retainingMain(
       'certificate-acceptance/owner-and-view',
       ascii(source),
     )
-    const cleanup = Analysis.ownershipOf(
-      ownership,
-      'certificate-acceptance/owner-and-view',
-    )?.functions.find(
-      (operation) =>
-        operation.declaration.canonical._tag === 'Canonical' &&
-        operation.declaration.canonical.id.name === 'abandon',
-    )
-    assert.isDefined(cleanup)
-    const releases =
-      cleanup?.exits
-        .filter((exit) => exit.kind === 'Propagation')
-        .flatMap((exit) => exit.releases) ?? []
-    for (const name of ['value', 'bundle']) {
-      assert.isTrue(
-        releases.some(
-          (release) => release.binding.name === name && CleanupPlan.reclaims(release.cleanup),
-        ),
+    // The same snapshot includes decoder ownership facts: partial DER traversal/index storage,
+    // decoded PEM bytes, and a partially accumulated bundle must have reclaiming failure exits.
+    const partialStates = [
+      { module: 'silk/certificate', operation: 'openValue', bindings: ['frames'] },
+      { module: 'silk/certificate', operation: 'Certificate.decodeDer', bindings: ['extensions'] },
+      { module: 'silk/certificate', operation: 'Certificate.decodePem', bindings: ['value'] },
+      {
+        module: 'silk/certificate_bundle',
+        operation: 'CertificateBundle.decodePem',
+        bindings: ['certificates', 'block', 'certificate'],
+      },
+    ]
+    for (const state of partialStates) {
+      const operation = Analysis.ownershipOf(ownership, state.module)?.functions.find(
+        (candidate) =>
+          candidate.declaration.canonical._tag === 'Canonical' &&
+          candidate.declaration.canonical.id.name === state.operation,
       )
+      const releases =
+        operation?.exits
+          .filter((exit) => exit.kind === 'Propagation')
+          .flatMap((exit) => exit.releases) ?? []
+      for (const binding of state.bindings) {
+        const partial = releases.filter((release) => release.binding.name === binding)
+        assert.isNotEmpty(partial, `${state.operation}: ${binding}`)
+        assert.isTrue(
+          partial.every((release) => CleanupPlan.reclaims(release.cleanup)),
+          `${state.operation}: ${binding}`,
+        )
+      }
     }
     const diagnostics = Analysis.diagnostics(ownership)
     assert.deepEqual(
