@@ -218,16 +218,19 @@ Error precedence for `verify` is fixed:
 5. Search valid eligible SANs in source order and return the first matching `sanIndex`. Otherwise
    return `NoMatch`, including absent SAN/CN-only and unsupported-only SAN sets.
 
-For DNS SANs, a NUL or non-ASCII octet is a malformed certificate name. These octet checks precede
-wildcard handling and prevent invalid IA5String data or embedded terminators from being ignored.
-For remaining ASCII, NUL-free DNS payloads, count `*`: if there is more than one, or its sole
+For DNS SANs, non-ASCII octets invalidate IA5String and fail with a malformed certificate name
+before wildcard handling. NUL is an IA5-valid octet but malformed DNS syntax, not a DER failure.
+For remaining ASCII DNS payloads, count `*`: if there is more than one, or its sole
 occurrence is not the entire leftmost label, ignore that identifier as RFC 9525 §6.3 requires.
 Continue considering other entries. Such an ignored identifier still counts toward all limits.
-After this special rule, validate the ordinary DNS grammar above; the allowed initial `*` label
+After this special rule, validate the ordinary DNS grammar above, including NUL rejection;
+the allowed initial `*` label
 is exempt from LDH checks but requires a nonempty suffix (`*` alone is
 `MissingWildcardSuffix`). Other invalid names fail the complete set. Reference-only
 `WildcardReference` never describes a SAN; otherwise name-error precedence is the reference
-order after the octet/wildcard checks, with missing wildcard suffix before label checks.
+order after the non-ASCII/wildcard checks, with missing wildcard suffix before label checks.
+Thus `w*` plus NUL is ignored, while `*.exa` plus NUL plus `mple` fails as `Nul`. All scanning is
+length-delimited; no C-string truncation is permitted.
 
 Case folding affects ASCII A..Z only. Exact DNS matches require equal labels and label count.
 An eligible `*.example` matches one nonempty leftmost label, including an A-label, followed by

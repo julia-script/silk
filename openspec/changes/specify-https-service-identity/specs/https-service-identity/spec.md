@@ -82,7 +82,7 @@ SHALL follow design.md Decision 3 so inputs with multiple defects have stable ty
 
 DNS equality SHALL compare every label case-insensitively using ASCII A..Z folding only. A
 presented wildcard SHALL occur exactly once and be the entire leftmost label; it SHALL match
-exactly one nonempty reference label. After NUL/non-ASCII checks, a presented identifier violating
+exactly one nonempty reference label. After non-ASCII checks, a presented identifier violating
 the single/whole-leftmost wildcard rules SHALL be ignored while other SANs remain eligible.
 Other DNS syntax defects SHALL be malformed-certificate failures. A sole `*` SHALL fail with
 `MissingWildcardSuffix`; a valid wildcard SHALL have one or more ordinary suffix labels.
@@ -134,8 +134,10 @@ unsupported entries.
 
 After reference validation, verification SHALL apply structural, count-limit, byte-limit, and
 ordered per-entry validation in that precedence, before any success. It SHALL validate both DNS
-and IP SANs irrespective of reference kind. NUL/non-ASCII DNS octets SHALL fail before wildcard
-checks. Ignorable wildcard entries SHALL still consume budgets. Invalid ordinary DNS names or
+and IP SANs irrespective of reference kind. Non-ASCII DNS octets SHALL fail before wildcard
+checks because they invalidate IA5String. NUL SHALL be checked after invalid-wildcard skipping
+because it is malformed DNS syntax, not invalid IA5 encoding. Ignorable wildcard entries SHALL
+still consume budgets. Invalid ordinary DNS names or
 IP lengths anywhere SHALL defeat a matching SAN in either order. Valid unsupported GeneralName
 forms SHALL be ignored for matching and counted; invalid/misclassified `Other.tag` SHALL fail as
 `WrongGeneralNameTag`. Absent SAN/CN-only, unsupported-only and valid mismatching lists SHALL
