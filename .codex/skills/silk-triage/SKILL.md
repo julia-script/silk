@@ -35,6 +35,16 @@ says otherwise, choose stabilization leads before feature leads for the default 
    changes, and GitHub PRs. Treat the issue's proposed solution as a hypothesis. Explicitly decide
    whether the issue is still wanted, already delivered, outdated, newly owned elsewhere, or in need
    of revised acceptance because of changes since its Review baseline.
+   When the issue concerns a language, compiler, runtime, ABI, ownership, or standard-library
+   feature for which established implementations are informative, investigate and cite relevant
+   reference implementations. Include direct repository links and, when possible, links to the
+   exact source paths or revisions that support the comparison. Treat
+   [Zig](https://codeberg.org/ziglang/zig) as a major standard-library reference and
+   [Rust](https://github.com/rust-lang/rust) as a major ownership reference; also consult
+   [GCC](https://github.com/gcc-mirror/gcc), [LLVM/Clang](https://github.com/llvm/llvm-project), or
+   other relevant compiler repositories when their design bears on the feature. Choose references
+   by relevance rather than citing every implementation mechanically, and record the behavior,
+   tradeoff, or precedent the referenced code establishes.
 5. Resolve investigator and skeptic disagreements against repository evidence. When evidence is
    still insufficient, leave normal intake in Triage, set
    `Triage disposition: needs-more-investigation`, and add a focused comment stating what remains to
@@ -62,6 +72,9 @@ state` and `## Desired behavior` snippets under `WORKFLOW.md`. Verify the curren
    Backlog or Todo when the verdict remains valid; never promote an issue into Todo.
    Then update Review baseline to the exact triage commit with `Stage: triage` and either
    `Outcome: confirmed current` or `Outcome: specification revised`.
+   Preserve the applicable reference-implementation findings and direct repository/source links in
+   the rewritten issue so they remain available to the implementer; do not leave them only in the
+   investigator's transient notes.
 8. When completion is genuinely blocked, admit normal Triage intake to Backlog, add the smallest
    accurate `## Gate`, and
    apply the `Blocked` label. Use native issue relations for issue-to-issue blockers. Split an
