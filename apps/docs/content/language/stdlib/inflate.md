@@ -10,19 +10,20 @@ Bounded streaming decoding for raw DEFLATE, zlib, and gzip bytes.
 
 Use [`Decoder`](#declaration-73696c6b2f696e666c6174653a3a4465636f646572) to decode compressed input into caller-owned output buffers.
 Select [`Format`](#declaration-73696c6b2f696e666c6174653a3a466f726d6174) explicitly. Use [`make`](#declaration-73696c6b2f696e666c6174653a3a4465636f6465722e6d616b65) to create state and [`step`](#declaration-73696c6b2f696e666c6174653a3a4465636f6465722e73746570) to decode bytes.
+Use [`reset`](#declaration-73696c6b2f696e666c6174653a3a4465636f6465722e7265736574) to reuse a decoder for another independent stream.
 This module does not detect formats or encode data.
 
 ## Details
 
 Construction acquires two bounded allocations: history and table storage.
-Steps retain no borrowed buffers and allocate nothing.
-Limits count consumed input, emitted output, started members, and header bytes across all calls.
+Steps and reset retain no borrowed buffers and allocate nothing.
+Limits count consumed input, emitted output, started members, and header bytes within each independent stream.
 Raw and zlib stop at the first stream boundary. Gzip accepts concatenated members and requires final input.
 
 ## Gotchas
 
 Output is provisional until `Finished`. Discard all output after a decoding failure.
-Preset dictionaries are unsupported. A failed decoder cannot be reused.
+Preset dictionaries are unsupported. A failed decoder rejects steps until a successful reset.
 
 ## Examples
 
@@ -430,7 +431,7 @@ Consuming a header byte would exceed the header allowance.
 MemoryLimit = 14
 ```
 
-Construction cannot fit within the decoder storage allowance.
+Construction or reset cannot fit within the decoder storage allowance.
 
 <a id="declaration-73696c6b2f696e666c6174653a3a4465636f64654572726f72"></a>
 
@@ -444,7 +445,8 @@ A typed failure with exact progress for the failing call.
 
 ### Gotchas
 
-The written prefix can contain provisional output. Discard the complete decoded stream after any failure.
+The written prefix can contain provisional output. Discard the decoded stream after a step failure.
+A rejected reset leaves the original decoder and its output unchanged.
 
 <a id="declaration-73696c6b2f696e666c6174653a3a4465636f64654572726f723a3a6669656c643a30"></a>
 
@@ -489,7 +491,8 @@ An owned, bounded decoder with no retained input or output borrow.
 ### Details
 
 Drop releases its history and table allocations. A finished decoder returns `Finished` with zero progress on later calls.
-A failed decoder rejects later calls with `InvalidUse`.
+A failed decoder rejects later steps with `InvalidUse`.
+A successful [`reset`](#declaration-73696c6b2f696e666c6174653a3a4465636f6465722e7265736574) starts another independent stream with the same owned storage.
 
 <a id="declaration-73696c6b2f696e666c6174653a3a4465636f6465722e6d616b65"></a>
 
@@ -505,6 +508,33 @@ Creates a decoder and acquires bounded history and table storage through the cur
 
 Construction fails with `MemoryLimit` or `MemberLimit` before allocation if either allowance is insufficient.
 Allocation failure is `OutOfMemoryError`. The first member counts at construction.
+
+<a id="declaration-73696c6b2f696e666c6174653a3a4465636f6465722e7265736574"></a>
+
+### Method `Decoder.reset`
+
+```silk
+pub fn reset<'life0>(self: &'life0 mut Decoder, format: Format, limits: Limits) -> silk/result.Result<(), silk/inflate.DecodeError>
+```
+
+Starts another independent stream with the existing decoder storage.
+
+#### When to use
+
+Use after completion, failure, or abandonment to reuse storage without an allocator requirement.
+
+#### Details
+
+Success replaces the format and limits and restores fresh stream behavior. Reset allocates nothing.
+The first member counts immediately. Counters and final-input obligations start again for the new stream.
+The memory allowance must cover [`MEMORY_BOUND`](#declaration-73696c6b2f696e666c6174653a3a4d454d4f52595f424f554e44), and the member allowance must be nonzero.
+These checks occur in that order before mutation. Rejection returns `MemoryLimit` or `MemberLimit` with zero progress.
+A rejected reset leaves the decoder unchanged. An in-progress stream can continue.
+
+#### Gotchas
+
+Reset does not validate, reclaim, or erase previous output. Output from failed or abandoned streams remains provisional.
+Reset does not securely erase the decoder storage.
 
 <a id="declaration-73696c6b2f696e666c6174653a3a4465636f6465722e73746570"></a>
 
@@ -526,4 +556,5 @@ Raw and zlib leave trailing input unconsumed. Gzip waits for final exhaustion af
 #### Gotchas
 
 Output remains provisional until `Finished`. A failure poisons the decoder; discard all output after failure.
-Limits are cumulative across calls and gzip members. Checks occur before the excess byte or member is accepted.
+Limits are cumulative across calls and gzip members until a successful [`reset`](#declaration-73696c6b2f696e666c6174653a3a4465636f6465722e7265736574).
+Checks occur before the excess byte or member is accepted.

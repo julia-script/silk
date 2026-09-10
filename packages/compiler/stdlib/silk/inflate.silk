@@ -3,17 +3,18 @@
 //! # When to use
 //! Use [`Decoder`] to decode compressed input into caller-owned output buffers.
 //! Select [`Format`] explicitly. Use [`make`] to create state and [`step`] to decode bytes.
+//! Use [`reset`] to reuse a decoder for another independent stream.
 //! This module does not detect formats or encode data.
 //!
 //! # Details
 //! Construction acquires two bounded allocations: history and table storage.
-//! Steps retain no borrowed buffers and allocate nothing.
-//! Limits count consumed input, emitted output, started members, and header bytes across all calls.
+//! Steps and reset retain no borrowed buffers and allocate nothing.
+//! Limits count consumed input, emitted output, started members, and header bytes within each independent stream.
 //! Raw and zlib stop at the first stream boundary. Gzip accepts concatenated members and requires final input.
 //!
 //! # Gotchas
 //! Output is provisional until `Finished`. Discard all output after a decoding failure.
-//! Preset dictionaries are unsupported. A failed decoder cannot be reused.
+//! Preset dictionaries are unsupported. A failed decoder rejects steps until a successful reset.
 //!
 //! # Examples
 //! ## Decode a stored block into a caller-owned buffer
@@ -151,7 +152,7 @@ pub enum ErrorKind {
   MemberLimit,
   /// Consuming a header byte would exceed the header allowance.
   HeaderLimit,
-  /// Construction cannot fit within the decoder storage allowance.
+  /// Construction or reset cannot fit within the decoder storage allowance.
   MemoryLimit,
 }
 
@@ -159,7 +160,8 @@ pub enum ErrorKind {
 ///
 /// # Gotchas
 ///
-/// The written prefix can contain provisional output. Discard the complete decoded stream after any failure.
+/// The written prefix can contain provisional output. Discard the decoded stream after a step failure.
+/// A rejected reset leaves the original decoder and its output unchanged.
 pub struct DecodeError {
   /// The failure category.
   pub kind: ErrorKind
@@ -174,7 +176,8 @@ pub struct DecodeError {
 /// # Details
 ///
 /// Drop releases its history and table allocations. A finished decoder returns `Finished` with zero progress on later calls.
-/// A failed decoder rejects later calls with `InvalidUse`.
+/// A failed decoder rejects later steps with `InvalidUse`.
+/// A successful [`reset`] starts another independent stream with the same owned storage.
 pub struct Decoder {
   format: Format
   limits: Limits
@@ -312,6 +315,91 @@ impl Decoder {
       hLength: 1,
     }
   }
+  /// Starts another independent stream with the existing decoder storage.
+  ///
+  /// # When to use
+  ///
+  /// Use after completion, failure, or abandonment to reuse storage without an allocator requirement.
+  ///
+  /// # Details
+  ///
+  /// Success replaces the format and limits and restores fresh stream behavior. Reset allocates nothing.
+  /// The first member counts immediately. Counters and final-input obligations start again for the new stream.
+  /// The memory allowance must cover [`MEMORY_BOUND`], and the member allowance must be nonzero.
+  /// These checks occur in that order before mutation. Rejection returns `MemoryLimit` or `MemberLimit` with zero progress.
+  /// A rejected reset leaves the decoder unchanged. An in-progress stream can continue.
+  ///
+  /// # Gotchas
+  ///
+  /// Reset does not validate, reclaim, or erase previous output. Output from failed or abandoned streams remains provisional.
+  /// Reset does not securely erase the decoder storage.
+  pub fn reset(self: &mut Self, format: Format, limits: Limits) -> Result<(), DecodeError> {
+    if limits.maxMemoryBytes < MEMORY_BOUND {
+      return Result.failResult<(), DecodeError>(
+        DecodeError {kind: ErrorKind.MemoryLimit, consumed: 0, written: 0},
+      )
+    }
+    if limits.maxMembers == 0 {
+      return Result.failResult<(), DecodeError>(
+        DecodeError {kind: ErrorKind.MemberLimit, consumed: 0, written: 0},
+      )
+    }
+    let mut phase: u32 = 10
+    if format == Format.Zlib {
+      phase = 6
+    }
+    if format == Format.Gzip {
+      phase = 0
+    }
+    // Match construction defaults while keeping both vectors in place. Empty logical history
+    // hides old bytes; fixed/dynamic table setup overwrites every workspace entry before use.
+    self.format = format
+    self.limits = move limits
+    self.historyNext = 0
+    self.historyCount = 0
+    self.window = 32768
+    self.literalMaximum = 0
+    self.distanceMaximum = 0
+    self.codeMaximum = 0
+    self.phase = phase
+    self.error = ErrorKind.InvalidUse
+    self.totalInput = 0
+    self.totalOutput = 0
+    self.totalHeaders = 0
+    self.members = 1
+    self.finalSeen = false
+    self.finalRemaining = 0
+    self.inputPosition = 0
+    self.outputPosition = 0
+    self.bits = 0
+    self.bitCount = 0
+    self.value = 0
+    self.finalBlock = false
+    self.index = 0
+    self.remaining = 0
+    self.flags = 0
+    self.first = 0
+    self.trailer = 0
+    self.headerCrc = 0xffffffff
+    self.crc = 0xffffffff
+    self.adlerLow = 1
+    self.adlerHigh = 0
+    self.memberSize = 0
+    self.literalCount = 0
+    self.distanceCount = 0
+    self.codeCount = 0
+    self.repeat = 0
+    self.repeatValue = 0
+    self.matchLength = 0
+    self.matchDistance = 0
+    self.extra = 0
+    self.pending = 0
+    self.hCode = 0
+    self.hFirst = 0
+    self.hIndex = 0
+    self.hLength = 1
+    return Result.succeed<(), DecodeError>(())
+  }
   /// Decodes input into the supplied output buffer and returns exact per-call progress.
   ///
   /// # Details
@@ -324,7 +412,8 @@ impl Decoder {
   /// # Gotchas
   ///
   /// Output remains provisional until `Finished`. A failure poisons the decoder; discard all output after failure.
-  /// Limits are cumulative across calls and gzip members. Checks occur before the excess byte or member is accepted.
+  /// Limits are cumulative across calls and gzip members until a successful [`reset`].
+  /// Checks occur before the excess byte or member is accepted.
   pub fn step(self: &mut Self, input: &[u8], output: &mut [u8], finalInput: bool) -> Result<
     Progress,
     DecodeError,
