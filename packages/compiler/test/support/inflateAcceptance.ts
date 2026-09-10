@@ -536,15 +536,11 @@ fn resetStreams(decoder: &mut Decoder) -> i32 {
   if !resetSucceeded(Decoder.reset(&mut decoder, Format.Gzip, limits())) { return 2 }
   if !finishResetStream(&mut decoder, concatenated, joined, ${concatenated.expected?.length ?? 0}) { return 3 }
   // Starting at a completed multi-member stream makes cumulative member state observable.
+  let cap = Limits { maxInputBytes: ${gzip.compressed.length}, maxOutputBytes: ${gzip.expected?.length ?? 0}, maxMembers: 1, maxHeaderBytes: 41, maxMemoryBytes: 65536 }
+  if !resetSucceeded(Decoder.reset(&mut decoder, Format.Gzip, move cap)) { return 4 }
+  // Exact limits and the optional-header fixture witness all counters, CRCs and member size.
+  if !finishResetStream(&mut decoder, gzip, greeting, ${gzip.expected?.length ?? 0}) { return 5 }
   let mut repetition: usize = 0
-  while repetition < 2 {
-    let cap = Limits { maxInputBytes: ${gzip.compressed.length}, maxOutputBytes: ${gzip.expected?.length ?? 0}, maxMembers: 1, maxHeaderBytes: 41, maxMemoryBytes: 65536 }
-    if !resetSucceeded(Decoder.reset(&mut decoder, Format.Gzip, move cap)) { return 4 }
-    // Exact limits and the optional-header fixture witness all counters, CRCs and member size.
-    if !finishResetStream(&mut decoder, gzip, greeting, ${gzip.expected?.length ?? 0}) { return 5 }
-    repetition = repetition + 1
-  }
-  repetition = 0
   while repetition < 2 {
     if !resetSucceeded(Decoder.reset(&mut decoder, Format.Zlib, limits())) { return 6 }
     if !finishResetStream(&mut decoder, zlib, hello, ${zlib.expected?.length ?? 0}) { return 7 }

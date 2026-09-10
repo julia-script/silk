@@ -327,7 +327,7 @@ impl Decoder {
   /// The first member counts immediately. Counters and final-input obligations start again for the new stream.
   /// The memory allowance must cover [`MEMORY_BOUND`], and the member allowance must be nonzero.
   /// These checks occur in that order before mutation. Rejection returns `MemoryLimit` or `MemberLimit` with zero progress.
-  /// A rejected reset leaves the original stream unchanged and resumable.
+  /// A rejected reset leaves the decoder unchanged. An in-progress stream can continue.
   ///
   /// # Gotchas
   ///
