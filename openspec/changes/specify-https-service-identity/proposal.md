@@ -32,3 +32,9 @@ Generic URI syntax remains with JUL-164, certificate decoding with JUL-167, cert
 policy and name constraints with JUL-168, and TLS composition with JUL-171. No new intrinsic is
 needed. Published language references and generated stdlib inventories remain descriptions of
 implemented capabilities.
+
+At the refreshed base `991386ae75fe3037e70da1cde9dc71d91dbc3e67`, JUL-182 implements JUL-167's
+certificate envelope decoder. It exposes raw extension values and retains duplicates; it does
+not decode SAN GeneralNames. The proposed matcher still consumes explicit decoded inputs. A
+separate identity-consumer adapter must bridge the raw extension API before certificate/TLS
+integration; neither this design nor the pure matcher follow-up claims to deliver that adapter.

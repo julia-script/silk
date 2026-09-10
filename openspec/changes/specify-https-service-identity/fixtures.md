@@ -116,8 +116,13 @@ Reference is `N(www.example)` except where specified.
 | M13 | Structurally malformed input plus zero budgets                                                | Structure failure wins                              |
 | M14 | `OriginHost.Unsupported` with `UriId` or `SrvId`                                              | Corresponding `Unsupported`                         |
 
-Decoder integration must map DER/SAN structure faults to M05 even if a valid name was decoded
-first. A fabricated `Decoded` value is not proof that real DER was validated.
+SAN adapter integration must map DER/SAN structure faults to M05 even if a valid name was decoded
+first. JUL-182's certificate decoder preserves extension payloads opaquely and retains duplicate
+OIDs: successful envelope decoding can therefore precede M05 for malformed SAN contents or
+duplicate SAN extensions. Those cases need the separate adapter, not a change to the envelope
+decoder or an assumed existing GeneralNames API. A fabricated `Decoded` value is not proof that
+real DER was validated. These notes clarify integration provenance without changing matrix v1
+expectations or adding executable fixtures.
 
 ## Limits and work
 

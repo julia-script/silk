@@ -19,7 +19,7 @@ matrix is a specification for JUL-183, not delivered runtime support.
 - [JUL-183](https://linear.app/juliaortiz/issue/JUL-183) is the separately scoped five-point runtime
   follow-up, created in canonical-project Triage and read back successfully.
 
-## Local repository verification
+## Initial local repository verification
 
 Commands ran in the required order on the published design commit:
 
@@ -54,7 +54,7 @@ No timeouts, assertions, production code or runner settings were changed to obta
 
 `pnpm release:candidate` is not applicable because no package contents or exports change.
 
-## CI and remaining gate
+## Initial CI
 
 [CI for the reviewed design commit](https://github.com/julia-script/silk/actions/runs/34530688744)
 passed validation, all four compiler shards, documentation, LSP/CLI, native smoke, macOS native OS
@@ -62,7 +62,28 @@ and WebContainer browser jobs. The platform-supply job was skipped by its workfl
 The draft PR and Linear record hold the exact final head SHA and current CI status after this
 verification-record update.
 
-Required local verification remains unresolved. Preserve the draft and resume the repository gate
-when the host has sufficient isolated capacity; do not mark JUL-169 In Review or claim the complete
-workflow has passed. The test-economics reviewer advised against another full run under unchanged
-contention. No runtime support is claimed by this design or its verification.
+## Resumed verification and base correction
+
+The user resumed verification after final metadata head `a11fe0e4` passed all applicable
+[CI jobs](https://github.com/julia-script/silk/actions/runs/34533767397). Typecheck, formatting and
+lint passed again. Default-worker LSP passed all 149 tests; a different compiler layout test then
+timed out at 60 seconds, and that run was stopped.
+
+A scheduling-only retry used `VITEST_MAX_WORKERS=2`, temporarily passed through Turbo's strict
+environment. The wrapper restored `turbo.json` byte-for-byte afterward. No suites, assertions or
+timeouts changed. All 209 compiler files and all 2,449 tests passed in 1,263.33 seconds. Native
+acceptance then exposed malformed source in existing corpus programs (`silk.i32n`, missing
+`pub fn`, and similar corruption), producing `Rejected` instead of `Compiled`. The obsolete-base
+run was stopped after those concrete failures; it was not a successful full `pnpm test`, and its
+chained `pnpm check` was not reached.
+
+These malformed corpus fixtures predate JUL-169: the task diff never changes them, and they are
+present at the initial work base. Fix commit `333f76c70f35a9f9e43c313005a053884e84f0e2` subsequently
+landed in main through PR #407. The task branch was rebased onto
+`991386ae75fe3037e70da1cde9dc71d91dbc3e67`, incorporating that upstream fix without adding it to
+the identity PR's scoped diff. The same upstream change delivers raw certificate-extension views;
+the design now distinguishes that API from the still-deferred GeneralNames/SAN adapter.
+
+Fresh verification on the corrected base is pending. The PR and Linear record will hold the exact
+reviewed final head, executed versus cached checks and current CI result. No runtime identity
+support is delivered by this design.

@@ -4,13 +4,20 @@ This is the design deliverable for [JUL-169](https://linear.app/juliaortiz/issue
 runtime implementation. See [proposal.md](proposal.md) for motivation and
 [the delta specification](specs/https-service-identity/spec.md) for observable requirements.
 
-Work admission inspected clean `c6eae2f976a8f1a7681ffbfdcbbc8c776b9f0c96` against
+Initial work admission inspected clean `c6eae2f976a8f1a7681ffbfdcbbc8c776b9f0c96` against
 `f5ada543a1738e4f0c69b311bdeb9a72e32e9dd3`. URI, HMAC/HKDF, inflate/zstd and storage APIs have
 landed since triage. Graph queries and bounded source/manifest/reference/OpenSpec searches found
 no identity implementation; Silk graph coverage is incomplete. Open PR #404 owns cryptographic
 profile selection, not identity. Existing `Uri.host` preserves brackets and percent escapes;
 `Uri.hostKind` distinguishes registered names, IPv4, IPv6 and IPvFuture. It deliberately does not
 establish an HTTPS reference identity.
+
+Rebase admission additionally inspected that work base through
+`991386ae75fe3037e70da1cde9dc71d91dbc3e67`. Merged PR #405 specifies bounded certificate
+decoding (JUL-167); PR #407 implements it (JUL-182) and repairs fourteen baseline native corpus
+fixtures. The delivered certificate actor preserves raw extensions, including duplicate OIDs,
+without decoding GeneralNames or matching identities. This does not supersede JUL-169. The
+matcher remains independent of that actor; the missing SAN adapter is identified below.
 
 ## Goals / Non-Goals
 
@@ -144,7 +151,7 @@ them during shared borrowing. No hidden certificate copy, self-reference, cached
 allocation, I/O, Effect failure row or provider is involved. Callers needing longer-lived DNS
 references keep their own `String`/`Bytes` owner and create a view when needed.
 
-This shape avoids coupling to future parser handles or inventing an owned certificate model. A
+This shape avoids coupling to certificate handles or inventing an owned certificate model. A
 caller can populate descriptors from static bytes today in a future matcher test. Production
 adapters must preserve the complete leaf SAN list in source order and report structural failure;
 they must not filter names before this boundary. `Absent` means no SAN extension, not an empty
@@ -153,6 +160,25 @@ GeneralName alternative number 0..8 excluding 2 (dNSName) and 7 (iPAddress); tho
 `Dns`/`Ip`. Out-of-range or misclassified tags produce `WrongGeneralNameTag`. URI-ID uses tag 6;
 SRVName is within tag 0. No semantic parsing of `Other` payloads occurs here. Its bytes include the
 complete alternative content octets, including nested otherName content, for accounting.
+
+The delivered `silk.certificate.Certificate` supplies `extensionCount(self: &Self) -> usize` and
+`extension<'a>(self: &'a Self, index: usize) -> Option<ExtensionView<'a>>`.
+`ExtensionView.oid` holds DER OID content octets, and `value` holds the opaque extension OCTET
+STRING content. Both borrow the certificate owner. The decoder neither interprets that value
+as GeneralNames nor rejects duplicate extension OIDs; its success cannot be substituted for
+`CertificateIdentities.Decoded`.
+
+A separately implemented SAN adapter must select subjectAltName OID `2.5.29.17` (content octets
+`55 1d 11`), detect duplicate occurrences across the complete extension list, and decode its
+GeneralNames content before constructing these descriptors. It must distinguish absence from an
+empty or malformed value, preserve order and every alternative, and retain the certificate owner
+and descriptor storage for the shared borrow. Its own raw-input, traversal and descriptor-storage
+budgets must apply before matching; the matcher's payload budgets do not bound ASN.1 decoding.
+The accepted JUL-167 design assigns SAN interpretation to the identity consumer, not the envelope
+decoder. This adapter is tracked separately as [JUL-184](https://linear.app/juliaortiz/issue/JUL-184)
+(five-point Triage intake), an integration obligation outside both JUL-169's design-only
+delivery and JUL-183's pure matcher implementation. No SAN parser API or implementation is added
+here; manually supplied decoded inputs remain sufficient for JUL-183.
 
 ### 2. Select the original HTTPS host before networking
 

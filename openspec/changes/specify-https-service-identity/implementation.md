@@ -5,8 +5,10 @@ Estimate: **5 points**, standard-library feature, Low priority. Tracked separate
 [JUL-183](https://linear.app/juliaortiz/issue/JUL-183), created in Triage pending design acceptance
 and technical admission. This is subsequent implementation, not runtime work in JUL-169.
 
-The implementation can proceed once this design is accepted; JUL-164/167/168/171 implementations
-are not prerequisites for the core API. Use `design.md` Decision 1 as the exact public contract
+The implementation can proceed once this design is accepted; URI, certificate, trust and TLS
+integration are not prerequisites for the core API. JUL-164's URI API and JUL-182's implementation
+of JUL-167 certificate decoding already exist at the refreshed base; neither supplies the planned
+SAN descriptor adapter. Use `design.md` Decision 1 as the exact public contract
 and `fixtures.md` v1 as the fixture oracle. No new intrinsic or external dependency is expected.
 
 ## Scope and acceptance
@@ -32,15 +34,22 @@ No runtime checklist item is marked complete by publishing this design.
 
 ## Ownership boundaries
 
-| Owner                                                  | Retained work                                  | Integration obligation                                                                                                                   |
-| ------------------------------------------------------ | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| [JUL-164](https://linear.app/juliaortiz/issue/JUL-164) | Generic URI syntax and lossless components     | Preserve host classification and source data; HTTPS caller owns stricter admission and binary conversion                                 |
-| [JUL-167](https://linear.app/juliaortiz/issue/JUL-167) | PEM/DER/X.509 decoding                         | Bound decoding; expose complete leaf SAN data or structural failure, never prefilter invalid names                                       |
-| [JUL-168](https://linear.app/juliaortiz/issue/JUL-168) | Certification path, trust and name constraints | Require independent identity result for the same leaf; use separate constraint encodings                                                 |
-| [JUL-171](https://linear.app/juliaortiz/issue/JUL-171) | TLS state/record/handshake composition         | Retain original origin, reject unsupported forms upstream and gate application data on identity plus trust plus handshake authentication |
+| Owner                                                                                                                         | Retained work                                  | Integration obligation                                                                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| [JUL-164](https://linear.app/juliaortiz/issue/JUL-164)                                                                        | Generic URI syntax and lossless components     | Preserve host classification and source data; HTTPS caller owns stricter admission and binary conversion                                 |
+| [JUL-167](https://linear.app/juliaortiz/issue/JUL-167), implemented by [JUL-182](https://linear.app/juliaortiz/issue/JUL-182) | PEM/DER/X.509 envelope decoding                | Preserve every raw extension and duplicate OID; SAN GeneralNames interpretation remains with a separate identity-consumer adapter        |
+| [JUL-168](https://linear.app/juliaortiz/issue/JUL-168)                                                                        | Certification path, trust and name constraints | Require independent identity result for the same leaf; use separate constraint encodings                                                 |
+| [JUL-171](https://linear.app/juliaortiz/issue/JUL-171)                                                                        | TLS state/record/handshake composition         | Retain original origin, reject unsupported forms upstream and gate application data on identity plus trust plus handshake authentication |
 
-URI/IP text conversion and full DER fixtures belong to future integration with those owners,
-not the pure matcher follow-up. Decoder integration tests must include a matching SAN followed
-by a structural failure. HTTP integration must prove no DNS alias/address substitution and keep
+URI/IP text conversion, bounded SAN adapter implementation and full DER fixtures belong to future
+integration with those owners, not the five-point pure matcher follow-up. The SAN adapter is
+separate identity-consumer work tracked as [JUL-184](https://linear.app/juliaortiz/issue/JUL-184),
+a provisional five-point Triage intake before JUL-171 certificate integration; it must not be
+mistaken for work already delivered by JUL-182. It consumes `Certificate.extensionCount` and
+`Certificate.extension`, selects OID `2.5.29.17`, rejects duplicates, and owns bounded GeneralNames
+decoding and caller-visible descriptor storage as described in design.md Decision 1. Adapter
+integration tests must include a matching SAN followed by a structural failure, duplicate SAN
+extensions retained by the envelope decoder, and malformed opaque SAN contents after successful
+certificate decoding. HTTP integration must prove no DNS alias/address substitution and keep
 port-based origin separation. Neither integration is implied to exist by this design or by the
 pure matcher follow-up.

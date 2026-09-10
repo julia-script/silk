@@ -132,6 +132,12 @@ SHALL fail structurally. Production adapters SHALL preserve every SAN in origina
 report structural errors before offering a decoded list; they MUST NOT prefilter invalid or
 unsupported entries.
 
+The delivered certificate envelope decoder's raw extension views SHALL NOT be treated as decoded
+SAN identities. A separate identity-consumer adapter SHALL select subjectAltName OID `2.5.29.17`,
+detect duplicate SAN extensions, decode complete GeneralNames under its own finite parsing/storage
+budgets, and preserve the certificate owner and descriptor lifetimes. This integration obligation
+SHALL NOT expand JUL-169 into parsing work or require a decoder dependency in the pure matcher.
+
 After reference validation, verification SHALL apply structural, count-limit, byte-limit, and
 ordered per-entry validation in that precedence, before any success. It SHALL validate both DNS
 and IP SANs irrespective of reference kind. Non-ASCII DNS octets SHALL fail before wildcard
@@ -157,6 +163,11 @@ return `NoMatch`. `Decoded` with zero entries SHALL be `EmptySanExtension`.
 
 - **WHEN** a certificate has only a matching CN, or only valid URI-ID/SRV-ID SANs
 - **THEN** verification returns `NoMatch` and does not fall back to those names
+
+#### Scenario: Certificate envelope decoding is not SAN decoding
+
+- **WHEN** certificate decoding succeeds while preserving duplicate SAN OIDs or malformed opaque SAN contents
+- **THEN** the separate SAN adapter reports the appropriate structural failure rather than treating envelope success as a complete decoded identity list
 
 ### Requirement: SAN count and bytes bound matching work
 
