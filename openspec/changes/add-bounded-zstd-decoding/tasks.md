@@ -12,5 +12,5 @@
 ## 3. Verification and delivery
 
 - [x] 3.1 Run typecheck, format:check, lint, test, check, and release:candidate in required order; retain exact results.
-- [ ] 3.2 Complete independent correctness review and separate test-economics review, fix verified findings, and obtain approval on the committed diff.
-- [ ] 3.3 Push the issue branch, create and confirm a draft PR, and update Linear with verified head and evidence.
+- [x] 3.2 Complete independent correctness review and separate test-economics review, fix verified findings, and obtain approval on the committed diff.
+- [x] 3.3 Push the issue branch, create and confirm a draft PR, and update Linear with verified head and evidence.
