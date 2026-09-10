@@ -121,6 +121,7 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
           operation._tag === 'RawBufferCount' ||
           operation._tag === 'RawBufferSlot' ||
           operation._tag === 'RawBufferRead' ||
+          operation._tag === 'SliceView' ||
           operation._tag === 'RawBufferView' ||
           operation._tag === 'RawBufferCopy' ||
           operation._tag === 'RawBufferFill' ||

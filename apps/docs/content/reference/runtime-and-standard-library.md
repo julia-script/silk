@@ -407,6 +407,70 @@ constant-time comparison, truncation policy, TLS labels, password hashing, or se
 [RFC 4231](https://www.rfc-editor.org/rfc/rfc4231.html), and
 [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869.html).
 
+### STDLIB-009 — URI syntax preserves its original serialization
+
+**Status:** Confirmed
+
+`silk.uri.Uri` accepts RFC 3986's `URI` production: a scheme is required and a fragment is allowed.
+`silk.uri_reference.UriReference` also accepts relative references. Both are lifetime-bound borrowed values.
+Parsing stores the input view and validated byte ranges without allocating. Accessors retain the
+input lifetime; no view can outlive its storage. `copy` and `parseOwned` explicitly create
+`OwnedUri` or `OwnedUriReference`; `fromString` validates and adopts existing owned text without
+copying. Owned values expose borrowed views and can transfer their serialization with `intoString`. `format` returns the original text without normalization,
+including the case of schemes, hosts, and percent escapes.
+
+Authority, userinfo, host, port, query, and fragment accessors distinguish `None` from `Some("")`.
+The path is always present and can be empty. Authority excludes `//`, userinfo excludes `@`, and
+port excludes `:`. Bracketed hosts retain their brackets. Userinfo remains one lexical component.
+Port accepts zero or more digits with no numeric range limit. Hosts use the RFC first-match rule:
+a complete IPv4 match takes precedence over reg-name. IPv6 and IPvFuture require valid brackets
+and internal grammar. Zone identifiers are rejected.
+
+Parsing synchronously returns a `Result` with a borrowed value or a `ParseError` containing its
+reason, component, and byte offset. Explicit allocating operations use the separate
+`OutOfMemoryError` Effect channel and the `Allocator` requirement.
+
+`Uri.resolveInto` replaces caller-owned `Bytes` and compacts the path directly in that buffer.
+Sufficient existing capacity requires no allocation. `resolveOwned` reserves one calculated upper
+bound and adopts the final storage without copying; dot removal may leave spare capacity. Both follow the strict RFC 3986 section 5.2 algorithm. It removes literal dot segments
+only from the selected path; percent-encoded dots remain data. Query and fragment text never take
+part in path cleanup. A reference with its own scheme replaces the base, including `http:g`.
+The recomposed serialization is validated again. Dot removal can expose `//` in a path without
+an original authority: resolving `/a/..//g` against `x:a` gives `x://g` with authority `g`.
+Resolving `/a/..//g:h` instead returns an invalid-port failure at byte 6 of the recomposed text.
+
+`silk.uri_percent` encodes raw bytes for userinfo, reg-name, path segment, first relative path
+segment, whole path, query, fragment, or unreserved-only data. Encoding escapes percent signs and creates uppercase hex escapes.
+The first-relative-segment context also escapes colon, preventing data from becoming a scheme.
+Decoding returns bytes, preserves plus signs, and reports malformed escapes at their percent sign.
+Call `String.fromUtf8` explicitly to validate decoded bytes as text. Generic query coding does not
+implement HTML form fields. `encodeInto` and `decodeInto` reuse caller storage; `encodeToWriter`
+streams to a Writer. `decodeInPlace` validates before compacting bytes and leaves malformed input
+unchanged. `decodeOrBorrow` borrows unchanged input when it contains no escapes. Owned percent
+operations calculate the exact output size and reserve once.
+
+`silk.uri_components.UriComponents` constructs and modifies borrowed components. `ComponentValue`
+distinguishes raw bytes from encoded text, preventing accidental double encoding. `Host` separates
+registered names from bracketed IP literals; authority retains unsplit userinfo and lexical ports.
+Serialization can emit every component, omit authentication, or emit only path and query. Reusable
+serialization validates and sizes components before replacing output, and owned construction adopts
+its completed buffer. Raw colons in the first relative path segment are escaped.
+
+The general `silk.slice.Slice.view` operation creates a lifetime-preserving borrowed subslice.
+It checks offset and length without overflowing, permits an empty view at the end, and traps on
+out-of-bounds requests. URI code uses this ordinary wrapper over `Intrinsic.sliceView`; the compiler
+has no URI-specific operations.
+
+**Boundary:** URI syntax does not establish that an HTTP endpoint is usable or trusted. Scheme
+policy, DNS lookup, TLS service identity, IDNA, WHATWG URL, IRI normalization, file semantics,
+username/password interpretation, service lookup, and canonicalization are separate concerns.
+
+**Evidence:** [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986.html),
+[URI source](../../../../packages/compiler/stdlib/silk/uri.silk),
+[reference source](../../../../packages/compiler/stdlib/silk/uri_reference.silk),
+[percent coding](../../../../packages/compiler/stdlib/silk/uri_percent.silk),
+[component construction](../../../../packages/compiler/stdlib/silk/uri_components.silk).
+
 ## Target providers and entry closure
 
 ### PROVIDER-001 — Target providers are ordinary explicit modules

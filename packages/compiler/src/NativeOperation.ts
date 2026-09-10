@@ -27,6 +27,7 @@ export const needsAllocation = (operation: Mir.Operation): boolean =>
   operation._tag === 'RawBufferCount' ||
   operation._tag === 'RawBufferSlot' ||
   operation._tag === 'RawBufferRead' ||
+  operation._tag === 'SliceView' ||
   operation._tag === 'RawBufferView' ||
   operation._tag === 'RawBufferCopy' ||
   operation._tag === 'RawBufferFill' ||
@@ -85,6 +86,7 @@ export const emit = Effect.fnUntraced(function* (
     case 'RawBufferCount':
     case 'RawBufferSlot':
     case 'RawBufferRead':
+    case 'SliceView':
     case 'RawBufferView':
     case 'RawBufferCopy':
     case 'RawBufferFill':

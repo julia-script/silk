@@ -135,6 +135,8 @@ const operationText = (operation: Operation): string => {
       return `${localText(operation.destination)} = raw-buffer-slot ${localText(operation.buffer)}[${localText(operation.index)}] element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferRead':
       return `${localText(operation.destination)} = raw-buffer-read ${localText(operation.buffer)}[${localText(operation.index)}] element=${SilkType.encode(operation.element)} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
+    case 'SliceView':
+      return `${localText(operation.destination)} = slice-view ${localText(operation.slice)} offset=${localText(operation.offset)} length=${localText(operation.length)} stride=${operation.stride} loans=${operation.heldLoans.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferView':
       return `${localText(operation.destination)} = raw-buffer-view ${localText(operation.buffer)} offset=${localText(operation.offset)} length=${localText(operation.length)} element=${SilkType.encode(operation.element)} access=${operation.access.toLowerCase()} : ${typeText(operation.type)} ${provenanceText(operation.provenance)}`
     case 'RawBufferCopy':

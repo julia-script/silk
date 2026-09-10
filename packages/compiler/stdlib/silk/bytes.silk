@@ -89,10 +89,39 @@ impl Bytes {
   }
 
   /// Copies a complete borrowed byte sequence into independently owned storage.
+  ///
+  /// # Details
+  ///
+  /// Empty input does not allocate. Nonempty input uses one allocation sized to its byte length.
   pub effect fn copy(values: &[u8]) -> Bytes ! OutOfMemoryError ? &mut Allocator {
     let mut result = Bytes.make()
+    let reserved = run Bytes.reserveExact(&mut result, values.length)
     let appended = run Bytes.append(&mut result, values)
     return move result
+  }
+
+  /// Reserves storage for `additional` bytes without changing the initialized length.
+  ///
+  /// # Details
+  ///
+  /// Sufficient capacity is reused. Otherwise, one allocation provides the current length plus
+  /// `additional` bytes of capacity. Size overflow or allocation failure leaves the value unchanged.
+  pub effect fn reserveExact(self: &mut Self, additional: usize) -> ()
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    return run Vector.reserveExact<u8>(&mut self.values, additional)
+  }
+  /// Removes all initialized bytes and keeps the allocation for reuse.
+  pub fn clear(self: &mut Self) -> () {
+    return Vector.clear<u8>(&mut self.values)
+  }
+  /// Removes bytes after `length` and keeps the allocation for reuse.
+  ///
+  /// # Details
+  ///
+  /// A length greater than or equal to the current length leaves the value unchanged.
+  pub fn truncate(self: &mut Self, length: usize) -> () {
+    return Vector.truncate<u8>(&mut self.values, length)
   }
 
   /// Appends a complete borrowed byte sequence in source order.

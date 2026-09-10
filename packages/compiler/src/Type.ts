@@ -308,6 +308,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'SlotDrop',
   'StringFromUtf8Unchecked',
   'StringUtf8Bytes',
+  'SliceView',
   'StringByteLength',
   'StringEqualsExact',
 ] as const)

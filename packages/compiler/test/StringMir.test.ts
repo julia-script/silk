@@ -4,6 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Lifetime from '../src/Lifetime.js'
 import type * as Mir from '../src/Mir.js'
+import * as MirLinearization from '../src/MirLinearization.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
@@ -17,15 +18,25 @@ pub fn main() -> i32 {
     let runtime = Intrinsic.stringFromUtf8Unchecked(&bytes)
     let returned = passthrough(runtime)
     let raw = Intrinsic.stringUtf8Bytes(returned)
+    let selected = Intrinsic.sliceView(&bytes, 1, 2)
     let length = Intrinsic.stringByteLength(returned)
     if returned != "hé" { return 1 }
-    return Intrinsic.usizeToI32(raw.length) + Intrinsic.usizeToI32(length)
+    return Intrinsic.usizeToI32(selected.length) + Intrinsic.usizeToI32(length)
   }
   return 1
 }`
 
-const lowered = () =>
-  AnalysisFixture.retainingMain('string/mir', encoder.encode(source), 'wasm32-unknown-unknown')
+let cachedSnapshot: Analysis.Snapshot | undefined
+const lowered = Effect.fnUntraced(function* () {
+  if (cachedSnapshot === undefined) {
+    cachedSnapshot = yield* AnalysisFixture.retainingMain(
+      'string/mir',
+      encoder.encode(source),
+      'wasm32-unknown-unknown',
+    )
+  }
+  return cachedSnapshot
+})
 
 const mapOperations = (
   self: Mir.Module,
@@ -81,6 +92,7 @@ it.effect('lowers every logical string path without reusing slice operations', (
     assert.include(tags, 'StaticString')
     assert.include(tags, 'StringFromUtf8Unchecked')
     assert.include(tags, 'StringUtf8Bytes')
+    assert.include(tags, 'SliceView')
     assert.include(tags, 'StringByteLength')
     assert.include(tags, 'StringEqualsExact')
     assert.include(tags, 'Call')
@@ -103,10 +115,15 @@ it.effect('lowers every logical string path without reusing slice operations', (
       runtime?._tag === 'StringFromUtf8Unchecked' ? runtime.heldLoans.length : undefined,
       1,
     )
+    const selected = operations.find((operation) => operation._tag === 'SliceView')
+    assert.strictEqual(selected?.stride, 1)
+    assert.strictEqual(selected?.heldLoans.length, 1)
+    if (selected !== undefined) assert.isTrue(MirLinearization.opensRuntimeContinuation(selected))
     const encoded = MirEncoding.encode(mir)
     assert.include(encoded, 'static-string')
     assert.include(encoded, 'string-from-utf8-unchecked')
     assert.include(encoded, 'string-utf8-bytes')
+    assert.include(encoded, 'slice-view')
     assert.include(encoded, 'string-byte-length')
     assert.include(encoded, 'string-not-equals-exact')
     assert.deepEqual(MirVerification.verify(mir), [])
@@ -142,6 +159,20 @@ it.effect('rejects forged, mutable, confused, unterminated, and call-mismatched 
         ? Object.freeze({ ...operation, string: raw.destination })
         : operation,
     )
+    const wrongStride = mapOperations(mir, (operation) =>
+      operation._tag === 'SliceView' ? Object.freeze({ ...operation, stride: 2 }) : operation,
+    )
+    const wrongViewSource = mapOperations(mir, (operation) =>
+      operation._tag === 'SliceView'
+        ? Object.freeze({ ...operation, slice: operation.offset })
+        : operation,
+    )
+    for (const candidate of [wrongStride, wrongViewSource]) {
+      assert.include(
+        MirVerification.verify(candidate).map((violation) => violation.rule),
+        'InvalidRawStorageOperation',
+      )
+    }
     const unterminated = mapOperations(mir, (operation) =>
       operation._tag === 'EndLoan' ? undefined : operation,
     )

@@ -4984,6 +4984,14 @@
       "identity": "StringEqualsExact"
     },
     {
+      "operation": "Intrinsic.sliceView",
+      "signature": "fn Intrinsic.sliceView<T>(values: &[T], offset: usize, length: usize) -> &[T]",
+      "unsafe": false,
+      "admission": "Representation",
+      "consumer": "silk/slice.view",
+      "identity": "SliceView"
+    },
+    {
       "operation": "Intrinsic.layoutOf",
       "signature": "fn Intrinsic.layoutOf<T>() -> Layout",
       "unsafe": false,

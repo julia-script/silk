@@ -268,6 +268,7 @@ pub fn main() -> i32 {
   return replace(&mut counter)
 }`,
   `fn inspect(bytes: &[u8]) -> bool {
+  let selected = Intrinsic.sliceView<u8>(bytes, 0, 0)
   unsafe {
     let text = Intrinsic.stringFromUtf8Unchecked(bytes)
     let raw = Intrinsic.stringUtf8Bytes(text)

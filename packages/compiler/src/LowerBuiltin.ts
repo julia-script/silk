@@ -616,6 +616,40 @@ const lowerBuiltinOperation = (
     )
     return finishBuiltin(destination)
   }
+  if (expression.operation === 'SliceView') {
+    const [slice, offset, length] = argumentLocals
+    const type = fn.type(expression.type)
+    const element = Type.isSlice(expression.type) ? expression.type.element : undefined
+    const semanticElement = element === undefined ? undefined : fn.semantic(element)
+    const elementLayout =
+      semanticElement === undefined ? undefined : Layout.entry(fn.layout, semanticElement)
+    if (
+      slice === undefined ||
+      offset === undefined ||
+      length === undefined ||
+      type?._tag !== 'Slice' ||
+      semanticElement === undefined ||
+      elementLayout === undefined
+    ) {
+      return undefined
+    }
+    const destination = fn.alloc(type)
+    fn.emit(
+      Object.freeze({
+        _tag: 'SliceView' as const,
+        destination,
+        slice,
+        offset,
+        length,
+        element: semanticElement,
+        stride: Math.ceil(elementLayout.size / elementLayout.alignment) * elementLayout.alignment,
+        heldLoans: expression.heldLoans,
+        type,
+        provenance: authored(expression.span),
+      }),
+    )
+    return finishBuiltin(destination)
+  }
   if (expression.operation === 'RawBufferView' || expression.operation === 'RawBufferViewMut') {
     const [buffer, offset, length] = argumentLocals
     const type = fn.type(expression.type)

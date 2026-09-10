@@ -21,6 +21,7 @@ import { shaAcceptanceSource } from './shaAcceptance.js'
 import { hmacHkdfAcceptanceSource } from './hmacHkdfAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
+import { uriAcceptanceSource } from './uriAcceptance.js'
 import {
   borrowedBox,
   borrowedStream,
@@ -6199,6 +6200,11 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
+    name: 'uri-rfc3986',
+    source: uriAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
     name: 'borrowed-temporary-stream-suspension',
     source: borrowedTemporaryStream,
     expected: { _tag: 'Completes', result: 42 },
@@ -7588,6 +7594,47 @@ pub fn main() -> i32 {
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'runtime-slice-shared-subranges',
+    source: `import silk.slice { Slice }
+pub fn main() -> i32 {
+  let values: [i32; 3] = [10, 20, 30]
+  let selected = Slice.view(Slice.view(&values, 1, 2), 1, 1)
+  if selected.length != 1 || selected[0] != 30 { return 1 }
+  let empty = Slice.view(&values, 3, 0)
+  let nestedEmpty = Slice.view(empty, 0, 0)
+  if nestedEmpty.length != 0 { return 2 }
+  return 42
+}`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'runtime-slice-offset-bounds-trap',
+    source: `import silk.slice { Slice }
+fn choose(values: &[i32], offset: usize) -> usize {
+  return Slice.view(values, offset, 0).length
+}
+pub fn main() -> i32 {
+  let values = [10, 20]
+  let length = choose(&values, 3)
+  return 0
+}`,
+    expected: { _tag: 'Trap' },
+  },
+  {
+    name: 'runtime-slice-length-overflow-trap',
+    source: `import silk.slice { Slice }
+import silk.usize as usize
+fn choose(values: &[i32], length: usize) -> usize {
+  return Slice.view(values, 1, length).length
+}
+pub fn main() -> i32 {
+  let values = [10, 20]
+  let length = choose(&values, usize.MAX)
+  return 0
+}`,
+    expected: { _tag: 'Trap' },
   },
   {
     name: 'runtime-slice-temporary-and-lexical-borrows',

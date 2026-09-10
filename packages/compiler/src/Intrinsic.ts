@@ -157,7 +157,7 @@ const admission = (family: string): AdmissionCategory => {
   if (Scalar.isSpelling(family)) return 'Scalar'
   if (family === 'Effect') return 'Effect'
   if (family === 'Host' || family === 'Storage' || family === 'Os') return 'Platform'
-  if (family === 'Layout' || family === 'string') return 'Representation'
+  if (family === 'Layout' || family === 'string' || family === 'Slice') return 'Representation'
   if (
     family === 'RawBuffer' ||
     family === 'Pointer' ||
@@ -1301,6 +1301,25 @@ const replaceOperation: Operation = Object.freeze({
 const intrinsicOperations = Object.freeze([
   ...Scalar.all().flatMap(scalarOperations),
   ...stringOperations,
+  builtin({
+    actor: 'Slice',
+    name: 'view',
+    operation: 'SliceView',
+    typeParameters: Object.freeze(['T']),
+    semanticTypeParameters: rawTypeParameters,
+    parameters: Object.freeze([
+      valueParameter('values', '&[T]'),
+      valueParameter('offset', 'usize'),
+      valueParameter('length', 'usize'),
+    ]),
+    semanticParameters: Object.freeze([
+      Type.slice('Shared', rawElement, contractLifetime('sliceView')),
+      'usize',
+      'usize',
+    ]),
+    result: '&[T]',
+    semanticResult: Type.slice('Shared', rawElement, contractLifetime('sliceView')),
+  }),
   ...Object.freeze([
     builtin({
       actor: 'Layout',

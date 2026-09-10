@@ -6,7 +6,8 @@
 //!
 //! # Details
 //! [`fromUtf8`] validates and borrows existing bytes without allocating; [`copyUtf8`] validates and
-//! owns a copy. [`append`] and [`appendOwned`] leave the original value unchanged if growth cannot
+//! owns a copy. [`fromBytes`] adopts owned bytes without copying; [`intoBytes`] transfers them back.
+//! [`append`] and [`appendOwned`] leave the original value unchanged if growth cannot
 //! allocate. Scalar cursors expose Unicode scalar values and byte offsets, not grapheme clusters.
 //!
 //! # Gotchas
@@ -135,6 +136,51 @@ impl String {
   /// Constructs an empty owned String without allocating.
   pub fn make() -> String {
     return String { bytes: Bytes.make() }
+  }
+
+  /// Validates owned bytes and transfers their storage into a String without allocation or copying.
+  ///
+  /// # When to use
+  ///
+  /// Use when a byte buffer must become owned text. Use [`fromUtf8`] to borrow bytes without consuming them.
+  ///
+  /// # Details
+  ///
+  /// This function consumes `values`. Invalid UTF-8 returns the first invalid byte offset and releases
+  /// the input storage. Success preserves the input allocation and its capacity.
+  pub fn fromBytes(values: Bytes) -> Result<String, InvalidUtf8> {
+    let failure = firstInvalidUtf8(Bytes.asSlice(&values))
+    return match move failure {
+      Option<usize>.Some {value} => Result.failResult<String, InvalidUtf8>(
+        InvalidUtf8 {offset: value},
+      )
+      Option<usize>.None => Result.succeed<String, InvalidUtf8>(String {bytes: move values})
+    }
+  }
+  /// Transfers caller-validated UTF-8 storage into a String without validation, allocation, or copying.
+  ///
+  /// # When to use
+  ///
+  /// Use when an earlier operation proves that every initialized byte forms valid UTF-8.
+  /// Use [`fromBytes`] when that guarantee is not available.
+  ///
+  /// # Gotchas
+  ///
+  /// The complete initialized contents of `values` must be valid UTF-8. Invalid bytes violate the safety contract.
+  /// This function consumes `values` and preserves its allocation and capacity.
+  pub unsafe fn fromBytesUnchecked(values: Bytes) -> String {
+    return String {bytes: move values}
+  }
+  /// Consumes the String and returns its bytes without allocation or copying.
+  ///
+  /// # Details
+  ///
+  /// The returned bytes retain the allocation, capacity, and complete UTF-8 contents.
+  /// They can be modified as arbitrary bytes after this conversion.
+  pub fn intoBytes(self: Self) -> Bytes {
+    return match move self {
+      String {bytes} => move bytes
+    }
   }
 
   /// Copies valid borrowed text into independently owned storage.
