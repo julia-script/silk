@@ -222,6 +222,18 @@ history. Keep the description as the current specification rather than an activi
 
 ## Pull request quality bar
 
+Prefer creating the draft PR during implementation, as soon as a coherent issue-scoped commit can
+be published. Commit and push the latest intended changes before the final local checks so slow CI
+can run alongside them. Focused development tests may run earlier. Audit the staged changes and
+complete branch diff for scope before publishing; final verification and reviewer approval gate
+handoff, not the first draft push. Commit and push fixes before rerunning affected final checks.
+
+An early draft describes the current implementation and explicitly marks remaining work, local
+checks, CI, and reviews as pending where appropriate. Refresh that evidence for the final PR head
+at handoff. Keep the Linear issue In Progress until the required implementation, verification, and
+reviews are complete; merely opening a draft does not justify In Review or advancing the Review
+baseline to implementation complete.
+
 A draft PR must be understandable to a reviewer who has not read the agent conversation. Give it a
 specific outcome-oriented title. In the body, explain the problem and why it mattered, summarize
 the delivered behavior and meaningful design choices, link the Linear issue and relevant OpenSpec
@@ -230,7 +242,7 @@ change, and report verification, test-economics evidence, risks, and deferred wo
 Strongly prefer short paired `Before` and `After` code or output examples when they make the change
 concrete. This is the default for API-shape changes, call-site changes, diagnostics, generated
 output, configuration, documentation examples, and user-visible behavior. Copy `Before` from the
-verified PR base and `After` from the final PR head; keep both minimal, syntactically valid when
+verified PR base and `After` from the current PR head; keep both minimal, syntactically valid when
 practical, and focused on the observable difference rather than incidental implementation. Refresh
 examples after review fixes so they describe the exact published diff.
 

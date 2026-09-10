@@ -59,6 +59,20 @@ baseline to `Stage: work admission` and
 - Meet the Linear acceptance criteria literally. If investigation changes the correct solution,
   update the issue specification before implementing the new scope.
 
+## Early draft PR
+
+Prefer committing and pushing a coherent issue-scoped change early in implementation, then creating
+a draft PR targeting `main` so CI can start. Audit the staged patch and complete branch diff for
+unrelated work before publishing. Reuse an existing PR only when its branch and scope belong to this
+issue, and keep it a draft. Follow the Pull request quality bar in `WORKFLOW.md`, with remaining
+implementation, checks, and reviews explicitly pending. Link the draft from Linear while keeping
+the issue In Progress and preserving its work-admission Review baseline until handoff.
+
+Before starting the final local verification pass, commit and push all latest intended issue
+changes to that draft. CI is slow; let it run alongside local checks and final reviews. Focused
+tests during development may run before a push. After verification or review fixes, audit, commit,
+and push the updates before rerunning affected final checks.
+
 ## Verification and review
 
 Use the cheapest tests that falsify each claim, while following the repository's required order:
@@ -83,24 +97,24 @@ PR diff is approved. A general reviewer cannot double as the test-economics revi
 
 ## Draft PR and handoff
 
-A `silk-work` run is not finished until the completed change has a draft pull request. After
-verification and review:
+A `silk-work` run is not finished until the completed change has a confirmed draft pull request and
+the required verification and reviews are complete. Finalize the draft opened during implementation:
 
-1. Commit only the intended issue changes on a non-`main` branch.
+1. Confirm the latest intended issue changes are committed and pushed on the non-`main` branch.
 2. Give the test-economics reviewer the exact committed issue diff. If commit hooks, generated
-   artifacts, or review fixes alter it, rerun affected checks, recommit, and repeat review until the
-   committed diff is approved.
-3. Push the approved branch to `origin`.
-4. Create a clear draft PR targeting `main` and follow the Pull request quality bar in
-   `WORKFLOW.md`. Include the Linear issue link, outcome, acceptance evidence, exact checks run,
+   artifacts, or review fixes alter it, audit, commit, and push the update before rerunning affected
+   checks and repeating review until the committed diff is approved.
+3. Update the draft PR under the Pull request quality bar in `WORKFLOW.md`. Include the Linear
+   issue link, outcome, acceptance evidence, exact checks run, current CI status for the latest head,
    test-review verdict and timing delta, risks or deferred checks, and relevant OpenSpec change.
    Strongly prefer concise `Before` and `After` code or output examples when they materially clarify
    the delivered change; omit them only when examples would add no useful signal or would
    misrepresent the work.
-5. If the branch already has an open PR, reuse it rather than creating a duplicate and ensure it is
+4. Reuse the branch's existing PR rather than creating a duplicate and ensure it is
    still a draft. Never mark the PR ready for review as part of this skill.
-6. Read the PR back and require both its URL and draft state before treating the run as complete.
-7. Add the confirmed draft PR link and the same verification evidence to Linear. Update Review
+5. Read the PR back and confirm its URL, draft state, and head SHA match the verified committed
+   change before treating the run as complete. Report pending CI truthfully.
+6. Add the confirmed draft PR link and the same verification evidence to Linear. Update Review
    baseline to the exact committed PR-head SHA with `Context: PR <number> head`,
    `Stage: implementation handoff`, and `Outcome: implementation complete`; then move the issue to In
    Review and read it back.

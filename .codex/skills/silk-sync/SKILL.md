@@ -31,7 +31,9 @@ new maintenance issues.
    - issue with `Triage disposition: queue-ready` accidentally left in Triage -> Backlog unless
      Julia already curated it into Todo;
    - merged PR or otherwise proven delivery -> Done;
-   - open PR with matching work -> In Review;
+   - open PR with matching work and confirmed completion of required implementation, verification,
+     and reviews -> In Review; an early draft with work or checks pending stays In Progress while
+     its implementation task is active. Draft existence alone is not handoff evidence;
    - unambiguously abandoned In Progress work with no live task, branch, or PR owner -> its
      pre-claim Todo or Backlog tier from issue history, defaulting to Backlog when unknown;
    - closed unmerged PR with unfinished work -> its pre-claim Todo or Backlog tier, with a comment;

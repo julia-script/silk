@@ -97,6 +97,8 @@ material finding. `revise` means the evidence can become worthwhile after a name
 consolidation, measurement, or explanation. `reject` means the test's value does not justify its
 complexity or runtime and it should not ship.
 
-The coordinator verifies the findings, applies valid changes, reruns affected checks, and repeats
-this review until the reviewer approves the final committed PR diff. Record the timing delta,
-deleted or consolidated tests, and reviewer verdict in the PR and Linear handoff.
+The coordinator verifies the findings, applies valid changes, commits and pushes them to the draft
+before rerunning affected final checks, and repeats this review until the reviewer approves the
+final committed PR diff. Approval gates handoff; it does not delay early draft publication or CI.
+Record the timing delta, deleted or consolidated tests, and reviewer verdict in the PR and Linear
+handoff.
