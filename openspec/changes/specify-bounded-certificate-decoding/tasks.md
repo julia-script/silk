@@ -10,9 +10,9 @@ design delivery complete does not claim those checks passed.
 
 ## 2. Decoder implementation follow-up — JUL-182
 
-- [ ] 2.1 Implement private bounded DER cursor and schema traversal in ordinary Silk; verify canonical tag/length/value/default/time/SET rules against manifest cases at the cheapest structural tier.
-- [ ] 2.2 Implement Certificate ownership and all declared views; verify signed TBS/SPKI/signature/algorithm/extension byte identity and input/output lifetime separation with shared analysis snapshots and native corpus evidence.
-- [ ] 2.3 Implement strict PEM and atomic CertificateBundle decoding; verify all input-profile table rows, canonical base64, duplicate retention and later-block rollback with distinct fixtures.
-- [ ] 2.4 Enforce every independent limit and deterministic error coordinate/precedence; verify exact/one-over boundaries and checked overflow/truncation without allocating giant fixtures.
-- [ ] 2.5 Verify allocation refusal and cleanup with a scoped fake allocator and minimal distinguishing native corpus cases; add one intended LLVM-to-Wasm portability leg without redundant feature executables.
+- [x] 2.1 Implement private bounded DER cursor and schema traversal in ordinary Silk; verify canonical tag/length/value/default/time/SET rules against manifest cases at the cheapest structural tier.
+- [x] 2.2 Implement Certificate ownership and all declared views; verify signed TBS/SPKI/signature/algorithm/extension byte identity and input/output lifetime separation with shared analysis snapshots and native corpus evidence.
+- [x] 2.3 Implement strict PEM and atomic CertificateBundle decoding; verify all input-profile table rows, canonical base64, duplicate retention and later-block rollback with distinct fixtures.
+- [x] 2.4 Enforce every independent limit and deterministic error coordinate/precedence; verify exact/one-over boundaries and checked overflow/truncation without allocating giant fixtures.
+- [x] 2.5 Verify allocation refusal and cleanup with a scoped fake allocator and minimal distinguishing native corpus cases; add one intended LLVM-to-Wasm portability leg without redundant feature executables.
 - [ ] 2.6 Register actors, generate API docs and update reference support status only after implementation; run typecheck, format:check, lint, test, check, release:candidate and independent test-economics review before parser handoff.
