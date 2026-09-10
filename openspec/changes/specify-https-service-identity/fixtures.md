@@ -18,31 +18,30 @@ variants from the design: `Reference`, `Structure`, `Name(index, reason)`, `Iden
 
 ## DNS matching and wildcard policy
 
-| ID  | Reference                  | Certificate input                             | Expected                                                                |
-| --- | -------------------------- | --------------------------------------------- | ----------------------------------------------------------------------- |
-| D01 | `N(www.example)`           | `[D(www.example)]`                            | `Match(0)`                                                              |
-| D02 | `N(WWW.Example)`           | `[D(www.EXAMPLE)]`                            | `Match(0)`                                                              |
-| D03 | `N(www.example)`           | `[D(other.example)]`                          | `NoMatch`                                                               |
-| D04 | `N(a.example)`             | `[D(*.example)]`                              | `Match(0)`; one-label suffix is allowed                                 |
-| D05 | `N(example)`               | `[D(*.example)]`                              | `NoMatch`; wildcard cannot match zero labels                            |
-| D06 | `N(a.b.example)`           | `[D(*.example)]`                              | `NoMatch`; wildcard cannot match two labels                             |
-| D07 | `N(a.example)`             | `[D(a.example.evil)]`                         | `NoMatch`; suffix/prefix comparison is insufficient                     |
-| D08 | `N(www.example)`           | `[D(w*.example), D(www.example)]`             | `Match(1)`; partial wildcard skipped                                    |
-| D09 | `N(www.example)`           | `[D(*.*.example), D(www.example)]`            | `Match(1)`; multiple wildcards skipped                                  |
-| D10 | `N(www.example)`           | `[D(a.*.example), D(www.example)]`            | `Match(1)`; interior wildcard skipped                                   |
-| D11 | `N(www.example)`           | `[D(**.example)]`                             | `NoMatch`; invalid wildcard alone                                       |
-| D12 | `N(www.example)`           | `[D(www.example), D(w*.example)]`             | `Match(0)`; ignored wildcard after match                                |
-| D13 | `N(xn--bcher-kva.example)` | `[D(XN--BCHER-KVA.EXAMPLE)]`                  | `Match(0)`; prepared A-label                                            |
-| D14 | `N(xn--bcher-kva.example)` | `[D(*.example)]`                              | `Match(0)`; whole A-label wildcard                                      |
-| D15 | `N(a.com)`                 | `[D(*.com)]`                                  | `Match(0)`; no public-suffix policy                                     |
-| D16 | `N(intranet)`              | `[D(INTRANET)]`                               | `Match(0)`; absolute single-label identity                              |
-| D17 | `N(a.example)`             | `[D(*a.example), D(a.example), D(*.example)]` | `Match(1)`; first eligible match keeps original index                   |
-| D18 | `N(www.example)`           | `[D(*), D(www.example)]`                      | `Name(0, MissingWildcardSuffix)`                                        |
-| D19 | `N(www.example)`           | `[D(w*._bad.example), D(www.example)]`        | `Match(1)`; mandatory wildcard ignore precedes ordinary label grammar   |
-| D20 | `N(www.example)`           | `[D("w*" + 00 + ".example"), D(www.example)]` | `Match(1)`; NUL is ordinary name syntax after invalid-wildcard skipping |
-
-| D21 | `N(www.example)` | `[D("*.exa" + 00 + "mple"), D(www.example)]` | `Name(0, Nul)`; valid wildcard placement does not hide malformed name syntax |
-| D22 | `N(www.example)` | `[D("w*" + ff + ".example"), D(www.example)]` | `Name(0, NonAscii)`; invalid IA5 octet precedes wildcard handling |
+| ID  | Reference                  | Certificate input                             | Expected                                                                     |
+| --- | -------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------- |
+| D01 | `N(www.example)`           | `[D(www.example)]`                            | `Match(0)`                                                                   |
+| D02 | `N(WWW.Example)`           | `[D(www.EXAMPLE)]`                            | `Match(0)`                                                                   |
+| D03 | `N(www.example)`           | `[D(other.example)]`                          | `NoMatch`                                                                    |
+| D04 | `N(a.example)`             | `[D(*.example)]`                              | `Match(0)`; one-label suffix is allowed                                      |
+| D05 | `N(example)`               | `[D(*.example)]`                              | `NoMatch`; wildcard cannot match zero labels                                 |
+| D06 | `N(a.b.example)`           | `[D(*.example)]`                              | `NoMatch`; wildcard cannot match two labels                                  |
+| D07 | `N(a.example)`             | `[D(a.example.evil)]`                         | `NoMatch`; suffix/prefix comparison is insufficient                          |
+| D08 | `N(www.example)`           | `[D(w*.example), D(www.example)]`             | `Match(1)`; partial wildcard skipped                                         |
+| D09 | `N(www.example)`           | `[D(*.*.example), D(www.example)]`            | `Match(1)`; multiple wildcards skipped                                       |
+| D10 | `N(www.example)`           | `[D(a.*.example), D(www.example)]`            | `Match(1)`; interior wildcard skipped                                        |
+| D11 | `N(www.example)`           | `[D(**.example)]`                             | `NoMatch`; invalid wildcard alone                                            |
+| D12 | `N(www.example)`           | `[D(www.example), D(w*.example)]`             | `Match(0)`; ignored wildcard after match                                     |
+| D13 | `N(xn--bcher-kva.example)` | `[D(XN--BCHER-KVA.EXAMPLE)]`                  | `Match(0)`; prepared A-label                                                 |
+| D14 | `N(xn--bcher-kva.example)` | `[D(*.example)]`                              | `Match(0)`; whole A-label wildcard                                           |
+| D15 | `N(a.com)`                 | `[D(*.com)]`                                  | `Match(0)`; no public-suffix policy                                          |
+| D16 | `N(intranet)`              | `[D(INTRANET)]`                               | `Match(0)`; absolute single-label identity                                   |
+| D17 | `N(a.example)`             | `[D(*a.example), D(a.example), D(*.example)]` | `Match(1)`; first eligible match keeps original index                        |
+| D18 | `N(www.example)`           | `[D(*), D(www.example)]`                      | `Name(0, MissingWildcardSuffix)`                                             |
+| D19 | `N(www.example)`           | `[D(w*._bad.example), D(www.example)]`        | `Match(1)`; mandatory wildcard ignore precedes ordinary label grammar        |
+| D20 | `N(www.example)`           | `[D("w*" + 00 + ".example"), D(www.example)]` | `Match(1)`; NUL is ordinary name syntax after invalid-wildcard skipping      |
+| D21 | `N(www.example)`           | `[D("*.exa" + 00 + "mple"), D(www.example)]`  | `Name(0, Nul)`; valid wildcard placement does not hide malformed name syntax |
+| D22 | `N(www.example)`           | `[D("w*" + ff + ".example"), D(www.example)]` | `Name(0, NonAscii)`; invalid IA5 octet precedes wildcard handling            |
 
 ## Reference and certificate-name admission
 
