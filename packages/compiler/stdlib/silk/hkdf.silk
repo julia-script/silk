@@ -1,0 +1,229 @@
+//! HKDF key extraction and expansion with SHA-256 and SHA-384.
+//!
+//! # When to use
+//! Use [`HkdfSha256`] or [`HkdfSha384`] to derive keys from secret input material under RFC 5869.
+//! Use `silk.hmac` when the protocol needs a message authentication tag.
+//!
+//! # Details
+//! `extract` returns a fixed-size pseudorandom key. `expand` borrows that key and context bytes,
+//! then fills caller-owned output. These operations allocate no memory.
+//!
+//! # Gotchas
+//! HKDF is not a password-hashing function. These actors provide no protocol labels or secret-erasure guarantee.
+//! Expansion rejects output beyond 255 digest blocks with [`OutputTooLongError`] before any output write.
+
+import silk.hmac {HmacSha256, HmacSha384}
+import silk.result {Result}
+import silk.usize as usize
+
+/// An HKDF output request that exceeds the selected hash's 255-block limit.
+pub struct OutputTooLongError {
+  /// The requested output length in bytes.
+  pub requested: usize
+  /// The maximum output length in bytes for the selected hash.
+  pub maximum: usize
+}
+
+/// HKDF-SHA-256 extraction and expansion with a 32-byte pseudorandom key.
+pub struct HkdfSha256 {}
+
+impl HkdfSha256 {
+  /// Returns a 32-byte pseudorandom key from borrowed salt and input key material.
+  ///
+  /// # Details
+  ///
+  /// An empty salt is equivalent to 32 zero bytes. Empty input key material is valid.
+  /// Use the result with `HkdfSha256.expand` and protocol-specific context bytes.
+  ///
+  /// # Gotchas
+  ///
+  /// If the salt exceeds the 64-bit bit-length domain, the program traps.
+  /// If the input plus the 64-byte HMAC pad exceeds that domain, the program traps.
+  pub fn extract(salt: &[u8], ikm: &[u8]) -> [u8; 32] {
+    return HmacSha256.authenticate(salt, ikm)
+  }
+  /// Writes the requested HKDF-SHA-256 output prefix, or returns an error without changing output.
+  ///
+  /// # Details
+  ///
+  /// `prk` must be a pseudorandom key from extraction or an equivalently strong key source.
+  /// Empty `info` and zero output length are valid. Lengths through 8160 bytes succeed.
+  /// Larger lengths return `OutputTooLongError` with the requested length and maximum 8160.
+  ///
+  /// # Gotchas
+  ///
+  /// If the HMAC input exceeds the 64-bit bit-length domain, the program traps.
+  /// That input includes the 64-byte pad, previous digest, `info`, and one counter byte.
+  pub fn expand(prk: &([u8; 32]), info: &[u8], output: &mut [u8]) -> Result<(), OutputTooLongError> {
+    if output.length > 8160 {
+      return Result.failResult<(), OutputTooLongError>(
+        OutputTooLongError {requested: output.length, maximum: 8160},
+      )
+    }
+    let key = prk.*
+    let mut previous: [u8; 32] = [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ]
+    let mut written = usize.ZERO
+    let mut counter = usize.ONE
+    while written < output.length {
+      let mut state = HmacSha256.make(&key)
+      if counter > usize.ONE {
+        state.update(&previous)
+      }
+      state.update(info)
+      let counterByte: [u8; 1] = [usize.toU8(counter)]
+      state.update(&counterByte)
+      previous = state.finish()
+      let mut index = usize.ZERO
+      while index < 32 && written < output.length {
+        output[written] = previous[index]
+        index = index + usize.ONE
+        written = written + usize.ONE
+      }
+      counter = counter + usize.ONE
+    }
+    return Result.succeed<(), OutputTooLongError>(())
+  }
+}
+
+/// HKDF-SHA-384 extraction and expansion with a 48-byte pseudorandom key.
+pub struct HkdfSha384 {}
+
+impl HkdfSha384 {
+  /// Returns a 48-byte pseudorandom key from borrowed salt and input key material.
+  ///
+  /// # Details
+  ///
+  /// An empty salt is equivalent to 48 zero bytes. Empty input key material is valid.
+  /// Use the result with `HkdfSha384.expand` and protocol-specific context bytes.
+  ///
+  /// # Gotchas
+  ///
+  /// If the salt exceeds the 128-bit bit-length domain, the program traps.
+  /// If the input plus the 128-byte HMAC pad exceeds that domain, the program traps.
+  pub fn extract(salt: &[u8], ikm: &[u8]) -> [u8; 48] {
+    return HmacSha384.authenticate(salt, ikm)
+  }
+  /// Writes the requested HKDF-SHA-384 output prefix, or returns an error without changing output.
+  ///
+  /// # Details
+  ///
+  /// `prk` must be a pseudorandom key from extraction or an equivalently strong key source.
+  /// Empty `info` and zero output length are valid. Lengths through 12240 bytes succeed.
+  /// Larger lengths return `OutputTooLongError` with the requested length and maximum 12240.
+  ///
+  /// # Gotchas
+  ///
+  /// If the HMAC input exceeds the 128-bit bit-length domain, the program traps.
+  /// That input includes the 128-byte pad, previous digest, `info`, and one counter byte.
+  pub fn expand(prk: &([u8; 48]), info: &[u8], output: &mut [u8]) -> Result<(), OutputTooLongError> {
+    if output.length > 12240 {
+      return Result.failResult<(), OutputTooLongError>(
+        OutputTooLongError {requested: output.length, maximum: 12240},
+      )
+    }
+    let key = prk.*
+    let mut previous: [u8; 48] = [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+    ]
+    let mut written = usize.ZERO
+    let mut counter = usize.ONE
+    while written < output.length {
+      let mut state = HmacSha384.make(&key)
+      if counter > usize.ONE {
+        state.update(&previous)
+      }
+      state.update(info)
+      let counterByte: [u8; 1] = [usize.toU8(counter)]
+      state.update(&counterByte)
+      previous = state.finish()
+      let mut index = usize.ZERO
+      while index < 48 && written < output.length {
+        output[written] = previous[index]
+        index = index + usize.ONE
+        written = written + usize.ONE
+      }
+      counter = counter + usize.ONE
+    }
+    return Result.succeed<(), OutputTooLongError>(())
+  }
+}

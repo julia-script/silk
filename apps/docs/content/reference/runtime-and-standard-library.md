@@ -376,6 +376,37 @@ and each resource limit. No codec-specific compiler intrinsic or runtime provide
 [shared native acceptance](../../../../packages/compiler/test/support/inflateAcceptance.ts),
 [independent fixture provenance](../../../../packages/compiler/test/fixtures/inflate-vectors.md).
 
+### STDLIB-008 — HMAC and HKDF use concrete SHA-2 actors with bounded output
+
+**Status:** Confirmed
+
+`silk.hmac` exposes `HmacSha256` and `HmacSha384`. Each actor provides `make(key)`,
+`update(self: &mut Self, bytes)`, consuming `finish(self: Self)`, and one-shot
+`authenticate(key, message)`. Keys and message inputs are borrowed byte slices. The tags are fixed
+`[u8; 32]` and `[u8; 48]` values respectively. Empty keys, messages, and updates are admitted.
+Any segmentation of the same message produces the same tag. Keys longer than the hash block size
+(64 or 128 bytes) are hashed before key padding.
+
+`silk.hkdf` exposes `HkdfSha256`, `HkdfSha384`, and `OutputTooLongError`. Both actors implement
+RFC 5869: `extract(salt, ikm)` borrows byte slices and returns a fixed-size PRK (32 or 48 bytes).
+Empty salt has the same meaning as a salt of HashLen zero bytes. `expand(prk, info, output)` borrows
+a fixed-size PRK array, a byte slice of context information, and a mutable caller-owned byte slice.
+Empty info and zero-length output are admitted. Expansion returns `Result<(), OutputTooLongError>`.
+It accepts at most 8160 bytes for SHA-256 or 12240 bytes for SHA-384, including the exact maximum.
+A longer output returns public `requested: usize` and `maximum: usize` fields without changing
+any output byte or trapping for the rejected length.
+
+**Boundary:** These are ordinary, allocation-free Silk compositions over SHA-2. They stream
+variable-length inputs and use bounded key storage, with no providers, native crypto, or compiler recognition. HMAC inherits the SHA message
+bit-length limit, including its initial key pad. These actors do not provide tag verification,
+constant-time comparison, truncation policy, TLS labels, password hashing, or secret zeroization.
+
+**Evidence:** [HMAC source](../../../../packages/compiler/stdlib/silk/hmac.silk),
+[HKDF source](../../../../packages/compiler/stdlib/silk/hkdf.silk),
+[known-answer acceptance corpus](../../../../packages/compiler/test/support/hmacHkdfAcceptance.ts),
+[RFC 4231](https://www.rfc-editor.org/rfc/rfc4231.html), and
+[RFC 5869](https://www.rfc-editor.org/rfc/rfc5869.html).
+
 ## Target providers and entry closure
 
 ### PROVIDER-001 — Target providers are ordinary explicit modules

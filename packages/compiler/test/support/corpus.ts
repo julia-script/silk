@@ -18,6 +18,7 @@ import {
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
 import { shaAcceptanceSource } from './shaAcceptance.js'
+import { hmacHkdfAcceptanceSource } from './hmacHkdfAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import {
@@ -7776,6 +7777,11 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     nativeSource: replaceDropProgram,
     nativeStdout: '1243',
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'hmac-hkdf',
+    source: hmacHkdfAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'bounded-zstd',

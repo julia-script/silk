@@ -122,6 +122,18 @@
     "namespace": "HashSet"
   },
   {
+    "module": "silk/hkdf",
+    "path": "silk/hkdf.silk",
+    "namespace": "HkdfSha256",
+    "aliases": ["HkdfSha384", "OutputTooLongError"]
+  },
+  {
+    "module": "silk/hmac",
+    "path": "silk/hmac.silk",
+    "namespace": "HmacSha256",
+    "aliases": ["HmacSha384"]
+  },
+  {
     "module": "silk/host_input",
     "path": "silk/host_input.silk",
     "namespace": "HostInput",
