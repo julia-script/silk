@@ -1,9 +1,9 @@
 ---
-name: "OPSX: Archive"
-description: "Archive a completed change in the experimental workflow"
+name: 'OPSX: Archive'
+description: 'Archive a completed change in the experimental workflow'
 allowed-tools: Bash(openspec:*)
-category: "Workflow"
-tags: ["workflow", "archive", "experimental"]
+category: 'Workflow'
+tags: ['workflow', 'archive', 'experimental']
 ---
 
 Archive a completed change in the experimental workflow.
@@ -31,9 +31,11 @@ Archive a completed change in the experimental workflow.
    **Load current archive inputs before the existing archive checks:**
 
    After resolving the selected change and planning root, run:
+
    ```bash
    openspec instructions archive --change "<name>" --json
    ```
+
    Keep the same selected-root flags on this command. This lookup is advisory and
    optional: it only supplies extra prompt inputs, so it must never block archiving.
    If it exits non-zero or returns invalid JSON — for example on an older CLI that
@@ -126,6 +128,7 @@ Archive a completed change in the experimental workflow.
 5. **Perform the archive**
 
    Create an `archive` directory under `planningHome.changesDir` if it doesn't exist:
+
    ```bash
    mkdir -p "<planningHome.changesDir>/archive"
    ```
@@ -186,6 +189,7 @@ All artifacts complete. All tasks complete.
 **Specs:** Sync skipped (user chose to skip)
 
 **Warnings:**
+
 - Archived with 2 incomplete artifacts
 - Archived with 3 incomplete tasks
 - Delta spec sync was skipped (user chose to skip)
@@ -204,12 +208,14 @@ Review the archive if this was not intentional.
 Target archive directory already exists.
 
 **Options:**
+
 1. Rename the existing archive
 2. Delete the existing archive if it's a duplicate
 3. Wait until a different date to archive
 ```
 
 **Guardrails**
+
 - Announce the selected change; prompt for selection when it is ambiguous
 - Use artifact graph (openspec status --json) for completion checking
 - Don't block archive on warnings - just inform and confirm
