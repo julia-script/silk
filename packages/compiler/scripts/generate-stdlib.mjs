@@ -31,10 +31,10 @@ const sourceLiteral = (source) => {
   return `'${JSON.stringify(source).slice(1, -1).replaceAll('\\"', '"').replaceAll("'", "\\'")}'`
 }
 
-const aliasesLiteral = (aliases) => {
+const aliasesLiteral = (aliases, inlineLimit = 80) => {
   const quoted = aliases.map((alias) => `'${alias}'`)
   const inline = `[${quoted.join(', ')}]`
-  if (inline.length <= 80) return inline
+  if (inline.length <= inlineLimit) return inline
   return `[\n${quoted.map((alias) => `      ${alias},`).join('\n')}\n    ]`
 }
 
@@ -89,7 +89,7 @@ const entries = modules
     documentation: '${entry.documentation}',
     staticInventory: ${aliasesLiteral(entry.staticInventory)},
     runtimeInventory: ${aliasesLiteral(entry.runtimeInventory)},
-    ${entry.namespace === undefined ? '' : `namespace: '${entry.namespace}',\n    `}${entry.aliases === undefined ? '' : `aliases: ${aliasesLiteral(entry.aliases)},\n    `}source:
+    ${entry.namespace === undefined ? '' : `namespace: '${entry.namespace}',\n    `}${entry.aliases === undefined ? '' : `aliases: ${aliasesLiteral(entry.aliases, 86)},\n    `}source:
       ${sourceLiteral(entry.source)},
   },`,
   )
