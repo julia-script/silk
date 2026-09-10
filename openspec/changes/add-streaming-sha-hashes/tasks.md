@@ -21,4 +21,4 @@
 ## 4. Repository Verification and Handoff
 
 - [x] 4.1 Run focused SHA checks, then `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, `pnpm test`, `pnpm check`, and `pnpm release:candidate`; record exact outcomes and distinguish any pre-existing failure.
-- [ ] 4.2 Measure the focused test surface against the resolved base and branch, obtain independent general-code and test-economics approvals of the exact final diff, and record the verdicts for the pull-request handoff.
+- [x] 4.2 Measure the focused test surface against the resolved base and branch, obtain independent general-code and test-economics approvals of the exact final diff, and record the verdicts for the pull-request handoff.
