@@ -21,6 +21,28 @@
     "namespace": "Bytes"
   },
   {
+    "module": "silk/certificate",
+    "path": "silk/certificate.silk",
+    "namespace": "Certificate",
+    "aliases": [
+      "DecodeLimits",
+      "DecodeClass",
+      "DecodeReason",
+      "DecodeOffsetSpace",
+      "DecodeError",
+      "CertificateVersion",
+      "CertificateTime",
+      "BitStringView",
+      "AlgorithmView",
+      "ExtensionView"
+    ]
+  },
+  {
+    "module": "silk/certificate_bundle",
+    "path": "silk/certificate_bundle.silk",
+    "namespace": "CertificateBundle"
+  },
+  {
     "module": "silk/char",
     "path": "silk/char.silk",
     "namespace": "char"
@@ -440,6 +462,12 @@
   {
     "module": "silk/support/bzero",
     "path": "silk/support/bzero.silk"
+  },
+  {
+    "module": "silk/support/certificate_pem",
+    "path": "silk/support/certificate_pem.silk",
+    "namespace": "Pem",
+    "aliases": ["PemBlock"]
   },
   {
     "module": "silk/support/memcmp",

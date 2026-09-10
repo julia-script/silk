@@ -19,6 +19,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 import { invalidGenericCorpus } from './support/corpus.js'
+import { certificateWasmAcceptanceSource } from './support/certificateAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
 const defaultClang = (): string => {
@@ -607,5 +608,27 @@ it.effect('rejects a supplied foreign contract before backend-cache or native-to
     assert.isTrue(outcome.sources.has(supplied.id))
     assert.strictEqual(cacheReads, 0)
     assert.isFalse(existsSync(join(destinationRoot, 'rejected-interface')))
+  }),
+)
+
+// The native corpus covers the full profile; this one portability leg exercises owned byte views
+// and strict PEM decoding with wasm32 pointer widths and the shipped Wasm allocator.
+it.effect('executes bounded certificate decoding through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('certificate.wasm', certificateWasmAcceptanceSource, {
+      compilation: {
+        root: SourceFile.make('memory/certificate-wasm', ascii(certificateWasmAcceptanceSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+    assert.deepEqual(WebAssembly.Module.imports(module), [])
+    const instance = new WebAssembly.Instance(module)
+    const main = instance.exports['main']
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 0)
   }),
 )

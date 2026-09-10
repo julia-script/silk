@@ -1,0 +1,1351 @@
+//! Owned X.509 certificates decoded from bounded DER or strict PEM input.
+//!
+//! # When to use
+//!
+//! Use `Certificate.decodeDer` for one binary certificate or `Certificate.decodePem` for one CERTIFICATE block.
+//! Use `silk.certificate_bundle.CertificateBundle` for multiple PEM certificates.
+//!
+//! # Details
+//!
+//! Results own their bytes. Accessors borrow the owner and preserve original signed bytes and all extensions.
+//! Input is borrowed during execution. Allocation refusal uses `OutOfMemoryError`; other failures return `DecodeError`.
+//!
+//! # Gotchas
+//!
+//! Decoding checks structure only. It does not verify signatures, trust, identities, or certificate validity.
+//! PEM rejects explanatory text, unrelated blocks, VT/FF whitespace, and noncanonical base64.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.layout {Layout, LayoutOverflow}
+import silk.option {Option}
+import silk.result {Result}
+import silk.slice {Slice}
+import silk.vector {Vector}
+import silk.support.certificate_pem {Pem, PemBlock}
+import silk.u8
+import silk.u16
+import silk.usize
+
+/// Inclusive resource limits for one decode call. Zero permits no corresponding resource.
+pub struct DecodeLimits {
+  /// Maximum complete input length, including PEM whitespace.
+  pub inputBytes: usize
+  /// Maximum DER length of one certificate, including its tag and length.
+  pub certificateBytes: usize
+  /// Maximum sum of certificate DER lengths in one call.
+  pub totalDerBytes: usize
+  /// Maximum certificate count, including duplicates.
+  pub certificates: usize
+  /// Maximum content length of each primitive or open field, including the BIT STRING count octet.
+  pub fieldBytes: usize
+  /// Maximum extension count per certificate, including duplicates.
+  pub extensions: usize
+  /// Maximum traversed TLV depth; the certificate root has depth one.
+  pub depth: usize
+  /// Maximum traversed TLV count per certificate; opaque payloads do not add nodes.
+  pub nodes: usize
+}
+
+impl Copy for DecodeLimits {}
+
+impl DecodeLimits {
+  /// Returns finite default limits: 16 MiB input, 1 MiB certificates, 8 MiB total DER, and 1024 certificates.
+  ///
+  /// # Details
+  ///
+  /// Fields are limited to 256 KiB, extensions to 256, depth to 32, and nodes to 65536 per certificate.
+  pub fn defaults() -> DecodeLimits {
+    return DecodeLimits {
+      inputBytes: 16777216,
+      certificateBytes: 1048576,
+      totalDerBytes: 8388608,
+      certificates: 1024,
+      fieldBytes: 262144,
+      extensions: 256,
+      depth: 32,
+      nodes: 65536,
+    }
+  }
+}
+
+/// The category of a decoding failure.
+pub enum DecodeClass {
+  /// The input violates the accepted encoding or schema.
+  Malformed,
+  /// The version or PEM label is outside the selected format.
+  Unsupported,
+  /// A configured limit or machine size bound is exceeded.
+  ResourceLimit,
+}
+
+/// The specific failed decoding rule.
+pub enum DecodeReason {
+  /// The input contains no certificate.
+  EmptyInput,
+  /// A PEM marker or document byte is invalid.
+  PemSyntax,
+  /// Base64 alphabet, padding, or pad bits are invalid.
+  Base64,
+  /// Data follows the required single certificate.
+  TrailingData,
+  /// Required input ends before its declared boundary.
+  Truncated,
+  /// A tag encoding or primitive/constructed bit is invalid.
+  Tag,
+  /// A DER length encoding is not canonical.
+  Length,
+  /// An INTEGER is empty or is not minimally encoded.
+  Integer,
+  /// A BOOLEAN is not one canonical octet.
+  Boolean,
+  /// A BIT STRING count or unused tail bits are invalid.
+  BitString,
+  /// An OID subidentifier is empty, unfinished, or nonminimal.
+  Oid,
+  /// An RDN SET OF is not in DER order.
+  SetOrder,
+  /// A default value is explicitly encoded.
+  DefaultValue,
+  /// A certificate time or calendar date is invalid.
+  Time,
+  /// The certificate fields violate the selected schema.
+  Schema,
+  /// An ASN.1 string encoding is invalid.
+  StringEncoding,
+  /// The certificate version is not v1, v2, or v3.
+  Version,
+  /// The PEM label is not CERTIFICATE.
+  PemLabel,
+  /// The complete input exceeds its limit.
+  InputBytes,
+  /// One certificate exceeds its DER byte limit.
+  CertificateBytes,
+  /// The aggregate DER bytes exceed their limit.
+  TotalDerBytes,
+  /// The certificate count exceeds its limit.
+  Certificates,
+  /// A primitive or open field exceeds its content limit.
+  FieldBytes,
+  /// The extension count exceeds its limit.
+  Extensions,
+  /// The traversed TLV depth exceeds its limit.
+  Depth,
+  /// The traversed TLV count exceeds its limit.
+  Nodes,
+  /// A length, tag number, or allocation size exceeds the target size range.
+  SizeOverflow,
+}
+
+/// The byte sequence used by a diagnostic offset.
+pub enum DecodeOffsetSpace {
+  /// The offset is in the original supplied input.
+  Input,
+  /// The offset is in the DER decoded from the indicated PEM block.
+  Der,
+}
+
+/// The structural X.509 certificate version.
+pub enum CertificateVersion {
+  /// Version one, encoded by an absent version field.
+  V1,
+  /// Version two, encoded as INTEGER one.
+  V2,
+  /// Version three, encoded as INTEGER two.
+  V3,
+}
+
+/// A decoding failure without a borrow of the input.
+pub struct DecodeError {
+  /// The failure category.
+  pub kind: DecodeClass
+  /// The failed rule.
+  pub reason: DecodeReason
+  /// The zero-based attempted certificate index; document failures use zero.
+  pub certificateIndex: usize
+  /// The coordinate system for the offset.
+  pub offsetSpace: DecodeOffsetSpace
+  /// The offending byte, TLV tag, or end offset when required input is missing.
+  pub offset: usize
+}
+
+impl Copy for DecodeError {}
+
+/// A decoded Gregorian certificate time in UTC.
+pub struct CertificateTime {
+  /// The full year, from 1 through 9999.
+  pub year: u16
+  /// The month, from 1 through 12.
+  pub month: u8
+  /// The valid day of the month.
+  pub day: u8
+  /// The hour, from 0 through 23.
+  pub hour: u8
+  /// The minute, from 0 through 59.
+  pub minute: u8
+  /// The second, from 0 through 59.
+  pub second: u8
+}
+
+impl Copy for CertificateTime {}
+
+/// A borrowed BIT STRING payload with its unused-bit metadata.
+pub struct BitStringView<'a> {
+  /// The original payload, excluding its initial count octet.
+  pub bytes: &'a [u8]
+  /// The number of zero low bits in the last payload octet.
+  pub unusedBits: u8
+}
+
+/// A borrowed AlgorithmIdentifier with uninterpreted parameters.
+pub struct AlgorithmView<'a> {
+  /// The complete original AlgorithmIdentifier TLV.
+  pub der: &'a [u8]
+  /// The canonical OID content octets, without tag or length.
+  pub oid: &'a [u8]
+  /// The complete parameter TLV; absence differs from explicit NULL.
+  pub parametersDer: Option<&'a [u8]>
+}
+
+/// A borrowed raw extension, including unknown or duplicate extensions.
+pub struct ExtensionView<'a> {
+  /// The complete original Extension TLV.
+  pub der: &'a [u8]
+  /// The canonical OID content octets, without tag or length.
+  pub oid: &'a [u8]
+  /// The critical bit, false when absent.
+  pub critical: bool
+  /// The exact OCTET STRING content, without ASN.1 interpretation.
+  pub value: &'a [u8]
+}
+
+struct Span {
+  start: usize
+  content: usize
+  end: usize
+  tag: usize
+}
+
+impl Copy for Span {}
+
+struct Algorithm {
+  whole: Span
+  oid: Span
+  parameters: Span
+  present: bool
+}
+
+impl Copy for Algorithm {}
+
+struct Extension {
+  whole: Span
+  oid: Span
+  value: Span
+  critical: bool
+}
+
+impl Copy for Extension {}
+
+struct Fields {
+  tbs: Span
+  serial: Span
+  issuer: Span
+  subject: Span
+  validity: Span
+  spki: Span
+  key: Span
+  signature: Span
+  inner: Algorithm
+  outer: Algorithm
+  keyAlgorithm: Algorithm
+  issuerId: Span
+  subjectId: Span
+  hasIssuerId: bool
+  hasSubjectId: bool
+  version: CertificateVersion
+  before: CertificateTime
+  after: CertificateTime
+}
+
+impl Copy for Fields {}
+
+struct Reader<'a> {
+  bytes: &'a [u8]
+  limits: DecodeLimits
+  cursor: usize
+  nodes: usize
+  failed: bool
+  error: DecodeError
+}
+
+struct Frame {
+  end: usize
+  depth: usize
+}
+
+impl Copy for Frame {}
+
+/// An immutable owned certificate that preserves its original DER and all raw extensions.
+///
+/// # Details
+///
+/// Accessors borrow this owner. Dropping the certificate releases all owned storage.
+/// Unknown algorithms, duplicate extensions, and policy-invalid serials remain available to independent validators.
+pub struct Certificate {
+  bytes: Bytes
+  fields: Fields
+  extensions: Vector<Extension>
+}
+
+fn emptySpan() -> Span {
+  return Span {start: 0, content: 0, end: 0, tag: 0}
+}
+
+fn emptyAlgorithm() -> Algorithm {
+  return Algorithm {whole: emptySpan(), oid: emptySpan(), parameters: emptySpan(), present: false}
+}
+
+fn emptyTime() -> CertificateTime {
+  return CertificateTime {year: 1, month: 1, day: 1, hour: 0, minute: 0, second: 0}
+}
+
+fn emptyFields() -> Fields {
+  return Fields {
+    tbs: emptySpan(),
+    serial: emptySpan(),
+    issuer: emptySpan(),
+    subject: emptySpan(),
+    validity: emptySpan(),
+    spki: emptySpan(),
+    key: emptySpan(),
+    signature: emptySpan(),
+    inner: emptyAlgorithm(),
+    outer: emptyAlgorithm(),
+    keyAlgorithm: emptyAlgorithm(),
+    issuerId: emptySpan(),
+    subjectId: emptySpan(),
+    hasIssuerId: false,
+    hasSubjectId: false,
+    version: CertificateVersion.V1,
+    before: emptyTime(),
+    after: emptyTime(),
+  }
+}
+
+fn errorAt(kind: DecodeClass, reason: DecodeReason, offset: usize) -> DecodeError {
+  return DecodeError {
+    kind: kind,
+    reason: reason,
+    certificateIndex: 0,
+    offsetSpace: DecodeOffsetSpace.Input,
+    offset: offset,
+  }
+}
+
+fn reject(reader: &mut Reader, kind: DecodeClass, reason: DecodeReason, offset: usize) -> () {
+  if !reader.failed {
+    reader.failed = true
+    reader.error = errorAt(kind, reason, offset)
+  }
+}
+
+fn malformed(reader: &mut Reader, reason: DecodeReason, offset: usize) -> () {
+  return reject(&mut reader, DecodeClass.Malformed, reason, offset)
+}
+
+fn limited(reader: &mut Reader, reason: DecodeReason, offset: usize) -> () {
+  return reject(&mut reader, DecodeClass.ResourceLimit, reason, offset)
+}
+
+fn octet(reader: &Reader, index: usize) -> usize {
+  return u8.toUsize(reader.bytes[index])
+}
+
+// Each read checks declared sizes before containment and content. Parent cursors never escape bounds.
+fn read(reader: &mut Reader, end: usize, depth: usize, field: bool) -> Span {
+  if reader.failed {
+    return emptySpan()
+  }
+  let start = reader.cursor
+  if start >= end {
+    let ignored = malformed(&mut reader, DecodeReason.Truncated, end)
+    return emptySpan()
+  }
+  let tag = octet(&reader, start)
+  let mut at = start + 1
+  if tag % 32 == 31 {
+    let mut number = usize.ZERO
+    let mut first = true
+    let mut more = true
+    while more && !reader.failed {
+      if at >= end {
+        let ignored = malformed(&mut reader, DecodeReason.Truncated, end)
+        return emptySpan()
+      }
+      let byte = octet(&reader, at)
+      if first && byte % 128 == 0 {
+        let ignored = malformed(&mut reader, DecodeReason.Tag, at)
+        return emptySpan()
+      }
+      if number > (usize.MAX - byte % 128) / 128 {
+        let ignored = limited(&mut reader, DecodeReason.SizeOverflow, at)
+        return emptySpan()
+      }
+      number = number * 128 + byte % 128
+      first = false
+      more = byte >= 128
+      at = at + 1
+    }
+    if number < 31 {
+      let ignored = malformed(&mut reader, DecodeReason.Tag, start)
+      return emptySpan()
+    }
+  }
+  if tag == 0 || tag == 32 {
+    let ignored = malformed(&mut reader, DecodeReason.Tag, start)
+    return emptySpan()
+  }
+  if at >= end {
+    let ignored = malformed(&mut reader, DecodeReason.Truncated, end)
+    return emptySpan()
+  }
+  let firstLength = octet(&reader, at)
+  let lengthAt = at
+  at = at + 1
+  let mut size = firstLength
+  if firstLength >= 128 {
+    if firstLength == 128 || firstLength == 255 {
+      let ignored = malformed(&mut reader, DecodeReason.Length, lengthAt)
+      return emptySpan()
+    }
+    let count = firstLength - 128
+    if count > end - at {
+      let ignored = malformed(&mut reader, DecodeReason.Truncated, end)
+      return emptySpan()
+    }
+    if octet(&reader, at) == 0 {
+      let ignored = malformed(&mut reader, DecodeReason.Length, at)
+      return emptySpan()
+    }
+    size = 0
+    let mut index = usize.ZERO
+    while index < count {
+      let byte = octet(&reader, at)
+      if size > (usize.MAX - byte) / 256 {
+        let ignored = limited(&mut reader, DecodeReason.SizeOverflow, at)
+        return emptySpan()
+      }
+      size = size * 256 + byte
+      at = at + 1
+      index = index + 1
+    }
+    if size < 128 {
+      let ignored = malformed(&mut reader, DecodeReason.Length, lengthAt)
+      return emptySpan()
+    }
+  }
+  if size > usize.MAX - at {
+    let ignored = limited(&mut reader, DecodeReason.SizeOverflow, start)
+    return emptySpan()
+  }
+  let stop = at + size
+  if start == 0 && depth == 1 {
+    if stop > reader.limits.certificateBytes {
+      let ignored = limited(&mut reader, DecodeReason.CertificateBytes, start)
+      return emptySpan()
+    }
+    if stop > reader.limits.totalDerBytes {
+      let ignored = limited(&mut reader, DecodeReason.TotalDerBytes, start)
+      return emptySpan()
+    }
+  }
+  if (field || tag / 32 % 2 == 0) && size > reader.limits.fieldBytes {
+    let ignored = limited(&mut reader, DecodeReason.FieldBytes, start)
+    return emptySpan()
+  }
+  if stop > end {
+    let ignored = malformed(&mut reader, DecodeReason.Truncated, end)
+    return emptySpan()
+  }
+  if depth > reader.limits.depth {
+    let ignored = limited(&mut reader, DecodeReason.Depth, start)
+    return emptySpan()
+  }
+  if reader.nodes >= reader.limits.nodes {
+    let ignored = limited(&mut reader, DecodeReason.Nodes, start)
+    return emptySpan()
+  }
+  reader.nodes = reader.nodes + 1
+  reader.cursor = stop
+  let span = Span {start: start, content: at, end: stop, tag: tag}
+  let ignored = universal(&mut reader, span)
+  return span
+}
+
+fn expect(reader: &mut Reader, end: usize, depth: usize, tag: usize) -> Span {
+  let span = read(&mut reader, end, depth, false)
+  if !reader.failed && span.tag != tag {
+    let ignored = malformed(&mut reader, DecodeReason.Tag, span.start)
+  }
+  return span
+}
+
+fn finish(reader: &mut Reader, end: usize) -> () {
+  if !reader.failed && reader.cursor != end {
+    let offset = reader.cursor
+    return malformed(&mut reader, DecodeReason.Schema, offset)
+  }
+}
+
+fn bitString(reader: &mut Reader, span: Span) -> () {
+  let size = span.end - span.content
+  if size == 0 {
+    return malformed(&mut reader, DecodeReason.BitString, span.start)
+  }
+  let count = octet(&reader, span.content)
+  if count > 7 || (size == 1 && count != 0) {
+    return malformed(&mut reader, DecodeReason.BitString, span.start)
+  }
+  let mut divisor: usize = 1
+  let mut i = usize.ZERO
+  while i < count {
+    divisor = divisor * 2
+    i = i + 1
+  }
+  if size > 1 && octet(&reader, span.end - 1) % divisor != 0 {
+    return malformed(&mut reader, DecodeReason.BitString, span.start)
+  }
+}
+
+fn universal(reader: &mut Reader, span: Span) -> () {
+  let tag = span.tag
+  // Universal tag numbers have fixed encoding forms, even without an open-value schema.
+  if tag < 64 {
+    let number = tag % 32
+    let constructed = tag >= 32
+    if number == 16 || number == 17 {
+      if !constructed {
+        return malformed(&mut reader, DecodeReason.Tag, span.start)
+      }
+    } else {
+      if constructed && (number == 1 || number == 2 || number == 3 || number == 4 || number == 5 || number == 6 || number == 12 || (number >= 18 && number <= 30)) {
+        return malformed(&mut reader, DecodeReason.Tag, span.start)
+      }
+    }
+  }
+  let size = span.end - span.content
+  if tag == 2 {
+    if size == 0 {
+      return malformed(&mut reader, DecodeReason.Integer, span.start)
+    }
+    if size > 1 {
+      let a = octet(&reader, span.content)
+      let b = octet(&reader, span.content + 1)
+      if (a == 0 && b < 128) || (a == 255 && b >= 128) {
+        return malformed(&mut reader, DecodeReason.Integer, span.start)
+      }
+    }
+  } else if tag == 1 {
+    if size != 1 {
+      return malformed(&mut reader, DecodeReason.Boolean, span.start)
+    }
+    let b = octet(&reader, span.content)
+    if b != 0 && b != 255 {
+      return malformed(&mut reader, DecodeReason.Boolean, span.start)
+    }
+  } else if tag == 3 {
+    return bitString(&mut reader, span)
+  } else if tag == 5 {
+    if size != 0 {
+      return malformed(&mut reader, DecodeReason.Tag, span.start)
+    }
+  } else if tag == 6 {
+    if size == 0 {
+      return malformed(&mut reader, DecodeReason.Oid, span.start)
+    }
+    let mut index = span.content
+    let mut first = true
+    while index < span.end {
+      let b = octet(&reader, index)
+      if first && b == 128 {
+        return malformed(&mut reader, DecodeReason.Oid, index)
+      }
+      first = (b < 128)
+      index = index + 1
+    }
+    if !first {
+      return malformed(&mut reader, DecodeReason.Oid, span.end)
+    }
+  } else if tag == 12 || tag == 19 || tag == 22 || tag == 28 || tag == 30 {
+    return stringValue(&mut reader, span)
+  }
+}
+
+fn stringValue(reader: &mut Reader, span: Span) -> () {
+  let mut at = span.content
+  let size = span.end - at
+  if (span.tag == 30 && size % 2 != 0) || (span.tag == 28 && size % 4 != 0) {
+    return malformed(&mut reader, DecodeReason.StringEncoding, span.start)
+  }
+  while at < span.end {
+    let b = octet(&reader, at)
+    if span.tag == 19 {
+      let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 '()+,-./:=?"
+      let mut found = false
+      let mut i = usize.ZERO
+      while i < alphabet.length {
+        if u8.toUsize(alphabet[i]) == b {
+          found = true
+        }
+        i = i + 1
+      }
+      if !found {
+        return malformed(&mut reader, DecodeReason.StringEncoding, at)
+      }
+      at = at + 1
+    } else if span.tag == 22 {
+      if b > 127 {
+        return malformed(&mut reader, DecodeReason.StringEncoding, at)
+      }
+      at = at + 1
+    } else if span.tag == 30 {
+      let value = b * 256 + octet(&reader, at + 1)
+      if value >= 55296 && value <= 57343 {
+        return malformed(&mut reader, DecodeReason.StringEncoding, at)
+      }
+      at = at + 2
+    } else if span.tag == 28 {
+      // First octet must be zero, which also keeps arithmetic portable to 32-bit targets.
+      if b != 0 {
+        return malformed(&mut reader, DecodeReason.StringEncoding, at)
+      }
+      let value = octet(&reader, at + 1) * 65536 + octet(&reader, at + 2) * 256 + octet(
+        &reader,
+        at + 3,
+      )
+      if value > 1114111 || (value >= 55296 && value <= 57343) {
+        return malformed(&mut reader, DecodeReason.StringEncoding, at)
+      }
+      at = at + 4
+    } else {
+      let mut count: usize = 1
+      let mut value = b
+      let mut minimum = usize.ZERO
+      if b >= 128 {
+        if b >= 194 && b <= 223 {
+          count = 2
+          value = b - 192
+          minimum = 128
+        } else if b >= 224 && b <= 239 {
+          count = 3
+          value = b - 224
+          minimum = 2048
+        } else if b >= 240 && b <= 244 {
+          count = 4
+          value = b - 240
+          minimum = 65536
+        } else {
+          return malformed(&mut reader, DecodeReason.StringEncoding, at)
+        }
+      }
+      if count > span.end - at {
+        return malformed(&mut reader, DecodeReason.StringEncoding, at)
+      }
+      let mut i: usize = 1
+      while i < count {
+        let next = octet(&reader, at + i)
+        if next < 128 || next > 191 {
+          return malformed(&mut reader, DecodeReason.StringEncoding, at + i)
+        }
+        value = value * 64 + next - 128
+        i = i + 1
+      }
+      if value < minimum || value > 1114111 || (value >= 55296 && value <= 57343) {
+        return malformed(&mut reader, DecodeReason.StringEncoding, at)
+      }
+      at = at + count
+    }
+  }
+}
+
+// Reserve geometric capacity through checked layouts before Vector.append can grow internally.
+effect fn appendFrame(reader: &mut Reader, values: &mut Vector<Frame>, value: Frame, offset: usize) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  let count = Vector.length<Frame>(&values)
+  let capacity = Vector.capacity<Frame>(&values)
+  if count == capacity {
+    if count == usize.MAX {
+      return limited(&mut reader, DecodeReason.SizeOverflow, offset)
+    }
+    let mut next: usize = 4
+    if capacity > 0 {
+      if capacity > usize.MAX / 2 {
+        next = usize.MAX
+      } else {
+        next = capacity * 2
+      }
+    }
+    let fits = match move Layout.repeat(Layout.of<Frame>(), next) {
+      Layout ready => true
+      LayoutOverflow overflow => false
+    }
+    if !fits {
+      return limited(&mut reader, DecodeReason.SizeOverflow, offset)
+    }
+    let reserved = run Vector.reserveExact<Frame>(&mut values, next - count)
+  }
+  return run Vector.append<Frame>(&mut values, move value)
+}
+
+effect fn appendExtension(
+  reader: &mut Reader,
+  values: &mut Vector<Extension>,
+  value: Extension,
+  offset: usize,
+) -> () ! OutOfMemoryError ? &mut Allocator {
+  let count = Vector.length<Extension>(&values)
+  let capacity = Vector.capacity<Extension>(&values)
+  if count == capacity {
+    if count == usize.MAX {
+      return limited(&mut reader, DecodeReason.SizeOverflow, offset)
+    }
+    let mut next: usize = 4
+    if capacity > 0 {
+      if capacity > usize.MAX / 2 {
+        next = usize.MAX
+      } else {
+        next = capacity * 2
+      }
+    }
+    let fits = match move Layout.repeat(Layout.of<Extension>(), next) {
+      Layout ready => true
+      LayoutOverflow overflow => false
+    }
+    if !fits {
+      return limited(&mut reader, DecodeReason.SizeOverflow, offset)
+    }
+    let reserved = run Vector.reserveExact<Extension>(&mut values, next - count)
+  }
+  return run Vector.append<Extension>(&mut values, move value)
+}
+
+// Schema-independent constructed open values use an explicit bounded stack, never native recursion.
+effect fn openValue(reader: &mut Reader, span: Span, depth: usize) -> ()
+! OutOfMemoryError
+? &mut Allocator {
+  if reader.failed {
+    return ()
+  }
+  if span.end - span.content > reader.limits.fieldBytes {
+    return limited(&mut reader, DecodeReason.FieldBytes, span.start)
+  }
+  if span.tag / 32 % 2 == 0 {
+    return ()
+  }
+  let mut frames = Vector.make<Frame>()
+  let appended = run appendFrame(
+    &mut reader,
+    &mut frames,
+    Frame {end: span.end, depth: depth},
+    span.start,
+  )
+  reader.cursor = span.content
+  while Vector.length<Frame>(&frames) > 0 && !reader.failed {
+    let count = Vector.length<Frame>(&frames)
+    let frame = Vector.get<Frame>(&frames, count - 1)
+    if reader.cursor == frame.end {
+      let removed = Vector.truncate<Frame>(&mut frames, count - 1)
+    } else {
+      if frame.depth == usize.MAX {
+        let offset = reader.cursor
+        return limited(&mut reader, DecodeReason.SizeOverflow, offset)
+      }
+      let child = read(&mut reader, frame.end, frame.depth + 1, true)
+      if !reader.failed && child.tag / 32 % 2 == 1 {
+        let pushed = run appendFrame(
+          &mut reader,
+          &mut frames,
+          Frame {end: child.end, depth: frame.depth + 1},
+          child.start,
+        )
+        reader.cursor = child.content
+      }
+    }
+  }
+}
+
+effect fn algorithm(reader: &mut Reader, end: usize, depth: usize) -> Algorithm
+! OutOfMemoryError
+? &mut Allocator {
+  let whole = expect(&mut reader, end, depth, 48)
+  if reader.failed {
+    return emptyAlgorithm()
+  }
+  reader.cursor = whole.content
+  let oid = expect(&mut reader, whole.end, depth + 1, 6)
+  let mut parameters = emptySpan()
+  let mut present = false
+  if !reader.failed && reader.cursor < whole.end {
+    parameters = read(&mut reader, whole.end, depth + 1, true)
+    present = true
+    let ignored = run openValue(&mut reader, parameters, depth + 1)
+  }
+  let ignored = finish(&mut reader, whole.end)
+  return Algorithm {whole: whole, oid: oid, parameters: parameters, present: present}
+}
+
+fn ordered(reader: &Reader, left: Span, right: Span) -> bool {
+  let mut a = left.start
+  let mut b = right.start
+  while a < left.end && b < right.end {
+    let av = octet(&reader, a)
+    let bv = octet(&reader, b)
+    if av < bv {
+      return true
+    }
+    if av > bv {
+      return false
+    }
+    a = a + 1
+    b = b + 1
+  }
+  return a == left.end
+}
+
+effect fn name(reader: &mut Reader, end: usize) -> Span ! OutOfMemoryError ? &mut Allocator {
+  let whole = expect(&mut reader, end, 3, 48)
+  if reader.failed {
+    return whole
+  }
+  reader.cursor = whole.content
+  while reader.cursor < whole.end && !reader.failed {
+    let set = expect(&mut reader, whole.end, 4, 49)
+    if reader.failed {
+      return whole
+    }
+    reader.cursor = set.content
+    if reader.cursor == set.end {
+      let ignored = malformed(&mut reader, DecodeReason.Schema, set.start)
+      return whole
+    }
+    let mut previous = emptySpan()
+    let mut hasPrevious = false
+    while reader.cursor < set.end && !reader.failed {
+      let attribute = expect(&mut reader, set.end, 5, 48)
+      if reader.failed {
+        return whole
+      }
+      if hasPrevious && !ordered(&reader, previous, attribute) {
+        let ignored = malformed(&mut reader, DecodeReason.SetOrder, attribute.start)
+        return whole
+      }
+      previous = attribute
+      hasPrevious = true
+      reader.cursor = attribute.content
+      let oid = expect(&mut reader, attribute.end, 6, 6)
+      let value = read(&mut reader, attribute.end, 6, true)
+      let ignored = run openValue(&mut reader, value, 6)
+      let done = finish(&mut reader, attribute.end)
+    }
+  }
+  return whole
+}
+
+fn decimal(reader: &mut Reader, at: usize, count: usize) -> usize {
+  let mut value = usize.ZERO
+  let mut i = usize.ZERO
+  while i < count {
+    let b = octet(&reader, at + i)
+    if b < 48 || b > 57 {
+      let ignored = malformed(&mut reader, DecodeReason.Time, at + i)
+      return 0
+    }
+    value = value * 10 + b - 48
+    i = i + 1
+  }
+  return value
+}
+
+fn time(reader: &mut Reader, end: usize) -> CertificateTime {
+  let span = read(&mut reader, end, 4, false)
+  if reader.failed {
+    return emptyTime()
+  }
+  let mut digits: usize = 2
+  if span.tag == 24 {
+    digits = 4
+  } else if span.tag != 23 {
+    let ignored = malformed(&mut reader, DecodeReason.Time, span.start)
+    return emptyTime()
+  }
+  if span.end - span.content != digits + 11 {
+    let ignored = malformed(&mut reader, DecodeReason.Time, span.start)
+    return emptyTime()
+  }
+  if octet(&reader, span.end - 1) != 90 {
+    let ignored = malformed(&mut reader, DecodeReason.Time, span.start)
+    return emptyTime()
+  }
+  let mut year = decimal(&mut reader, span.content, digits)
+  if digits == 2 {
+    if year >= 50 {
+      year = year + 1900
+    } else {
+      year = year + 2000
+    }
+  }
+  let at = span.content + digits
+  let month = decimal(&mut reader, at, 2)
+  let day = decimal(&mut reader, at + 2, 2)
+  let hour = decimal(&mut reader, at + 4, 2)
+  let minute = decimal(&mut reader, at + 6, 2)
+  let second = decimal(&mut reader, at + 8, 2)
+  let mut days: usize = 31
+  if month == 4 || month == 6 || month == 9 || month == 11 {
+    days = 30
+  }
+  if month == 2 {
+    days = 28
+    if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+      days = 29
+    }
+  }
+  if year == 0 || month == 0 || month > 12 || day == 0 || day > days || hour > 23 || minute > 59 || second > 59 {
+    let ignored = malformed(&mut reader, DecodeReason.Time, span.start)
+    return emptyTime()
+  }
+  return CertificateTime {
+    year: usize.toU16(year),
+    month: usize.toU8(month),
+    day: usize.toU8(day),
+    hour: usize.toU8(hour),
+    minute: usize.toU8(minute),
+    second: usize.toU8(second),
+  }
+}
+
+effect fn schema(reader: &mut Reader, extensions: &mut Vector<Extension>) -> Fields
+! OutOfMemoryError
+? &mut Allocator {
+  let mut fields = emptyFields()
+  let inputEnd = reader.bytes.length
+  let root = expect(&mut reader, inputEnd, 1, 48)
+  if reader.failed {
+    return fields
+  }
+  reader.cursor = root.content
+  let tbs = expect(&mut reader, root.end, 2, 48)
+  fields.tbs = tbs
+  if reader.failed {
+    return fields
+  }
+  reader.cursor = tbs.content
+  if reader.cursor < tbs.end && octet(&reader, reader.cursor) == 160 {
+    let wrapper = expect(&mut reader, tbs.end, 3, 160)
+    if reader.failed {
+      return fields
+    }
+    reader.cursor = wrapper.content
+    let version = expect(&mut reader, wrapper.end, 4, 2)
+    let ignored = finish(&mut reader, wrapper.end)
+    if reader.failed {
+      return fields
+    }
+    let value = octet(&reader, version.content)
+    if value >= 128 {
+      let ignored = malformed(&mut reader, DecodeReason.Schema, version.start)
+      return fields
+    }
+    if version.end - version.content != 1 || value > 2 {
+      let ignored = reject(
+        &mut reader,
+        DecodeClass.Unsupported,
+        DecodeReason.Version,
+        version.start,
+      )
+      return fields
+    }
+    if value == 0 {
+      let ignored = malformed(&mut reader, DecodeReason.DefaultValue, version.start)
+      return fields
+    }
+    if value == 1 {
+      fields.version = CertificateVersion.V2
+    } else {
+      fields.version = CertificateVersion.V3
+    }
+  }
+  fields.serial = expect(&mut reader, tbs.end, 3, 2)
+  fields.inner = run algorithm(&mut reader, tbs.end, 3)
+  fields.issuer = run name(&mut reader, tbs.end)
+  let validity = expect(&mut reader, tbs.end, 3, 48)
+  fields.validity = validity
+  if reader.failed {
+    return fields
+  }
+  reader.cursor = validity.content
+  fields.before = time(&mut reader, validity.end)
+  fields.after = time(&mut reader, validity.end)
+  let doneValidity = finish(&mut reader, validity.end)
+  fields.subject = run name(&mut reader, tbs.end)
+  let spki = expect(&mut reader, tbs.end, 3, 48)
+  fields.spki = spki
+  if reader.failed {
+    return fields
+  }
+  reader.cursor = spki.content
+  fields.keyAlgorithm = run algorithm(&mut reader, spki.end, 4)
+  fields.key = expect(&mut reader, spki.end, 4, 3)
+  let doneSpki = finish(&mut reader, spki.end)
+  if reader.failed {
+    return fields
+  }
+  let isV1 = match fields.version {
+    CertificateVersion.V1 => true
+    _ => false
+  }
+  if reader.cursor < tbs.end && octet(&reader, reader.cursor) == 129 {
+    let id = expect(&mut reader, tbs.end, 3, 129)
+    if !reader.failed {
+      let checked = bitString(&mut reader, id)
+    }
+    fields.issuerId = id
+    fields.hasIssuerId = true
+    if isV1 && !reader.failed {
+      let ignored = malformed(&mut reader, DecodeReason.Schema, id.start)
+      return fields
+    }
+  }
+  if !reader.failed && reader.cursor < tbs.end && octet(&reader, reader.cursor) == 130 {
+    let id = expect(&mut reader, tbs.end, 3, 130)
+    if !reader.failed {
+      let checked = bitString(&mut reader, id)
+    }
+    fields.subjectId = id
+    fields.hasSubjectId = true
+    if isV1 && !reader.failed {
+      let ignored = malformed(&mut reader, DecodeReason.Schema, id.start)
+      return fields
+    }
+  }
+  if reader.failed {
+    return fields
+  }
+  if reader.cursor < tbs.end {
+    let isV3 = match fields.version {
+      CertificateVersion.V3 => true
+      _ => false
+    }
+    if !isV3 {
+      let offset = reader.cursor
+      let ignored = malformed(&mut reader, DecodeReason.Schema, offset)
+      return fields
+    }
+    let wrapper = expect(&mut reader, tbs.end, 3, 163)
+    if reader.failed {
+      return fields
+    }
+    reader.cursor = wrapper.content
+    let list = expect(&mut reader, wrapper.end, 4, 48)
+    if reader.failed {
+      return fields
+    }
+    reader.cursor = list.content
+    if reader.cursor == list.end {
+      let ignored = malformed(&mut reader, DecodeReason.Schema, list.start)
+      return fields
+    }
+    while reader.cursor < list.end && !reader.failed {
+      if Vector.length<Extension>(&extensions) >= reader.limits.extensions {
+        let offset = reader.cursor
+        let ignored = limited(&mut reader, DecodeReason.Extensions, offset)
+        return fields
+      }
+      let whole = expect(&mut reader, list.end, 5, 48)
+      if reader.failed {
+        return fields
+      }
+      reader.cursor = whole.content
+      let oid = expect(&mut reader, whole.end, 6, 6)
+      if reader.failed {
+        return fields
+      }
+      let mut critical = false
+      if reader.cursor < whole.end && octet(&reader, reader.cursor) == 1 {
+        let boolean = expect(&mut reader, whole.end, 6, 1)
+        if reader.failed {
+          return fields
+        }
+        if octet(&reader, boolean.content) == 0 {
+          let ignored = malformed(&mut reader, DecodeReason.DefaultValue, boolean.start)
+          return fields
+        }
+        critical = true
+      }
+      let value = expect(&mut reader, whole.end, 6, 4)
+      let done = finish(&mut reader, whole.end)
+      if !reader.failed {
+        let appended = run appendExtension(
+          &mut reader,
+          &mut extensions,
+          Extension {whole: whole, oid: oid, value: value, critical: critical},
+          whole.start,
+        )
+      }
+    }
+    let doneWrapper = finish(&mut reader, wrapper.end)
+  }
+  let doneTbs = finish(&mut reader, tbs.end)
+  fields.outer = run algorithm(&mut reader, root.end, 2)
+  fields.signature = expect(&mut reader, root.end, 2, 3)
+  let doneRoot = finish(&mut reader, root.end)
+  if !reader.failed && root.end != reader.bytes.length {
+    let ignored = malformed(&mut reader, DecodeReason.TrailingData, root.end)
+  }
+  return fields
+}
+
+fn content<'a>(bytes: &'a [u8], span: Span) -> &'a [u8] {
+  return Slice.view<u8>(bytes, span.content, span.end - span.content)
+}
+
+fn whole<'a>(bytes: &'a [u8], span: Span) -> &'a [u8] {
+  return Slice.view<u8>(bytes, span.start, span.end - span.start)
+}
+
+fn bits<'a>(bytes: &'a [u8], span: Span) -> BitStringView<'a> {
+  return BitStringView<'a> {
+    bytes: Slice.view<u8>(bytes, span.content + 1, span.end - span.content - 1),
+    unusedBits: bytes[span.content],
+  }
+}
+
+fn algorithmView<'a>(bytes: &'a [u8], info: Algorithm) -> AlgorithmView<'a> {
+  let mut parameters = Option.none<&'a [u8]>()
+  if info.present {
+    parameters = Option.some<&'a [u8]>(whole(bytes, info.parameters))
+  }
+  return AlgorithmView<'a> {
+    der: whole(bytes, info.whole),
+    oid: content(bytes, info.oid),
+    parametersDer: move parameters,
+  }
+}
+
+impl Certificate {
+  /// Decodes exactly one DER certificate into independent owned storage.
+  ///
+  /// # Details
+  ///
+  /// Limits are inclusive. Structural failures return `DecodeError`; allocation refusal uses `OutOfMemoryError`.
+  /// No partial result escapes. The result retains no input borrow. Trailing bytes, including whitespace, fail.
+  ///
+  /// # Gotchas
+  ///
+  /// Success does not verify signatures, trust, names, or current validity. Extensions remain opaque.
+  pub effect fn decodeDer(input: &[u8], limits: DecodeLimits) -> Result<Certificate, DecodeError>
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    if input.length > limits.inputBytes {
+      return Result.failResult<Certificate, DecodeError>(
+        errorAt(DecodeClass.ResourceLimit, DecodeReason.InputBytes, limits.inputBytes),
+      )
+    }
+    if input.length == 0 {
+      return Result.failResult<Certificate, DecodeError>(
+        errorAt(DecodeClass.Malformed, DecodeReason.EmptyInput, 0),
+      )
+    }
+    if limits.certificates == 0 {
+      return Result.failResult<Certificate, DecodeError>(
+        errorAt(DecodeClass.ResourceLimit, DecodeReason.Certificates, 0),
+      )
+    }
+    let mut reader = Reader {
+      bytes: input,
+      limits: limits,
+      cursor: 0,
+      nodes: 0,
+      failed: false,
+      error: errorAt(DecodeClass.Malformed, DecodeReason.Schema, 0),
+    }
+    let mut extensions = Vector.make<Extension>()
+    let fields = run schema(&mut reader, &mut extensions)
+    if reader.failed {
+      return Result.failResult<Certificate, DecodeError>(reader.error)
+    }
+    let bytes = run Bytes.copy(input)
+    return Result.succeed<Certificate, DecodeError>(
+      Certificate {bytes: move bytes, fields: fields, extensions: move extensions},
+    )
+  }
+  /// Decodes exactly one strict CERTIFICATE PEM block into independent owned storage.
+  ///
+  /// # Details
+  ///
+  /// The parser accepts SP, HT, LF, CRLF, and CR whitespace, with canonical base64 padding and pad bits.
+  /// Other labels are unsupported. Text outside markers, malformed markers, and a second block fail.
+  /// Allocation refusal uses `OutOfMemoryError`; no partial certificate escapes.
+  ///
+  /// # Gotchas
+  ///
+  /// This strict profile rejects explanatory text and VT/FF that permissive RFC 7468 readers can ignore.
+  /// Success does not establish trust or validate a signature.
+  pub effect fn decodePem(input: &[u8], limits: DecodeLimits) -> Result<Certificate, DecodeError>
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    if input.length > limits.inputBytes {
+      return Result.failResult<Certificate, DecodeError>(
+        errorAt(DecodeClass.ResourceLimit, DecodeReason.InputBytes, limits.inputBytes),
+      )
+    }
+    let start = Pem.skipWhitespace(input, usize.ZERO)
+    if start == input.length {
+      return Result.failResult<Certificate, DecodeError>(
+        errorAt(DecodeClass.Malformed, DecodeReason.EmptyInput, start),
+      )
+    }
+    if limits.certificates == 0 {
+      return Result.failResult<Certificate, DecodeError>(
+        errorAt(DecodeClass.ResourceLimit, DecodeReason.Certificates, start),
+      )
+    }
+    let next = run Pem.decodeNext(input, start, limits, usize.ZERO, usize.ZERO)
+    return match move next {
+      Result<PemBlock, DecodeError>.Failure {error} => Result.failResult<Certificate, DecodeError>(
+        error,
+      )
+      Result<PemBlock, DecodeError>.Success {value} => {
+        let decoded = run Certificate.decodeDer(Bytes.asSlice(&value.bytes), limits)
+        match move decoded {
+          Result<Certificate, DecodeError>.Failure {error} => {
+            let mut adjusted = error
+            adjusted.offsetSpace = DecodeOffsetSpace.Der
+            return Result.failResult<Certificate, DecodeError>(adjusted)
+          }
+          Result<Certificate, DecodeError>.Success {value: certificate} => {
+            let end = Pem.skipWhitespace(input, value.nextOffset)
+            if end != input.length {
+              return Result.failResult<Certificate, DecodeError>(
+                errorAt(DecodeClass.Malformed, DecodeReason.TrailingData, end),
+              )
+            }
+            return Result.succeed<Certificate, DecodeError>(move certificate)
+          }
+        }
+      }
+    }
+  }
+  /// Borrows the complete original signed TBSCertificate TLV; the view cannot outlive this owner.
+  pub fn tbsDer(self: &Self) -> &[u8] {
+    let info = self.fields.tbs
+    return whole(Bytes.asSlice(&self.bytes), info)
+  }
+  /// Borrows the complete issuer Name TLV, without normalization; the view cannot outlive this owner.
+  pub fn issuerDer(self: &Self) -> &[u8] {
+    let info = self.fields.issuer
+    return whole(Bytes.asSlice(&self.bytes), info)
+  }
+  /// Borrows the complete subject Name TLV, without normalization; the view cannot outlive this owner.
+  pub fn subjectDer(self: &Self) -> &[u8] {
+    let info = self.fields.subject
+    return whole(Bytes.asSlice(&self.bytes), info)
+  }
+  /// Borrows the complete original Validity TLV; the view cannot outlive this owner.
+  pub fn validityDer(self: &Self) -> &[u8] {
+    let info = self.fields.validity
+    return whole(Bytes.asSlice(&self.bytes), info)
+  }
+  /// Borrows the complete original SubjectPublicKeyInfo TLV; the view cannot outlive this owner.
+  pub fn spkiDer(self: &Self) -> &[u8] {
+    let info = self.fields.spki
+    return whole(Bytes.asSlice(&self.bytes), info)
+  }
+  /// Borrows all original DER bytes; the view cannot outlive this owner.
+  pub fn der(self: &Self) -> &[u8] {
+    return Bytes.asSlice(&self.bytes)
+  }
+  /// Returns the structural certificate version without imposing validation policy.
+  pub fn version(self: &Self) -> CertificateVersion {
+    return self.fields.version
+  }
+  /// Borrows minimal signed INTEGER content, including a required sign octet; the view borrows this owner.
+  pub fn serial(self: &Self) -> &[u8] {
+    let info = self.fields.serial
+    return content(Bytes.asSlice(&self.bytes), info)
+  }
+  /// Returns the decoded UTC lower validity boundary without consulting a clock.
+  pub fn notBefore(self: &Self) -> CertificateTime {
+    return self.fields.before
+  }
+  /// Returns the decoded UTC upper validity boundary without checking interval order.
+  pub fn notAfter(self: &Self) -> CertificateTime {
+    return self.fields.after
+  }
+  /// Borrows the original subjectPublicKey payload and unused-bit count; the view borrows this owner.
+  pub fn publicKey<'a>(self: &'a Self) -> BitStringView<'a> {
+    let info = self.fields.key
+    return bits(Bytes.asSlice(&self.bytes), info)
+  }
+  /// Borrows the original signatureValue payload and unused-bit count; the view borrows this owner.
+  pub fn signature<'a>(self: &'a Self) -> BitStringView<'a> {
+    let info = self.fields.signature
+    return bits(Bytes.asSlice(&self.bytes), info)
+  }
+  /// Borrows the SPKI AlgorithmIdentifier, preserving parameter absence and original encoding.
+  pub fn publicKeyAlgorithm<'a>(self: &'a Self) -> AlgorithmView<'a> {
+    let info = self.fields.keyAlgorithm
+    return algorithmView(Bytes.asSlice(&self.bytes), info)
+  }
+  /// Borrows the TBSCertificate signature AlgorithmIdentifier, preserving parameter absence and original encoding.
+  pub fn tbsSignatureAlgorithm<'a>(self: &'a Self) -> AlgorithmView<'a> {
+    let info = self.fields.inner
+    return algorithmView(Bytes.asSlice(&self.bytes), info)
+  }
+  /// Borrows the outer signature AlgorithmIdentifier, preserving parameter absence and original encoding.
+  pub fn signatureAlgorithm<'a>(self: &'a Self) -> AlgorithmView<'a> {
+    let info = self.fields.outer
+    return algorithmView(Bytes.asSlice(&self.bytes), info)
+  }
+  /// Borrows the optional unique ID and unused-bit count; absence returns `None`. The view borrows this owner.
+  pub fn issuerUniqueId<'a>(self: &'a Self) -> Option<BitStringView<'a>> {
+    if self.fields.hasIssuerId {
+      let info = self.fields.issuerId
+      return Option.some<BitStringView<'a>>(bits(Bytes.asSlice(&self.bytes), info))
+    }
+    return Option.none<BitStringView<'a>>()
+  }
+  /// Borrows the optional unique ID and unused-bit count; absence returns `None`. The view borrows this owner.
+  pub fn subjectUniqueId<'a>(self: &'a Self) -> Option<BitStringView<'a>> {
+    if self.fields.hasSubjectId {
+      let info = self.fields.subjectId
+      return Option.some<BitStringView<'a>>(bits(Bytes.asSlice(&self.bytes), info))
+    }
+    return Option.none<BitStringView<'a>>()
+  }
+  /// Returns the extension count, including duplicates and unknown OIDs.
+  pub fn extensionCount(self: &Self) -> usize {
+    return Vector.length<Extension>(&self.extensions)
+  }
+  /// Borrows an extension in input order, or returns `None` when the index is out of range.
+  ///
+  /// # Details
+  ///
+  /// The value is exact OCTET STRING content. Unknown and duplicate OIDs remain present. The view borrows this owner.
+  pub fn extension<'a>(self: &'a Self, index: usize) -> Option<ExtensionView<'a>> {
+    if index >= Vector.length<Extension>(&self.extensions) {
+      return Option.none<ExtensionView<'a>>()
+    }
+    let item = Vector.get<Extension>(&self.extensions, index)
+    let bytes = Bytes.asSlice(&self.bytes)
+    return Option.some<ExtensionView<'a>>(
+      ExtensionView<'a> {
+        der: whole(bytes, item.whole),
+        oid: content(bytes, item.oid),
+        critical: item.critical,
+        value: content(bytes, item.value),
+      },
+    )
+  }
+}

@@ -1,0 +1,163 @@
+//! Owned certificate sequences decoded atomically from strict PEM input.
+//!
+//! # When to use
+//!
+//! Use [`CertificateBundle`] for a PEM document with one or more CERTIFICATE blocks.
+//! Use `silk.certificate.Certificate` when the input must contain exactly one certificate.
+//!
+//! # Details
+//!
+//! A bundle preserves input order and duplicate certificates. Each certificate owns its DER bytes.
+//! All input, field, count, and traversal limits are inclusive. Zero never means unlimited.
+//! A failed call releases prior certificates and returns no partial bundle.
+//!
+//! # Gotchas
+//!
+//! Successful decoding does not establish trust, signature validity, or certificate-path order.
+//! Explanatory text, unrelated PEM labels, and malformed later blocks fail the entire call.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.certificate {
+  Certificate,
+  DecodeLimits,
+  DecodeError,
+  DecodeClass,
+  DecodeReason,
+  DecodeOffsetSpace,
+}
+import silk.layout {Layout, LayoutOverflow}
+import silk.option {Option}
+import silk.result {Result}
+import silk.support.certificate_pem {Pem, PemBlock}
+import silk.usize
+import silk.vector {Vector}
+
+/// An immutable owned sequence that preserves every decoded certificate in input order.
+///
+/// # Details
+///
+/// The bundle releases all certificate storage on drop. Borrowed certificates cannot outlive the bundle.
+/// Duplicate certificates remain separate entries. Decoding does not assign trust or chain order.
+pub struct CertificateBundle {
+  certificates: Vector<Certificate>
+}
+
+impl CertificateBundle {
+  /// Decodes all strict PEM certificate blocks into one owned result, or returns no bundle.
+  ///
+  /// # Details
+  ///
+  /// The input remains borrowed until the Effect completes or is dropped. A successful result owns independent DER bytes.
+  /// Limits include whitespace and duplicate certificates. All limits are inclusive; zero is a zero budget.
+  /// Malformed input, unsupported labels, and exhausted limits return `DecodeError` in the result.
+  /// Allocation refusal uses `OutOfMemoryError`. Every failure releases accumulated certificates and scratch storage.
+  ///
+  /// # Gotchas
+  ///
+  /// Only CERTIFICATE labels and SP, HT, CR, and LF whitespace are accepted.
+  /// Explanatory text and malformed later blocks fail the entire document. This operation does not validate trust.
+  pub effect fn decodePem(input: &[u8], limits: DecodeLimits) -> Result<
+    CertificateBundle,
+    DecodeError,
+  > ! OutOfMemoryError ? &mut Allocator {
+    if input.length > limits.inputBytes {
+      return failed(DecodeClass.ResourceLimit, DecodeReason.InputBytes, 0, limits.inputBytes)
+    }
+    let mut offset = Pem.skipWhitespace(input, 0)
+    if offset == input.length {
+      return failed(DecodeClass.Malformed, DecodeReason.EmptyInput, 0, offset)
+    }
+    let mut certificates = Vector.make<Certificate>()
+    let mut total = usize.ZERO
+    let mut capacity = usize.ZERO
+    while offset < input.length {
+      let index = Vector.length<Certificate>(&certificates)
+      let next = run Pem.decodeNext(input, offset, limits, index, total)
+      let block = match move next {
+        Result<PemBlock, DecodeError>.Failure {error} => {
+          return Result.failResult<CertificateBundle, DecodeError>(move error)
+        }
+        Result<PemBlock, DecodeError>.Success {value} => move value
+      }
+      let size = Bytes.length(&block.bytes)
+      if size > usize.MAX - total {
+        return failed(DecodeClass.ResourceLimit, DecodeReason.SizeOverflow, index, offset)
+      }
+      if total > limits.totalDerBytes || size > limits.totalDerBytes - total {
+        return failed(DecodeClass.ResourceLimit, DecodeReason.TotalDerBytes, index, offset)
+      }
+      let mut remaining = limits
+      remaining.totalDerBytes = limits.totalDerBytes - total
+      let decoded = run Certificate.decodeDer(Bytes.asSlice(&block.bytes), remaining)
+      let certificate = match move decoded {
+        Result<Certificate, DecodeError>.Failure {error} => {
+          let mut located = move error
+          located.certificateIndex = index
+          located.offsetSpace = DecodeOffsetSpace.Der
+          return Result.failResult<CertificateBundle, DecodeError>(move located)
+        }
+        Result<Certificate, DecodeError>.Success {value} => move value
+      }
+      // Preflight geometric growth so no unchecked Vector growth arithmetic is reachable.
+      if index == capacity {
+        if capacity > usize.MAX / 2 {
+          return failed(DecodeClass.ResourceLimit, DecodeReason.SizeOverflow, index, offset)
+        }
+        let mut nextCapacity = capacity * 2
+        if nextCapacity == 0 {
+          nextCapacity = 1
+        }
+        if nextCapacity > limits.certificates {
+          nextCapacity = limits.certificates
+        }
+        let validLayout = match move Layout.repeat(Layout.of<Certificate>(), nextCapacity) {
+          Layout ready => true
+          LayoutOverflow overflow => false
+        }
+        if !validLayout {
+          return failed(DecodeClass.ResourceLimit, DecodeReason.SizeOverflow, index, offset)
+        }
+        let reserved = run Vector.reserveExact<Certificate>(&mut certificates, nextCapacity - index)
+        capacity = nextCapacity
+      }
+      let appended = run Vector.append<Certificate>(&mut certificates, move certificate)
+      total = total + size
+      offset = Pem.skipWhitespace(input, block.nextOffset)
+    }
+    return Result.succeed<CertificateBundle, DecodeError>(
+      CertificateBundle {certificates: move certificates},
+    )
+  }
+  /// Returns the number of certificates, including duplicate entries.
+  pub fn length(self: &Self) -> usize {
+    return Vector.length<Certificate>(&self.certificates)
+  }
+  /// Borrows the certificate at `index`, or returns `None` when the index is outside the bundle.
+  ///
+  /// # Details
+  ///
+  /// The returned certificate cannot outlive this bundle. This operation allocates nothing and preserves input order.
+  pub fn get<'a>(self: &'a Self, index: usize) -> Option<&'a Certificate> {
+    let values = Vector.asSlice<Certificate>(&self.certificates)
+    if index >= values.length {
+      return Option.none<&'a Certificate>()
+    }
+    return Option.some<&'a Certificate>(&values[index])
+  }
+}
+
+fn failed(kind: DecodeClass, reason: DecodeReason, index: usize, offset: usize) -> Result<
+  CertificateBundle,
+  DecodeError,
+> {
+  return Result.failResult<CertificateBundle, DecodeError>(
+    DecodeError {
+      kind: kind,
+      reason: reason,
+      certificateIndex: index,
+      offsetSpace: DecodeOffsetSpace.Input,
+      offset: offset,
+    },
+  )
+}
