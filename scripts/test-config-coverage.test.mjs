@@ -106,7 +106,7 @@ const ciJobBody = (name) => {
 }
 
 void test('every Linux native test job selects the complete verified LLVM toolchain', () => {
-  for (const job of ['validate', 'native-acceptance', 'compiler-tests']) {
+  for (const job of ['package-tests', 'native-acceptance', 'compiler-tests']) {
     assert.match(
       ciJobBody(job),
       /uses: \.\/\.github\/actions\/setup-linux-llvm/,
