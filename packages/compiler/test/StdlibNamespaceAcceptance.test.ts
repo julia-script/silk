@@ -84,3 +84,26 @@ pub fn main() -> i32 {
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
   }),
 )
+
+it.effect('consumes a SHA state when finish finalizes it', () =>
+  Effect.gen(function* () {
+    const source = `import silk.sha2 { Sha256 }
+pub fn main() -> i32 {
+  let empty: [u8; 0] = []
+  let mut state = Sha256.make()
+  state.update(&empty)
+  let digest = state.finish()
+  state.update(&empty)
+  drop digest
+  return 42
+}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/consuming-sha-finish',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['OWN0001'],
+    )
+  }),
+)

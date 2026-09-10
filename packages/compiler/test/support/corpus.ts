@@ -17,6 +17,7 @@ import {
 } from './ownedAllocatorSuspension.js'
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
+import { shaAcceptanceSource } from './shaAcceptance.js'
 import {
   borrowedBox,
   borrowedStream,
@@ -90,6 +91,41 @@ const localSchedulerImplementation = readFileSync(
   new URL('../../stdlib/silk/local_scheduler.silk', import.meta.url),
   'utf8',
 )
+
+const sourceSection = (source: string, start: string, end: string): string => {
+  const startOffset = source.indexOf(start)
+  const endOffset = source.indexOf(end, startOffset)
+  if (startOffset < 0 || endOffset < 0)
+    throw new Error(`Cannot find test source section from ${start} to ${end}`)
+  return source.slice(startOffset, endOffset)
+}
+
+const sha2Source = readFileSync(new URL('../../stdlib/silk/sha2.silk', import.meta.url), 'utf8')
+
+const sha2LengthTestSource = `import silk.u64 as u64
+
+${sourceSection(sha2Source, 'struct Length64Transition {', 'fn makeState32')}
+
+fn __testLength64Transition() -> bool {
+  let carry = length64Transition(7, u64.MAX - 7, 1)
+  if carry.overflow || carry.high != 8 || carry.low != 0 { return false }
+
+  let highEdge = length64Transition(u64.MAX - 7, 0, u64.MAX)
+  if highEdge.overflow || highEdge.high != u64.MAX || highEdge.low != u64.MAX - 7 {
+    return false
+  }
+
+  let directOverflow = length64Transition(u64.MAX - 6, 0, u64.MAX)
+  let carryOverflow = length64Transition(u64.MAX, u64.MAX - 7, 1)
+  return directOverflow.overflow && carryOverflow.overflow
+}`
+
+const shaAcceptanceNativeSource = shaAcceptanceSource
+  .replace('import silk.sha1', `${sha2LengthTestSource}\n\nimport silk.sha1`)
+  .replace(
+    '  return 42\n}',
+    '  if __testLength64Transition() == false { return 102 }\n  return 42\n}',
+  )
 
 /** Canonical-bits transcendental program with independently committed native expectations. */
 export const transcendentalCanonicalBits = `import silk.f32 as f32
@@ -7738,6 +7774,12 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     nativeSource: replaceDropProgram,
     nativeStdout: '1243',
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'fixed-output-sha',
+    source: shaAcceptanceSource,
+    nativeSource: shaAcceptanceNativeSource,
+    expected: { _tag: 'Completes', result: 42 },
   },
   ...corpus,
   ...algorithmExamples,

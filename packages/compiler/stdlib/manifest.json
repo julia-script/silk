@@ -354,6 +354,23 @@
     "aliases": ["PendingPublication", "TaskId", "TaskIdExhaustedError"]
   },
   {
+    "module": "silk/sha1",
+    "path": "silk/sha1.silk",
+    "namespace": "Sha1"
+  },
+  {
+    "module": "silk/sha2",
+    "path": "silk/sha2.silk",
+    "namespace": "Sha256",
+    "aliases": ["Sha224", "Sha384", "Sha512", "Sha512_224", "Sha512_256"]
+  },
+  {
+    "module": "silk/sha3",
+    "path": "silk/sha3.silk",
+    "namespace": "Sha3_256",
+    "aliases": ["Sha3_224", "Sha3_384", "Sha3_512"]
+  },
+  {
     "module": "silk/shared",
     "path": "silk/shared.silk",
     "namespace": "Shared"
