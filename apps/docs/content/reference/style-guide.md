@@ -186,7 +186,7 @@ return run provided
 Import a module namespace when the module itself is the subject being taught, or when the operation
 is a root declaration with no owner type, as in the primitive namespaces `silk.i32` and
 `silk.usize`. A namespace binding exposes only root declarations and never reaches an inherent
-member, so `import silk.option as OptionModule` followed by `OptionModule.map(...)` is not a
+member, so `import silk.option` followed by `option.map(...)` is not a
 substitute for the owner import. Select a root declaration directly when an example reads it
 unqualified or when repeated qualification would obscure the example's actual point; an inherent
 member cannot be selected on its own.
@@ -199,7 +199,13 @@ fn id(user: &User) -> i32 {
 }
 ```
 
-When two owner types have the same default name, alias one selected type explicitly and keep its
+Use canonical names without aliases. Standard-library operation modules provide a public owner,
+using a zero-data scope struct when there is no principal data type. Import that owner selectively,
+for example `import silk.static_sequence { StaticSequence }` or `import silk.pointer { Pointer }`.
+Primitive modules keep their lowercase names: `import silk.usize` makes `usize.ZERO` available.
+
+Use an alias only to resolve a real name collision. First consider giving the declarations more
+specific canonical names. When both names must remain, alias one selected type and keep its
 operations qualified:
 
 ```silk

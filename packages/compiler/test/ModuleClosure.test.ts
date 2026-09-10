@@ -448,7 +448,7 @@ it.effect('retains partial closure facts around ordered operational failures', (
 it.effect('records cycles and exact dotted-to-canonical import provenance', () =>
   Effect.gen(function* () {
     const closure = yield* fixture('app/Main', [
-      ['app/Main', `import compiler.Syntax as Tree { parse }\n${fn}`],
+      ['app/Main', `import compiler.Syntax { parse }\n${fn}`],
       ['compiler/Syntax', `import cycle.Other\npub fn parse() -> i32 { return 42 }`],
       ['cycle/Other', `import compiler.Syntax\n${fn}`],
     ])
@@ -463,7 +463,7 @@ it.effect('records cycles and exact dotted-to-canonical import provenance', () =
 it.effect('maps reserved contextual path segments to canonical module identities', () =>
   Effect.gen(function* () {
     const closure = yield* fixture('app/Main', [
-      ['app/Main', `import toolkit.effect.helpers as Helpers\n${fn}`],
+      ['app/Main', `import toolkit.effect.helpers\n${fn}`],
       ['toolkit/effect/helpers', 'pub fn answer() -> i32 { return 42 }'],
     ])
     const imported = closure.modules.find((module) => module.name === 'app/Main')?.imports.at(0)

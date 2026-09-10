@@ -16,11 +16,11 @@ import silk.option {Option}
 import silk.string {String}
 import silk.slice {Slice}
 import silk.writer {Writer, WriterError}
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u8
+import silk.usize
 
 /// The grammar context of raw bytes supplied to percent encoding.
-pub enum Component {
+pub enum PercentComponent {
   /// User information; an at sign is escaped and a colon is retained.
   Userinfo,
   /// A registered host name; authority delimiters are escaped.
@@ -75,7 +75,7 @@ impl UriPercent {
   /// # Gotchas
   /// Supply raw data, not already escaped text. Whole-path encoding retains slash and colon;
   /// use `FirstPathSegment` for data that must not become a relative reference's scheme.
-  pub effect fn encodeOwned(values: &[u8], component: Component) -> String
+  pub effect fn encodeOwned(values: &[u8], component: PercentComponent) -> String
   ! OutOfMemoryError
   ? &mut Allocator {
     let mut output = Bytes.make()
@@ -88,7 +88,7 @@ impl UriPercent {
   /// # Details
   /// Computes the size and reserves exact required capacity before changing the contents.
   /// Existing sufficient capacity requires no allocation. Failure leaves the original contents intact.
-  pub effect fn encodeInto(output: &mut Bytes, values: &[u8], component: Component) -> ()
+  pub effect fn encodeInto(output: &mut Bytes, values: &[u8], component: PercentComponent) -> ()
   ! OutOfMemoryError
   ? &mut Allocator {
     let length = run requiredEncodedLength(values, component)
@@ -101,7 +101,7 @@ impl UriPercent {
   /// # Details
   /// Counts raw data under the selected grammar context, including three bytes for each escape.
   /// Use this to reserve a combined serialization before appending its individual components.
-  pub fn encodedLength(values: &[u8], component: Component) -> Option<usize> {
+  pub fn encodedLength(values: &[u8], component: PercentComponent) -> Option<usize> {
     return encodedSize(values, component)
   }
   /// Appends encoded component data while retaining all existing destination bytes.
@@ -109,7 +109,7 @@ impl UriPercent {
   /// # Details
   /// Computes the additional byte count and reserves exact capacity before mutation. Sufficient
   /// capacity requires no allocation. Size overflow or allocation failure leaves the output intact.
-  pub effect fn appendEncoded(output: &mut Bytes, values: &[u8], component: Component) -> ()
+  pub effect fn appendEncoded(output: &mut Bytes, values: &[u8], component: PercentComponent) -> ()
   ! OutOfMemoryError
   ? &mut Allocator {
     let length = run requiredEncodedLength(values, component)
@@ -124,7 +124,7 @@ impl UriPercent {
   ///
   /// # Gotchas
   /// Writer failure may leave partial output. This operation does not flush the provider.
-  pub effect fn encodeToWriter(values: &[u8], component: Component) -> ()
+  pub effect fn encodeToWriter(values: &[u8], component: PercentComponent) -> ()
   ! WriterError
   ? &mut Writer {
     let mut index = usize.ZERO
@@ -255,7 +255,7 @@ impl UriPercent {
   }
 }
 
-effect fn requiredEncodedLength(values: &[u8], component: Component) -> usize ! OutOfMemoryError {
+effect fn requiredEncodedLength(values: &[u8], component: PercentComponent) -> usize ! OutOfMemoryError {
   let size = encodedSize(values, component)
   return match move size {
     Option<usize>.Some {value} => value
@@ -264,7 +264,7 @@ effect fn requiredEncodedLength(values: &[u8], component: Component) -> usize ! 
 }
 
 // Callers reserve the complete output before emission, so append cannot grow between runs.
-effect fn appendReserved(output: &mut Bytes, values: &[u8], component: Component) -> ()
+effect fn appendReserved(output: &mut Bytes, values: &[u8], component: PercentComponent) -> ()
 ! OutOfMemoryError
 ? &mut Allocator {
   let mut index = usize.ZERO
@@ -286,7 +286,7 @@ effect fn appendReserved(output: &mut Bytes, values: &[u8], component: Component
   return ()
 }
 
-fn encodedSize(values: &[u8], component: Component) -> Option<usize> {
+fn encodedSize(values: &[u8], component: PercentComponent) -> Option<usize> {
   let mut index = usize.ZERO
   let mut length = usize.ZERO
   while index < values.length {
@@ -351,7 +351,7 @@ fn digit(value: u8) -> u8 {
   return u8.toU8(255)
 }
 
-fn allowed(value: u8, component: Component) -> bool {
+fn allowed(value: u8, component: PercentComponent) -> bool {
   if value >= u8.toU8(65) && value <= u8.toU8(90) {
     return true
   }
@@ -364,7 +364,7 @@ fn allowed(value: u8, component: Component) -> bool {
   if value == u8.toU8(45) || value == u8.toU8(46) || value == u8.toU8(95) || value == u8.toU8(126) {
     return true
   }
-  if component == Component.Unreserved {
+  if component == PercentComponent.Unreserved {
     return false
   }
   if value == u8.toU8(33) || value == u8.toU8(36) || value == u8.toU8(38) || value == u8.toU8(39) {
@@ -376,22 +376,22 @@ fn allowed(value: u8, component: Component) -> bool {
   if value == u8.toU8(44) || value == u8.toU8(59) || value == u8.toU8(61) {
     return true
   }
-  if component == Component.RegName {
+  if component == PercentComponent.RegName {
     return false
   }
   if value == u8.toU8(58) {
-    return component != Component.FirstPathSegment
+    return component != PercentComponent.FirstPathSegment
   }
-  if component == Component.Userinfo {
+  if component == PercentComponent.Userinfo {
     return false
   }
   if value == u8.toU8(64) {
     return true
   }
-  if component == Component.Path {
+  if component == PercentComponent.Path {
     return value == u8.toU8(47)
   }
-  if component == Component.Query || component == Component.Fragment {
+  if component == PercentComponent.Query || component == PercentComponent.Fragment {
     return value == u8.toU8(47) || value == u8.toU8(63)
   }
   return false

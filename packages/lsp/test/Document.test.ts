@@ -1598,22 +1598,18 @@ it.effect('still lists the toolchain declaration among a standard-library name r
 )
 
 const stdlibAliases =
-  'import silk.vector { appendBytes as vectorAppendBytes }\npub fn main() -> i32 { return 0 }'
-// The alias spelling repeats across the standard library, so the offset is taken from the clause
-// itself rather than searched for by spelling.
-const vectorAliasBinding =
-  stdlibAliases.indexOf('appendBytes as vectorAppendBytes') + 'appendBytes as '.length
+  'import silk.vector { Vector as ProjectVector }\npub fn main() -> i32 { return 0 }'
+// Locate the local binding in the selected import clause.
+const vectorAliasBinding = stdlibAliases.indexOf('Vector as ProjectVector') + 'Vector as '.length
 
-it.effect('renames the project alias of a standard-library member the toolchain also aliases', () =>
+it.effect('renames a project alias without renaming the standard-library owner', () =>
   Effect.gen(function* () {
     const { document, snapshot } = yield* openProject(
       [{ module: 'main', text: stdlibAliases }],
       'main',
     )
     const position = positionAt(stdlibAliases, vectorAliasBinding)
-    // `silk/bytes` spells its own alias of `silk.vector.appendBytes` `vectorAppendBytes` too:
-    // identity and spelling both coincide, and only the module that wrote the clause owns this
-    // binding.
+    // The project owns this alias; the canonical Vector declaration remains read-only.
     const renamed = Document.rename(document, snapshot, position, 'newVector', uriOfModule)
     assert.strictEqual(renamed?._tag, 'RenameEdit')
     if (renamed?._tag !== 'RenameEdit') return
@@ -1631,10 +1627,10 @@ it.effect('renames the project alias of a standard-library member the toolchain 
         start: position,
         end: {
           line: position.line,
-          character: position.character + 'vectorAppendBytes'.length,
+          character: position.character + 'ProjectVector'.length,
         },
       },
-      placeholder: 'vectorAppendBytes',
+      placeholder: 'ProjectVector',
     })
     // Confining the *rename* leaves the read-only reference list whole: every occurrence of the
     // declaration, standard-library ones included, is still worth showing.
@@ -2240,7 +2236,7 @@ it.effect('aliases a colliding Effect member completion deterministically', () =
 
 it.effect('does not duplicate an existing equivalent Effect import', () =>
   Effect.gen(function* () {
-    for (const declaration of ['import silk.effect { Effect }', 'import silk.effect as Effect']) {
+    for (const declaration of ['import silk.effect { Effect }', 'import silk.effect {Effect}']) {
       const source = `${declaration}\npub fn main() -> i32 { Eff return 0 }`
       const { document, snapshot } = yield* open(source)
       const completion = Document.completion(

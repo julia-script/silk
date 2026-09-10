@@ -13,8 +13,8 @@
 //! Secret state is not guaranteed to be erased. The SHA input limit includes the initial key pad.
 
 import silk.sha2 {Sha256, Sha384}
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u8
+import silk.usize
 
 /// An incremental HMAC-SHA-256 state that returns a 32-byte authentication tag.
 ///

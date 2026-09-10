@@ -965,7 +965,7 @@ it('bounds damaged conformance recovery before the following declaration', () =>
 
 it('bounds a damaged unsafe call before the following statement and declaration', () => {
   const source =
-    'import silk.slot as Slot\nfn main() -> i32 { unsafe { let value = Slot.take( return 42 } } fn after() -> i32 { return 7 }'
+    'import silk.slot { Slot }\nfn main() -> i32 { unsafe { let value = Slot.take( return 42 } } fn after() -> i32 { return 7 }'
   const result = parseText('memory://damaged-unsafe-call.silk', source)
   const functions = directFunctionDeclarations(result.root)
 
@@ -982,7 +982,7 @@ it('bounds a damaged unsafe call before the following statement and declaration'
 it('parses an explicit selected requirement row in a provision pipeline', () => {
   const result = parseText(
     'memory://provider-role.silk',
-    'import silk.effect as Effect\nfn main() -> i32 { let recipe = work() |> Effect.provide<Clock at Scratch>(&clock) return 0 }',
+    'import silk.effect { Effect }\nfn main() -> i32 { let recipe = work() |> Effect.provide<Clock at Scratch>(&clock) return 0 }',
   )
   assert.deepEqual(result.parserDiagnostics, [])
   assert.include(
@@ -2408,7 +2408,7 @@ it('keeps statements after the return statement as concrete branches', () => {
 it('parses signed literals and qualified callees', () => {
   const result = parseText(
     'fixture://arith.silk',
-    'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(-8, 50) }',
+    'import silk.i32\npub fn main() -> i32 { return i32.add(-8, 50) }',
   )
   const fn = directFunctionDeclarations(result.root).at(0)
   const block = fn === undefined ? undefined : SyntaxTree.directNode(fn, 'Block')
@@ -2444,7 +2444,7 @@ it('parses signed literals and qualified callees', () => {
 it('recovers a missing operation name after the dot', () => {
   const result = parseText(
     'fixture://missing-operation.silk',
-    'import silk.i32 as i32\npub fn main() -> i32 { return i32.(1, 2) }',
+    'import silk.i32\npub fn main() -> i32 { return i32.(1, 2) }',
   )
 
   assert.deepEqual(
@@ -2721,9 +2721,9 @@ it('parses grouping and right-associative prefix expressions losslessly', () => 
 
 it('parses complete callable pipelines left-to-right', () => {
   const source =
-    'import silk.i32 as i32\npub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }\n' +
-    'import silk.bool as bool\npub fn flag() -> bool { return true |> bool.not }\n' +
-    'import silk.effect as Effect\npub fn recover() -> i32 { return risky() |> Effect.catchAll(handler) }'
+    'import silk.i32\npub fn main() -> i32 { return 2 |> i32.add(3) |> i32.multiply(4) }\n' +
+    'import silk.bool\npub fn flag() -> bool { return true |> bool.not }\n' +
+    'import silk.effect { Effect }\npub fn recover() -> i32 { return risky() |> Effect.catchAll(handler) }'
   const result = parseText('memory/operator-pipelines', source)
   const pipelines = descendants(result.root).filter(
     (element): element is SyntaxTree.Node =>
@@ -2992,7 +2992,7 @@ it('recovers every callable type boundary without crossing the next declaration'
 })
 
 it('parses repeated postfix application over every callable-producing expression', () => {
-  const source = `import silk.i32 as i32
+  const source = `import silk.i32
 fn use(operation: fn(i32) -> i32, value: i32) -> i32 {
   let bound = i32.add(2)
   let named = operation(value)
@@ -3373,7 +3373,7 @@ it('retains damaged patterns explicitly in every pattern position', () => {
 })
 
 it('parses bare, shared, and exclusive matches in expression positions', () => {
-  const source = `import silk.i32 as i32
+  const source = `import silk.i32
 pub struct Token { kind: i32 }
 pub fn bare(event: Token) -> i32 { return match event { Token { kind } => kind } }
 pub fn shared(event: Token) -> i32 { return i32.add(match &event { Token { kind } => kind }, 1) }

@@ -24,7 +24,7 @@ it.effect('lowers the system clock to libc externs on Darwin and Linux', () =>
     const source = `import silk.effect { Effect }
 import silk.os_system_clock { OsSystemClock }
 import silk.system_clock { SystemClock }
-import silk.i64 as i64
+import silk.i64
 pub fn main() -> i32 {
   let mut provider = OsSystemClock.make()
   let instant = run Effect.provideMut(SystemClock.now(), &mut provider)

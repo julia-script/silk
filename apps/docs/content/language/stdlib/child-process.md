@@ -35,7 +35,7 @@ as its entry separator, and a native provider cannot preserve an embedded NUL as
 ```silk
 import silk.bytes { Bytes }
 
-import silk.child_process { ChildProcess as Process, ProcessError, ProcessOutcome, ProcessRequest }
+import silk.child_process { ChildProcess, ProcessError, ProcessOutcome, ProcessRequest }
 
 import silk.allocator { Allocator, OutOfMemoryError }
 
@@ -50,10 +50,10 @@ struct Completed {}
 effect fn execute(self: &mut Completed, request: &ProcessRequest) -> ProcessOutcome
 ! ProcessError | OutOfMemoryError
 ? &mut Allocator {
-  return Process.exited(7, Bytes.make(), Bytes.make())
+  return ChildProcess.exited(7, Bytes.make(), Bytes.make())
 }
 
-impl Process for Completed {
+impl ChildProcess for Completed {
   execute: Completed.execute
 }
 
@@ -63,12 +63,12 @@ effect fn program() -> i32
   let mut provider = Completed {}
   let path = run Path.make("/tool")
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let request = run Process.request(&path)
+  let request = run ChildProcess.request(&path)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let outcome = run Process.submit(&request)
-    |> Effect.provideMut<Process>(&mut provider)
+  let outcome = run ChildProcess.submit(&request)
+    |> Effect.provideMut<ChildProcess>(&mut provider)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  return match move Process.exitCode(&outcome) {
+  return match move ChildProcess.exitCode(&outcome) {
     Option<i32>.Some {value} => 35 + value
     Option<i32>.None => 1
   }

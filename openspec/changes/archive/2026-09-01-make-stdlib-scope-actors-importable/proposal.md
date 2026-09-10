@@ -1,6 +1,6 @@
 ## Why
 
-Documentation currently relies on namespace aliases such as `import silk.raw_buffer as RawBuffer`
+Documentation currently relies on module namespace aliases for operations such as `RawBuffer.from`
 to qualify standard-library operations. Replacing those aliases with selected imports exposes an
 inconsistent library surface: actor-backed modules work, while intrinsic-backed and utility
 modules reject the preferred scoped name as a missing member.

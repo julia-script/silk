@@ -14,8 +14,8 @@
 //! Native declarations are absent on unsupported and no-libc profiles.
 
 static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
-import silk.i64 as i64
-import silk.u64 as u64
+import silk.i64
+import silk.u64
 import silk.pointer { Pointer }
 import silk.system_clock { SystemClock, Instant }
 

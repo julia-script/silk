@@ -43,8 +43,8 @@ objects, and runtime-none profiles acquire no default startup or storage compone
 **Example:**
 
 ```silk
-import Intrinsic.application as app
-export "C" fn answer() -> i32 as "answer" { return app.answer() }
+import Intrinsic.application
+export "C" fn answer() -> i32 as "answer" { return application.answer() }
 ```
 
 The application can expose `pub fn answer() -> i32 { return 42 }` without defining `main`.

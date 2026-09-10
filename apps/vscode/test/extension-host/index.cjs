@@ -24,7 +24,7 @@ const waitFor = async (condition, label, milliseconds = 15_000) => {
   throw new Error(`Timed out waiting for ${label}`)
 }
 
-const source = (line = '') => `import silk.vector as Vector
+const source = (line = '') => `import silk.vector { Vector }
 import Util
 
 fn outer() -> Effect<i32> {

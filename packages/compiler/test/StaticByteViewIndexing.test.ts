@@ -15,8 +15,8 @@ const ascii = (value: string): Uint8Array =>
 
 const moduleName = 'static-byte-view-indexing/main'
 
-const directSource = `import silk.u8 as u8
-import silk.usize as usize
+const directSource = `import silk.u8
+import silk.usize
 pub fn main() -> i32 {
   let bytes = b"\\x99\\x13\\x1d\\x00"
   let decoy = [1, 2]

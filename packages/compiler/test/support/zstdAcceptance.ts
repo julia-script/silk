@@ -146,7 +146,7 @@ export const zstdAcceptanceSource = `import silk.zstd { Zstd, ZstdLimits, ZstdSt
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.result { Result }
-import silk.u8 as u8
+import silk.u8
 import silk.raw_buffer { RawBuffer }
 import silk.layout { Layout }
 

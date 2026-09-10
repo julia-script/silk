@@ -24,7 +24,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
   import silk.allocator {OutOfMemoryError}
   import silk.pointer {Pointer}
   import silk.layout {Layout}
-  import silk.usize as usize
+  import silk.usize
   import silk.native_report {NativeReport}
   struct NoStorage {}
   struct Node {

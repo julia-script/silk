@@ -15,16 +15,7 @@ pub enum Libc {
   /// The `system` C library request.
   System,
   /// The `gnu` C library request.
-  Gnu
-}
-
-/// Returns the selected C library request during static evaluation.
-pub static fn libc() -> Libc {
-  let selected = Intrinsic.profileText("libc")
-  if selected == "none" { return Libc.None }
-  if selected == "system" { return Libc.System }
-  if selected == "gnu" { return Libc.Gnu }
-  compileError("Unknown Libc request")
+  Gnu,
 }
 
 /// The admitted choices for the artifact request.
@@ -36,17 +27,7 @@ pub enum Artifact {
   /// The `static-archive` artifact request.
   StaticArchive,
   /// The `object` artifact request.
-  Object
-}
-
-/// Returns the selected artifact request during static evaluation.
-pub static fn artifact() -> Artifact {
-  let selected = Intrinsic.profileText("artifact")
-  if selected == "executable" { return Artifact.Executable }
-  if selected == "loadable-module" { return Artifact.LoadableModule }
-  if selected == "static-archive" { return Artifact.StaticArchive }
-  if selected == "object" { return Artifact.Object }
-  compileError("Unknown Artifact request")
+  Object,
 }
 
 /// The admitted choices for the link request.
@@ -54,15 +35,7 @@ pub enum Link {
   /// The `static` link request.
   Static,
   /// The `dynamic` link request.
-  Dynamic
-}
-
-/// Returns the selected link request during static evaluation.
-pub static fn link() -> Link {
-  let selected = Intrinsic.profileText("link")
-  if selected == "static" { return Link.Static }
-  if selected == "dynamic" { return Link.Dynamic }
-  compileError("Unknown Link request")
+  Dynamic,
 }
 
 /// The admitted choices for the code model.
@@ -70,15 +43,7 @@ pub enum CodeModel {
   /// The `small` code model.
   Small,
   /// The `large` code model.
-  Large
-}
-
-/// Returns the selected code model during static evaluation.
-pub static fn codeModel() -> CodeModel {
-  let selected = Intrinsic.profileText("code-model")
-  if selected == "small" { return CodeModel.Small }
-  if selected == "large" { return CodeModel.Large }
-  compileError("Unknown CodeModel request")
+  Large,
 }
 
 /// The admitted choices for the relocation model.
@@ -86,15 +51,7 @@ pub enum Relocation {
   /// The `static` relocation model.
   Static,
   /// The `pic` relocation model.
-  Pic
-}
-
-/// Returns the selected relocation model during static evaluation.
-pub static fn relocation() -> Relocation {
-  let selected = Intrinsic.profileText("relocation")
-  if selected == "static" { return Relocation.Static }
-  if selected == "pic" { return Relocation.Pic }
-  compileError("Unknown Relocation request")
+  Pic,
 }
 
 /// The admitted choices for the optimization request.
@@ -102,15 +59,7 @@ pub enum Optimization {
   /// The `none` optimization request.
   None,
   /// The `speed` optimization request.
-  Speed
-}
-
-/// Returns the selected optimization request during static evaluation.
-pub static fn optimization() -> Optimization {
-  let selected = Intrinsic.profileText("optimization")
-  if selected == "none" { return Optimization.None }
-  if selected == "speed" { return Optimization.Speed }
-  compileError("Unknown Optimization request")
+  Speed,
 }
 
 /// The admitted choices for the library safety policy.
@@ -118,15 +67,7 @@ pub enum Safety {
   /// The `checked` library safety policy.
   Checked,
   /// The `unchecked` library safety policy.
-  Unchecked
-}
-
-/// Returns the selected library safety policy during static evaluation.
-pub static fn safety() -> Safety {
-  let selected = Intrinsic.profileText("safety")
-  if selected == "checked" { return Safety.Checked }
-  if selected == "unchecked" { return Safety.Unchecked }
-  compileError("Unknown Safety request")
+  Unchecked,
 }
 
 /// The admitted choices for the library threading policy.
@@ -134,15 +75,7 @@ pub enum Threading {
   /// The `single` library threading policy.
   Single,
   /// The `multi` library threading policy.
-  Multi
-}
-
-/// Returns the selected library threading policy during static evaluation.
-pub static fn threading() -> Threading {
-  let selected = Intrinsic.profileText("threading")
-  if selected == "single" { return Threading.Single }
-  if selected == "multi" { return Threading.Multi }
-  compileError("Unknown Threading request")
+  Multi,
 }
 
 /// The admitted choices for the unwind request.
@@ -150,15 +83,7 @@ pub enum Unwind {
   /// The `none` unwind request.
   None,
   /// The `native` unwind request.
-  Native
-}
-
-/// Returns the selected unwind request during static evaluation.
-pub static fn unwind() -> Unwind {
-  let selected = Intrinsic.profileText("unwind")
-  if selected == "none" { return Unwind.None }
-  if selected == "native" { return Unwind.Native }
-  compileError("Unknown Unwind request")
+  Native,
 }
 
 /// A logical default, absent, or named entry/runtime request.
@@ -170,28 +95,9 @@ pub union Selection {
   /// A logical symbol or package identity, without a physical path.
   Named {
     /// The selected logical identity.
-    pub name: string<'static>
-  }
+    pub name: string<'static>,
+  },
 }
-
-/// Returns the logical entry request without resolving a startup symbol.
-pub static fn entry() -> Selection {
-  let kind = Intrinsic.profileText("entry-kind")
-  if kind == "default" { return Selection.Default }
-  if kind == "none" { return Selection.None }
-  return Selection.Named { name: Intrinsic.profileText("entry-name") }
-}
-
-/// Returns the logical runtime request without loading a runtime package.
-pub static fn runtime() -> Selection {
-  let kind = Intrinsic.profileText("runtime-kind")
-  if kind == "default" { return Selection.Default }
-  if kind == "none" { return Selection.None }
-  return Selection.Named { name: Intrinsic.profileText("runtime-name") }
-}
-
-/// Whether the build requests debug information.
-pub const debug: bool = Intrinsic.profileFlag("debug")
 
 /// The sanitizer requests supported by a compilation profile.
 pub enum Sanitizer {
@@ -200,12 +106,159 @@ pub enum Sanitizer {
   /// Data-race checks for instrumented concurrent operations.
   Thread,
   /// Checks for instrumented undefined behavior.
-  Undefined
+  Undefined,
 }
 
-/// Returns whether the build requests the selected sanitizer.
-pub static fn hasSanitizer(value: Sanitizer) -> bool {
-  if value == Sanitizer.Address { return Intrinsic.profileContains("sanitizers", "address") }
-  if value == Sanitizer.Thread { return Intrinsic.profileContains("sanitizers", "thread") }
-  return Intrinsic.profileContains("sanitizers", "undefined")
+/// Whether the build requests debug information.
+pub const debug: bool = Intrinsic.profileFlag("debug")
+
+/// The scope for Compilation operations.
+///
+/// # Details
+///
+/// This owner carries no data. Select it with `import silk.compilation { Compilation }`
+/// to access its inherent operations.
+pub struct Compilation {}
+
+impl Compilation {
+  /// Returns the selected C library request during static evaluation.
+  pub static fn libc() -> Libc {
+    let selected = Intrinsic.profileText("libc")
+    if selected == "none" {
+      return Libc.None
+    }
+    if selected == "system" {
+      return Libc.System
+    }
+    if selected == "gnu" {
+      return Libc.Gnu
+    }
+    compileError("Unknown Libc request")
+  }
+  /// Returns the selected artifact request during static evaluation.
+  pub static fn artifact() -> Artifact {
+    let selected = Intrinsic.profileText("artifact")
+    if selected == "executable" {
+      return Artifact.Executable
+    }
+    if selected == "loadable-module" {
+      return Artifact.LoadableModule
+    }
+    if selected == "static-archive" {
+      return Artifact.StaticArchive
+    }
+    if selected == "object" {
+      return Artifact.Object
+    }
+    compileError("Unknown Artifact request")
+  }
+  /// Returns the selected link request during static evaluation.
+  pub static fn link() -> Link {
+    let selected = Intrinsic.profileText("link")
+    if selected == "static" {
+      return Link.Static
+    }
+    if selected == "dynamic" {
+      return Link.Dynamic
+    }
+    compileError("Unknown Link request")
+  }
+  /// Returns the selected code model during static evaluation.
+  pub static fn codeModel() -> CodeModel {
+    let selected = Intrinsic.profileText("code-model")
+    if selected == "small" {
+      return CodeModel.Small
+    }
+    if selected == "large" {
+      return CodeModel.Large
+    }
+    compileError("Unknown CodeModel request")
+  }
+  /// Returns the selected relocation model during static evaluation.
+  pub static fn relocation() -> Relocation {
+    let selected = Intrinsic.profileText("relocation")
+    if selected == "static" {
+      return Relocation.Static
+    }
+    if selected == "pic" {
+      return Relocation.Pic
+    }
+    compileError("Unknown Relocation request")
+  }
+  /// Returns the selected optimization request during static evaluation.
+  pub static fn optimization() -> Optimization {
+    let selected = Intrinsic.profileText("optimization")
+    if selected == "none" {
+      return Optimization.None
+    }
+    if selected == "speed" {
+      return Optimization.Speed
+    }
+    compileError("Unknown Optimization request")
+  }
+  /// Returns the selected library safety policy during static evaluation.
+  pub static fn safety() -> Safety {
+    let selected = Intrinsic.profileText("safety")
+    if selected == "checked" {
+      return Safety.Checked
+    }
+    if selected == "unchecked" {
+      return Safety.Unchecked
+    }
+    compileError("Unknown Safety request")
+  }
+  /// Returns the selected library threading policy during static evaluation.
+  pub static fn threading() -> Threading {
+    let selected = Intrinsic.profileText("threading")
+    if selected == "single" {
+      return Threading.Single
+    }
+    if selected == "multi" {
+      return Threading.Multi
+    }
+    compileError("Unknown Threading request")
+  }
+  /// Returns the selected unwind request during static evaluation.
+  pub static fn unwind() -> Unwind {
+    let selected = Intrinsic.profileText("unwind")
+    if selected == "none" {
+      return Unwind.None
+    }
+    if selected == "native" {
+      return Unwind.Native
+    }
+    compileError("Unknown Unwind request")
+  }
+  /// Returns the logical entry request without resolving a startup symbol.
+  pub static fn entry() -> Selection {
+    let kind = Intrinsic.profileText("entry-kind")
+    if kind == "default" {
+      return Selection.Default
+    }
+    if kind == "none" {
+      return Selection.None
+    }
+    return Selection.Named {name: Intrinsic.profileText("entry-name")}
+  }
+  /// Returns the logical runtime request without loading a runtime package.
+  pub static fn runtime() -> Selection {
+    let kind = Intrinsic.profileText("runtime-kind")
+    if kind == "default" {
+      return Selection.Default
+    }
+    if kind == "none" {
+      return Selection.None
+    }
+    return Selection.Named {name: Intrinsic.profileText("runtime-name")}
+  }
+  /// Returns whether the build requests the selected sanitizer.
+  pub static fn hasSanitizer(value: Sanitizer) -> bool {
+    if value == Sanitizer.Address {
+      return Intrinsic.profileContains("sanitizers", "address")
+    }
+    if value == Sanitizer.Thread {
+      return Intrinsic.profileContains("sanitizers", "thread")
+    }
+    return Intrinsic.profileContains("sanitizers", "undefined")
+  }
 }

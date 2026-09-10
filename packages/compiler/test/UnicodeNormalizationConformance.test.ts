@@ -102,8 +102,8 @@ import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u8
+import silk.usize
 import silk.result { Result }
 import silk.string { String, InvalidUtf8 }
 import silk.unicode { Unicode }

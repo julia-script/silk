@@ -2,65 +2,65 @@
 import lexer.Token {TokenKind}
 import parser.Node {NodeKind}
 import parser.ParseState {State, ElementsResult, NodeResult}
-import parser.ParseState as P
-import parser.Expression as Expressions
+import parser.ParseState
+import parser.Expression
 import silk.allocator {Allocator, OutOfMemoryError}
 
 effect fn property(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let mut p = run move initial
-    |> P.begin
-    |> P.expect(TokenKind.Identifier)
+    |> ParseState.begin
+    |> ParseState.expect(TokenKind.Identifier)
   let afterColon = run move p
-    |> P.expect(TokenKind.Colon)
+    |> ParseState.expect(TokenKind.Colon)
   p = move afterColon
-  let withExpressionsParse = run P.attach(
+  let withExpressionsParse = run ParseState.attach(
     move p.elements,
-    run Expressions.parse(move p.state, false),
+    run Expression.parse(move p.state, false),
   )
   p = move withExpressionsParse
   return run move p
-    |> P.complete(NodeKind.FunctionProperty)
+    |> ParseState.complete(NodeKind.FunctionProperty)
 }
 
 /// Parses one `with Namespace.operation(name: value, ...)` clause without interpreting it.
 pub effect fn clause(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let mut p = run move initial
-    |> P.begin
-    |> P.contextual("with")
+    |> ParseState.begin
+    |> ParseState.contextual("with")
   let afterIdentifier = run move p
-    |> P.expect(TokenKind.Identifier)
+    |> ParseState.expect(TokenKind.Identifier)
   p = move afterIdentifier
   let afterDot = run move p
-    |> P.expect(TokenKind.Dot)
+    |> ParseState.expect(TokenKind.Dot)
   p = move afterDot
   let afterIdentifier2 = run move p
-    |> P.expect(TokenKind.Identifier)
+    |> ParseState.expect(TokenKind.Identifier)
   p = move afterIdentifier2
   let afterLeftParenthesis = run move p
-    |> P.expect(TokenKind.LeftParenthesis)
+    |> ParseState.expect(TokenKind.LeftParenthesis)
   p = move afterLeftParenthesis
-  while P.currentKind(&p.state) == TokenKind.Identifier {
-    let attached = run P.attach(move p.elements, run property(move p.state))
+  while ParseState.currentKind(&p.state) == TokenKind.Identifier {
+    let attached = run ParseState.attach(move p.elements, run property(move p.state))
     p = move attached
-    if P.currentKind(&p.state) != TokenKind.Comma {
+    if ParseState.currentKind(&p.state) != TokenKind.Comma {
       break
     }
     let consumed = run move p
-      |> P.consume
+      |> ParseState.consume
     p = move consumed
   }
   let afterRightParenthesis = run move p
-    |> P.expect(TokenKind.RightParenthesis)
+    |> ParseState.expect(TokenKind.RightParenthesis)
   p = move afterRightParenthesis
   return run move p
-    |> P.complete(NodeKind.FunctionPropertyClause)
+    |> ParseState.complete(NodeKind.FunctionPropertyClause)
 }
 
 /// Appends all consecutive property clauses to an unfinished declaration or foreign type.
 pub effect fn list(initial: ElementsResult) -> ElementsResult ! OutOfMemoryError ? &mut Allocator {
   let mut p = move initial
-  while P.word(&p.state, "with") {
-    let attached = run P.attach(move p.elements, run clause(move p.state))
+  while ParseState.word(&p.state, "with") {
+    let attached = run ParseState.attach(move p.elements, run clause(move p.state))
     p = move attached
   }
   return move p

@@ -8,7 +8,7 @@ Typed logical build choices fixed before source specialization.
 
 ## When to use
 
-Use [`artifact`](#declaration-73696c6b2f636f6d70696c6174696f6e3a3a6172746966616374), [`safety`](#declaration-73696c6b2f636f6d70696c6174696f6e3a3a736166657479), and [`threading`](#declaration-73696c6b2f636f6d70696c6174696f6e3a3a746872656164696e67) to select source behavior from the build request.
+Use [`artifact`](#declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e6172746966616374), [`safety`](#declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e736166657479), and [`threading`](#declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e746872656164696e67) to select source behavior from the build request.
 Use `silk.target` for machine facts such as architecture and pointer width.
 
 ## Details
@@ -18,7 +18,7 @@ change ownership rules. All operations in this module run during static evaluati
 
 Import as `Compilation` with `import silk.compilation { Compilation }`.
 
-Public declarations: 24.
+Public declarations: 13.
 
 <a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a4c696263"></a>
 
@@ -59,16 +59,6 @@ Gnu = 2
 ```
 
 The `gnu` C library request.
-
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a6c696263"></a>
-
-## `libc`
-
-```silk
-pub static fn libc() -> Libc
-```
-
-Returns the selected C library request during static evaluation.
 
 <a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a4172746966616374"></a>
 
@@ -120,16 +110,6 @@ Object = 3
 
 The `object` artifact request.
 
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a6172746966616374"></a>
-
-## `artifact`
-
-```silk
-pub static fn artifact() -> Artifact
-```
-
-Returns the selected artifact request during static evaluation.
-
 <a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a4c696e6b"></a>
 
 ## `Link`
@@ -159,16 +139,6 @@ Dynamic = 1
 ```
 
 The `dynamic` link request.
-
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a6c696e6b"></a>
-
-## `link`
-
-```silk
-pub static fn link() -> Link
-```
-
-Returns the selected link request during static evaluation.
 
 <a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f64654d6f64656c"></a>
 
@@ -200,16 +170,6 @@ Large = 1
 
 The `large` code model.
 
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a636f64654d6f64656c"></a>
-
-## `codeModel`
-
-```silk
-pub static fn codeModel() -> CodeModel
-```
-
-Returns the selected code model during static evaluation.
-
 <a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a52656c6f636174696f6e"></a>
 
 ## `Relocation`
@@ -239,16 +199,6 @@ Pic = 1
 ```
 
 The `pic` relocation model.
-
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a72656c6f636174696f6e"></a>
-
-## `relocation`
-
-```silk
-pub static fn relocation() -> Relocation
-```
-
-Returns the selected relocation model during static evaluation.
 
 <a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a4f7074696d697a6174696f6e"></a>
 
@@ -280,16 +230,6 @@ Speed = 1
 
 The `speed` optimization request.
 
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a6f7074696d697a6174696f6e"></a>
-
-## `optimization`
-
-```silk
-pub static fn optimization() -> Optimization
-```
-
-Returns the selected optimization request during static evaluation.
-
 <a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a536166657479"></a>
 
 ## `Safety`
@@ -319,16 +259,6 @@ Unchecked = 1
 ```
 
 The `unchecked` library safety policy.
-
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a736166657479"></a>
-
-## `safety`
-
-```silk
-pub static fn safety() -> Safety
-```
-
-Returns the selected library safety policy during static evaluation.
 
 <a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a546872656164696e67"></a>
 
@@ -360,16 +290,6 @@ Multi = 1
 
 The `multi` library threading policy.
 
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a746872656164696e67"></a>
-
-## `threading`
-
-```silk
-pub static fn threading() -> Threading
-```
-
-Returns the selected library threading policy during static evaluation.
-
 <a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a556e77696e64"></a>
 
 ## `Unwind`
@@ -399,16 +319,6 @@ Native = 1
 ```
 
 The `native` unwind request.
-
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a756e77696e64"></a>
-
-## `unwind`
-
-```silk
-pub static fn unwind() -> Unwind
-```
-
-Returns the selected unwind request during static evaluation.
 
 <a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a53656c656374696f6e"></a>
 
@@ -460,36 +370,6 @@ pub name: string<'static>
 
 The selected logical identity.
 
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a656e747279"></a>
-
-## `entry`
-
-```silk
-pub static fn entry() -> Selection
-```
-
-Returns the logical entry request without resolving a startup symbol.
-
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a72756e74696d65"></a>
-
-## `runtime`
-
-```silk
-pub static fn runtime() -> Selection
-```
-
-Returns the logical runtime request without loading a runtime package.
-
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a6465627567"></a>
-
-## `debug`
-
-```silk
-pub const debug: bool
-```
-
-Whether the build requests debug information.
-
 <a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a53616e6974697a6572"></a>
 
 ## `Sanitizer`
@@ -530,9 +410,144 @@ Undefined = 2
 
 Checks for instrumented undefined behavior.
 
-<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a68617353616e6974697a6572"></a>
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a6465627567"></a>
 
-## `hasSanitizer`
+## `debug`
+
+```silk
+pub const debug: bool
+```
+
+Whether the build requests debug information.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e"></a>
+
+## `Compilation`
+
+```silk
+pub struct Compilation
+```
+
+The scope for Compilation operations.
+
+### Details
+
+This owner carries no data. Select it with `import silk.compilation { Compilation }`
+to access its inherent operations.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e6c696263"></a>
+
+### Associated function `Compilation.libc`
+
+```silk
+pub static fn libc() -> Libc
+```
+
+Returns the selected C library request during static evaluation.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e6172746966616374"></a>
+
+### Associated function `Compilation.artifact`
+
+```silk
+pub static fn artifact() -> Artifact
+```
+
+Returns the selected artifact request during static evaluation.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e6c696e6b"></a>
+
+### Associated function `Compilation.link`
+
+```silk
+pub static fn link() -> Link
+```
+
+Returns the selected link request during static evaluation.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e636f64654d6f64656c"></a>
+
+### Associated function `Compilation.codeModel`
+
+```silk
+pub static fn codeModel() -> CodeModel
+```
+
+Returns the selected code model during static evaluation.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e72656c6f636174696f6e"></a>
+
+### Associated function `Compilation.relocation`
+
+```silk
+pub static fn relocation() -> Relocation
+```
+
+Returns the selected relocation model during static evaluation.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e6f7074696d697a6174696f6e"></a>
+
+### Associated function `Compilation.optimization`
+
+```silk
+pub static fn optimization() -> Optimization
+```
+
+Returns the selected optimization request during static evaluation.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e736166657479"></a>
+
+### Associated function `Compilation.safety`
+
+```silk
+pub static fn safety() -> Safety
+```
+
+Returns the selected library safety policy during static evaluation.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e746872656164696e67"></a>
+
+### Associated function `Compilation.threading`
+
+```silk
+pub static fn threading() -> Threading
+```
+
+Returns the selected library threading policy during static evaluation.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e756e77696e64"></a>
+
+### Associated function `Compilation.unwind`
+
+```silk
+pub static fn unwind() -> Unwind
+```
+
+Returns the selected unwind request during static evaluation.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e656e747279"></a>
+
+### Associated function `Compilation.entry`
+
+```silk
+pub static fn entry() -> Selection
+```
+
+Returns the logical entry request without resolving a startup symbol.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e72756e74696d65"></a>
+
+### Associated function `Compilation.runtime`
+
+```silk
+pub static fn runtime() -> Selection
+```
+
+Returns the logical runtime request without loading a runtime package.
+
+<a id="declaration-73696c6b2f636f6d70696c6174696f6e3a3a436f6d70696c6174696f6e2e68617353616e6974697a6572"></a>
+
+### Associated function `Compilation.hasSanitizer`
 
 ```silk
 pub static fn hasSanitizer(static value: Sanitizer) -> bool

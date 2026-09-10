@@ -29,6 +29,8 @@ language definition and reference live in `apps/docs/content/reference/`.
 ## Repository workflow
 
 - The workspace uses pnpm, Turbo, strict TypeScript, Oxfmt, Oxlint, and Vitest.
+- Commit and push changes before running local tests so CI can start. Push follow-up fixes before
+  rerunning local tests.
 - Put public LLVM code in `packages/llvm/src` and tests in `packages/llvm/test`.
 - Keep the public barrel at `packages/llvm/src/index.ts` explicit.
 - Verify changes in this order: `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, then

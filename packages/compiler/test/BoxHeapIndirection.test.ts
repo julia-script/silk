@@ -24,7 +24,7 @@ import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.usize as usize
+import silk.usize
 import silk.box { Box }
 
 pub struct Leaf {}
@@ -106,7 +106,7 @@ const accessors = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.usize as usize
+import silk.usize
 import silk.box { Box }
 
 effect fn build() -> i32 ! OutOfMemoryError {

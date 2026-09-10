@@ -13,11 +13,26 @@ address, mutable alias, destructor, or runtime layout.
 
 Import as `StaticSequence` with `import silk.static_sequence { StaticSequence }`.
 
-Public declarations: 5.
+Public declarations: 1.
 
-<a id="declaration-73696c6b2f7374617469635f73657175656e63653a3a656d707479"></a>
+<a id="declaration-73696c6b2f7374617469635f73657175656e63653a3a53746174696353657175656e6365"></a>
 
-## `empty`
+## `StaticSequence`
+
+```silk
+pub struct StaticSequence
+```
+
+The scope for StaticSequence operations.
+
+### Details
+
+This owner carries no data. Select it with `import silk.static_sequence { StaticSequence }`
+to access its inherent operations.
+
+<a id="declaration-73696c6b2f7374617469635f73657175656e63653a3a53746174696353657175656e63652e656d707479"></a>
+
+### Associated function `StaticSequence.empty`
 
 ```silk
 pub static fn empty<Element>() -> Intrinsic.StaticSequence<Element>
@@ -25,9 +40,9 @@ pub static fn empty<Element>() -> Intrinsic.StaticSequence<Element>
 
 Returns the empty sequence for `Element`.
 
-<a id="declaration-73696c6b2f7374617469635f73657175656e63653a3a617070656e64"></a>
+<a id="declaration-73696c6b2f7374617469635f73657175656e63653a3a53746174696353657175656e63652e617070656e64"></a>
 
-## `append`
+### Associated function `StaticSequence.append`
 
 ```silk
 pub static fn append<Element>(static self: Intrinsic.StaticSequence<Element>, static value: Element) -> Intrinsic.StaticSequence<Element>
@@ -35,9 +50,9 @@ pub static fn append<Element>(static self: Intrinsic.StaticSequence<Element>, st
 
 Returns `self` followed by `value` without changing `self`.
 
-<a id="declaration-73696c6b2f7374617469635f73657175656e63653a3a636f6e636174"></a>
+<a id="declaration-73696c6b2f7374617469635f73657175656e63653a3a53746174696353657175656e63652e636f6e636174"></a>
 
-## `concat`
+### Associated function `StaticSequence.concat`
 
 ```silk
 pub static fn concat<Element>(static left: Intrinsic.StaticSequence<Element>, static right: Intrinsic.StaticSequence<Element>) -> Intrinsic.StaticSequence<Element>
@@ -45,9 +60,9 @@ pub static fn concat<Element>(static left: Intrinsic.StaticSequence<Element>, st
 
 Returns every element of `left` followed by every element of `right`.
 
-<a id="declaration-73696c6b2f7374617469635f73657175656e63653a3a6c656e677468"></a>
+<a id="declaration-73696c6b2f7374617469635f73657175656e63653a3a53746174696353657175656e63652e6c656e677468"></a>
 
-## `length`
+### Associated function `StaticSequence.length`
 
 ```silk
 pub static fn length<Element>(static self: Intrinsic.StaticSequence<Element>) -> usize
@@ -55,9 +70,9 @@ pub static fn length<Element>(static self: Intrinsic.StaticSequence<Element>) ->
 
 Returns the finite sequence length.
 
-<a id="declaration-73696c6b2f7374617469635f73657175656e63653a3a6174"></a>
+<a id="declaration-73696c6b2f7374617469635f73657175656e63653a3a53746174696353657175656e63652e6174"></a>
 
-## `at`
+### Associated function `StaticSequence.at`
 
 ```silk
 pub static fn at<Element>(static self: Intrinsic.StaticSequence<Element>, static index: usize) -> Element

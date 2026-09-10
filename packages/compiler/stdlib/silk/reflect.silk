@@ -23,40 +23,41 @@ pub const labeledFieldKind: u8 = 0
 /// Positional member kind returned by `fieldKind`.
 pub const positionalFieldKind: u8 = 1
 
-/// Returns the canonical aggregate type descriptor for `Owner`.
-pub static fn typeOf<Owner>() -> Intrinsic.Type<Owner> {
-  return Intrinsic.reflectType<Owner>()
-}
+/// The scope for Reflect operations.
+///
+/// # Details
+///
+/// This owner carries no data. Select it with `import silk.reflect { Reflect }`
+/// to access its inherent operations.
+pub struct Reflect {}
 
-/// Returns declaration-ordered descriptors for fields visible from this wrapper.
-pub static fn fields<Owner>() -> Intrinsic.Fields<Owner> {
-  return Intrinsic.reflectFields<Owner>()
-}
-
-/// Returns the stable aggregate-kind code for `descriptor`.
-pub static fn typeKind<Owner>(descriptor: Intrinsic.Type<Owner>) -> u8 {
-  return Intrinsic.reflectTypeKind<Owner>(descriptor)
-}
-
-/// Returns whether `field` carries a label or a position.
-pub static fn fieldKind<Owner, Value>(field: Intrinsic.Field<Owner, Value>) -> u8 {
-  return Intrinsic.reflectFieldKind<Owner, Value>(field)
-}
-
-/// Returns the source label of a labeled field.
-pub static fn fieldLabel<Owner, Value>(field: Intrinsic.Field<Owner, Value>) -> string<'static> {
-  return Intrinsic.reflectFieldLabel<Owner, Value>(field)
-}
-
-/// Returns the source position of a positional field.
-pub static fn fieldOrdinal<Owner, Value>(field: Intrinsic.Field<Owner, Value>) -> usize {
-  return Intrinsic.reflectFieldOrdinal<Owner, Value>(field)
-}
-
-/// Borrows exactly the runtime field authorized by one static descriptor.
-pub fn borrowField<Owner, Value>(
-  owner: &Owner,
-  static field: Intrinsic.Field<Owner, Value>
-) -> &Value {
-  return Intrinsic.borrowField<Owner, Value>(owner, field)
+impl Reflect {
+  /// Returns the canonical aggregate type descriptor for `Owner`.
+  pub static fn typeOf<Owner>() -> Intrinsic.Type<Owner> {
+    return Intrinsic.reflectType<Owner>()
+  }
+  /// Returns declaration-ordered descriptors for fields visible from this wrapper.
+  pub static fn fields<Owner>() -> Intrinsic.Fields<Owner> {
+    return Intrinsic.reflectFields<Owner>()
+  }
+  /// Returns the stable aggregate-kind code for `descriptor`.
+  pub static fn typeKind<Owner>(descriptor: Intrinsic.Type<Owner>) -> u8 {
+    return Intrinsic.reflectTypeKind<Owner>(descriptor)
+  }
+  /// Returns whether `field` carries a label or a position.
+  pub static fn fieldKind<Owner, Value>(field: Intrinsic.Field<Owner, Value>) -> u8 {
+    return Intrinsic.reflectFieldKind<Owner, Value>(field)
+  }
+  /// Returns the source label of a labeled field.
+  pub static fn fieldLabel<Owner, Value>(field: Intrinsic.Field<Owner, Value>) -> string<'static> {
+    return Intrinsic.reflectFieldLabel<Owner, Value>(field)
+  }
+  /// Returns the source position of a positional field.
+  pub static fn fieldOrdinal<Owner, Value>(field: Intrinsic.Field<Owner, Value>) -> usize {
+    return Intrinsic.reflectFieldOrdinal<Owner, Value>(field)
+  }
+  /// Borrows exactly the runtime field authorized by one static descriptor.
+  pub fn borrowField<Owner, Value>(owner: &Owner, static field: Intrinsic.Field<Owner, Value>) -> &Value {
+    return Intrinsic.borrowField<Owner, Value>(owner, field)
+  }
 }

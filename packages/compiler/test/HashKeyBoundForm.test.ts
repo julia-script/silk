@@ -28,7 +28,7 @@ it.effect('refuses a source witness for a scalar provider', () =>
     // Source witnesses for scalars therefore have one unambiguous declaration form: inline.
     const snapshot = yield* analyzed(
       'hash-key-bound/scalar-source-witness',
-      `import silk.u64 as u64
+      `import silk.u64
 interface HashKey {
   fn digest(left: &Self, right: &Self) -> u64
 }

@@ -3,8 +3,8 @@ import silk.filesystem { FileSystem, FileError }
 import silk.effect { Effect }
 import silk.result { Result }
 import silk.option { Option }
-import silk.u8 as u8
-import silk.u64 as u64
+import silk.u8
+import silk.u64
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.execution { Execution }
 

@@ -11,7 +11,7 @@ const encoder = new TextEncoder()
 const nativeSource = `import silk.os_random { OsRandom }
 import silk.random { Random }
 import silk.effect { Effect }
-import silk.u8 as u8
+import silk.u8
 pub fn main() -> i32 {
   let mut provider = OsRandom.make()
   let mut bytes = [u8.toU8(9)]
@@ -66,7 +66,7 @@ it.effect('keeps portable secure-byte replacement free of native entropy imports
       'entropy/portable',
       encoder.encode(`import silk.random { Random }
 import silk.effect { Effect }
-import silk.u8 as u8
+import silk.u8
 struct Scripted {}
 impl Random for Scripted {
   effect fn fillBytes(self: &mut Self, output: &mut [u8]) -> () {

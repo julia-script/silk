@@ -18,7 +18,7 @@ import silk.result {Result}
 import silk.string {String}
 import silk.slice {Slice}
 import silk.uri_percent {UriPercent}
-import silk.uri_percent {Component as PercentComponent}
+import silk.uri_percent {PercentComponent}
 import silk.uri_reference {
   UriReference,
   OwnedUriReference,
@@ -27,8 +27,8 @@ import silk.uri_reference {
   Component,
   HostKind,
 }
-import silk.usize as usize
-import silk.u8 as u8
+import silk.usize
+import silk.u8
 
 /// Component data that explicitly selects raw-byte encoding or existing encoded text.
 pub union ComponentValue<'text> {

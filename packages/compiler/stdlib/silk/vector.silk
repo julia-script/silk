@@ -102,16 +102,16 @@
 // through &mut self without a partial move, and the Drop hook destroys exactly the
 // initialized elements before the backing buffer releases.
 
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.allocator { OutOfMemoryError }
-import silk.layout { Layout }
-import silk.layout { LayoutOverflow }
-import silk.option { Option }
-import silk.order { Order }
-import silk.raw_buffer { RawBuffer }
-import silk.slot { Slot }
-import silk.u8 as u8
-import silk.usize as usize
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.allocator {OutOfMemoryError}
+import silk.layout {Layout}
+import silk.layout {LayoutOverflow}
+import silk.option {Option}
+import silk.order {Order}
+import silk.raw_buffer {RawBuffer}
+import silk.slot {Slot}
+import silk.u8
+import silk.usize
 
 /// The allocation-free storage state of an empty [`Vector`].
 pub struct Empty<T> {
@@ -140,31 +140,27 @@ pub struct Vector<T> {
 impl<T> Vector<T> {
   /// Creates an empty vector with zero capacity and no allocation.
   pub fn make() -> Vector<T> {
-    return Vector<T> { storage: Empty<T> { anchor: [] }, count: usize.ZERO, limit: usize.ZERO }
+    return Vector<T> {storage: Empty<T> {anchor: []}, count: usize.ZERO, limit: usize.ZERO}
   }
-
   /// Returns the number of initialized elements.
   pub fn length(self: &Self) -> usize {
     return self.count
   }
-
   /// Returns the total number of elements that fit without another growth allocation.
   pub fn capacity(self: &Self) -> usize {
     return self.limit
   }
-
   /// Borrows the initialized elements as one shared lexical slice.
   ///
   /// # Gotchas
   ///
   /// Do not retain this slice across an operation that can grow the vector.
   pub fn asSlice(self: &Self) -> &[T] {
-    return match &self.storage {
-      Empty<T> { anchor } => emptySlice<T>(&anchor)
-      Full<T> { buffer } => RawBuffer.view<T>(&buffer, usize.ZERO, self.count)
+    return match & self.storage {
+      Empty<T> {anchor} => emptySlice<T>(&anchor)
+      Full<T> {buffer} => RawBuffer.view<T>(&buffer, usize.ZERO, self.count)
     }
   }
-
   /// Borrows all initialized elements as one exclusive lexical slice.
   ///
   /// # Gotchas
@@ -172,11 +168,10 @@ impl<T> Vector<T> {
   /// Do not retain this slice across an operation that can grow the vector.
   pub fn asMutSlice(self: &mut Self) -> &mut [T] {
     return match &mut self.storage {
-      Empty<T> { anchor } => emptyMutSlice<T>(&mut anchor)
-      Full<T> { buffer } => RawBuffer.viewMut<T>(&mut buffer, usize.ZERO, self.count)
+      Empty<T> {anchor} => emptyMutSlice<T>(&mut anchor)
+      Full<T> {buffer} => RawBuffer.viewMut<T>(&mut buffer, usize.ZERO, self.count)
     }
   }
-
   /// Appends one owned value, growing geometrically when capacity is exhausted.
   ///
   /// # Details
@@ -197,15 +192,15 @@ impl<T> Vector<T> {
       }
       let recipe = Allocator.allocate(move layout)
       let allocation = run recipe
-      let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+      let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
       let moved = match move storage {
-        Empty<T> nothing => Full<T> { buffer: freshBuffer<T>(move allocation, next) }
-        Full<T> full => Full<T> { buffer: migrate<T>(move full, move allocation, self.count, next) }
+        Empty<T> nothing => Full<T> {buffer: freshBuffer<T>(move allocation, next)}
+        Full<T> full => Full<T> {buffer: migrate<T>(move full, move allocation, self.count, next)}
       }
       self.storage = move moved
       self.limit = next
     }
-    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+    let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
     let stored = match move storage {
       Empty<T> nothing => absurd<Full<T>>()
       Full<T> full => writeAt<T>(move full, self.count, move value)
@@ -214,7 +209,6 @@ impl<T> Vector<T> {
     self.count = self.count + usize.ONE
     return ()
   }
-
   /// Inserts one owned value at an index, shifting later elements without requiring T to be Copy.
   ///
   /// # Details
@@ -225,11 +219,9 @@ impl<T> Vector<T> {
   /// # Gotchas
   ///
   /// `index` must be less than or equal to [`length`].
-  pub effect fn insert(
-    self: &mut Self,
-    index: usize,
-    value: T
-  ) -> () ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn insert(self: &mut Self, index: usize, value: T) -> ()
+  ! OutOfMemoryError
+  ? &mut Allocator {
     if self.count == self.limit {
       let mut next = self.limit + self.limit
       if self.limit == usize.ZERO {
@@ -243,15 +235,15 @@ impl<T> Vector<T> {
       }
       let recipe = Allocator.allocate(move layout)
       let allocation = run recipe
-      let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+      let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
       let moved = match move storage {
-        Empty<T> nothing => Full<T> { buffer: freshBuffer<T>(move allocation, next) }
-        Full<T> full => Full<T> { buffer: migrate<T>(move full, move allocation, self.count, next) }
+        Empty<T> nothing => Full<T> {buffer: freshBuffer<T>(move allocation, next)}
+        Full<T> full => Full<T> {buffer: migrate<T>(move full, move allocation, self.count, next)}
       }
       self.storage = move moved
       self.limit = next
     }
-    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+    let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
     let stored = match move storage {
       Empty<T> nothing => absurd<Full<T>>()
       Full<T> full => insertInto<T>(move full, index, self.count, move value)
@@ -260,7 +252,6 @@ impl<T> Vector<T> {
     self.count = self.count + usize.ONE
     return ()
   }
-
   /// Copies the element at one index and traps when the index is out of range.
   ///
   /// # When to use
@@ -270,15 +261,14 @@ impl<T> Vector<T> {
     if self.count <= index {
       let boom = 1 / 0
     }
-    let read = match &self.storage {
+    let read = match & self.storage {
       Empty<T> nothing => absurd<Read<T>>()
-      Full<T> { buffer } => Read<T> { value: readAt<T>(&buffer, index) }
+      Full<T> {buffer} => Read<T> {value: readAt<T>(&buffer, index)}
     }
     return match move read {
-      Read<T> { value } => move value
+      Read<T> {value} => move value
     }
   }
-
   /// Removes the last element and returns it. Returns an absent value for an empty vector.
   ///
   /// # Details
@@ -288,17 +278,16 @@ impl<T> Vector<T> {
     if self.count == usize.ZERO {
       return Option.none<T>()
     }
-    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+    let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
     let taken = match move storage {
       Empty<T> nothing => absurd<Taken<T>>()
       Full<T> full => takeAt<T>(move full, self.count - usize.ONE)
     }
     self.count = self.count - usize.ONE
     return match move taken {
-      Taken<T> { storage: kept, value } => finish<T>(move self, move kept, move value)
+      Taken<T> {storage: kept, value} => finish<T>(move self, move kept, move value)
     }
   }
-
   /// Removes the element at one index, shifting the later elements down. Traps out of range.
   ///
   /// # Details
@@ -308,22 +297,20 @@ impl<T> Vector<T> {
     if self.count <= index {
       let boom = 1 / 0
     }
-    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+    let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
     let taken = match move storage {
       Empty<T> nothing => absurd<Taken<T>>()
       Full<T> full => removeAt<T>(move full, index, self.count)
     }
     self.count = self.count - usize.ONE
     return match move taken {
-      Taken<T> { storage: kept, value } => commit<T>(move self, move kept, move value)
+      Taken<T> {storage: kept, value} => commit<T>(move self, move kept, move value)
     }
   }
-
   /// Drops every initialized element and sets the length to zero, keeping the capacity.
   pub fn clear(self: &mut Self) -> () {
     return Vector.truncate<T>(move self, usize.ZERO)
   }
-
   /// Drops every element past one length, keeping the capacity. Shorter lengths are left alone.
   ///
   /// # Details
@@ -333,7 +320,7 @@ impl<T> Vector<T> {
     if self.count <= length {
       return ()
     }
-    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+    let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
     let kept = match move storage {
       Empty<T> nothing => absurd<Full<T>>()
       Full<T> full => dropRange<T>(move full, length, self.count)
@@ -342,13 +329,12 @@ impl<T> Vector<T> {
     self.count = length
     return ()
   }
-
   /// Overwrites the element at one index, dropping the old element first. Traps out of range.
   pub fn set(self: &mut Self, index: usize, value: T) -> () {
     if self.count <= index {
       let boom = 1 / 0
     }
-    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+    let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
     let stored = match move storage {
       Empty<T> nothing => absurd<Full<T>>()
       Full<T> full => replaceAt<T>(move full, index, move value)
@@ -356,17 +342,15 @@ impl<T> Vector<T> {
     self.storage = move stored
     return ()
   }
-
   /// Grows capacity to hold at least `additional` more elements without another allocation.
   ///
   /// # Details
   ///
   /// This function does not change the length. If allocation fails, contents, length, and capacity
   /// remain unchanged.
-  pub effect fn reserve(
-    self: &mut Self,
-    additional: usize
-  ) -> () ! OutOfMemoryError ? &mut Allocator {
+  pub effect fn reserve(self: &mut Self, additional: usize) -> ()
+  ! OutOfMemoryError
+  ? &mut Allocator {
     let needed = self.count + additional
     if needed <= self.limit {
       return ()
@@ -386,16 +370,15 @@ impl<T> Vector<T> {
     }
     let recipe = Allocator.allocate(move layout)
     let allocation = run recipe
-    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+    let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
     let moved = match move storage {
-      Empty<T> nothing => Full<T> { buffer: freshBuffer<T>(move allocation, next) }
-      Full<T> full => Full<T> { buffer: migrate<T>(move full, move allocation, self.count, next) }
+      Empty<T> nothing => Full<T> {buffer: freshBuffer<T>(move allocation, next)}
+      Full<T> full => Full<T> {buffer: migrate<T>(move full, move allocation, self.count, next)}
     }
     self.storage = move moved
     self.limit = next
     return ()
   }
-
   /// Reserves space for `additional` elements without geometric capacity growth.
   ///
   /// # When to use
@@ -433,7 +416,6 @@ impl<T> Vector<T> {
     self.limit = needed
     return ()
   }
-
   /// Orders the elements in place. Equal elements keep their input order.
   ///
   /// # Details
@@ -462,7 +444,7 @@ impl<T> Vector<T> {
       let staged = run Vector.append<usize>(&mut spare, seed)
       seed = seed + usize.ONE
     }
-    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+    let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
     let mut owned = takeBuffer<T>(move storage)
     let mut width = usize.ONE
     while width < count {
@@ -520,12 +502,11 @@ impl<T> Vector<T> {
     }
     let applied = applyOrder<T>(move owned, move scratch, Vector.asSlice<usize>(&order), count)
     let sorted = match move applied {
-      Applied<T> { buffer, scratch: leftover } => releaseScratch<T>(move buffer, move leftover)
+      Applied<T> {buffer, scratch: leftover} => releaseScratch<T>(move buffer, move leftover)
     }
-    self.storage = Full<T> { buffer: move sorted }
+    self.storage = Full<T> {buffer: move sorted}
     return ()
   }
-
   /// Returns the index of a matching element in a sorted vector, or an absent value when Option.none matches.
   ///
   /// # Details
@@ -575,7 +556,7 @@ fn emptyMutSlice<T>(anchor: &mut [T]) -> &mut [T] {
 
 impl<T> Drop for Vector<T> {
   fn drop(self: &mut Vector<T>) -> () {
-    let storage = Intrinsic.replace(self.storage, Empty<T> { anchor: [] })
+    let storage = Intrinsic.replace(self.storage, Empty<T> {anchor: []})
     let count = Intrinsic.replace(self.count, usize.ZERO)
     return match move storage {
       Empty<T> nothing => ()
@@ -586,7 +567,7 @@ impl<T> Drop for Vector<T> {
 
 fn releaseFull<T>(full: Full<T>, length: usize) -> () {
   return match move full {
-    Full<T> { buffer } => releaseBuffer<T>(move buffer, length)
+    Full<T> {buffer} => releaseBuffer<T>(move buffer, length)
   }
 }
 
@@ -610,57 +591,60 @@ fn releaseBuffer<T>(buffer: RawBuffer<T>, length: usize) -> () {
 // Bulk byte append. Concrete to u8 rather than generic over T: the copy moves the source range,
 // and moving out of a borrowed slice is only a copy when the element type is Copy. Growth
 // repeats the shape `append` uses, so a failed allocation leaves the original vector untouched.
-/// Appends every byte of one borrowed sequence in source order with one bulk copy.
-///
-/// # Details
-///
-/// If growth fails, the vector keeps its prior contents, length, and capacity.
-pub effect fn appendBytes(
-  self: &mut Vector<u8>,
-  values: &[u8]
-) -> () ! OutOfMemoryError ? &mut Allocator {
-  let count = values.length
-  if count == usize.ZERO {
+impl<T> Vector<T> {
+  /// Appends every byte of one borrowed sequence in source order with one bulk copy.
+  ///
+  /// # Details
+  ///
+  /// If growth fails, the vector keeps its prior contents, length, and capacity.
+  pub effect fn appendBytes(self: &mut Vector<u8>, values: &[u8]) -> ()
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let count = values.length
+    if count == usize.ZERO {
+      return ()
+    }
+    let needed = self.count + count
+    if self.limit < needed {
+      let mut next = self.limit + self.limit
+      if self.limit == usize.ZERO {
+        next = 4
+      }
+      while next < needed {
+        next = next + next
+      }
+      let element = Layout.of<u8>()
+      let plan = Layout.repeat(move element, next)
+      let layout = match move plan {
+        Layout ready => ready
+        LayoutOverflow overflow => run overflowed()
+      }
+      let recipe = Allocator.allocate(move layout)
+      let allocation = run recipe
+      let storage = Intrinsic.replace(self.storage, Empty<u8> {anchor: []})
+      let moved = match move storage {
+        Empty<u8> nothing => Full<u8> {buffer: freshBuffer<u8>(move allocation, next)}
+        Full<u8> full => Full<u8> {
+          buffer: migrate<u8>(move full, move allocation, self.count, next),
+        }
+      }
+      self.storage = move moved
+      self.limit = next
+    }
+    let storage = Intrinsic.replace(self.storage, Empty<u8> {anchor: []})
+    let stored = match move storage {
+      Empty<u8> nothing => absurd<Full<u8>>()
+      Full<u8> full => copyInto(move full, self.count, values, count)
+    }
+    self.storage = move stored
+    self.count = needed
     return ()
   }
-  let needed = self.count + count
-  if self.limit < needed {
-    let mut next = self.limit + self.limit
-    if self.limit == usize.ZERO {
-      next = 4
-    }
-    while next < needed {
-      next = next + next
-    }
-    let element = Layout.of<u8>()
-    let plan = Layout.repeat(move element, next)
-    let layout = match move plan {
-      Layout ready => ready
-      LayoutOverflow overflow => run overflowed()
-    }
-    let recipe = Allocator.allocate(move layout)
-    let allocation = run recipe
-    let storage = Intrinsic.replace(self.storage, Empty<u8> { anchor: [] })
-    let moved = match move storage {
-      Empty<u8> nothing => Full<u8> { buffer: freshBuffer<u8>(move allocation, next) }
-      Full<u8> full => Full<u8> { buffer: migrate<u8>(move full, move allocation, self.count, next) }
-    }
-    self.storage = move moved
-    self.limit = next
-  }
-  let storage = Intrinsic.replace(self.storage, Empty<u8> { anchor: [] })
-  let stored = match move storage {
-    Empty<u8> nothing => absurd<Full<u8>>()
-    Full<u8> full => copyInto(move full, self.count, values, count)
-  }
-  self.storage = move stored
-  self.count = needed
-  return ()
 }
 
 fn copyInto(full: Full<u8>, offset: usize, values: &[u8], count: usize) -> Full<u8> {
   return match move full {
-    Full<u8> { buffer } => Full<u8> { buffer: copyBuffer(move buffer, offset, values, count) }
+    Full<u8> {buffer} => Full<u8> {buffer: copyBuffer(move buffer, offset, values, count)}
   }
 }
 
@@ -675,7 +659,7 @@ fn copyBuffer(buffer: RawBuffer<u8>, offset: usize, values: &[u8], count: usize)
 
 fn insertInto<T>(full: Full<T>, index: usize, length: usize, value: T) -> Full<T> {
   return match move full {
-    Full<T> { buffer } => Full<T> { buffer: insertBuffer<T>(move buffer, index, length, move value) }
+    Full<T> {buffer} => Full<T> {buffer: insertBuffer<T>(move buffer, index, length, move value)}
   }
 }
 
@@ -711,13 +695,15 @@ fn freshBuffer<T>(allocation: Allocation, count: usize) -> RawBuffer<T> {
 
 fn migrate<T>(full: Full<T>, allocation: Allocation, length: usize, count: usize) -> RawBuffer<T> {
   return match move full {
-    Full<T> { buffer } => migrateBuffer<T>(move buffer, move allocation, length, count)
+    Full<T> {buffer} => migrateBuffer<T>(move buffer, move allocation, length, count)
   }
 }
 
 // One bulk move replaces the element-by-element migration: the initialized prefix of the old
 // buffer travels to the fresh buffer in a single copy, and the emptied source releases as before.
-fn migrateBuffer<T>(old: RawBuffer<T>, allocation: Allocation, length: usize, count: usize) -> RawBuffer<T> {
+fn migrateBuffer<T>(old: RawBuffer<T>, allocation: Allocation, length: usize, count: usize) -> RawBuffer<
+  T,
+> {
   let mut target = freshBuffer<T>(move allocation, count)
   unsafe {
     let mut source = move old
@@ -730,7 +716,7 @@ fn migrateBuffer<T>(old: RawBuffer<T>, allocation: Allocation, length: usize, co
 
 fn writeAt<T>(full: Full<T>, index: usize, value: T) -> Full<T> {
   return match move full {
-    Full<T> { buffer } => Full<T> { buffer: writeSlot<T>(move buffer, index, move value) }
+    Full<T> {buffer} => Full<T> {buffer: writeSlot<T>(move buffer, index, move value)}
   }
 }
 
@@ -768,7 +754,7 @@ struct Taken<T> {
 
 fn takeAt<T>(full: Full<T>, index: usize) -> Taken<T> {
   return match move full {
-    Full<T> { buffer } => takeSlot<T>(move buffer, index)
+    Full<T> {buffer} => takeSlot<T>(move buffer, index)
   }
 }
 
@@ -777,7 +763,7 @@ fn takeSlot<T>(buffer: RawBuffer<T>, index: usize) -> Taken<T> {
     let mut owned = move buffer
     let selected = RawBuffer.slot(&mut owned, index)
     let value = Slot.take(move selected)
-    return Taken<T> { storage: Full<T> { buffer: move owned }, value: move value }
+    return Taken<T> {storage: Full<T> {buffer: move owned}, value: move value}
   }
   return absurd<Taken<T>>()
 }
@@ -796,7 +782,7 @@ fn commit<T>(self: &mut Vector<T>, storage: Full<T>, value: T) -> T {
 
 fn removeAt<T>(full: Full<T>, index: usize, length: usize) -> Taken<T> {
   return match move full {
-    Full<T> { buffer } => removeBuffer<T>(move buffer, index, length)
+    Full<T> {buffer} => removeBuffer<T>(move buffer, index, length)
   }
 }
 
@@ -818,14 +804,14 @@ fn removeBuffer<T>(buffer: RawBuffer<T>, index: usize, length: usize) -> Taken<T
       let written = Slot.write(move target, move shifted)
       cursor = cursor + usize.ONE
     }
-    return Taken<T> { storage: Full<T> { buffer: move owned }, value: move value }
+    return Taken<T> {storage: Full<T> {buffer: move owned}, value: move value}
   }
   return absurd<Taken<T>>()
 }
 
 fn dropRange<T>(full: Full<T>, from: usize, to: usize) -> Full<T> {
   return match move full {
-    Full<T> { buffer } => Full<T> { buffer: dropRangeBuffer<T>(move buffer, from, to) }
+    Full<T> {buffer} => Full<T> {buffer: dropRangeBuffer<T>(move buffer, from, to)}
   }
 }
 
@@ -845,7 +831,7 @@ fn dropRangeBuffer<T>(buffer: RawBuffer<T>, from: usize, to: usize) -> RawBuffer
 
 fn replaceAt<T>(full: Full<T>, index: usize, value: T) -> Full<T> {
   return match move full {
-    Full<T> { buffer } => Full<T> { buffer: replaceSlot<T>(move buffer, index, move value) }
+    Full<T> {buffer} => Full<T> {buffer: replaceSlot<T>(move buffer, index, move value)}
   }
 }
 
@@ -897,14 +883,16 @@ fn takeBuffer<T>(storage: Empty<T> | Full<T>) -> RawBuffer<T> {
 
 fn unwrapFull<T>(full: Full<T>) -> RawBuffer<T> {
   return match move full {
-    Full<T> { buffer } => move buffer
+    Full<T> {buffer} => move buffer
   }
 }
 
 // Moves every element into the scratch buffer in the order the permutation names, then returns the
 // whole prefix in one bulk move. Every source slot is taken exactly once because the permutation is
 // a bijection, so nothing leaks and nothing is dropped twice.
-fn applyOrder<T>(buffer: RawBuffer<T>, scratch: RawBuffer<T>, order: &[usize], count: usize) -> Applied<T> {
+fn applyOrder<T>(buffer: RawBuffer<T>, scratch: RawBuffer<T>, order: &[usize], count: usize) -> Applied<
+  T,
+> {
   let mut owned = move buffer
   let mut staging = move scratch
   unsafe {
@@ -919,7 +907,7 @@ fn applyOrder<T>(buffer: RawBuffer<T>, scratch: RawBuffer<T>, order: &[usize], c
   }
   let merged = RawBuffer.view<T>(&staging, usize.ZERO, count)
   let moved = RawBuffer.copy<T>(&mut owned, usize.ZERO, merged, count)
-  return Applied<T> { buffer: move owned, scratch: move staging }
+  return Applied<T> {buffer: move owned, scratch: move staging}
 }
 
 // The scratch buffer holds no initialized element once the bulk move returns, so releasing it

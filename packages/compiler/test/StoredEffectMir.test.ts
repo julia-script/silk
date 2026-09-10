@@ -350,7 +350,7 @@ it.effect('retains provided runner contracts through typed-failure recovery', ()
     assert.isDefined(providedRun)
     if (providedRun === undefined || providedRun.runnerBase === undefined) return
     assert.strictEqual(providedRun.providers.length, 1)
-    assert.strictEqual(providedRun.providers.at(0)?.capability.name, 'Writer')
+    assert.strictEqual(providedRun.providers.at(0)?.capability.name, 'RecoveredWriter')
     assert.strictEqual(providedRun.providers.at(0)?.providerType.name, 'StdoutWriter')
     assert.strictEqual(providedRun.providers.at(0)?.role, 'DefaultRole')
     assert.strictEqual(providedRun.providers.at(0)?.requirementAccess, 'Exclusive')

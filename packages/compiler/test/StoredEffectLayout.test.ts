@@ -146,7 +146,7 @@ it.effect('shapes nested Effect and callable captures from their concrete enviro
   Effect.gen(function* () {
     const { plan } = yield* storedLayout(
       'stored-effect-layout/nested-executables',
-      `import silk.i32 as i32
+      `import silk.i32
 struct Token { value: i32 }
 struct Deferred<F: once Effect<i32>> { operation: F }
 pub fn main() -> i32 {
@@ -187,7 +187,7 @@ it.effect('preserves local executable identities through recursively nested Effe
   Effect.gen(function* () {
     const { plan } = yield* storedLayout(
       'stored-effect-layout/deep-nested-executables',
-      `import silk.i32 as i32
+      `import silk.i32
 struct Deferred<F: once Effect<i32>> { operation: F }
 pub fn main() -> i32 {
   let deepest = effect { return 1 }

@@ -22,11 +22,11 @@ const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
 
 const mapImports = `import silk.hash { Hash }
 import silk.hash { HashKey, HashSeed, Word }
-import silk.i32 as i32
+import silk.i32
 import silk.hash_map { HashMap }
 import silk.option { Option }
-import silk.u64 as u64
-import silk.usize as usize`
+import silk.u64
+import silk.usize`
 
 it.effect('refuses a key type that has no HashKey witness', () =>
   Effect.gen(function* () {

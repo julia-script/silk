@@ -33,7 +33,7 @@ import parser.SyntaxTree {SyntaxTree}
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
 import silk.string {String}
-import silk.usize as Usize
+import silk.usize
 import silk.vector {Vector}
 
 /// Maximum number of active recursive grammar operations.
@@ -109,7 +109,7 @@ fn significantIndex(state: &State) -> usize {
       |> isTrivia) {
       return index
     }
-    index = Usize.add(index, Usize.ONE)
+    index = usize.add(index, usize.ONE)
   }
   return index
 }
@@ -136,7 +136,7 @@ pub fn make(source: Bytes, tokens: Vector<Token>) -> State {
     tokens: move tokens,
     nodes: Vector.make<Node>(),
     diagnostics: Vector.make<Diagnostic>(),
-    index: Usize.ZERO,
+    index: usize.ZERO,
     depth: 0,
   }
 }
@@ -194,11 +194,11 @@ pub fn insertionSpan(state: &State) -> Span {
     return Span.make(tokenSpan.start, tokenSpan.start)
   }
   let length = Vector.length<Token>(&state.tokens)
-  if length == Usize.ZERO {
-    return Span.make(Usize.ZERO, Usize.ZERO)
+  if length == usize.ZERO {
+    return Span.make(usize.ZERO, usize.ZERO)
   }
   let finalSpan = &state.tokens
-    |> Vector.get<Token>(Usize.subtract(length, Usize.ONE))
+    |> Vector.get<Token>(usize.subtract(length, usize.ONE))
     |> span
   return Span.make(finalSpan.end, finalSpan.end)
 }
@@ -219,7 +219,7 @@ pub effect fn consume(initial: ElementsResult) -> ElementsResult ! OutOfMemoryEr
   let mut state = move initialState
   let mut elements = move initialElements
   let index = significantIndex(&state)
-  state.index = Usize.add(index, Usize.ONE)
+  state.index = usize.add(index, usize.ONE)
   run Vector.append<Element>(&mut elements, Element.Token {id: TokenId {index: index}})
   return ElementsResult {state: move state, elements: move elements}
 }
@@ -296,7 +296,7 @@ pub effect fn unexpected(initial: ElementsResult) -> ElementsResult
     &mut state.diagnostics,
     Diagnostic.UnexpectedToken {actual: kind(token), span: span(token)},
   )
-  state.index = Usize.add(index, Usize.ONE)
+  state.index = usize.add(index, usize.ONE)
   run Vector.append<Element>(&mut elements, Element.Token {id: TokenId {index: index}})
   return ElementsResult {state: move state, elements: move elements}
 }
@@ -322,11 +322,11 @@ pub effect fn finish(initial: ElementsResult, nodeKind: NodeKind, emptySpan: Spa
   let mut state = move initialState
   let length = Vector.length<Element>(&elements)
   let mut nodeSpan = emptySpan
-  if Usize.ZERO < length {
-    let first = elementSpan(&state, Vector.get<Element>(&elements, Usize.ZERO))
+  if usize.ZERO < length {
+    let first = elementSpan(&state, Vector.get<Element>(&elements, usize.ZERO))
     let last = elementSpan(
       &state,
-      Vector.get<Element>(&elements, Usize.subtract(length, Usize.ONE)),
+      Vector.get<Element>(&elements, usize.subtract(length, usize.ONE)),
     )
     nodeSpan = Span.make(first.start, last.end)
   }
@@ -360,7 +360,7 @@ pub effect fn finishSourceFile(initial: ElementsResult) -> NodeResult
     &mut state.nodes,
     Node {
       kind: NodeKind.SourceFile,
-      span: Span.make(Usize.ZERO, sourceEnd),
+      span: Span.make(usize.ZERO, sourceEnd),
       elements: move elements,
     },
   )
@@ -404,9 +404,9 @@ pub fn peek(state: &State, offset: usize) -> TokenKind {
       if remaining == 0 {
         return candidate
       }
-      remaining = Usize.subtract(remaining, 1)
+      remaining = usize.subtract(remaining, 1)
     }
-    index = Usize.add(index, 1)
+    index = usize.add(index, 1)
   }
   return TokenKind.EndOfFile
 }
@@ -425,15 +425,15 @@ pub fn word(state: &State, expected: string) -> bool {
     |> span
   let bytes = Bytes.asSlice(&state.source)
   let text = String.utf8Bytes(expected)
-  if location.end > bytes.length || Usize.subtract(location.end, location.start) != text.length {
+  if location.end > bytes.length || usize.subtract(location.end, location.start) != text.length {
     return false
   }
   let mut index: usize = 0
   while index < text.length {
-    if bytes[Usize.add(location.start, index)] != text[index] {
+    if bytes[usize.add(location.start, index)] != text[index] {
       return false
     }
-    index = Usize.add(index, 1)
+    index = usize.add(index, 1)
   }
   return true
 }
@@ -456,7 +456,7 @@ pub fn lineBreakBefore(state: &State) -> bool {
     if bytes[index] == 10 {
       return true
     }
-    index = Usize.add(index, 1)
+    index = usize.add(index, 1)
   }
   return false
 }
@@ -510,7 +510,7 @@ pub effect fn extend(elements: Vector<Element>, fragment: ElementsResult) -> Ele
   let mut index: usize = 0
   while index < Vector.length<Element>(&children) {
     run Vector.append<Element>(&mut parent, Vector.get<Element>(&children, index))
-    index = Usize.add(index, 1)
+    index = usize.add(index, 1)
   }
   return ElementsResult {state: move state, elements: move parent}
 }
@@ -558,10 +558,10 @@ pub effect fn nestingError(initial: State) -> NodeResult ! OutOfMemoryError ? &m
     } else if kind == TokenKind.LeftBrace {
       run Vector.append<TokenKind>(&mut closing, TokenKind.RightBrace)
     } else if kind == TokenKind.RightParenthesis || kind == TokenKind.RightBracket || kind == TokenKind.RightBrace {
-      if length == 0 || Vector.get<TokenKind>(&closing, Usize.subtract(length, 1)) != kind {
+      if length == 0 || Vector.get<TokenKind>(&closing, usize.subtract(length, 1)) != kind {
         break
       }
-      Vector.truncate<TokenKind>(&mut closing, Usize.subtract(length, 1))
+      Vector.truncate<TokenKind>(&mut closing, usize.subtract(length, 1))
     }
     let next = run consume(move p)
     p = move next

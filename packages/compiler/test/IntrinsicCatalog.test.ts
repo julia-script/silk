@@ -79,7 +79,7 @@ pub fn main() -> i32 {
       const arguments_ = operation.arity === 1 ? '1' : '1, 1'
       return `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(${arguments_})`
     })
-    return `import silk.${scalar.spelling} as ${scalar.spelling}\npub fn scalar${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
+    return `import silk.${scalar.spelling}\npub fn scalar${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
   }),
   ...Scalar.floats().map((scalar, scalarOrdinal) => {
     const calls = scalar.operations.map((operation, operationOrdinal) => {
@@ -87,7 +87,7 @@ pub fn main() -> i32 {
       const arguments_ = operation.arity === 1 ? argument : `${argument}, ${argument}`
       return `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(${arguments_})`
     })
-    return `import silk.${scalar.spelling} as ${scalar.spelling}\npub fn floating${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
+    return `import silk.${scalar.spelling}\npub fn floating${scalarOrdinal}() -> i32 {\n${calls.join('\n')}\n  return 0\n}`
   }),
   // Character operations use typed parameters so checked construction receives `u32` while
   // comparison and inspection receive `char`.
@@ -103,14 +103,14 @@ pub fn main() -> i32 {
         })
         return `  let v${operationOrdinal} = ${scalar.spelling}.${operation.spelling}(${arguments_.join(', ')})`
       })
-      return `import silk.${scalar.spelling} as ${scalar.spelling}\npub fn character${scalarOrdinal}(number: u32, left: ${scalar.spelling}, right: ${scalar.spelling}) -> i32 {\n${calls.join('\n')}\n  return 0\n}`
+      return `import silk.${scalar.spelling}\npub fn character${scalarOrdinal}(number: u32, left: ${scalar.spelling}, right: ${scalar.spelling}) -> i32 {\n${calls.join('\n')}\n  return 0\n}`
     }),
-  `import silk.bool as bool
+  `import silk.bool
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
-import silk.i32 as i32
+import silk.i32
 import silk.layout { Layout }
-import silk.usize as usize
+import silk.usize
 pub fn main() -> i32 {
   let i00 = i32.negate(1)
   let i01 = i32.add(1, 2)
@@ -212,7 +212,7 @@ fn register(wake: Intrinsic.Wake) -> Guard {
 effect fn parking() -> () { return run Execution.park(register) }
 pub fn main() -> i32 { return 42 }`,
   `import silk.effect { Effect }
-import silk.i32 as i32
+import silk.i32
 struct Problem {}
 service Clock {}
 struct FixedClock {}
@@ -1477,7 +1477,7 @@ it.effect(
   'resolves former scalar actor spellings to source wrappers, not compiler identities',
   () =>
     Effect.gen(function* () {
-      const source = 'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(20, 22) }'
+      const source = 'import silk.i32\npub fn main() -> i32 { return i32.add(20, 22) }'
       const snapshot = yield* AnalysisFixture.retainingMain(
         'intrinsic/source-wrapper',
         encoder.encode(source),

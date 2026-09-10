@@ -64,7 +64,7 @@ import silk.allocator { OutOfMemoryError }
 import silk.layout { Layout }
 import silk.raw_buffer { RawBuffer }
 import silk.slot { Slot }
-import silk.usize as usize
+import silk.usize
 
 /// A marker for a box whose element has been transferred to its caller.
 pub struct Vacant {}

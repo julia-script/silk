@@ -19,7 +19,7 @@ import silk.hash { Hash }
 import silk.hash { HashKey, HashSeed }
 import silk.monotonic_clock { MonotonicClock }
 import silk.shared { Shared }
-import silk.u64 as u64
+import silk.u64
 
 /// A task identity that is unique within one Scheduler execution.
 ///

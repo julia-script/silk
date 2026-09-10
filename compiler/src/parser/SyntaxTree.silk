@@ -23,7 +23,6 @@
 
 import lexer.Span {Span}
 import lexer.Token {Token, TokenKind}
-import lexer.Token as LexicalToken
 import parser.Diagnostic {Diagnostic}
 import parser.Element {Element}
 import parser.Node {Node, NodeKind}
@@ -302,7 +301,7 @@ effect fn writeElement(tree: &SyntaxTree, element: Element) -> () ! WriterError 
       run Writer.writeString("token #")
       run Format.display(&id.index)
       run Writer.writeString(" ")
-      run LexicalToken.write(Vector.get<Token>(&tree.tokens, id.index))
+      run Token.write(Vector.get<Token>(&tree.tokens, id.index))
     }
     Element.MissingToken {expected, span} => {
       run Writer.writeString("missing ")

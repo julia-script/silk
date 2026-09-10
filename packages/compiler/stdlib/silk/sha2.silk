@@ -32,11 +32,11 @@
 //! }
 //! ```
 
-import silk.static_sequence as StaticSequence
-import silk.u32 as u32
-import silk.u64 as u64
-import silk.u8 as u8
-import silk.usize as usize
+import silk.static_sequence { StaticSequence }
+import silk.u32
+import silk.u64
+import silk.u8
+import silk.usize
 
 /// An allocation-free incremental SHA-224 state that returns a 28-byte digest.
 pub struct Sha224 {

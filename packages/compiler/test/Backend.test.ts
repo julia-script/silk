@@ -304,9 +304,9 @@ pub fn main() -> i32 {
 )
 
 const arithmeticSource =
-  'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }'
+  'import silk.i32\npub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }'
 
-const matchSource = `import silk.i32 as i32
+const matchSource = `import silk.i32
 pub struct Left { value: i32 }
 pub struct Right { value: i32 }
 pub fn inspect(input: Left | Right) -> i32 {
@@ -322,7 +322,7 @@ it.effect('emits checked arithmetic through overflow intrinsics and guarded divi
   Effect.gen(function* () {
     const artifact = yield* emit(arithmeticSource, { mode: 'release' })
     const division = yield* emit(
-      'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(1, 0) }',
+      'import silk.i32\npub fn main() -> i32 { return i32.divide(1, 0) }',
       {
         mode: 'release',
       },
@@ -351,7 +351,7 @@ it.effect('matches the arithmetic IR golden and stays deterministic', () =>
 it.effect('emits comparisons as icmp with zero-extension and branches natively', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(
-      'import silk.i32 as i32\npub fn main() -> i32 { if i32.lessThan(1, 2) { return 42 } return 0 }',
+      'import silk.i32\npub fn main() -> i32 { if i32.lessThan(1, 2) { return 42 } return 0 }',
       {
         mode: 'release',
       },
@@ -398,7 +398,7 @@ pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left:
 it.effect('orders checked array reads before private match blocks', () =>
   Effect.gen(function* () {
     const artifact = yield* emit(
-      `import silk.usize as usize
+      `import silk.usize
 struct A {}
 struct B {}
 fn decode(code: i32) -> A | B { if code == 1 { return A {} } return B {} }
@@ -530,8 +530,8 @@ it.effect('declares each reachable foreign symbol once and calls through its unw
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
       'backend/foreign-native',
-      ascii(`import silk.i32 as i32
-import silk.usize as usize
+      ascii(`import silk.i32
+import silk.usize
 unsafe extern "C" fn silk_test_add(a: i32, b: i32) -> i32
 unsafe extern "C" fn silk_test_scale(count: usize) -> usize
 unsafe extern "C" fn abs(value: i32) -> i32
@@ -711,7 +711,7 @@ it.effect('declares a foreign pointer signature with the LLVM pointer type', () 
     const snapshot = yield* AnalysisFixture.retainingMain(
       'backend/pointer-malloc',
       ascii(`import silk.pointer { Pointer }
-import silk.i32 as i32
+import silk.i32
 unsafe extern "C" fn malloc(size: usize) -> *mut u8
 pub fn main() -> i32 {
   let bytes = unsafe malloc(i32.toUsize(8))

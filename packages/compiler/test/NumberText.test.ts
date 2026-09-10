@@ -150,9 +150,9 @@ it.effect('classifies static template bytes and residualizes only the selected a
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
       'number-text/template-byte',
-      ascii(`import silk.static_text as StaticText
-import silk.static_sequence as StaticSequence
-import silk.usize as usize
+      ascii(`import silk.static_text { StaticText }
+import silk.static_sequence { StaticSequence }
+import silk.usize
 static fn startsOpen(value: string) -> bool {
   let parts = StaticSequence.empty<i32>()
   let length = StaticText.byteLength(value)
@@ -224,7 +224,7 @@ it.effect('residualizes borrowed aggregate formatting without allocator machiner
 it.effect('does not expose private fields as named formatting candidates', () =>
   Effect.gen(function* () {
     const module = 'number-text/template-private-field'
-    const source = `import model.Person as Model
+    const source = `import model.Person
 import silk.effect { Effect }
 import silk.format { Format }
 import silk.writer { Writer, WriterError }
@@ -237,7 +237,7 @@ impl Writer for Sink {
 }
 
 effect fn render() -> () ! WriterError ? &mut Writer {
-  let person = Model.make()
+  let person = Person.make()
   return run Format.format("{missing}", &person)
 }
 
@@ -309,7 +309,7 @@ it.effect('rejects the removed toText operation as an unknown module member', ()
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
       'number-text/no-to-text',
-      ascii(`import silk.i32 as i32
+      ascii(`import silk.i32
 pub fn main() -> i32 { let text = i32.toText(42) return 0 }`),
       'wasm32-unknown-unknown',
     )

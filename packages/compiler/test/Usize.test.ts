@@ -25,14 +25,14 @@ afterAll(() => {
   rmSync(destinationRoot, { recursive: true, force: true })
 })
 
-const nativeExact = `import silk.usize as usize
+const nativeExact = `import silk.usize
 fn increment(value: usize) -> usize { return usize.add(value, 1) }
 pub fn main() -> i32 {
   if increment(9007199254740993) == 9007199254740994 { return 42 }
   return 0
 }`
 
-const sharedUnsigned = `import silk.usize as usize
+const sharedUnsigned = `import silk.usize
 fn maximum() -> usize { return 4294967293 |> usize.add(2) }
 pub fn main() -> i32 {
   if maximum() > 2147483647 { return 42 }

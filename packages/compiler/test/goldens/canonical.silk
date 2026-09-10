@@ -1,4 +1,4 @@
-import Core.Math as Math {add as plus, subtract}
+import Core.Math {add as plus, subtract}
 
 static if true {
   pub import first {original as selected}

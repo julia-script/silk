@@ -12,7 +12,7 @@ it.effect(
     Effect.gen(function* () {
       const moved = yield* AnalysisFixture.retainingMain(
         'bytes-acceptance/moved',
-        ascii(`import silk.usize as usize
+        ascii(`import silk.usize
 import silk.bytes { Bytes }
 pub fn main() -> i32 {
   let first = Bytes.make()

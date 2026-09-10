@@ -25,7 +25,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
 ) == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText(
   "libc",
 ) == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
-  import Intrinsic.application as app
+  import Intrinsic.application
 
   import silk.effect {Effect}
 
@@ -33,7 +33,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
 
   import silk.native_report {NativeReport}
 
-  import silk.usize as usize
+  import silk.usize
 
   import silk.host_input {HostInput, HostInputError}
 
@@ -100,9 +100,9 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     drop execution
     return ()
   }
-  fn application(inputs: OsHostInput) -> i32 {
+  fn invokeApplication(inputs: OsHostInput) -> i32 {
     let mut host = move inputs
-    let value = app.main()
+    let value = application.main()
     let provider = select(&value)
     return adapt(move value, move provider, &mut host)
   }
@@ -114,7 +114,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     return run NativeDiagnostics.observe(
       move observer,
       effect {
-        return invoke(application, move inputs)
+        return invoke(invokeApplication, move inputs)
       },
     )
   }

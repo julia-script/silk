@@ -325,7 +325,7 @@ it.effect('does not recurse through references to represented executable values'
   Effect.gen(function* () {
     const callable = yield* realized(
       'representation-fence/callable-reference',
-      `import silk.i32 as i32
+      `import silk.i32
 struct Pointer<F: fn<'static>(i32) -> i32> { operation: &F }
 fn point<F: fn<'static>(i32) -> i32>(operation: &F) -> Pointer<F> {
   return Pointer<F> { operation }

@@ -7,23 +7,23 @@ const storageAcquire = 'Intrinsic.systemAllocationAcquire'
  */
 export const ordinaryStorageSource = (source: string): string => {
   if (!source.includes(storageAcquire)) return source
-  return `import silk.allocator { OutOfMemoryError as TestStorageFailure }
-import silk.layout { Layout as TestStorageLayout }
+  return `import silk.allocator { OutOfMemoryError }
+import silk.layout { Layout }
 ${source.replaceAll(storageAcquire, 'testStorageAcquire')}
 effect fn testStorageRefused(
   error: Intrinsic.StorageFailure
-) -> Allocation ! TestStorageFailure {
+) -> Allocation ! OutOfMemoryError {
   drop error
-  fail TestStorageFailure {}
+  fail OutOfMemoryError {}
 }
 effect fn testRawStorageAcquire(
-  layout: TestStorageLayout
+  layout: Layout
 ) -> Allocation ! Intrinsic.StorageFailure {
   return run Intrinsic.systemAllocationAcquire(move layout)
 }
 effect fn testStorageAcquire(
-  layout: TestStorageLayout
-) -> Allocation ! TestStorageFailure {
+  layout: Layout
+) -> Allocation ! OutOfMemoryError {
   return run Intrinsic.catchFailure<Intrinsic.StorageFailure>(
     testRawStorageAcquire(move layout),
     testStorageRefused

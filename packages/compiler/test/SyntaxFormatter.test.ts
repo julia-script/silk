@@ -1272,7 +1272,7 @@ y"""[0]
 
 it.effect('prints and reparses the complete current grammar surface', () =>
   Effect.gen(function* () {
-    const source = `import Core.Math as Math { add as plus, subtract }
+    const source = `import Core.Math { add as plus, subtract }
 static if true { pub import first { original as selected } } else static if false { import second } else { pub const selected: i32 = 1 }
 pub const limit:i32=2
 pub const timeout:u64=01h05m00s

@@ -28,9 +28,9 @@
 //! ```
 
 import silk.option { Option }
-import silk.u64 as u64
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u64
+import silk.u8
+import silk.usize
 
 /// An exclusive source of deterministic non-cryptographic `u64` words.
 ///

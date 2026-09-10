@@ -632,7 +632,7 @@ pub fn main() -> i32 {
 )
 
 it.effect('navigates and presents the source-defined Vector lexical view accessors', () => {
-  const source = `import silk.usize as usize
+  const source = `import silk.usize
 import silk.vector { Vector }
 pub fn main() -> i32 {
   let mut values = Vector.make<i32>()
@@ -699,8 +699,7 @@ pub fn main() -> i32 {
 it.effect('navigates and presents the source-defined owned Bytes surface', () => {
   const source = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.bytes { Bytes }
-import silk.usize as usize
-import silk.bytes { Bytes as OwnedBytes }
+import silk.usize
 effect fn build() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let mut bytes = Bytes.make()
   let copied = run Bytes.copy(Bytes.asSlice(&bytes))
@@ -1294,11 +1293,11 @@ pub fn main() -> i32 { return 0 }`
 })
 
 it.effect('qualifies same-spelled contracts and excludes invalid conformances', () => {
-  const qualifiedSource = `import contracts as Other
+  const qualifiedSource = `import contracts
 service Contract {}
 struct Provider {}
 impl Contract for Provider {}
-impl Other.Contract for Provider {}
+impl contracts.Contract for Provider {}
 pub fn main() -> Provider { return Provider {} }`
   const contracts = `pub service Contract {}`
   const invalidSource = `service Broken { fn value() -> i32 }
@@ -1318,7 +1317,7 @@ pub fn main() -> Provider { return Provider {} }`
           'main',
           qualifiedSource.indexOf('Provider'),
         )?.implementedContracts.map((contract) => contract.text),
-        ['Other.Contract', 'Contract'],
+        ['contracts.Contract', 'Contract'],
       )
       assert.isAbove(Analysis.diagnostics(invalid).length, 0)
       assert.deepEqual(
@@ -1362,9 +1361,9 @@ pub fn main() -> i32 {
 })
 
 it.effect('excludes conformances whose provider or contract endpoint is private', () => {
-  const root = `import lib as Lib
+  const root = `import lib
 pub fn main() -> i32 {
-  let provider = Lib.make()
+  let provider = lib.make()
   return 0
 }`
   const privateContractLibrary = `service Hidden {}
@@ -1635,13 +1634,13 @@ fn hidden() -> i32 { return 0 }`
 })
 
 it.effect('keeps struct field tooling visibility-aware across modules', () => {
-  const root = `import lib as Model { Secret, make }
+  const root = `import lib
 fn invalid() -> i32 {
-  let secret = Model.Secret { value: 1, key: 2 }
+  let secret = lib.Secret { value: 1, key: 2 }
   return 0
 }
 pub fn main() -> i32 {
-  let secret = Model.make(1)
+  let secret = lib.make(1)
   return secret.
 }`
   const library = `pub struct Secret { pub value: i32 key: i32 }
@@ -1675,7 +1674,8 @@ pub fn make(value: i32) -> Secret { return Secret { value: value, key: 7 } }`
 it.effect('renders inferred types through unambiguous imports and canonical fallbacks', () => {
   const root = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.box { Box }
-import types.Models as Schema { Box as Selected }
+import types.Models
+import types.Models { Box as Selected }
 struct Selected {}
 struct Problem {}
 pub fn main() -> i32 { return 0 }`
@@ -1695,14 +1695,14 @@ pub struct Other {}`
         'R',
         'RequirementRow',
       )
-      assert.strictEqual(Presentation.type(box, 'main', scope), 'Schema.Box<i32>')
-      assert.strictEqual(Presentation.type(other, 'main', scope), 'Schema.Other')
+      assert.strictEqual(Presentation.type(box, 'main', scope), 'Models.Box<i32>')
+      assert.strictEqual(Presentation.type(other, 'main', scope), 'Models.Other')
       assert.strictEqual(Presentation.type(box, 'detached'), 'types/Models.Box<i32>')
       assert.strictEqual(
         Presentation.scopedNominal(Type.nominal('silk/allocator', 'Allocator'), 'main', scope).text,
         'Allocator',
       )
-      assert.strictEqual(Presentation.scopedNominal(box, 'main', scope).text, 'Schema.Box<i32>')
+      assert.strictEqual(Presentation.scopedNominal(box, 'main', scope).text, 'Models.Box<i32>')
 
       const effect = Type.effect(
         Type.reference('Exclusive', box, Lifetime.staticLifetime),
@@ -1720,7 +1720,7 @@ pub struct Other {}`
       )
       assert.strictEqual(
         Presentation.type(effect, 'main', scope),
-        "Effect<'static; &'static mut Schema.Box<i32> ! Problem | E ? &mut Allocator at Heap | R>",
+        "Effect<'static; &'static mut Models.Box<i32> ! Problem | E ? &mut Allocator at Heap | R>",
       )
       const retainedType = Type.parameter({ module: 'main', name: 'retain' }, 0, 'T')
       const retainedEnvironment = Lifetime.bound({ module: 'main', name: 'retain' }, 1, 'env')
@@ -1844,9 +1844,9 @@ pub fn main() -> i32 { return SystemAllocator. }`
       { _tag: 'ValueMemberContext', state: 'Missing' },
     )
 
-    const namespaceSource = `import lib as Library
+    const namespaceSource = `import lib
 struct Local {}
-pub fn main(value: i32) -> i32 { return Library. }`
+pub fn main(value: i32) -> i32 { return lib. }`
     const namespace = yield* Analysis.make({
       root: SourceFile.make('main', encoder.encode(namespaceSource)),
     }).pipe(
@@ -1866,7 +1866,7 @@ pub fn main(value: i32) -> i32 { return Library. }`
     const namespaceResult = Analysis.completionAt(
       namespace,
       'main',
-      namespaceSource.indexOf('Library.') + 'Library.'.length,
+      namespaceSource.indexOf('lib.') + 'lib.'.length,
     )
     assert.deepEqual(namespaceResult?.context, { _tag: 'ActorMemberContext', actor: 'lib' })
     assert.include(namespaceResult?.candidates.map((candidate) => candidate.label) ?? [], 'visible')
@@ -1997,12 +1997,12 @@ it.effect('keeps inherent members out of a module-namespace completion', () => {
 impl Counter { pub fn make() -> Self { return Counter { value: 1 } } }
 pub fn helper() -> i32 { return 1 }
 `
-  const source = `import shapes as Shapes
-pub fn main() -> i32 { let value = Shapes. return 0 }`
+  const source = `import shapes
+pub fn main() -> i32 { let value = shapes. return 0 }`
   return Analysis.make({ root: SourceFile.make('main', encoder.encode(source)) }).pipe(
     Effect.provide(SourceResolver.memory(new Map([['shapes', encoder.encode(shapes)]]))),
     Effect.map((snapshot) => {
-      const offset = source.indexOf('Shapes.') + 'Shapes.'.length
+      const offset = source.indexOf('shapes.') + 'shapes.'.length
       const completion = Analysis.completionAt(snapshot, 'main', offset)
       assert.deepEqual(
         [...(completion?.candidates.map((candidate) => candidate.label) ?? [])].sort(),

@@ -24,10 +24,10 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
     ProcessOperation,
     ProcessReason,
   }
-  import silk.isize as isize
-  import silk.i32 as i32
-  import silk.usize as usize
-  import silk.u8 as u8
+  import silk.isize
+  import silk.i32
+  import silk.usize
+  import silk.u8
   unsafe extern "C" fn close(fd: i32) -> i32
   unsafe extern "C" fn read(fd: i32, buffer: ?[*]mut u8, count: usize) -> isize with Intrinsic.foreign(
     noCapture: ("buffer",),

@@ -156,8 +156,8 @@ it.effect('declares no arithmetic and exposes only explicit integer conversion',
   Effect.gen(function* () {
     const snapshot = yield* analyze(
       'absent-members',
-      'import silk.char as char\npub fn sum(left: char, right: char) -> char { return char.add(left, right) }\n' +
-        'import silk.char as char\npub fn code(value: char) -> u32 { return char.toU32(value) }\n' +
+      'import silk.char\npub fn sum(left: char, right: char) -> char { return char.add(left, right) }\n' +
+        'import silk.char\npub fn code(value: char) -> u32 { return char.toU32(value) }\n' +
         'pub fn main() -> i32 { return 0 }',
     )
     assert.deepEqual(codes(snapshot), ['SEM0014'])

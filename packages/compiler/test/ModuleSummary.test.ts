@@ -14,7 +14,7 @@ it('extracts ordered imports and unique public declaration headers', () => {
   const summary = summarize(
     'app.main',
     `import silk.bytes { Bytes }
-import app.log as Log
+import app.log
 pub fn execute() -> i32 { return 1 }
 fn helper() -> i32 { return 2 }
 pub struct User {}

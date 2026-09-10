@@ -205,7 +205,7 @@ const program = Effect.gen(function* () {
                   [
                     'runtime',
                     new TextEncoder().encode(
-                      'import Intrinsic.application as app\nexport "C" fn answer() -> i32 { return app.answer() }',
+                      'import Intrinsic.application\nexport "C" fn answer() -> i32 { return application.answer() }',
                     ),
                   ],
                 ]),

@@ -111,7 +111,7 @@ import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
 import silk.filesystem { FileError }
 import silk.filesystem { FileSystem }
-import silk.u8 as u8
+import silk.u8
 ${prelude}
 ${nativeRootResolution}
 
@@ -196,7 +196,7 @@ import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
 import silk.filesystem { FileError }
 import silk.filesystem { FileSystem }
-import silk.u8 as u8
+import silk.u8
 ${prelude}
 ${nativeRootResolution}
 

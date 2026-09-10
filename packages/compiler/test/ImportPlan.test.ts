@@ -73,11 +73,11 @@ it('renders canonical module identities with Silk import-path spelling', () => {
   )
   assert.strictEqual(
     apply(
-      'import silk.vector { appendBytes }\nfn main() -> () {\n  Vector\n  return ()\n}',
+      'import silk.vector { Empty }\nfn main() -> () {\n  Vector\n  return ()\n}',
       'silk/vector',
       'Vector',
     ),
-    'import silk.vector { appendBytes, Vector }\nfn main() -> () {\n  Vector\n  return ()\n}',
+    'import silk.vector { Empty, Vector }\nfn main() -> () {\n  Vector\n  return ()\n}',
   )
 })
 
@@ -127,6 +127,8 @@ it('renders a collision-selected local alias for new and existing module imports
   )
 })
 
+// These fixtures explicitly request a namespace, including the reserved basename `effect`.
+// Ordinary Effect callers select the owner; this suite exercises the separate namespace API.
 it('inserts, extends, and reuses explicit namespace imports', () => {
   assert.deepEqual(applyNamespace('fn main() -> i32 { return 1 }'), {
     output: 'import silk.effect as Effect\nfn main() -> i32 { return 1 }',

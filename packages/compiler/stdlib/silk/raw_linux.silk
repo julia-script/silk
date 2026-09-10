@@ -10,159 +10,163 @@
 //! Every unsafe caller must prove the selected syscall's pointer, lifetime and resource contract.
 
 static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText("libc") == "none" && (Intrinsic.targetArchitecture() == "x86_64" || Intrinsic.targetArchitecture() == "aarch64") {
-  import silk.usize as usize
+  import silk.usize
   import silk.pointer {Pointer}
+  /// The scope for raw Linux kernel operations on the selected target.
+  pub struct RawLinux {}
 
   static if Intrinsic.targetArchitecture() == "x86_64" {
-    /// Issues a Linux syscall with 0 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall0(number: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "syscall",
-        "={rax},0",
-        "rcx,r11,flags",
-        "readwrite",
-        true,
-        false, (number,),
-      )
-    }
-    /// Issues a Linux syscall with 1 argument and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall1(number: usize, a1: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "syscall",
-        "={rax},0,{rdi}",
-        "rcx,r11,flags",
-        "readwrite",
-        true,
-        false, (number, a1),
-      )
-    }
-    /// Issues a Linux syscall with 2 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall2(number: usize, a1: usize, a2: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "syscall",
-        "={rax},0,{rdi},{rsi}",
-        "rcx,r11,flags",
-        "readwrite",
-        true,
-        false, (number, a1, a2),
-      )
-    }
-    /// Issues a Linux syscall with 3 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall3(number: usize, a1: usize, a2: usize, a3: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "syscall",
-        "={rax},0,{rdi},{rsi},{rdx}",
-        "rcx,r11,flags",
-        "readwrite",
-        true,
-        false, (number, a1, a2, a3),
-      )
-    }
-    /// Issues a Linux syscall with 4 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "syscall",
-        "={rax},0,{rdi},{rsi},{rdx},{r10}",
-        "rcx,r11,flags",
-        "readwrite",
-        true,
-        false, (number, a1, a2, a3, a4),
-      )
-    }
-    /// Issues a Linux syscall with 5 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall5(number: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "syscall",
-        "={rax},0,{rdi},{rsi},{rdx},{r10},{r8}",
-        "rcx,r11,flags",
-        "readwrite",
-        true,
-        false, (number, a1, a2, a3, a4, a5),
-      )
-    }
-    /// Issues a Linux syscall with 6 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall6(
-      number: usize,
-      a1: usize,
-      a2: usize,
-      a3: usize,
-      a4: usize,
-      a5: usize,
-      a6: usize,
-    ) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "syscall",
-        "={rax},0,{rdi},{rsi},{rdx},{r10},{r8},{r9}",
-        "rcx,r11,flags",
-        "readwrite",
-        true,
-        false, (number, a1, a2, a3, a4, a5, a6),
-      )
-    }
-    /// Issues a terminal Linux syscall with one argument.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must select a syscall that cannot return. No structured cleanup follows this call.
-    pub unsafe fn syscallNoReturn(number: usize, argument: usize) -> () {
-      return unsafe Intrinsic.assembly<()>(
-        "syscall\nud2",
-        "{rax},{rdi}",
-        "rcx,r11,flags",
-        "readwrite",
-        true,
-        true, (number, argument),
-      )
-    }
-    /// Forms a nullable byte pointer from a kernel-provided address without reading memory.
-    ///
-    /// # Gotchas
-    ///
-    /// The address grants no ownership or readable range. Prove validity before every access.
-    pub unsafe fn pointer(address: usize) -> ?[*]mut u8 {
-      return unsafe Intrinsic.assembly<?[*]mut u8>(
-        "movq $1, $0",
-        "={rax},{rdi}",
-        "",
-        "none",
-        false,
-        false, (address,),
-      )
+    impl RawLinux {
+      /// Issues a Linux syscall with 0 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall0(number: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "syscall",
+          "={rax},0",
+          "rcx,r11,flags",
+          "readwrite",
+          true,
+          false, (number,),
+        )
+      }
+      /// Issues a Linux syscall with 1 argument and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall1(number: usize, a1: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "syscall",
+          "={rax},0,{rdi}",
+          "rcx,r11,flags",
+          "readwrite",
+          true,
+          false, (number, a1),
+        )
+      }
+      /// Issues a Linux syscall with 2 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall2(number: usize, a1: usize, a2: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "syscall",
+          "={rax},0,{rdi},{rsi}",
+          "rcx,r11,flags",
+          "readwrite",
+          true,
+          false, (number, a1, a2),
+        )
+      }
+      /// Issues a Linux syscall with 3 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall3(number: usize, a1: usize, a2: usize, a3: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "syscall",
+          "={rax},0,{rdi},{rsi},{rdx}",
+          "rcx,r11,flags",
+          "readwrite",
+          true,
+          false, (number, a1, a2, a3),
+        )
+      }
+      /// Issues a Linux syscall with 4 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "syscall",
+          "={rax},0,{rdi},{rsi},{rdx},{r10}",
+          "rcx,r11,flags",
+          "readwrite",
+          true,
+          false, (number, a1, a2, a3, a4),
+        )
+      }
+      /// Issues a Linux syscall with 5 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall5(number: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "syscall",
+          "={rax},0,{rdi},{rsi},{rdx},{r10},{r8}",
+          "rcx,r11,flags",
+          "readwrite",
+          true,
+          false, (number, a1, a2, a3, a4, a5),
+        )
+      }
+      /// Issues a Linux syscall with 6 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall6(
+        number: usize,
+        a1: usize,
+        a2: usize,
+        a3: usize,
+        a4: usize,
+        a5: usize,
+        a6: usize,
+      ) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "syscall",
+          "={rax},0,{rdi},{rsi},{rdx},{r10},{r8},{r9}",
+          "rcx,r11,flags",
+          "readwrite",
+          true,
+          false, (number, a1, a2, a3, a4, a5, a6),
+        )
+      }
+      /// Issues a terminal Linux syscall with one argument.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must select a syscall that cannot return. No structured cleanup follows this call.
+      pub unsafe fn syscallNoReturn(number: usize, argument: usize) -> () {
+        return unsafe Intrinsic.assembly<()>(
+          "syscall\nud2",
+          "{rax},{rdi}",
+          "rcx,r11,flags",
+          "readwrite",
+          true,
+          true, (number, argument),
+        )
+      }
+      /// Forms a nullable byte pointer from a kernel-provided address without reading memory.
+      ///
+      /// # Gotchas
+      ///
+      /// The address grants no ownership or readable range. Prove validity before every access.
+      pub unsafe fn pointer(address: usize) -> ?[*]mut u8 {
+        return unsafe Intrinsic.assembly<?[*]mut u8>(
+          "movq $1, $0",
+          "={rax},{rdi}",
+          "",
+          "none",
+          false,
+          false, (address,),
+        )
+      }
     }
     /// The selected Linux read syscall number.
     pub const READ: usize = 0
@@ -175,155 +179,157 @@ static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText(
     /// The selected Linux exit_group syscall number.
     pub const EXIT_GROUP: usize = 231
   } else {
-    /// Issues a Linux syscall with 0 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall0(number: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "svc #0",
-        "={x0},{x8}",
-        "",
-        "readwrite",
-        true,
-        false, (number,),
-      )
-    }
-    /// Issues a Linux syscall with 1 argument and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall1(number: usize, a1: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "svc #0",
-        "={x0},{x8},0",
-        "",
-        "readwrite",
-        true,
-        false, (number, a1),
-      )
-    }
-    /// Issues a Linux syscall with 2 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall2(number: usize, a1: usize, a2: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "svc #0",
-        "={x0},{x8},0,{x1}",
-        "",
-        "readwrite",
-        true,
-        false, (number, a1, a2),
-      )
-    }
-    /// Issues a Linux syscall with 3 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall3(number: usize, a1: usize, a2: usize, a3: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "svc #0",
-        "={x0},{x8},0,{x1},{x2}",
-        "",
-        "readwrite",
-        true,
-        false, (number, a1, a2, a3),
-      )
-    }
-    /// Issues a Linux syscall with 4 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "svc #0",
-        "={x0},{x8},0,{x1},{x2},{x3}",
-        "",
-        "readwrite",
-        true,
-        false, (number, a1, a2, a3, a4),
-      )
-    }
-    /// Issues a Linux syscall with 5 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall5(number: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "svc #0",
-        "={x0},{x8},0,{x1},{x2},{x3},{x4}",
-        "",
-        "readwrite",
-        true,
-        false, (number, a1, a2, a3, a4, a5),
-      )
-    }
-    /// Issues a Linux syscall with 6 arguments and returns its raw result.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must prove the syscall's memory, lifetime and resource obligations.
-    /// Kernel errors remain encoded in the result; no libc error state is read.
-    pub unsafe fn syscall6(
-      number: usize,
-      a1: usize,
-      a2: usize,
-      a3: usize,
-      a4: usize,
-      a5: usize,
-      a6: usize,
-    ) -> usize {
-      return unsafe Intrinsic.assembly<usize>(
-        "svc #0",
-        "={x0},{x8},0,{x1},{x2},{x3},{x4},{x5}",
-        "",
-        "readwrite",
-        true,
-        false, (number, a1, a2, a3, a4, a5, a6),
-      )
-    }
-    /// Issues a terminal Linux syscall with one argument.
-    ///
-    /// # Gotchas
-    ///
-    /// The caller must select a syscall that cannot return. No structured cleanup follows this call.
-    pub unsafe fn syscallNoReturn(number: usize, argument: usize) -> () {
-      return unsafe Intrinsic.assembly<()>(
-        "svc #0\nbrk #0",
-        "{x8},{x0}",
-        "",
-        "readwrite",
-        true,
-        true, (number, argument),
-      )
-    }
-    /// Forms a nullable byte pointer from a kernel-provided address without reading memory.
-    ///
-    /// # Gotchas
-    ///
-    /// The address grants no ownership or readable range. Prove validity before every access.
-    pub unsafe fn pointer(address: usize) -> ?[*]mut u8 {
-      return unsafe Intrinsic.assembly<?[*]mut u8>(
-        "mov $0, $1",
-        "={x0},{x1}",
-        "",
-        "none",
-        false,
-        false, (address,),
-      )
+    impl RawLinux {
+      /// Issues a Linux syscall with 0 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall0(number: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "svc #0",
+          "={x0},{x8}",
+          "",
+          "readwrite",
+          true,
+          false, (number,),
+        )
+      }
+      /// Issues a Linux syscall with 1 argument and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall1(number: usize, a1: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "svc #0",
+          "={x0},{x8},0",
+          "",
+          "readwrite",
+          true,
+          false, (number, a1),
+        )
+      }
+      /// Issues a Linux syscall with 2 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall2(number: usize, a1: usize, a2: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "svc #0",
+          "={x0},{x8},0,{x1}",
+          "",
+          "readwrite",
+          true,
+          false, (number, a1, a2),
+        )
+      }
+      /// Issues a Linux syscall with 3 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall3(number: usize, a1: usize, a2: usize, a3: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "svc #0",
+          "={x0},{x8},0,{x1},{x2}",
+          "",
+          "readwrite",
+          true,
+          false, (number, a1, a2, a3),
+        )
+      }
+      /// Issues a Linux syscall with 4 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "svc #0",
+          "={x0},{x8},0,{x1},{x2},{x3}",
+          "",
+          "readwrite",
+          true,
+          false, (number, a1, a2, a3, a4),
+        )
+      }
+      /// Issues a Linux syscall with 5 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall5(number: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "svc #0",
+          "={x0},{x8},0,{x1},{x2},{x3},{x4}",
+          "",
+          "readwrite",
+          true,
+          false, (number, a1, a2, a3, a4, a5),
+        )
+      }
+      /// Issues a Linux syscall with 6 arguments and returns its raw result.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must prove the syscall's memory, lifetime and resource obligations.
+      /// Kernel errors remain encoded in the result; no libc error state is read.
+      pub unsafe fn syscall6(
+        number: usize,
+        a1: usize,
+        a2: usize,
+        a3: usize,
+        a4: usize,
+        a5: usize,
+        a6: usize,
+      ) -> usize {
+        return unsafe Intrinsic.assembly<usize>(
+          "svc #0",
+          "={x0},{x8},0,{x1},{x2},{x3},{x4},{x5}",
+          "",
+          "readwrite",
+          true,
+          false, (number, a1, a2, a3, a4, a5, a6),
+        )
+      }
+      /// Issues a terminal Linux syscall with one argument.
+      ///
+      /// # Gotchas
+      ///
+      /// The caller must select a syscall that cannot return. No structured cleanup follows this call.
+      pub unsafe fn syscallNoReturn(number: usize, argument: usize) -> () {
+        return unsafe Intrinsic.assembly<()>(
+          "svc #0\nbrk #0",
+          "{x8},{x0}",
+          "",
+          "readwrite",
+          true,
+          true, (number, argument),
+        )
+      }
+      /// Forms a nullable byte pointer from a kernel-provided address without reading memory.
+      ///
+      /// # Gotchas
+      ///
+      /// The address grants no ownership or readable range. Prove validity before every access.
+      pub unsafe fn pointer(address: usize) -> ?[*]mut u8 {
+        return unsafe Intrinsic.assembly<?[*]mut u8>(
+          "mov $0, $1",
+          "={x0},{x1}",
+          "",
+          "none",
+          false,
+          false, (address,),
+        )
+      }
     }
     /// The selected Linux read syscall number.
     pub const READ: usize = 63
@@ -336,32 +342,34 @@ static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText(
     /// The selected Linux exit_group syscall number.
     pub const EXIT_GROUP: usize = 94
   }
-  /// Returns zero for success or the positive kernel error number.
-  pub fn error(result: usize) -> usize {
-    if result < 18446744073709547521 {
-      return 0
+  impl RawLinux {
+    /// Returns zero for success or the positive kernel error number.
+    pub fn error(result: usize) -> usize {
+      if result < 18446744073709547521 {
+        return 0
+      }
+      return usize.MAX - result + 1
     }
-    return usize.MAX - result + 1
-  }
-  /// Reads one initialized prefix from a borrowed Linux descriptor.
-  ///
-  /// # Details
-  ///
-  /// Returns the raw kernel result: a byte count, zero at EOF, or an encoded error. Interrupted reads
-  /// are returned to the caller. Bytes beyond a successful prefix retain their previous values.
-  pub fn read(descriptor: usize, buffer: &mut [u8]) -> usize {
-    let length = buffer.length
-    let address = Pointer.addressMany<u8>(Pointer.fromMutSlice<u8>(move buffer))
-    return unsafe syscall3(READ, descriptor, address, length)
-  }
-  /// Writes one prefix to a borrowed Linux descriptor and returns the raw kernel result.
-  ///
-  /// # Details
-  ///
-  /// A positive count can be shorter than the input. Interrupted writes and encoded errors remain
-  /// visible to the caller. The operation does not close the descriptor or retain the input.
-  pub fn write(descriptor: usize, buffer: &[u8]) -> usize {
-    let address = Pointer.addressMany<u8>(Pointer.fromSlice<u8>(buffer))
-    return unsafe syscall3(WRITE, descriptor, address, buffer.length)
+    /// Reads one initialized prefix from a borrowed Linux descriptor.
+    ///
+    /// # Details
+    ///
+    /// Returns the raw kernel result: a byte count, zero at EOF, or an encoded error. Interrupted reads
+    /// are returned to the caller. Bytes beyond a successful prefix retain their previous values.
+    pub fn read(descriptor: usize, buffer: &mut [u8]) -> usize {
+      let length = buffer.length
+      let address = Pointer.addressMany<u8>(Pointer.fromMutSlice<u8>(move buffer))
+      return unsafe RawLinux.syscall3(READ, descriptor, address, length)
+    }
+    /// Writes one prefix to a borrowed Linux descriptor and returns the raw kernel result.
+    ///
+    /// # Details
+    ///
+    /// A positive count can be shorter than the input. Interrupted writes and encoded errors remain
+    /// visible to the caller. The operation does not close the descriptor or retain the input.
+    pub fn write(descriptor: usize, buffer: &[u8]) -> usize {
+      let address = Pointer.addressMany<u8>(Pointer.fromSlice<u8>(buffer))
+      return unsafe RawLinux.syscall3(WRITE, descriptor, address, buffer.length)
+    }
   }
 }

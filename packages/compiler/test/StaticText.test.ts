@@ -949,7 +949,7 @@ it.effect('rolls back every earlier static iteration when a later element fails'
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain(
       'static/iteration-rollback',
-      encoder.encode(`import silk.static_sequence as StaticSequence
+      encoder.encode(`import silk.static_sequence { StaticSequence }
 
 fn rejected() -> i32 {
   let mut count = 0
@@ -1030,7 +1030,7 @@ it.effect('derives ordered visible descriptors for every concrete aggregate kind
     const sourceId = 'static/reflection-descriptors'
     const snapshot = yield* AnalysisFixture.retainingMain(
       sourceId,
-      encoder.encode(`import silk.reflect as Reflect
+      encoder.encode(`import silk.reflect { Reflect, labeledFieldKind }
 
 struct Box<T> { pub value: T hidden: i32 }
 tuple Point(u32, u64)
@@ -1038,7 +1038,7 @@ tuple Point(u32, u64)
 fn inspect<Owner>(value: Owner) -> i32 {
   let static ownerKind = Reflect.typeKind(Reflect.typeOf<Owner>())
   static for field in Reflect.fields<Owner>() {
-    static if Reflect.fieldKind(field) == Reflect.labeledFieldKind {
+    static if Reflect.fieldKind(field) == labeledFieldKind {
       let static label = Reflect.fieldLabel(field)
     } else {
       let static ordinal = Reflect.fieldOrdinal(field)
@@ -1117,7 +1117,7 @@ pub fn main() -> i32 {
           declarationOrdinal: 0,
           member: 'value',
           valueType: "string<'static>",
-          authorization: 'silk/reflect.fields',
+          authorization: 'silk/reflect.Reflect.fields',
           provenance: sourceId,
         },
       ],
@@ -1128,7 +1128,7 @@ pub fn main() -> i32 {
         declarationOrdinal: 0,
         member: '#0',
         valueType: 'u32',
-        authorization: 'silk/reflect.fields',
+        authorization: 'silk/reflect.Reflect.fields',
         provenance: sourceId,
       },
       {
@@ -1136,7 +1136,7 @@ pub fn main() -> i32 {
         declarationOrdinal: 1,
         member: '#1',
         valueType: 'u64',
-        authorization: 'silk/reflect.fields',
+        authorization: 'silk/reflect.Reflect.fields',
         provenance: sourceId,
       },
     ])
@@ -1202,7 +1202,7 @@ pub fn main() -> i32 {
 it.effect('rejects phase-only descriptor types from runtime signatures, bindings, and calls', () =>
   Effect.gen(function* () {
     const sourceId = 'static/phase-only-types'
-    const program = `import silk.reflect as Reflect
+    const program = `import silk.reflect { Reflect, labeledFieldKind }
 
 tuple Pair(i32)
 
@@ -1499,9 +1499,9 @@ pub fn main() -> i32 { return recurse(42) }`),
 
 it.effect('preserves static text provenance through nested source wrappers', () =>
   Effect.gen(function* () {
-    const nestedTextFailure = `import silk.static_text { byteAt }
+    const nestedTextFailure = `import silk.static_text { StaticText }
 
-static fn inspect() -> bool { return byteAt("é", 3) == 0 }
+static fn inspect() -> bool { return StaticText.byteAt("é", 3) == 0 }
 
 pub fn main() -> i32 {
   static if inspect() { return 42 } else { return 0 }
@@ -1538,13 +1538,13 @@ it.effect('preserves static text provenance through returned text and source com
       {
         sourceId: 'static/provenance-identity',
         literal: '"é"',
-        source: `import silk.static_text { byteAt }
+        source: `import silk.static_text { StaticText }
 
 static fn identity(value: string) -> string { return value }
 
 static fn inspect() -> bool {
   let result = identity("é")
-  return byteAt(result, 3) == 0
+  return StaticText.byteAt(result, 3) == 0
 }
 
 pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
@@ -1552,11 +1552,11 @@ pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
       {
         sourceId: 'static/provenance-slice',
         literal: '"é"',
-        source: `import silk.static_text { byteAt, slice }
+        source: `import silk.static_text { StaticText }
 
 static fn inspect() -> bool {
-  let result = slice("é", 0, 2)
-  return byteAt(result, 3) == 0
+  let result = StaticText.slice("é", 0, 2)
+  return StaticText.byteAt(result, 3) == 0
 }
 
 pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
@@ -1564,13 +1564,13 @@ pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
       {
         sourceId: 'static/provenance-ambiguous',
         literal: '"é"',
-        source: `import silk.static_text { byteAt }
+        source: `import silk.static_text { StaticText }
 
 static fn second<'a, 'b>(first: string<'a>, value: string<'b>) -> string<'b> { return value }
 
 static fn inspect() -> bool {
   let result = second("éx", "é")
-  return byteAt(result, 3) == 0
+  return StaticText.byteAt(result, 3) == 0
 }
 
 pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
@@ -1578,15 +1578,15 @@ pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
       {
         sourceId: 'static/provenance-cached-ascii',
         literal: '"abc"',
-        source: `import silk.static_text { byteAt }
+        source: `import silk.static_text { StaticText }
 
 static fn second<'a, 'b>(first: string<'a>, value: string<'b>) -> string<'b> { return value }
 
 static fn inspect() -> bool {
   let a = second("abcx", "abc")
-  let ok = byteAt(a, 0) == 97
+  let ok = StaticText.byteAt(a, 0) == 97
   let b = second("abcx", "abc")
-  return ok && byteAt(b, 9) == 0
+  return ok && StaticText.byteAt(b, 9) == 0
 }
 
 pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
@@ -1621,10 +1621,10 @@ pub fn main() -> i32 { static if inspect() { return 42 } else { return 0 } }`,
 it.effect('anchors compileError to a nested static-text slice of a non-literal parameter', () =>
   Effect.gen(function* () {
     const sourceId = 'static/compile-error-slice'
-    const program = `import silk.static_text { slice }
+    const program = `import silk.static_text { StaticText }
 
-static fn inner(value: string) -> string { return slice(value, 1, 4) }
-static fn outer(value: string) -> string { return slice(inner(value), 0, 2) }
+static fn inner(value: string) -> string { return StaticText.slice(value, 1, 4) }
+static fn outer(value: string) -> string { return StaticText.slice(inner(value), 0, 2) }
 
 fn reject(static template: string) -> i32 { compileError(outer(template)) }
 
@@ -1649,9 +1649,9 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const sourceId = 'static/compile-error-shared-specialization'
-      const program = `import silk.static_text { slice }
+      const program = `import silk.static_text { StaticText }
 
-fn reject(static template: string) -> i32 { compileError(slice(template, 1, 3)) }
+fn reject(static template: string) -> i32 { compileError(StaticText.slice(template, 1, 3)) }
 
 pub fn main() -> i32 {
   let first = reject("aéz")
@@ -2312,8 +2312,8 @@ pub fn main() -> i32 { static if enabled { return count } else { return 0 } }`
 
 it.effect('resolves imported defaults and validates overrides using final target facts', () =>
   Effect.gen(function* () {
-    const root = `import config.helper as Defaults
-pub param count: u32 = Defaults.choose() where Defaults.validate(count)
+    const root = `import config.helper
+pub param count: u32 = helper.choose() where helper.validate(count)
 pub fn main() -> i32 { return 0 }`
     const helper = `pub param word: u32 = Intrinsic.targetPointerBits()
 pub static fn choose() -> u32 { return word }

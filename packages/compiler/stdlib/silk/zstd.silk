@@ -20,9 +20,9 @@ import silk.raw_buffer {RawBuffer}
 import silk.result {Result}
 import silk.support.zstd_block {BlockState, BlockReason, BlockError}
 import silk.support.zstd_checksum {Xxh64}
-import silk.u8 as u8
-import silk.u64 as u64
-import silk.usize as usize
+import silk.u8
+import silk.u64
+import silk.usize
 
 const BLOCK_CAPACITY: usize = 131072
 

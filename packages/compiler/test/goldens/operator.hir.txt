@@ -1,14 +1,14 @@
 hir-module golden/operator
 fn golden/operator.main () -> i32 entry=r0 regions=r0
-  return r0 [52, 76)
-    callable-apply access=shared evaluation=LeftThenCallable realization=DirectErasedSection substitution=none ends=none held=none : i32 [52, 76)
+  return r0 [45, 69)
+    callable-apply access=shared evaluation=LeftThenCallable realization=DirectErasedSection substitution=none ends=none held=none : i32 [45, 69)
       argument #0
-        builtin i32.Add : i32 [52, 62)
-          literal 2 : i32 [52, 54)
-          builtin i32.Multiply : i32 [56, 62)
-            literal 3 : i32 [56, 58)
-            literal 4 : i32 [60, 62)
+        builtin i32.Add : i32 [45, 55)
+          literal 2 : i32 [45, 47)
+          builtin i32.Multiply : i32 [49, 55)
+            literal 3 : i32 [49, 51)
+            literal 4 : i32 [53, 55)
       callee
-        callable-section site=callable:declaration:golden/operator:main:site:0 mode=shared remaining=p0 target=silk/i32.add : fn<'static>(i32) -> i32 [65, 76)
+        callable-section site=callable:declaration:golden/operator:main:site:0 mode=shared remaining=p0 target=silk/i32.add : fn<'static>(i32) -> i32 [58, 69)
           capture #0->p1 copy
-            literal 1 : i32 [74, 75)
+            literal 1 : i32 [67, 68)

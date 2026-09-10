@@ -33,7 +33,7 @@ behavior even after a non-empty read has observed permanent end-of-input.
 ```silk
 import silk.effect { Effect }
 
-import silk.standard_input { StandardInput as Input, ReadOutcome, StreamReadError }
+import silk.standard_input { StandardInput, ReadOutcome, StreamReadError }
 
 import silk.u8
 
@@ -45,16 +45,16 @@ struct OneByte {
 
 effect fn read(self: &mut OneByte, buffer: &mut [u8]) -> ReadOutcome
 ! StreamReadError {
-  if buffer.length == 0 { return Input.filled(usize.ZERO) }
+  if buffer.length == 0 { return StandardInput.filled(usize.ZERO) }
   if self.complete {
-    return Input.endOfInput()
+    return StandardInput.endOfInput()
   }
   buffer[usize.ZERO] = u8.toU8(42)
   self.complete = true
-  return Input.filled(usize.ONE)
+  return StandardInput.filled(usize.ONE)
 }
 
-impl Input for OneByte {
+impl StandardInput for OneByte {
   read: OneByte.read
 }
 
@@ -62,14 +62,14 @@ effect fn program() -> i32
 ! StreamReadError {
   let mut provider = OneByte {complete: false}
   let mut buffer = [u8.toU8(0)]
-  let first = run Input.receive(&mut buffer)
-    |> Effect.provideMut<Input>(&mut provider)
-  if Input.count(&first) != usize.ONE {
+  let first = run StandardInput.receive(&mut buffer)
+    |> Effect.provideMut<StandardInput>(&mut provider)
+  if StandardInput.count(&first) != usize.ONE {
     return 1
   }
-  let second = run Input.receive(&mut buffer)
-    |> Effect.provideMut<Input>(&mut provider)
-  if Input.isEndOfInput(&second) == false {
+  let second = run StandardInput.receive(&mut buffer)
+    |> Effect.provideMut<StandardInput>(&mut provider)
+  if StandardInput.isEndOfInput(&second) == false {
     return 2
   }
   return u8.toI32(buffer[usize.ZERO])

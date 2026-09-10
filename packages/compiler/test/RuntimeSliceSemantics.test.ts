@@ -558,7 +558,7 @@ it.effect('discovers one generic slice instance across distinct source lengths',
   Effect.gen(function* () {
     const self = yield* AnalysisFixture.retainingMain(
       'slices/Instances',
-      ascii(`import silk.usize as usize
+      ascii(`import silk.usize
 fn scan<T>(values: &[T]) -> i32 { return usize.toI32(values.length) }
 fn short() -> i32 { let values = [1, 2, 3] return scan(&values) }
 fn long() -> i32 { let values = [1, 2, 3, 4, 5, 6] return scan(&values) }

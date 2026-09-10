@@ -175,7 +175,7 @@ call it duplicates SHALL produce identical lowered MIR.
 
 #### Scenario: Elaborate a namespace-qualified call
 
-- **WHEN** root imports `library.Answer as Answers` and calls `Answers.answer()`
+- **WHEN** root imports `library.Answer` and calls `Answer.answer()`
 - **THEN** HIR contains the same canonical call target as the selective form while retaining the qualified call's source span
 
 #### Scenario: Pass a borrow to a nominal actor's operation

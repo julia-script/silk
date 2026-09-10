@@ -64,7 +64,7 @@ afterAll(() => rmSync(destinationRoot, { recursive: true, force: true }))
  */
 const prelude = `import silk.allocator { Allocator }
 import silk.allocator { OutOfMemoryError }
-import silk.usize as usize
+import silk.usize
 import silk.box { Box }
 
 pub struct End {}

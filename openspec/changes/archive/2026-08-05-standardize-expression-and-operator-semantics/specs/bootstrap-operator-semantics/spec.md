@@ -96,7 +96,7 @@ operation.
 
 #### Scenario: Pipe into an imported public operation
 
-- **WHEN** a module imports `math.Transform as Transform` and returns `value |> Transform.apply(extra)`
+- **WHEN** a module imports `math.Transform` and returns `value |> Transform.apply(extra)`
 - **THEN** the pipeline resolves through the existing namespace and visibility rules to the canonical imported declaration
 
 ### Requirement: Operator-authored programs reuse the backend-neutral pipeline

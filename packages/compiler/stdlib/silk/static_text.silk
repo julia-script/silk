@@ -5,22 +5,29 @@
 //! These operations inspect UTF-8 bytes without exposing compiler storage. They are available only
 //! to static functions and produce finite static values.
 
-/// Returns the UTF-8 byte length of `value` during static evaluation.
-pub static fn byteLength(value: string) -> usize {
-  return Intrinsic.staticTextByteLength(value)
-}
+/// The scope for StaticText operations.
+///
+/// # Details
+///
+/// This owner carries no data. Select it with `import silk.static_text { StaticText }`
+/// to access its inherent operations.
+pub struct StaticText {}
 
-/// Returns one UTF-8 byte at `index`, or reports a static phase violation when out of bounds.
-pub static fn byteAt(value: string, index: usize) -> u8 {
-  return Intrinsic.staticTextByteAt(value, index)
-}
-
-/// Concatenates two static texts and retains `left` as the source anchor for diagnostics.
-pub static fn concat(left: string, right: string) -> string<'static> {
-  return Intrinsic.staticTextConcat(left, right)
-}
-
-/// Returns the UTF-8 byte range `start..end` when both boundaries are scalar boundaries.
-pub static fn slice(value: string, start: usize, end: usize) -> string<'static> {
-  return Intrinsic.staticTextSlice(value, start, end)
+impl StaticText {
+  /// Returns the UTF-8 byte length of `value` during static evaluation.
+  pub static fn byteLength(value: string) -> usize {
+    return Intrinsic.staticTextByteLength(value)
+  }
+  /// Returns one UTF-8 byte at `index`, or reports a static phase violation when out of bounds.
+  pub static fn byteAt(value: string, index: usize) -> u8 {
+    return Intrinsic.staticTextByteAt(value, index)
+  }
+  /// Concatenates two static texts and retains `left` as the source anchor for diagnostics.
+  pub static fn concat(left: string, right: string) -> string<'static> {
+    return Intrinsic.staticTextConcat(left, right)
+  }
+  /// Returns the UTF-8 byte range `start..end` when both boundaries are scalar boundaries.
+  pub static fn slice(value: string, start: usize, end: usize) -> string<'static> {
+    return Intrinsic.staticTextSlice(value, start, end)
+  }
 }

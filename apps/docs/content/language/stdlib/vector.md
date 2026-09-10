@@ -109,7 +109,7 @@ pub fn main() -> i32 {
 
 Import as `Vector` with `import silk.vector { Vector }`.
 
-Public declarations: 4.
+Public declarations: 3.
 
 <a id="declaration-73696c6b2f766563746f723a3a456d707479"></a>
 
@@ -386,6 +386,20 @@ This function consumes `target` and does not change the vector.
 
 The vector must already be ordered by the same `Order` witness.
 
+<a id="declaration-73696c6b2f766563746f723a3a566563746f722e617070656e644279746573"></a>
+
+### Method `Vector.appendBytes`
+
+```silk
+pub effect<'env> fn appendBytes<'life1: 'env, 'life2: 'env, 'env>(self: &'life1 mut silk/vector.Vector<u8>, values: &'life2 [u8]) -> () ! OutOfMemoryError ? &mut Allocator
+```
+
+Appends every byte of one borrowed sequence in source order with one bulk copy.
+
+#### Details
+
+If growth fails, the vector keeps its prior contents, length, and capacity.
+
 <a id="declaration-73696c6b2f766563746f723a3a696d706c656d656e746174696f6e3a30"></a>
 
 ## Implementation `Drop for silk/vector.Vector<T>`
@@ -393,17 +407,3 @@ The vector must already be ordered by the same `Order` witness.
 ```silk
 impl Drop for silk/vector.Vector<T>
 ```
-
-<a id="declaration-73696c6b2f766563746f723a3a617070656e644279746573"></a>
-
-## `appendBytes`
-
-```silk
-pub effect<'env> fn appendBytes<'life0: 'env, 'life1: 'env, 'env>(self: &'life0 mut silk/vector.Vector<u8>, values: &'life1 [u8]) -> () ! OutOfMemoryError ? &mut Allocator
-```
-
-Appends every byte of one borrowed sequence in source order with one bulk copy.
-
-### Details
-
-If growth fails, the vector keeps its prior contents, length, and capacity.

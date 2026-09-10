@@ -19,9 +19,9 @@
 
 import lexer.Token {Token, TokenKind}
 import parser.Element {Element}
-import parser.Declaration as Declarations
+import parser.Declaration
 import parser.ParseState {ElementsResult, NodeResult}
-import parser.ParseState as Parsing
+import parser.ParseState
 import parser.SyntaxTree {SyntaxTree}
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
@@ -55,16 +55,16 @@ import silk.vector {Vector}
 pub effect fn parse(source: Bytes, tokens: Vector<Token>) -> SyntaxTree
 ! OutOfMemoryError
 ? &mut Allocator {
-  let mut state = Parsing.make(move source, move tokens)
+  let mut state = ParseState.make(move source, move tokens)
   let mut elements = Vector.make<Element>()
-  while Parsing.currentKind(&state) != TokenKind.EndOfFile {
+  while ParseState.currentKind(&state) != TokenKind.EndOfFile {
     let before = state.index
-    let result = run Declarations.parse(move state)
+    let result = run Declaration.parse(move state)
     let NodeResult {state: afterDeclaration, node} = move result
     state = move afterDeclaration
     run Vector.append<Element>(&mut elements, Element.Node {id: node})
     if state.index == before {
-      let advanced = run Parsing.unexpected(
+      let advanced = run ParseState.unexpected(
         ElementsResult {state: move state, elements: move elements},
       )
       let ElementsResult {state: nextState, elements: nextElements} = move advanced
@@ -72,12 +72,12 @@ pub effect fn parse(source: Bytes, tokens: Vector<Token>) -> SyntaxTree
       elements = move nextElements
     }
   }
-  let endOfFile = run Parsing.expect(
+  let endOfFile = run ParseState.expect(
     ElementsResult {state: move state, elements: move elements},
     TokenKind.EndOfFile,
   )
   let sourceFile = run move endOfFile
-    |> Parsing.finishSourceFile
+    |> ParseState.finishSourceFile
   return move sourceFile
-    |> Parsing.intoSyntaxTree
+    |> ParseState.intoSyntaxTree
 }

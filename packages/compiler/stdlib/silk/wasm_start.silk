@@ -18,7 +18,7 @@
 //! in application source; the complete application call must satisfy Intrinsic.NonParking.
 
 static if Intrinsic.targetArchitecture() == "wasm32" {
-  import Intrinsic.application as app
+  import Intrinsic.application
   import silk.allocator {Allocator, OutOfMemoryError}
   import silk.effect {Effect}
   import silk.execution {Execution}
@@ -55,8 +55,8 @@ static if Intrinsic.targetArchitecture() == "wasm32" {
   fn adapt<T, P: EntryResult<T>>(value: T, provider: P) -> i32 {
     return EntryResult<T>.code(move value)
   }
-  fn application() -> i32 {
-    let value = app.main()
+  fn invokeApplication() -> i32 {
+    let value = application.main()
     let provider = select(&value)
     return adapt(move value, move provider)
   }
@@ -80,7 +80,7 @@ static if Intrinsic.targetArchitecture() == "wasm32" {
     let mut allocator = Allocator.systemAllocatorProvider()
     let execution = run Execution.make(
       effect {
-        return invoke(application)
+        return invoke(invokeApplication)
       },
       (),
       ready,

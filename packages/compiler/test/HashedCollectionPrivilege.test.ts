@@ -30,7 +30,7 @@ const usingAMap = `import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.i32 as i32
+import silk.i32
 import silk.hash { Hash }
 import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap }

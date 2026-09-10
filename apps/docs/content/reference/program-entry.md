@@ -18,8 +18,8 @@ The installed executable defaults call public `app.main`. A custom runtime may c
 visible function, including one with parameters. The name `main` has no compiler privilege.
 
 ```silk
-import Intrinsic.application as app
-export "C" fn enter() -> i32 as "main" { return app.answer(42) }
+import Intrinsic.application
+export "C" fn enter() -> i32 as "main" { return application.answer(42) }
 ```
 
 **Diagnostics:** Missing or private application members, invalid arguments, and unsupported results

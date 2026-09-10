@@ -104,8 +104,8 @@ pub fn selected() -> typeof(identity<i32>) { return 0 }`,
 it.effect('resolves a specialized callable through a module namespace', () =>
   Effect.gen(function* () {
     const self = yield* indexWithImports('app/Main', {
-      'app/Main': `import library.Callables as Lib
-pub fn selected() -> typeof(Lib.identity<i32>) { return 0 }`,
+      'app/Main': `import library.Callables
+pub fn selected() -> typeof(Callables.identity<i32>) { return 0 }`,
       'library/Callables': 'pub fn identity<T>(value: T) -> T { return value }',
     })
     const found = declaration(self, 'app/Main', 'selected')
@@ -137,7 +137,7 @@ pub fn selected() -> typeof(id<i32>) { return 0 }`,
   }),
 )
 
-const identitySource = `import silk.i32 as i32
+const identitySource = `import silk.i32
 struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
 struct Deferred<F: Effect<i32>, G: Effect<i32>> { first: F second: G }
 pub fn main() -> i32 {
@@ -145,7 +145,7 @@ pub fn main() -> i32 {
   let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
   return 0
 }`
-const shiftedIdentitySource = `import silk.i32 as i32
+const shiftedIdentitySource = `import silk.i32
 // Moving source trivia must not rename executable sites.
 
 struct Mappers<F: fn(i32) -> i32, G: fn(i32) -> i32> { first: F second: G }
@@ -443,8 +443,8 @@ pub fn selected() -> typeof(duplicated) { return 0 }`,
 it.effect('rejects an inaccessible exact item from another module', () =>
   Effect.gen(function* () {
     const self = yield* indexWithImports('app/Main', {
-      'app/Main': `import library.Callables as Lib
-pub fn selected() -> typeof(Lib.hidden) { return 0 }`,
+      'app/Main': `import library.Callables
+pub fn selected() -> typeof(Callables.hidden) { return 0 }`,
       'library/Callables': 'fn hidden(value: i32) -> i32 { return value }',
     })
     const diagnostic = self.diagnostics.find((candidate) => candidate.code === 'SEM0108')

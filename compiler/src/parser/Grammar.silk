@@ -4,15 +4,15 @@
 //! starts a declaration only when its next token names a declaration; a public field is different.
 import lexer.Token {TokenKind}
 import parser.ParseState {State}
-import parser.ParseState as P
+import parser.ParseState
 
 /// Reports whether the current position starts a declaration rather than a public field.
 pub fn declarationStart(state: &State) -> bool {
   let mut offset: usize = 0
-  if P.currentKind(state) == TokenKind.PubKeyword {
+  if ParseState.currentKind(state) == TokenKind.PubKeyword {
     offset = 1
   }
-  return match P.peek(state, offset) {
+  return match ParseState.peek(state, offset) {
     TokenKind.ImportKeyword => true
     TokenKind.ConstKeyword => true
     TokenKind.ParamKeyword => true
@@ -31,7 +31,7 @@ pub fn declarationStart(state: &State) -> bool {
     TokenKind.UnsafeKeyword => true
     TokenKind.FnKeyword => true
     TokenKind.EffectKeyword => true
-    _ => P.word(state, "module")
+    _ => ParseState.word(state, "module")
   }
 }
 
@@ -91,18 +91,18 @@ pub fn typeStart(kind: TokenKind) -> bool {
 ///
 /// An anonymous callable is an expression, whereas a named callable starts a new declaration.
 pub fn blockEnd(state: &State) -> bool {
-  let kind = P.currentKind(state)
+  let kind = ParseState.currentKind(state)
   if kind == TokenKind.RightBrace || kind == TokenKind.EndOfFile || kind == TokenKind.ElseKeyword {
     return true
   }
   if kind == TokenKind.FnKeyword {
-    return P.peek(state, 1) == TokenKind.Identifier
+    return ParseState.peek(state, 1) == TokenKind.Identifier
   }
   if kind == TokenKind.EffectKeyword {
-    return P.peek(state, 1) == TokenKind.FnKeyword && P.peek(state, 2) == TokenKind.Identifier
+    return ParseState.peek(state, 1) == TokenKind.FnKeyword && ParseState.peek(state, 2) == TokenKind.Identifier
   }
   if kind == TokenKind.StaticKeyword {
-    return P.peek(state, 1) == TokenKind.FnKeyword
+    return ParseState.peek(state, 1) == TokenKind.FnKeyword
   }
   if kind == TokenKind.UnsafeKeyword {
     return false

@@ -726,7 +726,7 @@ pub fn main() -> i32 { return 0 }`)
 
 it.effect('retains reborrow parent suspension and restores access after the call', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.usize as usize
+    const self = yield* snapshot(`import silk.usize
 fn edit(values: &mut [i32]) -> i32 { return 1 }
 fn forward(values: &mut [i32]) -> i32 {
   let result = edit(&mut values)

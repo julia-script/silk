@@ -58,5 +58,5 @@ not semantic scope. An implicit catalog namespace contradicts explicit imports a
 import-bearing completion meaningless.
 
 **Migration**: Add ordinary explicit imports for every standard-library namespace used by source.
-For the Effect operation namespace, use `import silk.effect as Effect`; the closed `Effect<...>` type
+For the Effect operation owner, use `import silk.effect { Effect }`; the closed `Effect<...>` type
 syntax still requires no import.

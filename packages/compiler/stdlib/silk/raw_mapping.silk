@@ -10,9 +10,9 @@
 //! Raw pointers do not keep their mapping alive. Fatal traps do not guarantee release.
 
 static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText("libc") == "none" && (Intrinsic.targetArchitecture() == "x86_64" || Intrinsic.targetArchitecture() == "aarch64") {
-  import silk.raw_linux as RawLinux
+  import silk.raw_linux { RawLinux, MMAP, MUNMAP }
   import silk.result {Result}
-  import silk.usize as usize
+  import silk.usize
   /// One affine, zero-initialized anonymous mapping and its aligned usable range.
   pub struct Mapping {
     base: usize
@@ -24,7 +24,7 @@ static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText(
     fn drop(self: &mut Mapping) -> () {
       let reserved = Intrinsic.replace(self.reserved, 0)
       if reserved != 0 {
-        let ignored = unsafe RawLinux.syscall2(RawLinux.MUNMAP, self.base, reserved)
+        let ignored = unsafe RawLinux.syscall2(MUNMAP, self.base, reserved)
       }
     }
   }
@@ -52,7 +52,7 @@ static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText(
         return Result.failResult<Mapping, usize>(22)
       }
       let reserved = ((needed + (pageSize - 1)) / pageSize) * pageSize
-      let base = unsafe RawLinux.syscall6(RawLinux.MMAP, 0, reserved, 3, 34, usize.MAX, 0)
+      let base = unsafe RawLinux.syscall6(MMAP, 0, reserved, 3, 34, usize.MAX, 0)
       let error = RawLinux.error(base)
       if error != 0 {
         return Result.failResult<Mapping, usize>(error)
@@ -87,7 +87,7 @@ static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText(
     pub fn release(value: Mapping) -> usize {
       let mut self = move value
       let reserved = Intrinsic.replace(self.reserved, 0)
-      return RawLinux.error(unsafe RawLinux.syscall2(RawLinux.MUNMAP, self.base, reserved))
+      return RawLinux.error(unsafe RawLinux.syscall2(MUNMAP, self.base, reserved))
     }
   }
 }
