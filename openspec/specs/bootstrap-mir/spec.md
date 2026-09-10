@@ -436,7 +436,7 @@ byte-identical MIR across fresh processes without materializing mutable graph id
 
 MIR SHALL represent a match as one evaluated scrutinee local, exact logical type and access mode,
 canonical member cases in source decision order, optional guard regions, pattern-bound locals,
-per-arm result and cleanup regions, and one typed join outcome. Member cases SHALL reference the
+per-arm expression or ordinary statement regions, their completion and cleanup outcomes, and one typed match outcome. A normally completing block SHALL supply unit with zero payload lanes. Only normally completing paths SHALL assign or access a join destination; a returning, failing, breaking, continuing, or otherwise noncompleting path SHALL transfer without reading an uninitialized result or executing continuation-only operations. An all-noncompleting match SHALL require no joined result local. Member cases SHALL reference the
 compiler layout plan while omitting source aliases, public numeric tags, backend types, target
 blocks, branch depths, and arbitrary cyclic edges.
 
@@ -450,13 +450,28 @@ blocks, branch depths, and arbitrary cyclic edges.
 - **WHEN** two guarded arms and one unguarded fallback arm target the same nominal member
 - **THEN** MIR preserves their source decision order and guard fallthrough without duplicating the scrutinee payload
 
+#### Scenario: Lower selected statements with unit completion
+
+- **WHEN** a selected ordinary block performs several statements and reaches its closing brace
+- **THEN** MIR preserves statement order, produces unit without payload storage, and continues the enclosing body without a synthesized return
+
+#### Scenario: Stop a containing expression on transfer
+
+- **WHEN** a match nested in an argument, initializer, assignment operand, or return operand has a selected block that transfers
+- **THEN** MIR terminates that path before later operands, call execution, initializer storage, destination replacement, or later statements; earlier acquired resources receive exactly their transfer cleanup
+
+#### Scenario: Join a scalar only on its completing path
+
+- **WHEN** one match arm returns from the enclosing body and another produces `i32`
+- **THEN** only the scalar-producing path initializes the scalar join destination and no transfer path reads or writes it
+
 ### Requirement: MIR verifies match coverage bindings and cleanup
 
 Verification SHALL reject a match whose scrutinee or result local disagrees with its logical type or
 layout, whose member cases are invalid or non-exhaustive, whose source decision order contradicts
-the semantic coverage facts, whose pattern field or binding types disagree, whose guard is not
+the semantic coverage facts, whose pattern field or binding types disagree, whose normally completing guard paths do not produce
 `bool`, whose access mode violates ownership metadata, or whose arm result and cleanup outcomes do
-not reach the declared join consistently. Violations SHALL be deterministic data produced before
+not agree with the declared completion and transfer outcomes. Verification SHALL reject a join read without a value on every reaching path, a join assignment on a noncompleting path, or continuation-only operations or cleanup attached to an unconditional transfer. Violations SHALL be deterministic data produced before
 backend emission.
 
 #### Scenario: Reject a missing member case
@@ -468,6 +483,16 @@ backend emission.
 
 - **WHEN** a match-local shared or exclusive binding is referenced outside its arm region
 - **THEN** verification reports its arm boundary and no backend receives the program
+
+#### Scenario: Reject use after noncompletion
+
+- **WHEN** hand-built MIR reads a required match result after an arm transfers without reaching the join or attaches later argument evaluation to that transfer path
+- **THEN** verification reports the inconsistent path and result provenance before backend emission
+
+#### Scenario: Transfer while evaluating a guard
+
+- **WHEN** a guard contains a nested match whose selected block transfers from the enclosing computation or loop
+- **THEN** MIR takes that exit with applicable cleanup and executes no later candidate; only a normally completing Boolean-false guard advances candidates, and an all-transferring guard requires no Boolean result local
 
 ### Requirement: Match MIR encoding is deterministic
 
@@ -1189,3 +1214,48 @@ whose operand types disagree with the pointer type. Pointer MIR SHALL encode det
 
 - **WHEN** a constructed pointer-write operation targets a `*mut Vector<i32>`
 - **THEN** verification reports one structural violation and no artifact is emitted
+
+### Requirement: MIR lowers anonymous callables as finite exact environments
+
+MIR lowering SHALL create a statically selected executable body and one finite concrete environment
+layout for each realized anonymous callable identity. Environment fields SHALL follow semantic
+capture order and retain their Copy, borrowed, exclusive, or owned representation and cleanup plan.
+Construction, invocation, ordinary result delivery, effect construction, dropped-uninvoked cleanup,
+and consuming cleanup SHALL preserve source and ownership order through MIR and LLVM lowering.
+Structural callable types MUST NOT gain a standalone layout, universal closure
+ABI, runtime target table, or heap-allocation requirement from anonymous callables.
+
+#### Scenario: Lower an environment-bearing callable
+
+- **WHEN** a realized anonymous callable captures one Copy value and one moved affine owner
+- **THEN** MIR names its static body, lays out the two fields in semantic capture order, and emits exactly-once cleanup for the owner
+
+#### Scenario: Lower a capture-free handler
+
+- **WHEN** a capture-free effectful anonymous handler is passed through a generic combinator
+- **THEN** specialization retains its exact empty-environment identity and lowers invocation to its static body
+
+#### Scenario: Keep structural contracts unlayoutable
+
+- **WHEN** layout receives only an anonymous callable's structural `fn(A) -> B` contract without its hidden concrete identity
+- **THEN** it remains unavailable rather than choosing an erased closure representation
+
+### Requirement: Slice field indexing retains descriptor bounds and element layout
+
+Indexing a slice projected from a borrowed aggregate SHALL retain that slice's backing address, runtime length and element layout through lowering. Direct field indexing and indexing a copied local view SHALL have equivalent consumed values and bounds behavior. A slice descriptor SHALL NOT be addressed as inline repeated element storage.
+
+#### Scenario: Index a slice field through a borrowed receiver
+
+- **WHEN** a borrowed holder reads self.slice[i] directly
+- **THEN** lowering emits the same runtime-bounded element access as reading through a local copy of self.slice without a backend defect
+- **AND** an index at or beyond the runtime length traps under the ordinary bounds contract
+
+### Requirement: Hidden initializer owners use ordinary storage lifecycles
+
+Materialized array owners retained by binding initializers SHALL have ordinary local storage, initialized-state tracking, ordered cleanup and suspension-frame liveness. Lowering SHALL preserve the original producer evaluation point and SHALL NOT duplicate producers or retain iteration owners beyond their lexical exit.
+
+#### Scenario: Retain a hidden backing array across suspension
+
+- **WHEN** a dependent holder is live in a suspended computation
+- **THEN** its hidden backing owner is stored for the suspension and restored for resumed use
+- **AND** completion or interruption cleans the initialized owner exactly once after its dependents

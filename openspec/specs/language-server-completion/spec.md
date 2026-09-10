@@ -221,3 +221,47 @@ candidate SHALL remain import-free and the same spelling MUST NOT cause a namesp
 
 - **WHEN** identical source and catalog snapshots request completion for the same partial namespace spelling repeatedly
 - **THEN** candidate labels, module identity, ordering, insertion text, and import edits are identical
+
+### Requirement: Completion follows anonymous callable lexical scope
+
+Completion inside an anonymous callable signature or body SHALL consume compiler-owned recovered
+scope facts. Parameter type and result positions SHALL offer the surrounding accessible types and
+type parameters. Body expression positions SHALL offer the anonymous parameters plus visible outer
+locals, pattern bindings, parameters, declarations, and keywords under ordinary shadowing. The LSP
+MUST NOT synthesize a capture list or expose a self-name. At an expression start, ordinary `fn`
+SHALL be an applicable keyword; after an expression-position `effect`, completion SHALL distinguish
+`fn` from the Effect-block form without hiding either valid continuation.
+
+#### Scenario: Complete inside an anonymous body
+
+- **WHEN** completion is requested in a body where parameter `value` shadows an outer `value` and outer `offset` remains visible
+- **THEN** candidates identify the anonymous parameter for `value` and the selected outer binding for `offset`
+
+#### Scenario: Complete an anonymous parameter type
+
+- **WHEN** completion is requested after the colon in `fn(value: ) -> Result { ... }`
+- **THEN** completion offers accessible types and enclosing type parameters but excludes value-only locals
+
+#### Scenario: Complete an anonymous callable start
+
+- **WHEN** completion is requested at an expression start or immediately after `effect`
+- **THEN** it offers the valid anonymous `fn` continuation from compiler grammar facts without inventing `mut fn` or `once fn` construction
+
+### Requirement: Concrete receiver completion offers uniquely supplied interface operations
+
+Completion after a runtime-concrete nominal receiver SHALL offer the receiver operations supplied by
+the interface applications the resolver would admit at that position, under the same visibility,
+proof, precedence, and ambiguity filter call resolution uses. An operation whose name an inherent
+member already claims SHALL NOT be offered a second time, and an operation supplied by more than one
+participating application SHALL NOT be offered as a callable member, because the call would be
+ambiguous.
+
+#### Scenario: Complete a conformance operation on a concrete value
+
+- **WHEN** completion is requested after `document.` and `Document` conforms only to `Printable`
+- **THEN** `print` is offered as a method alongside the inherent members
+
+#### Scenario: An invisible interface is not offered
+
+- **WHEN** the conforming interface is not visible to the requesting module
+- **THEN** its operations are absent from the completion list

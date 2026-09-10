@@ -18,6 +18,11 @@ guard, explicit arm body kind, statement, arm boundary, trivia item, and exact s
 - **WHEN** a return expression matches `&event` with a guarded nominal arm followed by `_`
 - **THEN** the tree retains the ampersand, guard expression, both fat arrows, and universal identifier in source order
 
+#### Scenario: Parse owned-place refinement
+
+- **WHEN** source contains match place value with ordinary variant patterns and guards
+- **THEN** the tree retains the place marker separately from the scrutinee and existing consuming and borrowed match forms
+
 #### Scenario: Parse ordinary blocks in nested expression positions
 
 - **WHEN** matches in an initializer, call argument, and return operand contain empty, sequential, guarded, and nested statement arms alongside expression arms

@@ -114,7 +114,9 @@ A declaration SHALL be visible within its defining module regardless of whether 
 an explicitly public declaration SHALL resolve through a namespace or selective import. Selecting
 or qualifying an unknown member SHALL produce an unknown-member outcome; naming a private member
 from another module SHALL produce a distinct inaccessible-member outcome retaining the private
-declaration candidate and diagnostic cause. Imports MUST NOT re-export members or activate methods,
+declaration candidate and diagnostic cause. Ordinary imports MUST NOT re-export members. Explicit
+`pub import module { member as alias }` SHALL publish only the selected public declarations,
+preserving original identity and collision diagnostics. Imports MUST NOT activate unlisted methods,
 operators, overloads, conformances, or runtime initialization.
 
 #### Scenario: Call a private local function

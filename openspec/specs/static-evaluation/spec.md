@@ -55,8 +55,9 @@ operation when its condition is false.
 The selected arm MAY contain ordinary runtime operations and runtime values. Such operations SHALL
 be retained rather than executed by `StaticEvaluation`. Static selection SHALL be controlled only
 by explicitly static constructs; an ordinary runtime `return`, branch, or loop MUST NOT decide
-which later source is statically elaborated. `static if` SHALL be permitted only in executable
-statement or expression positions and MUST NOT conditionally introduce declarations.
+which later source is statically elaborated. At module scope, `static if` SHALL select declaration
+groups under the module-static-selection contract. It SHALL remain a statement within executable
+bodies and SHALL NOT introduce local declarations or become an expression.
 
 #### Scenario: Retain runtime work from a selected static arm
 
@@ -73,10 +74,15 @@ statement or expression positions and MUST NOT conditionally introduce declarati
 - **WHEN** an unselected arm contains malformed syntax
 - **THEN** parsing reports the ordinary syntax diagnostic because static selection does not suppress parsing or recovery
 
+#### Scenario: Select module declarations
+
+- **WHEN** source places `static if` at module scope
+- **THEN** its selected declaration group contributes the profile-specific module surface
+
 #### Scenario: Refuse a conditional declaration
 
-- **WHEN** source places `static if` where a module or block declaration is expected
-- **THEN** parsing rejects the form without creating a target-dependent declaration surface
+- **WHEN** source attempts to introduce a local declaration inside an executable static arm
+- **THEN** parsing rejects the local declaration; module declaration selection does not add local declarations
 
 #### Scenario: Analyze returns after specialization
 
@@ -220,3 +226,32 @@ Target facts MUST NOT be readable at runtime, changed by source, inferred from t
 
 - **WHEN** one process evaluates the same ordinary static helper under same-target profiles whose package boolean differs
 - **THEN** each evaluation returns its own configured value and repeated applications cannot reuse the other profile
+
+### Requirement: Compile-time matching executes ordinary arms in the current computation
+
+Compile-time evaluation SHALL accept ordinary match-arm blocks in every otherwise legal expression position and execute only the selected block eagerly in statement order. Block-local bindings and mutation SHALL obey ordinary lexical scope. Normal block completion SHALL yield unit without returning from the enclosing static computation; a body without normal completion SHALL produce the ordinary enclosing transfer rather than a block value. Explicit nested callable and Effect execution boundaries and existing static legality restrictions SHALL remain in force. No separate runtime evaluator SHALL be introduced.
+
+#### Scenario: Evaluate selected sequential statements
+
+- **WHEN** a static computation selects an ordinary block that mutates local state twice while an unselected block would alter it differently
+- **THEN** the static result reflects only the selected statements in order and subsequent enclosing statements execute after unit completion
+
+#### Scenario: Preserve guarded fallthrough
+
+- **WHEN** a guarded ordinary block is rejected and a later arm is selected during compile-time evaluation
+- **THEN** the rejected block performs no work and the later selected body determines the current computation outcome
+
+#### Scenario: Return from a match argument at compile time
+
+- **WHEN** a selected ordinary block nested in a call argument or initializer executes return during compile-time evaluation
+- **THEN** the current static body returns immediately without evaluating later arguments, performing the call, storing the initializer, or executing later statements
+
+#### Scenario: Distinguish loop targets during compile-time evaluation
+
+- **WHEN** an ordinary arm breaks or continues an enclosing loop, or breaks a loop declared inside itself
+- **THEN** evaluation uses the same lexical target as analysis and resumes only at the correct loop boundary
+
+#### Scenario: Transfer while evaluating a static guard
+
+- **WHEN** a static guard evaluates a nested match whose selected ordinary block returns or transfers to an enclosing loop
+- **THEN** evaluation takes that transfer and does not evaluate later candidates; only a normally completing Boolean-false result advances to another candidate

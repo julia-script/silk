@@ -57,7 +57,7 @@ its concrete size, alignment, and representation facts for the selected target.
 
 ### Requirement: Bootstrap scalar layouts are canonical
 
-The layout plan SHALL retain `bool` as the existing four-byte zero-or-one scalar; fixed-width integers SHALL use their named byte width and natural alignment; `usize`/`isize` SHALL use pointer width and alignment; `()`/`never` SHALL have no runtime lane. All supported targets remain little-endian and these are private ABI facts.
+The selected audited target description SHALL supply primitive physical size/alignment and endianness before layout or ABI classification. The scalar vocabulary SHALL determine language width/category, but SHALL NOT supply a competing physical-layout fallback. `bool` SHALL use the target's four-byte zero-or-one storage; fixed integers and floats SHALL use their audited primitive facts; `usize`/`isize` SHALL use audited pointer facts; `()`/`never` SHALL have no runtime lane. External structs and fixed arrays SHALL derive offsets and stride from those semantic entries. Missing or inconsistent target facts SHALL produce a typed rejection before lowering. LLVM SHALL consume semantic layout rather than infer it from the host.
 
 #### Scenario: Plan the integer family
 

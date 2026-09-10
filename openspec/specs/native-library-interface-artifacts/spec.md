@@ -62,9 +62,9 @@ collision-safe include guard and C++ linkage guards without changing the C ABI.
 
 ### Requirement: The ABI manifest is versioned canonical data
 
-The JSON manifest SHALL contain schema marker `silkForeignAbi: 1`, the canonical target id, and
+The JSON manifest SHALL contain schema marker `silkForeignAbi: 2`, the canonical target id, and
 `exports` and `imports` arrays. Every entry SHALL contain its symbol, explicit ABI `C`, lowercase
-direction, and kind. Function entries SHALL contain canonical parameter and result classes; data
+direction, and kind. Function entries SHALL contain canonical parameter and result classes and the complete normalized behavioral contract; data
 entries SHALL contain their canonical type class. Entries SHALL be ordered by symbol and then kind,
 object fields SHALL have one stable order, and the document SHALL end with one newline.
 
@@ -77,3 +77,27 @@ object fields SHALL have one stable order, and the document SHALL end with one n
 
 - **WHEN** the same admitted source is rendered repeatedly for one native target
 - **THEN** the manifest bytes are identical and target-sized integers use that target's fixed-width class
+
+#### Scenario: Reject incompatible behavioral interfaces
+
+- **WHEN** supplied imported function records disagree with a visible contract despite equal machine classes
+- **THEN** interface validation rejects the mismatch and retains both origins; obsolete type-only schema records are rejected
+
+### Requirement: Callback interfaces preserve complete behavioral identity
+
+Published native interfaces SHALL preserve callback nonnullness, exact nested C signatures and normalized behavioral contracts, including each callback parameter's synchronous invocation promise. Equivalent property order and parameter renaming SHALL produce identical identity. Detectable behavior mismatches SHALL reject before backend cache reuse or linking. Generated C headers SHALL render valid C declarators without Silk-only properties. The replaced schema SHALL be rejected without compatibility decoding.
+
+#### Scenario: Equivalent callback contract
+
+- **WHEN** two declarations differ only in parameter naming or contract property order
+- **THEN** their normalized callback interface identity agrees
+
+#### Scenario: Mismatched callback behavior
+
+- **WHEN** a supplied native interface differs in callback access or invocation behavior
+- **THEN** compilation reports the mismatch with available declaration origins
+
+#### Scenario: Render a callback-bearing C header
+
+- **WHEN** a native library exports a callback-bearing function
+- **THEN** its sibling header is valid C and its manifest retains the additional Silk behavioral identity
