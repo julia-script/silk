@@ -18,6 +18,7 @@ import {
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
 import { shaAcceptanceSource } from './shaAcceptance.js'
+import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import {
   borrowedBox,
   borrowedStream,
@@ -7779,6 +7780,11 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     name: 'fixed-output-sha',
     source: shaAcceptanceSource,
     nativeSource: shaAcceptanceNativeSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'streaming-inflate',
+    source: inflateAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
   },
   ...corpus,

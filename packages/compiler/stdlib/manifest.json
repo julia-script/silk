@@ -148,6 +148,20 @@
     "namespace": "i8"
   },
   {
+    "module": "silk/inflate",
+    "path": "silk/inflate.silk",
+    "namespace": "Decoder",
+    "aliases": [
+      "Format",
+      "Status",
+      "Limits",
+      "Progress",
+      "DecodeError",
+      "ErrorKind",
+      "MEMORY_BOUND"
+    ]
+  },
+  {
     "module": "silk/insecure_random",
     "path": "silk/insecure_random.silk",
     "namespace": "InsecureRandom",
