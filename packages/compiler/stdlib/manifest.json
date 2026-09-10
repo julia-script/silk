@@ -160,6 +160,20 @@
     "namespace": "i8"
   },
   {
+    "module": "silk/inflate",
+    "path": "silk/inflate.silk",
+    "namespace": "Decoder",
+    "aliases": [
+      "Format",
+      "Status",
+      "Limits",
+      "Progress",
+      "DecodeError",
+      "ErrorKind",
+      "MEMORY_BOUND"
+    ]
+  },
+  {
     "module": "silk/insecure_random",
     "path": "silk/insecure_random.silk",
     "namespace": "InsecureRandom",
@@ -439,6 +453,17 @@
     "path": "silk/support/memset.silk"
   },
   {
+    "module": "silk/support/zstd_block",
+    "path": "silk/support/zstd_block.silk",
+    "namespace": "BlockState",
+    "aliases": ["BlockError", "BlockReason"]
+  },
+  {
+    "module": "silk/support/zstd_checksum",
+    "path": "silk/support/zstd_checksum.silk",
+    "namespace": "Xxh64"
+  },
+  {
     "module": "silk/system_clock",
     "path": "silk/system_clock.silk",
     "namespace": "SystemClock",
@@ -501,5 +526,11 @@
     "path": "silk/writer.silk",
     "namespace": "Writer",
     "aliases": ["WriterError"]
+  },
+  {
+    "module": "silk/zstd",
+    "path": "silk/zstd.silk",
+    "namespace": "Zstd",
+    "aliases": ["ZstdError", "ZstdLimits", "ZstdProgress", "ZstdReason", "ZstdStatus"]
   }
 ]
