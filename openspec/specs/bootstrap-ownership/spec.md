@@ -124,11 +124,11 @@ produced the violation.
 
 ### Requirement: Arms scope their bindings and every return is an exit
 
-A binding declared inside a conditional arm SHALL be live from its statement to the end of its
+A binding declared inside a conditional or ordinary match arm SHALL be live from its statement to the end of its
 arm and SHALL be released at that arm's boundary — its arm's return exit where one exists,
 otherwise the arm's end — never at an exit outside its arm. Every return statement SHALL be its
 own exit in the cleanup plan, releasing the bindings live and unconsumed on paths reaching it in
-last-acquired, first-released order. Reaching branches SHALL join initialization independently for each tracked place; unreachable returning branches SHALL NOT consume values on surviving paths. A place SHALL be usable only when definitely initialized on every reachable incoming path.
+last-acquired, first-released order. For ownership after a match, only paths reaching its continuation SHALL participate in the join. A move on any such path SHALL conservatively count as consuming for every subsequent use; a path that returns, fails, breaks, or continues out of that continuation SHALL NOT invalidate a value used only on a surviving path. Other conditional joins SHALL retain their existing conservative behavior.
 
 #### Scenario: Release an arm binding inside its arm
 
@@ -139,6 +139,16 @@ last-acquired, first-released order. Reaching branches SHALL join initialization
 
 - **WHEN** one arm moves a body binding and the trailing return reads it
 - **THEN** the later read is an `OWN0001` violation even though the move was conditional
+
+#### Scenario: Join only match paths that continue
+
+- **WHEN** one ordinary arm moves an outer owner and returns while another arm reaches the match continuation with that owner live
+- **THEN** the owner remains usable after the match on the continuing path and every return path retains its independent cleanup plan
+
+#### Scenario: Reject a move on a completing arm
+
+- **WHEN** one reachable ordinary arm moves an outer owner and completes normally while another leaves it live
+- **THEN** a use after the match receives `OWN0001` at the later invalid reference span
 
 ### Requirement: Copy is one sealed validated property
 
@@ -476,7 +486,7 @@ Every available reference or slice borrow SHALL create a compiler-only loan atta
 
 ### Requirement: Borrowed-view loans remain lexical and non-escaping
 
-Borrow requirements SHALL follow actual uses, transfer, copies, capture, and cleanup within a finite local control-flow domain. A returned view SHALL retain its source loans beyond its originating call whenever needed. Shared and exclusive references and slices SHALL be admitted in ordinary structs, unions, fixed arrays, generic wrappers, named tuples, and synthesized aggregates while preserving every nested semantic lifetime. Moving a holder SHALL transfer obligations and Copy SHALL duplicate dependents without detachment. Exclusive stored references SHALL remain affine, and dependent user Drop SHALL retain all observable payload lifetimes through cleanup. Borrowed Effect outcomes SHALL preserve their complete lifetimes, and suspended partial owners SHALL preserve initialized state and exact remainder cleanup. Lexically valid callable and Effect captures SHALL retain environment bounds immediately. No borrow SHALL outlive its referent or lose reborrow ancestry through abstraction.
+Borrow requirements SHALL follow actual uses, transfer, copies, capture, and cleanup within a finite local control-flow domain. A returned view SHALL retain its source loans beyond its originating call whenever needed. Shared references and slices SHALL be admitted in ordinary structs, unions, fixed arrays, generic wrappers, named tuples, and synthesized aggregates while preserving every nested semantic lifetime. Moving a holder SHALL transfer obligations and Copy SHALL duplicate dependents without detachment. Exclusive stored references, dependent user Drop, borrowed Effect outcomes, and suspension with partial owners SHALL remain rejected until their respective storage, cleanup, outcome, and frame proofs are admitted. Lexically valid callable and Effect captures SHALL retain environment bounds immediately. No borrow SHALL outlive its referent or lose reborrow ancestry through abstraction.
 
 #### Scenario: End a temporary loan after an ordinary call
 
@@ -1318,3 +1328,116 @@ Replacement SHALL check the unchanged destination type before a non-suspending c
 
 - **WHEN** a complete initialized Drop-bearing child moves out of a plain outer owner
 - **THEN** its new owner retains the child's dependencies and cleanup; moving a subfield across the child's own Drop boundary remains rejected
+
+#### Scenario: Installed referents survive dependent cleanup
+
+- **WHEN** a field of a dependent Drop owner is replaced with a borrow of storage released before that owner, including storage inside a nested branch
+- **THEN** analysis SHALL reject the installation; a referent acquired before the owner and surviving its cleanup SHALL remain accepted
+
+### Requirement: Anonymous environments obey capture ownership and cleanup
+
+Constructing an anonymous callable SHALL acquire each implicit capture exactly once in
+first-reference source order. Copy snapshots and shared loans SHALL permit shared repeated
+invocation; exclusive loans SHALL remain live with the environment and require exclusive repeated
+invocation; moved affine owners SHALL transfer into a consuming environment. Borrowed captures MUST
+NOT escape their permitted region. Dropping an uninvoked environment SHALL release loans and clean
+owned captures exactly once in reverse acquisition order. A successful consuming invocation SHALL
+transfer or clean every owned capture exactly once, and a second consuming invocation MUST be
+rejected before it can duplicate an owner.
+
+#### Scenario: Reuse a shared capture
+
+- **WHEN** an anonymous callable reads one shared-borrowed outer value twice across two invocations
+- **THEN** both calls observe the same valid loan and the loan ends when the callable's last use ends
+
+#### Scenario: Mutate an exclusive capture
+
+- **WHEN** a `mut fn` anonymous callable updates an exclusively borrowed outer value across sequential invocations
+- **THEN** mutation persists between calls and no competing access is accepted while the environment remains live
+
+#### Scenario: Drop an uninvoked moved capture
+
+- **WHEN** a `once fn` anonymous callable captures `move token` and leaves its region without invocation
+- **THEN** the environment drops `token` exactly once
+
+#### Scenario: Reject an escaping borrowed environment
+
+- **WHEN** an anonymous callable captures a local borrow and is returned beyond that borrow's valid region
+- **THEN** ownership rejects the escape under the same region rules as other stored callable environments
+
+### Requirement: Receiver loans preserve stored borrowed access modes
+
+Implicit and written receiver borrows SHALL establish equivalent concrete wrapper loans and retain the access modes of borrowed data stored inside the wrapper. Exclusive access to a wrapper SHALL NOT imply exclusive access to a shared slice's backing owner. Genuine overlapping wrapper or backing-owner conflicts SHALL remain rejected.
+
+#### Scenario: Repeatedly advance a shared slice holder
+
+- **WHEN** a mutable holder of a shared slice advances its index through repeated receiver calls
+- **THEN** the calls are accepted exactly as their qualified explicit-borrow forms are
+- **AND** a live conflicting borrow of the wrapper or mutation of its retained backing owner is rejected
+
+### Requirement: Binding initializer array borrows retain lexical hidden owners
+
+A borrowed array temporary evaluated within a local binding initializer SHALL materialize a hidden local owner with the ownership behavior of an equivalently named array at the same evaluation point. The array SHALL be evaluated exactly once in source order with unchanged element inference. Storage SHALL remain valid through dependent local views, aggregates and delayed computations, including suspension. The hidden owner SHALL belong to the originating block, selected branch or loop iteration and SHALL use ordinary initialization and cleanup on normal completion, early structured exits and interruption. Affine elements SHALL be cleaned exactly once after their dependent loans end. This rule SHALL NOT permit references to function-local storage to escape or change fatal-trap no-unwind semantics.
+
+#### Scenario: Construct a holder from a temporary array
+
+- **WHEN** let mut stream = SliceStream.make(&[1, 2, 3]) is followed by consumed stream calls
+- **THEN** the hidden array remains valid for those calls and uncontextualized elements retain their ordinary i32 inference
+
+#### Scenario: Preserve evaluation and lexical boundaries
+
+- **WHEN** an initializer contains earlier side effects or a borrowed array in a selected branch or repeated loop body
+- **THEN** the producer runs exactly once at its original position only when selected and its storage is cleaned within that branch or iteration
+
+#### Scenario: Suspend and interrupt a dependent holder
+
+- **WHEN** a holder of hidden array storage remains live across suspension and execution completes or is interrupted
+- **THEN** the backing storage survives all retained uses and its affine cleanup runs exactly once in ordinary dependency order
+
+#### Scenario: Reject hidden local escapes
+
+- **WHEN** a function returns a slice, aggregate or retained Effect borrowing its hidden array storage
+- **THEN** lifetime checking rejects the escape as it would for an explicitly named local array
+
+### Requirement: Reacquired pattern owners receive fresh cleanup state
+
+Every successful pattern acquisition SHALL start with the initialized state of the newly acquired value. A previous loop iteration's conditional partial move or drop MUST NOT suppress cleanup of the new value.
+
+#### Scenario: Match reacquires an owner after conditional partial drop
+
+- **WHEN** a loop move-matches a fresh aggregate into a binding on each iteration and drops one field only on the first iteration
+- **THEN** cleanup SHALL release each remaining initialized field exactly once on every iteration
+
+#### Scenario: Statement pattern reacquires an owner
+
+- **WHEN** repeated statement-pattern selection acquires fresh owned storage after an earlier iteration conditionally drops a field
+- **THEN** the newly acquired storage SHALL receive fresh cleanup state before its body executes
+
+### Requirement: Ordinary arm ownership follows selected statements and expression transfers
+
+Ordinary arm blocks SHALL introduce lexical ownership scope without a capture environment. A Boolean-false guard SHALL leave provisional bindings, loans, and payload ownership available to later candidate arms; ownership SHALL commit only for the selected arm. A transfer during guard evaluation SHALL take its ordinary exit with applicable provisional cleanup and SHALL NOT advance to a later candidate. Normal completion and each early transfer SHALL clean live arm owners, omitted consumed fields, and earlier enclosing-expression temporaries exactly once according to ordinary acquisition and transfer rules. Loans SHALL end before owner cleanup, narrowed borrows and block locals SHALL NOT escape, and cleanup belonging only to a continuation SHALL NOT execute on a path that never reaches it.
+
+#### Scenario: Reject a guarded block before ownership commits
+
+- **WHEN** a consuming guarded candidate has an ordinary block but its guard is false before a later candidate selects the payload
+- **THEN** the rejected block performs no statements or cleanup, and the later selected arm owns the complete available payload exactly once
+
+#### Scenario: Clean earlier arguments after a nested return
+
+- **WHEN** earlier call arguments acquire live owned temporaries and a later match argument selects a block that returns
+- **THEN** the current arm owners and untransferred earlier temporaries are released exactly once; later arguments and the call do not execute
+
+#### Scenario: End borrowed selection before a loop transfer
+
+- **WHEN** a borrowed ordinary arm inside an enclosing loop executes break or continue with live block locals
+- **THEN** the arm loans end before affected owners are released, and the lexical loop transfer receives exactly the required cleanup
+
+#### Scenario: Release omitted fields on early failure
+
+- **WHEN** a consuming block arm binds one affine field, omits another with `..`, and fails after transferring the bound field onward
+- **THEN** cleanup releases only still-owned active fields once, with no cleanup for inactive members, the consumed source, or the transferred field
+
+#### Scenario: Clean a guard transfer without selecting another candidate
+
+- **WHEN** evaluating a guard reaches a nested ordinary arm that returns or transfers to an enclosing loop
+- **THEN** ownership ends provisional loans and releases the obligations left live on that exit exactly once, without executing or committing a later candidate

@@ -10,12 +10,7 @@ the rules that make native writes through them observable.
 
 ### Requirement: Raw pointer types hold one un-owned address
 
-`*const T` and `*mut T` SHALL be types for any concrete pointee `T`, including a struct with no
-fields used as an opaque handle. Pointer identity SHALL include the canonical pointee and the
-mutability. A raw pointer value SHALL be Copy, MAY be null, SHALL own nothing, SHALL hold no loan,
-and SHALL carry no guarantee that its address is valid, aligned, initialized, or still allocated.
-`*mut T` SHALL convert to `*const T` at an immediate expected-type boundary; no other implicit
-conversion, arithmetic, comparison, or cast SHALL exist on pointers.
+Raw pointers SHALL follow the qualified forms in native-pointer-boundary: non-null single `*const T`/`*mut T`, non-null many `[*]const T`/`[*]mut T`, explicit nullable `?` prefixes, minimum alignment and ordinary data address space zero. Identity SHALL retain all axes and invariant pointee identity. A pointer SHALL be Copy, own nothing and hold no loan. Nullability and alignment SHALL state representational guarantees without proving initialization, liveness or ownership. Implicit conversions SHALL only weaken access, nullability or proven alignment and SHALL preserve pointee and extent.
 
 #### Scenario: Copy a pointer freely
 
@@ -34,18 +29,7 @@ conversion, arithmetic, comparison, or cast SHALL exist on pointers.
 
 ### Requirement: Pointer primitives are sealed and split by safety
 
-The compiler SHALL expose exactly these pointer primitives through `Intrinsic`, and the module
-`silk/pointer` SHALL expose them as the ordinary `Pointer` API: `null<T>() -> *mut T`,
-`isNull(pointer: *const T) -> bool`, `fromRef(value: &T) -> *const T`, `fromMutRef(value: &mut T)
--> *mut T`, `fromSlice(values: &[T]) -> *const T`, `fromMutSlice(values: &mut [T]) -> *mut T`,
-`offset(pointer: *const T, count: usize) -> *const T` and `offsetMut(pointer: *mut T, count:
-usize) -> *mut T` advancing by `count` elements of `T`, `read(pointer: *const T) -> T`, and
-`write(pointer: *mut T, value: T) -> ()`. `null`, `isNull`, and the four formation primitives SHALL
-be safe. `offset`, `offsetMut`, `read`, and `write` SHALL be unsafe and SHALL each state their
-caller invariant. The `Pointer` API SHALL bound `read` and `write` to a Copy pointee so a
-move-only pointee is rejected at the call, and MIR verification SHALL reject a read or write
-operation whose pointee is not Copy. Every primitive SHALL be available through LLVM for native
-and WebAssembly targets.
+The compiler SHALL expose minimal sealed primitives for null construction/testing, reference/slice/raw-slot address formation, qualified pointer conversion, many-item indexed address calculation and Copy reads/writes. Ordinary source wrappers SHALL own null-to-Option checking and output initialization-state policy. Null construction SHALL only produce nullable pointers. Reference and raw-slot formation SHALL produce non-null single pointers; slice formation SHALL produce explicit many pointers without retaining length. Indexed access SHALL require a non-null many pointer and an unsafe bounds/liveness proof and SHALL produce a single-object pointer. Dereference SHALL require non-null pointers, explicit unsafe acknowledgement and Copy pointees. Unaligned operations SHALL accept byte-aligned pointers and preserve the LLVM alignment guarantee. Unsafe qualifier strengthening SHALL preserve pointee and address space and state caller proof obligations. Every admitted primitive SHALL remain available through LLVM for native and WebAssembly targets.
 
 #### Scenario: Form a pointer safely
 

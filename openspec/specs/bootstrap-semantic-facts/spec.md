@@ -851,7 +851,7 @@ without changing the source's inferred type or fabricating a later conversion.
 Semantic analysis SHALL publish the scrutinee type and access mode, source-ordered arms, resolved
 structural roots, applied nominal parents, canonical variants, complete selection paths, source and
 canonical field mappings, pattern bindings, guard outcomes, remaining path set before and after each
-arm, reachability, result type, and complete-or-unavailable match outcome. Whole-member selection
+arm, reachability, explicit expression-or-block body kind, statement facts, normal-completion and lexical-transfer facts, result type, and complete-or-unavailable match outcome. Whole-member selection
 SHALL retain the covered descendant paths, while direct variant selection SHALL retain its exact
 root-parent-variant leaf without representing that leaf as a structural member. Failed lookups,
 damaged patterns, incompatible guards, and unavailable results SHALL retain all independent facts
@@ -871,6 +871,11 @@ with exact provenance and causal diagnostics.
 
 - **WHEN** direct variant arms cover every leaf of `HttpError` inside `HttpError | OutOfMemoryError`
 - **THEN** facts retain each complete selection path, each subtraction step, and the unchanged normalized structural root identities
+
+#### Scenario: Inspect an expression-nested ordinary arm
+
+- **WHEN** a call argument contains a match with ordinary statement arms
+- **THEN** facts retain arm-local statement identities and spans, selected body kind, completion paths, and enclosing transfer targets without introducing a callable or Effect construction
 
 ### Requirement: Pattern bindings are arm-local non-shadowing facts
 
@@ -1479,3 +1484,124 @@ Semantic inspection SHALL publish authored and inferred declaration-relative bin
 
 - **WHEN** a whole-value borrow follows a conditional field move
 - **THEN** facts identify the moved path and branch join, initialized siblings, and the complete-value operation that failed
+
+### Requirement: Anonymous callable facts bind explicit contracts and implicit captures
+
+Analysis SHALL bind each anonymous callable parameter and body in a lexical scope nested inside its
+containing expression scope. Parameter types and the ordinary result or effect success, failure, and
+requirement contracts SHALL be explicit and SHALL be checked under the surrounding generic
+substitution. A contextual callable expectation MAY constrain compatibility and surrounding generic
+selection, but MUST NOT supply an omitted parameter or result contract. References to the nearest
+visible outer local or parameter SHALL become implicit captures in deterministic first-reference
+source order; module declarations, type names, and the anonymous callable's own parameters MUST NOT
+be captures. The first slice SHALL reject nested anonymous bodies, self-reference, independent type
+parameters, declaration modifiers, and overload participation with semantic diagnostics.
+
+#### Scenario: Resolve a lexical capture
+
+- **WHEN** an anonymous body reads an outer `offset` after declaring its own `value` parameter
+- **THEN** facts resolve `value` to the anonymous parameter and record `offset` once as the selected outer binding
+
+#### Scenario: Preserve explicit contracts under context
+
+- **WHEN** an authored `fn(value: A) -> B { ... }` appears where a compatible callable is expected
+- **THEN** analysis checks the authored parameter and result under surrounding substitutions rather than replacing them with the expected signature
+
+#### Scenario: Reject an excluded nested body
+
+- **WHEN** an anonymous callable body contains another anonymous callable expression
+- **THEN** analysis reports the first-slice exclusion while preserving bounded syntax and the outer body's remaining facts
+
+### Requirement: Capture access derives anonymous invocation mode
+
+For each implicit capture, analysis SHALL derive Copy snapshot, shared loan, exclusive loan, or moved
+affine ownership transfer from the body operation that uses the selected binding. A callable whose
+environment permits shared repeated invocation SHALL have `fn` mode; any reusable capture requiring
+exclusive access SHALL raise the mode to `mut fn`; and any capture consumed by moving an affine value
+SHALL raise it to `once fn`. Copy moves SHALL remain reusable. The derived mode SHALL participate in
+the existing callable substitution order without an authored construction modifier.
+
+#### Scenario: Derive every invocation mode
+
+- **WHEN** representative anonymous bodies capture a Copy value, a shared borrow, an exclusive borrow, and a moved affine owner
+- **THEN** their facts derive `fn`, `fn`, `mut fn`, and `once fn` respectively with the exact capture access recorded
+
+#### Scenario: Reject a consuming value as reusable
+
+- **WHEN** a moved-affine anonymous callable is required where `fn(A) -> B` is expected
+- **THEN** analysis reports the incompatible consuming mode before lowering
+
+### Requirement: A concrete receiver call records the operation it selected
+
+Resolving a receiver call through a conformance SHALL record the selected capability, concrete
+provider, and operation on the call's semantic facts. The operation occurrence SHALL carry the
+identity of the interface operation the call selected, so it agrees with the same operation named
+through a bounded generic receiver and resolves to its declaration.
+
+#### Scenario: Identity matches the bounded spelling
+
+- **WHEN** `report.print()` and a bounded `value.print()` select the same operation of `Printed<i32>`
+- **THEN** both occurrences of `print` carry the identity of the operation declared in `Printed`
+
+#### Scenario: Navigation reaches the interface declaration
+
+- **WHEN** navigation targets `print` in `report.print()`
+- **THEN** it resolves to the operation declared in `Printed`, not to the conformance's mapped implementation
+
+### Requirement: Ordinary match arms participate in enclosing statement analysis
+
+Analysis SHALL analyze ordinary arm statements in the current computation wherever the match occurs, including initializers, arguments, assignment operands, and return operands. Pattern bindings and block locals SHALL have arm-local lexical scope and obey existing name-conflict rules. Outer mutable writes SHALL affect the enclosing computation eagerly. Every reachable `return` SHALL be discovered and checked against the current function, anonymous callable, or Effect body return contract, including returns nested in a larger expression. The arm closing brace SHALL NOT synthesize an enclosing return. Explicit nested callable and Effect bodies SHALL retain their own execution boundaries. Invalid programs SHALL retain independent facts and use the existing diagnostic codes and exact offending source spans without speculative duplicate diagnostics.
+
+#### Scenario: Check a return nested in an argument
+
+- **WHEN** a function declared to return `i32` calls another function with a match argument whose selected block executes `return true`
+- **THEN** the inner return is checked against the enclosing `i32` contract and receives the existing return-mismatch diagnostic at its returned operand span; the body is not executable
+
+#### Scenario: Discover returns in initializer and return operands
+
+- **WHEN** a match nested in a binding initializer or another return operand executes an explicit return
+- **THEN** that return belongs to the current enclosing body, contributes its return contract fact, and prevents completion of the containing expression on that path
+
+#### Scenario: Do not infer return from the arm brace
+
+- **WHEN** a selected block completes normally before a later enclosing statement
+- **THEN** analysis retains continuation to the later statement and checks enclosing fallthrough separately
+
+#### Scenario: Keep explicit execution boundaries
+
+- **WHEN** an ordinary arm inside a callable or Effect returns, or an explicit callable or Effect expression occurs inside an arm
+- **THEN** each return belongs to its nearest enclosing callable or Effect body; the ordinary arm adds no return boundary
+
+#### Scenario: Keep block locals arm-local
+
+- **WHEN** one block declares a local beside pattern bindings and another arm or subsequent statement references that local
+- **THEN** the declaration is visible only within its selected arm, and the outside reference receives the existing unresolved-name diagnostic at the reference span
+
+#### Scenario: Apply existing name-conflict rules
+
+- **WHEN** an arm block attempts to redeclare a pattern binding or a name forbidden by the enclosing lexical conflict rules
+- **THEN** analysis reports the existing declaration-conflict code at the conflicting declaration with provenance to the original binding
+
+#### Scenario: Distinguish a guard transfer from Boolean rejection
+
+- **WHEN** a guard evaluates a nested match containing ordinary transferring arms
+- **THEN** analysis records those enclosing transfers and requires `bool` only on normally completing guard paths; a transfer-only guard needs no Boolean value, and a transfer does not make a later candidate execute
+
+### Requirement: Ordinary match arms compose current computation Effect rows
+
+`run` and `fail` in ordinary arm blocks SHALL obey ordinary legality, failure propagation, requirement-row composition, and lexical provider scope in the current computation. Analysis SHALL retain their success and failure facts and enclosing contracts through every expression nesting position. An arm block SHALL NOT construct an Effect, allocate a capture environment, or defer its statements.
+
+#### Scenario: Compose eager run rows
+
+- **WHEN** selected ordinary arms perform sequential `run` operations requiring Writer and propagating WriterError inside an enclosing effect function
+- **THEN** their rows compose into the current computation contract and the enclosing provider scope supplies Writer without any arm-created Effect boundary
+
+#### Scenario: Propagate a failure out of a nested expression
+
+- **WHEN** an ordinary arm within a call argument executes a legal `fail`
+- **THEN** the failure contributes to the current failure row and terminates that expression path; it does not become an arm value
+
+#### Scenario: Preserve illegal run and fail diagnostics
+
+- **WHEN** an ordinary block uses `run` or `fail` where the current computation does not permit its requirements or failure row
+- **THEN** analysis reports the existing operation or propagation diagnostic code at its ordinary offending source span rather than accepting an implicit Effect boundary

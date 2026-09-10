@@ -420,8 +420,23 @@ owned by both the running state and suspended state.
 
 #### Scenario: Reject an unverified partial suspension
 
+- **WHEN** a partial owner would cross suspension without a verified frame initialization, stable-placement or remainder-cleanup plan
+- **THEN** analysis rejects the suspension before executable lowering
+
+#### Scenario: Preserve partial suspension
+
 - **WHEN** a partial owner would remain live across a potentially suspending child call
-- **THEN** analysis rejects the suspension until frame initialization flags and remainder cleanup are supported; lifetime-bearing complete values retain their existing stable-location requirements
+- **THEN** the frame preserves definite, missing and conditional component state with live flag storage; resume cannot read missing components and cancellation cleans only the initialized remainder in established order
+
+#### Scenario: Cancel before restoration
+
+- **WHEN** a field moves to a destination before suspension and cancellation occurs before restoration
+- **THEN** the destination retains the transferred child and the frame cleans only its live remainder, retaining every referent through cleanup
+
+#### Scenario: Complete installation atomically
+
+- **WHEN** a moved component is reinitialized or replaced
+- **THEN** cleanup, installation and ownership-state update commit without suspension between them
 
 ### Requirement: Nominal union ownership follows nominal struct rules
 

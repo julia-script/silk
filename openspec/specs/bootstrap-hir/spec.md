@@ -376,8 +376,7 @@ or cyclic control edges.
 
 HIR SHALL represent one match as a scrutinee evaluated once, its logical access mode and type, and
 source-ordered arm regions. Each executable arm SHALL carry its canonical member or universal
-coverage, narrowed payload, pattern bindings, optional typed guard, result expression, cleanup
-boundary, and join result type. Child, guard, arm, cleanup, and continuation relationships SHALL
+coverage, narrowed payload, pattern bindings, optional typed guard, an explicit expression-or-ordinary-statement-block body, normal-completion and lexical-transfer outcomes, cleanup boundary, and join result type. Body statements and expressions SHALL retain exact source provenance. Normally completing blocks SHALL provide unit and noncompleting arms SHALL provide no join value. Transfer targets SHALL belong to the enclosing execution boundary; ordinary arm blocks SHALL NOT create a callable or Effect boundary. Child, guard, arm, cleanup, and continuation relationships SHALL
 remain acyclic and MUST NOT contain physical tags, backend blocks, branch depths, or reconstructed
 cyclic control.
 
@@ -390,6 +389,16 @@ cyclic control.
 
 - **WHEN** a consuming arm binds one field and acknowledges omitted fields
 - **THEN** HIR carries the complete narrowed payload, bound field access, omitted-field cleanup boundary, and arm result provenance
+
+#### Scenario: Retain a return through expression nesting
+
+- **WHEN** a typed ordinary match arm nested in a larger expression returns from the current body
+- **THEN** HIR retains the arm statement region, exact return provenance and target, and the noncompleting path without demanding an arm result expression
+
+#### Scenario: Preserve body facts through specialization
+
+- **WHEN** a generic match with ordinary block arms is specialized to a complete application
+- **THEN** specialized HIR retains explicit body kinds, typed statements, provenance, canonical selected bindings, completion facts, and enclosing transfer regions
 
 ### Requirement: HIR is generic-aware before specialization
 
@@ -754,3 +763,28 @@ replacement contexts without rewriting the projection into an intrinsic call.
 
 - **WHEN** semantic analysis cannot establish a reference subject
 - **THEN** no executable referent-place HIR is produced for that expression
+
+### Requirement: HIR represents anonymous callable bodies and environments canonically
+
+HIR SHALL retain each anonymous callable's deterministic source-occurrence target, enclosing owner,
+explicit ordinary or effect contract, derived invocation mode, ordered parameters, typed body,
+surrounding substitution, and ordered captures with canonical binding, access, ownership root, and
+dependency facts. The containing expression SHALL construct that exact target and environment;
+executable discovery SHALL reach the body through the anonymous value without surface-syntax lookup.
+HIR encoding and traversal SHALL be deterministic, and damaged anonymous bodies SHALL remain
+explicitly unavailable rather than publishing a partial executable target.
+
+#### Scenario: Retain a capturing anonymous body
+
+- **WHEN** an anonymous callable captures an outer value and is stored before invocation
+- **THEN** HIR contains one anonymous target and one construction carrying the capture's canonical identity, access, and source-order ordinal
+
+#### Scenario: Retain an effectful anonymous contract
+
+- **WHEN** an effectful anonymous body declares success, failure, and requirement channels
+- **THEN** HIR keeps those channels on its executable contract and keeps invocation distinct from later Effect execution
+
+#### Scenario: Encode occurrences deterministically
+
+- **WHEN** the same module is elaborated repeatedly
+- **THEN** anonymous target identities, capture order, body traversal, and encoded HIR bytes remain stable

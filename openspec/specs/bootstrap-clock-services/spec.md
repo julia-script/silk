@@ -198,10 +198,10 @@ clock guarantees.
 ### Requirement: Native Unix-family providers preserve the portable contracts
 
 The standard library SHALL provide separate stateless `OsSystemClock` and `OsMonotonicClock`
-ordinary-source implementations for every native target currently supported by the compiler. The
+ordinary-source implementations selected for Darwin ARM64 with system libc and GNU Linux x86-64/ARM64 with GNU libc. Unsupported and no-libc profiles SHALL leave their native provider modules empty. The
 system provider SHALL use ordinary unsafe C declarations for `clock_gettime` and `clock_getres`
 with `CLOCK_REALTIME` and a C-layout `timespec`; it MUST NOT call an `Intrinsic.os*` operation or a
-compiler-generated `silk_os_*` runtime function. The monotonic provider SHALL use one platform
+compiler-generated `silk_os_*` runtime function. The monotonic provider SHALL use ordinary unsafe C declarations, with source-owned read/resolution validation and platform wait policy, and SHALL use one platform
 monotonic clock consistently for reads, resolution, and waits, SHALL tolerate interruptions, and
 SHALL never substitute the adjustable system clock for elapsed-time behavior.
 
@@ -232,40 +232,32 @@ ABI requires a separate target-baseline change.
 
 ### Requirement: Clock target behavior follows each provider boundary
 
-Clock service declarations and pure source providers SHALL remain analyzable on every target. The
-monotonic provider's primitive calls SHALL be native-only, validated only after executable
-reachability, and linked only when reachable. A reachable system provider SHALL retain ordinary
-foreign calls linked from libc by native artifacts. LLVM-generated WebAssembly SHALL reject both OS
-providers. No target receives an ambient or compiler-invented system-clock implementation.
+Clock services and pure source providers SHALL remain analyzable on every target. Native provider members SHALL be selected only for admitted Darwin/system-libc or GNU/Linux/GNU-libc profiles. Reachable operations SHALL use ordinary foreign imports, with no clock-specific compiler-runtime inventory. No target SHALL receive an ambient clock implementation or generated clock shim.
 
 #### Scenario: Import an unused OS provider on LLVM-generated WebAssembly
 
-- **WHEN** a LLVM-generated WebAssembly program imports an OS clock module but reaches no clock operation
-- **THEN** compilation succeeds without a clock import or runtime symbol
+- **WHEN** a WebAssembly program imports the OS module without requesting a native member
+- **THEN** source selection leaves it empty and no clock import is emitted
 
 #### Scenario: Reach the system provider on LLVM-generated WebAssembly
 
-- **WHEN** a LLVM-generated WebAssembly program reaches `OsSystemClock.now`
-- **THEN** target-availability validation rejects the native-only provider before emission
+- **WHEN** WebAssembly or no-libc source imports OsSystemClock or OsMonotonicClock
+- **THEN** source selection reports the missing member before emission
 
 #### Scenario: Link only a selected clock operation
 
-- **WHEN** a native program reaches system `now` but no resolution or monotonic operation
-- **THEN** its foreign inventory contains only `clock_gettime` and its compiler-runtime inventory
-  contains no system-clock symbol
-
-#### Scenario: Keep a clock-only shim independent of filesystem support
-
-- **WHEN** a native program reaches a monotonic clock primitive and no filesystem or child-process primitive
-- **THEN** the selected C source contains the minimal clock prelude plus the reachable monotonic
-  clock symbol, without unrelated filesystem macros, helpers, or platform assumptions
+- **WHEN** native source reaches system now but no resolution or wait
+- **THEN** its foreign inventory contains only clock_gettime for clock operations, with no clock runtime symbols or C fragment
 
 #### Scenario: Expose POSIX clocks in a combined shim
 
-- **WHEN** a monotonic clock symbol is combined with standard streams, typed-failure termination,
-  or another runtime fragment that includes system headers
-- **THEN** the translation unit defines its platform and POSIX feature-test macros before every
-  system header and the strict-C11 compiler sees all required clock declarations
+- **WHEN** source reaches native clocks alongside filesystem or typed-failure termination
+- **THEN** clock declarations and policy remain ordinary source and do not require a generated clock prelude
+
+#### Scenario: Keep a clock-only shim independent of filesystem support
+
+- **WHEN** a native program reaches only a monotonic clock operation
+- **THEN** no clock shim is generated; ordinary source calls libc without filesystem support
 
 ### Requirement: LocalScheduler provides a task-local monotonic timeline
 

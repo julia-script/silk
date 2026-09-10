@@ -6,7 +6,7 @@
 ## 2. Integration and specification
 
 - [ ] 2.1 Verify the full check and release-candidate gates in PR CI; local focused tests, typecheck, format:check, lint, and required fixture updates are complete. The user moved full validation to CI because other local sessions are running tests.
-- [ ] 2.2 Strict-validate the OpenSpec change, sync the delta to the main specification, and archive the completed artifacts.
+- [x] 2.2 Strict-validate the OpenSpec change, sync the delta to the main specification, and archive the completed artifacts.
 
 ## Validation status
 

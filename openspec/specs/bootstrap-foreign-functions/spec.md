@@ -10,7 +10,7 @@ use, and the linkage and availability rules of calling it.
 
 ### Requirement: A foreign function declaration names a native symbol under an explicit ABI
 
-`[pub] unsafe extern "C" fn <name>(<parameters>) -> <result> [as "<symbol>"]` SHALL declare one
+`[pub] unsafe extern "C" fn <name>(<parameters>) -> <result> [as "<symbol>"] [with Intrinsic.foreign(...)]` SHALL declare one
 module-level function whose implementation is supplied by native code linked into the artifact. The
 declaration SHALL have no body. It SHALL carry three separate identities: the Silk name used by
 source, the native symbol (the `as` string when present, otherwise the Silk name), and the ABI
@@ -40,6 +40,8 @@ ordinary function and SHALL NOT affect native linkage.
 - **WHEN** module `a` declares `pub unsafe extern "C" fn abs(value: i32) -> i32` and module `b` imports it
 - **THEN** `b` calls it under the same unsafe rule and the executable declares the symbol `abs` once
 
+The optional sealed clause SHALL follow the foreign-call-contracts specification and retain each property origin.
+
 ### Requirement: Foreign functions are unsafe by declaration
 
 Every foreign function declaration SHALL carry the `unsafe` qualifier, and its callable contract
@@ -65,10 +67,9 @@ result only; `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `i64`, `u64` as exact-width
 `isize` and `usize` as pointer-width integers of the selected target; `f32` and `f64` as the C
 `float` and `double` classes; and `*const T` and `*mut T` for any pointee `T` as the C pointer
 class, without requiring the pointee itself to be admitted. Parameters SHALL be by value. Every
-other type, including `bool`, `char`, `string`, references, slices, fixed arrays, structs, unions,
+other type, including `bool`, `char`, `string`, slices, fixed arrays, structs, unions,
 enums, callable types, and type parameters, SHALL be rejected with a diagnostic at the offending
-type that names the type and the foreign ABI. Admission SHALL be judged on the type spelling alone, independent of the selected target, so a
-foreign header is admitted or rejected once per module. The C classification of `isize`,
+type that names the type and the foreign ABI. Admission SHALL use resolved types and the normalized foreign behavior contract, independent of machine target classification. A single-value reference parameter named by the explicit borrow assertion SHALL be admitted as one nonnull C pointer, with ordinary initialized-state and call-loan obligations. References without that assertion, slices and reference results SHALL be rejected. The C classification of `isize`,
 `usize`, and pointers SHALL take the selected target's pointer width when the executable is
 realized for that target.
 
@@ -130,7 +131,7 @@ SHALL be rejected with a diagnostic naming the restriction.
 A native symbol SHALL be a non-empty ASCII identifier: a letter or underscore followed by letters,
 digits, or underscores. Any other spelling, including an embedded NUL, SHALL be rejected at the
 declaration. Within one executable closure, two reachable foreign declarations of the same symbol
-SHALL be accepted when their classified C signatures are equal and SHALL be rejected with one
+SHALL be accepted when their classified C signatures and normalized behavioral contracts are equal and SHALL be rejected with one
 diagnostic relating both declarations when they differ. A foreign symbol that names a compiler-owned
 runtime symbol, the process entry `main`, or matches the compiler's generated symbol shape SHALL
 be rejected at the declaration. A foreign symbol the native backend also declares for its own use
@@ -159,11 +160,10 @@ disagreement SHALL be reported as a backend diagnostic naming the symbol.
 
 ### Requirement: Foreign calls are direct linked calls
 
-A call to a foreign function SHALL lower to one direct native call under the target's C calling
+A call to a foreign function SHALL lower to a direct linked native invocation through a compiler-generated forbidden-unwind guard under the target's C calling
 convention with the classified signature. The artifact SHALL contain the symbol as an undefined
 external reference resolved by the system linker from the program's link inputs. The compiler SHALL
-NOT introduce runtime symbol lookup, caching, indirection, or a compiler-owned adapter for a
-foreign call. Linking SHALL fail as toolchain data when no link input defines the symbol.
+NOT introduce runtime symbol lookup or dynamic binding. Its boundary guard SHALL preserve the admitted machine and behavioral contract and terminate a foreign exception at the boundary; a bare nounwind assertion SHALL NOT replace the guard. Linking SHALL fail as toolchain data when no link input defines the symbol.
 
 #### Scenario: Call a separately compiled C function
 
@@ -315,26 +315,27 @@ Foreign import and export signatures SHALL continue to admit `*const T` and `*mu
 
 ### Requirement: C callbacks are exact noncapturing export addresses
 
-Silk SHALL define `extern "C" fn(P...) -> R` as a C function-pointer type admitted only when every
-parameter and result is admitted by the C ABI. A named, nongeneric, synchronous `export "C" fn`
-item SHALL contextually convert to that type only when its classified signature is exact. Ordinary
-functions, effect or suspending functions, generic functions, and capturing callables SHALL NOT
-convert.
+Silk SHALL define `extern "C" fn(P...) -> R` as a nonnull C function-pointer type with its exact ABI and normalized forbidden-unwind access contract. An optional `with Intrinsic.foreign(...)` clause SHALL express admitted behavior; unnamed type parameters SHALL use decimal ordinal strings in parameter sets. A named, nongeneric, synchronous `export "C" fn` item SHALL contextually convert only when both its value signature and declared behavioral contract match. Stronger exported assertions SHALL require an unsafe export. Ordinary functions, effect or suspending functions, generic functions, and capturing callables SHALL NOT convert.
 
 #### Scenario: Pass an exported comparator to qsort
 
-- **WHEN** an exact synchronous exported comparator is passed to a foreign `qsort` declaration
+- **WHEN** an exact synchronous exported comparator is passed to a foreign qsort declaration with an explicit callback invocation promise
 - **THEN** native execution passes the comparator's C-callable address and C invokes the Silk thunk
 
 #### Scenario: Reject a nonexported callback
 
 - **WHEN** an ordinary private function is used where a C function pointer is required
-- **THEN** semantic analysis reports that only an exact `export "C" fn` is addressable
+- **THEN** semantic analysis reports that only an exact exported function is addressable
 
 #### Scenario: Reject a suspending or capturing callback
 
 - **WHEN** an effect/suspending function or capturing anonymous callable is used as a C callback
 - **THEN** semantic analysis reports the unsupported callback form at the conversion site
+
+#### Scenario: Reject a stronger expected contract
+
+- **WHEN** a conservatively declared export is passed where argument-local read-only access is required
+- **THEN** analysis rejects the mismatch rather than assigning the expected promises to the export
 
 ### Requirement: Foreign data symbols are immutable native bindings
 
@@ -382,3 +383,84 @@ Within an executable closure, repeated reachable C data imports SHALL share one 
 
 - **WHEN** reachable declarations import one data symbol with different classified C types or collide with a function or exported definition
 - **THEN** planning reports `SEM0192` relating both declarations and emits no artifact
+
+### Requirement: Foreign ellipsis preserves a fixed declaration boundary
+
+An `unsafe extern "C" fn` declaration SHALL admit a final `, ...` after at least one fixed
+parameter. Ellipsis SHALL introduce no named parameter and SHALL remain visible in syntax,
+formatting, declaration presentation, C signature identity and ABI inspection. The same declaration
+SHALL accept zero or more admitted tail arguments after all fixed arguments. Ellipsis on ordinary
+or exported definitions and C function-pointer types SHALL diagnose; missing fixed arguments,
+nonfinal ellipsis and a declaration with no fixed parameters SHALL diagnose.
+
+#### Scenario: One declaration admits zero and additional operands
+
+- **WHEN** selected source declares `unsafe extern "C" fn f(tag: i32, ...) -> i32` and calls `f(0)` and `f(1, 42)` inside unsafe boundaries
+- **THEN** both calls share one genuinely variadic native declaration and preserve their distinct call operands
+
+#### Scenario: Reject a variadic definition or missing fixed operand
+
+- **WHEN** a source function defines a variadic body, or a call omits an ellipsis declaration's fixed parameter
+- **THEN** analysis diagnoses the unsupported declaration or missing argument before native lowering
+
+### Requirement: Integer tails use value-preserving C promotions
+
+Variadic tails SHALL admit only i8/u8/i16/u16/i32/u32/i64/u64/isize/usize values. Tail expressions
+SHALL retain ordinary expression typing without a declared contextual parameter type. On the three
+admitted native targets, signed and unsigned 8/16-bit values SHALL promote to signed i32; 32/64-bit
+and pointer-width integer values SHALL retain their target width and signedness. Fixed pointer and
+scalar parameters SHALL retain their existing admission and contextual typing. Floating-point,
+pointer, reference, aggregate, bool, char and callable tails SHALL diagnose explicitly.
+
+#### Scenario: Promote Darwin mode without changing GNU mode
+
+- **WHEN** selected Darwin source passes a u16 mode and selected GNU source passes a u32 mode to a variadic tail
+- **THEN** the respective calls pass i32 and u32 values under the target's actual C variadic ABI
+
+#### Scenario: Reject unsupported tail categories
+
+- **WHEN** a variadic tail contains a floating-point, pointer, reference, aggregate, bool, char or callable value
+- **THEN** analysis reports the unsupported tail at its source span and emits no native call
+
+### Requirement: Variadic agreement and promoted call shapes remain distinct
+
+C declaration agreement SHALL include variadic status and the fixed parameter boundary. ABI records
+SHALL explicitly encode this status and reject missing or invalid serialized status. Each call SHALL
+separately retain its promoted argument types and conversions without changing the callee's C
+signature. Inactive selected-source variants SHALL contribute no symbols or signature conflicts.
+
+#### Scenario: Reject a fixed versus variadic redeclaration
+
+- **WHEN** two reachable declarations name one native symbol with equal fixed types but different variadic status
+- **THEN** planning reports the conflicting signature and relates both declarations
+
+#### Scenario: Keep multiple tail shapes under one signature
+
+- **WHEN** reachable calls use different admitted tail counts and widths for the same variadic declaration
+- **THEN** ABI inspection reports one symbol signature and call inspection retains each promoted shape
+
+### Requirement: Native variadic lowering preserves the C ABI and foreign contract
+
+Native lowering SHALL emit a true variadic external function type, retain the fixed boundary and
+perform integer promotions before the call. Darwin ARM64 unnamed integer operands SHALL use the
+platform's stack convention; GNU ARM64 and System V x86-64 SHALL use their prescribed register/stack
+conventions. Conservative foreign memory, retention and fatal-unwind behavior SHALL remain in force.
+The compiler SHALL NOT substitute a fixed-signature cast, generated C adapter or libc spelling rule.
+
+#### Scenario: Observe stack and register boundaries with C
+
+- **WHEN** independently compiled C va_arg receivers consume signed/unsigned promoted integers and enough operands to exceed the target's integer argument registers
+- **THEN** debug and optimized native artifacts deliver the exact values under the target ABI and retain the foreign contract
+
+### Requirement: Integer variadic conformance is required on pinned native supplies
+
+Required CI SHALL compile, link, inspect and execute designated C receiver and direct open/openat
+fixtures on Darwin ARM64 and GNU/Linux x86-64 and ARM64 using the recorded SDK/glibc/LLVM/linker
+baselines. Fixtures SHALL distinguish zero/additional tails, promotions, call shapes and target
+placement in debug and optimized modes. Missing tools/supplies or skipped designated cases SHALL
+fail. Unverified LTO SHALL remain rejected. Source wrappers SHALL own flags/mode policy.
+
+#### Scenario: Execute direct platform calls without adapters
+
+- **WHEN** selected Silk calls native open/openat with no creation mode and with its target's integer mode
+- **THEN** the fixture performs the intended file operation through the true variadic declarations without a C call adapter

@@ -9,10 +9,7 @@ the portable FileSystem contract without leaking platform mechanisms into portab
 
 ### Requirement: OS resources use one opaque affine handle representation
 
-The compiler SHALL expose an opaque move-only `OsHandle` representation for open files and
-directories. It MUST NOT be constructible, copyable, inspectable, or storable by ordinary source
-except through sealed `Intrinsic` operations. Every successful open SHALL transfer one explicit
-close obligation to the caller.
+Native filesystem resources SHALL use ordinary affine source representations. Every successful open transfers one close obligation. The compiler SHALL NOT expose or recognize OsHandle, resource constructors or filesystem handle access operations.
 
 #### Scenario: Move an open handle into cleanup
 
@@ -21,42 +18,31 @@ close obligation to the caller.
 
 #### Scenario: Reject copying a handle
 
-- **WHEN** source attempts to copy or duplicate an `OsHandle`
+- **WHEN** source attempts to copy or duplicate an affine native resource
 - **THEN** ownership rejects the operation before emission
 
 ### Requirement: OS intrinsics report low-level outcomes without library values
 
-Unsafe handle-producing open operations SHALL receive exact success and failure `once fn` carriers.
-Success SHALL invoke its carrier with one newly initialized affine `OsHandle`; failure SHALL create no
-handle, write a stable low-level numeric reason plus optional native `u32` code to initialized scalar
-outputs, and invoke its zero-argument failure carrier. Every other fallible OS operation SHALL return
-`bool` and write transferred counts, required capacity, reason, or native code to explicit initialized
-scalar outputs as its contract requires. The compiler MUST NOT construct or recognize `Option`,
-`Path`, `Bytes`, `DirectoryEntry`, `FileError`, or the portable `FileSystem` service. Read and write
-SHALL report transferred byte counts and MAY complete partially.
+Ordinary selected extern calls SHALL return their exact native outcomes. Source SHALL validate counts, capture native errors and construct portable values. The compiler MUST NOT recognize Option, Path, Bytes, DirectoryEntry, FileError or FileSystem by spelling. Read and write can complete partially; source owns completion and translation.
 
 #### Scenario: Report a failed open
 
 - **WHEN** the host refuses a file open
-- **THEN** the intrinsic creates no handle, writes the normalized low-level reason and native code, and invokes the failure carrier without constructing a standard-library error
+- **THEN** source captures the native error before cleanup and returns FileError without creating a resource owner
 
 #### Scenario: Transfer a successful open
 
 - **WHEN** a file or directory open succeeds
-- **THEN** the intrinsic invokes the success carrier exactly once with the new affine handle and transfers one explicit close obligation
+- **THEN** ordinary source creates one affine owner and transfers one close obligation
 
 #### Scenario: Report a partial write
 
 - **WHEN** the host accepts fewer bytes than the supplied slice
-- **THEN** the write intrinsic returns `true` and writes the exact positive byte count so ordinary source can continue or translate a later failure
+- **THEN** ordinary source validates the exact positive byte count and continues or translates a later failure
 
 ### Requirement: Directory iteration is retryable and deterministic at the protocol boundary
 
-Directory-next SHALL return `true` and write `n > 0` for one entry, return `true` and write zero for
-end of directory, and return `false` with normalized reason outputs for failure. When the supplied
-name buffer is too small, it SHALL report the stable buffer-too-small reason and required capacity
-without advancing the iterator. The intrinsic MUST NOT construct an optional carrier, sort entries,
-or construct portable paths.
+Directory-next SHALL distinguish entries, EOF, failure and insufficient capacity in ordinary source. An insufficient name buffer SHALL report required capacity and retain an owned pending entry without another readdir. Source SHALL construct and sort portable results.
 
 #### Scenario: Retry an oversized directory name
 
@@ -66,15 +52,11 @@ or construct portable paths.
 #### Scenario: Reach directory end
 
 - **WHEN** every host entry has been consumed
-- **THEN** directory-next returns `true` with a zero count without fabricating an empty-name entry
+- **THEN** source reports EOF without fabricating an empty-name entry
 
 ### Requirement: OsFileSystem confines every operation beneath its native root
 
-Ordinary canonical source SHALL define `OsFileSystem` with an owned copy of one absolute native root.
-Each portable operation SHALL combine that root with the provider-absolute `Path` through confined
-host traversal. Traversal MUST reject symlinks, `.` or `..` namespace components, NUL, invalid host
-encoding, and any attempt to escape the root. The provider SHALL open the root as part of each
-operation and MUST NOT retain a long-lived root handle.
+OsFileSystem SHALL own a copied absolute native byte root supplied without constructor I/O. Traversal SHALL preserve non-UTF-8 bytes and reject NUL, malformed components, dot, dot-dot and symlinks below the configured root. It SHALL open the root per operation and use descriptor-relative no-follow traversal. The root and its ancestors are trusted configuration; hostile cross-boundary renames and mount changes are outside this confinement guarantee.
 
 #### Scenario: Resolve a portable root path
 
@@ -88,10 +70,7 @@ operation and MUST NOT retain a long-lived root handle.
 
 ### Requirement: OsFileSystem brackets fallible handles explicitly
 
-For every opened file or directory, `OsFileSystem` SHALL attempt consuming close on success, typed
-failure, and other structured exits. If the primary operation fails, a close failure MUST NOT replace
-that primary error. If the primary operation succeeds and close fails, the close failure SHALL
-become the operation result. Ordinary infallible Drop MUST NOT silently perform this fallible close.
+For every acquired resource, source SHALL attempt consuming cleanup on success, typed failure and structured cancellation. Primary failure MUST survive cleanup failure; cleanup failure after otherwise successful work SHALL become the result. Source Drop SHALL provide disarmed exact-once cleanup for structured unwinding. Explicit close MUST NOT retry, including EINTR. Fatal traps carry no cleanup guarantee.
 
 #### Scenario: Preserve a read failure over close failure
 
@@ -105,11 +84,7 @@ become the operation result. Ordinary infallible Drop MUST NOT silently perform 
 
 ### Requirement: OsFileSystem implements whole-file portable semantics
 
-The provider SHALL implement the portable seven-operation service contract using handle-level
-intrinsics. `readFile` SHALL allocate and return complete owned bytes. `writeFile` SHALL create a
-missing file or truncate an existing file and loop over partial writes. `listDirectory` SHALL own
-full child paths and sort results by portable path bytes. Provider failure MAY leave a write
-destination partially changed; no transactional rollback or atomic replacement is required.
+The provider SHALL implement the portable seven-operation service with ordinary source calls. readFile SHALL accumulate complete owned bytes. writeFile SHALL create or truncate only a checked regular file and complete partial writes. listDirectory SHALL own full byte paths and sort by bytes. Failure can leave a write destination changed, without rollback or atomic replacement.
 
 #### Scenario: Read a complete file through partial host reads
 
@@ -128,10 +103,7 @@ destination partially changed; no transactional rollback or atomic replacement i
 
 ### Requirement: OS support is native-only
 
-OS intrinsics SHALL be available to supported native LLVM targets through reachable runtime support.
-They SHALL be unavailable to LLVM-generated WebAssembly. Browser-capable compiler core modules MUST
-NOT import Node or other operating-system
-filesystem APIs merely because `OsFileSystem` source is packaged.
+Native filesystem members SHALL be selected only on the supported native target/libc pairs and absent on Wasm and no-libc profiles. Compiler core modules MUST NOT import host filesystem APIs merely because OsFileSystem source is packaged.
 
 #### Scenario: Keep portable Wasm clean
 
@@ -140,5 +112,23 @@ filesystem APIs merely because `OsFileSystem` source is packaged.
 
 #### Scenario: Reject reachable OsFileSystem on LLVM-generated WebAssembly
 
-- **WHEN** executable closure reaches an OS intrinsic through `OsFileSystem` for LLVM-generated WebAssembly
-- **THEN** generic target-availability validation reports the intrinsic as unavailable before emission
+- **WHEN** source requests an OsFileSystem member for LLVM-generated WebAssembly
+- **THEN** ordinary selected-source availability reports the member as unavailable before emission
+
+### Requirement: File-open metadata outcomes preserve their cause
+
+After successful metadata inspection identifies a nonregular object, file-open SHALL report
+WrongType with no native error, regardless of residual native error state. Failed metadata
+inspection SHALL report its actual native error captured before cleanup. Both rejected-open
+outcomes SHALL release the acquired descriptor exactly once and create no handle; cleanup failure
+MUST NOT replace the primary outcome.
+
+#### Scenario: Nonregular metadata with stale native error
+
+- **WHEN** metadata inspection succeeds with a nonregular mode while a previous native error remains set
+- **THEN** file-open reports WrongType without a native error and closes the acquired descriptor exactly once
+
+#### Scenario: Metadata failure followed by cleanup failure
+
+- **WHEN** metadata inspection fails and closing the acquired descriptor changes the native error state
+- **THEN** file-open reports the metadata call's original native error and attempts no second close
