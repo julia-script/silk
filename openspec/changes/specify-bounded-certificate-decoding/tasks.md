@@ -3,9 +3,12 @@
 - [x] 1.1 Revalidate the historical baseline and absence of a competing decoder owner; record bounded graph/source/manifest/reference/OpenSpec evidence in the design and Linear admission.
 - [x] 1.2 Specify API ownership, complete field retention, encoding tables, finite budgets and failure precedence; verify every JUL-167 acceptance topic is represented in design and delta scenarios.
 - [x] 1.3 Pin authoritative fixture bytes, mutation hashes and expected outcomes; verify manifest hashes independently and complete design review.
-- [ ] 1.4 Create a separately estimated implementation intake, strictly validate OpenSpec, run repository checks and obtain independent test-economics approval; publish a confirmed draft PR with truthful verification evidence.
+- [x] 1.4 Create a separately estimated implementation intake, strictly validate OpenSpec, run repository checks and obtain independent test-economics approval; publish a confirmed draft PR with truthful verification evidence.
 
-## 2. Decoder implementation follow-up — not delivered by JUL-167
+Design PR #405 merged. Its verification report records the local LSP timeout failures; marking
+design delivery complete does not claim those checks passed.
+
+## 2. Decoder implementation follow-up — JUL-182
 
 - [ ] 2.1 Implement private bounded DER cursor and schema traversal in ordinary Silk; verify canonical tag/length/value/default/time/SET rules against manifest cases at the cheapest structural tier.
 - [ ] 2.2 Implement Certificate ownership and all declared views; verify signed TBS/SPKI/signature/algorithm/extension byte identity and input/output lifetime separation with shared analysis snapshots and native corpus evidence.

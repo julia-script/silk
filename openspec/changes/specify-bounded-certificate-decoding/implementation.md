@@ -1,6 +1,7 @@
 # Implementation follow-up
 
-Status: planned, separately estimated at **8 points**. JUL-167 delivers the contract only.
+Status: implementation in progress under JUL-182, separately estimated at **8 points**.
+JUL-167 delivered the contract in merged PR #405; Julia subsequently authorized this implementation.
 The follow-up owns the complete portable decoder: private DER/schema traversal, strict PEM,
 owned Certificate/CertificateBundle, all limits/errors/accessors, manifest fixtures, ordinary
 allocator cleanup and generated documentation. Tasks 2.1–2.6 give the implementation order and
@@ -24,4 +25,4 @@ interpretation (including SAN matching), reference identities, root acquisition,
 private-key formats, encoding, and generic ASN.1 tooling. JUL-166/168/169/170 retain these seams.
 
 Implementation intake: [JUL-182](https://linear.app/juliaortiz/issue/JUL-182), **8 points**,
-Triage. This separately estimated intake does not imply Julia has queued implementation.
+In Progress. This implementation is a separate pull request from the merged design.

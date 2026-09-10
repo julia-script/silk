@@ -22,6 +22,7 @@ import { hmacHkdfAcceptanceSource } from './hmacHkdfAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
+import { certificateAcceptanceSource } from './certificateAcceptance.js'
 import {
   borrowedBox,
   borrowedStream,
@@ -6192,6 +6193,11 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 ]
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
+  {
+    name: 'certificate-bounded-decoding',
+    source: certificateAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
   {
     name: 'uri-rfc3986',
     source: uriAcceptanceSource,

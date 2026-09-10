@@ -897,6 +897,44 @@ validation, limits, and terminal semantics.
 [HTTP window sizing](https://www.rfc-editor.org/rfc/rfc9659.html),
 [canonical source](../../../../packages/compiler/stdlib/silk/zstd.silk).
 
+## Certificate decoding
+
+`silk.certificate { Certificate, DecodeLimits }` decodes one DER certificate with `decodeDer`
+or one strict PEM certificate with `decodePem`. `silk.certificate_bundle { CertificateBundle }`
+decodes one or more PEM certificates atomically. These are ordinary Silk actors with an explicit
+`Allocator` requirement. Inputs are borrowed for the Effect's lifetime; successful outputs own
+independent DER storage. Views borrow that storage and cannot outlive their certificate or bundle.
+
+The decoder preserves the original signed TBSCertificate encoding, names, serial, validity, complete
+SPKI, both signature AlgorithmIdentifiers and their parameters, signature bits and unused-bit count,
+unique identifiers, and every extension's OID, critical bit and raw value. Unknown algorithms,
+unknown critical extensions, duplicate extensions and duplicate bundle entries are retained.
+Certificate versions 1, 2 and 3 are accepted when their fields obey the selected schema.
+
+DER parsing checks canonical tag and length encoding, primitive values, default omission, RDN SET
+ordering, and calendar-valid UTC times. Unknown extension values, public-key bits and signature bits
+remain opaque. Algorithm parameters and name attribute values receive bounded ASN.1 framing checks;
+the decoder does not infer their algorithm-specific schemas.
+
+PEM accepts only matching `CERTIFICATE` markers, canonical base64 and SP, HT, CR and LF whitespace.
+LF, CRLF and CR newlines may be mixed. Explanatory text, unrelated labels, headers, noncanonical
+padding, mismatched markers and trailing data after a single certificate fail. A malformed later
+bundle block releases earlier results; no partial bundle escapes.
+
+`DecodeLimits.defaults()` permits 16 MiB of input, 1 MiB per certificate, 8 MiB of total decoded DER,
+1024 certificates, 256 KiB per field, 256 extensions per certificate, depth 32 and 65,536 ASN.1 nodes
+per certificate. Limits are inclusive and zero means zero. Errors distinguish `Malformed`,
+`Unsupported` and `ResourceLimit`, with a reason, certificate index and input or decoded-DER offset.
+Allocator refusal uses the separate `OutOfMemoryError` Effect channel.
+
+Decoding does not verify signatures, establish trust, build or validate paths, match service
+identities, or acquire roots. A successful parse is not a certificate-validity decision. Generic
+public ASN.1 tooling is outside this API.
+
+**Evidence:** [certificate actor](../../../../packages/compiler/stdlib/silk/certificate.silk),
+[bundle actor](../../../../packages/compiler/stdlib/silk/certificate_bundle.silk),
+[decoding contract and fixture provenance](../../../../openspec/changes/specify-bounded-certificate-decoding/design.md).
+
 ## Deferred directions
 
 The following are deliberately outside the first stable model:
