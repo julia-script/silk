@@ -1,4 +1,7 @@
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { assert, it } from '@effect/vitest'
 import * as Inspection from '../src/Inspection.js'
 import {
@@ -26,19 +29,34 @@ interface ViewResult {
 
 it('projects inspector views over real stdio', { timeout: stdioTestTimeout }, async () => {
   assert.isTrue(existsSync(binPath), 'dist/bin.js missing; run pnpm build first')
-  const client = connect()
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'silk-inspector-e2e-')))
+  // Inspector realization runs the compiler; allow the stdio scenario's bounded request budget.
+  const server = join(root, 'server.mjs')
+  writeFileSync(
+    server,
+    `import * as Server from ${JSON.stringify(new URL('../dist/Server.js', import.meta.url).href)}
+Server.start({ policy: { inspectionDeadline: 60_000 } })
+`,
+  )
+  const client = connect(server)
   try {
+    mkdirSync(join(root, 'src'))
+    const uri = pathToFileURL(join(root, 'src', 'Main.silk')).href
+    const text = `pub fn identity(value: i32) -> i32 { return value }
+pub fn main() -> i32 { return identity(42) }`
+    writeFileSync(
+      join(root, 'silk.toml'),
+      '[package]\nname = "inspector-e2e"\nversion = "0.1.0"\nroot = "src/Main.silk"\n',
+    )
+    writeFileSync(join(root, 'src', 'Main.silk'), text)
     client.send({
       id: 1,
       method: 'initialize',
-      params: { processId: null, rootUri: null, capabilities: {} },
+      params: { processId: null, rootUri: pathToFileURL(root).href, capabilities: {} },
     })
     await client.waitFor((message) => response(message, 1))
     client.send({ method: 'initialized', params: {} })
 
-    const uri = 'file:///silk-inspector-e2e/main.silk'
-    const text = `pub fn identity(value: i32) -> i32 { return value }
-pub fn main() -> i32 { return identity(42) }`
     didOpen(client, uri, text)
     await client.waitFor((message) => pulledDiagnostics(message, uri))
 
@@ -105,6 +123,10 @@ pub fn main() -> i32 { return identity(42) }`
     const unopened = await client.waitFor((message) => failure(message, 7))
     assert.include(unopened.message, 'never-opened')
   } finally {
-    await client.close()
+    try {
+      await client.close()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   }
 })

@@ -18,6 +18,7 @@ import {
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
 import { shaAcceptanceSource } from './shaAcceptance.js'
+import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import {
   borrowedBox,
@@ -7775,6 +7776,11 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     nativeSource: replaceDropProgram,
     nativeStdout: '1243',
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'bounded-zstd',
+    source: zstdAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'fixed-output-sha',
