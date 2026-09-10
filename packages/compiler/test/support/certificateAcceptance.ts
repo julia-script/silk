@@ -719,7 +719,7 @@ effect fn malformedAt(bytes: &[u8], reason: DecodeReason, offset: usize) -> bool
   let result = run Certificate.decodeDer(bytes, DecodeLimits.defaults())
   return match move result {
     Result<Certificate, DecodeError>.Success { value } => false
-    Result<Certificate, DecodeError>.Failure { error } => error.kind == DecodeClass.Malformed && error.reason == reason && error.offsetSpace == DecodeOffsetSpace.Der && error.offset == offset && error.certificateIndex == 0
+    Result<Certificate, DecodeError>.Failure { error } => error.kind == DecodeClass.Malformed && error.reason == reason && error.offsetSpace == DecodeOffsetSpace.Input && error.offset == offset && error.certificateIndex == 0
   }
 }
 fn inputLimitError(error: DecodeError) -> bool {
