@@ -146,7 +146,7 @@ jobs:
           --reporter=default --reporter=json
           --outputFile.json=compiler-shard-${{ matrix.shard }}.json
         env:
-          SILK_VERIFY_CORPUS_LIMIT: ${{ github.event_name == 'pull_request' && '1' || '' }}
+          SILK_VERIFY_CORPUS_LIMIT: ${{ github.event_name == 'pull_request' && '2' || '' }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
