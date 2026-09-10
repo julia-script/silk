@@ -704,6 +704,48 @@ source edits.
 [editor intelligence tests](../../../../packages/compiler/test/EditorIntelligence.test.ts),
 [canonical source requirements](../../../../openspec/specs/bootstrap-silk-stdlib/spec.md).
 
+## Zstandard decoding
+
+`silk.zstd { Zstd }` provides bounded RFC 8878 decoding in ordinary Silk source. It accepts all
+non-dictionary compressed-block modes, raw and RLE blocks, concatenated frames, and skippable
+frames. Nonzero dictionary IDs fail explicitly. The decoder validates frame content sizes and
+the low 32 bits of seed-zero XXH64 whenever a frame carries a checksum.
+
+`Zstd.make` owns exact history and workspace allocations through the ordinary `Allocator` service.
+Dropping the decoder releases them. `Zstd.step` allocates nothing, borrows input and output for
+only that call, and returns exact consumed and written counts. The caller retains the unconsumed
+input suffix and reads only the written output prefix.
+
+`NeedInput` means the supplied input is exhausted. `NeedOutput` means pending decoded bytes need
+more destination space; retry with a nonempty output slice. The first call with final input fixes
+the absolute input end. Subsequent calls must provide the complete remaining suffix with final
+input still set. `Finished` means that this end follows complete frame and trailer validation;
+an ordinary frame boundary alone does not finish a concatenated stream. Empty final input with
+no frame is truncated input. Empty final calls after `Finished` are idempotent; additional input
+is an invalid-state failure.
+
+Errors carry a typed reason, input position, and exact progress made before the failure. Failure
+is sticky: subsequent calls report the original reason and position with zero progress. Output
+remains provisional until `Finished`, because a later checksum or truncation error can invalidate
+bytes already returned to the caller.
+
+`ZstdLimits.make` defaults to 64 MiB consumed input, 256 MiB decoded output, 1024 total frames,
+8 MiB skipped payload, an 8 MiB maximum window, and 1 MiB non-window workspace. Input, output,
+frame, and skipped-byte counters apply cumulatively across all concatenated frames. The window
+and workspace limits bound live storage, independently of stream length. Workspace includes three
+128 KiB staging buffers, decoder state, and a conservative fixed allowance for entropy tables and
+transient scratch. The constructor checks these limits before allocating. A frame advertising a
+window above the configured capacity fails before its blocks are decoded. Larger configured
+windows are permitted within representable storage limits.
+
+The cataloged `silk/support/zstd_block` and `silk/support/zstd_checksum` modules expose low-level
+support actors under ordinary visibility rules. Applications should use `Zstd` for frame
+validation, limits, and terminal semantics.
+
+**Evidence:** [Zstandard format](https://www.rfc-editor.org/rfc/rfc8878.html),
+[HTTP window sizing](https://www.rfc-editor.org/rfc/rfc9659.html),
+[canonical source](../../../../packages/compiler/stdlib/silk/zstd.silk).
+
 ## Deferred directions
 
 The following are deliberately outside the first stable model:
