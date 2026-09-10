@@ -12,5 +12,7 @@
 ## 3. Verification and delivery
 
 - [x] 3.1 Run typecheck, format:check, lint, test, check and release:candidate in repository order; resolve failures and record exact evidence.
-- [ ] 3.2 Complete independent implementation review and separate mandatory test-economics review with equivalent base/head timings; resolve findings and obtain approval for the final committed diff.
-- [ ] 3.3 Commit and push the issue-scoped change, confirm a draft PR, and update JUL-163 to In Review with exact PR-head baseline and verification evidence.
+- [x] 3.2 Complete independent implementation review and separate mandatory test-economics review with equivalent base/head timings; resolve findings and obtain approval for the final committed diff.
+- [x] 3.3 Commit and push the issue-scoped change, confirm a draft PR, and update JUL-163 to In Review with exact PR-head baseline and verification evidence.
+
+Delivery: [draft PR #398](https://github.com/julia-script/silk/pull/398); JUL-163 is In Review. Verification evidence and independent review results are recorded in the PR and Linear handoff.
