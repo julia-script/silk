@@ -30,6 +30,17 @@ const nextModule = (): string => {
   return `snippet/${ordinal}`
 }
 
+/** Detail published whenever editable Silk source changes. */
+export interface SilkChangeDetail {
+  readonly source: string
+}
+
+/** Detail published whenever semantic analysis catches up with the visible source. */
+export interface SilkAnalysisDetail {
+  readonly diagnostics: ReadonlyArray<Editor.Diagnostic>
+  readonly source: string
+}
+
 /**
  * Shadow-scoped chrome and the default palette for both color schemes. Every value is a
  * `--silk-snippet-*` custom property, so a host page can retheme snippets with one rule on the
@@ -125,6 +136,17 @@ export class SilkSnippetElement extends HTMLElement {
     return this.#handle?.value() ?? this.#source ?? ''
   }
 
+  set source(source: string) {
+    this.#source = source
+    this.#handle?.setValue(source)
+    if (this.#handle !== undefined && this.#semantic()) this.#compile()
+  }
+
+  /** Diagnostics from the latest analysis of the current source. */
+  get diagnostics(): ReadonlyArray<Editor.Diagnostic> {
+    return this.#handle?.diagnostics() ?? []
+  }
+
   #features(): Editor.Features {
     return {
       diagnostics: this.hasAttribute('diagnostics'),
@@ -157,6 +179,34 @@ export class SilkSnippetElement extends HTMLElement {
       }).pipe(Effect.provide(SourceResolver.empty)),
     )
     handle.setSession(Editor.session(this.#module, bytes, snapshot))
+    this.dispatchEvent(
+      new CustomEvent<SilkAnalysisDetail>('silk-analysis', {
+        bubbles: true,
+        composed: true,
+        detail: { diagnostics: handle.diagnostics(), source: handle.value() },
+      }),
+    )
+  }
+
+  /** Immediately refreshes semantic presentation and returns its diagnostics. */
+  analyze(): ReadonlyArray<Editor.Diagnostic> {
+    if (this.#handle === undefined || !this.#semantic()) return []
+    this.#compile()
+    return this.diagnostics
+  }
+
+  /** Formats the current source through the language server. */
+  format(): boolean {
+    const handle = this.#handle
+    if (handle === undefined) return false
+    this.#compile()
+    const formatted = handle.format()
+    if (!formatted) return false
+    this.#source = handle.value()
+    if (this.#recompileFiber !== undefined) Effect.runFork(Fiber.interrupt(this.#recompileFiber))
+    this.#recompileFiber = undefined
+    this.#compile()
+    return true
   }
 
   #scheduleRecompile(): void {
@@ -207,6 +257,13 @@ export class SilkSnippetElement extends HTMLElement {
       features: this.#features(),
       onChange: (doc) => {
         this.#source = doc
+        this.dispatchEvent(
+          new CustomEvent<SilkChangeDetail>('silk-change', {
+            bubbles: true,
+            composed: true,
+            detail: { source: doc },
+          }),
+        )
         this.#scheduleRecompile()
       },
     })

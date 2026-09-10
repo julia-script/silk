@@ -29,6 +29,7 @@ export default function Home() {
       <header className="bar">
         <span className="title">silk</span>
         <span className="spacer" />
+        <Link href="/share">share</Link>
         <Link href="/docs/language">docs</Link>
       </header>
       {/* Repo-authored content, not user-supplied. */}

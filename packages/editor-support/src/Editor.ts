@@ -49,10 +49,19 @@ export interface Session {
   readonly source: string
 }
 
+/** One editor-ready diagnostic, projected into UTF-16 offsets for the visible document. */
+export interface Diagnostic {
+  readonly from: number
+  readonly to: number
+  readonly message: string
+}
+
 /** The imperative surface a host (custom element or React wrapper) drives the editor through. */
 export interface Handle {
   value(): string
   setValue(doc: string): void
+  /** Diagnostics from the current, source-matched analysis session. */
+  diagnostics(): ReadonlyArray<Diagnostic>
   /** Installs the session every enabled semantic feature reads; `undefined` clears semantics. */
   setSession(session: Session | undefined): void
   /** Draws the shared span highlight over one byte range; `null` clears it. */
@@ -262,11 +271,16 @@ const theme = EditorView.theme({
 export const mount = (options: Options): Handle => {
   const features = options.features ?? {}
   let current: Session | undefined
+  let currentDiagnostics: ReadonlyArray<Diagnostic> = []
 
   const applyDiagnostics = (view: EditorView): void => {
-    if (features.diagnostics !== true) return
+    if (features.diagnostics !== true) {
+      currentDiagnostics = []
+      return
+    }
     const session_ = current
     if (session_ === undefined || view.state.doc.toString() !== session_.source) {
+      currentDiagnostics = []
       view.dispatch(setDiagnostics(view.state, []))
       return
     }
@@ -275,17 +289,22 @@ export const mount = (options: Options): Handle => {
       session_.snapshot,
       () => undefined,
     )
+    currentDiagnostics = diagnostics.map((diagnostic) => ({
+      from: lspOffset(view.state, diagnostic.range.start),
+      to: lspOffset(view.state, diagnostic.range.end),
+      message:
+        typeof diagnostic.code === 'string'
+          ? `${diagnostic.code}: ${diagnostic.message}`
+          : diagnostic.message,
+    }))
     view.dispatch(
       setDiagnostics(
         view.state,
-        diagnostics.map((diagnostic) => ({
-          from: lspOffset(view.state, diagnostic.range.start),
-          to: lspOffset(view.state, diagnostic.range.end),
+        currentDiagnostics.map((diagnostic) => ({
+          from: diagnostic.from,
+          to: diagnostic.to,
           severity: 'error' as const,
-          message:
-            typeof diagnostic.code === 'string'
-              ? `${diagnostic.code}: ${diagnostic.message}`
-              : diagnostic.message,
+          message: diagnostic.message,
         })),
       ),
     )
@@ -417,6 +436,7 @@ export const mount = (options: Options): Handle => {
         annotations: External.of(true),
       })
     },
+    diagnostics: () => currentDiagnostics,
     setSession: (session_) => {
       current = session_
       applyDiagnostics(view)
