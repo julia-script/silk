@@ -32,22 +32,22 @@
 //! }
 //! ```
 
-import silk.bool as bool
-import silk.f32 as f32
-import silk.f64 as f64
+import silk.bool
+import silk.f32
+import silk.f64
 import silk.format { Format, ParseError }
-import silk.i16 as i16
-import silk.i32 as i32
-import silk.i64 as i64
-import silk.i8 as i8
+import silk.i16
+import silk.i32
+import silk.i64
+import silk.i8
 import silk.option { Option }
 import silk.result { Result }
-import silk.target as Target
-import silk.u16 as u16
-import silk.u32 as u32
-import silk.u64 as u64
-import silk.u8 as u8
-import silk.usize as usize
+import silk.target { pointerBits, isizeMax, isizeMin }
+import silk.u16
+import silk.u32
+import silk.u64
+import silk.u8
+import silk.usize
 
 /// The largest `isize` value for the compilation target.
 ///
@@ -55,17 +55,17 @@ import silk.usize as usize
 ///
 /// This is 2147483647 on a 32-bit target and 9223372036854775807 on a 64-bit target. Checked
 /// arithmetic rejects results above it.
-pub const MAX: isize = Target.isizeMax
+pub const MAX: isize = isizeMax
 
 /// The smallest `isize` value for the compilation target.
 ///
 /// # Details
 ///
 /// This is -2147483648 on a 32-bit target and -9223372036854775808 on a 64-bit target.
-pub const MIN: isize = Target.isizeMin
+pub const MIN: isize = isizeMin
 
 /// The width of `isize` in bits, which is the compilation target's pointer width.
-pub const BITS: u32 = Target.pointerBits
+pub const BITS: u32 = pointerBits
 
 /// Returns the arithmetic negation of `value` and traps when `value` is [`MIN`]. Use
 /// this function when that boundary is a program error.

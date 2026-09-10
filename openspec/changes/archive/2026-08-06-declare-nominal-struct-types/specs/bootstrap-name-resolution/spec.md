@@ -21,7 +21,7 @@ declaration kind, or reinterpret a function as a type.
 
 #### Scenario: Resolve a qualified nominal type
 
-- **WHEN** a module imports `syntax.Tree as Tree` and a field names `Tree.Node`
+- **WHEN** a module imports `syntax.Tree` and a field names `Tree.Node`
 - **THEN** the type lookup resolves the public struct through the namespace alias
 
 #### Scenario: Refuse a function in type position

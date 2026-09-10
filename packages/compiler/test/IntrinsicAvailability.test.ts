@@ -357,9 +357,9 @@ const twoModules = (dependencyAbs: string) =>
     configuration: AnalysisFixture.configuration('availability/foreign-root'),
     root: SourceFile.make(
       'availability/foreign-root',
-      encoder.encode(`import foreign_dep as Dep
+      encoder.encode(`import foreign_dep
 unsafe extern "C" fn abs(value: i32) -> i32
-pub fn main() -> i32 { return unsafe abs(-2) + Dep.viaDep() }`),
+pub fn main() -> i32 { return unsafe abs(-2) + foreign_dep.viaDep() }`),
     ),
   }).pipe(
     Effect.provide(
@@ -475,12 +475,12 @@ it.effect('seeds native discovery with an uncalled export and records it on MIR'
   }),
 )
 
-const exportModules = (root: string, dependency: string, main = 'Dep.viaDep()') =>
+const exportModules = (root: string, dependency: string, main = 'export_dep.viaDep()') =>
   Analysis.makeRealized({
     configuration: AnalysisFixture.configuration('availability/export-root'),
     root: SourceFile.make(
       'availability/export-root',
-      encoder.encode(`import export_dep as Dep
+      encoder.encode(`import export_dep
 ${root}
 pub fn main() -> i32 { return ${main} }`),
     ),
@@ -528,7 +528,7 @@ it.effect('rejects an export whose symbol a reachable import claims', () =>
     const self = yield* exportModules(
       'unsafe extern "C" fn abs(value: i32) -> i32',
       'export "C" fn abs(value: i32) -> i32 { return value }',
-      'unsafe abs(-1) + Dep.viaDep()',
+      'unsafe abs(-1) + export_dep.viaDep()',
     )
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(yield* planningFailure(self), [
@@ -1059,7 +1059,7 @@ it.effect('compiles portable stream replacements on Wasm without foreign stream 
       encoder.encode(`import silk.writer { Writer, WriterError }
 import silk.standard_input { StandardInput, StreamReadError, ReadOutcome }
 import silk.effect { Effect }
-import silk.u8 as u8
+import silk.u8
 struct Sink {}
 impl Writer for Sink {
   effect fn writeAll(self: &mut Self, bytes: &[u8]) -> () ! WriterError ? &mut Writer { return () }

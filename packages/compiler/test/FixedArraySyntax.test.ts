@@ -126,8 +126,8 @@ it.effect('resolves a namespace-qualified array element to canonical identity', 
     const root = SourceFile.make(
       'app/Main',
       ascii(
-        `import model.Token as Model { Token }
-pub fn keep(values: [Model.Token; 8]) -> [Model.Token; 8] { return values }
+        `import model.Token
+pub fn keep(values: [Token.Token; 8]) -> [Token.Token; 8] { return values }
 pub fn main() -> i32 { return 0 }`,
       ),
     )

@@ -530,9 +530,9 @@ local spelling; the associated items follow the canonical declaration.
 A namespace binding exposes only the module's root declarations:
 
 ```silk,ignore
-import model.user_profile as UserProfileModule
+import model.user_profile
 
-let profile = UserProfileModule.make(42)
+let profile = user_profile.make(42)
 ```
 
 `make` is a member of `UserProfile`, not a root declaration, so the namespace form reports an
@@ -541,7 +541,7 @@ applies to a root type reached through a nominal qualifier: `Format.ParseError` 
 when `ParseError` is a root struct of `silk/format`; select it directly with
 `import silk.format { Format, ParseError }`.
 
-An inherent member is never selected on its own. `import silk.option { Option }` reports `SEM0197`
+An inherent member is never selected on its own. `import silk.option { map }` reports `SEM0197`
 because `Option.map` is a member of `Option`; import the owner and qualify the member.
 
 **Boundary:** An inherent member keeps the visibility of its declaration: a member declared without

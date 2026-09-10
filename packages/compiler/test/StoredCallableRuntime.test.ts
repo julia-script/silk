@@ -27,21 +27,21 @@ pub fn main() -> i32 {
   return parser.parse(40)
 }`
 
-const copiedCapture = `import silk.i32 as i32
+const copiedCapture = `import silk.i32
 struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
 pub fn main() -> i32 {
   let parser = Parser { parse: i32.add(2) }
   return parser.parse(40)
 }`
 
-const sharedReuse = `import silk.i32 as i32
+const sharedReuse = `import silk.i32
 struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
 pub fn main() -> i32 {
   let parser = Parser { parse: i32.add(1) }
   return parser.parse(20) + parser.parse(20)
 }`
 
-const nested = `import silk.i32 as i32
+const nested = `import silk.i32
 struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
 struct Boxed<F: fn<'static>(i32) -> i32> { inner: Parser<F> }
 fn box<F: fn<'static>(i32) -> i32>(inner: Parser<F>) -> Boxed<F> {
@@ -103,7 +103,7 @@ pub fn main() -> i32 {
   return apply<i32>(Token<i32> { value: 1 }, 20) + apply<bool>(Token<bool> { value: true }, 22)
 }`
 
-const equalShapeSpecializations = `import silk.i32 as i32
+const equalShapeSpecializations = `import silk.i32
 struct Holder<F: fn<'static>(i32) -> i32> { step: F }
 fn apply<T>(marker: T, value: i32) -> i32 {
   let holder = Holder { step: i32.add(1) }

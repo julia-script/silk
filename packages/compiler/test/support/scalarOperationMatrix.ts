@@ -81,11 +81,11 @@ export const integerOperationMatrix = (() => {
     scalar.operations.map((operation) => ({ scalar, operation })),
   )
   const imports = Scalar.integers()
-    .map((scalar) => `import silk.${scalar.spelling} as ${scalar.spelling}`)
+    .map((scalar) => `import silk.${scalar.spelling}`)
     .join('\n')
   return `${imports}
-import silk.f32 as f32
-import silk.f64 as f64
+import silk.f32
+import silk.f64
 import silk.option { Option }
 ${cases.map(({ scalar, operation }, ordinal) => integerCase(scalar, operation, ordinal)).join('\n')}
 fn verify(value: i32) -> () { if value != 42 { let boom = 1 / 0 } }
@@ -159,7 +159,7 @@ export const floatOperationMatrix = (() => {
     return `fn floatCase${ordinal}() -> i32 { return ${target?.spelling ?? scalar.spelling}.toI32(${invocation}) }`
   })
   const imports = [...Scalar.floats(), ...Scalar.integers()]
-    .map((scalar) => `import silk.${scalar.spelling} as ${scalar.spelling}`)
+    .map((scalar) => `import silk.${scalar.spelling}`)
     .join('\n')
   return `${imports}
 ${functions.join('\n')}

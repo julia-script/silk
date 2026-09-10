@@ -17,11 +17,21 @@ Every unsafe caller must prove the selected syscall's pointer, lifetime and reso
 
 Import as `RawLinux` with `import silk.raw_linux { RawLinux }`.
 
-Public declarations: 17.
+Public declarations: 6.
 
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a73797363616c6c30"></a>
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e7578"></a>
 
-## `syscall0`
+## `RawLinux`
+
+```silk
+pub struct RawLinux
+```
+
+The scope for raw Linux kernel operations on the selected target.
+
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e73797363616c6c30"></a>
+
+### Associated function `RawLinux.syscall0`
 
 ```silk
 pub unsafe fn syscall0(number: usize) -> usize
@@ -29,14 +39,14 @@ pub unsafe fn syscall0(number: usize) -> usize
 
 Issues a Linux syscall with 0 arguments and returns its raw result.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove the syscall's memory, lifetime and resource obligations.
 Kernel errors remain encoded in the result; no libc error state is read.
 
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a73797363616c6c31"></a>
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e73797363616c6c31"></a>
 
-## `syscall1`
+### Associated function `RawLinux.syscall1`
 
 ```silk
 pub unsafe fn syscall1(number: usize, a1: usize) -> usize
@@ -44,14 +54,14 @@ pub unsafe fn syscall1(number: usize, a1: usize) -> usize
 
 Issues a Linux syscall with 1 argument and returns its raw result.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove the syscall's memory, lifetime and resource obligations.
 Kernel errors remain encoded in the result; no libc error state is read.
 
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a73797363616c6c32"></a>
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e73797363616c6c32"></a>
 
-## `syscall2`
+### Associated function `RawLinux.syscall2`
 
 ```silk
 pub unsafe fn syscall2(number: usize, a1: usize, a2: usize) -> usize
@@ -59,14 +69,14 @@ pub unsafe fn syscall2(number: usize, a1: usize, a2: usize) -> usize
 
 Issues a Linux syscall with 2 arguments and returns its raw result.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove the syscall's memory, lifetime and resource obligations.
 Kernel errors remain encoded in the result; no libc error state is read.
 
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a73797363616c6c33"></a>
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e73797363616c6c33"></a>
 
-## `syscall3`
+### Associated function `RawLinux.syscall3`
 
 ```silk
 pub unsafe fn syscall3(number: usize, a1: usize, a2: usize, a3: usize) -> usize
@@ -74,14 +84,14 @@ pub unsafe fn syscall3(number: usize, a1: usize, a2: usize, a3: usize) -> usize
 
 Issues a Linux syscall with 3 arguments and returns its raw result.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove the syscall's memory, lifetime and resource obligations.
 Kernel errors remain encoded in the result; no libc error state is read.
 
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a73797363616c6c34"></a>
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e73797363616c6c34"></a>
 
-## `syscall4`
+### Associated function `RawLinux.syscall4`
 
 ```silk
 pub unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> usize
@@ -89,14 +99,14 @@ pub unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize
 
 Issues a Linux syscall with 4 arguments and returns its raw result.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove the syscall's memory, lifetime and resource obligations.
 Kernel errors remain encoded in the result; no libc error state is read.
 
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a73797363616c6c35"></a>
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e73797363616c6c35"></a>
 
-## `syscall5`
+### Associated function `RawLinux.syscall5`
 
 ```silk
 pub unsafe fn syscall5(number: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> usize
@@ -104,14 +114,14 @@ pub unsafe fn syscall5(number: usize, a1: usize, a2: usize, a3: usize, a4: usize
 
 Issues a Linux syscall with 5 arguments and returns its raw result.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove the syscall's memory, lifetime and resource obligations.
 Kernel errors remain encoded in the result; no libc error state is read.
 
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a73797363616c6c36"></a>
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e73797363616c6c36"></a>
 
-## `syscall6`
+### Associated function `RawLinux.syscall6`
 
 ```silk
 pub unsafe fn syscall6(number: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize, a6: usize) -> usize
@@ -119,14 +129,14 @@ pub unsafe fn syscall6(number: usize, a1: usize, a2: usize, a3: usize, a4: usize
 
 Issues a Linux syscall with 6 arguments and returns its raw result.
 
-### Gotchas
+#### Gotchas
 
 The caller must prove the syscall's memory, lifetime and resource obligations.
 Kernel errors remain encoded in the result; no libc error state is read.
 
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a73797363616c6c4e6f52657475726e"></a>
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e73797363616c6c4e6f52657475726e"></a>
 
-## `syscallNoReturn`
+### Associated function `RawLinux.syscallNoReturn`
 
 ```silk
 pub unsafe fn syscallNoReturn(number: usize, argument: usize) -> ()
@@ -134,13 +144,13 @@ pub unsafe fn syscallNoReturn(number: usize, argument: usize) -> ()
 
 Issues a terminal Linux syscall with one argument.
 
-### Gotchas
+#### Gotchas
 
 The caller must select a syscall that cannot return. No structured cleanup follows this call.
 
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a706f696e746572"></a>
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e706f696e746572"></a>
 
-## `pointer`
+### Associated function `RawLinux.pointer`
 
 ```silk
 pub unsafe fn pointer(address: usize) -> ?[*]mut u8
@@ -148,9 +158,49 @@ pub unsafe fn pointer(address: usize) -> ?[*]mut u8
 
 Forms a nullable byte pointer from a kernel-provided address without reading memory.
 
-### Gotchas
+#### Gotchas
 
 The address grants no ownership or readable range. Prove validity before every access.
+
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e6572726f72"></a>
+
+### Associated function `RawLinux.error`
+
+```silk
+pub fn error(result: usize) -> usize
+```
+
+Returns zero for success or the positive kernel error number.
+
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e72656164"></a>
+
+### Associated function `RawLinux.read`
+
+```silk
+pub fn read<'life0>(descriptor: usize, buffer: &'life0 mut [u8]) -> usize
+```
+
+Reads one initialized prefix from a borrowed Linux descriptor.
+
+#### Details
+
+Returns the raw kernel result: a byte count, zero at EOF, or an encoded error. Interrupted reads
+are returned to the caller. Bytes beyond a successful prefix retain their previous values.
+
+<a id="declaration-73696c6b2f7261775f6c696e75783a3a5261774c696e75782e7772697465"></a>
+
+### Associated function `RawLinux.write`
+
+```silk
+pub fn write<'life0>(descriptor: usize, buffer: &'life0 [u8]) -> usize
+```
+
+Writes one prefix to a borrowed Linux descriptor and returns the raw kernel result.
+
+#### Details
+
+A positive count can be shorter than the input. Interrupted writes and encoded errors remain
+visible to the caller. The operation does not close the descriptor or retain the input.
 
 <a id="declaration-73696c6b2f7261775f6c696e75783a3a52454144"></a>
 
@@ -201,43 +251,3 @@ pub const EXIT_GROUP: usize
 ```
 
 The selected Linux exit\_group syscall number.
-
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a6572726f72"></a>
-
-## `error`
-
-```silk
-pub fn error(result: usize) -> usize
-```
-
-Returns zero for success or the positive kernel error number.
-
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a72656164"></a>
-
-## `read`
-
-```silk
-pub fn read<'life0>(descriptor: usize, buffer: &'life0 mut [u8]) -> usize
-```
-
-Reads one initialized prefix from a borrowed Linux descriptor.
-
-### Details
-
-Returns the raw kernel result: a byte count, zero at EOF, or an encoded error. Interrupted reads
-are returned to the caller. Bytes beyond a successful prefix retain their previous values.
-
-<a id="declaration-73696c6b2f7261775f6c696e75783a3a7772697465"></a>
-
-## `write`
-
-```silk
-pub fn write<'life0>(descriptor: usize, buffer: &'life0 [u8]) -> usize
-```
-
-Writes one prefix to a borrowed Linux descriptor and returns the raw kernel result.
-
-### Details
-
-A positive count can be shorter than the input. Interrupted writes and encoded errors remain
-visible to the caller. The operation does not close the descriptor or retain the input.

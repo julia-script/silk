@@ -23,8 +23,8 @@ import silk.uri_reference {
   Component,
   HostKind,
 }
-import silk.usize as usize
-import silk.u8 as u8
+import silk.usize
+import silk.u8
 
 /// A parsed URI borrowing input text, with a required scheme and an optional fragment.
 ///

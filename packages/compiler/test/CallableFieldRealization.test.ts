@@ -332,7 +332,7 @@ it.effect('publishes nested Effect and callable identities for local binding cap
   Effect.gen(function* () {
     const snapshot = yield* realized(
       'effect-field/nested-bindings',
-      `import silk.i32 as i32
+      `import silk.i32
 struct Deferred<F: once Effect<i32>> { operation: F }
 pub fn main() -> i32 {
   let nested = effect { return 1 }
@@ -702,7 +702,7 @@ pub fn main() -> i32 {
 
 it.effect('keeps equal same-site capture shapes distinct by owner specialization', () =>
   Effect.gen(function* () {
-    const source = `import silk.i32 as i32
+    const source = `import silk.i32
 struct Holder<F: fn(i32) -> i32> { step: F }
 fn apply<T>(marker: T, value: i32) -> i32 {
   let holder = Holder { step: i32.add(1) }

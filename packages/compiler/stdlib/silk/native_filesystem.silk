@@ -16,13 +16,13 @@ import silk.effect { Effect }
 import silk.result { Result }
 import silk.option { Option }
 import silk.filesystem { FileSystem, FileError, FileOperation, FileReason }
-import silk.u8 as u8
-import silk.u16 as u16
-import silk.u32 as u32
-import silk.u64 as u64
-import silk.i64 as i64
-import silk.isize as isize
-import silk.usize as usize
+import silk.u8
+import silk.u16
+import silk.u32
+import silk.u64
+import silk.i64
+import silk.isize
+import silk.usize
 
 extern "C" struct Timespec {
  seconds: i64

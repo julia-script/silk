@@ -70,7 +70,7 @@ pub fn main() -> i32 { return 0 }`),
     )
     const viaFunction = yield* AnalysisFixture.retainingMain(
       'bitwise-operator/mixed-function',
-      ascii(`import silk.u32 as u32
+      ascii(`import silk.u32
 fn mixed(a: u32, b: i32) -> u32 { return u32.bitAnd(a, b) }
 pub fn main() -> i32 { return 0 }`),
     )

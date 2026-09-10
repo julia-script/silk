@@ -33,7 +33,7 @@ import silk.allocator { Allocator, OutOfMemoryError }
 
 import silk.effect { Effect }
 
-import silk.host_input { HostInput as Host, HostInputError }
+import silk.host_input { HostInput, HostInputError }
 
 import silk.option { Option }
 
@@ -49,22 +49,22 @@ effect fn argumentCount(self: &mut FixedInput) -> usize
 effect fn argument(self: &mut FixedInput, index: usize) -> Option<Bytes>
 ! HostInputError | OutOfMemoryError
 ? &mut Allocator {
-  fail Host.inputFailure()
+  fail HostInput.inputFailure()
 }
 
 effect fn variable(self: &mut FixedInput, name: &[u8]) -> Option<Bytes>
 ! HostInputError | OutOfMemoryError
 ? &mut Allocator {
-  fail Host.inputFailure()
+  fail HostInput.inputFailure()
 }
 
 effect fn workingDirectory(self: &mut FixedInput) -> Bytes
 ! HostInputError | OutOfMemoryError
 ? &mut Allocator {
-  fail Host.inputFailure()
+  fail HostInput.inputFailure()
 }
 
-impl Host for FixedInput {
+impl HostInput for FixedInput {
   argumentCount: FixedInput.argumentCount
   argument: FixedInput.argument
   variable: FixedInput.variable
@@ -74,8 +74,8 @@ impl Host for FixedInput {
 effect fn program() -> i32
 ! HostInputError {
   let mut provider = FixedInput {}
-  let total = run Host.argumentCount()
-    |> Effect.provideMut<Host>(&mut provider)
+  let total = run HostInput.argumentCount()
+    |> Effect.provideMut<HostInput>(&mut provider)
   if total != usize.ONE {
     return 1
   }

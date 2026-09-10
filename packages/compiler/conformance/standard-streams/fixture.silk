@@ -4,7 +4,7 @@ import silk.writer { Writer, WriterError }
 import silk.os_standard_input { OsStandardInput }
 import silk.standard_input { StandardInput, StreamReadError }
 import silk.effect { Effect }
-import silk.u8 as u8
+import silk.u8
 
 effect fn writeFailed(error: WriterError) -> i32 { return 7 }
 effect fn readFailed(error: StreamReadError) -> i32 { return 7 }

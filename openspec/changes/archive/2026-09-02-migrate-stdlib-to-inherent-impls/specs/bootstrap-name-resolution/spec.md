@@ -16,7 +16,7 @@ an unknown member under a namespace SHALL report an unknown module member.
 
 #### Scenario: A namespace does not expose members
 
-- **WHEN** a module imports `silk.option as OptionModule` and calls `OptionModule.map(...)`
+- **WHEN** a module imports `silk.option` and calls `option.map(...)`
 - **THEN** resolution reports an unknown module member because `map` is an inherent member of `Option`, not a root declaration
 
 #### Scenario: Type import is not a namespace

@@ -8,7 +8,7 @@ Typed compile-time facts for the selected compilation profile.
 
 ## When to use
 
-Use [`arch`](#declaration-73696c6b2f7461726765743a3a61726368) and [`operatingSystem`](#declaration-73696c6b2f7461726765743a3a6f7065726174696e6753797374656d) to select source behavior for a machine. Use [`pointerBits`](#declaration-73696c6b2f7461726765743a3a706f696e74657242697473)
+Use [`arch`](#declaration-73696c6b2f7461726765743a3a5461726765742e61726368) and [`operatingSystem`](#declaration-73696c6b2f7461726765743a3a5461726765742e6f7065726174696e6753797374656d) to select source behavior for a machine. Use [`pointerBits`](#declaration-73696c6b2f7461726765743a3a706f696e74657242697473)
 for pointer-sized arithmetic. Read logical artifact and runtime requests through `silk.compilation`.
 
 ## Details
@@ -17,7 +17,7 @@ These facts are fixed before static evaluation. They have no runtime storage.
 
 Import as `Target` with `import silk.target { Target }`.
 
-Public declarations: 18.
+Public declarations: 11.
 
 <a id="declaration-73696c6b2f7461726765743a3a41726368"></a>
 
@@ -59,16 +59,6 @@ X86_64 = 2
 
 The X86\_64 choice.
 
-<a id="declaration-73696c6b2f7461726765743a3a61726368"></a>
-
-## `arch`
-
-```silk
-pub static fn arch() -> Arch
-```
-
-Returns the selected Arch during static evaluation.
-
 <a id="declaration-73696c6b2f7461726765743a3a4f7065726174696e6753797374656d"></a>
 
 ## `OperatingSystem`
@@ -108,16 +98,6 @@ Freestanding = 2
 ```
 
 The Freestanding choice.
-
-<a id="declaration-73696c6b2f7461726765743a3a6f7065726174696e6753797374656d"></a>
-
-## `operatingSystem`
-
-```silk
-pub static fn operatingSystem() -> OperatingSystem
-```
-
-Returns the selected OperatingSystem during static evaluation.
 
 <a id="declaration-73696c6b2f7461726765743a3a416269"></a>
 
@@ -159,16 +139,6 @@ Wasm = 2
 
 The Wasm choice.
 
-<a id="declaration-73696c6b2f7461726765743a3a616269"></a>
-
-## `abi`
-
-```silk
-pub static fn abi() -> Abi
-```
-
-Returns the selected Abi during static evaluation.
-
 <a id="declaration-73696c6b2f7461726765743a3a4f626a656374466f726d6174"></a>
 
 ## `ObjectFormat`
@@ -209,16 +179,6 @@ Wasm = 2
 
 The Wasm choice.
 
-<a id="declaration-73696c6b2f7461726765743a3a6f626a656374466f726d6174"></a>
-
-## `objectFormat`
-
-```silk
-pub static fn objectFormat() -> ObjectFormat
-```
-
-Returns the selected ObjectFormat during static evaluation.
-
 <a id="declaration-73696c6b2f7461726765743a3a456e6469616e6e657373"></a>
 
 ## `Endianness`
@@ -238,16 +198,6 @@ Little = 0
 ```
 
 The Little choice.
-
-<a id="declaration-73696c6b2f7461726765743a3a656e6469616e6e657373"></a>
-
-## `endianness`
-
-```silk
-pub static fn endianness() -> Endianness
-```
-
-Returns the selected Endianness during static evaluation.
 
 <a id="declaration-73696c6b2f7461726765743a3a706f696e74657242697473"></a>
 
@@ -299,9 +249,74 @@ pub const pointerAlignment: u32
 
 The alignment of a data pointer, in bytes.
 
-<a id="declaration-73696c6b2f7461726765743a3a637075"></a>
+<a id="declaration-73696c6b2f7461726765743a3a546172676574"></a>
 
-## `cpu`
+## `Target`
+
+```silk
+pub struct Target
+```
+
+The scope for Target operations.
+
+### Details
+
+This owner carries no data. Select it with `import silk.target { Target }`
+to access its inherent operations.
+
+<a id="declaration-73696c6b2f7461726765743a3a5461726765742e61726368"></a>
+
+### Associated function `Target.arch`
+
+```silk
+pub static fn arch() -> Arch
+```
+
+Returns the selected Arch during static evaluation.
+
+<a id="declaration-73696c6b2f7461726765743a3a5461726765742e6f7065726174696e6753797374656d"></a>
+
+### Associated function `Target.operatingSystem`
+
+```silk
+pub static fn operatingSystem() -> OperatingSystem
+```
+
+Returns the selected OperatingSystem during static evaluation.
+
+<a id="declaration-73696c6b2f7461726765743a3a5461726765742e616269"></a>
+
+### Associated function `Target.abi`
+
+```silk
+pub static fn abi() -> Abi
+```
+
+Returns the selected Abi during static evaluation.
+
+<a id="declaration-73696c6b2f7461726765743a3a5461726765742e6f626a656374466f726d6174"></a>
+
+### Associated function `Target.objectFormat`
+
+```silk
+pub static fn objectFormat() -> ObjectFormat
+```
+
+Returns the selected ObjectFormat during static evaluation.
+
+<a id="declaration-73696c6b2f7461726765743a3a5461726765742e656e6469616e6e657373"></a>
+
+### Associated function `Target.endianness`
+
+```silk
+pub static fn endianness() -> Endianness
+```
+
+Returns the selected Endianness during static evaluation.
+
+<a id="declaration-73696c6b2f7461726765743a3a5461726765742e637075"></a>
+
+### Associated function `Target.cpu`
 
 ```silk
 pub static fn cpu() -> string<'static>
@@ -309,9 +324,9 @@ pub static fn cpu() -> string<'static>
 
 Returns the logical cpu selection.
 
-<a id="declaration-73696c6b2f7461726765743a3a6465706c6f796d656e74"></a>
+<a id="declaration-73696c6b2f7461726765743a3a5461726765742e6465706c6f796d656e74"></a>
 
-## `deployment`
+### Associated function `Target.deployment`
 
 ```silk
 pub static fn deployment() -> string<'static>
@@ -319,9 +334,9 @@ pub static fn deployment() -> string<'static>
 
 Returns the logical deployment selection.
 
-<a id="declaration-73696c6b2f7461726765743a3a68617343707546656174757265"></a>
+<a id="declaration-73696c6b2f7461726765743a3a5461726765742e68617343707546656174757265"></a>
 
-## `hasCpuFeature`
+### Associated function `Target.hasCpuFeature`
 
 ```silk
 pub static fn hasCpuFeature(static value: string<'static>) -> bool

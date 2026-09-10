@@ -21,17 +21,17 @@ Import as `UriPercent` with `import silk.uri_percent { UriPercent }`.
 
 Public declarations: 4.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e74"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a50657263656e74436f6d706f6e656e74"></a>
 
-## `Component`
+## `PercentComponent`
 
 ```silk
-pub enum Component
+pub enum PercentComponent
 ```
 
 The grammar context of raw bytes supplied to percent encoding.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a30"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a50657263656e74436f6d706f6e656e743a3a6d656d6265723a30"></a>
 
 ### `Userinfo`
 
@@ -41,7 +41,7 @@ Userinfo = 0
 
 User information; an at sign is escaped and a colon is retained.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a31"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a50657263656e74436f6d706f6e656e743a3a6d656d6265723a31"></a>
 
 ### `RegName`
 
@@ -51,7 +51,7 @@ RegName = 1
 
 A registered host name; authority delimiters are escaped.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a32"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a50657263656e74436f6d706f6e656e743a3a6d656d6265723a32"></a>
 
 ### `PathSegment`
 
@@ -61,7 +61,7 @@ PathSegment = 2
 
 One path segment; slash is escaped and colon is retained.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a33"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a50657263656e74436f6d706f6e656e743a3a6d656d6265723a33"></a>
 
 ### `FirstPathSegment`
 
@@ -71,7 +71,7 @@ FirstPathSegment = 3
 
 The first relative path segment; slash and colon are escaped.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a34"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a50657263656e74436f6d706f6e656e743a3a6d656d6265723a34"></a>
 
 ### `Path`
 
@@ -81,7 +81,7 @@ Path = 4
 
 A whole path; slash is retained, but question mark and number sign are escaped.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a35"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a50657263656e74436f6d706f6e656e743a3a6d656d6265723a35"></a>
 
 ### `Unreserved`
 
@@ -91,7 +91,7 @@ Unreserved = 5
 
 Only ASCII letters, digits, hyphen, period, underscore, and tilde are retained.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a36"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a50657263656e74436f6d706f6e656e743a3a6d656d6265723a36"></a>
 
 ### `Query`
 
@@ -101,7 +101,7 @@ Query = 6
 
 A complete generic query; slash and question mark are retained.
 
-<a id="declaration-73696c6b2f7572695f70657263656e743a3a436f6d706f6e656e743a3a6d656d6265723a37"></a>
+<a id="declaration-73696c6b2f7572695f70657263656e743a3a50657263656e74436f6d706f6e656e743a3a6d656d6265723a37"></a>
 
 ### `Fragment`
 
@@ -200,7 +200,7 @@ The owner of byte percent encoding and decoding operations for URI components.
 ### Associated function `UriPercent.encodeOwned`
 
 ```silk
-pub effect<'life0> fn encodeOwned<'life0>(values: &'life0 [u8], component: Component) -> String ! OutOfMemoryError ? &mut Allocator
+pub effect<'life0> fn encodeOwned<'life0>(values: &'life0 [u8], component: PercentComponent) -> String ! OutOfMemoryError ? &mut Allocator
 ```
 
 Encodes raw bytes into independently owned ASCII text with one exact backing allocation.
@@ -220,7 +220,7 @@ use `FirstPathSegment` for data that must not become a relative reference's sche
 ### Associated function `UriPercent.encodeInto`
 
 ```silk
-pub effect<'env> fn encodeInto<'life0: 'env, 'life1: 'env, 'env>(output: &'life0 mut silk/bytes.Bytes, values: &'life1 [u8], component: Component) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn encodeInto<'life0: 'env, 'life1: 'env, 'env>(output: &'life0 mut silk/bytes.Bytes, values: &'life1 [u8], component: PercentComponent) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Replaces a reusable byte buffer with percent-encoded ASCII component data.
@@ -235,7 +235,7 @@ Existing sufficient capacity requires no allocation. Failure leaves the original
 ### Associated function `UriPercent.encodedLength`
 
 ```silk
-pub fn encodedLength<'life0>(values: &'life0 [u8], component: Component) -> silk/option.Option<usize>
+pub fn encodedLength<'life0>(values: &'life0 [u8], component: PercentComponent) -> silk/option.Option<usize>
 ```
 
 Returns the encoded byte count without allocating, or `None` when the size exceeds `usize`.
@@ -250,7 +250,7 @@ Use this to reserve a combined serialization before appending its individual com
 ### Associated function `UriPercent.appendEncoded`
 
 ```silk
-pub effect<'env> fn appendEncoded<'life0: 'env, 'life1: 'env, 'env>(output: &'life0 mut silk/bytes.Bytes, values: &'life1 [u8], component: Component) -> () ! OutOfMemoryError ? &mut Allocator
+pub effect<'env> fn appendEncoded<'life0: 'env, 'life1: 'env, 'env>(output: &'life0 mut silk/bytes.Bytes, values: &'life1 [u8], component: PercentComponent) -> () ! OutOfMemoryError ? &mut Allocator
 ```
 
 Appends encoded component data while retaining all existing destination bytes.
@@ -265,7 +265,7 @@ capacity requires no allocation. Size overflow or allocation failure leaves the 
 ### Associated function `UriPercent.encodeToWriter`
 
 ```silk
-pub effect<'life0> fn encodeToWriter<'life0>(values: &'life0 [u8], component: Component) -> () ! WriterError ? &mut Writer
+pub effect<'life0> fn encodeToWriter<'life0>(values: &'life0 [u8], component: PercentComponent) -> () ! WriterError ? &mut Writer
 ```
 
 Streams percent encoding to a Writer without allocating intermediate output storage.

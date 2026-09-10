@@ -28,7 +28,7 @@ const source = 'pub fn main() -> i32 { return 42 }'
 
 const llvmWasmRuntimeSource = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
-import silk.u8 as u8
+import silk.u8
 import silk.vector { Vector }
 
 effect fn program() -> i32 ! OutOfMemoryError {

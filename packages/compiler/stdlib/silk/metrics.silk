@@ -53,7 +53,7 @@
 // are read.
 
 import silk.allocator { Allocator }
-import silk.usize as usize
+import silk.usize
 
 /// The owner of the allocation-ledger operations.
 ///

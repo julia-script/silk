@@ -26,7 +26,7 @@
 //! ```
 
 import silk.option { Option }
-import silk.usize as usize
+import silk.usize
 
 /// A byte size paired with a non-zero power-of-two alignment.
 pub struct Layout {

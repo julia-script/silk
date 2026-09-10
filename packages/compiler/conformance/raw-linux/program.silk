@@ -2,13 +2,13 @@ import silk.raw_mapping {Mapping}
 
 import silk.raw_process_inputs {ProcessInputs}
 
-import silk.raw_linux as RawLinux
+import silk.raw_linux { RawLinux }
 
 import silk.pointer {Pointer}
 
 import silk.result {Result}
 
-import silk.usize as usize
+import silk.usize
 
 static if Intrinsic.targetArchitecture() == "x86_64" {
   const GETPID: usize = 39

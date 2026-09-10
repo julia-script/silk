@@ -133,7 +133,7 @@ provenance and be deterministic across fresh processes.
 
 #### Scenario: Resolve a namespace-qualified call
 
-- **WHEN** a module imports `compiler.Syntax as Tree` and calls `Tree.parse()`
+- **WHEN** a module imports `compiler.Syntax` and calls `Syntax.parse()`
 - **THEN** the namespace and member lookups resolve to canonical module `compiler/Syntax` and its public `parse` declaration
 
 #### Scenario: Resolve mutual calls across an import cycle

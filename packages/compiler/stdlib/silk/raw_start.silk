@@ -16,11 +16,11 @@
 //! synchronous application closure. Fatal traps do not guarantee cleanup or a report.
 
 static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText("libc") == "none" && (Intrinsic.targetArchitecture() == "x86_64" || Intrinsic.targetArchitecture() == "aarch64") {
-  import Intrinsic.application as app
-  import silk.raw_linux as RawLinux
+  import Intrinsic.application
+  import silk.raw_linux { RawLinux, EXIT_GROUP }
   import silk.raw_process_inputs {ProcessInputs}
   import silk.result {Result}
-  import silk.i32 as i32
+  import silk.i32
 
   static if Intrinsic.targetArchitecture() == "x86_64" {
     /// Enters from the Linux kernel stack and transfers to the source process initializer.
@@ -64,10 +64,10 @@ static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText(
   export "C" fn invoke(stack: [*]const usize) -> () as "silk_raw_process_entry" {
     let decoded = unsafe ProcessInputs.decode(stack)
     let code = match move decoded {
-      Result<ProcessInputs, usize>.Success {value} => app.main(&value)
+      Result<ProcessInputs, usize>.Success {value} => application.main(&value)
       Result<ProcessInputs, usize>.Failure {error} => 127
     }
     let status = i32.toUsize(code & 255)
-    return unsafe RawLinux.syscallNoReturn(RawLinux.EXIT_GROUP, status)
+    return unsafe RawLinux.syscallNoReturn(EXIT_GROUP, status)
   }
 }

@@ -51,7 +51,7 @@ const resolutionVectors: ReadonlyArray<readonly [string, string]> = [
 export const uriAcceptanceSource = `import silk.uri { Uri, OwnedUri }
 import silk.uri_reference { UriReference, OwnedUriReference, ParseError, ParseReason, Component, HostKind }
 import silk.uri_percent { UriPercent, DecodeError, Decoded }
-import silk.uri_percent { Component as PercentComponent }
+import silk.uri_percent { PercentComponent }
 import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.layout { Layout }
@@ -62,7 +62,7 @@ import silk.string { String, InvalidUtf8 }
 import silk.bytes { Bytes }
 import silk.slice { Slice }
 import silk.uri_components { UriComponents, ComponentValue, Authority, Host, Serialization }
-import silk.usize as usize
+import silk.usize
 
 fn present(actual: Option<string>, expected: string) -> bool {
   return match move actual {

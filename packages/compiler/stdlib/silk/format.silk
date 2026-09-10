@@ -73,23 +73,23 @@
 //! }
 //! ```
 
-import silk.char as char
-import silk.i16 as i16
-import silk.i32 as i32
-import silk.i64 as i64
-import silk.i8 as i8
-import silk.isize as isize
+import silk.char
+import silk.i16
+import silk.i32
+import silk.i64
+import silk.i8
+import silk.isize
 import silk.option { Option }
-import silk.reflect as Reflect
+import silk.reflect { Reflect, namedKind, positionalKind, anonymousNamedKind, anonymousPositionalKind, labeledFieldKind, positionalFieldKind }
 import silk.result { Result }
-import silk.static_sequence as StaticSequence
-import silk.static_text as StaticText
+import silk.static_sequence { StaticSequence }
+import silk.static_text { StaticText }
 import silk.string { String }
-import silk.u16 as u16
-import silk.u32 as u32
-import silk.u64 as u64
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u16
+import silk.u32
+import silk.u64
+import silk.u8
+import silk.usize
 import silk.writer { Writer, WriterError }
 
 /// The owner of the parsing and rendering operations.
@@ -391,14 +391,14 @@ impl Format {
       } else {
         static for field in Reflect.fields<Args>() {
           static if part.mode == PartMode.Positional {
-            static if Reflect.fieldKind(field) == Reflect.positionalFieldKind {
+            static if Reflect.fieldKind(field) == positionalFieldKind {
               static if Reflect.fieldOrdinal(field) == part.ordinal {
                 let value = Intrinsic.borrowField(args, field)
                 run Format.display(value)
               }
             }
           } else {
-            static if Reflect.fieldKind(field) == Reflect.labeledFieldKind {
+            static if Reflect.fieldKind(field) == labeledFieldKind {
               static if Reflect.fieldLabel(field) == part.text {
                 let value = Intrinsic.borrowField(args, field)
                 run Format.display(value)
@@ -697,7 +697,7 @@ static fn parseTemplate(template: string<'static>) -> TemplatePlan {
 static fn hasPositionalField<Args>(ordinal: usize) -> bool {
   let mut found = false
   static for field in Reflect.fields<Args>() {
-    static if Reflect.fieldKind(field) == Reflect.positionalFieldKind {
+    static if Reflect.fieldKind(field) == positionalFieldKind {
       static if Reflect.fieldOrdinal(field) == ordinal { found = true }
     }
   }
@@ -721,7 +721,7 @@ static fn visibleNamedFields<Args>() -> string<'static> {
   let mut labels = ""
   let mut first = true
   static for field in Reflect.fields<Args>() {
-    static if Reflect.fieldKind(field) == Reflect.labeledFieldKind {
+    static if Reflect.fieldKind(field) == labeledFieldKind {
       if !first { labels = StaticText.concat(labels, ", ") }
       labels = StaticText.concat(labels, Reflect.fieldLabel(field))
       first = false
@@ -746,7 +746,7 @@ static fn validatedTemplate<Args>(
     static if part.mode == PartMode.Named {
       let mut found = false
       static for field in Reflect.fields<Args>() {
-        static if Reflect.fieldKind(field) == Reflect.labeledFieldKind {
+        static if Reflect.fieldKind(field) == labeledFieldKind {
           static if Reflect.fieldLabel(field) == part.text { found = true }
         }
       }
@@ -765,11 +765,11 @@ static fn validatedTemplate<Args>(
   }
 
   static if plan.mode == PartMode.Positional {
-    if kind != Reflect.positionalKind && kind != Reflect.anonymousPositionalKind {
+    if kind != positionalKind && kind != anonymousPositionalKind {
       compileError(template)
     }
     static for field in Reflect.fields<Args>() {
-      static if Reflect.fieldKind(field) == Reflect.positionalFieldKind {
+      static if Reflect.fieldKind(field) == positionalFieldKind {
         static if !hasPositionalPart(parts, Reflect.fieldOrdinal(field)) {
           compileError(template)
         }
@@ -777,7 +777,7 @@ static fn validatedTemplate<Args>(
     }
   }
   static if plan.mode == PartMode.Named {
-    if kind != Reflect.namedKind && kind != Reflect.anonymousNamedKind {
+    if kind != namedKind && kind != anonymousNamedKind {
       compileError(template)
     }
   }

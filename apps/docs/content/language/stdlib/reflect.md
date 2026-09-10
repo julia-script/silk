@@ -13,7 +13,7 @@ representation and disappear before runtime HIR is published.
 
 Import as `Reflect` with `import silk.reflect { Reflect }`.
 
-Public declarations: 13.
+Public declarations: 7.
 
 <a id="declaration-73696c6b2f7265666c6563743a3a6e616d65644b696e64"></a>
 
@@ -75,9 +75,24 @@ pub const positionalFieldKind: u8
 
 Positional member kind returned by `fieldKind`.
 
-<a id="declaration-73696c6b2f7265666c6563743a3a747970654f66"></a>
+<a id="declaration-73696c6b2f7265666c6563743a3a5265666c656374"></a>
 
-## `typeOf`
+## `Reflect`
+
+```silk
+pub struct Reflect
+```
+
+The scope for Reflect operations.
+
+### Details
+
+This owner carries no data. Select it with `import silk.reflect { Reflect }`
+to access its inherent operations.
+
+<a id="declaration-73696c6b2f7265666c6563743a3a5265666c6563742e747970654f66"></a>
+
+### Associated function `Reflect.typeOf`
 
 ```silk
 pub static fn typeOf<Owner>() -> Intrinsic.Type<Owner>
@@ -85,9 +100,9 @@ pub static fn typeOf<Owner>() -> Intrinsic.Type<Owner>
 
 Returns the canonical aggregate type descriptor for `Owner`.
 
-<a id="declaration-73696c6b2f7265666c6563743a3a6669656c6473"></a>
+<a id="declaration-73696c6b2f7265666c6563743a3a5265666c6563742e6669656c6473"></a>
 
-## `fields`
+### Associated function `Reflect.fields`
 
 ```silk
 pub static fn fields<Owner>() -> Intrinsic.Fields<Owner>
@@ -95,9 +110,9 @@ pub static fn fields<Owner>() -> Intrinsic.Fields<Owner>
 
 Returns declaration-ordered descriptors for fields visible from this wrapper.
 
-<a id="declaration-73696c6b2f7265666c6563743a3a747970654b696e64"></a>
+<a id="declaration-73696c6b2f7265666c6563743a3a5265666c6563742e747970654b696e64"></a>
 
-## `typeKind`
+### Associated function `Reflect.typeKind`
 
 ```silk
 pub static fn typeKind<Owner>(static descriptor: Intrinsic.Type<Owner>) -> u8
@@ -105,9 +120,9 @@ pub static fn typeKind<Owner>(static descriptor: Intrinsic.Type<Owner>) -> u8
 
 Returns the stable aggregate-kind code for `descriptor`.
 
-<a id="declaration-73696c6b2f7265666c6563743a3a6669656c644b696e64"></a>
+<a id="declaration-73696c6b2f7265666c6563743a3a5265666c6563742e6669656c644b696e64"></a>
 
-## `fieldKind`
+### Associated function `Reflect.fieldKind`
 
 ```silk
 pub static fn fieldKind<Owner, Value>(static field: Intrinsic.Field<Owner, Value>) -> u8
@@ -115,9 +130,9 @@ pub static fn fieldKind<Owner, Value>(static field: Intrinsic.Field<Owner, Value
 
 Returns whether `field` carries a label or a position.
 
-<a id="declaration-73696c6b2f7265666c6563743a3a6669656c644c6162656c"></a>
+<a id="declaration-73696c6b2f7265666c6563743a3a5265666c6563742e6669656c644c6162656c"></a>
 
-## `fieldLabel`
+### Associated function `Reflect.fieldLabel`
 
 ```silk
 pub static fn fieldLabel<Owner, Value>(static field: Intrinsic.Field<Owner, Value>) -> string<'static>
@@ -125,9 +140,9 @@ pub static fn fieldLabel<Owner, Value>(static field: Intrinsic.Field<Owner, Valu
 
 Returns the source label of a labeled field.
 
-<a id="declaration-73696c6b2f7265666c6563743a3a6669656c644f7264696e616c"></a>
+<a id="declaration-73696c6b2f7265666c6563743a3a5265666c6563742e6669656c644f7264696e616c"></a>
 
-## `fieldOrdinal`
+### Associated function `Reflect.fieldOrdinal`
 
 ```silk
 pub static fn fieldOrdinal<Owner, Value>(static field: Intrinsic.Field<Owner, Value>) -> usize
@@ -135,9 +150,9 @@ pub static fn fieldOrdinal<Owner, Value>(static field: Intrinsic.Field<Owner, Va
 
 Returns the source position of a positional field.
 
-<a id="declaration-73696c6b2f7265666c6563743a3a626f72726f774669656c64"></a>
+<a id="declaration-73696c6b2f7265666c6563743a3a5265666c6563742e626f72726f774669656c64"></a>
 
-## `borrowField`
+### Associated function `Reflect.borrowField`
 
 ```silk
 pub fn borrowField<Owner, Value, 'life2>(owner: &'life2 Owner, static field: Intrinsic.Field<Owner, Value>) -> &'life2 Value

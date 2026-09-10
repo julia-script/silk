@@ -73,7 +73,7 @@ it.effect('guards native float-to-integer conversion against out-of-range and Na
     const snapshot = yield* AnalysisFixture.retainingMain(
       'float/native-convert-guard',
       new TextEncoder().encode(
-        'import silk.f64 as f64\n' +
+        'import silk.f64\n' +
           'fn convert(value: f64) -> i32 { return f64.toI32(value) }\n' +
           'pub fn main() -> i32 { return convert(42.75) }',
       ),

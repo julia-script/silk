@@ -12,7 +12,7 @@
 
 static if Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.profileText("libc") == "none" && (Intrinsic.targetArchitecture() == "x86_64" || Intrinsic.targetArchitecture() == "aarch64") {
   import silk.pointer {Pointer}
-  import silk.raw_linux as RawLinux
+  import silk.raw_linux { RawLinux }
   import silk.result {Result}
   /// Borrowed argument/environment words and a validated runtime page size.
   pub struct ProcessInputs {

@@ -626,3 +626,8 @@ publication.
 - [ ] Terms, names, defaults, and failure conditions match implementation.
 - [ ] A related API appears only when it helps the reader.
 - [ ] The rendered comment is easy to scan in an editor and generated reference page.
+
+Use canonical import names in every example, including inline snippets and comments. Select the
+standard-library owner (`import silk.pointer { Pointer }`) and import primitive modules without an
+alias (`import silk.usize`). Reserve aliases for actual collisions or examples explicitly teaching
+alias syntax. Prefer more specific declaration names before introducing a collision alias.

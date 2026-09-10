@@ -53,7 +53,7 @@ module's root scope; `format.silk` alone has about 75 such sites and gets its ow
 Several modules declare more than one nominal. A function joins the owner that callers select
 as its qualifier today, even when its parameter zero is another nominal of the module; that keeps
 every public spelling stable and the migration mechanical. Namespace-alias call sites that reach
-such a function (`import silk.system_clock as SystemClock` then `SystemClock.make(...)`) switch to
+such a function (a module namespace followed by its root `make(...)`) switch to
 the selected owner import, because a namespace exposes only root declarations afterwards.
 
 | module                          | owner receiving the functions                                                        | note                                                                                                                                                                                             |
@@ -102,15 +102,14 @@ Modules whose qualifier is a zero-data struct (`RawBuffer`, `Unicode`, `Format`,
 `Hash`, `Numeric`, `Effect`, ...) keep that struct as the owner and gain an `impl`. The struct's
 role changes from "scope actor" to "owner" with no source-level difference other than the impl
 block. `static fn` members join an impl like any function. `const` declarations stay root
-declarations. Modules with no owner nominal are reached through namespace aliases and are
-untouched.
+declarations. Modules without a principal data type use a zero-data owner struct for their operations.
 
 ### Selective and namespace imports of former root functions are rewritten to qualified calls
 
 `import silk.option { Option, none, some }` becomes `import silk.option { Option }` and each
 `none<T>()` becomes `Option.none<T>()`. Where a site aliased a function to disambiguate
 (`make as vectorMake`), the alias disappears because the owner qualifier disambiguates. A
-namespace import used to reach members (`import silk.option as Option` then `Option.some`)
+namespace import used to reach members (`import silk.option` then `option.some`)
 becomes the selected owner import, because a namespace exposes only root declarations. No
 re-export of members through the module is added.
 

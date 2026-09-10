@@ -106,7 +106,7 @@ const sourceSection = (source: string, start: string, end: string): string => {
 
 const sha2Source = readFileSync(new URL('../../stdlib/silk/sha2.silk', import.meta.url), 'utf8')
 
-const sha2LengthTestSource = `import silk.u64 as u64
+const sha2LengthTestSource = `import silk.u64
 
 ${sourceSection(sha2Source, 'struct Length64Transition {', 'fn makeState32')}
 
@@ -132,8 +132,8 @@ const shaAcceptanceNativeSource = shaAcceptanceSource
   )
 
 /** Canonical-bits transcendental program with independently committed native expectations. */
-export const transcendentalCanonicalBits = `import silk.f32 as f32
-import silk.f64 as f64
+export const transcendentalCanonicalBits = `import silk.f32
+import silk.f64
 pub fn main() -> i32 {
 ${transcendentalVectors
   .map((vector, index) => {
@@ -174,7 +174,7 @@ export interface InvalidCorpusProgram {
   readonly codes: ReadonlyArray<string>
 }
 
-export const scalarEnumSignedAcceptance = `import silk.i8 as i8
+export const scalarEnumSignedAcceptance = `import silk.i8
 enum(i8) Status {
   Unknown = -1,
   Ready = 7,
@@ -229,8 +229,8 @@ pub fn main() -> i32 {
 /** A generic Display call selects the interface-owned inline i32 witness in native execution. */
 export const scalarDisplayAcceptance = `import silk.effect { Effect }
 import silk.format { Format }
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u8
+import silk.usize
 import silk.writer { Writer, WriterError }
 
 struct Capture { index: usize valid: bool }
@@ -273,8 +273,8 @@ pub fn main() -> i32 {
 /** Static template parsing and reflection erase before the shared engine differential. */
 export const templateFormattingAcceptance = `import silk.effect { Effect }
 import silk.format { Format }
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u8
+import silk.usize
 import silk.writer { Writer, WriterError }
 
 struct Capture { index: usize valid: bool }
@@ -332,7 +332,7 @@ export const formatOptionsAcceptance = `import silk.os_writer { StdoutWriter }
 import silk.effect { Effect }
 import silk.format { Alignment, Format, FormatOptions, Sign }
 import silk.option { Option }
-import silk.usize as usize
+import silk.usize
 import silk.writer { Writer, WriterError }
 
 fn options(
@@ -439,7 +439,7 @@ pub fn main() -> i32 {
 }`
 
 /** Explicit referent projection preserves runtime-indexed reads and writes in native execution. */
-export const referenceProjectionAcceptance = `import silk.usize as usize
+export const referenceProjectionAcceptance = `import silk.usize
 
 struct Empty {}
 impl Copy for Empty {}
@@ -1167,8 +1167,8 @@ pub fn main() -> i32 {
 /** Fixed-seed xoshiro256** known answers pinned for native execution. */
 export const seededRandomFingerprint = `import silk.effect { Effect }
 import silk.insecure_random { InsecureRandom }
-import silk.u64 as u64
-import silk.usize as usize
+import silk.u64
+import silk.usize
 
 fn matches(seed: u64, expected: &[u64]) -> bool {
   let mut provider = InsecureRandom.seeded(seed)
@@ -1201,8 +1201,8 @@ pub fn main() -> i32 {
 export const portableRandomCapabilities = `import silk.effect { Effect }
 import silk.insecure_seed { InsecureSeed }
 import silk.random { Random }
-import silk.u64 as u64
-import silk.usize as usize
+import silk.u64
+import silk.usize
 
 struct ScriptedRandom {
   first: u64
@@ -1451,9 +1451,9 @@ import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
 import silk.hash { Hash, HashKey, HashSeed, Word }
 import silk.hash_map { HashMap }
-import silk.i32 as i32
-import silk.u64 as u64
-import silk.usize as usize
+import silk.i32
+import silk.u64
+import silk.usize
 
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -1538,11 +1538,11 @@ const integerParsingRanges = [
 ] as const
 
 const numberParsingAcceptance = `${integerParsingRanges
-  .map(({ spelling }) => `import silk.${spelling} as ${spelling}`)
+  .map(({ spelling }) => `import silk.${spelling}`)
   .join('\n')}
 import silk.format { NotANumber, OutOfRange, ParseError }
 import silk.result { Result }
-import silk.usize as usize
+import silk.usize
 
 fn parsed<T>(result: Result<T, ParseError>) -> bool {
   return match move result {
@@ -1592,8 +1592,8 @@ ${integerParsingRanges
 }`
 
 export const narrowEffectRecord = `import silk.effect { Effect }
-import silk.u16 as u16
-import silk.u8 as u8
+import silk.u16
+import silk.u8
 struct Small { first: u16 second: u8 }
 struct WideFailure { first: i64 second: i64 }
 effect fn build(failNow: bool) -> Small ! WideFailure {
@@ -2007,7 +2007,7 @@ pub fn main() -> i32 {
   },
   {
     name: 'recursive-mutable-slice',
-    source: `import silk.usize as usize
+    source: `import silk.usize
 fn fill(values: &mut [i32], index: usize) -> i32 {
   if index == 4 { return values[0] + values[1] + values[2] + values[3] }
   values[index] = usize.toI32(index) + 9
@@ -2063,8 +2063,7 @@ pub fn main() -> i32 { let value = 42 return identity(move value) }`,
   },
   {
     name: 'arithmetic',
-    source:
-      'import silk.i32 as i32\npub fn main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }',
+    source: 'import silk.i32n main() -> i32 { return i32.subtract(i32.multiply(6, 7), 0) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -2156,7 +2155,7 @@ pub fn main() -> i32 {
   },
   {
     name: 'operator-pipeline',
-    source: 'import silk.i32 as i32\npub fn main() -> i32 { return 2 |> i32.add(40) }',
+    source: 'import silk.i32n main() -> i32 { return 2 |> i32.add(40) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -2205,8 +2204,8 @@ pub fn main() -> i32 {
   },
   {
     name: 'closed-operator-surface',
-    source: `import silk.i16 as i16
-import silk.u8 as u8
+    source: `import silk.i16
+import silk.u8
 import silk.option { Option }
 fn checkedSection() -> Option<u8> {
   let addOne = u8.checkedAdd(1)
@@ -2247,33 +2246,30 @@ return (40 + 2) * 1
   },
   {
     name: 'unary-bool-pipeline',
-    source:
-      'import silk.bool as bool\npub fn main() -> i32 { if true |> bool.not { return 0 } return 42 }',
+    source: 'import silk.bool main() -> i32 { if true |> bool.not { return 0 } return 42 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'signed-truncation',
-    source:
-      'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(i32.divide(-7, 2), 45) }',
+    source: 'import silk.i32n main() -> i32 { return i32.add(i32.divide(-7, 2), 45) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'remainder-sign',
-    source:
-      'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(i32.remainder(-7, 2), 43) }',
+    source: 'import silk.i32n main() -> i32 { return i32.add(i32.remainder(-7, 2), 43) }',
     expected: { _tag: 'Completes', result: 42 },
   },
   // MIN % -1 traps identically everywhere: the quotient overflows even though the mathematical
   // remainder is 0, matching ordinary arithmetic's invalid-remainder trap rule.
   {
     name: 'arith-convergence-remainder-min-trap',
-    source: `import silk.i32 as i32
+    source: `import silk.i32
 pub fn main() -> i32 { return i32.remainder(i32.subtract(-2147483647, 1), -1) }`,
     expected: { _tag: 'Trap' },
   },
   {
     name: 'arith-convergence-remainder-min-trap-i64',
-    source: `import silk.i64 as i64
+    source: `import silk.i64
 pub fn main() -> i32 {
   let minimum = i64.subtract(-9223372036854775807, 1)
   if i64.remainder(minimum, -1) != 0 { return 1 }
@@ -2284,7 +2280,7 @@ pub fn main() -> i32 {
   // The checked variant answers None exactly where the ordinary operation traps.
   {
     name: 'arith-convergence-checked-remainder-min-none',
-    source: `import silk.i32 as i32
+    source: `import silk.i32
 import silk.option { Option }
 pub fn main() -> i32 {
   let minimum = i32.subtract(-2147483647, 1)
@@ -2300,8 +2296,8 @@ pub fn main() -> i32 {
   // instead of degenerating into a plain shift.
   {
     name: 'arith-convergence-rotate-negative-count',
-    source: `import silk.i32 as i32
-import silk.i64 as i64
+    source: `import silk.i32
+import silk.i64
 pub fn main() -> i32 {
   if i32.rotateLeft(5, -1) != i32.rotateLeft(5, 31) { return 1 }
   if i32.rotateLeft(5, -1) != -2147483646 { return 2 }
@@ -2316,8 +2312,8 @@ pub fn main() -> i32 {
   // exponent differences and bit-exact results for ordinary operands.
   {
     name: 'arith-convergence-float-remainder-exact',
-    source: `import silk.f32 as f32
-import silk.f64 as f64
+    source: `import silk.f32
+import silk.f64
 fn infinity() -> f64 { return 1e308 * 10.0 }
 pub fn main() -> i32 {
   if f64.toBits(f64.remainder(10.5, 3.25)) != 4604930618986332160 { return 1 }
@@ -2337,7 +2333,7 @@ pub fn main() -> i32 {
   // A binding referenced only as an enum-value argument still becomes an effect capture.
   {
     name: 'arith-convergence-effect-enum-value-capture',
-    source: `import silk.i8 as i8
+    source: `import silk.i8
 enum(i8) Status {
   Unknown = -1,
   Ready = 41,
@@ -2351,13 +2347,12 @@ pub fn main() -> i32 {
   },
   {
     name: 'overflow-trap',
-    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.add(2147483647, 1) }',
+    source: 'import silk.i32n main() -> i32 { return i32.add(2147483647, 1) }',
     expected: { _tag: 'Trap' },
   },
   {
     name: 'float-to-subword-out-of-range-trap',
-    source:
-      'import silk.f64 as f64\nimport silk.u8 as u8\npub fn main() -> i32 { return u8.toI32(f64.toU8(300.0)) }',
+    source: 'import silk.f64t silk.u8\npu.u8() -> i32 { return u8.toI32(f64.toU8(300.0)) }',
     expected: { _tag: 'Trap' },
   },
   {
@@ -2367,36 +2362,34 @@ pub fn main() -> i32 {
   },
   {
     name: 'divide-by-zero-trap',
-    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(1, 0) }',
+    source: 'import silk.i32n main() -> i32 { return i32.divide(1, 0) }',
     expected: { _tag: 'Trap' },
   },
   {
     name: 'minimum-division-trap',
-    source: 'import silk.i32 as i32\npub fn main() -> i32 { return i32.divide(-2147483648, -1) }',
+    source: 'import silk.i32n main() -> i32 { return i32.divide(-2147483648, -1) }',
     expected: { _tag: 'Trap' },
   },
   {
     name: 'branch-taken',
-    source:
-      'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
+    source: 'import silk.i32n main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'branch-otherwise',
-    source:
-      'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }',
+    source: 'import silk.i32n main() -> i32 { if i32.equals(1, 2) { return 0 } return 42 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'branch-else',
     source:
-      'import silk.i32 as i32\npub fn main() -> i32 { if i32.lessThan(2, 1) { return 1 } else { return 42 } return 0 }',
+      'import silk.i32n main() -> i32 { if i32.lessThan(2, 1) { return 1 } else { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'bool-not',
     source:
-      'import silk.bool as bool\nimport silk.i32 as i32\npub fn main() -> i32 { if bool.not(i32.equals(1, 2)) { return 42 } return 0 }',
+      'import silk.bool silk.i32\npu.i32 -> i32 { if bool.not(i32.equals(1, 2)) { return 42 } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -2406,7 +2399,7 @@ pub fn main() -> i32 {
   },
   {
     name: 'bool-through-function',
-    source: `import silk.i32 as i32
+    source: `import silk.i32
 pub fn check(flag: bool) -> i32 { if flag { return 42 } return 0 }
 pub fn main() -> i32 { return check(i32.greaterOrEqual(3, 3)) }`,
     expected: { _tag: 'Completes', result: 42 },
@@ -2414,7 +2407,7 @@ pub fn main() -> i32 { return check(i32.greaterOrEqual(3, 3)) }`,
   {
     name: 'arm-binding',
     source:
-      'import silk.i32 as i32\npub fn main() -> i32 { let base = 40 if i32.equals(base, 40) { let bonus = 2 return i32.add(base, bonus) } return 0 }',
+      'import silk.i32n main() -> i32 { let base = 40 if i32.equals(base, 40) { let bonus = 2 return i32.add(base, bonus) } return 0 }',
     expected: { _tag: 'Completes', result: 42 },
   },
   {
@@ -2475,7 +2468,7 @@ pub fn main() -> i32 { return choose([], 0) }`,
   },
   {
     name: 'mutable-array-loop',
-    source: `import silk.usize as usize
+    source: `import silk.usize
 pub fn main() -> i32 {
   let mut values = [40, 0]
   let mut index = usize.add(0, 0)
@@ -2489,7 +2482,7 @@ pub fn main() -> i32 {
   },
   {
     name: 'loop-continue-break',
-    source: `import silk.usize as usize
+    source: `import silk.usize
 pub fn main() -> i32 {
   let mut index = usize.add(0, 0)
   while index < 50 {
@@ -2579,10 +2572,10 @@ pub fn main() -> i32 {
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.u32 as u32
+import silk.u32
 import silk.string { ScalarCursor, ScalarStep, String }
 import silk.option { Option }
-import silk.char { toU32 as charToU32 }
+import silk.char
 
 fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
   return match move String.nextScalar(value, move cursor) {
@@ -2592,7 +2585,7 @@ fn scalarSum(value: string, cursor: ScalarCursor) -> u32 {
 }
 
 fn continueSum(value: string, step: ScalarStep) -> u32 {
-  let scalar = charToU32(String.scalarValue(&step))
+  let scalar = char.toU32(String.scalarValue(&step))
   let cursor = String.nextCursor(move step)
   return scalar + scalarSum(value, move cursor)
 }
@@ -2621,7 +2614,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   },
   {
     name: 'string-utf8-validation',
-    source: `import silk.usize as usize
+    source: `import silk.usize
 import silk.string { InvalidUtf8, String }
 import silk.result { Result }
 fn inspect(bytes: &[u8]) -> i32 {
@@ -2776,7 +2769,7 @@ pub fn main() -> i32 {
   },
   {
     name: 'module-string-constants',
-    source: `import silk.usize as usize
+    source: `import silk.usize
 import silk.string { String }
 const escapedPattern: string<'static> = "\\\\d+\\\\.\\\\d+"
 const rawPattern: string<'static> = r"\\d+\\.\\d+"
@@ -2900,7 +2893,7 @@ pub fn main() -> i32 {
   },
   {
     name: 'bitwise-values-and-precedence',
-    source: `import silk.u32 as u32
+    source: `import silk.u32
 pub fn main() -> i32 {
   let a: u32 = 12
   let b: u32 = 10
@@ -3388,7 +3381,7 @@ import silk.hash { Hash, HashKey, HashSeed, Word }
 import silk.hash_map { HashMap }
 import silk.hash_set { HashSet }
 import silk.option { Option }
-import silk.u64 as u64
+import silk.u64
 
 struct Counter { value: i32 calls: i32 }
 impl Copy for Counter {}
@@ -3485,7 +3478,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
 import silk.effect { Effect }
 import silk.hash { Hash, HashKey, HashSeed }
 import silk.hash_map { HashMap }
-import silk.i32 as i32
+import silk.i32
 import silk.shared { Shared }
 
 struct Counts { keys: i32 values: i32 }
@@ -3612,7 +3605,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.i32 as i32
+import silk.i32
 import silk.hash { Hash }
 import silk.hash { HashKey, HashSeed, Word }
 import silk.hash_map { HashMap }
@@ -3654,10 +3647,10 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
 import silk.effect { Effect }
 import silk.hash { Hash, Word }
 import silk.hash_map { HashMap }
-import silk.i32 as i32
+import silk.i32
 import silk.layout { Layout }
 import silk.option { Option }
-import silk.usize as usize
+import silk.usize
 
 struct Budget { inner: SystemAllocator remaining: usize }
 
@@ -3750,7 +3743,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     source: `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.option { Option }
-import silk.usize as usize
+import silk.usize
 import silk.vector { Vector }
 
 effect fn build() -> i32 ! OutOfMemoryError {
@@ -3847,7 +3840,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), outer) }`,
 import silk.effect { Effect }
 import silk.option { Option }
 import silk.order { Order }
-import silk.usize as usize
+import silk.usize
 import silk.vector { Vector }
 
 struct Item { key: i32 tag: i32 }
@@ -3917,7 +3910,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
 import silk.effect { Effect }
 import silk.order { Order }
 import silk.shared { Shared }
-import silk.usize as usize
+import silk.usize
 import silk.vector { Vector }
 
 struct Counts { dropped: i32 }
@@ -4026,7 +4019,7 @@ import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.raw_buffer { RawBuffer }
 import silk.slot { Slot }
-import silk.u8 as u8
+import silk.u8
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[u8; 4]>()
@@ -4218,7 +4211,7 @@ import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.raw_buffer { RawBuffer }
 import silk.slot { Slot }
-import silk.u8 as u8
+import silk.u8
 effect fn store() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let layout = Layout.of<[u8; 4]>()
@@ -4251,7 +4244,7 @@ import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.f64 as f64
+import silk.f64
 import silk.layout { Layout }
 import silk.raw_buffer { RawBuffer }
 import silk.slot { Slot }
@@ -4286,8 +4279,8 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u8
+import silk.usize
 import silk.bytes { Bytes }
 
 fn octet(value: u8) -> u8 { return value }
@@ -4328,8 +4321,8 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     name: 'standard-input-source-provider',
     source: `import silk.effect { Effect }
 import silk.standard_input { ReadOutcome, StandardInput, StreamReadError }
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u8
+import silk.usize
 struct Scripted { bytes: [u8; 5] length: usize offset: usize chunk: usize }
 fn scripted() -> Scripted {
   return Scripted {
@@ -4409,8 +4402,8 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
   // folded from StaticByteViewIndexing.test.ts: out-of-bounds static byte read traps.
   {
     name: 'static-byte-view-bounds',
-    source: `import silk.u8 as u8
-import silk.usize as usize
+    source: `import silk.u8
+import silk.usize
 pub fn main() -> i32 {
   let bytes = b"\\x99\\x13\\x1d\\x00"
   let index = usize.add(0, 4)
@@ -4536,7 +4529,7 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
     source: `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.shared { Shared }
-import silk.usize as usize
+import silk.usize
 struct Counter { value: i32 }
 struct Token { value: i32 counter: Shared<Counter> }
 fn increment(counter: &mut Counter) -> i32 {
@@ -5559,8 +5552,8 @@ const localSharedPressureFailure = (ordinal: 0 | 1): string =>
 
 const deterministicSecureRandom = `import silk.effect { Effect }
 import silk.random { Random }
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u8
+import silk.usize
 struct FixedRandom {}
 effect fn fixedFill(self: &mut FixedRandom, output: &mut [u8]) -> () {
   let mut index = usize.ZERO
@@ -5644,7 +5637,7 @@ export const independentExecutionFinalizedDestroy = readFileSync(
 const nativeSecureRandom = `import silk.effect { Effect }
 import silk.os_random { OsRandom }
 import silk.random { Random }
-import silk.u8 as u8
+import silk.u8
 pub fn main() -> i32 {
   let mut provider = OsRandom.make()
   let mut output = [u8.toU8(0), u8.toU8(0), u8.toU8(0)]
@@ -5676,18 +5669,18 @@ int32_t silk_test_touched(void) { return silk_test_counter; }
 `
 
 /** The extern leg of the scalar fixture; `foreignScalarReference` computes the same checksum. */
-export const foreignScalarNative = `import silk.i8 as i8
-import silk.u8 as u8
-import silk.i16 as i16
-import silk.u16 as u16
-import silk.i32 as i32
-import silk.u32 as u32
-import silk.i64 as i64
-import silk.u64 as u64
-import silk.isize as isize
-import silk.usize as usize
-import silk.f32 as f32
-import silk.f64 as f64
+export const foreignScalarNative = `import silk.i8
+import silk.u8
+import silk.i16
+import silk.u16
+import silk.i32
+import silk.u32
+import silk.i64
+import silk.u64
+import silk.isize
+import silk.usize
+import silk.f32
+import silk.f64
 unsafe extern "C" fn silk_test_add_i8(a: i8, b: i8) -> i8
 unsafe extern "C" fn silk_test_add_u8(a: u8, b: u8) -> u8
 unsafe extern "C" fn silk_test_add_i16(a: i16, b: i16) -> i16
@@ -5724,18 +5717,18 @@ pub fn main() -> i32 {
 }`
 
 /** Pure-Silk control for `foreignScalarNative`: the same checksum without C. */
-export const foreignScalarReference = `import silk.i8 as i8
-import silk.u8 as u8
-import silk.i16 as i16
-import silk.u16 as u16
-import silk.i32 as i32
-import silk.u32 as u32
-import silk.i64 as i64
-import silk.u64 as u64
-import silk.isize as isize
-import silk.usize as usize
-import silk.f32 as f32
-import silk.f64 as f64
+export const foreignScalarReference = `import silk.i8
+import silk.u8
+import silk.i16
+import silk.u16
+import silk.i32
+import silk.u32
+import silk.i64
+import silk.u64
+import silk.isize
+import silk.usize
+import silk.f32
+import silk.f64
 fn addI8(a: i8, b: i8) -> i8 { return a + b }
 fn addU8(a: u8, b: u8) -> u8 { return a + b }
 fn addI16(a: i16, b: i16) -> i16 { return a + b }
@@ -5789,8 +5782,8 @@ pub fn main() -> i32 {
 }`
 
 /** `Pointer.fromMutSlice(&mut bytes)` plus `bytes.length` handed to C; `bytes[0]` observes the fill. */
-export const foreignPointerFillNative = `import silk.i32 as i32
-import silk.u8 as u8
+export const foreignPointerFillNative = `import silk.i32
+import silk.u8
 import silk.pointer { Pointer }
 unsafe extern "C" fn silk_test_fill(buffer: ?[*]mut u8, length: usize, byte: u8) -> ()
 fn fill(bytes: &mut [u8], byte: u8) -> () {
@@ -5803,9 +5796,9 @@ pub fn main() -> i32 {
 }`
 
 /** Pure-Silk control for `foreignPointerFillNative`. */
-export const foreignPointerFillReference = `import silk.i32 as i32
-import silk.u8 as u8
-import silk.usize as usize
+export const foreignPointerFillReference = `import silk.i32
+import silk.u8
+import silk.usize
 fn fill(bytes: &mut [u8], byte: u8) -> () {
   let mut index = usize.ZERO
   while index < bytes.length {
@@ -5842,9 +5835,9 @@ pub fn main() -> i32 {
  * to exactly those LLVM types (`*mut`/`*const` -> `ptr`, `usize` -> `i64`, `()` -> `void`) so the
  * redeclarations share one entry instead of reporting `ForeignSymbolConflict`.
  */
-export const foreignLibcRoundtripNative = `import silk.i32 as i32
-import silk.isize as isize
-import silk.usize as usize
+export const foreignLibcRoundtripNative = `import silk.i32
+import silk.isize
+import silk.usize
 import silk.pointer { Pointer }
 unsafe extern "C" fn malloc(size: usize) -> ?*mut u8
 unsafe extern "C" fn free(pointer: ?*mut u8) -> ()
@@ -5870,7 +5863,7 @@ pub fn main() -> i32 {
 }`
 
 /** Pure-Silk control for `foreignLibcRoundtripNative`: the same status without libc. */
-export const foreignLibcRoundtripReference = `import silk.usize as usize
+export const foreignLibcRoundtripReference = `import silk.usize
 pub fn main() -> i32 {
   let bytes = b"hello\\n"
   return usize.toI32(bytes.length) * 7
@@ -5936,18 +5929,18 @@ int32_t silk_test_export_checksum(void) {
 }
 `
 
-export const foreignExportScalarNative = `import silk.i8 as i8
-import silk.u8 as u8
-import silk.i16 as i16
-import silk.u16 as u16
-import silk.i32 as i32
-import silk.u32 as u32
-import silk.i64 as i64
-import silk.u64 as u64
-import silk.isize as isize
-import silk.usize as usize
-import silk.f32 as f32
-import silk.f64 as f64
+export const foreignExportScalarNative = `import silk.i8
+import silk.u8
+import silk.i16
+import silk.u16
+import silk.i32
+import silk.u32
+import silk.i64
+import silk.u64
+import silk.isize
+import silk.usize
+import silk.f32
+import silk.f64
 unsafe extern "C" fn silk_test_export_note() -> ()
 unsafe extern "C" fn silk_test_export_noted() -> i32
 unsafe extern "C" fn silk_test_export_checksum() -> i32
@@ -6668,7 +6661,7 @@ pub fn main() -> i32 { return taskIdBoundary() }`,
     source: `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.execution { Execution }
-import silk.i8 as i8
+import silk.i8
 import silk.layout { Layout }
 import silk.shared { Shared }
 struct Counter { value: i32 }
@@ -7062,7 +7055,7 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`,
     name: 'multi-affine-effect-return',
     source: `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
-import silk.usize as usize
+import silk.usize
 import silk.vector { Vector }
 struct Step { pc: usize opcode: u8 depth: usize top: i32 }
 struct VmDiagnostic { pc: usize code: usize }
@@ -7142,7 +7135,7 @@ pub fn main() -> i32 { return run make(42) }`,
     name: 'slot-nominal-union-cleanup-lanes',
     source: `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
-import silk.i8 as i8
+import silk.i8
 import silk.layout { Layout }
 import silk.raw_buffer { RawBuffer }
 import silk.shared { Shared }
@@ -7221,7 +7214,7 @@ import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.raw_buffer { RawBuffer }
 import silk.slot { Slot }
-import silk.u8 as u8
+import silk.u8
 struct Left { value: i32 }
 impl Copy for Left {}
 struct Right { marker: u8 value: i32 }
@@ -7269,10 +7262,10 @@ pub fn main() -> i32 { return run Effect.catchAll(store(), recover) }`,
   },
   {
     name: 'packed-subword-reference',
-    source: `import silk.i16 as i16
-import silk.i8 as i8
-import silk.u16 as u16
-import silk.u8 as u8
+    source: `import silk.i16
+import silk.i8
+import silk.u16
+import silk.u8
 struct Packed { first: u8 second: i8 third: u16 fourth: i16 }
 fn peek(self: &Packed) -> i32 {
   return u8.toI32(self.first) + i8.toI32(self.second) + u16.toI32(self.third) + i16.toI32(self.fourth)
@@ -7308,7 +7301,7 @@ pub fn main() -> i32 {
   },
   {
     name: 'raw-string-delimiters',
-    source: `import silk.usize as usize
+    source: `import silk.usize
 import silk.string { String }
 pub fn main() -> i32 {
   let single = r"\\n"
@@ -7364,7 +7357,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recoverAllocation) }`
 import silk.box { Box }
 import silk.effect { Effect }
 import silk.shared { Shared }
-import silk.usize as usize
+import silk.usize
 struct Counter { value: i32 }
 fn increment(counter: &mut Counter) -> i32 { counter.value = counter.value + 1 return counter.value }
 fn read(counter: &Counter) -> i32 { return counter.value }
@@ -7490,7 +7483,7 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recover) }`,
 import silk.box { Box }
 import silk.effect { Effect }
 import silk.shared { Shared }
-import silk.usize as usize
+import silk.usize
 struct Counter { value: i32 }
 fn increment(counter: &mut Counter) -> i32 { counter.value = counter.value + 1 return counter.value }
 fn read(counter: &Counter) -> i32 { return counter.value }
@@ -7625,7 +7618,7 @@ pub fn main() -> i32 {
   {
     name: 'runtime-slice-length-overflow-trap',
     source: `import silk.slice { Slice }
-import silk.usize as usize
+import silk.usize
 fn choose(values: &[i32], length: usize) -> usize {
   return Slice.view(values, 1, length).length
 }
@@ -7674,7 +7667,7 @@ pub fn main() -> i32 {
     source: `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.box { Box }
 import silk.effect { Effect }
-import silk.usize as usize
+import silk.usize
 effect fn build() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut boxed = run Box.make<i32>(20) |> Effect.provideMut(&mut allocator)
@@ -7696,7 +7689,7 @@ pub fn main() -> i32 { return run Effect.catchAll(build(), recover) }`,
     source: `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.shared { Shared }
-import silk.u8 as u8
+import silk.u8
 union Checked<T> { Present { value: T }, Absent }
 struct Audit { selected: i32 dropped: i32 sum: i32 }
 fn selected(audit: &mut Audit, marker: i32) -> i32 {
@@ -7929,7 +7922,7 @@ pub fn main() -> i32 {
   {
     name: 'foreign-object-libm-order',
     source: 'pub fn main() -> i32 { return 42 }',
-    nativeSource: `import silk.i32 as i32
+    nativeSource: `import silk.i32
 unsafe extern "C" fn silk_test_libm_order(value: f64) -> i32
 pub fn main() -> i32 { return unsafe silk_test_libm_order(i32.toF64(85)) }`,
     nativeCSources: {

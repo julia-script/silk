@@ -66,9 +66,9 @@
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.vector {Vector}
 import silk.result {Result}
-import silk.u8 as u8
-import silk.u32 as u32
-import silk.usize as usize
+import silk.u8
+import silk.u32
+import silk.usize
 
 /// A conservative byte bound for decoder storage, owned tables, and temporary decoding state.
 ///

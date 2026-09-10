@@ -9,8 +9,7 @@ import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 const encoder = new TextEncoder()
 
-const pipelineSource =
-  'import silk.i32 as i32\npub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }'
+const pipelineSource = 'import silk.i32\npub fn main() -> i32 { return 2 + 3 * 4 |> i32.add(1) }'
 
 const golden = (name: string): string =>
   readFileSync(new URL(`./goldens/operator.${name}`, import.meta.url), 'utf8')

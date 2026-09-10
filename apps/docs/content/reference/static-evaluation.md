@@ -295,7 +295,7 @@ owner's ordinary borrow lifetime.
 concatenation do not mutate the input sequence.
 
 ```silk,ignore
-import silk.static_sequence as StaticSequence
+import silk.static_sequence { StaticSequence }
 
 static fn values() -> Intrinsic.StaticSequence<i32> {
   let mut result = StaticSequence.empty<i32>()
@@ -323,7 +323,7 @@ field descriptor's concrete `Field<Owner, Value>` type, so one authored body can
 interfaces and generate differently typed runtime operations.
 
 ```silk,ignore
-import silk.reflect as Reflect
+import silk.reflect { Reflect }
 
 fn visit<Owner>(owner: &Owner) -> () {
   static for field in Reflect.fields<Owner>() {
@@ -441,28 +441,28 @@ arguments produces the same code, semantic details, related spans, and trace enc
 
 The ordinary standard-library module `silk.target` exposes individual machine facts:
 
-| Member                     | Type                     | Value                                  |
-| -------------------------- | ------------------------ | -------------------------------------- |
-| `Target.arch()`            | `Target.Arch`            | Instruction-set architecture           |
-| `Target.operatingSystem()` | `Target.OperatingSystem` | Operating system                       |
-| `Target.abi()`             | `Target.Abi`             | Platform ABI                           |
-| `Target.objectFormat()`    | `Target.ObjectFormat`    | Object-file format                     |
-| `Target.endianness()`      | `Target.Endianness`      | Byte order                             |
-| `Target.pointerBits`       | `u32`                    | Data-pointer width in bits             |
-| `Target.pointerAlignment`  | `u32`                    | Data-pointer alignment in bytes        |
-| `Target.usizeMax`          | `usize`                  | Largest unsigned pointer-sized integer |
-| `Target.isizeMax`          | `isize`                  | Largest signed pointer-sized integer   |
-| `Target.isizeMin`          | `isize`                  | Smallest signed pointer-sized integer  |
+| Member                     | Type              | Value                                  |
+| -------------------------- | ----------------- | -------------------------------------- |
+| `Target.arch()`            | `Arch`            | Instruction-set architecture           |
+| `Target.operatingSystem()` | `OperatingSystem` | Operating system                       |
+| `Target.abi()`             | `Abi`             | Platform ABI                           |
+| `Target.objectFormat()`    | `ObjectFormat`    | Object-file format                     |
+| `Target.endianness()`      | `Endianness`      | Byte order                             |
+| `pointerBits`              | `u32`             | Data-pointer width in bits             |
+| `pointerAlignment`         | `u32`             | Data-pointer alignment in bytes        |
+| `usizeMax`                 | `usize`           | Largest unsigned pointer-sized integer |
+| `isizeMax`                 | `isize`           | Largest signed pointer-sized integer   |
+| `isizeMin`                 | `isize`           | Smallest signed pointer-sized integer  |
 
 Use `silk.compilation` for typed logical build choices. Source checks use the narrow domain needed
 for the decision. The complete [compilation profile](compilation-profiles.md) also contains resolved
 package parameters and controls static-evaluation identity.
 
 ```silk,ignore
-import silk.target as Target
+import silk.target { Target, Arch }
 
 fn targetWordBits() -> u32 {
-  static if Target.arch() == Target.Arch.Wasm32 {
+  static if Target.arch() == Arch.Wasm32 {
     return 32
   } else {
     return 64

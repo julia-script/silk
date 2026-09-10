@@ -468,18 +468,18 @@ compile errors, cycles, and static-evaluation limits retain their diagnostic and
 The ordinary `silk.target` module publishes these primitive constants. Their initializers use the
 same static evaluator as every other constant, and the selected target determines their values.
 
-| Fact                 | Type    | Value                                        |
-| -------------------- | ------- | -------------------------------------------- |
-| `Target.usizeMax`    | `usize` | Largest `usize` at the target pointer width  |
-| `Target.isizeMax`    | `isize` | Largest `isize` at the target pointer width  |
-| `Target.isizeMin`    | `isize` | Smallest `isize` at the target pointer width |
-| `Target.pointerBits` | `u32`   | Target pointer width in bits                 |
+| Fact          | Type    | Value                                        |
+| ------------- | ------- | -------------------------------------------- |
+| `usizeMax`    | `usize` | Largest `usize` at the target pointer width  |
+| `isizeMax`    | `isize` | Largest `isize` at the target pointer width  |
+| `isizeMin`    | `isize` | Smallest `isize` at the target pointer width |
+| `pointerBits` | `u32`   | Target pointer width in bits                 |
 
 ```silk
-import silk.target as Target
+import silk.target { pointerBits, usizeMax, isizeMax, isizeMin }
 
-pub const MAX: usize = Target.usizeMax
-pub const BITS: u32 = Target.pointerBits
+pub const MAX: usize = usizeMax
+pub const BITS: u32 = pointerBits
 ```
 
 The declaration and imported module surface retain the explicit type, static initializer, and
@@ -1301,7 +1301,7 @@ initialized live value; writes require live writable storage. Aligned operations
 alignment. Unaligned operations emit no stronger LLVM alignment than the source guarantee.
 
 ```silk
-import silk.pointer as Pointer
+import silk.pointer { Pointer }
 
 fn seventh() -> i32 {
   let mut value = 0
@@ -1346,7 +1346,7 @@ it would anyway, and the pointer itself holds no loan on the root. The root stay
 mutable, and droppable while pointers to it exist.
 
 ```silk
-import silk.pointer as Pointer
+import silk.pointer { Pointer }
 
 fn address(value: i32) -> *const i32 {
   let pointer = Pointer.fromRef(&value)

@@ -276,11 +276,11 @@ pub fn main() -> i32 {
 it.effect('indexes namespace-qualified applied interface owners without duplicate call paths', () =>
   Effect.gen(function* () {
     const module = 'interface-operation-witness/qualified-tooling'
-    const source = `import model.Encoding as Model
+    const source = `import model.Encoding
 pub fn main() -> i32 {
-  let age = Model.Age { value: 42 }
-  let encoded = Model.Encodable<i32>.encode(&age)
-  return (&age) |> Model.Encodable<i32>.encode
+  let age = Encoding.Age { value: 42 }
+  let encoded = Encoding.Encodable<i32>.encode(&age)
+  return (&age) |> Encoding.Encodable<i32>.encode
 }`
     const snapshot = yield* Analysis.makeRealized({
       root: SourceFile.make(module, ascii(source)),
@@ -302,13 +302,17 @@ impl Encodable<i32> for Age {
     )
     assert.deepEqual(messages(snapshot), [])
 
-    const appliedOffset = source.indexOf('Model.Encodable<i32>.encode')
+    const appliedOffset = source.indexOf('Encoding.Encodable<i32>.encode')
     const namespace = Analysis.semanticOccurrenceAt(snapshot, module, appliedOffset)
-    const owner = Analysis.semanticOccurrenceAt(snapshot, module, appliedOffset + 'Model.'.length)
+    const owner = Analysis.semanticOccurrenceAt(
+      snapshot,
+      module,
+      appliedOffset + 'Encoding.'.length,
+    )
     const operation = Analysis.semanticOccurrenceAt(
       snapshot,
       module,
-      appliedOffset + 'Model.Encodable<i32>.'.length,
+      appliedOffset + 'Encoding.Encodable<i32>.'.length,
     )
     assert.strictEqual(namespace?.role, 'Actor')
     assert.strictEqual(namespace?.resolution._tag, 'Available')
@@ -320,10 +324,10 @@ impl Encodable<i32> for Age {
     const inaccessible = yield* Analysis.makeRealized({
       root: SourceFile.make(
         `${module}/inaccessible`,
-        ascii(`import model.Hidden as Model
+        ascii(`import model.Hidden
 pub fn main() -> i32 {
-  let age = Model.Age { value: 42 }
-  return Model.Encodable<i32>.encode(&age)
+  let age = Hidden.Age { value: 42 }
+  return Hidden.Encodable<i32>.encode(&age)
 }`),
       ),
     }).pipe(

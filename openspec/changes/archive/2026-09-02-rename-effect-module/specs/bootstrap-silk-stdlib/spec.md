@@ -12,12 +12,12 @@ diagnostics, documentation, hover, and navigation.
 
 #### Scenario: Import the canonical Effect module
 
-- **WHEN** source imports `silk.effect as Effect`
+- **WHEN** source imports `silk.effect { Effect }`
 - **THEN** ordinary module resolution loads canonical module `silk/effect` and qualified operations resolve to its source declarations
 
 #### Scenario: Reject the removed plural identity
 
-- **WHEN** source imports `silk.effects as Effect`
+- **WHEN** source imports `silk.effects { Effect }`
 - **THEN** ordinary module resolution reports that `silk/effects` is unavailable
 
 #### Scenario: Navigate to a standard Effect combinator

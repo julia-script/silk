@@ -33,7 +33,7 @@ as a caller error rather than producing a source diagnostic.
 
 #### Scenario: Follow a reserved path segment
 
-- **WHEN** a root imports `silk.effect as Effect` and the resolver provides canonical module `silk/effect`
+- **WHEN** a root imports `silk.effect { Effect }` and the resolver provides canonical module `silk/effect`
 - **THEN** loading follows that exact module using the retained bytes of both path segments
 
 #### Scenario: Exclude unreachable modules

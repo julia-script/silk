@@ -28,7 +28,7 @@
 //! ```
 
 import silk.random { Random }
-import silk.u64 as u64
+import silk.u64
 
 /// A copyable pair of initialization seed words with private representation.
 pub struct Seed {

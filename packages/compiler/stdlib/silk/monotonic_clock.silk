@@ -64,11 +64,11 @@
 //! }
 //! ```
 
-import silk.i64 as i64
+import silk.i64
 import silk.option { Option }
 import silk.system_clock { SystemClock }
 import silk.system_clock { Instant }
-import silk.u64 as u64
+import silk.u64
 
 /// An explicit provider of monotonic marks, nominal resolution, and deadline waits.
 ///

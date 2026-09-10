@@ -91,7 +91,7 @@ authoritative catalog used by analysis and hover.
 
 #### Scenario: Exclude members after a namespace
 
-- **WHEN** completion is requested after `OptionModule.` for `import silk.option as OptionModule`
+- **WHEN** completion is requested after `option.` for `import silk.option`
 - **THEN** the result lists `Option` and any public root declarations and excludes `map`
 
 ### Requirement: Completion remains deterministic under recovery

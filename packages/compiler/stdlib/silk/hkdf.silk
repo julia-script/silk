@@ -14,7 +14,7 @@
 
 import silk.hmac {HmacSha256, HmacSha384}
 import silk.result {Result}
-import silk.usize as usize
+import silk.usize
 
 /// An HKDF output request that exceeds the selected hash's 255-block limit.
 pub struct OutputTooLongError {

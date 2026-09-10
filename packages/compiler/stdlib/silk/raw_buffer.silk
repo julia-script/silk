@@ -54,8 +54,8 @@
 //! ```
 
 import silk.slot { Slot }
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u8
+import silk.usize
 
 /// The owner of the raw storage operations.
 ///

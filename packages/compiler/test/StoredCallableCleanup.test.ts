@@ -161,7 +161,7 @@ it.effect('owes nothing for a stored callable whose captures are all Copy', () =
     const module = 'stored-callable-cleanup/copy'
     const snapshot = yield* realized(
       module,
-      `import silk.i32 as i32
+      `import silk.i32
 struct Adder<F: fn<'static>(i32) -> i32> { step: F }
 pub fn main() -> i32 {
   let adder = Adder { step: i32.add(1) }

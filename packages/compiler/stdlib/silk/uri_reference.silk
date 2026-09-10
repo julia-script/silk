@@ -19,8 +19,8 @@ import silk.option {Option}
 import silk.result {Result}
 import silk.string {String}
 import silk.slice {Slice}
-import silk.usize as usize
-import silk.u8 as u8
+import silk.usize
+import silk.u8
 
 /// The RFC grammar that matches an authority host.
 pub enum HostKind {

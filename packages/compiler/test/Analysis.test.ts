@@ -85,7 +85,7 @@ it.effect('constructs frontend snapshots for deterministic damaged-source edits'
 it.effect('resolves imported declarations as stored callable values', () =>
   Effect.gen(function* () {
     const source =
-      'import lib as Lib\npub fn main() -> i32 { let callback = Lib.identity return callback(42) }'
+      'import lib\npub fn main() -> i32 { let callback = lib.identity return callback(42) }'
     const self = yield* snapshot('root', [
       ['root', source],
       ['lib', 'pub fn identity(value: i32) -> i32 { return value }'],
@@ -132,7 +132,7 @@ pub fn main() -> i32 { let increment = add(2) return 40 |> increment }`
 it.effect('retains inaccessible imported callable targets without inventing a value lookup', () =>
   Effect.gen(function* () {
     const self = yield* snapshot('root', [
-      ['root', 'import lib as Lib\npub fn main() -> i32 { let callback = Lib.hidden return 0 }'],
+      ['root', 'import lib\npub fn main() -> i32 { let callback = lib.hidden return 0 }'],
       ['lib', 'fn hidden(value: i32) -> i32 { return value }'],
     ])
     const root = self.results.get('root')
@@ -291,9 +291,7 @@ it.effect('preserves one exact target and layout plan across facade queries and 
   Effect.gen(function* () {
     const self = yield* AnalysisFixture.retainingMain(
       'memory/plan',
-      ascii(
-        'import silk.i32 as i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }',
-      ),
+      ascii('import silk.i32\npub fn main() -> i32 { if i32.equals(1, 1) { return 42 } return 0 }'),
       'wasm32-unknown-unknown',
     )
     const target = Analysis.targetOf(self)
@@ -399,8 +397,8 @@ pub fn main() -> i32 { return identity(42) }`
 it.effect('resolves imported and qualified declarations without spelling lookup', () =>
   Effect.gen(function* () {
     const root = `import lib { answer }
-import other as tools
-pub fn main() -> i32 { return answer() + tools.answer() }`
+import other
+pub fn main() -> i32 { return answer() + other.answer() }`
     const self = yield* snapshot('root', [
       ['root', root],
       ['lib', 'pub fn answer() -> i32 { return 42 }'],
@@ -954,8 +952,8 @@ pub fn main() -> i32 { return 42 }`,
 it.effect('resolves public foreign functions across modules under the unsafe rule', () =>
   Effect.gen(function* () {
     const root = `import lib { abs }
-import lib as Lib
-pub fn main() -> i32 { return unsafe abs(1) + unsafe Lib.abs(2) + Lib.hidden(3) }`
+import lib
+pub fn main() -> i32 { return unsafe abs(1) + unsafe lib.abs(2) + lib.hidden(3) }`
     const self = yield* Analysis.make({ root: SourceFile.make('root', ascii(root)) }).pipe(
       Effect.provide(
         SourceResolver.memory(

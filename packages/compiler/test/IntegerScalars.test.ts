@@ -5,8 +5,8 @@ import * as Analysis from '../src/Analysis.js'
 import * as Hir from '../src/Hir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 
-const checkedIntegerSource = `import silk.i16 as i16
-import silk.u8 as u8
+const checkedIntegerSource = `import silk.i16
+import silk.u8
 import silk.option { Option }
 fn overflow() -> Option<u8> { return u8.checkedAdd(255, 1) }
 fn convert() -> Option<u8> { return i16.checkedToU8(255) }
@@ -46,7 +46,7 @@ it.effect('lowers checked integer outcomes through native and Wasm LLVM targets'
   }),
 )
 
-const contextualCallSource = `import silk.u8 as u8
+const contextualCallSource = `import silk.u8
 fn selectByte(
   source: &[u8],
   index: usize,
@@ -144,7 +144,7 @@ it.effect('rejects contextual overflow and already-typed integer mismatches befo
 
     const mismatch = yield* AnalysisFixture.retainingMain(
       'integer/contextual-mismatch',
-      new TextEncoder().encode(`import silk.i32 as i32
+      new TextEncoder().encode(`import silk.i32
 fn accept(value: u8) -> u8 { return value }
 pub fn main() -> i32 {
   let wider = i32.add(40, 2)
@@ -186,7 +186,7 @@ it.effect('lets a declared scalar operand drive literal-first infix arithmetic',
     const id = 'integer/literal-first-infix'
     const snapshot = yield* AnalysisFixture.retainingMain(
       id,
-      new TextEncoder().encode(`import silk.u16 as u16
+      new TextEncoder().encode(`import silk.u16
 fn mixed(value: u16) -> i32 {
   let literalFirst = 5 + value
   let literalLast = value + 5

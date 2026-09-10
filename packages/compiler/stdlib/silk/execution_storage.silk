@@ -17,7 +17,7 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.profileTex
   import silk.layout {Layout}
   import silk.allocator {OutOfMemoryError}
   import silk.effect {Effect}
-  import silk.usize as usize
+  import silk.usize
   unsafe extern "C" fn malloc(size: usize) -> ?*mut u8
   unsafe extern "C" fn free(pointer: ?*mut u8) -> ()
   extern "C" struct Reservation {

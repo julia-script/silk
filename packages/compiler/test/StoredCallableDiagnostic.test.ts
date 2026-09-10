@@ -43,7 +43,7 @@ const sourceSpanText = (
 const messages = (snapshot: Analysis.Snapshot): ReadonlyArray<string> =>
   Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.message)
 
-const accepted = `import silk.i32 as i32
+const accepted = `import silk.i32
 struct Parser { decode: fn<'static>(i32) -> i32 }
 struct Nested { parser: Parser }
 fn size(self: &Parser) -> i32 { return 1 }
@@ -66,7 +66,7 @@ it.effect('keeps declaration-only and unreachable callable fields out of realiza
 )
 
 /** The minimal reproducer from #184, repaired so declaration and semantic analysis accept it. */
-const reproducer = `import silk.i32 as i32
+const reproducer = `import silk.i32
 struct Parser<A> {
   decode: fn<'static>(i32) -> A
 }
@@ -126,7 +126,7 @@ it.effect('fences realization: SEM0103 leaves layout and MIR unavailable, not In
 
 it.effect('rejects a monomorphic construction that stores a partial application', () =>
   Effect.gen(function* () {
-    const source = `import silk.i32 as i32
+    const source = `import silk.i32
 struct Parser { decode: fn<'static>(i32) -> i32 }
 pub fn main() -> i32 {
   let parser = Parser { decode: i32.add(1) }
@@ -142,7 +142,7 @@ it.effect('points a generic wrapper violation at the specializing call site', ()
     // The declared field type is `T`; only instance substitution makes it a callable. The concrete
     // callable was written at the call, so that is the primary origin, and the generic body's
     // construction is retained as related provenance.
-    const source = `import silk.i32 as i32
+    const source = `import silk.i32
 struct Holder<T> { value: T }
 fn wrap<T>(value: T) -> Holder<T> { return Holder<T> { value: move value } }
 pub fn main() -> i32 {
@@ -171,7 +171,7 @@ pub fn main() -> i32 {
 
 it.effect('rejects a callable stored through an array field and a bare array literal', () =>
   Effect.gen(function* () {
-    const throughField = `import silk.i32 as i32
+    const throughField = `import silk.i32
 struct Parser { decode: [fn<'static>(i32) -> i32; 2] }
 pub fn main() -> i32 {
   let parser = Parser { decode: [i32.add(1), i32.add(2)] }
@@ -185,7 +185,7 @@ pub fn main() -> i32 {
       messages(fieldSnapshot).join('\n'),
     )
 
-    const bare = `import silk.i32 as i32
+    const bare = `import silk.i32
 pub fn main() -> i32 {
   let transforms = [i32.add(1), i32.add(2)]
   return 42
@@ -197,7 +197,7 @@ pub fn main() -> i32 {
 
 it.effect('rejects a capturing closure stored in a nominal field', () =>
   Effect.gen(function* () {
-    const source = `import silk.i32 as i32
+    const source = `import silk.i32
 struct Parser { decode: fn<'static>(i32) -> i32 }
 pub fn main() -> i32 {
   let offset = 1
@@ -211,7 +211,7 @@ pub fn main() -> i32 {
 
 it.effect('keeps nested structural callable captures fenced before layout and MIR', () =>
   Effect.gen(function* () {
-    const source = `import silk.i32 as i32
+    const source = `import silk.i32
 struct Parser<F: fn<'static>(i32) -> i32> { decode: F }
 fn apply(value: i32, transform: fn<'static>(i32) -> i32) -> i32 { return transform(value) }
 pub fn main() -> i32 {
@@ -228,7 +228,7 @@ pub fn main() -> i32 {
 
 it.effect('reports the stored callable alongside ownership findings for a once field', () =>
   Effect.gen(function* () {
-    const source = `import silk.i32 as i32
+    const source = `import silk.i32
 struct Parser { decode: once fn<'static>(i32) -> i32 }
 pub fn main() -> i32 {
   let parser = Parser { decode: i32.add(1) }
@@ -245,7 +245,7 @@ it.effect('points a stdlib construction reached through inference at the user ca
     // that cannot receive a layout lives inside silk/option, but the callable was written at the
     // user's call, so the primary span is the user source and the stdlib construction is related
     // provenance.
-    const source = `import silk.i32 as i32
+    const source = `import silk.i32
 import silk.option { Option }
 pub fn main() -> i32 {
   let optional = Option.some(i32.add(1))

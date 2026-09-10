@@ -89,9 +89,9 @@ it.effect(
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.u32 as u32
-import silk.u8 as u8
-import silk.usize as usize
+import silk.u32
+import silk.u8
+import silk.usize
 import silk.os_filesystem { OsFileSystem }
 import silk.native_filesystem { NativeFileSystem }
 import silk.bytes { Bytes }

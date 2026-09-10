@@ -156,7 +156,7 @@ provenance and be deterministic across fresh processes.
 
 #### Scenario: Resolve a namespace-qualified call
 
-- **WHEN** a module imports `compiler.Syntax as Tree` and calls `Tree.parse()`
+- **WHEN** a module imports `compiler.Syntax` and calls `Syntax.parse()`
 - **THEN** the namespace and member lookups resolve to canonical module `compiler/Syntax` and its public `parse` declaration
 
 #### Scenario: Resolve mutual calls across an import cycle
@@ -190,7 +190,7 @@ declaration kind, or reinterpret a function as a type.
 
 #### Scenario: Resolve a qualified nominal type
 
-- **WHEN** a module imports `syntax.Tree as Tree` and a field names `Tree.Node`
+- **WHEN** a module imports `syntax.Tree` and a field names `Tree.Node`
 - **THEN** the type lookup resolves the public struct through the namespace alias
 
 #### Scenario: Refuse a function in type position
@@ -447,7 +447,7 @@ an unknown member under a namespace SHALL report an unknown module member.
 
 #### Scenario: A namespace does not expose members
 
-- **WHEN** a module imports `silk.option as OptionModule` and calls `OptionModule.map(...)`
+- **WHEN** a module imports `silk.option` and calls `option.map(...)`
 - **THEN** resolution reports an unknown module member because `map` is an inherent member of `Option`, not a root declaration
 
 #### Scenario: Type import is not a namespace

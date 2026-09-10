@@ -33,22 +33,22 @@
 //! }
 //! ```
 
-import silk.bool as bool
-import silk.f32 as f32
-import silk.f64 as f64
+import silk.bool
+import silk.f32
+import silk.f64
 import silk.format { Format, ParseError }
-import silk.i16 as i16
-import silk.i32 as i32
-import silk.i64 as i64
-import silk.i8 as i8
-import silk.isize as isize
+import silk.i16
+import silk.i32
+import silk.i64
+import silk.i8
+import silk.isize
 import silk.option { Option }
 import silk.result { Result }
-import silk.target as Target
-import silk.u16 as u16
-import silk.u32 as u32
-import silk.u64 as u64
-import silk.u8 as u8
+import silk.target { pointerBits, usizeMax }
+import silk.u16
+import silk.u32
+import silk.u64
+import silk.u8
 
 /// The largest `usize` value for the compilation target.
 ///
@@ -56,13 +56,13 @@ import silk.u8 as u8
 ///
 /// This is 4294967295 on a 32-bit target and 18446744073709551615 on a 64-bit target. Checked
 /// arithmetic rejects results above it.
-pub const MAX: usize = Target.usizeMax
+pub const MAX: usize = usizeMax
 
 /// The smallest `usize` value, which is zero at each pointer width.
 pub const MIN: usize = 0
 
 /// The width of `usize` in bits, which is the compilation target's pointer width.
-pub const BITS: u32 = Target.pointerBits
+pub const BITS: u32 = pointerBits
 
 /// The `usize` zero value for a count without a typed context.
 pub const ZERO: usize = 0

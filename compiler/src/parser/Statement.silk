@@ -8,69 +8,69 @@ import parser.Node {Node, NodeKind}
 import parser.NodeId {NodeId}
 import parser.Element {Element}
 import parser.ParseState {State, NodeResult}
-import parser.ParseState as P
-import parser.Grammar as G
-import parser.Type as Types
-import parser.Expression as Expressions
-import parser.Pattern as Patterns
-import parser.Lookahead as Look
+import parser.ParseState
+import parser.Grammar
+import parser.Type
+import parser.Expression
+import parser.Pattern
+import parser.Lookahead
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.vector {Vector}
-import silk.usize as Usize
+import silk.usize
 
 effect fn binding(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let mut p = run move initial
-    |> P.begin
-    |> P.consume
+    |> ParseState.begin
+    |> ParseState.consume
   let mut nodeKind = NodeKind.BindingStatement
-  let kind = P.currentKind(&p.state)
-  let ordinary = kind == TokenKind.MutKeyword || kind == TokenKind.StaticKeyword || kind == TokenKind.Equals || (kind == TokenKind.Identifier && !P.word(
+  let kind = ParseState.currentKind(&p.state)
+  let ordinary = kind == TokenKind.MutKeyword || kind == TokenKind.StaticKeyword || kind == TokenKind.Equals || (kind == TokenKind.Identifier && !ParseState.word(
     &p.state,
     "_",
-  ) && (P.peek(&p.state, 1) == TokenKind.Colon || P.peek(&p.state, 1) == TokenKind.Equals))
+  ) && (ParseState.peek(&p.state, 1) == TokenKind.Colon || ParseState.peek(&p.state, 1) == TokenKind.Equals))
   if ordinary {
     if kind == TokenKind.MutKeyword || kind == TokenKind.StaticKeyword {
       let consumed = run move p
-        |> P.consume
+        |> ParseState.consume
       p = move consumed
     }
     let afterIdentifier = run move p
-      |> P.expect(TokenKind.Identifier)
+      |> ParseState.expect(TokenKind.Identifier)
     p = move afterIdentifier
-    if P.currentKind(&p.state) == TokenKind.Colon {
+    if ParseState.currentKind(&p.state) == TokenKind.Colon {
       let consumed2 = run move p
-        |> P.consume
+        |> ParseState.consume
       p = move consumed2
-      let withTypesParse = run P.attach(move p.elements, run Types.parse(move p.state))
+      let withTypesParse = run ParseState.attach(move p.elements, run Type.parse(move p.state))
       p = move withTypesParse
     }
   } else {
-    let withPatternsParse = run P.attach(move p.elements, run Patterns.parse(move p.state))
+    let withPatternsParse = run ParseState.attach(move p.elements, run Pattern.parse(move p.state))
     p = move withPatternsParse
     nodeKind = NodeKind.PatternBindingStatement
   }
   let afterEquals = run move p
-    |> P.expect(TokenKind.Equals)
+    |> ParseState.expect(TokenKind.Equals)
   p = move afterEquals
-  let withExpressionsParse = run P.attach(
+  let withExpressionsParse = run ParseState.attach(
     move p.elements,
-    run Expressions.parse(move p.state, true),
+    run Expression.parse(move p.state, true),
   )
   p = move withExpressionsParse
   return run move p
-    |> P.complete(nodeKind)
+    |> ParseState.complete(nodeKind)
 }
 
 effect fn conditional(initial: State, isStatic: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  if initial.depth >= P.NESTING_LIMIT {
+  if initial.depth >= ParseState.NESTING_LIMIT {
     return run move initial
-      |> P.nestingError
+      |> ParseState.nestingError
   }
   let depth = initial.depth
   let mut state = move initial
-  state.depth = Usize.add(depth, 1)
+  state.depth = usize.add(depth, 1)
   let mut result = run conditionalInner(move state, isStatic)
   result.state.depth = depth
   return move result
@@ -79,132 +79,132 @@ effect fn conditional(initial: State, isStatic: bool) -> NodeResult
 effect fn conditionalInner(initial: State, isStatic: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  let mut p = P.begin(move initial)
+  let mut p = ParseState.begin(move initial)
   if isStatic {
     let afterStaticKeyword = run move p
-      |> P.expect(TokenKind.StaticKeyword)
+      |> ParseState.expect(TokenKind.StaticKeyword)
     p = move afterStaticKeyword
   }
   let afterIfKeyword = run move p
-    |> P.expect(TokenKind.IfKeyword)
+    |> ParseState.expect(TokenKind.IfKeyword)
   p = move afterIfKeyword
-  let pattern = !isStatic && P.currentKind(&p.state) == TokenKind.LetKeyword
+  let pattern = !isStatic && ParseState.currentKind(&p.state) == TokenKind.LetKeyword
   if pattern {
     let consumed = run move p
-      |> P.consume
+      |> ParseState.consume
     p = move consumed
-    let withPatternsParse = run P.attach(move p.elements, run Patterns.parse(move p.state))
+    let withPatternsParse = run ParseState.attach(move p.elements, run Pattern.parse(move p.state))
     p = move withPatternsParse
     let afterEquals = run move p
-      |> P.expect(TokenKind.Equals)
+      |> ParseState.expect(TokenKind.Equals)
     p = move afterEquals
   }
-  let withExpressionsParse = run P.attach(
+  let withExpressionsParse = run ParseState.attach(
     move p.elements,
-    run Expressions.parse(move p.state, false),
+    run Expression.parse(move p.state, false),
   )
   p = move withExpressionsParse
-  let attached = run P.attach(move p.elements, run block(move p.state, false, false))
+  let attached = run ParseState.attach(move p.elements, run block(move p.state, false, false))
   p = move attached
-  if P.currentKind(&p.state) == TokenKind.ElseKeyword {
+  if ParseState.currentKind(&p.state) == TokenKind.ElseKeyword {
     let consumed2 = run move p
-      |> P.consume
+      |> ParseState.consume
     p = move consumed2
-    if !isStatic && P.currentKind(&p.state) == TokenKind.IfKeyword {
-      let attached2 = run P.attach(move p.elements, run conditional(move p.state, false))
+    if !isStatic && ParseState.currentKind(&p.state) == TokenKind.IfKeyword {
+      let attached2 = run ParseState.attach(move p.elements, run conditional(move p.state, false))
       p = move attached2
     } else {
-      let attached3 = run P.attach(move p.elements, run block(move p.state, false, false))
+      let attached3 = run ParseState.attach(move p.elements, run block(move p.state, false, false))
       p = move attached3
     }
   }
   if isStatic {
     return run move p
-      |> P.complete(NodeKind.StaticConditionalStatement)
+      |> ParseState.complete(NodeKind.StaticConditionalStatement)
   }
   if pattern {
     return run move p
-      |> P.complete(NodeKind.PatternConditionalStatement)
+      |> ParseState.complete(NodeKind.PatternConditionalStatement)
   }
   return run move p
-    |> P.complete(NodeKind.ConditionalStatement)
+    |> ParseState.complete(NodeKind.ConditionalStatement)
 }
 
 effect fn staticFor(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let mut p = run move initial
-    |> P.begin
-    |> P.consume
+    |> ParseState.begin
+    |> ParseState.consume
   let afterForKeyword = run move p
-    |> P.expect(TokenKind.ForKeyword)
+    |> ParseState.expect(TokenKind.ForKeyword)
   p = move afterForKeyword
-  if P.word(&p.state, "in") {
+  if ParseState.word(&p.state, "in") {
     let afterIdentifier = run move p
-      |> P.missing(TokenKind.Identifier)
+      |> ParseState.missing(TokenKind.Identifier)
     p = move afterIdentifier
   } else {
     let afterIdentifier2 = run move p
-      |> P.expect(TokenKind.Identifier)
+      |> ParseState.expect(TokenKind.Identifier)
     p = move afterIdentifier2
   }
   let advanced = run move p
-    |> P.contextual("in")
+    |> ParseState.contextual("in")
   p = move advanced
-  let withExpressionsParse = run P.attach(
+  let withExpressionsParse = run ParseState.attach(
     move p.elements,
-    run Expressions.parse(move p.state, false),
+    run Expression.parse(move p.state, false),
   )
   p = move withExpressionsParse
-  let attached = run P.attach(move p.elements, run block(move p.state, false, false))
+  let attached = run ParseState.attach(move p.elements, run block(move p.state, false, false))
   p = move attached
   return run move p
-    |> P.complete(NodeKind.StaticForStatement)
+    |> ParseState.complete(NodeKind.StaticForStatement)
 }
 
 effect fn whileStatement(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
   let mut p = run move initial
-    |> P.begin
-    |> P.consume
-  let withExpressionsParse = run P.attach(
+    |> ParseState.begin
+    |> ParseState.consume
+  let withExpressionsParse = run ParseState.attach(
     move p.elements,
-    run Expressions.parse(move p.state, false),
+    run Expression.parse(move p.state, false),
   )
   p = move withExpressionsParse
-  let attached = run P.attach(move p.elements, run block(move p.state, false, false))
+  let attached = run ParseState.attach(move p.elements, run block(move p.state, false, false))
   p = move attached
   return run move p
-    |> P.complete(NodeKind.WhileStatement)
+    |> ParseState.complete(NodeKind.WhileStatement)
 }
 
 effect fn transfer(initial: State, kind: NodeKind) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  return run P.complete(run P.consume(P.begin(move initial)), kind)
+  return run ParseState.complete(run ParseState.consume(ParseState.begin(move initial)), kind)
 }
 
 effect fn valueStatement(initial: State, kind: NodeKind) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
   let mut p = run move initial
-    |> P.begin
-    |> P.consume
-  if kind == NodeKind.ReturnStatement && P.currentKind(&p.state) == TokenKind.RightBrace {
-    let attached = run P.attach(
+    |> ParseState.begin
+    |> ParseState.consume
+  if kind == NodeKind.ReturnStatement && ParseState.currentKind(&p.state) == TokenKind.RightBrace {
+    let attached = run ParseState.attach(
       move p.elements,
-      run P.complete(P.begin(move p.state), NodeKind.UnitExpression),
+      run ParseState.complete(ParseState.begin(move p.state), NodeKind.UnitExpression),
     )
     p = move attached
   } else {
     if kind == NodeKind.FailStatement {
       let afterMoveKeyword = run move p
-        |> P.optional(TokenKind.MoveKeyword)
+        |> ParseState.optional(TokenKind.MoveKeyword)
       p = move afterMoveKeyword
     }
-    let withExpressionsParse = run P.attach(
+    let withExpressionsParse = run ParseState.attach(
       move p.elements,
-      run Expressions.parse(move p.state, true),
+      run Expression.parse(move p.state, true),
     )
     p = move withExpressionsParse
   }
   return run move p
-    |> P.complete(kind)
+    |> ParseState.complete(kind)
 }
 
 /// Parses one ordinary statement; an expression followed by `=` becomes an assignment.
@@ -212,17 +212,17 @@ effect fn valueStatement(initial: State, kind: NodeKind) -> NodeResult
 /// Assignment-place legality belongs to semantic analysis. Parsing the left side once avoids
 /// speculative state copies and discarded node allocations.
 pub effect fn parse(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allocator {
-  let kind = P.currentKind(&initial)
+  let kind = ParseState.currentKind(&initial)
   if kind == TokenKind.LetKeyword {
     return run binding(move initial)
   }
   if kind == TokenKind.IfKeyword {
     return run conditional(move initial, false)
   }
-  if kind == TokenKind.StaticKeyword && P.peek(&initial, 1) == TokenKind.IfKeyword {
+  if kind == TokenKind.StaticKeyword && ParseState.peek(&initial, 1) == TokenKind.IfKeyword {
     return run conditional(move initial, true)
   }
-  if kind == TokenKind.StaticKeyword && P.peek(&initial, 1) == TokenKind.ForKeyword {
+  if kind == TokenKind.StaticKeyword && ParseState.peek(&initial, 1) == TokenKind.ForKeyword {
     return run staticFor(move initial)
   }
   if kind == TokenKind.WhileKeyword {
@@ -243,34 +243,34 @@ pub effect fn parse(initial: State) -> NodeResult ! OutOfMemoryError ? &mut Allo
   if kind == TokenKind.DropKeyword {
     return run valueStatement(move initial, NodeKind.DropStatement)
   }
-  if kind == TokenKind.UnsafeKeyword && P.peek(&initial, 1) == TokenKind.LeftBrace {
+  if kind == TokenKind.UnsafeKeyword && ParseState.peek(&initial, 1) == TokenKind.LeftBrace {
     let mut p = run move initial
-      |> P.begin
-      |> P.consume
-    let attached = run P.attach(move p.elements, run block(move p.state, false, false))
+      |> ParseState.begin
+      |> ParseState.consume
+    let attached = run ParseState.attach(move p.elements, run block(move p.state, false, false))
     p = move attached
     return run move p
-      |> P.complete(NodeKind.UnsafeStatement)
+      |> ParseState.complete(NodeKind.UnsafeStatement)
   }
-  if G.expressionStart(kind) {
-    let mut p = run P.wrap(run Expressions.parse(move initial, true))
-    if P.currentKind(&p.state) == TokenKind.Equals {
+  if Grammar.expressionStart(kind) {
+    let mut p = run ParseState.wrap(run Expression.parse(move initial, true))
+    if ParseState.currentKind(&p.state) == TokenKind.Equals {
       let consumed = run move p
-        |> P.consume
+        |> ParseState.consume
       p = move consumed
-      let withExpressionsParse = run P.attach(
+      let withExpressionsParse = run ParseState.attach(
         move p.elements,
-        run Expressions.parse(move p.state, true),
+        run Expression.parse(move p.state, true),
       )
       p = move withExpressionsParse
       return run move p
-        |> P.complete(NodeKind.AssignmentStatement)
+        |> ParseState.complete(NodeKind.AssignmentStatement)
     }
     return run move p
-      |> P.complete(NodeKind.ExpressionStatement)
+      |> ParseState.complete(NodeKind.ExpressionStatement)
   }
-  let error = run P.complete(run P.unexpected(P.begin(move initial)), NodeKind.Error)
-  return run P.complete(run P.wrap(move error), NodeKind.ErrorStatement)
+  let error = run ParseState.complete(run ParseState.unexpected(ParseState.begin(move initial)), NodeKind.Error)
+  return run ParseState.complete(run ParseState.wrap(move error), NodeKind.ErrorStatement)
 }
 
 fn terminates(state: &State, id: NodeId) -> bool {
@@ -290,10 +290,10 @@ fn terminates(state: &State, id: NodeId) -> bool {
         if node.kind != NodeKind.ConditionalStatement {
           return true
         }
-        branches = Usize.add(branches, 1)
+        branches = usize.add(branches, 1)
       }
     }
-    index = Usize.add(index, 1)
+    index = usize.add(index, 1)
   }
   return branches == 2
 }
@@ -306,13 +306,13 @@ fn terminates(state: &State, id: NodeId) -> bool {
 pub effect fn block(initial: State, terminal: bool, matchArm: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  if initial.depth >= P.NESTING_LIMIT {
+  if initial.depth >= ParseState.NESTING_LIMIT {
     return run move initial
-      |> P.nestingError
+      |> ParseState.nestingError
   }
   let depth = initial.depth
   let mut state = move initial
-  state.depth = Usize.add(depth, 1)
+  state.depth = usize.add(depth, 1)
   let mut result = run blockInner(move state, terminal, matchArm)
   result.state.depth = depth
   return move result
@@ -321,39 +321,39 @@ pub effect fn block(initial: State, terminal: bool, matchArm: bool) -> NodeResul
 effect fn blockInner(initial: State, terminal: bool, matchArm: bool) -> NodeResult
 ! OutOfMemoryError
 ? &mut Allocator {
-  let opened = P.currentKind(&initial) == TokenKind.LeftBrace
+  let opened = ParseState.currentKind(&initial) == TokenKind.LeftBrace
   let mut p = run move initial
-    |> P.begin
-    |> P.expect(TokenKind.LeftBrace)
+    |> ParseState.begin
+    |> ParseState.expect(TokenKind.LeftBrace)
   let mut terminated = false
   if opened {
-    while !G.blockEnd(&p.state) && !(matchArm && Look.arm(&p.state)) {
+    while !Grammar.blockEnd(&p.state) && !(matchArm && Lookahead.arm(&p.state)) {
       let before = p.state.index
       let statement = run parse(move p.state)
       let statementId = statement.node
       if terminates(&statement.state, statementId) {
         terminated = true
       }
-      let attached = run P.attach(move p.elements, move statement)
+      let attached = run ParseState.attach(move p.elements, move statement)
       p = move attached
       if p.state.index == before {
         let advanced = run move p
-          |> P.unexpected
+          |> ParseState.unexpected
         p = move advanced
       }
     }
   }
   if terminal && !terminated {
     let unit = run move p.state
-      |> P.begin
-      |> P.complete(NodeKind.UnitExpression)
-    let statement = run P.complete(run P.wrap(move unit), NodeKind.ReturnStatement)
-    let attached2 = run P.attach(move p.elements, move statement)
+      |> ParseState.begin
+      |> ParseState.complete(NodeKind.UnitExpression)
+    let statement = run ParseState.complete(run ParseState.wrap(move unit), NodeKind.ReturnStatement)
+    let attached2 = run ParseState.attach(move p.elements, move statement)
     p = move attached2
   }
   let afterRightBrace = run move p
-    |> P.expect(TokenKind.RightBrace)
+    |> ParseState.expect(TokenKind.RightBrace)
   p = move afterRightBrace
   return run move p
-    |> P.complete(NodeKind.Block)
+    |> ParseState.complete(NodeKind.Block)
 }

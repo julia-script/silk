@@ -3,7 +3,7 @@ import silk.os_system_clock { OsSystemClock }
 import silk.monotonic_clock { MonotonicClock }
 import silk.system_clock { SystemClock }
 import silk.effect { Effect }
-import silk.i64 as i64
+import silk.i64
 
 export "C" fn construct_fixture() -> i32 {
   let system = OsSystemClock.make()

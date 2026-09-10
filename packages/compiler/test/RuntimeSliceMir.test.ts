@@ -12,7 +12,7 @@ const ascii = (value: string): Uint8Array =>
 const snapshot = (source: string) =>
   AnalysisFixture.retainingMain('runtime-slice-mir/main', ascii(source))
 
-const source = `import silk.usize as usize
+const source = `import silk.usize
 fn inspect(values: &[i32], index: usize) -> i32 {
   return values[index] + usize.toI32(values.length)
 }

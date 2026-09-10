@@ -1266,7 +1266,7 @@ it.effect(
               [
                 'runtime',
                 ascii(
-                  'import Intrinsic.application as app\nexport "C" fn proxy() -> i32 as "proxy" { return app.answer() }',
+                  'import Intrinsic.application\nexport "C" fn proxy() -> i32 as "proxy" { return application.answer() }',
                 ),
               ],
               [

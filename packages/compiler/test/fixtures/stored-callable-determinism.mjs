@@ -11,7 +11,7 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
  * their declared fields, and `Holder<T>` violates twice through two distinct specializations, so
  * the printed report exercises both provenance modes and the deterministic ordering between them.
  */
-const source = `import silk.i32 as i32
+const source = `import silk.i32
 
 struct Parser<A> { decode: fn(i32) -> A }
 struct Nested<A> { parser: Parser<A> }

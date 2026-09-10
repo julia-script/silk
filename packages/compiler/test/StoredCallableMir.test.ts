@@ -128,7 +128,7 @@ pub fn main() -> i32 {
 
 it.effect('keeps nested layouts, instance keys, symbols, and MIR text deterministic', () =>
   Effect.gen(function* () {
-    const source = `import silk.i32 as i32
+    const source = `import silk.i32
 struct Parser<F: fn<'static>(i32) -> i32> { parse: F }
 struct Boxed<F: fn<'static>(i32) -> i32> { inner: Parser<F> }
 fn box<F: fn<'static>(i32) -> i32>(inner: Parser<F>) -> Boxed<F> {

@@ -137,7 +137,7 @@ import silk.allocator { OutOfMemoryError }
 import silk.allocator { Allocator }
 import silk.allocator { SystemAllocator }
 import silk.effect { Effect }
-import silk.usize as usize
+import silk.usize
 import silk.box { Box }
 
 pub struct Leaf {}

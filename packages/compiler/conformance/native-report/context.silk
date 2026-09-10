@@ -2,7 +2,7 @@ import silk.native_diagnostics {NativeDiagnostics}
 
 import silk.native_report {NativeReport}
 
-import silk.usize as usize
+import silk.usize
 
 struct Primary {}
 

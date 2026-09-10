@@ -81,8 +81,8 @@ it.effect(
 
 it.effect('lowers both square-root widths to the exact LLVM intrinsic', () =>
   Effect.gen(function* () {
-    const source = `import silk.f32 as f32
-import silk.f64 as f64
+    const source = `import silk.f32
+import silk.f64
 pub fn main() -> i32 {
   if f64.sqrt(1764.0) != 42.0 { return 1 }
   if f32.sqrt(1764.0) != 42.0 { return 2 }

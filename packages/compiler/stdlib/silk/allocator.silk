@@ -40,7 +40,7 @@
 //! }
 //! ```
 
-import silk.layout { Layout as LayoutValue }
+import silk.layout { Layout }
 
 /// A failure that reports that an allocator cannot satisfy a storage request.
 pub struct OutOfMemoryError {}
@@ -48,7 +48,7 @@ pub struct OutOfMemoryError {}
 /// A mutable service that acquires owned storage described by a layout.
 pub service Allocator {
   /// Acquires one allocation for `layout`, or fails without returning partial storage.
-  effect fn allocate(layout: LayoutValue) -> Allocation ! OutOfMemoryError ? &mut Allocator
+  effect fn allocate(layout: Layout) -> Allocation ! OutOfMemoryError ? &mut Allocator
 }
 
 impl Allocator {
@@ -71,7 +71,7 @@ impl Allocator {
 pub struct SystemAllocator {}
 
 impl SystemAllocator {
-  effect fn systemAllocate(self: &mut Self, layout: LayoutValue) -> Allocation ! OutOfMemoryError {
+  effect fn systemAllocate(self: &mut Self, layout: Layout) -> Allocation ! OutOfMemoryError {
     return run Intrinsic.catchFailure<Intrinsic.StorageFailure>(
       rawSystemAllocate(move self, move layout),
       storageRefused
@@ -86,7 +86,7 @@ effect fn storageRefused(error: Intrinsic.StorageFailure) -> Allocation ! OutOfM
 
 effect fn rawSystemAllocate(
   self: &mut SystemAllocator,
-  layout: LayoutValue
+  layout: Layout
 ) -> Allocation ! Intrinsic.StorageFailure {
   return run Intrinsic.systemAllocationAcquire(move layout)
 }

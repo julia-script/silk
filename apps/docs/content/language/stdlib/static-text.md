@@ -13,11 +13,26 @@ to static functions and produce finite static values.
 
 Import as `StaticText` with `import silk.static_text { StaticText }`.
 
-Public declarations: 4.
+Public declarations: 1.
 
-<a id="declaration-73696c6b2f7374617469635f746578743a3a627974654c656e677468"></a>
+<a id="declaration-73696c6b2f7374617469635f746578743a3a53746174696354657874"></a>
 
-## `byteLength`
+## `StaticText`
+
+```silk
+pub struct StaticText
+```
+
+The scope for StaticText operations.
+
+### Details
+
+This owner carries no data. Select it with `import silk.static_text { StaticText }`
+to access its inherent operations.
+
+<a id="declaration-73696c6b2f7374617469635f746578743a3a537461746963546578742e627974654c656e677468"></a>
+
+### Associated function `StaticText.byteLength`
 
 ```silk
 pub static fn byteLength<'life0>(static value: string<'life0>) -> usize
@@ -25,9 +40,9 @@ pub static fn byteLength<'life0>(static value: string<'life0>) -> usize
 
 Returns the UTF-8 byte length of `value` during static evaluation.
 
-<a id="declaration-73696c6b2f7374617469635f746578743a3a627974654174"></a>
+<a id="declaration-73696c6b2f7374617469635f746578743a3a537461746963546578742e627974654174"></a>
 
-## `byteAt`
+### Associated function `StaticText.byteAt`
 
 ```silk
 pub static fn byteAt<'life0>(static value: string<'life0>, static index: usize) -> u8
@@ -35,9 +50,9 @@ pub static fn byteAt<'life0>(static value: string<'life0>, static index: usize) 
 
 Returns one UTF-8 byte at `index`, or reports a static phase violation when out of bounds.
 
-<a id="declaration-73696c6b2f7374617469635f746578743a3a636f6e636174"></a>
+<a id="declaration-73696c6b2f7374617469635f746578743a3a537461746963546578742e636f6e636174"></a>
 
-## `concat`
+### Associated function `StaticText.concat`
 
 ```silk
 pub static fn concat<'life0, 'life1>(static left: string<'life0>, static right: string<'life1>) -> string<'static>
@@ -45,9 +60,9 @@ pub static fn concat<'life0, 'life1>(static left: string<'life0>, static right: 
 
 Concatenates two static texts and retains `left` as the source anchor for diagnostics.
 
-<a id="declaration-73696c6b2f7374617469635f746578743a3a736c696365"></a>
+<a id="declaration-73696c6b2f7374617469635f746578743a3a537461746963546578742e736c696365"></a>
 
-## `slice`
+### Associated function `StaticText.slice`
 
 ```silk
 pub static fn slice<'life0>(static value: string<'life0>, static start: usize, static end: usize) -> string<'static>

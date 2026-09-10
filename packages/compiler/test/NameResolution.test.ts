@@ -190,7 +190,7 @@ it.effect('keeps cyclic cross-module calls finite and canonical', () =>
 const threeModuleSources = {
   'app/Main': 'import library.Answer { answer }\npub fn main() -> i32 { return answer() }',
   'library/Answer':
-    'import silk.i32 as i32\nimport values.Number\nfn local() -> i32 { return 40 }\npub fn answer() -> i32 { return i32.add(local(), Number.two()) }',
+    'import silk.i32\nimport values.Number\nfn local() -> i32 { return 40 }\npub fn answer() -> i32 { return i32.add(local(), Number.two()) }',
   'values/Number': 'pub fn two() -> i32 { return 2 }',
 }
 
@@ -255,7 +255,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const self = yield* snapshot('root', {
-        root: 'import left.Api { left }\nimport right.Api { right }\nimport silk.i32 as i32\npub fn main() -> i32 { return i32.add(left(), right()) }',
+        root: 'import left.Api { left }\nimport right.Api { right }\nimport silk.i32\npub fn main() -> i32 { return i32.add(left(), right()) }',
         'left/Api':
           'import shared.Value { value }\npub fn left() -> i32 { return value() }\npub fn unused() -> i32 { return 0 }',
         'right/Api': 'import shared.Value { value }\npub fn right() -> i32 { return value() }',
@@ -278,8 +278,8 @@ it.effect('resolves local, selected, and qualified nominal types in declaration 
   Effect.gen(function* () {
     const self = yield* snapshot('app/Main', {
       'app/Main':
-        'import syntax.Tree as Ast { Node }\n' +
-        'struct Local { node: Node qualified: Ast.Node }\n' +
+        'import syntax.Tree\nimport syntax.Tree { Node }\n' +
+        'struct Local { node: Node qualified: Tree.Node }\n' +
         'fn identity(value: Local) -> Local { return move value }\n' +
         'pub fn main() -> i32 { return 0 }',
       'syntax/Tree': 'pub struct Node { value: i32 }',
@@ -395,7 +395,7 @@ const oneAnswer = { 'library/One': 'pub fn one() -> i32 { return 1 }' }
 
 it.effect('accepts unchanged aliases and exact or combinable repeated imports', () =>
   Effect.gen(function* () {
-    const text = `import library.One as One
+    const text = `import library.One
 import library.One { one as one }
 import library.One { one }
 pub fn main() -> i32 { return one() }`

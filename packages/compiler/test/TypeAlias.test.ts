@@ -249,10 +249,10 @@ pub effect fn fetch() -> i32 ! FetchError { fail HttpError {} }`
     const self = yield* analyzeModules('root', [
       [
         'root',
-        `import lib as Lib
+        `import lib
 import lib { FetchError }
-effect fn selected() -> i32 ! FetchError { return run Lib.fetch() }
-effect fn qualified() -> i32 ! Lib.FetchError { return run Lib.fetch() }
+effect fn selected() -> i32 ! FetchError { return run lib.fetch() }
+effect fn qualified() -> i32 ! lib.FetchError { return run lib.fetch() }
 pub fn main() -> i32 { return 0 }`,
       ],
       ['lib', lib],
@@ -266,7 +266,7 @@ pub fn main() -> i32 { return 0 }`,
     const hidden = yield* analyzeModules('root', [
       [
         'root',
-        `import lib as Lib\nfn use(value: Lib.Secret) -> i32 { return 0 }\npub fn main() -> i32 { return 0 }`,
+        `import lib\nfn use(value: lib.Secret) -> i32 { return 0 }\npub fn main() -> i32 { return 0 }`,
       ],
       ['lib', lib],
     ])

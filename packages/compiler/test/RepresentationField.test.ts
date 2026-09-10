@@ -448,7 +448,7 @@ pub fn main() -> i32 {
 it.effect('keeps executable identities stable across edit shifts and source-path relocation', () =>
   Effect.gen(function* () {
     const module = 'representation-field/executable-sites'
-    const source = `import silk.i32 as i32
+    const source = `import silk.i32
 struct Mappers<F: fn<'static>(i32) -> i32, G: fn<'static>(i32) -> i32> { first: F second: G }
 struct Deferred<F: Effect<'static; i32>, G: Effect<'static; i32>> { first: F second: G }
 pub fn main() -> i32 {
@@ -456,7 +456,7 @@ pub fn main() -> i32 {
   let deferred = Deferred { first: effect { return 1 }, second: effect { return 1 } }
   return 0
 }`
-    const shifted = `import silk.i32 as i32
+    const shifted = `import silk.i32
 // Leading comments and whitespace move every diagnostic span.
 
 struct Mappers<F: fn<'static>(i32) -> i32, G: fn<'static>(i32) -> i32> { first: F second: G }
