@@ -24,7 +24,7 @@ None. Existing cryptographic-hash, random and HMAC/HKDF contracts remain owned b
 
 ## Impact
 
-Planning artifacts and Linear decomposition only. Future implementations will add ordinary Silk actors and their manifest/reference/test integration. This profile feeds [JUL-171](https://linear.app/juliaortiz/issue/JUL-171) and [JUL-168](https://linear.app/juliaortiz/issue/JUL-168); generic HMAC/HKDF remains [JUL-162](https://linear.app/juliaortiz/issue/JUL-162).
+Planning artifacts and Linear decomposition, plus canonical-source repairs to 14 existing native corpus fixtures that blocked verification. Their bodies, expectations and test count are unchanged; no production API implementation is included. Future implementations will add ordinary Silk actors and their manifest/reference/test integration. This profile feeds [JUL-171](https://linear.app/juliaortiz/issue/JUL-171) and [JUL-168](https://linear.app/juliaortiz/issue/JUL-168); generic HMAC/HKDF remains [JUL-162](https://linear.app/juliaortiz/issue/JUL-162).
 
 ## Non-goals
 
