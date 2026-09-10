@@ -2,7 +2,7 @@
 
 - [x] 1.1 Revalidate the historical baseline and absence of a competing decoder owner; record bounded graph/source/manifest/reference/OpenSpec evidence in the design and Linear admission.
 - [x] 1.2 Specify API ownership, complete field retention, encoding tables, finite budgets and failure precedence; verify every JUL-167 acceptance topic is represented in design and delta scenarios.
-- [ ] 1.3 Pin authoritative fixture bytes, mutation hashes and expected outcomes; verify manifest hashes independently and complete design review.
+- [x] 1.3 Pin authoritative fixture bytes, mutation hashes and expected outcomes; verify manifest hashes independently and complete design review.
 - [ ] 1.4 Create a separately estimated implementation intake, strictly validate OpenSpec, run repository checks and obtain independent test-economics approval; publish a confirmed draft PR with truthful verification evidence.
 
 ## 2. Decoder implementation follow-up — not delivered by JUL-167

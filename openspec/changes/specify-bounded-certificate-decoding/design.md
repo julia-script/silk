@@ -137,6 +137,8 @@ All rejection below is `Malformed` unless explicitly `Unsupported` or `ResourceL
 | Later invalid block in bundle                                                     | Entire call fails; no prefix result |
 
 Markers have exactly five hyphens at each end and exactly one space between BEGIN/END and label.
+A well-formed unsupported label follows the RFC 7468 §3 `label` grammar; malformed labels
+return Malformed.PemSyntax rather than Unsupported.PemLabel.
 After ignoring allowed body whitespace, base64 length is a multiple of four; only its last
 quartet may use one or two `=` as dictated by the decoded length. Each block decodes exactly one
 DER certificate, with no decoded suffix. No automatic DER/PEM detection or recovery scanning.
@@ -289,6 +291,11 @@ claimed. See [fixtures.md](fixtures.md) and [implementation.md](implementation.m
 - Owned copies increase storage → finite aggregate budgets, exact reservation where available, simple immutable lifetime contract.
 - Structural success can be mistaken for Web PKI validity → distinct decoder errors and consumer responsibilities; never expose a validation flag.
 - Open ASN.1 types lack schemas → preserve encodings and limit checks honestly; algorithm/extension consumers enforce their own schemas.
+
+The pinned [Zig Certificate implementation](https://raw.githubusercontent.com/ziglang/zig/e78ea8f2cb3677c0a104319b8aa5e37ea64d9cfa/lib/std/crypto/Certificate.zig)
+provides a structural precedent for retaining signed-message spans. Its omission of unknown
+extensions is deliberately not adopted. The owned bundle design avoids borrowed views being
+invalidated by later acquisition or mutation; acquisition remains a separate consumer.
 
 ## Migration Plan
 
