@@ -359,6 +359,7 @@ jobs:
           node packages/compiler/conformance/native-clocks/run.mjs
           node packages/compiler/conformance/native-entropy/run.mjs
           node packages/compiler/conformance/native-filesystem/run.mjs
+          SILK_NATIVE_FILE_TRUST_ONLY=true node packages/compiler/conformance/native-filesystem/run.mjs
           pnpm --filter @silklang/compiler run test:native-process:full
           node packages/compiler/conformance/hosted-start/run.mjs
           SILK_STARTUP_FAULTS=true node packages/compiler/conformance/hosted-start/run.mjs
@@ -386,6 +387,7 @@ jobs:
             .scratch/native-clocks
             .scratch/native-entropy
             .scratch/native-filesystem
+            .scratch/native-file-trust-source
             .scratch/native-process
             .scratch/hosted-start
             .scratch/hosted-start-faults

@@ -33,9 +33,12 @@ const program = Effect.gen(function* () {
   const root = yield* Config.string('SILK_SUPPLY_ROOT')
   const gcc = yield* Config.string('SILK_SUPPLY_GCC').pipe(Config.withDefault(''))
   const image = yield* Config.string('SILK_SUPPLY_IMAGE').pipe(Config.withDefault(''))
+  const trust = yield* Config.boolean('SILK_NATIVE_FILE_TRUST_ONLY').pipe(Config.withDefault(false))
   const output = path.resolve(
     yield* Config.string('SILK_SUPPLY_OUTPUT').pipe(
-      Config.withDefault('.scratch/native-filesystem'),
+      Config.withDefault(
+        trust ? '.scratch/native-file-trust-source' : '.scratch/native-filesystem',
+      ),
     ),
   )
   yield* fs.makeDirectory(output, { recursive: true })
@@ -88,7 +91,7 @@ const program = Effect.gen(function* () {
     yield* fs.readFileString(
       path.join(
         directory,
-        '../../../../openspec/changes/source-owned-native-filesystem/supplies.json',
+        '../../../../openspec/changes/archive/2026-09-10-source-owned-native-filesystem/supplies.json',
       ),
     ),
   )
@@ -100,13 +103,30 @@ const program = Effect.gen(function* () {
     if (actual !== expected)
       return yield* new ConformanceError({ message: `Unpinned filesystem header: ${header}` })
   }
-  const source = yield* fs.readFile(path.join(directory, 'fixture.silk'))
+  const source = yield* fs.readFile(
+    path.join(directory, trust ? 'trust-fixture.silk' : 'fixture.silk'),
+  )
+  const trustPem = trust ? yield* fs.readFile(path.join(directory, 'trust.pem')) : undefined
+  const trustFixture =
+    trustPem === undefined
+      ? ''
+      : `const unsigned char silk_trust_pem[] = {${Array.from(trustPem).join(',')}};\nconst size_t silk_trust_pem_length = ${trustPem.length};\n`
   const receiver =
     (yield* fs.readFileString(path.join(directory, 'layout.c'))) +
     '\n' +
-    (yield* fs.readFileString(path.join(directory, 'receiver.c')))
+    trustFixture +
+    '\n' +
+    (yield* fs.readFileString(path.join(directory, trust ? 'trust-receiver.c' : 'receiver.c')))
   const objdump = path.join(path.dirname(inspect), 'llvm-objdump')
-  const report = { schema: 1, target, tools: versions, lto: 'rejected', headers, lanes: [] }
+  const report = {
+    schema: 1,
+    fixture: trust ? 'native-file-trust-source' : 'native-filesystem',
+    target,
+    tools: versions,
+    lto: 'rejected',
+    headers,
+    lanes: [],
+  }
   for (const optimization of ['none', 'speed']) {
     const input = {
       target,
@@ -140,7 +160,11 @@ const program = Effect.gen(function* () {
         const snapshot = yield* Analysis.makeRealized({
           root: SourceFile.make('filesystem-conformance/root', source),
           configuration: {
-            profile: { ...input, artifact: 'object', entry: { kind: 'none' } },
+            profile: {
+              ...input,
+              artifact: 'object',
+              entry: trust ? { kind: 'default' } : { kind: 'none' },
+            },
             composition: {
               components: [
                 {
@@ -168,7 +192,7 @@ const program = Effect.gen(function* () {
           artifact.nativeRuntimeSymbols.some((value) => value.startsWith('silk_os_'))
         )
           return yield* new ConformanceError({
-            message: 'Filesystem fixture retained compiler OS policy',
+            message: 'Native file fixture retained compiler OS policy',
           })
         const object = yield* NativeToolchain.emitObject(tools, scope, artifact, profile)
         const support = yield* NativeToolchain.compileHelpers(tools, scope, profile, object.helpers)
@@ -206,7 +230,7 @@ const program = Effect.gen(function* () {
             '-o',
             c.artifact.path,
           ],
-          'independent C filesystem receiver',
+          `independent C ${trust ? 'native file trust' : 'filesystem'} receiver`,
         )
         const runtime = yield* NativeToolchain.compileRuntime(tools, scope, profile.target)
         const runtimeInspection = yield* run(inspect, [
@@ -252,7 +276,8 @@ const program = Effect.gen(function* () {
           !inspection.stdout.includes('openat')
         )
           return yield* new ConformanceError({
-            message: 'Object inspection did not verify architecture and filesystem relocation',
+            message:
+              'Object inspection did not verify architecture and native filesystem relocation',
           })
         let execution
         if (target.includes('apple')) {
@@ -294,7 +319,7 @@ const program = Effect.gen(function* () {
     )
     report.lanes.push(lane)
     yield* Console.log(
-      `${target} ${optimization}: source filesystem provider verified against independent headers and deterministic foreign calls`,
+      `${target} ${optimization}: ${trust ? 'native file trust' : 'source filesystem'} provider verified against independent headers and deterministic foreign calls`,
     )
   }
   const reportPath = path.join(output, `${target}.json`)

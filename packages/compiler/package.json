@@ -590,6 +590,7 @@
     "test:native-process:full": "SILK_PROCESS_MODE=all vitest run --config vitest.native-process.config.ts",
     "test:native-entropy": "node conformance/native-entropy/run.mjs",
     "test:native-filesystem": "node conformance/native-filesystem/run.mjs",
+    "test:native-file-trust-source": "SILK_NATIVE_FILE_TRUST_ONLY=true node conformance/native-filesystem/run.mjs",
     "test:raw-linux": "node conformance/raw-linux/run.mjs",
     "test:execution-storage": "node conformance/execution-storage/run.mjs",
     "test:execution-storage-faults": "SILK_STORAGE_FAULTS=true node conformance/execution-storage/run.mjs",

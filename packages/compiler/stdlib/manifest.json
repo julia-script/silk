@@ -336,6 +336,11 @@
     "namespace": "NativeDiagnostics"
   },
   {
+    "module": "silk/native_file_trust_source",
+    "path": "silk/native_file_trust_source.silk",
+    "namespace": "NativeFileTrustSource"
+  },
+  {
     "module": "silk/native_filesystem",
     "path": "silk/native_filesystem.silk",
     "namespace": "NativeFileSystem"
