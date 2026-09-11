@@ -22,6 +22,7 @@ import { hmacHkdfAcceptanceSource } from './hmacHkdfAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
+import { ecdsaP256AcceptanceSource } from './ecdsaP256Acceptance.js'
 import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
 import {
@@ -6195,6 +6196,11 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 ]
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
+  {
+    name: 'ecdsa-p256-verification',
+    source: ecdsaP256AcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   {
     name: 'p256-key-agreement',
     source: p256AcceptanceSource,

@@ -19,6 +19,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 import { invalidGenericCorpus } from './support/corpus.js'
+import { ecdsaP256WasmSource } from './support/ecdsaP256Acceptance.js'
 import { p256WasmAcceptanceSource } from './support/p256Acceptance.js'
 import { certificateWasmAcceptanceSource } from './support/certificateAcceptance.js'
 import * as Driver from './support/TestDriver.js'
@@ -651,5 +652,25 @@ it.effect('executes P-256 agreement through LLVM-to-Wasm without host imports', 
     const main = instance.exports['main']
     assert.isFunction(main)
     if (typeof main === 'function') assert.strictEqual(main(), 0)
+  }),
+)
+
+it.effect('executes ECDSA P-256 verification through LLVM-to-Wasm without host imports', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('ecdsa-p256.wasm', ecdsaP256WasmSource, {
+      compilation: {
+        root: SourceFile.make('memory/ecdsa-p256-wasm', ascii(ecdsaP256WasmSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+    assert.deepEqual(WebAssembly.Module.imports(module), [])
+    const instance = new WebAssembly.Instance(module)
+    const main = instance.exports['main']
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 42)
   }),
 )

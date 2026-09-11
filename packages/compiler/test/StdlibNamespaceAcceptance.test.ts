@@ -164,3 +164,27 @@ pub effect fn main() -> i32 {
     )
   }),
 )
+
+it.effect('verifies ECDSA messages without providers or retained input loans', () =>
+  Effect.gen(function* () {
+    const source = `import silk.p256 { EcdsaP256Sha256 }
+pub fn main() -> i32 {
+  let mut key: [u8; 1] = [0]
+  let mut message: [u8; 1] = [0]
+  let mut signature: [u8; 1] = [0]
+  let result = EcdsaP256Sha256.verify(&key, &message, &signature)
+  key[0] = 1
+  message[0] = 1
+  signature[0] = 1
+  drop result
+  let again = EcdsaP256Sha256.verify(&key, &message, &signature)
+  drop again
+  return 42
+}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/ecdsa-borrowed-inputs',
+      ascii(source),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)

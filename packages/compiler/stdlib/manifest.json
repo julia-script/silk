@@ -354,7 +354,7 @@
     "module": "silk/p256",
     "path": "silk/p256.silk",
     "namespace": "P256",
-    "aliases": ["P256Error"]
+    "aliases": ["P256Error", "EcdsaP256Sha256", "P256SignatureError"]
   },
   {
     "module": "silk/pointer",
