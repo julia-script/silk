@@ -21,4 +21,4 @@
 
 - [x] 4.1 Register the new ordinary-source actors in the canonical standard-library manifest and generate API/reference artifacts; verify focused manifest/catalog/doc checks pass.
 - [x] 4.2 Document the restricted profile, explicit trust decision, borrowed inspection boundary, and non-authentication caveats in the public runtime/standard-library reference; verify generated links and formatting.
-- [x] 4.3 Run strict OpenSpec validation, focused tests/timing, `pnpm typecheck`, `pnpm format:check`, and `pnpm lint`; record exact results and leave full `pnpm test`, `pnpm check`, and release-candidate verification to exact-head CI per the user override.
+- [ ] 4.3 Run strict OpenSpec validation, focused tests/timing, `pnpm typecheck`, `pnpm format:check`, and `pnpm lint`; record exact results and leave full `pnpm test`, `pnpm check`, and release-candidate verification to exact-head CI per the user override.

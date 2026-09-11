@@ -90,7 +90,7 @@ The standard library SHALL expose opaque `silk/trust_anchor.TrustAnchor`. `fromC
 
 ### Requirement: Delivery evidence remains portable and economical
 
-The implementation SHALL use ordinary Silk source with no compiler-known actor or crypto provider. Repository evidence SHALL reuse existing decoder, SAN, RSA, and ECDSA fixtures; pin selected Apache-2.0 x509-limbo cases with source IDs and hashes; include distinct native cases only for behavior not already falsified by neighboring tests; and include one compact LLVM-to-Wasm witness. Generated API/reference documentation SHALL state that constructing an anchor is a trust decision and semantic inspection is not authentication.
+The implementation SHALL use ordinary Silk source with no compiler-known actor or crypto provider. Repository evidence SHALL reuse existing decoder, SAN, RSA, and ECDSA fixtures; pin selected Apache-2.0 x509-limbo cases with source IDs and hashes; preserve Zig HTTP comparison provenance at snapshot `1bc892110da738d6137b3f0b7e8e3a586ce09928` without treating it as a full-path oracle; include distinct native cases only for behavior not already falsified by neighboring tests; and include one compact LLVM-to-Wasm witness. Generated API/reference documentation SHALL state that constructing an anchor is a trust decision and semantic inspection is not authentication.
 
 #### Scenario: Cross-target evidence
 

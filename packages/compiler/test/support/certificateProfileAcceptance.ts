@@ -1,4 +1,5 @@
 import fixtures from '../fixtures/certificate-profile-limbo.json' with { type: 'json' }
+import { certificateUniqueIdsDer } from './certificateAcceptance.js'
 
 const literal = (base64: string): string => {
   const bytes = Buffer.from(base64, 'base64')
@@ -17,6 +18,143 @@ const fixtureBytes = (id: string): Buffer => {
   return Buffer.from(selected.der, 'base64')
 }
 
+interface DerNode {
+  readonly start: number
+  readonly content: number
+  readonly end: number
+  readonly lengthOctets: number
+  readonly tag: number
+}
+
+const derNode = (bytes: Buffer, start: number): DerNode => {
+  const tag = bytes[start]
+  const firstLength = bytes[start + 1]
+  if (tag === undefined || firstLength === undefined) throw new Error('Truncated DER node')
+  const lengthOctets = (firstLength & 0x80) === 0 ? 0 : firstLength & 0x7f
+  if (lengthOctets > 4) throw new Error('Unsupported fixture DER length width')
+  let length = (firstLength & 0x80) === 0 ? firstLength : 0
+  for (let index = 0; index < lengthOctets; index += 1) {
+    const octet = bytes[start + 2 + index]
+    if (octet === undefined) throw new Error('Truncated fixture DER length')
+    length = length * 256 + octet
+  }
+  const content = start + 2 + lengthOctets
+  const end = content + length
+  if (end > bytes.length) throw new Error('Fixture DER node escapes its input')
+  return { start, content, end, lengthOctets, tag }
+}
+
+const rebuildDerNode = (
+  bytes: Buffer,
+  node: DerNode,
+  targetStart: number,
+  targetEnd: number,
+  replacement: Buffer,
+): Buffer => {
+  if (node.start === targetStart && node.end === targetEnd) return replacement
+  if (targetStart < node.content || targetEnd > node.end || (node.tag & 0x20) === 0) {
+    throw new Error('Replacement target is not a complete constructed DER child')
+  }
+  const children: Array<Buffer> = []
+  let childStart = node.content
+  let replaced = false
+  while (childStart < node.end) {
+    const child = derNode(bytes, childStart)
+    if (targetStart >= child.start && targetEnd <= child.end) {
+      children.push(rebuildDerNode(bytes, child, targetStart, targetEnd, replacement))
+      replaced = true
+    } else {
+      children.push(bytes.subarray(child.start, child.end))
+    }
+    childStart = child.end
+  }
+  if (childStart !== node.end || !replaced) {
+    throw new Error('Replacement target is not in the fixture DER tree')
+  }
+  const content = Buffer.concat(children)
+  return Buffer.concat([Buffer.from([node.tag, ...derLength(content.length)]), content])
+}
+
+const rewriteDerNodes = (
+  input: Buffer,
+  id: string,
+  needle: ReadonlyArray<number>,
+  replacement: ReadonlyArray<number>,
+  count: number,
+): Buffer => {
+  const selected = Buffer.from(needle)
+  let bytes = Buffer.from(input)
+  for (let ordinal = 0; ordinal < count; ordinal += 1) {
+    const offset = bytes.indexOf(selected)
+    if (offset < 0) throw new Error(`Missing DER replacement ${ordinal} in ${id}`)
+    const target = derNode(bytes, offset)
+    if (target.end !== offset + selected.length)
+      throw new Error(`Replacement is not one DER node in ${id}`)
+    const replacementBytes = Buffer.from(replacement)
+    bytes = rebuildDerNode(bytes, derNode(bytes, 0), offset, target.end, replacementBytes)
+  }
+  if (bytes.indexOf(selected) >= 0) throw new Error(`Unexpected extra DER replacement in ${id}`)
+  return bytes
+}
+
+const replaceDerNodes = (
+  id: string,
+  needle: ReadonlyArray<number>,
+  replacement: ReadonlyArray<number>,
+  count: number,
+): string => {
+  const bytes = rewriteDerNodes(fixtureBytes(id), id, needle, replacement, count)
+  return literal(bytes.toString('base64'))
+}
+
+const removeContainingNode = (
+  input: Buffer,
+  id: string,
+  needle: ReadonlyArray<number>,
+  tag: number,
+): Buffer => {
+  const offset = input.indexOf(Buffer.from(needle))
+  if (offset < 0) throw new Error(`Missing contained DER value in ${id}`)
+  let selected: DerNode | undefined
+  const find = (node: DerNode): void => {
+    if (offset < node.content || offset + needle.length > node.end) return
+    if (node.tag === tag) selected = node
+    if ((node.tag & 0x20) === 0) return
+    let childStart = node.content
+    while (childStart < node.end) {
+      const child = derNode(input, childStart)
+      find(child)
+      childStart = child.end
+    }
+  }
+  find(derNode(input, 0))
+  if (selected === undefined) throw new Error(`Missing containing DER tag ${tag} in ${id}`)
+  return rewriteDerNodes(input, id, input.subarray(selected.start, selected.end), [], 1)
+}
+
+const derLength = (length: number): Array<number> => {
+  if (length < 128) return [length]
+  if (length < 256) return [0x81, length]
+  if (length < 65536) return [0x82, Math.floor(length / 256), length & 0xff]
+  throw new Error('Generated fixture DER value is too long')
+}
+
+const derTlv = (tag: number, content: ReadonlyArray<number>): Array<number> => [
+  tag,
+  ...derLength(content.length),
+  ...content,
+]
+
+const sanExtension = (
+  tag: number,
+  payload: ReadonlyArray<number>,
+  critical: boolean,
+): Array<number> => {
+  const oid = [0x06, 0x03, 0x55, 0x1d, 0x11]
+  const names = derTlv(0x30, derTlv(tag, payload))
+  return derTlv(0x30, [...oid, ...(critical ? [0x01, 0x01, 0xff] : []), ...derTlv(0x04, names)])
+}
+
 const mutateUnique = (
   id: string,
   needle: ReadonlyArray<number>,
@@ -33,6 +171,24 @@ const mutateUnique = (
   const offset = found[0]
   if (offset === undefined) throw new Error(`Missing ${id} mutation offset`)
   mutate(bytes, offset)
+  return literal(bytes.toString('base64'))
+}
+
+const mutateOccurrence = (
+  id: string,
+  needle: ReadonlyArray<number>,
+  ordinal: number,
+  relativeOffset: number,
+  value: number,
+): string => {
+  const bytes = fixtureBytes(id)
+  const selected = Buffer.from(needle)
+  let offset = -1
+  for (let index = 0; index <= ordinal; index += 1) {
+    offset = bytes.indexOf(selected, offset + 1)
+    if (offset < 0) throw new Error(`Missing mutation occurrence ${ordinal} in ${id}`)
+  }
+  bytes[offset + relativeOffset] = value
   return literal(bytes.toString('base64'))
 }
 
@@ -90,6 +246,177 @@ const root = fixture('rfc5280::no-keyusage/trusted_certs[0]')
 const zeroSerial = fixture('rfc5280::serial::zero/peer_certificate')
 const wrongEku = fixture('rfc5280::eku::ee-wrong-eku/peer_certificate')
 const wildcardConstraint = fixture('rfc5280::nc::invalid-dnsname-wildcard/trusted_certs[0]')
+const constrainedRoot = fixture('rfc5280::nc::permitted-dns-match/trusted_certs[0]')
+const rsaLeafId = 'webpki::cryptographydotio-chain/peer_certificate'
+const rsaLeaf = fixture(rsaLeafId)
+const rsaEncryptionNull = [
+  0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
+]
+const rsaEncryptionAbsent = [
+  0x30, 0x0b, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01,
+]
+const rsaPkcs1Null = [
+  0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00,
+]
+const rsaPkcs1Absent = [
+  0x30, 0x0b, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b,
+]
+const rsaPssSha256 = [
+  0x30, 0x41, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a, 0x30, 0x34, 0xa0,
+  0x0f, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00,
+  0xa1, 0x1c, 0x30, 0x1a, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x08, 0x30,
+  0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0xa2, 0x03,
+  0x02, 0x01, 0x20,
+]
+const rsaPssDefaults = [
+  0x30, 0x0b, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a,
+]
+const rsaSpkiAbsent = replaceDerNodes(rsaLeafId, rsaEncryptionNull, rsaEncryptionAbsent, 1)
+const rsaSignatureAbsent = replaceDerNodes(rsaLeafId, rsaPkcs1Null, rsaPkcs1Absent, 2)
+const rsaPss = replaceDerNodes(rsaLeafId, rsaPkcs1Null, rsaPssSha256, 2)
+const rsaPssWithDefaults = replaceDerNodes(rsaLeafId, rsaPkcs1Null, rsaPssDefaults, 2)
+const versionTwo = mutateUnique(
+  'rfc5280::no-keyusage/peer_certificate',
+  [0xa0, 0x03, 0x02, 0x01, 0x02],
+  (bytes, offset) => {
+    bytes[offset + 4] = 1
+  },
+)
+const uniqueIds = (() => {
+  const bytes = Buffer.from(certificateUniqueIdsDer)
+  bytes[8] = 2
+  return literal(bytes.toString('base64'))
+})()
+const wrongCurve = mutateUnique(
+  'rfc5280::no-keyusage/peer_certificate',
+  [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07],
+  (bytes, offset) => {
+    bytes[offset + 9] = 8
+  },
+)
+const invalidPoint = mutateUnique(
+  'rfc5280::no-keyusage/peer_certificate',
+  [0x03, 0x42, 0x00, 0x04],
+  (bytes, offset) => {
+    bytes[offset + 3] = 2
+  },
+)
+const ecdsaSha256Identifier = [
+  0x30, 0x0a, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02,
+]
+const innerUnsupportedSignature = mutateOccurrence(
+  'rfc5280::no-keyusage/peer_certificate',
+  ecdsaSha256Identifier,
+  0,
+  11,
+  3,
+)
+const outerUnsupportedSignature = mutateOccurrence(
+  'rfc5280::no-keyusage/peer_certificate',
+  ecdsaSha256Identifier,
+  1,
+  11,
+  3,
+)
+const missingCaKeyUsage = mutateUnique(
+  'rfc5280::no-keyusage/trusted_certs[0]',
+  [0x04, 0x04, 0x03, 0x02, 0x01, 0x06],
+  (bytes, offset) => {
+    bytes[offset + 4] = 7
+    bytes[offset + 5] = 0x80
+  },
+)
+const originalSanExtension = sanExtension(
+  0x82,
+  Array.from(Buffer.from('example.com', 'ascii')),
+  false,
+)
+const unsupportedCriticalSan = replaceDerNodes(
+  'rfc5280::no-keyusage/trusted_certs[0]',
+  originalSanExtension,
+  sanExtension(0x81, [0x61], true),
+  1,
+)
+const numericSan = replaceDerNodes(
+  'rfc5280::no-keyusage/peer_certificate',
+  originalSanExtension,
+  sanExtension(0x82, Array.from(Buffer.from('example.123', 'ascii')), false),
+  1,
+)
+const wildcard254Name = Array.from(
+  Buffer.from(`*.${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(62)}.${'d'.repeat(61)}`, 'ascii'),
+)
+if (wildcard254Name.length !== 254) throw new Error('Wildcard regression must be 254 octets')
+const oversizedWildcardSan = replaceDerNodes(
+  'rfc5280::no-keyusage/peer_certificate',
+  originalSanExtension,
+  sanExtension(0x82, wildcard254Name, false),
+  1,
+)
+const invalidIpSan = replaceDerNodes(
+  'rfc5280::no-keyusage/peer_certificate',
+  originalSanExtension,
+  sanExtension(0x87, [192, 0, 2, 1, 0], false),
+  1,
+)
+const validIpSan = replaceDerNodes(
+  'rfc5280::no-keyusage/peer_certificate',
+  originalSanExtension,
+  sanExtension(0x87, [192, 0, 2, 1], false),
+  1,
+)
+const policyProcessing = mutateUnique(
+  'rfc5280::no-keyusage/trusted_certs[0]',
+  [0x06, 0x03, 0x55, 0x1d, 0x13],
+  (bytes, offset) => {
+    bytes[offset + 4] = 0x20
+  },
+)
+const tlsFeature = mutateUnique(
+  rsaLeafId,
+  [0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x01, 0x01],
+  (bytes, offset) => {
+    bytes[offset + 9] = 0x18
+  },
+)
+const unpairedAkiSerial = mutateUnique(
+  'rfc5280::no-keyusage/peer_certificate',
+  [0x30, 0x16, 0x80, 0x14],
+  (bytes, offset) => {
+    bytes[offset + 2] = 0x82
+    bytes[offset + 4] = 1
+  },
+)
+const v1Anchor = (() => {
+  const id = 'rfc5280::no-keyusage/trusted_certs[0]'
+  let bytes = rewriteDerNodes(fixtureBytes(id), id, [0xa0, 0x03, 0x02, 0x01, 0x02], [], 1)
+  bytes = removeContainingNode(bytes, id, [0x06, 0x03, 0x55, 0x1d, 0x13], 0xa3)
+  return literal(bytes.toString('base64'))
+})()
+const ignoredAnchorMetadata = (() => {
+  const id = 'rfc5280::no-keyusage/trusted_certs[0]'
+  let bytes = fixtureBytes(id)
+  const rootNode = derNode(bytes, 0)
+  const tbs = derNode(bytes, rootNode.content)
+  const version = derNode(bytes, tbs.content)
+  const serial = derNode(bytes, version.end)
+  bytes = rewriteDerNodes(
+    bytes,
+    id,
+    bytes.subarray(serial.start, serial.end),
+    [0x02, 0x01, 0x00],
+    1,
+  )
+  let offset = bytes.indexOf(Buffer.from(ecdsaSha256Identifier))
+  while (offset >= 0) {
+    bytes[offset + ecdsaSha256Identifier.length - 1] = 3
+    offset = bytes.indexOf(Buffer.from(ecdsaSha256Identifier), offset + 1)
+  }
+  const finalOctet = bytes.at(-1)
+  if (finalOctet === undefined) throw new Error('Missing anchor signature')
+  bytes[bytes.length - 1] = finalOctet ^ 1
+  return literal(bytes.toString('base64'))
+})()
 const duplicateExtension = mutateUnique(
   'rfc5280::no-keyusage/trusted_certs[0]',
   [0x06, 0x03, 0x55, 0x1d, 0x0f],
@@ -142,8 +469,9 @@ const invalidSignature = mutateUnique(
  */
 export const certificateProfileAcceptanceSource = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.certificate { Certificate, DecodeError, DecodeLimits, ExtensionView }
-import silk.certificate_profile { CertificateProfile, CertificateRole, ProfileClass, ProfileError, ProfileLimits, ProfileOffsetSpace, ProfileReason }
+import silk.certificate_profile { CertificateKeyKind, CertificateProfile, CertificateRole, ExtendedKeyUsage, KeyUsage, ProfileClass, ProfileError, ProfileLimits, ProfileOffsetSpace, ProfileReason }
 import silk.effect { Effect }
+import silk.layout { Layout }
 import silk.option { Option }
 import silk.result { Result }
 import silk.trust_anchor { TrustAnchor }
@@ -157,6 +485,107 @@ fn profileFailure<'a>(
   return match move outcome {
     Result<CertificateProfile<'a>, ProfileError>.Success {value} => false
     Result<CertificateProfile<'a>, ProfileError>.Failure {error} => error.kind == kind && error.reason == reason
+  }
+}
+
+fn profileFailureAt<'a>(
+  outcome: Result<CertificateProfile<'a>, ProfileError>,
+  kind: ProfileClass,
+  reason: ProfileReason,
+  offset: usize,
+) -> bool {
+  return match move outcome {
+    Result<CertificateProfile<'a>, ProfileError>.Success {value} => false
+    Result<CertificateProfile<'a>, ProfileError>.Failure {error} => error.kind == kind
+        && error.reason == reason
+        && error.offsetSpace == ProfileOffsetSpace.CertificateDer
+        && error.offset == offset
+  }
+}
+
+fn profileSuccess<'a>(outcome: Result<CertificateProfile<'a>, ProfileError>) -> bool {
+  return match move outcome {
+    Result<CertificateProfile<'a>, ProfileError>.Success {value} => true
+    Result<CertificateProfile<'a>, ProfileError>.Failure {error} => false
+  }
+}
+
+fn constraintFailure(
+  outcome: Result<(), ProfileError>,
+  kind: ProfileClass,
+  reason: ProfileReason,
+) -> bool {
+  return match move outcome {
+    Result<(), ProfileError>.Success {value} => false
+    Result<(), ProfileError>.Failure {error} => error.kind == kind
+        && error.reason == reason
+        && error.offsetSpace == ProfileOffsetSpace.ConfiguredConstraintDer
+  }
+}
+
+fn unitSuccess(outcome: Result<(), ProfileError>) -> bool {
+  return match move outcome {
+    Result<(), ProfileError>.Success {value} => true
+    Result<(), ProfileError>.Failure {error} => false
+  }
+}
+
+fn embeddedConstraint<'a>(
+  outcome: Result<CertificateProfile<'a>, ProfileError>,
+  expected: &[u8],
+) -> bool {
+  return match move outcome {
+    Result<CertificateProfile<'a>, ProfileError>.Failure {error} => false
+    Result<CertificateProfile<'a>, ProfileError>.Success {value} => {
+      return optionBytes(CertificateProfile.nameConstraintsDer(&value), expected)
+    }
+  }
+}
+
+fn absentPathLength(option: Option<usize>) -> bool {
+  return match move option {
+    Option<usize>.None => true
+    Option<usize>.Some {value} => false
+  }
+}
+
+fn absentKeyUsage(option: Option<KeyUsage>) -> bool {
+  return match move option {
+    Option<KeyUsage>.None => true
+    Option<KeyUsage>.Some {value} => false
+  }
+}
+
+fn absentExtendedKeyUsage(option: Option<ExtendedKeyUsage>) -> bool {
+  return match move option {
+    Option<ExtendedKeyUsage>.None => true
+    Option<ExtendedKeyUsage>.Some {value} => false
+  }
+}
+
+fn absentBytes(option: Option<&[u8]>) -> bool {
+  return match move option {
+    Option<&[u8]>.None => true
+    Option<&[u8]>.Some {value} => false
+  }
+}
+
+fn serverUsage(option: Option<ExtendedKeyUsage>) -> bool {
+  return match move option {
+    Option<ExtendedKeyUsage>.None => false
+    Option<ExtendedKeyUsage>.Some {value} => value.serverAuth
+        && !value.anyExtendedKeyUsage
+        && value.purposeCount == usize.ONE
+  }
+}
+
+fn caUsage(option: Option<KeyUsage>) -> bool {
+  return match move option {
+    Option<KeyUsage>.None => false
+    Option<KeyUsage>.Some {value} => !value.digitalSignature
+        && value.keyCertSign
+        && value.crlSign
+        && !value.keyAgreement
   }
 }
 
@@ -262,11 +691,118 @@ fn sameCertificate(left: &Certificate, right: &Certificate) -> bool {
   return true
 }
 
+fn leafGetters<'a>(
+  outcome: Result<CertificateProfile<'a>, ProfileError>,
+  certificate: &Certificate,
+) -> bool {
+  let expectedSan: [u8; 15] = [48, 13, 130, 11, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109]
+  return match move outcome {
+    Result<CertificateProfile<'a>, ProfileError>.Failure {error} => false
+    Result<CertificateProfile<'a>, ProfileError>.Success {value} => {
+      return sameCertificate(CertificateProfile.certificate(&value), certificate)
+        && CertificateProfile.certificateRole(&value) == CertificateRole.ServerLeaf
+        && CertificateProfile.keyKind(&value) == CertificateKeyKind.P256
+        && !CertificateProfile.ca(&value)
+        && absentPathLength(CertificateProfile.pathLength(&value))
+        && absentKeyUsage(CertificateProfile.keyUsage(&value))
+        && serverUsage(CertificateProfile.extendedKeyUsage(&value))
+        && optionBytes(CertificateProfile.subjectAltNamesDer(&value), &expectedSan)
+        && absentBytes(CertificateProfile.nameConstraintsDer(&value))
+    }
+  }
+}
+
+fn rootGetters<'a>(
+  outcome: Result<CertificateProfile<'a>, ProfileError>,
+  certificate: &Certificate,
+) -> bool {
+  let expectedSan: [u8; 15] = [48, 13, 130, 11, 101, 120, 97, 109, 112, 108, 101, 46, 99, 111, 109]
+  return match move outcome {
+    Result<CertificateProfile<'a>, ProfileError>.Failure {error} => false
+    Result<CertificateProfile<'a>, ProfileError>.Success {value} => {
+      return sameCertificate(CertificateProfile.certificate(&value), certificate)
+        && CertificateProfile.certificateRole(&value) == CertificateRole.Anchor
+        && CertificateProfile.keyKind(&value) == CertificateKeyKind.P256
+        && CertificateProfile.ca(&value)
+        && absentPathLength(CertificateProfile.pathLength(&value))
+        && caUsage(CertificateProfile.keyUsage(&value))
+        && absentExtendedKeyUsage(CertificateProfile.extendedKeyUsage(&value))
+        && optionBytes(CertificateProfile.subjectAltNamesDer(&value), &expectedSan)
+        && absentBytes(CertificateProfile.nameConstraintsDer(&value))
+    }
+  }
+}
+
+effect fn inspectionSucceeds(
+  input: &[u8],
+  selectedRole: CertificateRole,
+  limits: ProfileLimits,
+) -> bool ! OutOfMemoryError ? &mut Allocator {
+  let result = run decoded(input)
+  return match move result {
+    Result<Certificate, DecodeError>.Failure {error} => false
+    Result<Certificate, DecodeError>.Success {value} => profileSuccess(
+      CertificateProfile.inspect(&value, selectedRole, limits),
+    )
+  }
+}
+
+effect fn inspectionFails(
+  input: &[u8],
+  selectedRole: CertificateRole,
+  limits: ProfileLimits,
+  kind: ProfileClass,
+  reason: ProfileReason,
+) -> bool ! OutOfMemoryError ? &mut Allocator {
+  let result = run decoded(input)
+  return match move result {
+    Result<Certificate, DecodeError>.Failure {error} => false
+    Result<Certificate, DecodeError>.Success {value} => profileFailure(
+      CertificateProfile.inspect(&value, selectedRole, limits),
+      kind,
+      reason,
+    )
+  }
+}
+
 effect fn decoded(input: &[u8]) -> Result<Certificate, DecodeError>
 ! OutOfMemoryError
 ? &mut Allocator {
   return run Certificate.decodeDer(input, DecodeLimits.defaults())
 }
+
+struct RefusingAllocator { calls: usize failAt: usize }
+
+effect fn allocate(self: &mut RefusingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  self.calls = self.calls + usize.ONE
+  if self.calls == self.failAt { return run Allocator.outOfMemory() }
+  let mut system = Allocator.systemAllocatorProvider()
+  return run Allocator.allocate(move layout) |> Effect.provideMut<Allocator>(&mut system)
+}
+
+impl Allocator for RefusingAllocator { allocate: RefusingAllocator.allocate }
+
+effect fn cloneSucceeded(anchor: &TrustAnchor) -> bool ! OutOfMemoryError ? &mut Allocator {
+  let cloned = run TrustAnchor.clone(anchor)
+  return sameCertificate(TrustAnchor.certificate(&cloned), TrustAnchor.certificate(anchor))
+}
+
+effect fn anchorConstructionSucceeded(certificate: Certificate, constraints: &[u8]) -> bool
+! OutOfMemoryError
+? &mut Allocator {
+  let built = run TrustAnchor.fromCertificateWithConstraints(
+    move certificate,
+    Option.none<usize>(),
+    Option.some<&[u8]>(constraints),
+    ProfileLimits.defaults(),
+  )
+  return match move built {
+    Result<TrustAnchor, ProfileError>.Failure {error} => false
+    Result<TrustAnchor, ProfileError>.Success {value} => true
+  }
+}
+
+effect fn allocationFailed(error: OutOfMemoryError) -> bool { return false }
 
 effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
   let leafResult = run decoded(${leaf})
@@ -279,6 +815,22 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     Result<Certificate, DecodeError>.Failure {error} => { return 2 }
     Result<Certificate, DecodeError>.Success {value} => move value
   }
+  if !leafGetters(
+    CertificateProfile.inspect(
+      &leafCertificate,
+      CertificateRole.ServerLeaf,
+      ProfileLimits.defaults(),
+    ),
+    &leafCertificate,
+  ) { return 3 }
+  if !rootGetters(
+    CertificateProfile.inspect(
+      &rootCertificate,
+      CertificateRole.Anchor,
+      ProfileLimits.defaults(),
+    ),
+    &rootCertificate,
+  ) { return 4 }
   let inspectedLeaf = CertificateProfile.inspect(
     &leafCertificate,
     CertificateRole.ServerLeaf,
@@ -312,10 +864,11 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     Result<Certificate, DecodeError>.Failure {error} => { return 6 }
     Result<Certificate, DecodeError>.Success {value} => move value
   }
-  if !profileFailure(
+  if !profileFailureAt(
     CertificateProfile.inspect(&zeroCertificate, CertificateRole.ServerLeaf, ProfileLimits.defaults()),
     ProfileClass.Malformed,
     ProfileReason.Serial,
+    Certificate.offsets(&zeroCertificate).serial,
   ) { return 7 }
 
   let wrongResult = run decoded(${wrongEku})
@@ -408,6 +961,225 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     ProfileReason.SignatureAlgorithmMismatch,
   ) { return 36 }
 
+  let versionLimits = ProfileLimits {
+    extensions: usize.ZERO,
+    extensionBytes: usize.ZERO,
+    sanNames: usize.ZERO,
+    constraintSubtrees: usize.ZERO,
+    nodes: usize.ZERO,
+    depth: usize.ZERO,
+  }
+  if !(run inspectionFails(
+    ${versionTwo},
+    CertificateRole.ServerLeaf,
+    versionLimits,
+    ProfileClass.Unsupported,
+    ProfileReason.Version,
+  )) { return 100 }
+  if !(run inspectionFails(
+    ${zeroSerial},
+    CertificateRole.ServerLeaf,
+    versionLimits,
+    ProfileClass.Malformed,
+    ProfileReason.Serial,
+  )) { return 159 }
+
+  let uniqueResult = run decoded(${uniqueIds})
+  let uniqueCertificate = match move uniqueResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 101 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  if !profileFailureAt(
+    CertificateProfile.inspect(&uniqueCertificate, CertificateRole.ServerLeaf, ProfileLimits.defaults()),
+    ProfileClass.Unsupported,
+    ProfileReason.UniqueIdentifier,
+    Certificate.offsets(&uniqueCertificate).issuerUniqueId,
+  ) { return 102 }
+
+  let curveResult = run decoded(${wrongCurve})
+  let curveCertificate = match move curveResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 103 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  if !profileFailureAt(
+    CertificateProfile.inspect(&curveCertificate, CertificateRole.ServerLeaf, ProfileLimits.defaults()),
+    ProfileClass.Unsupported,
+    ProfileReason.PublicKey,
+    Certificate.offsets(&curveCertificate).spki,
+  ) { return 104 }
+  if !(run inspectionFails(
+    ${invalidPoint},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Unsupported,
+    ProfileReason.PublicKey,
+  )) { return 105 }
+
+  let innerResult = run decoded(${innerUnsupportedSignature})
+  let innerCertificate = match move innerResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 106 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  let innerOffsets = Certificate.offsets(&innerCertificate)
+  if !profileFailureAt(
+    CertificateProfile.inspect(&innerCertificate, CertificateRole.ServerLeaf, ProfileLimits.defaults()),
+    ProfileClass.Unsupported,
+    ProfileReason.SignatureAlgorithm,
+    innerOffsets.tbsSignatureAlgorithm,
+  ) { return 107 }
+
+  let outerResult = run decoded(${outerUnsupportedSignature})
+  let outerCertificate = match move outerResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 108 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  let outerOffsets = Certificate.offsets(&outerCertificate)
+  if outerOffsets.tbsSignatureAlgorithm == outerOffsets.signatureAlgorithm { return 109 }
+  if !profileFailureAt(
+    CertificateProfile.inspect(&outerCertificate, CertificateRole.ServerLeaf, ProfileLimits.defaults()),
+    ProfileClass.Unsupported,
+    ProfileReason.SignatureAlgorithm,
+    outerOffsets.signatureAlgorithm,
+  ) { return 110 }
+  if !profileFailureAt(
+    CertificateProfile.inspect(&mismatchCertificate, CertificateRole.ServerLeaf, ProfileLimits.defaults()),
+    ProfileClass.Unsupported,
+    ProfileReason.SignatureAlgorithmMismatch,
+    Certificate.offsets(&mismatchCertificate).signatureAlgorithm,
+  ) { return 111 }
+
+  if !(run inspectionSucceeds(${rsaLeaf}, CertificateRole.ServerLeaf, ProfileLimits.defaults())) {
+    return 112
+  }
+  if !(run inspectionSucceeds(${rsaSpkiAbsent}, CertificateRole.ServerLeaf, ProfileLimits.defaults())) {
+    return 113
+  }
+  if !(run inspectionSucceeds(${rsaSignatureAbsent}, CertificateRole.ServerLeaf, ProfileLimits.defaults())) {
+    return 114
+  }
+  if !(run inspectionSucceeds(${rsaPss}, CertificateRole.ServerLeaf, ProfileLimits.defaults())) {
+    return 115
+  }
+  if !(run inspectionFails(
+    ${rsaPssWithDefaults},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Unsupported,
+    ProfileReason.SignatureAlgorithm,
+  )) { return 116 }
+
+  if !(run inspectionSucceeds(${root}, CertificateRole.Intermediate, ProfileLimits.defaults())) {
+    return 117
+  }
+  if !(run inspectionFails(
+    ${root},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Unsupported,
+    ProfileReason.Role,
+  )) { return 118 }
+  if !(run inspectionFails(
+    ${missingCaKeyUsage},
+    CertificateRole.Anchor,
+    ProfileLimits.defaults(),
+    ProfileClass.Unsupported,
+    ProfileReason.MissingKeyUsage,
+  )) { return 119 }
+  if !(run inspectionSucceeds(${v1Anchor}, CertificateRole.Anchor, ProfileLimits.defaults())) {
+    return 120
+  }
+  if !(run inspectionSucceeds(${ignoredAnchorMetadata}, CertificateRole.Anchor, ProfileLimits.defaults())) {
+    return 121
+  }
+
+  if !(run inspectionFails(
+    ${unsupportedCriticalSan},
+    CertificateRole.Anchor,
+    ProfileLimits.defaults(),
+    ProfileClass.Unsupported,
+    ProfileReason.UnsupportedCriticalName,
+  )) { return 122 }
+  if !(run inspectionFails(
+    ${numericSan},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Malformed,
+    ProfileReason.SubjectAltName,
+  )) { return 123 }
+  if !(run inspectionFails(
+    ${oversizedWildcardSan},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Malformed,
+    ProfileReason.SubjectAltName,
+  )) { return 124 }
+  if !(run inspectionFails(
+    ${invalidIpSan},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Malformed,
+    ProfileReason.SubjectAltName,
+  )) { return 125 }
+  if !(run inspectionSucceeds(${validIpSan}, CertificateRole.ServerLeaf, ProfileLimits.defaults())) {
+    return 126
+  }
+
+  if !(run inspectionFails(
+    ${policyProcessing},
+    CertificateRole.Anchor,
+    ProfileLimits.defaults(),
+    ProfileClass.Unsupported,
+    ProfileReason.PolicyProcessing,
+  )) { return 127 }
+  if !(run inspectionFails(
+    ${tlsFeature},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Unsupported,
+    ProfileReason.TlsFeature,
+  )) { return 128 }
+  if !(run inspectionFails(
+    ${unpairedAkiSerial},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Malformed,
+    ProfileReason.MalformedExtension,
+  )) { return 129 }
+
+  let mut extensionLimits = ProfileLimits.defaults()
+  extensionLimits.extensions = 4
+  if !(run inspectionSucceeds(${leaf}, CertificateRole.ServerLeaf, extensionLimits)) { return 130 }
+  extensionLimits.extensions = 3
+  if !(run inspectionFails(
+    ${leaf},
+    CertificateRole.ServerLeaf,
+    extensionLimits,
+    ProfileClass.ResourceLimit,
+    ProfileReason.Extensions,
+  )) { return 131 }
+  let mut byteLimits = ProfileLimits.defaults()
+  byteLimits.extensionBytes = 24
+  if !(run inspectionSucceeds(${leaf}, CertificateRole.ServerLeaf, byteLimits)) { return 132 }
+  byteLimits.extensionBytes = 23
+  if !(run inspectionFails(
+    ${leaf},
+    CertificateRole.ServerLeaf,
+    byteLimits,
+    ProfileClass.ResourceLimit,
+    ProfileReason.ExtensionBytes,
+  )) { return 133 }
+  let mut sanLimits = ProfileLimits.defaults()
+  sanLimits.sanNames = usize.ONE
+  if !(run inspectionSucceeds(${leaf}, CertificateRole.ServerLeaf, sanLimits)) { return 134 }
+  sanLimits.sanNames = usize.ZERO
+  if !(run inspectionFails(
+    ${leaf},
+    CertificateRole.ServerLeaf,
+    sanLimits,
+    ProfileClass.ResourceLimit,
+    ProfileReason.SanNames,
+  )) { return 135 }
+
   let configured: [u8; 19] = [
     48, 17, 160, 15, 48, 13, 130, 11, 101, 120,
     97, 109, 112, 108, 101, 46, 99, 111, 109,
@@ -436,6 +1208,48 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
   if !optionBytes(TrustAnchor.configuredNameConstraints(&cloned), &configured) { return 19 }
   if !sameCertificate(TrustAnchor.certificate(&cloned), &rootCertificate) { return 37 }
 
+  let mut cloneAudit = RefusingAllocator { calls: usize.ZERO, failAt: usize.ONE }
+  let cloneRefused = run Effect.catchAll(
+    cloneSucceeded(&cloned) |> Effect.provideMut<Allocator>(&mut cloneAudit),
+    allocationFailed,
+  )
+  if cloneRefused || cloneAudit.calls != usize.ONE { return 136 }
+  cloneAudit.calls = usize.ZERO
+  cloneAudit.failAt = usize.ZERO
+  let cloneRetried = run Effect.catchAll(
+    cloneSucceeded(&cloned) |> Effect.provideMut<Allocator>(&mut cloneAudit),
+    allocationFailed,
+  )
+  if !cloneRetried || !sameCertificate(TrustAnchor.certificate(&cloned), &rootCertificate) {
+    return 137
+  }
+
+  let refusedOwnerResult = run decoded(${root})
+  let refusedOwner = match move refusedOwnerResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 138 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  let mut constructionAudit = RefusingAllocator { calls: usize.ZERO, failAt: usize.ONE }
+  let constructionRefused = run Effect.catchAll(
+    anchorConstructionSucceeded(move refusedOwner, &configured)
+      |> Effect.provideMut<Allocator>(&mut constructionAudit),
+    allocationFailed,
+  )
+  if constructionRefused || constructionAudit.calls != usize.ONE { return 139 }
+  let retryOwnerResult = run decoded(${root})
+  let retryOwner = match move retryOwnerResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 140 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  constructionAudit.calls = usize.ZERO
+  constructionAudit.failAt = usize.ZERO
+  let constructionRetried = run Effect.catchAll(
+    anchorConstructionSucceeded(move retryOwner, &configured)
+      |> Effect.provideMut<Allocator>(&mut constructionAudit),
+    allocationFailed,
+  )
+  if !constructionRetried { return 141 }
+
   let malformed = CertificateProfile.validateConfiguredNameConstraints(b"\\x30\\x00", ProfileLimits.defaults())
   let malformedAccepted = match move malformed {
     Result<(), ProfileError>.Success {value} => true
@@ -452,6 +1266,126 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     Result<(), ProfileError>.Failure {error} => error.kind != ProfileClass.ResourceLimit || error.reason != ProfileReason.Nodes
   }
   if limitAccepted { return 21 }
+
+  let leadingConstraint: [u8; 20] = [
+    48, 18, 160, 16, 48, 14, 130, 12, 46, 101,
+    120, 97, 109, 112, 108, 101, 46, 99, 111, 109,
+  ]
+  let minConstraint: [u8; 22] = [
+    48, 20, 160, 18, 48, 16, 130, 11, 101, 120, 97,
+    109, 112, 108, 101, 46, 99, 111, 109, 128, 1, 1,
+  ]
+  let maxConstraint: [u8; 22] = [
+    48, 20, 160, 18, 48, 16, 130, 11, 101, 120, 97,
+    109, 112, 108, 101, 46, 99, 111, 109, 129, 1, 1,
+  ]
+  let ipConstraint: [u8; 16] = [
+    48, 14, 160, 12, 48, 10, 135, 8, 192, 0, 2, 0, 255, 255, 255, 0,
+  ]
+  let invalidIpMask: [u8; 16] = [
+    48, 14, 160, 12, 48, 10, 135, 8, 0, 0, 0, 0, 255, 0, 255, 0,
+  ]
+  let unsupportedSubtree: [u8; 8] = [48, 6, 160, 4, 48, 2, 164, 0]
+  if !constraintFailure(
+    CertificateProfile.validateConfiguredNameConstraints(&minConstraint, ProfileLimits.defaults()),
+    ProfileClass.Malformed,
+    ProfileReason.NameConstraints,
+  ) { return 142 }
+  if !constraintFailure(
+    CertificateProfile.validateConfiguredNameConstraints(&maxConstraint, ProfileLimits.defaults()),
+    ProfileClass.Unsupported,
+    ProfileReason.NameConstraints,
+  ) { return 143 }
+  if !constraintFailure(
+    CertificateProfile.validateConfiguredNameConstraints(&invalidIpMask, ProfileLimits.defaults()),
+    ProfileClass.Malformed,
+    ProfileReason.NameConstraints,
+  ) { return 144 }
+  if !constraintFailure(
+    CertificateProfile.validateConfiguredNameConstraints(&unsupportedSubtree, ProfileLimits.defaults()),
+    ProfileClass.Unsupported,
+    ProfileReason.UnsupportedNameConstraint,
+  ) { return 145 }
+  if !unitSuccess(
+    CertificateProfile.validateConfiguredNameConstraints(&ipConstraint, ProfileLimits.defaults()),
+  ) { return 146 }
+
+  let mut subtreeLimits = ProfileLimits.defaults()
+  subtreeLimits.constraintSubtrees = usize.ONE
+  if !unitSuccess(CertificateProfile.validateConfiguredNameConstraints(&configured, subtreeLimits)) {
+    return 147
+  }
+  subtreeLimits.constraintSubtrees = usize.ZERO
+  if !constraintFailure(
+    CertificateProfile.validateConfiguredNameConstraints(&configured, subtreeLimits),
+    ProfileClass.ResourceLimit,
+    ProfileReason.ConstraintSubtrees,
+  ) { return 148 }
+  let mut nodeLimits = ProfileLimits.defaults()
+  nodeLimits.nodes = 4
+  if !unitSuccess(CertificateProfile.validateConfiguredNameConstraints(&configured, nodeLimits)) {
+    return 149
+  }
+  nodeLimits.nodes = 3
+  if !constraintFailure(
+    CertificateProfile.validateConfiguredNameConstraints(&configured, nodeLimits),
+    ProfileClass.ResourceLimit,
+    ProfileReason.Nodes,
+  ) { return 150 }
+  let mut depthLimits = ProfileLimits.defaults()
+  depthLimits.depth = 4
+  if !unitSuccess(CertificateProfile.validateConfiguredNameConstraints(&configured, depthLimits)) {
+    return 151
+  }
+  depthLimits.depth = 3
+  if !constraintFailure(
+    CertificateProfile.validateConfiguredNameConstraints(&configured, depthLimits),
+    ProfileClass.ResourceLimit,
+    ProfileReason.Depth,
+  ) { return 152 }
+
+  let constrainedResult = run decoded(${constrainedRoot})
+  let constrainedCertificate = match move constrainedResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 153 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  let embeddedPresent = embeddedConstraint(
+    CertificateProfile.inspect(
+      &constrainedCertificate,
+      CertificateRole.Anchor,
+      ProfileLimits.defaults(),
+    ),
+    &configured,
+  )
+  if !embeddedPresent { return 154 }
+
+  let ownedConstrainedResult = run decoded(${constrainedRoot})
+  let ownedConstrained = match move ownedConstrainedResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 155 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  let provenanceResult = run TrustAnchor.fromCertificateWithConstraints(
+    move ownedConstrained,
+    Option.none<usize>(),
+    Option.some<&[u8]>(&leadingConstraint),
+    ProfileLimits.defaults(),
+  )
+  let provenanceAnchor = match move provenanceResult {
+    Result<TrustAnchor, ProfileError>.Failure {error} => { return 156 }
+    Result<TrustAnchor, ProfileError>.Success {value} => move value
+  }
+  if !optionBytes(TrustAnchor.configuredNameConstraints(&provenanceAnchor), &leadingConstraint) {
+    return 157
+  }
+  let provenanceKept = embeddedConstraint(
+    CertificateProfile.inspect(
+      TrustAnchor.certificate(&provenanceAnchor),
+      CertificateRole.Anchor,
+      ProfileLimits.defaults(),
+    ),
+    &configured,
+  )
+  if !provenanceKept { return 158 }
   return 42
 }
 

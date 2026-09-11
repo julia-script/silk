@@ -207,6 +207,34 @@ pub struct AlgorithmView<'a> {
   pub parametersDer: Option<&'a [u8]>
 }
 
+/// Stable byte offsets for semantically significant fields in the retained certificate DER.
+pub struct CertificateOffsets {
+  /// Complete TBSCertificate tag.
+  pub tbs: usize
+  /// Explicit version wrapper, or the first TBSCertificate field when version is absent.
+  pub version: usize
+  /// Serial-number INTEGER tag.
+  pub serial: usize
+  /// Inner TBSCertificate signature AlgorithmIdentifier tag.
+  pub tbsSignatureAlgorithm: usize
+  /// Issuer Name tag.
+  pub issuer: usize
+  /// Subject Name tag.
+  pub subject: usize
+  /// SubjectPublicKeyInfo tag.
+  pub spki: usize
+  /// SubjectPublicKey BIT STRING tag.
+  pub publicKey: usize
+  /// Outer signature AlgorithmIdentifier tag.
+  pub signatureAlgorithm: usize
+  /// Signature-value BIT STRING tag.
+  pub signature: usize
+  /// Issuer unique-identifier tag, or the TBSCertificate tag when absent.
+  pub issuerUniqueId: usize
+  /// Subject unique-identifier tag, or the TBSCertificate tag when absent.
+  pub subjectUniqueId: usize
+}
+
 /// A borrowed raw extension, including unknown or duplicate extensions.
 pub struct ExtensionView<'a> {
   /// Byte offset of the complete Extension TLV in the certificate DER.
@@ -252,6 +280,7 @@ impl Copy for Extension {}
 
 struct Fields {
   tbs: Span
+  versionOffset: usize
   serial: Span
   issuer: Span
   subject: Span
@@ -316,6 +345,7 @@ fn emptyTime() -> CertificateTime {
 fn emptyFields() -> Fields {
   return Fields {
     tbs: emptySpan(),
+    versionOffset: 0,
     serial: emptySpan(),
     issuer: emptySpan(),
     subject: emptySpan(),
@@ -941,12 +971,14 @@ effect fn schema(reader: &mut Reader, extensions: &mut Vector<Extension>) -> Fie
   reader.cursor = root.content
   let tbs = expect(&mut reader, root.end, 2, 48)
   fields.tbs = tbs
+  fields.versionOffset = tbs.content
   if reader.failed {
     return fields
   }
   reader.cursor = tbs.content
   if reader.cursor < tbs.end && octet(&reader, reader.cursor) == 160 {
     let wrapper = expect(&mut reader, tbs.end, 3, 160)
+    fields.versionOffset = wrapper.start
     if reader.failed {
       return fields
     }
@@ -1293,6 +1325,27 @@ impl Certificate {
   /// Returns the structural certificate version without imposing validation policy.
   pub fn version(self: &Self) -> CertificateVersion {
     return self.fields.version
+  }
+  /// Returns stable byte offsets for semantic diagnostics over the retained DER.
+  pub fn offsets(self: &Self) -> CertificateOffsets {
+    let mut issuerId = self.fields.tbs.start
+    if self.fields.hasIssuerId { issuerId = self.fields.issuerId.start }
+    let mut subjectId = self.fields.tbs.start
+    if self.fields.hasSubjectId { subjectId = self.fields.subjectId.start }
+    return CertificateOffsets {
+      tbs: self.fields.tbs.start,
+      version: self.fields.versionOffset,
+      serial: self.fields.serial.start,
+      tbsSignatureAlgorithm: self.fields.inner.whole.start,
+      issuer: self.fields.issuer.start,
+      subject: self.fields.subject.start,
+      spki: self.fields.spki.start,
+      publicKey: self.fields.key.start,
+      signatureAlgorithm: self.fields.outer.whole.start,
+      signature: self.fields.signature.start,
+      issuerUniqueId: issuerId,
+      subjectUniqueId: subjectId,
+    }
   }
   /// Borrows minimal signed INTEGER content, including a required sign octet; the view borrows this owner.
   pub fn serial(self: &Self) -> &[u8] {

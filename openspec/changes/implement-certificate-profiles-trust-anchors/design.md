@@ -63,6 +63,8 @@ One generated acceptance source is registered once in the shared native corpus. 
 
 Selected x509-limbo cases are recorded in a fixture manifest with upstream commit `3f8cba420e90322223486086054401189b7b320e`, upstream `limbo.json` SHA-256 `563805f46937ad25ac9d4e41341c414070aced32a22294821b5c5fe526e2c52d`, per-certificate hashes, Apache-2.0 provenance, and profile-specific inspection outcomes. No full corpus sweep is added.
 
+The fixed Zig HTTP parity snapshot is `1bc892110da738d6137b3f0b7e8e3a586ce09928`. It is a comparison provenance point for profile choices only, not a path-building, trust-policy, or authentication oracle.
+
 ## Risks / Trade-offs
 
 - [A specialized extension walker can drift from the structural decoder] → Keep it scoped to complete already-decoded extension values, reuse shared SAN behavior, preserve original bytes, and pin malformed/duplicate/critical cases.

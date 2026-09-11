@@ -1034,6 +1034,9 @@ claim equivalence with an operating system's trust policy.
 [trust-anchor actor](../../../../packages/compiler/stdlib/silk/trust_anchor.silk),
 [implementation contract](../../../../openspec/changes/implement-certificate-profiles-trust-anchors/specs/certificate-profiles-trust-anchors/spec.md),
 [pinned x509-limbo fixtures](../../../../packages/compiler/test/fixtures/certificate-profile-limbo.json).
+Profile comparisons also preserve the fixed Zig HTTP snapshot
+`1bc892110da738d6137b3f0b7e8e3a586ce09928`; it is provenance, not a full-path or trust-policy
+oracle.
 
 ## Deferred directions
 

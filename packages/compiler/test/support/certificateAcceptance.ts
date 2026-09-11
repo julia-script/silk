@@ -585,18 +585,18 @@ const bundleIndex =
 
 // Synthetic schema fixture: v2, both unique IDs, explicit NULL versus absent parameters,
 // nonzero unused-bit counts, and empty names. These are retained structural data, not policy.
-const uniqueDer = Uint8Array.from([
+export const certificateUniqueIdsDer = Uint8Array.from([
   48, 83, 48, 70, 160, 3, 2, 1, 1, 2, 1, 1, 48, 3, 6, 1, 42, 48, 0, 48, 30, 23, 13, 53, 48, 48, 49,
   48, 49, 48, 48, 48, 48, 48, 48, 90, 23, 13, 52, 57, 49, 50, 51, 49, 50, 51, 53, 57, 53, 57, 90,
   48, 0, 48, 11, 48, 5, 6, 1, 42, 5, 0, 3, 2, 3, 160, 129, 2, 7, 128, 130, 2, 1, 254, 48, 5, 6, 1,
   43, 5, 0, 3, 2, 2, 252,
 ])
 
-const constructedEoc = uniqueDer.map((byte, index) => (index === 79 ? 0x20 : byte))
+const constructedEoc = certificateUniqueIdsDer.map((byte, index) => (index === 79 ? 0x20 : byte))
 const v1SubjectId = Uint8Array.from([
-  ...uniqueDer.subarray(0, 4),
-  ...uniqueDer.subarray(9, 66),
-  ...uniqueDer.subarray(70),
+  ...certificateUniqueIdsDer.subarray(0, 4),
+  ...certificateUniqueIdsDer.subarray(9, 66),
+  ...certificateUniqueIdsDer.subarray(70),
 ]).map((byte, index) => (index === 1 || index === 3 ? byte - 9 : byte))
 
 const imports = `import silk.certificate { Certificate, CertificateVersion, DecodeLimits, DecodeError, DecodeClass, DecodeReason, DecodeOffsetSpace, AlgorithmView, BitStringView, ExtensionView }
@@ -760,7 +760,7 @@ effect fn inputLimits() -> bool ! OutOfMemoryError ? &mut Allocator {
   }
 }
 effect fn uniqueIds() -> bool ! OutOfMemoryError ? &mut Allocator {
-  let result = run Certificate.decodeDer(${literal(uniqueDer)}, DecodeLimits.defaults())
+  let result = run Certificate.decodeDer(${literal(certificateUniqueIdsDer)}, DecodeLimits.defaults())
   return match move result {
     Result<Certificate, DecodeError>.Failure { error } => false
     Result<Certificate, DecodeError>.Success { value } => {

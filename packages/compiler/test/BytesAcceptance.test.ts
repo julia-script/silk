@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
-import { certificateProfileAcceptanceSource } from './support/certificateProfileAcceptance.js'
 import certificateProfileFixtures from './fixtures/certificate-profile-limbo.json' with { type: 'json' }
 
 const ascii = (value: string): Uint8Array =>
@@ -67,6 +66,9 @@ it.effect('keeps decoded certificate owners move-only and their returned views b
   Effect.gen(function* () {
     const source = `import silk.certificate { Certificate }
 import silk.certificate_bundle { CertificateBundle }
+import silk.certificate_profile { CertificateProfile, CertificateRole, ProfileLimits, ProfileError }
+import silk.result { Result }
+import silk.trust_anchor { TrustAnchor }
 import silk.usize
 fn moved(value: Certificate) -> usize {
   let next = move value
@@ -80,6 +82,17 @@ fn viewed(value: Certificate) -> usize {
   let bytes = Certificate.der(&value)
   drop value
   return bytes.length
+}
+fn profile<'a>(certificate: &'a Certificate) -> Result<CertificateProfile<'a>, ProfileError> {
+  return CertificateProfile.inspect(certificate, CertificateRole.Anchor, ProfileLimits.defaults())
+}
+fn anchor(certificate: Certificate) -> usize {
+  let value = TrustAnchor.fromCertificate(move certificate)
+  return TrustAnchor.encodedBytes(&value)
+}
+fn anchorMoved(value: TrustAnchor) -> usize {
+  let next = move value
+  return TrustAnchor.encodedBytes(&value)
 }
 pub fn main() -> i32 { return 0 }`
     const ownership = yield* AnalysisFixture.retainingMain(
@@ -97,6 +110,17 @@ pub fn main() -> i32 { return 0 }`
         operation: 'CertificateBundle.decodePem',
         bindings: ['certificates', 'block', 'certificate'],
       },
+      {
+        module: 'silk/certificate',
+        operation: 'Certificate.copy',
+        bindings: ['bytes', 'extensions'],
+      },
+      {
+        module: 'silk/trust_anchor',
+        operation: 'TrustAnchor.fromCertificateWithConstraints',
+        bindings: ['certificate'],
+      },
+      { module: 'silk/trust_anchor', operation: 'TrustAnchor.clone', bindings: ['certificate'] },
     ]
     for (const state of partialStates) {
       const operation = Analysis.ownershipOf(ownership, state.module)?.functions.find(
@@ -128,90 +152,8 @@ pub fn main() -> i32 { return 0 }`
         { code: 'OWN0001', text: '&value' },
         { code: 'OWN0011', text: 'value' },
         { code: 'OWN0019', text: 'bytes.length' },
+        { code: 'OWN0001', text: '&value' },
       ],
-    )
-  }),
-)
-
-it.effect('exposes borrowed certificate profiles and move-only owned trust anchors', () =>
-  Effect.gen(function* () {
-    const source = `import silk.certificate { Certificate }
-import silk.certificate_profile { CertificateProfile, CertificateRole, ProfileLimits, ProfileError }
-import silk.option { Option }
-import silk.result { Result }
-import silk.trust_anchor { TrustAnchor }
-import silk.usize
-fn profile<'a>(certificate: &'a Certificate) -> Result<CertificateProfile<'a>, ProfileError> {
-  return CertificateProfile.inspect(certificate, CertificateRole.Anchor, ProfileLimits.defaults())
-}
-fn anchor(certificate: Certificate) -> usize {
-  let value = TrustAnchor.fromCertificate(move certificate)
-  return TrustAnchor.encodedBytes(&value)
-}
-fn moved(value: TrustAnchor) -> usize {
-  let next = move value
-  return TrustAnchor.encodedBytes(&value)
-}
-pub fn main() -> i32 { return 0 }`
-    const snapshot = yield* AnalysisFixture.retainingMain(
-      'certificate-profile/public-surface',
-      ascii(source),
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => ({
-        code: diagnostic.code,
-        text: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
-      })),
-      [{ code: 'OWN0001', text: '&value' }],
-    )
-    const partialStates = [
-      {
-        module: 'silk/certificate',
-        operation: 'Certificate.copy',
-        bindings: ['bytes', 'extensions'],
-      },
-      {
-        module: 'silk/trust_anchor',
-        operation: 'TrustAnchor.fromCertificateWithConstraints',
-        bindings: ['certificate'],
-      },
-      { module: 'silk/trust_anchor', operation: 'TrustAnchor.clone', bindings: ['certificate'] },
-    ]
-    for (const state of partialStates) {
-      const operation = Analysis.ownershipOf(snapshot, state.module)?.functions.find(
-        (candidate) =>
-          candidate.declaration.canonical._tag === 'Canonical' &&
-          candidate.declaration.canonical.id.name === state.operation,
-      )
-      const releases =
-        operation?.exits
-          .filter((exit) => exit.kind === 'Propagation')
-          .flatMap((exit) => exit.releases) ?? []
-      for (const binding of state.bindings) {
-        const partial = releases.filter((release) => release.binding.name === binding)
-        assert.isNotEmpty(partial, `${state.operation}: ${binding}`)
-        assert.isTrue(
-          partial.every((release) => CleanupPlan.reclaims(release.cleanup)),
-          `${state.operation}: ${binding}`,
-        )
-      }
-    }
-  }),
-)
-
-it.effect('analyzes the consolidated certificate profile and trust-anchor acceptance program', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* AnalysisFixture.retainingMain(
-      'certificate-profile/acceptance',
-      ascii(certificateProfileAcceptanceSource),
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => ({
-        code: diagnostic.code,
-        source: diagnostic.span.sourceId,
-        message: diagnostic.message,
-      })),
-      [],
     )
   }),
 )
