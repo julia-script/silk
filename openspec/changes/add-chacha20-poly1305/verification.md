@@ -75,10 +75,22 @@ being repeated with `PATH=/opt/homebrew/opt/llvm/bin:$PATH`. At revision `13e7b9
 (699.91 seconds). The subsequent native phase was stopped during execution after independent
 review found an orphaned documentation example. This partial run is historical regression
 evidence, not a complete or final-revision gate. The orphaned example was removed; public API
-contracts and runtime implementation are unchanged. The existing documentation gate will verify
-the final generated pages. Required repository checks are being rerun on the corrected revision.
+contracts and runtime implementation are unchanged.
 
-Independent general correctness review approved `13e7b911f55d0887e2620247b8d02ca1dd1ec82f`.
+On corrected revision `9f835ff11135e73ee5da30305d81a9d4442f15a0`, typecheck passed in 26.097
+seconds, format:check in 8.191 seconds, and lint in 26.356 seconds. Documentation policy checked
+104 modules without violations, and executable documentation completed before the compiler
+parallel phase. During concurrent full-suite pools, existing SelectiveCatch and Suspendability
+cases failed around the 60-second test timeout. The coordinator stopped the owned run
+after those failures; the partial log is `/tmp/jul176-final-test.log` and the cancellation
+record is `/tmp/jul176-final-cancelled.json`. This is an incomplete test gate, not a pass.
+The same existing files passed in the earlier complete parallel phase; a fresh run with one
+broad compiler pool is queued. `pnpm check` and `pnpm release:candidate` remain pending.
+
+Independent general correctness review approved `13e7b911f55d0887e2620247b8d02ca1dd1ec82f`
+and extended approval to `9f835ff11135e73ee5da30305d81a9d4442f15a0` after inspecting the
+orphan-example deletion and generated digest update; source from the first import onward is
+byte-identical.
 The reviewer inspected the complete source, specification, documentation, ownership and runtime
 integration, independently reproduced every committed fixture with Python cryptography 48 /
 OpenSSL 4, and checked the counter schedule, Poly1305 bounds and authentication/write ordering.
@@ -101,4 +113,5 @@ The review retained the consolidated distinct AEAD/component boundaries, one nat
 one small Wasm witness and one shared ownership snapshot. A subsequent documentation audit found
 that the unrendered example was both orphaned and syntactically invalid. Removing it resolves the
 finding without adding a redundant doctest compilation; no new executable documentation example
-remains. Final independent approval is recorded by the coordinator on the corrected commit.
+remains. Final independent approval covers `9f835ff11135e73ee5da30305d81a9d4442f15a0`;
+the complete dedicated report is [test-economics-review.md](test-economics-review.md).
