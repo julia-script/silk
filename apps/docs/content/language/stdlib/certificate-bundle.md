@@ -86,3 +86,23 @@ Borrows the certificate at `index`, or returns `None` when the index is outside 
 #### Details
 
 The returned certificate cannot outlive this bundle. This operation allocates nothing and preserves input order.
+
+<a id="declaration-73696c6b2f63657274696669636174655f62756e646c653a3a436572746966696361746542756e646c652e696e746f436572746966696361746573"></a>
+
+### Method `CertificateBundle.intoCertificates`
+
+```silk
+pub fn intoCertificates(self: CertificateBundle) -> silk/vector.Vector<silk/certificate.Certificate>
+```
+
+Consumes the bundle and returns every owned certificate without allocating or copying DER.
+
+#### When to use
+
+Use this function when another owner must take the complete decoded sequence. Use [`get`](#declaration-73696c6b2f63657274696669636174655f62756e646c653a3a436572746966696361746542756e646c652e676574) to
+inspect one certificate without consuming the bundle.
+
+#### Details
+
+The returned vector preserves input order, duplicate entries, allocation, and capacity. This
+operation assigns no trust and performs no certificate validation.

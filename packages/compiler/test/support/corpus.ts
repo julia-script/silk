@@ -39,6 +39,7 @@ import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
 import { certificateProfileAcceptanceSource } from './certificateProfileAcceptance.js'
 import { certificatePathAcceptanceSource } from './certificatePathAcceptance.js'
+import { trustSourceAcceptanceSource } from './trustSourceAcceptance.js'
 import { httpsIdentityAcceptanceSource } from './httpsIdentityAcceptance.js'
 import { sanAcceptanceSource } from './sanAcceptance.js'
 import {
@@ -6271,6 +6272,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'certificate-path-validation',
     source: certificatePathAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'owned-trust-snapshots',
+    source: trustSourceAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

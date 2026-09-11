@@ -254,6 +254,103 @@ pub fn main() -> i32 { return 0 }`
   }),
 )
 
+it.effect('keeps trust snapshots opaque, move-only, borrowed, and lexically service-loaded', () =>
+  Effect.gen(function* () {
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.memory_trust_source { MemoryTrustSource }
+import silk.result { Result }
+import silk.trust_anchor { TrustAnchor }
+import silk.trust_snapshot { TrustLoadLimits, TrustSnapshot, TrustSourceError }
+import silk.trust_source { TrustSource }
+import silk.usize
+import silk.vector { Vector }
+fn moved(value: TrustSnapshot) -> usize {
+  let next = move value
+  return TrustSnapshot.anchors(&value).length
+}
+fn viewed(value: TrustSnapshot) -> usize {
+  let anchors = TrustSnapshot.anchors(&value)
+  drop value
+  return anchors.length
+}
+fn provider(snapshot: TrustSnapshot) -> MemoryTrustSource {
+  return MemoryTrustSource.make(move snapshot)
+}
+fn replace(source: &mut MemoryTrustSource, next: TrustSnapshot) -> TrustSnapshot {
+  return MemoryTrustSource.replace(move source, move next)
+}
+fn forged() -> TrustSnapshot {
+  return TrustSnapshot { anchorsValue: Vector.make<TrustAnchor>() }
+}
+fn limitFailure(result: Result<TrustSnapshot, TrustSourceError>) -> bool {
+  return match move result {
+    Result<TrustSnapshot, TrustSourceError>.Failure {
+      error: TrustSourceError.LimitExceeded { kind, limit }
+    } => true
+    _ => false
+  }
+}
+effect fn load(limits: TrustLoadLimits) -> TrustSnapshot
+! TrustSourceError | OutOfMemoryError
+? &mut TrustSource | &mut Allocator {
+  return run TrustSource.load(limits)
+}
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'trust-source/ownership-and-requirements',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        text: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0001', text: '&value' },
+        { code: 'OWN0011', text: 'value' },
+        { code: 'OWN0019', text: 'anchors.length' },
+        {
+          code: 'SEM0021',
+          text: 'TrustSnapshot { anchorsValue: Vector.make<TrustAnchor>() }',
+        },
+      ],
+    )
+
+    const partialStates = [
+      {
+        module: 'silk/trust_snapshot',
+        operation: 'TrustSnapshot.fromPem',
+        bindings: ['certificates', 'anchors'],
+      },
+      { module: 'silk/trust_snapshot', operation: 'TrustSnapshot.copy', bindings: ['copied'] },
+      {
+        module: 'silk/trust_snapshot',
+        operation: 'TrustSnapshot.combine',
+        bindings: ['combined'],
+      },
+    ]
+    for (const state of partialStates) {
+      const operation = Analysis.ownershipOf(snapshot, state.module)?.functions.find(
+        (candidate) =>
+          candidate.declaration.canonical._tag === 'Canonical' &&
+          candidate.declaration.canonical.id.name === state.operation,
+      )
+      const releases =
+        operation?.exits
+          .filter((exit) => exit.kind === 'Propagation')
+          .flatMap((exit) => exit.releases) ?? []
+      for (const binding of state.bindings) {
+        const partial = releases.filter((release) => release.binding.name === binding)
+        assert.isNotEmpty(partial, `${state.operation}: ${binding}`)
+        assert.isTrue(
+          partial.every((release) => CleanupPlan.reclaims(release.cleanup)),
+          `${state.operation}: ${binding}`,
+        )
+      }
+    }
+  }),
+)
+
 it.effect('keeps HTTPS reference and SAN payload borrows within caller storage', () =>
   Effect.gen(function* () {
     const source = `import silk.https_identity { HttpsIdentity, OriginHost, ReferenceIdentity, CertificateIdentities, PresentedIdentity, IdentityLimits, IdentityMatch, IdentityError }

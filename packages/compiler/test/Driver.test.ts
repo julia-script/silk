@@ -30,6 +30,7 @@ import { chacha20Poly1305WasmSource } from './support/chacha20Poly1305Acceptance
 import { certificateWasmAcceptanceSource } from './support/certificateAcceptance.js'
 import { certificateProfileWasmSource } from './support/certificateProfileAcceptance.js'
 import { certificatePathWasmSource } from './support/certificatePathAcceptance.js'
+import { trustSourceWasmSource } from './support/trustSourceAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
 const defaultClang = (): string => {
@@ -692,6 +693,37 @@ it.effect(
       const main = instance.exports['main']
       assert.isFunction(main)
       if (typeof main === 'function') assert.strictEqual(main(), 0)
+    }),
+  300_000,
+)
+
+it.effect(
+  'copies empty explicit trust through LLVM-to-Wasm',
+  () =>
+    Effect.gen(function* () {
+      const outcome = yield* compileSource('trust-source.wasm', trustSourceWasmSource, {
+        compilation: {
+          root: SourceFile.make('memory/trust-source-wasm', ascii(trustSourceWasmSource)),
+          target: 'wasm32-unknown-unknown',
+        },
+        artifactKind: 'WebAssemblyModule',
+      })
+      assert.strictEqual(
+        outcome._tag,
+        'Compiled',
+        outcome._tag === 'Rejected'
+          ? outcome.diagnostics
+              .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+              .join('\n')
+          : undefined,
+      )
+      if (outcome._tag !== 'Compiled') return
+      const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+      assert.deepEqual(WebAssembly.Module.imports(module), [])
+      const instance = new WebAssembly.Instance(module)
+      const main = instance.exports['main']
+      assert.isFunction(main)
+      if (typeof main === 'function') assert.strictEqual(main(), 42)
     }),
   300_000,
 )

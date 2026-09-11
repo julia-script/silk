@@ -305,6 +305,11 @@
     "aliases": ["InMemoryLogger", "LogError", "LogLevel"]
   },
   {
+    "module": "silk/memory_trust_source",
+    "path": "silk/memory_trust_source.silk",
+    "namespace": "MemoryTrustSource"
+  },
+  {
     "module": "silk/metrics",
     "path": "silk/metrics.silk",
     "namespace": "AllocationMetrics"
@@ -620,6 +625,24 @@
     "module": "silk/trust_anchor",
     "path": "silk/trust_anchor.silk",
     "namespace": "TrustAnchor"
+  },
+  {
+    "module": "silk/trust_snapshot",
+    "path": "silk/trust_snapshot.silk",
+    "namespace": "TrustSnapshot",
+    "aliases": [
+      "SnapshotLimits",
+      "TrustLoadLimits",
+      "TrustLimitKind",
+      "TrustConfigurationReason",
+      "TrustFileOperation",
+      "TrustSourceError"
+    ]
+  },
+  {
+    "module": "silk/trust_source",
+    "path": "silk/trust_source.silk",
+    "namespace": "TrustSource"
   },
   {
     "module": "silk/u16",

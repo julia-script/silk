@@ -1083,6 +1083,47 @@ revocation, or transparency equivalence.
 [fixture provenance](../../../../packages/compiler/test/fixtures/certificate-path-limbo.json), and
 [offline importer](../../../../packages/compiler/scripts/import-certificate-path-fixtures.mjs).
 
+## Owned trust snapshots and replaceable trust sources
+
+`silk.trust_snapshot { TrustSnapshot, SnapshotLimits, TrustLoadLimits, TrustSourceError }`
+represents one opaque, immutable owner of an ordered sequence of explicit `TrustAnchor` values.
+`fromAnchors` consumes an existing vector without allocation after checking its complete count and
+aggregate retained byte size. Empty explicit trust is valid and authenticates no peer. `fromPem`
+strictly decodes one or more certificates, transfers their owners into unconstrained anchors, and
+rejects empty or whitespace-only input. Both constructors preserve every input position and
+duplicate; anchors with identical certificate DER but different configured restrictions remain
+distinct candidates.
+
+`SnapshotLimits.defaults()` permits 1024 anchors and 8 MiB of aggregate certificate and configured
+constraint bytes. `TrustLoadLimits.defaults()` combines that finite snapshot budget with the finite
+certificate decoder defaults. Every limit is inclusive and zero means zero. Count and byte totals
+are checked before snapshot allocation or growth. Semantic failures distinguish structured decoder
+errors and `AnchorCount`, `EncodedBytes`, or provider-input limits. Allocation refusal stays in the
+separate `OutOfMemoryError` channel.
+
+`TrustSnapshot.copy` creates an independently owned snapshot. `TrustSnapshot.combine` copies the
+primary anchors followed by the additional anchors without deduplication or restriction merging.
+Dropping either source cannot invalidate the new owner. A less-restricted additional anchor can
+therefore widen authority and must be an application policy decision.
+
+`silk.trust_source.TrustSource` is the portable lexical service for loading one independent bounded
+snapshot. `silk.memory_trust_source.MemoryTrustSource` owns an explicit current snapshot, copies it
+on each load, and atomically exchanges it with `replace`, returning the complete old owner without
+allocation. Replacement affects only later loads: prior results survive replacement and provider
+drop. The memory provider performs no I/O, environment lookup, refresh, caching, or global
+selection.
+
+These APIs represent configured certificate authority, not certificate-path validation. They do
+not verify signatures, identities, time, revocation, or policy. Native PEM acquisition is a
+separate provider concern, and loading the same certificate bytes as an operating system store does
+not reproduce that system's trust policy.
+
+**Evidence:** [snapshot actor](../../../../packages/compiler/stdlib/silk/trust_snapshot.silk),
+[service actor](../../../../packages/compiler/stdlib/silk/trust_source.silk),
+[memory provider](../../../../packages/compiler/stdlib/silk/memory_trust_source.silk),
+[implementation contract](../../../../openspec/changes/implement-owned-trust-snapshots/specs/owned-trust-snapshots/spec.md),
+[shared native acceptance](../../../../packages/compiler/test/support/trustSourceAcceptance.ts).
+
 ## Deferred directions
 
 The following are deliberately outside the first stable model:

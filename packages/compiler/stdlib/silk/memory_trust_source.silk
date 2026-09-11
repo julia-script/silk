@@ -1,0 +1,65 @@
+//! Explicit replaceable in-memory trust for deterministic applications and tests.
+//!
+//! # When to use
+//!
+//! Use [`MemoryTrustSource`] when the application already owns its trust snapshot and wants later
+//! loads to observe explicit replacement. Supply it lexically as `silk.trust_source.TrustSource`.
+//!
+//! # Details
+//!
+//! Each load copies the current snapshot. Replacement exchanges complete owners without allocation
+//! and affects only later loads. Earlier loaded snapshots remain independent.
+//!
+//! # Gotchas
+//!
+//! This provider performs no I/O, refresh, deduplication, path validation, or OS-policy discovery.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.result {Result}
+import silk.trust_snapshot {
+  TrustLoadLimits,
+  TrustSnapshot,
+  TrustSourceError,
+}
+import silk.trust_source {TrustSource}
+
+/// A mutable provider that owns one complete current trust snapshot.
+pub struct MemoryTrustSource {
+  current: TrustSnapshot
+}
+
+impl MemoryTrustSource {
+  /// Consumes a snapshot and creates a provider without allocation or validation.
+  pub fn make(snapshot: TrustSnapshot) -> MemoryTrustSource {
+    return MemoryTrustSource {current: move snapshot}
+  }
+
+  /// Atomically replaces current trust and returns the complete old snapshot.
+  ///
+  /// # Details
+  ///
+  /// This operation allocates nothing and cannot fail. The new snapshot affects only later loads.
+  /// Existing loaded snapshots remain independent owners.
+  pub fn replace(self: &mut Self, next: TrustSnapshot) -> TrustSnapshot {
+    return Intrinsic.replace(self.current, move next)
+  }
+
+  effect fn loadCurrent(
+    self: &mut Self,
+    limits: TrustLoadLimits,
+  ) -> TrustSnapshot
+  ! TrustSourceError | OutOfMemoryError
+  ? &mut Allocator {
+    let copied = run TrustSnapshot.copy(&self.current, limits.snapshot)
+    return match move copied {
+      Result<TrustSnapshot, TrustSourceError>.Success {value} => move value
+      Result<TrustSnapshot, TrustSourceError>.Failure {
+        error: TrustSourceError.LimitExceeded {kind, limit}
+      } => { fail TrustSourceError.LimitExceeded {kind: kind, limit: limit} }
+    }
+  }
+}
+
+impl TrustSource for MemoryTrustSource {
+  load: MemoryTrustSource.loadCurrent
+}
