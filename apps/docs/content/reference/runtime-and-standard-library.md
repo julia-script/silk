@@ -451,6 +451,35 @@ nonce generation, replay protection, or peer authentication policy.
 [fixture provenance](../../../../packages/compiler/test/fixtures/chacha20-poly1305.md), and
 [RFC 8439](https://www.rfc-editor.org/rfc/rfc8439).
 
+### STDLIB-AES-GCM — Detached authenticated encryption preserves destinations on failure
+
+**Status:** Confirmed
+
+`silk.aes_gcm` exports `AesGcm` and `AesGcmError`. `seal(key, nonce, aad, plaintext,
+ciphertext, tag)` and `open(key, nonce, aad, ciphertext, tag, plaintext)` return
+`Result<(), AesGcmError>`. Inputs are shared byte slices and destinations are exclusive byte
+slices. Keys must contain 16 or 32 bytes, nonces 12 bytes, and detached tags exactly 16 bytes.
+Empty plaintext, ciphertext and AAD are valid. Destinations may exceed the message length;
+the unused suffix remains unchanged.
+
+Both operations validate widths, output capacity and widened GCM length limits before writing.
+A message contains at most 2^36−32 bytes and AAD at most 2^61−1 bytes, additionally bounded by
+target addressability. `open` authenticates all sixteen tag bytes before producing plaintext.
+Any failure preserves every byte of every destination, including its unused suffix.
+The error variants distinguish invalid key, nonce and tag lengths, insufficient output,
+excess domain lengths, and failed authentication. Ordinary borrow checking forbids aliasing
+inputs with exclusive outputs or overlapping ciphertext and tag destinations.
+
+**Boundary:** This ordinary Silk implementation allocates no memory and invokes no provider or
+native crypto API. Its algebraic AES S-box and GHASH have fixed secret-processing schedules.
+The caller supplies a nonce unique under the key and enforces per-key usage limits.
+The module provides no nonce generation, TLS records, replay protection, peer identity,
+physical secret-erasure guarantee, or audited constant-time/production-security claim.
+
+**Evidence:** [canonical AES-GCM source](../../../../packages/compiler/stdlib/silk/aes_gcm.silk),
+[shared acceptance](../../../../packages/compiler/test/support/aesGcmAcceptance.ts), and
+[fixture provenance](../../../../packages/compiler/test/fixtures/aes-gcm/README.md).
+
 ### STDLIB-009 — URI syntax preserves its original serialization
 
 **Status:** Confirmed

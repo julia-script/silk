@@ -654,3 +654,25 @@ it.effect('executes ChaCha20-Poly1305 through LLVM-to-Wasm', () =>
     if (typeof main === 'function') assert.strictEqual(main(), 42)
   }),
 )
+
+// The native corpus covers the full profile; this one portability leg exercises partial AES blocks and 64-bit GHASH
+// plus authentication failure preservation with wasm32 pointer widths and the shipped Wasm allocator.
+it.effect('executes bounded AES-GCM through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('aes-gcm.wasm', aesGcmWasmAcceptanceSource, {
+      compilation: {
+        root: SourceFile.make('memory/aes-gcm-wasm', ascii(aesGcmWasmAcceptanceSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+    assert.deepEqual(WebAssembly.Module.imports(module), [])
+    const instance = new WebAssembly.Instance(module)
+    const main = instance.exports['main']
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 0)
+  }),
+)
