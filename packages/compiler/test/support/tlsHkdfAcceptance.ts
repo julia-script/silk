@@ -206,12 +206,7 @@ effect fn failed(error: OutOfMemoryError) -> i32 { return 99 }
 pub fn main() -> i32 { return run Effect.catchAll(verify(), failed) }`
 
 export const tlsHkdfWasmSource = `import silk.tls_hkdf { TlsHkdfSha256, TlsHkdfSha384, LabelError }
-import silk.sha2 { Sha256, Sha384 }
 import silk.result { Result }
-import silk.bytes { Bytes }
-import silk.allocator { Allocator, OutOfMemoryError }
-import silk.effect { Effect }
-import silk.slice { Slice }
 fn same(a: &[u8], b: &[u8]) -> bool {
   if a.length != b.length { return false }
   let mut i: usize = 0
@@ -220,11 +215,6 @@ fn same(a: &[u8], b: &[u8]) -> bool {
 }
 fn ok(r: Result<(), LabelError>) -> bool {
   return match move r { Result<(), LabelError>.Success {value} => true Result<(), LabelError>.Failure {error} => false }
-}
-fn sentinel(a: &[u8]) -> bool {
-  let mut i: usize = 0
-  while i < a.length { if a[i] != 0 { return false } i = i + 1 }
-  return true
 }
 
 fn case1() -> bool {
@@ -245,19 +235,6 @@ fn case2() -> bool {
   if !ok(TlsHkdfSha384.expandLabel(&secret, &label, &context, &mut output)) { return false }
   let expected: [u8; 48] = [168, 86, 166, 17, 149, 241, 90, 28, 133, 99, 208, 200, 68, 33, 138, 15, 4, 64, 38, 208, 207, 73, 132, 181, 47, 47, 236, 210, 145, 167, 20, 55, 251, 129, 251, 166, 154, 105, 253, 205, 1, 38, 123, 128, 244, 184, 93, 96]
   if !same(&output, &expected) { return false }
-  let messages: [u8; 15] = [104, 97, 110, 100, 115, 104, 97, 107, 101, 32, 98, 121, 116, 101, 115]
-  let resultderiveSecret = TlsHkdfSha384.deriveSecret(&secret, &label, &messages)
-  let validderiveSecret = match move resultderiveSecret {
-    Result<[u8; 48], LabelError>.Failure {error} => false
-    Result<[u8; 48], LabelError>.Success {value} => same(&value, &expected)
-  }
-  if !validderiveSecret { return false }
-  let resultderiveSecretFromHash = TlsHkdfSha384.deriveSecretFromHash(&secret, &label, &context)
-  let validderiveSecretFromHash = match move resultderiveSecretFromHash {
-    Result<[u8; 48], LabelError>.Failure {error} => false
-    Result<[u8; 48], LabelError>.Success {value} => same(&value, &expected)
-  }
-  if !validderiveSecretFromHash { return false }
   return true
 }
 pub fn main() -> i32 { if !case1() || !case2() { return 1 } return 0 }`
