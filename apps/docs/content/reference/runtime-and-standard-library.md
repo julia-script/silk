@@ -1038,6 +1038,40 @@ Profile comparisons also preserve the fixed Zig HTTP snapshot
 `1bc892110da738d6137b3f0b7e8e3a586ce09928`; it is provenance, not a full-path or trust-policy
 oracle.
 
+## Bounded certificate-path validation
+
+`silk.certificate_path { CertificatePath, ValidationLimits, ValidatedPath, ValidationError }`
+builds a deterministic TLS-server certificate path from one borrowed leaf, caller-ordered peer
+intermediates, and explicit caller-ordered `TrustAnchor` values. Search is iterative depth-first:
+at each depth it considers anchors first and then intermediates. The first fully valid path wins,
+and the returned value retains the original leaf plus original intermediate and anchor indices
+rather than copying certificate material.
+
+Every input and unit of search work has an inclusive finite bound. Candidate visits are charged
+before name comparison, signature checks before primitive verification, complete paths before
+root-to-leaf policy, and DNS/IP comparisons before each same-form subtree comparison. These
+counters span backtracking. Exhausting a work bound is terminal, while an ordinary invalid
+signature, unsupported candidate, date failure, path-length failure, or name-constraint failure
+leaves later alternatives eligible.
+
+The validator applies the restricted certificate profile, exact issuer/subject DER linkage,
+original-TBSCertificate signatures, one explicit validation `Instant`, cumulative DNS/IP
+NameConstraints, and path-length restrictions. Identical anchor certificate bytes remain separate
+candidates because configured restrictions may differ. Anchor authority is always explicit; peer
+certificates are never promoted into anchors, and no AIA, revocation, CT, operating-system policy,
+time, network, or entropy source is consulted.
+
+A successful `ValidatedPath` is only certificate-path assurance under this documented restricted
+profile. A TLS client must still verify the HTTPS service identity and the TLS CertificateVerify
+and Finished messages before accepting application data. `revocationStatus()` is therefore
+`NotChecked`; success is not a claim of complete RFC 5280, browser Web PKI, production security,
+revocation, or transparency equivalence.
+
+**Evidence:** [path actor](../../../../packages/compiler/stdlib/silk/certificate_path.silk),
+[implementation contract](../../../../openspec/changes/implement-bounded-certificate-path-validation/specs/bounded-certificate-path-validation/spec.md),
+[fixture provenance](../../../../packages/compiler/test/fixtures/certificate-path-limbo.json), and
+[offline importer](../../../../packages/compiler/scripts/import-certificate-path-fixtures.mjs).
+
 ## Deferred directions
 
 The following are deliberately outside the first stable model:

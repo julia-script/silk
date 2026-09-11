@@ -29,6 +29,7 @@ import { p256WasmAcceptanceSource } from './support/p256Acceptance.js'
 import { chacha20Poly1305WasmSource } from './support/chacha20Poly1305Acceptance.js'
 import { certificateWasmAcceptanceSource } from './support/certificateAcceptance.js'
 import { certificateProfileWasmSource } from './support/certificateProfileAcceptance.js'
+import { certificatePathWasmSource } from './support/certificatePathAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
 const defaultClang = (): string => {
@@ -668,6 +669,29 @@ it.effect(
       const main = instance.exports['main']
       assert.isFunction(main)
       if (typeof main === 'function') assert.strictEqual(main(), 42)
+    }),
+  300_000,
+)
+
+it.effect(
+  'executes bounded certificate-path validation through LLVM-to-Wasm',
+  () =>
+    Effect.gen(function* () {
+      const outcome = yield* compileSource('certificate-path.wasm', certificatePathWasmSource, {
+        compilation: {
+          root: SourceFile.make('memory/certificate-path-wasm', ascii(certificatePathWasmSource)),
+          target: 'wasm32-unknown-unknown',
+        },
+        artifactKind: 'WebAssemblyModule',
+      })
+      assert.strictEqual(outcome._tag, 'Compiled')
+      if (outcome._tag !== 'Compiled') return
+      const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+      assert.deepEqual(WebAssembly.Module.imports(module), [])
+      const instance = new WebAssembly.Instance(module)
+      const main = instance.exports['main']
+      assert.isFunction(main)
+      if (typeof main === 'function') assert.strictEqual(main(), 0)
     }),
   300_000,
 )
