@@ -156,6 +156,11 @@ effect fn suite() -> i32 ! FileError | TrustSourceError | OutOfMemoryError ? &mu
   }
   let mut oversized = run Bytes.zeroed(4096)
   let mut oversizedBytes = Bytes.asMutSlice(&mut oversized)
+  let mut oversizedIndex = usize.ZERO
+  while oversizedIndex < oversizedBytes.length {
+    oversizedBytes[oversizedIndex] = u8.toU8(97)
+    oversizedIndex = oversizedIndex + usize.ONE
+  }
   oversizedBytes[usize.ZERO] = u8.toU8(47)
   drop oversizedBytes
   if !(run rejectsConfiguration(Bytes.asSlice(&oversized), &configurationPath, TrustConfigurationReason.PathBytes)) {
