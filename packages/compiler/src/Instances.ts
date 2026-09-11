@@ -1334,18 +1334,35 @@ export const discover = (
       })
     )
   }
-  const sameHiddenExecutableArguments = (left: InstanceKey, right: InstanceKey): boolean => {
-    const leftHidden = left.typeArguments.filter(Type.isHiddenExecutableArgument)
-    const rightHidden = right.typeArguments.filter(Type.isHiddenExecutableArgument)
+  const runtimeNonTypeArgumentsOf = (key: InstanceKey): ReadonlyArray<Type.GenericArgument> =>
+    key.typeArguments.filter(
+      (argument) =>
+        !Type.isTypeArgument(argument) && Type.runtimeGenericArgumentKey(argument) !== '',
+    )
+  const sameRuntimeArguments = (
+    left: ReadonlyArray<Type.GenericArgument>,
+    right: ReadonlyArray<Type.GenericArgument>,
+  ): boolean =>
+    left.length === right.length &&
+    left.every((argument, index) => {
+      const candidate = right.at(index)
+      return (
+        candidate !== undefined &&
+        Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate)
+      )
+    })
+  const sameRuntimeNonTypeArguments = (left: InstanceKey, right: InstanceKey): boolean =>
+    sameRuntimeArguments(runtimeNonTypeArgumentsOf(left), runtimeNonTypeArgumentsOf(right))
+  const sameRuntimeNonCallableArguments = (left: InstanceKey, right: InstanceKey): boolean => {
+    const leftNonCallable = runtimeNonTypeArgumentsOf(left).filter(
+      (argument) => !Type.isCallableIdentityArgument(argument),
+    )
+    const rightNonCallable = runtimeNonTypeArgumentsOf(right).filter(
+      (argument) => !Type.isCallableIdentityArgument(argument),
+    )
     return (
-      leftHidden.length === rightHidden.length &&
-      leftHidden.every((argument, index) => {
-        const candidate = rightHidden.at(index)
-        return (
-          candidate !== undefined &&
-          Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate)
-        )
-      })
+      sameRuntimeArguments(leftNonCallable, rightNonCallable) &&
+      isTerminalCallableSpecialization(left, right)
     )
   }
   const isTerminalCallableSpecialization = (ancestor: InstanceKey, target: InstanceKey): boolean =>
@@ -1364,8 +1381,8 @@ export const discover = (
   ): boolean =>
     cleanup !== undefined &&
     (ancestor === undefined ||
-      sameHiddenExecutableArguments(ancestor, target) ||
-      isTerminalCallableSpecialization(ancestor, target))
+      sameRuntimeNonTypeArguments(ancestor, target) ||
+      sameRuntimeNonCallableArguments(ancestor, target))
   const rootItem = (key: InstanceKey): WorkItem =>
     Object.freeze({
       key,

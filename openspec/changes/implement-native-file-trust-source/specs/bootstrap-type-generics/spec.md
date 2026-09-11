@@ -16,10 +16,12 @@ as an immutable finite measure. Every later ordinary type argument SHALL be runt
 owner root or a semantic structural subterm of it; repeated unfolding of the same nominal
 declaration SHALL require the exact same or a strictly smaller instantiation. Cross-arity helpers
 and sibling root subterms MAY be followed without replacing the root. Provider-owner cleanup SHALL
-use the same rule. Hidden callable, Effect, and composite-representation identities SHALL retain
-the ordinary recursion guard except for an otherwise-admitted terminal capture-free callable
-specialization. The cleanup measure SHALL NOT propagate through an ordinary edge to the same target
-or to unrelated calls, and semantic lifetime arguments SHALL remain erased from comparisons.
+use the same rule. Every runtime-relevant non-type argument, including requirement rows and
+callable, Effect, opaque, exact, parameter, and composite representations, SHALL retain the ordinary
+recursion guard. An otherwise-admitted terminal capture-free callable specialization MAY replace
+only callable identities while every other non-type argument remains runtime-equal. The cleanup
+measure SHALL NOT propagate through an ordinary edge to the same target or to unrelated calls, and
+semantic lifetime arguments SHALL remain erased from comparisons.
 
 #### Scenario: Discover two concrete instances
 

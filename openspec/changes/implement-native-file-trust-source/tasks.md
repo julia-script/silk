@@ -8,7 +8,7 @@
 - [x] 2.1 Implement reopen-per-load bounded reads with reusable 4096-byte scratch, exact remaining budgets, and the separate one-byte EOF probe; verify exact offered slices for short, exact, over, and zero-budget outcomes.
 - [x] 2.2 Implement stage-preserving open/read/close translation and primary-error cleanup precedence; verify receiver-controlled read/close, limit-plus-close failures, and exact-once consuming cleanup through the existing native-filesystem conformance seam.
 - [x] 2.3 Decode only complete successfully closed input through `TrustSnapshot.fromPem` and implement `TrustSource`; verify duplicate retention, malformed atomic failure, rename reload, failed-reload retention, and provider-drop independence.
-- [x] 2.4 Bound nested cleanup and provider-owner specialization by the exact selected cleanup plan's immutable concrete owner root; admit only runtime-equal/structural-subterm ordinary types while retaining the ordinary guard for hidden executable identities, and verify positive paths plus unrelated, nominal-growth, and hidden-callable recursion rejection.
+- [x] 2.4 Bound nested cleanup and provider-owner specialization by the exact selected cleanup plan's immutable concrete owner root; admit only runtime-equal/structural-subterm ordinary types while retaining the ordinary guard for every runtime-relevant non-type argument, and verify positive paths plus unrelated, nominal-growth, and hidden-callable recursion rejection.
 
 ## 3. Deterministic evidence and target matrix
 
