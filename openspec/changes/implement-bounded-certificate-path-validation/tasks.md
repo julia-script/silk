@@ -19,5 +19,5 @@
 
 ## 4. Verification and review
 
-- [ ] 4.1 Strict-validate this OpenSpec change and run focused tests, typecheck, format check, and lint after committing and pushing the intended implementation.
+- [x] 4.1 Strict-validate this OpenSpec change and run focused tests, typecheck, format check, and lint after committing and pushing the intended implementation.
 - [ ] 4.2 Obtain independent correctness and distinct TEST_REVIEW approval for the exact issue diff; leave this task incomplete until the coordinator confirms both verdicts.
