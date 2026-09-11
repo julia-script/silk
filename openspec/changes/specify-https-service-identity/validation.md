@@ -84,6 +84,49 @@ landed in main through PR #407. The task branch was rebased onto
 the identity PR's scoped diff. The same upstream change delivers raw certificate-extension views;
 the design now distinguishes that API from the still-deferred GeneralNames/SAN adapter.
 
-Fresh verification on the corrected base is pending. The PR and Linear record will hold the exact
-reviewed final head, executed versus cached checks and current CI result. No runtime identity
-support is delivered by this design.
+## Successful verification on the corrected base
+
+Verification completed on published design head `1842da7f68f1b0134f58faa61fcb887e257293c6`,
+based on `991386ae75fe3037e70da1cde9dc71d91dbc3e67`:
+
+| Required command    | Final result and execution evidence                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `pnpm typecheck`    | Passed: 18 successful tasks, two cache hits, 18.276 seconds                                                              |
+| `pnpm format:check` | Passed: 3,627 files, 4.694 seconds                                                                                       |
+| `pnpm lint`         | Passed                                                                                                                   |
+| `pnpm test`         | Passed: 22 successful tasks, 17 cache hits, 7m13.892s in the final invocation                                            |
+| `pnpm check`        | Passed: formatting and lint, 11 cached build tasks, 33 cached typecheck/test tasks, and 19 freshly executed script tests |
+
+The fresh compiler execution used `VITEST_MAX_WORKERS=4`: all 209 compiler files / 2,451 tests
+passed in 645.50 seconds; all 335 native acceptance tests passed in 2,906.07 seconds. The same
+compiler task passed documentation policy for 103 modules and all 57 doctests. Its successful
+Turbo result was reused by the final invocation, not rerun or fabricated. CLI and the remaining
+package tests also passed; the final invocation freshly completed LSP and the outstanding
+editor-support, editor-extension and documentation tasks.
+
+LSP's four-worker run had five timeouts across four files. The first one-worker retry passed
+147/149 tests; the stdio file still had one 120-second timeout and one healthy-worker retirement
+assertion failure while other compiler work and substantial host swapping were observed. After
+the competing documentation generator finished, the full one-worker LSP retry passed all
+11 files / 149 tests in 283.60 seconds, including every previously failing case. The original
+stdio case took 43.544 seconds within its unchanged 120-second limit. These failed attempts are
+retained as evidence; successful scheduling-adjusted verification does not establish that default
+scheduling succeeds on the shared host or prove a unique cause for every earlier failure.
+
+Both worker settings were local environment overrides passed through Turbo's strict environment
+by temporarily adding `VITEST_MAX_WORKERS` to `globalPassThroughEnv`. This also overrides the
+native target's explicit worker setting, but that target selects one file and still executes its
+cases sequentially. No suites, assertions or timeout settings changed. Each wrapper restored
+`turbo.json` byte-for-byte; its working-file hash and committed blob both equal
+`baea0e2932e61540aef28fcb032da66b01ffc3b1`. The final repository diff includes no runner changes.
+
+Independent design and dedicated test-economics reviewers approved the exact corrected-base
+design diff. The test-economics reviewer accepted this explicitly reported scheduling method and
+confirmed zero added executable test work. All applicable CI jobs passed on design head
+`1842da7f`; platform supply was conditionally skipped. The PR and Linear handoff record hold the
+exact final metadata head, its review confirmation and current CI status after this record update.
+
+The local verification gate is resolved. The final metadata-only update is checked with strict
+OpenSpec validation, formatting and diff checks; executable inputs are unchanged. No runtime
+identity support is delivered by this design. JUL-183 remains the pure matcher follow-up and
+JUL-184 the separately scoped SAN-adapter intake.
