@@ -73,8 +73,7 @@ wrapper evidence, not an independent audit of every SHA/HMAC/HKDF instruction.
 
 Independent general review approved the implementation subject to completed delivery
 gates; its requested zero-output negative cases and numeric SHA-256 boundary seam
-are included. Final committed-diff economics review, full repository test/check and
-release-candidate verification remain pending.
+are included. The separate committed-diff economics verdict is recorded below.
 
 ## Independent review outcome
 
@@ -86,3 +85,14 @@ and from-hash calls. Its complete inventory, justification, paired measurements 
 limitations are in `test-economics-review.md`. The full native corpus remains intact.
 
 Full repository test/check/release verification is the remaining delivery gate.
+
+## Repository verification retry
+
+The initial ordered typecheck, format and lint checks passed. A subsequent full test run
+was stopped after six unrelated compiler tests exceeded their 60/120-second budgets while
+two whole-machine Vitest pools overlapped. The affected cases were two receiver-bound member
+checks, OS directory-list lowering, two native-call/union target checks and sort-scratch release.
+The partial log is retained at `/tmp/jul181-test-full.log`; it is not a passing full-suite result.
+No timeout or test configuration was changed. The final gate is being rerun with only one
+broad test suite scheduled by this task; this note does not classify those failures as
+pre-existing source defects.
