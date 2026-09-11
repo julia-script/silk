@@ -71,9 +71,20 @@ scalar/intermediate copies. Callers still own secure Random provision and protoc
 
 ## Remaining delivery gates
 
-Documentation generation passed policy validation for 104 modules. Repository checks remain in progress. Full test/check/release runs
-are serialized by the coordinator. Independent correctness and economics reviews, including a
-matched base measurement, remain required before handoff. No complete task claim is made from
-focused checks alone.
+Documentation generation passed policy validation for 104 modules. Ordered typecheck, format
+check and lint passed on implementation commit `b7ab4826520fe300163090553886bfd2b589935d`.
+The subsequent test-only consolidation is commit `062b39eb694d5aa27e556d11031bd54070d05792`;
+production source, Wasm witness and analysis assertions are unchanged.
+
+The coordinator's independent correctness review approves that final consolidation, including
+the stronger RFC shared-output assertions. Investigator B's independent
+[test-economics review](test-economics.md) also approves that exact commit after all six matched
+base/branch focused invocations passed. These include the final consolidated native program.
+The review records the removed duplicate work, all permanent test boundaries and substantial
+shared-machine timing limitations.
+
+Full `pnpm test`, `pnpm check` and `pnpm release:candidate` remain queued by the coordinator.
+They have not yet run for this issue; successful focused checks and reviews do not complete
+those delivery requirements.
 
 Economics consolidation keeps all 16 independent oracle fixtures but proves the four Alice/Bob public/agreement claims inside the scripted generation exchange. Both shared results compare with the pinned RFC bytes. This removes six repeated ladder executions from standalone cases while retaining fromSecret public derivation through the scalar-clamping fixture and raw agreement through RFC section 5.2. Final focused validation and comparative cost are recorded by the independent reviewer.
