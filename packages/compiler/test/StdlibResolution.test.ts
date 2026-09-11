@@ -932,4 +932,8 @@ pub fn portableProvider(value: MemoryTrustSource) -> () { return () }`
         )
       }
     }),
+  // This intentionally resolves every target plus two realized unavailable-member programs. The
+  // complete stdlib crosses the 60s default while CI shards saturate the host; this is contention
+  // headroom, not a performance assertion or an expanded test matrix.
+  120_000,
 )
