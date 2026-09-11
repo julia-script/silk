@@ -286,14 +286,28 @@ fn inspect(receiver: &mut TlsRecordReceiver, input: &[u8]) -> i32 {
   drop progress
   return 42
 }
-fn rotateSender(sender: TlsRecordSender, secret: &[u8]) -> i32 {
-  let replaced = sender.replaceEpoch(CipherSuite.Aes128GcmSha256, secret)
+fn rotateSender(sender: &mut TlsRecordSender, secret: &[u8]) -> i32 {
+  let replaced = TlsRecordSender.replaceEpoch(
+    &mut sender.*,
+    CipherSuite.Aes128GcmSha256,
+    secret,
+  )
+  let remaining = sender.recordsRemaining()
+  let pending = sender.pendingOutput()
   drop replaced
+  drop remaining
+  drop pending
   return 42
 }
-fn rotateReceiver(receiver: TlsRecordReceiver, secret: &[u8]) -> i32 {
-  let replaced = receiver.replaceEpoch(CipherSuite.Aes128GcmSha256, secret)
+fn rotateReceiver(receiver: &mut TlsRecordReceiver, secret: &[u8]) -> i32 {
+  let replaced = TlsRecordReceiver.replaceEpoch(
+    &mut receiver.*,
+    CipherSuite.Aes128GcmSha256,
+    secret,
+  )
+  let record = receiver.record()
   drop replaced
+  drop record
   return 42
 }
 pub fn main() -> i32 { return 42 }`
