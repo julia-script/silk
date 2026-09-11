@@ -30,7 +30,7 @@ static void finish_previous(void) {
   int reload=scenario==10 || scenario==11;
   int expected=reload ? 2 : 1;
   if(!clean() || opens!=expected || children!=expected || stats!=(scenario==7 || scenario==14 || scenario==15 ? 0 : expected)) invalid=1;
-  if(scenario==0 && (reads!=3 || closes!=2)) invalid=1;
+  if(scenario==0 && (reads!=2 || closes!=2)) invalid=1;
   if(scenario==1 && (reads<=3 || closes!=2)) invalid=1;
   if((scenario==2 || scenario==3 || scenario==4 || scenario==6 || scenario==8 || scenario==9 || scenario==13) && closes!=2) invalid=1;
   if(scenario==5 && (reads!=1 || closes!=2 || error_reads!=2)) invalid=1;
