@@ -351,6 +351,7 @@ fn profileReason(reason: ProfileReason) -> ValidationReason {
     ProfileReason.UniqueIdentifier => ValidationReason.UnsupportedExtension
     ProfileReason.PublicKey => ValidationReason.InvalidKey
     ProfileReason.SignatureAlgorithm => ValidationReason.UnsupportedAlgorithm
+    ProfileReason.SignatureParameters => ValidationReason.UnsupportedParameters
     ProfileReason.SignatureAlgorithmMismatch => ValidationReason.UnsupportedParameters
     ProfileReason.Extensions => ValidationReason.SizeOverflow
     ProfileReason.ExtensionBytes => ValidationReason.SizeOverflow
@@ -363,6 +364,7 @@ fn profileReason(reason: ProfileReason) -> ValidationReason {
     ProfileReason.ExtendedKeyUsage => ValidationReason.InvalidUsage
     ProfileReason.MissingServerAuth => ValidationReason.InvalidUsage
     ProfileReason.SubjectAltName => ValidationReason.InvalidName
+    ProfileReason.EmptySubject => ValidationReason.InvalidName
     ProfileReason.UnsupportedCriticalName => ValidationReason.UnsupportedExtension
     ProfileReason.NameConstraints => ValidationReason.UnsupportedConstraint
     ProfileReason.UnsupportedNameConstraint => ValidationReason.UnsupportedConstraint

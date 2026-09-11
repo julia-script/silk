@@ -105,6 +105,11 @@ DNS comparisons SHALL be ASCII case-insensitive by complete label. Leading-dot c
 
 `ValidationError` SHALL contain `InvalidInput`, `Rejected`, or `ResourceLimit`; a stable reason; `Leaf`, `Intermediate(index)`, `Anchor(index)`, or `Call`; an optional extension index; and an optional named limit kind. Invalid caller time and aggregate input bounds SHALL precede semantic errors. A leaf profile rejection SHALL return immediately. Exhausted search SHALL return `NoValidPath` with the first rejected candidate detail in stable traversal order, or `NoIssuer` when no candidate linked. No message string is contractual.
 
+Recognized signature-algorithm parameter failures SHALL map to `UnsupportedParameters` while
+unknown signature algorithms remain `UnsupportedAlgorithm`. An empty subject that lacks a nonempty
+critical SAN SHALL map to `InvalidName`. These mappings SHALL preserve the profile error's exact
+location, original candidate index, optional extension index, and offset.
+
 Within one certificate, rejection precedence SHALL be version/serial/unique identifiers, algorithm consistency and key syntax, extension sequence, role and usage, then date. Path constraint checks SHALL run anchor-to-leaf with excluded checks before permitted checks.
 
 #### Scenario: Stable first rejected candidate
@@ -116,3 +121,8 @@ Within one certificate, rejection precedence SHALL be version/serial/unique iden
 
 - **WHEN** the leaf violates the fixed certificate profile
 - **THEN** validation returns that leaf reason before issuer traversal or signature work
+
+#### Scenario: Profile taxonomy remains distinguishable
+
+- **WHEN** a linked candidate has forbidden parameters on a recognized signature algorithm, or the leaf violates the empty-subject SAN invariant
+- **THEN** validation reports `UnsupportedParameters` or `InvalidName` respectively with unchanged scalar location evidence and without preventing a later valid candidate after an ordinary candidate rejection

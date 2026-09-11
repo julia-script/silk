@@ -33,6 +33,13 @@ The leaf is inspected before search. Intermediate and anchor profiles are inspec
 
 Ordinary branch failures update a first-rejection slot only once, then search continues. Work-budget failures return immediately. The final `NoValidPath` wraps the retained reason/location, while a search that never linked any candidate reports `NoIssuer`. This keeps stable traversal evidence without storing borrowed DER in the error.
 
+Profile errors retain their semantic distinctions at this boundary: recognized signature-parameter
+failures map to `UnsupportedParameters`, unknown signature algorithms remain
+`UnsupportedAlgorithm`, and empty-subject structural failures map to `InvalidName`. Location,
+extension index, and offset evidence are copied unchanged. This prevents downstream callers from
+collapsing a parameter-policy failure into algorithm support or a subject-name invariant into CA
+role policy.
+
 ### Evaluate constraint sources without duplicating the profile parser
 
 Small allocation-free `CertificateProfile` operations enumerate validated SAN/NameConstraints values and compare a subordinate profile against one supported constraint source. `certificate_path.silk` owns ordering, source accumulation, self-issued skipping, and global comparison accounting. The profile actor continues to own DER framing, DNS syntax, wildcard semantics, mask validation, and strict supported forms. Duplicating these parsers in the path actor was rejected because it would allow individual admission and cumulative validation to diverge.

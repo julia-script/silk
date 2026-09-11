@@ -21,3 +21,4 @@
 
 - [x] 4.1 Strict-validate this OpenSpec change and run focused tests, typecheck, format check, and lint after committing and pushing the intended implementation.
 - [ ] 4.2 Obtain independent correctness and distinct TEST_REVIEW approval for the exact issue diff; leave this task incomplete until the coordinator confirms both verdicts.
+- [x] 4.3 Preserve upstream signature-parameter and empty-subject reasons in path errors; verify exact scalar evidence and alternate-candidate continuation in the consolidated acceptance source, then regenerate and rerun focused gates.

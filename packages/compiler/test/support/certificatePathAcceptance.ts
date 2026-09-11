@@ -127,6 +127,13 @@ const direct = fixture('rfc5280::eku::ee-without-eku')
 const permittedDns = fixture('rfc5280::nc::permitted-dns-match')
 const unknownCriticalLeaf = fixture('rfc5280::unknown-critical-extension-ee')
 const noKeyUsageLeaf = projectFixture('source::rfc5280::no-keyusage/peer_certificate')
+const emptySubjectMissingSan = projectFixture('silk::empty-subject-missing-san/peer_certificate')
+const emptySubjectNoncriticalSan = projectFixture(
+  'silk::empty-subject-noncritical-san/peer_certificate',
+)
+const emptySubjectEmptyCriticalSan = projectFixture(
+  'silk::empty-subject-empty-critical-san/peer_certificate',
+)
 const ignoredAnchor = projectFixture(
   'silk::ignored-anchor-validity-self-signature/trusted_certs[0]',
 )
@@ -355,6 +362,7 @@ ${decoded('policy', certificatePolicy, 284)}
 ${decoded('feature', tlsFeature, 285)}
 ${decoded('valid', certificateAt(pathLengthZero.intermediates, 0, pathLengthZero.id), 286)}
 ${decoded('root', certificateAt(pathLengthZero.anchors, 0, pathLengthZero.id), 287)}
+  let parametersOffset = Certificate.offsets(&parameters).tbsSignatureAlgorithm
   let candidates: [Certificate; 7] = [
     move wrong, move parameters, move algorithm, move mismatch, move policy, move feature, move valid,
   ]
@@ -362,8 +370,8 @@ ${decoded('root', certificateAt(pathLengthZero.anchors, 0, pathLengthZero.id), 2
   let at = SystemClock.make(${fixedInstant.seconds}, ${fixedInstant.nanoseconds})
   let parametersOnly = Slice.view<Certificate>(&candidates, 1, 1)
   let parametersOutcome = run CertificatePath.validate(&leaf, parametersOnly, &anchors, &at, ValidationLimits.defaults())
-  if !exactIntermediateRejection(
-    move parametersOutcome, ValidationReason.UnsupportedAlgorithm, usize.ZERO, Option.none<usize>(),
+  if !exactIntermediateRejectionAt(
+    move parametersOutcome, ValidationReason.UnsupportedParameters, usize.ZERO, parametersOffset,
   ) { return 288 }
   let algorithmOnly = Slice.view<Certificate>(&candidates, 2, 1)
   let algorithmOutcome = run CertificatePath.validate(&leaf, algorithmOnly, &anchors, &at, ValidationLimits.defaults())
@@ -425,12 +433,59 @@ ${decoded('ignored', ignoredAnchor, 295)}
 effect fn leafErrorContract() -> i32 ! OutOfMemoryError ? &mut Allocator {
 ${decoded('leaf', unknownCriticalLeaf.peer, 299)}
 ${decoded('root', certificateAt(unknownCriticalLeaf.anchors, 0, unknownCriticalLeaf.id), 300)}
+${decoded('emptyMissing', emptySubjectMissingSan, 302)}
+${decoded('emptyNoncritical', emptySubjectNoncriticalSan, 303)}
+${decoded('emptyCritical', emptySubjectEmptyCriticalSan, 304)}
   let intermediates: [Certificate; 0] = []
   let anchors: [TrustAnchor; 1] = [TrustAnchor.fromCertificate(move root)]
   let at = SystemClock.make(${fixedInstant.seconds}, ${fixedInstant.nanoseconds})
+  let criticalOffset = match move extensionOffset(&leaf, 5, false) {
+    Option<usize>.None => { return 305 }
+    Option<usize>.Some {value} => value
+  }
   let outcome = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, ValidationLimits.defaults())
-  if exactLeafFailure(move outcome, ValidationReason.UnsupportedExtension, 5) { return 0 }
-  return 301
+  if !exactLeafFailure(
+    move outcome,
+    ValidationReason.UnsupportedExtension,
+    Option.some<usize>(5),
+    criticalOffset,
+  ) { return 301 }
+  let missingOutcome = run CertificatePath.validate(
+    &emptyMissing, &intermediates, &anchors, &at, ValidationLimits.defaults(),
+  )
+  if !exactLeafFailure(
+    move missingOutcome,
+    ValidationReason.InvalidName,
+    Option.none<usize>(),
+    Certificate.offsets(&emptyMissing).subject,
+  ) { return 306 }
+  let noncriticalOffset = match move extensionOffset(&emptyNoncritical, 3, false) {
+    Option<usize>.None => { return 307 }
+    Option<usize>.Some {value} => value
+  }
+  let noncriticalOutcome = run CertificatePath.validate(
+    &emptyNoncritical, &intermediates, &anchors, &at, ValidationLimits.defaults(),
+  )
+  if !exactLeafFailure(
+    move noncriticalOutcome,
+    ValidationReason.InvalidName,
+    Option.some<usize>(3),
+    noncriticalOffset,
+  ) { return 308 }
+  let emptySanOffset = match move extensionOffset(&emptyCritical, 3, true) {
+    Option<usize>.None => { return 309 }
+    Option<usize>.Some {value} => value
+  }
+  let emptyCriticalOutcome = run CertificatePath.validate(
+    &emptyCritical, &intermediates, &anchors, &at, ValidationLimits.defaults(),
+  )
+  if !exactLeafFailure(
+    move emptyCriticalOutcome,
+    ValidationReason.InvalidName,
+    Option.some<usize>(3),
+    emptySanOffset,
+  ) { return 310 }
+  return 0
 }`
 
 /**
@@ -438,7 +493,7 @@ ${decoded('root', certificateAt(unknownCriticalLeaf.anchors, 0, unknownCriticalL
  * matrix without compiling one binary per vector.
  */
 const sourcePrelude = `import silk.allocator { Allocator, OutOfMemoryError }
-import silk.certificate { Certificate, DecodeError, DecodeLimits }
+import silk.certificate { Certificate, DecodeError, DecodeLimits, ExtensionView }
 import silk.certificate_path { CertificatePath, RevocationStatus, ValidatedPath, ValidationClass, ValidationError, ValidationLimit, ValidationLimits, ValidationLocation, ValidationReason }
 import silk.certificate_profile { ProfileError, ProfileLimits }
 import silk.effect { Effect }
@@ -485,10 +540,21 @@ fn noLimit(limit: Option<ValidationLimit>) -> bool {
   }
 }
 
+fn extensionOffset<'a>(certificate: &'a Certificate, index: usize, value: bool) -> Option<usize> {
+  return match move Certificate.extension(certificate, index) {
+    Option<ExtensionView<'a>>.None => Option.none<usize>()
+    Option<ExtensionView<'a>>.Some {value: extension} => {
+      if value { return Option.some<usize>(extension.valueOffset) }
+      return Option.some<usize>(extension.offset)
+    }
+  }
+}
+
 fn exactLeafFailure<'a>(
   outcome: Result<ValidatedPath<'a>, ValidationError>,
   reason: ValidationReason,
-  extension: usize,
+  extension: Option<usize>,
+  offset: usize,
 ) -> bool {
   return match move outcome {
     Result<ValidatedPath<'a>, ValidationError>.Success {value} => false
@@ -500,8 +566,35 @@ fn exactLeafFailure<'a>(
           ValidationLocation.Leaf => true
           _ => false
         }
-        && extensionIs(move error.extensionIndex, extension)
+        && match move extension {
+          Option<usize>.None => noExtension(move error.extensionIndex)
+          Option<usize>.Some {value} => extensionIs(move error.extensionIndex, value)
+        }
         && noLimit(move error.limit)
+        && error.offset == offset
+    }
+  }
+}
+
+fn exactIntermediateRejectionAt<'a>(
+  outcome: Result<ValidatedPath<'a>, ValidationError>,
+  detail: ValidationReason,
+  index: usize,
+  offset: usize,
+) -> bool {
+  return match move outcome {
+    Result<ValidatedPath<'a>, ValidationError>.Success {value} => false
+    Result<ValidatedPath<'a>, ValidationError>.Failure {error} => {
+      return error.kind == ValidationClass.Rejected
+        && error.reason == ValidationReason.NoValidPath
+        && detailIs(move error.detailReason, detail)
+        && match move error.location {
+          ValidationLocation.Intermediate {index: found} => found == index
+          _ => false
+        }
+        && noExtension(move error.extensionIndex)
+        && noLimit(move error.limit)
+        && error.offset == offset
     }
   }
 }

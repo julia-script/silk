@@ -1059,6 +1059,12 @@ counters span backtracking. Exhausting a work bound is terminal, while an ordina
 signature, unsupported candidate, date failure, path-length failure, or name-constraint failure
 leaves later alternatives eligible.
 
+Profile diagnostics remain distinguishable across the path boundary. Forbidden parameters on a
+recognized signature algorithm report `UnsupportedParameters`; unknown signature algorithms
+report `UnsupportedAlgorithm`. An empty subject without a nonempty critical SAN reports
+`InvalidName`. Each mapping preserves leaf/intermediate/anchor location, original candidate index,
+extension index when present, and the profile byte offset.
+
 The validator applies the restricted certificate profile, exact issuer/subject DER linkage,
 original-TBSCertificate signatures, one explicit validation `Instant`, cumulative DNS/IP
 NameConstraints, and path-length restrictions. Identical anchor certificate bytes remain separate
