@@ -43,6 +43,24 @@
     "namespace": "CertificateBundle"
   },
   {
+    "module": "silk/certificate_identities",
+    "path": "silk/certificate_identities.silk",
+    "namespace": "CertificateSan",
+    "aliases": [
+      "SanDecodeLimits",
+      "SanDecodeClass",
+      "SanDecodeReason",
+      "SanDecodeError",
+      "SanDecodeSummary"
+    ]
+  },
+  {
+    "module": "silk/chacha20_poly1305",
+    "path": "silk/chacha20_poly1305.silk",
+    "namespace": "ChaCha20Poly1305",
+    "aliases": ["AeadError"]
+  },
+  {
     "module": "silk/char",
     "path": "silk/char.silk",
     "namespace": "char"
@@ -589,6 +607,12 @@
     "path": "silk/writer.silk",
     "namespace": "Writer",
     "aliases": ["WriterError"]
+  },
+  {
+    "module": "silk/x25519",
+    "path": "silk/x25519.silk",
+    "namespace": "X25519",
+    "aliases": ["X25519Error"]
   },
   {
     "module": "silk/zstd",

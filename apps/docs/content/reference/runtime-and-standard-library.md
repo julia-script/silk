@@ -429,6 +429,66 @@ constant-time comparison, truncation policy, TLS labels, password hashing, or se
 [RFC 4231](https://www.rfc-editor.org/rfc/rfc4231.html), and
 [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869.html).
 
+### STDLIB-CHACHA20-POLY1305 — Detached authenticated encryption preserves destinations on failure
+
+**Status:** Confirmed
+
+`silk.chacha20_poly1305` exports `ChaCha20Poly1305` and `AeadError`. The ordinary synchronous
+operations `seal(key, nonce, aad, plaintext, ciphertext, tag)` and
+`open(key, nonce, aad, ciphertext, tag, plaintext)` return `Result<(), AeadError>`. Inputs are
+shared byte slices and destinations are exclusive byte slices. Keys contain exactly 32 bytes,
+nonces 12 bytes, and detached tags 16 bytes. Empty payloads and AAD are valid. Successful
+operations write only the payload prefix and preserve spare destination capacity.
+
+Both operations check key, nonce and tag widths, output capacity, then the payload limit, in
+that order. Payloads contain at most 274877906880 bytes, using ChaCha20 counters 1 through
+2^32−1; counter zero derives the Poly1305 key. AAD lengths must fit `u64`, as every addressable
+Silk slice does. Widened length checks and remaining-length iteration avoid target-size overflow.
+Authentication pads AAD and ciphertext separately to 16-byte boundaries and includes both
+little-endian 64-bit byte lengths. `open` authenticates the full tag before writing plaintext.
+Every rejected operation preserves all destination bytes, including the detached seal tag.
+Ordinary borrowing rules reject overlapping input/output and output/tag arguments.
+
+**Boundary:** The implementation allocates no memory and requests no provider or native crypto
+operation. Callers own nonce uniqueness and per-key usage limits. Source-level fixed work and
+reviewed generated output do not guarantee constant-time execution across future compilers or
+runtimes, physical secret erasure, or production security. The module provides no transport,
+nonce generation, replay protection, or peer authentication policy.
+
+**Evidence:** [canonical source](../../../../packages/compiler/stdlib/silk/chacha20_poly1305.silk),
+[shared acceptance](../../../../packages/compiler/test/support/chacha20Poly1305Acceptance.ts),
+[fixture provenance](../../../../packages/compiler/test/fixtures/chacha20-poly1305.md), and
+[RFC 8439](https://www.rfc-editor.org/rfc/rfc8439).
+
+### STDLIB-AES-GCM — Detached authenticated encryption preserves destinations on failure
+
+**Status:** Confirmed
+
+`silk.aes_gcm` exports `AesGcm` and `AesGcmError`. `seal(key, nonce, aad, plaintext,
+ciphertext, tag)` and `open(key, nonce, aad, ciphertext, tag, plaintext)` return
+`Result<(), AesGcmError>`. Inputs are shared byte slices and destinations are exclusive byte
+slices. Keys must contain 16 or 32 bytes, nonces 12 bytes, and detached tags exactly 16 bytes.
+Empty plaintext, ciphertext and AAD are valid. Destinations may exceed the message length;
+the unused suffix remains unchanged.
+
+Both operations validate widths, output capacity and widened GCM length limits before writing.
+A message contains at most 2^36−32 bytes and AAD at most 2^61−1 bytes, additionally bounded by
+target addressability. `open` authenticates all sixteen tag bytes before producing plaintext.
+Any failure preserves every byte of every destination, including its unused suffix.
+The error variants distinguish invalid key, nonce and tag lengths, insufficient output,
+excess domain lengths, and failed authentication. Ordinary borrow checking forbids aliasing
+inputs with exclusive outputs or overlapping ciphertext and tag destinations.
+
+**Boundary:** This ordinary Silk implementation allocates no memory and invokes no provider or
+native crypto API. Its algebraic AES S-box and GHASH have fixed secret-processing schedules.
+The caller supplies a nonce unique under the key and enforces per-key usage limits.
+The module provides no nonce generation, TLS records, replay protection, peer identity,
+physical secret-erasure guarantee, or audited constant-time/production-security claim.
+
+**Evidence:** [canonical AES-GCM source](../../../../packages/compiler/stdlib/silk/aes_gcm.silk),
+[shared acceptance](../../../../packages/compiler/test/support/aesGcmAcceptance.ts), and
+[fixture provenance](../../../../packages/compiler/test/fixtures/aes-gcm/README.md).
+
 ### STDLIB-009 — URI syntax preserves its original serialization
 
 **Status:** Confirmed
@@ -959,3 +1019,22 @@ The following are deliberately outside the first stable model:
 - alternative standard-library profiles or “no-stdlib” project configuration in the official
   toolchain; and
 - omitted struct fields, field defaults, and any deliberate integration with ordinary `Option`.
+
+## X25519 key agreement {#STDLIB-X25519}
+
+`silk.x25519.X25519` owns an ephemeral scalar and its canonical 32-byte little-endian public key.
+Use `X25519.generate()` with explicit exclusive `Random` provision for production: each call
+requests exactly 32 fresh bytes, clamps them and derives X25519(secret, 9). Provider failure
+remains fatal, without retry or insecure fallback. Deterministic `fromSecret` imports exactly
+32 borrowed bytes into owned storage; callers must not reimport a scalar for distinct exchanges.
+
+`publicKey(&key)` returns the public bytes without consuming the owner. `agree(move key, peer)`
+consumes it on success or failure. Peer encodings must be exactly 32 bytes. Agreement masks the
+high bit, reduces noncanonical coordinates, admits curve and twist inputs, and rejects an all-zero
+result. Width failures and all-zero results use `X25519Error`. No allocator or cryptographic
+provider is required by the arithmetic; fixed local limbs and a 255-step ladder implement RFC 7748.
+
+Pass the raw shared result into the protocol's key derivation. This primitive does not authenticate
+a peer or implement TLS. Ownership prevents accidental reuse of the same owner, but does not
+guarantee physical secret erasure. Functional vectors and inspection of a particular compiler's
+output do not establish universal constant-time execution or production security.

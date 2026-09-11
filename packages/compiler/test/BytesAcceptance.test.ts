@@ -109,3 +109,53 @@ pub fn main() -> i32 { return 0 }`
     )
   }),
 )
+
+it.effect('keeps HTTPS reference and SAN payload borrows within caller storage', () =>
+  Effect.gen(function* () {
+    const source = `import silk.https_identity { HttpsIdentity, OriginHost, ReferenceIdentity, CertificateIdentities, PresentedIdentity, IdentityLimits, IdentityMatch, IdentityError }
+import silk.result { Result }
+import silk.certificate { Certificate }
+import silk.certificate_identities { CertificateSan, SanDecodeLimits, SanDecodeSummary, SanDecodeError }
+import silk.usize
+fn decodeBorrowed<'a>(certificate: &'a Certificate, storage: &mut [PresentedIdentity<'a>]) -> Result<SanDecodeSummary, SanDecodeError> {
+  return CertificateSan.decode(certificate, &mut storage, SanDecodeLimits.standard())
+}
+fn decodeEscapes<'a>(certificate: Certificate, storage: &mut [PresentedIdentity<'a>]) -> Result<SanDecodeSummary, SanDecodeError> {
+  return CertificateSan.decode(&certificate, &mut storage, SanDecodeLimits.standard())
+}
+fn forwarded<'a>(bytes: &'a [u8]) -> Result<ReferenceIdentity<'a>, IdentityError> {
+  return HttpsIdentity.reference(OriginHost.Dns { bytes: bytes })
+}
+fn escaped<'a>(input: &'a [u8]) -> Result<ReferenceIdentity<'a>, IdentityError> {
+  let bytes: [u8; 1] = [97]
+  return HttpsIdentity.reference(OriginHost.Dns { bytes: &bytes })
+}
+fn certificateView<'a>(entries: &'a [PresentedIdentity<'a>]) -> CertificateIdentities<'a> {
+  return CertificateIdentities<'a>.Decoded { entries: entries }
+}
+fn conflict() -> Result<IdentityMatch, IdentityError> {
+  let mut bytes: [u8; 1] = [97]
+  let reference = ReferenceIdentity.Dns { bytes: &bytes }
+  let entries = [PresentedIdentity.Dns { bytes: b"a" }]
+  let certificate = certificateView(&entries)
+  bytes[0] = 98
+  return HttpsIdentity.verify(&reference, &certificate, IdentityLimits.standard())
+}
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* AnalysisFixture.retainingMain('https-identity/ownership', ascii(source))
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'SEM0212', span: '&certificate' },
+        { code: 'OWN0019', span: 'HttpsIdentity.reference(OriginHost.Dns { bytes: &bytes })' },
+        { code: 'OWN0019', span: 'HttpsIdentity.reference(OriginHost.Dns { bytes: &bytes })' },
+        { code: 'SEM0212', span: '&bytes' },
+        { code: 'OWN0011', span: 'bytes[0]' },
+        { code: 'OWN0019', span: '&reference' },
+      ],
+    )
+  }),
+)

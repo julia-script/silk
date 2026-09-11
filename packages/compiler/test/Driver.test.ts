@@ -1,3 +1,4 @@
+import { x25519WasmAcceptanceSource } from './support/x25519Acceptance.js'
 import * as AbiManifest from '../src/AbiManifest.js'
 import * as ForeignContract from '../src/ForeignContract.js'
 import * as Target from '../src/Target.js'
@@ -21,6 +22,7 @@ import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 import { invalidGenericCorpus } from './support/corpus.js'
 import { ecdsaP256WasmSource } from './support/ecdsaP256Acceptance.js'
 import { p256WasmAcceptanceSource } from './support/p256Acceptance.js'
+import { chacha20Poly1305WasmSource } from './support/chacha20Poly1305Acceptance.js'
 import { certificateWasmAcceptanceSource } from './support/certificateAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
@@ -635,11 +637,76 @@ it.effect('executes bounded certificate decoding through LLVM-to-Wasm', () =>
   }),
 )
 
+// A single portability leg covers 64-bit MAC arithmetic and 32-bit slice addressing.
+it.effect('executes ChaCha20-Poly1305 through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('chacha20-poly1305.wasm', chacha20Poly1305WasmSource, {
+      compilation: {
+        root: SourceFile.make('memory/chacha20-poly1305-wasm', ascii(chacha20Poly1305WasmSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+    assert.deepEqual(WebAssembly.Module.imports(module), [])
+    const instance = new WebAssembly.Instance(module)
+    const main = instance.exports['main']
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 42)
+  }),
+)
+
+// The native corpus covers the full profile; this one portability leg exercises partial AES blocks and 64-bit GHASH
+// plus authentication failure preservation with wasm32 pointer widths and the shipped Wasm allocator.
+it.effect('executes bounded AES-GCM through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('aes-gcm.wasm', aesGcmWasmAcceptanceSource, {
+      compilation: {
+        root: SourceFile.make('memory/aes-gcm-wasm', ascii(aesGcmWasmAcceptanceSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+    assert.deepEqual(WebAssembly.Module.imports(module), [])
+    const instance = new WebAssembly.Instance(module)
+    const main = instance.exports['main']
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 0)
+  }),
+)
+
 it.effect('executes P-256 agreement through LLVM-to-Wasm without host imports', () =>
   Effect.gen(function* () {
     const outcome = yield* compileSource('p256.wasm', p256WasmAcceptanceSource, {
       compilation: {
         root: SourceFile.make('memory/p256-wasm', ascii(p256WasmAcceptanceSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+    assert.deepEqual(WebAssembly.Module.imports(module), [])
+    const instance = new WebAssembly.Instance(module)
+    const main = instance.exports['main']
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 0)
+  }),
+)
+
+// The native corpus covers the full profile; this one portability leg exercises bounded field arithmetic
+// and ephemeral ownership with wasm32 pointer widths and the shipped Wasm allocator.
+it.effect('executes bounded X25519 agreement through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('x25519.wasm', x25519WasmAcceptanceSource, {
+      compilation: {
+        root: SourceFile.make('memory/x25519-wasm', ascii(x25519WasmAcceptanceSource)),
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',

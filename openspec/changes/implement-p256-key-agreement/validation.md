@@ -77,3 +77,5 @@ the opt-in script now uses Effect services and scoped child processes. Its focus
 test-economics review remain pending the coordinator's shared validation lane.
 
 Economics review consolidated ownership and missing-Random diagnostics into one analysis snapshot and removed NIST COUNT24 from the default native matrix. COUNT0 and both RFC directions remain; COUNT24 stays in the opt-in independent oracle fixture manifest. This removes one analysis and two scalar multiplications without losing a distinct boundary claim.
+
+The dedicated independent [test-economics review](test-economics-review.md) approves final implementation b7c5bb41 after removing one duplicate vector and consolidating two analysis snapshots. The matched selections added17.268s process/15.46s test bodies; this is not a full parallel-suite wall-time prediction. Full test/check/release gates remain pending coordinated execution.
