@@ -86,7 +86,6 @@ fn limitFailure(
     Result<TrustSnapshot, TrustSourceError>.Failure {
       error: TrustSourceError.LimitExceeded { kind, limit: actual }
     } => kind == expected && actual == limit
-    _ => false
   }
 }
 
@@ -245,7 +244,6 @@ effect fn suite() -> i32 ! TrustSourceError | OutOfMemoryError ? &mut Allocator 
     Result<TrustSnapshot, TrustSourceError>.Failure {
       error: TrustSourceError.Decode { error: decode }
     } => decode.reason == DecodeReason.EmptyInput
-    _ => false
   }
   if !emptyRejected { return 12 }
 
@@ -255,7 +253,6 @@ effect fn suite() -> i32 ! TrustSourceError | OutOfMemoryError ? &mut Allocator 
     Result<TrustSnapshot, TrustSourceError>.Failure {
       error: TrustSourceError.Decode { error: decode }
     } => decode.certificateIndex == 1
-    _ => false
   }
   if !laterRejected { return 13 }
 
