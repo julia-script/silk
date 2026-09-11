@@ -65,6 +65,15 @@
       "wire": "170303001860ee4ef59020a566cd2174d40d3a443fdec83051f75e3d87"
     },
     {
+      "name": "independent-aes128-sequence-zero",
+      "suite": "TLS_AES_128_GCM_SHA256",
+      "sequence": "0",
+      "trafficSecret": "b3eddb126e067f35a780b3abf45e2d8f3b1a950738f52e9600746a0e27a55a21",
+      "contentType": "application_data",
+      "content": "08",
+      "wire": "170303001269fb409d5870c5a97e55a2a4b25b0c72ebc3"
+    },
+    {
       "name": "independent-aes128-sequence-one",
       "suite": "TLS_AES_128_GCM_SHA256",
       "sequence": "1",
