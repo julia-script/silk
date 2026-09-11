@@ -7,5 +7,5 @@
 
 - [x] 2.1 Pin independent SHA-256/SHA-384 vector provenance and reproduction.
 - [x] 2.2 Add economical native, analysis and LLVM-to-Wasm evidence for distinct contracts.
-- [ ] 2.3 Inspect target output and complete independent correctness/security and test-economics review.
+- [x] 2.3 Inspect target output and complete independent correctness/security and test-economics review.
 - [ ] 2.4 Run repository checks and release candidate verification; publish the draft implementation handoff and update JUL-181.

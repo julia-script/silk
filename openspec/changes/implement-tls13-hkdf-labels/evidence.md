@@ -75,3 +75,14 @@ Independent general review approved the implementation subject to completed deli
 gates; its requested zero-output negative cases and numeric SHA-256 boundary seam
 are included. Final committed-diff economics review, full repository test/check and
 release-candidate verification remain pending.
+
+## Independent review outcome
+
+General reviewer investigator_a approved exact commit
+`9e5f18a14076edf7ff08337a8ab3a724945ab198`, including the private numeric-boundary seam
+and final two-operation Wasm witness. No correctness finding remains. Separate economics
+reviewer investigator_b approved the same commit after removing redundant Wasm transcript
+and from-hash calls. Its complete inventory, justification, paired measurements and load
+limitations are in `test-economics-review.md`. The full native corpus remains intact.
+
+Full repository test/check/release verification is the remaining delivery gate.
