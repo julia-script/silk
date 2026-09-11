@@ -152,7 +152,7 @@ allocation, I/O, Effect failure row or provider is involved. Callers needing lon
 references keep their own `String`/`Bytes` owner and create a view when needed.
 
 This shape avoids coupling to certificate handles or inventing an owned certificate model. A
-caller can populate descriptors from static bytes today in a future matcher test. Production
+caller can populate descriptors from static bytes, as the delivered matcher fixtures do. Production
 adapters must preserve the complete leaf SAN list in source order and report structural failure;
 they must not filter names before this boundary. `Absent` means no SAN extension, not an empty
 present extension. `Decoded` with zero entries is `EmptySanExtension`. `Other.tag` is the decoded

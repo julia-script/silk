@@ -23,6 +23,8 @@ import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
+import { httpsIdentityAcceptanceSource } from './httpsIdentityAcceptance.js'
+import { sanAcceptanceSource } from './sanAcceptance.js'
 import {
   borrowedBox,
   borrowedStream,
@@ -6194,6 +6196,16 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 ]
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
+  {
+    name: 'https-san-adapter',
+    source: sanAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'https-identity-matrix-v1',
+    source: httpsIdentityAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
   {
     name: 'certificate-bounded-decoding',
     source: certificateAcceptanceSource,

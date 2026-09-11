@@ -1,5 +1,48 @@
 # JUL-169 validation
 
+The design-only record below is historical. Julia subsequently authorized implementation of all
+created specifications; the current runtime evidence follows.
+
+## Runtime implementation
+
+Implemented `silk.https_identity` and `silk.certificate_identities`, including registered public
+APIs, generated reference pages, and the JUL-183/JUL-184 follow-through. Neither module validates
+certificate trust, parses an HTTPS URI, or implements TLS. Opaque schema-dependent ASN.1 values
+retain the documented framing-versus-schema boundary in design.md.
+
+Focused execution on the runtime change:
+
+| Check                                                      | Result                                                                                                                   |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Matcher native corpus `https-identity-matrix-v1`           | Passed; 117 matrix cases plus construction/budget checks, 151.80 seconds test body / 163.78 seconds wall                 |
+| SAN native corpus `https-san-adapter`                      | Passed; GeneralNames cases and four certificate-envelope integration cases, 21.93 seconds test body / 27.26 seconds wall |
+| Borrow-contract semantic test in `BytesAcceptance.test.ts` | Passed; one shared analysis snapshot, 4.35 seconds test body / 8.11 seconds wall                                         |
+| Existing manifest-order and namespace-discovery tests      | Passed; two tests, 54 milliseconds test bodies                                                                           |
+| `pnpm typecheck`                                           | Passed; 18 tasks, 55.603 seconds                                                                                         |
+| `pnpm release:candidate`                                   | Passed; 11 build tasks and all 10 package-consumer tests, 50.69 seconds test-run wall time                               |
+| Strict OpenSpec validation                                 | Passed                                                                                                                   |
+| Full reference generation and documentation policy         | Passed; 105 modules, no policy violations; final adapter prose refreshed through the same generator                      |
+
+Independent correctness review approved both runtime modules after malformed nested primitive
+handling was corrected. Dedicated test-economics review approved two consolidated native programs
+and one semantic snapshot. The added measured test bodies total 178.08 seconds across separate
+focused runs under variable shared-host load. The design base has none of these test bodies; this
+is not a controlled whole-suite wall-time delta. Baseline runner startup comparison was unavailable
+because the isolated checkout could not load equivalent dependency/runner instances. No test
+timeouts, assertions, runner settings or additional backends were added.
+
+Initial fixture attempts exposed generic-lifetime/lowering limitations; the final SAN fixture uses
+a certificate-owning wrapper and explicit borrowed descriptor lifetimes. Earlier oversized literal
+fixtures exhausted the compiler heap; runtime-built boundary data and smaller helper functions
+replaced them. The passing runs use the default heap and one worker.
+
+Final formatting, lint, package-candidate and published-head evidence are recorded in PR #406.
+The full repository test/check gate was not repeated for this runtime follow-through; focused
+passes do not establish a full repository gate. Current CI status belongs to the published runtime
+head, not the historical successful design CI below.
+
+## Historical design-only verification
+
 Scope: design-only `specify-https-service-identity`; verified work base
 `c6eae2f976a8f1a7681ffbfdcbbc8c776b9f0c96` was clean. The diff changes eight OpenSpec files only.
 No runtime, manifest, package exports, test configuration or executable tests change. The fixture

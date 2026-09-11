@@ -1,5 +1,5 @@
 Sections 1–2 record the completed design-only JUL-169 deliverable. Runtime implementation is separately
-estimated in [implementation.md](implementation.md); none of these tasks ships a matcher.
+estimated in [implementation.md](implementation.md); those historical design tasks did not ship a matcher. Section 3 delivers the runtime follow-through.
 
 ## 1. Specify the identity contract
 
@@ -19,8 +19,8 @@ estimated in [implementation.md](implementation.md); none of these tasks ships a
 
 Julia explicitly authorized implementation of all created specs after the design handoff.
 
-- [ ] 3.1 Implement the pure HTTPS reference and DNS-ID/IP-ID matcher with exact typed errors, complete SAN validation and bounds.
-- [ ] 3.2 Implement the bounded certificate SAN adapter with caller storage, duplicate detection and complete GeneralNames validation.
-- [ ] 3.3 Register public modules, document ownership and APIs, and regenerate stdlib/reference artifacts.
-- [ ] 3.4 Execute the pinned matcher matrix and SAN integration cases in consolidated native acceptance fixtures; verify borrow contracts with semantic checks.
-- [ ] 3.5 Review correctness and test cost, publish the implementation and record focused verification evidence.
+- [x] 3.1 Implement the pure HTTPS reference and DNS-ID/IP-ID matcher with exact typed errors, complete SAN validation and bounds.
+- [x] 3.2 Implement the bounded certificate SAN adapter with caller storage, duplicate detection and complete GeneralNames validation.
+- [x] 3.3 Register public modules, document ownership and APIs, and regenerate stdlib/reference artifacts.
+- [x] 3.4 Execute the pinned matcher matrix and SAN integration cases in consolidated native acceptance fixtures; verify borrow contracts with semantic checks.
+- [x] 3.5 Review correctness and test cost, publish the implementation and record focused verification evidence.
