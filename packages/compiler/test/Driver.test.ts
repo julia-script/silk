@@ -19,6 +19,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 import { invalidGenericCorpus } from './support/corpus.js'
+import { tlsHkdfWasmSource } from './support/tlsHkdfAcceptance.js'
 import { certificateWasmAcceptanceSource } from './support/certificateAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
@@ -630,5 +631,27 @@ it.effect('executes bounded certificate decoding through LLVM-to-Wasm', () =>
     const main = instance.exports['main']
     assert.isFunction(main)
     if (typeof main === 'function') assert.strictEqual(main(), 0)
+  }),
+)
+
+// Two compact label derivations cover both digest widths on wasm32; native owns the boundary corpus.
+it.effect('executes TLS HKDF through LLVM-to-Wasm without host imports', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('tls-hkdf.wasm', tlsHkdfWasmSource, {
+      compilation: {
+        root: SourceFile.make('memory/tls-hkdf-wasm', ascii(tlsHkdfWasmSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    yield* Effect.sync(() => {
+      const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+      assert.deepEqual(WebAssembly.Module.imports(module), [])
+      const main = new WebAssembly.Instance(module).exports['main']
+      assert.isFunction(main)
+      if (typeof main === 'function') assert.strictEqual(main(), 0)
+    })
   }),
 )

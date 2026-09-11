@@ -18,6 +18,7 @@ import {
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
 import { shaAcceptanceSource } from './shaAcceptance.js'
+import { tlsHkdfAcceptanceSource } from './tlsHkdfAcceptance.js'
 import { hmacHkdfAcceptanceSource } from './hmacHkdfAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
@@ -104,6 +105,26 @@ const sourceSection = (source: string, start: string, end: string): string => {
     throw new Error(`Cannot find test source section from ${start} to ${end}`)
   return source.slice(startOffset, endOffset)
 }
+
+const tlsHkdfSource = readFileSync(
+  new URL('../../stdlib/silk/tls_hkdf.silk', import.meta.url),
+  'utf8',
+)
+const tlsHkdfNativeSource = tlsHkdfAcceptanceSource
+  .replace(
+    'import silk.tls_hkdf',
+    `import silk.u64
+${sourceSection(tlsHkdfSource, 'fn sha256MessageLengthAdmitted(', 'fn validate(')}
+import silk.tls_hkdf`,
+  )
+  .replace(
+    '  return 42\n}',
+    `  if !sha256MessageLengthAdmitted(2305843009213693951) { return 21 }
+  if sha256MessageLengthAdmitted(2305843009213693952) { return 22 }
+  if sha256MessageLengthAdmitted(u64.MAX) { return 23 }
+  return 42
+}`,
+  )
 
 const sha2Source = readFileSync(new URL('../../stdlib/silk/sha2.silk', import.meta.url), 'utf8')
 
@@ -7824,6 +7845,12 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     nativeSource: replaceDropProgram,
     nativeStdout: '1243',
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'tls-hkdf',
+    source: tlsHkdfAcceptanceSource,
+    nativeSource: tlsHkdfNativeSource,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'hmac-hkdf',

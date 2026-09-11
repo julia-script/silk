@@ -950,3 +950,29 @@ The following are deliberately outside the first stable model:
 - alternative standard-library profiles or “no-stdlib” project configuration in the official
   toolchain; and
 - omitted struct fields, field defaults, and any deliberate integration with ordinary `Option`.
+
+### STDLIB-010 — TLS label derivation preserves raw bytes and rejects lengths before mutation
+
+`silk/tls_hkdf` supplies `TlsHkdfSha256` and `TlsHkdfSha384` over the corresponding generic HKDF
+actors. Each `expandLabel` borrows a fixed 32-byte or 48-byte secret, label and context slices, and
+an exclusive output slice. It fills the complete output or returns `LabelError` without changing it.
+
+The info bytes are the two-byte big-endian output length, the one-byte prefixed label length,
+`tls13 `, the raw label, the one-byte context length, and the raw context. Labels contain 1..249
+bytes, contexts 0..255 bytes, and outputs 0..8160 or 0..12240 bytes. Validate label, context, then
+output length before narrowing, framing, mutation or an empty-output return. Error variants
+`LabelLength`, `ContextLength`, and `OutputLength` report the requested and maximum public lengths.
+Zero bytes and caller-supplied prefix bytes retain their original meaning; there is no trimming,
+normalization, terminator, or prefix detection.
+
+`deriveSecret` hashes exactly the supplied messages, then expands to the digest width with that
+hash as context. `deriveSecretFromHash` accepts a fixed-width transcript hash and does not hash it
+again. Empty messages use Hash(empty), which differs from an empty expansion context. SHA-256
+messages longer than 2^61−1 bytes return `MessageTooLong` before the hash operation. SHA-384's hash
+domain exceeds addressable slice lengths on supported targets.
+
+These operations require no allocator or Random provider. They retain no input and use at most
+514 bytes of framing storage, independent of message size. Protocol label selection, transcript
+serialization, message inclusion, and HelloRetryRequest handling belong to the TLS consumer.
+This module does not implement a handshake, records, authentication or trust. Vector success does
+not establish constant-time execution or secret erasure.

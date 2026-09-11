@@ -509,6 +509,12 @@
     "aliases": ["Arch"]
   },
   {
+    "module": "silk/tls_hkdf",
+    "path": "silk/tls_hkdf.silk",
+    "namespace": "TlsHkdfSha256",
+    "aliases": ["TlsHkdfSha384", "LabelError"]
+  },
+  {
     "module": "silk/u16",
     "path": "silk/u16.silk",
     "namespace": "u16"
