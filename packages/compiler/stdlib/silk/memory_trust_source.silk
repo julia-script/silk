@@ -53,9 +53,7 @@ impl MemoryTrustSource {
     let copied = run TrustSnapshot.copy(&self.current, limits.snapshot)
     return match move copied {
       Result<TrustSnapshot, TrustSourceError>.Success {value} => move value
-      Result<TrustSnapshot, TrustSourceError>.Failure {
-        error: TrustSourceError.LimitExceeded {kind, limit}
-      } => { fail TrustSourceError.LimitExceeded {kind: kind, limit: limit} }
+      Result<TrustSnapshot, TrustSourceError>.Failure {error} => { fail move error }
     }
   }
 }

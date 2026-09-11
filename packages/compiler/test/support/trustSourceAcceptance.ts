@@ -83,9 +83,10 @@ fn limitFailure(
 ) -> bool {
   return match move result {
     Result<TrustSnapshot, TrustSourceError>.Success { value } => false
-    Result<TrustSnapshot, TrustSourceError>.Failure {
-      error: TrustSourceError.LimitExceeded { kind, limit: actual }
-    } => kind == expected && actual == limit
+    Result<TrustSnapshot, TrustSourceError>.Failure { error } => match move error {
+      TrustSourceError.LimitExceeded { kind, limit: actual } => kind == expected && actual == limit
+      _ => false
+    }
   }
 }
 
@@ -241,18 +242,20 @@ effect fn suite() -> i32 ! TrustSourceError | OutOfMemoryError ? &mut Allocator 
   let emptyPemResult = run TrustSnapshot.fromPem(${literal(Buffer.from(' \n\t'))}, TrustLoadLimits.defaults())
   let emptyRejected = match move emptyPemResult {
     Result<TrustSnapshot, TrustSourceError>.Success { value } => false
-    Result<TrustSnapshot, TrustSourceError>.Failure {
-      error: TrustSourceError.Decode { error: decode }
-    } => decode.reason == DecodeReason.EmptyInput
+    Result<TrustSnapshot, TrustSourceError>.Failure { error } => match move error {
+      TrustSourceError.Decode { error: decode } => decode.reason == DecodeReason.EmptyInput
+      _ => false
+    }
   }
   if !emptyRejected { return 12 }
 
   let laterResult = run TrustSnapshot.fromPem(${literal(malformedLaterPem)}, TrustLoadLimits.defaults())
   let laterRejected = match move laterResult {
     Result<TrustSnapshot, TrustSourceError>.Success { value } => false
-    Result<TrustSnapshot, TrustSourceError>.Failure {
-      error: TrustSourceError.Decode { error: decode }
-    } => decode.certificateIndex == 1
+    Result<TrustSnapshot, TrustSourceError>.Failure { error } => match move error {
+      TrustSourceError.Decode { error: decode } => decode.certificateIndex == 1
+      _ => false
+    }
   }
   if !laterRejected { return 13 }
 
