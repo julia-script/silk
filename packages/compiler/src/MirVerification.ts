@@ -2612,6 +2612,7 @@ const loanViolations = (
 interface SuspensionCallTarget {
   readonly declaration: DeclarationFacts.CanonicalId
   readonly typeArguments: ReadonlyArray<SilkType.GenericArgument>
+  readonly staticArguments: ReadonlyArray<StaticValue.Value>
 }
 
 const suspensionCallTargets = (
@@ -2622,7 +2623,11 @@ const suspensionCallTargets = (
     case 'Call':
     case 'RunEffect':
       return [
-        Object.freeze({ declaration: operation.target, typeArguments: operation.typeArguments }),
+        Object.freeze({
+          declaration: operation.target,
+          typeArguments: operation.typeArguments,
+          staticArguments: operation.staticArguments ?? Object.freeze([]),
+        }),
       ]
     case 'RunEffectValue':
     case 'RunStaticEffect':
@@ -2631,6 +2636,7 @@ const suspensionCallTargets = (
         Object.freeze({
           declaration: operation.runner,
           typeArguments: operation.runnerTypeArguments,
+          staticArguments: operation.runnerStaticArguments ?? Object.freeze([]),
         }),
       ]
     case 'RunEffectComposite':
@@ -2638,6 +2644,7 @@ const suspensionCallTargets = (
         Object.freeze({
           declaration: alternative.runner,
           typeArguments: alternative.runnerTypeArguments,
+          staticArguments: Object.freeze([]),
         }),
       )
     case 'ApplyCallable': {
@@ -2649,6 +2656,7 @@ const suspensionCallTargets = (
             Object.freeze({
               declaration: target.declaration,
               typeArguments: operation.typeArguments,
+              staticArguments: Object.freeze([]),
             }),
           ]
         : []
@@ -2690,6 +2698,7 @@ const originReachableSuspensionFunctions = (self: Module): ReadonlySet<string> =
                 {
                   declaration: region.runner.declaration,
                   typeArguments: region.runner.typeArguments,
+                  staticArguments: region.runner.instance?.staticArguments ?? Object.freeze([]),
                 },
               ]
             : [],
@@ -2708,7 +2717,12 @@ const originReachableSuspensionFunctions = (self: Module): ReadonlySet<string> =
         ).some(
           (candidate) =>
             reachable.has(instanceText(candidate.instance)) &&
-            matchesInstance(candidate, target.declaration, target.typeArguments),
+            matchesInstance(
+              candidate,
+              target.declaration,
+              target.typeArguments,
+              target.staticArguments,
+            ),
         ),
       )
       if (reachesOrigin) {
@@ -3393,7 +3407,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           !self.functions.some(
             (candidate) =>
               originReachable.has(instanceText(candidate.instance)) &&
-              matchesInstance(candidate, declaration, region.runner.typeArguments),
+              matchesInstance(
+                candidate,
+                declaration,
+                region.runner.typeArguments,
+                region.runner.instance?.staticArguments ?? Object.freeze([]),
+              ),
           )
           ? [Object.freeze({ fn, region })]
           : []

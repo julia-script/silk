@@ -11,6 +11,7 @@ import * as Option from 'effect/Option'
 import * as Lifetime from '../src/Lifetime.js'
 import * as ModuleClosure from '../src/ModuleClosure.js'
 import * as NameResolution from '../src/NameResolution.js'
+import * as Presentation from '../src/Presentation.js'
 import type * as Scalar from '../src/Scalar.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
@@ -338,7 +339,7 @@ it.effect('indexes source services and their operation contracts as distinct can
         'root',
         `pub struct WriteFailure {}
 pub service Logger<T> {
-  effect fn log(message: &[u8], value: T) -> () ! WriteFailure ? &mut Logger<T>
+  effect fn log(static template: string<'static>, message: &[u8], value: T) -> () ! WriteFailure ? &mut Logger<T>
   fn enabled() -> bool
 }`,
       ],
@@ -375,7 +376,7 @@ pub service Logger<T> {
           name: 'log',
           state: 'Unique',
           kind: 'Effect',
-          parameters: ["&'life1 [u8]", 'T'],
+          parameters: ["string<'static>", "&'life1 [u8]", 'T'],
           result: '()',
           failures: ['root.WriteFailure'],
           requirements: [{ type: 'root.Logger<T>', access: 'Exclusive' }],
@@ -390,6 +391,11 @@ pub service Logger<T> {
           requirements: [],
         },
       ],
+    )
+    const log = service?.operations.at(0)
+    assert.strictEqual(
+      log === undefined ? undefined : Presentation.serviceOperation(log).text,
+      "effect<'env> fn log<'life1: 'env, 'env>(static template: string<'static>, message: &'life1 [u8], value: T) -> () ! WriteFailure ? &mut root.Logger<T>",
     )
     assert.deepEqual(index.diagnostics, [])
   }),

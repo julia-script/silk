@@ -34,7 +34,7 @@ import silk.os_logger { StdoutLogger }
 pub effect fn main() -&gt; () ! LogError {
   let mut logger = StdoutLogger.make()
 
-  run Effect.log(&quot;Hello!&quot;)
+  run Effect.log(&quot;Hello!&quot;, &amp;())
     |&gt; Effect.provideMut(&amp;mut logger)
 }
 </silk-snippet>
@@ -447,7 +447,7 @@ import silk.os_logger { StdoutLogger }
 
 pub effect fn main() -&gt; () ! LogError {
   let mut logger = StdoutLogger.make()
-  run Effect.log(&quot;connected&quot;)
+  run Effect.log(&quot;connected&quot;, &amp;())
     |&gt; Effect.provideMut(&amp;mut logger)
 }
 </silk-snippet>

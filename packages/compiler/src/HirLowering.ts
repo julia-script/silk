@@ -498,6 +498,21 @@ export const loanEndsOf = (
     }),
   )
 
+const isRepresentationIdenticalGenericForwarding = (
+  declared: SemanticType,
+  actual: SemanticType,
+): boolean => {
+  if (!Type.someSubterm(declared, Type.isParameter) || !Type.someSubterm(actual, Type.isParameter))
+    return false
+  const inferred = new Map<string, Type.GenericArgument>()
+  const inference = TypeInference.inferOpenGenericArguments(declared, actual, inferred)
+  return (
+    inference.matches &&
+    inference.conflicts.length === 0 &&
+    Type.equals(Type.substitute(declared, inferred), actual)
+  )
+}
+
 export const hirExpression = (
   fact: ExpressionFact,
   borrow?: Hir.BorrowId,
@@ -1620,6 +1635,7 @@ export const hirExpression = (
     )
     if (requirement === undefined)
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
+    const substitution = fact.contract.substitution
     const target = fact.reference.operation
     const staticArgumentOrigins = Object.freeze(
       (fact._tag === 'Call' ? (fact.staticArguments ?? []) : []).map(
@@ -1646,7 +1662,25 @@ export const hirExpression = (
           const parameter = target.parameters.at(ordinal)
           if (parameter?.phase === 'Static') return []
           const borrowId = argumentBorrowId(argument, ordinal)
-          return [hirExpression(argument.expression, borrowId, options)]
+          const genericForwarding =
+            parameter?.declaredType._tag === 'Resolved' &&
+            argument.expression.type._tag === 'Available' &&
+            isRepresentationIdenticalGenericForwarding(
+              parameter.declaredType.type,
+              argument.expression.type.type,
+            )
+          return [
+            parameter?.declaredType._tag === 'Resolved' && !genericForwarding
+              ? hirExpectedExpression(
+                  argument.expression,
+                  Type.substitute(parameter.declaredType.type, substitution),
+                  'Argument',
+                  parameter.syntax.span,
+                  borrowId,
+                  options,
+                )
+              : hirExpression(argument.expression, borrowId, options),
+          ]
         }),
       ),
       loanEnds: loanEndsOf(
@@ -1697,8 +1731,10 @@ export const hirExpression = (
           const genericForwarding =
             parameter?.declaredType._tag === 'Resolved' &&
             argument.expression.type._tag === 'Available' &&
-            Type.someSubterm(parameter.declaredType.type, Type.isParameter) &&
-            Type.someSubterm(argument.expression.type.type, Type.isParameter)
+            isRepresentationIdenticalGenericForwarding(
+              parameter.declaredType.type,
+              argument.expression.type.type,
+            )
           return [
             parameter?.declaredType._tag === 'Resolved' && !genericForwarding
               ? hirExpectedExpression(

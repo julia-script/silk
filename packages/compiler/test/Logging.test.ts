@@ -57,9 +57,18 @@ pub fn main() -> i32 {
   run Effect.catchAll(program(), ignore)
   return 42
 }`)
-    const codes = Analysis.diagnostics(frontend).map((diagnostic) => diagnostic.code)
-    assert.strictEqual(codes.filter((code) => code === 'SEM0177').length, 3)
-    assert.include(codes, 'SEM0083')
+    assert.deepEqual(
+      Analysis.diagnostics(frontend).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: [diagnostic.span.sourceId, diagnostic.span.start, diagnostic.span.end],
+      })),
+      [
+        { code: 'SEM0083', span: ['silk/format', 14495, 14517] },
+        { code: 'SEM0177', span: ['silk/format', 21507, 21562] },
+        { code: 'SEM0177', span: ['silk/format', 26710, 26733] },
+        { code: 'SEM0177', span: ['silk/format', 27059, 27307] },
+      ],
+    )
   }),
 )
 
