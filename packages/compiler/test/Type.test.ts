@@ -218,6 +218,7 @@ it('refuses carrier tags whose member order can change after specialization', ()
   const unavailableIdentity = Type.effectIdentityArgument('types/failure-carrier.effect', {
     declaration: owner,
     typeArguments: [unavailableOuter],
+    staticArgumentKeys: [],
   })
   const concreteContract = Type.effect('i32', [], detached)
   const unavailableRepresentation = Type.represented(
@@ -280,6 +281,7 @@ it('specializes executable owners throughout nested callable schemas without cap
     Type.effectIdentityArgument('types/schema-owner.effect', {
       declaration,
       typeArguments: [openOwner],
+      staticArgumentKeys: [],
     }),
     effect,
   )
@@ -311,7 +313,7 @@ it('specializes executable owners throughout nested callable schemas without cap
 
   const specialized = Type.specializeExecutableOwner(
     callable,
-    Object.freeze({ declaration, typeArguments: [marker] }),
+    Object.freeze({ declaration, typeArguments: [marker], staticArgumentKeys: [] }),
     Constraint.specializeCallableSchemaExecutableOwner,
   )
   assert.isTrue(Type.isCallable(specialized))
@@ -1415,6 +1417,7 @@ it('preserves lifetime arguments through generic substitution and erases only ru
       Type.effectIdentityArgument('lifetimes/transport', {
         declaration: owner,
         typeArguments: [first, source],
+        staticArgumentKeys: [],
       }),
       effect,
     ),

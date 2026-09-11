@@ -84,6 +84,56 @@ it('constructs typed HIR with canonical call targets and normalized contracts', 
   assert.strictEqual(inner.arguments.at(0)?._tag, 'IntegerLiteral')
 })
 
+it.effect('preserves contextual conversions across generic and service calls', () =>
+  Effect.gen(function* () {
+    const service = yield* elaborateWithStdlib(
+      'hir://service-argument-conversion.silk',
+      `import silk.effect { Effect }
+service Sink { effect fn put(value: i32 | bool) -> i32 ? &Sink }
+struct Provider {}
+impl Sink for Provider { effect fn put(self: &Self, value: i32 | bool) -> i32 { return 42 } }
+effect fn use() -> i32 ? &Sink { return run Sink.put(1) }
+pub fn main() -> i32 {
+  let provider = Provider {}
+  return run Effect.provide(use(), &provider)
+}`,
+    )
+    assert.deepEqual(service.diagnostics, [])
+    const use = service.hir.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'use',
+    )
+    const serviceConstruct =
+      use === undefined
+        ? undefined
+        : Hir.expressionTree(Hir.returned(use)).find(
+            (expression) => expression._tag === 'ServiceEffectConstruct',
+          )
+    assert.strictEqual(serviceConstruct?._tag, 'ServiceEffectConstruct')
+    if (serviceConstruct?._tag === 'ServiceEffectConstruct')
+      assert.strictEqual(serviceConstruct.arguments.at(0)?._tag, 'UnionConvert')
+
+    const generic = elaborate(
+      'hir://generic-argument-conversion.silk',
+      `fn accept<T>(value: T | i32) -> i32 { return 42 }
+fn forward<T>(value: T) -> i32 { return accept<T>(move value) }
+pub fn main() -> i32 { return forward<bool>(true) }`,
+    )
+    assert.deepEqual(generic.diagnostics, [])
+    const forward = generic.hir.functions.find(
+      (fn) => fn.declaration.name._tag === 'Present' && fn.declaration.name.spelling === 'forward',
+    )
+    const acceptCall =
+      forward === undefined
+        ? undefined
+        : Hir.expressionTree(Hir.returned(forward)).find(
+            (expression) => expression._tag === 'Call' && expression.target.name === 'accept',
+          )
+    assert.strictEqual(acceptCall?._tag, 'Call')
+    if (acceptCall?._tag === 'Call')
+      assert.strictEqual(acceptCall.arguments.at(0)?._tag, 'UnionConvert')
+  }),
+)
+
 it('retains canonical scalar enum member, value, and equality identities in typed HIR', () => {
   const result = elaborate(
     'hir://enum-values.silk',

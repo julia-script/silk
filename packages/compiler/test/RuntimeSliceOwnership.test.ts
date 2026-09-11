@@ -506,7 +506,11 @@ it.effect('round-trips semantic borrowed types and executable predicates without
       effect,
       effect,
       Type.exactRepresentationArgument(
-        Type.effectIdentityArgument('roundtrip', { declaration: owner, typeArguments: [a, value] }),
+        Type.effectIdentityArgument('roundtrip', {
+          declaration: owner,
+          typeArguments: [a, value],
+          staticArgumentKeys: [],
+        }),
         effect,
       ),
     )

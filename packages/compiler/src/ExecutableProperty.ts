@@ -8,6 +8,7 @@ import * as Lifetime from './Lifetime.js'
 import * as TypeInference from './internal/TypeInference.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as SuspensionMode from './SuspensionMode.js'
+import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 import * as TypeOutlives from './TypeOutlives.js'
 
@@ -479,6 +480,11 @@ const matchesEffectIdentity = (
         identity.owner.typeArguments.filter(
           (argument) => !Type.isHiddenExecutableArgument(argument),
         ),
+      ) &&
+      candidate.owner.staticArguments.length === identity.owner.staticArgumentKeys.length &&
+      candidate.owner.staticArguments.every(
+        (argument, ordinal) =>
+          StaticValue.key(argument) === identity.owner?.staticArgumentKeys.at(ordinal),
       ))
   )
 }

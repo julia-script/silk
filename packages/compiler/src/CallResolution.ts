@@ -2916,6 +2916,7 @@ export const executableSpecializationOwner = (
         typeArguments: Object.freeze(
           declaration.typeParameters.map((parameter) => Type.parameterArgument(parameter.type)),
         ),
+        staticArgumentKeys: Object.freeze([]),
       })
 }
 

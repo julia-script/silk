@@ -1123,6 +1123,7 @@ export type Operation =
         readonly type: Extract<Type, { readonly _tag: 'EffectValue' }>
         readonly runner: DeclarationFacts.CanonicalId
         readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+        readonly runnerStaticArguments?: ReadonlyArray<StaticValue.Value>
         readonly tagMappings: ReadonlyArray<{ readonly source: number; readonly target: number }>
         readonly arguments: ReadonlyArray<LocalId>
       }>
@@ -1169,6 +1170,7 @@ export type Operation =
       readonly effect: LocalId
       readonly runner: DeclarationFacts.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+      readonly runnerStaticArguments?: ReadonlyArray<StaticValue.Value>
       readonly arguments: ReadonlyArray<LocalId>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly failureValueType: SilkType.Type

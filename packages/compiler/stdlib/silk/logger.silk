@@ -6,10 +6,10 @@
 //! deterministic observation and failure tests.
 //!
 //! # Details
-//! Each invocation carries one [`LogLevel`] and one valid UTF-8 message. The service does not add
-//! formatting, newlines, timestamps, or allocation requirements. The stdout provider forwards only
-//! the message bytes; the in-memory provider retains at most eight committed events and 64 message
-//! bytes, and exposes attempted calls separately from successful commits.
+//! Each invocation carries one [`LogLevel`], one static format template, and one borrowed argument
+//! pack. Providers reuse `silk.format` to produce one semantic message without adding caller-visible
+//! Writer or allocation requirements. The in-memory provider retains at most eight committed events
+//! and 64 message bytes, and exposes attempted calls separately from successful commits.
 //!
 //! # Gotchas
 //! Logger failures are typed [`LogError`] values and do not guarantee that a message committed.
@@ -29,7 +29,10 @@
 //! effect fn program() -> i32
 //! ! LogError {
 //!   let mut logger = Logger.inMemoryProvider()
-//!   let logged = run Effect.logWarning("cache miss")
+//!   let logged = run Effect.logWarning("cache {kind} missed {count} times", &.{
+//!     kind: "users",
+//!     count: 3,
+//!   })
 //!     |> Effect.provideMut(&mut logger)
 //!   if Logger.length(&logger) != usize.ONE {
 //!     return 1
@@ -51,11 +54,12 @@
 
 import silk.bool
 import silk.effect { Effect }
+import silk.format { Format }
 import silk.i32
 import silk.result { Result }
-import silk.string { String }
 import silk.u8
 import silk.usize
+import silk.writer { Writer, WriterError }
 
 /// One closed logging severity from Trace through Error.
 pub enum LogLevel {
@@ -85,7 +89,7 @@ effect fn reject(code: i32) -> never ! LogError {
   fail LogError { code: code }
 }
 
-/// A replaceable service that receives one complete semantic log event per call.
+/// A replaceable service that formats and receives one complete semantic log event per call.
 ///
 /// # When to use
 ///
@@ -94,18 +98,21 @@ effect fn reject(code: i32) -> never ! LogError {
 ///
 /// # Details
 ///
-/// Each call carries one severity and one valid UTF-8 message. The service does not require a
-/// newline, timestamp, prefix, allocation, or output destination. The provider owns those choices.
+/// Each call carries one severity, one static template, and one borrowed argument pack. The service
+/// does not require a newline, timestamp, prefix, allocation, or output destination. The provider
+/// owns those choices and applies the shared `silk.format` contract.
 pub service Logger {
-  /// Submits one complete UTF-8 message at one severity to the active provider.
+  /// Formats and submits one complete UTF-8 message at one severity to the active provider.
   ///
   /// # Details
   ///
-  /// The call preserves the message bytes exactly. It does not add a newline, severity label,
-  /// timestamp, or other formatting. A provider failure produces [`LogError`].
-  effect fn log(
+  /// Template validation and Display selection match [`Format.format`]. The call does not add a
+  /// newline, severity label, timestamp, or provider-independent decoration. A provider failure
+  /// produces [`LogError`].
+  effect fn log<Args>(
     level: LogLevel,
-    message: string
+    static template: string<'static>,
+    args: &Args
   ) -> () ! LogError ? &mut Logger
 }
 
@@ -236,12 +243,12 @@ pub struct InMemoryLogger {
 }
 
 impl InMemoryLogger {
-  effect fn record(
+  effect fn record<Args>(
     self: &mut Self,
     level: LogLevel,
-    message: string
+    static template: string<'static>,
+    args: &Args
   ) -> () ! LogError {
-    let values = String.utf8Bytes(message)
     let ordinal = self.attempts
     self.attempts = self.attempts + usize.add(0, 1)
     if self.failEnabled {
@@ -249,13 +256,22 @@ impl InMemoryLogger {
     }
 
     if self.count == usize.add(0, 8) { return run reject(2) }
-    if values.length > usize.add(0, 64) - self.messageLength { return run reject(2) }
+    let mut staged = EventWriter {
+      values: emptyMessages(),
+      length: usize.ZERO,
+      capacity: usize.add(0, 64) - self.messageLength,
+    }
+    let rendered = run Effect.result(renderEvent<Args>(&mut staged, template, args))
+    match move rendered {
+      Result<(), WriterError>.Success { value: _ } => ()
+      Result<(), WriterError>.Failure { error: _ } => { return run reject(2) }
+    }
 
     let offset = self.messageLength
     let mut messages = Intrinsic.replace(self.messages, emptyMessages())
     let mut index = usize.add(0, 0)
-    while index < values.length {
-      messages[offset + index] = u8.toI32(values[index])
+    while index < staged.length {
+      messages[offset + index] = staged.values[index]
       index = index + usize.add(0, 1)
     }
     let mut levels = Intrinsic.replace(self.levels, emptyLevels())
@@ -263,15 +279,49 @@ impl InMemoryLogger {
     let mut lengths = Intrinsic.replace(self.lengths, emptyIndexes())
     levels[self.count] = level
     offsets[self.count] = offset
-    lengths[self.count] = values.length
+    lengths[self.count] = staged.length
     self.messages = move messages
     self.levels = move levels
     self.offsets = move offsets
     self.lengths = move lengths
     self.count = self.count + usize.add(0, 1)
-    self.messageLength = self.messageLength + values.length
+    self.messageLength = self.messageLength + staged.length
     return ()
   }
+}
+
+struct EventWriter {
+  values: [i32; 64]
+  length: usize
+  capacity: usize
+}
+
+impl EventWriter {
+  effect fn writeAll(self: &mut Self, values: &[u8]) -> () ! WriterError {
+    if values.length > self.capacity - self.length { fail Writer.failure() }
+    let mut index = usize.ZERO
+    while index < values.length {
+      self.values[self.length + index] = u8.toI32(values[index])
+      index = index + usize.ONE
+    }
+    self.length = self.length + values.length
+    return ()
+  }
+
+  effect fn flush(self: &mut Self) -> () { return () }
+}
+
+effect fn renderEvent<Args>(
+  writer: &mut EventWriter,
+  static template: string<'static>,
+  args: &Args
+) -> () ! WriterError {
+  return run Format.format<Args>(template, args) |> Effect.provideMut<Writer>(writer)
+}
+
+impl Writer for EventWriter {
+  writeAll: EventWriter.writeAll
+  flush: EventWriter.flush
 }
 
 fn emptyLevels() -> [LogLevel; 8] {
@@ -305,4 +355,3 @@ fn emptyMessages() -> [i32; 64] {
 impl Logger for InMemoryLogger {
   log: InMemoryLogger.record
 }
-

@@ -138,6 +138,23 @@ it.effect('keeps final synchronous MIR free of suspension machinery', () =>
   }),
 )
 
+it.effect('keeps static runner identity in suspension reachability', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect { Effect }
+struct Problem {}
+effect fn work(static label: string<'static>) -> i32 ! Problem {
+  return run Effect.suspend(effect { fail Problem {} })
+}
+pub fn main() -> i32 {
+  let ignored = run Effect.result(work("x"))
+  return 42
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const program = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(program), [])
+  }),
+)
+
 it.effect(
   'rejects malformed logical layouts, resumes, runner contracts, and orphan machinery',
   () =>

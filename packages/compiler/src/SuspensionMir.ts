@@ -124,7 +124,7 @@ const runnerOf = (
     staticArguments = runner.instance?.staticArguments ?? Object.freeze([])
   else if (operation._tag === 'RunEffect')
     staticArguments = operation.staticArguments ?? Object.freeze([])
-  else if (operation._tag === 'RunEffectValue')
+  else if (operation._tag === 'RunEffectValue' || operation._tag === 'CatchEffect')
     staticArguments = operation.runnerStaticArguments ?? Object.freeze([])
   else staticArguments = Object.freeze([])
   const exact =

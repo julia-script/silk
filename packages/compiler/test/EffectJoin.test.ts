@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as StaticValue from '../src/StaticValue.js'
 import * as Type from '../src/Type.js'
 import * as ValueStorage from '../src/ValueStorage.js'
 
@@ -61,6 +62,41 @@ pub fn main() -> i32 {
 
 const snapshotOf = (name: string, text: string) =>
   AnalysisFixture.retainingMain(name, ascii(text), 'wasm32-unknown-unknown')
+
+it.effect('keeps static specializations distinct across a finite Effect join', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* snapshotOf(
+      'effect-join/static-specializations',
+      `enum Flag { No, Yes }
+effect fn selected(static value: i32) -> i32 { return value }
+effect fn outer(flag: Flag) -> i32 {
+  let picked = match move flag {
+    Flag.Yes => selected(41)
+    Flag.No => selected(42)
+  }
+  return run picked
+}
+pub fn main() -> i32 { return run outer(Flag.No) }`,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const composite = mir.functions
+      .flatMap(MirVerification.operations)
+      .find((operation) => operation._tag === 'RunEffectComposite')
+    assert.isDefined(composite)
+    if (composite?._tag !== 'RunEffectComposite') return
+    assert.deepEqual(
+      composite.alternatives.flatMap((alternative) =>
+        (alternative.runnerStaticArguments ?? []).map(StaticValue.key),
+      ),
+      [
+        StaticValue.key(Object.freeze({ _tag: 'IntegerValue', type: 'i32', value: 41n })),
+        StaticValue.key(Object.freeze({ _tag: 'IntegerValue', type: 'i32', value: 42n })),
+      ],
+    )
+  }),
+)
 
 it.effect('finalizes chosen capture environments through ordinary suspension controls', () =>
   Effect.gen(function* () {

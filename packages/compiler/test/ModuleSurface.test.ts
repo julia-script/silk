@@ -988,6 +988,7 @@ it.effect('rejects negative semantic ordinals in every serialized identity famil
           Type.callableEnvironmentIdentity(site, {
             declaration: owner,
             typeArguments: [],
+            staticArgumentKeys: ['static:key'],
           }),
         ),
       ])

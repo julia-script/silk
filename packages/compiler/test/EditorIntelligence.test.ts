@@ -783,10 +783,10 @@ import silk.logger { LogError }
 import silk.logger { LogLevel }
 import silk.logger { Logger }
 effect fn pending() -> () ! LogError ? &mut Logger {
-  return run Effect.logWarning("ready")
+  return run Effect.logWarning("ready", &())
 }
 effect fn direct() -> () ! LogError ? &mut Logger {
-  return run Logger.log(LogLevel.Info, "direct")
+  return run Logger.log(LogLevel.Info, "direct", &())
 }
 pub fn main() -> i32 {
   let memory = Logger.inMemoryProvider()

@@ -306,6 +306,7 @@ it('walks Effect owner arguments as canonical semantic children', () => {
       Type.effectIdentityArgument('effect-field/owner-walk.effect', {
         declaration,
         typeArguments: [open, marker],
+        staticArgumentKeys: [],
       }),
       contract,
     ),
@@ -322,6 +323,7 @@ it('walks Effect owner arguments as canonical semantic children', () => {
       Type.specializeExecutableOwner(holder, {
         declaration,
         typeArguments: ['bool', marker],
+        staticArgumentKeys: [],
       }),
     ),
     true,
@@ -586,6 +588,7 @@ it.effect('reports an unresolved representation field as explicitly unsupported'
               {
                 declaration: { module: 'callable-field/unsupported', name: 'main' },
                 typeArguments: [],
+                staticArgumentKeys: [],
               },
             ),
           ),

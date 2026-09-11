@@ -213,6 +213,8 @@ export interface RequirementRowArgument {
 export interface ExecutableSpecializationOwner {
   readonly declaration: { readonly module: string; readonly name: string }
   readonly typeArguments: ReadonlyArray<GenericArgument>
+  /** Canonical identities of the enclosing executable's compile-time value arguments. */
+  readonly staticArgumentKeys: ReadonlyArray<string>
 }
 
 /** One compiler-only hidden Effect construction identity used for monomorphic specialization. */
@@ -1242,6 +1244,7 @@ export const effectIdentityArgument = (
           owner: Object.freeze({
             declaration: Object.freeze({ ...owner.declaration }),
             typeArguments: Object.freeze(Array.from(owner.typeArguments)),
+            staticArgumentKeys: Object.freeze(Array.from(owner.staticArgumentKeys)),
           }),
         }),
   })
@@ -1275,6 +1278,7 @@ export const callableEnvironmentIdentity = (
     owner: Object.freeze({
       declaration: Object.freeze({ ...owner.declaration }),
       typeArguments: Object.freeze(Array.from(owner.typeArguments)),
+      staticArgumentKeys: Object.freeze(Array.from(owner.staticArgumentKeys)),
     }),
   })
 
@@ -1624,8 +1628,11 @@ const callableEnvironmentSiteKey = (self: CallableEnvironmentSite): string =>
     : `recovered:${self.functionOrdinal}:site:${self.ordinal}`
 
 /** Returns the deterministic identity of one specialized callable capture environment. */
+const executableOwnerStaticKey = (self: ExecutableSpecializationOwner): string =>
+  self.staticArgumentKeys.length === 0 ? '' : `:static=${Canonical.array(self.staticArgumentKeys)}`
+
 export const callableEnvironmentKey = (self: CallableEnvironmentIdentity): string =>
-  `${callableEnvironmentSiteKey(self.site)}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>`
+  `${callableEnvironmentSiteKey(self.site)}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>${executableOwnerStaticKey(self.owner)}`
 
 /** Tests complete callable-environment specialization identity. */
 export const equalsCallableEnvironmentIdentity = (
@@ -1681,7 +1688,7 @@ const computeGenericArgumentKey = (self: GenericArgument): string => {
   }
   if (isEffectIdentityArgument(self)) {
     if (self.owner === undefined) return `effect-identity:${self.identity}`
-    return `effect-identity:${self.identity}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>`
+    return `effect-identity:${self.identity}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>${executableOwnerStaticKey(self.owner)}`
   }
   if (isCallableIdentityArgument(self)) return callableIdentityKey(self)
   if (isRequirementRowArgument(self))
@@ -3394,6 +3401,7 @@ export const substituteGenericArgument = (
         typeArguments: self.owner.typeArguments.map((argument) =>
           substituteGenericArgument(argument, substitution, compatibility),
         ),
+        staticArgumentKeys: self.owner.staticArgumentKeys,
       }
     }
     return effectIdentityArgument(self.identity, owner)
@@ -3406,6 +3414,7 @@ export const substituteGenericArgument = (
         typeArguments: self.environment.owner.typeArguments.map((argument) =>
           substituteGenericArgument(argument, substitution, compatibility),
         ),
+        staticArgumentKeys: self.environment.owner.staticArgumentKeys,
       })
     }
     return callableIdentityArgument(
@@ -3450,6 +3459,7 @@ export const specializeExecutableOwner = (
       : Object.freeze({
           declaration: current.declaration,
           typeArguments: Object.freeze(current.typeArguments.map(specializeArgument)),
+          staticArgumentKeys: current.staticArgumentKeys,
         })
   const specializeArgument = (argument: GenericArgument): GenericArgument => {
     if (Lifetime.isLifetime(argument)) return argument
@@ -3963,6 +3973,7 @@ const runtimeOwnerKey = (self: ExecutableSpecializationOwner): string =>
     self.declaration.module,
     self.declaration.name,
     Canonical.array(runtimeArgumentKeys(self.typeArguments)),
+    Canonical.array(self.staticArgumentKeys),
   ])
 
 /** Erases proof-only owner arguments from a physical callable environment identity. */

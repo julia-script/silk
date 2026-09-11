@@ -155,7 +155,7 @@ builtin `Effect<A ! E ? R>` type, which needs no import.
 ### Associated function `Effect.log`
 
 ```silk
-pub effect<'life0> fn log<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
+pub effect<'env> fn log<Args: 'env, 'life1: 'env, 'env>(static template: string<'static>, args: &'life1 Args) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Info` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -170,7 +170,7 @@ neither buffers nor recovers that failure. Use [`logAt`](#declaration-73696c6b2f
 ### Associated function `Effect.logAt`
 
 ```silk
-pub effect<'life0> fn logAt<'life0>(level: LogLevel, message: string<'life0>) -> () ! LogError ? &mut Logger
+pub effect<'env> fn logAt<Args: 'env, 'life1: 'env, 'env>(level: LogLevel, static template: string<'static>, args: &'life1 Args) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `level` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -185,7 +185,7 @@ destination; its [`LogError`](./logger.md#declaration-73696c6b2f6c6f676765723a3a
 ### Associated function `Effect.logTrace`
 
 ```silk
-pub effect<'life0> fn logTrace<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
+pub effect<'env> fn logTrace<Args: 'env, 'life1: 'env, 'env>(static template: string<'static>, args: &'life1 Args) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Trace` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -195,7 +195,7 @@ Sends one complete message at `LogLevel.Trace` through the required mutable [`Lo
 ### Associated function `Effect.logDebug`
 
 ```silk
-pub effect<'life0> fn logDebug<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
+pub effect<'env> fn logDebug<Args: 'env, 'life1: 'env, 'env>(static template: string<'static>, args: &'life1 Args) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Debug` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -205,7 +205,7 @@ Sends one complete message at `LogLevel.Debug` through the required mutable [`Lo
 ### Associated function `Effect.logInfo`
 
 ```silk
-pub effect<'life0> fn logInfo<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
+pub effect<'env> fn logInfo<Args: 'env, 'life1: 'env, 'env>(static template: string<'static>, args: &'life1 Args) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Info` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -215,7 +215,7 @@ Sends one complete message at `LogLevel.Info` through the required mutable [`Log
 ### Associated function `Effect.logWarning`
 
 ```silk
-pub effect<'life0> fn logWarning<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
+pub effect<'env> fn logWarning<Args: 'env, 'life1: 'env, 'env>(static template: string<'static>, args: &'life1 Args) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Warning` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).
@@ -225,7 +225,7 @@ Sends one complete message at `LogLevel.Warning` through the required mutable [`
 ### Associated function `Effect.logError`
 
 ```silk
-pub effect<'life0> fn logError<'life0>(message: string<'life0>) -> () ! LogError ? &mut Logger
+pub effect<'env> fn logError<Args: 'env, 'life1: 'env, 'env>(static template: string<'static>, args: &'life1 Args) -> () ! LogError ? &mut Logger
 ```
 
 Sends one complete message at `LogLevel.Error` through the required mutable [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572).

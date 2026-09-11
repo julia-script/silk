@@ -312,6 +312,8 @@ export type ExpressionTypeFact =
 export interface IdentifierExpressionFact {
   readonly _tag: 'Identifier'
   readonly reference: ParameterReferenceFact
+  /** Concrete compile-time value retained while residualizing a runtime specialization. */
+  readonly staticValue?: StaticValue.Value
   readonly type: ExpressionTypeFact
   readonly syntax: SyntaxTree.Node
 }

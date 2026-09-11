@@ -174,7 +174,7 @@ import silk.os_logger { StdoutLogger }
 pub effect fn main() -> () ! LogError {
   let mut logger = StdoutLogger.make()
 
-  run Effect.log("Hello, world!")
+  run Effect.log("Hello, world!", &())
     |> Effect.provideMut(&mut logger)
 }
 `

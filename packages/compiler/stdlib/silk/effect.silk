@@ -141,10 +141,11 @@ impl Effect {
   ///
   /// The logger decides where the message goes. Logging may fail with [`LogError`], and this wrapper
   /// neither buffers nor recovers that failure. Use [`logAt`] when the level is not Info.
-  pub effect fn log(
-    message: string
+  pub effect fn log<Args>(
+    static template: string<'static>,
+    args: &Args
   ) -> () ! LogError ? &mut Logger {
-    return run Effect.logAt(LogLevel.Info, message)
+    return run Logger.log(LogLevel.Info, template, args)
   }
 
   /// Sends one complete message at `level` through the required mutable [`Logger`].
@@ -153,46 +154,52 @@ impl Effect {
   ///
   /// The message is one logging event rather than a fragment. The provider controls formatting and
   /// destination; its [`LogError`] propagates unchanged.
-  pub effect fn logAt(
+  pub effect fn logAt<Args>(
     level: LogLevel,
-    message: string
+    static template: string<'static>,
+    args: &Args
   ) -> () ! LogError ? &mut Logger {
-    return run Logger.log(move level, message)
+    return run Logger.log(move level, template, args)
   }
 
   /// Sends one complete message at `LogLevel.Trace` through the required mutable [`Logger`].
-  pub effect fn logTrace(
-    message: string
+  pub effect fn logTrace<Args>(
+    static template: string<'static>,
+    args: &Args
   ) -> () ! LogError ? &mut Logger {
-    return run Effect.logAt(LogLevel.Trace, message)
+    return run Logger.log(LogLevel.Trace, template, args)
   }
 
   /// Sends one complete message at `LogLevel.Debug` through the required mutable [`Logger`].
-  pub effect fn logDebug(
-    message: string
+  pub effect fn logDebug<Args>(
+    static template: string<'static>,
+    args: &Args
   ) -> () ! LogError ? &mut Logger {
-    return run Effect.logAt(LogLevel.Debug, message)
+    return run Logger.log(LogLevel.Debug, template, args)
   }
 
   /// Sends one complete message at `LogLevel.Info` through the required mutable [`Logger`].
-  pub effect fn logInfo(
-    message: string
+  pub effect fn logInfo<Args>(
+    static template: string<'static>,
+    args: &Args
   ) -> () ! LogError ? &mut Logger {
-    return run Effect.logAt(LogLevel.Info, message)
+    return run Logger.log(LogLevel.Info, template, args)
   }
 
   /// Sends one complete message at `LogLevel.Warning` through the required mutable [`Logger`].
-  pub effect fn logWarning(
-    message: string
+  pub effect fn logWarning<Args>(
+    static template: string<'static>,
+    args: &Args
   ) -> () ! LogError ? &mut Logger {
-    return run Effect.logAt(LogLevel.Warning, message)
+    return run Logger.log(LogLevel.Warning, template, args)
   }
 
   /// Sends one complete message at `LogLevel.Error` through the required mutable [`Logger`].
-  pub effect fn logError(
-    message: string
+  pub effect fn logError<Args>(
+    static template: string<'static>,
+    args: &Args
   ) -> () ! LogError ? &mut Logger {
-    return run Effect.logAt(LogLevel.Error, message)
+    return run Logger.log(LogLevel.Error, template, args)
   }
 
   /// Executes `protected` once and converts its success or typed failure into ordinary [`Result`] data.

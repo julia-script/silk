@@ -30,6 +30,7 @@ import * as Scalar from './Scalar.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as StaticText from './StaticText.js'
 import * as SuspensionMode from './SuspensionMode.js'
+import * as StaticValue from './StaticValue.js'
 import type * as Target from './Target.js'
 import * as Type from './Type.js'
 import * as ValueStorage from './ValueStorage.js'
@@ -358,7 +359,11 @@ const sameExactOwner = (
       expected !== undefined &&
       Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(expected)
     )
-  })
+  }) &&
+  left.staticArguments.length === right.staticArgumentKeys.length &&
+  left.staticArguments.every(
+    (argument, ordinal) => StaticValue.key(argument) === right.staticArgumentKeys.at(ordinal),
+  )
 
 const sameVisibleOwner = (
   left: Instances.InstanceKey,
@@ -376,6 +381,10 @@ const sameVisibleOwner = (
     (argument) => !Type.isHiddenExecutableArgument(argument),
   )
   return (
+    left.staticArguments.length === right.staticArgumentKeys.length &&
+    left.staticArguments.every(
+      (argument, ordinal) => StaticValue.key(argument) === right.staticArgumentKeys.at(ordinal),
+    ) &&
     leftVisible.length === rightVisible.length &&
     leftVisible.every((argument, ordinal) => {
       const expected = rightVisible.at(ordinal)

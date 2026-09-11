@@ -801,6 +801,7 @@ export const callableEnvironmentIdentity = (
       name: self.owner.declaration.name,
     }),
     typeArguments: self.owner.typeArguments,
+    staticArgumentKeys: Object.freeze(self.owner.staticArguments.map(StaticValue.key)),
   })
 
 const {
@@ -898,7 +899,11 @@ const sameExactOwner = (left: InstanceKey, right: Type.ExecutableSpecializationO
   left.typeArguments.every((argument, ordinal) => {
     const expected = right.typeArguments.at(ordinal)
     return expected !== undefined && Type.equalsGenericArgument(argument, expected)
-  })
+  }) &&
+  left.staticArguments.length === right.staticArgumentKeys.length &&
+  left.staticArguments.every(
+    (argument, ordinal) => StaticValue.key(argument) === right.staticArgumentKeys.at(ordinal),
+  )
 
 /** Resolves an owner-scoped source representation identity to its concrete hidden Effect. */
 export const representedEffectOf = (
@@ -918,7 +923,11 @@ export const representedEffectOf = (
     (effect) =>
       effect.owner.declaration.module === owner.declaration.module &&
       effect.owner.declaration.name === owner.declaration.name &&
-      sameVisibleTypeArguments(effect.owner.typeArguments, owner.typeArguments),
+      sameVisibleTypeArguments(effect.owner.typeArguments, owner.typeArguments) &&
+      effect.owner.staticArguments.length === owner.staticArgumentKeys.length &&
+      effect.owner.staticArguments.every(
+        (argument, ordinal) => StaticValue.key(argument) === owner.staticArgumentKeys.at(ordinal),
+      ),
   )
   return visible.length === 1 ? visible.at(0) : undefined
 }
@@ -1800,6 +1809,9 @@ export const discover = (
         }
         const item = Object.freeze({
           key: provided.target,
+          ...(provided.staticArgumentOrigins === undefined
+            ? {}
+            : { staticArgumentOrigins: provided.staticArgumentOrigins }),
           ancestors: withAncestor(ownerContext.ancestors, Object.freeze({ key: provided.target })),
           ...(cleanupSpecialization && cleanup !== undefined ? { cleanupMeasure: cleanup } : {}),
         })

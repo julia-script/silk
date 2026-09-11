@@ -736,49 +736,51 @@ static fn validatedTemplate<Args>(
 ) -> Intrinsic.StaticSequence<Part> {
   let plan = parseTemplate(template)
   let parts = plan.parts
-  let descriptor = Reflect.typeOf<Args>()
-  let kind = Reflect.typeKind<Args>(descriptor)
+  static if plan.mode != PartMode.Literal {
+    let descriptor = Reflect.typeOf<Args>()
+    let kind = Reflect.typeKind<Args>(descriptor)
 
-  static for part in parts {
-    static if part.mode == PartMode.Positional {
-      if !hasPositionalField<Args>(part.ordinal) { compileError(template) }
-    }
-    static if part.mode == PartMode.Named {
-      let mut found = false
-      static for field in Reflect.fields<Args>() {
-        static if Reflect.fieldKind(field) == labeledFieldKind {
-          static if Reflect.fieldLabel(field) == part.text { found = true }
-        }
+    static for part in parts {
+      static if part.mode == PartMode.Positional {
+        if !hasPositionalField<Args>(part.ordinal) { compileError(template) }
       }
-      if !found {
-        compileError(
-          StaticText.concat(
-            part.source,
+      static if part.mode == PartMode.Named {
+        let mut found = false
+        static for field in Reflect.fields<Args>() {
+          static if Reflect.fieldKind(field) == labeledFieldKind {
+            static if Reflect.fieldLabel(field) == part.text { found = true }
+          }
+        }
+        if !found {
+          compileError(
             StaticText.concat(
-              "; available visible fields: ",
-              visibleNamedFields<Args>()
+              part.source,
+              StaticText.concat(
+                "; available visible fields: ",
+                visibleNamedFields<Args>()
+              )
             )
           )
-        )
-      }
-    }
-  }
-
-  static if plan.mode == PartMode.Positional {
-    if kind != positionalKind && kind != anonymousPositionalKind {
-      compileError(template)
-    }
-    static for field in Reflect.fields<Args>() {
-      static if Reflect.fieldKind(field) == positionalFieldKind {
-        static if !hasPositionalPart(parts, Reflect.fieldOrdinal(field)) {
-          compileError(template)
         }
       }
     }
-  }
-  static if plan.mode == PartMode.Named {
-    if kind != namedKind && kind != anonymousNamedKind {
-      compileError(template)
+
+    static if plan.mode == PartMode.Positional {
+      if kind != positionalKind && kind != anonymousPositionalKind {
+        compileError(template)
+      }
+      static for field in Reflect.fields<Args>() {
+        static if Reflect.fieldKind(field) == positionalFieldKind {
+          static if !hasPositionalPart(parts, Reflect.fieldOrdinal(field)) {
+            compileError(template)
+          }
+        }
+      }
+    }
+    static if plan.mode == PartMode.Named {
+      if kind != namedKind && kind != anonymousNamedKind {
+        compileError(template)
+      }
     }
   }
   return move parts
@@ -1268,4 +1270,3 @@ fn narrowIsize(value: i64) -> Result<isize, ParseError> {
     Option<isize>.Some { value: narrowed } => Result.succeed<isize, ParseError>(narrowed)
   }
 }
-

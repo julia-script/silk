@@ -542,6 +542,7 @@ const encodeExecutableOwner = (value: Type.ExecutableSpecializationOwner): Seria
   tag: 'ExecutableOwner',
   declaration: { module: value.declaration.module, name: value.declaration.name },
   typeArguments: value.typeArguments.map(encodeGenericArgumentNode),
+  staticArgumentKeys: value.staticArgumentKeys,
 })
 
 const decodeExecutableOwner = (value: unknown): Type.ExecutableSpecializationOwner => {
@@ -557,6 +558,11 @@ const decodeExecutableOwner = (value: unknown): Type.ExecutableSpecializationOwn
     typeArguments: Object.freeze(
       serializedArray(encoded.typeArguments, 'executable owner arguments').map(
         decodeGenericArgumentNode,
+      ),
+    ),
+    staticArgumentKeys: Object.freeze(
+      serializedArray(encoded.staticArgumentKeys, 'executable owner static arguments').map((key) =>
+        serializedString(key, 'executable owner static argument'),
       ),
     ),
   })

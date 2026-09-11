@@ -498,6 +498,21 @@ export const loanEndsOf = (
     }),
   )
 
+const isRepresentationIdenticalGenericForwarding = (
+  declared: SemanticType,
+  actual: SemanticType,
+): boolean => {
+  if (!Type.someSubterm(declared, Type.isParameter) || !Type.someSubterm(actual, Type.isParameter))
+    return false
+  const inferred = new Map<string, Type.GenericArgument>()
+  const inference = TypeInference.inferOpenGenericArguments(declared, actual, inferred)
+  return (
+    inference.matches &&
+    inference.conflicts.length === 0 &&
+    Type.equals(Type.substitute(declared, inferred), actual)
+  )
+}
+
 export const hirExpression = (
   fact: ExpressionFact,
   borrow?: Hir.BorrowId,
@@ -691,6 +706,8 @@ export const hirExpression = (
         })
   }
   if (fact._tag === 'Identifier') {
+    if (fact.staticValue !== undefined && fact.type._tag === 'Available')
+      return staticValueExpression(fact.staticValue, fact.type.type, fact.syntax.span)
     if (
       fact.reference._tag === 'ResolvedBinding' &&
       fact.reference.binding.staticValue !== undefined &&
@@ -1622,6 +1639,11 @@ export const hirExpression = (
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
     const substitution = fact.contract.substitution
     const target = fact.reference.operation
+    const staticArgumentOrigins = Object.freeze(
+      (fact._tag === 'Call' ? (fact.staticArguments ?? []) : []).map(
+        (argument) => argument.textOrigin,
+      ),
+    )
     return Object.freeze({
       _tag: 'ServiceEffectConstruct',
       service,
@@ -1629,23 +1651,44 @@ export const hirExpression = (
       role: requirement.role,
       access: requirement.access,
       typeArguments: fact.contract.typeArguments,
+      staticArguments: Object.freeze(
+        (fact._tag === 'Call' ? (fact.staticArguments ?? []) : []).map(
+          (argument) => argument.value,
+        ),
+      ),
+      ...(staticArgumentOrigins.some((origin) => origin !== undefined)
+        ? { staticArgumentOrigins }
+        : {}),
       arguments: Object.freeze(
-        fact.arguments.map((argument, ordinal) => {
+        fact.arguments.flatMap((argument, ordinal) => {
           const parameter = target.parameters.at(ordinal)
+          if (parameter?.phase === 'Static') return []
           const borrowId = argumentBorrowId(argument, ordinal)
-          return parameter?.declaredType._tag === 'Resolved'
-            ? hirExpectedExpression(
-                argument.expression,
-                Type.substitute(parameter.declaredType.type, substitution),
-                'Argument',
-                parameter.syntax.span,
-                borrowId,
-                options,
-              )
-            : hirExpression(argument.expression, borrowId, options)
+          const genericForwarding =
+            parameter?.declaredType._tag === 'Resolved' &&
+            argument.expression.type._tag === 'Available' &&
+            isRepresentationIdenticalGenericForwarding(
+              parameter.declaredType.type,
+              argument.expression.type.type,
+            )
+          return [
+            parameter?.declaredType._tag === 'Resolved' && !genericForwarding
+              ? hirExpectedExpression(
+                  argument.expression,
+                  Type.substitute(parameter.declaredType.type, substitution),
+                  'Argument',
+                  parameter.syntax.span,
+                  borrowId,
+                  options,
+                )
+              : hirExpression(argument.expression, borrowId, options),
+          ]
         }),
       ),
-      loanEnds: loanEndsOf(fact.arguments),
+      loanEnds: loanEndsOf(
+        fact.arguments,
+        (ordinal) => target.parameters.at(ordinal)?.phase !== 'Static',
+      ),
       type: fact.type.type,
       span: fact.syntax.span,
     })
@@ -1687,8 +1730,15 @@ export const hirExpression = (
           const parameter = target.parameters.at(ordinal)
           if (parameter?.phase === 'Static') return []
           const borrowId = argumentBorrowId(argument, ordinal)
+          const genericForwarding =
+            parameter?.declaredType._tag === 'Resolved' &&
+            argument.expression.type._tag === 'Available' &&
+            isRepresentationIdenticalGenericForwarding(
+              parameter.declaredType.type,
+              argument.expression.type.type,
+            )
           return [
-            parameter?.declaredType._tag === 'Resolved'
+            parameter?.declaredType._tag === 'Resolved' && !genericForwarding
               ? hirExpectedExpression(
                   argument.expression,
                   Type.substitute(parameter.declaredType.type, substitution),

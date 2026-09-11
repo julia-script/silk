@@ -263,6 +263,8 @@ export const lowerRunEffectComposite = (
     const runnerTypeArguments =
       alternative.storage?.realization.runnerArguments ??
       alternative.environment.instance.typeArguments
+    const runnerInstance =
+      alternative.storage?.realization.runnerInstance ?? alternative.environment.instance
     const tagMappings = Type.failureMembers(alternative.type).flatMap((failure, sourceOrdinal) => {
       const target = Type.failureMembers(effectType.contract).findIndex(
         (candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(failure),
@@ -276,6 +278,9 @@ export const lowerRunEffectComposite = (
             type: alternative,
             runner,
             runnerTypeArguments,
+            ...(runnerInstance.staticArguments.length === 0
+              ? {}
+              : { runnerStaticArguments: runnerInstance.staticArguments }),
             tagMappings,
             arguments: runtimeRequirementArguments(provided),
           }),
@@ -381,6 +386,8 @@ export const runCaughtEffectValue = (
   const valid = fn.alloc(boolType)
   const success = fn.alloc(successType)
   const failure = fn.alloc(failureType)
+  const runnerInstance =
+    effectType.storage?.realization.runnerInstance ?? effectType.environment.instance
   fn.emit(
     Object.freeze({
       _tag: 'CatchEffect' as const,
@@ -393,6 +400,9 @@ export const runCaughtEffectValue = (
       runnerTypeArguments:
         effectType.storage?.realization.runnerArguments ??
         effectType.environment.instance.typeArguments,
+      ...(runnerInstance.staticArguments.length === 0
+        ? {}
+        : { runnerStaticArguments: runnerInstance.staticArguments }),
       arguments: runtimeRequirementArguments(provided),
       outcomeType,
       failureValueType,
@@ -1422,7 +1432,7 @@ export const lowerServiceEffectValue = (
     if (lowered === 'Transferred' || lowered === undefined) return lowered
     loweredArguments.push(lowered.result)
   }
-  const call = fn.call(subject.span, target)
+  const call = fn.call(subject.span, target, undefined, subject.staticArguments)
   if (
     call === undefined ||
     call.target.declaration.module !== target.module ||
@@ -1434,7 +1444,7 @@ export const lowerServiceEffectValue = (
     (call?.resultEffect === undefined
       ? undefined
       : effectValueByIdentity(fn.layout, call.resultEffect)) ??
-    fn.effectResults.get(instanceText(target, typeArguments))
+    fn.effectResults.get(instanceText(target, typeArguments, call?.target.staticArguments))
   if (effectValue === undefined) return undefined
   const effect = fn.alloc(effectValue)
   fn.emit(
@@ -1443,6 +1453,9 @@ export const lowerServiceEffectValue = (
       destination: effect,
       target,
       typeArguments,
+      ...(call.target.staticArguments.length === 0
+        ? {}
+        : { staticArguments: call.target.staticArguments }),
       arguments: Object.freeze([provided.local, ...loweredArguments]),
       type: effectValue,
       provenance: authored(subject.span),

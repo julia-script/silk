@@ -13,7 +13,7 @@ import type {} from './LowerExpression.js'
 import type * as Mir from './Mir.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Specialization from './Specialization.js'
-import type * as StaticValue from './StaticValue.js'
+import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 
 export interface GeneratedBlockEffectRunner {
@@ -166,7 +166,11 @@ export const effectValueByIdentity = (
         owner !== undefined &&
         candidate.instance.declaration.module === owner.declaration.module &&
         candidate.instance.declaration.name === owner.declaration.name &&
-        sameArguments(candidate.instance.typeArguments, owner.typeArguments),
+        sameArguments(candidate.instance.typeArguments, owner.typeArguments) &&
+        candidate.instance.staticArguments.length === owner.staticArgumentKeys.length &&
+        candidate.instance.staticArguments.every(
+          (argument, ordinal) => StaticValue.key(argument) === owner.staticArgumentKeys.at(ordinal),
+        ),
     )
   return environment === undefined
     ? undefined

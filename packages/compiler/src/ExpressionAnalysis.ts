@@ -3087,6 +3087,7 @@ export const exactEffectDeclarationRepresentation = (
   declaration: DeclarationFact,
   contract: Type.Effect,
   typeArguments: ReadonlyArray<Type.GenericArgument>,
+  staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
 ): Type.ExactRepresentationArgument | undefined => {
   if (declaration.functionKind !== 'Effect' || declaration.canonical._tag !== 'Canonical')
     return undefined
@@ -3096,6 +3097,7 @@ export const exactEffectDeclarationRepresentation = (
       name: declaration.canonical.id.name,
     }),
     typeArguments,
+    staticArgumentKeys: Object.freeze(staticArguments.map(StaticValue.key)),
   })
   const site: Hir.EffectSiteId = Object.freeze({
     _tag: 'EffectSiteId',
@@ -3173,6 +3175,7 @@ export const effectCallableApplicationRepresentation = (
       ...declaredArguments,
       ...hiddenEffectArguments(callee.reference.declaration, substitution, applicationArgument),
     ]),
+    Object.freeze([]),
   )
 }
 
@@ -3238,6 +3241,7 @@ export function representationOfExpression(
           (ordinal) => expression.arguments.at(ordinal)?.expression,
         ),
       ]),
+      Object.freeze((expression.staticArguments ?? []).map((argument) => argument.value)),
     )
   }
   if (
@@ -9340,8 +9344,21 @@ export function analyzeExpression(
       (value.fact.reference._tag === 'Resolved' ||
         value.fact.reference._tag === 'ResolvedBinding' ||
         value.fact.reference._tag === 'ResolvedPattern')
-    )
-      return value
+    ) {
+      const local =
+        value.fact.reference._tag === 'Resolved'
+          ? value.fact.reference.parameter
+          : value.fact.reference.binding
+      const staticValue = resolution.staticContext?.values.get(
+        StaticEvaluation.localValueKey(local),
+      )
+      return staticValue === undefined
+        ? value
+        : Object.freeze({
+            ...value,
+            fact: Object.freeze({ ...value.fact, staticValue }),
+          })
+    }
     return (
       analyzeConstantReference(source, node, resolution) ??
       analyzeForeignStaticReference(source, node, resolution) ??
@@ -10122,10 +10139,10 @@ export const finishDeclarationCall = (
     resolution,
   )
   const phaseDiagnostics =
-    reference._tag !== 'Resolved'
+    callable === undefined
       ? Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([])
       : Object.freeze(
-          reference.declaration.parameters.flatMap((parameter) => {
+          callable.parameters.flatMap((parameter) => {
             if (parameter.phase !== 'Runtime') return []
             const argument = argumentsResult.facts.at(parameter.id.ordinal)
             return argument?.type._tag === 'Available' &&
@@ -10143,7 +10160,7 @@ export const finishDeclarationCall = (
         )
   const staticArguments = (() => {
     if (
-      reference._tag !== 'Resolved' ||
+      callable === undefined ||
       resolution.staticContext === undefined ||
       resolution.deferStaticCalls === true
     )
@@ -10156,7 +10173,7 @@ export const finishDeclarationCall = (
     const values: Array<{ readonly parameter: ParameterFact; readonly value: StaticValue.Value }> =
       []
     const diagnostics: Array<Diagnostic.Diagnostic> = []
-    for (const parameter of reference.declaration.parameters) {
+    for (const parameter of callable.parameters) {
       if (parameter.phase !== 'Static') continue
       const argument = argumentsResult.facts.at(parameter.id.ordinal)
       if (argument === undefined) continue

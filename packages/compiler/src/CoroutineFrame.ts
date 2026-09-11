@@ -3,6 +3,7 @@ import { alignUp } from './internal/Align.js'
 import * as Layout from './Layout.js'
 import * as ValueStorage from './ValueStorage.js'
 import * as Mir from './Mir.js'
+import * as StaticValue from './StaticValue.js'
 import * as SilkType from './Type.js'
 
 const pointKey = (point: Mir.SuspensionPointId): string =>
@@ -10,6 +11,7 @@ const pointKey = (point: Mir.SuspensionPointId): string =>
     point.owner.declaration.module,
     point.owner.declaration.name,
     ...point.owner.typeArguments.map(SilkType.genericArgumentKey),
+    ...point.owner.staticArguments.map(StaticValue.key),
     ...point.owner.contractRow,
     point.sourceId,
     point.spanStart,

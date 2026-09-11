@@ -9,12 +9,75 @@ const encoder = new TextEncoder()
 const snapshot = (source: string, target = 'aarch64-apple-darwin') =>
   Analysis.ofSourceRealized('logging/main', encoder.encode(source), target)
 
-it.effect('keeps missing providers and invalid message inputs explicit', () =>
+it.effect('specializes static logging templates without exposing formatting requirements', () =>
+  Effect.gen(function* () {
+    const frontend = yield* snapshot(`import silk.effect { Effect }
+import silk.logger { LogError, LogLevel, Logger }
+
+effect fn exercise(level: LogLevel) -> () ! LogError ? &mut Logger {
+  let args = .{ name: "Julia", count: 2 }
+  run Effect.log("literal", &())
+  run Effect.logDebug("{} {}", &(1, "two"))
+  run Effect.logWarning("{name} {count}", &args)
+  run Effect.logAt(level, "temporary {}", &("pack",))
+  return ()
+}
+
+effect fn program() -> () ! LogError {
+  let mut logger = Logger.inMemoryProvider()
+  let level = LogLevel.Warning
+  return run exercise(level) |> Effect.provideMut(&mut logger)
+}
+effect fn ignore(error: LogError) -> () { return () }
+pub fn main() -> i32 {
+  run Effect.catchAll(program(), ignore)
+  return 42
+}`)
+    assert.deepEqual(Analysis.diagnostics(frontend), [])
+    assert.strictEqual(frontend.mir._tag, 'Available')
+  }),
+)
+
+it.effect('applies Format template and Display diagnostics to logging calls', () =>
+  Effect.gen(function* () {
+    const frontend = yield* snapshot(`import silk.effect { Effect }
+import silk.logger { LogError, Logger }
+effect fn invalid() -> () ! LogError ? &mut Logger {
+  run Effect.log("open {", &(1,))
+  run Effect.log("{}{}", &(1,))
+  run Effect.log("{missing}", &.{ name: "Julia" })
+  return run Effect.log("{enabled}", &.{ enabled: true })
+}
+effect fn program() -> () ! LogError {
+  let mut logger = Logger.inMemoryProvider()
+  return run invalid() |> Effect.provideMut(&mut logger)
+}
+effect fn ignore(error: LogError) -> () { return () }
+pub fn main() -> i32 {
+  run Effect.catchAll(program(), ignore)
+  return 42
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(frontend).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: [diagnostic.span.sourceId, diagnostic.span.start, diagnostic.span.end],
+      })),
+      [
+        { code: 'SEM0177', span: ['logging/main', 146, 147] },
+        { code: 'SEM0177', span: ['logging/main', 175, 179] },
+        { code: 'SEM0177', span: ['logging/main', 207, 216] },
+        { code: 'SEM0083', span: ['silk/format', 14495, 14517] },
+      ],
+    )
+  }),
+)
+
+it.effect('keeps missing providers and invalid logging inputs explicit', () =>
   Effect.gen(function* () {
     const missing = yield* snapshot(`import silk.effect { Effect }
 import silk.logger { LogError }
 pub effect fn main() -> () ! LogError {
-  return run Effect.log("missing")
+  return run Effect.log("missing", &())
 }`)
     assert.include(
       Analysis.diagnostics(missing).map((diagnostic) => diagnostic.code),
@@ -23,14 +86,14 @@ pub effect fn main() -> () ! LogError {
 
     const invalidMessage = yield* snapshot(`import silk.effect { Effect }
 pub fn main() -> i32 {
-  let effect = Effect.log(42)
+  let effect = Effect.log(42, &())
   return 0
 }`)
     assert.isAbove(Analysis.diagnostics(invalidMessage).length, 0)
 
     const invalidLevel = yield* snapshot(`import silk.effect { Effect }
 pub fn main() -> i32 {
-  let effect = Effect.logAt(42, "message")
+  let effect = Effect.logAt(42, "message", &())
   return 0
 }`)
     assert.isAbove(Analysis.diagnostics(invalidLevel).length, 0)
@@ -52,7 +115,7 @@ ${constraint} {
 }
 
 effect fn read() -> () ! LogError ? &mut Logger {
-  run Effect.log("Reading")
+  run Effect.log("Reading", &())
 }
 
 pub effect fn main() -> () ! LogError {
@@ -146,7 +209,7 @@ fn invoke<A, E, ?R, F: fn(once Effect<A ! E ? R>) -> Effect<A ! E>>(operation: F
 }
 pub fn main() -> i32 {
   let mut logger = Logger.inMemoryProvider()
-  let operation = invoke(Effect.provideMut<Logger>(&mut logger), Effect.log("indirect"))
+  let operation = invoke(Effect.provideMut<Logger>(&mut logger), Effect.log("indirect", &()))
   return 42
 }`,
         `import silk.effect { Effect }

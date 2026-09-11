@@ -13,7 +13,7 @@ import * as TypeInference from './internal/TypeInference.js'
 import * as RowAlgebra from './RowAlgebra.js'
 import * as Specialization from './Specialization.js'
 import type * as StaticEvaluation from './StaticEvaluation.js'
-import type * as StaticValue from './StaticValue.js'
+import * as StaticValue from './StaticValue.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import type * as SourceSpan from './SourceSpan.js'
 import type * as Target from './Target.js'
@@ -346,7 +346,11 @@ export const make = (operations: Operations) => {
         expected !== undefined &&
         Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(expected)
       )
-    })
+    }) &&
+    left.staticArguments.length === right.staticArgumentKeys.length &&
+    left.staticArguments.every(
+      (argument, ordinal) => StaticValue.key(argument) === right.staticArgumentKeys.at(ordinal),
+    )
   /** Converts proved strict-subterm obligations into the only structurally descending call edges. */
   const witnessDependencyCallTargets = (
     index: DeclarationIndex.Index,
@@ -933,6 +937,7 @@ export const make = (operations: Operations) => {
                 name: context.owner.declaration.name,
               }),
               typeArguments: context.owner.typeArguments,
+              staticArgumentKeys: Object.freeze(context.owner.staticArguments.map(StaticValue.key)),
             })
       const target = Hir.callableTargetIdentity(expression.target)
       const identity =
@@ -980,6 +985,7 @@ export const make = (operations: Operations) => {
                 name: context.owner.declaration.name,
               }),
               typeArguments: context.owner.typeArguments,
+              staticArgumentKeys: Object.freeze(context.owner.staticArguments.map(StaticValue.key)),
             }),
           )
     }
@@ -1821,6 +1827,7 @@ export const make = (operations: Operations) => {
       target.contract,
       target.declaration.typeParameters.map((parameter) => parameter.type),
       [...typeArguments, ...hiddenArguments],
+      expression.staticArguments,
     )
   }
 
@@ -2644,7 +2651,13 @@ export const make = (operations: Operations) => {
               (candidate) =>
                 Type.runtimeCallableEnvironmentIdentityKey(environment) ===
                 Type.runtimeCallableEnvironmentIdentityKey(
-                  Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+                  Hir.callableEnvironmentIdentity(candidate.site, {
+                    declaration: candidate.owner.declaration,
+                    typeArguments: candidate.owner.typeArguments,
+                    staticArgumentKeys: Object.freeze(
+                      candidate.owner.staticArguments.map(StaticValue.key),
+                    ),
+                  }),
                 ),
             ) ?? resolveCallable(identity))
       if (environment !== undefined && base === undefined) continue
@@ -3080,7 +3093,13 @@ export const make = (operations: Operations) => {
           identity.environment !== undefined &&
           Type.runtimeCallableEnvironmentIdentityKey(identity.environment) ===
             Type.runtimeCallableEnvironmentIdentityKey(
-              Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+              Hir.callableEnvironmentIdentity(candidate.site, {
+                declaration: candidate.owner.declaration,
+                typeArguments: candidate.owner.typeArguments,
+                staticArgumentKeys: Object.freeze(
+                  candidate.owner.staticArguments.map(StaticValue.key),
+                ),
+              }),
             ) &&
           Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
           identity.typeArguments.length === candidate.typeArguments.length &&
@@ -3246,7 +3265,12 @@ export const make = (operations: Operations) => {
         (candidate) =>
           candidate.owner.declaration.module === owner.declaration.module &&
           candidate.owner.declaration.name === owner.declaration.name &&
-          sameVisibleTypeArguments(candidate.owner.typeArguments, owner.typeArguments),
+          sameVisibleTypeArguments(candidate.owner.typeArguments, owner.typeArguments) &&
+          candidate.owner.staticArguments.length === owner.staticArgumentKeys.length &&
+          candidate.owner.staticArguments.every(
+            (argument, ordinal) =>
+              StaticValue.key(argument) === owner.staticArgumentKeys.at(ordinal),
+          ),
       )
       return visible.length === 1 ? visible.at(0)?.identity : undefined
     }
@@ -3626,7 +3650,14 @@ export const make = (operations: Operations) => {
             const span = service.expression.span
             providedTargets.set(
               `${keyText(instance.key)}\0${keyText(target)}\0${span.sourceId}:${span.start}:${span.end}`,
-              Object.freeze({ owner: instance.key, target, span }),
+              Object.freeze({
+                owner: instance.key,
+                target,
+                span,
+                ...(service.expression.staticArgumentOrigins === undefined
+                  ? {}
+                  : { staticArgumentOrigins: service.expression.staticArgumentOrigins }),
+              }),
             )
             addDependency(execution, executionNodeForKey(target))
           }
@@ -3662,7 +3693,14 @@ export const make = (operations: Operations) => {
             const span = service.expression.span
             providedTargets.set(
               `${keyText(instance.key)}\0${keyText(target)}\0${span.sourceId}:${span.start}:${span.end}`,
-              Object.freeze({ owner: instance.key, target, span }),
+              Object.freeze({
+                owner: instance.key,
+                target,
+                span,
+                ...(service.expression.staticArgumentOrigins === undefined
+                  ? {}
+                  : { staticArgumentOrigins: service.expression.staticArgumentOrigins }),
+              }),
             )
             addDependency(execution, executionNodeForKey(target))
           }
@@ -4032,6 +4070,9 @@ export const make = (operations: Operations) => {
                 owner: serviceCall.context.owner,
                 target,
                 span: serviceCall.expression.span,
+                ...(serviceCall.expression.staticArgumentOrigins === undefined
+                  ? {}
+                  : { staticArgumentOrigins: serviceCall.expression.staticArgumentOrigins }),
               }),
             )
             const targetNode = executionNodeForKey(target)

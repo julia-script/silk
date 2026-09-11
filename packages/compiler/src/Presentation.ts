@@ -459,7 +459,7 @@ export const serviceOperation = (self: DeclarationFacts.ServiceOperationFact): P
   const parameters = self.parameters
     .map((parameter) => {
       const parameterName = parameter.name._tag === 'Present' ? parameter.name.spelling : '_'
-      return `${parameterName}: ${declaredType(parameter.declaredType)}`
+      return `${parameter.phase === 'Static' ? 'static ' : ''}${parameterName}: ${declaredType(parameter.declaredType)}`
     })
     .join(', ')
   return Object.freeze({
