@@ -1337,3 +1337,33 @@ it.effect('extends a view loan through a use nested in a place replace', () =>
     )
   }),
 )
+
+it.effect('enforces X25519 consumption, private storage and Random provision', () =>
+  Effect.gen(function* () {
+    const source = `import silk.x25519 { X25519 }
+import silk.u8
+fn reused(key: X25519, peer: &[u8]) -> () {
+  let agreed = X25519.agree(move key, peer)
+  let public = X25519.publicKey(&key)
+}
+fn privateStorage(key: &X25519) -> () {
+  let secret = key.scalar
+}
+fn missingRandom() -> () {
+  let key = run X25519.generate()
+}
+pub fn main() -> i32 { return 0 }`
+    const self = yield* analyze(source)
+    assert.deepEqual(
+      Analysis.diagnostics(self).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0001', span: '&key' },
+        { code: 'SEM0028', span: 'scalar' },
+        { code: 'SEM0071', span: 'run X25519.generate()' },
+      ],
+    )
+  }),
+)

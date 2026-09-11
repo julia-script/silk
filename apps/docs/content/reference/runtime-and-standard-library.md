@@ -950,3 +950,22 @@ The following are deliberately outside the first stable model:
 - alternative standard-library profiles or “no-stdlib” project configuration in the official
   toolchain; and
 - omitted struct fields, field defaults, and any deliberate integration with ordinary `Option`.
+
+## X25519 key agreement {#STDLIB-X25519}
+
+`silk.x25519.X25519` owns an ephemeral scalar and its canonical 32-byte little-endian public key.
+Use `X25519.generate()` with explicit exclusive `Random` provision for production: each call
+requests exactly 32 fresh bytes, clamps them and derives X25519(secret, 9). Provider failure
+remains fatal, without retry or insecure fallback. Deterministic `fromSecret` imports exactly
+32 borrowed bytes into owned storage; callers must not reimport a scalar for distinct exchanges.
+
+`publicKey(&key)` returns the public bytes without consuming the owner. `agree(move key, peer)`
+consumes it on success or failure. Peer encodings must be exactly 32 bytes. Agreement masks the
+high bit, reduces noncanonical coordinates, admits curve and twist inputs, and rejects an all-zero
+result. Width failures and all-zero results use `X25519Error`. No allocator or cryptographic
+provider is required by the arithmetic; fixed local limbs and a 255-step ladder implement RFC 7748.
+
+Pass the raw shared result into the protocol's key derivation. This primitive does not authenticate
+a peer or implement TLS. Ownership prevents accidental reuse of the same owner, but does not
+guarantee physical secret erasure. Functional vectors and inspection of a particular compiler's
+output do not establish universal constant-time execution or production security.

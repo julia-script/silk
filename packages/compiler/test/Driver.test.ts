@@ -1,3 +1,4 @@
+import { x25519WasmAcceptanceSource } from './support/x25519Acceptance.js'
 import * as AbiManifest from '../src/AbiManifest.js'
 import * as ForeignContract from '../src/ForeignContract.js'
 import * as Target from '../src/Target.js'
@@ -618,6 +619,28 @@ it.effect('executes bounded certificate decoding through LLVM-to-Wasm', () =>
     const outcome = yield* compileSource('certificate.wasm', certificateWasmAcceptanceSource, {
       compilation: {
         root: SourceFile.make('memory/certificate-wasm', ascii(certificateWasmAcceptanceSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+    assert.deepEqual(WebAssembly.Module.imports(module), [])
+    const instance = new WebAssembly.Instance(module)
+    const main = instance.exports['main']
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 0)
+  }),
+)
+
+// The native corpus covers the full profile; this one portability leg exercises bounded field arithmetic
+// and ephemeral ownership with wasm32 pointer widths and the shipped Wasm allocator.
+it.effect('executes bounded X25519 agreement through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('x25519.wasm', x25519WasmAcceptanceSource, {
+      compilation: {
+        root: SourceFile.make('memory/x25519-wasm', ascii(x25519WasmAcceptanceSource)),
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',

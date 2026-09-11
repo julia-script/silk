@@ -1,3 +1,4 @@
+import { x25519AcceptanceSource } from './x25519Acceptance.js'
 import type * as RuntimeComponent from '../../src/RuntimeComponent.js'
 import { borrowedTemporaryStream, borrowedTemporaryLifecycle } from './borrowedTemporaries.js'
 import { partialSuspension } from './partialSuspension.js'
@@ -7824,6 +7825,11 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     nativeSource: replaceDropProgram,
     nativeStdout: '1243',
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'x25519',
+    source: x25519AcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'hmac-hkdf',

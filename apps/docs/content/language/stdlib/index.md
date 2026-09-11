@@ -133,6 +133,7 @@ Each page describes the selected source API for the listed profiles. Distinct su
 | [`silk/wasm_start`](./wasm-start.md)                           | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu-no-libc`, `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu-no-libc`                           |                   0 |
 | [`silk/wasm_start`](./wasm-start.profile-2.md)                 | `wasm32-unknown-unknown`                                                                                                                                                           |                   0 |
 | [`silk/writer`](./writer.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu-no-libc`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu-no-libc` |                   2 |
+| [`silk/x25519`](./x25519.md)                                   | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu-no-libc`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu-no-libc` |                   2 |
 | [`silk/zstd`](./zstd.md)                                       | `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu-no-libc`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu-no-libc` |                   6 |
 
 Profile identities:
