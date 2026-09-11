@@ -26,7 +26,13 @@
 //!
 //! # Examples
 //!
-//! ## Construct a source without reading the file
+//! ## Configure explicit regular PEM files without reading them
+//!
+//! Debian applications can explicitly select the generated regular bundle without scanning its
+//! sibling certificate links. Darwin applications must first export their chosen authorities to a
+//! caller-managed regular PEM file; this actor does not read the system keychain. Both constructors
+//! below only validate and copy configuration, so the example is executable on either supported
+//! platform without opening either file.
 //!
 //! ```silk
 //! import silk.allocator as Allocators {Allocator, OutOfMemoryError}
@@ -37,11 +43,19 @@
 //!
 //! effect fn program() -> i32 ! FileError | TrustSourceError | OutOfMemoryError {
 //!   let mut allocator = Allocator.systemAllocatorProvider()
-//!   let path = run Path.fromBytes(b"/trust.pem")
+//!   let debianPath = run Path.fromBytes(b"/ca-certificates.crt")
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
-//!   let source = run NativeFileTrustSource.make(b"/tmp", &path)
+//!   let debian = run NativeFileTrustSource.make(b"/etc/ssl/certs", &debianPath)
 //!     |> Effect.provideMut<Allocator>(&mut allocator)
-//!   drop source
+//!   let darwinPath = run Path.fromBytes(b"/trust.pem")
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   let darwin = run NativeFileTrustSource.make(
+//!     b"/Library/Application Support/Example",
+//!     &darwinPath,
+//!   )
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   drop debian
+//!   drop darwin
 //!   return 42
 //! }
 //!
