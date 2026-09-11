@@ -31,6 +31,9 @@ const array = (hex: string): string => `[${bytes(hex)}]`
 const rfc = fixture('rfc8448-client-finished')
 const aes256 = fixture('independent-aes256-application')
 const chacha = fixture('independent-chacha-alert')
+const padded = fixture('independent-aes128-padded-application')
+const sequenceOne = fixture('independent-aes128-sequence-one')
+const admittedHeaderTamper = `1703030034${rfc.wire.slice(10, -2)}`
 
 const dependencies = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.bytes { Bytes }
@@ -155,7 +158,18 @@ effect fn fixtureRecord(
     return false
   }
   if unitError(TlsRecordSender.ackWritten(&mut sender, pending - 5)) != 0 { return false }
-  return TlsRecordSender.pendingOutput(&sender).length == 0
+  if TlsRecordSender.pendingOutput(&sender).length != 0 { return false }
+
+  let received = run (TlsRecordReceiver.make(suite, secret) |> Effect.provideMut(&mut allocator))
+  let mut receiver = match move received {
+    Result<TlsRecordReceiver, RecordError>.Failure {error} => { return false }
+    Result<TlsRecordReceiver, RecordError>.Success {value} => move value
+  }
+  if !fed(TlsRecordReceiver.feedInput(&mut receiver, expected), expected.length, InputDemand.RecordReady) {
+    return false
+  }
+  if !recordIs(&receiver, contentType, content) { return false }
+  return unitError(TlsRecordReceiver.consumeRecord(&mut receiver)) == 0
 }
 
 effect fn fragmentedRfc() -> bool ! OutOfMemoryError {
@@ -210,15 +224,15 @@ effect fn coalescingAndFailure() -> bool ! OutOfMemoryError {
   }
   if !recordIs(&receiver, ContentType.Handshake, &content) { return false }
 
-  let mut tampered: [u8; 58] = ${array(rfc.wire)}
-  tampered[57] = tampered[57] ^ 1
+  let mut tagTampered: [u8; 58] = ${array(rfc.wire)}
+  tagTampered[57] = tagTampered[57] ^ 1
   let second = run (TlsRecordReceiver.make(CipherSuite.Aes128GcmSha256, &secret)
     |> Effect.provideMut(&mut allocator))
   let mut failed = match move second {
     Result<TlsRecordReceiver, RecordError>.Failure {error} => { return false }
     Result<TlsRecordReceiver, RecordError>.Success {value} => move value
   }
-  if inputError(TlsRecordReceiver.feedInput(&mut failed, &tampered)) != 5 { return false }
+  if inputError(TlsRecordReceiver.feedInput(&mut failed, &tagTampered)) != 5 { return false }
   if !recordAbsent(&failed) { return false }
   let empty: [u8; 0] = []
   if inputError(TlsRecordReceiver.feedInput(&mut failed, &empty)) != 2 { return false }
@@ -231,7 +245,28 @@ effect fn coalescingAndFailure() -> bool ! OutOfMemoryError {
   }
   let badHeader: [u8; 5] = [22, 3, 3, 0, 53]
   if inputError(TlsRecordReceiver.feedInput(&mut headerFailed, &badHeader)) != 4 { return false }
-  return inputError(TlsRecordReceiver.feedInput(&mut headerFailed, &empty)) == 2
+  if inputError(TlsRecordReceiver.feedInput(&mut headerFailed, &empty)) != 2 { return false }
+
+  let fourth = run (TlsRecordReceiver.make(CipherSuite.Aes128GcmSha256, &secret)
+    |> Effect.provideMut(&mut allocator))
+  let mut ciphertextFailed = match move fourth {
+    Result<TlsRecordReceiver, RecordError>.Failure {error} => { return false }
+    Result<TlsRecordReceiver, RecordError>.Success {value} => move value
+  }
+  let mut ciphertextTampered: [u8; 58] = ${array(rfc.wire)}
+  ciphertextTampered[10] = ciphertextTampered[10] ^ 1
+  if inputError(TlsRecordReceiver.feedInput(&mut ciphertextFailed, &ciphertextTampered)) != 5 {
+    return false
+  }
+
+  let fifth = run (TlsRecordReceiver.make(CipherSuite.Aes128GcmSha256, &secret)
+    |> Effect.provideMut(&mut allocator))
+  let mut aadFailed = match move fifth {
+    Result<TlsRecordReceiver, RecordError>.Failure {error} => { return false }
+    Result<TlsRecordReceiver, RecordError>.Success {value} => move value
+  }
+  let admittedAadTamper: [u8; 57] = ${array(admittedHeaderTamper)}
+  return inputError(TlsRecordReceiver.feedInput(&mut aadFailed, &admittedAadTamper)) == 5
 }
 
 effect fn plaintextAndBounds() -> bool ! OutOfMemoryError {
@@ -250,11 +285,91 @@ effect fn plaintextAndBounds() -> bool ! OutOfMemoryError {
   }
   let emptyWire: [u8; 5] = [23, 3, 3, 0, 0]
   if !same(TlsRecordSender.pendingOutput(&sender), &emptyWire) { return false }
+  if unitError(TlsRecordSender.ackWritten(&mut sender, 5)) != 0 { return false }
+
+  let handshake: [u8; 2] = [1, 2]
+  let handshakeWire: [u8; 7] = [22, 3, 3, 0, 2, 1, 2]
+  if !queued(TlsRecordSender.queueRecord(&mut sender, ContentType.Handshake, &handshake), 2, OutputDemand.RecordQueued) {
+    return false
+  }
+  if !same(TlsRecordSender.pendingOutput(&sender), &handshakeWire) { return false }
 
   let mut receiver = run (TlsRecordReceiver.makePlaintext() |> Effect.provideMut(&mut allocator))
+  let toleratedHandshakeWire: [u8; 7] = [22, 3, 1, 0, 2, 1, 2]
+  if !fed(TlsRecordReceiver.feedInput(&mut receiver, &toleratedHandshakeWire), 7, InputDemand.RecordReady) {
+    return false
+  }
+  if !recordIs(&receiver, ContentType.Handshake, &handshake) { return false }
+  if unitError(TlsRecordReceiver.consumeRecord(&mut receiver)) != 0 { return false }
+
+  let mut oversizedReceiver = run (TlsRecordReceiver.makePlaintext() |> Effect.provideMut(&mut allocator))
   let oversized: [u8; 5] = [23, 3, 3, 65, 1]
-  if inputError(TlsRecordReceiver.feedInput(&mut receiver, &oversized)) != 3 { return false }
-  return inputError(TlsRecordReceiver.feedInput(&mut receiver, &empty)) == 2
+  if inputError(TlsRecordReceiver.feedInput(&mut oversizedReceiver, &oversized)) != 3 { return false }
+  return inputError(TlsRecordReceiver.feedInput(&mut oversizedReceiver, &empty)) == 2
+}
+
+effect fn authenticatedPadding() -> bool ! OutOfMemoryError {
+  let secret: [u8; 32] = ${array(padded.trafficSecret)}
+  let content: [u8; 3] = ${array(padded.content)}
+  let wire: [u8; 29] = ${array(padded.wire)}
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let created = run (TlsRecordReceiver.make(CipherSuite.Aes128GcmSha256, &secret)
+    |> Effect.provideMut(&mut allocator))
+  let mut receiver = match move created {
+    Result<TlsRecordReceiver, RecordError>.Failure {error} => { return false }
+    Result<TlsRecordReceiver, RecordError>.Success {value} => move value
+  }
+  if !fed(TlsRecordReceiver.feedInput(&mut receiver, &wire), 29, InputDemand.RecordReady) {
+    return false
+  }
+  if !recordIs(&receiver, ContentType.ApplicationData, &content) { return false }
+  return unitError(TlsRecordReceiver.consumeRecord(&mut receiver)) == 0
+}
+
+effect fn sequenceOneAfterPartialAck() -> bool ! OutOfMemoryError {
+  let secret: [u8; 32] = ${array(sequenceOne.trafficSecret)}
+  let firstContent: [u8; 1] = [8]
+  let secondContent: [u8; 1] = ${array(sequenceOne.content)}
+  let secondWire: [u8; 23] = ${array(sequenceOne.wire)}
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let madeSender = run (TlsRecordSender.make(CipherSuite.Aes128GcmSha256, &secret)
+    |> Effect.provideMut(&mut allocator))
+  let mut sender = match move madeSender {
+    Result<TlsRecordSender, RecordError>.Failure {error} => { return false }
+    Result<TlsRecordSender, RecordError>.Success {value} => move value
+  }
+  let madeReceiver = run (TlsRecordReceiver.make(CipherSuite.Aes128GcmSha256, &secret)
+    |> Effect.provideMut(&mut allocator))
+  let mut receiver = match move madeReceiver {
+    Result<TlsRecordReceiver, RecordError>.Failure {error} => { return false }
+    Result<TlsRecordReceiver, RecordError>.Success {value} => move value
+  }
+
+  if !queued(TlsRecordSender.queueRecord(&mut sender, ContentType.ApplicationData, &firstContent), 1, OutputDemand.RecordQueued) {
+    return false
+  }
+  let firstWire = TlsRecordSender.pendingOutput(&sender)
+  let firstLength = firstWire.length
+  if !fed(TlsRecordReceiver.feedInput(&mut receiver, firstWire), firstLength, InputDemand.RecordReady) {
+    return false
+  }
+  if !recordIs(&receiver, ContentType.ApplicationData, &firstContent) { return false }
+  if unitError(TlsRecordReceiver.consumeRecord(&mut receiver)) != 0 { return false }
+
+  if unitError(TlsRecordSender.ackWritten(&mut sender, 1)) != 0 { return false }
+  let afterOne = TlsRecordSender.pendingOutput(&sender)
+  if afterOne.length != firstLength - 1 || afterOne[0] != 3 { return false }
+  if unitError(TlsRecordSender.ackWritten(&mut sender, firstLength - 1)) != 0 { return false }
+
+  if !queued(TlsRecordSender.queueRecord(&mut sender, ContentType.ApplicationData, &secondContent), 1, OutputDemand.RecordQueued) {
+    return false
+  }
+  if !same(TlsRecordSender.pendingOutput(&sender), &secondWire) { return false }
+  if !fed(TlsRecordReceiver.feedInput(&mut receiver, &secondWire), 23, InputDemand.RecordReady) {
+    return false
+  }
+  if !recordIs(&receiver, ContentType.ApplicationData, &secondContent) { return false }
+  return unitError(TlsRecordReceiver.consumeRecord(&mut receiver)) == 0
 }
 
 effect fn maximumContent() -> bool ! OutOfMemoryError {
@@ -317,8 +432,10 @@ effect fn publicCases() -> i32 ! OutOfMemoryError {
   if !(run fragmentedRfc()) { return 4 }
   if !(run coalescingAndFailure()) { return 5 }
   if !(run plaintextAndBounds()) { return 6 }
-  if !(run maximumContent()) { return 7 }
-  if !(run constructorBounds()) { return 8 }
+  if !(run authenticatedPadding()) { return 7 }
+  if !(run sequenceOneAfterPartialAck()) { return 8 }
+  if !(run maximumContent()) { return 9 }
+  if !(run constructorBounds()) { return 10 }
   return 42
 }
 
