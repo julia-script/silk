@@ -1,6 +1,6 @@
 # HTTPS identity fixture matrix v1
 
-Design fixtures only: none of these rows claim an executing matcher or certificate decoder.
+Matrix v1 is the oracle for the runtime matcher corpus and SAN adapter integration fixtures.
 Freeze expectations against RFC 9525 (November 2023), RFC 9110 (June 2022), RFC 5280 (May 2008),
 RFC 3986 (January 2005), and the webpki comparison at commit
 `3d0adc46704c1d985a9fefe2034650488d96d49e`. Links and policy differences are in

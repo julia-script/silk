@@ -6,35 +6,30 @@ can compose without accepting names supplied by DNS resolution or the peer.
 
 ## What Changes
 
-- Specify caller-owned origin inputs, borrowed decoded SAN inputs, exact Silk operation signatures,
-  DNS-ID/IP-ID matching, typed failures, deterministic malformed-entry handling and resource limits.
-- Pin an adversarial fixture matrix and compare the policy with RFC 9525, RFC 9110 and webpki.
-- Decompose runtime implementation into a separately estimated follow-up.
+- Implement caller-owned origin inputs, borrowed SAN descriptors, DNS-ID/IP-ID matching,
+  typed failures, deterministic malformed-entry handling and resource limits in `silk.https_identity`.
+- Implement bounded certificate GeneralNames decoding into caller-owned descriptor storage in
+  `silk.certificate_identities`.
+- Execute the version-pinned adversarial fixture matrix and preserve the documented RFC/webpki differences.
+- Publish public source documentation and generated stdlib registration/reference pages.
 
-This is the design-only deliverable for [JUL-169](https://linear.app/juliaortiz/issue/JUL-169).
-No runtime API, certificate parser, trust validator or TLS integration is delivered here.
+The original JUL-169 design handoff is complete. Julia subsequently authorized implementation of
+all created specifications; this change now includes runtime follow-through for JUL-183 and JUL-184.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `https-service-identity`: HTTPS origin reference selection and bounded DNS-ID/IP-ID verification.
+- `https-service-identity`: HTTPS reference selection, bounded DNS-ID/IP-ID matching and SAN adaptation.
 
 ### Modified Capabilities
 
-None. Existing cryptographic hashes and generic URI syntax do not own service identity policy.
+None. Certificate envelope decoding remains unchanged; the identity consumer decodes SAN content.
 
 ## Impact
 
-Only this OpenSpec change is edited. The future ordinary-source `silk.https_identity` actor will
-consume explicit inputs without requiring a URI parser, certificate decoder or transport provider.
-Generic URI syntax remains with JUL-164, certificate decoding with JUL-167, certification-path
-policy and name constraints with JUL-168, and TLS composition with JUL-171. No new intrinsic is
-needed. Published language references and generated stdlib inventories remain descriptions of
-implemented capabilities.
-
-At the refreshed base `991386ae75fe3037e70da1cde9dc71d91dbc3e67`, JUL-182 implements JUL-167's
-certificate envelope decoder. It exposes raw extension values and retains duplicates; it does
-not decode SAN GeneralNames. The proposed matcher still consumes explicit decoded inputs. A
-separate identity-consumer adapter must bridge the raw extension API before certificate/TLS
-integration; neither this design nor the pure matcher follow-up claims to deliver that adapter.
+Ordinary Silk modules, manifest/generated stdlib sources, documentation and focused acceptance fixtures.
+No compiler privilege, runtime provider or external dependency is added. The pure matcher remains
+usable without a certificate decoder. The SAN adapter consumes the existing certificate extension API.
+Generic URI syntax, textual IP conversion, trust/path policy, name constraints and TLS composition
+remain separately owned integration work.

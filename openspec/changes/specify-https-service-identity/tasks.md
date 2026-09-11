@@ -1,4 +1,4 @@
-This checklist tracks the **design-only JUL-169 deliverable**. Runtime implementation is separately
+Sections 1–2 record the completed design-only JUL-169 deliverable. Runtime implementation is separately
 estimated in [implementation.md](implementation.md); none of these tasks ships a matcher.
 
 ## 1. Specify the identity contract
@@ -14,3 +14,13 @@ estimated in [implementation.md](implementation.md); none of these tasks ships a
 - [x] 2.2 Strictly validate this OpenSpec change and obtain independent design review; resolve concrete findings and record commands/verdicts in validation.md.
 - [x] 2.3 Commit and push the scoped change to a draft PR before final verification; run pnpm typecheck, pnpm format:check, pnpm lint, pnpm test and pnpm check in order and record exact outcomes.
 - [x] 2.4 Obtain dedicated test-economics approval of the committed diff, confirm draft PR head/state and update JUL-169 with the same verification evidence; report no runtime support.
+
+## 3. Implement the authorized runtime contract
+
+Julia explicitly authorized implementation of all created specs after the design handoff.
+
+- [ ] 3.1 Implement the pure HTTPS reference and DNS-ID/IP-ID matcher with exact typed errors, complete SAN validation and bounds.
+- [ ] 3.2 Implement the bounded certificate SAN adapter with caller storage, duplicate detection and complete GeneralNames validation.
+- [ ] 3.3 Register public modules, document ownership and APIs, and regenerate stdlib/reference artifacts.
+- [ ] 3.4 Execute the pinned matcher matrix and SAN integration cases in consolidated native acceptance fixtures; verify borrow contracts with semantic checks.
+- [ ] 3.5 Review correctness and test cost, publish the implementation and record focused verification evidence.

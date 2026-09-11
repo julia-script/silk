@@ -43,6 +43,18 @@
     "namespace": "CertificateBundle"
   },
   {
+    "module": "silk/certificate_identities",
+    "path": "silk/certificate_identities.silk",
+    "namespace": "CertificateSan",
+    "aliases": [
+      "SanDecodeLimits",
+      "SanDecodeClass",
+      "SanDecodeReason",
+      "SanDecodeError",
+      "SanDecodeSummary"
+    ]
+  },
+  {
     "module": "silk/char",
     "path": "silk/char.silk",
     "namespace": "char"
@@ -160,6 +172,25 @@
     "path": "silk/host_input.silk",
     "namespace": "HostInput",
     "aliases": ["HostInputError"]
+  },
+  {
+    "module": "silk/https_identity",
+    "path": "silk/https_identity.silk",
+    "namespace": "HttpsIdentity",
+    "aliases": [
+      "UnsupportedForm",
+      "OriginHost",
+      "ReferenceIdentity",
+      "PresentedIdentity",
+      "CertificateStructureError",
+      "CertificateIdentities",
+      "NameError",
+      "CertificateIdentityError",
+      "LimitKind",
+      "IdentityError",
+      "IdentityLimits",
+      "IdentityMatch"
+    ]
   },
   {
     "module": "silk/i16",

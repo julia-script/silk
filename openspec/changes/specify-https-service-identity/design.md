@@ -1,7 +1,7 @@
 ## Context
 
-This is the design deliverable for [JUL-169](https://linear.app/juliaortiz/issue/JUL-169), not a
-runtime implementation. See [proposal.md](proposal.md) for motivation and
+This contract originated as the design deliverable for [JUL-169](https://linear.app/juliaortiz/issue/JUL-169).
+Julia subsequently authorized its runtime implementation, including JUL-183 and JUL-184. See [proposal.md](proposal.md) for motivation and
 [the delta specification](specs/https-service-identity/spec.md) for observable requirements.
 
 Initial work admission inspected clean `c6eae2f976a8f1a7681ffbfdcbbc8c776b9f0c96` against
@@ -33,8 +33,8 @@ application data. No compiler privilege, service or allocator requirement is nee
 
 ### 1. Explicit origin and decoded-input boundaries
 
-The planned module is `silk.https_identity`. Its actor is `HttpsIdentity`; operations are inherent
-members. The following are exact public type declarations. All payload bytes remain ordinary
+The matcher module is `silk.https_identity`. Its actor is `HttpsIdentity`; operations are inherent
+members. The following are the public data declarations; the implementation also declares Copy for these small borrowed/scalar values. All payload bytes remain ordinary
 untrusted data. Public construction does not certify validity; `verify` rechecks its inputs.
 
 ```silk
@@ -128,7 +128,7 @@ pub struct IdentityMatch {
 pub struct HttpsIdentity {}
 ```
 
-Exact operation headers (bodies are intentionally unspecified here, not stub implementations):
+Exact operation headers (implementation bodies live in the stdlib source):
 
 ```silk
 // In impl HttpsIdentity:
@@ -168,7 +168,7 @@ STRING content. Both borrow the certificate owner. The decoder neither interpret
 as GeneralNames nor rejects duplicate extension OIDs; its success cannot be substituted for
 `CertificateIdentities.Decoded`.
 
-A separately implemented SAN adapter must select subjectAltName OID `2.5.29.17` (content octets
+The SAN adapter must select subjectAltName OID `2.5.29.17` (content octets
 `55 1d 11`), detect duplicate occurrences across the complete extension list, and decode its
 GeneralNames content before constructing these descriptors. It must distinguish absence from an
 empty or malformed value, preserve order and every alternative, and retain the certificate owner
@@ -176,9 +176,8 @@ and descriptor storage for the shared borrow. Its own raw-input, traversal and d
 budgets must apply before matching; the matcher's payload budgets do not bound ASN.1 decoding.
 The accepted JUL-167 design assigns SAN interpretation to the identity consumer, not the envelope
 decoder. This adapter is tracked separately as [JUL-184](https://linear.app/juliaortiz/issue/JUL-184)
-(five-point Triage intake), an integration obligation outside both JUL-169's design-only
-delivery and JUL-183's pure matcher implementation. No SAN parser API or implementation is added
-here; manually supplied decoded inputs remain sufficient for JUL-183.
+(five-point implementation slice), and is now included by explicit user authorization.
+Manually supplied decoded inputs remain sufficient for the pure matcher.
 
 ### 2. Select the original HTTPS host before networking
 
@@ -347,7 +346,47 @@ policy choices.
 
 ## Implementation Plan
 
-The separate follow-up is scoped and estimated in [implementation.md](implementation.md). It
-implements the pure module, its documentation and consolidated acceptance fixtures. URI adapter,
-DER decoder, path policy and TLS integration stay with their respective owners. This change has
-no deployment or migration step and must not be archived as evidence that runtime support exists.
+The runtime work is tracked in tasks.md section 3 and [implementation.md](implementation.md).
+The pure matcher and SAN adapter, documentation and consolidated acceptance fixtures are included.
+URI/IP text conversion, certificate envelope decoding, path policy and TLS composition stay with their owners.
+
+## Runtime SAN adapter contract
+
+The authorized JUL-184 implementation adds `silk.certificate_identities.CertificateSan`, separate
+from the pure matcher. Its exact operations are:
+
+```silk
+pub fn decode<'a>(certificate: &'a Certificate, storage: &mut [PresentedIdentity<'a>], limits: SanDecodeLimits) -> Result<SanDecodeSummary, SanDecodeError>
+pub fn decodeValue<'a>(value: &'a [u8], storage: &mut [PresentedIdentity<'a>], limits: SanDecodeLimits) -> Result<SanDecodeSummary, SanDecodeError>
+```
+
+`SanDecodeSummary` owns `present: bool` and `count: usize`. A successful present result authorizes
+using exactly `storage[0..count]`; absent returns false/zero. Payloads borrow the input certificate
+or DER bytes. Storage is initialized caller-owned memory and cannot be used concurrently with its
+mutable borrow. A failure can leave a partial prefix: callers must discard that prefix and stop,
+never construct a successful `CertificateIdentities` value from it. No allocation or service is
+required. A helper with named lifetime `'a` can construct `CertificateIdentities<'a>.Decoded`
+from `&'a [PresentedIdentity<'a>]` for verification; this makes both lifetime relationships explicit.
+
+`SanDecodeLimits` has inclusive `extensions`, `inputBytes`, `identities`, `nodes`, and `depth`
+fields. Defaults are 256 extensions, 1048576 input bytes, 256 identities, 4096 traversed nodes,
+and depth 32. A fixed 32-frame stack imposes a hard depth ceiling independent of caller limits.
+For certificate input, count covers every extension and input bytes sum every OID and value length.
+For direct DER input, input bytes is the entire supplied value length. All sums use remaining-budget
+subtraction before addition. Caller storage is an additional descriptor-count bound.
+
+The certificate operation checks extension count, then complete input accounting and duplicate SAN
+selection, before parsing. A duplicate SAN is fatal even if the first is valid. DER decoding consumes
+one complete SEQUENCE with no trailing bytes, preserves all GeneralName alternatives in order,
+and checks framing, primitive encodings and the known GeneralName wrappers under traversal budgets.
+Unsupported alternatives keep their complete alternative content octets. DNS LDH/wildcard rules
+and IP lengths are left to the matcher. OID-selected open-value semantics and X.400 attribute
+semantics are outside this adapter; no successful identity claim depends on them.
+
+`SanDecodeError` owns `kind: SanDecodeClass`, `reason: SanDecodeReason`, and `offset: usize`.
+Classes distinguish `Malformed` from `ResourceLimit`. Reasons distinguish invalid DER, duplicate
+SAN, empty SAN, extension count, input bytes, identity count, caller storage, node count and depth.
+Offsets address the GeneralNames DER input; extension-list errors use zero. These failures remain
+separate from both matcher policy and path trust. If composing through the explicit malformed
+matcher input, map duplicate/empty to `DuplicateSanExtension`/`EmptySanExtension` and other
+malformed encoding to `InvalidDer`; resource failures must stop before the matcher.

@@ -2,7 +2,7 @@
 
 Define the bounded standard-library contract for matching an HTTPS origin's reference identity
 against a leaf certificate's DNS-ID and IP-ID identities, independently of decoding and trust.
-This delta is a design contract; JUL-169 does not deliver its runtime implementation.
+This delta governs the authorized runtime follow-through for JUL-183 and JUL-184 after the JUL-169 design handoff.
 
 ## ADDED Requirements
 
@@ -29,7 +29,7 @@ HTTPS scheme separately and retain port-based origin isolation.
 
 ### Requirement: Public inputs and results have exact ownership and typed failures
 
-The future `silk.https_identity` module SHALL expose the exact types and operation headers in
+The `silk.https_identity` module SHALL expose the exact types and operation headers in
 design.md Decision 1: `HttpsIdentity.reference` consumes `OriginHost<'name>` and returns
 `Result<ReferenceIdentity<'name>, IdentityError>`; `HttpsIdentity.verify` borrows the reference
 and `CertificateIdentities<'cert>`, consumes scalar `IdentityLimits`, and returns
@@ -135,8 +135,7 @@ unsupported entries.
 The delivered certificate envelope decoder's raw extension views SHALL NOT be treated as decoded
 SAN identities. A separate identity-consumer adapter SHALL select subjectAltName OID `2.5.29.17`,
 detect duplicate SAN extensions, decode complete GeneralNames under its own finite parsing/storage
-budgets, and preserve the certificate owner and descriptor lifetimes. This integration obligation
-SHALL NOT expand JUL-169 into parsing work or require a decoder dependency in the pure matcher.
+budgets, and preserve the certificate owner and descriptor lifetimes. The adapter SHALL remain separate from the pure matcher and SHALL NOT introduce a decoder dependency in that matcher.
 
 After reference validation, verification SHALL apply structural, count-limit, byte-limit, and
 ordered per-entry validation in that precedence, before any success. It SHALL validate both DNS
@@ -204,7 +203,32 @@ for the same leaf; identity success alone SHALL NOT be treated as a secure conne
 - **WHEN** a leaf's DNS SAN matches the origin but its path is untrusted or violates name constraints
 - **THEN** this matcher can return identity success while the separate trust/path check rejects the connection
 
-#### Scenario: Design-only completion
+#### Scenario: Runtime completion
 
-- **WHEN** JUL-169 is handed off with validated proposal, design, delta, tasks and implementation decomposition
-- **THEN** the handoff records no runtime support and leaves runtime implementation to the separately estimated follow-up
+- **WHEN** the authorized runtime follow-through is handed off
+- **THEN** evidence includes executing matcher and SAN adapter cases, while trust, URI/IP conversion and TLS remain separate
+
+### Requirement: SAN adaptation uses explicit bounded caller storage
+
+`CertificateSan.decode` and `decodeValue` SHALL implement the exact signatures and ownership in
+design.md's runtime SAN adapter contract. They SHALL allocate no memory and SHALL return an owned
+presence/count summary or typed structural/resource error. Callers MUST NOT consume a partial
+prefix after failure. The adapter SHALL preserve all GeneralName alternatives in source order,
+check complete DER framing and known primitive encodings, and use independent byte, extension,
+identity, node and depth budgets plus caller storage capacity. OID-selected open-value semantics
+and X.400 attribute semantics SHALL remain outside identity verification.
+
+#### Scenario: Caller storage is insufficient
+
+- **WHEN** a valid GeneralNames list contains more entries than caller storage can hold
+- **THEN** decoding fails with the typed storage resource limit and its partial prefix cannot authorize a match
+
+#### Scenario: An unsupported name contains malformed primitive DER
+
+- **WHEN** a matching DNS SAN is followed by an otherName containing a noncanonical universal primitive
+- **THEN** adaptation fails structurally before any successful identity result is available
+
+#### Scenario: Independent decode limits
+
+- **WHEN** extension/input/identity/node/depth limits are exceeded, including nested unsupported forms
+- **THEN** adaptation returns its corresponding typed resource failure without unbounded allocation or traversal
