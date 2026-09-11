@@ -163,7 +163,7 @@ const program = Effect.gen(function* () {
             profile: {
               ...input,
               artifact: 'object',
-              entry: trust ? { kind: 'default' } : { kind: 'none' },
+              entry: { kind: 'none' },
             },
             composition: {
               components: [

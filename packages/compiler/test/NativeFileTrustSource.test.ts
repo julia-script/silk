@@ -5,6 +5,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as SourceFile from '../src/SourceFile.js'
+import * as SourceCatalog from '../src/SourceCatalog.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as Target from '../src/Target.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
@@ -26,46 +27,54 @@ pub effect fn construct(root: Bytes, path: Path) -> NativeFileTrustSource
   return move provider
 }`
 
-it.effect('owns accepted configuration and selects all three verified libc profiles', () =>
+it.effect('owns accepted root and path configuration', () =>
   Effect.gen(function* () {
-    for (const target of Target.native) {
-      const snapshot = yield* AnalysisFixture.declarations(
-        `native-file-trust-source/${target.id}`,
-        ascii(constructorSource),
-        target.id,
-      )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [], target.id)
-    }
+    const snapshot = yield* AnalysisFixture.declarations(
+      'native-file-trust-source/ownership',
+      ascii(constructorSource),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
   }),
 )
 
-it.effect('omits the provider from Wasm and every no-libc profile', () =>
+it.effect('selects only the three verified native libc profiles', () =>
   Effect.gen(function* () {
-    const source =
-      'import silk.native_file_trust_source { NativeFileTrustSource }\npub fn main() -> i32 { return 42 }'
+    const source = 'import silk.native_file_trust_source as provider'
     for (const target of Target.all) {
-      const snapshot = yield* Analysis.makeRealized({
-        root: SourceFile.make(`native-file-trust-source/unavailable/${target.id}`, ascii(source)),
+      const selection = yield* SourceCatalog.analyze({
+        roots: [SourceFile.make(`native-file-trust-source/${target.id}`, ascii(source))],
         configuration: {
-          profile: { target: target.id, artifact: 'object', libc: 'none', entry: { kind: 'none' } },
+          profile: { target: target.id, artifact: 'object', runtime: { kind: 'none' } },
         },
       }).pipe(Effect.provide(SourceResolver.empty))
-      assert.deepEqual(
-        Analysis.diagnostics(snapshot).map((diagnostic) => [
-          diagnostic.code,
-          diagnostic.span.start,
-          diagnostic.span.end,
-        ]),
-        [
-          [
-            'SEM0014',
-            source.indexOf('NativeFileTrustSource'),
-            source.indexOf('NativeFileTrustSource') + 'NativeFileTrustSource'.length,
-          ],
-        ],
+      assert.deepEqual(selection.closure.resolutionFailures, [], target.id)
+      assert.deepEqual(selection.closure.diagnostics, [], target.id)
+      assert.strictEqual(
+        (selection.catalog?.modules.get('silk/native_file_trust_source')?.publicDeclarations
+          .length ?? 0) > 0,
+        target.kind === 'Native',
         target.id,
       )
-      assert.deepEqual(snapshot.instances.foreignCalls, [], target.id)
+    }
+    for (const target of Target.all) {
+      const selection = yield* SourceCatalog.analyze({
+        roots: [SourceFile.make(`native-file-trust-source/no-libc/${target.id}`, ascii(source))],
+        configuration: {
+          profile: {
+            target: target.id,
+            artifact: 'object',
+            libc: 'none',
+            runtime: { kind: 'none' },
+          },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.deepEqual(selection.closure.resolutionFailures, [], target.id)
+      assert.deepEqual(selection.closure.diagnostics, [], target.id)
+      assert.strictEqual(
+        selection.catalog?.modules.get('silk/native_file_trust_source')?.publicDeclarations.length,
+        0,
+        target.id,
+      )
     }
   }),
 )

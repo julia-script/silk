@@ -273,7 +273,6 @@ jobs:
       - run: pnpm --filter @silklang/platform-webcontainer test:browser
 
   platform-supplies:
-    if: github.event_name != 'pull_request'
     name: Platform supply / ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -349,6 +348,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @silklang/compiler... build
       - name: Required real supply conformance
+        if: github.event_name != 'pull_request'
         env:
           SILK_SUPPLY_TARGET: ${{ matrix.target }}
         run: |
@@ -367,11 +367,17 @@ jobs:
           node packages/compiler/conformance/native-report/run.mjs
           node packages/compiler/conformance/execution-storage/run.mjs
           SILK_STORAGE_FAULTS=true node packages/compiler/conformance/execution-storage/run.mjs
+      - name: Required native file trust conformance
+        if: github.event_name == 'pull_request'
+        env:
+          SILK_SUPPLY_TARGET: ${{ matrix.target }}
+          SILK_NATIVE_FILE_TRUST_ONLY: true
+        run: node packages/compiler/conformance/native-filesystem/run.mjs
       - name: Required Wasm storage conformance
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        if: github.event_name != 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: node packages/compiler/conformance/execution-storage/wasm.mjs
       - name: Required raw Linux conformance
-        if: runner.os == 'Linux'
+        if: github.event_name != 'pull_request' && runner.os == 'Linux'
         env:
           SILK_SUPPLY_TARGET: ${{ matrix.target }}
         run: node packages/compiler/conformance/raw-linux/run.mjs

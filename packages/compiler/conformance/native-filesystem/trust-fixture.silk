@@ -218,4 +218,6 @@ effect fn allocated() -> i32 ! OutOfMemoryError {
     |> Effect.catch<TrustSourceError>(trustExit)
 }
 
-pub fn main() -> i32 { return run Effect.catchAll(allocated(), memoryExit) }
+export "C" fn trust_fixture() -> i32 as "trust_fixture" {
+  return run Effect.catchAll(allocated(), memoryExit)
+}

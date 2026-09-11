@@ -1,5 +1,6 @@
 extern const unsigned char silk_trust_pem[];
 extern const size_t silk_trust_pem_length;
+extern int trust_fixture(void);
 
 static int scenario=-1, invalid, native_error, need_capture, error_reads;
 static int opens, children, stats, reads, closes, next_fd, generation;
@@ -130,3 +131,5 @@ ssize_t read(int fd,void *data,size_t count) {
   offset+=accepted;
   return (ssize_t)accepted;
 }
+
+int main(void) { return trust_fixture(); }
