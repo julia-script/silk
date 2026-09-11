@@ -23,7 +23,7 @@ PEM rejects explanatory text, unrelated blocks, VT/FF whitespace, and noncanonic
 
 Import as `Certificate` with `import silk.certificate { Certificate }`.
 
-Public declarations: 11.
+Public declarations: 12.
 
 <a id="declaration-73696c6b2f63657274696669636174653a3a4465636f64654c696d697473"></a>
 
@@ -743,6 +743,136 @@ pub parametersDer: silk/option.Option<&'a [u8]>
 
 The complete parameter TLV; absence differs from explicit NULL.
 
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f666673657473"></a>
+
+## `CertificateOffsets`
+
+```silk
+pub struct CertificateOffsets
+```
+
+Stable byte offsets for semantically significant fields in the retained certificate DER.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a30"></a>
+
+### Field `tbs`
+
+```silk
+pub tbs: usize
+```
+
+Complete TBSCertificate tag.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a31"></a>
+
+### Field `version`
+
+```silk
+pub version: usize
+```
+
+Explicit version wrapper, or the first TBSCertificate field when version is absent.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a32"></a>
+
+### Field `serial`
+
+```silk
+pub serial: usize
+```
+
+Serial-number INTEGER tag.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a33"></a>
+
+### Field `tbsSignatureAlgorithm`
+
+```silk
+pub tbsSignatureAlgorithm: usize
+```
+
+Inner TBSCertificate signature AlgorithmIdentifier tag.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a34"></a>
+
+### Field `issuer`
+
+```silk
+pub issuer: usize
+```
+
+Issuer Name tag.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a35"></a>
+
+### Field `subject`
+
+```silk
+pub subject: usize
+```
+
+Subject Name tag.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a36"></a>
+
+### Field `spki`
+
+```silk
+pub spki: usize
+```
+
+SubjectPublicKeyInfo tag.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a37"></a>
+
+### Field `publicKey`
+
+```silk
+pub publicKey: usize
+```
+
+SubjectPublicKey BIT STRING tag.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a38"></a>
+
+### Field `signatureAlgorithm`
+
+```silk
+pub signatureAlgorithm: usize
+```
+
+Outer signature AlgorithmIdentifier tag.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a39"></a>
+
+### Field `signature`
+
+```silk
+pub signature: usize
+```
+
+Signature-value BIT STRING tag.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a3130"></a>
+
+### Field `issuerUniqueId`
+
+```silk
+pub issuerUniqueId: usize
+```
+
+Issuer unique-identifier tag, or the TBSCertificate tag when absent.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174654f6666736574733a3a6669656c643a3131"></a>
+
+### Field `subjectUniqueId`
+
+```silk
+pub subjectUniqueId: usize
+```
+
+Subject unique-identifier tag, or the TBSCertificate tag when absent.
+
 <a id="declaration-73696c6b2f63657274696669636174653a3a457874656e73696f6e56696577"></a>
 
 ## `ExtensionView`
@@ -953,6 +1083,16 @@ pub fn version<'life0>(self: &'life0 Certificate) -> CertificateVersion
 ```
 
 Returns the structural certificate version without imposing validation policy.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174652e6f666673657473"></a>
+
+### Method `Certificate.offsets`
+
+```silk
+pub fn offsets<'life0>(self: &'life0 Certificate) -> CertificateOffsets
+```
+
+Returns stable byte offsets for semantic diagnostics over the retained DER.
 
 <a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174652e73657269616c"></a>
 

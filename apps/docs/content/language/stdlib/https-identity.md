@@ -847,6 +847,36 @@ pub struct HttpsIdentity
 
 Pure HTTPS DNS-ID and IP-ID reference construction and verification.
 
+<a id="declaration-73696c6b2f68747470735f6964656e746974793a3a48747470734964656e746974792e6578616374446e734e616d654572726f72"></a>
+
+### Associated function `HttpsIdentity.exactDnsNameError`
+
+```silk
+pub fn exactDnsNameError<'life0>(bytes: &'life0 [u8]) -> silk/option.Option<silk/https_identity.NameError>
+```
+
+Returns the shared HTTPS-profile admission error for one exact DNS name, when invalid.
+
+#### Details
+
+This applies the canonical 253-octet, LDH-label, edge-hyphen, wildcard-free, and
+nonnumeric-final-label grammar used by HTTPS reference identities.
+
+<a id="declaration-73696c6b2f68747470735f6964656e746974793a3a48747470734964656e746974792e70726573656e746564446e734e616d654572726f72"></a>
+
+### Associated function `HttpsIdentity.presentedDnsNameError`
+
+```silk
+pub fn presentedDnsNameError<'life0>(bytes: &'life0 [u8]) -> silk/option.Option<silk/https_identity.NameError>
+```
+
+Returns the shared HTTPS-profile admission error for one presented DNS name, when invalid.
+
+#### Details
+
+A wildcard is admitted only as the complete leftmost `*.` label and remains included in the
+253-octet total-name bound. All other label policy is identical to exact DNS names.
+
 <a id="declaration-73696c6b2f68747470735f6964656e746974793a3a48747470734964656e746974792e7265666572656e6365"></a>
 
 ### Associated function `HttpsIdentity.reference`

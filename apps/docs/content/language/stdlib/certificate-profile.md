@@ -45,7 +45,7 @@ The certificate's intended position in the restricted TLS-server profile.
 ServerLeaf = 0
 ```
 
-A peer end-entity certificate authenticated for TLS server use.
+A peer end-entity certificate inspected for admission to later TLS-server validation.
 
 <a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a4365727469666963617465526f6c653a3a6d656d6265723a31"></a>
 

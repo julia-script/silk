@@ -275,13 +275,7 @@ const rsaSpkiAbsent = replaceDerNodes(rsaLeafId, rsaEncryptionNull, rsaEncryptio
 const rsaSignatureAbsent = replaceDerNodes(rsaLeafId, rsaPkcs1Null, rsaPkcs1Absent, 2)
 const rsaPss = replaceDerNodes(rsaLeafId, rsaPkcs1Null, rsaPssSha256, 2)
 const rsaPssWithDefaults = replaceDerNodes(rsaLeafId, rsaPkcs1Null, rsaPssDefaults, 2)
-const versionTwo = mutateUnique(
-  'rfc5280::no-keyusage/peer_certificate',
-  [0xa0, 0x03, 0x02, 0x01, 0x02],
-  (bytes, offset) => {
-    bytes[offset + 4] = 1
-  },
-)
+const versionTwo = literal(Buffer.from(certificateUniqueIdsDer).toString('base64'))
 const uniqueIds = (() => {
   const bytes = Buffer.from(certificateUniqueIdsDer)
   bytes[8] = 2
@@ -969,13 +963,17 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     nodes: usize.ZERO,
     depth: usize.ZERO,
   }
-  if !(run inspectionFails(
-    ${versionTwo},
-    CertificateRole.ServerLeaf,
-    versionLimits,
+  let versionResult = run decoded(${versionTwo})
+  let versionCertificate = match move versionResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 160 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  if !profileFailureAt(
+    CertificateProfile.inspect(&versionCertificate, CertificateRole.ServerLeaf, versionLimits),
     ProfileClass.Unsupported,
     ProfileReason.Version,
-  )) { return 100 }
+    Certificate.offsets(&versionCertificate).version,
+  ) { return 161 }
   if !(run inspectionFails(
     ${zeroSerial},
     CertificateRole.ServerLeaf,
@@ -1208,12 +1206,20 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
   if !optionBytes(TrustAnchor.configuredNameConstraints(&cloned), &configured) { return 19 }
   if !sameCertificate(TrustAnchor.certificate(&cloned), &rootCertificate) { return 37 }
 
-  let mut cloneAudit = RefusingAllocator { calls: usize.ZERO, failAt: usize.ONE }
+  let mut cloneAudit = RefusingAllocator { calls: usize.ZERO, failAt: usize.ZERO }
+  let cloneCalibration = run Effect.catchAll(
+    cloneSucceeded(&cloned) |> Effect.provideMut<Allocator>(&mut cloneAudit),
+    allocationFailed,
+  )
+  if !cloneCalibration || cloneAudit.calls == usize.ZERO { return 136 }
+  let cloneAllocations = cloneAudit.calls
+  cloneAudit.calls = usize.ZERO
+  cloneAudit.failAt = cloneAllocations
   let cloneRefused = run Effect.catchAll(
     cloneSucceeded(&cloned) |> Effect.provideMut<Allocator>(&mut cloneAudit),
     allocationFailed,
   )
-  if cloneRefused || cloneAudit.calls != usize.ONE { return 136 }
+  if cloneRefused || cloneAudit.calls != cloneAllocations { return 137 }
   cloneAudit.calls = usize.ZERO
   cloneAudit.failAt = usize.ZERO
   let cloneRetried = run Effect.catchAll(
@@ -1221,24 +1227,38 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     allocationFailed,
   )
   if !cloneRetried || !sameCertificate(TrustAnchor.certificate(&cloned), &rootCertificate) {
-    return 137
+    return 138
   }
 
-  let refusedOwnerResult = run decoded(${root})
-  let refusedOwner = match move refusedOwnerResult {
-    Result<Certificate, DecodeError>.Failure {error} => { return 138 }
+  let calibrationOwnerResult = run decoded(${root})
+  let calibrationOwner = match move calibrationOwnerResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 139 }
     Result<Certificate, DecodeError>.Success {value} => move value
   }
-  let mut constructionAudit = RefusingAllocator { calls: usize.ZERO, failAt: usize.ONE }
+  let mut constructionAudit = RefusingAllocator { calls: usize.ZERO, failAt: usize.ZERO }
+  let constructionCalibration = run Effect.catchAll(
+    anchorConstructionSucceeded(move calibrationOwner, &configured)
+      |> Effect.provideMut<Allocator>(&mut constructionAudit),
+    allocationFailed,
+  )
+  if !constructionCalibration || constructionAudit.calls == usize.ZERO { return 140 }
+  let constructionAllocations = constructionAudit.calls
+  let refusedOwnerResult = run decoded(${root})
+  let refusedOwner = match move refusedOwnerResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 141 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  constructionAudit.calls = usize.ZERO
+  constructionAudit.failAt = constructionAllocations
   let constructionRefused = run Effect.catchAll(
     anchorConstructionSucceeded(move refusedOwner, &configured)
       |> Effect.provideMut<Allocator>(&mut constructionAudit),
     allocationFailed,
   )
-  if constructionRefused || constructionAudit.calls != usize.ONE { return 139 }
+  if constructionRefused || constructionAudit.calls != constructionAllocations { return 142 }
   let retryOwnerResult = run decoded(${root})
   let retryOwner = match move retryOwnerResult {
-    Result<Certificate, DecodeError>.Failure {error} => { return 140 }
+    Result<Certificate, DecodeError>.Failure {error} => { return 143 }
     Result<Certificate, DecodeError>.Success {value} => move value
   }
   constructionAudit.calls = usize.ZERO
@@ -1248,7 +1268,7 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
       |> Effect.provideMut<Allocator>(&mut constructionAudit),
     allocationFailed,
   )
-  if !constructionRetried { return 141 }
+  if !constructionRetried { return 144 }
 
   let malformed = CertificateProfile.validateConfiguredNameConstraints(b"\\x30\\x00", ProfileLimits.defaults())
   let malformedAccepted = match move malformed {
@@ -1290,63 +1310,63 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     CertificateProfile.validateConfiguredNameConstraints(&minConstraint, ProfileLimits.defaults()),
     ProfileClass.Malformed,
     ProfileReason.NameConstraints,
-  ) { return 142 }
+  ) { return 145 }
   if !constraintFailure(
     CertificateProfile.validateConfiguredNameConstraints(&maxConstraint, ProfileLimits.defaults()),
     ProfileClass.Unsupported,
     ProfileReason.NameConstraints,
-  ) { return 143 }
+  ) { return 146 }
   if !constraintFailure(
     CertificateProfile.validateConfiguredNameConstraints(&invalidIpMask, ProfileLimits.defaults()),
     ProfileClass.Malformed,
     ProfileReason.NameConstraints,
-  ) { return 144 }
+  ) { return 147 }
   if !constraintFailure(
     CertificateProfile.validateConfiguredNameConstraints(&unsupportedSubtree, ProfileLimits.defaults()),
     ProfileClass.Unsupported,
     ProfileReason.UnsupportedNameConstraint,
-  ) { return 145 }
+  ) { return 148 }
   if !unitSuccess(
     CertificateProfile.validateConfiguredNameConstraints(&ipConstraint, ProfileLimits.defaults()),
-  ) { return 146 }
+  ) { return 149 }
 
   let mut subtreeLimits = ProfileLimits.defaults()
   subtreeLimits.constraintSubtrees = usize.ONE
   if !unitSuccess(CertificateProfile.validateConfiguredNameConstraints(&configured, subtreeLimits)) {
-    return 147
+    return 150
   }
   subtreeLimits.constraintSubtrees = usize.ZERO
   if !constraintFailure(
     CertificateProfile.validateConfiguredNameConstraints(&configured, subtreeLimits),
     ProfileClass.ResourceLimit,
     ProfileReason.ConstraintSubtrees,
-  ) { return 148 }
+  ) { return 151 }
   let mut nodeLimits = ProfileLimits.defaults()
   nodeLimits.nodes = 4
   if !unitSuccess(CertificateProfile.validateConfiguredNameConstraints(&configured, nodeLimits)) {
-    return 149
+    return 152
   }
   nodeLimits.nodes = 3
   if !constraintFailure(
     CertificateProfile.validateConfiguredNameConstraints(&configured, nodeLimits),
     ProfileClass.ResourceLimit,
     ProfileReason.Nodes,
-  ) { return 150 }
+  ) { return 153 }
   let mut depthLimits = ProfileLimits.defaults()
   depthLimits.depth = 4
   if !unitSuccess(CertificateProfile.validateConfiguredNameConstraints(&configured, depthLimits)) {
-    return 151
+    return 154
   }
   depthLimits.depth = 3
   if !constraintFailure(
     CertificateProfile.validateConfiguredNameConstraints(&configured, depthLimits),
     ProfileClass.ResourceLimit,
     ProfileReason.Depth,
-  ) { return 152 }
+  ) { return 155 }
 
   let constrainedResult = run decoded(${constrainedRoot})
   let constrainedCertificate = match move constrainedResult {
-    Result<Certificate, DecodeError>.Failure {error} => { return 153 }
+    Result<Certificate, DecodeError>.Failure {error} => { return 156 }
     Result<Certificate, DecodeError>.Success {value} => move value
   }
   let embeddedPresent = embeddedConstraint(
@@ -1357,11 +1377,11 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     ),
     &configured,
   )
-  if !embeddedPresent { return 154 }
+  if !embeddedPresent { return 157 }
 
   let ownedConstrainedResult = run decoded(${constrainedRoot})
   let ownedConstrained = match move ownedConstrainedResult {
-    Result<Certificate, DecodeError>.Failure {error} => { return 155 }
+    Result<Certificate, DecodeError>.Failure {error} => { return 158 }
     Result<Certificate, DecodeError>.Success {value} => move value
   }
   let provenanceResult = run TrustAnchor.fromCertificateWithConstraints(
@@ -1371,11 +1391,11 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     ProfileLimits.defaults(),
   )
   let provenanceAnchor = match move provenanceResult {
-    Result<TrustAnchor, ProfileError>.Failure {error} => { return 156 }
+    Result<TrustAnchor, ProfileError>.Failure {error} => { return 162 }
     Result<TrustAnchor, ProfileError>.Success {value} => move value
   }
   if !optionBytes(TrustAnchor.configuredNameConstraints(&provenanceAnchor), &leadingConstraint) {
-    return 157
+    return 163
   }
   let provenanceKept = embeddedConstraint(
     CertificateProfile.inspect(
@@ -1385,7 +1405,7 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     ),
     &configured,
   )
-  if !provenanceKept { return 158 }
+  if !provenanceKept { return 164 }
   return 42
 }
 
