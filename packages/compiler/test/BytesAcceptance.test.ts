@@ -73,7 +73,17 @@ it('pins certificate-path fixture provenance, ordering, and DER/key digests', ()
   )
   assert.deepEqual(
     certificatePathFixtures.projectFixtures.map((fixture) => fixture.id),
-    ['silk::wrong-signature-first/intermediates[0]'],
+    [
+      'source::rfc5280::no-keyusage/peer_certificate',
+      'silk::wrong-signature-first/intermediates[0]',
+      'silk::ignored-anchor-validity-self-signature/trusted_certs[0]',
+      'silk::missing-ec-parameters/trusted_certs[0]',
+      'silk::unsupported-signature-parameters/intermediates[0]',
+      'silk::unsupported-signature-algorithm/intermediates[0]',
+      'silk::mismatching-signature-algorithms/intermediates[0]',
+      'silk::certificate-policy/intermediates[0]',
+      'silk::tls-feature/intermediates[0]',
+    ],
   )
   for (const fixture of certificatePathFixtures.projectFixtures) {
     assert.strictEqual(
@@ -81,7 +91,11 @@ it('pins certificate-path fixture provenance, ordering, and DER/key digests', ()
       fixture.sha256,
       fixture.id,
     )
-    assert.strictEqual(fixture.mutation, 'xor 0x01 into the final ECDSA signature octet')
+    assert.isNotEmpty(fixture.sourceCase, fixture.id)
+    assert.isNotEmpty(fixture.sourceCertificateRole, fixture.id)
+    assert.strictEqual(fixture.sourceCertificateSha256.length, 64, fixture.id)
+    assert.isNotEmpty(fixture.mutation, fixture.id)
+    assert.match(fixture.expectedSilk.result, /^(Success|Failure)$/, fixture.id)
   }
 })
 

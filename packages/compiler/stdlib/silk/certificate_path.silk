@@ -726,7 +726,9 @@ fn applyConstraint(
       if error.reason == ProfileReason.NameComparisons {
         mapped.kind = ValidationClass.ResourceLimit
         mapped.location = ValidationLocation.Call
+        mapped.extensionIndex = noExtension()
         mapped.limit = Option.some<ValidationLimit>(ValidationLimit.NameComparisons)
+        mapped.offset = 0
       }
       return validationFailure<()>(move mapped)
     }
@@ -791,11 +793,6 @@ fn completePath<'a>(
   counters: &mut Counters,
   limits: ValidationLimits,
 ) -> Result<(), ValidationError> {
-  let budget = consume(&mut counters.paths, limits.completePaths, ValidationLimit.CompletePaths)
-  match move budget {
-    Result<(), ValidationError>.Failure {error} => { return validationFailure<()>(error) }
-    Result<(), ValidationError>.Success {value: pathBudgetAccepted} => {}
-  }
   let lengths = pathLengthAllowed(
     leaf,
     intermediates,
@@ -874,6 +871,13 @@ fn evaluateAnchor<'a>(
 ) -> AnchorCandidate {
   if !sameName(subjectCertificate, TrustAnchor.certificate(&anchors[anchorIndex])) {
     return AnchorCandidate.Unlinked
+  }
+  let budget = consume(&mut counters.paths, limits.completePaths, ValidationLimit.CompletePaths)
+  match move budget {
+    Result<(), ValidationError>.Failure {error} => {
+      return AnchorCandidate.Rejected {error: move error}
+    }
+    Result<(), ValidationError>.Success {value: pathBudgetAccepted} => {}
   }
   let anchorResult = inspect(
     TrustAnchor.certificate(&anchors[anchorIndex]),

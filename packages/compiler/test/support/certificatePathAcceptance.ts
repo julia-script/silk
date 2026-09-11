@@ -125,6 +125,23 @@ const wrongSignature = projectFixture('silk::wrong-signature-first/intermediates
 const selfIssued = fixture('rfc5280::nc::permitted-self-issued')
 const direct = fixture('rfc5280::eku::ee-without-eku')
 const permittedDns = fixture('rfc5280::nc::permitted-dns-match')
+const unknownCriticalLeaf = fixture('rfc5280::unknown-critical-extension-ee')
+const noKeyUsageLeaf = projectFixture('source::rfc5280::no-keyusage/peer_certificate')
+const ignoredAnchor = projectFixture(
+  'silk::ignored-anchor-validity-self-signature/trusted_certs[0]',
+)
+const missingEcParametersAnchor = projectFixture('silk::missing-ec-parameters/trusted_certs[0]')
+const unsupportedParameters = projectFixture(
+  'silk::unsupported-signature-parameters/intermediates[0]',
+)
+const unsupportedAlgorithm = projectFixture(
+  'silk::unsupported-signature-algorithm/intermediates[0]',
+)
+const mismatchingAlgorithms = projectFixture(
+  'silk::mismatching-signature-algorithms/intermediates[0]',
+)
+const certificatePolicy = projectFixture('silk::certificate-policy/intermediates[0]')
+const tlsFeature = projectFixture('silk::tls-feature/intermediates[0]')
 const fixedInstant = instant(fixtures.defaultValidationTime)
 
 const deterministicAndBoundCases = `effect fn wrongSignatureThenValid() -> i32 ! OutOfMemoryError ? &mut Allocator {
@@ -244,6 +261,178 @@ ${decoded('root', certificateAt(permittedDns.anchors, 0, permittedDns.id), 248)}
   return 251
 }`
 
+const reviewRepairCases = `effect fn configuredRestrictionsAndGlobalBudgets() -> i32 ! OutOfMemoryError ? &mut Allocator {
+${decoded('leaf', pathLengthZero.peer, 260)}
+${decoded('wrong', wrongSignature, 261)}
+${decoded('valid', certificateAt(pathLengthZero.intermediates, 0, pathLengthZero.id), 262)}
+${decoded('restrictedRoot', certificateAt(pathLengthZero.anchors, 0, pathLengthZero.id), 263)}
+${decoded('acceptedRoot', certificateAt(pathLengthZero.anchors, 0, pathLengthZero.id), 264)}
+  let restrictedResult = run TrustAnchor.fromCertificateWithConstraints(
+    move restrictedRoot,
+    Option.some<usize>(usize.ZERO),
+    Option.none<&[u8]>(),
+    ProfileLimits.defaults(),
+  )
+  let restricted = match move restrictedResult {
+    Result<TrustAnchor, ProfileError>.Failure {error} => { return 265 }
+    Result<TrustAnchor, ProfileError>.Success {value} => move value
+  }
+  let intermediates: [Certificate; 2] = [move wrong, move valid]
+  let anchors: [TrustAnchor; 2] = [move restricted, TrustAnchor.fromCertificate(move acceptedRoot)]
+  let at = SystemClock.make(${fixedInstant.seconds}, ${fixedInstant.nanoseconds})
+  let expected: [usize; 1] = [1]
+
+  let mut limits = ValidationLimits.defaults()
+  limits.completePaths = usize.ZERO
+  let zeroPaths = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, limits)
+  if !limited(move zeroPaths, ValidationLimit.CompletePaths) { return 266 }
+  limits.completePaths = 3
+  let exhaustedPaths = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, limits)
+  if !limited(move exhaustedPaths, ValidationLimit.CompletePaths) { return 267 }
+  limits.completePaths = 4
+  let exactPaths = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, limits)
+  if !succeeded(move exactPaths, 1, &expected, &at) { return 268 }
+
+  limits = ValidationLimits.defaults()
+  limits.signatureVerifications = 5
+  let exhaustedSignatures = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, limits)
+  if !limited(move exhaustedSignatures, ValidationLimit.SignatureVerifications) { return 269 }
+  limits.signatureVerifications = 6
+  let exactSignatures = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, limits)
+  if !succeeded(move exactSignatures, 1, &expected, &at) { return 270 }
+
+  limits = ValidationLimits.defaults()
+  limits.issuerCandidates = 9
+  let exhaustedIssuers = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, limits)
+  if !limited(move exhaustedIssuers, ValidationLimit.IssuerCandidates) { return 271 }
+  limits.issuerCandidates = 10
+  let exactIssuers = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, limits)
+  if !succeeded(move exactIssuers, 1, &expected, &at) { return 272 }
+  return 0
+}
+
+effect fn configuredConstraintIntersectionAndGlobalComparisons() -> i32 ! OutOfMemoryError ? &mut Allocator {
+${decoded('leaf', permittedDns.peer, 273)}
+${decoded('narrowRoot', certificateAt(permittedDns.anchors, 0, permittedDns.id), 274)}
+${decoded('acceptedRoot', certificateAt(permittedDns.anchors, 0, permittedDns.id), 275)}
+  let narrow: [u8; 23] = [
+    48, 21, 160, 19, 48, 17, 130, 15,
+    115, 117, 98, 46, 101, 120, 97, 109,
+    112, 108, 101, 46, 99, 111, 109,
+  ]
+  let narrowDer = Slice.view<u8>(&narrow, usize.ZERO, 23)
+  let narrowResult = run TrustAnchor.fromCertificateWithConstraints(
+    move narrowRoot,
+    Option.none<usize>(),
+    Option.some<&[u8]>(narrowDer),
+    ProfileLimits.defaults(),
+  )
+  let narrowAnchor = match move narrowResult {
+    Result<TrustAnchor, ProfileError>.Failure {error} => { return 276 }
+    Result<TrustAnchor, ProfileError>.Success {value} => move value
+  }
+  let intermediates: [Certificate; 0] = []
+  let anchors: [TrustAnchor; 2] = [move narrowAnchor, TrustAnchor.fromCertificate(move acceptedRoot)]
+  let at = SystemClock.make(${fixedInstant.seconds}, ${fixedInstant.nanoseconds})
+  let expected: [usize; 0] = []
+  let mut limits = ValidationLimits.defaults()
+  limits.nameComparisons = 2
+  let exhausted = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, limits)
+  if !limited(move exhausted, ValidationLimit.NameComparisons) { return 277 }
+  limits.nameComparisons = 3
+  let exact = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, limits)
+  if !succeeded(move exact, 1, &expected, &at) { return 278 }
+  return 0
+}
+
+effect fn profileRejectionsContinueInOrder() -> i32 ! OutOfMemoryError ? &mut Allocator {
+${decoded('leaf', pathLengthZero.peer, 279)}
+${decoded('wrong', wrongSignature, 280)}
+${decoded('parameters', unsupportedParameters, 281)}
+${decoded('algorithm', unsupportedAlgorithm, 282)}
+${decoded('mismatch', mismatchingAlgorithms, 283)}
+${decoded('policy', certificatePolicy, 284)}
+${decoded('feature', tlsFeature, 285)}
+${decoded('valid', certificateAt(pathLengthZero.intermediates, 0, pathLengthZero.id), 286)}
+${decoded('root', certificateAt(pathLengthZero.anchors, 0, pathLengthZero.id), 287)}
+  let candidates: [Certificate; 7] = [
+    move wrong, move parameters, move algorithm, move mismatch, move policy, move feature, move valid,
+  ]
+  let anchors: [TrustAnchor; 1] = [TrustAnchor.fromCertificate(move root)]
+  let at = SystemClock.make(${fixedInstant.seconds}, ${fixedInstant.nanoseconds})
+  let parametersOnly = Slice.view<Certificate>(&candidates, 1, 1)
+  let parametersOutcome = run CertificatePath.validate(&leaf, parametersOnly, &anchors, &at, ValidationLimits.defaults())
+  if !exactIntermediateRejection(
+    move parametersOutcome, ValidationReason.UnsupportedAlgorithm, usize.ZERO, Option.none<usize>(),
+  ) { return 288 }
+  let algorithmOnly = Slice.view<Certificate>(&candidates, 2, 1)
+  let algorithmOutcome = run CertificatePath.validate(&leaf, algorithmOnly, &anchors, &at, ValidationLimits.defaults())
+  if !exactIntermediateRejection(
+    move algorithmOutcome, ValidationReason.UnsupportedAlgorithm, usize.ZERO, Option.none<usize>(),
+  ) { return 289 }
+  let mismatchOnly = Slice.view<Certificate>(&candidates, 3, 1)
+  let mismatchOutcome = run CertificatePath.validate(&leaf, mismatchOnly, &anchors, &at, ValidationLimits.defaults())
+  if !exactIntermediateRejection(
+    move mismatchOutcome, ValidationReason.UnsupportedParameters, usize.ZERO, Option.none<usize>(),
+  ) { return 290 }
+  let policyOnly = Slice.view<Certificate>(&candidates, 4, 1)
+  let policyOutcome = run CertificatePath.validate(&leaf, policyOnly, &anchors, &at, ValidationLimits.defaults())
+  if !exactIntermediateRejection(
+    move policyOutcome, ValidationReason.UnsupportedPolicy, usize.ZERO, Option.some<usize>(usize.ZERO),
+  ) { return 291 }
+  let featureOnly = Slice.view<Certificate>(&candidates, 5, 1)
+  let featureOutcome = run CertificatePath.validate(&leaf, featureOnly, &anchors, &at, ValidationLimits.defaults())
+  if !exactIntermediateRejection(
+    move featureOutcome, ValidationReason.UnsupportedExtension, usize.ZERO, Option.some<usize>(usize.ZERO),
+  ) { return 292 }
+  let rejected = Slice.view<Certificate>(&candidates, usize.ZERO, 6)
+  let rejectedOutcome = run CertificatePath.validate(&leaf, rejected, &anchors, &at, ValidationLimits.defaults())
+  if !exactAnchorRejection(
+    move rejectedOutcome, ValidationReason.InvalidSignature, usize.ZERO, Option.none<usize>(),
+  ) { return 293 }
+  let expected: [usize; 1] = [6]
+  let accepted = run CertificatePath.validate(&leaf, &candidates, &anchors, &at, ValidationLimits.defaults())
+  if !succeeded(move accepted, usize.ZERO, &expected, &at) { return 294 }
+  return 0
+}
+
+effect fn anchorExceptionsAndErrors() -> i32 ! OutOfMemoryError ? &mut Allocator {
+${decoded('leaf', noKeyUsageLeaf, 293)}
+${decoded('missing', missingEcParametersAnchor, 294)}
+${decoded('ignored', ignoredAnchor, 295)}
+  let intermediates: [Certificate; 0] = []
+  let anchors: [TrustAnchor; 2] = [
+    TrustAnchor.fromCertificate(move missing),
+    TrustAnchor.fromCertificate(move ignored),
+  ]
+  let at = SystemClock.make(${fixedInstant.seconds}, ${fixedInstant.nanoseconds})
+  let missingOnly = Slice.view<TrustAnchor>(&anchors, usize.ZERO, usize.ONE)
+  let rejected = run CertificatePath.validate(&leaf, &intermediates, missingOnly, &at, ValidationLimits.defaults())
+  if !exactAnchorRejection(
+    move rejected, ValidationReason.InvalidKey, usize.ZERO, Option.none<usize>(),
+  ) { return 296 }
+  let expected: [usize; 0] = []
+  let accepted = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, ValidationLimits.defaults())
+  if !succeeded(move accepted, usize.ONE, &expected, &at) { return 297 }
+  let ignoredOnly = Slice.view<TrustAnchor>(&anchors, usize.ONE, usize.ONE)
+  let ignoredAccepted = run CertificatePath.validate(
+    &leaf, &intermediates, ignoredOnly, &at, ValidationLimits.defaults(),
+  )
+  if !succeeded(move ignoredAccepted, usize.ZERO, &expected, &at) { return 298 }
+  return 0
+}
+
+effect fn leafErrorContract() -> i32 ! OutOfMemoryError ? &mut Allocator {
+${decoded('leaf', unknownCriticalLeaf.peer, 299)}
+${decoded('root', certificateAt(unknownCriticalLeaf.anchors, 0, unknownCriticalLeaf.id), 300)}
+  let intermediates: [Certificate; 0] = []
+  let anchors: [TrustAnchor; 1] = [TrustAnchor.fromCertificate(move root)]
+  let at = SystemClock.make(${fixedInstant.seconds}, ${fixedInstant.nanoseconds})
+  let outcome = run CertificatePath.validate(&leaf, &intermediates, &anchors, &at, ValidationLimits.defaults())
+  if exactLeafFailure(move outcome, ValidationReason.UnsupportedExtension, 5) { return 0 }
+  return 301
+}`
+
 /**
  * One native corpus program checks the pinned path, constraint, date, alternate-path and error
  * matrix without compiling one binary per vector.
@@ -251,10 +440,12 @@ ${decoded('root', certificateAt(permittedDns.anchors, 0, permittedDns.id), 248)}
 const sourcePrelude = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.certificate { Certificate, DecodeError, DecodeLimits }
 import silk.certificate_path { CertificatePath, RevocationStatus, ValidatedPath, ValidationClass, ValidationError, ValidationLimit, ValidationLimits, ValidationLocation, ValidationReason }
+import silk.certificate_profile { ProfileError, ProfileLimits }
 import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.option { Option }
 import silk.result { Result }
+import silk.slice { Slice }
 import silk.system_clock { Instant, SystemClock }
 import silk.trust_anchor { TrustAnchor }
 import silk.usize
@@ -263,6 +454,107 @@ fn detailIs(detail: Option<ValidationReason>, expected: ValidationReason) -> boo
   return match move detail {
     Option<ValidationReason>.None => false
     Option<ValidationReason>.Some {value} => value == expected
+  }
+}
+
+fn noDetail(detail: Option<ValidationReason>) -> bool {
+  return match move detail {
+    Option<ValidationReason>.None => true
+    Option<ValidationReason>.Some {value} => false
+  }
+}
+
+fn extensionIs(extension: Option<usize>, expected: usize) -> bool {
+  return match move extension {
+    Option<usize>.None => false
+    Option<usize>.Some {value} => value == expected
+  }
+}
+
+fn noExtension(extension: Option<usize>) -> bool {
+  return match move extension {
+    Option<usize>.None => true
+    Option<usize>.Some {value} => false
+  }
+}
+
+fn noLimit(limit: Option<ValidationLimit>) -> bool {
+  return match move limit {
+    Option<ValidationLimit>.None => true
+    Option<ValidationLimit>.Some {value} => false
+  }
+}
+
+fn exactLeafFailure<'a>(
+  outcome: Result<ValidatedPath<'a>, ValidationError>,
+  reason: ValidationReason,
+  extension: usize,
+) -> bool {
+  return match move outcome {
+    Result<ValidatedPath<'a>, ValidationError>.Success {value} => false
+    Result<ValidatedPath<'a>, ValidationError>.Failure {error} => {
+      return error.kind == ValidationClass.Rejected
+        && error.reason == reason
+        && noDetail(move error.detailReason)
+        && match move error.location {
+          ValidationLocation.Leaf => true
+          _ => false
+        }
+        && extensionIs(move error.extensionIndex, extension)
+        && noLimit(move error.limit)
+    }
+  }
+}
+
+fn exactIntermediateRejection<'a>(
+  outcome: Result<ValidatedPath<'a>, ValidationError>,
+  detail: ValidationReason,
+  index: usize,
+  extension: Option<usize>,
+) -> bool {
+  return match move outcome {
+    Result<ValidatedPath<'a>, ValidationError>.Success {value} => false
+    Result<ValidatedPath<'a>, ValidationError>.Failure {error} => {
+      if error.kind != ValidationClass.Rejected
+        || error.reason != ValidationReason.NoValidPath
+        || !detailIs(move error.detailReason, detail)
+        || !noLimit(move error.limit) { return false }
+      let located = match move error.location {
+        ValidationLocation.Intermediate {index: found} => found == index
+        _ => false
+      }
+      if !located { return false }
+      return match move extension {
+        Option<usize>.None => noExtension(move error.extensionIndex)
+        Option<usize>.Some {value} => extensionIs(move error.extensionIndex, value)
+      }
+    }
+  }
+}
+
+fn exactAnchorRejection<'a>(
+  outcome: Result<ValidatedPath<'a>, ValidationError>,
+  detail: ValidationReason,
+  index: usize,
+  extension: Option<usize>,
+) -> bool {
+  return match move outcome {
+    Result<ValidatedPath<'a>, ValidationError>.Success {value} => false
+    Result<ValidatedPath<'a>, ValidationError>.Failure {error} => {
+      if error.kind != ValidationClass.Rejected
+        || error.reason != ValidationReason.NoValidPath
+        || !detailIs(move error.detailReason, detail)
+        || !noLimit(move error.limit) { return false }
+      let located = match move error.location {
+        ValidationLocation.Anchor {index: found} => found == index
+        _ => false
+      }
+      if !located { return false }
+      return match move extension {
+        Option<usize>.None => noExtension(move error.extensionIndex)
+        Option<usize>.Some {value} => extensionIs(move error.extensionIndex, value)
+      }
+    }
   }
 }
 
@@ -280,7 +572,16 @@ fn limited<'a>(outcome: Result<ValidatedPath<'a>, ValidationError>, expected: Va
   return match move outcome {
     Result<ValidatedPath<'a>, ValidationError>.Success {value} => false
     Result<ValidatedPath<'a>, ValidationError>.Failure {error} => {
-      if error.kind != ValidationClass.ResourceLimit { return false }
+      if error.kind != ValidationClass.ResourceLimit
+        || error.reason != ValidationReason.SizeOverflow
+        || !noDetail(move error.detailReason)
+        || !noExtension(move error.extensionIndex)
+        || error.offset != 0 { return false }
+      let callScoped = match move error.location {
+        ValidationLocation.Call => true
+        _ => false
+      }
+      if !callScoped { return false }
       return match move error.limit {
         Option<ValidationLimit>.None => false
         Option<ValidationLimit>.Some {value} => value == expected
@@ -486,6 +787,8 @@ ${cases.join('\n\n')}
 
 ${deterministicAndBoundCases}
 
+${reviewRepairCases}
+
 ${allocationRefusalCase}
 
 effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
@@ -500,6 +803,16 @@ ${fixtures.cases.map((_, index) => `  let result${index} = run case${index}()\n 
   if bounds != 0 { return bounds }
   let comparisons = run comparisonBounds()
   if comparisons != 0 { return comparisons }
+  let configured = run configuredRestrictionsAndGlobalBudgets()
+  if configured != 0 { return configured }
+  let intersection = run configuredConstraintIntersectionAndGlobalComparisons()
+  if intersection != 0 { return intersection }
+  let profiles = run profileRejectionsContinueInOrder()
+  if profiles != 0 { return profiles }
+  let anchors = run anchorExceptionsAndErrors()
+  if anchors != 0 { return anchors }
+  let leafError = run leafErrorContract()
+  if leafError != 0 { return leafError }
   let allocations = run allocationBoundaries()
   if !allocations { return 254 }
   return 42
