@@ -51,8 +51,10 @@ const mutateFinalBitStringUnused = (id: string): string => {
     }
     const headerLength = 2 + lengthOctets
     if (offset + headerLength + length !== bytes.length || length === 0) continue
+    const finalOctet = bytes.at(-1)
+    if (finalOctet === undefined) throw new Error(`Missing final BIT STRING payload in ${id}`)
     bytes[offset + headerLength] = 1
-    bytes[bytes.length - 1] = bytes[bytes.length - 1] & 0xfe
+    bytes[bytes.length - 1] = finalOctet & 0xfe
     return literal(bytes.toString('base64'))
   }
   throw new Error(`Missing final BIT STRING in ${id}`)
@@ -113,8 +115,10 @@ const publicKeyUnusedBits = mutateUnique(
   'rfc5280::no-keyusage/peer_certificate',
   [0x03, 0x42, 0x00, 0x04],
   (bytes, offset) => {
+    const finalOctet = bytes[offset + 67]
+    if (finalOctet === undefined) throw new Error('Missing public-key BIT STRING payload')
     bytes[offset + 2] = 1
-    bytes[offset + 67] = bytes[offset + 67] & 0xfe
+    bytes[offset + 67] = finalOctet & 0xfe
   },
 )
 const signatureUnusedBits = mutateFinalBitStringUnused('rfc5280::no-keyusage/peer_certificate')
@@ -125,7 +129,9 @@ const invalidSignature = mutateUnique(
   'rfc5280::no-keyusage/peer_certificate',
   [0x30, 0x45, 0x02, 0x21],
   (bytes) => {
-    bytes[bytes.length - 1] = bytes[bytes.length - 1] ^ 0x01
+    const finalOctet = bytes.at(-1)
+    if (finalOctet === undefined) throw new Error('Missing certificate signature payload')
+    bytes[bytes.length - 1] = finalOctet ^ 0x01
   },
 )
 
