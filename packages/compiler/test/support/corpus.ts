@@ -1,6 +1,8 @@
 import type * as RuntimeComponent from '../../src/RuntimeComponent.js'
 import { borrowedTemporaryStream, borrowedTemporaryLifecycle } from './borrowedTemporaries.js'
 import { partialSuspension } from './partialSuspension.js'
+import { rsaNativeSource, rsaWasmSource } from './rsaAcceptance.js'
+import { x25519AcceptanceSource } from './x25519Acceptance.js'
 /**
  * The shared native acceptance corpus: programs with independently pinned process outcomes.
  */
@@ -18,11 +20,17 @@ import {
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
 import { shaAcceptanceSource } from './shaAcceptance.js'
-import { tlsHkdfAcceptanceSource } from './tlsHkdfAcceptance.js'
+import {
+  chacha20Poly1305WasmSource,
+  chacha20Poly1305NativeSource,
+} from './chacha20Poly1305Acceptance.js'
 import { hmacHkdfAcceptanceSource } from './hmacHkdfAcceptance.js'
+import { tlsHkdfAcceptanceSource } from './tlsHkdfAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
+import { ecdsaP256AcceptanceSource } from './ecdsaP256Acceptance.js'
+import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
 import {
   borrowedBox,
@@ -6216,6 +6224,16 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
+    name: 'ecdsa-p256-verification',
+    source: ecdsaP256AcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'p256-key-agreement',
+    source: p256AcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
     name: 'certificate-bounded-decoding',
     source: certificateAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
@@ -7845,6 +7863,28 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     nativeSource: replaceDropProgram,
     nativeStdout: '1243',
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'chacha20-poly1305',
+    source: chacha20Poly1305WasmSource,
+    nativeSource: chacha20Poly1305NativeSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'aes-gcm',
+    source: aesGcmAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'x25519',
+    source: x25519AcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'rsa-verification',
+    source: rsaWasmSource,
+    nativeSource: rsaNativeSource,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'tls-hkdf',
