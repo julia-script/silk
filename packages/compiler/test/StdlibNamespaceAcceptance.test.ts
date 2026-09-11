@@ -124,6 +124,37 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('rejects overlapping ChaCha20-Poly1305 input and output borrows', () =>
+  Effect.gen(function* () {
+    const source = `import silk.chacha20_poly1305 { ChaCha20Poly1305 }
+pub fn main() -> i32 {
+  let key: [u8; 0] = []
+  let mut output: [u8; 0] = []
+  let mut tag: [u8; 0] = []
+  let sealed = ChaCha20Poly1305.seal(&key, &key, &key, &key, &mut output, &mut output)
+  let opened = ChaCha20Poly1305.open(&key, &key, &key, &output, &tag, &mut output)
+  drop sealed
+  drop opened
+  return 42
+}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/chacha20-poly1305',
+      ascii(source),
+    )
+    const diagnostics = Analysis.diagnostics(snapshot)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['OWN0010', 'OWN0010'],
+    )
+    assert.deepEqual(
+      diagnostics.map((diagnostic) =>
+        source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      ),
+      ['&mut output', '&mut output'],
+    )
+  }),
+)
+
 it.effect('enforces P-256 scalar ownership and explicit Random', () =>
   Effect.gen(function* () {
     const source = `import silk.p256 { P256, P256Error }

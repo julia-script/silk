@@ -1,0 +1,621 @@
+//! Bounded HTTPS DNS-ID and IP-ID matching over caller-supplied identities.
+//!
+//! # When to use
+//!
+//! Use `HttpsIdentity.reference` with the original HTTPS host before DNS resolution.
+//! Use `HttpsIdentity.verify` with the complete SAN list from the same leaf used for trust validation.
+//!
+//! # Details
+//!
+//! DNS inputs borrow ASCII LDH bytes or prepared A-labels. IP references own network-order octets.
+//! DNS comparison ignores ASCII case. A whole leftmost wildcard matches exactly one label.
+//! The matcher validates all SANs before success and uses constant temporary storage without allocation.
+//!
+//! # Gotchas
+//!
+//! Success proves only name matching, not signatures, path trust, name constraints, or TLS authentication.
+//! There is no CN, URI-ID, SRV-ID, alias, or reverse-DNS fallback. Trailing dots and Unicode inputs are rejected.
+//! The caller must validate HTTPS origins and convert IP literals; brackets, ports, escapes and zones are not DNS inputs.
+
+import silk.result {Result}
+import silk.u8
+import silk.usize
+import silk.option {Option}
+import silk.slice {Slice}
+
+/// A reference form that HTTPS identity verification does not support.
+pub enum UnsupportedForm {
+  /// An IPvFuture reference is unsupported.
+  IpvFuture,
+  /// A scoped address reference is unsupported.
+  ZoneIdentifier,
+  /// A URI-ID reference is unsupported for HTTPS.
+  UriId,
+  /// An SRV-ID reference is unsupported for HTTPS.
+  SrvId,
+}
+
+/// The original HTTPS host, classified by the caller before DNS resolution.
+pub union OriginHost<'name> {
+  /// Borrowed ASCII DNS bytes without a trailing dot.
+  Dns {
+    /// The exact bytes; no normalization or text conversion is implicit.
+    pub bytes: &'name [u8],
+  },
+  /// Four owned network-order address octets.
+  Ipv4 {
+    /// The exact bytes; no normalization or text conversion is implicit.
+    pub bytes: [u8; 4],
+  },
+  /// Sixteen owned network-order address octets.
+  Ipv6 {
+    /// The exact bytes; no normalization or text conversion is implicit.
+    pub bytes: [u8; 16],
+  },
+  /// An explicitly unsupported reference form.
+  Unsupported {
+    /// The unsupported reference form.
+    pub form: UnsupportedForm,
+  },
+}
+
+/// A DNS borrow or owned binary IP reference; public construction does not validate it.
+pub union ReferenceIdentity<'name> {
+  /// Borrowed ASCII DNS bytes without a trailing dot.
+  Dns {
+    /// The exact bytes; no normalization or text conversion is implicit.
+    pub bytes: &'name [u8],
+  },
+  /// Four owned network-order address octets.
+  Ipv4 {
+    /// The exact bytes; no normalization or text conversion is implicit.
+    pub bytes: [u8; 4],
+  },
+  /// Sixteen owned network-order address octets.
+  Ipv6 {
+    /// The exact bytes; no normalization or text conversion is implicit.
+    pub bytes: [u8; 16],
+  },
+}
+
+/// One untrusted SAN descriptor in original certificate order.
+pub union PresentedIdentity<'cert> {
+  /// Borrowed ASCII DNS bytes without a trailing dot.
+  Dns {
+    /// The exact bytes; no normalization or text conversion is implicit.
+    pub bytes: &'cert [u8],
+  },
+  /// Borrowed network-order address octets; only lengths four and sixteen are valid.
+  Ip {
+    /// The exact bytes; no normalization or text conversion is implicit.
+    pub bytes: &'cert [u8],
+  },
+  /// An uninterpreted GeneralName with an alternative number other than two or seven.
+  Other {
+    /// The decoded GeneralName alternative number, from zero through eight except two and seven.
+    pub tag: u8,
+    /// The complete alternative content octets, counted even when this form is ignored.
+    pub bytes: &'cert [u8],
+  },
+}
+
+/// A structural failure reported by a complete SAN decoder.
+pub enum CertificateStructureError {
+  /// The SAN input violates DER framing.
+  InvalidDer,
+  /// A GeneralName violates its structural encoding.
+  InvalidGeneralName,
+  /// The certificate contains more than one SAN extension.
+  DuplicateSanExtension,
+  /// A present SAN extension has no GeneralNames.
+  EmptySanExtension,
+}
+
+/// The complete SAN state; an absent extension is distinct from an empty extension.
+pub union CertificateIdentities<'cert> {
+  /// The certificate has no SAN extension; common names are never consulted.
+  Absent,
+  /// All SAN descriptors in source order, with no filtered entries.
+  Decoded {
+    /// The complete shared descriptor slice and payloads, bounded by the same lifetime.
+    pub entries: &'cert [PresentedIdentity<'cert>],
+  },
+  /// A structural failure that must prevent a match.
+  Malformed {
+    /// The failed rule.
+    pub reason: CertificateStructureError,
+  },
+}
+
+/// The first failed DNS admission rule under the documented precedence.
+pub enum NameError {
+  /// The name has no octets.
+  EmptyName,
+  /// The name exceeds 253 octets.
+  NameTooLong,
+  /// A label has no octets.
+  EmptyLabel,
+  /// A label exceeds 63 octets.
+  LabelTooLong,
+  /// The name contains an embedded zero octet.
+  Nul,
+  /// The name contains an octet above 127.
+  NonAscii,
+  /// A label contains an octet outside ASCII letters, digits and hyphens.
+  InvalidCharacter,
+  /// A label starts or ends with a hyphen.
+  EdgeHyphen,
+  /// The name ends with a dot.
+  TrailingDot,
+  /// A reference contains an asterisk.
+  WildcardReference,
+  /// The final label contains decimal digits only.
+  NumericFinalLabel,
+  /// A wildcard name has no suffix.
+  MissingWildcardSuffix,
+}
+
+/// An invalid SAN descriptor form or binary address size.
+pub enum CertificateIdentityError {
+  /// An IP SAN has neither four nor sixteen octets.
+  InvalidIpLength,
+  /// An Other descriptor uses tag two, seven, or a number above eight.
+  WrongGeneralNameTag,
+}
+
+/// The exhausted matcher budget.
+pub enum LimitKind {
+  /// The total descriptor count exceeds the configured budget.
+  SanCount,
+  /// The sum of payload lengths exceeds the configured budget.
+  SanBytes,
+}
+
+/// An identity failure that is independent of certificate path trust.
+pub union IdentityError {
+  /// The reference violates DNS admission rules.
+  MalformedReference {
+    /// The failed rule.
+    pub reason: NameError,
+  },
+  /// The complete SAN structure is malformed.
+  MalformedCertificateStructure {
+    /// The failed rule.
+    pub reason: CertificateStructureError,
+  },
+  /// A DNS SAN violates name admission rules.
+  MalformedCertificateName {
+    /// The original zero-based SAN index.
+    pub index: usize,
+    /// The failed rule.
+    pub reason: NameError,
+  },
+  /// A SAN descriptor has an invalid form.
+  MalformedCertificateIdentity {
+    /// The original zero-based SAN index.
+    pub index: usize,
+    /// The failed rule.
+    pub reason: CertificateIdentityError,
+  },
+  /// An explicitly unsupported reference form.
+  Unsupported {
+    /// The unsupported reference form.
+    pub form: UnsupportedForm,
+  },
+  /// A count or byte budget was exceeded.
+  LimitExceeded {
+    /// The exhausted resource budget.
+    pub kind: LimitKind,
+  },
+  /// No eligible SAN matches the reference.
+  NoMatch,
+}
+
+/// Inclusive SAN budgets; zero allows none of the corresponding resource.
+pub struct IdentityLimits {
+  /// Maximum number of descriptors, including ignored and unsupported forms.
+  pub maxSanCount: usize
+  /// Maximum sum of all payload lengths, counting each alias occurrence.
+  pub maxSanBytes: usize
+}
+
+/// The first matching SAN index after validation of the entire SAN set.
+pub struct IdentityMatch {
+  /// The original zero-based index of the first matching SAN.
+  pub sanIndex: usize
+}
+
+/// Pure HTTPS DNS-ID and IP-ID reference construction and verification.
+pub struct HttpsIdentity {}
+
+impl<'a> Copy for OriginHost<'a> {}
+
+impl<'a> Copy for ReferenceIdentity<'a> {}
+
+impl<'a> Copy for PresentedIdentity<'a> {}
+
+impl<'a> Copy for CertificateIdentities<'a> {}
+
+impl Copy for IdentityError {}
+
+impl Copy for IdentityLimits {}
+
+impl Copy for IdentityMatch {}
+
+impl IdentityLimits {
+  /// Returns inclusive limits of 256 SAN descriptors and 65536 payload octets.
+  pub fn standard() -> IdentityLimits {
+    return IdentityLimits {maxSanCount: 256, maxSanBytes: 65536}
+  }
+}
+
+fn nameFailure(reason: NameError) -> Option<NameError> {
+  return Option.some<NameError>(reason)
+}
+
+// Ordered passes preserve public error precedence. Total accepted names are at most 253 bytes.
+fn nameError(bytes: &[u8], wildcard: bool) -> Option<NameError> {
+  let n = bytes.length
+  if n == 0 {
+    return nameFailure(NameError.EmptyName)
+  }
+  if n > 253 {
+    return nameFailure(NameError.NameTooLong)
+  }
+  let mut at = usize.ZERO
+  while at < n {
+    if bytes[at] == 0 {
+      return nameFailure(NameError.Nul)
+    }
+    at = at + 1
+  }
+  at = 0
+  while at < n {
+    if bytes[at] > 127 {
+      return nameFailure(NameError.NonAscii)
+    }
+    at = at + 1
+  }
+  if bytes[n - 1] == 46 {
+    return nameFailure(NameError.TrailingDot)
+  }
+  if !wildcard {
+    at = 0
+    while at < n {
+      if bytes[at] == 42 {
+        return nameFailure(NameError.WildcardReference)
+      }
+      at = at + 1
+    }
+  }
+  if wildcard && n == 1 {
+    return nameFailure(NameError.MissingWildcardSuffix)
+  }
+  let mut start = usize.ZERO
+  if wildcard {
+    start = 2
+  }
+  while start < n {
+    let mut end = start
+    while end < n && bytes[end] != 46 {
+      end = end + 1
+    }
+    if end == start {
+      return nameFailure(NameError.EmptyLabel)
+    }
+    if end - start > 63 {
+      return nameFailure(NameError.LabelTooLong)
+    }
+    at = start
+    let mut numeric = true
+    while at < end {
+      let byte = bytes[at]
+      let digit = byte >= 48 && byte <= 57
+      let alpha = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+      if !digit && !alpha && byte != 45 {
+        return nameFailure(NameError.InvalidCharacter)
+      }
+      if !digit {
+        numeric = false
+      }
+      at = at + 1
+    }
+    if bytes[start] == 45 || bytes[end - 1] == 45 {
+      return nameFailure(NameError.EdgeHyphen)
+    }
+    if end == n && numeric {
+      return nameFailure(NameError.NumericFinalLabel)
+    }
+    start = end + 1
+  }
+  return Option.none<NameError>()
+}
+
+// Non-ASCII validation precedes this classification; misplaced/multiple stars must be ignored.
+fn ignoredWildcard(bytes: &[u8]) -> bool {
+  let mut at = usize.ZERO
+  let mut found = false
+  while at < bytes.length {
+    if bytes[at] == 42 {
+      if found || at != 0 {
+        return true
+      }
+      found = true
+    }
+    at = at + 1
+  }
+  return found && bytes.length > 1 && bytes[1] != 46
+}
+
+fn sanNameError(bytes: &[u8]) -> Option<NameError> {
+  let mut at = usize.ZERO
+  while at < bytes.length {
+    if bytes[at] > 127 {
+      return nameFailure(NameError.NonAscii)
+    }
+    at = at + 1
+  }
+  if ignoredWildcard(bytes) {
+    return Option.none<NameError>()
+  }
+  return nameError(bytes, bytes.length > 0 && bytes[0] == 42)
+}
+
+fn folded(byte: u8) -> u8 {
+  if byte >= 65 && byte <= 90 {
+    return byte + 32
+  }
+  return byte
+}
+
+fn equal(bytes: &[u8], other: &[u8], fold: bool) -> bool {
+  if bytes.length != other.length {
+    return false
+  }
+  let mut at = usize.ZERO
+  while at < bytes.length {
+    if fold {
+      if folded(bytes[at]) != folded(other[at]) {
+        return false
+      }
+    } else {
+      if bytes[at] != other[at] {
+        return false
+      }
+    }
+    at = at + 1
+  }
+  return true
+}
+
+fn dnsMatch(reference: &[u8], presented: &[u8]) -> bool {
+  if ignoredWildcard(presented) {
+    return false
+  }
+  if presented[0] != 42 {
+    return equal(reference, presented, true)
+  }
+  // Length gating keeps reference work charged to candidate bytes. The first label is at most 63 bytes.
+  let suffixLength = presented.length - 1
+  if reference.length <= suffixLength || reference.length - suffixLength > 63 {
+    return false
+  }
+  let firstLength = reference.length - suffixLength
+  let mut at = usize.ZERO
+  while at < firstLength {
+    if reference[at] == 46 {
+      return false
+    }
+    at = at + 1
+  }
+  return equal(
+    Slice.view<u8>(reference, firstLength, suffixLength),
+    Slice.view<u8>(presented, 1, suffixLength),
+    true,
+  )
+}
+
+fn payloadLength<'cert>(entry: &PresentedIdentity<'cert>) -> usize {
+  return match & entry.* {
+    PresentedIdentity<'cert>.Dns {bytes} => bytes.length
+    PresentedIdentity<'cert>.Ip {bytes} => bytes.length
+    PresentedIdentity<'cert>.Other {tag, bytes} => bytes.length
+  }
+}
+
+fn malformedName(index: usize, reason: NameError) -> IdentityError {
+  return IdentityError.MalformedCertificateName {index: index, reason: reason}
+}
+
+fn malformedIdentity(index: usize, reason: CertificateIdentityError) -> IdentityError {
+  return IdentityError.MalformedCertificateIdentity {index: index, reason: reason}
+}
+
+fn validateEntry<'cert>(entry: &PresentedIdentity<'cert>, index: usize) -> Option<IdentityError> {
+  return match & entry.* {
+    PresentedIdentity<'cert>.Dns {bytes} => {
+      return match move sanNameError(bytes) {
+        Option<NameError>.Some {value} => Option.some<IdentityError>(malformedName(index, value))
+        Option<NameError>.None => Option.none<IdentityError>()
+      }
+    }
+    PresentedIdentity<'cert>.Ip {bytes} => {
+      if bytes.length != 4 && bytes.length != 16 {
+        return Option.some<IdentityError>(
+          malformedIdentity(index, CertificateIdentityError.InvalidIpLength),
+        )
+      }
+      return Option.none<IdentityError>()
+    }
+    PresentedIdentity<'cert>.Other {tag, bytes} => {
+      if tag == 2 || tag == 7 || tag > 8 {
+        return Option.some<IdentityError>(
+          malformedIdentity(index, CertificateIdentityError.WrongGeneralNameTag),
+        )
+      }
+      return Option.none<IdentityError>()
+    }
+  }
+}
+
+fn matches<'name, 'cert>(reference: &ReferenceIdentity<'name>, entry: &PresentedIdentity<'cert>) -> bool {
+  return match & reference.* {
+    ReferenceIdentity<'name>.Dns {bytes: name} => {
+      return match & entry.* {
+        PresentedIdentity<'cert>.Dns {bytes} => dnsMatch(name, bytes)
+        PresentedIdentity<'cert>.Ip {bytes} => false
+        PresentedIdentity<'cert>.Other {tag, bytes} => false
+      }
+    }
+    ReferenceIdentity<'name>.Ipv4 {bytes: address} => {
+      return match & entry.* {
+        PresentedIdentity<'cert>.Dns {bytes} => false
+        PresentedIdentity<'cert>.Ip {bytes} => equal(&address, bytes, false)
+        PresentedIdentity<'cert>.Other {tag, bytes} => false
+      }
+    }
+    ReferenceIdentity<'name>.Ipv6 {bytes: address} => {
+      return match & entry.* {
+        PresentedIdentity<'cert>.Dns {bytes} => false
+        PresentedIdentity<'cert>.Ip {bytes} => equal(&address, bytes, false)
+        PresentedIdentity<'cert>.Other {tag, bytes} => false
+      }
+    }
+  }
+}
+
+impl HttpsIdentity {
+  /// Creates a reference from the original HTTPS host without allocation or name substitution.
+  ///
+  /// # Details
+  ///
+  /// DNS bytes remain borrowed and unchanged. IP arrays become owned network-order addresses.
+  /// DNS names require 1..253 ASCII octets and 1..63-octet LDH labels without a numeric final label.
+  /// Errors follow empty name, total length, NUL, non-ASCII, trailing dot, wildcard, then label grammar order.
+  /// Label checks proceed left to right: empty, length, characters, then edge hyphens. Numeric final labels fail last.
+  ///
+  /// # Gotchas
+  ///
+  /// Supply the original origin host before resolution, never an alias, peer name, or resolved address.
+  /// The caller checks HTTPS and converts IP literals. DNS input rejects brackets, ports, escapes, underscores and Unicode.
+  /// A-label grammar does not validate Punycode. Explicit IPvFuture, zones, URI-ID and SRV-ID return `Unsupported`.
+  pub fn reference<'name>(host: OriginHost<'name>) -> Result<
+    ReferenceIdentity<'name>,
+    IdentityError,
+  > {
+    return match move host {
+      OriginHost<'name>.Dns {bytes} => {
+        let error = nameError(bytes, false)
+        return match move error {
+          Option<NameError>.Some {value} => Result.failResult<
+            ReferenceIdentity<'name>,
+            IdentityError,
+          >(IdentityError.MalformedReference {reason: value})
+          Option<NameError>.None => Result.succeed<ReferenceIdentity<'name>, IdentityError>(
+            ReferenceIdentity<'name>.Dns {bytes: bytes},
+          )
+        }
+      }
+      OriginHost<'name>.Ipv4 {bytes} => Result.succeed<ReferenceIdentity<'name>, IdentityError>(
+        ReferenceIdentity<'name>.Ipv4 {bytes: bytes},
+      )
+      OriginHost<'name>.Ipv6 {bytes} => Result.succeed<ReferenceIdentity<'name>, IdentityError>(
+        ReferenceIdentity<'name>.Ipv6 {bytes: bytes},
+      )
+      OriginHost<'name>.Unsupported {form} => Result.failResult<
+        ReferenceIdentity<'name>,
+        IdentityError,
+      >(IdentityError.Unsupported {form: form})
+    }
+  }
+  /// Validates the complete SAN list and returns the first matching DNS-ID or IP-ID index.
+  ///
+  /// # Details
+  ///
+  /// Revalidates public references, then checks structure, count, total bytes, and every SAN in order before comparison.
+  /// DNS matches ignore ASCII case. A whole leftmost wildcard matches one label; invalid wildcard placement is ignored.
+  /// Other malformed DNS names fail, including non-ASCII before wildcard handling. NUL is checked after invalid wildcard skipping.
+  /// IP SANs require four or sixteen equal network-order bytes. IPv4 and mapped IPv6 remain distinct.
+  /// All descriptors consume limits, including aliases and ignored forms. Zero budgets are valid. Errors retain no input borrow.
+  /// Work is linear in reference bytes, SAN count and payload bytes, with constant temporary storage and no allocation.
+  ///
+  /// # Gotchas
+  ///
+  /// A malformed later SAN defeats an earlier match, even if its identity kind differs from the reference.
+  /// Empty present SANs fail structurally. Absent, unsupported-only and mismatching sets return `NoMatch`; there is no CN fallback.
+  /// Success does not validate trust, name constraints, signatures, time, or the TLS handshake.
+  pub fn verify<'name, 'cert>(
+    reference: &ReferenceIdentity<'name>,
+    certificate: &CertificateIdentities<'cert>,
+    limits: IdentityLimits,
+  ) -> Result<IdentityMatch, IdentityError> {
+    let error = match & reference.* {
+      ReferenceIdentity<'name>.Dns {bytes} => nameError(bytes, false)
+      ReferenceIdentity<'name>.Ipv4 {bytes} => Option.none<NameError>()
+      ReferenceIdentity<'name>.Ipv6 {bytes} => Option.none<NameError>()
+    }
+    match move error {
+      Option<NameError>.Some {value} => {
+        return Result.failResult<IdentityMatch, IdentityError>(
+          IdentityError.MalformedReference {reason: value},
+        )
+      }
+      Option<NameError>.None => {}
+    }
+    return match & certificate.* {
+      CertificateIdentities<'cert>.Absent => Result.failResult<IdentityMatch, IdentityError>(
+        IdentityError.NoMatch,
+      )
+      CertificateIdentities<'cert>.Malformed {reason} => Result.failResult<
+        IdentityMatch,
+        IdentityError,
+      >(IdentityError.MalformedCertificateStructure {reason: reason})
+      CertificateIdentities<'cert>.Decoded {entries} => {
+        if entries.length == 0 {
+          return Result.failResult<IdentityMatch, IdentityError>(
+            IdentityError.MalformedCertificateStructure {
+              reason: CertificateStructureError.EmptySanExtension,
+            },
+          )
+        }
+        if entries.length > limits.maxSanCount {
+          return Result.failResult<IdentityMatch, IdentityError>(
+            IdentityError.LimitExceeded {kind: LimitKind.SanCount},
+          )
+        }
+        let mut at = usize.ZERO
+        let mut total = usize.ZERO
+        while at < entries.length {
+          let length = payloadLength(&entries[at])
+          // Subtraction avoids usize overflow and checks the budget before inspecting any payload.
+          if length > limits.maxSanBytes - total {
+            return Result.failResult<IdentityMatch, IdentityError>(
+              IdentityError.LimitExceeded {kind: LimitKind.SanBytes},
+            )
+          }
+          total = total + length
+          at = at + 1
+        }
+        at = 0
+        while at < entries.length {
+          let invalid = validateEntry(&entries[at], at)
+          match move invalid {
+            Option<IdentityError>.Some {value} => {
+              return Result.failResult<IdentityMatch, IdentityError>(value)
+            }
+            Option<IdentityError>.None => {}
+          }
+          at = at + 1
+        }
+        at = 0
+        while at < entries.length {
+          if matches(&reference, &entries[at]) {
+            return Result.succeed<IdentityMatch, IdentityError>(IdentityMatch {sanIndex: at})
+          }
+          at = at + 1
+        }
+        return Result.failResult<IdentityMatch, IdentityError>(IdentityError.NoMatch)
+      }
+    }
+  }
+}

@@ -18,6 +18,10 @@ import {
 import { recoveredProvidedWrite, recoveredWriterModule } from './recoveredProvidedWrite.js'
 import { floatOperationMatrix, integerOperationMatrix } from './scalarOperationMatrix.js'
 import { shaAcceptanceSource } from './shaAcceptance.js'
+import {
+  chacha20Poly1305WasmSource,
+  chacha20Poly1305NativeSource,
+} from './chacha20Poly1305Acceptance.js'
 import { hmacHkdfAcceptanceSource } from './hmacHkdfAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
@@ -7830,6 +7834,17 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     nativeSource: replaceDropProgram,
     nativeStdout: '1243',
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'chacha20-poly1305',
+    source: chacha20Poly1305WasmSource,
+    nativeSource: chacha20Poly1305NativeSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'aes-gcm',
+    source: aesGcmAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'hmac-hkdf',
