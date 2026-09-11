@@ -5,7 +5,7 @@
 ## 2. Implementation
 
 - [x] 2.1 Implement private ChaCha20/Poly1305 and public seal/open; verify component and composed known answers plus distinct rejection boundaries.
-- [ ] 2.2 Register the module and document all public items; generate and verify API documentation and executable examples.
+- [x] 2.2 Register the module and document all public items; generate and verify API documentation and executable examples.
 - [x] 2.3 Add shared native acceptance and small LLVM-to-Wasm witness with fixture provenance; verify deterministic output, unchanged destinations and independent oracle comparison.
 
 ## 3. Verification

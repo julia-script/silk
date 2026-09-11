@@ -12,34 +12,6 @@
 //! allocation and per-key usage limits. Fixed-work source is not a constant-time or secure-erasure
 //! guarantee for every compiler and target. This module does not implement a transport protocol.
 
-//!
-//! # Examples
-//! ```silk
-//! import silk.chacha20_poly1305 {ChaCha20Poly1305, AeadError}
-//! import silk.result {Result}
-//!
-//! pub fn main() -> i32 {
-//!   // Demonstration only: real callers must allocate a fresh nonce for every encryption.
-//!   let key: [u8; 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-//!   let nonce: [u8; 12] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-//!   let aad: [u8; 0] = []
-//!   let message: [u8; 1] = [42]
-//!   let mut ciphertext: [u8; 1] = [0]
-//!   let mut tag: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-//!   let sealed = ChaCha20Poly1305.seal(&key, &nonce, &aad, &message, &mut ciphertext, &mut tag)
-//!   match move sealed {
-//!     Result<(), AeadError>.Failure {error} => { return 1 }
-//!     Result<(), AeadError>.Success {value} => { drop value }
-//!   }
-//!   let mut opened: [u8; 1] = [0]
-//!   let result = ChaCha20Poly1305.open(&key, &nonce, &aad, &ciphertext, &tag, &mut opened)
-//!   return match move result {
-//!     Result<(), AeadError>.Failure {error} => 2
-//!     Result<(), AeadError>.Success {value} => if opened[0] == 42 { 0 } else { 3 }
-//!   }
-//! }
-//! ```
-
 import silk.result {Result}
 import silk.u8
 import silk.u32

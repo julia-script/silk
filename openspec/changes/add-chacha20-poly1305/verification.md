@@ -71,6 +71,34 @@ Typechecking, formatting, and lint passed. The default-path full test run failed
 existing CLI native build/run cases: Apple Clang cannot read the emitted LLVM bitcode
 (`Unknown attribute kind (102)`). A minimal `main` returning 42 reproduces the failure without
 crypto imports; the failing CLI run test passes with Homebrew LLVM on `PATH`. The full run is
-being repeated with `PATH=/opt/homebrew/opt/llvm/bin:$PATH`. The remaining required repository
-checks and independent correctness/test-economics review are pending. The coordinator will record exact reviewed commits and the clean comparative test costs
-before handoff. No task is marked complete on the strength of this partial check record.
+being repeated with `PATH=/opt/homebrew/opt/llvm/bin:$PATH`. At revision `13e7b911`, the compiler parallel phase passed all 209 files and 2453 tests
+(699.91 seconds). The subsequent native phase was stopped during execution after independent
+review found an orphaned documentation example. This partial run is historical regression
+evidence, not a complete or final-revision gate. The orphaned example was removed; public API
+contracts and runtime implementation are unchanged. The existing documentation gate will verify
+the final generated pages. Required repository checks are being rerun on the corrected revision.
+
+Independent general correctness review approved `13e7b911f55d0887e2620247b8d02ca1dd1ec82f`.
+The reviewer inspected the complete source, specification, documentation, ownership and runtime
+integration, independently reproduced every committed fixture with Python cryptography 48 /
+OpenSSL 4, and checked the counter schedule, Poly1305 bounds and authentication/write ordering.
+There were no blocking findings. The generated-output conclusions remain bounded to the recorded
+inspection; the independent reviewer did not repeat every assembly inspection.
+
+The coordinator will record exact final check results and comparative test costs before handoff.
+No verification task is marked complete on the strength of this partial check record.
+
+## Test-economics review
+
+The independent reviewer measured three matched base/branch selections with one worker and the
+same LLVM PATH. Namespace ownership: 9.621 to 12.193 seconds process, 5.86 to 7.83 seconds test
+work. Certificate plus ChaCha Wasm: 13.404 to 16.614 seconds process, 8.98 to 12.01 seconds test
+work. HMAC/HKDF plus ChaCha native: 21.105 to 30.211 seconds process, 16.62 to 25.52 seconds test
+work. Summed increments are 14.888 seconds process and 13.90 seconds test work; these are loaded
+machine observations, not a parallel full-suite wall-time prediction.
+
+The review retained the consolidated distinct AEAD/component boundaries, one native program,
+one small Wasm witness and one shared ownership snapshot. A subsequent documentation audit found
+that the unrendered example was both orphaned and syntactically invalid. Removing it resolves the
+finding without adding a redundant doctest compilation; no new executable documentation example
+remains. Final independent approval is recorded by the coordinator on the corrected commit.
