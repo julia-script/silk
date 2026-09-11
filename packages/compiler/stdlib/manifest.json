@@ -1,5 +1,11 @@
 [
   {
+    "module": "silk/aes_gcm",
+    "path": "silk/aes_gcm.silk",
+    "namespace": "AesGcm",
+    "aliases": ["AesGcmError"]
+  },
+  {
     "module": "silk/allocator",
     "path": "silk/allocator.silk",
     "namespace": "Allocator",

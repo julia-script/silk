@@ -1337,3 +1337,31 @@ it.effect('extends a view loan through a use nested in a place replace', () =>
     )
   }),
 )
+
+it.effect('rejects AES-GCM input/output and detached-tag aliases at the call boundary', () =>
+  Effect.gen(function* () {
+    const source = `import silk.aes_gcm { AesGcm }
+fn invalidSeal(key: &[u8], nonce: &[u8], aad: &[u8], bytes: &mut [u8], tag: &mut [u8]) -> () {
+  let result = AesGcm.seal(key, nonce, aad, &bytes, &mut bytes, &mut tag)
+}
+fn invalidOpen(key: &[u8], nonce: &[u8], aad: &[u8], bytes: &mut [u8], tag: &[u8]) -> () {
+  let result = AesGcm.open(key, nonce, aad, &bytes, tag, &mut bytes)
+}
+fn invalidTag(key: &[u8], nonce: &[u8], aad: &[u8], bytes: &[u8], output: &mut [u8]) -> () {
+  let result = AesGcm.seal(key, nonce, aad, bytes, &mut output, &mut output)
+}`
+    const self = yield* analyze(source)
+    const diagnostics = Analysis.diagnostics(self)
+    const spans = [' &mut bytes, &mut tag', ' &mut bytes)', ' &mut output)'].map((text) =>
+      source.indexOf(text),
+    )
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['OWN0010', 'OWN0010', 'OWN0010'],
+    )
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.span.start),
+      spans,
+    )
+  }),
+)
