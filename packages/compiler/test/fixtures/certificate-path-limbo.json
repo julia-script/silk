@@ -670,8 +670,21 @@
   ],
   "projectFixtures": [
     {
+      "id": "source::rfc5280::no-keyusage/peer_certificate",
+      "sourceCase": "rfc5280::no-keyusage",
+      "sourceCertificateRole": "peer_certificate",
+      "sourceCertificateSha256": "6660521f90ce62d5e7a17efa4f399b48a99c4e1d9f04f25d1a074b69728a13aa",
+      "mutation": "none; exact pinned source certificate",
+      "der": "MIIBozCCAUmgAwIBAgIUByPb2jQamctzq5XYoJpI9jQFbc0wCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzI5NjkwNTAzMDAwMDAxWjAWMRQwEgYDVQQDDAtleGFtcGxlLmNvbTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABCwFxxgiRTXAwZ1912ys2Ydg4aZbp6dr/+T+mpmB4mFfk+UUWvMXLGXbKf5m/0eQuWCw/pjdmaMyfyDuFOrea8ajbzBtMB0GA1UdDgQWBBRWrx664GBsPgQHJNqKsSdzZr+OkDAfBgNVHSMEGDAWgBTUaDFriC2bZfB7n76finAq2NVW1zATBgNVHSUEDDAKBggrBgEFBQcDATAWBgNVHREEDzANggtleGFtcGxlLmNvbTAKBggqhkjOPQQDAgNIADBFAiEA4cu3I1xV2Rr/6vfIpfa2X9KW96yWn4TUDqts+iA6e4ECIBswEet+6xpFYe9VL8weDO0Hw6S6QQTstEqkAGscz8Jn",
+      "sha256": "6660521f90ce62d5e7a17efa4f399b48a99c4e1d9f04f25d1a074b69728a13aa",
+      "expectedSilk": {
+        "result": "Success"
+      }
+    },
+    {
       "id": "silk::wrong-signature-first/intermediates[0]",
       "sourceCase": "pathlen::ee-with-intermediate-pathlen-0",
+      "sourceCertificateRole": "untrusted_intermediates[0]",
       "sourceCertificateSha256": "a6f39c6e3cfd02e1d69df5df5e61edef8fca6f951de93f3f0f3ce5ced6390f01",
       "mutation": "xor 0x01 into the final ECDSA signature octet",
       "der": "MIICATCCAaagAwIBAgIUTIRcpXB7SoD1P++HfW7mwoch96swCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzI5NjkwNTAzMDAwMDAxWjBnMTkwNwYDVQQLDDA0NjYzNjg2MjI0NjI1ODM2MjU2OTA5NzM0MzQxODU1MjIzMTMxMTY1ODM3MTI5NjkxKjAoBgNVBAMMIXg1MDktbGltYm8taW50ZXJtZWRpYXRlLXBhdGhsZW4tMDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABAL2sHdHh01L2QDAAjFsT0wvMcSM8NL9bSh6IfgDhVl6dHNSLyV8f/U7c9kLTJoTh2DVb4skdyBNSPxlBmmSYTujezB5MBIGA1UdEwEB/wQIMAYBAf8CAQAwCwYDVR0PBAQDAgIEMBYGA1UdEQQPMA2CC2V4YW1wbGUuY29tMB8GA1UdIwQYMBaAFEoogyxR5JxpITYutOfGmZIoZ+ktMB0GA1UdDgQWBBTriyd/YwUXFDfMPrBoJIjnbwr1WzAKBggqhkjOPQQDAgNJADBGAiEAmyibTNnkn62QmH37MpAMP6oDaJNhn9FW1F0O9vSrd/4CIQCgnIUJdZFZs7bAfR6eEhqv1fLsg346f6RqzrEgYvFNLQ==",
@@ -679,6 +692,96 @@
       "expectedSilk": {
         "result": "Failure",
         "reason": "InvalidSignature"
+      }
+    },
+    {
+      "id": "silk::ignored-anchor-validity-self-signature/trusted_certs[0]",
+      "sourceCase": "rfc5280::no-keyusage",
+      "sourceCertificateRole": "trusted_certs[0]",
+      "sourceCertificateSha256": "2ffcf7efc81cbd3f7f2aa126fa6de0663e011ed71e7cdf2bec63a6c2af828455",
+      "mutation": "replace notAfter with 2000-01-01 and xor 0x01 into the final self-signature octet",
+      "der": "MIIBkDCCATWgAwIBAgIUAzu942YNpt4fwlszYw3JjczWGUUwCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzIwMDAwMTAxMDAwMDAxWjAaMRgwFgYDVQQDDA94NTA5LWxpbWJvLXJvb3QwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQN5+J4KP/hIzMJj+GvFVC1BEUJ+7Uf4ECp6ndL9EORTyjIqGU4cUSs9waZ3ElkEfdYUiqhJnUHDtYnChXh9Axio1cwVTAPBgNVHRMBAf8EBTADAQH/MAsGA1UdDwQEAwIBBjAWBgNVHREEDzANggtleGFtcGxlLmNvbTAdBgNVHQ4EFgQU1Ggxa4gtm2Xwe5++n4pwKtjVVtcwCgYIKoZIzj0EAwIDSQAwRgIhAIpiGMOesmqqc4KNQ3UAqQVkARdZ/cfNwEhJZQNRnSRoAiEAqNhzylZ7sS13IYYRxJJ8rMDE5oYo6JnFK4izY3win6U=",
+      "sha256": "3256992fbbc4eed03a208eb9faaa38b3a38459c162c172b128f6d382f96e237b",
+      "expectedSilk": {
+        "result": "Success"
+      }
+    },
+    {
+      "id": "silk::missing-ec-parameters/trusted_certs[0]",
+      "sourceCase": "rfc5280::no-keyusage",
+      "sourceCertificateRole": "trusted_certs[0]",
+      "sourceCertificateSha256": "2ffcf7efc81cbd3f7f2aa126fa6de0663e011ed71e7cdf2bec63a6c2af828455",
+      "mutation": "remove the named-curve parameters OID from SubjectPublicKeyInfo",
+      "der": "MIIBhjCCASugAwIBAgIUAzu942YNpt4fwlszYw3JjczWGUUwCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzI5NjkwNTAzMDAwMDAxWjAaMRgwFgYDVQQDDA94NTA5LWxpbWJvLXJvb3QwTzAJBgcqhkjOPQIBA0IABA3n4ngo/+EjMwmP4a8VULUERQn7tR/gQKnqd0v0Q5FPKMioZThxRKz3BpncSWQR91hSKqEmdQcO1icKFeH0DGKjVzBVMA8GA1UdEwEB/wQFMAMBAf8wCwYDVR0PBAQDAgEGMBYGA1UdEQQPMA2CC2V4YW1wbGUuY29tMB0GA1UdDgQWBBTUaDFriC2bZfB7n76finAq2NVW1zAKBggqhkjOPQQDAgNJADBGAiEAimIYw56yaqpzgo1DdQCpBWQBF1n9x83ASEllA1GdJGgCIQCo2HPKVnuxLXchhhHEknyswMTmhijomcUriLNjfCKfpA==",
+      "sha256": "34fab25a807a3547955986b7b509bb577fe512f21e1dea38667453ecfe2a6281",
+      "expectedSilk": {
+        "result": "Failure",
+        "reason": "InvalidKey"
+      }
+    },
+    {
+      "id": "silk::unsupported-signature-parameters/intermediates[0]",
+      "sourceCase": "pathlen::ee-with-intermediate-pathlen-0",
+      "sourceCertificateRole": "untrusted_intermediates[0]",
+      "sourceCertificateSha256": "a6f39c6e3cfd02e1d69df5df5e61edef8fca6f951de93f3f0f3ce5ced6390f01",
+      "mutation": "append DER NULL parameters to both ECDSA-with-SHA256 AlgorithmIdentifiers",
+      "der": "MIICBTCCAaigAwIBAgIUTIRcpXB7SoD1P++HfW7mwoch96swDAYIKoZIzj0EAwIFADAaMRgwFgYDVQQDDA94NTA5LWxpbWJvLXJvb3QwIBcNNzAwMTAxMDAwMDAxWhgPMjk2OTA1MDMwMDAwMDFaMGcxOTA3BgNVBAsMMDQ2NjM2ODYyMjQ2MjU4MzYyNTY5MDk3MzQzNDE4NTUyMjMxMzExNjU4MzcxMjk2OTEqMCgGA1UEAwwheDUwOS1saW1iby1pbnRlcm1lZGlhdGUtcGF0aGxlbi0wMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEAvawd0eHTUvZAMACMWxPTC8xxIzw0v1tKHoh+AOFWXp0c1IvJXx/9Ttz2QtMmhOHYNVviyR3IE1I/GUGaZJhO6N7MHkwEgYDVR0TAQH/BAgwBgEB/wIBADALBgNVHQ8EBAMCAgQwFgYDVR0RBA8wDYILZXhhbXBsZS5jb20wHwYDVR0jBBgwFoAUSiiDLFHknGkhNi6058aZkihn6S0wHQYDVR0OBBYEFOuLJ39jBRcUN8w+sGgkiOdvCvVbMAwGCCqGSM49BAMCBQADSQAwRgIhAJsom0zZ5J+tkJh9+zKQDD+qA2iTYZ/RVtRdDvb0q3f+AiEAoJyFCXWRWbO2wH0enhIar9Xy7IN+On+kas6xIGLxTSw=",
+      "sha256": "0327b1374b42d54a53baf5c799c61a1e6a162ef9e5e1c7c84b68c21883c8c667",
+      "expectedSilk": {
+        "result": "Failure",
+        "reason": "UnsupportedAlgorithm"
+      }
+    },
+    {
+      "id": "silk::unsupported-signature-algorithm/intermediates[0]",
+      "sourceCase": "pathlen::ee-with-intermediate-pathlen-0",
+      "sourceCertificateRole": "untrusted_intermediates[0]",
+      "sourceCertificateSha256": "a6f39c6e3cfd02e1d69df5df5e61edef8fca6f951de93f3f0f3ce5ced6390f01",
+      "mutation": "replace both ECDSA-with-SHA256 OIDs with ECDSA-with-SHA384",
+      "der": "MIICATCCAaagAwIBAgIUTIRcpXB7SoD1P++HfW7mwoch96swCgYIKoZIzj0EAwMwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzI5NjkwNTAzMDAwMDAxWjBnMTkwNwYDVQQLDDA0NjYzNjg2MjI0NjI1ODM2MjU2OTA5NzM0MzQxODU1MjIzMTMxMTY1ODM3MTI5NjkxKjAoBgNVBAMMIXg1MDktbGltYm8taW50ZXJtZWRpYXRlLXBhdGhsZW4tMDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABAL2sHdHh01L2QDAAjFsT0wvMcSM8NL9bSh6IfgDhVl6dHNSLyV8f/U7c9kLTJoTh2DVb4skdyBNSPxlBmmSYTujezB5MBIGA1UdEwEB/wQIMAYBAf8CAQAwCwYDVR0PBAQDAgIEMBYGA1UdEQQPMA2CC2V4YW1wbGUuY29tMB8GA1UdIwQYMBaAFEoogyxR5JxpITYutOfGmZIoZ+ktMB0GA1UdDgQWBBTriyd/YwUXFDfMPrBoJIjnbwr1WzAKBggqhkjOPQQDAwNJADBGAiEAmyibTNnkn62QmH37MpAMP6oDaJNhn9FW1F0O9vSrd/4CIQCgnIUJdZFZs7bAfR6eEhqv1fLsg346f6RqzrEgYvFNLA==",
+      "sha256": "bf925287f1aba73edfce2bb5e932e2fabc57dbb1488be5e42b76ceac46d308ee",
+      "expectedSilk": {
+        "result": "Failure",
+        "reason": "UnsupportedAlgorithm"
+      }
+    },
+    {
+      "id": "silk::mismatching-signature-algorithms/intermediates[0]",
+      "sourceCase": "pathlen::ee-with-intermediate-pathlen-0",
+      "sourceCertificateRole": "untrusted_intermediates[0]",
+      "sourceCertificateSha256": "a6f39c6e3cfd02e1d69df5df5e61edef8fca6f951de93f3f0f3ce5ced6390f01",
+      "mutation": "replace the outer ECDSA-with-SHA256 AlgorithmIdentifier with RSA-PKCS1-SHA256",
+      "der": "MIICBDCCAaagAwIBAgIUTIRcpXB7SoD1P++HfW7mwoch96swCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzI5NjkwNTAzMDAwMDAxWjBnMTkwNwYDVQQLDDA0NjYzNjg2MjI0NjI1ODM2MjU2OTA5NzM0MzQxODU1MjIzMTMxMTY1ODM3MTI5NjkxKjAoBgNVBAMMIXg1MDktbGltYm8taW50ZXJtZWRpYXRlLXBhdGhsZW4tMDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABAL2sHdHh01L2QDAAjFsT0wvMcSM8NL9bSh6IfgDhVl6dHNSLyV8f/U7c9kLTJoTh2DVb4skdyBNSPxlBmmSYTujezB5MBIGA1UdEwEB/wQIMAYBAf8CAQAwCwYDVR0PBAQDAgIEMBYGA1UdEQQPMA2CC2V4YW1wbGUuY29tMB8GA1UdIwQYMBaAFEoogyxR5JxpITYutOfGmZIoZ+ktMB0GA1UdDgQWBBTriyd/YwUXFDfMPrBoJIjnbwr1WzANBgkqhkiG9w0BAQsFAANJADBGAiEAmyibTNnkn62QmH37MpAMP6oDaJNhn9FW1F0O9vSrd/4CIQCgnIUJdZFZs7bAfR6eEhqv1fLsg346f6RqzrEgYvFNLA==",
+      "sha256": "9d16bef2a0fa0983bcf7ce89699c10f53ca19014973c60aed381688cdb72d881",
+      "expectedSilk": {
+        "result": "Failure",
+        "reason": "UnsupportedParameters"
+      }
+    },
+    {
+      "id": "silk::certificate-policy/intermediates[0]",
+      "sourceCase": "pathlen::ee-with-intermediate-pathlen-0",
+      "sourceCertificateRole": "untrusted_intermediates[0]",
+      "sourceCertificateSha256": "a6f39c6e3cfd02e1d69df5df5e61edef8fca6f951de93f3f0f3ce5ced6390f01",
+      "mutation": "replace the BasicConstraints OID with certificatePolicies while retaining its DER value",
+      "der": "MIICATCCAaagAwIBAgIUTIRcpXB7SoD1P++HfW7mwoch96swCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzI5NjkwNTAzMDAwMDAxWjBnMTkwNwYDVQQLDDA0NjYzNjg2MjI0NjI1ODM2MjU2OTA5NzM0MzQxODU1MjIzMTMxMTY1ODM3MTI5NjkxKjAoBgNVBAMMIXg1MDktbGltYm8taW50ZXJtZWRpYXRlLXBhdGhsZW4tMDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABAL2sHdHh01L2QDAAjFsT0wvMcSM8NL9bSh6IfgDhVl6dHNSLyV8f/U7c9kLTJoTh2DVb4skdyBNSPxlBmmSYTujezB5MBIGA1UdIAEB/wQIMAYBAf8CAQAwCwYDVR0PBAQDAgIEMBYGA1UdEQQPMA2CC2V4YW1wbGUuY29tMB8GA1UdIwQYMBaAFEoogyxR5JxpITYutOfGmZIoZ+ktMB0GA1UdDgQWBBTriyd/YwUXFDfMPrBoJIjnbwr1WzAKBggqhkjOPQQDAgNJADBGAiEAmyibTNnkn62QmH37MpAMP6oDaJNhn9FW1F0O9vSrd/4CIQCgnIUJdZFZs7bAfR6eEhqv1fLsg346f6RqzrEgYvFNLA==",
+      "sha256": "b016032a85dc483a1bcd2030990a90105bd7822385f02b9b4def280868b760fa",
+      "expectedSilk": {
+        "result": "Failure",
+        "reason": "UnsupportedPolicy"
+      }
+    },
+    {
+      "id": "silk::tls-feature/intermediates[0]",
+      "sourceCase": "pathlen::ee-with-intermediate-pathlen-0",
+      "sourceCertificateRole": "untrusted_intermediates[0]",
+      "sourceCertificateSha256": "a6f39c6e3cfd02e1d69df5df5e61edef8fca6f951de93f3f0f3ce5ced6390f01",
+      "mutation": "replace the BasicConstraints OID with TLS Feature while retaining its DER value",
+      "der": "MIICBzCCAaygAwIBAgIUTIRcpXB7SoD1P++HfW7mwoch96swCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzI5NjkwNTAzMDAwMDAxWjBnMTkwNwYDVQQLDDA0NjYzNjg2MjI0NjI1ODM2MjU2OTA5NzM0MzQxODU1MjIzMTMxMTY1ODM3MTI5NjkxKjAoBgNVBAMMIXg1MDktbGltYm8taW50ZXJtZWRpYXRlLXBhdGhsZW4tMDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABAL2sHdHh01L2QDAAjFsT0wvMcSM8NL9bSh6IfgDhVl6dHNSLyV8f/U7c9kLTJoTh2DVb4skdyBNSPxlBmmSYTujgYAwfjAXBggrBgEFBQcBGAEB/wQIMAYBAf8CAQAwCwYDVR0PBAQDAgIEMBYGA1UdEQQPMA2CC2V4YW1wbGUuY29tMB8GA1UdIwQYMBaAFEoogyxR5JxpITYutOfGmZIoZ+ktMB0GA1UdDgQWBBTriyd/YwUXFDfMPrBoJIjnbwr1WzAKBggqhkjOPQQDAgNJADBGAiEAmyibTNnkn62QmH37MpAMP6oDaJNhn9FW1F0O9vSrd/4CIQCgnIUJdZFZs7bAfR6eEhqv1fLsg346f6RqzrEgYvFNLA==",
+      "sha256": "6a83078032ffd1315b82c1ecacfc26497bbc5d678f316557cba3ccbc0f7286ee",
+      "expectedSilk": {
+        "result": "Failure",
+        "reason": "UnsupportedExtension"
       }
     }
   ]
