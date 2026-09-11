@@ -1,0 +1,174 @@
+//! Owned explicit trust authority with independently configured path and name constraints.
+//!
+//! # When to use
+//!
+//! Use `TrustAnchor.fromCertificate` when a decoded certificate is already explicit authority. Use
+//! `fromCertificateWithConstraints` to attach stricter local path-length or DNS/IP
+//! NameConstraints policy.
+//!
+//! # Details
+//!
+//! A trust anchor owns the complete decoded certificate and any configured constraint DER. The
+//! configured constraints remain distinct from embedded certificate constraints, including when
+//! two anchors contain identical certificate bytes.
+//!
+//! # Gotchas
+//!
+//! Constructing an anchor declares authority; it does not inspect a certificate profile, verify a
+//! self-signature, authenticate a path, or make native trust files equivalent to OS policy.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.bytes {Bytes}
+import silk.certificate {Certificate}
+import silk.certificate_profile {
+  CertificateProfile,
+  ProfileClass,
+  ProfileError,
+  ProfileLimits,
+  ProfileOffsetSpace,
+  ProfileReason,
+}
+import silk.option {Option}
+import silk.result {Result}
+import silk.usize
+
+/// One owned trust candidate plus optional locally configured restrictions.
+pub struct TrustAnchor {
+  certificateValue: Certificate
+  hasPathLength: bool
+  pathLengthValue: usize
+  hasNameConstraints: bool
+  nameConstraintsValue: Bytes
+  encodedBytesValue: usize
+}
+
+impl TrustAnchor {
+  /// Moves a decoded certificate into an unconstrained explicit trust anchor without allocating.
+  ///
+  /// # Details
+  ///
+  /// All retained certificate bytes and unsupported extension values remain intact for later
+  /// inspection. Authority does not imply that the certificate is supported by a selected profile.
+  pub fn fromCertificate(certificate: Certificate) -> TrustAnchor {
+    let encoded = Certificate.der(&certificate).length
+    return TrustAnchor {
+      certificateValue: move certificate,
+      hasPathLength: false,
+      pathLengthValue: usize.ZERO,
+      hasNameConstraints: false,
+      nameConstraintsValue: Bytes.make(),
+      encodedBytesValue: encoded,
+    }
+  }
+
+  /// Moves a decoded certificate into explicit authority with independent configured restrictions.
+  ///
+  /// # Details
+  ///
+  /// Configured NameConstraints are validated under the strict DNS/IP subset and copied only after
+  /// validation. The encoded-byte count includes complete certificate DER and configured
+  /// constraint DER. On semantic failure the consumed certificate is dropped. Allocation refusal
+  /// releases partial owned state through ordinary lexical destruction.
+  pub effect fn fromCertificateWithConstraints(
+    certificate: Certificate,
+    maximumPathLength: Option<usize>,
+    configuredNameConstraints: Option<&[u8]>,
+    limits: ProfileLimits,
+  ) -> Result<TrustAnchor, ProfileError>
+  ! OutOfMemoryError
+  ? &mut Allocator {
+    let certificateBytes = Certificate.der(&certificate).length
+    let pathPresent = match & maximumPathLength {
+      Option<usize>.Some {value} => true
+      Option<usize>.None => false
+    }
+    let pathValue = match move maximumPathLength {
+      Option<usize>.Some {value} => value
+      Option<usize>.None => usize.ZERO
+    }
+    return match move configuredNameConstraints {
+      Option<&[u8]>.None => Result.succeed<TrustAnchor, ProfileError>(
+        TrustAnchor {
+          certificateValue: move certificate,
+          hasPathLength: pathPresent,
+          pathLengthValue: pathValue,
+          hasNameConstraints: false,
+          nameConstraintsValue: Bytes.make(),
+          encodedBytesValue: certificateBytes,
+        },
+      )
+      Option<&[u8]>.Some {value} => {
+        let checked = CertificateProfile.validateConfiguredNameConstraints(value, limits)
+        match move checked {
+          Result<(), ProfileError>.Failure {error} => {
+            return Result.failResult<TrustAnchor, ProfileError>(error)
+          }
+          Result<(), ProfileError>.Success {value: ignored} => {}
+        }
+        let total = match move usize.checkedAdd(certificateBytes, value.length) {
+          Option<usize>.Some {value: totalValue} => totalValue
+          Option<usize>.None => {
+            return Result.failResult<TrustAnchor, ProfileError>(
+              ProfileError {
+                kind: ProfileClass.ResourceLimit,
+                reason: ProfileReason.SizeOverflow,
+                extensionIndex: Option.none<usize>(),
+                offsetSpace: ProfileOffsetSpace.ConfiguredConstraintDer,
+                offset: 0,
+              },
+            )
+          }
+        }
+        let copied = run Bytes.copy(value)
+        return Result.succeed<TrustAnchor, ProfileError>(
+          TrustAnchor {
+            certificateValue: move certificate,
+            hasPathLength: pathPresent,
+            pathLengthValue: pathValue,
+            hasNameConstraints: true,
+            nameConstraintsValue: move copied,
+            encodedBytesValue: total,
+          },
+        )
+      }
+    }
+  }
+
+  /// Produces a byte- and constraint-preserving independent owner.
+  ///
+  /// # Details
+  ///
+  /// Allocation refusal releases every partial copy and leaves the original unchanged.
+  pub effect fn clone(self: &Self) -> TrustAnchor ! OutOfMemoryError ? &mut Allocator {
+    let certificate = run Certificate.copy(&self.certificateValue)
+    let constraints = run Bytes.copy(Bytes.asSlice(&self.nameConstraintsValue))
+    return TrustAnchor {
+      certificateValue: move certificate,
+      hasPathLength: self.hasPathLength,
+      pathLengthValue: self.pathLengthValue,
+      hasNameConstraints: self.hasNameConstraints,
+      nameConstraintsValue: move constraints,
+      encodedBytesValue: self.encodedBytesValue,
+    }
+  }
+
+  /// Borrows the complete owned decoded certificate.
+  pub fn certificate(self: &Self) -> &Certificate { return &self.certificateValue }
+
+  /// Returns the independent configured maximum path length when present.
+  pub fn configuredPathLength(self: &Self) -> Option<usize> {
+    if self.hasPathLength { return Option.some<usize>(self.pathLengthValue) }
+    return Option.none<usize>()
+  }
+
+  /// Borrows exact configured NameConstraints DER when present.
+  pub fn configuredNameConstraints(self: &Self) -> Option<&[u8]> {
+    if self.hasNameConstraints {
+      return Option.some<&[u8]>(Bytes.asSlice(&self.nameConstraintsValue))
+    }
+    return Option.none<&[u8]>()
+  }
+
+  /// Returns certificate DER bytes plus configured NameConstraints DER bytes.
+  pub fn encodedBytes(self: &Self) -> usize { return self.encodedBytesValue }
+}

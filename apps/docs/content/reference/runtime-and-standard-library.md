@@ -1004,6 +1004,45 @@ public ASN.1 tooling is outside this API.
 [bundle actor](../../../../packages/compiler/stdlib/silk/certificate_bundle.silk),
 [decoding contract and fixture provenance](../../../../openspec/changes/specify-bounded-certificate-decoding/design.md).
 
+## Certificate semantic profiles and trust anchors
+
+`silk.certificate_profile { CertificateProfile, CertificateRole, ProfileLimits }` applies the
+restricted TLS-server certificate profile to a borrowed decoded `Certificate`. Inspection admits
+P-256 or bounded RSA keys, supported SHA-256 certificate signature metadata, strict extension DER,
+and role-specific BasicConstraints, KeyUsage, ExtendedKeyUsage, SAN, and NameConstraints policy.
+It retains borrowed access to the original certificate and exact SAN/NameConstraints values. It
+allocates nothing and reports owned `Malformed`, `Unsupported`, or `ResourceLimit` errors with
+stable semantic reasons and certificate-DER offsets. `SignatureAlgorithm` identifies an unknown
+signature OID or invalid signature-bit metadata, `SignatureParameters` identifies parameters that
+are invalid for a recognized algorithm, and `SignatureAlgorithmMismatch` identifies two admitted
+but differing inner and outer algorithms. `EmptySubject` identifies the structural requirement for
+a nonempty critical SAN; malformed SAN content remains `SubjectAltName`, while `Role` remains CA
+and BasicConstraints policy.
+
+`CertificateProfile.verifyIssuedBy` checks exact issuer-name DER equality and verifies the
+subject's original retained TBSCertificate bytes with the issuer's admitted key. It checks one
+edge only. Successful inspection or signature verification does not check dates, authority, a
+complete path, accumulated constraints, HTTPS identity, revocation, or transparency.
+
+`silk.trust_anchor { TrustAnchor }` owns an explicitly authoritative certificate. The simple
+constructor is an infallible ownership move and deliberately preserves unsupported roots. The
+constrained constructor can add an independent maximum-intermediate count and strict DNS/IP
+NameConstraints DER; these additions never replace embedded certificate restrictions. Cloning
+creates an independent certificate and constraint owner through an explicit allocator. Identical
+certificate bytes with different configured restrictions remain distinct trust candidates.
+
+Constructing a `TrustAnchor` is a trust decision, not certificate validation. Native PEM loading
+and trust-source replacement are separate APIs, and loading native certificate bytes does not
+claim equivalence with an operating system's trust policy.
+
+**Evidence:** [profile actor](../../../../packages/compiler/stdlib/silk/certificate_profile.silk),
+[trust-anchor actor](../../../../packages/compiler/stdlib/silk/trust_anchor.silk),
+[implementation contract](../../../../openspec/changes/implement-certificate-profiles-trust-anchors/specs/certificate-profiles-trust-anchors/spec.md),
+[pinned x509-limbo fixtures](../../../../packages/compiler/test/fixtures/certificate-profile-limbo.json).
+Profile comparisons also preserve the fixed Zig HTTP snapshot
+`1bc892110da738d6137b3f0b7e8e3a586ce09928`; it is provenance, not a full-path or trust-policy
+oracle.
+
 ## Deferred directions
 
 The following are deliberately outside the first stable model:
@@ -1057,7 +1096,7 @@ and trailer. Verification failure returns `InvalidSignature`; invalid signature 
 
 `fromCertificateKey` takes the original AlgorithmIdentifier DER, key BIT STRING bytes and unused
 bit count retained by the certificate container decoder. It requires byte alignment, rsaEncryption
-with NULL parameters, and a minimal positive DER RSAPublicKey sequence without trailing data.
+with absent or NULL parameters, and a minimal positive DER RSAPublicKey sequence without trailing data.
 PSS-restricted key identifiers are outside this profile. `verifyCertificate` similarly takes the
 original signature AlgorithmIdentifier DER and signature BIT STRING metadata. It admits PSS only
 with effective SHA-256/MGF1-SHA-256/salt32/trailer1 parameters, in unique ordered explicit fields;

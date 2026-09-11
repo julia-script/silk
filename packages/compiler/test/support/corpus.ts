@@ -33,6 +33,7 @@ import { uriAcceptanceSource } from './uriAcceptance.js'
 import { ecdsaP256AcceptanceSource } from './ecdsaP256Acceptance.js'
 import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
+import { certificateProfileAcceptanceSource } from './certificateProfileAcceptance.js'
 import { httpsIdentityAcceptanceSource } from './httpsIdentityAcceptance.js'
 import { sanAcceptanceSource } from './sanAcceptance.js'
 import {
@@ -6250,6 +6251,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     name: 'certificate-bounded-decoding',
     source: certificateAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'certificate-profile-and-trust-anchor',
+    source: certificateProfileAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'uri-rfc3986',

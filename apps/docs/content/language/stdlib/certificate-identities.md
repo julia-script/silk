@@ -301,6 +301,16 @@ pub count: usize
 
 Number of initialized entries in caller storage.
 
+<a id="declaration-73696c6b2f63657274696669636174655f6964656e7469746965733a3a53616e4465636f646553756d6d6172793a3a6669656c643a32"></a>
+
+### Field `nodes`
+
+```silk
+pub nodes: usize
+```
+
+Number of DER nodes traversed while validating the selected GeneralNames value.
+
 <a id="declaration-73696c6b2f63657274696669636174655f6964656e7469746965733a3a436572746966696361746553616e"></a>
 
 ## `CertificateSan`
@@ -310,6 +320,22 @@ pub struct CertificateSan
 ```
 
 Operations that decode complete SAN values without allocation or identity matching.
+
+<a id="declaration-73696c6b2f63657274696669636174655f6964656e7469746965733a3a436572746966696361746553616e2e76616c696461746556616c7565"></a>
+
+### Associated function `CertificateSan.validateValue`
+
+```silk
+pub fn validateValue<'life0>(value: &'life0 [u8], limits: SanDecodeLimits) -> silk/result.Result<silk/certificate_identities.SanDecodeSummary, silk/certificate_identities.SanDecodeError>
+```
+
+Validates one complete DER GeneralNames value without descriptor storage or allocation.
+
+#### Details
+
+This performs the same complete framing and GeneralName schema checks as `decodeValue`,
+enforces the supplied input, identity, node, and depth budgets, and returns the name count.
+Payload syntax such as DNS label policy and IP address width remains the consumer's job.
 
 <a id="declaration-73696c6b2f63657274696669636174655f6964656e7469746965733a3a436572746966696361746553616e2e6465636f646556616c7565"></a>
 

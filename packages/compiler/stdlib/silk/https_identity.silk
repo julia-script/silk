@@ -249,6 +249,34 @@ impl IdentityLimits {
   }
 }
 
+impl HttpsIdentity {
+  /// Returns the shared HTTPS-profile admission error for one exact DNS name, when invalid.
+  ///
+  /// # Details
+  ///
+  /// This applies the canonical 253-octet, LDH-label, edge-hyphen, wildcard-free, and
+  /// nonnumeric-final-label grammar used by HTTPS reference identities.
+  pub fn exactDnsNameError(bytes: &[u8]) -> Option<NameError> {
+    return nameError(bytes, false)
+  }
+
+  /// Returns the shared HTTPS-profile admission error for one presented DNS name, when invalid.
+  ///
+  /// # Details
+  ///
+  /// A wildcard is admitted only as the complete leftmost `*.` label and remains included in the
+  /// 253-octet total-name bound. All other label policy is identical to exact DNS names.
+  pub fn presentedDnsNameError(bytes: &[u8]) -> Option<NameError> {
+    if bytes.length > 0 && bytes[0] == 42 {
+      if bytes.length < 2 || bytes[1] != 46 {
+        return nameFailure(NameError.WildcardReference)
+      }
+      return nameError(bytes, true)
+    }
+    return nameError(bytes, false)
+  }
+}
+
 fn nameFailure(reason: NameError) -> Option<NameError> {
   return Option.some<NameError>(reason)
 }

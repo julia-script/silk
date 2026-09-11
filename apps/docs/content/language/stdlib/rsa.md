@@ -153,7 +153,7 @@ Admits certificate RSA key DER after checking its original AlgorithmIdentifier a
 #### Details
 
 Pass the decoder's algorithm DER, key BIT STRING bytes and unused-bit count unchanged.
-Requires rsaEncryption with NULL parameters and a minimal positive RSAPublicKey DER sequence.
+Requires rsaEncryption with absent or NULL parameters and a minimal positive RSAPublicKey DER sequence.
 The modulus and exponent then pass the same bounded profile as fromComponents.
 Malformed DER returns InvalidEncoding; wrong algorithm parameters return InvalidParameters.
 Nonzero unused bits return InvalidLength. No borrowed bytes are retained.

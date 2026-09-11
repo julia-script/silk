@@ -1,11 +1,33 @@
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
+import { createHash } from 'node:crypto'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
+import certificateProfileFixtures from './fixtures/certificate-profile-limbo.json' with { type: 'json' }
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+it('pins certificate-profile fixture provenance and DER digests', () => {
+  assert.strictEqual(
+    certificateProfileFixtures.source,
+    'https://github.com/C2SP/x509-limbo/blob/3f8cba420e90322223486086054401189b7b320e/limbo.json',
+  )
+  assert.strictEqual(
+    certificateProfileFixtures.sourceSha256,
+    '563805f46937ad25ac9d4e41341c414070aced32a22294821b5c5fe526e2c52d',
+  )
+  assert.strictEqual(certificateProfileFixtures.license, 'Apache-2.0')
+  for (const fixture of certificateProfileFixtures.fixtures) {
+    assert.strictEqual(
+      createHash('sha256').update(Buffer.from(fixture.der, 'base64')).digest('hex'),
+      fixture.sha256,
+      fixture.id,
+    )
+    assert.isNotEmpty(fixture.profileOutcome, fixture.id)
+  }
+})
 
 it.effect(
   'keeps Bytes move-only and rejects exclusive field projection through shared access',
@@ -44,6 +66,9 @@ it.effect('keeps decoded certificate owners move-only and their returned views b
   Effect.gen(function* () {
     const source = `import silk.certificate { Certificate }
 import silk.certificate_bundle { CertificateBundle }
+import silk.certificate_profile { CertificateProfile, CertificateRole, ProfileLimits, ProfileError }
+import silk.result { Result }
+import silk.trust_anchor { TrustAnchor }
 import silk.usize
 fn moved(value: Certificate) -> usize {
   let next = move value
@@ -57,6 +82,17 @@ fn viewed(value: Certificate) -> usize {
   let bytes = Certificate.der(&value)
   drop value
   return bytes.length
+}
+fn profile<'a>(certificate: &'a Certificate) -> Result<CertificateProfile<'a>, ProfileError> {
+  return CertificateProfile.inspect(certificate, CertificateRole.Anchor, ProfileLimits.defaults())
+}
+fn anchor(certificate: Certificate) -> usize {
+  let value = TrustAnchor.fromCertificate(move certificate)
+  return TrustAnchor.encodedBytes(&value)
+}
+fn anchorMoved(value: TrustAnchor) -> usize {
+  let next = move value
+  return TrustAnchor.encodedBytes(&value)
 }
 pub fn main() -> i32 { return 0 }`
     const ownership = yield* AnalysisFixture.retainingMain(
@@ -74,6 +110,17 @@ pub fn main() -> i32 { return 0 }`
         operation: 'CertificateBundle.decodePem',
         bindings: ['certificates', 'block', 'certificate'],
       },
+      {
+        module: 'silk/certificate',
+        operation: 'Certificate.copy',
+        bindings: ['bytes', 'extensions'],
+      },
+      {
+        module: 'silk/trust_anchor',
+        operation: 'TrustAnchor.fromCertificateWithConstraints',
+        bindings: ['certificate'],
+      },
+      { module: 'silk/trust_anchor', operation: 'TrustAnchor.clone', bindings: ['certificate'] },
     ]
     for (const state of partialStates) {
       const operation = Analysis.ownershipOf(ownership, state.module)?.functions.find(
@@ -105,6 +152,7 @@ pub fn main() -> i32 { return 0 }`
         { code: 'OWN0001', text: '&value' },
         { code: 'OWN0011', text: 'value' },
         { code: 'OWN0019', text: 'bytes.length' },
+        { code: 'OWN0001', text: '&value' },
       ],
     )
   }),
