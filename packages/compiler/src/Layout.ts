@@ -4589,6 +4589,8 @@ export const coverageFieldSlots = (
     shape.tree._tag === 'NominalUnionShape' &&
     Type.runtimeKey(shape.tree.type) === Type.runtimeKey(member.type)
   ) {
+    if (path.length === 0)
+      return Object.freeze(Array.from({ length: shape.tree.laneCount }, (_, ordinal) => ordinal))
     const variant = shape.tree.variants.find(
       (candidate) =>
         candidate.ordinal === member.variantOrdinal &&
@@ -4602,6 +4604,10 @@ export const coverageFieldSlots = (
       (candidate) => Type.runtimeKey(candidate.member) === Type.runtimeKey(member.root),
     )
     if (outer?.shape._tag === 'NominalUnionShape') {
+      if (path.length === 0)
+        return Object.freeze(
+          Array.from({ length: outer.shape.laneCount }, (_, ordinal) => 1 + ordinal),
+        )
       const variant = outer.shape.variants.find(
         (candidate) =>
           candidate.ordinal === member.variantOrdinal &&
