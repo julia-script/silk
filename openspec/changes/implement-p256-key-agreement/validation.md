@@ -27,9 +27,13 @@ node packages/compiler/scripts/inspect-p256-codegen.mjs /tmp/p256-codegen
 
 The opt-in command retains executable main roots, emits bitcode, lowers native objects with Clang,
 and writes disassembly/WAT for Darwin ARM64, GNU/Linux ARM64, GNU/Linux x86-64 and wasm32, each in
-debug, release and release-with-debug modes. Native execution is witnessed only on Darwin ARM64;
+debug, release and release-with-debug modes (-O0, -O2 and -O2 respectively). Native execution is witnessed only on Darwin ARM64;
 GNU evidence is source selection and emitted machine code. Native rootless object requests would
 produce empty artifacts and are not used as inspection evidence.
+
+The reproduction completed successfully for all twelve target/mode combinations. Its initial
+native release lowering used -O3; all six optimized native artifacts were then relowered and
+inspected at the compiler's actual -O2 setting. The committed script now selects -O2 directly.
 
 Tool versions: Homebrew LLVM/Clang22.1.8, wasm2wat1.0.41, Node26.7.0. Native debug and
 release-with-debug bitcode currently prompts Clang's warning that debug information has version0;
@@ -68,6 +72,6 @@ production security or FIPS/CAVP validation.
 
 `pnpm typecheck` passed (18 tasks,15.389s on the final arithmetic design). `pnpm format:check`
 passed before this evidence update. Initial `pnpm lint` exposed Effect script-boundary warnings;
-the opt-in script now uses Effect services and scoped child processes and its focused lint check passes. The full lint rerun is pending completion.
+the opt-in script now uses Effect services and scoped child processes. Its focused lint and the full lint rerun pass.
 `pnpm test`, `pnpm check`, `pnpm release:candidate`, exact-diff correctness review and independent
 test-economics review remain pending the coordinator's shared validation lane.

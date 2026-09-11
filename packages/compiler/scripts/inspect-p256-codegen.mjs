@@ -80,12 +80,13 @@ const inspect = Effect.fnUntraced(function* () {
       const artifact = wasm ? outcome.path : `${stem}.o`
       if (!wasm) {
         const arguments_ = [
+          '--no-default-config',
           `--target=${target}`,
           '-c',
           '-x',
           'ir',
           outcome.path,
-          optimization === 'debug' ? '-O0' : '-O3',
+          optimization === 'debug' ? '-O0' : '-O2',
           '-o',
           artifact,
         ]
