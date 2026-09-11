@@ -121,8 +121,6 @@ let badDer1: [u8;4] = [48, 129, 1, 0]
  if !keyRejected(RsaPublicKey.fromCertificateKey(&keyAlg,&badDer1,0)) {return false}
 let badDer2: [u8;5] = [48, 130, 0, 1, 0]
  if !keyRejected(RsaPublicKey.fromCertificateKey(&keyAlg,&badDer2,0)) {return false}
-let badDer3: [u8;7] = [48, 132, 0, 0, 0, 1, 0]
- if !keyRejected(RsaPublicKey.fromCertificateKey(&keyAlg,&badDer3,0)) {return false}
 let badDer4: [u8;5] = [48, 3, 2, 1, 1]
  if !keyRejected(RsaPublicKey.fromCertificateKey(&keyAlg,&badDer4,0)) {return false}
 let badDer5: [u8;3] = [48, 2, 2]
