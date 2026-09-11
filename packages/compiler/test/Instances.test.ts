@@ -495,6 +495,55 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('keeps composite Effect representations guarded at a terminal cleanup callable', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`struct First {}
+struct Second {}
+struct Guard {}
+
+fn initial(input: First | Second) -> Effect<'static; i32> {
+  return match move input {
+    First {} => effect { return 1 }
+    Second {} => effect { return 2 }
+  }
+}
+
+fn recursive(input: First | Second) -> Effect<'static; i32> {
+  return match move input {
+    First {} => effect { return 3 }
+    Second {} => effect { return 4 }
+  }
+}
+
+fn identity(value: i32) -> i32 { return value }
+
+fn loop(
+  operation: once Effect<'static; i32>,
+  callback: once fn<'static>(i32) -> i32
+) -> i32 {
+  return loop(recursive(First {}), identity)
+}
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let value = loop(initial(First {}), identity)
+    return ()
+  }
+}
+
+pub fn main() -> i32 {
+  let held = Guard {}
+  drop held
+  return 0
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    assert.strictEqual(result.instances.violations.length, 1)
+  }),
+)
+
 it.effect('rejects mutually recursive cleanup specialization growth', () =>
   Effect.gen(function* () {
     const result = yield* snapshot(`import silk.box { Box }

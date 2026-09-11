@@ -1691,7 +1691,7 @@ export const discover = (
           ordinaryIdentities.has(identity) ? Object.freeze([]) : (cleanupRoots.get(identity) ?? []),
         )
         const terminalCallableSpecialization =
-          ancestor !== undefined && isTerminalCallableSpecialization(ancestor.key, targetKey)
+          ancestor !== undefined && sameRuntimeNonCallableArguments(ancestor.key, targetKey)
         const cleanupSpecialization = cleanupPermitsSpecialization(
           ancestor?.key,
           targetKey,

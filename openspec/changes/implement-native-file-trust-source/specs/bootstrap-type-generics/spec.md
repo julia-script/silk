@@ -53,6 +53,11 @@ semantic lifetime arguments SHALL remain erased from comparisons.
 - **WHEN** a cleanup-reachable helper recursively wraps a captured callable and changes only its hidden executable identity
 - **THEN** analysis applies the ordinary recursion guard and rejects the call before instance discovery can expand indefinitely
 
+#### Scenario: Preserve non-callable arguments at a terminal callable
+
+- **WHEN** a cleanup-reachable recursive edge selects a terminal capture-free callable but changes a composite Effect representation
+- **THEN** analysis rejects the edge because the terminal exception may replace only callable identities
+
 #### Scenario: Erase different caller lifetimes
 
 - **WHEN** two calls differ only in source owners or inferred regions
