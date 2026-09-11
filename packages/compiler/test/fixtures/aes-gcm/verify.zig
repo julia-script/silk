@@ -58,20 +58,12 @@ comptime {
         if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "936da5cd621ef15343db6b813aae7e") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "9d286e1de80dcfcff6da4dc7e58c2f49")) @compileError("vector 6 mismatch");
     }
     {
-        const m = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
-        const ad = [_]u8{ 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47 };
-        var c: [16]u8 = undefined;
-        var tag: [16]u8 = undefined;
-        std.crypto.aead.aes_gcm.Aes128Gcm.encrypt(&c, &tag, &m, &ad, .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }, .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 });
-        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "936da5cd621ef15343db6b813aae7e07") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "af5cdce412834cbd30d8df5de6b874d4")) @compileError("vector 7 mismatch");
-    }
-    {
         const m = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
         const ad = [_]u8{ 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48 };
         var c: [17]u8 = undefined;
         var tag: [16]u8 = undefined;
         std.crypto.aead.aes_gcm.Aes128Gcm.encrypt(&c, &tag, &m, &ad, .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }, .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 });
-        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "936da5cd621ef15343db6b813aae7e07a3") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "8e7125ccce70e14362069747f5cae80c")) @compileError("vector 8 mismatch");
+        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "936da5cd621ef15343db6b813aae7e07a3") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "8e7125ccce70e14362069747f5cae80c")) @compileError("vector 7 mismatch");
     }
     {
         const m = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 };
@@ -79,15 +71,7 @@ comptime {
         var c: [15]u8 = undefined;
         var tag: [16]u8 = undefined;
         std.crypto.aead.aes_gcm.Aes256Gcm.encrypt(&c, &tag, &m, &ad, .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }, .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 });
-        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "4703d418c1e0c41c85489d80bde476") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "699e5c7db35b495e9afc781a88f77a3d")) @compileError("vector 9 mismatch");
-    }
-    {
-        const m = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
-        const ad = [_]u8{ 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47 };
-        var c: [16]u8 = undefined;
-        var tag: [16]u8 = undefined;
-        std.crypto.aead.aes_gcm.Aes256Gcm.encrypt(&c, &tag, &m, &ad, .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }, .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 });
-        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "4703d418c1e0c41c85489d80bde47662") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "d9ea5c177db8f522a91a02c7d7b5d210")) @compileError("vector 10 mismatch");
+        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "4703d418c1e0c41c85489d80bde476") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "699e5c7db35b495e9afc781a88f77a3d")) @compileError("vector 8 mismatch");
     }
     {
         const m = [_]u8{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
@@ -95,7 +79,7 @@ comptime {
         var c: [17]u8 = undefined;
         var tag: [16]u8 = undefined;
         std.crypto.aead.aes_gcm.Aes256Gcm.encrypt(&c, &tag, &m, &ad, .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }, .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31 });
-        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "4703d418c1e0c41c85489d80bde4766293") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "7e20bf8a37f30c57948b02e3cce92a77")) @compileError("vector 11 mismatch");
+        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "4703d418c1e0c41c85489d80bde4766293") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "7e20bf8a37f30c57948b02e3cce92a77")) @compileError("vector 9 mismatch");
     }
     {
         const m = [_]u8{};
@@ -103,7 +87,7 @@ comptime {
         var c: [0]u8 = undefined;
         var tag: [16]u8 = undefined;
         std.crypto.aead.aes_gcm.Aes128Gcm.encrypt(&c, &tag, &m, &ad, .{ 224, 224, 15, 25, 254, 215, 186, 1, 54, 167, 151, 243 }, .{ 119, 190, 99, 112, 137, 113, 196, 226, 64, 209, 203, 121, 232, 215, 127, 235 });
-        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "209fcc8d3675ed938e9c7166709dd946")) @compileError("vector 12 mismatch");
+        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "209fcc8d3675ed938e9c7166709dd946")) @compileError("vector 10 mismatch");
     }
     {
         const m = [_]u8{};
@@ -111,6 +95,6 @@ comptime {
         var c: [0]u8 = undefined;
         var tag: [16]u8 = undefined;
         std.crypto.aead.aes_gcm.Aes256Gcm.encrypt(&c, &tag, &m, &ad, .{ 215, 156, 242, 45, 80, 76, 199, 147, 195, 251, 108, 138 }, .{ 120, 220, 78, 10, 175, 82, 217, 53, 195, 192, 30, 234, 87, 66, 143, 0, 202, 31, 212, 117, 245, 218, 134, 164, 156, 141, 215, 61, 104, 200, 226, 35 });
-        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "3e5d486aa2e30b22e040b85723a06e76")) @compileError("vector 13 mismatch");
+        if (!std.mem.eql(u8, &std.fmt.bytesToHex(c, .lower), "") or !std.mem.eql(u8, &std.fmt.bytesToHex(tag, .lower), "3e5d486aa2e30b22e040b85723a06e76")) @compileError("vector 11 mismatch");
     }
 }

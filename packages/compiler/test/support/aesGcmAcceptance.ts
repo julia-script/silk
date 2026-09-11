@@ -81,7 +81,7 @@ fn case${index}() -> bool {
 const cases = caseSources.join('\n')
 
 // One nonempty fixture gives independent authentication failures for every bound input.
-const tamper = vectors[8]
+const tamper = vectors.find((entry) => entry.Key.length === 32 && entry.PT.length === 34)
 if (tamper === undefined) throw new Error('Missing AES-GCM boundary fixture')
 const negatives = `fn negatives() -> bool {
   ${array('key', tamper.Key)}
@@ -161,9 +161,9 @@ pub fn main() -> i32 {
 }`
 
 // One partial AES-256 block exercises 64-bit GHASH on wasm32, plus tag rejection before output.
-export const aesGcmWasmAcceptanceSource = `${imports}${helpers}${caseSources[11]}
+export const aesGcmWasmAcceptanceSource = `${imports}${helpers}${caseSources[9]}
 pub fn main() -> i32 {
-  if case11() == false { return 1 }
+  if case9() == false { return 1 }
   ${array('key', tamper.Key)}
   ${array('nonce', tamper.IV)}
   ${array('aad', tamper.AAD)}

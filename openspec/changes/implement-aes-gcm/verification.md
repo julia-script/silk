@@ -5,7 +5,7 @@ The change adds ordinary Silk source only; it changes no compiler privileges or 
 
 ## Functional and diagnostic evidence
 
-- Fourteen committed fixtures: eight NIST CAVP selections and six pinned Zig boundary cases.
+- Twelve committed fixtures: eight NIST CAVP selections and four pinned Zig boundary cases.
   Inputs, outputs, archive checksum, member/case selectors and a standalone independent verifier
   live in `packages/compiler/test/fixtures/aes-gcm/`.
 - The shared native corpus covers both key widths; empty, AAD-only and multi-block inputs;
@@ -90,3 +90,5 @@ Passed during implementation: strict OpenSpec validation, full build, typecheck,
 lint, generated documentation policy, the pinned Zig verifier, and the focused tests above.
 The full `pnpm test`, `pnpm check`, `pnpm release:candidate`, independent correctness review,
 independent economics approval and draft PR handoff are tracked by the coordinator before delivery.
+
+Economics review removed two supplemental exact-block fixtures: the NIST exact-block selections already falsify the same boundary claim. The 15- and 17-byte Zig cases remain for both key widths.

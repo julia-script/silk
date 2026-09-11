@@ -1,6 +1,6 @@
 # AES-GCM fixture provenance
 
-The committed `vectors.json` contains eight NIST CAVP cases and six supplemental boundary cases.
+The committed `vectors.json` contains eight NIST CAVP cases and four supplemental boundary cases.
 No fixture oracle runs in the correctness suite.
 
 NIST source: [GCM test vectors](https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/mac/gcmtestvectors.zip),
@@ -13,7 +13,7 @@ The members are `gcmEncryptExtIV128.rsp` and `gcmEncryptExtIV256.rsp`; all selec
 
 The supplemental cases use ascending key bytes starting at 0, nonce bytes 0 through 11,
 plaintext bytes starting at 0, and AAD bytes starting at 32. Both plaintext and AAD lengths
-are 15, 16 and 17 bytes for each key width. Expected ciphertext and tags came from the pinned
+are 15 and 17 bytes for each key width. Expected ciphertext and tags came from the pinned
 Zig implementation. This adds the byte boundaries absent from the selected NIST groups.
 
 `verify.zig` independently verifies every committed ciphertext and tag using Zig's standard library
