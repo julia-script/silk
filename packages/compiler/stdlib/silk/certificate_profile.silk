@@ -176,6 +176,10 @@ pub enum ProfileReason {
   IssuerName,
   /// An admitted cryptographic primitive rejected the retained signature.
   SignatureRejected,
+  /// A subordinate DNS or IP subjectAltName violates one NameConstraints source.
+  NameConstraintViolation,
+  /// The caller-supplied name/subtree comparison budget is exhausted.
+  NameComparisons,
 }
 
 /// An owned certificate-profile error with optional extension context and a stable byte offset.
@@ -1125,6 +1129,224 @@ fn subjectIsEmpty(certificate: &Certificate) -> bool {
   return subject.length == 2 && subject[0] == 48 && subject[1] == 0
 }
 
+fn asciiLower(value: u8) -> u8 {
+  if value >= 65 && value <= 90 { return value + 32 }
+  return value
+}
+
+fn equalAscii(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length { return false }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if asciiLower(left[index]) != asciiLower(right[index]) { return false }
+    index = index + 1
+  }
+  return true
+}
+
+fn dnsSuffix(name: &[u8], suffix: &[u8]) -> bool {
+  if name.length < suffix.length { return false }
+  let start = name.length - suffix.length
+  if !equalAscii(Slice.view<u8>(name, start, suffix.length), suffix) { return false }
+  return start == 0 || name[start - 1] == 46
+}
+
+fn dnsConstraintMatches(name: &[u8], subtreeValue: &[u8]) -> bool {
+  if subtreeValue[0] != 46 { return dnsSuffix(name, subtreeValue) }
+  let base = Slice.view<u8>(subtreeValue, 1, subtreeValue.length - 1)
+  return dnsSuffix(name, base) && name.length > base.length
+}
+
+fn wildcardBase(name: &[u8]) -> &[u8] {
+  return Slice.view<u8>(name, 2, name.length - 2)
+}
+
+fn wildcardPermitted(name: &[u8], subtreeValue: &[u8]) -> bool {
+  let base = wildcardBase(name)
+  if subtreeValue[0] == 46 {
+    let selected = Slice.view<u8>(subtreeValue, 1, subtreeValue.length - 1)
+    return dnsSuffix(base, selected)
+  }
+  return dnsSuffix(base, subtreeValue)
+}
+
+fn labelCount(value: &[u8]) -> usize {
+  let mut count = usize.ONE
+  let mut index = usize.ZERO
+  while index < value.length {
+    if value[index] == 46 { count = count + 1 }
+    index = index + 1
+  }
+  return count
+}
+
+fn wildcardExcluded(name: &[u8], subtreeValue: &[u8]) -> bool {
+  let base = wildcardBase(name)
+  if subtreeValue[0] == 46 {
+    let selected = Slice.view<u8>(subtreeValue, 1, subtreeValue.length - 1)
+    return dnsSuffix(base, selected)
+  }
+  if dnsSuffix(base, subtreeValue) { return true }
+  if !dnsSuffix(subtreeValue, base) { return false }
+  return labelCount(subtreeValue) == labelCount(base) + 1
+}
+
+fn dnsPermitted(name: &[u8], subtreeValue: &[u8]) -> bool {
+  if name.length >= 2 && name[0] == 42 && name[1] == 46 {
+    return wildcardPermitted(name, subtreeValue)
+  }
+  return dnsConstraintMatches(name, subtreeValue)
+}
+
+fn dnsExcluded(name: &[u8], subtreeValue: &[u8]) -> bool {
+  if name.length >= 2 && name[0] == 42 && name[1] == 46 {
+    return wildcardExcluded(name, subtreeValue)
+  }
+  return dnsConstraintMatches(name, subtreeValue)
+}
+
+fn ipMatches(name: &[u8], subtreeValue: &[u8]) -> bool {
+  if subtreeValue.length != name.length * 2 { return false }
+  let width = name.length
+  let mut index = usize.ZERO
+  while index < width {
+    if u8.bitAnd(name[index], subtreeValue[width + index]) != subtreeValue[index] { return false }
+    index = index + 1
+  }
+  return true
+}
+
+fn comparison(
+  used: &mut usize,
+  maximum: usize,
+  offsetSpace: ProfileOffsetSpace,
+  offset: usize,
+) -> Result<(), ProfileError> {
+  if used.* >= maximum {
+    return Result.failResult<(), ProfileError>(
+      profileError(ProfileClass.ResourceLimit, ProfileReason.NameComparisons, offsetSpace, offset),
+    )
+  }
+  used.* = used.* + 1
+  return Result.succeed<(), ProfileError>(())
+}
+
+fn constraintField(
+  name: &[u8],
+  nameTag: usize,
+  constraintDer: &[u8],
+  selectedTag: usize,
+  excluded: bool,
+  used: &mut usize,
+  maximum: usize,
+  offsetSpace: ProfileOffsetSpace,
+) -> Result<bool, ProfileError> {
+  let root = rawSpan(constraintDer, 0, constraintDer.length)
+  let mut fieldAt = root.content
+  let mut applicable = false
+  let mut matched = false
+  while fieldAt < root.end {
+    let field = rawSpan(constraintDer, fieldAt, root.end)
+    if field.tag == selectedTag {
+      let mut subtreeAt = field.content
+      while subtreeAt < field.end {
+        let subtree = rawSpan(constraintDer, subtreeAt, field.end)
+        let base = rawSpan(constraintDer, subtree.content, subtree.end)
+        if base.tag == nameTag {
+          applicable = true
+          let counted = comparison(&mut used, maximum, offsetSpace, base.start)
+          match move counted {
+            Result<(), ProfileError>.Failure {error} => {
+              return Result.failResult<bool, ProfileError>(error)
+            }
+            Result<(), ProfileError>.Success {value} => {}
+          }
+          let baseValue = content(constraintDer, base)
+          let mut currentMatch = ipMatches(name, baseValue)
+          if nameTag == 130 {
+            currentMatch = dnsPermitted(name, baseValue)
+            if excluded { currentMatch = dnsExcluded(name, baseValue) }
+          }
+          if currentMatch { matched = true }
+        }
+        subtreeAt = subtree.end
+      }
+    }
+    fieldAt = field.end
+  }
+  if excluded { return Result.succeed<bool, ProfileError>(matched) }
+  return Result.succeed<bool, ProfileError>(!applicable || matched)
+}
+
+fn checkName(
+  name: &[u8],
+  nameTag: usize,
+  constraintDer: &[u8],
+  used: &mut usize,
+  maximum: usize,
+  offsetSpace: ProfileOffsetSpace,
+  offset: usize,
+) -> Result<(), ProfileError> {
+  let denied = constraintField(name, nameTag, constraintDer, 161, true, &mut used, maximum, offsetSpace)
+  match move denied {
+    Result<bool, ProfileError>.Failure {error} => {
+      return Result.failResult<(), ProfileError>(error)
+    }
+    Result<bool, ProfileError>.Success {value} => {
+      if value {
+        return Result.failResult<(), ProfileError>(
+          profileError(ProfileClass.Unsupported, ProfileReason.NameConstraintViolation, offsetSpace, offset),
+        )
+      }
+    }
+  }
+  let allowed = constraintField(name, nameTag, constraintDer, 160, false, &mut used, maximum, offsetSpace)
+  return match move allowed {
+    Result<bool, ProfileError>.Failure {error} => Result.failResult<(), ProfileError>(error)
+    Result<bool, ProfileError>.Success {value} => {
+      if !value {
+        return Result.failResult<(), ProfileError>(
+          profileError(ProfileClass.Unsupported, ProfileReason.NameConstraintViolation, offsetSpace, offset),
+        )
+      }
+      return Result.succeed<(), ProfileError>(())
+    }
+  }
+}
+
+fn checkSanAgainst(
+  san: &[u8],
+  constraintDer: &[u8],
+  used: &mut usize,
+  maximum: usize,
+  offsetSpace: ProfileOffsetSpace,
+) -> Result<(), ProfileError> {
+  let root = rawSpan(san, 0, san.length)
+  let mut at = root.content
+  while at < root.end {
+    let entry = rawSpan(san, at, root.end)
+    if entry.tag == 130 || entry.tag == 135 {
+      let checked = checkName(
+        content(san, entry),
+        entry.tag,
+        constraintDer,
+        &mut used,
+        maximum,
+        offsetSpace,
+        entry.start,
+      )
+      match move checked {
+        Result<(), ProfileError>.Failure {error} => {
+          return Result.failResult<(), ProfileError>(error)
+        }
+        Result<(), ProfileError>.Success {value} => {}
+      }
+    }
+    at = entry.end
+  }
+  return Result.succeed<(), ProfileError>(())
+}
+
 fn resultFailure<A>(error: ProfileError) -> Result<A, ProfileError> {
   return Result.failResult<A, ProfileError>(move error)
 }
@@ -1547,6 +1769,39 @@ impl<'a> CertificateProfile<'a> {
     nameConstraints(&mut reader)
     if reader.failed { return Result.failResult<(), ProfileError>(move reader.error) }
     return Result.succeed<(), ProfileError>(())
+  }
+
+  /// Checks every DNS and IP subjectAltName against one strict NameConstraints value.
+  ///
+  /// # Details
+  ///
+  /// Exclusions run before permissions. The operation consumes one comparison before each
+  /// same-form name/subtree comparison and updates `comparisons` across calls. `offsetSpace`
+  /// identifies the coordinate system used by any returned constraint error.
+  ///
+  /// # Gotchas
+  ///
+  /// The constraint value must first pass [`validateConfiguredNameConstraints`] or profile
+  /// inspection. The operation checks only one constraint source; callers must apply all sources.
+  pub fn checkNameConstraints(
+    subject: &CertificateProfile,
+    constraintDer: &[u8],
+    comparisons: &mut usize,
+    maximumComparisons: usize,
+    offsetSpace: ProfileOffsetSpace,
+  ) -> Result<(), ProfileError> {
+    return match move subject.subjectAltNamesDer() {
+      Option<&[u8]>.None => Result.succeed<(), ProfileError>(())
+      Option<&[u8]>.Some {value} => {
+        return checkSanAgainst(
+          value,
+          constraintDer,
+          &mut comparisons,
+          maximumComparisons,
+          offsetSpace,
+        )
+      }
+    }
   }
 
   /// Verifies exact issuer-name linkage and the subject's retained original TBS signature.

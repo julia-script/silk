@@ -329,8 +329,8 @@ pub fn main() -> i32 { return 0 }`
 )
 
 /**
- * A shape that would demand an infinite tower of drop instances is rejected by the existing
- * finite-discovery check rather than diverging. No new guard was added for it.
+ * A shape that would demand an infinite tower of drop instances is rejected by the finite cleanup
+ * specialization guard rather than diverging.
  */
 it.effect('rejects a polymorphically recursive box shape', () =>
   Effect.gen(function* () {

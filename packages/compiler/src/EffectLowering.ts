@@ -1700,7 +1700,7 @@ export const lowerEffectExecution = (
         forwarded.binding.protected,
         success,
         span,
-        Object.freeze([...availableRequirements, requirement]),
+        Object.freeze([requirement, ...availableRequirements]),
       )
       if (result === 'Transferred') return result
       if (result === undefined) return undefined
@@ -1721,7 +1721,7 @@ export const lowerEffectExecution = (
         subject.protected,
         success,
         span,
-        Object.freeze([...availableRequirements, requirement]),
+        Object.freeze([requirement, ...availableRequirements]),
       )
       if (result === 'Transferred') return result
       if (result === undefined) return undefined

@@ -1,6 +1,7 @@
 import { rsaWasmSource } from './support/rsaAcceptance.js'
 import { aesGcmWasmAcceptanceSource } from './support/aesGcmAcceptance.js'
 import { tlsHkdfWasmSource } from './support/tlsHkdfAcceptance.js'
+import { tlsRecordWasmSource } from './support/tlsRecordAcceptance.js'
 import { x25519WasmAcceptanceSource } from './support/x25519Acceptance.js'
 import * as AbiManifest from '../src/AbiManifest.js'
 import * as ForeignContract from '../src/ForeignContract.js'
@@ -28,6 +29,8 @@ import { p256WasmAcceptanceSource } from './support/p256Acceptance.js'
 import { chacha20Poly1305WasmSource } from './support/chacha20Poly1305Acceptance.js'
 import { certificateWasmAcceptanceSource } from './support/certificateAcceptance.js'
 import { certificateProfileWasmSource } from './support/certificateProfileAcceptance.js'
+import { certificatePathWasmSource } from './support/certificatePathAcceptance.js'
+import { trustSourceWasmSource } from './support/trustSourceAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
 const defaultClang = (): string => {
@@ -671,6 +674,60 @@ it.effect(
   300_000,
 )
 
+it.effect(
+  'executes bounded certificate-path validation through LLVM-to-Wasm',
+  () =>
+    Effect.gen(function* () {
+      const outcome = yield* compileSource('certificate-path.wasm', certificatePathWasmSource, {
+        compilation: {
+          root: SourceFile.make('memory/certificate-path-wasm', ascii(certificatePathWasmSource)),
+          target: 'wasm32-unknown-unknown',
+        },
+        artifactKind: 'WebAssemblyModule',
+      })
+      assert.strictEqual(outcome._tag, 'Compiled')
+      if (outcome._tag !== 'Compiled') return
+      const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+      assert.deepEqual(WebAssembly.Module.imports(module), [])
+      const instance = new WebAssembly.Instance(module)
+      const main = instance.exports['main']
+      assert.isFunction(main)
+      if (typeof main === 'function') assert.strictEqual(main(), 0)
+    }),
+  300_000,
+)
+
+it.effect(
+  'copies empty explicit trust through LLVM-to-Wasm',
+  () =>
+    Effect.gen(function* () {
+      const outcome = yield* compileSource('trust-source.wasm', trustSourceWasmSource, {
+        compilation: {
+          root: SourceFile.make('memory/trust-source-wasm', ascii(trustSourceWasmSource)),
+          target: 'wasm32-unknown-unknown',
+        },
+        artifactKind: 'WebAssemblyModule',
+      })
+      assert.strictEqual(
+        outcome._tag,
+        'Compiled',
+        outcome._tag === 'Rejected'
+          ? outcome.diagnostics
+              .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+              .join('\n')
+          : undefined,
+      )
+      if (outcome._tag !== 'Compiled') return
+      const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+      assert.deepEqual(WebAssembly.Module.imports(module), [])
+      const instance = new WebAssembly.Instance(module)
+      const main = instance.exports['main']
+      assert.isFunction(main)
+      if (typeof main === 'function') assert.strictEqual(main(), 42)
+    }),
+  300_000,
+)
+
 // A single portability leg covers 64-bit MAC arithmetic and 32-bit slice addressing.
 it.effect('executes ChaCha20-Poly1305 through LLVM-to-Wasm', () =>
   Effect.gen(function* () {
@@ -802,6 +859,29 @@ it.effect('executes TLS HKDF through LLVM-to-Wasm without host imports', () =>
     const outcome = yield* compileSource('tls-hkdf.wasm', tlsHkdfWasmSource, {
       compilation: {
         root: SourceFile.make('memory/tls-hkdf-wasm', ascii(tlsHkdfWasmSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    yield* Effect.sync(() => {
+      const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+      assert.deepEqual(WebAssembly.Module.imports(module), [])
+      const main = new WebAssembly.Instance(module).exports['main']
+      assert.isFunction(main)
+      if (typeof main === 'function') assert.strictEqual(main(), 0)
+    })
+  }),
+)
+
+// Native coverage owns protected fixtures and transport state; this leg witnesses fixed record
+// storage and borrowed pending output at wasm32 pointer width with the shipped allocator.
+it.effect('executes bounded TLS record framing through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('tls-record.wasm', tlsRecordWasmSource, {
+      compilation: {
+        root: SourceFile.make('memory/tls-record-wasm', ascii(tlsRecordWasmSource)),
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',

@@ -872,3 +872,68 @@ it.effect(
       }
     }),
 )
+
+it.effect(
+  'selects native file trust on exactly three libc profiles and rejects other reachability',
+  () =>
+    Effect.gen(function* () {
+      const supported = [
+        'aarch64-apple-darwin',
+        'aarch64-unknown-linux-gnu',
+        'x86_64-unknown-linux-gnu',
+      ]
+      const source = `import silk.memory_trust_source { MemoryTrustSource }
+import silk.native_file_trust_source { NativeFileTrustSource }
+pub fn nativeProvider(value: NativeFileTrustSource) -> () { return () }
+pub fn portableProvider(value: MemoryTrustSource) -> () { return () }`
+      const selected: Array<string> = []
+      for (const target of Target.all) {
+        const selection = yield* SourceCatalog.analyze({
+          roots: [SourceFile.make(`native-file-trust/${target.id}`, ascii(source))],
+          configuration: {
+            profile: { target: target.id, artifact: 'object', runtime: { kind: 'none' } },
+          },
+        }).pipe(Effect.provide(SourceResolver.empty))
+        assert.deepEqual(selection.closure.resolutionFailures, [], target.id)
+        const native = selection.catalog?.modules.get('silk/native_file_trust_source')
+        const portable = selection.catalog?.modules.get('silk/memory_trust_source')
+        assert.isDefined(portable, target.id)
+        assert.isAbove(portable?.publicDeclarations.length ?? 0, 0, target.id)
+        if ((native?.publicDeclarations.length ?? 0) > 0) {
+          selected.push(target.id)
+        }
+      }
+      assert.deepEqual(selected.sort(), supported)
+
+      const unavailable = [
+        { target: 'wasm32-unknown-unknown', libc: undefined },
+        { target: 'x86_64-unknown-linux-gnu', libc: 'none' as const },
+      ]
+      for (const profile of unavailable) {
+        const snapshot = yield* Analysis.makeRealized({
+          root: SourceFile.make(
+            `native-file-trust/unavailable/${profile.target}/${profile.libc ?? 'default'}`,
+            ascii(source),
+          ),
+          configuration: {
+            profile: {
+              target: profile.target,
+              artifact: 'object',
+              ...(profile.libc === undefined ? {} : { libc: profile.libc }),
+              runtime: { kind: 'none' },
+              entry: { kind: 'none' },
+            },
+          },
+        }).pipe(Effect.provide(SourceResolver.empty))
+        assert.deepEqual(
+          Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+          ['SEM0014'],
+          `${profile.target}/${profile.libc ?? 'default'}`,
+        )
+      }
+    }),
+  // This intentionally resolves every target plus two realized unavailable-member programs. The
+  // complete stdlib crosses the 60s default while CI shards saturate the host; this is contention
+  // headroom, not a performance assertion or an expanded test matrix.
+  120_000,
+)

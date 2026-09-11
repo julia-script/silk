@@ -413,6 +413,207 @@ pub fn main() -> () { return run Intrinsic.catchFailure<SomeError>(failWithOwned
   }),
 )
 
+it.effect('admits nested cleanup reached through a lexical service provider', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.effect { Effect }
+import silk.vector { Vector }
+struct Inner { value: i32 }
+struct Leaf { inner: Vector<Inner> }
+struct Owner { leaves: Vector<Leaf> }
+service Source { effect fn load() -> Owner ? &mut Source }
+struct Provider {}
+impl Provider {
+  effect fn load(self: &mut Self) -> Owner {
+    return Owner { leaves: Vector.make<Leaf>() }
+  }
+}
+impl Source for Provider { load: Provider.load }
+effect fn program() -> i32 {
+  let mut provider = Provider {}
+  let owner = run Source.load() |> Effect.provideMut<Source>(&mut provider)
+  drop owner
+  return 42
+}
+pub fn main() -> i32 { return run program() }`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(Analysis.instancesOf(result).violations, [])
+  }),
+)
+
+it.effect('rejects unrelated polymorphic recursion inside a lexical service provider', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.effect { Effect }
+service Source { effect fn load() -> i32 ? &mut Source }
+struct Provider<T> {}
+fn expand<T>() -> i32 { return expand<[T; 1]>() }
+impl<T> Source for Provider<T> {
+  effect fn load(self: &mut Self) -> i32 { return expand<T>() }
+}
+pub fn main() -> i32 {
+  let mut provider = Provider<i32> {}
+  return run Source.load() |> Effect.provideMut<Source>(&mut provider)
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    assert.strictEqual(result.instances.violations.length, 1)
+    assert.deepEqual(
+      result.instances.violations.at(0)?.target.typeArguments.map(Type.encodeGenericArgument),
+      ['Array<i32, 1>'],
+    )
+  }),
+)
+
+it.effect('rejects hidden callable identity growth reached through cleanup', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`struct Guard {}
+fn invoke(value: i32, callback: once fn(i32) -> i32) -> i32 { return callback(value) }
+fn loop(seed: i32, callback: once fn(i32) -> i32) -> i32 {
+  let wrapped = invoke(move callback)
+  let next = loop(move wrapped)
+  return next(seed)
+}
+fn identity(value: i32) -> i32 { return value }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let call = loop(identity)
+    let value = call(0)
+    return ()
+  }
+}
+pub fn main() -> i32 {
+  let held = Guard {}
+  drop held
+  return 0
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    assert.strictEqual(result.instances.violations.length, 1)
+  }),
+)
+
+it.effect('keeps composite Effect representations guarded at a terminal cleanup callable', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`struct First {}
+struct Second {}
+struct Guard {}
+
+fn initial(input: First | Second) -> Effect<'static; i32> {
+  return match move input {
+    First {} => effect { return 1 }
+    Second {} => effect { return 2 }
+  }
+}
+
+fn recursive(input: First | Second) -> Effect<'static; i32> {
+  return match move input {
+    First {} => effect { return 3 }
+    Second {} => effect { return 4 }
+  }
+}
+
+fn identity(value: i32) -> i32 { return value }
+
+fn loop(
+  operation: once Effect<'static; i32>,
+  callback: once fn<'static>(i32) -> i32
+) -> i32 {
+  return loop(recursive(First {}), identity)
+}
+
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let value = loop(initial(First {}), identity)
+    return ()
+  }
+}
+
+pub fn main() -> i32 {
+  let held = Guard {}
+  drop held
+  return 0
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    assert.strictEqual(result.instances.violations.length, 1)
+  }),
+)
+
+it.effect('rejects mutually recursive cleanup specialization growth', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.box { Box }
+import silk.vector { Vector }
+struct Left<T> { next: Box<Right<Box<T>>> }
+struct Right<T> { next: Box<Left<Box<T>>> }
+pub fn main() -> i32 {
+  let held = Vector.make<Left<i32>>()
+  return 0
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    assert.strictEqual(result.instances.violations.length, 1)
+  }),
+)
+
+it.effect('admits repeated nominal cleanup at a smaller instantiation', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.box { Box }
+import silk.vector { Vector }
+struct Outer<T> { next: Box<Middle<T>> }
+struct Middle<T> { next: Box<T> }
+pub fn main() -> i32 {
+  let held = Vector.make<Outer<Outer<i32>>>()
+  return 0
+}`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(Analysis.instancesOf(result).violations, [])
+  }),
+)
+
+it.effect('erases nested lifetimes while one cleanup type position descends', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.box { Box }
+import silk.option { Option }
+struct Outer<T> { value: T }
+struct Chain<'a, A, Whole, Part> {
+  anchor: &'a i32
+  marker: A
+  whole: Whole
+  part: Part
+  next: Option<Box<Chain<'a, &'a i32, Part, Part>>>
+}
+impl<'a, A, Whole, Part> Drop for Chain<'a, A, Whole, Part> {
+  fn drop(self: &mut Chain<'a, A, Whole, Part>) -> () { return () }
+}
+fn make<'a, 'b>(left: &'a i32, right: &'b i32)
+  -> Chain<'a, &'b i32, Outer<i32>, i32> {
+  return Chain {
+    anchor: left,
+    marker: right,
+    whole: Outer { value: 1 },
+    part: 2,
+    next: Option.none<Box<Chain<'a, &'a i32, i32, i32>>>()
+  }
+}
+pub fn main() -> i32 {
+  let left = 1
+  let right = 2
+  let held = make(&left, &right)
+  drop held
+  return 0
+}`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(Analysis.instancesOf(result).violations, [])
+  }),
+)
+
 it.effect('lowers discovered instances deterministically to verifier-clean MIR', () =>
   Effect.gen(function* () {
     const program = Analysis.loweredMir(yield* snapshot(nestedSource))

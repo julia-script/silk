@@ -13,8 +13,8 @@ class StdioTimeout extends Data.TaggedError('StdioTimeout')<{
 /** Shared stdio harness: a minimal Content-Length framed JSON-RPC client driving the real server. */
 export const binPath = fileURLToPath(new URL('../dist/bin.js', import.meta.url))
 
-/** A stdio scenario can load workers and analyze several source-runtime revisions. */
-export const stdioTestTimeout = 120_000
+/** A stdio scenario can load workers and analyze several full standard-library revisions. */
+export const stdioTestTimeout = 180_000
 
 export const delay = (milliseconds: number): Promise<void> =>
   Effect.runPromise(Effect.sleep(milliseconds))

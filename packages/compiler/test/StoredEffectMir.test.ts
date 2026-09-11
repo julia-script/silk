@@ -368,6 +368,55 @@ it.effect('retains provided runner contracts through typed-failure recovery', ()
   }),
 )
 
+it.effect('selects the innermost mutable provider for a nested lexical service binding', () =>
+  Effect.gen(function* () {
+    const name = 'stored-effect-mir/nested-mutable-provider'
+    const { snapshot, module } = yield* lowerStored(
+      name,
+      `import silk.effect { Effect }
+service Input { effect fn count() -> i32 ? &mut Input }
+struct Memory { value: i32 }
+effect fn memoryCount(self: &mut Memory) -> i32 { return self.value }
+impl Input for Memory { count: Memory.memoryCount }
+effect fn read() -> i32 ? &mut Input { return run Input.count() }
+effect fn nested(inner: &mut Memory) -> i32 ? &mut Input {
+  let outerBefore = run read()
+  let nested = run read() |> Effect.provideMut<Input>(move inner)
+  let outerAfter = run read()
+  return outerBefore * 100 + nested * 10 + outerAfter
+}
+pub fn main() -> i32 {
+  let mut outer = Memory { value: 3 }
+  let mut inner = Memory { value: 7 }
+  return run nested(&mut inner) |> Effect.provideMut<Input>(&mut outer)
+}`,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(module), [])
+    const nestedRunners = module.functions.filter((fn) => fn.id.name.startsWith('nested$effect$'))
+    const selected = nestedRunners.flatMap((fn) =>
+      MirVerification.operations(fn).flatMap((operation) =>
+        operation._tag === 'RunEffectValue' && operation.runner.name.startsWith('read$effect$')
+          ? [{ fn, operation }]
+          : [],
+      ),
+    )
+    assert.strictEqual(selected.length, 3)
+    const first = selected.at(0) ?? unreachable('expected first outer provider run')
+    assert.strictEqual(first.fn.parameterCount, 2)
+    assert.deepEqual(
+      selected.map(({ operation }) => operation.arguments.map((argument) => argument.ordinal)),
+      [[1], [0], [1]],
+    )
+    assert.deepEqual(
+      selected.map(({ operation }) =>
+        operation.providers.map((provider) => provider.argument?.ordinal),
+      ),
+      [[1], [0], [1]],
+    )
+  }),
+)
+
 it.effect(
   'materializes nested intrinsic Effect captures with their executable representation',
   () =>

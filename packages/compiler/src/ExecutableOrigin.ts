@@ -46,6 +46,8 @@ export interface CallTarget {
   /** Caller-authored metadata aligned with static arguments and excluded from target identity. */
   readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
   readonly structuralProvider?: Type.Type
+  /** Concrete owner whose cleanup plan selected this target; excluded from target identity. */
+  readonly cleanupRoot?: Type.Type
 }
 
 export const instanceNode = (key: InstanceKey, encode: (key: InstanceKey) => string): string =>
@@ -366,6 +368,7 @@ export const make = (operations: Operations) => {
     cleanup: CleanupPlan.CleanupPlan,
     index: DeclarationIndex.Index,
     includeWitnessDependencies = true,
+    cleanupRoot: Type.Type = cleanup.type,
   ): ReadonlyArray<CallTarget> => {
     switch (cleanup._tag) {
       case 'HookCleanup':
@@ -374,37 +377,37 @@ export const make = (operations: Operations) => {
             ? witnessDependencyCallTargets(index, cleanup.type, Type.dropCapability)
             : []),
           Object.freeze({ declaration: cleanup.hook, typeArguments: cleanup.typeArguments }),
-          ...hookCalls(cleanup.inner, index, includeWitnessDependencies),
-        ]
+          ...hookCalls(cleanup.inner, index, includeWitnessDependencies, cleanupRoot),
+        ].map((call) => Object.freeze({ ...call, cleanupRoot }))
       case 'StructCleanup':
         return cleanup.fields.flatMap((field) =>
-          hookCalls(field.cleanup, index, includeWitnessDependencies),
+          hookCalls(field.cleanup, index, includeWitnessDependencies, cleanupRoot),
         )
       case 'NominalUnionCleanup':
         return cleanup.variants.flatMap((variant) =>
           variant.fields.flatMap((field) =>
-            hookCalls(field.cleanup, index, includeWitnessDependencies),
+            hookCalls(field.cleanup, index, includeWitnessDependencies, cleanupRoot),
           ),
         )
       case 'ArrayCleanup':
-        return hookCalls(cleanup.element, index, includeWitnessDependencies)
+        return hookCalls(cleanup.element, index, includeWitnessDependencies, cleanupRoot)
       case 'UnionCleanup':
         return cleanup.cases.flatMap((entry) =>
-          hookCalls(entry.cleanup, index, includeWitnessDependencies),
+          hookCalls(entry.cleanup, index, includeWitnessDependencies, cleanupRoot),
         )
       case 'RawBufferCleanup':
-        return hookCalls(cleanup.allocation, index, includeWitnessDependencies)
+        return hookCalls(cleanup.allocation, index, includeWitnessDependencies, cleanupRoot)
       case 'CallableCleanup':
         return cleanup.slots.flatMap((slot) =>
-          hookCalls(slot.cleanup, index, includeWitnessDependencies),
+          hookCalls(slot.cleanup, index, includeWitnessDependencies, cleanupRoot),
         )
       case 'EffectCleanup':
         return cleanup.slots.flatMap((slot) =>
-          hookCalls(slot.cleanup, index, includeWitnessDependencies),
+          hookCalls(slot.cleanup, index, includeWitnessDependencies, cleanupRoot),
         )
       case 'EffectCompositeCleanup':
         return cleanup.alternatives.flatMap((alternative) =>
-          hookCalls(alternative, index, includeWitnessDependencies),
+          hookCalls(alternative, index, includeWitnessDependencies, cleanupRoot),
         )
       default:
         return []

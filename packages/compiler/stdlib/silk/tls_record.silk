@@ -1,0 +1,968 @@
+//! Bounded TLS 1.3 record protection and partial-byte transport driving.
+//!
+//! # When to use
+//! Use [`TlsRecordSender`] and [`TlsRecordReceiver`] after a TLS handshake supplies a traffic
+//! secret, or use their plaintext constructors for the initial handshake record framing.
+//!
+//! # Details
+//! Each direction owns fixed-capacity storage allocated at construction. Later queue, input,
+//! acknowledgment, and consumption operations allocate nothing and retain no caller buffer.
+//! Protected epochs support the three TLS 1.3 cipher suites admitted by Silk and stop after
+//! [`RECORDS_PER_EPOCH`] records. A record view borrows its receiver until it is consumed.
+//!
+//! # Gotchas
+//! Possession of a traffic secret does not authenticate a server identity. This module does not
+//! perform a handshake, validate certificates, acquire trust, drive network resources, reserve a
+//! client KeyUpdate, or decide close-notify policy. Secret copies are not guaranteed to be erased.
+
+import silk.aes_gcm {AesGcm, AesGcmError}
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.chacha20_poly1305 {AeadError, ChaCha20Poly1305}
+import silk.layout {Layout}
+import silk.option {Option}
+import silk.raw_buffer {RawBuffer}
+import silk.result {Result}
+import silk.slice {Slice}
+import silk.tls_hkdf {LabelError, TlsHkdfSha256, TlsHkdfSha384}
+import silk.u8
+import silk.u64
+import silk.usize
+
+const HEADER_LENGTH: usize = 5
+const CONTENT_LIMIT: usize = 16384
+const INNER_LIMIT: usize = 16385
+const WIRE_LIMIT: usize = 16645
+const ENCRYPTED_PAYLOAD_LIMIT: usize = 16640
+const TAG_LENGTH: usize = 16
+
+/// The conservative maximum number of records protected by one traffic epoch.
+pub const RECORDS_PER_EPOCH: u64 = 8388608
+
+/// One cipher suite in Silk's TLS 1.3 profile.
+pub enum CipherSuite {
+  /// TLS_AES_128_GCM_SHA256.
+  Aes128GcmSha256,
+  /// TLS_AES_256_GCM_SHA384.
+  Aes256GcmSha384,
+  /// TLS_CHACHA20_POLY1305_SHA256.
+  ChaCha20Poly1305Sha256,
+}
+
+/// A TLS record content type exposed after complete framing and authentication.
+pub enum ContentType {
+  /// Compatibility change_cipher_spec content. It is admitted only by plaintext framing.
+  ChangeCipherSpec,
+  /// Exactly one complete two-byte alert.
+  Alert,
+  /// A nonempty handshake fragment.
+  Handshake,
+  /// Application data, including an empty fragment.
+  ApplicationData,
+}
+
+/// The next receive-side action after a successful input call.
+pub enum InputDemand {
+  /// Supply more bytes for the current record.
+  NeedInput,
+  /// Inspect and consume the completed record.
+  RecordReady,
+  /// Consume the already-ready record before supplying more input.
+  NeedRecordConsumption,
+}
+
+/// Exact input progress and the next receive-side action.
+pub struct InputProgress {
+  /// The caller-input prefix copied during this call.
+  pub consumed: usize
+  /// The resource or action needed next.
+  pub demand: InputDemand
+}
+
+/// The next send-side action after a successful queue call.
+pub enum OutputDemand {
+  /// One record was encoded and is ready for transport.
+  RecordQueued,
+  /// A prior record still has unacknowledged output.
+  NeedOutput,
+}
+
+/// Exact queue progress and the next send-side action.
+pub struct OutputProgress {
+  /// The content prefix accepted into the queued record.
+  pub accepted: usize
+  /// Whether output was queued or an existing record needs acknowledgment.
+  pub demand: OutputDemand
+}
+
+/// A semantic record-construction, caller-use, or peer-record failure.
+pub union RecordError {
+  /// A traffic secret did not have the suite hash's exact width.
+  InvalidSecretLength {
+    /// The supplied byte length.
+    pub requested: usize,
+    /// The required byte length.
+    pub expected: usize,
+  },
+  /// The operation is not valid in the direction's current state.
+  InvalidState,
+  /// A declared or supplied record length exceeds the admitted bound.
+  RecordOverflow {
+    /// The rejected length.
+    pub requested: usize,
+    /// The largest admitted length.
+    pub maximum: usize,
+  },
+  /// A content type, plaintext version, inner plaintext, or alert shape is invalid.
+  InvalidContent,
+  /// A protected record's authenticated header, ciphertext, or tag did not verify.
+  AuthenticationFailed,
+  /// An output acknowledgment exceeds the currently pending suffix.
+  InvalidAcknowledgment {
+    /// The requested acknowledgment count.
+    pub requested: usize,
+    /// The number of bytes currently pending.
+    pub pending: usize,
+  },
+  /// This traffic epoch has already protected its maximum record count.
+  KeyUsageExhausted,
+}
+
+/// A complete record borrowed from its receiver's verified storage.
+pub struct RecordView<'owner> {
+  /// The authenticated or plaintext content type.
+  pub contentType: ContentType
+  /// The complete content without header, tag, inner type, or padding.
+  pub content: &'owner [u8]
+}
+
+struct KeyMaterial {
+  key: [u8; 32]
+  keyLength: usize
+  iv: [u8; 12]
+}
+
+/// An affine owner of one TLS record send epoch and at most one pending record.
+///
+/// # Details
+///
+/// Protected construction validates the traffic-secret width before allocation, derives the AEAD
+/// key and IV with TLS HKDF, and starts at sequence zero. Plaintext construction has no key epoch.
+/// Queueing accepts at most 16384 content bytes, adds no protected padding, and reserves one
+/// protected sequence only after complete encoding. Pending bytes remain stable until acknowledged.
+///
+/// # Gotchas
+///
+/// The later authenticated client owns epoch installation and reserves its final send record for
+/// KeyUpdate. Standalone users must replace an exhausted sender; no sequence reset is exposed.
+pub struct TlsRecordSender {
+  suite: CipherSuite
+  key: [u8; 32]
+  keyLength: usize
+  iv: [u8; 12]
+  sequence: u64
+  protected: bool
+  pending: RawBuffer<u8>
+  staging: RawBuffer<u8>
+  pendingLength: usize
+  acknowledged: usize
+}
+
+impl TlsRecordSender {
+  /// Creates a protected send epoch from one exact-width traffic secret.
+  ///
+  /// # Details
+  ///
+  /// SHA-256 suites require 32 secret bytes and the SHA-384 suite requires 48. A wrong width
+  /// returns `InvalidSecretLength` before allocation. Success acquires fixed pending and staging
+  /// storage once; later operations allocate nothing.
+  ///
+  /// # Gotchas
+  ///
+  /// A traffic secret proves no peer identity. Install it only after authenticated key agreement.
+  pub effect fn make(
+    suite: CipherSuite,
+    trafficSecret: &[u8],
+  ) -> Result<TlsRecordSender, RecordError> ! OutOfMemoryError ? &mut Allocator {
+    let derived = deriveMaterial(suite, trafficSecret)
+    let material = match move derived {
+      Result<KeyMaterial, RecordError>.Failure {error} => {
+        return Result.failResult<TlsRecordSender, RecordError>(move error)
+      }
+      Result<KeyMaterial, RecordError>.Success {value} => move value
+    }
+    let pending = run allocateBytes(WIRE_LIMIT)
+    let staging = run allocateBytes(INNER_LIMIT)
+    return Result.succeed<TlsRecordSender, RecordError>(
+      TlsRecordSender {
+        suite: suite,
+        key: material.key,
+        keyLength: material.keyLength,
+        iv: material.iv,
+        sequence: 0,
+        protected: true,
+        pending: move pending,
+        staging: move staging,
+        pendingLength: 0,
+        acknowledged: 0,
+      },
+    )
+  }
+
+  /// Creates plaintext TLS record framing without a traffic secret or protected epoch.
+  pub effect fn makePlaintext() -> TlsRecordSender ! OutOfMemoryError ? &mut Allocator {
+    let pending = run allocateBytes(WIRE_LIMIT)
+    let staging = run allocateBytes(INNER_LIMIT)
+    return TlsRecordSender {
+      suite: CipherSuite.Aes128GcmSha256,
+      key: zeroKey(),
+      keyLength: 0,
+      iv: zeroIv(),
+      sequence: 0,
+      protected: false,
+      pending: move pending,
+      staging: move staging,
+      pendingLength: 0,
+      acknowledged: 0,
+    }
+  }
+
+  /// Queues at most one content fragment without retaining the caller input.
+  ///
+  /// # Details
+  ///
+  /// An existing pending record returns zero accepted bytes with `NeedOutput`. Otherwise handshake
+  /// content must be nonempty, alerts exactly two bytes, and application content may be empty.
+  /// Inputs longer than 16384 bytes queue one exact prefix. A protected record adds its inner type,
+  /// no padding, an authenticated outer header, and one sequence reservation.
+  pub fn queueRecord(
+    self: &mut Self,
+    contentType: ContentType,
+    content: &[u8],
+  ) -> Result<OutputProgress, RecordError> {
+    if self.acknowledged < self.pendingLength {
+      return outputProgress(0, OutputDemand.NeedOutput)
+    }
+    let admitted = admittedContent(contentType, content, self.protected)
+    if let Result<(), RecordError>.Failure {error} = move admitted {
+      return Result.failResult<OutputProgress, RecordError>(move error)
+    }
+    let mut accepted = content.length
+    if accepted > CONTENT_LIMIT {
+      accepted = CONTENT_LIMIT
+    }
+    if self.protected {
+      if self.sequence >= RECORDS_PER_EPOCH {
+        return Result.failResult<OutputProgress, RecordError>(RecordError.KeyUsageExhausted)
+      }
+      return queueProtected(&mut self, contentType, content, accepted)
+    }
+    writeHeader(&mut self.pending, contentTypeByte(contentType), accepted)
+    copySlice(&mut self.pending, HEADER_LENGTH, content, accepted)
+    self.pendingLength = HEADER_LENGTH + accepted
+    self.acknowledged = 0
+    return outputProgress(accepted, OutputDemand.RecordQueued)
+  }
+
+  /// Borrows the exact unacknowledged output suffix.
+  /// Repeated inspection and inspection before any queued record are idempotent.
+  pub fn pendingOutput<'owner>(self: &'owner Self) -> &'owner [u8] {
+    let acknowledged = self.acknowledged
+    let remaining = self.pendingLength - acknowledged
+    return RawBuffer.view<u8>(&self.pending, acknowledged, remaining)
+  }
+
+  /// Acknowledges a written prefix, or leaves all state unchanged when the count is excessive.
+  pub fn ackWritten(self: &mut Self, count: usize) -> Result<(), RecordError> {
+    let remaining = self.pendingLength - self.acknowledged
+    if count > remaining {
+      return Result.failResult<(), RecordError>(
+        RecordError.InvalidAcknowledgment {requested: count, pending: remaining},
+      )
+    }
+    self.acknowledged = self.acknowledged + count
+    if self.acknowledged == self.pendingLength {
+      self.pendingLength = 0
+      self.acknowledged = 0
+    }
+    return Result.succeed<(), RecordError>(())
+  }
+}
+
+/// An affine owner of one TLS record receive epoch and one verified record view.
+///
+/// # Details
+///
+/// Input is copied only into fixed storage, headers are admitted before body bytes, and protected
+/// plaintext is published only after tag, type, padding, and content validation. A complete record
+/// remains ready until consumed, and its view structurally borrows this owner.
+///
+/// # Gotchas
+///
+/// Every peer-record failure is terminal for this receiver. Construct a fresh epoch after a valid
+/// TLS key transition; never attempt to reuse a failed or exhausted receiver.
+pub struct TlsRecordReceiver {
+  suite: CipherSuite
+  key: [u8; 32]
+  keyLength: usize
+  iv: [u8; 12]
+  sequence: u64
+  protected: bool
+  wire: RawBuffer<u8>
+  plaintext: RawBuffer<u8>
+  wireLength: usize
+  expectedLength: usize
+  recordLength: usize
+  recordType: ContentType
+  ready: bool
+  terminal: bool
+}
+
+impl TlsRecordReceiver {
+  /// Creates a protected receive epoch from one exact-width traffic secret.
+  pub effect fn make(
+    suite: CipherSuite,
+    trafficSecret: &[u8],
+  ) -> Result<TlsRecordReceiver, RecordError> ! OutOfMemoryError ? &mut Allocator {
+    let derived = deriveMaterial(suite, trafficSecret)
+    let material = match move derived {
+      Result<KeyMaterial, RecordError>.Failure {error} => {
+        return Result.failResult<TlsRecordReceiver, RecordError>(move error)
+      }
+      Result<KeyMaterial, RecordError>.Success {value} => move value
+    }
+    let wire = run allocateBytes(WIRE_LIMIT)
+    let plaintext = run allocateBytes(INNER_LIMIT)
+    return Result.succeed<TlsRecordReceiver, RecordError>(
+      TlsRecordReceiver {
+        suite: suite,
+        key: material.key,
+        keyLength: material.keyLength,
+        iv: material.iv,
+        sequence: 0,
+        protected: true,
+        wire: move wire,
+        plaintext: move plaintext,
+        wireLength: 0,
+        expectedLength: 0,
+        recordLength: 0,
+        recordType: ContentType.Handshake,
+        ready: false,
+        terminal: false,
+      },
+    )
+  }
+
+  /// Creates plaintext TLS record framing without a traffic secret or protected epoch.
+  pub effect fn makePlaintext() -> TlsRecordReceiver ! OutOfMemoryError ? &mut Allocator {
+    let wire = run allocateBytes(WIRE_LIMIT)
+    let plaintext = run allocateBytes(INNER_LIMIT)
+    return TlsRecordReceiver {
+      suite: CipherSuite.Aes128GcmSha256,
+      key: zeroKey(),
+      keyLength: 0,
+      iv: zeroIv(),
+      sequence: 0,
+      protected: false,
+      wire: move wire,
+      plaintext: move plaintext,
+      wireLength: 0,
+      expectedLength: 0,
+      recordLength: 0,
+      recordType: ContentType.Handshake,
+      ready: false,
+      terminal: false,
+    }
+  }
+
+  /// Copies a prefix for the current record and reports the exact next receive action.
+  ///
+  /// # Details
+  ///
+  /// Empty input reports zero-consumption `NeedInput`. Header admission occurs after exactly five
+  /// bytes and before any body byte is copied. Completion stops before a coalesced following record.
+  /// A ready record causes zero-consumption `NeedRecordConsumption` until [`consumeRecord`] succeeds.
+  ///
+  /// # Gotchas
+  ///
+  /// Header, authentication, content, and key-use failures terminally invalidate this receiver.
+  pub fn feedInput(self: &mut Self, input: &[u8]) -> Result<InputProgress, RecordError> {
+    if self.terminal {
+      return Result.failResult<InputProgress, RecordError>(RecordError.InvalidState)
+    }
+    if self.ready {
+      return inputProgress(0, InputDemand.NeedRecordConsumption)
+    }
+    if input.length == 0 {
+      return inputProgress(0, InputDemand.NeedInput)
+    }
+    let mut consumed: usize = 0
+    while self.wireLength < HEADER_LENGTH && consumed < input.length {
+      let offset = self.wireLength
+      RawBuffer.fill(&mut self.wire, offset, 1, input[consumed])
+      self.wireLength = self.wireLength + 1
+      consumed = consumed + 1
+    }
+    if self.wireLength < HEADER_LENGTH {
+      return inputProgress(consumed, InputDemand.NeedInput)
+    }
+    if self.wireLength == HEADER_LENGTH && self.expectedLength == 0 {
+      let admitted = admitHeader(&self)
+      let payload = match move admitted {
+        Result<usize, RecordError>.Failure {error} => {
+          return peerFailure(&mut self, move error)
+        }
+        Result<usize, RecordError>.Success {value} => value
+      }
+      self.expectedLength = HEADER_LENGTH + payload
+    }
+    while self.wireLength < self.expectedLength && consumed < input.length {
+      let offset = self.wireLength
+      RawBuffer.fill(&mut self.wire, offset, 1, input[consumed])
+      self.wireLength = self.wireLength + 1
+      consumed = consumed + 1
+    }
+    if self.wireLength < self.expectedLength {
+      return inputProgress(consumed, InputDemand.NeedInput)
+    }
+    let completed = finishRecord(&mut self)
+    if let Result<(), RecordError>.Failure {error} = move completed {
+      return peerFailure(&mut self, move error)
+    }
+    return inputProgress(consumed, InputDemand.RecordReady)
+  }
+
+  /// Borrows the complete current record, or returns `None` while more input is needed.
+  pub fn record<'owner>(self: &'owner Self) -> Option<RecordView<'owner>> {
+    if self.ready == false {
+      return Option.none<RecordView<'owner>>()
+    }
+    let contentType = self.recordType
+    let length = self.recordLength
+    return Option.some<RecordView<'owner>>(
+      RecordView<'owner> {
+        contentType: contentType,
+        content: RawBuffer.view<u8>(&self.plaintext, 0, length),
+      },
+    )
+  }
+
+  /// Releases the current record and permits input for the next record.
+  pub fn consumeRecord(self: &mut Self) -> Result<(), RecordError> {
+    if self.terminal || self.ready == false {
+      return Result.failResult<(), RecordError>(RecordError.InvalidState)
+    }
+    self.wireLength = 0
+    self.expectedLength = 0
+    self.recordLength = 0
+    self.ready = false
+    return Result.succeed<(), RecordError>(())
+  }
+}
+
+fn outputProgress(accepted: usize, demand: OutputDemand) -> Result<OutputProgress, RecordError> {
+  return Result.succeed<OutputProgress, RecordError>(
+    OutputProgress {accepted: accepted, demand: demand},
+  )
+}
+
+fn inputProgress(consumed: usize, demand: InputDemand) -> Result<InputProgress, RecordError> {
+  return Result.succeed<InputProgress, RecordError>(
+    InputProgress {consumed: consumed, demand: demand},
+  )
+}
+
+fn peerFailure(
+  receiver: &mut TlsRecordReceiver,
+  error: RecordError,
+) -> Result<InputProgress, RecordError> {
+  receiver.terminal = true
+  receiver.ready = false
+  receiver.recordLength = 0
+  return Result.failResult<InputProgress, RecordError>(move error)
+}
+
+fn admittedContent(
+  contentType: ContentType,
+  content: &[u8],
+  protected: bool,
+) -> Result<(), RecordError> {
+  if contentType == ContentType.Alert {
+    if content.length != 2 {
+      return Result.failResult<(), RecordError>(RecordError.InvalidContent)
+    }
+  } else if contentType == ContentType.Handshake {
+    if content.length == 0 {
+      return Result.failResult<(), RecordError>(RecordError.InvalidContent)
+    }
+  } else if contentType == ContentType.ChangeCipherSpec {
+    if protected || content.length != 1 || content[0] != 1 {
+      return Result.failResult<(), RecordError>(RecordError.InvalidContent)
+    }
+  }
+  return Result.succeed<(), RecordError>(())
+}
+
+fn queueProtected(
+  sender: &mut TlsRecordSender,
+  contentType: ContentType,
+  content: &[u8],
+  accepted: usize,
+) -> Result<OutputProgress, RecordError> {
+  copySlice(&mut sender.staging, 0, content, accepted)
+  RawBuffer.fill(&mut sender.staging, accepted, 1, contentTypeByte(contentType))
+  let innerLength = accepted + 1
+  let encryptedLength = innerLength + TAG_LENGTH
+  let header = headerBytes(23, encryptedLength)
+  let sequence = sender.sequence
+  let chacha = sender.suite == CipherSuite.ChaCha20Poly1305Sha256
+  let keyLength = sender.keyLength
+  let nonce = recordNonce(&sender.iv, sequence)
+  let key = sender.key
+  let keyBytes = Slice.view<u8>(&key, 0, keyLength)
+  let plaintext = RawBuffer.view<u8>(&sender.staging, 0, innerLength)
+  let ciphertext = RawBuffer.viewMut<u8>(&mut sender.pending, HEADER_LENGTH, innerLength)
+  let mut tag = zeroTag()
+  if chacha {
+    let sealed = mapChaChaSeal(
+      ChaCha20Poly1305.seal(keyBytes, &nonce, &header, plaintext, move ciphertext, &mut tag),
+    )
+    if let Result<(), RecordError>.Failure {error} = move sealed {
+      return Result.failResult<OutputProgress, RecordError>(move error)
+    }
+  } else {
+    let sealed = mapAesSeal(
+      AesGcm.seal(keyBytes, &nonce, &header, plaintext, move ciphertext, &mut tag),
+    )
+    if let Result<(), RecordError>.Failure {error} = move sealed {
+      return Result.failResult<OutputProgress, RecordError>(move error)
+    }
+  }
+  copyArray(&mut sender.pending, 0, &header)
+  copyArray(&mut sender.pending, HEADER_LENGTH + innerLength, &tag)
+  sender.pendingLength = HEADER_LENGTH + encryptedLength
+  sender.acknowledged = 0
+  sender.sequence = sender.sequence + 1
+  return outputProgress(accepted, OutputDemand.RecordQueued)
+}
+
+fn mapAesSeal(result: Result<(), AesGcmError>) -> Result<(), RecordError> {
+  return match move result {
+    Result<(), AesGcmError>.Success {value} => Result.succeed<(), RecordError>(())
+    Result<(), AesGcmError>.Failure {error} => discardAesSealFailure(move error)
+  }
+}
+
+fn mapChaChaSeal(result: Result<(), AeadError>) -> Result<(), RecordError> {
+  return match move result {
+    Result<(), AeadError>.Success {value} => Result.succeed<(), RecordError>(())
+    Result<(), AeadError>.Failure {error} => discardChaChaSealFailure(move error)
+  }
+}
+
+fn discardAesSealFailure(error: AesGcmError) -> Result<(), RecordError> {
+  drop error
+  return Result.failResult<(), RecordError>(RecordError.InvalidState)
+}
+
+fn discardChaChaSealFailure(error: AeadError) -> Result<(), RecordError> {
+  drop error
+  return Result.failResult<(), RecordError>(RecordError.InvalidState)
+}
+
+fn admitHeader(receiver: &TlsRecordReceiver) -> Result<usize, RecordError> {
+  let outerType = RawBuffer.read<u8>(&receiver.wire, 0)
+  let major = RawBuffer.read<u8>(&receiver.wire, 1)
+  let minor = RawBuffer.read<u8>(&receiver.wire, 2)
+  let payload = u8.toUsize(RawBuffer.read<u8>(&receiver.wire, 3)) * 256
+    + u8.toUsize(RawBuffer.read<u8>(&receiver.wire, 4))
+  if receiver.protected {
+    if outerType != 23 || major != 3 || minor != 3 {
+      return Result.failResult<usize, RecordError>(RecordError.InvalidContent)
+    }
+    if payload < TAG_LENGTH + 1 || payload > ENCRYPTED_PAYLOAD_LIMIT {
+      return Result.failResult<usize, RecordError>(
+        RecordError.RecordOverflow {requested: payload, maximum: ENCRYPTED_PAYLOAD_LIMIT},
+      )
+    }
+    if payload - TAG_LENGTH > INNER_LIMIT {
+      return Result.failResult<usize, RecordError>(
+        RecordError.RecordOverflow {requested: payload - TAG_LENGTH, maximum: INNER_LIMIT},
+      )
+    }
+    return Result.succeed<usize, RecordError>(payload)
+  }
+  if major != 3 || (minor != 1 && minor != 2 && minor != 3) {
+    return Result.failResult<usize, RecordError>(RecordError.InvalidContent)
+  }
+  let decoded = decodeContentType(outerType, false)
+  let contentType = match move decoded {
+    Option<ContentType>.None => {
+      return Result.failResult<usize, RecordError>(RecordError.InvalidContent)
+    }
+    Option<ContentType>.Some {value} => value
+  }
+  if payload > CONTENT_LIMIT {
+    return Result.failResult<usize, RecordError>(
+      RecordError.RecordOverflow {requested: payload, maximum: CONTENT_LIMIT},
+    )
+  }
+  if contentType == ContentType.Alert && payload != 2 {
+    return Result.failResult<usize, RecordError>(RecordError.InvalidContent)
+  }
+  if contentType == ContentType.Handshake && payload == 0 {
+    return Result.failResult<usize, RecordError>(RecordError.InvalidContent)
+  }
+  if contentType == ContentType.ChangeCipherSpec && payload != 1 {
+    return Result.failResult<usize, RecordError>(RecordError.InvalidContent)
+  }
+  return Result.succeed<usize, RecordError>(payload)
+}
+
+fn finishRecord(receiver: &mut TlsRecordReceiver) -> Result<(), RecordError> {
+  if receiver.protected {
+    return finishProtected(&mut receiver)
+  }
+  let outerType = RawBuffer.read<u8>(&receiver.wire, 0)
+  let decoded = decodeContentType(outerType, false)
+  let contentType = match move decoded {
+    Option<ContentType>.None => {
+      return Result.failResult<(), RecordError>(RecordError.InvalidContent)
+    }
+    Option<ContentType>.Some {value} => value
+  }
+  let length = receiver.expectedLength - HEADER_LENGTH
+  let source = RawBuffer.view<u8>(&receiver.wire, HEADER_LENGTH, length)
+  if contentType == ContentType.ChangeCipherSpec && (length != 1 || source[0] != 1) {
+    return Result.failResult<(), RecordError>(RecordError.InvalidContent)
+  }
+  RawBuffer.copy<u8>(&mut receiver.plaintext, 0, source, length)
+  receiver.recordType = contentType
+  receiver.recordLength = length
+  receiver.ready = true
+  return Result.succeed<(), RecordError>(())
+}
+
+fn finishProtected(receiver: &mut TlsRecordReceiver) -> Result<(), RecordError> {
+  let sequence = receiver.sequence
+  if sequence >= RECORDS_PER_EPOCH {
+    return Result.failResult<(), RecordError>(RecordError.KeyUsageExhausted)
+  }
+  let payloadLength = receiver.expectedLength - HEADER_LENGTH
+  let ciphertextLength = payloadLength - TAG_LENGTH
+  let chacha = receiver.suite == CipherSuite.ChaCha20Poly1305Sha256
+  let keyLength = receiver.keyLength
+  let header = firstHeader(&receiver.wire)
+  let ciphertext = RawBuffer.view<u8>(&receiver.wire, HEADER_LENGTH, ciphertextLength)
+  let mut tag = zeroTag()
+  copyBuffer(&mut tag, &receiver.wire, HEADER_LENGTH + ciphertextLength, TAG_LENGTH)
+  let nonce = recordNonce(&receiver.iv, sequence)
+  let key = receiver.key
+  let keyBytes = Slice.view<u8>(&key, 0, keyLength)
+  let plaintext = RawBuffer.viewMut<u8>(&mut receiver.plaintext, 0, ciphertextLength)
+  if chacha {
+    let opened = mapChaChaOpen(
+      ChaCha20Poly1305.open(keyBytes, &nonce, &header, ciphertext, &tag, move plaintext),
+    )
+    if let Result<(), RecordError>.Failure {error} = move opened {
+      return Result.failResult<(), RecordError>(move error)
+    }
+  } else {
+    let opened = mapAesOpen(
+      AesGcm.open(keyBytes, &nonce, &header, ciphertext, &tag, move plaintext),
+    )
+    if let Result<(), RecordError>.Failure {error} = move opened {
+      return Result.failResult<(), RecordError>(move error)
+    }
+  }
+  let inner = RawBuffer.view<u8>(&receiver.plaintext, 0, ciphertextLength)
+  let parsed = parseInner(inner)
+  let record = match move parsed {
+    Result<ParsedRecord, RecordError>.Failure {error} => {
+      return Result.failResult<(), RecordError>(move error)
+    }
+    Result<ParsedRecord, RecordError>.Success {value} => move value
+  }
+  receiver.recordType = record.contentType
+  receiver.recordLength = record.length
+  receiver.sequence = receiver.sequence + 1
+  receiver.ready = true
+  return Result.succeed<(), RecordError>(())
+}
+
+fn mapAesOpen(result: Result<(), AesGcmError>) -> Result<(), RecordError> {
+  return match move result {
+    Result<(), AesGcmError>.Success {value} => Result.succeed<(), RecordError>(())
+    Result<(), AesGcmError>.Failure {error} => match move error {
+      AesGcmError.AuthenticationFailed => Result.failResult<(), RecordError>(RecordError.AuthenticationFailed)
+      AesGcmError.InvalidKeyLength => Result.failResult<(), RecordError>(RecordError.InvalidState)
+      AesGcmError.InvalidNonceLength => Result.failResult<(), RecordError>(RecordError.InvalidState)
+      AesGcmError.InvalidTagLength => Result.failResult<(), RecordError>(RecordError.InvalidState)
+      AesGcmError.OutputTooSmall => Result.failResult<(), RecordError>(RecordError.InvalidState)
+      AesGcmError.LimitExceeded => Result.failResult<(), RecordError>(RecordError.InvalidState)
+    }
+  }
+}
+
+fn mapChaChaOpen(result: Result<(), AeadError>) -> Result<(), RecordError> {
+  return match move result {
+    Result<(), AeadError>.Success {value} => Result.succeed<(), RecordError>(())
+    Result<(), AeadError>.Failure {error} => match move error {
+      AeadError.AuthenticationFailed => Result.failResult<(), RecordError>(RecordError.AuthenticationFailed)
+      AeadError.InvalidKey => Result.failResult<(), RecordError>(RecordError.InvalidState)
+      AeadError.InvalidNonce => Result.failResult<(), RecordError>(RecordError.InvalidState)
+      AeadError.InvalidTag => Result.failResult<(), RecordError>(RecordError.InvalidState)
+      AeadError.OutputTooSmall => Result.failResult<(), RecordError>(RecordError.InvalidState)
+      AeadError.LimitExceeded => Result.failResult<(), RecordError>(RecordError.InvalidState)
+    }
+  }
+}
+
+struct ParsedRecord {
+  contentType: ContentType
+  length: usize
+}
+
+fn parseInner(inner: &[u8]) -> Result<ParsedRecord, RecordError> {
+  let mut end = inner.length
+  while end > 0 && inner[end - 1] == 0 {
+    end = end - 1
+  }
+  if end == 0 {
+    return Result.failResult<ParsedRecord, RecordError>(RecordError.InvalidContent)
+  }
+  let decoded = decodeContentType(inner[end - 1], true)
+  let contentType = match move decoded {
+    Option<ContentType>.None => {
+      return Result.failResult<ParsedRecord, RecordError>(RecordError.InvalidContent)
+    }
+    Option<ContentType>.Some {value} => value
+  }
+  let length = end - 1
+  if contentType == ContentType.Alert && length != 2 {
+    return Result.failResult<ParsedRecord, RecordError>(RecordError.InvalidContent)
+  }
+  if contentType == ContentType.Handshake && length == 0 {
+    return Result.failResult<ParsedRecord, RecordError>(RecordError.InvalidContent)
+  }
+  return Result.succeed<ParsedRecord, RecordError>(
+    ParsedRecord {contentType: contentType, length: length},
+  )
+}
+
+fn deriveMaterial(suite: CipherSuite, trafficSecret: &[u8]) -> Result<KeyMaterial, RecordError> {
+  let expected = secretLength(suite)
+  if trafficSecret.length != expected {
+    return Result.failResult<KeyMaterial, RecordError>(
+      RecordError.InvalidSecretLength {requested: trafficSecret.length, expected: expected},
+    )
+  }
+  let keyLabel: [u8; 3] = [107, 101, 121]
+  let ivLabel: [u8; 2] = [105, 118]
+  let empty: [u8; 0] = []
+  let mut key = zeroKey()
+  let mut iv = zeroIv()
+  if expected == 48 {
+    let secret = copySecret48(trafficSecret)
+    let keyResult = TlsHkdfSha384.expandLabel(&secret, &keyLabel, &empty, &mut key)
+    if let Result<(), LabelError>.Failure {error} = move keyResult {
+      drop error
+      return Result.failResult<KeyMaterial, RecordError>(RecordError.InvalidState)
+    }
+    let ivResult = TlsHkdfSha384.expandLabel(&secret, &ivLabel, &empty, &mut iv)
+    if let Result<(), LabelError>.Failure {error} = move ivResult {
+      drop error
+      return Result.failResult<KeyMaterial, RecordError>(RecordError.InvalidState)
+    }
+    return Result.succeed<KeyMaterial, RecordError>(
+      KeyMaterial {key: move key, keyLength: 32, iv: move iv},
+    )
+  }
+  let secret = copySecret32(trafficSecret)
+  let keyLength = suiteKeyLength(suite)
+  let mut keyOutput = zeroKey()
+  if keyLength == 16 {
+    let mut key16 = zeroKey16()
+    let keyResult = TlsHkdfSha256.expandLabel(&secret, &keyLabel, &empty, &mut key16)
+    if let Result<(), LabelError>.Failure {error} = move keyResult {
+      drop error
+      return Result.failResult<KeyMaterial, RecordError>(RecordError.InvalidState)
+    }
+    let mut index: usize = 0
+    while index < 16 {
+      keyOutput[index] = key16[index]
+      index = index + 1
+    }
+  } else {
+    let keyResult = TlsHkdfSha256.expandLabel(&secret, &keyLabel, &empty, &mut keyOutput)
+    if let Result<(), LabelError>.Failure {error} = move keyResult {
+      drop error
+      return Result.failResult<KeyMaterial, RecordError>(RecordError.InvalidState)
+    }
+  }
+  key = move keyOutput
+  let ivResult = TlsHkdfSha256.expandLabel(&secret, &ivLabel, &empty, &mut iv)
+  if let Result<(), LabelError>.Failure {error} = move ivResult {
+    drop error
+    return Result.failResult<KeyMaterial, RecordError>(RecordError.InvalidState)
+  }
+  return Result.succeed<KeyMaterial, RecordError>(
+    KeyMaterial {key: move key, keyLength: keyLength, iv: move iv},
+  )
+}
+
+fn secretLength(suite: CipherSuite) -> usize {
+  if suite == CipherSuite.Aes256GcmSha384 {
+    return 48
+  }
+  return 32
+}
+
+fn suiteKeyLength(suite: CipherSuite) -> usize {
+  if suite == CipherSuite.Aes128GcmSha256 {
+    return 16
+  }
+  return 32
+}
+
+fn recordNonce(iv: &([u8; 12]), sequence: u64) -> [u8; 12] {
+  let mut nonce = iv.*
+  let mut index: usize = 0
+  while index < 8 {
+    let shift = usize.toU64((7 - index) * 8)
+    let byte = u64.toU8(u64.bitAnd(u64.shiftRight(sequence, shift), 255))
+    nonce[4 + index] = u8.bitXor(nonce[4 + index], byte)
+    index = index + 1
+  }
+  return nonce
+}
+
+fn decodeContentType(value: u8, protected: bool) -> Option<ContentType> {
+  if value == 21 {
+    return Option.some<ContentType>(ContentType.Alert)
+  }
+  if value == 22 {
+    return Option.some<ContentType>(ContentType.Handshake)
+  }
+  if value == 23 {
+    return Option.some<ContentType>(ContentType.ApplicationData)
+  }
+  if value == 20 && protected == false {
+    return Option.some<ContentType>(ContentType.ChangeCipherSpec)
+  }
+  return Option.none<ContentType>()
+}
+
+fn contentTypeByte(contentType: ContentType) -> u8 {
+  if contentType == ContentType.ChangeCipherSpec {
+    return 20
+  }
+  if contentType == ContentType.Alert {
+    return 21
+  }
+  if contentType == ContentType.Handshake {
+    return 22
+  }
+  return 23
+}
+
+fn headerBytes(contentType: u8, payloadLength: usize) -> [u8; 5] {
+  return [
+    contentType,
+    3,
+    3,
+    usize.toU8(payloadLength / 256),
+    usize.toU8(payloadLength % 256),
+  ]
+}
+
+fn firstHeader(buffer: &RawBuffer<u8>) -> [u8; 5] {
+  return [
+    RawBuffer.read<u8>(buffer, 0),
+    RawBuffer.read<u8>(buffer, 1),
+    RawBuffer.read<u8>(buffer, 2),
+    RawBuffer.read<u8>(buffer, 3),
+    RawBuffer.read<u8>(buffer, 4),
+  ]
+}
+
+fn writeHeader(buffer: &mut RawBuffer<u8>, contentType: u8, payloadLength: usize) -> () {
+  let header = headerBytes(contentType, payloadLength)
+  copyArray(move buffer, 0, &header)
+  return ()
+}
+
+fn copySlice(destination: &mut RawBuffer<u8>, offset: usize, source: &[u8], length: usize) -> () {
+  return RawBuffer.copy<u8>(move destination, offset, source, length)
+}
+
+fn copyArray(destination: &mut RawBuffer<u8>, offset: usize, source: &[u8]) -> () {
+  return copySlice(move destination, offset, source, source.length)
+}
+
+fn copyBuffer(
+  destination: &mut [u8],
+  source: &RawBuffer<u8>,
+  offset: usize,
+  length: usize,
+) -> () {
+  let mut index: usize = 0
+  while index < length {
+    destination[index] = RawBuffer.read<u8>(source, offset + index)
+    index = index + 1
+  }
+  return ()
+}
+
+effect fn allocateBytes(length: usize) -> RawBuffer<u8> ! OutOfMemoryError ? &mut Allocator {
+  let allocation = run Allocator.allocate(Layout {bytes: length, alignment: 1})
+  let mut buffer = RawBuffer.from<u8>(move allocation, length)
+  RawBuffer.fill(&mut buffer, 0, length, 0)
+  return move buffer
+}
+
+fn copySecret32(input: &[u8]) -> [u8; 32] {
+  let mut output = zeroKey()
+  let mut index: usize = 0
+  while index < 32 {
+    output[index] = input[index]
+    index = index + 1
+  }
+  return output
+}
+
+fn copySecret48(input: &[u8]) -> [u8; 48] {
+  let mut output = zeroSecret48()
+  let mut index: usize = 0
+  while index < 48 {
+    output[index] = input[index]
+    index = index + 1
+  }
+  return output
+}
+
+fn zeroKey() -> [u8; 32] {
+  return [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+}
+
+fn zeroKey16() -> [u8; 16] {
+  return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+fn zeroSecret48() -> [u8; 48] {
+  return [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  ]
+}
+
+fn zeroIv() -> [u8; 12] {
+  return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}
+
+fn zeroTag() -> [u8; 16] {
+  return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+}

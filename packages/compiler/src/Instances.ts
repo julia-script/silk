@@ -1137,11 +1137,16 @@ export const discover = (
     readonly key: InstanceKey
     readonly structuralProvider?: Type.Type
   }
+  interface CleanupMeasure {
+    /** Concrete owner types whose exact cleanup plans selected this path. */
+    readonly roots: ReadonlyArray<Type.Type>
+  }
   interface WorkItem {
     readonly key: InstanceKey
     readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
     readonly ancestors: ReadonlyMap<string, Ancestor>
-    readonly cleanupReachable: boolean
+    /** Ordinary type arguments retained as the finite structural measure of a cleanup path. */
+    readonly cleanupMeasure?: CleanupMeasure
   }
   const declarationText = (key: InstanceKey): string =>
     `${key.declaration.module}\u0000${key.declaration.name}`
@@ -1184,6 +1189,133 @@ export const discover = (
         Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate)
       )
     })
+  const typeArgumentsOf = (key: InstanceKey): ReadonlyArray<Type.Type> =>
+    key.typeArguments.filter(Type.isTypeArgument)
+  /**
+   * Recognizes a field/type-argument subterm without unfolding the same nominal declaration twice.
+   * That declaration guard is what makes a recursive shape such as `Bad<Box<T>>` non-descending
+   * even though the concrete cleanup plan reaches it through an indirection actor.
+   */
+  const nominalTypeText = (type: Type.Type): string | undefined =>
+    Type.isNominal(type) ? `${type.module}\u0000${type.name}` : undefined
+  const sameRuntimeType = (left: Type.Type, right: Type.Type): boolean =>
+    Type.runtimeKey(left) === Type.runtimeKey(right)
+  const isStrictRuntimeStructuralSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
+    if (sameRuntimeType(candidate, whole)) return false
+    const candidateKey = Type.runtimeKey(candidate)
+    let found = false
+    Type.visit(whole, (type) => {
+      if (Type.runtimeKey(type) === candidateKey) found = true
+    })
+    return found
+  }
+  const strictlyDescendsSameNominal = (candidate: Type.Nominal, whole: Type.Nominal): boolean => {
+    if (candidate.module !== whole.module || candidate.name !== whole.name) return false
+    return (
+      candidate.arguments.length === whole.arguments.length &&
+      candidate.arguments.every((argument, index) => {
+        const parent = whole.arguments.at(index)
+        if (parent === undefined) return false
+        if (Type.isTypeArgument(argument) && Type.isTypeArgument(parent))
+          return (
+            sameRuntimeType(argument, parent) || isStrictRuntimeStructuralSubterm(argument, parent)
+          )
+        return Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(parent)
+      }) &&
+      candidate.arguments.some((argument, index) => {
+        const parent = whole.arguments.at(index)
+        return (
+          parent !== undefined &&
+          Type.isTypeArgument(argument) &&
+          Type.isTypeArgument(parent) &&
+          isStrictRuntimeStructuralSubterm(argument, parent)
+        )
+      })
+    )
+  }
+  const isStrictCleanupSubterm = (
+    candidate: Type.Type,
+    whole: Type.Type,
+    unfolding: ReadonlyMap<string, Type.Nominal> = new Map(),
+  ): boolean => {
+    if (sameRuntimeType(candidate, whole)) return false
+    const candidateDeclaration = nominalTypeText(candidate)
+    const wholeDeclaration = nominalTypeText(whole)
+    if (candidateDeclaration !== undefined && candidateDeclaration === wholeDeclaration)
+      return (
+        Type.isNominal(candidate) &&
+        Type.isNominal(whole) &&
+        strictlyDescendsSameNominal(candidate, whole)
+      )
+    if (isStrictRuntimeStructuralSubterm(candidate, whole)) return true
+    const nominals = new Map<string, Type.Nominal>()
+    Type.visit(whole, (type) => {
+      if (Type.isNominal(type)) nominals.set(Type.runtimeKey(type), type)
+    })
+    for (const nominal of nominals.values()) {
+      const declarationText = `${nominal.module}\u0000${nominal.name}`
+      const prior = unfolding.get(declarationText)
+      if (
+        prior !== undefined &&
+        (sameRuntimeType(nominal, prior) || !strictlyDescendsSameNominal(nominal, prior))
+      )
+        continue
+      const declaration = DeclarationFacts.byCanonical(index, {
+        _tag: 'CanonicalDeclarationId',
+        module: nominal.module,
+        name: nominal.name,
+      })
+      if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
+        continue
+      const substitution =
+        TypeInference.substitution(
+          declaration.typeParameters.map((parameter) => parameter.type),
+          nominal.arguments,
+        ) ?? new Map()
+      const nextUnfolding = new Map(unfolding).set(declarationText, nominal)
+      const fields =
+        declaration._tag === 'StructDeclaration'
+          ? declaration.fields
+          : declaration.variants.flatMap((variant) => variant.fields)
+      if (
+        fields.some(
+          (field) =>
+            field.declaredType._tag === 'Resolved' &&
+            isStrictCleanupSubterm(
+              candidate,
+              Type.substitute(field.declaredType.type, substitution),
+              nextUnfolding,
+            ),
+        )
+      )
+        return true
+    }
+    return false
+  }
+  const coveredByCleanupMeasure = (measure: CleanupMeasure, candidate: Type.Type): boolean =>
+    measure.roots.some(
+      (root) => sameRuntimeType(candidate, root) || isStrictCleanupSubterm(candidate, root),
+    )
+  const cleanupMeasureOf = (roots: ReadonlyArray<Type.Type>): CleanupMeasure =>
+    Object.freeze({
+      roots: Object.freeze([
+        ...new Map(roots.map((root) => [Type.runtimeKey(root), root])).values(),
+      ]),
+    })
+  const cleanupTransition = (
+    measure: CleanupMeasure | undefined,
+    target: InstanceKey,
+    selectedRoots: ReadonlyArray<Type.Type>,
+  ): CleanupMeasure | undefined => {
+    if (measure === undefined)
+      return selectedRoots.length === 0 ? undefined : cleanupMeasureOf(selectedRoots)
+    if (selectedRoots.length > 0)
+      return selectedRoots.some((root) => coveredByCleanupMeasure(measure, root))
+        ? measure
+        : undefined
+    const targetTypes = typeArgumentsOf(target)
+    return targetTypes.every((type) => coveredByCleanupMeasure(measure, type)) ? measure : undefined
+  }
   const sameVisibleArguments = (left: InstanceKey, right: InstanceKey): boolean => {
     const leftVisible = left.typeArguments.filter(
       (argument) => !Type.isHiddenExecutableArgument(argument),
@@ -1202,11 +1334,59 @@ export const discover = (
       })
     )
   }
+  const runtimeNonTypeArgumentsOf = (key: InstanceKey): ReadonlyArray<Type.GenericArgument> =>
+    key.typeArguments.filter(
+      (argument) =>
+        !Type.isTypeArgument(argument) && Type.runtimeGenericArgumentKey(argument) !== '',
+    )
+  const sameRuntimeArguments = (
+    left: ReadonlyArray<Type.GenericArgument>,
+    right: ReadonlyArray<Type.GenericArgument>,
+  ): boolean =>
+    left.length === right.length &&
+    left.every((argument, index) => {
+      const candidate = right.at(index)
+      return (
+        candidate !== undefined &&
+        Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate)
+      )
+    })
+  const sameRuntimeNonTypeArguments = (left: InstanceKey, right: InstanceKey): boolean =>
+    sameRuntimeArguments(runtimeNonTypeArgumentsOf(left), runtimeNonTypeArgumentsOf(right))
+  const sameRuntimeNonCallableArguments = (left: InstanceKey, right: InstanceKey): boolean => {
+    const leftNonCallable = runtimeNonTypeArgumentsOf(left).filter(
+      (argument) => !Type.isCallableIdentityArgument(argument),
+    )
+    const rightNonCallable = runtimeNonTypeArgumentsOf(right).filter(
+      (argument) => !Type.isCallableIdentityArgument(argument),
+    )
+    return (
+      sameRuntimeArguments(leftNonCallable, rightNonCallable) &&
+      isTerminalCallableSpecialization(left, right)
+    )
+  }
+  const isTerminalCallableSpecialization = (ancestor: InstanceKey, target: InstanceKey): boolean =>
+    sameVisibleArguments(ancestor, target) &&
+    target.typeArguments.some(Type.isCallableIdentityArgument) &&
+    target.typeArguments
+      .filter(Type.isHiddenIdentityArgument)
+      .every(
+        (argument) =>
+          Type.isCallableIdentityArgument(argument) && argument.environment === undefined,
+      )
+  const cleanupPermitsSpecialization = (
+    ancestor: InstanceKey | undefined,
+    target: InstanceKey,
+    cleanup: CleanupMeasure | undefined,
+  ): boolean =>
+    cleanup !== undefined &&
+    (ancestor === undefined ||
+      sameRuntimeNonTypeArguments(ancestor, target) ||
+      sameRuntimeNonCallableArguments(ancestor, target))
   const rootItem = (key: InstanceKey): WorkItem =>
     Object.freeze({
       key,
       ancestors: withAncestor(new Map(), Object.freeze({ key })),
-      cleanupReachable: false,
     })
   const roots: Array<WorkItem> = retention.map(rootItem)
   // Retain exactly the export implementations admitted by the selected target's C contract.
@@ -1217,9 +1397,11 @@ export const discover = (
   const specializationFailures = new Map<string, NonConcreteSpecialization>()
   const recordedContexts = new Map<string, Map<string, WorkItem>>()
   const contextText = (item: WorkItem): string =>
-    `${item.cleanupReachable ? 'cleanup' : 'ordinary'}\u0001${keyText(item.key)}\u0001${[
-      ...item.ancestors.entries(),
-    ]
+    `${
+      item.cleanupMeasure === undefined
+        ? 'ordinary'
+        : item.cleanupMeasure.roots.map(Type.runtimeKey).sort().join('\u0000')
+    }\u0001${keyText(item.key)}\u0001${[...item.ancestors.entries()]
       .sort(([left], [right]) => {
         if (left < right) return -1
         if (left > right) return 1
@@ -1263,6 +1445,26 @@ export const discover = (
       [...types.values()].flatMap((type) => hookCalls(CleanupPlan.cleanupPlan(index, type), index)),
     )
   }
+  /** Finds concrete provider-owner roots whose cleanup plans select the target. */
+  const cleanupRootsOf = (ancestor: InstanceKey, target: InstanceKey): ReadonlyArray<Type.Type> =>
+    typeArgumentsOf(ancestor).filter((type) =>
+      hookCalls(CleanupPlan.cleanupPlan(index, type), index).some((call) => {
+        const fn = FunctionIndex.hirByName(
+          results.get(call.declaration.module)?.hir,
+          call.declaration.name,
+        )
+        if (fn === undefined) return false
+        const candidate = keyOf(
+          call.declaration,
+          fn.contract,
+          fn.declaration.typeParameters.map((parameter) => parameter.type),
+          call.typeArguments,
+          call.staticArguments ?? Object.freeze([]),
+          call.evidence ?? Object.freeze([]),
+        )
+        return keyText(candidate) === keyText(target)
+      }),
+    )
   while (true) {
     for (let cursor = 0; cursor < pending.length; cursor += 1) {
       const queued = pending[cursor]
@@ -1385,8 +1587,7 @@ export const discover = (
       }
       const cleanupTargets = [...slotDropHookTargets(fn, index, substitution), ...cleanupHooks]
       const identityOfCall = Specialization.key
-      const cleanupIdentities = new Set(cleanupTargets.map(identityOfCall))
-      const reachableCalls: ReadonlyArray<CallTarget> = [
+      const ordinaryTargets: ReadonlyArray<CallTarget> = [
         ...bodyCallTargets(fn, index, substitution),
         ...interfaceWitnessTargets(fn, index, substitution),
         ...requirementBindingCallTargets(fn, substitution, index),
@@ -1402,8 +1603,17 @@ export const discover = (
         ...forwardedRequirementCallTargets(directCalls, results, index),
         ...callableTargets,
         ...forwardedRequirementTargets(callableTargets, results, index),
-        ...cleanupTargets,
       ]
+      const ordinaryIdentities = new Set(ordinaryTargets.map(identityOfCall))
+      const cleanupRoots = new Map<string, Array<Type.Type>>()
+      for (const cleanup of cleanupTargets) {
+        if (cleanup.cleanupRoot === undefined) continue
+        const identity = identityOfCall(cleanup)
+        const roots = cleanupRoots.get(identity) ?? []
+        roots.push(cleanup.cleanupRoot)
+        cleanupRoots.set(identity, roots)
+      }
+      const reachableCalls: ReadonlyArray<CallTarget> = [...ordinaryTargets, ...cleanupTargets]
       for (const call of reachableCalls) {
         const identity = identityOfCall(call)
         const existing = calls.get(identity)
@@ -1455,6 +1665,7 @@ export const discover = (
           )
       }
       for (const call of calls.values()) {
+        const identity = identityOfCall(call)
         const target = call.declaration
         const targetFunction = FunctionIndex.hirByName(results.get(target.module)?.hir, target.name)
         if (targetFunction === undefined) continue
@@ -1474,25 +1685,24 @@ export const discover = (
           call.structuralProvider !== undefined &&
           ancestor?.structuralProvider !== undefined &&
           Type.isStrictStructuralSubterm(call.structuralProvider, ancestor.structuralProvider)
+        const cleanup = cleanupTransition(
+          item.cleanupMeasure,
+          targetKey,
+          ordinaryIdentities.has(identity) ? Object.freeze([]) : (cleanupRoots.get(identity) ?? []),
+        )
         const terminalCallableSpecialization =
-          ancestor !== undefined &&
-          sameVisibleArguments(ancestor.key, targetKey) &&
-          targetKey.typeArguments.some(Type.isCallableIdentityArgument) &&
-          targetKey.typeArguments
-            .filter(Type.isHiddenIdentityArgument)
-            .every(
-              (argument) =>
-                Type.isCallableIdentityArgument(argument) && argument.environment === undefined,
-            )
+          ancestor !== undefined && sameRuntimeNonCallableArguments(ancestor.key, targetKey)
+        const cleanupSpecialization = cleanupPermitsSpecialization(
+          ancestor?.key,
+          targetKey,
+          cleanup,
+        )
         if (
           ancestor !== undefined &&
           !sameArguments(ancestor.key, targetKey) &&
           !structurallyDescending &&
-          !terminalCallableSpecialization &&
-          !(
-            prepared.has(keyText(targetKey)) &&
-            (item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)))
-          )
+          !cleanupSpecialization &&
+          !terminalCallableSpecialization
         ) {
           const violationKey = `${keyText(key)}\u0000${keyText(targetKey)}`
           if (!violationKeys.has(violationKey)) {
@@ -1518,7 +1728,7 @@ export const discover = (
                   : { structuralProvider: call.structuralProvider }),
               }),
             ),
-            cleanupReachable: item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)),
+            ...(cleanupSpecialization && cleanup !== undefined ? { cleanupMeasure: cleanup } : {}),
           }),
         )
       }
@@ -1556,7 +1766,25 @@ export const discover = (
       for (const ownerContext of recordedContexts.get(keyText(provided.owner))?.values() ?? []) {
         const declaration = declarationText(provided.target)
         const ancestor = ownerContext.ancestors.get(declaration)
-        if (ancestor !== undefined && !sameArguments(ancestor.key, provided.target)) {
+        // A cleanup implementation can select another specialization of the same lexical service
+        // operation while recursively releasing a field. Admit only targets proved reachable from
+        // the providing owner's finite cleanup plan; unrelated provider recursion stays guarded.
+        const cleanupRoots = cleanupRootsOf(provided.owner, provided.target)
+        const cleanup = cleanupTransition(
+          ownerContext.cleanupMeasure,
+          provided.target,
+          cleanupRoots,
+        )
+        const cleanupSpecialization = cleanupPermitsSpecialization(
+          ancestor?.key,
+          provided.target,
+          cleanup,
+        )
+        if (
+          ancestor !== undefined &&
+          !sameArguments(ancestor.key, provided.target) &&
+          !cleanupSpecialization
+        ) {
           const violationKey = `${keyText(provided.owner)}\u0000${keyText(provided.target)}`
           if (!violationKeys.has(violationKey)) {
             violationKeys.add(violationKey)
@@ -1573,7 +1801,7 @@ export const discover = (
         const item = Object.freeze({
           key: provided.target,
           ancestors: withAncestor(ownerContext.ancestors, Object.freeze({ key: provided.target })),
-          cleanupReachable: ownerContext.cleanupReachable,
+          ...(cleanupSpecialization && cleanup !== undefined ? { cleanupMeasure: cleanup } : {}),
         })
         if (schedule(item)) scheduledProvided = true
       }

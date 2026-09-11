@@ -127,7 +127,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"smoke","cases":"literal,direct-recursion,effect-ensuring-outcomes-and-order,foreign-c-layout-clock,scheduler-fiber-semantics,certificate-profile-and-trust-anchor"}]' || '[{"name":"1-of-3","shard":"1/3"},{"name":"2-of-3","shard":"2/3"},{"name":"3-of-3","shard":"3/3"}]') }}
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"smoke","cases":"literal,direct-recursion,effect-ensuring-outcomes-and-order,foreign-c-layout-clock,scheduler-fiber-semantics,certificate-profile-and-trust-anchor,tls-record,certificate-path-validation,owned-trust-snapshots"}]' || '[{"name":"1-of-3","shard":"1/3"},{"name":"2-of-3","shard":"2/3"},{"name":"3-of-3","shard":"3/3"}]') }}
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -273,7 +273,6 @@ jobs:
       - run: pnpm --filter @silklang/platform-webcontainer test:browser
 
   platform-supplies:
-    if: github.event_name != 'pull_request'
     name: Platform supply / ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -349,6 +348,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @silklang/compiler... build
       - name: Required real supply conformance
+        if: github.event_name != 'pull_request'
         env:
           SILK_SUPPLY_TARGET: ${{ matrix.target }}
         run: |
@@ -359,6 +359,7 @@ jobs:
           node packages/compiler/conformance/native-clocks/run.mjs
           node packages/compiler/conformance/native-entropy/run.mjs
           node packages/compiler/conformance/native-filesystem/run.mjs
+          SILK_NATIVE_FILE_TRUST_ONLY=true node packages/compiler/conformance/native-filesystem/run.mjs
           pnpm --filter @silklang/compiler run test:native-process:full
           node packages/compiler/conformance/hosted-start/run.mjs
           SILK_STARTUP_FAULTS=true node packages/compiler/conformance/hosted-start/run.mjs
@@ -366,11 +367,17 @@ jobs:
           node packages/compiler/conformance/native-report/run.mjs
           node packages/compiler/conformance/execution-storage/run.mjs
           SILK_STORAGE_FAULTS=true node packages/compiler/conformance/execution-storage/run.mjs
+      - name: Required native file trust conformance
+        if: github.event_name == 'pull_request'
+        env:
+          SILK_SUPPLY_TARGET: ${{ matrix.target }}
+          SILK_NATIVE_FILE_TRUST_ONLY: true
+        run: node packages/compiler/conformance/native-filesystem/run.mjs
       - name: Required Wasm storage conformance
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        if: github.event_name != 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu'
         run: node packages/compiler/conformance/execution-storage/wasm.mjs
       - name: Required raw Linux conformance
-        if: runner.os == 'Linux'
+        if: github.event_name != 'pull_request' && runner.os == 'Linux'
         env:
           SILK_SUPPLY_TARGET: ${{ matrix.target }}
         run: node packages/compiler/conformance/raw-linux/run.mjs
@@ -386,6 +393,7 @@ jobs:
             .scratch/native-clocks
             .scratch/native-entropy
             .scratch/native-filesystem
+            .scratch/native-file-trust-source
             .scratch/native-process
             .scratch/hosted-start
             .scratch/hosted-start-faults

@@ -2,7 +2,16 @@ import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as TestToolchain from './support/TestToolchain.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
@@ -18,6 +27,76 @@ import * as Driver from './support/TestDriver.js'
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
 
+const trustDefinitions = (root: string): string => `fn trustLimits() -> TrustLoadLimits {
+  let mut limits = TrustLoadLimits.defaults()
+  limits.decode.inputBytes = usize.add(0, 1206)
+  return limits
+}
+fn trustFailure(error: TrustSourceError) -> i32 {
+  return match move error {
+    TrustSourceError.File { operation, error: file } => {
+      if operation != TrustFileOperation.Open { return 90 }
+      return 10 + FileSystem.reasonCode(move file.reason)
+    }
+    TrustSourceError.InvalidConfiguration { reason } => 91
+    TrustSourceError.LimitExceeded { kind, limit } => 92
+    TrustSourceError.Decode { error: decode } => 93
+  }
+}
+effect fn loadTrust(source: &mut NativeFileTrustSource) -> TrustSnapshot
+! TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  return run TrustSource.load(trustLimits())
+    |> Effect.provideMut<TrustSource>(move source)
+}
+effect fn trustAt(pathBytes: &[u8]) -> i32
+! FileError | TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  let path = run Path.fromBytes(pathBytes)
+  let mut source = run NativeFileTrustSource.make(b"${root}", &path)
+  let loaded: Result<TrustSnapshot, TrustSourceError | OutOfMemoryError> = run Effect.result(
+    loadTrust(&mut source),
+  )
+  drop source
+  return match move loaded {
+    Result<TrustSnapshot, TrustSourceError | OutOfMemoryError>.Success { value } => {
+      return usize.toI32(TrustSnapshot.anchors(&value).length)
+    }
+    Result<TrustSnapshot, TrustSourceError | OutOfMemoryError>.Failure { error: failure } => match move failure {
+      TrustSourceError trust => trustFailure(move trust)
+      OutOfMemoryError memory => { fail move memory }
+    }
+  }
+}
+effect fn checkedTrustAt(pathBytes: &[u8]) -> i32 ! FileError | OutOfMemoryError
+? &mut Allocator {
+  let observed: Result<i32, FileError | TrustSourceError | OutOfMemoryError> = run Effect.result(
+    trustAt(pathBytes),
+  )
+  return match move observed {
+    Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Success { value } => value
+    Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Failure { error: failure } => match move failure {
+      FileError file => { fail move file }
+      TrustSourceError trust => trustFailure(move trust)
+      OutOfMemoryError memory => { fail move memory }
+    }
+  }
+}
+effect fn ownedTrust() -> i32 ! FileError | TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  let mut root = run Bytes.copy(b"${root}")
+  let path = run Path.fromBytes(b"/trust.pem")
+  let mut source = run NativeFileTrustSource.make(Bytes.asSlice(&root), &path)
+  let mut callerRoot = Bytes.asMutSlice(&mut root)
+  callerRoot[usize.ONE] = u8.toU8(120)
+  drop callerRoot
+  drop root
+  drop path
+  let snapshot = run loadTrust(&mut source)
+  drop source
+  return usize.toI32(TrustSnapshot.anchors(&snapshot).length)
+}`
+
 const nativeRoot = mkdtempSync(join(tmpdir(), 'silk-os-filesystem-'))
 const outsideRoot = mkdtempSync(join(tmpdir(), 'silk-os-filesystem-outside-'))
 const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-os-filesystem-artifacts-'))
@@ -25,6 +104,18 @@ const outsideMarker = join(outsideRoot, 'marker')
 writeFileSync(outsideMarker, 'untouched')
 mkdirSync(join(nativeRoot, 'nested'))
 symlinkSync(outsideRoot, join(nativeRoot, 'escape'))
+const trustPem = readFileSync(
+  new URL('../conformance/native-filesystem/trust.pem', import.meta.url),
+)
+const trustPath = join(nativeRoot, 'trust.pem')
+const trustReplacement = join(nativeRoot, 'trust-replacement.pem')
+const deniedTrustPath = join(nativeRoot, 'trust-denied.pem')
+writeFileSync(trustPath, trustPem)
+writeFileSync(trustReplacement, Buffer.concat([trustPem, trustPem]))
+writeFileSync(deniedTrustPath, trustPem)
+chmodSync(deniedTrustPath, 0o000)
+mkdirSync(join(nativeRoot, 'trust-directory'))
+symlinkSync(trustPath, join(nativeRoot, 'trust-link.pem'))
 afterAll(() => {
   rmSync(nativeRoot, { recursive: true, force: true })
   rmSync(outsideRoot, { recursive: true, force: true })
@@ -44,6 +135,56 @@ pub effect fn construct(root: string) -> OsFileSystem ! OutOfMemoryError ? &mut 
       'aarch64-apple-darwin',
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
+it.effect('analyzes the real-file trust runner and its released caller configuration', () =>
+  Effect.gen(function* () {
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.bytes { Bytes }
+import silk.effect { Effect }
+import silk.filesystem { FileError, FileSystem, Path }
+import silk.native_file_trust_source { NativeFileTrustSource }
+import silk.result { Result }
+import silk.trust_snapshot { TrustFileOperation, TrustLoadLimits, TrustSnapshot, TrustSourceError }
+import silk.trust_source { TrustSource }
+import silk.u8
+import silk.usize
+${trustDefinitions('/tmp/silk-real-trust')}
+effect fn verifyTrustProgram() -> i32 ! FileError | TrustSourceError | OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let anchors = run ownedTrust() |> Effect.provideMut(&mut allocator)
+  let missing = run checkedTrustAt(b"/trust-missing.pem") |> Effect.provideMut(&mut allocator)
+  let denied = run checkedTrustAt(b"/trust-denied.pem") |> Effect.provideMut(&mut allocator)
+  let linked = run checkedTrustAt(b"/trust-link.pem") |> Effect.provideMut(&mut allocator)
+  let wrongKind = run checkedTrustAt(b"/trust-directory") |> Effect.provideMut(&mut allocator)
+  return anchors + missing + denied + linked + wrongKind
+}
+pub fn main() -> i32 {
+  let completed = run Effect.result(verifyTrustProgram())
+  return match move completed {
+    Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Success { value } => value
+    Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Failure { error } => match move error {
+      FileError file => 1
+      TrustSourceError trust => 2
+      OutOfMemoryError exhausted => 3
+    }
+  }
+}`
+    const snapshot = yield* AnalysisFixture.declarations(
+      'native-file-trust-source/real-files',
+      ascii(source),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        message: diagnostic.message,
+        start: diagnostic.span.start,
+        text: source.slice(diagnostic.span.start, diagnostic.span.end),
+      })),
+      [],
+    )
   }),
 )
 
@@ -82,7 +223,7 @@ pub effect fn main() -> () ! FileError | OutOfMemoryError {
 )
 
 it.effect(
-  'runs the ordinary OS provider against a confined native root',
+  'runs OS and explicit trust providers against real confined files',
   () =>
     Effect.gen(function* () {
       const source = `import silk.allocator { OutOfMemoryError }
@@ -97,7 +238,11 @@ import silk.native_filesystem { NativeFileSystem }
 import silk.bytes { Bytes }
 import silk.filesystem { FileError, FileSystem, Path }
 import silk.result { Result }
+import silk.native_file_trust_source { NativeFileTrustSource }
+import silk.trust_snapshot { TrustFileOperation, TrustLoadLimits, TrustSnapshot, TrustSourceError }
+import silk.trust_source { TrustSource }
 import silk.vector { Vector }
+${trustDefinitions(nativeRoot)}
 effect fn program() -> i32 ! FileError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut fs = run OsFileSystem.make(b"${nativeRoot}") |> Effect.provideMut(&mut allocator)
@@ -139,7 +284,26 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
     Result<(), FileError>.Failure { error } => true
   }
   if blocked == false { return 4 }
-  return 42
+  let trustResult: Result<i32, FileError | TrustSourceError | OutOfMemoryError> = run Effect.result(
+    ownedTrust() |> Effect.provideMut(&mut allocator),
+  )
+  let anchors = match move trustResult {
+    Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Success { value } => value
+    Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Failure { error } => match move error {
+      FileError file => { fail move file }
+      TrustSourceError trust => { return trustFailure(move trust) }
+      OutOfMemoryError memory => { fail move memory }
+    }
+  }
+  let missing = run checkedTrustAt(b"/trust-missing.pem") |> Effect.provideMut(&mut allocator)
+  if missing != 10 { return 7 }
+  let denied = run checkedTrustAt(b"/trust-denied.pem") |> Effect.provideMut(&mut allocator)
+  if denied != 12 { return 8 }
+  let linked = run checkedTrustAt(b"/trust-link.pem") |> Effect.provideMut(&mut allocator)
+  if linked != 13 { return 9 }
+  let wrongKind = run checkedTrustAt(b"/trust-directory") |> Effect.provideMut(&mut allocator)
+  if wrongKind != 14 { return 10 }
+  return 40 + anchors
 }
 
 pub fn main() -> i32 {
@@ -175,15 +339,23 @@ export "C" fn enter() -> i32 as "main" { return main() }`
         Json.stringify(compiled._tag === 'BackendFailed' ? compiled.error : compiled),
       )
       if (compiled._tag !== 'Compiled') return
-      const run = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      assert.notStrictEqual(process.getuid?.(), 0, 'permission fixture requires a non-root runner')
+      const first = spawnSync(compiled.path, [], { encoding: 'utf8' })
       assert.strictEqual(
-        run.status,
+        first.status,
+        41,
+        Json.stringify({ signal: first.signal, stderr: first.stderr, stdout: first.stdout }),
+      )
+      renameSync(trustReplacement, trustPath)
+      const second = spawnSync(compiled.path, [], { encoding: 'utf8' })
+      assert.strictEqual(
+        second.status,
         42,
-        Json.stringify({ signal: run.signal, stderr: run.stderr, stdout: run.stdout }),
+        Json.stringify({ signal: second.signal, stderr: second.stderr, stdout: second.stdout }),
       )
       assert.strictEqual(readFileSync(outsideMarker, 'utf8'), 'untouched')
     }),
-  // This compiles the complete native filesystem provider before exercising the confined root.
+  // This compiles both ordinary filesystem actors once before exercising real confined files.
   120_000,
 )
 

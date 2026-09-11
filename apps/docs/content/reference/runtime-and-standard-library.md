@@ -1043,6 +1043,87 @@ Profile comparisons also preserve the fixed Zig HTTP snapshot
 `1bc892110da738d6137b3f0b7e8e3a586ce09928`; it is provenance, not a full-path or trust-policy
 oracle.
 
+## Bounded certificate-path validation
+
+`silk.certificate_path { CertificatePath, ValidationLimits, ValidatedPath, ValidationError }`
+builds a deterministic TLS-server certificate path from one borrowed leaf, caller-ordered peer
+intermediates, and explicit caller-ordered `TrustAnchor` values. Search is iterative depth-first:
+at each depth it considers anchors first and then intermediates. The first fully valid path wins,
+and the returned value retains the original leaf plus original intermediate and anchor indices
+rather than copying certificate material.
+
+Every input and unit of search work has an inclusive finite bound. Candidate visits are charged
+before name comparison, signature checks before primitive verification, complete paths before
+root-to-leaf policy, and DNS/IP comparisons before each same-form subtree comparison. These
+counters span backtracking. Exhausting a work bound is terminal, while an ordinary invalid
+signature, unsupported candidate, date failure, path-length failure, or name-constraint failure
+leaves later alternatives eligible.
+
+Profile diagnostics remain distinguishable across the path boundary. Forbidden parameters on a
+recognized signature algorithm report `UnsupportedParameters`; unknown signature algorithms
+report `UnsupportedAlgorithm`. An empty subject without a nonempty critical SAN reports
+`InvalidName`. Each mapping preserves leaf/intermediate/anchor location, original candidate index,
+extension index when present, and the profile byte offset.
+
+The validator applies the restricted certificate profile, exact issuer/subject DER linkage,
+original-TBSCertificate signatures, one explicit validation `Instant`, cumulative DNS/IP
+NameConstraints, and path-length restrictions. Identical anchor certificate bytes remain separate
+candidates because configured restrictions may differ. Anchor authority is always explicit; peer
+certificates are never promoted into anchors, and no AIA, revocation, CT, operating-system policy,
+time, network, or entropy source is consulted.
+
+A successful `ValidatedPath` is only certificate-path assurance under this documented restricted
+profile. A TLS client must still verify the HTTPS service identity and the TLS CertificateVerify
+and Finished messages before accepting application data. `revocationStatus()` is therefore
+`NotChecked`; success is not a claim of complete RFC 5280, browser Web PKI, production security,
+revocation, or transparency equivalence.
+
+**Evidence:** [path actor](../../../../packages/compiler/stdlib/silk/certificate_path.silk),
+[implementation contract](../../../../openspec/changes/implement-bounded-certificate-path-validation/specs/bounded-certificate-path-validation/spec.md),
+[fixture provenance](../../../../packages/compiler/test/fixtures/certificate-path-limbo.json), and
+[offline importer](../../../../packages/compiler/scripts/import-certificate-path-fixtures.mjs).
+
+## Owned trust snapshots and replaceable trust sources
+
+`silk.trust_snapshot { TrustSnapshot, SnapshotLimits, TrustLoadLimits, TrustSourceError }`
+represents one opaque, immutable owner of an ordered sequence of explicit `TrustAnchor` values.
+`fromAnchors` consumes an existing vector without allocation after checking its complete count and
+aggregate retained byte size. Empty explicit trust is valid and authenticates no peer. `fromPem`
+strictly decodes one or more certificates, transfers their owners into unconstrained anchors, and
+rejects empty or whitespace-only input. Both constructors preserve every input position and
+duplicate; anchors with identical certificate DER but different configured restrictions remain
+distinct candidates.
+
+`SnapshotLimits.defaults()` permits 1024 anchors and 8 MiB of aggregate certificate and configured
+constraint bytes. `TrustLoadLimits.defaults()` combines that finite snapshot budget with the finite
+certificate decoder defaults. Every limit is inclusive and zero means zero. Count and byte totals
+are checked before snapshot allocation or growth. Semantic failures distinguish structured decoder
+errors and `AnchorCount`, `EncodedBytes`, or provider-input limits. Allocation refusal stays in the
+separate `OutOfMemoryError` channel.
+
+`TrustSnapshot.copy` creates an independently owned snapshot. `TrustSnapshot.combine` copies the
+primary anchors followed by the additional anchors without deduplication or restriction merging.
+Dropping either source cannot invalidate the new owner. A less-restricted additional anchor can
+therefore widen authority and must be an application policy decision.
+
+`silk.trust_source.TrustSource` is the portable lexical service for loading one independent bounded
+snapshot. `silk.memory_trust_source.MemoryTrustSource` owns an explicit current snapshot, copies it
+on each load, and atomically exchanges it with `replace`, returning the complete old owner without
+allocation. Replacement affects only later loads: prior results survive replacement and provider
+drop. The memory provider performs no I/O, environment lookup, refresh, caching, or global
+selection.
+
+These APIs represent configured certificate authority, not certificate-path validation. They do
+not verify signatures, identities, time, revocation, or policy. Native PEM acquisition is a
+separate provider concern, and loading the same certificate bytes as an operating system store does
+not reproduce that system's trust policy.
+
+**Evidence:** [snapshot actor](../../../../packages/compiler/stdlib/silk/trust_snapshot.silk),
+[service actor](../../../../packages/compiler/stdlib/silk/trust_source.silk),
+[memory provider](../../../../packages/compiler/stdlib/silk/memory_trust_source.silk),
+[implementation contract](../../../../openspec/changes/implement-owned-trust-snapshots/specs/owned-trust-snapshots/spec.md),
+[shared native acceptance](../../../../packages/compiler/test/support/trustSourceAcceptance.ts).
+
 ## Deferred directions
 
 The following are deliberately outside the first stable model:
@@ -1139,3 +1220,27 @@ These operations require no allocator or Random provider. They retain no input a
 serialization, message inclusion, and HelloRetryRequest handling belong to the TLS consumer.
 This module does not implement a handshake, records, authentication or trust. Vector success does
 not establish constant-time execution or secret erasure.
+
+### STDLIB-011 — bounded TLS 1.3 record protection and byte driving
+
+`silk/tls_record` supplies separate affine `TlsRecordSender` and `TlsRecordReceiver` owners for
+AES-128-GCM/SHA-256, AES-256-GCM/SHA-384, and ChaCha20-Poly1305/SHA-256. Protected constructors
+require the suite hash's exact traffic-secret width, derive the AEAD key and 12-byte IV through
+`silk/tls_hkdf`, allocate all direction storage once, and start a private sequence at zero.
+Plaintext constructors frame the initial handshake records without fabricating a protected epoch.
+
+The sender queues at most 16,384 content bytes into one record, exposes the stable unacknowledged
+suffix through `pendingOutput`, and advances it only through a valid `ackWritten` prefix count.
+The receiver's `feedInput` consumes an exact caller prefix, admits the five-byte header before body
+bytes, stops after one complete record when input is coalesced, and publishes plaintext only after
+authentication plus inner-type and padding validation. `record` returns an owner-borrowed view;
+`consumeRecord` releases that view and permits the next record. Empty application fragments are
+valid, handshake fragments are nonempty, alerts contain exactly two bytes, and protected records
+use outer type 23, legacy version `0x0303`, and the exact header as AEAD additional data.
+
+Each protected direction stops before record 8,388,608. Nonces are the derived IV XOR the
+left-zero-padded 64-bit sequence number. Invalid acknowledgments leave sender state unchanged;
+header, authentication, inner-content, and receive key-use failures make the receiver terminal.
+The actor performs framing and proves possession of installed traffic secrets only. It does not
+perform a handshake, authenticate a server identity, validate certificates, select trust anchors,
+drive network resources, reserve client KeyUpdate policy, or decide `close_notify` behavior.

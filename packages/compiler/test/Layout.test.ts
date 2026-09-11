@@ -14,7 +14,11 @@ import * as LayoutVerify from '../src/LayoutVerify.js'
 import * as LocalSharedAllocationProvenance from '../src/LocalSharedAllocationProvenance.js'
 import * as LocalSharedControlBlock from '../src/LocalSharedControlBlock.js'
 import * as LocalSharedLifecycle from '../src/LocalSharedLifecycle.js'
+import * as Mir from '../src/Mir.js'
+import * as MirLinearization from '../src/MirLinearization.js'
 import * as NativeToolchain from '../src/NativeToolchain.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as Target from '../src/Target.js'
 import * as Type from '../src/Type.js'
 import * as ValueStorage from '../src/ValueStorage.js'
@@ -202,6 +206,90 @@ pub fn main() -> i32 {
         )
       }
     }),
+)
+
+it.effect('binds a complete nested union payload that contains an imported opaque aggregate', () =>
+  Effect.gen(function* () {
+    const sourceId = 'layout/imported-opaque-union'
+    const selected = AnalysisFixture.configuration(sourceId)
+    const snapshot = yield* Analysis.make({
+      root: SourceFile.make(
+        sourceId,
+        ascii(`
+import silk.result { Result }
+import layout.problem { Problem }
+
+fn extract(result: Result<i32, Problem>) -> Problem {
+  return match move result {
+    Result<i32, Problem>.Success { value } => Problem.Limit { kind: value, limit: 0 }
+    Result<i32, Problem>.Failure { error } => move error
+  }
+}
+
+fn consume(problem: Problem) -> i32 {
+  return match move problem {
+    Problem.Limit { kind, .. } => kind
+    _ => 0
+  }
+}
+
+pub fn main() -> i32 {
+  let problem = Problem.Limit { kind: 1, limit: 0 }
+  let result = Result.failResult<i32, Problem>(move problem)
+  let extracted = extract(move result)
+  return consume(move extracted)
+}`),
+      ),
+      configuration: selected,
+    }).pipe(
+      Effect.flatMap((frontend) => Analysis.realize(frontend, selected)),
+      Effect.provide(
+        SourceResolver.memory(
+          new Map([
+            [
+              'layout/problem',
+              ascii(`
+import silk.filesystem { FileError }
+
+pub union Problem {
+  File { pub operation: i32, pub error: FileError },
+  Limit { pub kind: i32, pub limit: usize }
+}`),
+            ],
+          ]),
+        ),
+      ),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const module = Analysis.loweredMir(snapshot)
+    const bindings = module.functions
+      .filter((candidate) => candidate.id.module === sourceId)
+      .flatMap((candidate) => MirLinearization.linearize(candidate))
+      .flatMap((block) => block.operations)
+      .filter(
+        (operation) =>
+          operation._tag === 'BindMatch' &&
+          Type.encode(Mir.semanticType(operation.type)) === 'layout/problem.Problem',
+      )
+      .map((operation) => {
+        if (operation._tag !== 'BindMatch') return unreachable('expected match binding')
+        const physical = Layout.coverageFieldSlots(
+          operation.shape,
+          operation.member,
+          operation.path,
+        )
+        const target = Layout.callingShape(module.layout, Mir.semanticType(operation.type))
+        return {
+          physical: physical?.length,
+          target: target?.lanes.length,
+        }
+      })
+    assert.isNotEmpty(bindings)
+    assert.deepEqual(
+      bindings.filter((binding) => binding.physical !== binding.target),
+      [],
+    )
+  }),
 )
 
 it('plans transport from its actual start without treating tail padding as payload', () => {

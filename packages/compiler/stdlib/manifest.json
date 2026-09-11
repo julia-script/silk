@@ -61,6 +61,21 @@
     ]
   },
   {
+    "module": "silk/certificate_path",
+    "path": "silk/certificate_path.silk",
+    "namespace": "CertificatePath",
+    "aliases": [
+      "ValidationLimits",
+      "ValidationClass",
+      "ValidationReason",
+      "ValidationLocation",
+      "ValidationLimit",
+      "ValidationError",
+      "RevocationStatus",
+      "ValidatedPath"
+    ]
+  },
+  {
     "module": "silk/certificate_profile",
     "path": "silk/certificate_profile.silk",
     "namespace": "CertificateProfile",
@@ -290,6 +305,11 @@
     "aliases": ["InMemoryLogger", "LogError", "LogLevel"]
   },
   {
+    "module": "silk/memory_trust_source",
+    "path": "silk/memory_trust_source.silk",
+    "namespace": "MemoryTrustSource"
+  },
+  {
     "module": "silk/metrics",
     "path": "silk/metrics.silk",
     "namespace": "AllocationMetrics"
@@ -314,6 +334,11 @@
     "module": "silk/native_diagnostics",
     "path": "silk/native_diagnostics.silk",
     "namespace": "NativeDiagnostics"
+  },
+  {
+    "module": "silk/native_file_trust_source",
+    "path": "silk/native_file_trust_source.silk",
+    "namespace": "NativeFileTrustSource"
   },
   {
     "module": "silk/native_filesystem",
@@ -586,9 +611,43 @@
     "aliases": ["TlsHkdfSha384", "LabelError"]
   },
   {
+    "module": "silk/tls_record",
+    "path": "silk/tls_record.silk",
+    "namespace": "TlsRecordSender",
+    "aliases": [
+      "TlsRecordReceiver",
+      "CipherSuite",
+      "ContentType",
+      "InputDemand",
+      "InputProgress",
+      "OutputDemand",
+      "OutputProgress",
+      "RecordError",
+      "RecordView"
+    ]
+  },
+  {
     "module": "silk/trust_anchor",
     "path": "silk/trust_anchor.silk",
     "namespace": "TrustAnchor"
+  },
+  {
+    "module": "silk/trust_snapshot",
+    "path": "silk/trust_snapshot.silk",
+    "namespace": "TrustSnapshot",
+    "aliases": [
+      "SnapshotLimits",
+      "TrustLoadLimits",
+      "TrustLimitKind",
+      "TrustConfigurationReason",
+      "TrustFileOperation",
+      "TrustSourceError"
+    ]
+  },
+  {
+    "module": "silk/trust_source",
+    "path": "silk/trust_source.silk",
+    "namespace": "TrustSource"
   },
   {
     "module": "silk/u16",
