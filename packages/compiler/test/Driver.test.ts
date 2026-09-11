@@ -1,6 +1,7 @@
 import { rsaWasmSource } from './support/rsaAcceptance.js'
 import { aesGcmWasmAcceptanceSource } from './support/aesGcmAcceptance.js'
 import { tlsHkdfWasmSource } from './support/tlsHkdfAcceptance.js'
+import { tlsRecordWasmSource } from './support/tlsRecordAcceptance.js'
 import { x25519WasmAcceptanceSource } from './support/x25519Acceptance.js'
 import * as AbiManifest from '../src/AbiManifest.js'
 import * as ForeignContract from '../src/ForeignContract.js'
@@ -802,6 +803,29 @@ it.effect('executes TLS HKDF through LLVM-to-Wasm without host imports', () =>
     const outcome = yield* compileSource('tls-hkdf.wasm', tlsHkdfWasmSource, {
       compilation: {
         root: SourceFile.make('memory/tls-hkdf-wasm', ascii(tlsHkdfWasmSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    yield* Effect.sync(() => {
+      const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+      assert.deepEqual(WebAssembly.Module.imports(module), [])
+      const main = new WebAssembly.Instance(module).exports['main']
+      assert.isFunction(main)
+      if (typeof main === 'function') assert.strictEqual(main(), 0)
+    })
+  }),
+)
+
+// Native coverage owns protected fixtures and transport state; this leg witnesses fixed record
+// storage and borrowed pending output at wasm32 pointer width with the shipped allocator.
+it.effect('executes bounded TLS record framing through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('tls-record.wasm', tlsRecordWasmSource, {
+      compilation: {
+        root: SourceFile.make('memory/tls-record-wasm', ascii(tlsRecordWasmSource)),
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',

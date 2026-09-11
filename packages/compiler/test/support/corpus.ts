@@ -27,6 +27,10 @@ import {
 } from './chacha20Poly1305Acceptance.js'
 import { hmacHkdfAcceptanceSource } from './hmacHkdfAcceptance.js'
 import { tlsHkdfAcceptanceSource } from './tlsHkdfAcceptance.js'
+import {
+  tlsRecordAcceptanceSource,
+  tlsRecordNativeAcceptanceSource,
+} from './tlsRecordAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
@@ -137,6 +141,12 @@ import silk.tls_hkdf`,
   return 42
 }`,
   )
+
+const tlsRecordSource = readFileSync(
+  new URL('../../stdlib/silk/tls_record.silk', import.meta.url),
+  'utf8',
+)
+const tlsRecordNativeSource = tlsRecordNativeAcceptanceSource(tlsRecordSource)
 
 const sha2Source = readFileSync(new URL('../../stdlib/silk/sha2.silk', import.meta.url), 'utf8')
 
@@ -7909,6 +7919,12 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     name: 'tls-hkdf',
     source: tlsHkdfAcceptanceSource,
     nativeSource: tlsHkdfNativeSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'tls-record',
+    source: tlsRecordAcceptanceSource,
+    nativeSource: tlsRecordNativeSource,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

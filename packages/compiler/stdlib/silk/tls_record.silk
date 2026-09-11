@@ -264,14 +264,11 @@ impl TlsRecordSender {
   }
 
   /// Borrows the exact unacknowledged output suffix.
-  ///
   /// Repeated inspection and inspection before any queued record are idempotent.
   pub fn pendingOutput<'owner>(self: &'owner Self) -> &'owner [u8] {
-    return RawBuffer.view<u8>(
-      &self.pending,
-      self.acknowledged,
-      self.pendingLength - self.acknowledged,
-    )
+    let acknowledged = self.acknowledged
+    let remaining = self.pendingLength - acknowledged
+    return RawBuffer.view<u8>(&self.pending, acknowledged, remaining)
   }
 
   /// Acknowledges a written prefix, or leaves all state unchanged when the count is excessive.
@@ -400,9 +397,13 @@ impl TlsRecordReceiver {
     }
     let mut consumed: usize = 0
     while self.wireLength < HEADER_LENGTH && consumed < input.length {
-      RawBuffer.fill(&mut self.wire, self.wireLength, 1, input[consumed])
+      let offset = self.wireLength
+      RawBuffer.fill(&mut self.wire, offset, 1, input[consumed])
       self.wireLength = self.wireLength + 1
       consumed = consumed + 1
+    }
+    if self.wireLength < HEADER_LENGTH {
+      return inputProgress(consumed, InputDemand.NeedInput)
     }
     if self.wireLength == HEADER_LENGTH && self.expectedLength == 0 {
       let admitted = admitHeader(&self)
@@ -415,7 +416,8 @@ impl TlsRecordReceiver {
       self.expectedLength = HEADER_LENGTH + payload
     }
     while self.wireLength < self.expectedLength && consumed < input.length {
-      RawBuffer.fill(&mut self.wire, self.wireLength, 1, input[consumed])
+      let offset = self.wireLength
+      RawBuffer.fill(&mut self.wire, offset, 1, input[consumed])
       self.wireLength = self.wireLength + 1
       consumed = consumed + 1
     }
@@ -434,10 +436,12 @@ impl TlsRecordReceiver {
     if self.ready == false {
       return Option.none<RecordView<'owner>>()
     }
+    let contentType = self.recordType
+    let length = self.recordLength
     return Option.some<RecordView<'owner>>(
       RecordView<'owner> {
-        contentType: self.recordType,
-        content: RawBuffer.view<u8>(&self.plaintext, 0, self.recordLength),
+        contentType: contentType,
+        content: RawBuffer.view<u8>(&self.plaintext, 0, length),
       },
     )
   }
@@ -509,13 +513,16 @@ fn queueProtected(
   let innerLength = accepted + 1
   let encryptedLength = innerLength + TAG_LENGTH
   let header = headerBytes(23, encryptedLength)
-  let nonce = recordNonce(&sender.iv, sender.sequence)
+  let sequence = sender.sequence
+  let chacha = sender.suite == CipherSuite.ChaCha20Poly1305Sha256
+  let keyLength = sender.keyLength
+  let nonce = recordNonce(&sender.iv, sequence)
   let key = sender.key
-  let keyBytes = Slice.view<u8>(&key, 0, sender.keyLength)
+  let keyBytes = Slice.view<u8>(&key, 0, keyLength)
   let plaintext = RawBuffer.view<u8>(&sender.staging, 0, innerLength)
   let ciphertext = RawBuffer.viewMut<u8>(&mut sender.pending, HEADER_LENGTH, innerLength)
   let mut tag = zeroTag()
-  if sender.suite == CipherSuite.ChaCha20Poly1305Sha256 {
+  if chacha {
     let sealed = mapChaChaSeal(
       ChaCha20Poly1305.seal(keyBytes, &nonce, &header, plaintext, move ciphertext, &mut tag),
     )
@@ -636,20 +643,23 @@ fn finishRecord(receiver: &mut TlsRecordReceiver) -> Result<(), RecordError> {
 }
 
 fn finishProtected(receiver: &mut TlsRecordReceiver) -> Result<(), RecordError> {
-  if receiver.sequence >= RECORDS_PER_EPOCH {
+  let sequence = receiver.sequence
+  if sequence >= RECORDS_PER_EPOCH {
     return Result.failResult<(), RecordError>(RecordError.KeyUsageExhausted)
   }
   let payloadLength = receiver.expectedLength - HEADER_LENGTH
   let ciphertextLength = payloadLength - TAG_LENGTH
+  let chacha = receiver.suite == CipherSuite.ChaCha20Poly1305Sha256
+  let keyLength = receiver.keyLength
   let header = firstHeader(&receiver.wire)
   let ciphertext = RawBuffer.view<u8>(&receiver.wire, HEADER_LENGTH, ciphertextLength)
   let mut tag = zeroTag()
   copyBuffer(&mut tag, &receiver.wire, HEADER_LENGTH + ciphertextLength, TAG_LENGTH)
-  let nonce = recordNonce(&receiver.iv, receiver.sequence)
+  let nonce = recordNonce(&receiver.iv, sequence)
   let key = receiver.key
-  let keyBytes = Slice.view<u8>(&key, 0, receiver.keyLength)
+  let keyBytes = Slice.view<u8>(&key, 0, keyLength)
   let plaintext = RawBuffer.viewMut<u8>(&mut receiver.plaintext, 0, ciphertextLength)
-  if receiver.suite == CipherSuite.ChaCha20Poly1305Sha256 {
+  if chacha {
     let opened = mapChaChaOpen(
       ChaCha20Poly1305.open(keyBytes, &nonce, &header, ciphertext, &tag, move plaintext),
     )
