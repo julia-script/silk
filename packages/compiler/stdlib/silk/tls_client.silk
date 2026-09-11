@@ -19,6 +19,82 @@
 //! This module does not acquire trust, time, entropy, or a transport. It implements a selected
 //! TLS 1.3 profile, not complete Web PKI. Logical state invalidation does not guarantee physical
 //! secret erasure. Drop releases storage but does not send `close_notify`.
+//!
+//! # Examples
+//!
+//! ## Queue and acknowledge a ClientHello with explicit dependencies
+//!
+//! The client copies the HTTPS identity and consumes the trust snapshot. Transport writes are
+//! explicit: borrow the current suffix, write that exact prefix, then acknowledge only those bytes.
+//!
+//! ```silk
+//! import silk.allocator as Allocators {Allocator, OutOfMemoryError}
+//! import silk.effect as Effects {Effect}
+//! import silk.https_identity as Identities {HttpsIdentity, IdentityError, OriginHost, ReferenceIdentity}
+//! import silk.random as Randomness {Random}
+//! import silk.result as Results {Result}
+//! import silk.system_clock as Clocks {SystemClock}
+//! import silk.tls_client as TlsClients {AlpnConfig, Client, ClientConfig, ClientLimits, TlsError}
+//! import silk.trust_anchor as TrustAnchors {TrustAnchor}
+//! import silk.trust_snapshot as TrustSnapshots {SnapshotLimits, TrustSnapshot, TrustSourceError}
+//! import silk.u8
+//! import silk.usize
+//! import silk.vector as Vectors {Vector}
+//!
+//! struct ExampleRandom { next: usize }
+//!
+//! impl Random for ExampleRandom {
+//!   effect fn fillBytes(self: &mut Self, output: &mut [u8]) -> () {
+//!     let mut index = usize.ZERO
+//!     while index < output.length {
+//!       output[index] = usize.toU8((self.next + index) % 251 + usize.ONE)
+//!       index = index + usize.ONE
+//!     }
+//!     self.next = self.next + output.length
+//!     return ()
+//!   }
+//! }
+//!
+//! effect fn program<'name>(name: &'name [u8]) -> i32 ! OutOfMemoryError {
+//!   let admitted = HttpsIdentity.reference(OriginHost<'name>.Dns {bytes: name})
+//!   let reference = match move admitted {
+//!     Result<ReferenceIdentity<'name>, IdentityError>.Success {value} => value
+//!     Result<ReferenceIdentity<'name>, IdentityError>.Failure {error} => { return 0 }
+//!   }
+//!   let snapshot = TrustSnapshot.fromAnchors(
+//!     Vector.make<TrustAnchor>(),
+//!     SnapshotLimits {anchors: 0, encodedBytes: 0},
+//!   )
+//!   let trust = match move snapshot {
+//!     Result<TrustSnapshot, TrustSourceError>.Success {value} => move value
+//!     Result<TrustSnapshot, TrustSourceError>.Failure {error} => { return 0 }
+//!   }
+//!   let config = ClientConfig {
+//!     reference: reference,
+//!     alpn: AlpnConfig.defaults(),
+//!     limits: ClientLimits.defaults(),
+//!   }
+//!   let mut allocator = Allocator.systemAllocatorProvider()
+//!   let mut random = ExampleRandom {next: usize.ONE}
+//!   let made = run Client.make(&config, move trust, SystemClock.make(1789156800, 0))
+//!     |> Effect.provideMut<Random>(&mut random)
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   let mut client = match move made {
+//!     Result<Client, TlsError>.Success {value} => move value
+//!     Result<Client, TlsError>.Failure {error} => { return 0 }
+//!   }
+//!   let pending = client.pendingOutput()
+//!   let length = pending.length
+//!   drop pending
+//!   if length == 0 { return 0 }
+//!   drop client.ackWritten(length)
+//!   return 42
+//! }
+//!
+//! effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+//!
+//! pub fn main() -> i32 { return run Effect.catchAll(program(b"example.com"), recover) }
+//! ```
 
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
@@ -33,9 +109,11 @@ import silk.certificate_path {
   CertificatePath,
   RevocationStatus,
   ValidatedPath,
+  ValidationClass,
   ValidationLimit,
   ValidationError,
   ValidationLimits,
+  ValidationLocation,
   ValidationReason,
 }
 import silk.hkdf {HkdfSha256, HkdfSha384}
@@ -605,7 +683,17 @@ impl Client {
     }
     if !validTime(&validationTime) {
       return Result.failResult<Client, TlsError>(
-        TlsError.ProtocolViolation {reason: ProtocolReason.InvalidLength},
+        TlsError.CertificatePath {
+          error: ValidationError {
+            kind: ValidationClass.InvalidInput,
+            reason: ValidationReason.InvalidTime,
+            detailReason: Option.none<ValidationReason>(),
+            location: ValidationLocation.Call,
+            extensionIndex: Option.none<usize>(),
+            limit: Option.none<ValidationLimit>(),
+            offset: 0,
+          },
+        },
       )
     }
     let referenceResult = validateReference(config.reference)
@@ -796,9 +884,16 @@ impl Client {
     }
     if progress.demand == InputDemand.RecordReady {
       let handled = run handleReadyRecord(&mut self.*)
-      return match move handled {
-        Result<Progress, TlsError>.Failure {error} => Result.failResult<Progress, TlsError>(move error)
-        Result<Progress, TlsError>.Success {value} => success(progress.consumed, value.written, value.demand)
+      let written = match move handled {
+        Result<Progress, TlsError>.Failure {error} => {
+          return Result.failResult<Progress, TlsError>(move error)
+        }
+        Result<Progress, TlsError>.Success {value} => value.written
+      }
+      let scheduled = scheduleControl(&mut self.*)
+      return match move scheduled {
+        Result<(), TlsError>.Failure {error} => Result.failResult<Progress, TlsError>(move error)
+        Result<(), TlsError>.Success {value} => success(progress.consumed, written, demand(&mut self.*))
       }
     }
     return success(progress.consumed, 0, demand(&mut self.*))
@@ -842,7 +937,11 @@ impl Client {
         return Result.failResult<Progress, TlsError>(move error)
       }
     }
-    return success(0, 0, demand(&mut self.*))
+    let scheduled = scheduleControl(&mut self.*)
+    return match move scheduled {
+      Result<(), TlsError>.Failure {error} => Result.failResult<Progress, TlsError>(move error)
+      Result<(), TlsError>.Success {value} => success(0, 0, demand(&mut self.*))
+    }
   }
 
   /// Copies authenticated application plaintext or reports pending input, closure, or truncation.
@@ -881,8 +980,7 @@ impl Client {
         self.applicationRead = 0
         self.applicationLength = 0
         if self.truncationPending {
-          self.truncationPending = false
-          return terminalFailure(&mut self.*, TlsError.Truncated)
+          return success(0, count, Demand.PlaintextReady)
         }
       }
       return success(0, count, demand(&mut self.*))
@@ -907,7 +1005,11 @@ impl Client {
     if self.state != ClientState.Traffic || !self.authenticatedPublished || self.localCloseRequested {
       return invalidState(ClientOperation.WritePlaintext)
     }
-    if TlsRecordSender.pendingOutput(&self.sender).length > 0 || self.pendingKeyUpdate || self.respondingKeyUpdate {
+    let scheduled = scheduleControl(&mut self.*)
+    if let Result<(), TlsError>.Failure {error} = move scheduled {
+      return Result.failResult<Progress, TlsError>(move error)
+    }
+    if TlsRecordSender.pendingOutput(&self.sender).length > 0 {
       return success(0, 0, Demand.NeedOutput)
     }
     if input.length == 0 {
@@ -932,7 +1034,9 @@ impl Client {
     if self.state != ClientState.Traffic || self.localCloseRequested {
       return invalidState(ClientOperation.RequestKeyUpdate)
     }
-    self.pendingKeyUpdate = true
+    if self.pendingKind != PendingKind.KeyUpdate && !self.pendingKeyUpdate {
+      self.pendingKeyUpdate = true
+    }
     let scheduled = scheduleControl(&mut self.*)
     return match move scheduled {
       Result<(), TlsError>.Failure {error} => Result.failResult<Progress, TlsError>(move error)
@@ -1276,7 +1380,7 @@ fn validateAlpn<'a>(config: AlpnConfig<'a>) -> Option<TlsError> {
         if bytes.length == 0 || bytes.length > 255 {
           return limitOption(TlsLimitKind.Alpn, 255)
         }
-        if bytes.length > ALPN_BYTES_LIMIT - total {
+        if bytes.length + usize.ONE > ALPN_BYTES_LIMIT - total {
           return limitOption(TlsLimitKind.Alpn, ALPN_BYTES_LIMIT)
         }
         let mut prior = usize.ZERO
@@ -1286,7 +1390,7 @@ fn validateAlpn<'a>(config: AlpnConfig<'a>) -> Option<TlsError> {
           }
           prior = prior + usize.ONE
         }
-        total = total + bytes.length
+        total = total + bytes.length + usize.ONE
         index = index + usize.ONE
       }
       return Option.none<TlsError>()
@@ -1578,7 +1682,6 @@ effect fn queueClientHello(client: &mut Client, retry: bool) -> Result<(), TlsEr
       }
     }
   }
-  client.handshakeLength = 0
   client.pendingKind = PendingKind.ClientHello
   if retry { client.pendingKind = PendingKind.RetryClientHello }
   return Result.succeed<(), TlsError>(())
@@ -2020,6 +2123,7 @@ fn unitProgressFailure(client: &mut Client, error: TlsError) -> Result<Progress,
 
 fn compatibilityWindow(state: ClientState) -> bool {
   return state == ClientState.AwaitServerHello
+    || state == ClientState.RetryClientHelloPending
     || state == ClientState.AwaitEncryptedExtensions
     || state == ClientState.AwaitCertificate
     || state == ClientState.AwaitCertificateVerify
@@ -2426,7 +2530,7 @@ fn parseServerHello(
       }
       cookieLength = readU16Raw(&client.handshake, cursor)
       cookieOffset = cursor + 2
-      if cookieLength + 2 != length {
+      if cookieLength == 0 || cookieLength + 2 != length {
         return Result.failResult<ParsedServerHello, TlsError>(
           TlsError.ProtocolViolation {reason: ProtocolReason.HelloRetryRequest},
         )
@@ -2818,19 +2922,26 @@ fn handleCertificateRequest(client: &mut Client, messageLength: usize) -> Result
       )
     }
     if kind == 13 {
-      if seen13 || length < 4 { return certificateRequestFailure() }
+      if seen13 || !validRequestedSignatureSchemes(&client.*, cursor, length) {
+        return certificateRequestFailure()
+      }
       seen13 = true
     } else if kind == 47 {
-      if seen47 || length < 2 { return certificateRequestFailure() }
+      if seen47 || !validCertificateAuthorities(&client.*, cursor, length) {
+        return certificateRequestFailure()
+      }
       seen47 = true
     } else if kind == 50 {
-      if seen50 || length < 4 { return certificateRequestFailure() }
+      if seen50 || !validRequestedSignatureSchemes(&client.*, cursor, length) {
+        return certificateRequestFailure()
+      }
       seen50 = true
     } else {
       return certificateRequestFailure()
     }
     cursor = cursor + length
   }
+  if !seen13 { return certificateRequestFailure() }
   updateSelectedTranscript(&mut client.*, 0, messageLength)
   client.certificateRequest = true
   return Result.succeed<(), TlsError>(())
@@ -2840,6 +2951,40 @@ fn certificateRequestFailure() -> Result<(), TlsError> {
   return Result.failResult<(), TlsError>(
     TlsError.ProtocolViolation {reason: ProtocolReason.CertificateRequest},
   )
+}
+
+fn validRequestedSignatureSchemes(
+  client: &Client,
+  start: usize,
+  length: usize,
+) -> bool {
+  if length < 4 { return false }
+  let vectorLength = readU16Raw(&client.handshake, start)
+  if vectorLength + 2 != length || vectorLength % 2 != 0 { return false }
+  let mut cursor = start + 2
+  let end = start + length
+  while cursor < end {
+    let scheme = readU16Raw(&client.handshake, cursor)
+    drop scheme
+    cursor = cursor + 2
+  }
+  return cursor == end
+}
+
+fn validCertificateAuthorities(client: &Client, start: usize, length: usize) -> bool {
+  if length < 5 { return false }
+  let vectorLength = readU16Raw(&client.handshake, start)
+  if vectorLength + 2 != length || vectorLength < 3 { return false }
+  let mut cursor = start + 2
+  let end = start + length
+  while cursor < end {
+    if end - cursor < 2 { return false }
+    let nameLength = readU16Raw(&client.handshake, cursor)
+    cursor = cursor + 2
+    if nameLength == 0 || nameLength > end - cursor { return false }
+    cursor = cursor + nameLength
+  }
+  return cursor == end
 }
 
 effect fn handleCertificate(client: &mut Client, messageLength: usize) -> Result<(), TlsError>
@@ -3514,6 +3659,25 @@ fn handleNewSessionTicket(client: &mut Client, messageLength: usize) -> Result<(
   if extensionLength > client.limits.extensionBytes || extensionLength != messageLength - cursor {
     return postHandshakeFailure()
   }
+  let extensionsStart = cursor
+  let extensionsEnd = cursor + extensionLength
+  while cursor < extensionsEnd {
+    if extensionsEnd - cursor < 4 { return postHandshakeFailure() }
+    let kind = readU16Raw(&client.handshake, cursor)
+    let length = readU16Raw(&client.handshake, cursor + 2)
+    cursor = cursor + 4
+    if length > extensionsEnd - cursor { return postHandshakeFailure() }
+    let mut prior = extensionsStart
+    while prior < cursor - 4 {
+      let priorKind = readU16Raw(&client.handshake, prior)
+      let priorLength = readU16Raw(&client.handshake, prior + 2)
+      if priorKind == kind { return postHandshakeFailure() }
+      prior = prior + 4 + priorLength
+    }
+    if kind == 42 && length != 4 { return postHandshakeFailure() }
+    cursor = cursor + length
+  }
+  if cursor != extensionsEnd { return postHandshakeFailure() }
   if client.ticketCount >= client.limits.tickets {
     return Result.failResult<(), TlsError>(
       TlsError.LimitExceeded {kind: TlsLimitKind.Tickets, limit: client.limits.tickets},

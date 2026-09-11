@@ -10,6 +10,12 @@ import * as CleanupPlan from '../src/CleanupPlan.js'
 import certificateProfileFixtures from './fixtures/certificate-profile-limbo.json' with { type: 'json' }
 import certificatePathFixtures from './fixtures/certificate-path-limbo.json' with { type: 'json' }
 import tlsClientFixtures from './fixtures/tls-client/manifest.json' with { type: 'json' }
+import {
+  tlsClientFullMatrixSourceLength,
+  tlsClientNativeFixtureSource,
+  tlsClientNativeSource,
+  tlsClientWasmSource,
+} from './support/tlsClientAcceptance.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -24,11 +30,65 @@ it('pins authenticated TLS client replay provenance and every offline file diges
     tlsClientFixtures.comparison.zigHttpParityCommit,
     '1bc892110da738d6137b3f0b7e8e3a586ce09928',
   )
-  assert.strictEqual(tlsClientFixtures.capture.privateKeys, 'TEST ONLY')
+  assert.strictEqual(tlsClientFixtures.shared.privateKeys, 'TEST ONLY')
+  assert.deepEqual(
+    tlsClientFixtures.captures.map((capture) => capture.suite),
+    [
+      'TLS_CHACHA20_POLY1305_SHA256',
+      'TLS_CHACHA20_POLY1305_SHA256',
+      'TLS_CHACHA20_POLY1305_SHA256',
+      'TLS_AES_128_GCM_SHA256',
+      'TLS_AES_128_GCM_SHA256',
+      'TLS_AES_256_GCM_SHA384',
+    ],
+  )
+  assert.match(tlsClientFixtures.captures.at(-1)?.group ?? '', /HelloRetryRequest/)
   for (const [path, expected] of Object.entries(tlsClientFixtures.files)) {
     const bytes = readFileSync(new URL(`./fixtures/tls-client/${path}`, import.meta.url))
     assert.strictEqual(createHash('sha256').update(bytes).digest('hex'), expected, path)
   }
+})
+
+it('pins TLS client control-slot and encoded-ALPN boundary guards in ordinary Silk', () => {
+  const source = readFileSync(new URL('../stdlib/silk/tls_client.silk', import.meta.url), 'utf8')
+  assert.match(source, /if bytes\.length \+ usize\.ONE > ALPN_BYTES_LIMIT - total/)
+  assert.match(source, /total = total \+ bytes\.length \+ usize\.ONE/)
+  const write = source.slice(
+    source.indexOf('pub fn writePlaintext'),
+    source.indexOf('pub fn requestKeyUpdate'),
+  )
+  assert.isBelow(write.indexOf('scheduleControl'), write.indexOf('queueRecord'))
+  const schedule = source.slice(
+    source.indexOf('fn scheduleControl'),
+    source.indexOf('fn updateTrafficSecret'),
+  )
+  assert.match(schedule, /recordsRemaining\(&client\.sender\) == 1/)
+  const hello = source.slice(
+    source.indexOf('effect fn buildClientHello'),
+    source.indexOf('fn putU8'),
+  )
+  assert.notInclude(hello, 'handshakeLength = 0')
+  assert.match(source, /shiftHandshake\(&mut client\.\*, messageLength\)/)
+  const compatibility = source.slice(
+    source.indexOf('fn compatibilityWindow'),
+    source.indexOf('fn completeHandshakeAvailable'),
+  )
+  assert.include(compatibility, 'ClientState.RetryClientHelloPending')
+})
+
+it('keeps the TLS client Wasm witness representative instead of duplicating the native matrix', () => {
+  assert.notStrictEqual(tlsClientWasmSource, tlsClientNativeSource)
+  assert.isBelow(tlsClientWasmSource.length, tlsClientFullMatrixSourceLength / 2)
+  assert.include(tlsClientWasmSource, 'value.suite() == CipherSuite.ChaCha20Poly1305Sha256')
+  assert.include(tlsClientWasmSource, 'client.readPlaintext(&mut plaintext)')
+  assert.notInclude(tlsClientWasmSource, 'let aes128Flight =')
+  assert.notInclude(tlsClientWasmSource, 'let retryFlight =')
+  assert.include(tlsClientNativeSource, 'silk_tls_fixture_copy')
+  assert.lengthOf(tlsClientNativeSource.match(/Client\.make\(/g) ?? [], 1)
+  assert.notInclude(tlsClientNativeSource, 'makeDefaultClient')
+  assert.include(tlsClientNativeSource, 'invalidLimit(move made, 1024)')
+  assert.include(tlsClientNativeFixtureSource, 'static const uint8_t fixture_0[]')
+  assert.notInclude(tlsClientNativeFixtureSource, 'silk_tls_mark')
 })
 
 it('pins certificate-profile fixture provenance and DER digests', () => {

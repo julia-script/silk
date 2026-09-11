@@ -31,7 +31,11 @@ import {
   tlsRecordAcceptanceSource,
   tlsRecordNativeAcceptanceSource,
 } from './tlsRecordAcceptance.js'
-import { tlsClientAcceptanceSource } from './tlsClientAcceptance.js'
+import {
+  tlsClientNativeFixtureSource,
+  tlsClientNativeSource,
+  tlsClientWasmSource,
+} from './tlsClientAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
@@ -7942,7 +7946,9 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
   },
   {
     name: 'authenticated-tls-client',
-    source: tlsClientAcceptanceSource,
+    source: tlsClientWasmSource,
+    nativeSource: tlsClientNativeSource,
+    nativeCSources: { tls_client_fixtures: tlsClientNativeFixtureSource },
     expected: { _tag: 'Completes', result: 42 },
   },
   {

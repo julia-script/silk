@@ -17,8 +17,8 @@
 ## 4. Evidence and integration
 
 - [x] 4.1 Add immutable pinned-rustls fixture files, lockfile and generator metadata with exact checksums, test-only key markings, RFC 8448 component evidence, and an offline integrity check.
-- [ ] 4.2 Consolidate contract evidence into one shared native corpus matrix, one representative LLVM-to-Wasm witness, and cheap structural assertions; measure focused base/branch runtime and add the native case to scoped PR CI.
-- [ ] 4.3 Register the module, generate source and public reference documentation, extract/check/format/run every new example, and verify generated inventories and links.
+- [x] 4.2 Consolidate contract evidence into one shared native corpus matrix, one representative LLVM-to-Wasm witness, and cheap structural assertions; measure focused base/branch runtime and add the native case to scoped PR CI.
+- [x] 4.3 Register the module, generate source and public reference documentation, extract/check/format/run every new example, and verify generated inventories and links.
 
 ## 5. Delivery
 
@@ -33,3 +33,23 @@
   implementation now snapshots that offset before borrowing the buffer and copies inline, matching
   the established record-consumption ownership shape. The same speed-profile rustls replay then
   passed with authenticated coalesced application data and closure assertions intact.
+- The mandatory economics revision keeps one corpus registration and one `Client.make` path. A
+  30-scenario runtime loop reads capture and mutation bytes from one data-only C translation unit;
+  C exports only exact size/copy operations and never decides TLS outcomes. The final optimized
+  native run passed in 360.59 seconds with 3,067,117,568 bytes maximum RSS. The representative
+  Wasm source is independently composed (21,895 bytes, 266 lines), has no native fixture bridge or
+  negative matrix, and passed compile, zero-import instantiation, and `main() == 42` in 306.62
+  seconds with 4,436,836,352 bytes maximum RSS.
+- The complete rustls matrix exposed and fixed two HRR integration defects: retry ClientHello
+  construction no longer resets the outer dispatcher's buffered handshake length, and a valid
+  compatibility CCS is accepted while retry output is pending. Malformed CCS syntax remains owned
+  by the JUL-171 record layer (`ProtocolReason.Record`); a separate valid CCS in an illegal client
+  state proves the client-owned `ProtocolReason.CompatibilityCcs` taxonomy and stickiness.
+- Identity-negative replay uses exact pinned rustls transcripts for `wrong.example` SNI and an IPv4
+  reference with no SNI. Cheap host guards parse those ClientHellos, decrypt their certificate
+  messages, and require the canonical RSA leaf plus root byte-for-byte, so code 53 proves that path,
+  record, transcript, and CertificateVerify checks succeeded before identity alone rejected.
+- Generated documentation passes the 120-module policy check, and the executable public example
+  passes with all 58 standard-library doctests after rebuilding the compiler artifact used by the
+  CLI. The generated source identity and rendered reference contain the same lifetime-explicit
+  example and no removed diagnostic helper.
