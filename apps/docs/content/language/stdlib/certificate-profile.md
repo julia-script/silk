@@ -566,6 +566,26 @@ SignatureRejected = 29
 
 An admitted cryptographic primitive rejected the retained signature.
 
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3330"></a>
+
+### `NameConstraintViolation`
+
+```silk
+NameConstraintViolation = 30
+```
+
+A subordinate DNS or IP subjectAltName violates one NameConstraints source.
+
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3331"></a>
+
+### `NameComparisons`
+
+```silk
+NameComparisons = 31
+```
+
+The caller-supplied name/subtree comparison budget is exhausted.
+
 <a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c654572726f72"></a>
 
 ## `ProfileError`
@@ -913,6 +933,27 @@ pub fn validateConfiguredNameConstraints<'life1>(value: &'life1 [u8], limits: Pr
 ```
 
 Validates strict configured DNS/IP NameConstraints without allocating or retaining input.
+
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a436572746966696361746550726f66696c652e636865636b4e616d65436f6e73747261696e7473"></a>
+
+### Associated function `CertificateProfile.checkNameConstraints`
+
+```silk
+pub fn checkNameConstraints<'life1, 'life2, 'life3, 'life4>(subject: &'life1 silk/certificate_profile.CertificateProfile<'life2>, constraintDer: &'life3 [u8], comparisons: &'life4 mut usize, maximumComparisons: usize, offsetSpace: ProfileOffsetSpace) -> silk/result.Result<(), silk/certificate_profile.ProfileError>
+```
+
+Checks every DNS and IP subjectAltName against one strict NameConstraints value.
+
+#### Details
+
+Exclusions run before permissions. The operation consumes one comparison before each
+same-form name/subtree comparison and updates `comparisons` across calls. `offsetSpace`
+identifies the coordinate system used by any returned constraint error.
+
+#### Gotchas
+
+The constraint value must first pass [`validateConfiguredNameConstraints`](#declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a436572746966696361746550726f66696c652e76616c6964617465436f6e666967757265644e616d65436f6e73747261696e7473) or profile
+inspection. The operation checks only one constraint source; callers must apply all sources.
 
 <a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a436572746966696361746550726f66696c652e7665726966794973737565644279"></a>
 
