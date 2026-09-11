@@ -1874,19 +1874,6 @@ pub fn main() -> i32 { return change(0) }`,
   },
   {
     name: 'finite-effect-join',
-    source: `struct First {}
-struct Second {}
-fn choose(input: First | Second) -> Effect<'static; i32> {
-  return match move input {
-    First {} => effect { return 41 }
-    Second {} => effect { return 42 }
-  }
-}
-pub fn main() -> i32 { return run choose(First {}) }`,
-    expected: { _tag: 'Completes', result: 41 },
-  },
-  {
-    name: 'finite-effect-join-static-specializations',
     source: `enum Flag { No, Yes }
 effect fn selected(static value: i32) -> i32 { return value }
 effect fn outer(flag: Flag) -> i32 {

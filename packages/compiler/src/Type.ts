@@ -1628,16 +1628,11 @@ const callableEnvironmentSiteKey = (self: CallableEnvironmentSite): string =>
     : `recovered:${self.functionOrdinal}:site:${self.ordinal}`
 
 /** Returns the deterministic identity of one specialized callable capture environment. */
-const executableOwnerKey = (self: ExecutableSpecializationOwner): string =>
-  Canonical.record('ExecutableOwner', [
-    self.declaration.module,
-    self.declaration.name,
-    Canonical.array(self.typeArguments.map(genericArgumentKey)),
-    Canonical.array(self.staticArgumentKeys),
-  ])
+const executableOwnerStaticKey = (self: ExecutableSpecializationOwner): string =>
+  self.staticArgumentKeys.length === 0 ? '' : `:static=${Canonical.array(self.staticArgumentKeys)}`
 
 export const callableEnvironmentKey = (self: CallableEnvironmentIdentity): string =>
-  `${callableEnvironmentSiteKey(self.site)}:owner=${executableOwnerKey(self.owner)}`
+  `${callableEnvironmentSiteKey(self.site)}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>${executableOwnerStaticKey(self.owner)}`
 
 /** Tests complete callable-environment specialization identity. */
 export const equalsCallableEnvironmentIdentity = (
@@ -1693,7 +1688,7 @@ const computeGenericArgumentKey = (self: GenericArgument): string => {
   }
   if (isEffectIdentityArgument(self)) {
     if (self.owner === undefined) return `effect-identity:${self.identity}`
-    return `effect-identity:${self.identity}:owner=${executableOwnerKey(self.owner)}`
+    return `effect-identity:${self.identity}:owner=${self.owner.declaration.module}.${self.owner.declaration.name}<${self.owner.typeArguments.map(genericArgumentKey).join(',')}>${executableOwnerStaticKey(self.owner)}`
   }
   if (isCallableIdentityArgument(self)) return callableIdentityKey(self)
   if (isRequirementRowArgument(self))
