@@ -26,32 +26,35 @@
 //!
 //! # Examples
 //!
-//! ## Configure explicit regular PEM files
-//!
-//! Debian applications can explicitly select the generated regular bundle without scanning its
-//! sibling certificate links. Darwin applications must first export their chosen authorities to a
-//! caller-managed regular PEM file; this actor does not read the system keychain.
+//! ## Construct a source without reading the file
 //!
 //! ```silk
-//! import silk.allocator { Allocator, OutOfMemoryError }
-//! import silk.filesystem { FileError, Path }
-//! import silk.native_file_trust_source { NativeFileTrustSource }
-//! import silk.trust_snapshot { TrustSourceError }
+//! import silk.allocator as Allocators {Allocator, OutOfMemoryError}
+//! import silk.effect as Effects {Effect}
+//! import silk.filesystem as FileSystems {FileError, Path}
+//! import silk.native_file_trust_source as NativeTrust {NativeFileTrustSource}
+//! import silk.trust_snapshot as TrustSnapshots {TrustSourceError}
 //!
-//! pub effect fn debianGeneratedBundle()
-//! -> NativeFileTrustSource
-//! ! FileError | TrustSourceError | OutOfMemoryError
-//! ? &mut Allocator {
-//!   let path = run Path.fromBytes(b"/ca-certificates.crt")
-//!   return run NativeFileTrustSource.make(b"/etc/ssl/certs", &path)
+//! effect fn program() -> i32 ! FileError | TrustSourceError | OutOfMemoryError {
+//!   let mut allocator = Allocator.systemAllocatorProvider()
+//!   let path = run Path.fromBytes(b"/trust.pem")
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   let source = run NativeFileTrustSource.make(b"/tmp", &path)
+//!     |> Effect.provideMut<Allocator>(&mut allocator)
+//!   drop source
+//!   return 42
 //! }
 //!
-//! pub effect fn darwinManagedExport()
-//! -> NativeFileTrustSource
-//! ! FileError | TrustSourceError | OutOfMemoryError
-//! ? &mut Allocator {
-//!   let path = run Path.fromBytes(b"/trust.pem")
-//!   return run NativeFileTrustSource.make(b"/Library/Application Support/Example", &path)
+//! effect fn recover(error: FileError | TrustSourceError | OutOfMemoryError) -> i32 {
+//!   return 0
+//! }
+//!
+//! pub fn main() -> i32 {
+//!   let result = run Effect.catchAll(program(), recover)
+//!   if result != 42 {
+//!     let mismatch = 1 / 0
+//!   }
+//!   return 0
 //! }
 //! ```
 
