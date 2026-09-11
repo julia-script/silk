@@ -5,10 +5,19 @@
       "retrieved": "2026-09-11",
       "description": "Section 3 client Finished handshake record, sequence zero"
     },
+    "rustls": {
+      "repository": "https://github.com/rustls/rustls.git",
+      "revision": "7768cd2b44049e040685d48318d13bfa7f7d32a8",
+      "provider": "ring",
+      "harness": "oracle/verify-rustls-fixtures.sh",
+      "output": "oracle/rustls-output.txt",
+      "result": "1 passed; AES-256 and ChaCha wire bytes matched exactly",
+      "verified": "2026-09-11"
+    },
     "independent": {
       "generator": "Node.js crypto HMAC and AEAD primitives",
       "node": "v26.7.0",
-      "description": "HKDF-Expand-Label was assembled independently from the Silk implementation; AES-256-GCM and ChaCha20-Poly1305 used fixed artificial traffic secrets at sequence zero"
+      "description": "Secondary confirmation: HKDF-Expand-Label was assembled independently from the Silk implementation; fixed artificial traffic secrets cover AES-256-GCM and ChaCha20-Poly1305 at sequence zero, plus authenticated AES-128 padding and sequence one"
     }
   },
   "records": [
@@ -44,6 +53,25 @@
       "key": "df3699e1b74a259a2ad9768643061e979db8d36a482e5eea0916501604af2a9e",
       "iv": "8e1b2ed7b87e1f5a8024c34f",
       "wire": "1703030013e0b73ac1d55a107ef10280958b26be6111c244"
+    },
+    {
+      "name": "independent-aes128-padded-application",
+      "suite": "TLS_AES_128_GCM_SHA256",
+      "sequence": "0",
+      "trafficSecret": "b3eddb126e067f35a780b3abf45e2d8f3b1a950738f52e9600746a0e27a55a21",
+      "contentType": "application_data",
+      "content": "010203",
+      "paddingLength": 4,
+      "wire": "170303001860ee4ef59020a566cd2174d40d3a443fdec83051f75e3d87"
+    },
+    {
+      "name": "independent-aes128-sequence-one",
+      "suite": "TLS_AES_128_GCM_SHA256",
+      "sequence": "1",
+      "trafficSecret": "b3eddb126e067f35a780b3abf45e2d8f3b1a950738f52e9600746a0e27a55a21",
+      "contentType": "application_data",
+      "content": "09",
+      "wire": "17030300122a5aedb4704fd5fe935f703a0e22dd5482a8"
     }
   ]
 }
