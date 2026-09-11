@@ -150,7 +150,27 @@ import silk.trust_snapshot { TrustFileOperation, TrustLoadLimits, TrustSnapshot,
 import silk.trust_source { TrustSource }
 import silk.u8
 import silk.usize
-${trustDefinitions('/tmp/silk-real-trust')}`
+${trustDefinitions('/tmp/silk-real-trust')}
+effect fn verifyTrustProgram() -> i32 ! FileError | TrustSourceError | OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let anchors = run ownedTrust() |> Effect.provideMut(&mut allocator)
+  let missing = run checkedTrustAt(b"/trust-missing.pem") |> Effect.provideMut(&mut allocator)
+  let denied = run checkedTrustAt(b"/trust-denied.pem") |> Effect.provideMut(&mut allocator)
+  let linked = run checkedTrustAt(b"/trust-link.pem") |> Effect.provideMut(&mut allocator)
+  let wrongKind = run checkedTrustAt(b"/trust-directory") |> Effect.provideMut(&mut allocator)
+  return anchors + missing + denied + linked + wrongKind
+}
+pub fn main() -> i32 {
+  let completed = run Effect.result(verifyTrustProgram())
+  return match move completed {
+    Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Success { value } => value
+    Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Failure { error } => match move error {
+      FileError file => 1
+      TrustSourceError trust => 2
+      OutOfMemoryError exhausted => 3
+    }
+  }
+}`
     const snapshot = yield* AnalysisFixture.declarations(
       'native-file-trust-source/real-files',
       ascii(source),
@@ -264,7 +284,9 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
     Result<(), FileError>.Failure { error } => true
   }
   if blocked == false { return 4 }
-  let trustResult: Result<i32, FileError | TrustSourceError | OutOfMemoryError> = run Effect.result(ownedTrust())
+  let trustResult: Result<i32, FileError | TrustSourceError | OutOfMemoryError> = run Effect.result(
+    ownedTrust() |> Effect.provideMut(&mut allocator),
+  )
   let anchors = match move trustResult {
     Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Success { value } => value
     Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Failure { error } => match move error {
@@ -273,13 +295,13 @@ effect fn program() -> i32 ! FileError | OutOfMemoryError {
       OutOfMemoryError memory => { fail move memory }
     }
   }
-  let missing = run checkedTrustAt(b"/trust-missing.pem")
+  let missing = run checkedTrustAt(b"/trust-missing.pem") |> Effect.provideMut(&mut allocator)
   if missing != 10 { return 7 }
-  let denied = run checkedTrustAt(b"/trust-denied.pem")
+  let denied = run checkedTrustAt(b"/trust-denied.pem") |> Effect.provideMut(&mut allocator)
   if denied != 12 { return 8 }
-  let linked = run checkedTrustAt(b"/trust-link.pem")
+  let linked = run checkedTrustAt(b"/trust-link.pem") |> Effect.provideMut(&mut allocator)
   if linked != 13 { return 9 }
-  let wrongKind = run checkedTrustAt(b"/trust-directory")
+  let wrongKind = run checkedTrustAt(b"/trust-directory") |> Effect.provideMut(&mut allocator)
   if wrongKind != 14 { return 10 }
   return 40 + anchors
 }
