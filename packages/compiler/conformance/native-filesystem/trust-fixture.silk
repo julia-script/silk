@@ -30,7 +30,11 @@ effect fn rejected(failure: TrustSourceError) -> i32 {
   return match move failure {
     TrustSourceError.File { operation, error: file } => {
       let native = fileCode(&file)
-      if operation == TrustFileOperation.Open { return 100 + native }
+      let reason = FileSystem.reasonCode(move file.reason)
+      if operation == TrustFileOperation.Open {
+        if native == 0 && reason != FileSystem.reasonCode(FileSystem.wrongType()) { return 199 }
+        return 100 + native
+      }
       if operation == TrustFileOperation.Read { return 120 + native }
       return 140 + native
     }
@@ -201,7 +205,7 @@ effect fn suite() -> i32 ! FileError | TrustSourceError | OutOfMemoryError ? &mu
   }
   if refusedCode != 190 { return 22 }
   let case13 = run loadOnce(b"/case13", 603)
-  if case13 != 150 { return 23 }
+  if case13 != 100 { return 23 }
   let case14 = run loadOnce(b"/case14", 603)
   if case14 != 140 && case14 != 162 { return 24 }
   let case15 = run loadOnce(b"/case15", 603)
