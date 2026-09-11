@@ -268,3 +268,28 @@ pub fn main() -> i32 {
     )
   }),
 )
+
+it.effect('keeps TLS record views tied to their receive owner', () =>
+  Effect.gen(function* () {
+    const source = `import silk.tls_record { TlsRecordReceiver }
+fn inspect(receiver: &mut TlsRecordReceiver, input: &[u8]) -> i32 {
+  let record = TlsRecordReceiver.record(&receiver.*)
+  let progress = TlsRecordReceiver.feedInput(move receiver, input)
+  drop record
+  drop progress
+  return 42
+}
+pub fn main() -> i32 { return 42 }`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/tls-record-view',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [{ code: 'OWN0011', span: 'receiver' }],
+    )
+  }),
+)

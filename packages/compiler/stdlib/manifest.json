@@ -586,6 +586,22 @@
     "aliases": ["TlsHkdfSha384", "LabelError"]
   },
   {
+    "module": "silk/tls_record",
+    "path": "silk/tls_record.silk",
+    "namespace": "TlsRecordSender",
+    "aliases": [
+      "TlsRecordReceiver",
+      "CipherSuite",
+      "ContentType",
+      "InputDemand",
+      "InputProgress",
+      "OutputDemand",
+      "OutputProgress",
+      "RecordError",
+      "RecordView"
+    ]
+  },
+  {
     "module": "silk/trust_anchor",
     "path": "silk/trust_anchor.silk",
     "namespace": "TrustAnchor"
