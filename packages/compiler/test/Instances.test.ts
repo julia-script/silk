@@ -465,6 +465,39 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('rejects mutually recursive cleanup specialization growth', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.box { Box }
+import silk.vector { Vector }
+struct Left<T> { next: Box<Right<Box<T>>> }
+struct Right<T> { next: Box<Left<Box<T>>> }
+pub fn main() -> i32 {
+  let held = Vector.make<Left<i32>>()
+  return 0
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    assert.strictEqual(result.instances.violations.length, 1)
+  }),
+)
+
+it.effect('admits repeated nominal cleanup at a smaller instantiation', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.box { Box }
+import silk.vector { Vector }
+struct Outer<T> { next: Box<Middle<T>> }
+struct Middle<T> { next: Box<T> }
+pub fn main() -> i32 {
+  let held = Vector.make<Outer<Outer<i32>>>()
+  return 0
+}`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(Analysis.instancesOf(result).violations, [])
+  }),
+)
+
 it.effect('lowers discovered instances deterministically to verifier-clean MIR', () =>
   Effect.gen(function* () {
     const program = Analysis.loweredMir(yield* snapshot(nestedSource))
