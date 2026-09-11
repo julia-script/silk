@@ -154,3 +154,44 @@ pub fn main() -> i32 {
     )
   }),
 )
+
+it.effect('enforces P-256 scalar ownership and explicit Random', () =>
+  Effect.gen(function* () {
+    const source = `import silk.p256 { P256, P256Error }
+import silk.result { Result }
+pub fn consume() -> i32 {
+  let bytes: [u8; 32] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]
+  let admitted = P256.fromBytes(&bytes)
+  return match move admitted {
+    Result<P256, P256Error>.Success { value: scalar } => {
+      let publicKey = scalar.publicKey()
+      let shared = scalar.agree(&publicKey)
+      drop shared
+      let again = scalar.publicKey()
+      drop again
+      return 42
+    }
+    Result<P256, P256Error>.Failure { error } => 1
+  }
+}
+pub effect fn main() -> i32 {
+  let scalar = run P256.generate()
+  drop scalar
+  return consume()
+}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/p256-owner-and-random',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        text: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0001', text: 'scalar' },
+        { code: 'SEM0071', text: 'run P256.generate()' },
+      ],
+    )
+  }),
+)

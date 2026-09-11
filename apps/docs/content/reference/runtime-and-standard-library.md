@@ -389,6 +389,15 @@ and each resource limit. No codec-specific compiler intrinsic or runtime provide
 [shared native acceptance](../../../../packages/compiler/test/support/inflateAcceptance.ts),
 [independent fixture provenance](../../../../packages/compiler/test/fixtures/inflate-vectors.md).
 
+### P-256 ephemeral key agreement
+
+`silk.p256 { P256, P256Error }` provides ordinary-source, bounded P-256 arithmetic. Scalars are
+opaque owners imported from exactly 32 big-endian bytes in 1..n−1 or generated with explicit
+exclusive `Random`. Public keys are 65-byte uncompressed SEC1 points. Agreement validates the
+peer, consumes the scalar, and returns a complete fixed 32-byte shared x-coordinate or a typed
+error. Deterministic calls allocate nothing and require no host service. See the prescriptive
+[P-256 contract](p256-key-agreement.md) for rejection, entropy and assurance boundaries.
+
 ### STDLIB-008 — HMAC and HKDF use concrete SHA-2 actors with bounded output
 
 **Status:** Confirmed
