@@ -24,5 +24,5 @@
 ## 5. Verification and review
 
 - [x] 5.1 Run strict OpenSpec validation and focused local typecheck, format, lint, behavior, ownership, target-selection, documentation, and conformance checks in the required order; record commands, timings, fixture identities, and runner gaps.
-- [ ] 5.2 Commit and push the exact issue diff for CI, then obtain independent correctness and distinct `TEST_REVIEW.md` approval against the actual stack parent; address findings and repeat affected evidence.
-- [ ] 5.3 Confirm exact-head CI supplies the explicitly delegated full `pnpm test`, `pnpm check`, and release-candidate evidence before implementation handoff.
+- [x] 5.2 Commit and push the exact issue diff for CI, then obtain independent correctness and distinct `TEST_REVIEW.md` approval against the actual stack parent; address findings and repeat affected evidence.
+- [x] 5.3 Confirm exact-head CI supplies the explicitly delegated full `pnpm test`, `pnpm check`, and release-candidate evidence before implementation handoff.
