@@ -124,6 +124,102 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('rejects overlapping ChaCha20-Poly1305 input and output borrows', () =>
+  Effect.gen(function* () {
+    const source = `import silk.chacha20_poly1305 { ChaCha20Poly1305 }
+pub fn main() -> i32 {
+  let key: [u8; 0] = []
+  let mut output: [u8; 0] = []
+  let mut tag: [u8; 0] = []
+  let sealed = ChaCha20Poly1305.seal(&key, &key, &key, &key, &mut output, &mut output)
+  let opened = ChaCha20Poly1305.open(&key, &key, &key, &output, &tag, &mut output)
+  drop sealed
+  drop opened
+  return 42
+}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/chacha20-poly1305',
+      ascii(source),
+    )
+    const diagnostics = Analysis.diagnostics(snapshot)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['OWN0010', 'OWN0010'],
+    )
+    assert.deepEqual(
+      diagnostics.map((diagnostic) =>
+        source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      ),
+      ['&mut output', '&mut output'],
+    )
+  }),
+)
+
+it.effect('enforces P-256 scalar ownership and explicit Random', () =>
+  Effect.gen(function* () {
+    const source = `import silk.p256 { P256, P256Error }
+import silk.result { Result }
+pub fn consume() -> i32 {
+  let bytes: [u8; 32] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]
+  let admitted = P256.fromBytes(&bytes)
+  return match move admitted {
+    Result<P256, P256Error>.Success { value: scalar } => {
+      let publicKey = scalar.publicKey()
+      let shared = scalar.agree(&publicKey)
+      drop shared
+      let again = scalar.publicKey()
+      drop again
+      return 42
+    }
+    Result<P256, P256Error>.Failure { error } => 1
+  }
+}
+pub effect fn main() -> i32 {
+  let scalar = run P256.generate()
+  drop scalar
+  return consume()
+}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/p256-owner-and-random',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        text: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [
+        { code: 'OWN0001', text: 'scalar' },
+        { code: 'SEM0071', text: 'run P256.generate()' },
+      ],
+    )
+  }),
+)
+
+it.effect('verifies ECDSA messages without providers or retained input loans', () =>
+  Effect.gen(function* () {
+    const source = `import silk.p256 { EcdsaP256Sha256 }
+pub fn main() -> i32 {
+  let mut key: [u8; 1] = [0]
+  let mut message: [u8; 1] = [0]
+  let mut signature: [u8; 1] = [0]
+  let result = EcdsaP256Sha256.verify(&key, &message, &signature)
+  key[0] = 1
+  message[0] = 1
+  signature[0] = 1
+  drop result
+  let again = EcdsaP256Sha256.verify(&key, &message, &signature)
+  drop again
+  return 42
+}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/ecdsa-borrowed-inputs',
+      ascii(source),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
 it.effect('keeps admitted RSA public key representation private', () =>
   Effect.gen(function* () {
     const source = `import silk.rsa { RsaPublicKey }
