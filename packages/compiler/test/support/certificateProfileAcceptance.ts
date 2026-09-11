@@ -78,12 +78,12 @@ const rebuildDerNode = (
 const rewriteDerNodes = (
   input: Buffer,
   id: string,
-  needle: ReadonlyArray<number>,
-  replacement: ReadonlyArray<number>,
+  needle: ArrayLike<number>,
+  replacement: ArrayLike<number>,
   count: number,
 ): Buffer => {
   const selected = Buffer.from(needle)
-  let bytes = Buffer.from(input)
+  let bytes: Buffer = Buffer.from(input)
   for (let ordinal = 0; ordinal < count; ordinal += 1) {
     const offset = bytes.indexOf(selected)
     if (offset < 0) throw new Error(`Missing DER replacement ${ordinal} in ${id}`)
@@ -99,8 +99,8 @@ const rewriteDerNodes = (
 
 const replaceDerNodes = (
   id: string,
-  needle: ReadonlyArray<number>,
-  replacement: ReadonlyArray<number>,
+  needle: ArrayLike<number>,
+  replacement: ArrayLike<number>,
   count: number,
 ): string => {
   const bytes = rewriteDerNodes(fixtureBytes(id), id, needle, replacement, count)
@@ -110,7 +110,7 @@ const replaceDerNodes = (
 const removeContainingNode = (
   input: Buffer,
   id: string,
-  needle: ReadonlyArray<number>,
+  needle: ArrayLike<number>,
   tag: number,
 ): Buffer => {
   const offset = input.indexOf(Buffer.from(needle))
