@@ -49,7 +49,7 @@ separate operations. This actor provides no signing, certificates, trust policy 
 
 ## Known-answer evidence
 
-The shared native corpus checks RFC 5903 §8.1 in both directions, NIST ECCCDH P-256 COUNT0/24,
+The shared native corpus checks RFC 5903 §8.1 in both directions, NIST ECCCDH P-256 COUNT0,
 scalar1/n−1, a leading-zero x-coordinate, admission errors, and scripted rejection generation.
 The RFC's IKE x||y values receive an explicit SEC1 `0x04` prefix; IKE payload framing is excluded.
 The [fixture manifest](../../../../openspec/changes/implement-p256-key-agreement/fixtures.json)
