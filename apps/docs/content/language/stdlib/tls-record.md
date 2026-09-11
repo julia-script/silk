@@ -480,6 +480,26 @@ pub effect<'static> fn makePlaintext() -> TlsRecordSender ! OutOfMemoryError ? &
 
 Creates plaintext TLS record framing without a traffic secret or protected epoch.
 
+<a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726453656e6465722e7265706c61636545706f6368"></a>
+
+### Method `TlsRecordSender.replaceEpoch`
+
+```silk
+pub fn replaceEpoch<'life0, 'life1>(self: &'life0 mut TlsRecordSender, suite: CipherSuite, trafficSecret: &'life1 [u8]) -> silk/result.Result<(), silk/tls_record.RecordError>
+```
+
+Installs a fresh protected traffic epoch on an idle sender without allocation.
+
+#### Details
+
+The replacement reuses the owned wire and staging storage and starts at sequence zero. The
+traffic secret must have the selected suite hash width.
+
+#### Gotchas
+
+Pending output makes the replacement invalid. Every failure leaves the complete old epoch
+unchanged. A successful replacement is allowed after the old epoch exhausts its record budget.
+
 <a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726453656e6465722e71756575655265636f7264"></a>
 
 ### Method `TlsRecordSender.queueRecord`
@@ -507,6 +527,17 @@ pub fn pendingOutput<'owner>(self: &'owner TlsRecordSender) -> &'owner [u8]
 
 Borrows the exact unacknowledged output suffix.
 Repeated inspection and inspection before any queued record are idempotent.
+
+<a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726453656e6465722e7265636f72647352656d61696e696e67"></a>
+
+### Method `TlsRecordSender.recordsRemaining`
+
+```silk
+pub fn recordsRemaining<'life0>(self: &'life0 TlsRecordSender) -> u64
+```
+
+Returns the number of records that this protected epoch can still encode.
+Plaintext framing returns zero because it has no traffic-key epoch.
 
 <a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726453656e6465722e61636b5772697474656e"></a>
 
@@ -559,6 +590,26 @@ pub effect<'static> fn makePlaintext() -> TlsRecordReceiver ! OutOfMemoryError ?
 
 Creates plaintext TLS record framing without a traffic secret or protected epoch.
 
+<a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726452656365697665722e7265706c61636545706f6368"></a>
+
+### Method `TlsRecordReceiver.replaceEpoch`
+
+```silk
+pub fn replaceEpoch<'life0, 'life1>(self: &'life0 mut TlsRecordReceiver, suite: CipherSuite, trafficSecret: &'life1 [u8]) -> silk/result.Result<(), silk/tls_record.RecordError>
+```
+
+Installs a fresh protected traffic epoch on an idle receiver without allocation.
+
+#### Details
+
+The replacement reuses the owned wire and plaintext storage and starts at sequence zero. The
+traffic secret must have the selected suite hash width.
+
+#### Gotchas
+
+A partial, ready, or terminal receiver makes the replacement invalid. Every failure leaves
+the complete old epoch unchanged. A successful replacement is allowed after exhaustion.
+
 <a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726452656365697665722e66656564496e707574"></a>
 
 ### Method `TlsRecordReceiver.feedInput`
@@ -573,7 +624,9 @@ Copies a prefix for the current record and reports the exact next receive action
 
 Empty input reports zero-consumption `NeedInput`. Header admission occurs after exactly five
 bytes and before any body byte is copied. Completion stops before a coalesced following record.
-A ready record causes zero-consumption `NeedRecordConsumption` until [`consumeRecord`](#declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726452656365697665722e636f6e73756d655265636f7264) succeeds.
+A ready record causes zero-consumption `NeedRecordConsumption` until [`consumeRecord`](#declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726452656365697665722e636f6e73756d655265636f7264) or
+[`consumeRecordInto`](#declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726452656365697665722e636f6e73756d655265636f7264496e746f) succeeds. During a protected epoch, exact plaintext compatibility CCS
+`{1}` is admitted without consuming a protected sequence; every other record remains protected.
 
 #### Gotchas
 
@@ -588,6 +641,41 @@ pub fn record<'owner>(self: &'owner TlsRecordReceiver) -> silk/option.Option<sil
 ```
 
 Borrows the complete current record, or returns `None` while more input is needed.
+
+<a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726452656365697665722e7265616479436f6e74656e7454797065"></a>
+
+### Method `TlsRecordReceiver.readyContentType`
+
+```silk
+pub fn readyContentType<'life0>(self: &'life0 TlsRecordReceiver) -> silk/option.Option<silk/tls_record.ContentType>
+```
+
+Returns the ready record's authenticated content type without borrowing its content.
+
+<a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726452656365697665722e72656164794c656e677468"></a>
+
+### Method `TlsRecordReceiver.readyLength`
+
+```silk
+pub fn readyLength<'life0>(self: &'life0 TlsRecordReceiver) -> usize
+```
+
+Returns the ready record's authenticated content length, or zero when no record is ready.
+
+<a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726452656365697665722e636f6e73756d655265636f7264496e746f"></a>
+
+### Method `TlsRecordReceiver.consumeRecordInto`
+
+```silk
+pub fn consumeRecordInto<'life0, 'life1>(self: &'life0 mut TlsRecordReceiver, destination: &'life1 mut [u8]) -> silk/result.Result<usize, silk/tls_record.RecordError>
+```
+
+Copies and consumes one complete authenticated record without retaining an owner-tied view.
+
+#### Gotchas
+
+A destination smaller than the ready content returns `RecordOverflow` and leaves the record
+ready and unchanged. No ready record returns `InvalidState`.
 
 <a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726452656365697665722e636f6e73756d655265636f7264"></a>
 

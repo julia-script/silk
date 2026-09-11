@@ -605,6 +605,27 @@
     "aliases": ["Arch"]
   },
   {
+    "module": "silk/tls_client",
+    "path": "silk/tls_client.silk",
+    "namespace": "Client",
+    "aliases": [
+      "AlpnConfig",
+      "AlpnProtocol",
+      "Authentication",
+      "CertificateIdentityFailure",
+      "CertificateVerifyFailure",
+      "ClientConfig",
+      "ClientLimits",
+      "ClientOperation",
+      "Demand",
+      "NamedGroup",
+      "Progress",
+      "ProtocolReason",
+      "TlsError",
+      "TlsLimitKind"
+    ]
+  },
+  {
     "module": "silk/tls_hkdf",
     "path": "silk/tls_hkdf.silk",
     "namespace": "TlsHkdfSha256",

@@ -324,3 +324,37 @@ pub fn main() -> i32 { return 42 }`
       )
     }),
 )
+
+it.effect('pins the authenticated TLS client provider row and output lifetime', () =>
+  Effect.gen(function* () {
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.random { Random }
+import silk.result { Result }
+import silk.system_clock { Instant }
+import silk.tls_client { Client, ClientConfig, TlsError }
+import silk.trust_snapshot { TrustSnapshot }
+import silk.usize
+effect fn construct<'a>(config: &ClientConfig<'a>, trust: TrustSnapshot, time: Instant) -> Result<Client, TlsError>
+! OutOfMemoryError
+? &mut Allocator | &mut Random {
+  return run Client.make(config, move trust, move time)
+}
+fn retainAcrossMutation(client: &mut Client) -> usize {
+  let pending = Client.pendingOutput(&client.*)
+  drop Client.ackWritten(&mut client.*, usize.ZERO)
+  return pending.length
+}
+pub fn main() -> i32 { return 42 }`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/authenticated-tls-client',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [{ code: 'OWN0010', span: '&mut client.*' }],
+    )
+  }),
+)

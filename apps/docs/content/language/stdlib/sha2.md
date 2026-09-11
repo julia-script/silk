@@ -17,6 +17,8 @@ Use `silk.hash` only for collection keys. It is not a cryptographic hash.
 Each actor supports incremental input through `update`, consuming finalization through
 `finish`, and one-shot input through `hash`. The states use only inline storage and allocate no
 memory. Each digest uses the standardized big-endian byte order.
+[`Sha256.checkpoint`](#declaration-73696c6b2f736861323a3a5368613235362e636865636b706f696e74) and [`Sha384.checkpoint`](#declaration-73696c6b2f736861323a3a5368613338342e636865636b706f696e74) also return a digest without consuming the
+streaming state. Use these operations for exact protocol transcript boundaries.
 
 ## Gotchas
 
@@ -129,6 +131,21 @@ pub fn update<'life0, 'life1>(self: &'life0 mut Sha256, bytes: &'life1 [u8]) -> 
 Adds `bytes` to this SHA-256 state in source order. An empty slice does not change the state.
 If the complete message exceeds the 64-bit bit-length domain, the program traps.
 
+<a id="declaration-73696c6b2f736861323a3a5368613235362e636865636b706f696e74"></a>
+
+### Method `Sha256.checkpoint`
+
+```silk
+pub fn checkpoint<'life0>(self: &'life0 Sha256) -> Array<u8, 32>
+```
+
+Returns the SHA-256 digest of all bytes supplied so far without consuming this state.
+
+#### Details
+
+The operation copies the fixed inline state. A later `update` or `checkpoint` continues from
+the same original byte sequence.
+
 <a id="declaration-73696c6b2f736861323a3a5368613235362e66696e697368"></a>
 
 ### Method `Sha256.finish`
@@ -179,6 +196,21 @@ pub fn update<'life0, 'life1>(self: &'life0 mut Sha384, bytes: &'life1 [u8]) -> 
 
 Adds `bytes` to this SHA-384 state in source order. An empty slice does not change the state.
 If the complete message exceeds the 128-bit bit-length domain, the program traps.
+
+<a id="declaration-73696c6b2f736861323a3a5368613338342e636865636b706f696e74"></a>
+
+### Method `Sha384.checkpoint`
+
+```silk
+pub fn checkpoint<'life0>(self: &'life0 Sha384) -> Array<u8, 48>
+```
+
+Returns the SHA-384 digest of all bytes supplied so far without consuming this state.
+
+#### Details
+
+The operation copies the fixed inline state. A later `update` or `checkpoint` continues from
+the same original byte sequence.
 
 <a id="declaration-73696c6b2f736861323a3a5368613338342e66696e697368"></a>
 
