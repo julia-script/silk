@@ -124,11 +124,11 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('consumes an admitted P-256 scalar on agreement', () =>
+it.effect('enforces P-256 scalar ownership and explicit Random', () =>
   Effect.gen(function* () {
     const source = `import silk.p256 { P256, P256Error }
 import silk.result { Result }
-pub fn main() -> i32 {
+pub fn consume() -> i32 {
   let bytes: [u8; 32] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]
   let admitted = P256.fromBytes(&bytes)
   return match move admitted {
@@ -142,31 +142,14 @@ pub fn main() -> i32 {
     }
     Result<P256, P256Error>.Failure { error } => 1
   }
-}`
-    const snapshot = yield* AnalysisFixture.retainingMain(
-      'stdlib-namespace/p256-owner',
-      ascii(source),
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => ({
-        code: diagnostic.code,
-        text: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
-      })),
-      [{ code: 'OWN0001', text: 'scalar' }],
-    )
-  }),
-)
-
-it.effect('requires explicit exclusive Random when generating P-256 scalars', () =>
-  Effect.gen(function* () {
-    const source = `import silk.p256 { P256 }
+}
 pub effect fn main() -> i32 {
   let scalar = run P256.generate()
   drop scalar
-  return 0
+  return consume()
 }`
     const snapshot = yield* AnalysisFixture.retainingMain(
-      'stdlib-namespace/p256-random',
+      'stdlib-namespace/p256-owner-and-random',
       ascii(source),
     )
     assert.deepEqual(
@@ -174,7 +157,10 @@ pub effect fn main() -> i32 {
         code: diagnostic.code,
         text: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
       })),
-      [{ code: 'SEM0071', text: 'run P256.generate()' }],
+      [
+        { code: 'OWN0001', text: 'scalar' },
+        { code: 'SEM0071', text: 'run P256.generate()' },
+      ],
     )
   }),
 )

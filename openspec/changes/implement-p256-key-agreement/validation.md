@@ -75,3 +75,5 @@ passed before this evidence update. Initial `pnpm lint` exposed Effect script-bo
 the opt-in script now uses Effect services and scoped child processes. Its focused lint and the full lint rerun pass.
 `pnpm test`, `pnpm check`, `pnpm release:candidate`, exact-diff correctness review and independent
 test-economics review remain pending the coordinator's shared validation lane.
+
+Economics review consolidated ownership and missing-Random diagnostics into one analysis snapshot and removed NIST COUNT24 from the default native matrix. COUNT0 and both RFC directions remain; COUNT24 stays in the opt-in independent oracle fixture manifest. This removes one analysis and two scalar multiplications without losing a distinct boundary claim.
