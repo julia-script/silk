@@ -26,6 +26,82 @@ This module does not acquire trust, time, entropy, or a transport. It implements
 TLS 1.3 profile, not complete Web PKI. Logical state invalidation does not guarantee physical
 secret erasure. Drop releases storage but does not send `close_notify`.
 
+## Examples
+
+### Queue and acknowledge a ClientHello with explicit dependencies
+
+The client copies the HTTPS identity and consumes the trust snapshot. Transport writes are
+explicit: borrow the current suffix, write that exact prefix, then acknowledge only those bytes.
+
+```silk
+import silk.allocator as Allocators {Allocator, OutOfMemoryError}
+import silk.effect as Effects {Effect}
+import silk.https_identity as Identities {HttpsIdentity, IdentityError, OriginHost, ReferenceIdentity}
+import silk.random as Randomness {Random}
+import silk.result as Results {Result}
+import silk.system_clock as Clocks {SystemClock}
+import silk.tls_client as TlsClients {AlpnConfig, Client, ClientConfig, ClientLimits, TlsError}
+import silk.trust_anchor as TrustAnchors {TrustAnchor}
+import silk.trust_snapshot as TrustSnapshots {SnapshotLimits, TrustSnapshot, TrustSourceError}
+import silk.u8
+import silk.usize
+import silk.vector as Vectors {Vector}
+
+struct ExampleRandom { next: usize }
+
+impl Random for ExampleRandom {
+  effect fn fillBytes(self: &mut Self, output: &mut [u8]) -> () {
+    let mut index = usize.ZERO
+    while index < output.length {
+      output[index] = usize.toU8((self.next + index) % 251 + usize.ONE)
+      index = index + usize.ONE
+    }
+    self.next = self.next + output.length
+    return ()
+  }
+}
+
+effect fn program<'name>(name: &'name [u8]) -> i32 ! OutOfMemoryError {
+  let admitted = HttpsIdentity.reference(OriginHost<'name>.Dns {bytes: name})
+  let reference = match move admitted {
+    Result<ReferenceIdentity<'name>, IdentityError>.Success {value} => value
+    Result<ReferenceIdentity<'name>, IdentityError>.Failure {error} => { return 0 }
+  }
+  let snapshot = TrustSnapshot.fromAnchors(
+    Vector.make<TrustAnchor>(),
+    SnapshotLimits {anchors: 0, encodedBytes: 0},
+  )
+  let trust = match move snapshot {
+    Result<TrustSnapshot, TrustSourceError>.Success {value} => move value
+    Result<TrustSnapshot, TrustSourceError>.Failure {error} => { return 0 }
+  }
+  let config = ClientConfig {
+    reference: reference,
+    alpn: AlpnConfig.defaults(),
+    limits: ClientLimits.defaults(),
+  }
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut random = ExampleRandom {next: usize.ONE}
+  let made = run Client.make(&config, move trust, SystemClock.make(1789156800, 0))
+    |> Effect.provideMut<Random>(&mut random)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut client = match move made {
+    Result<Client, TlsError>.Success {value} => move value
+    Result<Client, TlsError>.Failure {error} => { return 0 }
+  }
+  let pending = client.pendingOutput()
+  let length = pending.length
+  drop pending
+  if length == 0 { return 0 }
+  drop client.ackWritten(length)
+  return 42
+}
+
+effect fn recover(error: OutOfMemoryError) -> i32 { return 0 }
+
+pub fn main() -> i32 { return run Effect.catchAll(program(b"example.com"), recover) }
+```
+
 Import as `Client` with `import silk.tls_client { Client }`.
 
 Public declarations: 15.
