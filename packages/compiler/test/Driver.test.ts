@@ -1,3 +1,4 @@
+import { rsaWasmSource } from './support/rsaAcceptance.js'
 import * as AbiManifest from '../src/AbiManifest.js'
 import * as ForeignContract from '../src/ForeignContract.js'
 import * as Target from '../src/Target.js'
@@ -630,5 +631,25 @@ it.effect('executes bounded certificate decoding through LLVM-to-Wasm', () =>
     const main = instance.exports['main']
     assert.isFunction(main)
     if (typeof main === 'function') assert.strictEqual(main(), 0)
+  }),
+)
+
+it.effect('executes bounded RSA verification through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('rsa.wasm', rsaWasmSource, {
+      compilation: {
+        root: SourceFile.make('memory/rsa-wasm', ascii(rsaWasmSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+    assert.deepEqual(WebAssembly.Module.imports(module), [])
+    const instance = new WebAssembly.Instance(module)
+    const main = instance.exports['main']
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 42)
   }),
 )

@@ -123,3 +123,21 @@ pub fn main() -> i32 {
     )
   }),
 )
+
+it.effect('keeps admitted RSA public key representation private', () =>
+  Effect.gen(function* () {
+    const source = `import silk.rsa { RsaPublicKey }
+fn width(key: &RsaPublicKey) -> usize {return key.width}
+pub fn main() -> i32 {return 0}`
+    const snapshot = yield* AnalysisFixture.retainingMain('stdlib-namespace/rsa', ascii(source))
+    const diagnostics = Analysis.diagnostics(snapshot)
+    assert.deepEqual(
+      diagnostics.map((d) => d.code),
+      ['SEM0028'],
+    )
+    assert.deepEqual(
+      diagnostics.map((d) => source.slice(d.span.start, d.span.end)),
+      ['width'],
+    )
+  }),
+)
