@@ -1134,3 +1134,27 @@ These operations require no allocator or Random provider. They retain no input a
 serialization, message inclusion, and HelloRetryRequest handling belong to the TLS consumer.
 This module does not implement a handshake, records, authentication or trust. Vector success does
 not establish constant-time execution or secret erasure.
+
+### STDLIB-011 — bounded TLS 1.3 record protection and byte driving
+
+`silk/tls_record` supplies separate affine `TlsRecordSender` and `TlsRecordReceiver` owners for
+AES-128-GCM/SHA-256, AES-256-GCM/SHA-384, and ChaCha20-Poly1305/SHA-256. Protected constructors
+require the suite hash's exact traffic-secret width, derive the AEAD key and 12-byte IV through
+`silk/tls_hkdf`, allocate all direction storage once, and start a private sequence at zero.
+Plaintext constructors frame the initial handshake records without fabricating a protected epoch.
+
+The sender queues at most 16,384 content bytes into one record, exposes the stable unacknowledged
+suffix through `pendingOutput`, and advances it only through a valid `ackWritten` prefix count.
+The receiver's `feedInput` consumes an exact caller prefix, admits the five-byte header before body
+bytes, stops after one complete record when input is coalesced, and publishes plaintext only after
+authentication plus inner-type and padding validation. `record` returns an owner-borrowed view;
+`consumeRecord` releases that view and permits the next record. Empty application fragments are
+valid, handshake fragments are nonempty, alerts contain exactly two bytes, and protected records
+use outer type 23, legacy version `0x0303`, and the exact header as AEAD additional data.
+
+Each protected direction stops before record 8,388,608. Nonces are the derived IV XOR the
+left-zero-padded 64-bit sequence number. Invalid acknowledgments leave sender state unchanged;
+header, authentication, inner-content, and receive key-use failures make the receiver terminal.
+The actor performs framing and proves possession of installed traffic secrets only. It does not
+perform a handshake, authenticate a server identity, validate certificates, select trust anchors,
+drive network resources, reserve client KeyUpdate policy, or decide `close_notify` behavior.

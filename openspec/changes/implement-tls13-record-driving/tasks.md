@@ -1,14 +1,14 @@
 ## 1. Record ownership and protection
 
-- [ ] 1.1 Add the `silk.tls_record` public types, exact protected/plaintext constructors, derived suite keys, fixed-capacity direction storage, and private sequence state; verify constructor widths, allocation channels, and manifest resolution with focused analysis.
-- [ ] 1.2 Implement protected and plaintext queue/pending/acknowledgment driving with exact prefix accounting, stable pending bytes, record fragmentation, atomic misuse errors, TLS headers/AAD/nonces, and no post-construction allocation; verify the focused native record program.
-- [ ] 1.3 Implement header-first fragmented receive driving, authenticated delayed publication, inner content/padding validation, terminal peer failure, owner-borrowed record inspection, and explicit consumption; verify fragmentation, coalescing, tampering, empty-buffer, and lifetime cases.
+- [x] 1.1 Add the `silk.tls_record` public types, exact protected/plaintext constructors, derived suite keys, fixed-capacity direction storage, and private sequence state; verify constructor widths, allocation channels, and manifest resolution with focused analysis.
+- [x] 1.2 Implement protected and plaintext queue/pending/acknowledgment driving with exact prefix accounting, stable pending bytes, record fragmentation, atomic misuse errors, TLS headers/AAD/nonces, and no post-construction allocation; verify the focused native record program.
+- [x] 1.3 Implement header-first fragmented receive driving, authenticated delayed publication, inner content/padding validation, terminal peer failure, owner-borrowed record inspection, and explicit consumption; verify fragmentation, coalescing, tampering, empty-buffer, and lifetime cases.
 
 ## 2. Evidence and integration
 
-- [ ] 2.1 Commit RFC 8448 SHA-256 and pinned independent AES-256/SHA-384 and ChaCha fixtures with immutable provenance; verify expected wire bytes through the focused native fixture.
-- [ ] 2.2 Add the minimum distinct shared native-corpus, structured-analysis, and LLVM-to-Wasm cases, including canonical-source private near-cap construction; measure the focused default-suite cost and verify no per-feature native harness or live network test is added.
-- [ ] 2.3 Add complete public doc comments, standard-library manifest/catalog registration, generated reference output, and the key-possession-versus-identity warning; verify focused documentation and generated-file checks.
+- [x] 2.1 Commit RFC 8448 SHA-256 and pinned independent AES-256/SHA-384 and ChaCha fixtures with immutable provenance; verify expected wire bytes through the focused native fixture.
+- [x] 2.2 Add the minimum distinct shared native-corpus, structured-analysis, and LLVM-to-Wasm cases, including canonical-source private near-cap construction; measure the focused default-suite cost and verify no per-feature native harness or live network test is added.
+- [x] 2.3 Add complete public doc comments, standard-library manifest/catalog registration, generated reference output, and the key-possession-versus-identity warning; verify focused documentation and generated-file checks.
 
 ## 3. Delivery
 
