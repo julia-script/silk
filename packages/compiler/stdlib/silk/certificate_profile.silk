@@ -236,9 +236,11 @@ pub struct CertificateProfile<'a> {
   hasExtendedKeyUsage: bool
   extendedKeyUsageValue: ExtendedKeyUsage
   hasSan: bool
-  sanValue: &'a [u8]
+  sanOffset: usize
+  sanLength: usize
   hasNameConstraints: bool
-  nameConstraintsValue: &'a [u8]
+  nameConstraintsOffset: usize
+  nameConstraintsLength: usize
 }
 
 impl<'a> Copy for CertificateProfile<'a> {}
@@ -1224,7 +1226,6 @@ impl<'a> CertificateProfile<'a> {
         profileError(ProfileClass.ResourceLimit, ProfileReason.Extensions, ProfileOffsetSpace.CertificateDer, 0),
       )
     }
-    let empty = Slice.view<u8>(Certificate.der(certificate), 0, 0)
     let mut hasBc = false
     let mut bcCritical = false
     let mut bc = BasicConstraints {ca: false, hasPathLength: false, pathLength: 0}
@@ -1234,9 +1235,11 @@ impl<'a> CertificateProfile<'a> {
     let mut eku = blankExtendedUsage()
     let mut hasSan = false
     let mut sanCritical = false
-    let mut san = empty
+    let mut sanOffset = usize.ZERO
+    let mut sanLength = usize.ZERO
     let mut hasNc = false
-    let mut nc = empty
+    let mut ncOffset = usize.ZERO
+    let mut ncLength = usize.ZERO
     let mut nodes = usize.ZERO
     let bcOid: [u8; 3] = [85, 29, 19]
     let kuOid: [u8; 3] = [85, 29, 15]
@@ -1299,7 +1302,8 @@ impl<'a> CertificateProfile<'a> {
             nodes = reader.nodes
             hasSan = true
             sanCritical = extension.critical
-            san = extension.value
+            sanOffset = extension.valueOffset
+            sanLength = extension.value.length
           } else if equal(extension.oid, &ncOid) {
             if selectedRole == CertificateRole.ServerLeaf || !extension.critical {
               return resultFailure<CertificateProfile<'a>>(
@@ -1311,7 +1315,8 @@ impl<'a> CertificateProfile<'a> {
             if reader.failed { return resultFailure<CertificateProfile<'a>>(move reader.error) }
             nodes = reader.nodes
             hasNc = true
-            nc = extension.value
+            ncOffset = extension.valueOffset
+            ncLength = extension.value.length
           } else if equal(extension.oid, &akiOid) {
             if extension.critical {
               return resultFailure<CertificateProfile<'a>>(
@@ -1410,9 +1415,11 @@ impl<'a> CertificateProfile<'a> {
         hasExtendedKeyUsage: hasEku,
         extendedKeyUsageValue: eku,
         hasSan: hasSan,
-        sanValue: san,
+        sanOffset: sanOffset,
+        sanLength: sanLength,
         hasNameConstraints: hasNc,
-        nameConstraintsValue: nc,
+        nameConstraintsOffset: ncOffset,
+        nameConstraintsLength: ncLength,
       },
     )
   }
@@ -1451,14 +1458,28 @@ impl<'a> CertificateProfile<'a> {
 
   /// Borrows the exact subjectAltName extension-value DER when present.
   pub fn subjectAltNamesDer(self: &Self) -> Option<&'a [u8]> {
-    if self.hasSan { return Option.some<&'a [u8]>(self.sanValue) }
+    if self.hasSan {
+      return Option.some<&'a [u8]>(
+        Slice.view<u8>(
+          Certificate.der(self.certificateValue),
+          self.sanOffset,
+          self.sanLength,
+        ),
+      )
+    }
     return Option.none<&'a [u8]>()
   }
 
   /// Borrows the exact embedded NameConstraints extension-value DER when present.
   pub fn nameConstraintsDer(self: &Self) -> Option<&'a [u8]> {
     if self.hasNameConstraints {
-      return Option.some<&'a [u8]>(self.nameConstraintsValue)
+      return Option.some<&'a [u8]>(
+        Slice.view<u8>(
+          Certificate.der(self.certificateValue),
+          self.nameConstraintsOffset,
+          self.nameConstraintsLength,
+        ),
+      )
     }
     return Option.none<&'a [u8]>()
   }

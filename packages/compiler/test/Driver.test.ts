@@ -27,6 +27,7 @@ import { ecdsaP256WasmSource } from './support/ecdsaP256Acceptance.js'
 import { p256WasmAcceptanceSource } from './support/p256Acceptance.js'
 import { chacha20Poly1305WasmSource } from './support/chacha20Poly1305Acceptance.js'
 import { certificateWasmAcceptanceSource } from './support/certificateAcceptance.js'
+import { certificateProfileWasmSource } from './support/certificateProfileAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
 const defaultClang = (): string => {
@@ -638,6 +639,27 @@ it.effect('executes bounded certificate decoding through LLVM-to-Wasm', () =>
     assert.isFunction(main)
     if (typeof main === 'function') assert.strictEqual(main(), 0)
   }),
+)
+
+it.effect('stores an unsupported certificate trust anchor through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('certificate-profile.wasm', certificateProfileWasmSource, {
+      compilation: {
+        root: SourceFile.make('memory/certificate-profile-wasm', ascii(certificateProfileWasmSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+    assert.deepEqual(WebAssembly.Module.imports(module), [])
+    const instance = new WebAssembly.Instance(module)
+    const main = instance.exports['main']
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 42)
+  }),
+  300_000,
 )
 
 // A single portability leg covers 64-bit MAC arithmetic and 32-bit slice addressing.

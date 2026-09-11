@@ -45,6 +45,8 @@ pub struct TrustAnchor {
 impl TrustAnchor {
   /// Moves a decoded certificate into an unconstrained explicit trust anchor without allocating.
   ///
+  /// # Details
+  ///
   /// All retained certificate bytes and unsupported extension values remain intact for later
   /// inspection. Authority does not imply that the certificate is supported by a selected profile.
   pub fn fromCertificate(certificate: Certificate) -> TrustAnchor {
@@ -133,6 +135,8 @@ impl TrustAnchor {
   }
 
   /// Produces a byte- and constraint-preserving independent owner.
+  ///
+  /// # Details
   ///
   /// Allocation refusal releases every partial copy and leaves the original unchanged.
   pub effect fn clone(self: &Self) -> TrustAnchor ! OutOfMemoryError ? &mut Allocator {

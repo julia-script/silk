@@ -23,7 +23,7 @@ The certificate decoder intentionally admits material this profile must reject. 
 
 ### Separate borrowed semantic profiles from owned trust authority
 
-`CertificateProfile<'a>` stores a private `&'a Certificate` plus small copied enum/boolean/optional scalar state and borrowed original extension values. `inspect` computes the state once, and only sibling getters expose it. This prevents callers from forging a profile and gives issuer verification a certificate already admitted for its selected role.
+`CertificateProfile<'a>` stores a private `&'a Certificate` plus small copied enum/boolean/optional scalar state and exact extension offsets. `inspect` computes the state once, and only sibling getters expose it. The role getter is `certificateRole`, because `role` is a reserved Silk keyword. This prevents callers from forging a profile and gives issuer verification a certificate already admitted for its selected role.
 
 `TrustAnchor` instead owns a moved `Certificate`, optional configured path length, optional copied configured NameConstraints bytes, and a preflighted retained-byte count. The simple constructor performs no semantic inspection. The constrained constructor validates only external constraint framing/policy before copying. This makes the authority grant explicit while preserving candidate-level rejection for later validation.
 

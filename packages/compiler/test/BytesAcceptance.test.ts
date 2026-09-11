@@ -1,11 +1,34 @@
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
+import { createHash } from 'node:crypto'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
+import { certificateProfileAcceptanceSource } from './support/certificateProfileAcceptance.js'
+import certificateProfileFixtures from './fixtures/certificate-profile-limbo.json' with { type: 'json' }
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+it('pins certificate-profile fixture provenance and DER digests', () => {
+  assert.strictEqual(
+    certificateProfileFixtures.source,
+    'https://github.com/C2SP/x509-limbo/blob/3f8cba420e90322223486086054401189b7b320e/limbo.json',
+  )
+  assert.strictEqual(
+    certificateProfileFixtures.sourceSha256,
+    '563805f46937ad25ac9d4e41341c414070aced32a22294821b5c5fe526e2c52d',
+  )
+  assert.strictEqual(certificateProfileFixtures.license, 'Apache-2.0')
+  for (const fixture of certificateProfileFixtures.fixtures) {
+    assert.strictEqual(
+      createHash('sha256').update(Buffer.from(fixture.der, 'base64')).digest('hex'),
+      fixture.sha256,
+      fixture.id,
+    )
+    assert.isNotEmpty(fixture.profileOutcome, fixture.id)
+  }
+})
 
 it.effect(
   'keeps Bytes move-only and rejects exclusive field projection through shared access',
@@ -140,6 +163,55 @@ pub fn main() -> i32 { return 0 }`
         text: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
       })),
       [{ code: 'OWN0001', text: '&value' }],
+    )
+    const partialStates = [
+      {
+        module: 'silk/certificate',
+        operation: 'Certificate.copy',
+        bindings: ['bytes', 'extensions'],
+      },
+      {
+        module: 'silk/trust_anchor',
+        operation: 'TrustAnchor.fromCertificateWithConstraints',
+        bindings: ['certificate'],
+      },
+      { module: 'silk/trust_anchor', operation: 'TrustAnchor.clone', bindings: ['certificate'] },
+    ]
+    for (const state of partialStates) {
+      const operation = Analysis.ownershipOf(snapshot, state.module)?.functions.find(
+        (candidate) =>
+          candidate.declaration.canonical._tag === 'Canonical' &&
+          candidate.declaration.canonical.id.name === state.operation,
+      )
+      const releases =
+        operation?.exits
+          .filter((exit) => exit.kind === 'Propagation')
+          .flatMap((exit) => exit.releases) ?? []
+      for (const binding of state.bindings) {
+        const partial = releases.filter((release) => release.binding.name === binding)
+        assert.isNotEmpty(partial, `${state.operation}: ${binding}`)
+        assert.isTrue(
+          partial.every((release) => CleanupPlan.reclaims(release.cleanup)),
+          `${state.operation}: ${binding}`,
+        )
+      }
+    }
+  }),
+)
+
+it.effect('analyzes the consolidated certificate profile and trust-anchor acceptance program', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'certificate-profile/acceptance',
+      ascii(certificateProfileAcceptanceSource),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        source: diagnostic.span.sourceId,
+        message: diagnostic.message,
+      })),
+      [],
     )
   }),
 )

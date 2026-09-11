@@ -6,7 +6,7 @@ Define Silk’s bounded, portable TLS-server certificate semantic profile, exact
 
 ### Requirement: Semantic inspection exposes immutable role-specific views
 
-The standard library SHALL expose `silk/certificate_profile` with `CertificateProfile<'a>`, `CertificateRole`, `ProfileLimits`, and owned `ProfileError`. `inspect` SHALL allocate nothing, retain a borrow of the complete decoded certificate, and expose the admitted role, key kind, BasicConstraints/pathLen, KeyUsage, ExtendedKeyUsage, SAN DER, and NameConstraints DER while preserving absence. Callers MUST NOT be able to forge or mutate cached views. Inspection SHALL not check time, cumulative constraints, trust, identity, or an actual signature.
+The standard library SHALL expose `silk/certificate_profile` with `CertificateProfile<'a>`, `CertificateRole`, `ProfileLimits`, and owned `ProfileError`. `inspect` SHALL allocate nothing, retain a borrow of the complete decoded certificate, and expose the admitted role through `certificateRole`, plus key kind, BasicConstraints/pathLen, KeyUsage, ExtendedKeyUsage, SAN DER, and NameConstraints DER while preserving absence. The getter uses `certificateRole` because `role` is a reserved Silk keyword. Callers MUST NOT be able to forge or mutate cached views. Inspection SHALL not check time, cumulative constraints, trust, identity, or an actual signature.
 
 #### Scenario: Supported server leaf
 

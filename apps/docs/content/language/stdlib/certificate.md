@@ -755,6 +755,26 @@ A borrowed raw extension, including unknown or duplicate extensions.
 
 <a id="declaration-73696c6b2f63657274696669636174653a3a457874656e73696f6e566965773a3a6669656c643a30"></a>
 
+### Field `offset`
+
+```silk
+pub offset: usize
+```
+
+Byte offset of the complete Extension TLV in the certificate DER.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a457874656e73696f6e566965773a3a6669656c643a31"></a>
+
+### Field `valueOffset`
+
+```silk
+pub valueOffset: usize
+```
+
+Byte offset of the extension value content in the certificate DER.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a457874656e73696f6e566965773a3a6669656c643a32"></a>
+
 ### Field `der`
 
 ```silk
@@ -763,7 +783,7 @@ pub der: &'a [u8]
 
 The complete original Extension TLV.
 
-<a id="declaration-73696c6b2f63657274696669636174653a3a457874656e73696f6e566965773a3a6669656c643a31"></a>
+<a id="declaration-73696c6b2f63657274696669636174653a3a457874656e73696f6e566965773a3a6669656c643a33"></a>
 
 ### Field `oid`
 
@@ -773,7 +793,7 @@ pub oid: &'a [u8]
 
 The canonical OID content octets, without tag or length.
 
-<a id="declaration-73696c6b2f63657274696669636174653a3a457874656e73696f6e566965773a3a6669656c643a32"></a>
+<a id="declaration-73696c6b2f63657274696669636174653a3a457874656e73696f6e566965773a3a6669656c643a34"></a>
 
 ### Field `critical`
 
@@ -783,7 +803,7 @@ pub critical: bool
 
 The critical bit, false when absent.
 
-<a id="declaration-73696c6b2f63657274696669636174653a3a457874656e73696f6e566965773a3a6669656c643a33"></a>
+<a id="declaration-73696c6b2f63657274696669636174653a3a457874656e73696f6e566965773a3a6669656c643a35"></a>
 
 ### Field `value`
 
@@ -807,6 +827,22 @@ An immutable owned certificate that preserves its original DER and all raw exten
 
 Accessors borrow this owner. Dropping the certificate releases all owned storage.
 Unknown algorithms, duplicate extensions, and policy-invalid serials remain available to independent validators.
+
+<a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174652e636f7079"></a>
+
+### Method `Certificate.copy`
+
+```silk
+pub effect<'life0> fn copy<'life0>(self: &'life0 Certificate) -> Certificate ! OutOfMemoryError ? &mut Allocator
+```
+
+Copies this decoded certificate into independent owned storage without reinterpreting it.
+
+#### Details
+
+The copy preserves every original DER byte, checked field offset, algorithm spelling, and raw
+extension in source order. Allocation refusal releases partial storage and returns
+`OutOfMemoryError`; no semantic validation is performed.
 
 <a id="declaration-73696c6b2f63657274696669636174653a3a43657274696669636174652e6465636f6465446572"></a>
 
