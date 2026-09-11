@@ -151,3 +151,4 @@ documentation remain separate from this reference.
 - [Native filesystem](./native-filesystem)
 
 - [P-256 key agreement](p256-key-agreement.md) — scalar ownership, SEC1 admission, explicit entropy and bounded arithmetic.
+- [ECDSA P-256 verification](ecdsa-p256-verification.md) — borrowed messages, strict DER and retained certificate parameter policy.

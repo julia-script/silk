@@ -1,4 +1,4 @@
-//! P-256 ephemeral scalars, public keys, and validated Diffie-Hellman agreement.
+//! P-256 key agreement and ECDSA P-256/SHA-256 message verification.
 //!
 //! # When to use
 //! Use [`P256`] for the secp256r1 key agreement group. Import explicit scalar bytes with
@@ -8,12 +8,17 @@
 //! Scalars and coordinates use fixed-width big-endian encodings. Public keys use 65-byte
 //! uncompressed SEC1 form. Agreement consumes the scalar owner and returns only a complete secret.
 //! All deterministic operations use inline storage and require no allocator or host service.
+//! [`EcdsaP256Sha256`] verifies borrowed messages, strict DER signatures and retained certificate
+//! metadata. Verification hashes messages once; it does not interpret messages as digests.
 //!
 //! # Gotchas
 //! A shared secret does not authenticate a peer. Supply `Random` explicitly for generation.
 //! Entropy failure is fatal. Scalar ownership does not guarantee physical erasure of secret copies.
 //! Functional vectors and source schedules do not establish production security or constant time.
 
+import silk.certificate {AlgorithmView, BitStringView}
+import silk.option {Option}
+import silk.sha2 {Sha256}
 import silk.random {Random}
 import silk.result {Result}
 import silk.u8
@@ -162,25 +167,14 @@ impl P256 {
   /// Wrong lengths, prefixes, field coordinates and off-curve points return typed errors.
   /// Failure returns no shared bytes. Compressed points and infinity are not admitted.
   pub fn agree(self: Self, peer: &[u8]) -> Result<[u8; 32], P256Error> {
-    if peer.length != 65 {
-      return Result.failResult<[u8; 32], P256Error>(P256Error.InvalidLength)
+    let admitted = admitPoint(peer)
+    return match move admitted {
+      Result<Point, P256Error>.Success {value} => {
+        let point = affine(multiply(value, &self.secret))
+        return Result.succeed<[u8; 32], P256Error>(encode(fromMontgomery(point.x)))
+      }
+      Result<Point, P256Error>.Failure {error} => Result.failResult<[u8; 32], P256Error>(error)
     }
-    if peer[0] != 4 {
-      return Result.failResult<[u8; 32], P256Error>(P256Error.InvalidEncoding)
-    }
-    let x = decode(peer, 1)
-    let y = decode(peer, 33)
-    if below(x, prime()) == 0 || below(y, prime()) == 0 {
-      return Result.failResult<[u8; 32], P256Error>(P256Error.InvalidPoint)
-    }
-    let mx = toMontgomery(x)
-    let my = toMontgomery(y)
-    let rhs = add(sub(mul(square(mx), mx), add(add(mx, mx), mx)), curveB())
-    if nonzero(sub(square(my), rhs)) != 0 {
-      return Result.failResult<[u8; 32], P256Error>(P256Error.InvalidPoint)
-    }
-    let point = affine(multiply(Point {x: mx, y: my, z: one()}, &self.secret))
-    return Result.succeed<[u8; 32], P256Error>(encode(fromMontgomery(point.x)))
   }
 }
 
@@ -385,7 +379,10 @@ fn select(left: Field, right: Field, bit: u32) -> Field {
 
 // Input is below 2p and carries at most one extra bit. Subtraction chooses its canonical residue.
 fn reduce(value: Field, high: u64) -> Field {
-  let p = prime()
+  return reduceMod(value, high, prime())
+}
+
+fn reduceMod(value: Field, high: u64, p: Field) -> Field {
   let mut result = zero()
   let mut borrow: u64 = 0
   let mut i: usize = 0
@@ -448,6 +445,10 @@ fn sub(left: Field, right: Field) -> Field {
 }
 
 fn mul(left: Field, right: Field) -> Field {
+  return mulMod(left, right, prime(), 1)
+}
+
+fn mulMod(left: Field, right: Field, p: Field, inverse: u32) -> Field {
   let mut words: [u64; 17] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   let mut i: usize = 0
   while i < 8 {
@@ -469,11 +470,9 @@ fn mul(left: Field, right: Field) -> Field {
     words[i + 8] = carry
     i = i + 1
   }
-  let p = prime()
   i = 0
   while i < 8 {
-    // -p[0]^-1 mod 2^32 is one.
-    let factor = words[i]
+    let factor = u32.toU64(u32.wrappingMultiply(low(words[i]), inverse))
     let mut carry: u64 = 0
     let mut j: usize = 0
     while j < 8 {
@@ -500,7 +499,7 @@ fn mul(left: Field, right: Field) -> Field {
     result.limbs[i] = low(words[i + 8])
     i = i + 1
   }
-  return reduce(result, words[16])
+  return reduceMod(result, words[16], p)
 }
 
 fn square(value: Field) -> Field {
@@ -608,4 +607,246 @@ fn multiply(point: Point, scalar: &([u8; 32])) -> Point {
 fn affine(point: Point) -> Point {
   let z = invert(point.z)
   return Point {x: mul(point.x, z), y: mul(point.y, z), z: one()}
+}
+
+// Order residues share the bounded Montgomery core with field arithmetic; no public bigint API.
+fn scalarMul(left: Field, right: Field) -> Field {
+  return mulMod(left, right, order(), 3993025615)
+}
+
+fn scalarToMontgomery(value: Field) -> Field {
+  return scalarMul(
+    value,
+    Field {
+      limbs: [
+        3195661986,
+        2200194197,
+        1237151654,
+        1184463260,
+        728493145,
+        675656249,
+        4091106848,
+        1726033300,
+      ],
+    },
+  )
+}
+
+fn scalarFromMontgomery(value: Field) -> Field {
+  return scalarMul(value, Field {limbs: [1, 0, 0, 0, 0, 0, 0, 0]})
+}
+
+fn scalarInvert(value: Field) -> Field {
+  let exponent = Field {
+    limbs: [4234356047, 4089039554, 2803342980, 3169254061, 4294967295, 4294967295, 0, 4294967295],
+  }
+  let mut result = Field {limbs: [60611247, 205927741, 1491624315, 1125713234, 0, 0, 4294967295, 0]}
+  let mut i: usize = 256
+  while i > 0 {
+    i = i - 1
+    result = scalarMul(result, result)
+    let candidate = scalarMul(result, value)
+    let bit = u32.bitAnd(u32.shiftRight(exponent.limbs[i / 32], usize.toU32(i % 32)), 1)
+    result = select(result, candidate, bit)
+  }
+  return result
+}
+
+/// A message, signature, public key or retained algorithm that cannot be verified.
+pub enum P256SignatureError {
+  /// The message exceeds SHA-256's supported byte length.
+  InvalidLength,
+  /// The public key is not an admitted uncompressed P-256 point.
+  InvalidKey,
+  /// The signature is not strict DER with r and s in 1 through n−1.
+  InvalidEncoding,
+  /// The retained key or signature algorithm is unsupported.
+  UnsupportedAlgorithm,
+  /// Curve parameters, signature parameters or unused bits are invalid.
+  InvalidParameters,
+  /// Admitted inputs do not satisfy the verification equation.
+  AuthenticationFailed,
+}
+
+/// Deterministic verification of borrowed ECDSA P-256/SHA-256 messages and signatures.
+pub struct EcdsaP256Sha256 {}
+
+impl EcdsaP256Sha256 {
+  /// Hashes the borrowed message exactly once and verifies a strict DER signature.
+  ///
+  /// # Details
+  ///
+  /// The key must be 65-byte uncompressed SEC1. Both high-s and low-s are accepted.
+  /// Message lengths above 2^61−1 bytes fail before hashing. No entropy or allocation is required.
+  pub fn verify(publicKey: &[u8], message: &[u8], signature: &[u8]) -> Result<
+    (),
+    P256SignatureError,
+  > {
+    if !signatureMessageLengthAdmitted(usize.toU64(message.length)) {
+      return Result.failResult<(), P256SignatureError>(P256SignatureError.InvalidLength)
+    }
+    let digest = Sha256.hash(message)
+    return verifyPrehashed(publicKey, &digest, signature)
+  }
+  /// Verifies retained certificate key and signature metadata against the borrowed message.
+  ///
+  /// # Details
+  ///
+  /// Requires id-ecPublicKey with named secp256r1, ecdsa-with-SHA256 with absent parameters,
+  /// and zero unused bits. Performs no certificate extraction, trust-path or identity validation.
+  pub fn verifyCertificate<'key, 'sig>(
+    keyAlgorithm: &AlgorithmView<'key>,
+    publicKey: &BitStringView<'key>,
+    message: &[u8],
+    signatureAlgorithm: &AlgorithmView<'sig>,
+    signature: &BitStringView<'sig>,
+  ) -> Result<(), P256SignatureError> {
+    let ecPublicKey: [u8; 7] = [42, 134, 72, 206, 61, 2, 1]
+    let ecdsaSha256: [u8; 8] = [42, 134, 72, 206, 61, 4, 3, 2]
+    if !signatureBytesEqual(keyAlgorithm.oid, &ecPublicKey) || !signatureBytesEqual(
+      signatureAlgorithm.oid,
+      &ecdsaSha256,
+    ) {
+      return Result.failResult<(), P256SignatureError>(P256SignatureError.UnsupportedAlgorithm)
+    }
+    let namedCurve: [u8; 10] = [6, 8, 42, 134, 72, 206, 61, 3, 1, 7]
+    let keyParametersValid = match & keyAlgorithm.parametersDer {
+      Option<&[u8]>.Some {value} => signatureBytesEqual(value, &namedCurve)
+      Option<&[u8]>.None => false
+    }
+    let signatureParametersAbsent = match & signatureAlgorithm.parametersDer {
+      Option<&[u8]>.Some {value} => false
+      Option<&[u8]>.None => true
+    }
+    if !keyParametersValid || !signatureParametersAbsent || publicKey.unusedBits != 0 || signature.unusedBits != 0 {
+      return Result.failResult<(), P256SignatureError>(P256SignatureError.InvalidParameters)
+    }
+    return EcdsaP256Sha256.verify(publicKey.bytes, message, signature.bytes)
+  }
+}
+
+fn signatureMessageLengthAdmitted(length: u64) -> bool {
+  return length <= 2305843009213693951
+}
+
+fn signatureBytesEqual(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length {
+    return false
+  }
+  let mut i: usize = 0
+  while i < left.length {
+    if left[i] != right[i] {
+      return false
+    }
+    i = i + 1
+  }
+  return true
+}
+
+// Zero denotes failure here: a DER scalar is valid only when strictly positive.
+fn signatureInteger(bytes: &[u8], start: usize, length: usize) -> Field {
+  if length == 0 || length > 33 || start + length > bytes.length {
+    return zero()
+  }
+  if bytes[start] >= 128 {
+    return zero()
+  }
+  let mut offset = start
+  let mut size = length
+  if bytes[start] == 0 {
+    if length == 1 || bytes[start + 1] < 128 {
+      return zero()
+    }
+    offset = offset + 1
+    size = size - 1
+  }
+  if size > 32 {
+    return zero()
+  }
+  let mut padded = emptyBytes()
+  let mut i: usize = 0
+  while i < size {
+    padded[32 - size + i] = bytes[offset + i]
+    i = i + 1
+  }
+  let value = decode(&padded, 0)
+  if below(value, order()) == 0 {
+    return zero()
+  }
+  return value
+}
+
+fn verifyPrehashed(publicKey: &[u8], digest: &([u8; 32]), signature: &[u8]) -> Result<
+  (),
+  P256SignatureError,
+> {
+  let admitted = admitPoint(publicKey)
+  return match move admitted {
+    Result<Point, P256Error>.Success {value} => verifyPoint(value, digest, signature)
+    Result<Point, P256Error>.Failure {error} => Result.failResult<(), P256SignatureError>(
+      P256SignatureError.InvalidKey,
+    )
+  }
+}
+
+fn verifyPoint(publicPoint: Point, digest: &([u8; 32]), signature: &[u8]) -> Result<
+  (),
+  P256SignatureError,
+> {
+  if signature.length < 8 || signature.length > 72 {
+    return Result.failResult<(), P256SignatureError>(P256SignatureError.InvalidEncoding)
+  }
+  if signature[0] != 48 || u8.toUsize(signature[1]) != signature.length - 2 || signature[2] != 2 {
+    return Result.failResult<(), P256SignatureError>(P256SignatureError.InvalidEncoding)
+  }
+  let rLength = u8.toUsize(signature[3])
+  let sHeader: usize = 4 + rLength
+  if sHeader + 2 > signature.length {
+    return Result.failResult<(), P256SignatureError>(P256SignatureError.InvalidEncoding)
+  }
+  let sLength = u8.toUsize(signature[sHeader + 1])
+  if signature[sHeader] != 2 || sHeader + 2 + sLength != signature.length {
+    return Result.failResult<(), P256SignatureError>(P256SignatureError.InvalidEncoding)
+  }
+  let r = signatureInteger(signature, 4, rLength)
+  let s = signatureInteger(signature, sHeader + 2, sLength)
+  if nonzero(r) == 0 || nonzero(s) == 0 {
+    return Result.failResult<(), P256SignatureError>(P256SignatureError.InvalidEncoding)
+  }
+  let digestBytes = digest.*
+  let z = reduceMod(decode(&digestBytes, 0), 0, order())
+  let inverse = scalarInvert(scalarToMontgomery(s))
+  let u1 = encode(scalarFromMontgomery(scalarMul(scalarToMontgomery(z), inverse)))
+  let u2 = encode(scalarFromMontgomery(scalarMul(scalarToMontgomery(r), inverse)))
+  let result = pointAdd(multiply(basePoint(), &u1), multiply(publicPoint, &u2))
+  if nonzero(result.z) == 0 {
+    return Result.failResult<(), P256SignatureError>(P256SignatureError.AuthenticationFailed)
+  }
+  let reducedX = reduceMod(fromMontgomery(affine(result).x), 0, order())
+  if nonzero(sub(reducedX, r)) != 0 {
+    return Result.failResult<(), P256SignatureError>(P256SignatureError.AuthenticationFailed)
+  }
+  return Result.succeed<(), P256SignatureError>(())
+}
+
+fn admitPoint(peer: &[u8]) -> Result<Point, P256Error> {
+  if peer.length != 65 {
+    return Result.failResult<Point, P256Error>(P256Error.InvalidLength)
+  }
+  if peer[0] != 4 {
+    return Result.failResult<Point, P256Error>(P256Error.InvalidEncoding)
+  }
+  let x = decode(peer, 1)
+  let y = decode(peer, 33)
+  if below(x, prime()) == 0 || below(y, prime()) == 0 {
+    return Result.failResult<Point, P256Error>(P256Error.InvalidPoint)
+  }
+  let mx = toMontgomery(x)
+  let my = toMontgomery(y)
+  let rhs = add(sub(mul(square(mx), mx), add(add(mx, mx), mx)), curveB())
+  if nonzero(sub(square(my), rhs)) != 0 {
+    return Result.failResult<Point, P256Error>(P256Error.InvalidPoint)
+  }
+
+  return Result.succeed<Point, P256Error>(Point {x: mx, y: my, z: one()})
 }
