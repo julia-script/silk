@@ -173,6 +173,48 @@ const mutateUnique = (input, id, needle, mutate) => {
   return bytes
 }
 
+const replaceUniqueDerNode = (input, id, needle, replacement) => {
+  const bytes = Buffer.from(input)
+  const selected = Buffer.from(needle)
+  const offset = bytes.indexOf(selected)
+  if (offset < 0 || bytes.indexOf(selected, offset + 1) >= 0) {
+    throw new Error(`expected one DER replacement target in ${id}`)
+  }
+  const target = derNode(bytes, offset)
+  if (target.end !== offset + selected.length) {
+    throw new Error(`replacement target is not one DER node in ${id}`)
+  }
+  return rebuildDerNode(
+    bytes,
+    derNode(bytes, 0),
+    target.start,
+    target.end,
+    Buffer.from(replacement),
+  )
+}
+
+const withEmptySubject = (input, id) => {
+  const bytes = Buffer.from(input)
+  const certificate = derNode(bytes, 0)
+  const tbs = derNode(bytes, certificate.content)
+  let offset = tbs.content
+  let child = derNode(bytes, offset)
+  if (child.tag === 0xa0) offset = child.end
+  for (let index = 0; index < 4; index += 1) {
+    child = derNode(bytes, offset)
+    offset = child.end
+  }
+  const subject = derNode(bytes, offset)
+  if (subject.tag !== 0x30) throw new Error(`unexpected subject Name in ${id}`)
+  return rebuildDerNode(
+    bytes,
+    derNode(bytes, 0),
+    subject.start,
+    subject.end,
+    Buffer.from([0x30, 0x00]),
+  )
+}
+
 const testcase = (id) => {
   const selected = source.testcases.find((candidate) => candidate.id === id)
   if (selected === undefined) throw new Error(`missing x509-limbo testcase ${id}`)
@@ -238,6 +280,7 @@ wrongSignatureBytes[wrongSignatureBytes.length - 1] = lastSignatureByte ^ 0x01
 
 const noKeyUsageCase = testcase('rfc5280::no-keyusage')
 const noKeyUsageLeaf = der(noKeyUsageCase.peer_certificate)
+const noKeyUsageLeafBytes = Buffer.from(noKeyUsageLeaf.der, 'base64')
 const noKeyUsageRoot = der(noKeyUsageCase.trusted_certs[0])
 const noKeyUsageRootBytes = Buffer.from(noKeyUsageRoot.der, 'base64')
 const ignoredAnchorMetadataBytes = mutateUnique(
@@ -305,6 +348,35 @@ const tlsFeatureBytes = rewriteDerNodes(
   [0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x01, 0x18],
   1,
 )
+const subjectAltNameExtension = [
+  0x30, 0x16, 0x06, 0x03, 0x55, 0x1d, 0x11, 0x04, 0x0f, 0x30, 0x0d, 0x82, 0x0b, 0x65, 0x78, 0x61,
+  0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d,
+]
+const emptyCriticalSubjectAltNameExtension = [
+  0x30, 0x0c, 0x06, 0x03, 0x55, 0x1d, 0x11, 0x01, 0x01, 0xff, 0x04, 0x02, 0x30, 0x00,
+]
+const emptySubjectMissingSanBytes = withEmptySubject(
+  replaceUniqueDerNode(
+    noKeyUsageLeafBytes,
+    'rfc5280::no-keyusage/peer_certificate subjectAltName',
+    subjectAltNameExtension,
+    [],
+  ),
+  'rfc5280::no-keyusage/peer_certificate without subjectAltName',
+)
+const emptySubjectNoncriticalSanBytes = withEmptySubject(
+  noKeyUsageLeafBytes,
+  'rfc5280::no-keyusage/peer_certificate',
+)
+const emptySubjectEmptyCriticalSanBytes = withEmptySubject(
+  replaceUniqueDerNode(
+    noKeyUsageLeafBytes,
+    'rfc5280::no-keyusage/peer_certificate subjectAltName',
+    subjectAltNameExtension,
+    emptyCriticalSubjectAltNameExtension,
+  ),
+  'rfc5280::no-keyusage/peer_certificate with empty critical subjectAltName',
+)
 const projectFixtures = [
   {
     id: 'source::rfc5280::no-keyusage/peer_certificate',
@@ -316,6 +388,36 @@ const projectFixtures = [
     sha256: noKeyUsageLeaf.sha256,
     expectedSilk: { result: 'Success' },
   },
+  derived(
+    'silk::empty-subject-missing-san/peer_certificate',
+    'rfc5280::no-keyusage',
+    'peer_certificate',
+    noKeyUsageLeaf,
+    'replace subject Name with an empty SEQUENCE and remove the subjectAltName extension',
+    emptySubjectMissingSanBytes,
+    'Failure',
+    'InvalidName',
+  ),
+  derived(
+    'silk::empty-subject-noncritical-san/peer_certificate',
+    'rfc5280::no-keyusage',
+    'peer_certificate',
+    noKeyUsageLeaf,
+    'replace subject Name with an empty SEQUENCE while retaining noncritical subjectAltName',
+    emptySubjectNoncriticalSanBytes,
+    'Failure',
+    'InvalidName',
+  ),
+  derived(
+    'silk::empty-subject-empty-critical-san/peer_certificate',
+    'rfc5280::no-keyusage',
+    'peer_certificate',
+    noKeyUsageLeaf,
+    'replace subject Name with an empty SEQUENCE and subjectAltName with an empty critical SEQUENCE',
+    emptySubjectEmptyCriticalSanBytes,
+    'Failure',
+    'InvalidName',
+  ),
   {
     id: 'silk::wrong-signature-first/intermediates[0]',
     sourceCase: pathLengthFixture.id,
@@ -354,7 +456,7 @@ const projectFixtures = [
     'append DER NULL parameters to both ECDSA-with-SHA256 AlgorithmIdentifiers',
     unsupportedParametersBytes,
     'Failure',
-    'UnsupportedAlgorithm',
+    'UnsupportedParameters',
   ),
   derived(
     'silk::unsupported-signature-algorithm/intermediates[0]',

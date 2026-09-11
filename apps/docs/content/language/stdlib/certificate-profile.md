@@ -586,22 +586,22 @@ SignatureRejected = 31
 
 An admitted cryptographic primitive rejected the retained signature.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3330"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3332"></a>
 
 ### `NameConstraintViolation`
 
 ```silk
-NameConstraintViolation = 30
+NameConstraintViolation = 32
 ```
 
 A subordinate DNS or IP subjectAltName violates one NameConstraints source.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3331"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3333"></a>
 
 ### `NameComparisons`
 
 ```silk
-NameComparisons = 31
+NameComparisons = 33
 ```
 
 The caller-supplied name/subtree comparison budget is exhausted.

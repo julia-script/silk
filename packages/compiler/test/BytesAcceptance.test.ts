@@ -75,6 +75,9 @@ it('pins certificate-path fixture provenance, ordering, and DER/key digests', ()
     certificatePathFixtures.projectFixtures.map((fixture) => fixture.id),
     [
       'source::rfc5280::no-keyusage/peer_certificate',
+      'silk::empty-subject-missing-san/peer_certificate',
+      'silk::empty-subject-noncritical-san/peer_certificate',
+      'silk::empty-subject-empty-critical-san/peer_certificate',
       'silk::wrong-signature-first/intermediates[0]',
       'silk::ignored-anchor-validity-self-signature/trusted_certs[0]',
       'silk::missing-ec-parameters/trusted_certs[0]',
@@ -85,6 +88,23 @@ it('pins certificate-path fixture provenance, ordering, and DER/key digests', ()
       'silk::tls-feature/intermediates[0]',
     ],
   )
+  assert.deepEqual(
+    certificatePathFixtures.projectFixtures.find(
+      (fixture) => fixture.id === 'silk::unsupported-signature-parameters/intermediates[0]',
+    )?.expectedSilk,
+    { result: 'Failure', reason: 'UnsupportedParameters' },
+  )
+  for (const id of [
+    'silk::empty-subject-missing-san/peer_certificate',
+    'silk::empty-subject-noncritical-san/peer_certificate',
+    'silk::empty-subject-empty-critical-san/peer_certificate',
+  ]) {
+    assert.deepEqual(
+      certificatePathFixtures.projectFixtures.find((fixture) => fixture.id === id)?.expectedSilk,
+      { result: 'Failure', reason: 'InvalidName' },
+      id,
+    )
+  }
   for (const fixture of certificatePathFixtures.projectFixtures) {
     assert.strictEqual(
       createHash('sha256').update(Buffer.from(fixture.der, 'base64')).digest('hex'),

@@ -682,6 +682,45 @@
       }
     },
     {
+      "id": "silk::empty-subject-missing-san/peer_certificate",
+      "sourceCase": "rfc5280::no-keyusage",
+      "sourceCertificateRole": "peer_certificate",
+      "sourceCertificateSha256": "6660521f90ce62d5e7a17efa4f399b48a99c4e1d9f04f25d1a074b69728a13aa",
+      "mutation": "replace subject Name with an empty SEQUENCE and remove the subjectAltName extension",
+      "der": "MIIBdTCCARugAwIBAgIUByPb2jQamctzq5XYoJpI9jQFbc0wCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzI5NjkwNTAzMDAwMDAxWjAAMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELAXHGCJFNcDBnX3XbKzZh2Dhplunp2v/5P6amYHiYV+T5RRa8xcsZdsp/mb/R5C5YLD+mN2ZozJ/IO4U6t5rxqNXMFUwHQYDVR0OBBYEFFavHrrgYGw+BAck2oqxJ3Nmv46QMB8GA1UdIwQYMBaAFNRoMWuILZtl8Hufvp+KcCrY1VbXMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAoGCCqGSM49BAMCA0gAMEUCIQDhy7cjXFXZGv/q98il9rZf0pb3rJafhNQOq2z6IDp7gQIgGzAR637rGkVh71UvzB4M7QfDpLpBBOy0SqQAaxzPwmc=",
+      "sha256": "ee5d5dfad5f82f092e2222bb9fd90944d14ab9eb080ce8ca35f67aa896cb1f71",
+      "expectedSilk": {
+        "result": "Failure",
+        "reason": "InvalidName"
+      }
+    },
+    {
+      "id": "silk::empty-subject-noncritical-san/peer_certificate",
+      "sourceCase": "rfc5280::no-keyusage",
+      "sourceCertificateRole": "peer_certificate",
+      "sourceCertificateSha256": "6660521f90ce62d5e7a17efa4f399b48a99c4e1d9f04f25d1a074b69728a13aa",
+      "mutation": "replace subject Name with an empty SEQUENCE while retaining noncritical subjectAltName",
+      "der": "MIIBjTCCATOgAwIBAgIUByPb2jQamctzq5XYoJpI9jQFbc0wCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzI5NjkwNTAzMDAwMDAxWjAAMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELAXHGCJFNcDBnX3XbKzZh2Dhplunp2v/5P6amYHiYV+T5RRa8xcsZdsp/mb/R5C5YLD+mN2ZozJ/IO4U6t5rxqNvMG0wHQYDVR0OBBYEFFavHrrgYGw+BAck2oqxJ3Nmv46QMB8GA1UdIwQYMBaAFNRoMWuILZtl8Hufvp+KcCrY1VbXMBMGA1UdJQQMMAoGCCsGAQUFBwMBMBYGA1UdEQQPMA2CC2V4YW1wbGUuY29tMAoGCCqGSM49BAMCA0gAMEUCIQDhy7cjXFXZGv/q98il9rZf0pb3rJafhNQOq2z6IDp7gQIgGzAR637rGkVh71UvzB4M7QfDpLpBBOy0SqQAaxzPwmc=",
+      "sha256": "a4755691f76263ca34db18eb7fefbb1157f294e100848d6017e80c9f38c57b8f",
+      "expectedSilk": {
+        "result": "Failure",
+        "reason": "InvalidName"
+      }
+    },
+    {
+      "id": "silk::empty-subject-empty-critical-san/peer_certificate",
+      "sourceCase": "rfc5280::no-keyusage",
+      "sourceCertificateRole": "peer_certificate",
+      "sourceCertificateSha256": "6660521f90ce62d5e7a17efa4f399b48a99c4e1d9f04f25d1a074b69728a13aa",
+      "mutation": "replace subject Name with an empty SEQUENCE and subjectAltName with an empty critical SEQUENCE",
+      "der": "MIIBgzCCASmgAwIBAgIUByPb2jQamctzq5XYoJpI9jQFbc0wCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzI5NjkwNTAzMDAwMDAxWjAAMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELAXHGCJFNcDBnX3XbKzZh2Dhplunp2v/5P6amYHiYV+T5RRa8xcsZdsp/mb/R5C5YLD+mN2ZozJ/IO4U6t5rxqNlMGMwHQYDVR0OBBYEFFavHrrgYGw+BAck2oqxJ3Nmv46QMB8GA1UdIwQYMBaAFNRoMWuILZtl8Hufvp+KcCrY1VbXMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAwGA1UdEQEB/wQCMAAwCgYIKoZIzj0EAwIDSAAwRQIhAOHLtyNcVdka/+r3yKX2tl/Slveslp+E1A6rbPogOnuBAiAbMBHrfusaRWHvVS/MHgztB8OkukEE7LRKpABrHM/CZw==",
+      "sha256": "c38acb5c63ce3a8999e3384c2d0da324f9d0b3e9e8ea80f1792ed5170b3f2552",
+      "expectedSilk": {
+        "result": "Failure",
+        "reason": "InvalidName"
+      }
+    },
+    {
       "id": "silk::wrong-signature-first/intermediates[0]",
       "sourceCase": "pathlen::ee-with-intermediate-pathlen-0",
       "sourceCertificateRole": "untrusted_intermediates[0]",
@@ -729,7 +768,7 @@
       "sha256": "0327b1374b42d54a53baf5c799c61a1e6a162ef9e5e1c7c84b68c21883c8c667",
       "expectedSilk": {
         "result": "Failure",
-        "reason": "UnsupportedAlgorithm"
+        "reason": "UnsupportedParameters"
       }
     },
     {
