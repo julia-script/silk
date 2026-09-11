@@ -375,34 +375,45 @@ it.effect('selects the innermost mutable provider for a nested lexical service b
       name,
       `import silk.effect { Effect }
 service Input { effect fn count() -> i32 ? &mut Input }
-struct Outer {}
-struct Inner {}
-effect fn outerCount(self: &mut Outer) -> i32 { return 3 }
-effect fn innerCount(self: &mut Inner) -> i32 { return 7 }
-impl Input for Outer { count: Outer.outerCount }
-impl Input for Inner { count: Inner.innerCount }
+struct Memory { value: i32 }
+effect fn memoryCount(self: &mut Memory) -> i32 { return self.value }
+impl Input for Memory { count: Memory.memoryCount }
 effect fn read() -> i32 ? &mut Input { return run Input.count() }
-effect fn nested(inner: &mut Inner) -> i32 ? &mut Input {
-  return run read() |> Effect.provideMut<Input>(move inner)
+effect fn nested(inner: &mut Memory) -> i32 ? &mut Input {
+  let outerBefore = run read()
+  let nested = run read() |> Effect.provideMut<Input>(move inner)
+  let outerAfter = run read()
+  return outerBefore * 100 + nested * 10 + outerAfter
 }
 pub fn main() -> i32 {
-  let mut outer = Outer {}
-  let mut inner = Inner {}
+  let mut outer = Memory { value: 3 }
+  let mut inner = Memory { value: 7 }
   return run nested(&mut inner) |> Effect.provideMut<Input>(&mut outer)
 }`,
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
     assert.deepEqual(MirVerification.verify(module), [])
-    const providerCalls = module.functions
-      .flatMap(MirVerification.operations)
-      .filter(
-        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Call' }> =>
-          operation._tag === 'Call' &&
-          operation.target.module === name &&
-          (operation.target.name === 'innerCount' || operation.target.name === 'outerCount'),
-      )
-      .map((operation) => operation.target.name)
-    assert.deepEqual(providerCalls, ['innerCount'])
+    const nestedRunners = module.functions.filter((fn) => fn.id.name.startsWith('nested$effect$'))
+    const selected = nestedRunners.flatMap((fn) =>
+      MirVerification.operations(fn).flatMap((operation) =>
+        operation._tag === 'RunEffectValue' && operation.runner.name.startsWith('read$effect$')
+          ? [{ fn, operation }]
+          : [],
+      ),
+    )
+    assert.strictEqual(selected.length, 3)
+    const first = selected.at(0) ?? unreachable('expected first outer provider run')
+    assert.strictEqual(first.fn.parameterCount, 2)
+    assert.deepEqual(
+      selected.map(({ operation }) => operation.arguments.map((argument) => argument.ordinal)),
+      [[1], [0], [1]],
+    )
+    assert.deepEqual(
+      selected.map(({ operation }) =>
+        operation.providers.map((provider) => provider.argument?.ordinal),
+      ),
+      [[1], [0], [1]],
+    )
   }),
 )
 
