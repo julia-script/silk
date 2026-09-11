@@ -11,11 +11,15 @@ descriptors.
 
 Instance discovery MAY follow a generic call with changed ordinary type arguments only while
 executing cleanup selected by the concrete owner's cleanup plan. The cleanup work item SHALL carry
-the exact selected cleanup target or hook and a finite measure derived from that plan. Every changed
-ordinary type vector SHALL be an exact proper subterm of the preceding vector; a downstream helper
-MAY preserve the current vector but SHALL NOT introduce another change unless it is the next strict
-descent. Provider-owner cleanup SHALL use the same rule. The cleanup measure SHALL NOT propagate to
-unrelated calls, and semantic lifetime arguments SHALL remain erased from comparisons.
+the concrete owner type whose exact cleanup target or hook was selected and SHALL retain that owner
+as an immutable finite measure. Every later ordinary type argument SHALL be runtime-equal to the
+owner root or a semantic structural subterm of it; repeated unfolding of the same nominal
+declaration SHALL require the exact same or a strictly smaller instantiation. Cross-arity helpers
+and sibling root subterms MAY be followed without replacing the root. Provider-owner cleanup SHALL
+use the same rule. Hidden callable, Effect, and composite-representation identities SHALL retain
+the ordinary recursion guard except for an otherwise-admitted terminal capture-free callable
+specialization. The cleanup measure SHALL NOT propagate through an ordinary edge to the same target
+or to unrelated calls, and semantic lifetime arguments SHALL remain erased from comparisons.
 
 #### Scenario: Discover two concrete instances
 
@@ -41,6 +45,11 @@ unrelated calls, and semantic lifetime arguments SHALL remain erased from compar
 
 - **WHEN** an ordinary recursive call changes `T` to `[T; 1]` outside an exact selected cleanup plan
 - **THEN** analysis rejects the call before instance discovery can expand indefinitely
+
+#### Scenario: Reject hidden callable identity growth during cleanup
+
+- **WHEN** a cleanup-reachable helper recursively wraps a captured callable and changes only its hidden executable identity
+- **THEN** analysis applies the ordinary recursion guard and rejects the call before instance discovery can expand indefinitely
 
 #### Scenario: Erase different caller lifetimes
 

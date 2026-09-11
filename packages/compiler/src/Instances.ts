@@ -1334,6 +1334,38 @@ export const discover = (
       })
     )
   }
+  const sameHiddenExecutableArguments = (left: InstanceKey, right: InstanceKey): boolean => {
+    const leftHidden = left.typeArguments.filter(Type.isHiddenExecutableArgument)
+    const rightHidden = right.typeArguments.filter(Type.isHiddenExecutableArgument)
+    return (
+      leftHidden.length === rightHidden.length &&
+      leftHidden.every((argument, index) => {
+        const candidate = rightHidden.at(index)
+        return (
+          candidate !== undefined &&
+          Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate)
+        )
+      })
+    )
+  }
+  const isTerminalCallableSpecialization = (ancestor: InstanceKey, target: InstanceKey): boolean =>
+    sameVisibleArguments(ancestor, target) &&
+    target.typeArguments.some(Type.isCallableIdentityArgument) &&
+    target.typeArguments
+      .filter(Type.isHiddenIdentityArgument)
+      .every(
+        (argument) =>
+          Type.isCallableIdentityArgument(argument) && argument.environment === undefined,
+      )
+  const cleanupPermitsSpecialization = (
+    ancestor: InstanceKey | undefined,
+    target: InstanceKey,
+    cleanup: CleanupMeasure | undefined,
+  ): boolean =>
+    cleanup !== undefined &&
+    (ancestor === undefined ||
+      sameHiddenExecutableArguments(ancestor, target) ||
+      isTerminalCallableSpecialization(ancestor, target))
   const rootItem = (key: InstanceKey): WorkItem =>
     Object.freeze({
       key,
@@ -1642,20 +1674,17 @@ export const discover = (
           ordinaryIdentities.has(identity) ? Object.freeze([]) : (cleanupRoots.get(identity) ?? []),
         )
         const terminalCallableSpecialization =
-          ancestor !== undefined &&
-          sameVisibleArguments(ancestor.key, targetKey) &&
-          targetKey.typeArguments.some(Type.isCallableIdentityArgument) &&
-          targetKey.typeArguments
-            .filter(Type.isHiddenIdentityArgument)
-            .every(
-              (argument) =>
-                Type.isCallableIdentityArgument(argument) && argument.environment === undefined,
-            )
+          ancestor !== undefined && isTerminalCallableSpecialization(ancestor.key, targetKey)
+        const cleanupSpecialization = cleanupPermitsSpecialization(
+          ancestor?.key,
+          targetKey,
+          cleanup,
+        )
         if (
           ancestor !== undefined &&
           !sameArguments(ancestor.key, targetKey) &&
           !structurallyDescending &&
-          cleanup === undefined &&
+          !cleanupSpecialization &&
           !terminalCallableSpecialization
         ) {
           const violationKey = `${keyText(key)}\u0000${keyText(targetKey)}`
@@ -1682,7 +1711,7 @@ export const discover = (
                   : { structuralProvider: call.structuralProvider }),
               }),
             ),
-            ...(cleanup === undefined ? {} : { cleanupMeasure: cleanup }),
+            ...(cleanupSpecialization && cleanup !== undefined ? { cleanupMeasure: cleanup } : {}),
           }),
         )
       }
@@ -1729,10 +1758,15 @@ export const discover = (
           provided.target,
           cleanupRoots,
         )
+        const cleanupSpecialization = cleanupPermitsSpecialization(
+          ancestor?.key,
+          provided.target,
+          cleanup,
+        )
         if (
           ancestor !== undefined &&
           !sameArguments(ancestor.key, provided.target) &&
-          cleanup === undefined
+          !cleanupSpecialization
         ) {
           const violationKey = `${keyText(provided.owner)}\u0000${keyText(provided.target)}`
           if (!violationKeys.has(violationKey)) {
@@ -1750,7 +1784,7 @@ export const discover = (
         const item = Object.freeze({
           key: provided.target,
           ancestors: withAncestor(ownerContext.ancestors, Object.freeze({ key: provided.target })),
-          ...(cleanup === undefined ? {} : { cleanupMeasure: cleanup }),
+          ...(cleanupSpecialization && cleanup !== undefined ? { cleanupMeasure: cleanup } : {}),
         })
         if (schedule(item)) scheduledProvided = true
       }

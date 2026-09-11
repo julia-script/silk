@@ -465,6 +465,36 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('rejects hidden callable identity growth reached through cleanup', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`struct Guard {}
+fn invoke(value: i32, callback: once fn(i32) -> i32) -> i32 { return callback(value) }
+fn loop(seed: i32, callback: once fn(i32) -> i32) -> i32 {
+  let wrapped = invoke(move callback)
+  let next = loop(move wrapped)
+  return next(seed)
+}
+fn identity(value: i32) -> i32 { return value }
+impl Drop for Guard {
+  fn drop(self: &mut Guard) -> () {
+    let call = loop(identity)
+    let value = call(0)
+    return ()
+  }
+}
+pub fn main() -> i32 {
+  let held = Guard {}
+  drop held
+  return 0
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    assert.strictEqual(result.instances.violations.length, 1)
+  }),
+)
+
 it.effect('rejects mutually recursive cleanup specialization growth', () =>
   Effect.gen(function* () {
     const result = yield* snapshot(`import silk.box { Box }
