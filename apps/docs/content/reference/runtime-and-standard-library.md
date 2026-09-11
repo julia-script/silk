@@ -389,6 +389,15 @@ and each resource limit. No codec-specific compiler intrinsic or runtime provide
 [shared native acceptance](../../../../packages/compiler/test/support/inflateAcceptance.ts),
 [independent fixture provenance](../../../../packages/compiler/test/fixtures/inflate-vectors.md).
 
+### P-256 ephemeral key agreement
+
+`silk.p256 { P256, P256Error }` provides ordinary-source, bounded P-256 arithmetic. Scalars are
+opaque owners imported from exactly 32 big-endian bytes in 1..n−1 or generated with explicit
+exclusive `Random`. Public keys are 65-byte uncompressed SEC1 points. Agreement validates the
+peer, consumes the scalar, and returns a complete fixed 32-byte shared x-coordinate or a typed
+error. Deterministic calls allocate nothing and require no host service. See the prescriptive
+[P-256 contract](p256-key-agreement.md) for rejection, entropy and assurance boundaries.
+
 ### STDLIB-008 — HMAC and HKDF use concrete SHA-2 actors with bounded output
 
 **Status:** Confirmed
@@ -419,6 +428,66 @@ constant-time comparison, truncation policy, TLS labels, password hashing, or se
 [known-answer acceptance corpus](../../../../packages/compiler/test/support/hmacHkdfAcceptance.ts),
 [RFC 4231](https://www.rfc-editor.org/rfc/rfc4231.html), and
 [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869.html).
+
+### STDLIB-CHACHA20-POLY1305 — Detached authenticated encryption preserves destinations on failure
+
+**Status:** Confirmed
+
+`silk.chacha20_poly1305` exports `ChaCha20Poly1305` and `AeadError`. The ordinary synchronous
+operations `seal(key, nonce, aad, plaintext, ciphertext, tag)` and
+`open(key, nonce, aad, ciphertext, tag, plaintext)` return `Result<(), AeadError>`. Inputs are
+shared byte slices and destinations are exclusive byte slices. Keys contain exactly 32 bytes,
+nonces 12 bytes, and detached tags 16 bytes. Empty payloads and AAD are valid. Successful
+operations write only the payload prefix and preserve spare destination capacity.
+
+Both operations check key, nonce and tag widths, output capacity, then the payload limit, in
+that order. Payloads contain at most 274877906880 bytes, using ChaCha20 counters 1 through
+2^32−1; counter zero derives the Poly1305 key. AAD lengths must fit `u64`, as every addressable
+Silk slice does. Widened length checks and remaining-length iteration avoid target-size overflow.
+Authentication pads AAD and ciphertext separately to 16-byte boundaries and includes both
+little-endian 64-bit byte lengths. `open` authenticates the full tag before writing plaintext.
+Every rejected operation preserves all destination bytes, including the detached seal tag.
+Ordinary borrowing rules reject overlapping input/output and output/tag arguments.
+
+**Boundary:** The implementation allocates no memory and requests no provider or native crypto
+operation. Callers own nonce uniqueness and per-key usage limits. Source-level fixed work and
+reviewed generated output do not guarantee constant-time execution across future compilers or
+runtimes, physical secret erasure, or production security. The module provides no transport,
+nonce generation, replay protection, or peer authentication policy.
+
+**Evidence:** [canonical source](../../../../packages/compiler/stdlib/silk/chacha20_poly1305.silk),
+[shared acceptance](../../../../packages/compiler/test/support/chacha20Poly1305Acceptance.ts),
+[fixture provenance](../../../../packages/compiler/test/fixtures/chacha20-poly1305.md), and
+[RFC 8439](https://www.rfc-editor.org/rfc/rfc8439).
+
+### STDLIB-AES-GCM — Detached authenticated encryption preserves destinations on failure
+
+**Status:** Confirmed
+
+`silk.aes_gcm` exports `AesGcm` and `AesGcmError`. `seal(key, nonce, aad, plaintext,
+ciphertext, tag)` and `open(key, nonce, aad, ciphertext, tag, plaintext)` return
+`Result<(), AesGcmError>`. Inputs are shared byte slices and destinations are exclusive byte
+slices. Keys must contain 16 or 32 bytes, nonces 12 bytes, and detached tags exactly 16 bytes.
+Empty plaintext, ciphertext and AAD are valid. Destinations may exceed the message length;
+the unused suffix remains unchanged.
+
+Both operations validate widths, output capacity and widened GCM length limits before writing.
+A message contains at most 2^36−32 bytes and AAD at most 2^61−1 bytes, additionally bounded by
+target addressability. `open` authenticates all sixteen tag bytes before producing plaintext.
+Any failure preserves every byte of every destination, including its unused suffix.
+The error variants distinguish invalid key, nonce and tag lengths, insufficient output,
+excess domain lengths, and failed authentication. Ordinary borrow checking forbids aliasing
+inputs with exclusive outputs or overlapping ciphertext and tag destinations.
+
+**Boundary:** This ordinary Silk implementation allocates no memory and invokes no provider or
+native crypto API. Its algebraic AES S-box and GHASH have fixed secret-processing schedules.
+The caller supplies a nonce unique under the key and enforces per-key usage limits.
+The module provides no nonce generation, TLS records, replay protection, peer identity,
+physical secret-erasure guarantee, or audited constant-time/production-security claim.
+
+**Evidence:** [canonical AES-GCM source](../../../../packages/compiler/stdlib/silk/aes_gcm.silk),
+[shared acceptance](../../../../packages/compiler/test/support/aesGcmAcceptance.ts), and
+[fixture provenance](../../../../packages/compiler/test/fixtures/aes-gcm/README.md).
 
 ### STDLIB-009 — URI syntax preserves its original serialization
 
