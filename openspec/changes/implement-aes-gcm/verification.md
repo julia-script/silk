@@ -88,7 +88,19 @@ uniqueness and per-key usage policy.
 
 Passed during implementation: strict OpenSpec validation, full build, typecheck, format check,
 lint, generated documentation policy, the pinned Zig verifier, and the focused tests above.
-The full `pnpm test`, `pnpm check`, `pnpm release:candidate`, independent correctness review,
-independent economics approval and draft PR handoff are tracked by the coordinator before delivery.
+Independent correctness review by investigator B and independent test-economics review by
+investigator C approve implementation commit `8fc69cb6a5c90222513f3ff06540338fd6152258`.
+The complete [test-economics review](test-economics.md) records the inventory, distinct failure
+claims, simplification and matched baseline measurements. Fresh ordered typecheck, format check
+and lint passed at that commit.
+
+The first full `pnpm test` attempt failed after 245.537 seconds in five existing LSP tests across
+AutoImportScale, ProjectWorker, Inspection and Server while concurrent full compiler suites
+contended for the host. Four failures were timeouts and one received no expected diagnostic.
+A subsequent isolated run of all four LSP files passed all eleven tests (343.26 seconds).
+The failure log is `/tmp/jul175-full-test-attempt1.log`; isolated evidence is
+`/tmp/jul175-lsp-isolated-branch.log`. These observations support a contention diagnosis but do
+not substitute for a successful full gate. The coordinator is scheduling the full test retry;
+`pnpm check` and `pnpm release:candidate` have not yet run. Draft PR handoff is coordinator-owned.
 
 Economics review removed two supplemental exact-block fixtures: the NIST exact-block selections already falsify the same boundary claim. The 15- and 17-byte Zig cases remain for both key widths.
