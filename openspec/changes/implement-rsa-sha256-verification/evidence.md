@@ -75,5 +75,20 @@ The earlier Wasm timeout under heavier concurrent load did not recur; no timeout
 Full repository typechecking, formatting and lint passed. Generated documentation policy passed
 for all 104 registered modules. Source formatting and strict OpenSpec validation passed.
 
-Target inspection is running. Full tests/check/release and independent correctness/economics
-reviews remain delivery gates; no complete task or production security claim is made.
+A retained public PSS witness compiled to nonempty LLVM bitcode and target assembly for all
+12 combinations of aarch64-apple-darwin, aarch64-unknown-linux-gnu,
+x86_64-unknown-linux-gnu and wasm32-unknown-unknown with debug, release and
+release-with-debug. Inspection of recovery, modular multiplication and DER decoding on native
+and Wasm output confirms bounded stack storage, public-data loops and checks before indexed
+reads. The optimized Darwin recovery/multiplication frames are approximately 5264/2912 bytes.
+The exponentiation executes 16 squares and one multiplication after signature-width and
+representative admission. GNU output was compiled and inspected, not executed. This is bounded
+implementation evidence, not an independent production security audit.
+
+Independent correctness review approved implementation commit
+`1e78af36688a4911061006047d97660fe0176d06` after three additional private encoding
+rejection checks: mismatched PSS digest, changed PKCS#1 digest byte and forbidden PSS high bit.
+The existing native program with these checks passed (122.16 seconds process, 85.23 seconds
+test work under concurrent load); no additional compiler pipeline was introduced.
+
+Full tests/check/release and dedicated economics review remain delivery gates.
