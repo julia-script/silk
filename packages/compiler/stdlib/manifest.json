@@ -43,6 +43,12 @@
     "namespace": "CertificateBundle"
   },
   {
+    "module": "silk/chacha20_poly1305",
+    "path": "silk/chacha20_poly1305.silk",
+    "namespace": "ChaCha20Poly1305",
+    "aliases": ["AeadError"]
+  },
+  {
     "module": "silk/char",
     "path": "silk/char.silk",
     "namespace": "char"

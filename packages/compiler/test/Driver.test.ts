@@ -19,6 +19,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
 import { invalidGenericCorpus } from './support/corpus.js'
+import { chacha20Poly1305WasmSource } from './support/chacha20Poly1305Acceptance.js'
 import { certificateWasmAcceptanceSource } from './support/certificateAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
@@ -630,5 +631,26 @@ it.effect('executes bounded certificate decoding through LLVM-to-Wasm', () =>
     const main = instance.exports['main']
     assert.isFunction(main)
     if (typeof main === 'function') assert.strictEqual(main(), 0)
+  }),
+)
+
+// A single portability leg covers 64-bit MAC arithmetic and 32-bit slice addressing.
+it.effect('executes ChaCha20-Poly1305 through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('chacha20-poly1305.wasm', chacha20Poly1305WasmSource, {
+      compilation: {
+        root: SourceFile.make('memory/chacha20-poly1305-wasm', ascii(chacha20Poly1305WasmSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+    assert.deepEqual(WebAssembly.Module.imports(module), [])
+    const instance = new WebAssembly.Instance(module)
+    const main = instance.exports['main']
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 42)
   }),
 )
