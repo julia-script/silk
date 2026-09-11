@@ -445,7 +445,7 @@ fn nullOrAbsent(parameters: &Option<&[u8]>) -> bool {
   }
 }
 
-fn positiveInteger(reader: &mut Reader, end: usize, depth: usize) -> usize {
+fn nonnegativeInteger(reader: &mut Reader, end: usize, depth: usize) -> usize {
   let value = expect(&mut reader, end, depth, 2)
   if reader.failed { return 0 }
   let length = value.end - value.content
@@ -454,8 +454,8 @@ fn positiveInteger(reader: &mut Reader, end: usize, depth: usize) -> usize {
     return 0
   }
   let mut at = value.content
-  if reader.bytes[at] == 0 {
-    if length == 1 || reader.bytes[at + 1] < 128 {
+  if length > 1 && reader.bytes[at] == 0 {
+    if reader.bytes[at + 1] < 128 {
       let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, at)
       return 0
     }
@@ -575,7 +575,7 @@ fn basicConstraints(reader: &mut Reader) -> BasicConstraints {
     }
   }
   if reader.cursor < root.end && !reader.failed {
-    result.pathLength = positiveInteger(&mut reader, root.end, 2)
+    result.pathLength = nonnegativeInteger(&mut reader, root.end, 2)
     result.hasPathLength = true
   }
   finish(&mut reader, root.end)

@@ -247,6 +247,11 @@ const zeroSerial = fixture('rfc5280::serial::zero/peer_certificate')
 const wrongEku = fixture('rfc5280::eku::ee-wrong-eku/peer_certificate')
 const wildcardConstraint = fixture('rfc5280::nc::invalid-dnsname-wildcard/trusted_certs[0]')
 const constrainedRoot = fixture('rfc5280::nc::permitted-dns-match/trusted_certs[0]')
+// x509-limbo pathlen::ee-with-intermediate-pathlen-0/untrusted_intermediates[0]. The explicit
+// `02 01 00` pathLenConstraint is legal DER and must remain distinguishable from an absent bound.
+const pathLengthZeroIntermediate = literal(
+  'MIICATCCAaagAwIBAgIUTIRcpXB7SoD1P++HfW7mwoch96swCgYIKoZIzj0EAwIwGjEYMBYGA1UEAwwPeDUwOS1saW1iby1yb290MCAXDTcwMDEwMTAwMDAwMVoYDzI5NjkwNTAzMDAwMDAxWjBnMTkwNwYDVQQLDDA0NjYzNjg2MjI0NjI1ODM2MjU2OTA5NzM0MzQxODU1MjIzMTMxMTY1ODM3MTI5NjkxKjAoBgNVBAMMIXg1MDktbGltYm8taW50ZXJtZWRpYXRlLXBhdGhsZW4tMDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABAL2sHdHh01L2QDAAjFsT0wvMcSM8NL9bSh6IfgDhVl6dHNSLyV8f/U7c9kLTJoTh2DVb4skdyBNSPxlBmmSYTujezB5MBIGA1UdEwEB/wQIMAYBAf8CAQAwCwYDVR0PBAQDAgIEMBYGA1UdEQQPMA2CC2V4YW1wbGUuY29tMB8GA1UdIwQYMBaAFEoogyxR5JxpITYutOfGmZIoZ+ktMB0GA1UdDgQWBBTriyd/YwUXFDfMPrBoJIjnbwr1WzAKBggqhkjOPQQDAgNJADBGAiEAmyibTNnkn62QmH37MpAMP6oDaJNhn9FW1F0O9vSrd/4CIQCgnIUJdZFZs7bAfR6eEhqv1fLsg346f6RqzrEgYvFNLA==',
+)
 const rsaLeafId = 'webpki::cryptographydotio-chain/peer_certificate'
 const rsaLeaf = fixture(rsaLeafId)
 const rsaEncryptionNull = [
@@ -631,6 +636,18 @@ fn pathLength(value: Option<usize>, expected: usize) -> bool {
   }
 }
 
+fn inspectedPathLength<'a>(
+  outcome: Result<CertificateProfile<'a>, ProfileError>,
+  expected: usize,
+) -> bool {
+  return match move outcome {
+    Result<CertificateProfile<'a>, ProfileError>.Failure {error} => false
+    Result<CertificateProfile<'a>, ProfileError>.Success {value} => {
+      return pathLength(CertificateProfile.pathLength(&value), expected)
+    }
+  }
+}
+
 fn equalBytes(left: &[u8], right: &[u8]) -> bool {
   if left.length != right.length { return false }
   let mut index = usize.ZERO
@@ -825,6 +842,19 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     ),
     &rootCertificate,
   ) { return 4 }
+  let pathLengthZeroResult = run decoded(${pathLengthZeroIntermediate})
+  let pathLengthZeroCertificate = match move pathLengthZeroResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 165 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  if !inspectedPathLength(
+    CertificateProfile.inspect(
+      &pathLengthZeroCertificate,
+      CertificateRole.Intermediate,
+      ProfileLimits.defaults(),
+    ),
+    0,
+  ) { return 166 }
   let inspectedLeaf = CertificateProfile.inspect(
     &leafCertificate,
     CertificateRole.ServerLeaf,
