@@ -61,6 +61,21 @@
     ]
   },
   {
+    "module": "silk/certificate_path",
+    "path": "silk/certificate_path.silk",
+    "namespace": "CertificatePath",
+    "aliases": [
+      "ValidationLimits",
+      "ValidationClass",
+      "ValidationReason",
+      "ValidationLocation",
+      "ValidationLimit",
+      "ValidationError",
+      "RevocationStatus",
+      "ValidatedPath"
+    ]
+  },
+  {
     "module": "silk/certificate_profile",
     "path": "silk/certificate_profile.silk",
     "namespace": "CertificateProfile",

@@ -5,6 +5,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
 import certificateProfileFixtures from './fixtures/certificate-profile-limbo.json' with { type: 'json' }
+import certificatePathFixtures from './fixtures/certificate-path-limbo.json' with { type: 'json' }
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -26,6 +27,61 @@ it('pins certificate-profile fixture provenance and DER digests', () => {
       fixture.id,
     )
     assert.isNotEmpty(fixture.profileOutcome, fixture.id)
+  }
+})
+
+it('pins certificate-path fixture provenance, ordering, and DER/key digests', () => {
+  assert.strictEqual(
+    certificatePathFixtures.source,
+    'https://github.com/C2SP/x509-limbo/blob/3f8cba420e90322223486086054401189b7b320e/limbo.json',
+  )
+  assert.strictEqual(
+    certificatePathFixtures.sourceSha256,
+    '563805f46937ad25ac9d4e41341c414070aced32a22294821b5c5fe526e2c52d',
+  )
+  assert.strictEqual(
+    certificatePathFixtures.zigHttpParityCommit,
+    '1bc892110da738d6137b3f0b7e8e3a586ce09928',
+  )
+  assert.strictEqual(certificatePathFixtures.cases.length, 22)
+  for (const fixture of certificatePathFixtures.cases) {
+    const certificates = [fixture.peer, ...fixture.intermediates, ...fixture.anchors]
+    for (const certificate of certificates) {
+      assert.strictEqual(
+        createHash('sha256').update(Buffer.from(certificate.der, 'base64')).digest('hex'),
+        certificate.sha256,
+        fixture.id,
+      )
+    }
+    assert.strictEqual(fixture.peerKeyPemSha256.length, 64, fixture.id)
+    assert.deepEqual(
+      fixture.ordering.intermediates,
+      fixture.intermediates.map((_, index) => index),
+      fixture.id,
+    )
+    assert.deepEqual(
+      fixture.ordering.anchors,
+      fixture.anchors.map((_, index) => index),
+      fixture.id,
+    )
+  }
+  assert.deepEqual(
+    certificatePathFixtures.cases.find(
+      (fixture) => fixture.id === 'rfc5280::nc::nc-forbids-alternate-chain-ica',
+    )?.expectedSilk,
+    { result: 'Success', anchorIndex: 0, intermediateIndices: [2, 0] },
+  )
+  assert.deepEqual(
+    certificatePathFixtures.projectFixtures.map((fixture) => fixture.id),
+    ['silk::wrong-signature-first/intermediates[0]'],
+  )
+  for (const fixture of certificatePathFixtures.projectFixtures) {
+    assert.strictEqual(
+      createHash('sha256').update(Buffer.from(fixture.der, 'base64')).digest('hex'),
+      fixture.sha256,
+      fixture.id,
+    )
+    assert.strictEqual(fixture.mutation, 'xor 0x01 into the final ECDSA signature octet')
   }
 })
 
@@ -67,6 +123,7 @@ it.effect('keeps decoded certificate owners move-only and their returned views b
     const source = `import silk.certificate { Certificate }
 import silk.certificate_bundle { CertificateBundle }
 import silk.certificate_profile { CertificateProfile, CertificateRole, ProfileLimits, ProfileError }
+import silk.certificate_path { CertificatePath }
 import silk.result { Result }
 import silk.trust_anchor { TrustAnchor }
 import silk.usize
@@ -121,6 +178,11 @@ pub fn main() -> i32 { return 0 }`
         bindings: ['certificate'],
       },
       { module: 'silk/trust_anchor', operation: 'TrustAnchor.clone', bindings: ['certificate'] },
+      {
+        module: 'silk/certificate_path',
+        operation: 'CertificatePath.validate',
+        bindings: ['path', 'frames'],
+      },
     ]
     for (const state of partialStates) {
       const operation = Analysis.ownershipOf(ownership, state.module)?.functions.find(
@@ -205,5 +267,85 @@ pub fn main() -> i32 { return 0 }`
         { code: 'OWN0019', span: '&reference' },
       ],
     )
+  }),
+)
+
+it.effect('binds validated certificate paths to every borrowed certificate input', () =>
+  Effect.gen(function* () {
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.certificate { Certificate }
+import silk.certificate_path { CertificatePath, ValidatedPath, ValidationError, ValidationLimits }
+import silk.result { Result }
+import silk.system_clock { Instant }
+import silk.trust_anchor { TrustAnchor }
+effect fn forwarded<'a>(
+  leaf: &'a Certificate,
+  intermediates: &'a [Certificate],
+  anchors: &'a [TrustAnchor],
+  at: &Instant,
+) -> Result<ValidatedPath<'a>, ValidationError> ! OutOfMemoryError ? &mut Allocator {
+  return run CertificatePath.validate(leaf, intermediates, anchors, at, ValidationLimits.defaults())
+}
+effect fn leafEscapes<'a>(
+  leaf: Certificate,
+  intermediates: &'a [Certificate],
+  anchors: &'a [TrustAnchor],
+  at: &Instant,
+) -> Result<ValidatedPath<'a>, ValidationError> ! OutOfMemoryError ? &mut Allocator {
+  return run CertificatePath.validate(&leaf, intermediates, anchors, at, ValidationLimits.defaults())
+}
+effect fn intermediatesEscape<'a>(
+  leaf: &'a Certificate,
+  intermediates: [Certificate; 1],
+  anchors: &'a [TrustAnchor],
+  at: &Instant,
+) -> Result<ValidatedPath<'a>, ValidationError> ! OutOfMemoryError ? &mut Allocator {
+  return run CertificatePath.validate(leaf, &intermediates, anchors, at, ValidationLimits.defaults())
+}
+effect fn anchorsEscape<'a>(
+  leaf: &'a Certificate,
+  intermediates: &'a [Certificate],
+  anchors: [TrustAnchor; 1],
+  at: &Instant,
+) -> Result<ValidatedPath<'a>, ValidationError> ! OutOfMemoryError ? &mut Allocator {
+  return run CertificatePath.validate(leaf, intermediates, &anchors, at, ValidationLimits.defaults())
+}
+fn moved<'a>(value: ValidatedPath<'a>) -> usize {
+  let next = move value
+  return value.anchorIndex()
+}
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* Analysis.ofSourceRealized(
+      'certificate-path/borrowed-result',
+      ascii(source),
+    )
+    const diagnostics = Analysis.diagnostics(snapshot).map((diagnostic) => ({
+      code: diagnostic.code,
+      span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+    }))
+    const distinct = diagnostics.filter(
+      (diagnostic, index) =>
+        diagnostics.findIndex(
+          (candidate) => candidate.code === diagnostic.code && candidate.span === diagnostic.span,
+        ) === index,
+    )
+    assert.deepEqual(distinct, [
+      {
+        code: 'OWN0019',
+        span: 'run CertificatePath.validate(&leaf, intermediates, anchors, at, ValidationLimits.defaults())',
+      },
+      { code: 'SEM0212', span: '&leaf' },
+      {
+        code: 'OWN0019',
+        span: 'run CertificatePath.validate(leaf, &intermediates, anchors, at, ValidationLimits.defaults())',
+      },
+      { code: 'SEM0212', span: '&intermediates' },
+      {
+        code: 'OWN0019',
+        span: 'run CertificatePath.validate(leaf, intermediates, &anchors, at, ValidationLimits.defaults())',
+      },
+      { code: 'SEM0212', span: '&anchors' },
+      { code: 'OWN0001', span: 'value' },
+    ])
   }),
 )

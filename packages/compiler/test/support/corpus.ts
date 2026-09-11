@@ -38,6 +38,7 @@ import { ecdsaP256AcceptanceSource } from './ecdsaP256Acceptance.js'
 import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
 import { certificateProfileAcceptanceSource } from './certificateProfileAcceptance.js'
+import { certificatePathAcceptanceSource } from './certificatePathAcceptance.js'
 import { httpsIdentityAcceptanceSource } from './httpsIdentityAcceptance.js'
 import { sanAcceptanceSource } from './sanAcceptance.js'
 import {
@@ -6265,6 +6266,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'certificate-profile-and-trust-anchor',
     source: certificateProfileAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'certificate-path-validation',
+    source: certificatePathAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
   },
   {
