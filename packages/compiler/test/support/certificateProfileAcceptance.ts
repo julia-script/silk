@@ -1054,10 +1054,11 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     Result<Certificate, DecodeError>.Failure {error} => { return 35 }
     Result<Certificate, DecodeError>.Success {value} => move value
   }
-  if !profileFailure(
+  if !profileFailureAt(
     CertificateProfile.inspect(&mismatchCertificate, CertificateRole.ServerLeaf, ProfileLimits.defaults()),
     ProfileClass.Unsupported,
     ProfileReason.SignatureAlgorithmMismatch,
+    Certificate.offsets(&mismatchCertificate).signatureAlgorithm,
   ) { return 36 }
 
   let versionLimits = ProfileLimits {
@@ -1144,13 +1145,6 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     ProfileReason.SignatureAlgorithm,
     outerOffsets.signatureAlgorithm,
   ) { return 110 }
-  if !profileFailureAt(
-    CertificateProfile.inspect(&mismatchCertificate, CertificateRole.ServerLeaf, ProfileLimits.defaults()),
-    ProfileClass.Unsupported,
-    ProfileReason.SignatureAlgorithmMismatch,
-    Certificate.offsets(&mismatchCertificate).signatureAlgorithm,
-  ) { return 111 }
-
   let parameterResult = run decoded(${ecdsaForbiddenParameters})
   let parameterCertificate = match move parameterResult {
     Result<Certificate, DecodeError>.Failure {error} => { return 167 }
