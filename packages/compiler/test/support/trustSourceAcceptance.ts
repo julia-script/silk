@@ -291,10 +291,14 @@ effect fn suite() -> i32 ! TrustSourceError | OutOfMemoryError ? &mut Allocator 
     pemSucceeded() |> Effect.provideMut<Allocator>(&mut audit),
     allocationFailed,
   )
-  if !calibrated || audit.calls < 2 { return 20 }
+  if !calibrated || audit.calls < 3 { return 20 }
   let allocationCount = audit.calls
-  let mut failureOrdinal = usize.ONE
-  while failureOrdinal <= allocationCount {
+  // The first refusal owns nothing, the second follows one successful allocation and therefore
+  // exercises partial-owner cleanup, and the calibrated final refusal reaches the deepest owner.
+  let failureOrdinals: [usize; 3] = [usize.ONE, usize.ONE + usize.ONE, allocationCount]
+  let mut failureIndex = usize.ZERO
+  while failureIndex < 3 {
+    let failureOrdinal = failureOrdinals[failureIndex]
     audit.calls = usize.ZERO
     audit.failAt = failureOrdinal
     let failed = run Effect.catchAll(
@@ -302,7 +306,7 @@ effect fn suite() -> i32 ! TrustSourceError | OutOfMemoryError ? &mut Allocator 
       allocationFailed,
     )
     if failed || audit.calls != failureOrdinal { return 21 }
-    failureOrdinal = failureOrdinal + usize.ONE
+    failureIndex = failureIndex + usize.ONE
   }
   audit.calls = usize.ZERO
   audit.failAt = usize.ZERO
