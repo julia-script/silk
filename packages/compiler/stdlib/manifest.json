@@ -609,6 +609,12 @@
     "aliases": ["WriterError"]
   },
   {
+    "module": "silk/x25519",
+    "path": "silk/x25519.silk",
+    "namespace": "X25519",
+    "aliases": ["X25519Error"]
+  },
+  {
     "module": "silk/zstd",
     "path": "silk/zstd.silk",
     "namespace": "Zstd",

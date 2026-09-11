@@ -7847,6 +7847,11 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'x25519',
+    source: x25519AcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'hmac-hkdf',
     source: hmacHkdfAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
@@ -8613,3 +8618,4 @@ pub fn main() -> i32 { return 0 }`,
     codes: ['PAR0001'],
   },
 ]
+import { x25519AcceptanceSource } from './x25519Acceptance.js'
