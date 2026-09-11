@@ -1,3 +1,4 @@
+import { aesGcmAcceptanceSource } from './aesGcmAcceptance.js'
 import type * as RuntimeComponent from '../../src/RuntimeComponent.js'
 import { borrowedTemporaryStream, borrowedTemporaryLifecycle } from './borrowedTemporaries.js'
 import { partialSuspension } from './partialSuspension.js'
@@ -7836,6 +7837,11 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     nativeSource: replaceDropProgram,
     nativeStdout: '1243',
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'aes-gcm',
+    source: aesGcmAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'hmac-hkdf',
