@@ -641,24 +641,33 @@ it.effect('executes bounded certificate decoding through LLVM-to-Wasm', () =>
   }),
 )
 
-it.effect('stores an unsupported certificate trust anchor through LLVM-to-Wasm', () =>
-  Effect.gen(function* () {
-    const outcome = yield* compileSource('certificate-profile.wasm', certificateProfileWasmSource, {
-      compilation: {
-        root: SourceFile.make('memory/certificate-profile-wasm', ascii(certificateProfileWasmSource)),
-        target: 'wasm32-unknown-unknown',
-      },
-      artifactKind: 'WebAssemblyModule',
-    })
-    assert.strictEqual(outcome._tag, 'Compiled')
-    if (outcome._tag !== 'Compiled') return
-    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
-    assert.deepEqual(WebAssembly.Module.imports(module), [])
-    const instance = new WebAssembly.Instance(module)
-    const main = instance.exports['main']
-    assert.isFunction(main)
-    if (typeof main === 'function') assert.strictEqual(main(), 42)
-  }),
+it.effect(
+  'stores an unsupported certificate trust anchor through LLVM-to-Wasm',
+  () =>
+    Effect.gen(function* () {
+      const outcome = yield* compileSource(
+        'certificate-profile.wasm',
+        certificateProfileWasmSource,
+        {
+          compilation: {
+            root: SourceFile.make(
+              'memory/certificate-profile-wasm',
+              ascii(certificateProfileWasmSource),
+            ),
+            target: 'wasm32-unknown-unknown',
+          },
+          artifactKind: 'WebAssemblyModule',
+        },
+      )
+      assert.strictEqual(outcome._tag, 'Compiled')
+      if (outcome._tag !== 'Compiled') return
+      const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+      assert.deepEqual(WebAssembly.Module.imports(module), [])
+      const instance = new WebAssembly.Instance(module)
+      const main = instance.exports['main']
+      assert.isFunction(main)
+      if (typeof main === 'function') assert.strictEqual(main(), 42)
+    }),
   300_000,
 )
 
