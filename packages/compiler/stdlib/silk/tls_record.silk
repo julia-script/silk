@@ -226,6 +226,48 @@ impl TlsRecordSender {
     }
   }
 
+  /// Consumes an idle sender and installs a fresh protected traffic epoch without allocation.
+  ///
+  /// # Details
+  ///
+  /// The replacement reuses the owned wire and staging storage and starts at sequence zero. The
+  /// traffic secret must have the selected suite hash width.
+  ///
+  /// # Gotchas
+  ///
+  /// Pending output makes the replacement invalid. The operation consumes the previous sender so
+  /// a caller cannot continue the old epoch after a key transition.
+  pub fn replaceEpoch(
+    self: Self,
+    suite: CipherSuite,
+    trafficSecret: &[u8],
+  ) -> Result<TlsRecordSender, RecordError> {
+    if self.acknowledged < self.pendingLength {
+      return Result.failResult<TlsRecordSender, RecordError>(RecordError.InvalidState)
+    }
+    let derived = deriveMaterial(suite, trafficSecret)
+    let material = match move derived {
+      Result<KeyMaterial, RecordError>.Failure {error} => {
+        return Result.failResult<TlsRecordSender, RecordError>(move error)
+      }
+      Result<KeyMaterial, RecordError>.Success {value} => move value
+    }
+    return Result.succeed<TlsRecordSender, RecordError>(
+      TlsRecordSender {
+        suite: suite,
+        key: material.key,
+        keyLength: material.keyLength,
+        iv: material.iv,
+        sequence: 0,
+        protected: true,
+        pending: move self.pending,
+        staging: move self.staging,
+        pendingLength: 0,
+        acknowledged: 0,
+      },
+    )
+  }
+
   /// Queues at most one content fragment without retaining the caller input.
   ///
   /// # Details
@@ -269,6 +311,13 @@ impl TlsRecordSender {
     let acknowledged = self.acknowledged
     let remaining = self.pendingLength - acknowledged
     return RawBuffer.view<u8>(&self.pending, acknowledged, remaining)
+  }
+
+  /// Returns the number of records that this protected epoch can still encode.
+  /// Plaintext framing returns zero because it has no traffic-key epoch.
+  pub fn recordsRemaining(self: &Self) -> u64 {
+    if !self.protected { return 0 }
+    return RECORDS_PER_EPOCH - self.sequence
   }
 
   /// Acknowledges a written prefix, or leaves all state unchanged when the count is excessive.
@@ -372,6 +421,52 @@ impl TlsRecordReceiver {
       ready: false,
       terminal: false,
     }
+  }
+
+  /// Consumes an idle receiver and installs a fresh protected traffic epoch without allocation.
+  ///
+  /// # Details
+  ///
+  /// The replacement reuses the owned wire and plaintext storage and starts at sequence zero. The
+  /// traffic secret must have the selected suite hash width.
+  ///
+  /// # Gotchas
+  ///
+  /// A partial, ready, terminal, or exhausted receiver makes the replacement invalid. The
+  /// operation consumes the previous receiver so the old epoch cannot accept another record.
+  pub fn replaceEpoch(
+    self: Self,
+    suite: CipherSuite,
+    trafficSecret: &[u8],
+  ) -> Result<TlsRecordReceiver, RecordError> {
+    if self.wireLength != 0 || self.ready || self.terminal {
+      return Result.failResult<TlsRecordReceiver, RecordError>(RecordError.InvalidState)
+    }
+    let derived = deriveMaterial(suite, trafficSecret)
+    let material = match move derived {
+      Result<KeyMaterial, RecordError>.Failure {error} => {
+        return Result.failResult<TlsRecordReceiver, RecordError>(move error)
+      }
+      Result<KeyMaterial, RecordError>.Success {value} => move value
+    }
+    return Result.succeed<TlsRecordReceiver, RecordError>(
+      TlsRecordReceiver {
+        suite: suite,
+        key: material.key,
+        keyLength: material.keyLength,
+        iv: material.iv,
+        sequence: 0,
+        protected: true,
+        wire: move self.wire,
+        plaintext: move self.plaintext,
+        wireLength: 0,
+        expectedLength: 0,
+        recordLength: 0,
+        recordType: ContentType.Handshake,
+        ready: false,
+        terminal: false,
+      },
+    )
   }
 
   /// Copies a prefix for the current record and reports the exact next receive action.

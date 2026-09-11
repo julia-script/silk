@@ -93,8 +93,13 @@ pub fn main() -> i32 {
   let empty: [u8; 0] = []
   let mut state = Sha256.make()
   state.update(&empty)
+  let checkpoint = state.checkpoint()
+  state.update(&empty)
+  let checkpointAgain = state.checkpoint()
   let digest = state.finish()
   state.update(&empty)
+  drop checkpoint
+  drop checkpointAgain
   drop digest
   let mut hmac256 = HmacSha256.make(&empty)
   let tag256 = hmac256.finish()
@@ -269,9 +274,11 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('keeps TLS record views tied to their receive owner', () =>
-  Effect.gen(function* () {
-    const source = `import silk.tls_record { TlsRecordReceiver }
+it.effect(
+  'keeps TLS record views tied to their receive owner and rotates epochs by ownership',
+  () =>
+    Effect.gen(function* () {
+      const source = `import silk.tls_record { CipherSuite, TlsRecordReceiver, TlsRecordSender }
 fn inspect(receiver: &mut TlsRecordReceiver, input: &[u8]) -> i32 {
   let record = TlsRecordReceiver.record(&receiver.*)
   let progress = TlsRecordReceiver.feedInput(move receiver, input)
@@ -279,17 +286,27 @@ fn inspect(receiver: &mut TlsRecordReceiver, input: &[u8]) -> i32 {
   drop progress
   return 42
 }
+fn rotateSender(sender: TlsRecordSender, secret: &[u8]) -> i32 {
+  let replaced = sender.replaceEpoch(CipherSuite.Aes128GcmSha256, secret)
+  drop replaced
+  return 42
+}
+fn rotateReceiver(receiver: TlsRecordReceiver, secret: &[u8]) -> i32 {
+  let replaced = receiver.replaceEpoch(CipherSuite.Aes128GcmSha256, secret)
+  drop replaced
+  return 42
+}
 pub fn main() -> i32 { return 42 }`
-    const snapshot = yield* AnalysisFixture.retainingMain(
-      'stdlib-namespace/tls-record-view',
-      ascii(source),
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => ({
-        code: diagnostic.code,
-        span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
-      })),
-      [{ code: 'OWN0011', span: 'receiver' }],
-    )
-  }),
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        'stdlib-namespace/tls-record-view',
+        ascii(source),
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => ({
+          code: diagnostic.code,
+          span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+        })),
+        [{ code: 'OWN0011', span: 'receiver' }],
+      )
+    }),
 )
