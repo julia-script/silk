@@ -126,6 +126,14 @@ let badDer5: [u8;3] = [48, 2, 2]
  if !keyRejected(RsaPublicKey.fromCertificateKey(&keyAlg,&badDer5,0)) {return false}
 let badDer6: [u8;4] = [48, 0, 2, 0]
  if !keyRejected(RsaPublicKey.fromCertificateKey(&keyAlg,&badDer6,0)) {return false}
+// Distinct final-digest and unused-leading-bit rejection paths.
+ let mut wrongDigest = hash0
+ wrongDigest[0] = u8.bitXor(wrongDigest[0],1)
+ if verifyPssEncoding(&em0,2048,&wrongDigest) {return false}
+ em1[255] = u8.bitXor(em1[255],1)
+ if verifyPkcs1Encoding(&em1,&hash1) {return false}
+ em0[0] = u8.bitOr(em0[0],128)
+ if verifyPssEncoding(&em0,2048,&hash0) {return false}
 return true
 }
 
