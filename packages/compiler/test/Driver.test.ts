@@ -1,4 +1,5 @@
 import { rsaWasmSource } from './support/rsaAcceptance.js'
+import { aesGcmWasmAcceptanceSource } from './support/aesGcmAcceptance.js'
 import { tlsHkdfWasmSource } from './support/tlsHkdfAcceptance.js'
 import { x25519WasmAcceptanceSource } from './support/x25519Acceptance.js'
 import * as AbiManifest from '../src/AbiManifest.js'

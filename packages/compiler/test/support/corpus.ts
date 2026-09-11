@@ -1,4 +1,5 @@
 import type * as RuntimeComponent from '../../src/RuntimeComponent.js'
+import { aesGcmAcceptanceSource } from './aesGcmAcceptance.js'
 import { borrowedTemporaryStream, borrowedTemporaryLifecycle } from './borrowedTemporaries.js'
 import { partialSuspension } from './partialSuspension.js'
 import { rsaNativeSource, rsaWasmSource } from './rsaAcceptance.js'
@@ -32,6 +33,8 @@ import { uriAcceptanceSource } from './uriAcceptance.js'
 import { ecdsaP256AcceptanceSource } from './ecdsaP256Acceptance.js'
 import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
+import { httpsIdentityAcceptanceSource } from './httpsIdentityAcceptance.js'
+import { sanAcceptanceSource } from './sanAcceptance.js'
 import {
   borrowedBox,
   borrowedStream,
@@ -6223,6 +6226,16 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 ]
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
+  {
+    name: 'https-san-adapter',
+    source: sanAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'https-identity-matrix-v1',
+    source: httpsIdentityAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
   {
     name: 'ecdsa-p256-verification',
     source: ecdsaP256AcceptanceSource,
