@@ -9,6 +9,8 @@
 //! Each actor supports incremental input through `update`, consuming finalization through
 //! `finish`, and one-shot input through `hash`. The states use only inline storage and allocate no
 //! memory. Each digest uses the standardized big-endian byte order.
+//! [`Sha256.checkpoint`] and [`Sha384.checkpoint`] also return a digest without consuming the
+//! streaming state. Use these operations for exact protocol transcript boundaries.
 //!
 //! # Gotchas
 //! If an update exceeds the algorithm's standard bit-length domain, the program traps. `finish`
@@ -81,6 +83,17 @@ impl Sha256 {
   pub fn update(self: &mut Self, bytes: &[u8]) -> () {
     return update32(&mut self.state, bytes)
   }
+  /// Returns the SHA-256 digest of all bytes supplied so far without consuming this state.
+  ///
+  /// # Details
+  ///
+  /// The operation copies the fixed inline state. A later `update` or `checkpoint` continues from
+  /// the same original byte sequence.
+  pub fn checkpoint(self: &Self) -> [u8; 32] {
+    let copied = copyState32(&self.state)
+    let finished = finish32(move copied)
+    return digest32_32(&finished)
+  }
   /// Consumes this SHA-256 state and returns its 32-byte digest in big-endian byte order.
   pub fn finish(self: Self) -> [u8; 32] {
     let state = finish32(move self.state)
@@ -108,6 +121,17 @@ impl Sha384 {
   /// If the complete message exceeds the 128-bit bit-length domain, the program traps.
   pub fn update(self: &mut Self, bytes: &[u8]) -> () {
     return update64(&mut self.state, bytes)
+  }
+  /// Returns the SHA-384 digest of all bytes supplied so far without consuming this state.
+  ///
+  /// # Details
+  ///
+  /// The operation copies the fixed inline state. A later `update` or `checkpoint` continues from
+  /// the same original byte sequence.
+  pub fn checkpoint(self: &Self) -> [u8; 48] {
+    let copied = copyState64(&self.state)
+    let finished = finish64(move copied)
+    return digest64_48(&finished)
   }
   /// Consumes this SHA-384 state and returns its 48-byte digest in big-endian byte order.
   pub fn finish(self: Self) -> [u8; 48] {
@@ -227,6 +251,25 @@ struct Length64Transition {
   high: u64
   low: u64
   overflow: bool
+}
+
+fn copyState32(state: &State32) -> State32 {
+  return State32 {
+    words: state.words,
+    buffer: state.buffer,
+    buffered: state.buffered,
+    bitLength: state.bitLength,
+  }
+}
+
+fn copyState64(state: &State64) -> State64 {
+  return State64 {
+    words: state.words,
+    buffer: state.buffer,
+    buffered: state.buffered,
+    bitLengthHigh: state.bitLengthHigh,
+    bitLengthLow: state.bitLengthLow,
+  }
 }
 
 fn length64Transition(high: u64, low: u64, byteLength: u64) -> Length64Transition {
