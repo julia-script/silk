@@ -14,10 +14,10 @@ deterministic observation and failure tests.
 
 ## Details
 
-Each invocation carries one [`LogLevel`](#declaration-73696c6b2f6c6f676765723a3a4c6f674c6576656c) and one valid UTF-8 message. The service does not add
-formatting, newlines, timestamps, or allocation requirements. The stdout provider forwards only
-the message bytes; the in-memory provider retains at most eight committed events and 64 message
-bytes, and exposes attempted calls separately from successful commits.
+Each invocation carries one [`LogLevel`](#declaration-73696c6b2f6c6f676765723a3a4c6f674c6576656c), one static format template, and one borrowed argument
+pack. Providers reuse `silk.format` to produce one semantic message without adding caller-visible
+Writer or allocation requirements. The in-memory provider retains at most eight committed events
+and 64 message bytes, and exposes attempted calls separately from successful commits.
 
 ## Gotchas
 
@@ -39,7 +39,10 @@ import silk.usize
 effect fn program() -> i32
 ! LogError {
   let mut logger = Logger.inMemoryProvider()
-  let logged = run Effect.logWarning("cache miss")
+  let logged = run Effect.logWarning("cache {kind} missed {count} times", &.{
+    kind: "users",
+    count: 3,
+  })
     |> Effect.provideMut(&mut logger)
   if Logger.length(&logger) != usize.ONE {
     return 1
@@ -146,7 +149,7 @@ assigning one meaning to that code across different providers.
 pub service Logger
 ```
 
-A replaceable service that receives one complete semantic log event per call.
+A replaceable service that formats and receives one complete semantic log event per call.
 
 ### When to use
 
@@ -155,23 +158,25 @@ destination.
 
 ### Details
 
-Each call carries one severity and one valid UTF-8 message. The service does not require a
-newline, timestamp, prefix, allocation, or output destination. The provider owns those choices.
+Each call carries one severity, one static template, and one borrowed argument pack. The service
+does not require a newline, timestamp, prefix, allocation, or output destination. The provider
+owns those choices and applies the shared `silk.format` contract.
 
 <a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765723a3a6f7065726174696f6e3a6c6f67"></a>
 
 ### Operation `log`
 
 ```silk
-effect<'life0> fn log<'life0>(level: LogLevel, message: string<'life0>) -> () ! LogError ? &mut Logger
+effect<'env> fn log<Args: 'env, 'life1: 'env, 'env>(level: LogLevel, template: string<'static>, args: &'life1 Args) -> () ! LogError ? &mut Logger
 ```
 
-Submits one complete UTF-8 message at one severity to the active provider.
+Formats and submits one complete UTF-8 message at one severity to the active provider.
 
 #### Details
 
-The call preserves the message bytes exactly. It does not add a newline, severity label,
-timestamp, or other formatting. A provider failure produces [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
+Template validation and Display selection match [`Format.format`](./format.md#declaration-73696c6b2f666f726d61743a3a466f726d61742e666f726d6174). The call does not add a
+newline, severity label, timestamp, or provider-independent decoration. A provider failure
+produces [`LogError`](#declaration-73696c6b2f6c6f676765723a3a4c6f674572726f72).
 
 <a id="declaration-73696c6b2f6c6f676765723a3a4c6f676765722e6661696c757265"></a>
 
@@ -321,7 +326,7 @@ The provider copies each committed message into fixed internal storage. It recor
 calls separately from committed events. Capacity failure and configured failure do not commit an
 event.
 
-<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a31"></a>
 
 ## Implementation `Logger for InMemoryLogger`
 
@@ -329,7 +334,7 @@ event.
 impl Logger for InMemoryLogger
 ```
 
-<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a303a3a6f7065726174696f6e3a30"></a>
+<a id="declaration-73696c6b2f6c6f676765723a3a696d706c656d656e746174696f6e3a313a3a6f7065726174696f6e3a30"></a>
 
 ### Operation `log`
 

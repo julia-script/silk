@@ -815,6 +815,9 @@ export type Expression =
       readonly role: string
       readonly access: 'Shared' | 'Exclusive'
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+      readonly staticArguments: ReadonlyArray<StaticValue.Value>
+      /** Caller-authored origins aligned with static arguments, excluded from instance identity. */
+      readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
       readonly arguments: ReadonlyArray<Expression>
       readonly loanEnds: ReadonlyArray<BorrowId>
       readonly type: Type.Effect
@@ -2075,7 +2078,7 @@ const encodeExpression = (expression: Expression, depth: number): string => {
       ].join('\n')
     case 'ServiceEffectConstruct':
       return [
-        `${indent}service-call ${Type.encode(expression.service)}.${expression.operation}@${expression.role}:${expression.access.toLowerCase()} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
+        `${indent}service-call ${Type.encode(expression.service)}.${expression.operation}@${expression.role}:${expression.access.toLowerCase()}${expression.staticArguments.length === 0 ? '' : ` static=${expression.staticArguments.map(StaticValue.presentation).join(',')}`} : ${Type.encode(expression.type)} loan-ends=${expression.loanEnds.map((loan) => `l${loan.ordinal}`).join(',') || 'none'} ${spanText(expression.span)}`,
         ...expression.arguments.map((argument) => encodeExpression(argument, depth + 1)),
       ].join('\n')
     case 'BuiltinCall': {

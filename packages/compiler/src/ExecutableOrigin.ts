@@ -1818,6 +1818,7 @@ export const make = (operations: Operations) => {
       target.contract,
       target.declaration.typeParameters.map((parameter) => parameter.type),
       [...typeArguments, ...hiddenArguments],
+      expression.staticArguments,
     )
   }
 

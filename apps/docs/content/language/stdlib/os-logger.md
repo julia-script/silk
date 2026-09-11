@@ -13,7 +13,7 @@ and can replace this provider with `silk.logger.InMemoryLogger`.
 
 ## Details
 
-Construction performs no output. Each log writes exactly the message's UTF-8 bytes without
+Construction performs no output. Each log formats directly through the stdout Writer without
 adding a newline or severity label. Descriptor failures become LogError code 3.
 
 ## Gotchas
@@ -33,12 +33,12 @@ Public declarations: 1.
 pub struct StdoutLogger
 ```
 
-A [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572) provider that writes each complete message to process standard output.
+A [`Logger`](./logger.md#declaration-73696c6b2f6c6f676765723a3a4c6f67676572) provider that formats each complete message to process standard output.
 
 ### Details
 
-The provider ignores the severity for physical formatting and writes only the UTF-8 message
-bytes. It adds no newline and performs no message allocation.
+The provider ignores the severity for physical formatting and writes only the formatted UTF-8
+message bytes. It adds no newline and performs no message allocation.
 
 <a id="declaration-73696c6b2f6f735f6c6f676765723a3a5374646f75744c6f676765722e6d616b65"></a>
 

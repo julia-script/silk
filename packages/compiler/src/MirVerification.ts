@@ -7139,7 +7139,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         }
         if (operation._tag === 'CatchEffect') {
           const runner = self.functions.find((candidate) =>
-            matchesInstance(candidate, operation.runner, operation.runnerTypeArguments),
+            matchesInstance(
+              candidate,
+              operation.runner,
+              operation.runnerTypeArguments,
+              operation.runnerStaticArguments,
+            ),
           )
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const effect = fn.localTypes.at(operation.effect.ordinal)

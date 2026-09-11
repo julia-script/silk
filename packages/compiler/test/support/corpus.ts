@@ -7080,30 +7080,63 @@ pub fn main() -> i32 { return run Effect.catchAll(program(), recover) }`,
   {
     name: 'logging-composition',
     source: `import silk.effect { Effect }
-import silk.logger { LogError, Logger }
+import silk.logger { LogError, LogLevel, Logger }
 effect fn logAndKeep(value: i32) -> i32 ! LogError ? &mut Logger {
-  let logged = run Effect.logDebug("composed")
+  let logged = run Effect.logDebug("d{}", &(value,))
   return value
 }
 effect fn storedLog() -> i32 ! LogError ? &mut Logger {
-  let logged = run Effect.log("stored")
+  let logged = run Effect.log("s", &())
   return 1
 }
 effect fn value(number: i32) -> i32 { return number }
 effect fn composed() -> i32 ! LogError ? &mut Logger {
-  let direct = run Effect.log("direct")
-  let piped = run Effect.log("piped")
+  let trace = run Effect.logTrace("t", &())
+  let direct = run Effect.log("i{}", &(2,))
+  let info = run Effect.logInfo("n{name}", &.{ name: "amed" })
+  let warning = run Effect.logWarning("w", &())
+  let error = run Effect.logError("e", &())
+  let level = LogLevel.Warning
+  let selected = run Effect.logAt(level, "a", &())
   let stored = storedLog()
   let storedValue = run stored
   let tapped = run (value(20) |> Effect.tap(logAndKeep))
-  let flatMapped = run (value(21) |> Effect.flatMap(logAndKeep))
-  if storedValue != 1 || tapped != 20 || flatMapped != 21 { return 2 }
+  if storedValue != 1 || tapped != 20 { return 2 }
   return 42
 }
+effect fn ignore(error: LogError) -> () { return () }
 effect fn program() -> i32 ! LogError {
   let mut logger = Logger.inMemoryProvider()
   let result = run composed() |> Effect.provideMut(&mut logger)
-  if Logger.length(&logger) != 5 { return 1 }
+  if Logger.length(&logger) != 8 { return 1 }
+  if Logger.levelAt(&logger, 0) != LogLevel.Trace { return 3 }
+  if Logger.levelAt(&logger, 1) != LogLevel.Info { return 4 }
+  if Logger.levelAt(&logger, 2) != LogLevel.Info { return 5 }
+  if Logger.levelAt(&logger, 3) != LogLevel.Warning { return 6 }
+  if Logger.levelAt(&logger, 4) != LogLevel.Error { return 7 }
+  if Logger.levelAt(&logger, 5) != LogLevel.Warning { return 8 }
+  if Logger.levelAt(&logger, 6) != LogLevel.Info { return 9 }
+  if Logger.levelAt(&logger, 7) != LogLevel.Debug { return 10 }
+  if Logger.messageLengthAt(&logger, 2) != 5 { return 11 }
+  if Logger.messageByteAt(&logger, 2, 0) != 110 { return 12 }
+  if Logger.messageByteAt(&logger, 2, 4) != 100 { return 13 }
+  if Logger.messageLengthAt(&logger, 7) != 3 { return 14 }
+  if Logger.messageByteAt(&logger, 7, 1) != 50 { return 15 }
+
+  let mut configured = Logger.inMemoryProviderFailAt(0)
+  run Effect.catchAll(
+    Effect.log("rejected {}", &(1,)) |> Effect.provideMut(&mut configured),
+    ignore
+  )
+  if Logger.attempts(&configured) != 1 || Logger.length(&configured) != 0 { return 16 }
+
+  let mut bounded = Logger.inMemoryProvider()
+  run Effect.catchAll(
+    Effect.log("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx{}", &(1,))
+      |> Effect.provideMut(&mut bounded),
+    ignore
+  )
+  if Logger.attempts(&bounded) != 1 || Logger.length(&bounded) != 0 { return 17 }
   return result
 }
 effect fn recover(error: LogError) -> i32 { return 3 }

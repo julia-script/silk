@@ -1620,8 +1620,12 @@ export const hirExpression = (
     )
     if (requirement === undefined)
       return Object.freeze({ _tag: 'Unavailable', span: fact.syntax.span })
-    const substitution = fact.contract.substitution
     const target = fact.reference.operation
+    const staticArgumentOrigins = Object.freeze(
+      (fact._tag === 'Call' ? (fact.staticArguments ?? []) : []).map(
+        (argument) => argument.textOrigin,
+      ),
+    )
     return Object.freeze({
       _tag: 'ServiceEffectConstruct',
       service,
@@ -1629,23 +1633,26 @@ export const hirExpression = (
       role: requirement.role,
       access: requirement.access,
       typeArguments: fact.contract.typeArguments,
+      staticArguments: Object.freeze(
+        (fact._tag === 'Call' ? (fact.staticArguments ?? []) : []).map(
+          (argument) => argument.value,
+        ),
+      ),
+      ...(staticArgumentOrigins.some((origin) => origin !== undefined)
+        ? { staticArgumentOrigins }
+        : {}),
       arguments: Object.freeze(
-        fact.arguments.map((argument, ordinal) => {
+        fact.arguments.flatMap((argument, ordinal) => {
           const parameter = target.parameters.at(ordinal)
+          if (parameter?.phase === 'Static') return []
           const borrowId = argumentBorrowId(argument, ordinal)
-          return parameter?.declaredType._tag === 'Resolved'
-            ? hirExpectedExpression(
-                argument.expression,
-                Type.substitute(parameter.declaredType.type, substitution),
-                'Argument',
-                parameter.syntax.span,
-                borrowId,
-                options,
-              )
-            : hirExpression(argument.expression, borrowId, options)
+          return [hirExpression(argument.expression, borrowId, options)]
         }),
       ),
-      loanEnds: loanEndsOf(fact.arguments),
+      loanEnds: loanEndsOf(
+        fact.arguments,
+        (ordinal) => target.parameters.at(ordinal)?.phase !== 'Static',
+      ),
       type: fact.type.type,
       span: fact.syntax.span,
     })
@@ -1687,8 +1694,13 @@ export const hirExpression = (
           const parameter = target.parameters.at(ordinal)
           if (parameter?.phase === 'Static') return []
           const borrowId = argumentBorrowId(argument, ordinal)
+          const genericForwarding =
+            parameter?.declaredType._tag === 'Resolved' &&
+            argument.expression.type._tag === 'Available' &&
+            Type.someSubterm(parameter.declaredType.type, Type.isParameter) &&
+            Type.someSubterm(argument.expression.type.type, Type.isParameter)
           return [
-            parameter?.declaredType._tag === 'Resolved'
+            parameter?.declaredType._tag === 'Resolved' && !genericForwarding
               ? hirExpectedExpression(
                   argument.expression,
                   Type.substitute(parameter.declaredType.type, substitution),

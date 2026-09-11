@@ -15,6 +15,7 @@ import * as MirVerification from './MirVerification.js'
 import type * as OpaqueRealization from './OpaqueRealization.js'
 import type * as Ownership from './Ownership.js'
 import * as SourceSpan from './SourceSpan.js'
+import type * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 
 /**
@@ -508,11 +509,14 @@ export const lowerProgram = (
   const runnerKey = (
     declaration: DeclarationFacts.CanonicalId,
     typeArguments: ReadonlyArray<Type.GenericArgument>,
-  ): string => instanceText(declaration, typeArguments)
+    staticArguments: ReadonlyArray<StaticValue.Value>,
+  ): string => instanceText(declaration, typeArguments, staticArguments)
   const retainedRunners = new Set(
     loweredRunners
       .filter(({ spec }) => !unresolvedOpenBase(spec))
-      .map(({ spec }) => runnerKey(spec.id, spec.owner.key.typeArguments)),
+      .map(({ spec }) =>
+        runnerKey(spec.id, spec.owner.key.typeArguments, spec.owner.key.staticArguments),
+      ),
   )
   const retainReferencedRunners = (fn: Mir.MirFunction): boolean => {
     let changed = false
@@ -523,7 +527,11 @@ export const lowerProgram = (
         operation._tag !== 'CatchEffect'
       )
         continue
-      const key = runnerKey(operation.runner, operation.runnerTypeArguments)
+      const key = runnerKey(
+        operation.runner,
+        operation.runnerTypeArguments,
+        operation.runnerStaticArguments ?? Object.freeze([]),
+      )
       if (!retainedRunners.has(key)) {
         retainedRunners.add(key)
         changed = true
@@ -536,13 +544,22 @@ export const lowerProgram = (
   while (retainedChanged) {
     retainedChanged = false
     for (const { spec, runner } of loweredRunners) {
-      if (!retainedRunners.has(runnerKey(spec.id, spec.owner.key.typeArguments))) continue
+      if (
+        !retainedRunners.has(
+          runnerKey(spec.id, spec.owner.key.typeArguments, spec.owner.key.staticArguments),
+        )
+      )
+        continue
       if (retainReferencedRunners(runner)) retainedChanged = true
     }
   }
   functions.push(
     ...loweredRunners.flatMap(({ spec, runner }) => {
-      return retainedRunners.has(runnerKey(spec.id, spec.owner.key.typeArguments)) ? [runner] : []
+      return retainedRunners.has(
+        runnerKey(spec.id, spec.owner.key.typeArguments, spec.owner.key.staticArguments),
+      )
+        ? [runner]
+        : []
     }),
   )
   const finalizedLayout = withExecutionPackageCleanups(layout, functions)

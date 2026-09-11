@@ -5,7 +5,7 @@
 //! and can replace this provider with `silk.logger.InMemoryLogger`.
 //!
 //! # Details
-//! Construction performs no output. Each log writes exactly the message's UTF-8 bytes without
+//! Construction performs no output. Each log formats directly through the stdout Writer without
 //! adding a newline or severity label. Descriptor failures become LogError code 3.
 //!
 //! # Gotchas
@@ -18,28 +18,28 @@ static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArch
   import silk.logger { Logger, LogError, LogLevel }
   import silk.effect { Effect }
   import silk.result { Result }
-  import silk.string { String }
+  import silk.format { Format }
 
-/// A [`Logger`] provider that writes each complete message to process standard output.
+/// A [`Logger`] provider that formats each complete message to process standard output.
 ///
 /// # Details
 ///
-/// The provider ignores the severity for physical formatting and writes only the UTF-8 message
-/// bytes. It adds no newline and performs no message allocation.
+/// The provider ignores the severity for physical formatting and writes only the formatted UTF-8
+/// message bytes. It adds no newline and performs no message allocation.
 pub struct StdoutLogger {}
 
 impl StdoutLogger {
   /// Creates a native stdout logger without writing or acquiring a descriptor.
   pub fn make() -> StdoutLogger { return StdoutLogger {} }
 
-  effect fn writeStdout(
+  effect fn writeStdout<Args>(
     self: &mut Self,
     level: LogLevel,
-    message: string
+    static template: string<'static>,
+    args: &Args
   ) -> () ! LogError {
     let mut streams = StdoutWriter.make()
-    let bytes = String.utf8Bytes(message)
-    let completed = run Effect.result(writeStdoutBytes(&mut streams, bytes))
+    let completed = run Effect.result(formatStdout<Args>(&mut streams, template, args))
     return match move completed {
       Result<(), WriterError>.Success { value: _ } => ()
       Result<(), WriterError>.Failure { error: _ } => run writeFailure()
@@ -47,11 +47,12 @@ impl StdoutLogger {
   }
 }
 
-effect fn writeStdoutBytes(
+effect fn formatStdout<Args>(
   writer: &mut StdoutWriter,
-  message: &[u8]
+  static template: string<'static>,
+  args: &Args
 ) -> () ! WriterError {
-  run Intrinsic.bindRequirementMut(Writer.writeAll(message), writer)
+  return run Format.format<Args>(template, args) |> Effect.provideMut<Writer>(writer)
 }
 
 effect fn writeFailure() -> never ! LogError { fail Logger.failure(3) }
@@ -61,4 +62,3 @@ impl Logger for StdoutLogger {
 }
 
 }
-

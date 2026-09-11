@@ -2750,7 +2750,7 @@ function lowerCallExpression(
       (call?.resultEffect === undefined
         ? undefined
         : effectValueByIdentity(fn.layout, call.resultEffect)) ??
-      fn.effectResults.get(instanceText(expression.target, typeArguments)) ??
+      fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments)) ??
       fn.type(expression.type) ??
       resultCallableValueType(
         fn.layout,

@@ -10122,10 +10122,10 @@ export const finishDeclarationCall = (
     resolution,
   )
   const phaseDiagnostics =
-    reference._tag !== 'Resolved'
+    callable === undefined
       ? Object.freeze<ReadonlyArray<Diagnostic.Diagnostic>>([])
       : Object.freeze(
-          reference.declaration.parameters.flatMap((parameter) => {
+          callable.parameters.flatMap((parameter) => {
             if (parameter.phase !== 'Runtime') return []
             const argument = argumentsResult.facts.at(parameter.id.ordinal)
             return argument?.type._tag === 'Available' &&
@@ -10143,7 +10143,7 @@ export const finishDeclarationCall = (
         )
   const staticArguments = (() => {
     if (
-      reference._tag !== 'Resolved' ||
+      callable === undefined ||
       resolution.staticContext === undefined ||
       resolution.deferStaticCalls === true
     )
@@ -10156,7 +10156,7 @@ export const finishDeclarationCall = (
     const values: Array<{ readonly parameter: ParameterFact; readonly value: StaticValue.Value }> =
       []
     const diagnostics: Array<Diagnostic.Diagnostic> = []
-    for (const parameter of reference.declaration.parameters) {
+    for (const parameter of callable.parameters) {
       if (parameter.phase !== 'Static') continue
       const argument = argumentsResult.facts.at(parameter.id.ordinal)
       if (argument === undefined) continue

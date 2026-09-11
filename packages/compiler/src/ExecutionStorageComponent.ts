@@ -247,7 +247,7 @@ const bootstrapDemand = (
           enqueue(operation.runner, operation.runnerTypeArguments, operation.runnerStaticArguments)
           break
         case 'CatchEffect':
-          enqueue(operation.runner, operation.runnerTypeArguments)
+          enqueue(operation.runner, operation.runnerTypeArguments, operation.runnerStaticArguments)
           break
         case 'RunEffectComposite':
           for (const alternative of operation.alternatives)

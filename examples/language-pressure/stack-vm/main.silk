@@ -303,7 +303,7 @@ fn verify(value: i32) -> () {
 }
 
 effect fn logVerified(value: ()) -> () ! LogError ? &mut Logger {
-  let logged = run Effect.log("stack VM verification complete")
+  let logged = run Effect.log("stack VM verification complete", &())
   return move value
 }
 

@@ -1169,6 +1169,7 @@ export type Operation =
       readonly effect: LocalId
       readonly runner: DeclarationFacts.CanonicalId
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+      readonly runnerStaticArguments?: ReadonlyArray<StaticValue.Value>
       readonly arguments: ReadonlyArray<LocalId>
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly failureValueType: SilkType.Type

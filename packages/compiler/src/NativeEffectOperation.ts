@@ -1031,7 +1031,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     }
     case 'CatchEffect': {
       const target = declared.find((candidate) =>
-        Mir.matchesInstance(candidate.fn, operation.runner, operation.runnerTypeArguments),
+        Mir.matchesInstance(
+          candidate.fn,
+          operation.runner,
+          operation.runnerTypeArguments,
+          operation.runnerStaticArguments,
+        ),
       )
       if (target === undefined) throw new RangeError('Backend cannot resolve Effect result runner')
       const reifyArguments = yield* NativeArgument.captures(
