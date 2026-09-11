@@ -1,6 +1,8 @@
 import type * as RuntimeComponent from '../../src/RuntimeComponent.js'
 import { borrowedTemporaryStream, borrowedTemporaryLifecycle } from './borrowedTemporaries.js'
 import { partialSuspension } from './partialSuspension.js'
+import { rsaNativeSource, rsaWasmSource } from './rsaAcceptance.js'
+import { x25519AcceptanceSource } from './x25519Acceptance.js'
 /**
  * The shared native acceptance corpus: programs with independently pinned process outcomes.
  */
@@ -7858,6 +7860,12 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'rsa-verification',
+    source: rsaWasmSource,
+    nativeSource: rsaNativeSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
     name: 'hmac-hkdf',
     source: hmacHkdfAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
@@ -8624,4 +8632,3 @@ pub fn main() -> i32 { return 0 }`,
     codes: ['PAR0001'],
   },
 ]
-import { x25519AcceptanceSource } from './x25519Acceptance.js'

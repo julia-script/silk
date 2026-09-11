@@ -1,3 +1,4 @@
+import { rsaWasmSource } from './support/rsaAcceptance.js'
 import { x25519WasmAcceptanceSource } from './support/x25519Acceptance.js'
 import * as AbiManifest from '../src/AbiManifest.js'
 import * as ForeignContract from '../src/ForeignContract.js'
@@ -727,6 +728,26 @@ it.effect('executes ECDSA P-256 verification through LLVM-to-Wasm without host i
     const outcome = yield* compileSource('ecdsa-p256.wasm', ecdsaP256WasmSource, {
       compilation: {
         root: SourceFile.make('memory/ecdsa-p256-wasm', ascii(ecdsaP256WasmSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+    assert.deepEqual(WebAssembly.Module.imports(module), [])
+    const instance = new WebAssembly.Instance(module)
+    const main = instance.exports['main']
+    assert.isFunction(main)
+    if (typeof main === 'function') assert.strictEqual(main(), 42)
+  }),
+)
+
+it.effect('executes bounded RSA verification through LLVM-to-Wasm', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('rsa.wasm', rsaWasmSource, {
+      compilation: {
+        root: SourceFile.make('memory/rsa-wasm', ascii(rsaWasmSource)),
         target: 'wasm32-unknown-unknown',
       },
       artifactKind: 'WebAssemblyModule',

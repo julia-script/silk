@@ -420,6 +420,12 @@
     "namespace": "Result"
   },
   {
+    "module": "silk/rsa",
+    "path": "silk/rsa.silk",
+    "namespace": "RsaPublicKey",
+    "aliases": ["RsaError"]
+  },
+  {
     "module": "silk/scheduler",
     "path": "silk/scheduler.silk",
     "namespace": "Scheduler",

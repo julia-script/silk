@@ -1038,3 +1038,39 @@ Pass the raw shared result into the protocol's key derivation. This primitive do
 a peer or implement TLS. Ownership prevents accidental reuse of the same owner, but does not
 guarantee physical secret erasure. Functional vectors and inspection of a particular compiler's
 output do not establish universal constant-time execution or production security.
+
+### STDLIB-RSA — bounded RSA SHA-256 verification
+
+`silk.rsa` exports `RsaPublicKey` and `RsaError`. `fromComponents` admits canonical unsigned
+big-endian odd moduli containing 2048 through 4096 significant bits and exactly the exponent
+bytes `01 00 01`. The resulting key owns bounded private storage. Verification borrows the key,
+message and signature; it requires no service, entropy, allocation or private-key operation.
+Messages exceeding 2^61−1 bytes return `MessageTooLong` before hashing. Each verification hashes
+the exact message once with SHA-256. Signatures must have exactly ceil(modulusBits/8) bytes and
+represent an integer below the modulus.
+
+`verifyPss` selects SHA-256, MGF1-SHA-256, salt length 32 and trailer field 1. It uses
+emBits = modulusBits−1 and emLen = ceil(emBits/8), including the shorter encoded-message width
+for a 2049-bit modulus. It checks all leading bits, padding bytes, delimiter, salt-dependent hash
+and trailer. Verification failure returns `InvalidSignature`; invalid signature width returns
+`InvalidLength`.
+
+`fromCertificateKey` takes the original AlgorithmIdentifier DER, key BIT STRING bytes and unused
+bit count retained by the certificate container decoder. It requires byte alignment, rsaEncryption
+with NULL parameters, and a minimal positive DER RSAPublicKey sequence without trailing data.
+PSS-restricted key identifiers are outside this profile. `verifyCertificate` similarly takes the
+original signature AlgorithmIdentifier DER and signature BIT STRING metadata. It admits PSS only
+with effective SHA-256/MGF1-SHA-256/salt32/trailer1 parameters, in unique ordered explicit fields;
+SHA-256 identifiers accept absent or NULL parameters. The default SHA-1 and salt20 values do not
+meet this profile. Trailer1 may be omitted or explicit.
+
+The certificate verifier also admits sha256WithRSAEncryption with absent or NULL parameters. Its
+PKCS#1 v1.5 verification checks the complete `00 01 FF…FF 00` padding and the exact SHA-256
+DigestInfo, including its NULL parameter. No general PKCS#1 signing or encryption API is exposed.
+Malformed key DER returns `InvalidEncoding`; unsupported algorithm metadata returns
+`InvalidParameters`; an unsupported mathematical key profile returns `InvalidKey`.
+
+Arithmetic is bounded public-data work. It does not introduce a bigint API, compiler-recognized
+library declaration or external cryptographic fallback. Signature validity establishes neither
+certificate trust nor certificate path or service identity validity. Native/Wasm evidence applies
+only to the recorded compiler profiles; it does not claim FIPS validation or complete TLS support.
