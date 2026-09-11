@@ -32,6 +32,7 @@ const rfc = fixture('rfc8448-client-finished')
 const aes256 = fixture('independent-aes256-application')
 const chacha = fixture('independent-chacha-alert')
 const padded = fixture('independent-aes128-padded-application')
+const sequenceZero = fixture('independent-aes128-sequence-zero')
 const sequenceOne = fixture('independent-aes128-sequence-one')
 const admittedHeaderTamper = `1703030034${rfc.wire.slice(10, -2)}`
 
@@ -108,6 +109,25 @@ fn inputError(result: Result<InputProgress, RecordError>) -> i32 {
       RecordError.AuthenticationFailed => 5
       RecordError.InvalidAcknowledgment {requested, pending} => 6
       RecordError.KeyUsageExhausted => 7
+    }
+  }
+}
+
+fn inputOverflow(
+  result: Result<InputProgress, RecordError>,
+  requested: usize,
+  maximum: usize,
+) -> bool {
+  return match move result {
+    Result<InputProgress, RecordError>.Success {value} => false
+    Result<InputProgress, RecordError>.Failure {error} => match move error {
+      RecordError.RecordOverflow {requested: actual, maximum: limit} => actual == requested && limit == maximum
+      RecordError.InvalidSecretLength {requested: actual, expected} => false
+      RecordError.InvalidState => false
+      RecordError.InvalidContent => false
+      RecordError.AuthenticationFailed => false
+      RecordError.InvalidAcknowledgment {requested: actual, pending} => false
+      RecordError.KeyUsageExhausted => false
     }
   }
 }
@@ -328,7 +348,8 @@ effect fn authenticatedPadding() -> bool ! OutOfMemoryError {
 
 effect fn sequenceOneAfterPartialAck() -> bool ! OutOfMemoryError {
   let secret: [u8; 32] = ${array(sequenceOne.trafficSecret)}
-  let firstContent: [u8; 1] = [8]
+  let firstContent: [u8; 1] = ${array(sequenceZero.content)}
+  let firstExpected: [u8; 23] = ${array(sequenceZero.wire)}
   let secondContent: [u8; 1] = ${array(sequenceOne.content)}
   let secondWire: [u8; 23] = ${array(sequenceOne.wire)}
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -348,18 +369,29 @@ effect fn sequenceOneAfterPartialAck() -> bool ! OutOfMemoryError {
   if !queued(TlsRecordSender.queueRecord(&mut sender, ContentType.ApplicationData, &firstContent), 1, OutputDemand.RecordQueued) {
     return false
   }
-  let firstWire = TlsRecordSender.pendingOutput(&sender)
-  let firstLength = firstWire.length
-  if !fed(TlsRecordReceiver.feedInput(&mut receiver, firstWire), firstLength, InputDemand.RecordReady) {
+  if !same(TlsRecordSender.pendingOutput(&sender), &firstExpected) { return false }
+  if !same(TlsRecordSender.pendingOutput(&sender), &firstExpected) { return false }
+  if !queued(TlsRecordSender.queueRecord(&mut sender, ContentType.ApplicationData, &secondContent), 0, OutputDemand.NeedOutput) {
+    return false
+  }
+  if unitError(TlsRecordSender.ackWritten(&mut sender, 0)) != 0 { return false }
+  if unitError(TlsRecordSender.ackWritten(&mut sender, 24)) != 6 { return false }
+  if !same(TlsRecordSender.pendingOutput(&sender), &firstExpected) { return false }
+
+  if !fed(TlsRecordReceiver.feedInput(&mut receiver, &firstExpected), 23, InputDemand.RecordReady) {
     return false
   }
   if !recordIs(&receiver, ContentType.ApplicationData, &firstContent) { return false }
   if unitError(TlsRecordReceiver.consumeRecord(&mut receiver)) != 0 { return false }
 
-  if unitError(TlsRecordSender.ackWritten(&mut sender, 1)) != 0 { return false }
-  let afterOne = TlsRecordSender.pendingOutput(&sender)
-  if afterOne.length != firstLength - 1 || afterOne[0] != 3 { return false }
-  if unitError(TlsRecordSender.ackWritten(&mut sender, firstLength - 1)) != 0 { return false }
+  let mut acknowledged: usize = 0
+  while acknowledged < 23 {
+    let expectedSuffix = Slice.view<u8>(&firstExpected, acknowledged, 23 - acknowledged)
+    if !same(TlsRecordSender.pendingOutput(&sender), expectedSuffix) { return false }
+    if unitError(TlsRecordSender.ackWritten(&mut sender, 1)) != 0 { return false }
+    acknowledged = acknowledged + 1
+  }
+  if TlsRecordSender.pendingOutput(&sender).length != 0 { return false }
 
   if !queued(TlsRecordSender.queueRecord(&mut sender, ContentType.ApplicationData, &secondContent), 1, OutputDemand.RecordQueued) {
     return false
@@ -370,6 +402,49 @@ effect fn sequenceOneAfterPartialAck() -> bool ! OutOfMemoryError {
   }
   if !recordIs(&receiver, ContentType.ApplicationData, &secondContent) { return false }
   return unitError(TlsRecordReceiver.consumeRecord(&mut receiver)) == 0
+}
+
+effect fn protectedHeaderBounds() -> bool ! OutOfMemoryError {
+  let secret: [u8; 32] = ${array(rfc.trafficSecret)}
+  let empty: [u8; 0] = []
+  let tooShort: [u8; 5] = [23, 3, 3, 0, 16]
+  let encryptedOverflow: [u8; 5] = [23, 3, 3, 65, 1]
+  let innerOverflow: [u8; 5] = [23, 3, 3, 64, 18]
+  let mut allocator = Allocator.systemAllocatorProvider()
+
+  let madeShort = run (TlsRecordReceiver.make(CipherSuite.Aes128GcmSha256, &secret)
+    |> Effect.provideMut(&mut allocator))
+  let mut short = match move madeShort {
+    Result<TlsRecordReceiver, RecordError>.Failure {error} => { return false }
+    Result<TlsRecordReceiver, RecordError>.Success {value} => move value
+  }
+  if !inputOverflow(TlsRecordReceiver.feedInput(&mut short, &tooShort), 16, 16640) { return false }
+  if !recordAbsent(&short) { return false }
+  if inputError(TlsRecordReceiver.feedInput(&mut short, &empty)) != 2 { return false }
+
+  let madeEncrypted = run (TlsRecordReceiver.make(CipherSuite.Aes128GcmSha256, &secret)
+    |> Effect.provideMut(&mut allocator))
+  let mut encrypted = match move madeEncrypted {
+    Result<TlsRecordReceiver, RecordError>.Failure {error} => { return false }
+    Result<TlsRecordReceiver, RecordError>.Success {value} => move value
+  }
+  if !inputOverflow(TlsRecordReceiver.feedInput(&mut encrypted, &encryptedOverflow), 16641, 16640) {
+    return false
+  }
+  if !recordAbsent(&encrypted) { return false }
+  if inputError(TlsRecordReceiver.feedInput(&mut encrypted, &empty)) != 2 { return false }
+
+  let madeInner = run (TlsRecordReceiver.make(CipherSuite.Aes128GcmSha256, &secret)
+    |> Effect.provideMut(&mut allocator))
+  let mut inner = match move madeInner {
+    Result<TlsRecordReceiver, RecordError>.Failure {error} => { return false }
+    Result<TlsRecordReceiver, RecordError>.Success {value} => move value
+  }
+  if !inputOverflow(TlsRecordReceiver.feedInput(&mut inner, &innerOverflow), 16386, 16385) {
+    return false
+  }
+  if !recordAbsent(&inner) { return false }
+  return inputError(TlsRecordReceiver.feedInput(&mut inner, &empty)) == 2
 }
 
 effect fn maximumContent() -> bool ! OutOfMemoryError {
@@ -434,8 +509,9 @@ effect fn publicCases() -> i32 ! OutOfMemoryError {
   if !(run plaintextAndBounds()) { return 6 }
   if !(run authenticatedPadding()) { return 7 }
   if !(run sequenceOneAfterPartialAck()) { return 8 }
-  if !(run maximumContent()) { return 9 }
-  if !(run constructorBounds()) { return 10 }
+  if !(run protectedHeaderBounds()) { return 9 }
+  if !(run maximumContent()) { return 10 }
+  if !(run constructorBounds()) { return 11 }
   return 42
 }
 
