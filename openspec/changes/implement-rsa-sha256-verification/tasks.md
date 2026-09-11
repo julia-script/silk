@@ -11,5 +11,5 @@
 ## 3. Evidence and handoff
 
 - [x] 3.1 Pin independent fixture provenance and reproduction; verify selected NIST and Zig-positive results plus standards-derived negatives.
-- [ ] 3.2 Complete economical shared native, structured and Wasm evidence plus emitted-target inspection; record exact results and limits.
+- [x] 3.2 Complete economical shared native, structured and Wasm evidence plus emitted-target inspection; record exact results and limits.
 - [ ] 3.3 Run required repository and release checks, resolve independent correctness and test-economics review, and verify the draft PR and Linear handoff.

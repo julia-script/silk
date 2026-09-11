@@ -91,4 +91,14 @@ rejection checks: mismatched PSS digest, changed PKCS#1 digest byte and forbidde
 The existing native program with these checks passed (122.16 seconds process, 85.23 seconds
 test work under concurrent load); no additional compiler pipeline was introduced.
 
-Full tests/check/release and dedicated economics review remain delivery gates.
+Dedicated economics review approved `5a915463bee775b0352f7291ca38f38d263d45f9` after
+removing the redundant default PKCS4096 execution and duplicate DER-length case, and adding
+canonical duplicate PSS hashAlgorithm rejection. The complete fixture/oracle collection remains
+unchanged. The final default native program executes five complete public verifications:
+PSS2048/2049/4096 and PKCS2048/2049. Its complete review and timing caveats are in
+`test-economics-review.md`. General correctness review approved this final test-only delta too.
+
+The final three new tests passed in 52.37 seconds process/42.27 seconds test work after the
+broad competing pools stopped. The comparable base selection contained no matching tests
+and took 37.33 seconds in startup/import; this is an observed increment, not a precise prediction
+of whole-suite wall time. Full tests/check/release remain delivery gates.
