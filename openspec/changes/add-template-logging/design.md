@@ -70,6 +70,9 @@ overload or adapter remains under the repository's green-field policy.
 - [Generic service dispatch exposes a compiler gap] → Cover static service-operation arguments from
   analysis through HIR, residualization, Effect lowering, runner retention, and verification with a
   focused regression before relying on the capability in the logging implementation.
+- [Stored or conditional logging joins static template specializations] → Carry canonical static
+  argument keys in representation owners and concrete static values in composite runner targets, so
+  every phase selects the same specialization rather than treating equal type arguments as sufficient.
 - [A retained message exceeds bounded capacity] → Fail with the provider's existing capacity
   LogError after one attempt and before committing any event metadata or bytes.
 - [Direct formatting increases physical stdout writes] → Accept this provider-local trade-off; the

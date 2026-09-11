@@ -63,10 +63,10 @@ pub fn main() -> i32 {
         span: [diagnostic.span.sourceId, diagnostic.span.start, diagnostic.span.end],
       })),
       [
+        { code: 'SEM0177', span: ['logging/main', 146, 147] },
+        { code: 'SEM0177', span: ['logging/main', 175, 179] },
+        { code: 'SEM0177', span: ['logging/main', 207, 216] },
         { code: 'SEM0083', span: ['silk/format', 14495, 14517] },
-        { code: 'SEM0177', span: ['silk/format', 21507, 21562] },
-        { code: 'SEM0177', span: ['silk/format', 26710, 26733] },
-        { code: 'SEM0177', span: ['silk/format', 27059, 27307] },
       ],
     )
   }),

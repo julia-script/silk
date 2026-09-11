@@ -611,7 +611,7 @@ import silk.logger { LogError, LogLevel, Logger }
 import silk.os_logger { StdoutLogger }
 
 effect fn program() -> () ! LogError ? &mut Logger {
-  return run Logger.log(LogLevel.Info, "ready")
+  return run Logger.log(LogLevel.Info, "ready", &())
 }
 
 pub effect fn main() ! LogError {

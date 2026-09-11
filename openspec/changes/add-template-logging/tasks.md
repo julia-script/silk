@@ -29,6 +29,9 @@
 - [x] 4.1 Extend the existing shared native acceptance corpus with the minimum formatted-logging case
       that proves helper severity/order/message behavior and cross-engine agreement without a new test
       worker or redundant native compilation.
-- [ ] 4.2 Run focused logging/formatting checks, OpenSpec strict validation, then the repository-required
+- [x] 4.2 Preserve static specialization identity through finite Effect joins and composite runner
+      selection, and verify a stored choice between two static specializations realizes, verifies, and
+      executes the selected specialization.
+- [ ] 4.3 Run focused logging/formatting checks, OpenSpec strict validation, then the repository-required
       `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, `pnpm test`, `pnpm check`, and
       `pnpm release:candidate` commands in order and record exact results.

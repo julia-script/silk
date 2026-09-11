@@ -706,6 +706,8 @@ export const hirExpression = (
         })
   }
   if (fact._tag === 'Identifier') {
+    if (fact.staticValue !== undefined && fact.type._tag === 'Available')
+      return staticValueExpression(fact.staticValue, fact.type.type, fact.syntax.span)
     if (
       fact.reference._tag === 'ResolvedBinding' &&
       fact.reference.binding.staticValue !== undefined &&

@@ -521,6 +521,19 @@ export const lowerProgram = (
   const retainReferencedRunners = (fn: Mir.MirFunction): boolean => {
     let changed = false
     for (const operation of MirVerification.operations(fn)) {
+      if (operation._tag === 'RunEffectComposite') {
+        for (const alternative of operation.alternatives) {
+          const key = runnerKey(
+            alternative.runner,
+            alternative.runnerTypeArguments,
+            alternative.runnerStaticArguments ?? Object.freeze([]),
+          )
+          if (retainedRunners.has(key)) continue
+          retainedRunners.add(key)
+          changed = true
+        }
+        continue
+      }
       if (
         operation._tag !== 'RunEffectValue' &&
         operation._tag !== 'RunStaticEffect' &&

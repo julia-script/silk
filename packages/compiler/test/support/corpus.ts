@@ -1885,6 +1885,20 @@ fn choose(input: First | Second) -> Effect<'static; i32> {
 pub fn main() -> i32 { return run choose(First {}) }`,
     expected: { _tag: 'Completes', result: 41 },
   },
+  {
+    name: 'finite-effect-join-static-specializations',
+    source: `enum Flag { No, Yes }
+effect fn selected(static value: i32) -> i32 { return value }
+effect fn outer(flag: Flag) -> i32 {
+  let picked = match move flag {
+    Flag.Yes => selected(41)
+    Flag.No => selected(42)
+  }
+  return run picked
+}
+pub fn main() -> i32 { return run outer(Flag.No) }`,
+    expected: { _tag: 'Completes', result: 42 },
+  },
   // Alternatives with different capture arities exercise the composite's unified payload lanes:
   // every executor must place and read alternative captures through the registered calling shape.
   // The aggregate alternative also crosses the private address ABI from composite payload lanes;

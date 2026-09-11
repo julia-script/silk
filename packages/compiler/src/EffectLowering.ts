@@ -263,6 +263,8 @@ export const lowerRunEffectComposite = (
     const runnerTypeArguments =
       alternative.storage?.realization.runnerArguments ??
       alternative.environment.instance.typeArguments
+    const runnerInstance =
+      alternative.storage?.realization.runnerInstance ?? alternative.environment.instance
     const tagMappings = Type.failureMembers(alternative.type).flatMap((failure, sourceOrdinal) => {
       const target = Type.failureMembers(effectType.contract).findIndex(
         (candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(failure),
@@ -276,6 +278,9 @@ export const lowerRunEffectComposite = (
             type: alternative,
             runner,
             runnerTypeArguments,
+            ...(runnerInstance.staticArguments.length === 0
+              ? {}
+              : { runnerStaticArguments: runnerInstance.staticArguments }),
             tagMappings,
             arguments: runtimeRequirementArguments(provided),
           }),

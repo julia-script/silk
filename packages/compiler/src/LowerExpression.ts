@@ -1377,7 +1377,11 @@ function lowerRunExpression(
       recipe.witnessEffectSite === undefined &&
       (recipe.operation !== 'EffectSuspend' || fn.builtinEffectRunner)
         ? undefined
-        : lowerExpression(fn, expression.subject, availableRequirements)
+        : lowerExpression(
+            fn,
+            recipe?._tag === 'Match' ? recipe : expression.subject,
+            availableRequirements,
+          )
     if (loweredSubject === 'Transferred') return loweredSubject
     const effectValueType =
       loweredSubject === undefined ? undefined : fn.localTypes.at(loweredSubject.result.ordinal)

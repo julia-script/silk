@@ -1764,7 +1764,14 @@ const cleanupMatchesSemanticType = (
             candidate.instance.typeArguments.every((argument, argumentOrdinal) => {
               const expected = identity.owner?.typeArguments.at(argumentOrdinal)
               return expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
-            }),
+            }) &&
+            candidate.instance.staticArguments.length ===
+              identity.owner.staticArgumentKeys.length &&
+            candidate.instance.staticArguments.every(
+              (argument, argumentOrdinal) =>
+                StaticValue.key(argument) ===
+                identity.owner?.staticArgumentKeys.at(argumentOrdinal),
+            ),
         )
         const selected = cleanup.alternatives.at(ordinal)
         return (
@@ -2644,7 +2651,7 @@ const suspensionCallTargets = (
         Object.freeze({
           declaration: alternative.runner,
           typeArguments: alternative.runnerTypeArguments,
-          staticArguments: Object.freeze([]),
+          staticArguments: alternative.runnerStaticArguments ?? Object.freeze([]),
         }),
       )
     case 'ApplyCallable': {
@@ -7005,7 +7012,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             operation.alternatives.every((alternative, ordinal) => {
               const expected = effect.alternatives.at(ordinal)
               const runner = self.functions.find((candidate) =>
-                matchesInstance(candidate, alternative.runner, alternative.runnerTypeArguments),
+                matchesInstance(
+                  candidate,
+                  alternative.runner,
+                  alternative.runnerTypeArguments,
+                  alternative.runnerStaticArguments,
+                ),
               )
               const sourceFailures = SilkType.failureMembers(alternative.type.type)
               const mappingsValid =

@@ -625,7 +625,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
         yield* LlvmBlock.setInsertionPoint(body, selected)
         const target = declared.find((candidate) =>
-          Mir.matchesInstance(candidate.fn, alternative.runner, alternative.runnerTypeArguments),
+          Mir.matchesInstance(
+            candidate.fn,
+            alternative.runner,
+            alternative.runnerTypeArguments,
+            alternative.runnerStaticArguments,
+          ),
         )
         if (target === undefined)
           throw new RangeError(

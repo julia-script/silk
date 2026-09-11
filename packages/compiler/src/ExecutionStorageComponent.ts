@@ -251,7 +251,11 @@ const bootstrapDemand = (
           break
         case 'RunEffectComposite':
           for (const alternative of operation.alternatives)
-            enqueue(alternative.runner, alternative.runnerTypeArguments)
+            enqueue(
+              alternative.runner,
+              alternative.runnerTypeArguments,
+              alternative.runnerStaticArguments,
+            )
           break
         case 'ApplyCallable': {
           const type =

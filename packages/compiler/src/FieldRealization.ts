@@ -5,6 +5,7 @@ import * as Lifetime from './Lifetime.js'
 import type * as Instances from './Instances.js'
 import * as RepresentationField from './RepresentationField.js'
 import * as SuspensionMode from './SuspensionMode.js'
+import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
 
 /**
@@ -360,7 +361,9 @@ const sameArguments = (
       if (owner === undefined || !retained.identity.startsWith('effect:')) return false
       const ownerPrefix = `${owner.declaration.module}\u0000${owner.declaration.name}\u0000${Type.runtimeArgumentKeys(
         owner.typeArguments,
-      ).join('\u0000')}\u0002`
+      ).join(
+        '\u0000',
+      )}${owner.staticArgumentKeys.length === 0 ? '' : `\u0001${owner.staticArgumentKeys.join('\u0000')}`}\u0002`
       return (
         discovered.identity.startsWith(ownerPrefix) &&
         discovered.identity.endsWith(`\u0004${retained.identity.slice('effect:'.length)}`)
@@ -376,7 +379,11 @@ export const matchesIdentity = (
   identity.environment !== undefined &&
   Type.runtimeCallableEnvironmentIdentityKey(identity.environment) ===
     Type.runtimeCallableEnvironmentIdentityKey(
-      Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+      Hir.callableEnvironmentIdentity(candidate.site, {
+        declaration: candidate.owner.declaration,
+        typeArguments: candidate.owner.typeArguments,
+        staticArgumentKeys: Object.freeze(candidate.owner.staticArguments.map(StaticValue.key)),
+      }),
     ) &&
   Hir.matchesCallableTargetIdentity(candidate.target, identity.target) &&
   sameArguments(identity.typeArguments, candidate.typeArguments)
@@ -516,7 +523,11 @@ const matchesEffectIdentity = (
   return (
     candidate.owner.declaration.module === owner.declaration.module &&
     candidate.owner.declaration.name === owner.declaration.name &&
-    sameArguments(owner.typeArguments, candidate.owner.typeArguments)
+    sameArguments(owner.typeArguments, candidate.owner.typeArguments) &&
+    candidate.owner.staticArguments.length === owner.staticArgumentKeys.length &&
+    candidate.owner.staticArguments.every(
+      (argument, ordinal) => StaticValue.key(argument) === owner.staticArgumentKeys.at(ordinal),
+    )
   )
 }
 
@@ -703,7 +714,11 @@ export const matchesCallable = (
   self.environment !== undefined &&
   Type.runtimeCallableEnvironmentIdentityKey(self.environment) ===
     Type.runtimeCallableEnvironmentIdentityKey(
-      Hir.callableEnvironmentIdentity(candidate.site, candidate.owner),
+      Hir.callableEnvironmentIdentity(candidate.site, {
+        declaration: candidate.owner.declaration,
+        typeArguments: candidate.owner.typeArguments,
+        staticArgumentKeys: Object.freeze(candidate.owner.staticArguments.map(StaticValue.key)),
+      }),
     )
 
 /** Structural equality for callable runtime facts owned by this actor. */
