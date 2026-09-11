@@ -226,7 +226,7 @@ impl TlsRecordSender {
     }
   }
 
-  /// Consumes an idle sender and installs a fresh protected traffic epoch without allocation.
+  /// Installs a fresh protected traffic epoch on an idle sender without allocation.
   ///
   /// # Details
   ///
@@ -235,37 +235,32 @@ impl TlsRecordSender {
   ///
   /// # Gotchas
   ///
-  /// Pending output makes the replacement invalid. The operation consumes the previous sender so
-  /// a caller cannot continue the old epoch after a key transition.
+  /// Pending output makes the replacement invalid. Every failure leaves the complete old epoch
+  /// unchanged. A successful replacement is allowed after the old epoch exhausts its record budget.
   pub fn replaceEpoch(
-    self: Self,
+    self: &mut Self,
     suite: CipherSuite,
     trafficSecret: &[u8],
-  ) -> Result<TlsRecordSender, RecordError> {
+  ) -> Result<(), RecordError> {
     if self.acknowledged < self.pendingLength {
-      return Result.failResult<TlsRecordSender, RecordError>(RecordError.InvalidState)
+      return Result.failResult<(), RecordError>(RecordError.InvalidState)
     }
     let derived = deriveMaterial(suite, trafficSecret)
     let material = match move derived {
       Result<KeyMaterial, RecordError>.Failure {error} => {
-        return Result.failResult<TlsRecordSender, RecordError>(move error)
+        return Result.failResult<(), RecordError>(move error)
       }
       Result<KeyMaterial, RecordError>.Success {value} => move value
     }
-    return Result.succeed<TlsRecordSender, RecordError>(
-      TlsRecordSender {
-        suite: suite,
-        key: material.key,
-        keyLength: material.keyLength,
-        iv: material.iv,
-        sequence: 0,
-        protected: true,
-        pending: move self.pending,
-        staging: move self.staging,
-        pendingLength: 0,
-        acknowledged: 0,
-      },
-    )
+    self.suite = suite
+    self.key = material.key
+    self.keyLength = material.keyLength
+    self.iv = material.iv
+    self.sequence = 0
+    self.protected = true
+    self.pendingLength = 0
+    self.acknowledged = 0
+    return Result.succeed<(), RecordError>(())
   }
 
   /// Queues at most one content fragment without retaining the caller input.
@@ -423,7 +418,7 @@ impl TlsRecordReceiver {
     }
   }
 
-  /// Consumes an idle receiver and installs a fresh protected traffic epoch without allocation.
+  /// Installs a fresh protected traffic epoch on an idle receiver without allocation.
   ///
   /// # Details
   ///
@@ -432,41 +427,35 @@ impl TlsRecordReceiver {
   ///
   /// # Gotchas
   ///
-  /// A partial, ready, terminal, or exhausted receiver makes the replacement invalid. The
-  /// operation consumes the previous receiver so the old epoch cannot accept another record.
+  /// A partial, ready, or terminal receiver makes the replacement invalid. Every failure leaves
+  /// the complete old epoch unchanged. A successful replacement is allowed after exhaustion.
   pub fn replaceEpoch(
-    self: Self,
+    self: &mut Self,
     suite: CipherSuite,
     trafficSecret: &[u8],
-  ) -> Result<TlsRecordReceiver, RecordError> {
+  ) -> Result<(), RecordError> {
     if self.wireLength != 0 || self.ready || self.terminal {
-      return Result.failResult<TlsRecordReceiver, RecordError>(RecordError.InvalidState)
+      return Result.failResult<(), RecordError>(RecordError.InvalidState)
     }
     let derived = deriveMaterial(suite, trafficSecret)
     let material = match move derived {
       Result<KeyMaterial, RecordError>.Failure {error} => {
-        return Result.failResult<TlsRecordReceiver, RecordError>(move error)
+        return Result.failResult<(), RecordError>(move error)
       }
       Result<KeyMaterial, RecordError>.Success {value} => move value
     }
-    return Result.succeed<TlsRecordReceiver, RecordError>(
-      TlsRecordReceiver {
-        suite: suite,
-        key: material.key,
-        keyLength: material.keyLength,
-        iv: material.iv,
-        sequence: 0,
-        protected: true,
-        wire: move self.wire,
-        plaintext: move self.plaintext,
-        wireLength: 0,
-        expectedLength: 0,
-        recordLength: 0,
-        recordType: ContentType.Handshake,
-        ready: false,
-        terminal: false,
-      },
-    )
+    self.suite = suite
+    self.key = material.key
+    self.keyLength = material.keyLength
+    self.iv = material.iv
+    self.sequence = 0
+    self.protected = true
+    self.wireLength = 0
+    self.expectedLength = 0
+    self.recordLength = 0
+    self.recordType = ContentType.Handshake
+    self.ready = false
+    return Result.succeed<(), RecordError>(())
   }
 
   /// Copies a prefix for the current record and reports the exact next receive action.
