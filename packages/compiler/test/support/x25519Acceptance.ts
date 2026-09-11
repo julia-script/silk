@@ -43,7 +43,8 @@ fn check(scalar: &[u8], peer: &[u8], expected: &[u8], publicOnly: bool, failure:
   }
 }
 `
-const cases = vectors.map(
+const runtimeVectors = vectors.filter((_, index) => index < 2 || index > 5)
+const cases = runtimeVectors.map(
   (entry, index) => `
 fn case${index}() -> bool {
   ${array('scalar', entry.scalar)}
@@ -56,6 +57,7 @@ const alice = vectors[2] ?? unreachable('Missing Alice fixture')
 const bob = vectors[3] ?? unreachable('Missing Bob fixture')
 const alicePublic = alice.expected ?? unreachable('Missing Alice public bytes')
 const bobPublic = bob.expected ?? unreachable('Missing Bob public bytes')
+const exchangeShared = vectors[4]?.expected ?? unreachable('Missing shared exchange bytes')
 const generation = `
 // Scripted entropy is test-only. Production requires a conforming secure Random provider.
 struct Scripted {
@@ -85,13 +87,14 @@ fn generation() -> bool {
   let publicFirst = X25519.publicKey(&first)
   let publicSecond = X25519.publicKey(&second)
   if equal(&publicFirst, &expectedFirst) == false || equal(&publicSecond, &expectedSecond) == false { return false }
+  ${array('expectedShared', exchangeShared)}
   let firstResult = X25519.agree(move first, &publicSecond)
   let secondResult = X25519.agree(move second, &publicFirst)
   return match move firstResult {
     Result.Failure { error } => false
     Result.Success { value: firstShared } => match move secondResult {
       Result.Failure { error } => false
-      Result.Success { value: secondShared } => equal(&firstShared, &secondShared)
+      Result.Success { value: secondShared } => equal(&firstShared, &expectedShared) && equal(&secondShared, &expectedShared)
     }
   }
 }
@@ -136,7 +139,7 @@ fn invalidWidths() -> bool {
 `
 export const x25519AcceptanceSource = `${imports}${helpers}${cases.join('\n')}${generation}
 pub fn main() -> i32 {
-  ${vectors.map((_, index) => `if case${index}() == false { return ${index + 1} }`).join('\n  ')}
+  ${runtimeVectors.map((_, index) => `if case${index}() == false { return ${index + 1} }`).join('\n  ')}
   if generation() == false { return 30 }
   if invalidWidths() == false { return 31 }
   return 42

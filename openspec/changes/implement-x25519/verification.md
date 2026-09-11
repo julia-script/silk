@@ -4,7 +4,7 @@ Base: `991386ae75fe3037e70da1cde9dc71d91dbc3e67`.
 
 ## Functional evidence
 
-The shared native `x25519` corpus passes all 16 committed oracle cases: the two RFC 7748
+The shared native `x25519` corpus covers all 16 committed oracle claims: the two RFC 7748
 multiplications, one iteration, both public keys and agreement directions, scalar-clamping
 equivalence, peer high-bit masking, p+9 reduction, nonzero twist-u2 agreement, and low-order
 0/1/p−1/p/p+1 rejection. Separate calls check scalar and peer widths 0/31/33. A scripted Random
@@ -75,3 +75,5 @@ Documentation generation passed policy validation for 104 modules. Repository ch
 are serialized by the coordinator. Independent correctness and economics reviews, including a
 matched base measurement, remain required before handoff. No complete task claim is made from
 focused checks alone.
+
+Economics consolidation keeps all 16 independent oracle fixtures but proves the four Alice/Bob public/agreement claims inside the scripted generation exchange. Both shared results compare with the pinned RFC bytes. This removes six repeated ladder executions from standalone cases while retaining fromSecret public derivation through the scalar-clamping fixture and raw agreement through RFC section 5.2. Final focused validation and comparative cost are recorded by the independent reviewer.
