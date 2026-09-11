@@ -420,6 +420,37 @@ constant-time comparison, truncation policy, TLS labels, password hashing, or se
 [RFC 4231](https://www.rfc-editor.org/rfc/rfc4231.html), and
 [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869.html).
 
+### STDLIB-CHACHA20-POLY1305 — Detached authenticated encryption preserves destinations on failure
+
+**Status:** Confirmed
+
+`silk.chacha20_poly1305` exports `ChaCha20Poly1305` and `AeadError`. The ordinary synchronous
+operations `seal(key, nonce, aad, plaintext, ciphertext, tag)` and
+`open(key, nonce, aad, ciphertext, tag, plaintext)` return `Result<(), AeadError>`. Inputs are
+shared byte slices and destinations are exclusive byte slices. Keys contain exactly 32 bytes,
+nonces 12 bytes, and detached tags 16 bytes. Empty payloads and AAD are valid. Successful
+operations write only the payload prefix and preserve spare destination capacity.
+
+Both operations check key, nonce and tag widths, output capacity, then the payload limit, in
+that order. Payloads contain at most 274877906880 bytes, using ChaCha20 counters 1 through
+2^32−1; counter zero derives the Poly1305 key. AAD lengths must fit `u64`, as every addressable
+Silk slice does. Widened length checks and remaining-length iteration avoid target-size overflow.
+Authentication pads AAD and ciphertext separately to 16-byte boundaries and includes both
+little-endian 64-bit byte lengths. `open` authenticates the full tag before writing plaintext.
+Every rejected operation preserves all destination bytes, including the detached seal tag.
+Ordinary borrowing rules reject overlapping input/output and output/tag arguments.
+
+**Boundary:** The implementation allocates no memory and requests no provider or native crypto
+operation. Callers own nonce uniqueness and per-key usage limits. Source-level fixed work and
+reviewed generated output do not guarantee constant-time execution across future compilers or
+runtimes, physical secret erasure, or production security. The module provides no transport,
+nonce generation, replay protection, or peer authentication policy.
+
+**Evidence:** [canonical source](../../../../packages/compiler/stdlib/silk/chacha20_poly1305.silk),
+[shared acceptance](../../../../packages/compiler/test/support/chacha20Poly1305Acceptance.ts),
+[fixture provenance](../../../../packages/compiler/test/fixtures/chacha20-poly1305.md), and
+[RFC 8439](https://www.rfc-editor.org/rfc/rfc8439).
+
 ### STDLIB-AES-GCM — Detached authenticated encryption preserves destinations on failure
 
 **Status:** Confirmed

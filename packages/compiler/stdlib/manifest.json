@@ -1,11 +1,5 @@
 [
   {
-    "module": "silk/aes_gcm",
-    "path": "silk/aes_gcm.silk",
-    "namespace": "AesGcm",
-    "aliases": ["AesGcmError"]
-  },
-  {
     "module": "silk/allocator",
     "path": "silk/allocator.silk",
     "namespace": "Allocator",
@@ -59,6 +53,12 @@
       "SanDecodeError",
       "SanDecodeSummary"
     ]
+  },
+  {
+    "module": "silk/chacha20_poly1305",
+    "path": "silk/chacha20_poly1305.silk",
+    "namespace": "ChaCha20Poly1305",
+    "aliases": ["AeadError"]
   },
   {
     "module": "silk/char",
@@ -178,25 +178,6 @@
     "path": "silk/host_input.silk",
     "namespace": "HostInput",
     "aliases": ["HostInputError"]
-  },
-  {
-    "module": "silk/https_identity",
-    "path": "silk/https_identity.silk",
-    "namespace": "HttpsIdentity",
-    "aliases": [
-      "UnsupportedForm",
-      "OriginHost",
-      "ReferenceIdentity",
-      "PresentedIdentity",
-      "CertificateStructureError",
-      "CertificateIdentities",
-      "NameError",
-      "CertificateIdentityError",
-      "LimitKind",
-      "IdentityError",
-      "IdentityLimits",
-      "IdentityMatch"
-    ]
   },
   {
     "module": "silk/i16",
