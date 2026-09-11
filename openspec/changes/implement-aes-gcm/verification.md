@@ -99,8 +99,12 @@ AutoImportScale, ProjectWorker, Inspection and Server while concurrent full comp
 contended for the host. Four failures were timeouts and one received no expected diagnostic.
 A subsequent isolated run of all four LSP files passed all eleven tests (343.26 seconds).
 The failure log is `/tmp/jul175-full-test-attempt1.log`; isolated evidence is
-`/tmp/jul175-lsp-isolated-branch.log`. These observations support a contention diagnosis but do
-not substitute for a successful full gate. The coordinator is scheduling the full test retry;
+`/tmp/jul175-lsp-isolated-branch.log`. A matching selection on untouched baseline
+`991386ae75fe3037e70da1cde9dc71d91dbc3e67` reproduced the ProjectWorker timeout, both Server
+failures (including diagnostics count zero) and Inspection timeout; AutoImportScale passed.
+That baseline run took 411.81 seconds with four failures, one pass and six skipped tests; its
+log is `/tmp/jul175-lsp-isolated-base.log`. These observations establish four baseline
+failures under contention but do not substitute for a successful full gate. The coordinator is scheduling the full test retry;
 `pnpm check` and `pnpm release:candidate` have not yet run. Draft PR handoff is coordinator-owned.
 
 Economics review removed two supplemental exact-block fixtures: the NIST exact-block selections already falsify the same boundary claim. The 15- and 17-byte Zig cases remain for both key widths.
