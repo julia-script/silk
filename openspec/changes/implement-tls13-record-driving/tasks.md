@@ -13,4 +13,4 @@
 ## 3. Delivery
 
 - [x] 3.1 Run strict OpenSpec validation, focused behavior tests, then local `pnpm typecheck`, `pnpm format:check`, and `pnpm lint`; commit and push the exact issue diff for CI full-suite and release-candidate verification.
-- [ ] 3.2 Complete independent correctness/security and separate TEST_REVIEW test-economics approval against the committed issue diff, fix findings, and provide exact head/evidence to the coordinator for the stacked draft PR and Linear handoff.
+- [x] 3.2 Complete independent correctness/security and separate TEST_REVIEW test-economics approval against the committed issue diff, fix findings, and provide exact head/evidence to the coordinator for the stacked draft PR and Linear handoff.
