@@ -1,6 +1,9 @@
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
-import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
+import { createHash, X509Certificate } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
@@ -117,6 +120,38 @@ it('pins certificate-path fixture provenance, ordering, and DER/key digests', ()
     assert.isNotEmpty(fixture.mutation, fixture.id)
     assert.match(fixture.expectedSilk.result, /^(Success|Failure)$/, fixture.id)
   }
+})
+
+it('regenerates the native trust PEM from its named certificate-profile fixture', () => {
+  const fixture = certificateProfileFixtures.fixtures.find(
+    (candidate) => candidate.id === 'rfc5280::no-keyusage/trusted_certs[0]',
+  )
+  assert.isDefined(fixture)
+  if (fixture === undefined) return
+  const pem = readFileSync(new URL('../conformance/native-filesystem/trust.pem', import.meta.url))
+  const certificate = new X509Certificate(pem)
+  assert.strictEqual(pem.length, 603)
+  assert.strictEqual(
+    createHash('sha256').update(pem).digest('hex'),
+    'e409d0b059a0e9124f42c0dbf95b2611525d605de9ef591a5f48e6e8754fe7b6',
+  )
+  assert.deepEqual(certificate.raw, Buffer.from(fixture.der, 'base64'))
+  assert.strictEqual(
+    createHash('sha256').update(certificate.raw).digest('hex'),
+    '2ffcf7efc81cbd3f7f2aa126fa6de0663e011ed71e7cdf2bec63a6c2af828455',
+  )
+  const generated = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(
+        new URL('../conformance/native-filesystem/generate-trust-fixture.mjs', import.meta.url),
+      ),
+      '--check',
+    ],
+    { encoding: 'utf8' },
+  )
+  assert.strictEqual(generated.status, 0, generated.stderr)
+  assert.include(generated.stdout, fixture.id)
 })
 
 it.effect(
@@ -257,7 +292,10 @@ pub fn main() -> i32 { return 0 }`
 it.effect('keeps trust snapshots opaque, move-only, borrowed, and lexically service-loaded', () =>
   Effect.gen(function* () {
     const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.bytes { Bytes }
+import silk.filesystem { Path }
 import silk.memory_trust_source { MemoryTrustSource }
+import silk.native_file_trust_source { NativeFileTrustSource }
 import silk.result { Result }
 import silk.trust_anchor { TrustAnchor }
 import silk.trust_snapshot { TrustLoadLimits, TrustSnapshot, TrustSourceError }
@@ -275,6 +313,14 @@ fn viewed(value: TrustSnapshot) -> usize {
 }
 fn provider(snapshot: TrustSnapshot) -> MemoryTrustSource {
   return MemoryTrustSource.make(move snapshot)
+}
+effect fn nativeProvider(root: Bytes, path: Path) -> NativeFileTrustSource
+! TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  let source = run NativeFileTrustSource.make(Bytes.asSlice(&root), &path)
+  drop root
+  drop path
+  return move source
 }
 fn replace(source: &mut MemoryTrustSource, next: TrustSnapshot) -> TrustSnapshot {
   return MemoryTrustSource.replace(move source, move next)

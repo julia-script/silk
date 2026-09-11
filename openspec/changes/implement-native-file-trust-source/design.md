@@ -49,7 +49,15 @@ This is preferred to runtime target checks or compiler availability metadata bec
 
 One structured analysis snapshot per relevant source proves API resolution, ownership, and supported/unsupported target selection. Strict-decoder and portable ownership behavior continue to use the existing shared trust-source acceptance case. A compact native-file fixture exercises real temp-directory open/read/rename/symlink behavior on the host. The existing native-filesystem conformance harness is extended only where deterministic receiver-controlled short reads and read/close failure precedence cannot be induced safely with ordinary files; it reuses the same six target/optimization lanes and libc stubs rather than adding a competing boundary suite.
 
-The synthetic CA fixture is committed or deterministically generated with recorded command and hashes. Cases are consolidated around distinct failure boundaries; no live root store, exhaustive matrix, per-feature fresh-process determinism test, or redundant native compile is added.
+The real fixture reuses the existing scoped temporary-directory and native-process infrastructure. It mutates and releases caller configuration after construction, executes genuine regular-file loads, checks missing, wrong-kind, no-follow symlink, and deterministic non-root permission denial, and observes a replacement installed with atomic rename. Receiver stubs remain limited to partial reads, exact offered-slice accounting, allocation refusal, and combined acquisition/close faults that regular files cannot induce deterministically.
+
+The synthetic CA fixture is deterministically generated from the named pinned catalog entry by a checked repository command, with canonical PEM wrapping and recorded source/DER hashes. Cases are consolidated around distinct failure boundaries; no live root store, exhaustive matrix, per-feature fresh-process determinism test, or redundant compiler-importing test worker is added.
+
+### Bound cleanup specialization by the selected cleanup plan
+
+Ordinary runtime specialization continues to reject a recursive generic edge that changes runtime-relevant type arguments. Cleanup discovery has a narrower exception because a concrete owner can require Drop implementations for strictly nested field types and the selected service provider owner can require the same nested cleanup. Instance discovery starts this exception only from the exact cleanup target or hook selected by `CleanupPlan.cleanupPlan`; each changed ordinary type vector must be an exact proper subterm of the preceding vector, and downstream helper edges may continue only with that same vector. The cleanup measure is part of the work-item context, so no unrelated call can inherit it and a finite concrete type has only finitely many proper subterms.
+
+This is preferred to accepting arbitrary same-type continuation from a cleanup-reachable item, recognizing a library actor, or suppressing the ordinary recursion diagnostic. Positive nested Drop and provider-owner fixtures prove the intended path; an unrelated `expand<T>` to `expand<[T; 1]>` remains rejected.
 
 ## Risks / Trade-offs
 

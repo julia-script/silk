@@ -13,6 +13,11 @@ The native file trust provider SHALL be constructed from an explicit native root
 - **WHEN** a caller supplies a valid absolute root and normalized path and later releases or changes its inputs
 - **THEN** the provider retains unchanged independent configuration and construction has not accessed the file
 
+#### Scenario: Refuse construction allocation
+
+- **WHEN** copying an otherwise valid root or path is refused by the caller allocator
+- **THEN** construction returns `OutOfMemoryError` before any file open or read
+
 #### Scenario: Reject invalid configuration without trapping
 
 - **WHEN** the root is empty, relative, contains NUL, or the combined configured byte length exceeds 4096
@@ -31,6 +36,11 @@ Every load SHALL open the configured regular file anew and enforce `limits.decod
 
 - **WHEN** the file has at least one byte beyond the configured input-byte limit, including a nonempty file under limit zero
 - **THEN** load fails immediately with `LimitExceeded(InputBytes, limit)` and retains no over-limit input
+
+#### Scenario: Offer exact bounded slices
+
+- **WHEN** the limit is exact, one byte short, or zero
+- **THEN** reads are offered exactly the remaining budget followed by one byte, the remaining budget followed by one byte, or one probe byte respectively
 
 #### Scenario: Advance through short reads
 
@@ -84,6 +94,11 @@ Each load SHALL reopen the configured path. A producer replacement by atomic ren
 - **WHEN** one load completes, the producer atomically renames a different valid PEM file onto the configured path, and a second load begins
 - **THEN** the two returned snapshots independently retain their respective file generations
 
+#### Scenario: Exercise a real temporary-directory generation
+
+- **WHEN** the native fixture loads an ordinary temporary file and a producer atomically renames a different synthetic PEM generation over it
+- **THEN** genuine native open and read observe the first and replacement generations while missing, wrong-kind, symlink, and non-root denied paths retain their exact `File(Open)` reasons
+
 ### Requirement: Native availability is restricted to verified libc supplies
 
 The provider SHALL expose selected members only for Darwin ARM64 with Apple ABI and system libc and GNU Linux ARM64 or x86-64 with GNU libc. It SHALL be absent on LLVM-generated WebAssembly and raw Linux no-libc profiles. Portable snapshots and memory trust sources SHALL remain available on those unsupported native-file targets.
@@ -120,3 +135,8 @@ Acceptance evidence SHALL use committed or generated synthetic certificate fixtu
 
 - **WHEN** the fixture generation and verification commands run in a clean checkout
 - **THEN** the recorded source/DER hashes and expected certificate results match without consulting a machine trust store
+
+#### Scenario: Regenerate the committed PEM from its named catalog entry
+
+- **WHEN** the checked generator selects `rfc5280::no-keyusage/trusted_certs[0]` from the pinned certificate-profile catalog
+- **THEN** canonical base64 wrapping with LF line endings reproduces the committed PEM byte-for-byte and its DER digest matches the catalog

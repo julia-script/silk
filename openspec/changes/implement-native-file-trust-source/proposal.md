@@ -10,6 +10,7 @@ Silk can now represent owned trust snapshots behind a replaceable `TrustSource`,
 - Decode complete bounded input through `TrustSnapshot.fromPem`; publish no partial snapshot or implicit cache, and reopen the configured path on every load.
 - Select the provider only for Darwin ARM64/system libc and GNU Linux x86-64 or ARM64; keep it absent on Wasm and no-libc supplies.
 - Add synthetic fixture, target-selection, ownership, fault-ordering, reload, documentation, manifest, generated, and CI evidence without consulting a live host root store.
+- Admit cleanup-discovered generic calls only along a finite cleanup-plan-derived type descent, while preserving rejection of unrelated polymorphic recursion.
 
 ## Capabilities
 
@@ -19,8 +20,8 @@ Silk can now represent owned trust snapshots behind a replaceable `TrustSource`,
 
 ### Modified Capabilities
 
-None.
+- `bootstrap-type-generics`: Define the finite specialization measure for nested generic cleanup and provider-owner cleanup without weakening the ordinary polymorphic-recursion rejection.
 
 ## Impact
 
-The change adds one ordinary-Silk standard-library actor and its generated package/documentation registrations. It reuses `silk.native_filesystem` as the sole libc boundary and depends on the existing `TrustSource`, `TrustSnapshot`, `Path`, `FileError`, and allocator contracts. Compiler tests and native conformance fixtures gain narrowly scoped evidence for selected-source availability, bounded reads, failure precedence, and independent snapshots; no compiler intrinsic, foreign declaration owner, default path, host policy integration, cache, search, watcher, or directory scan is introduced.
+The change adds one ordinary-Silk standard-library actor and its generated package/documentation registrations. It reuses `silk.native_filesystem` as the sole libc boundary and depends on the existing `TrustSource`, `TrustSnapshot`, `Path`, `FileError`, and allocator contracts. Instance discovery gains a generic cleanup-plan-derived finite measure, with positive nested cleanup/provider-owner and negative unrelated-recursion evidence. Compiler tests and native conformance fixtures gain narrowly scoped evidence for selected-source availability, bounded reads, failure precedence, real file generations, and independent snapshots; no compiler intrinsic, compiler-known library actor, foreign declaration owner, default path, host policy integration, cache, search, watcher, or directory scan is introduced.

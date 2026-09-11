@@ -16,10 +16,8 @@
     "sha256": "2ffcf7efc81cbd3f7f2aa126fa6de0663e011ed71e7cdf2bec63a6c2af828455"
   },
   "commands": [
-    "shasum -a 256 packages/compiler/conformance/native-filesystem/trust.pem",
-    "openssl x509 -in packages/compiler/conformance/native-filesystem/trust.pem -outform DER | shasum -a 256",
-    "wc -c packages/compiler/conformance/native-filesystem/trust.pem",
-    "openssl x509 -in packages/compiler/conformance/native-filesystem/trust.pem -outform DER | wc -c"
+    "pnpm --filter @silklang/compiler fixture:native-file-trust:check",
+    "pnpm --filter @silklang/compiler fixture:native-file-trust:generate --stdout"
   ],
   "expected": {
     "onePemAnchors": 1,

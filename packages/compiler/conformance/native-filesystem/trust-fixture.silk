@@ -131,6 +131,32 @@ effect fn refused() -> i32 ! FileError | TrustSourceError | OutOfMemoryError {
   return 1
 }
 
+effect fn constructionRefused() -> i32 ! FileError | TrustSourceError | OutOfMemoryError {
+  let mut system = Allocator.systemAllocatorProvider()
+  let path = run Path.fromBytes(b"/file") |> Effect.provideMut<Allocator>(&mut system)
+  let mut allocator = RefusingAllocator {}
+  let source = run NativeFileTrustSource.make(b"/never-opened", &path)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  drop source
+  return 1
+}
+
+effect fn ownedInputs() -> i32 ! FileError | TrustSourceError | OutOfMemoryError
+? &mut Allocator {
+  let mut root = run Bytes.copy(b"/case16")
+  let path = run Path.fromBytes(b"/file")
+  let mut source = run NativeFileTrustSource.make(Bytes.asSlice(&root), &path)
+  let mut changed = Bytes.asMutSlice(&mut root)
+  changed[usize.ONE] = u8.toU8(120)
+  drop changed
+  drop root
+  drop path
+  let snapshot = run load(&mut source, 603)
+  drop source
+  let anchors = TrustSnapshot.anchors(&snapshot)
+  return usize.toI32(anchors.length)
+}
+
 effect fn rejectsConfiguration(
   root: &[u8],
   path: &Path,
@@ -204,14 +230,26 @@ effect fn suite() -> i32 ! FileError | TrustSourceError | OutOfMemoryError ? &mu
     }
   }
   if refusedCode != 190 { return 22 }
+  let constructionResult = run Effect.result(constructionRefused())
+  let constructionCode = match move constructionResult {
+    Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Success { value } => value
+    Result<i32, FileError | TrustSourceError | OutOfMemoryError>.Failure { error: failure } => match move failure {
+      FileError file => 191
+      TrustSourceError trust => run rejected(move trust)
+      OutOfMemoryError memory => 190
+    }
+  }
+  if constructionCode != 190 { return 27 }
   let case13 = run loadOnce(b"/case13", 603)
   if case13 != 100 { return 23 }
   let case14 = run loadOnce(b"/case14", 603)
   if case14 != 140 && case14 != 162 { return 24 }
   let case15 = run loadOnce(b"/case15", 603)
   if case15 != 102 { return 25 }
-  let case16 = run loadOnce(b"/case16", 603)
+  let case16 = run ownedInputs()
   if case16 != 1 { return 26 }
+  let case17 = run loadOnce(b"/case17", 602)
+  if case17 != 170 { return 28 }
   return 42
 }
 

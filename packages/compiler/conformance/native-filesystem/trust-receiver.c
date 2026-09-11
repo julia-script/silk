@@ -5,6 +5,8 @@ extern int trust_fixture(void);
 static int scenario=-1, invalid, native_error, need_capture, error_reads;
 static int opens, children, stats, reads, closes, next_fd, generation;
 static size_t offset;
+static size_t offered[128];
+static int offered_length;
 static int active[64], directory_fd[64];
 
 static void before(void) { if (need_capture) invalid=1; }
@@ -25,6 +27,10 @@ static int clean(void) {
   for(int i=1;i<=next_fd;i++) if(active[i]) return 0;
   return !need_capture;
 }
+static int exact_offers(size_t first,size_t second,int length) {
+  if(offered_length!=length || offered[0]!=first) return 0;
+  return length==1 || offered[1]==second;
+}
 static void finish_previous(void) {
   if(scenario<0) return;
   int reload=scenario==10 || scenario==11;
@@ -37,12 +43,17 @@ static void finish_previous(void) {
   if(scenario==12 && (reads!=0 || closes!=2 || error_reads!=1)) invalid=1;
   if((scenario==7 || scenario==14 || scenario==15) && (reads!=0 || closes!=1)) invalid=1;
   if((scenario==10 || scenario==11) && (generation!=2 || closes!=4)) invalid=1;
+  if(scenario==0 && !exact_offers(1206,1,2)) invalid=1;
+  if(scenario==2 && !exact_offers(603,1,2)) invalid=1;
+  if(scenario==3 && !exact_offers(602,1,2)) invalid=1;
+  if(scenario==4 && !exact_offers(1,0,1)) invalid=1;
+  if(scenario==17 && (!exact_offers(602,1,2) || closes!=2)) invalid=1;
 }
 static int parse_case(const char *path) {
   if(strncmp(path,"/case",5)) return -1;
   char *end=NULL;
   long value=strtol(path+5,&end,10);
-  if(end==NULL || *end!='\0' || value<0 || value>16) return -1;
+  if(end==NULL || *end!='\0' || value<0 || value>17) return -1;
   return (int)value;
 }
 
@@ -53,7 +64,7 @@ int open(const char *path,int flags,...) {
   if(selected!=scenario) {
     finish_previous();
     scenario=selected;
-    opens=children=stats=reads=closes=next_fd=generation=error_reads=0;
+    opens=children=stats=reads=closes=next_fd=generation=error_reads=offered_length=0;
     offset=0;
     memset(active,0,sizeof(active));
   }
@@ -78,7 +89,7 @@ int close(int fd) {
   before(); ++closes;
   if(fd<1 || fd>=64 || !active[fd]) { invalid=1; return -1; }
   active[fd]=0;
-  if(!directory_fd[fd] && (scenario==5 || scenario==6 || scenario==12)) {
+  if(!directory_fd[fd] && (scenario==5 || scenario==6 || scenario==12 || scenario==17)) {
     native_error=EBADF;
     return -1;
   }
@@ -99,6 +110,8 @@ int fstat(int fd,struct stat *out) {
 ssize_t read(int fd,void *data,size_t count) {
   before(); ++reads;
   if(fd<1 || fd>=64 || !active[fd] || directory_fd[fd] || count<1 || count>4096) invalid=1;
+  if(offered_length>=128) invalid=1;
+  else offered[offered_length++]=count;
   if(scenario==5 || (scenario==11 && generation==2)) return failure(EIO);
   if(scenario==8) return 0;
   size_t copies=(scenario==0 || scenario==1 || (scenario==10 && generation==2)) ? 2 : 1;
@@ -132,4 +145,9 @@ ssize_t read(int fd,void *data,size_t count) {
   return (ssize_t)accepted;
 }
 
-int main(void) { return trust_fixture(); }
+int main(void) {
+  int result=trust_fixture();
+  finish_previous();
+  if(result==42 && invalid) return 198;
+  return result;
+}

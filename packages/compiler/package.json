@@ -577,6 +577,8 @@
     "documentation:check": "node scripts/generate-documentation.mjs --check",
     "documentation:examples": "pnpm --filter @silklang/cli doctest:stdlib",
     "documentation:inventory": "node scripts/inventory-stdlib-documentation.mjs",
+    "fixture:native-file-trust:check": "node conformance/native-filesystem/generate-trust-fixture.mjs --check",
+    "fixture:native-file-trust:generate": "node conformance/native-filesystem/generate-trust-fixture.mjs",
     "test:foreign-contracts": "node conformance/foreign-contracts/run.mjs",
     "test:native-boundary": "node conformance/native-boundary/run.mjs",
     "test:llvm-helpers": "node conformance/llvm-helpers/run.mjs",
