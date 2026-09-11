@@ -498,6 +498,43 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('erases nested lifetimes while one cleanup type position descends', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.box { Box }
+import silk.option { Option }
+struct Outer<T> { value: T }
+struct Chain<'a, A, Whole, Part> {
+  anchor: &'a i32
+  marker: A
+  whole: Whole
+  part: Part
+  next: Option<Box<Chain<'a, &'a i32, Part, Part>>>
+}
+impl<'a, A, Whole, Part> Drop for Chain<'a, A, Whole, Part> {
+  fn drop(self: &mut Chain<'a, A, Whole, Part>) -> () { return () }
+}
+fn make<'a, 'b>(left: &'a i32, right: &'b i32)
+  -> Chain<'a, &'b i32, Outer<i32>, i32> {
+  return Chain {
+    anchor: left,
+    marker: right,
+    whole: Outer { value: 1 },
+    part: 2,
+    next: Option.none<Box<Chain<'a, &'a i32, i32, i32>>>()
+  }
+}
+pub fn main() -> i32 {
+  let left = 1
+  let right = 2
+  let held = make(&left, &right)
+  drop held
+  return 0
+}`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(Analysis.instancesOf(result).violations, [])
+  }),
+)
+
 it.effect('lowers discovered instances deterministically to verifier-clean MIR', () =>
   Effect.gen(function* () {
     const program = Analysis.loweredMir(yield* snapshot(nestedSource))

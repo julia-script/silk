@@ -1138,9 +1138,8 @@ export const discover = (
     readonly structuralProvider?: Type.Type
   }
   interface CleanupMeasure {
-    readonly types: ReadonlyArray<Type.Type>
-    /** Per-vector-position nominal instantiations already crossed by strict cleanup descent. */
-    readonly histories: ReadonlyArray<ReadonlyMap<string, Type.Nominal>>
+    /** Concrete owner types whose exact cleanup plans selected this path. */
+    readonly roots: ReadonlyArray<Type.Type>
   }
   interface WorkItem {
     readonly key: InstanceKey
@@ -1192,21 +1191,6 @@ export const discover = (
     })
   const typeArgumentsOf = (key: InstanceKey): ReadonlyArray<Type.Type> =>
     key.typeArguments.filter(Type.isTypeArgument)
-  const sameTypes = (
-    leftTypes: ReadonlyArray<Type.Type>,
-    rightTypes: ReadonlyArray<Type.Type>,
-  ): boolean => {
-    return (
-      leftTypes.length === rightTypes.length &&
-      leftTypes.every((argument, index) => {
-        const candidate = rightTypes.at(index)
-        return (
-          candidate !== undefined &&
-          Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate)
-        )
-      })
-    )
-  }
   /**
    * Recognizes a field/type-argument subterm without unfolding the same nominal declaration twice.
    * That declaration guard is what makes a recursive shape such as `Bad<Box<T>>` non-descending
@@ -1214,6 +1198,17 @@ export const discover = (
    */
   const nominalTypeText = (type: Type.Type): string | undefined =>
     Type.isNominal(type) ? `${type.module}\u0000${type.name}` : undefined
+  const sameRuntimeType = (left: Type.Type, right: Type.Type): boolean =>
+    Type.runtimeKey(left) === Type.runtimeKey(right)
+  const isStrictRuntimeStructuralSubterm = (candidate: Type.Type, whole: Type.Type): boolean => {
+    if (sameRuntimeType(candidate, whole)) return false
+    const candidateKey = Type.runtimeKey(candidate)
+    let found = false
+    Type.visit(whole, (type) => {
+      if (Type.runtimeKey(type) === candidateKey) found = true
+    })
+    return found
+  }
   const strictlyDescendsSameNominal = (candidate: Type.Nominal, whole: Type.Nominal): boolean => {
     if (candidate.module !== whole.module || candidate.name !== whole.name) return false
     return (
@@ -1222,7 +1217,9 @@ export const discover = (
         const parent = whole.arguments.at(index)
         if (parent === undefined) return false
         if (Type.isTypeArgument(argument) && Type.isTypeArgument(parent))
-          return Type.equals(argument, parent) || Type.isStrictStructuralSubterm(argument, parent)
+          return (
+            sameRuntimeType(argument, parent) || isStrictRuntimeStructuralSubterm(argument, parent)
+          )
         return Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(parent)
       }) &&
       candidate.arguments.some((argument, index) => {
@@ -1231,7 +1228,7 @@ export const discover = (
           parent !== undefined &&
           Type.isTypeArgument(argument) &&
           Type.isTypeArgument(parent) &&
-          Type.isStrictStructuralSubterm(argument, parent)
+          isStrictRuntimeStructuralSubterm(argument, parent)
         )
       })
     )
@@ -1239,9 +1236,9 @@ export const discover = (
   const isStrictCleanupSubterm = (
     candidate: Type.Type,
     whole: Type.Type,
-    unfolding: ReadonlySet<string> = new Set(),
+    unfolding: ReadonlyMap<string, Type.Nominal> = new Map(),
   ): boolean => {
-    if (Type.equals(candidate, whole)) return false
+    if (sameRuntimeType(candidate, whole)) return false
     const candidateDeclaration = nominalTypeText(candidate)
     const wholeDeclaration = nominalTypeText(whole)
     if (candidateDeclaration !== undefined && candidateDeclaration === wholeDeclaration)
@@ -1250,112 +1247,74 @@ export const discover = (
         Type.isNominal(whole) &&
         strictlyDescendsSameNominal(candidate, whole)
       )
-    if (Type.isStrictStructuralSubterm(candidate, whole)) return true
-    if (!Type.isNominal(whole)) return false
-    const declarationText = `${whole.module}\u0000${whole.name}`
-    if (unfolding.has(declarationText)) return false
-    const declaration = DeclarationFacts.byCanonical(index, {
-      _tag: 'CanonicalDeclarationId',
-      module: whole.module,
-      name: whole.name,
+    if (isStrictRuntimeStructuralSubterm(candidate, whole)) return true
+    const nominals = new Map<string, Type.Nominal>()
+    Type.visit(whole, (type) => {
+      if (Type.isNominal(type)) nominals.set(Type.runtimeKey(type), type)
     })
-    if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
-      return false
-    const substitution =
-      TypeInference.substitution(
-        declaration.typeParameters.map((parameter) => parameter.type),
-        whole.arguments,
-      ) ?? new Map()
-    const nextUnfolding = new Set(unfolding).add(declarationText)
-    const fields =
-      declaration._tag === 'StructDeclaration'
-        ? declaration.fields
-        : declaration.variants.flatMap((variant) => variant.fields)
-    return fields.some(
-      (field) =>
-        field.declaredType._tag === 'Resolved' &&
-        isStrictCleanupSubterm(
-          candidate,
-          Type.substitute(field.declaredType.type, substitution),
-          nextUnfolding,
-        ),
-    )
-  }
-  const initialCleanupMeasure = (types: ReadonlyArray<Type.Type>): CleanupMeasure =>
-    Object.freeze({
-      types,
-      histories: Object.freeze(
-        types.map((type) => {
-          const history = new Map<string, Type.Nominal>()
-          if (Type.isNominal(type)) history.set(`${type.module}\u0000${type.name}`, type)
-          return history
-        }),
-      ),
-    })
-  const descendCleanupPosition = (
-    candidate: Type.Type,
-    whole: Type.Type,
-    history: ReadonlyMap<string, Type.Nominal>,
-  ): ReadonlyMap<string, Type.Nominal> | undefined => {
-    if (!isStrictCleanupSubterm(candidate, whole)) return undefined
-    const next = new Map(history)
-    if (Type.isNominal(whole)) {
-      const declaration = `${whole.module}\u0000${whole.name}`
-      const prior = next.get(declaration)
+    for (const nominal of nominals.values()) {
+      const declarationText = `${nominal.module}\u0000${nominal.name}`
+      const prior = unfolding.get(declarationText)
       if (
         prior !== undefined &&
-        !Type.equals(whole, prior) &&
-        !strictlyDescendsSameNominal(whole, prior)
+        (sameRuntimeType(nominal, prior) || !strictlyDescendsSameNominal(nominal, prior))
       )
-        return undefined
-      next.set(declaration, whole)
-    }
-    if (Type.isNominal(candidate)) {
-      const declaration = `${candidate.module}\u0000${candidate.name}`
-      const prior = next.get(declaration)
-      if (
-        prior !== undefined &&
-        !Type.equals(candidate, prior) &&
-        !strictlyDescendsSameNominal(candidate, prior)
-      )
-        return undefined
-      next.set(declaration, candidate)
-    }
-    return next
-  }
-  const strictlyDescendsCleanupMeasure = (
-    measure: CleanupMeasure,
-    targetTypes: ReadonlyArray<Type.Type>,
-  ): CleanupMeasure | undefined => {
-    if (targetTypes.length === 0 || targetTypes.length !== measure.types.length) return undefined
-    const histories: Array<ReadonlyMap<string, Type.Nominal>> = []
-    for (let index = 0; index < targetTypes.length; index += 1) {
-      const candidate = targetTypes.at(index)
-      const whole = measure.types.at(index)
-      const history = measure.histories.at(index)
-      if (candidate === undefined || whole === undefined || history === undefined) return undefined
-      if (Type.equals(candidate, whole)) {
-        histories.push(history)
         continue
-      }
-      const descended = descendCleanupPosition(candidate, whole, history)
-      if (descended === undefined) return undefined
-      histories.push(descended)
+      const declaration = DeclarationFacts.byCanonical(index, {
+        _tag: 'CanonicalDeclarationId',
+        module: nominal.module,
+        name: nominal.name,
+      })
+      if (declaration?._tag !== 'StructDeclaration' && declaration?._tag !== 'UnionDeclaration')
+        continue
+      const substitution =
+        TypeInference.substitution(
+          declaration.typeParameters.map((parameter) => parameter.type),
+          nominal.arguments,
+        ) ?? new Map()
+      const nextUnfolding = new Map(unfolding).set(declarationText, nominal)
+      const fields =
+        declaration._tag === 'StructDeclaration'
+          ? declaration.fields
+          : declaration.variants.flatMap((variant) => variant.fields)
+      if (
+        fields.some(
+          (field) =>
+            field.declaredType._tag === 'Resolved' &&
+            isStrictCleanupSubterm(
+              candidate,
+              Type.substitute(field.declaredType.type, substitution),
+              nextUnfolding,
+            ),
+        )
+      )
+        return true
     }
-    return Object.freeze({ types: targetTypes, histories: Object.freeze(histories) })
+    return false
   }
+  const coveredByCleanupMeasure = (measure: CleanupMeasure, candidate: Type.Type): boolean =>
+    measure.roots.some(
+      (root) => sameRuntimeType(candidate, root) || isStrictCleanupSubterm(candidate, root),
+    )
+  const cleanupMeasureOf = (roots: ReadonlyArray<Type.Type>): CleanupMeasure =>
+    Object.freeze({
+      roots: Object.freeze([
+        ...new Map(roots.map((root) => [Type.runtimeKey(root), root])).values(),
+      ]),
+    })
   const cleanupTransition = (
     measure: CleanupMeasure | undefined,
     target: InstanceKey,
-    selected: boolean,
+    selectedRoots: ReadonlyArray<Type.Type>,
   ): CleanupMeasure | undefined => {
+    if (measure === undefined)
+      return selectedRoots.length === 0 ? undefined : cleanupMeasureOf(selectedRoots)
+    if (selectedRoots.length > 0)
+      return selectedRoots.some((root) => coveredByCleanupMeasure(measure, root))
+        ? measure
+        : undefined
     const targetTypes = typeArgumentsOf(target)
-    if (measure === undefined) return selected ? initialCleanupMeasure(targetTypes) : undefined
-    if (targetTypes.length === 0 || sameTypes(measure.types, targetTypes)) return measure
-    // A nongeneric selected hook has no ordinary vector of its own. Its first exact cleanup target
-    // establishes the measure; after that point every change must be a strict structural descent.
-    if (measure.types.length === 0 && selected) return initialCleanupMeasure(targetTypes)
-    return selected ? strictlyDescendsCleanupMeasure(measure, targetTypes) : undefined
+    return targetTypes.every((type) => coveredByCleanupMeasure(measure, type)) ? measure : undefined
   }
   const sameVisibleArguments = (left: InstanceKey, right: InstanceKey): boolean => {
     const leftVisible = left.typeArguments.filter(
@@ -1392,18 +1351,7 @@ export const discover = (
     `${
       item.cleanupMeasure === undefined
         ? 'ordinary'
-        : `${item.cleanupMeasure.types.map(Type.runtimeKey).join('\u0000')}\u0004${item.cleanupMeasure.histories
-            .map((history) =>
-              [...history.entries()]
-                .sort(([left], [right]) => {
-                  if (left < right) return -1
-                  if (left > right) return 1
-                  return 0
-                })
-                .map(([declaration, type]) => `${declaration}\u0005${Type.runtimeKey(type)}`)
-                .join('\u0006'),
-            )
-            .join('\u0007')}`
+        : item.cleanupMeasure.roots.map(Type.runtimeKey).sort().join('\u0000')
     }\u0001${keyText(item.key)}\u0001${[...item.ancestors.entries()]
       .sort(([left], [right]) => {
         if (left < right) return -1
@@ -1448,9 +1396,9 @@ export const discover = (
       [...types.values()].flatMap((type) => hookCalls(CleanupPlan.cleanupPlan(index, type), index)),
     )
   }
-  /** Proves that a provider target is selected by one of its owner's concrete cleanup plans. */
-  const cleanupDescendsFrom = (ancestor: InstanceKey, target: InstanceKey): boolean =>
-    typeArgumentsOf(ancestor).some((type) =>
+  /** Finds concrete provider-owner roots whose cleanup plans select the target. */
+  const cleanupRootsOf = (ancestor: InstanceKey, target: InstanceKey): ReadonlyArray<Type.Type> =>
+    typeArgumentsOf(ancestor).filter((type) =>
       hookCalls(CleanupPlan.cleanupPlan(index, type), index).some((call) => {
         const fn = FunctionIndex.hirByName(
           results.get(call.declaration.module)?.hir,
@@ -1590,8 +1538,7 @@ export const discover = (
       }
       const cleanupTargets = [...slotDropHookTargets(fn, index, substitution), ...cleanupHooks]
       const identityOfCall = Specialization.key
-      const cleanupIdentities = new Set(cleanupTargets.map(identityOfCall))
-      const reachableCalls: ReadonlyArray<CallTarget> = [
+      const ordinaryTargets: ReadonlyArray<CallTarget> = [
         ...bodyCallTargets(fn, index, substitution),
         ...interfaceWitnessTargets(fn, index, substitution),
         ...requirementBindingCallTargets(fn, substitution, index),
@@ -1607,8 +1554,17 @@ export const discover = (
         ...forwardedRequirementCallTargets(directCalls, results, index),
         ...callableTargets,
         ...forwardedRequirementTargets(callableTargets, results, index),
-        ...cleanupTargets,
       ]
+      const ordinaryIdentities = new Set(ordinaryTargets.map(identityOfCall))
+      const cleanupRoots = new Map<string, Array<Type.Type>>()
+      for (const cleanup of cleanupTargets) {
+        if (cleanup.cleanupRoot === undefined) continue
+        const identity = identityOfCall(cleanup)
+        const roots = cleanupRoots.get(identity) ?? []
+        roots.push(cleanup.cleanupRoot)
+        cleanupRoots.set(identity, roots)
+      }
+      const reachableCalls: ReadonlyArray<CallTarget> = [...ordinaryTargets, ...cleanupTargets]
       for (const call of reachableCalls) {
         const identity = identityOfCall(call)
         const existing = calls.get(identity)
@@ -1660,6 +1616,7 @@ export const discover = (
           )
       }
       for (const call of calls.values()) {
+        const identity = identityOfCall(call)
         const target = call.declaration
         const targetFunction = FunctionIndex.hirByName(results.get(target.module)?.hir, target.name)
         if (targetFunction === undefined) continue
@@ -1679,8 +1636,11 @@ export const discover = (
           call.structuralProvider !== undefined &&
           ancestor?.structuralProvider !== undefined &&
           Type.isStrictStructuralSubterm(call.structuralProvider, ancestor.structuralProvider)
-        const cleanupSelected = cleanupIdentities.has(identityOfCall(call))
-        const cleanup = cleanupTransition(item.cleanupMeasure, targetKey, cleanupSelected)
+        const cleanup = cleanupTransition(
+          item.cleanupMeasure,
+          targetKey,
+          ordinaryIdentities.has(identity) ? Object.freeze([]) : (cleanupRoots.get(identity) ?? []),
+        )
         const terminalCallableSpecialization =
           ancestor !== undefined &&
           sameVisibleArguments(ancestor.key, targetKey) &&
@@ -1763,11 +1723,11 @@ export const discover = (
         // A cleanup implementation can select another specialization of the same lexical service
         // operation while recursively releasing a field. Admit only targets proved reachable from
         // the providing owner's finite cleanup plan; unrelated provider recursion stays guarded.
-        const cleanupReentry = cleanupDescendsFrom(provided.owner, provided.target)
+        const cleanupRoots = cleanupRootsOf(provided.owner, provided.target)
         const cleanup = cleanupTransition(
           ownerContext.cleanupMeasure,
           provided.target,
-          cleanupReentry,
+          cleanupRoots,
         )
         if (
           ancestor !== undefined &&
