@@ -99,9 +99,7 @@ for (const [id, selection] of expected) {
       result,
       ...(reason === undefined ? {} : { reason }),
       ...(divergence === undefined ? {} : { divergence }),
-      ...(selectedPath === undefined
-        ? {}
-        : { anchorIndex: 0, intermediateIndices: selectedPath }),
+      ...(selectedPath === undefined ? {} : { anchorIndex: 0, intermediateIndices: selectedPath }),
     },
     upstreamResult: testcase.expected_result,
     validationTime: testcase.validation_time ?? '2024-03-15T00:00:00Z',
