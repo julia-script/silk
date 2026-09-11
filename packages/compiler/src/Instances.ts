@@ -1141,7 +1141,8 @@ export const discover = (
     readonly key: InstanceKey
     readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
     readonly ancestors: ReadonlyMap<string, Ancestor>
-    readonly cleanupReachable: boolean
+    /** Ordinary type arguments retained as the finite structural measure of a cleanup path. */
+    readonly cleanupMeasure?: ReadonlyArray<Type.Type>
   }
   const declarationText = (key: InstanceKey): string =>
     `${key.declaration.module}\u0000${key.declaration.name}`
@@ -1184,6 +1185,42 @@ export const discover = (
         Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate)
       )
     })
+  const typeArgumentsOf = (key: InstanceKey): ReadonlyArray<Type.Type> =>
+    key.typeArguments.filter(Type.isTypeArgument)
+  const sameTypes = (
+    leftTypes: ReadonlyArray<Type.Type>,
+    rightTypes: ReadonlyArray<Type.Type>,
+  ): boolean => {
+    return (
+      leftTypes.length === rightTypes.length &&
+      leftTypes.every((argument, index) => {
+        const candidate = rightTypes.at(index)
+        return (
+          candidate !== undefined &&
+          Type.runtimeGenericArgumentKey(argument) === Type.runtimeGenericArgumentKey(candidate)
+        )
+      })
+    )
+  }
+  const sameTypeArguments = (left: InstanceKey, right: InstanceKey): boolean =>
+    sameTypes(typeArgumentsOf(left), typeArgumentsOf(right))
+  const continuesCleanupMeasure = (
+    measure: ReadonlyArray<Type.Type> | undefined,
+    target: InstanceKey,
+  ): measure is ReadonlyArray<Type.Type> => {
+    if (measure === undefined) return false
+    const targetTypes = typeArgumentsOf(target)
+    return targetTypes.length === 0 || sameTypes(measure, targetTypes)
+  }
+  const advanceCleanupMeasure = (
+    measure: ReadonlyArray<Type.Type> | undefined,
+    target: InstanceKey,
+    selected: boolean,
+  ): ReadonlyArray<Type.Type> | undefined => {
+    if (!selected) return continuesCleanupMeasure(measure, target) ? measure : undefined
+    const targetTypes = typeArgumentsOf(target)
+    return targetTypes.length === 0 ? measure : targetTypes
+  }
   const sameVisibleArguments = (left: InstanceKey, right: InstanceKey): boolean => {
     const leftVisible = left.typeArguments.filter(
       (argument) => !Type.isHiddenExecutableArgument(argument),
@@ -1206,7 +1243,6 @@ export const discover = (
     Object.freeze({
       key,
       ancestors: withAncestor(new Map(), Object.freeze({ key })),
-      cleanupReachable: false,
     })
   const roots: Array<WorkItem> = retention.map(rootItem)
   // Retain exactly the export implementations admitted by the selected target's C contract.
@@ -1217,7 +1253,7 @@ export const discover = (
   const specializationFailures = new Map<string, NonConcreteSpecialization>()
   const recordedContexts = new Map<string, Map<string, WorkItem>>()
   const contextText = (item: WorkItem): string =>
-    `${item.cleanupReachable ? 'cleanup' : 'ordinary'}\u0001${keyText(item.key)}\u0001${[
+    `${item.cleanupMeasure?.map(Type.runtimeKey).join('\u0000') ?? 'ordinary'}\u0001${keyText(item.key)}\u0001${[
       ...item.ancestors.entries(),
     ]
       .sort(([left], [right]) => {
@@ -1263,6 +1299,27 @@ export const discover = (
       [...types.values()].flatMap((type) => hookCalls(CleanupPlan.cleanupPlan(index, type), index)),
     )
   }
+  /** Proves that a recursive specialization is one of an owner's finite structural cleanup hooks. */
+  const cleanupDescendsFrom = (ancestor: InstanceKey, target: InstanceKey): boolean =>
+    !sameTypeArguments(ancestor, target) &&
+    typeArgumentsOf(ancestor).some((type) =>
+      hookCalls(CleanupPlan.cleanupPlan(index, type), index).some((call) => {
+        const fn = FunctionIndex.hirByName(
+          results.get(call.declaration.module)?.hir,
+          call.declaration.name,
+        )
+        if (fn === undefined) return false
+        const candidate = keyOf(
+          call.declaration,
+          fn.contract,
+          fn.declaration.typeParameters.map((parameter) => parameter.type),
+          call.typeArguments,
+          call.staticArguments ?? Object.freeze([]),
+          call.evidence ?? Object.freeze([]),
+        )
+        return keyText(candidate) === keyText(target)
+      }),
+    )
   while (true) {
     for (let cursor = 0; cursor < pending.length; cursor += 1) {
       const queued = pending[cursor]
@@ -1474,6 +1531,14 @@ export const discover = (
           call.structuralProvider !== undefined &&
           ancestor?.structuralProvider !== undefined &&
           Type.isStrictStructuralSubterm(call.structuralProvider, ancestor.structuralProvider)
+        const cleanupDescending = cleanupDescendsFrom(key, targetKey)
+        const cleanupContinuation = continuesCleanupMeasure(item.cleanupMeasure, targetKey)
+        const cleanupSelected = cleanupIdentities.has(identityOfCall(call))
+        const nextCleanupMeasure = advanceCleanupMeasure(
+          item.cleanupMeasure,
+          targetKey,
+          cleanupDescending || cleanupSelected,
+        )
         const terminalCallableSpecialization =
           ancestor !== undefined &&
           sameVisibleArguments(ancestor.key, targetKey) &&
@@ -1488,10 +1553,12 @@ export const discover = (
           ancestor !== undefined &&
           !sameArguments(ancestor.key, targetKey) &&
           !structurallyDescending &&
+          !cleanupDescending &&
+          !cleanupContinuation &&
           !terminalCallableSpecialization &&
           !(
             prepared.has(keyText(targetKey)) &&
-            (item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)))
+            (item.cleanupMeasure !== undefined || cleanupSelected)
           )
         ) {
           const violationKey = `${keyText(key)}\u0000${keyText(targetKey)}`
@@ -1518,7 +1585,7 @@ export const discover = (
                   : { structuralProvider: call.structuralProvider }),
               }),
             ),
-            cleanupReachable: item.cleanupReachable || cleanupIdentities.has(identityOfCall(call)),
+            ...(nextCleanupMeasure === undefined ? {} : { cleanupMeasure: nextCleanupMeasure }),
           }),
         )
       }
@@ -1556,7 +1623,25 @@ export const discover = (
       for (const ownerContext of recordedContexts.get(keyText(provided.owner))?.values() ?? []) {
         const declaration = declarationText(provided.target)
         const ancestor = ownerContext.ancestors.get(declaration)
-        if (ancestor !== undefined && !sameArguments(ancestor.key, provided.target)) {
+        // A cleanup implementation can select another specialization of the same lexical service
+        // operation while recursively releasing a field. Admit only targets proved reachable from
+        // the providing owner's finite cleanup plan; unrelated provider recursion stays guarded.
+        const cleanupReentry = cleanupDescendsFrom(provided.owner, provided.target)
+        const cleanupContinuation = continuesCleanupMeasure(
+          ownerContext.cleanupMeasure,
+          provided.target,
+        )
+        const nextCleanupMeasure = advanceCleanupMeasure(
+          ownerContext.cleanupMeasure,
+          provided.target,
+          cleanupReentry,
+        )
+        if (
+          ancestor !== undefined &&
+          !sameArguments(ancestor.key, provided.target) &&
+          !cleanupReentry &&
+          !cleanupContinuation
+        ) {
           const violationKey = `${keyText(provided.owner)}\u0000${keyText(provided.target)}`
           if (!violationKeys.has(violationKey)) {
             violationKeys.add(violationKey)
@@ -1573,7 +1658,7 @@ export const discover = (
         const item = Object.freeze({
           key: provided.target,
           ancestors: withAncestor(ownerContext.ancestors, Object.freeze({ key: provided.target })),
-          cleanupReachable: ownerContext.cleanupReachable,
+          ...(nextCleanupMeasure === undefined ? {} : { cleanupMeasure: nextCleanupMeasure }),
         })
         if (schedule(item)) scheduledProvided = true
       }

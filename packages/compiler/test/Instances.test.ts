@@ -413,6 +413,58 @@ pub fn main() -> () { return run Intrinsic.catchFailure<SomeError>(failWithOwned
   }),
 )
 
+it.effect('admits nested cleanup reached through a lexical service provider', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.effect { Effect }
+import silk.vector { Vector }
+struct Inner { value: i32 }
+struct Leaf { inner: Vector<Inner> }
+struct Owner { leaves: Vector<Leaf> }
+service Source { effect fn load() -> Owner ? &mut Source }
+struct Provider {}
+impl Provider {
+  effect fn load(self: &mut Self) -> Owner {
+    return Owner { leaves: Vector.make<Leaf>() }
+  }
+}
+impl Source for Provider { load: Provider.load }
+effect fn program() -> i32 {
+  let mut provider = Provider {}
+  let owner = run Source.load() |> Effect.provideMut<Source>(&mut provider)
+  drop owner
+  return 42
+}
+pub fn main() -> i32 { return run program() }`)
+    assert.deepEqual(Analysis.diagnostics(result), [])
+    assert.deepEqual(Analysis.instancesOf(result).violations, [])
+  }),
+)
+
+it.effect('rejects unrelated polymorphic recursion inside a lexical service provider', () =>
+  Effect.gen(function* () {
+    const result = yield* snapshot(`import silk.effect { Effect }
+service Source { effect fn load() -> i32 ? &mut Source }
+struct Provider<T> {}
+fn expand<T>() -> i32 { return expand<[T; 1]>() }
+impl<T> Source for Provider<T> {
+  effect fn load(self: &mut Self) -> i32 { return expand<T>() }
+}
+pub fn main() -> i32 {
+  let mut provider = Provider<i32> {}
+  return run Source.load() |> Effect.provideMut<Source>(&mut provider)
+}`)
+    assert.deepEqual(
+      Analysis.diagnostics(result).map((diagnostic) => diagnostic.code),
+      ['SEM0053'],
+    )
+    assert.strictEqual(result.instances.violations.length, 1)
+    assert.deepEqual(
+      result.instances.violations.at(0)?.target.typeArguments.map(Type.encodeGenericArgument),
+      ['Array<i32, 1>'],
+    )
+  }),
+)
+
 it.effect('lowers discovered instances deterministically to verifier-clean MIR', () =>
   Effect.gen(function* () {
     const program = Analysis.loweredMir(yield* snapshot(nestedSource))
