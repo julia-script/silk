@@ -31,6 +31,7 @@ import {
   tlsRecordAcceptanceSource,
   tlsRecordNativeAcceptanceSource,
 } from './tlsRecordAcceptance.js'
+import { tlsClientAcceptanceSource } from './tlsClientAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
@@ -7997,6 +7998,11 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     name: 'tls-record',
     source: tlsRecordAcceptanceSource,
     nativeSource: tlsRecordNativeSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'authenticated-tls-client',
+    source: tlsClientAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

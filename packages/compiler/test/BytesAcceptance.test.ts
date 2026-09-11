@@ -9,9 +9,27 @@ import * as Analysis from '../src/Analysis.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
 import certificateProfileFixtures from './fixtures/certificate-profile-limbo.json' with { type: 'json' }
 import certificatePathFixtures from './fixtures/certificate-path-limbo.json' with { type: 'json' }
+import tlsClientFixtures from './fixtures/tls-client/manifest.json' with { type: 'json' }
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+it('pins authenticated TLS client replay provenance and every offline file digest', () => {
+  assert.strictEqual(tlsClientFixtures.rustls.version, '0.23.35')
+  assert.strictEqual(tlsClientFixtures.rustls.commit, '7768cd2b44049e040685d48318d13bfa7f7d32a8')
+  assert.strictEqual(tlsClientFixtures.rustls.provider, 'ring')
+  assert.deepEqual(tlsClientFixtures.rustls.protocolVersions, ['TLSv1.3'])
+  assert.match(tlsClientFixtures.rustls.regeneration, /semantic-only/)
+  assert.strictEqual(
+    tlsClientFixtures.comparison.zigHttpParityCommit,
+    '1bc892110da738d6137b3f0b7e8e3a586ce09928',
+  )
+  assert.strictEqual(tlsClientFixtures.capture.privateKeys, 'TEST ONLY')
+  for (const [path, expected] of Object.entries(tlsClientFixtures.files)) {
+    const bytes = readFileSync(new URL(`./fixtures/tls-client/${path}`, import.meta.url))
+    assert.strictEqual(createHash('sha256').update(bytes).digest('hex'), expected, path)
+  }
+})
 
 it('pins certificate-profile fixture provenance and DER digests', () => {
   assert.strictEqual(

@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "purpose": "Deterministic offline replay evidence for the selected authenticated TLS 1.3 client profile",
+  "rustls": {
+    "version": "0.23.35",
+    "commit": "7768cd2b44049e040685d48318d13bfa7f7d32a8",
+    "provider": "ring",
+    "protocolVersions": ["TLSv1.3"],
+    "generatorCommand": "cd generator && cargo run --locked",
+    "regeneration": "semantic-only; rustls/ring peer entropy makes fresh capture bytes intentionally different"
+  },
+  "comparison": {
+    "rfc8448TextSha256": "6564d1376d1ec744fc7a9993da15ebc1b9be361908b166091f47ef605c537fba",
+    "zigHttpParityCommit": "1bc892110da738d6137b3f0b7e8e3a586ce09928",
+    "zigTlsClientSourceSha256": "21de8df98f17fc8ed00c03b54b60801fc168074c0e56f1d79d6d1b358096cfc5"
+  },
+  "capture": {
+    "id": "rsa-x25519-chacha20poly1305-sha256",
+    "serverName": "example.com",
+    "suite": "TLS_CHACHA20_POLY1305_SHA256",
+    "group": "X25519",
+    "certificateVerify": "RSA-PSS-RSAE-SHA256",
+    "validationUnixSeconds": 1789146000,
+    "validationNanoseconds": 123456789,
+    "scriptedClientRandom": "02..21",
+    "scriptedX25519Input": "22..41",
+    "coalescedAfterServerFinished": "one server application-data record containing 'coalesced authenticated plaintext'",
+    "privateKeys": "TEST ONLY"
+  },
+  "files": {
+    "README.md": "c31021fc374463ed0f1c4ec58d1b40522c5bd936938c5037bbe9b2270c25d660",
+    "captures/rsa-x25519-client-hello.bin": "5420d2479a4d27083a417fe20fd115b74fb1c1d50ea1ddbc3cc33028c8f92370",
+    "captures/rsa-x25519-keylog.TEST-ONLY.txt": "83d91e31ab5b99700f4c0505ff5cd99a3447a7d6ef10b3a2ab4125009da6c1c2",
+    "captures/rsa-x25519-server-flight.bin": "b84348c58f7128630f7ec1048e5865fd272e23dc16f63f074818e00af130ba1d",
+    "generator/Cargo.lock": "e29e7fdbf5a911c6099bf1530d9ffb5765982912351d2f53406d5f71564df132",
+    "generator/Cargo.toml": "aafa212cefaa7c7acf7db4171e91489216e37b6f96b36e60e57e648ef53f5df7",
+    "generator/src/main.rs": "0b7f45df804a0064e870395517b3ea71ea1da38c3e0712b1fb5582186e0e2d66",
+    "keys/leaf.cnf": "ffa7a3de1543a1898f2c9c799b38f640e46248dc0590b3991120e725d9e19a8c",
+    "keys/root-cert.pem": "f8ca22807d0d4a8d4990ddd855b2eb1b17a9abdeb8b0b2bb442ddefd8abefc0f",
+    "keys/root-key.TEST-ONLY.pem": "c46c773424a57063c67cd553189ab376252238eea39703259dbde27ac3de322d",
+    "keys/root.cnf": "2bf966c89995c055db8f089f0054c7e984723dc7ab14e8feae626ee56fe95fb5",
+    "keys/rsa-leaf-cert.pem": "0c6fb0a2ae68f0a2691e517aab62cbebd2e79cb836493f67aad96e1eb330ef4a",
+    "keys/rsa-leaf-chain.pem": "057755e4377c6db2a7c55f420b9a1a104a1bc0b1c9cbc3f9eb90ca6005d38594",
+    "keys/rsa-leaf-key.TEST-ONLY.pem": "b067b6392794949042c488b92b0d4e9cad76211a2429495b24c89e00eee1f455"
+  }
+}

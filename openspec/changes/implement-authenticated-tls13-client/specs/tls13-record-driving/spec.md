@@ -35,3 +35,12 @@ Define allocation-free, failure-atomic protected-epoch replacement needed by the
 
 - **WHEN** a destination is one byte smaller than the authenticated ready content
 - **THEN** `RecordOverflow` reports the requested and available sizes and a later adequate copy returns the same complete content
+
+### Requirement: Protected handshake epochs admit compatibility CCS without advancing keys
+
+An otherwise idle protected `TlsRecordReceiver` SHALL admit the plaintext TLS 1.3 compatibility record `{ content_type = change_cipher_spec, legacy_record_version = 0x0303, fragment = {1} }`. The record SHALL become an ordinary ready `ChangeCipherSpec` record without AEAD processing or sequence reservation. Every other plaintext outer type, version, length, or CCS byte during a protected epoch SHALL retain the existing terminal `InvalidContent` behavior.
+
+#### Scenario: A compatibility CCS does not consume the first protected sequence
+
+- **WHEN** a protected receiver consumes exact plaintext CCS `{1}` and then receives its peer's first protected record
+- **THEN** the CCS is reported as `ChangeCipherSpec` and the protected record authenticates at sequence zero
