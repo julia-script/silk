@@ -237,3 +237,34 @@ pub fn main() -> i32 {return 0}`
     )
   }),
 )
+
+it.effect('checks TLS digest widths and rejects overlapping secret/output borrows', () =>
+  Effect.gen(function* () {
+    const source = `import silk.tls_hkdf { TlsHkdfSha256 }
+pub fn main() -> i32 {
+  let mut secret: [u8; 32] = [${Array.from({ length: 32 }, () => 0).join(', ')}]
+  let wrong: [u8; 48] = [${Array.from({ length: 48 }, () => 0).join(', ')}]
+  let label: [u8; 1] = [1]
+  let empty: [u8; 0] = []
+  let badHash = TlsHkdfSha256.deriveSecretFromHash(&secret, &label, &wrong)
+  let overlap = TlsHkdfSha256.expandLabel(&secret, &label, &empty, &mut secret)
+  drop badHash
+  drop overlap
+  return 0
+}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/tls-contracts',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((d) => ({
+        code: d.code,
+        span: source.slice(d.span.start, d.span.end),
+      })),
+      [
+        { code: 'SEM0056', span: 'wrong' },
+        { code: 'OWN0010', span: ' &mut secret' },
+      ],
+    )
+  }),
+)

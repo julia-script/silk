@@ -1,4 +1,5 @@
 import { rsaWasmSource } from './support/rsaAcceptance.js'
+import { tlsHkdfWasmSource } from './support/tlsHkdfAcceptance.js'
 import { x25519WasmAcceptanceSource } from './support/x25519Acceptance.js'
 import * as AbiManifest from '../src/AbiManifest.js'
 import * as ForeignContract from '../src/ForeignContract.js'
@@ -760,5 +761,27 @@ it.effect('executes bounded RSA verification through LLVM-to-Wasm', () =>
     const main = instance.exports['main']
     assert.isFunction(main)
     if (typeof main === 'function') assert.strictEqual(main(), 42)
+  }),
+)
+
+// Two compact label derivations cover both digest widths on wasm32; native owns the boundary corpus.
+it.effect('executes TLS HKDF through LLVM-to-Wasm without host imports', () =>
+  Effect.gen(function* () {
+    const outcome = yield* compileSource('tls-hkdf.wasm', tlsHkdfWasmSource, {
+      compilation: {
+        root: SourceFile.make('memory/tls-hkdf-wasm', ascii(tlsHkdfWasmSource)),
+        target: 'wasm32-unknown-unknown',
+      },
+      artifactKind: 'WebAssemblyModule',
+    })
+    assert.strictEqual(outcome._tag, 'Compiled')
+    if (outcome._tag !== 'Compiled') return
+    yield* Effect.sync(() => {
+      const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+      assert.deepEqual(WebAssembly.Module.imports(module), [])
+      const main = new WebAssembly.Instance(module).exports['main']
+      assert.isFunction(main)
+      if (typeof main === 'function') assert.strictEqual(main(), 0)
+    })
   }),
 )
