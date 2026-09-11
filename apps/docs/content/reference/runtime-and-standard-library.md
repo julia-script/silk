@@ -1012,7 +1012,12 @@ P-256 or bounded RSA keys, supported SHA-256 certificate signature metadata, str
 and role-specific BasicConstraints, KeyUsage, ExtendedKeyUsage, SAN, and NameConstraints policy.
 It retains borrowed access to the original certificate and exact SAN/NameConstraints values. It
 allocates nothing and reports owned `Malformed`, `Unsupported`, or `ResourceLimit` errors with
-stable semantic reasons and certificate-DER offsets.
+stable semantic reasons and certificate-DER offsets. `SignatureAlgorithm` identifies an unknown
+signature OID or invalid signature-bit metadata, `SignatureParameters` identifies parameters that
+are invalid for a recognized algorithm, and `SignatureAlgorithmMismatch` identifies two admitted
+but differing inner and outer algorithms. `EmptySubject` identifies the structural requirement for
+a nonempty critical SAN; malformed SAN content remains `SubjectAltName`, while `Role` remains CA
+and BasicConstraints policy.
 
 `CertificateProfile.verifyIssuedBy` checks exact issuer-name DER equality and verifies the
 subject's original retained TBSCertificate bytes with the issuer's admitted key. It checks one

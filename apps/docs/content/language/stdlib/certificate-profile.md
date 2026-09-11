@@ -314,254 +314,274 @@ The public-key algorithm, encoding, parameters, or mathematical key is not admit
 SignatureAlgorithm = 4
 ```
 
-Signature AlgorithmIdentifier metadata is malformed or unsupported.
+The signature algorithm OID or signature BIT STRING metadata is not admitted.
 
 <a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a35"></a>
+
+### `SignatureParameters`
+
+```silk
+SignatureParameters = 5
+```
+
+A recognized signature algorithm has forbidden, missing, or unsupported parameters.
+
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a36"></a>
 
 ### `SignatureAlgorithmMismatch`
 
 ```silk
-SignatureAlgorithmMismatch = 5
+SignatureAlgorithmMismatch = 6
 ```
 
 Inner and outer signature identifiers do not denote the same admitted effective algorithm.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a36"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a37"></a>
 
 ### `Extensions`
 
 ```silk
-Extensions = 6
+Extensions = 7
 ```
 
 More certificate extensions are present than the configured bound.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a37"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a38"></a>
 
 ### `ExtensionBytes`
 
 ```silk
-ExtensionBytes = 7
+ExtensionBytes = 8
 ```
 
 One extension value exceeds its configured byte bound.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a38"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a39"></a>
 
 ### `DuplicateExtension`
 
 ```silk
-DuplicateExtension = 8
+DuplicateExtension = 9
 ```
 
 A duplicate extension OID is present.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a39"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3130"></a>
 
 ### `UnknownCriticalExtension`
 
 ```silk
-UnknownCriticalExtension = 9
+UnknownCriticalExtension = 10
 ```
 
 A critical extension has no supported semantics in this profile.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3130"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3131"></a>
 
 ### `MalformedExtension`
 
 ```silk
-MalformedExtension = 10
+MalformedExtension = 11
 ```
 
 A recognized extension violates strict DER or its selected schema.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3131"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3132"></a>
 
 ### `BasicConstraints`
 
 ```silk
-BasicConstraints = 11
+BasicConstraints = 12
 ```
 
 BasicConstraints conflicts with the role or path-length rules.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3132"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3133"></a>
 
 ### `KeyUsage`
 
 ```silk
-KeyUsage = 12
+KeyUsage = 13
 ```
 
 KeyUsage encoding or dependent bits are invalid.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3133"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3134"></a>
 
 ### `MissingKeyUsage`
 
 ```silk
-MissingKeyUsage = 13
+MissingKeyUsage = 14
 ```
 
 A present KeyUsage does not authorize the selected role.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3134"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3135"></a>
 
 ### `ExtendedKeyUsage`
 
 ```silk
-ExtendedKeyUsage = 14
+ExtendedKeyUsage = 15
 ```
 
 ExtendedKeyUsage is empty or malformed.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3135"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3136"></a>
 
 ### `MissingServerAuth`
 
 ```silk
-MissingServerAuth = 15
+MissingServerAuth = 16
 ```
 
 A present ExtendedKeyUsage omits id-kp-serverAuth.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3136"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3137"></a>
 
 ### `SubjectAltName`
 
 ```silk
-SubjectAltName = 16
+SubjectAltName = 17
 ```
 
 subjectAltName is malformed or contains an invalid DNS/IP identity.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3137"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3138"></a>
+
+### `EmptySubject`
+
+```silk
+EmptySubject = 18
+```
+
+An empty subject lacks a nonempty critical subjectAltName.
+
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3139"></a>
 
 ### `UnsupportedCriticalName`
 
 ```silk
-UnsupportedCriticalName = 17
+UnsupportedCriticalName = 19
 ```
 
 A critical subjectAltName contains an unsupported GeneralName alternative.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3138"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3230"></a>
 
 ### `NameConstraints`
 
 ```silk
-NameConstraints = 18
+NameConstraints = 20
 ```
 
 NameConstraints is malformed, empty, noncritical, or used on an end entity.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3139"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3231"></a>
 
 ### `UnsupportedNameConstraint`
 
 ```silk
-UnsupportedNameConstraint = 19
+UnsupportedNameConstraint = 21
 ```
 
 A NameConstraints subtree form is outside the DNS/IP subset.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3230"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3232"></a>
 
 ### `PolicyProcessing`
 
 ```silk
-PolicyProcessing = 20
+PolicyProcessing = 22
 ```
 
 A certificate-policy feature requiring policy-tree processing is present.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3231"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3233"></a>
 
 ### `TlsFeature`
 
 ```silk
-TlsFeature = 21
+TlsFeature = 23
 ```
 
 TLS Feature is present although this profile cannot satisfy must-staple semantics.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3232"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3234"></a>
 
 ### `Role`
 
 ```silk
-Role = 22
+Role = 24
 ```
 
-The certificate role's CA, extension-criticality, subject, or usage policy is violated.
+The certificate role's CA or BasicConstraints policy is violated.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3233"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3235"></a>
 
 ### `SanNames`
 
 ```silk
-SanNames = 23
+SanNames = 25
 ```
 
 A SAN name count exceeds its configured bound.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3234"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3236"></a>
 
 ### `ConstraintSubtrees`
 
 ```silk
-ConstraintSubtrees = 24
+ConstraintSubtrees = 26
 ```
 
 A NameConstraints subtree count exceeds its configured bound.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3235"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3237"></a>
 
 ### `Nodes`
 
 ```silk
-Nodes = 25
+Nodes = 27
 ```
 
 The traversed extension-value node count exceeds its configured bound.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3236"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3238"></a>
 
 ### `Depth`
 
 ```silk
-Depth = 26
+Depth = 28
 ```
 
 The traversed extension-value depth exceeds its configured bound.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3237"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3239"></a>
 
 ### `SizeOverflow`
 
 ```silk
-SizeOverflow = 27
+SizeOverflow = 29
 ```
 
 Checked size or counter arithmetic cannot be represented.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3238"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3330"></a>
 
 ### `IssuerName`
 
 ```silk
-IssuerName = 28
+IssuerName = 30
 ```
 
 The subject issuer Name DER does not exactly equal the issuer subject Name DER.
 
-<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3239"></a>
+<a id="declaration-73696c6b2f63657274696669636174655f70726f66696c653a3a50726f66696c65526561736f6e3a3a6d656d6265723a3331"></a>
 
 ### `SignatureRejected`
 
 ```silk
-SignatureRejected = 29
+SignatureRejected = 31
 ```
 
 An admitted cryptographic primitive rejected the retained signature.

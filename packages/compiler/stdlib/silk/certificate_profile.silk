@@ -120,8 +120,10 @@ pub enum ProfileReason {
   UniqueIdentifier,
   /// The public-key algorithm, encoding, parameters, or mathematical key is not admitted.
   PublicKey,
-  /// Signature AlgorithmIdentifier metadata is malformed or unsupported.
+  /// The signature algorithm OID or signature BIT STRING metadata is not admitted.
   SignatureAlgorithm,
+  /// A recognized signature algorithm has forbidden, missing, or unsupported parameters.
+  SignatureParameters,
   /// Inner and outer signature identifiers do not denote the same admitted effective algorithm.
   SignatureAlgorithmMismatch,
   /// More certificate extensions are present than the configured bound.
@@ -146,6 +148,8 @@ pub enum ProfileReason {
   MissingServerAuth,
   /// subjectAltName is malformed or contains an invalid DNS/IP identity.
   SubjectAltName,
+  /// An empty subject lacks a nonempty critical subjectAltName.
+  EmptySubject,
   /// A critical subjectAltName contains an unsupported GeneralName alternative.
   UnsupportedCriticalName,
   /// NameConstraints is malformed, empty, noncritical, or used on an end entity.
@@ -156,7 +160,7 @@ pub enum ProfileReason {
   PolicyProcessing,
   /// TLS Feature is present although this profile cannot satisfy must-staple semantics.
   TlsFeature,
-  /// The certificate role's CA, extension-criticality, subject, or usage policy is violated.
+  /// The certificate role's CA or BasicConstraints policy is violated.
   Role,
   /// A SAN name count exceeds its configured bound.
   SanNames,
@@ -727,7 +731,7 @@ fn rawSpan(bytes: &[u8], offset: usize, limit: usize) -> Span {
   return Span {start: offset, content: at, end: at + length, tag: tag}
 }
 
-fn validateSanNames(reader: &mut Reader, critical: bool) -> () {
+fn validateSanNames(reader: &mut Reader, critical: bool, emptySubject: bool) -> () {
   let limits = SanDecodeLimits {
     extensions: 1,
     inputBytes: reader.limits.extensionBytes,
@@ -739,6 +743,9 @@ fn validateSanNames(reader: &mut Reader, critical: bool) -> () {
   match move validated {
     Result<SanDecodeSummary, SanDecodeError>.Failure {error} => {
       let mut reason = ProfileReason.SubjectAltName
+      if emptySubject && error.reason == SanDecodeReason.EmptySan {
+        reason = ProfileReason.EmptySubject
+      }
       if error.kind == SanDecodeClass.ResourceLimit {
         if error.reason == SanDecodeReason.Identities {
           reason = ProfileReason.SanNames
@@ -1008,12 +1015,17 @@ fn signatureKind(algorithm: &AlgorithmView, offset: usize) -> Result<SignatureKi
     return match & algorithm.parametersDer {
       Option<&[u8]>.None => Result.succeed<SignatureKind, ProfileError>(SignatureKind.EcdsaP256Sha256)
       Option<&[u8]>.Some {value} => Result.failResult<SignatureKind, ProfileError>(
-        profileError(ProfileClass.Unsupported, ProfileReason.SignatureAlgorithm, ProfileOffsetSpace.CertificateDer, offset),
+        profileError(ProfileClass.Unsupported, ProfileReason.SignatureParameters, ProfileOffsetSpace.CertificateDer, offset),
       )
     }
   }
-  if equal(algorithm.oid, &pkcs1) && nullOrAbsent(&algorithm.parametersDer) {
-    return Result.succeed<SignatureKind, ProfileError>(SignatureKind.RsaPkcs1Sha256)
+  if equal(algorithm.oid, &pkcs1) {
+    if nullOrAbsent(&algorithm.parametersDer) {
+      return Result.succeed<SignatureKind, ProfileError>(SignatureKind.RsaPkcs1Sha256)
+    }
+    return Result.failResult<SignatureKind, ProfileError>(
+      profileError(ProfileClass.Unsupported, ProfileReason.SignatureParameters, ProfileOffsetSpace.CertificateDer, offset),
+    )
   }
   if equal(algorithm.oid, &pss) {
     return match & algorithm.parametersDer {
@@ -1022,11 +1034,11 @@ fn signatureKind(algorithm: &AlgorithmView, offset: usize) -> Result<SignatureKi
           return Result.succeed<SignatureKind, ProfileError>(SignatureKind.RsaPssSha256)
         }
         return Result.failResult<SignatureKind, ProfileError>(
-          profileError(ProfileClass.Unsupported, ProfileReason.SignatureAlgorithm, ProfileOffsetSpace.CertificateDer, offset),
+          profileError(ProfileClass.Unsupported, ProfileReason.SignatureParameters, ProfileOffsetSpace.CertificateDer, offset),
         )
       }
       Option<&[u8]>.None => Result.failResult<SignatureKind, ProfileError>(
-        profileError(ProfileClass.Unsupported, ProfileReason.SignatureAlgorithm, ProfileOffsetSpace.CertificateDer, offset),
+        profileError(ProfileClass.Unsupported, ProfileReason.SignatureParameters, ProfileOffsetSpace.CertificateDer, offset),
       )
     }
   }
@@ -1309,7 +1321,7 @@ impl<'a> CertificateProfile<'a> {
             ekuOffset = extension.offset
           } else if equal(extension.oid, &sanOid) {
             let mut reader = makeReader(extension.value, limits, nodes, extension.valueOffset, ProfileOffsetSpace.CertificateDer, true, index)
-            validateSanNames(&mut reader, extension.critical)
+            validateSanNames(&mut reader, extension.critical, subjectIsEmpty(certificate))
             if reader.failed { return resultFailure<CertificateProfile<'a>>(move reader.error) }
             nodes = reader.nodes
             hasSan = true
@@ -1418,11 +1430,11 @@ impl<'a> CertificateProfile<'a> {
     if subjectIsEmpty(certificate) && (!hasSan || !sanCritical) {
       if hasSan {
         return resultFailure<CertificateProfile<'a>>(
-          extensionError(ProfileClass.Unsupported, ProfileReason.Role, sanIndex, sanExtensionOffset),
+          extensionError(ProfileClass.Unsupported, ProfileReason.EmptySubject, sanIndex, sanExtensionOffset),
         )
       }
       return resultFailure<CertificateProfile<'a>>(
-        profileError(ProfileClass.Unsupported, ProfileReason.Role, ProfileOffsetSpace.CertificateDer, offsets.subject),
+        profileError(ProfileClass.Unsupported, ProfileReason.EmptySubject, ProfileOffsetSpace.CertificateDer, offsets.subject),
       )
     }
 

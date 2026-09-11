@@ -47,6 +47,13 @@ AKI/SKI are validated as noncritical hints but not cached because they cannot re
 
 `ProfileError` owns `ProfileClass`, `ProfileReason`, optional extension index, `ProfileOffsetSpace`, and a byte offset. Certificate offsets are derived by locating borrowed extension/subfield slices inside `Certificate.der`; configured constraints use their own offset space. Failures are selected in the ticket’s fixed order: version/serial/IDs; algorithms/key; extensions in certificate order; then role/usage.
 
+The public reason taxonomy preserves the recovery-relevant distinction between an unrecognized
+signature algorithm (`SignatureAlgorithm`), invalid parameters on a recognized admitted algorithm
+(`SignatureParameters`), and two individually admitted but differing inner/outer algorithms
+(`SignatureAlgorithmMismatch`). `EmptySubject` separately identifies the structural requirement
+for a nonempty critical SAN; ordinary malformed SAN content remains `SubjectAltName`, while `Role`
+remains reserved for CA and BasicConstraints policy.
+
 All additions, subtractions, counters, and bounds are checked before iteration or allocation. The constrained anchor constructor validates and checks `certificate.der.length + configured.length` before `Bytes.copy`; ordinary affine cleanup drops the consumed certificate and any partial copy if the Effect fails.
 
 ### Reuse cryptographic primitives without a second verifier
