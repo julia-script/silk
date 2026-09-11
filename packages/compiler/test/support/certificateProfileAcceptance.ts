@@ -75,6 +75,31 @@ const rebuildDerNode = (
   return Buffer.concat([Buffer.from([node.tag, ...derLength(content.length)]), content])
 }
 
+const replaceDerNodeAt = (
+  bytes: Buffer,
+  target: DerNode,
+  replacement: ReadonlyArray<number>,
+): Buffer =>
+  rebuildDerNode(bytes, derNode(bytes, 0), target.start, target.end, Buffer.from(replacement))
+
+const withEmptySubject = (bytes: Buffer, id: string): Buffer => {
+  const certificate = derNode(bytes, 0)
+  const tbs = derNode(bytes, certificate.content)
+  let at = tbs.content
+  let child = derNode(bytes, at)
+  if (child.tag === 0xa0) {
+    at = child.end
+  }
+  // Skip serial, signature, issuer, and validity to reach the subject Name.
+  for (let index = 0; index < 4; index += 1) {
+    child = derNode(bytes, at)
+    at = child.end
+  }
+  const subject = derNode(bytes, at)
+  if (subject.tag !== 0x30) throw new Error(`Unexpected subject Name in ${id}`)
+  return replaceDerNodeAt(bytes, subject, [0x30, 0x00])
+}
+
 const rewriteDerNodes = (
   input: Buffer,
   id: string,
@@ -276,10 +301,14 @@ const rsaPssSha256 = [
 const rsaPssDefaults = [
   0x30, 0x0b, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0a,
 ]
+const rsaPssBadSalt = rsaPssSha256.map((value, index) =>
+  index === rsaPssSha256.length - 1 ? 0x1f : value,
+)
 const rsaSpkiAbsent = replaceDerNodes(rsaLeafId, rsaEncryptionNull, rsaEncryptionAbsent, 1)
 const rsaSignatureAbsent = replaceDerNodes(rsaLeafId, rsaPkcs1Null, rsaPkcs1Absent, 2)
 const rsaPss = replaceDerNodes(rsaLeafId, rsaPkcs1Null, rsaPssSha256, 2)
-const rsaPssWithDefaults = replaceDerNodes(rsaLeafId, rsaPkcs1Null, rsaPssDefaults, 2)
+const rsaPssMissingParameters = replaceDerNodes(rsaLeafId, rsaPkcs1Null, rsaPssDefaults, 2)
+const rsaPssBadParameters = replaceDerNodes(rsaLeafId, rsaPkcs1Null, rsaPssBadSalt, 2)
 const versionTwo = literal(Buffer.from(certificateUniqueIdsDer).toString('base64'))
 const uniqueIds = (() => {
   const bytes = Buffer.from(certificateUniqueIdsDer)
@@ -303,19 +332,28 @@ const invalidPoint = mutateUnique(
 const ecdsaSha256Identifier = [
   0x30, 0x0a, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02,
 ]
-const innerUnsupportedSignature = mutateOccurrence(
+const ecdsaSha256WithNull = [
+  0x30, 0x0c, 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02, 0x05, 0x00,
+]
+const ecdsaForbiddenParameters = replaceDerNodes(
+  'rfc5280::no-keyusage/peer_certificate',
+  ecdsaSha256Identifier,
+  ecdsaSha256WithNull,
+  2,
+)
+const innerUnknownSignatureAlgorithm = mutateOccurrence(
   'rfc5280::no-keyusage/peer_certificate',
   ecdsaSha256Identifier,
   0,
   11,
-  3,
+  0x7f,
 )
-const outerUnsupportedSignature = mutateOccurrence(
+const outerUnknownSignatureAlgorithm = mutateOccurrence(
   'rfc5280::no-keyusage/peer_certificate',
   ecdsaSha256Identifier,
   1,
   11,
-  3,
+  0x7f,
 )
 const missingCaKeyUsage = mutateUnique(
   'rfc5280::no-keyusage/trusted_certs[0]',
@@ -329,6 +367,43 @@ const originalSanExtension = sanExtension(
   0x82,
   Array.from(Buffer.from('example.com', 'ascii')),
   false,
+)
+const emptyCriticalSanExtension = derTlv(0x30, [
+  0x06,
+  0x03,
+  0x55,
+  0x1d,
+  0x11,
+  0x01,
+  0x01,
+  0xff,
+  ...derTlv(0x04, derTlv(0x30, [])),
+])
+const emptySubjectMissingSan = (() => {
+  const id = 'rfc5280::no-keyusage/peer_certificate'
+  const withoutSan = rewriteDerNodes(fixtureBytes(id), id, originalSanExtension, [], 1)
+  return literal(withEmptySubject(withoutSan, id).toString('base64'))
+})()
+const emptySubjectNoncriticalSan = (() => {
+  const id = 'rfc5280::no-keyusage/peer_certificate'
+  return literal(withEmptySubject(fixtureBytes(id), id).toString('base64'))
+})()
+const emptySubjectEmptyCriticalSan = (() => {
+  const id = 'rfc5280::no-keyusage/peer_certificate'
+  const withEmptySan = rewriteDerNodes(
+    fixtureBytes(id),
+    id,
+    originalSanExtension,
+    emptyCriticalSanExtension,
+    1,
+  )
+  return literal(withEmptySubject(withEmptySan, id).toString('base64'))
+})()
+const nonemptySubjectEmptyCriticalSan = replaceDerNodes(
+  'rfc5280::no-keyusage/peer_certificate',
+  originalSanExtension,
+  emptyCriticalSanExtension,
+  1,
 )
 const unsupportedCriticalSan = replaceDerNodes(
   'rfc5280::no-keyusage/trusted_certs[0]',
@@ -1043,7 +1118,7 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     ProfileReason.PublicKey,
   )) { return 105 }
 
-  let innerResult = run decoded(${innerUnsupportedSignature})
+  let innerResult = run decoded(${innerUnknownSignatureAlgorithm})
   let innerCertificate = match move innerResult {
     Result<Certificate, DecodeError>.Failure {error} => { return 106 }
     Result<Certificate, DecodeError>.Success {value} => move value
@@ -1056,7 +1131,7 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     innerOffsets.tbsSignatureAlgorithm,
   ) { return 107 }
 
-  let outerResult = run decoded(${outerUnsupportedSignature})
+  let outerResult = run decoded(${outerUnknownSignatureAlgorithm})
   let outerCertificate = match move outerResult {
     Result<Certificate, DecodeError>.Failure {error} => { return 108 }
     Result<Certificate, DecodeError>.Success {value} => move value
@@ -1076,6 +1151,18 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     Certificate.offsets(&mismatchCertificate).signatureAlgorithm,
   ) { return 111 }
 
+  let parameterResult = run decoded(${ecdsaForbiddenParameters})
+  let parameterCertificate = match move parameterResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 167 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  if !profileFailureAt(
+    CertificateProfile.inspect(&parameterCertificate, CertificateRole.ServerLeaf, ProfileLimits.defaults()),
+    ProfileClass.Unsupported,
+    ProfileReason.SignatureParameters,
+    Certificate.offsets(&parameterCertificate).tbsSignatureAlgorithm,
+  ) { return 168 }
+
   if !(run inspectionSucceeds(${rsaLeaf}, CertificateRole.ServerLeaf, ProfileLimits.defaults())) {
     return 112
   }
@@ -1089,12 +1176,19 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
     return 115
   }
   if !(run inspectionFails(
-    ${rsaPssWithDefaults},
+    ${rsaPssMissingParameters},
     CertificateRole.ServerLeaf,
     ProfileLimits.defaults(),
     ProfileClass.Unsupported,
-    ProfileReason.SignatureAlgorithm,
+    ProfileReason.SignatureParameters,
   )) { return 116 }
+  if !(run inspectionFails(
+    ${rsaPssBadParameters},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Unsupported,
+    ProfileReason.SignatureParameters,
+  )) { return 169 }
 
   if !(run inspectionSucceeds(${root}, CertificateRole.Intermediate, ProfileLimits.defaults())) {
     return 117
@@ -1151,6 +1245,38 @@ effect fn suite() -> i32 ! OutOfMemoryError ? &mut Allocator {
   if !(run inspectionSucceeds(${validIpSan}, CertificateRole.ServerLeaf, ProfileLimits.defaults())) {
     return 126
   }
+  let emptyMissingResult = run decoded(${emptySubjectMissingSan})
+  let emptyMissingCertificate = match move emptyMissingResult {
+    Result<Certificate, DecodeError>.Failure {error} => { return 170 }
+    Result<Certificate, DecodeError>.Success {value} => move value
+  }
+  if !profileFailureAt(
+    CertificateProfile.inspect(&emptyMissingCertificate, CertificateRole.ServerLeaf, ProfileLimits.defaults()),
+    ProfileClass.Unsupported,
+    ProfileReason.EmptySubject,
+    Certificate.offsets(&emptyMissingCertificate).subject,
+  ) { return 171 }
+  if !(run inspectionFails(
+    ${emptySubjectNoncriticalSan},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Unsupported,
+    ProfileReason.EmptySubject,
+  )) { return 172 }
+  if !(run inspectionFails(
+    ${emptySubjectEmptyCriticalSan},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Malformed,
+    ProfileReason.EmptySubject,
+  )) { return 173 }
+  if !(run inspectionFails(
+    ${nonemptySubjectEmptyCriticalSan},
+    CertificateRole.ServerLeaf,
+    ProfileLimits.defaults(),
+    ProfileClass.Malformed,
+    ProfileReason.SubjectAltName,
+  )) { return 174 }
 
   if !(run inspectionFails(
     ${policyProcessing},

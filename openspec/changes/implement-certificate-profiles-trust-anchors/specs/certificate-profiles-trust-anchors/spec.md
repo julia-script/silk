@@ -20,12 +20,17 @@ The standard library SHALL expose `silk/certificate_profile` with `CertificatePr
 
 ### Requirement: Certificate admission is strict, bounded, and deterministic
 
-Path certificates SHALL be v3 with positive nonzero serials of at most 20 content octets, zero unused public-key/signature bits, no issuer/subject unique identifiers, and admitted P-256 or RSA public keys. Anchors SHALL admit v1 or v3 and ignore their serial, validity, self-signature, and signature-algorithm metadata while still applying key and embedded-extension policy. Inspection SHALL reject duplicate extension OIDs, unknown critical extensions, malformed recognized values, prohibited policy-processing extensions, TLS Feature, and role-invalid BC/KU/EKU/SAN/NC semantics. Limits SHALL be inclusive, zero SHALL forbid the corresponding resource, aggregate counters SHALL use checked arithmetic, and errors SHALL follow version/serial/IDs, algorithm/key, certificate-order extensions, then role/usage precedence.
+Path certificates SHALL be v3 with positive nonzero serials of at most 20 content octets, zero unused public-key/signature bits, no issuer/subject unique identifiers, and admitted P-256 or RSA public keys. Anchors SHALL admit v1 or v3 and ignore their serial, validity, self-signature, and signature-algorithm metadata while still applying key and embedded-extension policy. Inspection SHALL reject duplicate extension OIDs, unknown critical extensions, malformed recognized values, prohibited policy-processing extensions, TLS Feature, and role-invalid BC/KU/EKU/SAN/NC semantics. `SignatureAlgorithm` SHALL identify unrecognized signature OIDs or invalid signature BIT STRING metadata, `SignatureParameters` SHALL identify forbidden, missing, or unsupported parameters on a recognized admitted OID, and `SignatureAlgorithmMismatch` SHALL identify differing individually admitted inner and outer algorithms. Limits SHALL be inclusive, zero SHALL forbid the corresponding resource, aggregate counters SHALL use checked arithmetic, and errors SHALL follow version/serial/IDs, algorithm/key, certificate-order extensions, then role/usage precedence.
 
 #### Scenario: First deterministic semantic failure
 
 - **WHEN** a certificate violates more than one admission rule
 - **THEN** inspection returns the first error in the specified precedence with category, semantic reason, optional extension index, and certificate-DER byte offset
+
+#### Scenario: Signature failure taxonomy
+
+- **WHEN** signature metadata contains an unknown OID, recognized-OID parameter failure, or two differing individually admitted algorithms
+- **THEN** inspection distinguishes `SignatureAlgorithm`, `SignatureParameters`, and `SignatureAlgorithmMismatch` respectively
 
 #### Scenario: Resource budget boundary
 
@@ -48,12 +53,17 @@ Leaf and intermediate inspection SHALL require inner and outer signature Algorit
 
 ### Requirement: Extension policy implements the selected TLS-server subset
 
-The profile SHALL implement the fixed BasicConstraints, KeyUsage, ExtendedKeyUsage, SAN, NameConstraints, CertificatePolicies, AKI, and SKI rules recorded by JUL-185. It SHALL validate every SAN DNS/IP identity, reject unsupported alternatives in critical SAN, require critical nonempty DNS/IP-only NameConstraints on CAs, reject NameConstraints on end entities, and retain borrowed complete SAN/NC DER for downstream path and identity processing. Unsupported NC forms SHALL fail rather than bypass subject-DN semantics.
+The profile SHALL implement the fixed BasicConstraints, KeyUsage, ExtendedKeyUsage, SAN, NameConstraints, CertificatePolicies, AKI, and SKI rules recorded by JUL-185. It SHALL validate every SAN DNS/IP identity, reject unsupported alternatives in critical SAN, require a nonempty critical SAN when the subject Name is empty, require critical nonempty DNS/IP-only NameConstraints on CAs, reject NameConstraints on end entities, and retain borrowed complete SAN/NC DER for downstream path and identity processing. An empty subject without a nonempty critical SAN SHALL report `EmptySubject`; malformed or empty SAN on a nonempty subject SHALL remain `SubjectAltName`, and `Role` SHALL remain reserved for CA and BasicConstraints policy. Unsupported NC forms SHALL fail rather than bypass subject-DN semantics.
 
 #### Scenario: Role-specific CA semantics
 
 - **WHEN** an intermediate or v3 anchor lacks `cA=true`, an intermediate has noncritical BC, or a required key usage is absent from a present KU/EKU
 - **THEN** inspection rejects the candidate with the role/usage semantic reason
+
+#### Scenario: Empty subject requires a nonempty critical SAN
+
+- **WHEN** a certificate subject is empty and SAN is missing, noncritical, or critical but empty
+- **THEN** inspection rejects it with `EmptySubject` without collapsing the failure into CA-role or generic SAN policy
 
 #### Scenario: Name constraint profile
 
