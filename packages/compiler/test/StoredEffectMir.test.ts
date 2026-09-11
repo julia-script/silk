@@ -368,6 +368,44 @@ it.effect('retains provided runner contracts through typed-failure recovery', ()
   }),
 )
 
+it.effect('selects the innermost mutable provider for a nested lexical service binding', () =>
+  Effect.gen(function* () {
+    const name = 'stored-effect-mir/nested-mutable-provider'
+    const { snapshot, module } = yield* lowerStored(
+      name,
+      `import silk.effect { Effect }
+service Input { effect fn count() -> i32 ? &mut Input }
+struct Outer {}
+struct Inner {}
+effect fn outerCount(self: &mut Outer) -> i32 { return 3 }
+effect fn innerCount(self: &mut Inner) -> i32 { return 7 }
+impl Input for Outer { count: Outer.outerCount }
+impl Input for Inner { count: Inner.innerCount }
+effect fn read() -> i32 ? &mut Input { return run Input.count() }
+effect fn nested(inner: &mut Inner) -> i32 ? &mut Input {
+  return run read() |> Effect.provideMut<Input>(move inner)
+}
+pub fn main() -> i32 {
+  let mut outer = Outer {}
+  let mut inner = Inner {}
+  return run nested(&mut inner) |> Effect.provideMut<Input>(&mut outer)
+}`,
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(module), [])
+    const providerCalls = module.functions
+      .flatMap(MirVerification.operations)
+      .filter(
+        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'Call' }> =>
+          operation._tag === 'Call' &&
+          operation.target.module === name &&
+          (operation.target.name === 'innerCount' || operation.target.name === 'outerCount'),
+      )
+      .map((operation) => operation.target.name)
+    assert.deepEqual(providerCalls, ['innerCount'])
+  }),
+)
+
 it.effect(
   'materializes nested intrinsic Effect captures with their executable representation',
   () =>
