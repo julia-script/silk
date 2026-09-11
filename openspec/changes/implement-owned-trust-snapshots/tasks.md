@@ -19,4 +19,4 @@
 
 - [x] 4.1 Document every public module/member, ownership rule, finite limit, explicit authority boundary, and non-equivalence to OS trust policy; generate and inspect the public reference pages and links.
 - [x] 4.2 Strict-validate this OpenSpec change, run focused behavior/ownership/Wasm tests with timings, then run `pnpm typecheck`, `pnpm format:check`, and `pnpm lint`; leave full `pnpm test`, `pnpm check`, and `pnpm release:candidate` to exact-head CI under the user override.
-- [ ] 4.3 Obtain independent correctness and distinct TEST_REVIEW approval on the exact committed issue diff, record the timing delta, and confirm exact-head required CI before handoff.
+- [x] 4.3 Obtain independent correctness and distinct TEST_REVIEW approval on the exact committed issue diff, record the timing delta, and confirm exact-head required CI before handoff.
