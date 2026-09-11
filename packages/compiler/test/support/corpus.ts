@@ -22,6 +22,7 @@ import { hmacHkdfAcceptanceSource } from './hmacHkdfAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
+import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
 import {
   borrowedBox,
@@ -6194,6 +6195,11 @@ const pressurePrograms: ReadonlyArray<CorpusProgram> = [
 ]
 
 export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
+  {
+    name: 'p256-key-agreement',
+    source: p256AcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
   {
     name: 'certificate-bounded-decoding',
     source: certificateAcceptanceSource,
