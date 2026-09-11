@@ -26,3 +26,12 @@ Define allocation-free, failure-atomic protected-epoch replacement needed by the
 
 - **WHEN** one protected send record remains
 - **THEN** repeated inspection returns one until a record is queued or the epoch is replaced
+
+### Requirement: A ready record can be inspected and copied without retaining a view
+
+`TlsRecordReceiver.readyContentType(&self) -> Option<ContentType>` and `readyLength(&self) -> usize` SHALL inspect only the current authenticated ready record. `TlsRecordReceiver.consumeRecordInto(&mut self, destination: &mut [u8]) -> Result<usize, RecordError>` SHALL copy the complete ready plaintext, consume it only after the copy succeeds, and return its exact length. No ready record SHALL return `InvalidState`; insufficient destination capacity SHALL return `RecordOverflow` and preserve the complete record, epoch, and sequence state. These operations exist so an owner such as `Client` can move authenticated bytes into its own bounded storage without retaining a receiver-tied `RecordView`.
+
+#### Scenario: A failed copy preserves the ready record
+
+- **WHEN** a destination is one byte smaller than the authenticated ready content
+- **THEN** `RecordOverflow` reports the requested and available sizes and a later adequate copy returns the same complete content
