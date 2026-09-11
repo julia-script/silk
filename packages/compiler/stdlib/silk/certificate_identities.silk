@@ -96,6 +96,8 @@ pub struct SanDecodeSummary {
   pub present: bool
   /// Number of initialized entries in caller storage.
   pub count: usize
+  /// Number of DER nodes traversed while validating the selected GeneralNames value.
+  pub nodes: usize
 }
 
 /// Operations that decode complete SAN values without allocation or identity matching.
@@ -770,6 +772,75 @@ fn generalName(reader: &mut Reader, span: Span) -> () {
 }
 
 impl CertificateSan {
+  /// Validates one complete DER GeneralNames value without descriptor storage or allocation.
+  ///
+  /// # Details
+  ///
+  /// This performs the same complete framing and GeneralName schema checks as `decodeValue`,
+  /// enforces the supplied input, identity, node, and depth budgets, and returns the name count.
+  /// Payload syntax such as DNS label policy and IP address width remains the consumer's job.
+  pub fn validateValue(
+    value: &[u8],
+    limits: SanDecodeLimits,
+  ) -> Result<SanDecodeSummary, SanDecodeError> {
+    if value.length > limits.inputBytes {
+      return Result.failResult<SanDecodeSummary, SanDecodeError>(
+        SanDecodeError {
+          kind: SanDecodeClass.ResourceLimit,
+          reason: SanDecodeReason.InputBytes,
+          offset: 0,
+        },
+      )
+    }
+    let mut reader = Reader {
+      bytes: value,
+      cursor: 0,
+      nodes: 0,
+      limits: limits,
+      failed: false,
+      error: SanDecodeError {
+        kind: SanDecodeClass.Malformed,
+        reason: SanDecodeReason.InvalidDer,
+        offset: 0,
+      },
+    }
+    let root = expect(&mut reader, value.length, 1, 48)
+    let done = finish(&mut reader, value.length)
+    if !reader.failed && root.content == root.end {
+      let ignored = reject(
+        &mut reader,
+        SanDecodeClass.Malformed,
+        SanDecodeReason.EmptySan,
+        root.start,
+      )
+    }
+    reader.cursor = root.content
+    let mut count = usize.ZERO
+    while reader.cursor < root.end && !reader.failed {
+      let offset = reader.cursor
+      if count >= limits.identities {
+        let ignored = reject(
+          &mut reader,
+          SanDecodeClass.ResourceLimit,
+          SanDecodeReason.Identities,
+          offset,
+        )
+      } else {
+        let entry = read(&mut reader, root.end, 2, false)
+        let checked = generalName(&mut reader, entry)
+        if !reader.failed {
+          count = count + 1
+          reader.cursor = entry.end
+        }
+      }
+    }
+    if reader.failed {
+      return Result.failResult<SanDecodeSummary, SanDecodeError>(move reader.error)
+    }
+    return Result.succeed<SanDecodeSummary, SanDecodeError>(
+      SanDecodeSummary {present: true, count: count, nodes: reader.nodes},
+    )
+  }
   /// Decodes one complete DER GeneralNames value into a caller-owned descriptor prefix.
   ///
   /// # Details
@@ -865,7 +936,7 @@ impl CertificateSan {
       return Result.failResult<SanDecodeSummary, SanDecodeError>(move reader.error)
     }
     return Result.succeed<SanDecodeSummary, SanDecodeError>(
-      SanDecodeSummary {present: true, count: count},
+      SanDecodeSummary {present: true, count: count, nodes: reader.nodes},
     )
   }
   /// Scans every certificate extension and decodes the unique subjectAltName value into caller storage.
@@ -944,7 +1015,7 @@ impl CertificateSan {
     }
     if matches == 0 {
       return Result.succeed<SanDecodeSummary, SanDecodeError>(
-        SanDecodeSummary {present: false, count: 0},
+        SanDecodeSummary {present: false, count: 0, nodes: 0},
       )
     }
     let extension = Certificate.extension(certificate, selected)

@@ -1,0 +1,1555 @@
+//! Borrowed semantic views for Silk's deliberately restricted TLS-server certificate profile.
+//!
+//! # When to use
+//!
+//! Use `CertificateProfile.inspect` after structural certificate decoding and before path building.
+//! Use `verifyIssuedBy` only to check exact issuer linkage and the retained certificate signature.
+//!
+//! # Details
+//!
+//! Inspection is allocation-free, bounded, and retains the original certificate borrow. It admits
+//! role, key, signature metadata, and supported extension semantics while preserving original SAN
+//! and NameConstraints DER. Errors own only scalar metadata.
+//!
+//! # Gotchas
+//!
+//! A successful profile inspection or issuer signature is not authentication. Neither operation
+//! checks current time, cumulative path constraints, trust authority, service identity, revocation,
+//! certificate transparency, or a complete path.
+
+import silk.certificate {
+  AlgorithmView,
+  BitStringView,
+  Certificate,
+  CertificateVersion,
+  ExtensionView,
+}
+import silk.certificate_identities {
+  CertificateSan,
+  SanDecodeClass,
+  SanDecodeError,
+  SanDecodeLimits,
+  SanDecodeReason,
+  SanDecodeSummary,
+}
+import silk.option {Option}
+import silk.p256 {EcdsaP256Sha256, P256, P256Error, P256SignatureError}
+import silk.result {Result}
+import silk.rsa {RsaError, RsaPublicKey}
+import silk.slice {Slice}
+import silk.u8
+import silk.usize
+
+/// The certificate's intended position in the restricted TLS-server profile.
+pub enum CertificateRole {
+  /// A peer end-entity certificate authenticated for TLS server use.
+  ServerLeaf,
+  /// A non-anchor CA certificate below the trust endpoint.
+  Intermediate,
+  /// An explicitly configured trust endpoint outside the returned path.
+  Anchor,
+}
+
+/// The admitted public-key algorithm and bounded key profile.
+pub enum CertificateKeyKind {
+  /// An uncompressed validated secp256r1 point.
+  P256,
+  /// An odd 2048..4096-bit RSA modulus with exponent 65537.
+  Rsa,
+}
+
+/// Inclusive budgets for one semantic inspection or configured-constraint validation.
+pub struct ProfileLimits {
+  /// Maximum number of certificate extensions, including unknown and duplicate OIDs.
+  pub extensions: usize
+  /// Maximum bytes in each extension value, including opaque unknown noncritical values.
+  pub extensionBytes: usize
+  /// Maximum names in one subjectAltName value.
+  pub sanNames: usize
+  /// Maximum GeneralSubtree values across one NameConstraints value.
+  pub constraintSubtrees: usize
+  /// Maximum traversed extension-value TLV nodes across one operation.
+  pub nodes: usize
+  /// Maximum traversed extension-value TLV depth; a value root has depth one.
+  pub depth: usize
+}
+
+impl Copy for ProfileLimits {}
+
+impl ProfileLimits {
+  /// Returns 64 extensions, 16384 bytes per value, 256 SAN names, 256 constraint subtrees,
+  /// 4096 traversed nodes, and depth 16.
+  pub fn defaults() -> ProfileLimits {
+    return ProfileLimits {
+      extensions: 64,
+      extensionBytes: 16384,
+      sanNames: 256,
+      constraintSubtrees: 256,
+      nodes: 4096,
+      depth: 16,
+    }
+  }
+}
+
+/// The broad category of a semantic profile failure.
+pub enum ProfileClass {
+  /// DER or recognized extension content violates the selected schema.
+  Malformed,
+  /// A well-formed value is outside the deliberately restricted profile.
+  Unsupported,
+  /// A configured finite budget or target size bound is exceeded.
+  ResourceLimit,
+}
+
+/// The byte sequence in which a profile error offset is measured.
+pub enum ProfileOffsetSpace {
+  /// Offset in the complete decoded certificate DER.
+  CertificateDer,
+  /// Offset in caller-supplied configured NameConstraints DER.
+  ConfiguredConstraintDer,
+}
+
+/// The stable semantic reason for a profile rejection.
+pub enum ProfileReason {
+  /// The certificate version is invalid for the selected role.
+  Version,
+  /// A path-certificate serial is nonpositive, zero, or longer than 20 content octets.
+  Serial,
+  /// An issuer or subject unique identifier is present.
+  UniqueIdentifier,
+  /// The public-key algorithm, encoding, parameters, or mathematical key is not admitted.
+  PublicKey,
+  /// Signature AlgorithmIdentifier metadata is malformed or unsupported.
+  SignatureAlgorithm,
+  /// Inner and outer signature identifiers do not denote the same admitted effective algorithm.
+  SignatureAlgorithmMismatch,
+  /// More certificate extensions are present than the configured bound.
+  Extensions,
+  /// One extension value exceeds its configured byte bound.
+  ExtensionBytes,
+  /// A duplicate extension OID is present.
+  DuplicateExtension,
+  /// A critical extension has no supported semantics in this profile.
+  UnknownCriticalExtension,
+  /// A recognized extension violates strict DER or its selected schema.
+  MalformedExtension,
+  /// BasicConstraints conflicts with the role or path-length rules.
+  BasicConstraints,
+  /// KeyUsage encoding or dependent bits are invalid.
+  KeyUsage,
+  /// A present KeyUsage does not authorize the selected role.
+  MissingKeyUsage,
+  /// ExtendedKeyUsage is empty or malformed.
+  ExtendedKeyUsage,
+  /// A present ExtendedKeyUsage omits id-kp-serverAuth.
+  MissingServerAuth,
+  /// subjectAltName is malformed or contains an invalid DNS/IP identity.
+  SubjectAltName,
+  /// A critical subjectAltName contains an unsupported GeneralName alternative.
+  UnsupportedCriticalName,
+  /// NameConstraints is malformed, empty, noncritical, or used on an end entity.
+  NameConstraints,
+  /// A NameConstraints subtree form is outside the DNS/IP subset.
+  UnsupportedNameConstraint,
+  /// A certificate-policy feature requiring policy-tree processing is present.
+  PolicyProcessing,
+  /// TLS Feature is present although this profile cannot satisfy must-staple semantics.
+  TlsFeature,
+  /// The certificate role's CA, extension-criticality, subject, or usage policy is violated.
+  Role,
+  /// A SAN name count exceeds its configured bound.
+  SanNames,
+  /// A NameConstraints subtree count exceeds its configured bound.
+  ConstraintSubtrees,
+  /// The traversed extension-value node count exceeds its configured bound.
+  Nodes,
+  /// The traversed extension-value depth exceeds its configured bound.
+  Depth,
+  /// Checked size or counter arithmetic cannot be represented.
+  SizeOverflow,
+  /// The subject issuer Name DER does not exactly equal the issuer subject Name DER.
+  IssuerName,
+  /// An admitted cryptographic primitive rejected the retained signature.
+  SignatureRejected,
+}
+
+/// An owned certificate-profile error with optional extension context and a stable byte offset.
+pub struct ProfileError {
+  /// Broad failure category.
+  pub kind: ProfileClass
+  /// Stable semantic failure reason.
+  pub reason: ProfileReason
+  /// Zero-based extension index when the failure belongs to one certificate extension.
+  pub extensionIndex: Option<usize>
+  /// Coordinate system for `offset`.
+  pub offsetSpace: ProfileOffsetSpace
+  /// Byte offset in the selected coordinate system.
+  pub offset: usize
+}
+
+/// Parsed KeyUsage bits retained independently of their original DER positions.
+pub struct KeyUsage {
+  /// digitalSignature bit.
+  pub digitalSignature: bool
+  /// contentCommitment/nonRepudiation bit.
+  pub contentCommitment: bool
+  /// keyEncipherment bit.
+  pub keyEncipherment: bool
+  /// dataEncipherment bit.
+  pub dataEncipherment: bool
+  /// keyAgreement bit.
+  pub keyAgreement: bool
+  /// keyCertSign bit.
+  pub keyCertSign: bool
+  /// cRLSign bit.
+  pub crlSign: bool
+  /// encipherOnly bit.
+  pub encipherOnly: bool
+  /// decipherOnly bit.
+  pub decipherOnly: bool
+}
+
+impl Copy for KeyUsage {}
+
+/// Parsed ExtendedKeyUsage facts used by the restricted TLS-server profile.
+pub struct ExtendedKeyUsage {
+  /// Whether id-kp-serverAuth occurs.
+  pub serverAuth: bool
+  /// Whether anyExtendedKeyUsage occurs; it never substitutes for serverAuth.
+  pub anyExtendedKeyUsage: bool
+  /// Number of key-purpose identifiers in the original extension.
+  pub purposeCount: usize
+}
+
+impl Copy for ExtendedKeyUsage {}
+
+/// One immutable borrowed semantic view over a complete decoded certificate.
+pub struct CertificateProfile<'a> {
+  certificateValue: &'a Certificate
+  roleValue: CertificateRole
+  keyKindValue: CertificateKeyKind
+  caValue: bool
+  hasPathLength: bool
+  pathLengthValue: usize
+  hasKeyUsage: bool
+  keyUsageValue: KeyUsage
+  hasExtendedKeyUsage: bool
+  extendedKeyUsageValue: ExtendedKeyUsage
+  hasSan: bool
+  sanValue: &'a [u8]
+  hasNameConstraints: bool
+  nameConstraintsValue: &'a [u8]
+}
+
+impl<'a> Copy for CertificateProfile<'a> {}
+
+enum SignatureKind { EcdsaP256Sha256, RsaPssSha256, RsaPkcs1Sha256 }
+
+struct Span {
+  start: usize
+  content: usize
+  end: usize
+  tag: usize
+}
+impl Copy for Span {}
+
+struct Reader<'a> {
+  bytes: &'a [u8]
+  cursor: usize
+  nodes: usize
+  limits: ProfileLimits
+  offsetBase: usize
+  offsetSpace: ProfileOffsetSpace
+  hasExtension: bool
+  extensionIndex: usize
+  failed: bool
+  error: ProfileError
+}
+
+fn blankUsage() -> KeyUsage {
+  return KeyUsage {
+    digitalSignature: false,
+    contentCommitment: false,
+    keyEncipherment: false,
+    dataEncipherment: false,
+    keyAgreement: false,
+    keyCertSign: false,
+    crlSign: false,
+    encipherOnly: false,
+    decipherOnly: false,
+  }
+}
+
+fn blankExtendedUsage() -> ExtendedKeyUsage {
+  return ExtendedKeyUsage {serverAuth: false, anyExtendedKeyUsage: false, purposeCount: 0}
+}
+
+fn profileError(
+  kind: ProfileClass,
+  reason: ProfileReason,
+  offsetSpace: ProfileOffsetSpace,
+  offset: usize,
+) -> ProfileError {
+  return ProfileError {
+    kind: kind,
+    reason: reason,
+    extensionIndex: Option.none<usize>(),
+    offsetSpace: offsetSpace,
+    offset: offset,
+  }
+}
+
+fn extensionError(
+  kind: ProfileClass,
+  reason: ProfileReason,
+  extensionIndex: usize,
+  offset: usize,
+) -> ProfileError {
+  return ProfileError {
+    kind: kind,
+    reason: reason,
+    extensionIndex: Option.some<usize>(extensionIndex),
+    offsetSpace: ProfileOffsetSpace.CertificateDer,
+    offset: offset,
+  }
+}
+
+fn emptySpan() -> Span { return Span {start: 0, content: 0, end: 0, tag: 0} }
+
+fn reject(reader: &mut Reader, kind: ProfileClass, reason: ProfileReason, offset: usize) -> () {
+  if !reader.failed {
+    let absolute = reader.offsetBase + offset
+    let mut error = profileError(kind, reason, reader.offsetSpace, absolute)
+    if reader.hasExtension {
+      error.extensionIndex = Option.some<usize>(reader.extensionIndex)
+    }
+    reader.failed = true
+    reader.error = move error
+  }
+}
+
+fn read(reader: &mut Reader, end: usize, depth: usize) -> Span {
+  if reader.failed { return emptySpan() }
+  let start = reader.cursor
+  if start >= end {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, end)
+    return emptySpan()
+  }
+  let tag = u8.toUsize(reader.bytes[start])
+  if tag % 32 == 31 || tag == 0 || tag == 32 {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, start)
+    return emptySpan()
+  }
+  let mut at = start + 1
+  if at >= end {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, end)
+    return emptySpan()
+  }
+  let first = u8.toUsize(reader.bytes[at])
+  at = at + 1
+  let mut length = first
+  if first >= 128 {
+    let count = first - 128
+    if count == 0 || count > end - at || reader.bytes[at] == 0 {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, at - 1)
+      return emptySpan()
+    }
+    length = 0
+    let mut index = usize.ZERO
+    while index < count && !reader.failed {
+      let byte = u8.toUsize(reader.bytes[at])
+      if length > (usize.MAX - byte) / 256 {
+        let ignored = reject(&mut reader, ProfileClass.ResourceLimit, ProfileReason.SizeOverflow, at)
+      } else {
+        length = length * 256 + byte
+        at = at + 1
+        index = index + 1
+      }
+    }
+    if length < 128 {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, start + 1)
+    }
+  }
+  if reader.failed { return emptySpan() }
+  if length > end - at {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, end)
+    return emptySpan()
+  }
+  if depth > reader.limits.depth {
+    let ignored = reject(&mut reader, ProfileClass.ResourceLimit, ProfileReason.Depth, start)
+    return emptySpan()
+  }
+  if reader.nodes >= reader.limits.nodes {
+    let ignored = reject(&mut reader, ProfileClass.ResourceLimit, ProfileReason.Nodes, start)
+    return emptySpan()
+  }
+  reader.nodes = reader.nodes + 1
+  reader.cursor = at + length
+  return Span {start: start, content: at, end: at + length, tag: tag}
+}
+
+fn expect(reader: &mut Reader, end: usize, depth: usize, tag: usize) -> Span {
+  let span = read(&mut reader, end, depth)
+  if !reader.failed && span.tag != tag {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, span.start)
+  }
+  return span
+}
+
+fn finish(reader: &mut Reader, end: usize) -> () {
+  if !reader.failed && reader.cursor != end {
+    let offset = reader.cursor
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, offset)
+  }
+}
+
+fn equal(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length { return false }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if left[index] != right[index] { return false }
+    index = index + 1
+  }
+  return true
+}
+
+fn oid(value: &[u8], expected: &[u8]) -> bool { return equal(value, expected) }
+
+fn validOid(bytes: &[u8]) -> bool {
+  if bytes.length == 0 { return false }
+  let mut at = usize.ZERO
+  let mut first = true
+  while at < bytes.length {
+    if first && bytes[at] == 128 { return false }
+    first = bytes[at] < 128
+    at = at + 1
+  }
+  return first
+}
+
+fn content<'a>(bytes: &'a [u8], span: Span) -> &'a [u8] {
+  return Slice.view<u8>(bytes, span.content, span.end - span.content)
+}
+
+fn whole<'a>(bytes: &'a [u8], span: Span) -> &'a [u8] {
+  return Slice.view<u8>(bytes, span.start, span.end - span.start)
+}
+
+fn nullOrAbsent(parameters: &Option<&[u8]>) -> bool {
+  return match & parameters.* {
+    Option<&[u8]>.None => true
+    Option<&[u8]>.Some {value} => value.length == 2 && value[0] == 5 && value[1] == 0
+  }
+}
+
+fn positiveInteger(reader: &mut Reader, end: usize, depth: usize) -> usize {
+  let value = expect(&mut reader, end, depth, 2)
+  if reader.failed { return 0 }
+  let length = value.end - value.content
+  if length == 0 || reader.bytes[value.content] >= 128 {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, value.start)
+    return 0
+  }
+  let mut at = value.content
+  if reader.bytes[at] == 0 {
+    if length == 1 || reader.bytes[at + 1] < 128 {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, at)
+      return 0
+    }
+    at = at + 1
+  }
+  let mut result = usize.ZERO
+  while at < value.end && !reader.failed {
+    let byte = u8.toUsize(reader.bytes[at])
+    if result > (usize.MAX - byte) / 256 {
+      let ignored = reject(&mut reader, ProfileClass.ResourceLimit, ProfileReason.SizeOverflow, at)
+    } else {
+      result = result * 256 + byte
+      at = at + 1
+    }
+  }
+  return result
+}
+
+fn makeReader<'a>(
+  bytes: &'a [u8],
+  limits: ProfileLimits,
+  nodes: usize,
+  offsetBase: usize,
+  offsetSpace: ProfileOffsetSpace,
+  hasExtension: bool,
+  extensionIndex: usize,
+) -> Reader<'a> {
+  return Reader<'a> {
+    bytes: bytes,
+    cursor: 0,
+    nodes: nodes,
+    limits: limits,
+    offsetBase: offsetBase,
+    offsetSpace: offsetSpace,
+    hasExtension: hasExtension,
+    extensionIndex: extensionIndex,
+    failed: false,
+    error: profileError(ProfileClass.Malformed, ProfileReason.MalformedExtension, offsetSpace, offsetBase),
+  }
+}
+
+fn walkOpen(reader: &mut Reader, span: Span, depth: usize) -> () {
+  if reader.failed { return () }
+  if span.tag == 6 && !validOid(content(reader.bytes, span)) {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, span.start)
+    return ()
+  }
+  if span.tag == 2 {
+    let length = span.end - span.content
+    if length == 0 || (length > 1 && reader.bytes[span.content] == 0 && reader.bytes[span.content + 1] < 128) || (length > 1 && reader.bytes[span.content] == 255 && reader.bytes[span.content + 1] >= 128) {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, span.start)
+      return ()
+    }
+  }
+  if span.tag == 1 && (span.end - span.content != 1 || (reader.bytes[span.content] != 0 && reader.bytes[span.content] != 255)) {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, span.start)
+    return ()
+  }
+  if span.tag == 5 && span.content != span.end {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, span.start)
+    return ()
+  }
+  if span.tag == 3 {
+    if span.content == span.end || reader.bytes[span.content] > 7 {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, span.start)
+      return ()
+    }
+    if span.end - span.content == 1 && reader.bytes[span.content] != 0 {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, span.start)
+      return ()
+    }
+    if span.end - span.content > 1 {
+      let unused = u8.toUsize(reader.bytes[span.content])
+      let mut mask = u8.toU8(0)
+      let mut bitIndex = usize.ZERO
+      while bitIndex < unused {
+        mask = u8.bitOr(mask, u8.shiftLeft(u8.toU8(1), usize.toU8(bitIndex)))
+        bitIndex = bitIndex + 1
+      }
+      if u8.bitAnd(reader.bytes[span.end - 1], mask) != 0 {
+        let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, span.end - 1)
+        return ()
+      }
+    }
+  }
+  if span.tag % 64 >= 32 {
+    reader.cursor = span.content
+    while reader.cursor < span.end && !reader.failed {
+      let child = read(&mut reader, span.end, depth + 1)
+      walkOpen(&mut reader, child, depth + 1)
+    }
+    finish(&mut reader, span.end)
+  }
+}
+
+struct BasicConstraints {
+  ca: bool
+  hasPathLength: bool
+  pathLength: usize
+}
+impl Copy for BasicConstraints {}
+
+fn basicConstraints(reader: &mut Reader) -> BasicConstraints {
+  let mut result = BasicConstraints {ca: false, hasPathLength: false, pathLength: 0}
+  let end = reader.bytes.length
+  let root = expect(&mut reader, end, 1, 48)
+  finish(&mut reader, end)
+  reader.cursor = root.content
+  if reader.cursor < root.end && reader.bytes[reader.cursor] == 1 {
+    let value = expect(&mut reader, root.end, 2, 1)
+    if !reader.failed {
+      if value.end - value.content != 1 || reader.bytes[value.content] != 255 {
+        let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.BasicConstraints, value.start)
+      } else {
+        result.ca = true
+      }
+    }
+  }
+  if reader.cursor < root.end && !reader.failed {
+    result.pathLength = positiveInteger(&mut reader, root.end, 2)
+    result.hasPathLength = true
+  }
+  finish(&mut reader, root.end)
+  if !reader.failed && result.hasPathLength && !result.ca {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.BasicConstraints, root.start)
+  }
+  return result
+}
+
+fn trailingZeros(value: u8) -> usize {
+  let mut count = usize.ZERO
+  let mut current = value
+  while count < 8 && u8.bitAnd(current, u8.toU8(1)) == 0 {
+    current = u8.shiftRight(current, u8.toU8(1))
+    count = count + 1
+  }
+  return count
+}
+
+fn keyUsage(reader: &mut Reader) -> KeyUsage {
+  let mut result = blankUsage()
+  let end = reader.bytes.length
+  let bits = expect(&mut reader, end, 1, 3)
+  finish(&mut reader, end)
+  if reader.failed { return result }
+  let length = bits.end - bits.content
+  if length < 2 || length > 3 {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.KeyUsage, bits.start)
+    return result
+  }
+  let unused = u8.toUsize(reader.bytes[bits.content])
+  if unused > 7 || reader.bytes[bits.end - 1] == 0 || trailingZeros(reader.bytes[bits.end - 1]) != unused {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.KeyUsage, bits.start)
+    return result
+  }
+  let first = reader.bytes[bits.content + 1]
+  let mut second = u8.toU8(0)
+  if length == 3 { second = reader.bytes[bits.content + 2] }
+  if length == 3 && u8.bitAnd(second, u8.toU8(127)) != 0 {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.KeyUsage, bits.content + 2)
+    return result
+  }
+  result.digitalSignature = u8.bitAnd(first, u8.toU8(128)) != 0
+  result.contentCommitment = u8.bitAnd(first, u8.toU8(64)) != 0
+  result.keyEncipherment = u8.bitAnd(first, u8.toU8(32)) != 0
+  result.dataEncipherment = u8.bitAnd(first, u8.toU8(16)) != 0
+  result.keyAgreement = u8.bitAnd(first, u8.toU8(8)) != 0
+  result.keyCertSign = u8.bitAnd(first, u8.toU8(4)) != 0
+  result.crlSign = u8.bitAnd(first, u8.toU8(2)) != 0
+  result.encipherOnly = u8.bitAnd(first, u8.toU8(1)) != 0
+  result.decipherOnly = u8.bitAnd(second, u8.toU8(128)) != 0
+  if (result.encipherOnly || result.decipherOnly) && !result.keyAgreement {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.KeyUsage, bits.start)
+  }
+  return result
+}
+
+fn extendedKeyUsage(reader: &mut Reader) -> ExtendedKeyUsage {
+  let mut result = blankExtendedUsage()
+  let end = reader.bytes.length
+  let root = expect(&mut reader, end, 1, 48)
+  finish(&mut reader, end)
+  if !reader.failed && root.content == root.end {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.ExtendedKeyUsage, root.start)
+  }
+  reader.cursor = root.content
+  let serverAuth: [u8; 8] = [43, 6, 1, 5, 5, 7, 3, 1]
+  let anyUsage: [u8; 4] = [85, 29, 37, 0]
+  while reader.cursor < root.end && !reader.failed {
+    let item = expect(&mut reader, root.end, 2, 6)
+    let value = content(reader.bytes, item)
+    if !validOid(value) {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.ExtendedKeyUsage, item.start)
+    } else {
+      result.purposeCount = result.purposeCount + 1
+      if oid(value, &serverAuth) { result.serverAuth = true }
+      if oid(value, &anyUsage) { result.anyExtendedKeyUsage = true }
+    }
+  }
+  finish(&mut reader, root.end)
+  return result
+}
+
+fn validDnsConstraint(bytes: &[u8]) -> bool {
+  if bytes.length == 0 || bytes.length > 253 { return false }
+  let mut start = usize.ZERO
+  if bytes[0] == 46 {
+    if bytes.length == 1 { return false }
+    start = 1
+  }
+  if bytes[bytes.length - 1] == 46 { return false }
+  let mut labelStart = start
+  let mut at = start
+  while at <= bytes.length {
+    if at == bytes.length || bytes[at] == 46 {
+      let length = at - labelStart
+      if length == 0 || length > 63 { return false }
+      let mut index = labelStart
+      while index < at {
+        let byte = bytes[index]
+        let alpha = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+        let digit = byte >= 48 && byte <= 57
+        if !alpha && !digit && byte != 45 { return false }
+        if (index == labelStart || index + 1 == at) && byte == 45 { return false }
+        index = index + 1
+      }
+      labelStart = at + 1
+    }
+    at = at + 1
+  }
+  return true
+}
+
+fn validIpConstraint(bytes: &[u8]) -> bool {
+  if bytes.length != 8 && bytes.length != 32 { return false }
+  let width = bytes.length / 2
+  let mut zeroSeen = false
+  let mut index = usize.ZERO
+  while index < width {
+    let mask = bytes[width + index]
+    let address = bytes[index]
+    let mut bit = u8.toU8(128)
+    let mut count = usize.ZERO
+    while count < 8 {
+      let one = u8.bitAnd(mask, bit) != 0
+      if zeroSeen && one { return false }
+      if !one { zeroSeen = true }
+      if u8.bitAnd(address, u8.toU8(255) - mask) != 0 { return false }
+      bit = u8.shiftRight(bit, u8.toU8(1))
+      count = count + 1
+    }
+    index = index + 1
+  }
+  return true
+}
+
+fn validDnsName(bytes: &[u8]) -> bool {
+  if bytes.length == 0 || bytes[0] == 46 { return false }
+  if bytes.length >= 2 && bytes[0] == 42 && bytes[1] == 46 {
+    return validDnsConstraint(Slice.view<u8>(bytes, 2, bytes.length - 2))
+  }
+  let mut index = usize.ZERO
+  while index < bytes.length {
+    if bytes[index] == 42 { return false }
+    index = index + 1
+  }
+  return validDnsConstraint(bytes)
+}
+
+fn rawSpan(bytes: &[u8], offset: usize, limit: usize) -> Span {
+  if offset >= limit || limit > bytes.length || limit - offset < 2 { return emptySpan() }
+  let tag = u8.toUsize(bytes[offset])
+  if tag % 32 == 31 { return emptySpan() }
+  let first = u8.toUsize(bytes[offset + 1])
+  let mut at = offset + 2
+  let mut length = first
+  if first >= 128 {
+    let count = first - 128
+    if count == 0 || count > limit - at { return emptySpan() }
+    length = 0
+    let mut index = usize.ZERO
+    while index < count {
+      let byte = u8.toUsize(bytes[at])
+      if length > (usize.MAX - byte) / 256 { return emptySpan() }
+      length = length * 256 + byte
+      at = at + 1
+      index = index + 1
+    }
+  }
+  if length > limit - at { return emptySpan() }
+  return Span {start: offset, content: at, end: at + length, tag: tag}
+}
+
+fn validateSanNames(reader: &mut Reader, critical: bool) -> () {
+  let limits = SanDecodeLimits {
+    extensions: 1,
+    inputBytes: reader.limits.extensionBytes,
+    identities: reader.limits.sanNames,
+    nodes: reader.limits.nodes - reader.nodes,
+    depth: reader.limits.depth,
+  }
+  let validated = CertificateSan.validateValue(reader.bytes, limits)
+  match move validated {
+    Result<SanDecodeSummary, SanDecodeError>.Failure {error} => {
+      let mut reason = ProfileReason.SubjectAltName
+      if error.kind == SanDecodeClass.ResourceLimit {
+        if error.reason == SanDecodeReason.Identities {
+          reason = ProfileReason.SanNames
+        } else if error.reason == SanDecodeReason.Nodes {
+          reason = ProfileReason.Nodes
+        } else if error.reason == SanDecodeReason.Depth {
+          reason = ProfileReason.Depth
+        } else {
+          reason = ProfileReason.ExtensionBytes
+        }
+      }
+      let mut kind = ProfileClass.Malformed
+      if error.kind == SanDecodeClass.ResourceLimit { kind = ProfileClass.ResourceLimit }
+      let ignored = reject(&mut reader, kind, reason, error.offset)
+    }
+    Result<SanDecodeSummary, SanDecodeError>.Success {value} => {
+      reader.nodes = reader.nodes + value.nodes
+      let root = rawSpan(reader.bytes, 0, reader.bytes.length)
+      let mut at = root.content
+      while at < root.end && !reader.failed {
+        let entry = rawSpan(reader.bytes, at, root.end)
+        if entry.end == 0 {
+          let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.SubjectAltName, at)
+        } else if entry.tag == 130 || entry.tag == 135 {
+          let payload = content(reader.bytes, entry)
+          if entry.tag == 130 {
+            if !validDnsName(payload) {
+              let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.SubjectAltName, entry.content)
+            }
+          } else {
+            if payload.length != 4 && payload.length != 16 {
+              let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.SubjectAltName, entry.content)
+            }
+          }
+        } else if critical {
+          let ignored = reject(&mut reader, ProfileClass.Unsupported, ProfileReason.UnsupportedCriticalName, entry.start)
+        }
+        at = entry.end
+      }
+    }
+  }
+}
+
+fn nameConstraints(reader: &mut Reader) -> () {
+  let end = reader.bytes.length
+  let root = expect(&mut reader, end, 1, 48)
+  finish(&mut reader, end)
+  if !reader.failed && root.content == root.end {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.NameConstraints, root.start)
+  }
+  reader.cursor = root.content
+  let mut lastTag = usize.ZERO
+  let mut fieldCount = usize.ZERO
+  let mut subtreeCount = usize.ZERO
+  while reader.cursor < root.end && !reader.failed {
+    let field = read(&mut reader, root.end, 2)
+    if field.tag != 160 && field.tag != 161 {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.NameConstraints, field.start)
+    } else if fieldCount > 0 && field.tag <= lastTag {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.NameConstraints, field.start)
+    } else if field.content == field.end {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.NameConstraints, field.start)
+    } else {
+      lastTag = field.tag
+      fieldCount = fieldCount + 1
+      reader.cursor = field.content
+      while reader.cursor < field.end && !reader.failed {
+        if subtreeCount >= reader.limits.constraintSubtrees {
+          let offset = reader.cursor
+          let ignored = reject(&mut reader, ProfileClass.ResourceLimit, ProfileReason.ConstraintSubtrees, offset)
+        } else {
+          let subtree = expect(&mut reader, field.end, 3, 48)
+          subtreeCount = subtreeCount + 1
+          reader.cursor = subtree.content
+          let base = read(&mut reader, subtree.end, 4)
+          if base.tag == 130 {
+            if !validDnsConstraint(content(reader.bytes, base)) {
+              let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.NameConstraints, base.content)
+            }
+          } else if base.tag == 135 {
+            if !validIpConstraint(content(reader.bytes, base)) {
+              let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.NameConstraints, base.content)
+            }
+          } else {
+            let ignored = reject(&mut reader, ProfileClass.Unsupported, ProfileReason.UnsupportedNameConstraint, base.start)
+          }
+          if reader.cursor < subtree.end && !reader.failed {
+            let optional = read(&mut reader, subtree.end, 4)
+            if optional.tag == 128 {
+              let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.NameConstraints, optional.start)
+            } else if optional.tag == 129 {
+              let ignored = reject(&mut reader, ProfileClass.Unsupported, ProfileReason.NameConstraints, optional.start)
+            } else {
+              let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.NameConstraints, optional.start)
+            }
+          }
+          finish(&mut reader, subtree.end)
+          reader.cursor = subtree.end
+        }
+      }
+      finish(&mut reader, field.end)
+      reader.cursor = field.end
+    }
+  }
+  finish(&mut reader, root.end)
+}
+
+fn certificatePolicies(reader: &mut Reader) -> () {
+  let end = reader.bytes.length
+  let root = expect(&mut reader, end, 1, 48)
+  finish(&mut reader, end)
+  if !reader.failed && root.content == root.end {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, root.start)
+  }
+  reader.cursor = root.content
+  while reader.cursor < root.end && !reader.failed {
+    let policy = expect(&mut reader, root.end, 2, 48)
+    reader.cursor = policy.content
+    let identifier = expect(&mut reader, policy.end, 3, 6)
+    if !reader.failed && !validOid(content(reader.bytes, identifier)) {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, identifier.start)
+    }
+    if reader.cursor < policy.end && !reader.failed {
+      let qualifiers = expect(&mut reader, policy.end, 3, 48)
+      if !reader.failed && qualifiers.content == qualifiers.end {
+        let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, qualifiers.start)
+      }
+      reader.cursor = qualifiers.content
+      while reader.cursor < qualifiers.end && !reader.failed {
+        let qualifier = expect(&mut reader, qualifiers.end, 4, 48)
+        reader.cursor = qualifier.content
+        let qualifierId = expect(&mut reader, qualifier.end, 5, 6)
+        if !reader.failed && !validOid(content(reader.bytes, qualifierId)) {
+          let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, qualifierId.start)
+        }
+        if reader.cursor >= qualifier.end && !reader.failed {
+          let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, qualifier.end)
+        }
+        if reader.cursor < qualifier.end && !reader.failed {
+          let value = read(&mut reader, qualifier.end, 5)
+          walkOpen(&mut reader, value, 5)
+        }
+        finish(&mut reader, qualifier.end)
+        reader.cursor = qualifier.end
+      }
+      finish(&mut reader, qualifiers.end)
+      reader.cursor = qualifiers.end
+    }
+    finish(&mut reader, policy.end)
+    reader.cursor = policy.end
+  }
+  finish(&mut reader, root.end)
+}
+
+fn subjectKeyIdentifier(reader: &mut Reader) -> () {
+  let end = reader.bytes.length
+  let value = expect(&mut reader, end, 1, 4)
+  finish(&mut reader, end)
+  if !reader.failed && value.content == value.end {
+    let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, value.start)
+  }
+}
+
+fn authorityKeyIdentifier(reader: &mut Reader) -> () {
+  let end = reader.bytes.length
+  let root = expect(&mut reader, end, 1, 48)
+  finish(&mut reader, end)
+  reader.cursor = root.content
+  let mut lastTag = usize.ZERO
+  let mut count = usize.ZERO
+  while reader.cursor < root.end && !reader.failed {
+    let field = read(&mut reader, root.end, 2)
+    let number = field.tag % 32
+    if field.tag != 128 && field.tag != 161 && field.tag != 130 {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, field.start)
+    } else if count > 0 && number <= lastTag {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, field.start)
+    } else if field.content == field.end {
+      let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, field.start)
+    } else {
+      lastTag = number
+      count = count + 1
+      if field.tag == 161 {
+        reader.cursor = field.content
+        while reader.cursor < field.end && !reader.failed {
+          let name = read(&mut reader, field.end, 3)
+          walkOpen(&mut reader, name, 3)
+        }
+        finish(&mut reader, field.end)
+      } else if field.tag == 130 {
+        let bytes = content(reader.bytes, field)
+        if bytes.length == 0 || bytes[0] >= 128 || (bytes.length > 1 && bytes[0] == 0 && bytes[1] < 128) {
+          let ignored = reject(&mut reader, ProfileClass.Malformed, ProfileReason.MalformedExtension, field.start)
+        }
+      }
+      reader.cursor = field.end
+    }
+  }
+  finish(&mut reader, root.end)
+}
+
+fn nullTlv(bytes: &[u8], span: Span) -> bool {
+  return span.tag == 5 && span.content == span.end && span.end == bytes.length
+}
+
+fn sha256Identifier(bytes: &[u8]) -> bool {
+  let sequence = rawSpan(bytes, 0, bytes.length)
+  if sequence.tag != 48 || sequence.end != bytes.length { return false }
+  let identifier = rawSpan(bytes, sequence.content, sequence.end)
+  let sha256: [u8; 9] = [96, 134, 72, 1, 101, 3, 4, 2, 1]
+  if identifier.tag != 6 || !equal(content(bytes, identifier), &sha256) { return false }
+  if identifier.end == sequence.end { return true }
+  let parameters = rawSpan(bytes, identifier.end, sequence.end)
+  return parameters.tag == 5 && parameters.content == parameters.end && parameters.end == sequence.end
+}
+
+fn mgf1Sha256(bytes: &[u8]) -> bool {
+  let sequence = rawSpan(bytes, 0, bytes.length)
+  if sequence.tag != 48 || sequence.end != bytes.length { return false }
+  let identifier = rawSpan(bytes, sequence.content, sequence.end)
+  let mgf1: [u8; 9] = [42, 134, 72, 134, 247, 13, 1, 1, 8]
+  if identifier.tag != 6 || !equal(content(bytes, identifier), &mgf1) { return false }
+  if identifier.end >= sequence.end { return false }
+  return sha256Identifier(Slice.view<u8>(bytes, identifier.end, sequence.end - identifier.end))
+}
+
+fn explicitInteger(bytes: &[u8], span: Span, expected: u8) -> bool {
+  let integer = rawSpan(bytes, span.content, span.end)
+  return integer.tag == 2 && integer.end == span.end && integer.end - integer.content == 1 && bytes[integer.content] == expected
+}
+
+fn pssParameters(bytes: &[u8]) -> bool {
+  let root = rawSpan(bytes, 0, bytes.length)
+  if root.tag != 48 || root.end != bytes.length { return false }
+  let mut at = root.content
+  let hash = rawSpan(bytes, at, root.end)
+  if hash.tag != 160 || !sha256Identifier(Slice.view<u8>(bytes, hash.content, hash.end - hash.content)) { return false }
+  at = hash.end
+  let mask = rawSpan(bytes, at, root.end)
+  if mask.tag != 161 || !mgf1Sha256(Slice.view<u8>(bytes, mask.content, mask.end - mask.content)) { return false }
+  at = mask.end
+  let salt = rawSpan(bytes, at, root.end)
+  if salt.tag != 162 || !explicitInteger(bytes, salt, u8.toU8(32)) { return false }
+  at = salt.end
+  if at == root.end { return true }
+  let trailer = rawSpan(bytes, at, root.end)
+  return trailer.tag == 163 && trailer.end == root.end && explicitInteger(bytes, trailer, u8.toU8(1))
+}
+
+fn signatureKind(algorithm: &AlgorithmView) -> Result<SignatureKind, ProfileError> {
+  let ecdsa: [u8; 8] = [42, 134, 72, 206, 61, 4, 3, 2]
+  let pss: [u8; 9] = [42, 134, 72, 134, 247, 13, 1, 1, 10]
+  let pkcs1: [u8; 9] = [42, 134, 72, 134, 247, 13, 1, 1, 11]
+  if equal(algorithm.oid, &ecdsa) {
+    return match & algorithm.parametersDer {
+      Option<&[u8]>.None => Result.succeed<SignatureKind, ProfileError>(SignatureKind.EcdsaP256Sha256)
+      Option<&[u8]>.Some {value} => Result.failResult<SignatureKind, ProfileError>(
+        profileError(ProfileClass.Unsupported, ProfileReason.SignatureAlgorithm, ProfileOffsetSpace.CertificateDer, 0),
+      )
+    }
+  }
+  if equal(algorithm.oid, &pkcs1) && nullOrAbsent(&algorithm.parametersDer) {
+    return Result.succeed<SignatureKind, ProfileError>(SignatureKind.RsaPkcs1Sha256)
+  }
+  if equal(algorithm.oid, &pss) {
+    return match & algorithm.parametersDer {
+      Option<&[u8]>.Some {value} => {
+        if pssParameters(value) {
+          return Result.succeed<SignatureKind, ProfileError>(SignatureKind.RsaPssSha256)
+        }
+        return Result.failResult<SignatureKind, ProfileError>(
+          profileError(ProfileClass.Unsupported, ProfileReason.SignatureAlgorithm, ProfileOffsetSpace.CertificateDer, 0),
+        )
+      }
+      Option<&[u8]>.None => Result.failResult<SignatureKind, ProfileError>(
+        profileError(ProfileClass.Unsupported, ProfileReason.SignatureAlgorithm, ProfileOffsetSpace.CertificateDer, 0),
+      )
+    }
+  }
+  return Result.failResult<SignatureKind, ProfileError>(
+    profileError(ProfileClass.Unsupported, ProfileReason.SignatureAlgorithm, ProfileOffsetSpace.CertificateDer, 0),
+  )
+}
+
+fn sameSignatureKind(left: SignatureKind, right: SignatureKind) -> bool {
+  return match left {
+    SignatureKind.EcdsaP256Sha256 => right == SignatureKind.EcdsaP256Sha256
+    SignatureKind.RsaPssSha256 => right == SignatureKind.RsaPssSha256
+    SignatureKind.RsaPkcs1Sha256 => right == SignatureKind.RsaPkcs1Sha256
+  }
+}
+
+fn keyKind(certificate: &Certificate) -> Result<CertificateKeyKind, ProfileError> {
+  let algorithm = Certificate.publicKeyAlgorithm(certificate)
+  let key = Certificate.publicKey(certificate)
+  if key.unusedBits != 0 {
+    return Result.failResult<CertificateKeyKind, ProfileError>(
+      profileError(ProfileClass.Unsupported, ProfileReason.PublicKey, ProfileOffsetSpace.CertificateDer, 0),
+    )
+  }
+  let ec: [u8; 7] = [42, 134, 72, 206, 61, 2, 1]
+  if equal(algorithm.oid, &ec) {
+    let curve: [u8; 10] = [6, 8, 42, 134, 72, 206, 61, 3, 1, 7]
+    let parametersValid = match & algorithm.parametersDer {
+      Option<&[u8]>.Some {value} => equal(value, &curve)
+      Option<&[u8]>.None => false
+    }
+    if parametersValid {
+      let admitted = P256.validatePublicKey(key.bytes)
+      return match move admitted {
+        Result<(), P256Error>.Success {value} => Result.succeed<CertificateKeyKind, ProfileError>(CertificateKeyKind.P256)
+        Result<(), P256Error>.Failure {error} => Result.failResult<CertificateKeyKind, ProfileError>(
+          profileError(ProfileClass.Unsupported, ProfileReason.PublicKey, ProfileOffsetSpace.CertificateDer, 0),
+        )
+      }
+    }
+  }
+  let rsa: [u8; 9] = [42, 134, 72, 134, 247, 13, 1, 1, 1]
+  if equal(algorithm.oid, &rsa) && nullOrAbsent(&algorithm.parametersDer) {
+    let admitted = RsaPublicKey.fromCertificateKey(algorithm.der, key.bytes, key.unusedBits)
+    return match move admitted {
+      Result<RsaPublicKey, RsaError>.Success {value} => Result.succeed<CertificateKeyKind, ProfileError>(CertificateKeyKind.Rsa)
+      Result<RsaPublicKey, RsaError>.Failure {error} => Result.failResult<CertificateKeyKind, ProfileError>(
+        profileError(ProfileClass.Unsupported, ProfileReason.PublicKey, ProfileOffsetSpace.CertificateDer, 0),
+      )
+    }
+  }
+  return Result.failResult<CertificateKeyKind, ProfileError>(
+    profileError(ProfileClass.Unsupported, ProfileReason.PublicKey, ProfileOffsetSpace.CertificateDer, 0),
+  )
+}
+
+fn hasEarlierOid<'a>(certificate: &'a Certificate, index: usize, selected: &[u8]) -> bool {
+  let mut earlier = usize.ZERO
+  while earlier < index {
+    let candidate = Certificate.extension(certificate, earlier)
+    match move candidate {
+      Option<ExtensionView<'a>>.Some {value} => {
+        if equal(value.oid, selected) { return true }
+      }
+      Option<ExtensionView<'a>>.None => {}
+    }
+    earlier = earlier + 1
+  }
+  return false
+}
+
+fn serialAdmitted(serial: &[u8]) -> bool {
+  if serial.length == 0 || serial.length > 20 || serial[0] >= 128 { return false }
+  let mut index = usize.ZERO
+  while index < serial.length {
+    if serial[index] != 0 { return true }
+    index = index + 1
+  }
+  return false
+}
+
+fn subjectIsEmpty(certificate: &Certificate) -> bool {
+  let subject = Certificate.subjectDer(certificate)
+  return subject.length == 2 && subject[0] == 48 && subject[1] == 0
+}
+
+fn resultFailure<A>(error: ProfileError) -> Result<A, ProfileError> {
+  return Result.failResult<A, ProfileError>(move error)
+}
+
+impl<'a> CertificateProfile<'a> {
+  /// Inspects one decoded certificate under the restricted TLS-server semantic profile.
+  ///
+  /// # Details
+  ///
+  /// Inspection is allocation-free and bounded. It admits one role, validates key and extension
+  /// policy, and caches immutable borrowed views. Path certificates also require matching admitted
+  /// inner and outer signature metadata. Anchor signature metadata, serial, validity, and
+  /// self-signature are deliberately ignored.
+  ///
+  /// # Gotchas
+  ///
+  /// Success does not establish trust, current validity, a complete path, service identity, or an
+  /// actual signature. An anchor must be supplied through `silk.trust_anchor` as explicit authority.
+  pub fn inspect(
+    certificate: &'a Certificate,
+    selectedRole: CertificateRole,
+    limits: ProfileLimits,
+  ) -> Result<CertificateProfile<'a>, ProfileError> {
+    let version = Certificate.version(certificate)
+    let anchor = selectedRole == CertificateRole.Anchor
+    if anchor {
+      if version == CertificateVersion.V2 {
+        return resultFailure<CertificateProfile<'a>>(
+          profileError(ProfileClass.Unsupported, ProfileReason.Version, ProfileOffsetSpace.CertificateDer, 0),
+        )
+      }
+    } else {
+      if version != CertificateVersion.V3 {
+        return resultFailure<CertificateProfile<'a>>(
+          profileError(ProfileClass.Unsupported, ProfileReason.Version, ProfileOffsetSpace.CertificateDer, 0),
+        )
+      }
+      if !serialAdmitted(Certificate.serial(certificate)) {
+        return resultFailure<CertificateProfile<'a>>(
+          profileError(ProfileClass.Malformed, ProfileReason.Serial, ProfileOffsetSpace.CertificateDer, 0),
+        )
+      }
+    }
+    let issuerId = Certificate.issuerUniqueId(certificate)
+    match move issuerId {
+      Option<BitStringView<'a>>.Some {value} => {
+        return resultFailure<CertificateProfile<'a>>(
+          profileError(ProfileClass.Unsupported, ProfileReason.UniqueIdentifier, ProfileOffsetSpace.CertificateDer, 0),
+        )
+      }
+      Option<BitStringView<'a>>.None => {}
+    }
+    let subjectId = Certificate.subjectUniqueId(certificate)
+    match move subjectId {
+      Option<BitStringView<'a>>.Some {value} => {
+        return resultFailure<CertificateProfile<'a>>(
+          profileError(ProfileClass.Unsupported, ProfileReason.UniqueIdentifier, ProfileOffsetSpace.CertificateDer, 0),
+        )
+      }
+      Option<BitStringView<'a>>.None => {}
+    }
+
+    let admittedKey = keyKind(certificate)
+    let selectedKey = match move admittedKey {
+      Result<CertificateKeyKind, ProfileError>.Success {value} => value
+      Result<CertificateKeyKind, ProfileError>.Failure {error} => {
+        return resultFailure<CertificateProfile<'a>>(error)
+      }
+    }
+
+    if !anchor {
+      let signature = Certificate.signature(certificate)
+      if signature.unusedBits != 0 {
+        return resultFailure<CertificateProfile<'a>>(
+          profileError(ProfileClass.Unsupported, ProfileReason.SignatureAlgorithm, ProfileOffsetSpace.CertificateDer, 0),
+        )
+      }
+      let inner = signatureKind(&Certificate.tbsSignatureAlgorithm(certificate))
+      let innerKind = match move inner {
+        Result<SignatureKind, ProfileError>.Success {value} => value
+        Result<SignatureKind, ProfileError>.Failure {error} => {
+          return resultFailure<CertificateProfile<'a>>(error)
+        }
+      }
+      let outer = signatureKind(&Certificate.signatureAlgorithm(certificate))
+      let outerKind = match move outer {
+        Result<SignatureKind, ProfileError>.Success {value} => value
+        Result<SignatureKind, ProfileError>.Failure {error} => {
+          return resultFailure<CertificateProfile<'a>>(error)
+        }
+      }
+      if !sameSignatureKind(innerKind, outerKind) {
+        return resultFailure<CertificateProfile<'a>>(
+          profileError(ProfileClass.Unsupported, ProfileReason.SignatureAlgorithmMismatch, ProfileOffsetSpace.CertificateDer, 0),
+        )
+      }
+    }
+
+    let extensionCount = Certificate.extensionCount(certificate)
+    if extensionCount > limits.extensions {
+      return resultFailure<CertificateProfile<'a>>(
+        profileError(ProfileClass.ResourceLimit, ProfileReason.Extensions, ProfileOffsetSpace.CertificateDer, 0),
+      )
+    }
+    let empty = Slice.view<u8>(Certificate.der(certificate), 0, 0)
+    let mut hasBc = false
+    let mut bcCritical = false
+    let mut bc = BasicConstraints {ca: false, hasPathLength: false, pathLength: 0}
+    let mut hasKu = false
+    let mut ku = blankUsage()
+    let mut hasEku = false
+    let mut eku = blankExtendedUsage()
+    let mut hasSan = false
+    let mut sanCritical = false
+    let mut san = empty
+    let mut hasNc = false
+    let mut nc = empty
+    let mut nodes = usize.ZERO
+    let bcOid: [u8; 3] = [85, 29, 19]
+    let kuOid: [u8; 3] = [85, 29, 15]
+    let ekuOid: [u8; 3] = [85, 29, 37]
+    let sanOid: [u8; 3] = [85, 29, 17]
+    let ncOid: [u8; 3] = [85, 29, 30]
+    let akiOid: [u8; 3] = [85, 29, 35]
+    let skiOid: [u8; 3] = [85, 29, 14]
+    let policiesOid: [u8; 3] = [85, 29, 32]
+    let mappingsOid: [u8; 3] = [85, 29, 33]
+    let constraintsOid: [u8; 3] = [85, 29, 36]
+    let inhibitOid: [u8; 3] = [85, 29, 54]
+    let tlsFeatureOid: [u8; 8] = [43, 6, 1, 5, 5, 7, 1, 24]
+    let mut index = usize.ZERO
+    while index < extensionCount {
+      let selected = Certificate.extension(certificate, index)
+      match move selected {
+        Option<ExtensionView<'a>>.Some {value: extension} => {
+          if extension.value.length > limits.extensionBytes {
+            return resultFailure<CertificateProfile<'a>>(
+              extensionError(ProfileClass.ResourceLimit, ProfileReason.ExtensionBytes, index, extension.valueOffset),
+            )
+          }
+          if hasEarlierOid(certificate, index, extension.oid) {
+            return resultFailure<CertificateProfile<'a>>(
+              extensionError(ProfileClass.Malformed, ProfileReason.DuplicateExtension, index, extension.offset),
+            )
+          }
+          if equal(extension.oid, &bcOid) {
+            let mut reader = makeReader(
+              extension.value,
+              limits,
+              nodes,
+              extension.valueOffset,
+              ProfileOffsetSpace.CertificateDer,
+              true,
+              index,
+            )
+            bc = basicConstraints(&mut reader)
+            if reader.failed { return resultFailure<CertificateProfile<'a>>(move reader.error) }
+            nodes = reader.nodes
+            hasBc = true
+            bcCritical = extension.critical
+          } else if equal(extension.oid, &kuOid) {
+            let mut reader = makeReader(extension.value, limits, nodes, extension.valueOffset, ProfileOffsetSpace.CertificateDer, true, index)
+            ku = keyUsage(&mut reader)
+            if reader.failed { return resultFailure<CertificateProfile<'a>>(move reader.error) }
+            nodes = reader.nodes
+            hasKu = true
+          } else if equal(extension.oid, &ekuOid) {
+            let mut reader = makeReader(extension.value, limits, nodes, extension.valueOffset, ProfileOffsetSpace.CertificateDer, true, index)
+            eku = extendedKeyUsage(&mut reader)
+            if reader.failed { return resultFailure<CertificateProfile<'a>>(move reader.error) }
+            nodes = reader.nodes
+            hasEku = true
+          } else if equal(extension.oid, &sanOid) {
+            let mut reader = makeReader(extension.value, limits, nodes, extension.valueOffset, ProfileOffsetSpace.CertificateDer, true, index)
+            validateSanNames(&mut reader, extension.critical)
+            if reader.failed { return resultFailure<CertificateProfile<'a>>(move reader.error) }
+            nodes = reader.nodes
+            hasSan = true
+            sanCritical = extension.critical
+            san = extension.value
+          } else if equal(extension.oid, &ncOid) {
+            if selectedRole == CertificateRole.ServerLeaf || !extension.critical {
+              return resultFailure<CertificateProfile<'a>>(
+                extensionError(ProfileClass.Unsupported, ProfileReason.NameConstraints, index, extension.offset),
+              )
+            }
+            let mut reader = makeReader(extension.value, limits, nodes, extension.valueOffset, ProfileOffsetSpace.CertificateDer, true, index)
+            nameConstraints(&mut reader)
+            if reader.failed { return resultFailure<CertificateProfile<'a>>(move reader.error) }
+            nodes = reader.nodes
+            hasNc = true
+            nc = extension.value
+          } else if equal(extension.oid, &akiOid) {
+            if extension.critical {
+              return resultFailure<CertificateProfile<'a>>(
+                extensionError(ProfileClass.Unsupported, ProfileReason.UnknownCriticalExtension, index, extension.offset),
+              )
+            }
+            let mut reader = makeReader(extension.value, limits, nodes, extension.valueOffset, ProfileOffsetSpace.CertificateDer, true, index)
+            authorityKeyIdentifier(&mut reader)
+            if reader.failed { return resultFailure<CertificateProfile<'a>>(move reader.error) }
+            nodes = reader.nodes
+          } else if equal(extension.oid, &skiOid) {
+            if extension.critical {
+              return resultFailure<CertificateProfile<'a>>(
+                extensionError(ProfileClass.Unsupported, ProfileReason.UnknownCriticalExtension, index, extension.offset),
+              )
+            }
+            let mut reader = makeReader(extension.value, limits, nodes, extension.valueOffset, ProfileOffsetSpace.CertificateDer, true, index)
+            subjectKeyIdentifier(&mut reader)
+            if reader.failed { return resultFailure<CertificateProfile<'a>>(move reader.error) }
+            nodes = reader.nodes
+          } else if equal(extension.oid, &policiesOid) {
+            if extension.critical {
+              return resultFailure<CertificateProfile<'a>>(
+                extensionError(ProfileClass.Unsupported, ProfileReason.PolicyProcessing, index, extension.offset),
+              )
+            }
+            let mut reader = makeReader(extension.value, limits, nodes, extension.valueOffset, ProfileOffsetSpace.CertificateDer, true, index)
+            certificatePolicies(&mut reader)
+            if reader.failed { return resultFailure<CertificateProfile<'a>>(move reader.error) }
+            nodes = reader.nodes
+          } else if equal(extension.oid, &mappingsOid) || equal(extension.oid, &constraintsOid) || equal(extension.oid, &inhibitOid) {
+            return resultFailure<CertificateProfile<'a>>(
+              extensionError(ProfileClass.Unsupported, ProfileReason.PolicyProcessing, index, extension.offset),
+            )
+          } else if equal(extension.oid, &tlsFeatureOid) {
+            return resultFailure<CertificateProfile<'a>>(
+              extensionError(ProfileClass.Unsupported, ProfileReason.TlsFeature, index, extension.offset),
+            )
+          } else if extension.critical {
+            return resultFailure<CertificateProfile<'a>>(
+              extensionError(ProfileClass.Unsupported, ProfileReason.UnknownCriticalExtension, index, extension.offset),
+            )
+          }
+        }
+        Option<ExtensionView<'a>>.None => {}
+      }
+      index = index + 1
+    }
+
+    let caRole = selectedRole == CertificateRole.Intermediate || selectedRole == CertificateRole.Anchor
+    if caRole && version == CertificateVersion.V3 && (!hasBc || !bc.ca) {
+      return resultFailure<CertificateProfile<'a>>(
+        profileError(ProfileClass.Unsupported, ProfileReason.Role, ProfileOffsetSpace.CertificateDer, 0),
+      )
+    }
+    if selectedRole == CertificateRole.Intermediate && !bcCritical {
+      return resultFailure<CertificateProfile<'a>>(
+        profileError(ProfileClass.Unsupported, ProfileReason.Role, ProfileOffsetSpace.CertificateDer, 0),
+      )
+    }
+    if selectedRole == CertificateRole.ServerLeaf && hasBc && bc.ca {
+      return resultFailure<CertificateProfile<'a>>(
+        profileError(ProfileClass.Unsupported, ProfileReason.Role, ProfileOffsetSpace.CertificateDer, 0),
+      )
+    }
+    if hasKu {
+      let mut allowed = ku.keyCertSign
+      if selectedRole == CertificateRole.ServerLeaf { allowed = ku.digitalSignature }
+      if !allowed {
+        return resultFailure<CertificateProfile<'a>>(
+          profileError(ProfileClass.Unsupported, ProfileReason.MissingKeyUsage, ProfileOffsetSpace.CertificateDer, 0),
+        )
+      }
+    }
+    if hasEku && !eku.serverAuth {
+      return resultFailure<CertificateProfile<'a>>(
+        profileError(ProfileClass.Unsupported, ProfileReason.MissingServerAuth, ProfileOffsetSpace.CertificateDer, 0),
+      )
+    }
+    if subjectIsEmpty(certificate) && (!hasSan || !sanCritical) {
+      return resultFailure<CertificateProfile<'a>>(
+        profileError(ProfileClass.Unsupported, ProfileReason.Role, ProfileOffsetSpace.CertificateDer, 0),
+      )
+    }
+
+    return Result.succeed<CertificateProfile<'a>, ProfileError>(
+      CertificateProfile<'a> {
+        certificateValue: certificate,
+        roleValue: selectedRole,
+        keyKindValue: selectedKey,
+        caValue: bc.ca,
+        hasPathLength: bc.hasPathLength,
+        pathLengthValue: bc.pathLength,
+        hasKeyUsage: hasKu,
+        keyUsageValue: ku,
+        hasExtendedKeyUsage: hasEku,
+        extendedKeyUsageValue: eku,
+        hasSan: hasSan,
+        sanValue: san,
+        hasNameConstraints: hasNc,
+        nameConstraintsValue: nc,
+      },
+    )
+  }
+
+  /// Borrows the structurally decoded certificate retained by this view.
+  pub fn certificate(self: &Self) -> &'a Certificate { return self.certificateValue }
+
+  /// Returns the role under which this certificate was inspected.
+  pub fn certificateRole(self: &Self) -> CertificateRole { return self.roleValue }
+
+  /// Returns the admitted public-key profile.
+  pub fn keyKind(self: &Self) -> CertificateKeyKind { return self.keyKindValue }
+
+  /// Returns the admitted BasicConstraints CA value, or false when absent.
+  pub fn ca(self: &Self) -> bool { return self.caValue }
+
+  /// Returns the admitted BasicConstraints path length when present.
+  pub fn pathLength(self: &Self) -> Option<usize> {
+    if self.hasPathLength { return Option.some<usize>(self.pathLengthValue) }
+    return Option.none<usize>()
+  }
+
+  /// Returns admitted KeyUsage facts when the extension was present.
+  pub fn keyUsage(self: &Self) -> Option<KeyUsage> {
+    if self.hasKeyUsage { return Option.some<KeyUsage>(self.keyUsageValue) }
+    return Option.none<KeyUsage>()
+  }
+
+  /// Returns admitted ExtendedKeyUsage facts when the extension was present.
+  pub fn extendedKeyUsage(self: &Self) -> Option<ExtendedKeyUsage> {
+    if self.hasExtendedKeyUsage {
+      return Option.some<ExtendedKeyUsage>(self.extendedKeyUsageValue)
+    }
+    return Option.none<ExtendedKeyUsage>()
+  }
+
+  /// Borrows the exact subjectAltName extension-value DER when present.
+  pub fn subjectAltNamesDer(self: &Self) -> Option<&'a [u8]> {
+    if self.hasSan { return Option.some<&'a [u8]>(self.sanValue) }
+    return Option.none<&'a [u8]>()
+  }
+
+  /// Borrows the exact embedded NameConstraints extension-value DER when present.
+  pub fn nameConstraintsDer(self: &Self) -> Option<&'a [u8]> {
+    if self.hasNameConstraints {
+      return Option.some<&'a [u8]>(self.nameConstraintsValue)
+    }
+    return Option.none<&'a [u8]>()
+  }
+
+  /// Validates strict configured DNS/IP NameConstraints without allocating or retaining input.
+  pub fn validateConfiguredNameConstraints(
+    value: &[u8],
+    limits: ProfileLimits,
+  ) -> Result<(), ProfileError> {
+    if value.length > limits.extensionBytes {
+      return Result.failResult<(), ProfileError>(
+        profileError(
+          ProfileClass.ResourceLimit,
+          ProfileReason.ExtensionBytes,
+          ProfileOffsetSpace.ConfiguredConstraintDer,
+          0,
+        ),
+      )
+    }
+    let mut reader = makeReader(
+      value,
+      limits,
+      0,
+      0,
+      ProfileOffsetSpace.ConfiguredConstraintDer,
+      false,
+      0,
+    )
+    nameConstraints(&mut reader)
+    if reader.failed { return Result.failResult<(), ProfileError>(move reader.error) }
+    return Result.succeed<(), ProfileError>(())
+  }
+
+  /// Verifies exact issuer-name linkage and the subject's retained original TBS signature.
+  ///
+  /// # Gotchas
+  ///
+  /// This checks only one edge. It does not establish path, time, constraint, trust, or identity
+  /// authentication.
+  pub fn verifyIssuedBy(
+    subject: &CertificateProfile,
+    issuer: &CertificateProfile,
+  ) -> Result<(), ProfileError> {
+    let subjectCertificate = subject.certificateValue
+    let issuerCertificate = issuer.certificateValue
+    if !equal(Certificate.issuerDer(subjectCertificate), Certificate.subjectDer(issuerCertificate)) {
+      return Result.failResult<(), ProfileError>(
+        profileError(ProfileClass.Unsupported, ProfileReason.IssuerName, ProfileOffsetSpace.CertificateDer, 0),
+      )
+    }
+    let verified = match issuer.keyKindValue {
+      CertificateKeyKind.P256 => EcdsaP256Sha256.verifyCertificate(
+        &Certificate.publicKeyAlgorithm(issuerCertificate),
+        &Certificate.publicKey(issuerCertificate),
+        Certificate.tbsDer(subjectCertificate),
+        &Certificate.signatureAlgorithm(subjectCertificate),
+        &Certificate.signature(subjectCertificate),
+      )
+      CertificateKeyKind.Rsa => {
+        let admitted = RsaPublicKey.fromCertificateKey(
+          Certificate.publicKeyAlgorithm(issuerCertificate).der,
+          Certificate.publicKey(issuerCertificate).bytes,
+          Certificate.publicKey(issuerCertificate).unusedBits,
+        )
+        return match move admitted {
+          Result<RsaPublicKey, RsaError>.Failure {error} => Result.failResult<(), ProfileError>(
+            profileError(ProfileClass.Unsupported, ProfileReason.SignatureRejected, ProfileOffsetSpace.CertificateDer, 0),
+          )
+          Result<RsaPublicKey, RsaError>.Success {value: key} => {
+            let checked = RsaPublicKey.verifyCertificate(
+              &key,
+              Certificate.tbsDer(subjectCertificate),
+              Certificate.signatureAlgorithm(subjectCertificate).der,
+              Certificate.signature(subjectCertificate).bytes,
+              Certificate.signature(subjectCertificate).unusedBits,
+            )
+            return match move checked {
+              Result<(), RsaError>.Success {value} => Result.succeed<(), ProfileError>(())
+              Result<(), RsaError>.Failure {error} => Result.failResult<(), ProfileError>(
+                profileError(ProfileClass.Unsupported, ProfileReason.SignatureRejected, ProfileOffsetSpace.CertificateDer, 0),
+              )
+            }
+          }
+        }
+      }
+    }
+    return match move verified {
+      Result<(), P256SignatureError>.Success {value} => Result.succeed<(), ProfileError>(())
+      Result<(), P256SignatureError>.Failure {error} => Result.failResult<(), ProfileError>(
+        profileError(ProfileClass.Unsupported, ProfileReason.SignatureRejected, ProfileOffsetSpace.CertificateDer, 0),
+      )
+    }
+  }
+}

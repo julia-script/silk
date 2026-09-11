@@ -1754,7 +1754,7 @@ impl RsaPublicKey {
   /// # Details
   ///
   /// Pass the decoder's algorithm DER, key BIT STRING bytes and unused-bit count unchanged.
-  /// Requires rsaEncryption with NULL parameters and a minimal positive RSAPublicKey DER sequence.
+  /// Requires rsaEncryption with absent or NULL parameters and a minimal positive RSAPublicKey DER sequence.
   /// The modulus and exponent then pass the same bounded profile as fromComponents.
   /// Malformed DER returns InvalidEncoding; wrong algorithm parameters return InvalidParameters.
   /// Nonzero unused bits return InvalidLength. No borrowed bytes are retained.
@@ -1765,7 +1765,7 @@ impl RsaPublicKey {
     if unusedBits != 0 {
       return Result.failResult<RsaPublicKey, RsaError>(RsaError.InvalidLength)
     }
-    if !rsaAlgorithm(algorithmDer, 1, true) {
+    if !rsaAlgorithm(algorithmDer, 1, false) {
       return Result.failResult<RsaPublicKey, RsaError>(RsaError.InvalidParameters)
     }
     let sequence = readDer(keyDer, 0, keyDer.length, 48)

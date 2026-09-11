@@ -44,6 +44,20 @@ pub struct P256 {
 }
 
 impl P256 {
+  /// Validates one strict uncompressed P-256 public point without allocation.
+  ///
+  /// # Details
+  ///
+  /// The input must contain exactly `04 || X || Y`, with 32-byte big-endian coordinates smaller
+  /// than the field prime and satisfying the P-256 curve equation. This reuses the same admission
+  /// routine as ECDSA verification and does not retain the input.
+  pub fn validatePublicKey(publicKey: &[u8]) -> Result<(), P256Error> {
+    let admitted = admitPoint(publicKey)
+    return match move admitted {
+      Result<Point, P256Error>.Success {value} => Result.succeed<(), P256Error>(())
+      Result<Point, P256Error>.Failure {error} => Result.failResult<(), P256Error>(error)
+    }
+  }
   /// Imports exactly 32 big-endian scalar bytes in 1 through n−1 without allocation.
   ///
   /// # Details

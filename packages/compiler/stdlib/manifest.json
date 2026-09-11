@@ -61,6 +61,22 @@
     ]
   },
   {
+    "module": "silk/certificate_profile",
+    "path": "silk/certificate_profile.silk",
+    "namespace": "CertificateProfile",
+    "aliases": [
+      "CertificateRole",
+      "CertificateKeyKind",
+      "ProfileLimits",
+      "ProfileClass",
+      "ProfileOffsetSpace",
+      "ProfileReason",
+      "ProfileError",
+      "KeyUsage",
+      "ExtendedKeyUsage"
+    ]
+  },
+  {
     "module": "silk/chacha20_poly1305",
     "path": "silk/chacha20_poly1305.silk",
     "namespace": "ChaCha20Poly1305",
@@ -568,6 +584,11 @@
     "path": "silk/tls_hkdf.silk",
     "namespace": "TlsHkdfSha256",
     "aliases": ["TlsHkdfSha384", "LabelError"]
+  },
+  {
+    "module": "silk/trust_anchor",
+    "path": "silk/trust_anchor.silk",
+    "namespace": "TrustAnchor"
   },
   {
     "module": "silk/u16",

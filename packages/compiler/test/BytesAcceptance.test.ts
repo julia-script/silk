@@ -110,6 +110,40 @@ pub fn main() -> i32 { return 0 }`
   }),
 )
 
+it.effect('exposes borrowed certificate profiles and move-only owned trust anchors', () =>
+  Effect.gen(function* () {
+    const source = `import silk.certificate { Certificate }
+import silk.certificate_profile { CertificateProfile, CertificateRole, ProfileLimits, ProfileError }
+import silk.option { Option }
+import silk.result { Result }
+import silk.trust_anchor { TrustAnchor }
+import silk.usize
+fn profile<'a>(certificate: &'a Certificate) -> Result<CertificateProfile<'a>, ProfileError> {
+  return CertificateProfile.inspect(certificate, CertificateRole.Anchor, ProfileLimits.defaults())
+}
+fn anchor(certificate: Certificate) -> usize {
+  let value = TrustAnchor.fromCertificate(move certificate)
+  return TrustAnchor.encodedBytes(&value)
+}
+fn moved(value: TrustAnchor) -> usize {
+  let next = move value
+  return TrustAnchor.encodedBytes(&value)
+}
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'certificate-profile/public-surface',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        text: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+      })),
+      [{ code: 'OWN0001', text: '&value' }],
+    )
+  }),
+)
+
 it.effect('keeps HTTPS reference and SAN payload borrows within caller storage', () =>
   Effect.gen(function* () {
     const source = `import silk.https_identity { HttpsIdentity, OriginHost, ReferenceIdentity, CertificateIdentities, PresentedIdentity, IdentityLimits, IdentityMatch, IdentityError }

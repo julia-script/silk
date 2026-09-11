@@ -209,6 +209,10 @@ pub struct AlgorithmView<'a> {
 
 /// A borrowed raw extension, including unknown or duplicate extensions.
 pub struct ExtensionView<'a> {
+  /// Byte offset of the complete Extension TLV in the certificate DER.
+  pub offset: usize
+  /// Byte offset of the extension value content in the certificate DER.
+  pub valueOffset: usize
   /// The complete original Extension TLV.
   pub der: &'a [u8]
   /// The canonical OID content octets, without tag or length.
@@ -1134,6 +1138,26 @@ fn algorithmView<'a>(bytes: &'a [u8], info: Algorithm) -> AlgorithmView<'a> {
 }
 
 impl Certificate {
+  /// Copies this decoded certificate into independent owned storage without reinterpreting it.
+  ///
+  /// # Details
+  ///
+  /// The copy preserves every original DER byte, checked field offset, algorithm spelling, and raw
+  /// extension in source order. Allocation refusal releases partial storage and returns
+  /// `OutOfMemoryError`; no semantic validation is performed.
+  pub effect fn copy(self: &Self) -> Certificate ! OutOfMemoryError ? &mut Allocator {
+    let bytes = run Bytes.copy(Bytes.asSlice(&self.bytes))
+    let mut extensions = Vector.make<Extension>()
+    let mut index = usize.ZERO
+    while index < Vector.length<Extension>(&self.extensions) {
+      let appended = run Vector.append<Extension>(
+        &mut extensions,
+        Vector.get<Extension>(&self.extensions, index),
+      )
+      index = index + usize.ONE
+    }
+    return Certificate {bytes: move bytes, fields: self.fields, extensions: move extensions}
+  }
   /// Decodes exactly one DER certificate into independent owned storage.
   ///
   /// # Details
@@ -1341,6 +1365,8 @@ impl Certificate {
     let bytes = Bytes.asSlice(&self.bytes)
     return Option.some<ExtensionView<'a>>(
       ExtensionView<'a> {
+        offset: item.whole.start,
+        valueOffset: item.value.content,
         der: whole(bytes, item.whole),
         oid: content(bytes, item.oid),
         critical: item.critical,
