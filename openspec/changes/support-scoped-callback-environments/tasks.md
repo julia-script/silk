@@ -32,5 +32,6 @@ failure. Task 3.1 passed focused Effect documentation generation; full documenta
 three pre-existing ByteDuplex SummaryShape violations. Task 3.3 awaits CI execution. Task 4.1 was
 attempted in an isolated checkout: analysis still fails at the consumer, so lowering is not claimed.
 The remaining proof and minimal source are recorded under 4.2; no repair to that separate mechanism
-is included. Publication of an additional review-base branch is awaiting explicit approval after
-automatic approval review rejected it. The original scoped branch remains authorized for publication.
+is included. The user explicitly approved the additional review-base branch on 2026-09-12; it is
+published at the preserved checkpoint. A focused draft PR and its exact-revision CI are the remaining
+delivery steps. Broad validation is not yet claimed.

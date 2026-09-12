@@ -96,7 +96,7 @@ combining the TLS source corrections with the new Effect helper signature. Do no
 preserved generated file with this branch's embedding, which intentionally omits those TLS edits.
 Do not mark JUL-188 ready or merge it while the separate row/evidence failure remains.
 
-## Delivered revisions and remaining approval
+## Delivered revisions and CI handoff
 
 - `81eb46676f74ba656ca2f5b766a2a035f7d4f15b`: lexical constraint visibility and regression controls.
 - `00da6e84ee23a5ef585c3734030e6d9d3de4bcf4`: approved OpenSpec proposal and investigation.
@@ -108,9 +108,14 @@ typecheck, stdlib embedding check, and strict OpenSpec validation passed at this
 post-format checks also passed; they repeat only the affected canonicalization, formatter, and
 generic-capture assertions.
 
-No draft PR or CI run has been created. Automatic approval review rejected pushing the already
-preserved checkpoint to an additional `julia/scoped-resource-callback-base` branch, stating that
-prior approval covered the scoped branch but not this new destination containing TLS checkpoint
-code. Explicit approval for that base branch is pending. A base at `d1d707e6` keeps the draft PR
-limited to the compiler fix and gives CI the exact intended branch. Do not infer approval from
-elapsed time or publish that additional branch until the user responds.
+The user explicitly approved the additional review-base branch on 2026-09-12, resolving the prior
+automatic approval rejection. `origin/julia/scoped-resource-callback-base` is pinned to
+`d1d707e629a25316f0189cd65e5481114908d8aa`. The draft PR targets that branch so its diff contains
+only this compiler change, investigation, and regression evidence. It must not be merged as a
+completion of JUL-188; the independent callback-row blocker remains.
+
+Broad verification runs through the repository's PR CI, including package/compiler suites, native
+acceptance, and the validation job's `pnpm release:candidate` step. The workflow distributes the
+build/lint/typecheck/test components; it does not invoke the literal `pnpm check` command. Its result
+must be read before treating broad validation as passed. CI links and terminal status belong in the
+PR description so reporting them does not itself move the code revision under verification.
