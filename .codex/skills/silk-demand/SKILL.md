@@ -12,6 +12,12 @@ Julia's current statement is sufficient evidence that the request was made. A li
 not required. Preserve the requester, requested outcome, context, deadline, and wording when Julia
 provides them. Do not invent missing detail or require a person's name when a role is sufficient.
 
+Capture the requested implementation or concrete shipped outcome, not a research, specification,
+definition, or ticket-writing deliverable. Keep uncertain acceptance provisional in Triage and
+record the research questions on that implementation issue. Research and independent skeptical
+review are mandatory triage work before implementation admission; every decomposed child must
+pass that process too. OpenSpec artifacts ship with the implementation when required.
+
 ## Procedure
 
 1. Fetch the canonical Linear project by ID from `LINEAR.md` and verify its team. Never resolve or

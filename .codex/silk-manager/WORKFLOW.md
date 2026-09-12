@@ -90,6 +90,23 @@ a justification by itself.
 
 ## Triage intake bar
 
+Tickets own implementation or another concrete shipped outcome. Do not create tickets whose only
+deliverable is research, specification, definition, or more tickets. Capture uncertain requested
+implementations in Triage, with provisional acceptance and explicit questions.
+
+Research is mandatory within triage for every implementation ticket, including named work,
+manually curated Todo, and children created by decomposition. Before implementation admission,
+record the completed investigation and independent skeptical review on the issue. Resolve the
+contract, scope, dependencies, acceptance evidence, and relevant reference comparisons there.
+Research depth is proportional to uncertainty: a mechanical fix may need only repository evidence;
+a new protocol or ABI requires primary authorities and pinned implementation/fixture references.
+Unresolved contract questions remain in Triage rather than becoming research-only tickets.
+
+OpenSpec remains required for language and standard-library implementation. It records and
+validates the researched contract as part of delivering the implementation, not as a separate
+design-only ticket. Historic completed research tickets retain their provenance; this rule does
+not require rewriting history.
+
 Discovery is broad intake, not final triage. Favor recall over certainty. A Triage issue needs:
 
 - a specific lead anchored to paths, symbols, output, a documentation passage, or a structural

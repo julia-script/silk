@@ -22,6 +22,14 @@ overrides automatic selection; never claim an issue still in Triage.
 
 ## Admission and claim
 
+Every selected implementation ticket must have completed triage research and independent
+skeptical review recorded on the issue, with `Triage disposition: queue-ready`. This applies to
+named tickets, Todo, and implementation children. If the marker or evidence is missing, use
+`silk-triage` before claiming or editing implementation; preserve a manually curated Todo tier
+while reviewing it. Existing recorded research can be reused and its marker normalized after
+verification. Never create a research-only ticket to satisfy this gate. Selection and the
+attention-cap override do not bypass triage.
+
 Before automatic selection, show existing In Progress issues and In Review issues that currently
 need Julia. Do not automatically start a third attention-bearing item. A named issue is an explicit
 override of this soft cap.
