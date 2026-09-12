@@ -1380,6 +1380,7 @@ export const analyzeCallContract = (
     const inferred = new Map<string, Type.GenericArgument>(callLifetimes.substitution)
     let compatible = true
     let rowFailure: Type.RowInferenceFailure | undefined
+    let representationFailure: Diagnostic.Diagnostic | undefined
     let pending = [...sites]
     while (pending.length > 0) {
       const deferred: Array<SpecializationSite> = []
@@ -1405,7 +1406,18 @@ export const analyzeCallContract = (
             : supplied
         if (representedSupplied === undefined) {
           compatible = false
-          rowFailure = TypeInference.rowInferenceFailure(pattern, supplied)
+          const representationParameter =
+            Type.isRepresented(pattern) &&
+            Type.isRepresentationParameterArgument(pattern.representation.argument)
+              ? pattern.representation.argument.parameter
+              : undefined
+          if (representationParameter?.staticProperties.includes('Intrinsic.NonParking') === true)
+            representationFailure = Diagnostic.unsatisfiedExecutableProperty(
+              'Intrinsic.NonParking',
+              ['Unavailable:exact execution target'],
+              call.span,
+            )
+          else rowFailure = TypeInference.rowInferenceFailure(pattern, supplied)
           break
         }
         const attempt = new Map(inferred)
@@ -1441,9 +1453,10 @@ export const analyzeCallContract = (
     )
     if (!compatible || missingFromArguments !== undefined) {
       const diagnostic =
-        rowFailure === undefined
+        representationFailure ??
+        (rowFailure === undefined
           ? Diagnostic.typeArgumentInference(reference.spelling, call.span)
-          : Diagnostic.contractRowInference(rowFailure, call.span)
+          : Diagnostic.contractRowInference(rowFailure, call.span))
       return Object.freeze({
         mappings,
         fact: Object.freeze({

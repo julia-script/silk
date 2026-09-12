@@ -3445,7 +3445,7 @@ export const make = (operations: Operations) => {
         const arguments_ =
           target === undefined ? undefined : callableTargetArguments(target, origin.typeArguments)
         if (target === undefined || arguments_ === undefined) return undefined
-        return instanceNode(
+        return executionNodeForKey(
           keyOf(
             declaration,
             target.contract,
@@ -3467,6 +3467,9 @@ export const make = (operations: Operations) => {
             ordinals = [0]
             break
           case 'SharedWithMut':
+            ordinals = [1, 2]
+            break
+          case 'EffectUseReleaseNonParking':
             ordinals = [1, 2]
             break
           default:
@@ -3620,6 +3623,68 @@ export const make = (operations: Operations) => {
         }
         return Object.freeze(effectOrigins(expression).map(effectNode))
       }
+
+      const nonParkingExecutionTargets = (
+        expression: Hir.Expression,
+      ): { readonly targets: ReadonlyArray<string>; readonly complete: boolean } => {
+        if (expression._tag === 'BindingReference') {
+          const initializer = bindings.get(expression.binding.ordinal)
+          return initializer === undefined
+            ? Object.freeze({ targets: Object.freeze([]), complete: false })
+            : nonParkingExecutionTargets(initializer)
+        }
+        if (expression._tag === 'Move') return nonParkingExecutionTargets(expression.subject)
+        if (expression._tag === 'UnionConvert') return nonParkingExecutionTargets(expression.source)
+        if (expression._tag === 'Match') {
+          const reachable = expression.arms.filter((arm) => arm.reachable)
+          const selected = reachable.map((arm) =>
+            arm.body._tag === 'Expression'
+              ? nonParkingExecutionTargets(arm.body.expression)
+              : Object.freeze({
+                  targets: Object.freeze<ReadonlyArray<string>>([]),
+                  complete: false,
+                }),
+          )
+          return Object.freeze({
+            targets: Object.freeze([
+              ...new Set(selected.flatMap((candidate) => candidate.targets)),
+            ]),
+            complete:
+              selected.length === reachable.length &&
+              selected.length > 0 &&
+              selected.every((candidate) => candidate.complete),
+          })
+        }
+        const composite = compositeEffectRepresentationOf(expression, context)
+        if (composite !== undefined) {
+          const identities = composite.alternatives.map((alternative) =>
+            Type.isEffectIdentityArgument(alternative.identity)
+              ? resolveEffectIdentity(alternative.identity)
+              : undefined,
+          )
+          return Object.freeze({
+            targets: Object.freeze([
+              ...new Set(
+                identities.flatMap((identity) =>
+                  identity === undefined ? [] : [effectNode(identity)],
+                ),
+              ),
+            ]),
+            complete:
+              identities.length > 0 && identities.every((identity) => identity !== undefined),
+          })
+        }
+        const targets = executionTargets(expression)
+        return Object.freeze({ targets, complete: targets.length > 0 })
+      }
+
+      const carriesNonParkingProof = (expression: Hir.Expression): boolean =>
+        expression._tag !== 'Unavailable' &&
+        Type.isRepresented(expression.type) &&
+        Type.isRepresentationParameterArgument(expression.type.representation.argument) &&
+        expression.type.representation.argument.parameter.staticProperties.includes(
+          'Intrinsic.NonParking',
+        )
 
       const isSuspensionSubject = (expression: Hir.Expression): boolean => {
         if (expression._tag === 'BuiltinCall') return expression.operation === 'EffectSuspend'
@@ -3908,17 +3973,43 @@ export const make = (operations: Operations) => {
           const targets = executionTargets(expression)
           if (expression.operation === 'EffectFinalizeNonParking') {
             const finalizer = expression.arguments.at(1)
-            const finalizerTargets = finalizer === undefined ? [] : executionTargets(finalizer)
-            if (finalizerTargets.length === 0) {
-              const node = `nonparking-finalizer\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
-              unavailable.add(node)
-              nonParkingObligations.set(node, Object.freeze({ node, span: expression.span }))
-            } else {
-              for (const node of finalizerTargets)
+            if (finalizer === undefined || !carriesNonParkingProof(finalizer)) {
+              const resolved =
+                finalizer === undefined
+                  ? Object.freeze({
+                      targets: Object.freeze<ReadonlyArray<string>>([]),
+                      complete: false,
+                    })
+                  : nonParkingExecutionTargets(finalizer)
+              if (!resolved.complete) {
+                const node = `nonparking-finalizer\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
+                unavailable.add(node)
+                nonParkingObligations.set(node, Object.freeze({ node, span: expression.span }))
+              }
+              for (const node of resolved.targets)
                 nonParkingObligations.set(
                   `${node}\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`,
                   Object.freeze({ node, span: expression.span }),
                 )
+            }
+          }
+          if (expression.operation === 'EffectUseReleaseNonParking') {
+            const release = expression.arguments.at(2)
+            if (release === undefined || !carriesNonParkingProof(release)) {
+              const node = release === undefined ? undefined : callableApplicationTarget(release)
+              if (node === undefined) {
+                const unavailableNode = `nonparking-resource-release\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
+                unavailable.add(unavailableNode)
+                nonParkingObligations.set(
+                  unavailableNode,
+                  Object.freeze({ node: unavailableNode, span: expression.span }),
+                )
+              } else {
+                nonParkingObligations.set(
+                  `${node}\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`,
+                  Object.freeze({ node, span: expression.span }),
+                )
+              }
             }
           }
           if (!Type.isEffect(Type.substitute(expression.type, instance.substitution)))

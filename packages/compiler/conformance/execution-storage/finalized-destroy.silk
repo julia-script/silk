@@ -97,6 +97,89 @@ effect fn observed(state: Shared<State>, rejected: bool, parkBefore: bool, neste
 }
 fn complete(state: &mut (), value: i32) -> () { return () }
 fn suspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () { drop move execution return () }
+struct ResourceAudit {
+  released: i32
+  dropped: i32
+  bad: i32
+}
+struct Resource { audit: Shared<ResourceAudit> }
+struct ResourceFailure {}
+fn recordResourceDrop(audit: &mut ResourceAudit) -> () {
+  if audit.released != 1 { audit.bad = audit.bad + 1 }
+  audit.dropped = audit.dropped + 1
+  return ()
+}
+impl Drop for Resource {
+  fn drop(self: &mut Resource) -> () {
+    Shared.withMut(&self.audit, recordResourceDrop)
+    return ()
+  }
+}
+effect fn useResource(resource: &mut Resource) -> i32 {
+  run Execution.park(register)
+  return 1
+}
+effect fn useResourceSuccess(resource: &mut Resource) -> i32 {
+  return 17
+}
+effect fn useResourceFailure(resource: &mut Resource) -> i32 ! ResourceFailure {
+  fail ResourceFailure {}
+}
+fn recordResourceRelease(audit: &mut ResourceAudit) -> () {
+  audit.released = audit.released + 1
+  if audit.released != 1 || audit.dropped != 0 { audit.bad = audit.bad + 1 }
+  return ()
+}
+effect fn releaseResource(resource: &mut Resource) -> () {
+  Shared.withMut(&resource.audit, recordResourceRelease)
+  return ()
+}
+fn resourceReady(audit: &Shared<ResourceAudit>) -> () { return () }
+fn inspectResource(audit: &mut ResourceAudit) -> i32 {
+  if audit.released != 1 || audit.dropped != 1 || audit.bad != 0 { return -1 }
+  return 42
+}
+effect fn recoverResource(error: ResourceFailure) -> i32 { return 23 }
+effect fn exerciseResourceSuccess() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<ResourceAudit>(ResourceAudit { released: 0, dropped: 0, bad: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let value = run Effect.useReleaseNonParking(
+    Resource { audit: Shared.clone(&audit) },
+    useResourceSuccess,
+    releaseResource,
+  )
+  if Shared.withMut(&audit, inspectResource) != 42 { return -1 }
+  return value
+}
+effect fn exerciseResourceFailure() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<ResourceAudit>(ResourceAudit { released: 0, dropped: 0, bad: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let body = Effect.useReleaseNonParking(
+    Resource { audit: Shared.clone(&audit) },
+    useResourceFailure,
+    releaseResource,
+  )
+  let value = run Effect.catchAll(move body, recoverResource)
+  if Shared.withMut(&audit, inspectResource) != 42 { return -1 }
+  return value
+}
+effect fn exerciseResourceCancellation() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let audit = run Shared.make<ResourceAudit>(ResourceAudit { released: 0, dropped: 0, bad: 0 })
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let body = Effect.useReleaseNonParking(
+    Resource { audit: Shared.clone(&audit) },
+    useResource,
+    releaseResource,
+  )
+  let execution = run Execution.make(move body, Shared.clone(&audit), resourceReady)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut branch = ()
+  run Execution.drive(move execution, &mut branch, complete, suspend)
+  return Shared.withMut(&audit, inspectResource)
+}
 effect fn exercise(rejected: bool, parkBefore: bool, nested: bool) -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut expectedSequence = 1
@@ -114,6 +197,9 @@ effect fn program() -> i32 ! OutOfMemoryError {
   if (run exercise(true, false, false)) != 111 { return 2 }
   if (run exercise(false, true, false)) != 101 { return 3 }
   if (run exercise(false, true, true)) != 202 { return 4 }
+  if (run exerciseResourceSuccess()) != 17 { return 5 }
+  if (run exerciseResourceFailure()) != 23 { return 6 }
+  if (run exerciseResourceCancellation()) != 42 { return 7 }
   return 42
 }
 effect fn noMemory(error: OutOfMemoryError) -> i32 { return -2 }

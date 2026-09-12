@@ -276,6 +276,7 @@ const nonScalarBuiltinOperations = Object.freeze([
   'EffectSuspend',
   'EffectFinalize',
   'EffectFinalizeNonParking',
+  'EffectUseReleaseNonParking',
   'EffectObserveDiagnostics',
   'EffectObserveUnhandled',
   'StorageAcquire',

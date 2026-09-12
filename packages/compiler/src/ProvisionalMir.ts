@@ -938,6 +938,55 @@ const catchHandlerRunner = (
       })
 }
 
+const builtinEffectCallbackRunner = (
+  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+  argumentOrdinal: number,
+  context: BuildContext,
+): Runner | undefined => {
+  const argument = expression.arguments.at(argumentOrdinal)
+  if (argument === undefined || argument._tag === 'Unavailable') return undefined
+  const effect = context.discovery.effects.find(
+    (candidate) => candidate.identity === effectIdentityOf(expression, context),
+  )
+  const callableIdentity = effect?.captures.find(
+    (capture) => capture.sourceOrdinal === argumentOrdinal,
+  )?.callableIdentity
+  const callableType = Type.substitute(
+    argument.type,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
+  if (
+    callableIdentity?.target._tag !== 'Declaration' ||
+    !Type.isCallable(callableType) ||
+    !Type.isEffect(callableType.result)
+  )
+    return undefined
+  const declaration: DeclarationFacts.CanonicalId = Object.freeze({
+    _tag: 'CanonicalDeclarationId',
+    module: callableIdentity.target.module,
+    name: callableIdentity.target.name,
+  })
+  const identities = [
+    ...new Set(
+      Instances.matchingSpecialization(context.discovery, {
+        declaration,
+        typeArguments: callableIdentity.typeArguments,
+      }).flatMap((candidate) =>
+        candidate.resultEffect === undefined ? [] : [candidate.resultEffect],
+      ),
+    ),
+  ]
+  const identity = identities.length === 1 ? identities.at(0) : undefined
+  return identity === undefined
+    ? undefined
+    : runnerOf(argument, context, {
+        identity,
+        effect: callableType.result,
+        providers: context.ambientProviders,
+      })
+}
+
 const controlsOfCatch = (
   expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
   execution: ExecutionKey,
@@ -1114,6 +1163,57 @@ const controlsOfExpressions = (
           if (policy === undefined) continue
           const id = controlId(execution, argument.span, idOrdinal + inputOrdinal, 'Invoke')
           const complete = controlId(execution, argument.span, idOrdinal + inputOrdinal, 'Complete')
+          regions.push(
+            Object.freeze({
+              _tag: 'ProvisionalRegion',
+              id,
+              outcome: Object.freeze({
+                _tag: 'RunSuspendableEffect',
+                runner,
+                completion: policy,
+                complete,
+                relay: Object.freeze({
+                  _tag: 'RelayExistingTransfer',
+                  preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
+                }),
+                span: argument.span,
+              }),
+            }),
+            Object.freeze({
+              _tag: 'ProvisionalRegion',
+              id: complete,
+              outcome: Object.freeze({ _tag: 'Complete', policy }),
+            }),
+          )
+        }
+        ordinal += 1
+        for (const child of Hir.expressionChildren(expression.subject)) visit(child)
+        return
+      }
+      if (
+        expression.subject._tag === 'BuiltinCall' &&
+        expression.subject.operation === 'EffectUseReleaseNonParking'
+      ) {
+        for (const [offset, argumentOrdinal] of [1, 2].entries()) {
+          const argument = expression.subject.arguments.at(argumentOrdinal)
+          const runner = builtinEffectCallbackRunner(expression.subject, argumentOrdinal, context)
+          if (
+            argument === undefined ||
+            runner === undefined ||
+            runner.classification === 'Synchronous'
+          )
+            continue
+          const policy =
+            offset === 0 && Type.failureMembers(runner.outcome).length > 0
+              ? reifyPolicy(runner.outcome, context)
+              : Object.freeze({
+                  _tag: 'Propagate' as const,
+                  outcome: runner.outcome,
+                  failureMappings: Object.freeze([]),
+                })
+          if (policy === undefined) continue
+          const id = controlId(execution, argument.span, idOrdinal + offset, 'Invoke')
+          const complete = controlId(execution, argument.span, idOrdinal + offset, 'Complete')
           regions.push(
             Object.freeze({
               _tag: 'ProvisionalRegion',

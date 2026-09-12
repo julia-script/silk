@@ -143,6 +143,7 @@ const intrinsicSpelling = (family: string, operation: string): string => {
   if (family === 'Effect' && operation === 'finalizeEffect') return 'finalizeEffect'
   if (family === 'Effect' && operation === 'finalizeEffectNonParking')
     return 'finalizeEffectNonParking'
+  if (family === 'Effect' && operation === 'useReleaseNonParking') return 'useReleaseNonParking'
   if (family === 'Effect' && operation === 'observeDiagnostics') return 'observeDiagnostics'
   if (family === 'Effect' && operation === 'observeUnhandled') return 'observeUnhandled'
   if (family === 'Effect' && operation.startsWith('bindRequirement')) return operation
@@ -684,6 +685,70 @@ const nonParkingFinalizationEnvironment = {
   environment: contractLifetime('finalizeEffectNonParking'),
   lifetimeBinders: [],
 }
+const nonParkingResourceOwner = Object.freeze({
+  module: 'Intrinsic',
+  name: '$UseReleaseNonParking',
+})
+const nonParkingResource = Type.parameter(nonParkingResourceOwner, 0, 'Resource')
+const nonParkingResourceSuccess = Type.parameter(nonParkingResourceOwner, 1, 'A')
+const nonParkingResourceFailure = Type.parameter(nonParkingResourceOwner, 2, 'E')
+const nonParkingResourceUseRequirements = Type.parameter(
+  nonParkingResourceOwner,
+  3,
+  'R',
+  'RequirementRow',
+)
+const nonParkingResourceReleaseRequirements = Type.parameter(
+  nonParkingResourceOwner,
+  4,
+  'S',
+  'RequirementRow',
+)
+const nonParkingResourceFailureRow = RowAlgebra.singleton(
+  Type.failureRowPolicy(),
+  Type.failureMemberShape(nonParkingResourceFailure),
+  intrinsicContractOrigin,
+)
+const nonParkingResourceUseRow = RowAlgebra.parameter<
+  Type.Requirement,
+  Type.Parameter,
+  Type.RequirementMemberShape
+>(nonParkingResourceUseRequirements)
+const nonParkingResourceReleaseRow = RowAlgebra.parameter<
+  Type.Requirement,
+  Type.Parameter,
+  Type.RequirementMemberShape
+>(nonParkingResourceReleaseRequirements)
+const nonParkingResourceEnvironment = contractLifetime('useReleaseNonParking')
+const nonParkingResourceAccess = Lifetime.bound(
+  { module: 'Intrinsic', name: 'UseReleaseNonParking.access' },
+  0,
+  'access',
+)
+const nonParkingResourceUse = Type.callable(
+  Object.freeze([Type.reference('Exclusive', nonParkingResource, nonParkingResourceAccess)]),
+  Type.effectWithRows(
+    nonParkingResourceSuccess,
+    nonParkingResourceFailureRow,
+    { environment: nonParkingResourceAccess, lifetimeBinders: [] },
+    'Take',
+    nonParkingResourceUseRow,
+  ),
+  { environment: nonParkingResourceEnvironment, lifetimeBinders: [nonParkingResourceAccess] },
+  'Take',
+)
+const nonParkingResourceRelease = Type.callable(
+  Object.freeze([Type.reference('Exclusive', nonParkingResource, nonParkingResourceAccess)]),
+  Type.effectWithRows(
+    Type.unit,
+    RowAlgebra.concrete(Type.failureRowPolicy(), []),
+    { environment: nonParkingResourceAccess, lifetimeBinders: [] },
+    'Take',
+    nonParkingResourceReleaseRow,
+  ),
+  { environment: nonParkingResourceEnvironment, lifetimeBinders: [nonParkingResourceAccess] },
+  'Take',
+)
 const catchOwner = Object.freeze({ module: 'silk/core', name: '$CatchFailure' })
 const catchSelected = Type.parameter(catchOwner, 0, 'S')
 const catchSuccess = Type.parameter(catchOwner, 1, 'A')
@@ -2198,6 +2263,47 @@ const intrinsicOperations = Object.freeze([
           Type.requirementRowPolicy(),
           nonParkingFinalizationProtectedRow,
           nonParkingFinalizationFinalizerRow,
+        ),
+      ),
+    }),
+    builtin({
+      actor: 'Effect',
+      name: 'useReleaseNonParking',
+      operation: 'EffectUseReleaseNonParking',
+      typeParameters: Object.freeze(['Resource', 'A', 'E', '?R', '?S']),
+      semanticTypeParameters: Object.freeze([
+        nonParkingResource,
+        nonParkingResourceSuccess,
+        nonParkingResourceFailure,
+        nonParkingResourceUseRequirements,
+        nonParkingResourceReleaseRequirements,
+      ]),
+      parameters: Object.freeze([
+        valueParameter('resource', 'Resource'),
+        valueParameter(
+          'use',
+          "for<'scope> once fn(&'scope mut Resource) -> once Effect<'scope; A ! E ? R>",
+        ),
+        valueParameter(
+          'release',
+          "for<'scope> once fn(&'scope mut Resource) -> once Effect<'scope; () ? S>",
+        ),
+      ]),
+      semanticParameters: Object.freeze([
+        nonParkingResource,
+        nonParkingResourceUse,
+        nonParkingResourceRelease,
+      ]),
+      result: 'once Effect<A ! E ? R | S>',
+      semanticResult: Type.effectWithRows(
+        nonParkingResourceSuccess,
+        nonParkingResourceFailureRow,
+        { environment: nonParkingResourceEnvironment, lifetimeBinders: [] },
+        'Take',
+        RowAlgebra.union(
+          Type.requirementRowPolicy(),
+          nonParkingResourceUseRow,
+          nonParkingResourceReleaseRow,
         ),
       ),
     }),
