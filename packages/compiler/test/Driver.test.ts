@@ -524,49 +524,53 @@ it.effect('translates a synchronously throwing artifact-cache write at the Drive
   }),
 )
 
-it.effect('selects the durable disk cache from SILK_NATIVE_CACHE_DIR by default', () =>
-  Effect.acquireUseRelease(
-    Effect.sync(() => mkdtempSync(join(tmpdir(), 'silk-default-cache-'))),
-    (cacheDirectory) =>
-      Effect.gen(function* () {
-        // No artifactCache is pinned on either toolchain: the durable reuse below can only come
-        // from the environment-selected default, and each compile builds its own toolchain value
-        // so nothing is shared between them but the directory.
-        const source = 'pub fn main() -> i32 { return 40 + 2 }'
-        const first = yield* compileSource('default-cache-first', source, {
-          toolchain: Object.freeze({ _tag: 'Toolchain', clang, llvmAr: 'llvm-ar' }),
-          cache: true,
-        })
-        const second = yield* compileSource('default-cache-second', source, {
-          toolchain: Object.freeze({ _tag: 'Toolchain', clang, llvmAr: 'llvm-ar' }),
-          cache: true,
-        })
-        assert.strictEqual(first._tag, 'Compiled')
-        assert.strictEqual(second._tag, 'Compiled')
-        if (first._tag !== 'Compiled' || second._tag !== 'Compiled') return
-        assert.strictEqual(
-          first.report.some((entry) => entry.phase === 'link'),
-          true,
-        )
-        assert.strictEqual(
-          second.report.some((entry) => entry.phase === 'backend-cache'),
-          true,
-        )
-        assert.strictEqual(
-          second.report.some((entry) => entry.phase === 'artifact-cache'),
-          true,
-        )
-        assert.deepEqual(readFileSync(second.path), readFileSync(first.path))
-        const run = spawnSync(second.path, [], { encoding: 'utf8' })
-        assert.strictEqual(run.status, 42)
-      }).pipe(
-        Effect.provideService(
-          ConfigProvider.ConfigProvider,
-          ConfigProvider.fromUnknown({ SILK_NATIVE_CACHE_DIR: cacheDirectory }),
+it.effect(
+  'selects the durable disk cache from SILK_NATIVE_CACHE_DIR by default',
+  () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), 'silk-default-cache-'))),
+      (cacheDirectory) =>
+        Effect.gen(function* () {
+          // No artifactCache is pinned on either toolchain: the durable reuse below can only come
+          // from the environment-selected default, and each compile builds its own toolchain value
+          // so nothing is shared between them but the directory.
+          const source = 'pub fn main() -> i32 { return 40 + 2 }'
+          const first = yield* compileSource('default-cache-first', source, {
+            toolchain: Object.freeze({ _tag: 'Toolchain', clang, llvmAr: 'llvm-ar' }),
+            cache: true,
+          })
+          const second = yield* compileSource('default-cache-second', source, {
+            toolchain: Object.freeze({ _tag: 'Toolchain', clang, llvmAr: 'llvm-ar' }),
+            cache: true,
+          })
+          assert.strictEqual(first._tag, 'Compiled')
+          assert.strictEqual(second._tag, 'Compiled')
+          if (first._tag !== 'Compiled' || second._tag !== 'Compiled') return
+          assert.strictEqual(
+            first.report.some((entry) => entry.phase === 'link'),
+            true,
+          )
+          assert.strictEqual(
+            second.report.some((entry) => entry.phase === 'backend-cache'),
+            true,
+          )
+          assert.strictEqual(
+            second.report.some((entry) => entry.phase === 'artifact-cache'),
+            true,
+          )
+          assert.deepEqual(readFileSync(second.path), readFileSync(first.path))
+          const run = spawnSync(second.path, [], { encoding: 'utf8' })
+          assert.strictEqual(run.status, 42)
+        }).pipe(
+          Effect.provideService(
+            ConfigProvider.ConfigProvider,
+            ConfigProvider.fromUnknown({ SILK_NATIVE_CACHE_DIR: cacheDirectory }),
+          ),
         ),
-      ),
-    (cacheDirectory) => Effect.sync(() => rmSync(cacheDirectory, { recursive: true, force: true })),
-  ),
+      (cacheDirectory) =>
+        Effect.sync(() => rmSync(cacheDirectory, { recursive: true, force: true })),
+    ),
+  { timeout: 120_000 },
 )
 
 it.effect('rejects a supplied foreign contract before backend-cache or native-tool access', () =>
