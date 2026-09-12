@@ -9,6 +9,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { tlsConnectionWasmSource } from './support/tlsConnectionAcceptance.js'
 import * as Driver from './support/TestDriver.js'
+import * as Json from './support/Json.js'
 
 const defaultClang = (): string => {
   if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
@@ -51,7 +52,15 @@ it.effect(
         cache: false,
         artifactKind: 'WebAssemblyModule',
       }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(outcome._tag, 'Compiled')
+      let compilationMessage = 'scoped TLS connection'
+      if (outcome._tag === 'BackendFailed') {
+        compilationMessage = `${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
+      } else if (outcome._tag === 'Rejected') {
+        compilationMessage = outcome.diagnostics
+          .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+          .join('\n')
+      }
+      assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)
       if (outcome._tag !== 'Compiled') return
       yield* Effect.sync(() => {
         const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))

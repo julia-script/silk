@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -126,5 +127,84 @@ it.effect('accepts a borrow through a seeded namespace with no import', () =>
   Effect.gen(function* () {
     const snapshot = yield* AnalysisFixture.retainingMain('borrow/seeded', ascii(seeded))
     assert.deepEqual(codes(snapshot), [])
+  }),
+)
+
+it.effect('ends a returned nominal view after matching it through an exclusive reborrow', () =>
+  Effect.gen(function* () {
+    const source = `import silk.option { Option }
+struct Provider {}
+struct Connection<P> { value: i32 provider: P }
+struct View<'a> { value: &'a i32 }
+fn view<'a, P>(self: &'a Connection<P>) -> Option<View<'a>> {
+  return Option.some<View<'a>>(View<'a> { value: &self.value })
+}
+fn valid(value: &View) -> bool { return value.value.* == 0 }
+effect fn use<P>(connection: &mut Connection<P>) -> i32 {
+  let selected = view(&connection.*)
+  match move selected {
+    Option.None => { return 1 }
+    Option.Some {value} => { if !valid(&value) { return 2 } }
+  }
+  connection.value = 42
+  return connection.value
+}
+pub fn main() -> i32 {
+  let mut connection = Connection<Provider> { value: 0, provider: Provider {} }
+  return run use(&mut connection)
+}`
+    const self = yield* AnalysisFixture.retainingMain(
+      'qualified-borrow/nominal-view',
+      ascii(source),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+  }),
+)
+
+it.effect('reads sibling fields while constructing a borrowed field slice', () =>
+  Effect.gen(function* () {
+    const source = `import silk.slice { Slice }
+struct Bytes { values: [u8; 4] }
+struct Packet { bytes: Bytes offset: usize length: usize }
+fn view<'a>(bytes: &'a Bytes) -> &'a [u8] { return &bytes.values }
+fn read(packet: &mut Packet) -> usize {
+  let selected = Slice.view<u8>(view(&packet.bytes), packet.offset, packet.length - packet.offset)
+  return selected.length
+}
+pub fn main() -> i32 {
+  let mut packet = Packet { bytes: Bytes { values: [1, 2, 3, 4] }, offset: 1, length: 4 }
+  if read(&mut packet) == 3 { return 42 }
+  return 1
+}`
+    const self = yield* AnalysisFixture.retainingMain('qualified-borrow/field-view', ascii(source))
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const wholeOwnerRead = {
+      ...mir,
+      functions: mir.functions.map((fn) => ({
+        ...fn,
+        regions: fn.regions.map((region) =>
+          region._tag !== 'OperationRegion'
+            ? region
+            : {
+                ...region,
+                operations: region.operations.map((operation) =>
+                  operation._tag !== 'ReadPlace'
+                    ? operation
+                    : {
+                        ...operation,
+                        selectors: [],
+                      },
+                ),
+              },
+        ),
+      })),
+    }
+    assert.include(
+      MirVerification.verify(wholeOwnerRead).map((violation) => violation.rule),
+      'InvalidLoan',
+    )
   }),
 )

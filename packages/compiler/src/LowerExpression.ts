@@ -2355,12 +2355,13 @@ function lowerMatchExpression(
       const candidates = decision.candidates.flatMap((candidate) => {
         const arm = arms.find((entry) => entry.id.ordinal === candidate.ordinal)
         const armState = armStates.get(candidate.ordinal)
-        return arm === undefined || armState === undefined ? [] : [{ arm, armState }]
+        return arm === undefined ? [] : [{ arm, armState }]
       })
       return (
         candidates.length === decision.candidates.length &&
         candidates.some(({ arm }) => arm.guard === undefined) &&
-        candidates.every(({ armState }) => !armState.loanLocals.has(key))
+        // Transferring arms never reach the join; their exit already releases its loans.
+        candidates.every(({ armState }) => armState === undefined || !armState.loanLocals.has(key))
       )
     })
     if (endedOnEveryPath) fn.loanLocals.delete(key)

@@ -2304,7 +2304,29 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
 interface ActiveLoan {
   readonly operation: Extract<Operation, { readonly _tag: 'BeginLoan' }>
   readonly root: LocalId
+  readonly selectors: ReadonlyArray<PlaceSelector>
   readonly parent?: string
+}
+
+const loanPlacesOverlap = (
+  left: ReadonlyArray<PlaceSelector>,
+  right: ReadonlyArray<PlaceSelector>,
+): boolean => {
+  for (const [ordinal, selector] of left.entries()) {
+    const other = right.at(ordinal)
+    if (other === undefined) return true
+    if (selector._tag === 'FieldSelector' && other._tag === 'FieldSelector') {
+      if (!DeclarationFacts.sameFieldId(selector.field, other.field)) return false
+    } else if (
+      selector._tag === 'ElementSelector' &&
+      other._tag === 'ElementSelector' &&
+      selector.index._tag === 'Proven' &&
+      other.index._tag === 'Proven'
+    ) {
+      if (selector.index.value !== other.index.value) return false
+    } else if (!samePlaceSelector(selector, other)) return true
+  }
+  return true
 }
 
 const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
@@ -2526,7 +2548,8 @@ const loanViolations = (
       const liveChild = [...currentActive.values()].some((candidate) => candidate.parent === key)
       if (
         beginning === undefined ||
-        currentCompleted.has(key) ||
+        // Endpoint multiplicity is proved by loanPathsValid over the CFG. Nested execution
+        // traversal can visit mutually exclusive endings in the same structural sequence.
         beginning.destination.ordinal !== operation.slice.ordinal ||
         (loan !== undefined && !currentCalls.has(call)) ||
         liveChild
@@ -2595,9 +2618,11 @@ const loanViolations = (
           invalid(`loan ${key} has inconsistent root, slice type, access, or reborrow facts`)
         }
         const root = parent?.[1].root ?? operation.root
+        const selectors = [...(parent?.[1].selectors ?? []), ...operation.selectors]
         const conflicts = [...active.entries()].some(([candidateKey, candidate]) => {
           if (candidate.root.ordinal !== root.ordinal) return false
           if (parent?.[0] === candidateKey && operation.suspendsParent) return false
+          if (!loanPlacesOverlap(candidate.selectors, selectors)) return false
           return candidate.operation.access === 'Exclusive' || operation.access === 'Exclusive'
         })
         if (conflicts) invalid(`loan ${key} conflicts with an active loan of %${root.ordinal}`)
@@ -2606,6 +2631,7 @@ const loanViolations = (
           Object.freeze({
             operation,
             root,
+            selectors,
             ...(parent === undefined ? {} : { parent: parent[0] }),
           }),
         )
@@ -2633,7 +2659,12 @@ const loanViolations = (
 
       for (const local of accessedOwnerLocals(operation)) {
         const loan = [...active.values()].find(
-          (candidate) => candidate.root.ordinal === local.ordinal,
+          (candidate) =>
+            candidate.root.ordinal === local.ordinal &&
+            ((operation._tag !== 'ReadPlace' &&
+              operation._tag !== 'CheckPlace' &&
+              operation._tag !== 'WritePlace') ||
+              loanPlacesOverlap(candidate.selectors, operation.selectors)),
         )
         if (loan !== undefined) {
           invalid(
