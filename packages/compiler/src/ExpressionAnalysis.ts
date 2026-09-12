@@ -8667,6 +8667,10 @@ const analyzeAnonymousCallable = (
     returnType: returnType.fact,
     failureRow: failureRow.fact,
     requirementRow: requirementRow.fact,
+    // Anonymous callables are analyzed inside the enclosing generic declaration, so its
+    // compile-time constraint evidence remains lexically available to their hidden bodies.
+    constraints: declaration.constraints,
+    constraintContracts: declaration.constraintContracts,
   })
   const { hiddenFunctions: _hiddenFunctions, ...preliminaryResolution } = resolution
   const preliminary = analyzeFunctionBody(

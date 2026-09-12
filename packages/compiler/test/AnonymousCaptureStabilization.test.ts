@@ -110,3 +110,52 @@ pub fn main() -> i32 {
     }
   }),
 )
+
+it.effect(
+  'retains enclosing row exclusion evidence in anonymous bodies without hiding services',
+  () =>
+    Effect.gen(function* () {
+      const source = `import silk.effect { Effect }
+service ByteDuplex { effect fn read() -> i32 ? &ByteDuplex }
+service Probe { effect fn read() -> i32 ? &Probe }
+effect fn allowed<'env, A, E, ?R>(body: once Effect<'env; A ! E ? R>) -> A ! E ? R
+where R in Without<R, ByteDuplex> { return run body }
+effect fn outer<'env, A, E, ?R>(body: once Effect<'env; A ! E ? R>) -> A ! E ? R
+where R in Without<R, ByteDuplex> {
+  let use = effect fn() -> A ! E ? R { return run allowed(move body) }
+  return run use()
+}
+pub effect fn main() -> i32 ? &Probe { return run outer(Probe.read()) }`
+      for (const [name, program] of [
+        ['allowed', source],
+        [
+          'ambient',
+          source.replace(
+            'pub effect fn main() -> i32 ? &Probe { return run outer(Probe.read()) }',
+            'pub effect fn main() -> i32 ? &ByteDuplex { return run outer(ByteDuplex.read()) }',
+          ),
+        ],
+        [
+          'missing',
+          source.replace('pub effect fn main() -> i32 ? &Probe', 'pub effect fn main() -> i32'),
+        ],
+      ] as const) {
+        const self = yield* Analysis.ofSource('anonymous-capture/row-constraints', ascii(program))
+        const diagnostics = Analysis.diagnostics(self)
+        assert.deepEqual(
+          diagnostics.map((diagnostic) => diagnostic.code),
+          name === 'allowed' ? [] : [name === 'ambient' ? 'SEM0074' : 'SEM0071'],
+        )
+        if (name === 'ambient') {
+          const call = ' outer(ByteDuplex.read())'
+          assert.strictEqual(diagnostics.at(0)?.span.start, program.indexOf(call))
+          assert.strictEqual(diagnostics.at(0)?.span.end, program.indexOf(call) + call.length)
+        }
+        if (name === 'missing') {
+          const run = ' run outer(Probe.read())'
+          assert.strictEqual(diagnostics.at(0)?.span.start, program.indexOf(run))
+          assert.strictEqual(diagnostics.at(0)?.span.end, program.indexOf(run) + run.length)
+        }
+      }
+    }),
+)

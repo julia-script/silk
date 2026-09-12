@@ -1062,3 +1062,76 @@ pub fn main() -> i32 {
     assert.isUndefined(delayed)
   }),
 )
+
+const capturedScopedResourceSource = `import silk.effect { Effect }
+struct Resource { value: i32 }
+struct Config { value: i32 }
+service Probe { effect fn read() -> i32 ? &Probe }
+effect fn release(resource: &mut Resource) -> () { return () }
+effect fn scoped<'env, A, E, ?R>(
+  config: &'env Config,
+  callback: for<'call> once fn<'env>(&'call mut Resource) -> once Effect<'call; A ! E ? R>,
+) -> A ! E ? R {
+  let use = effect fn(resource: &mut Resource) -> A ! E ? R {
+    resource.value = config.value
+    return run callback(move resource)
+  }
+  return run Effect.useReleaseNonParking(Resource { value: 0 }, move use, release)
+}
+effect fn read(resource: &mut Resource) -> i32 ? &Probe {
+  return resource.value + run Probe.read()
+}
+pub effect fn main() -> i32 ? &Probe {
+  let config = Config { value: 42 }
+  return run scoped(&config, read)
+}`
+
+it.effect('preserves symbolic bracket rows without extending captured or resource lifetimes', () =>
+  Effect.gen(function* () {
+    const direct =
+      capturedScopedResourceSource.slice(
+        0,
+        capturedScopedResourceSource.indexOf('  let use = effect fn'),
+      ) +
+      '  return run Effect.useReleaseNonParking(Resource { value: 0 }, move callback, release)' +
+      capturedScopedResourceSource.slice(
+        capturedScopedResourceSource.indexOf('\n}\neffect fn read'),
+      )
+    const programs = [
+      ['captured', capturedScopedResourceSource],
+      ['direct', direct],
+      [
+        'escape',
+        `import silk.effect { Effect }
+struct Resource { value: i32 }
+effect fn use<'scope>(resource: &'scope mut Resource) -> &'scope i32 { return &resource.value }
+effect fn release(resource: &mut Resource) -> () { return () }
+pub fn main() -> i32 {
+  let escaped = run Effect.useReleaseNonParking(Resource { value: 42 }, use, release)
+  return escaped.*
+}`,
+      ],
+    ] as const
+    for (const [name, program] of programs) {
+      const self = yield* snapshot(program)
+      const diagnostics = Analysis.diagnostics(self)
+      assert.deepEqual(
+        diagnostics.map((diagnostic) => diagnostic.code),
+        name === 'direct' ? [] : ['SEM0089'],
+      )
+      if (name !== 'direct') {
+        assert.strictEqual(
+          diagnostics.at(0)?.span.start,
+          program.indexOf(' Effect.useReleaseNonParking'),
+        )
+        assert.strictEqual(
+          diagnostics.at(0)?.span.end,
+          program.indexOf('\n', program.indexOf(' Effect.useReleaseNonParking')),
+        )
+      }
+      if (name === 'direct') {
+        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+      }
+    }
+  }),
+)
