@@ -492,12 +492,12 @@ impl Effect {
     ?S,
     Release: for<'scope> once fn<'env>(
       &'scope mut Resource
-    ) -> once Effect<'scope; () ! never ? S> + Intrinsic.NonParking,
+    ) -> once Effect<'scope & 'env; () ! never ? S> + Intrinsic.NonParking,
   >(
     resource: Resource,
     use: for<'scope> once fn<'env>(
       &'scope mut Resource
-    ) -> once Effect<'scope; A ! E ? R>,
+    ) -> once Effect<'scope & 'env; A ! E ? R>,
     release: Release
   ) -> A ! E ? R | S {
     return run Intrinsic.useReleaseNonParking<Resource, A, E, R, S>(

@@ -730,7 +730,10 @@ const nonParkingResourceUse = Type.callable(
   Type.effectWithRows(
     nonParkingResourceSuccess,
     nonParkingResourceFailureRow,
-    { environment: nonParkingResourceAccess, lifetimeBinders: [] },
+    {
+      environment: Lifetime.intersection([nonParkingResourceAccess, nonParkingResourceEnvironment]),
+      lifetimeBinders: [],
+    },
     'Take',
     nonParkingResourceUseRow,
   ),
@@ -742,7 +745,10 @@ const nonParkingResourceRelease = Type.callable(
   Type.effectWithRows(
     Type.unit,
     RowAlgebra.concrete(Type.failureRowPolicy(), []),
-    { environment: nonParkingResourceAccess, lifetimeBinders: [] },
+    {
+      environment: Lifetime.intersection([nonParkingResourceAccess, nonParkingResourceEnvironment]),
+      lifetimeBinders: [],
+    },
     'Take',
     nonParkingResourceReleaseRow,
   ),
@@ -2282,11 +2288,11 @@ const intrinsicOperations = Object.freeze([
         valueParameter('resource', 'Resource'),
         valueParameter(
           'use',
-          "for<'scope> once fn(&'scope mut Resource) -> once Effect<'scope; A ! E ? R>",
+          "for<'scope> once fn<'env>(&'scope mut Resource) -> once Effect<'scope & 'env; A ! E ? R>",
         ),
         valueParameter(
           'release',
-          "for<'scope> once fn(&'scope mut Resource) -> once Effect<'scope; () ? S>",
+          "for<'scope> once fn<'env>(&'scope mut Resource) -> once Effect<'scope & 'env; () ? S>",
         ),
       ]),
       semanticParameters: Object.freeze([

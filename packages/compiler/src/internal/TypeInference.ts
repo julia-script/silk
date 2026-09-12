@@ -12,6 +12,7 @@ import type {
   RequirementRowArgument,
   RequirementsRow,
   RowInferenceFailure,
+  InferenceFailure,
   SealedStaticProperty,
   Substitution,
   TypeOutlives,
@@ -99,6 +100,7 @@ export interface LifetimeInference {
 }
 
 interface InferenceContext {
+  readonly environmentFailure?: (bound: Lifetime.Outlives) => void
   readonly lifetimes?: LifetimeInference | undefined
   readonly invariant?: boolean
   readonly contravariant?: boolean
@@ -393,7 +395,7 @@ const inferLifetime = (
     return true
   }
   if (context.lifetimes !== undefined) {
-    const expected = previous === undefined ? pattern : previous
+    const expected = previous === undefined ? substituteLifetime(pattern, inferred) : previous
     return (
       Lifetime.isLifetime(expected) &&
       context.lifetimes.accepts(
@@ -462,10 +464,7 @@ const inferRequirementRows = (
   )
 
 /** Explains a failed Effect-row decomposition without replacing ordinary type diagnostics. */
-export const rowInferenceFailure = (
-  pattern: Type,
-  actual: Type,
-): RowInferenceFailure | undefined => {
+const rowInferenceFailure = (pattern: Type, actual: Type): RowInferenceFailure | undefined => {
   // A generic forwarding site may preserve the exact caller-owned row identity. It is open, but
   // it requires no decomposition or inference, so rejecting it as non-finite would make ordinary
   // wrappers less expressive than the declaration they forward to.
@@ -554,9 +553,54 @@ export const rowInferenceFailure = (
   return undefined
 }
 
+/** Reports the failed environment proof before considering a later symbolic row. */
+export const inferenceFailure = (
+  pattern: Type,
+  actual: Type,
+  inferred: Substitution = new Map(),
+  lifetimes?: LifetimeInference,
+): InferenceFailure | undefined => {
+  let failure: Lifetime.Outlives | undefined
+  const diagnose = () =>
+    inferType(pattern, actual, new Map(inferred), {
+      allowOpenGenericArguments: false,
+      lifetimes,
+      environmentFailure: (bound) => {
+        failure ??= bound
+      },
+    })
+  const matched =
+    lifetimes?.compatibility === undefined
+      ? diagnose()
+      : TypeCompatibility.commitWhen(lifetimes.compatibility, diagnose, () => false)
+  if (matched) return undefined
+  if (failure !== undefined)
+    return {
+      _tag: 'EnvironmentMismatch',
+      longer: Lifetime.display(failure.longer),
+      shorter: Lifetime.display(failure.shorter),
+    }
+  return rowInferenceFailure(pattern, actual)
+}
+
+const inferEnvironment = (
+  pattern: Lifetime.Lifetime,
+  actual: Lifetime.Lifetime,
+  inferred: Map<string, GenericArgument>,
+  context: InferenceContext,
+): boolean => {
+  if (inferLifetime(pattern, actual, inferred, context)) return true
+  const expected = substituteLifetime(pattern, inferred)
+  context.environmentFailure?.({
+    longer: context.contravariant ? expected : actual,
+    shorter: context.contravariant ? actual : expected,
+  })
+  return false
+}
+
 /** Includes hidden representation identities when checking whether a rigid region escaped. */
 const argumentLifetimes = (argument: GenericArgument): ReadonlyArray<Lifetime.Lifetime> => {
-  if (Lifetime.isLifetime(argument)) return [argument]
+  if (Lifetime.isLifetime(argument)) return Lifetime.atoms(argument)
   if (
     (typeof argument !== 'string' && argument._tag === 'TypeParameter') ||
     isTypeArgument(argument)
@@ -936,7 +980,7 @@ const inferSelectedType = (
     if (pattern.lifetimeBinders.length !== 0 || actual.lifetimeBinders.length !== 0)
       return inferQuantifiedExecutable(pattern, actual, inferred, context)
     return (
-      inferLifetime(pattern.environment, actual.environment, inferred, context) &&
+      inferEnvironment(pattern.environment, actual.environment, inferred, context) &&
       (!actual.unsafe || pattern.unsafe) &&
       compareAccess(pattern.mode, actual.mode) &&
       pattern.parameters.length === actual.parameters.length &&
@@ -958,7 +1002,7 @@ const inferSelectedType = (
     if (pattern.lifetimeBinders.length !== 0 || actual.lifetimeBinders.length !== 0)
       return inferQuantifiedExecutable(pattern, actual, inferred, context)
     return (
-      inferLifetime(pattern.environment, actual.environment, inferred, context) &&
+      inferEnvironment(pattern.environment, actual.environment, inferred, context) &&
       compareAccess(pattern.access, actual.access) &&
       inferType(pattern.success, actual.success, inferred, context) &&
       inferFailureRows(pattern, actual, inferred, context) &&

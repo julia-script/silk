@@ -415,6 +415,14 @@ export type GenericArgument =
 export type Substitution = ReadonlyMap<string, GenericArgument>
 
 /** A row-specific explanation for one failed generic decomposition. */
+export type InferenceFailure =
+  | RowInferenceFailure
+  | {
+      readonly _tag: 'EnvironmentMismatch'
+      readonly longer: string
+      readonly shorter: string
+    }
+
 export type RowInferenceFailure =
   | { readonly _tag: 'AbsentFailureMember'; readonly member: string }
   | {
@@ -2446,7 +2454,9 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
   const visitArgument = (argument: GenericArgument): void => {
     append(visitor.argument?.(argument, inBinderScope))
     if (visitor.descendArgument?.(argument) === false) return
-    if (isTypeArgument(argument)) visitType(argument)
+    if (Lifetime.isLifetime(argument) && argument._tag === 'IntersectionLifetime')
+      for (const member of argument.members) visitArgument(member)
+    else if (isTypeArgument(argument)) visitType(argument)
     else if (isRepresentationParameterArgument(argument)) visitType(argument.parameter)
     else if (isOpaqueRepresentationArgument(argument)) {
       visitType(argument.contract)
@@ -3642,7 +3652,9 @@ export const freeLifetimes = (self: Type): ReadonlyArray<Lifetime.Lifetime> =>
     ...new Map(
       fold(self, {
         argument: (argument, inBinderScope) =>
-          Lifetime.isLifetime(argument) && !inBinderScope(Lifetime.key(argument))
+          Lifetime.isLifetime(argument) &&
+          argument._tag !== 'IntersectionLifetime' &&
+          !inBinderScope(Lifetime.key(argument))
             ? argument
             : undefined,
       }).map((lifetime) => [Lifetime.key(lifetime), lifetime]),
@@ -3663,7 +3675,9 @@ export const executableFormationRequirements = (
   // Inference opens invocation binders to rigid placeholders before comparing contracts. Those
   // placeholders still denote invocation requirements even after the binder list has been opened.
   const independent = (lifetime: Lifetime.Lifetime): boolean =>
-    lifetime._tag !== 'PlaceholderLifetime' && !invocation.has(Lifetime.key(lifetime))
+    Lifetime.atoms(lifetime).every(
+      (member) => member._tag !== 'PlaceholderLifetime' && !invocation.has(Lifetime.key(member)),
+    )
   return {
     lifetimeBounds: self.lifetimeBounds.filter(
       (bound) => independent(bound.longer) && independent(bound.shorter),
@@ -3763,7 +3777,10 @@ export const substituteLifetime = (
   substitution: Substitution,
 ): Lifetime.Lifetime => {
   const replacement = substitution.get(Lifetime.key(self))
-  return replacement !== undefined && Lifetime.isLifetime(replacement) ? replacement : self
+  if (replacement !== undefined && Lifetime.isLifetime(replacement)) return replacement
+  return self._tag === 'IntersectionLifetime'
+    ? Lifetime.intersection(self.members.map((member) => substituteLifetime(member, substitution)))
+    : self
 }
 
 /** Canonicalizes data-validity predicates without dropping them from semantic identity. */

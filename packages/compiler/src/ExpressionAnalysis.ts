@@ -8747,21 +8747,6 @@ const analyzeAnonymousCallable = (
       })
     }),
   )
-  const hiddenDeclaration: DeclarationFact = Object.freeze({
-    ...preliminaryDeclaration,
-    parameters: Object.freeze([...authoredParameters, ...captureParameters]),
-    parameterCount: authoredParameters.length + captureParameters.length,
-  })
-  const hidden = analyzeFunctionBody(
-    source,
-    hiddenDeclaration,
-    declarations,
-    Object.freeze({ ...preliminaryResolution, anonymousDepth: 1 }),
-    undefined,
-    anonymousOuterScope(hiddenDeclaration.parameters, scope),
-  )
-  resolution.hiddenFunctions?.push(hidden.fact)
-  const mode = anonymousCaptureMode(captures)
   const lifetimes = BodyLifetime.environment(
     resolution.bodyLifetimes,
     node,
@@ -8773,6 +8758,40 @@ const analyzeAnonymousCallable = (
       .filter((capture) => capture.access === 'Shared' || capture.access === 'Exclusive')
       .map((capture) => capture.expression.syntax),
   )
+  const hiddenDeclaration: DeclarationFact = Object.freeze({
+    ...preliminaryDeclaration,
+    parameters: Object.freeze([...authoredParameters, ...captureParameters]),
+    parameterCount: authoredParameters.length + captureParameters.length,
+    ...(preliminaryDeclaration.lifetimeElaboration === undefined || lifetimes === undefined
+      ? {}
+      : {
+          lifetimeElaboration: {
+            ...preliminaryDeclaration.lifetimeElaboration,
+            // All retained inputs are known after capture discovery. Their common validity is a
+            // meet, while executableLifetimes continues to carry generic content obligations.
+            explicitEnvironment:
+              preliminaryDeclaration.lifetimeElaboration.explicitEnvironment ??
+              Lifetime.intersection([
+                lifetimes.environment,
+                ...authoredParameters.flatMap((parameter) =>
+                  parameter.declaredType._tag === 'Resolved'
+                    ? Type.storageLifetimes(parameter.declaredType.type)
+                    : [],
+                ),
+              ]),
+          },
+        }),
+  })
+  const hidden = analyzeFunctionBody(
+    source,
+    hiddenDeclaration,
+    declarations,
+    Object.freeze({ ...preliminaryResolution, anonymousDepth: 1 }),
+    undefined,
+    anonymousOuterScope(hiddenDeclaration.parameters, scope),
+  )
+  resolution.hiddenFunctions?.push(hidden.fact)
+  const mode = anonymousCaptureMode(captures)
   let result: Type.Type | undefined =
     hiddenDeclaration.returnType._tag === 'Resolved' ? hiddenDeclaration.returnType.type : undefined
   if (result !== undefined && hiddenDeclaration.functionKind === 'Effect') {

@@ -159,3 +159,30 @@ pub effect fn main() -> i32 ? &Probe { return run outer(Probe.read()) }`
       }
     }),
 )
+
+it.effect(
+  'retains generic captured contents in intersection results without promoting their validity',
+  () =>
+    Effect.gen(function* () {
+      const source = `struct Resource { value: i32 }
+fn capture<'env, T: 'env>(value: T) -> for<'call> once fn<'env>(&'call mut Resource) -> once Effect<'call & 'env; T> {
+  return effect fn(resource: &mut Resource) -> T {
+    resource.value = 1
+    return move value
+  }
+}
+pub fn main() -> i32 { return 42 }`
+      for (const [name, program, expected] of [
+        ['accepted', source, []],
+        [
+          'promoted',
+          source.replace("Effect<'call & 'env;", "Effect<'call;"),
+          ['OWN0019', 'SEM0129'],
+        ],
+        ['unbounded', source.replace("T: 'env", 'T'), ['SEM0212', 'OWN0019', 'OWN0019']],
+      ] as const) {
+        const snapshot = yield* Analysis.ofSource(`anonymous-capture/${name}`, ascii(program))
+        assert.deepEqual(codesOf(snapshot), expected)
+      }
+    }),
+)

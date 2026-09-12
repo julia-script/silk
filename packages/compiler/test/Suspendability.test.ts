@@ -1117,9 +1117,9 @@ pub fn main() -> i32 {
       const diagnostics = Analysis.diagnostics(self)
       assert.deepEqual(
         diagnostics.map((diagnostic) => diagnostic.code),
-        name === 'direct' ? [] : ['SEM0089'],
+        name === 'escape' ? ['SEM0089'] : [],
       )
-      if (name !== 'direct') {
+      if (name === 'escape') {
         assert.strictEqual(
           diagnostics.at(0)?.span.start,
           program.indexOf(' Effect.useReleaseNonParking'),
@@ -1129,7 +1129,7 @@ pub fn main() -> i32 {
           program.indexOf('\n', program.indexOf(' Effect.useReleaseNonParking')),
         )
       }
-      if (name === 'direct') {
+      if (name !== 'escape') {
         assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
       }
     }

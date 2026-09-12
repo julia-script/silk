@@ -98,6 +98,7 @@ effect fn observed(state: Shared<State>, rejected: bool, parkBefore: bool, neste
 fn complete(state: &mut (), value: i32) -> () { return () }
 fn suspend(state: &mut (), execution: Intrinsic.Execution<i32>) -> () { drop move execution return () }
 struct ResourceAudit {
+  capturedDropped: i32
   released: i32
   dropped: i32
   bad: i32
@@ -142,7 +143,7 @@ fn inspectResource(audit: &mut ResourceAudit) -> i32 {
 effect fn recoverResource(error: ResourceFailure) -> i32 { return 23 }
 effect fn exerciseResourceSuccess() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let audit = run Shared.make<ResourceAudit>(ResourceAudit { released: 0, dropped: 0, bad: 0 })
+  let audit = run Shared.make<ResourceAudit>(ResourceAudit { released: 0, dropped: 0, bad: 0, capturedDropped: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let value = run Effect.useReleaseNonParking(
     Resource { audit: Shared.clone(&audit) },
@@ -154,7 +155,7 @@ effect fn exerciseResourceSuccess() -> i32 ! OutOfMemoryError {
 }
 effect fn exerciseResourceFailure() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let audit = run Shared.make<ResourceAudit>(ResourceAudit { released: 0, dropped: 0, bad: 0 })
+  let audit = run Shared.make<ResourceAudit>(ResourceAudit { released: 0, dropped: 0, bad: 0, capturedDropped: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator)
   let body = Effect.useReleaseNonParking(
     Resource { audit: Shared.clone(&audit) },
@@ -165,20 +166,39 @@ effect fn exerciseResourceFailure() -> i32 ! OutOfMemoryError {
   if Shared.withMut(&audit, inspectResource) != 42 { return -1 }
   return value
 }
+struct CapturedResourceAudit { audit: Shared<ResourceAudit> }
+fn recordCapturedDrop(audit: &mut ResourceAudit) -> () {
+  audit.capturedDropped = audit.capturedDropped + 1
+  if audit.released != 0 || audit.dropped != 0 { audit.bad = audit.bad + 1 }
+  return ()
+}
+impl Drop for CapturedResourceAudit {
+  fn drop(self: &mut CapturedResourceAudit) -> () { Shared.withMut(&self.audit, recordCapturedDrop) return () }
+}
+fn inspectCapturedResource(audit: &mut ResourceAudit) -> i32 {
+  if audit.capturedDropped != 1 { return -1 }
+  return inspectResource(move audit)
+}
 effect fn exerciseResourceCancellation() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
-  let audit = run Shared.make<ResourceAudit>(ResourceAudit { released: 0, dropped: 0, bad: 0 })
+  let audit = run Shared.make<ResourceAudit>(ResourceAudit { released: 0, dropped: 0, bad: 0, capturedDropped: 0 })
     |> Effect.provideMut<Allocator>(&mut allocator)
+  let capture = CapturedResourceAudit { audit: Shared.clone(&audit) }
+  let use = effect fn(resource: &mut Resource) -> i32 {
+    let result = run useResource(move resource)
+    drop capture
+    return result
+  }
   let body = Effect.useReleaseNonParking(
     Resource { audit: Shared.clone(&audit) },
-    useResource,
+    move use,
     releaseResource,
   )
   let execution = run Execution.make(move body, Shared.clone(&audit), resourceReady)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut branch = ()
   run Execution.drive(move execution, &mut branch, complete, suspend)
-  return Shared.withMut(&audit, inspectResource)
+  return Shared.withMut(&audit, inspectCapturedResource)
 }
 effect fn exercise(rejected: bool, parkBefore: bool, nested: bool) -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()

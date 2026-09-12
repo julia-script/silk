@@ -5359,7 +5359,7 @@
     },
     {
       "operation": "Intrinsic.useReleaseNonParking",
-      "signature": "fn Intrinsic.useReleaseNonParking<Resource, A, E, ?R, ?S>(resource: Resource, use: for<'scope> once fn(&'scope mut Resource) -> once Effect<'scope; A ! E ? R>, release: for<'scope> once fn(&'scope mut Resource) -> once Effect<'scope; () ? S>) -> once Effect<A ! E ? R | S>",
+      "signature": "fn Intrinsic.useReleaseNonParking<Resource, A, E, ?R, ?S>(resource: Resource, use: for<'scope> once fn<'env>(&'scope mut Resource) -> once Effect<'scope & 'env; A ! E ? R>, release: for<'scope> once fn<'env>(&'scope mut Resource) -> once Effect<'scope & 'env; () ? S>) -> once Effect<A ! E ? R | S>",
       "unsafe": false,
       "admission": "Effect",
       "consumer": "silk/effect.useReleaseNonParking",

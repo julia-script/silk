@@ -476,7 +476,7 @@ it('distinguishes row inference failure causes deterministically', () => {
     { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
     'Shared',
   )
-  const absentFailure = TypeInference.rowInferenceFailure(
+  const absentFailure = TypeInference.inferenceFailure(
     Type.effect('i32', [problem], { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
     closed,
   )
@@ -485,19 +485,15 @@ it('distinguishes row inference failure causes deterministically', () => {
   if (absentFailure !== undefined)
     assert.deepEqual(
       {
-        code: Diagnostic.contractRowInference(
-          absentFailure,
-          Parser.parse(Lexer.lex(file)).root.span,
-        ).code,
-        reason: Diagnostic.contractRowInference(
-          absentFailure,
-          Parser.parse(Lexer.lex(file)).root.span,
-        ).reason._tag,
+        code: Diagnostic.inferenceFailure(absentFailure, Parser.parse(Lexer.lex(file)).root.span)
+          .code,
+        reason: Diagnostic.inferenceFailure(absentFailure, Parser.parse(Lexer.lex(file)).root.span)
+          .reason._tag,
       },
       { code: 'SEM0089', reason: 'ContractRowInference' },
     )
   assert.strictEqual(
-    TypeInference.rowInferenceFailure(
+    TypeInference.inferenceFailure(
       Type.effect(
         'i32',
         [],
@@ -510,7 +506,7 @@ it('distinguishes row inference failure causes deterministically', () => {
     'AbsentRequirementMember',
   )
   assert.strictEqual(
-    TypeInference.rowInferenceFailure(
+    TypeInference.inferenceFailure(
       Type.effect(
         'i32',
         [],
@@ -529,7 +525,7 @@ it('distinguishes row inference failure causes deterministically', () => {
     'IncompatibleRequirementRole',
   )
   assert.strictEqual(
-    TypeInference.rowInferenceFailure(
+    TypeInference.inferenceFailure(
       Type.effect(
         'i32',
         [],
@@ -548,7 +544,7 @@ it('distinguishes row inference failure causes deterministically', () => {
     'IncompatibleRequirementAccess',
   )
   assert.strictEqual(
-    TypeInference.rowInferenceFailure(
+    TypeInference.inferenceFailure(
       Type.effect(
         'i32',
         [],
@@ -562,14 +558,14 @@ it('distinguishes row inference failure causes deterministically', () => {
     'AmbiguousRequirementRemainder',
   )
   assert.strictEqual(
-    TypeInference.rowInferenceFailure(
+    TypeInference.inferenceFailure(
       Type.effect(
         'i32',
         [],
         { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
         'Shared',
         [],
-        [firstRequirement],
+        [],
       ),
       Type.effect(
         'i32',
@@ -590,7 +586,7 @@ it('distinguishes row inference failure causes deterministically', () => {
     [],
     [firstRequirement],
   )
-  assert.strictEqual(TypeInference.rowInferenceFailure(forwarded, forwarded), undefined)
+  assert.strictEqual(TypeInference.inferenceFailure(forwarded, forwarded), undefined)
 
   const callee = { module: 'generics/Rows', name: 'callee' }
   const calleeFailure = Type.parameter(callee, 0, 'E')
