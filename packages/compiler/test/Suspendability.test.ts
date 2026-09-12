@@ -1197,3 +1197,51 @@ pub fn main() -> i32 { let mut provider = Provider {} return run scoped(&mut pro
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
+
+it.effect('lowers a scoped callback forwarded through a generic acquisition helper', () =>
+  Effect.gen(function* () {
+    const source = `import silk.effect { Effect }
+service Audit { effect fn record() -> () ? &mut Audit }
+struct Recorder {}
+impl Audit for Recorder { effect fn record(self: &mut Self) -> () { return () } }
+struct Provider {}
+struct Resource<'env, P> { provider: &'env mut P }
+struct Connection<'env, P> { provider: &'env mut P }
+effect fn acquireAndUse<'env, 'transport, A, E, ?R, P>(
+  provider: &'transport mut P,
+  callback: for<'call> once fn<'env>(
+    &'call mut Connection<'call, P>
+  ) -> once Effect<'call; A ! E ? R>,
+) -> A ! E ? R {
+  let mut connection = Connection { provider: &mut provider.* }
+  return run callback(&mut connection)
+}
+effect fn scoped<'env, A, E, ?R, P>(
+  provider: &'env mut P,
+  callback: for<'call> once fn<'env>(
+    &'call mut Connection<'call, P>
+  ) -> once Effect<'call; A ! E ? R>,
+) -> A ! E ? R {
+  let use = effect fn(owned: &mut Resource<'env, P>) -> A ! E ? R {
+    return run acquireAndUse(&mut owned.provider.*, move callback)
+  }
+  let release = effect fn(owned: &mut Resource<'env, P>) -> () { drop owned return () }
+  return run Effect.useReleaseNonParking(
+    Resource<'env, P> { provider: move provider }, move use, move release,
+  )
+}
+effect<'call> fn used<'call, P>(connection: &'call mut Connection<'call, P>) -> i32 ? &mut Audit {
+  drop connection
+  run Audit.record()
+  return 42
+}
+pub fn main() -> i32 {
+  let mut provider = Provider {}
+  let mut audit = Recorder {}
+  return run scoped(&mut provider, used) |> Effect.provideMut<Audit>(&mut audit)
+}`
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+  }),
+)

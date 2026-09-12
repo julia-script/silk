@@ -1764,7 +1764,9 @@ export const discover = (
     const currentInstances = Object.freeze(
       [...prepared.values()].map((candidate) => candidate.instance),
     )
-    const currentGraph = suspensionGraph(currentInstances, results, index)
+    const currentGraph = suspensionGraph(currentInstances, results, index, [
+      ...recordedCallables.values(),
+    ])
     providerCalls.clear()
     for (const provided of currentGraph.providedTargets) {
       const target = functionByKey(results, provided.target)
@@ -1898,7 +1900,7 @@ export const discover = (
       })
     }),
   )
-  const finalGraph = suspensionGraph(instances, results, index)
+  const finalGraph = suspensionGraph(instances, results, index, [...recordedCallables.values()])
   const summaries = ExecutableOrigin.suspensionSummaries(finalGraph)
   const observing = ExecutableOrigin.observingExecutions(finalGraph)
   const effects = concreteEffects(

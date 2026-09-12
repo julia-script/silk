@@ -2346,9 +2346,18 @@ export const make = (operations: Operations) => {
     const invocationBinders = new Set(
       DeclarationFacts.executableLifetimes(fn.declaration).lifetimeBinders.map(Lifetime.key),
     )
+    // Anonymous declarations also retain outer lifetimes. Only their own invocation
+    // binders may be absent; captured outer arguments still select the environment.
     const invocation = (parameter: DeclarationFacts.TypeParameterFact): boolean => {
       const argument = Type.parameterArgument(parameter.type)
-      return Lifetime.isLifetime(argument) && invocationBinders.has(Lifetime.key(argument))
+      const owner = fn.declaration.canonical
+      return (
+        owner._tag === 'Canonical' &&
+        parameter.type.owner.module === owner.id.module &&
+        parameter.type.owner.name === owner.id.name &&
+        Lifetime.isLifetime(argument) &&
+        invocationBinders.has(Lifetime.key(argument))
+      )
     }
     if (arguments_.length !== parameters.filter((parameter) => !invocation(parameter)).length)
       return undefined
@@ -3187,6 +3196,7 @@ export const make = (operations: Operations) => {
     instances: ReadonlyArray<Instance>,
     results: ReadonlyMap<string, Elaboration.Result>,
     index: DeclarationIndex.Index,
+    callables: ReadonlyArray<CallableInstance>,
   ): SuspensionGraph => {
     const nestedRoots = new Set<string>()
     const diagnosticObservations = new Set<string>()
@@ -3445,14 +3455,34 @@ export const make = (operations: Operations) => {
         const arguments_ =
           target === undefined ? undefined : callableTargetArguments(target, origin.typeArguments)
         if (target === undefined || arguments_ === undefined) return undefined
-        return executionNodeForKey(
-          keyOf(
-            declaration,
-            target.contract,
-            target.declaration.typeParameters.map((parameter) => parameter.type),
-            arguments_,
-          ),
+        // Builtin callback edges use the same captured callable identities as the concrete
+        // environment's runtime target. Omitting them loses the callback's provider graph.
+        const environment = origin.environment
+        const captured =
+          environment === undefined
+            ? undefined
+            : callables.find(
+                (candidate) =>
+                  Type.runtimeCallableEnvironmentIdentityKey(
+                    operations.callableEnvironmentIdentity(candidate),
+                  ) === Type.runtimeCallableEnvironmentIdentityKey(environment) &&
+                  Hir.matchesCallableTargetIdentity(candidate.target, origin.target) &&
+                  sameVisibleTypeArguments(candidate.typeArguments, arguments_),
+              )
+        if (environment !== undefined && captured === undefined) return undefined
+        const capturedCallables = (captured?.captures ?? [])
+          .slice()
+          .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
+          .flatMap((capture) =>
+            capture.callableIdentity === undefined ? [] : [capture.callableIdentity],
+          )
+        const selectedKey = keyOf(
+          declaration,
+          target.contract,
+          target.declaration.typeParameters.map((parameter) => parameter.type),
+          [...arguments_, ...capturedCallables],
         )
+        return executionNodeForKey(selectedKey)
       }
       const addBuiltinCallbacks = (
         expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
