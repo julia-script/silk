@@ -434,6 +434,37 @@ impl Effect {
     return run Intrinsic.finalizeEffect(move self, move finalizer)
   }
 
+  /// Runs a nonparking finalizer on every structured Effect exit and preserves the original outcome.
+  ///
+  /// # When to use
+  ///
+  /// Use this operation when structured cancellation must release a scoped resource before it
+  /// destroys the protected execution. Use [`ensuring`] when the finalizer can suspend.
+  ///
+  /// # Details
+  ///
+  /// The finalizer runs exactly once after success or typed failure. It also runs when an owner
+  /// cancels a parked `Execution`. Required providers remain valid until the finalizer completes.
+  /// Nested scopes finalize in reverse order. The original outcome remains unchanged.
+  ///
+  /// # Gotchas
+  ///
+  /// The finalizer must satisfy `Intrinsic.NonParking`. Fatal traps bypass this finalizer and all
+  /// Drop hooks. Recover a fallible release before you pass it to this operation.
+  pub effect fn ensuringNonParking<
+    'env,
+    A,
+    E,
+    ?R,
+    ?S,
+    F: once Effect<'env; () ! never ? S> + Intrinsic.NonParking,
+  >(
+    self: once Effect<'env; A ! E ? R>,
+    finalizer: F
+  ) -> A ! E ? R | S {
+    return run Intrinsic.finalizeEffectNonParking<A, E, R, S, F>(move self, move finalizer)
+  }
+
   /// Runs exactly one of two suspended branches, selected by a condition.
   ///
   /// # Details

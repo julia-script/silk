@@ -141,6 +141,8 @@ const intrinsicSpelling = (family: string, operation: string): string => {
   if (Scalar.isSpelling(family)) return `${family}${upperInitial(operation)}`
   if (family === 'Effect' && operation === 'suspendEffect') return 'suspendEffect'
   if (family === 'Effect' && operation === 'finalizeEffect') return 'finalizeEffect'
+  if (family === 'Effect' && operation === 'finalizeEffectNonParking')
+    return 'finalizeEffectNonParking'
   if (family === 'Effect' && operation === 'observeDiagnostics') return 'observeDiagnostics'
   if (family === 'Effect' && operation === 'observeUnhandled') return 'observeUnhandled'
   if (family === 'Effect' && operation.startsWith('bindRequirement')) return operation
@@ -180,6 +182,8 @@ const osConsumer = (spelling: string): string => {
 
 const consumer = (family: string, operation: string): string => {
   if (family === 'Effect' && operation === 'finalizeEffect') return 'silk/effect.ensuring'
+  if (family === 'Effect' && operation === 'finalizeEffectNonParking')
+    return 'silk/effect.ensuringNonParking'
   if (family === 'Effect' && operation === 'observeUnhandled')
     return 'language:terminal-diagnostic-observation'
   if (family === 'Effect' && operation === 'observeDiagnostics')
@@ -643,6 +647,63 @@ const finalizationEnvironment = {
   environment: contractLifetime('finalizeEffect'),
   lifetimeBinders: [],
 }
+const nonParkingFinalizationOwner = Object.freeze({
+  module: 'Intrinsic',
+  name: '$FinalizeEffectNonParking',
+})
+const nonParkingFinalizationSuccess = Type.parameter(nonParkingFinalizationOwner, 0, 'A')
+const nonParkingFinalizationFailure = Type.parameter(nonParkingFinalizationOwner, 1, 'E')
+const nonParkingFinalizationProtectedRequirements = Type.parameter(
+  nonParkingFinalizationOwner,
+  2,
+  'R',
+  'RequirementRow',
+)
+const nonParkingFinalizationFinalizerRequirements = Type.parameter(
+  nonParkingFinalizationOwner,
+  3,
+  'S',
+  'RequirementRow',
+)
+const nonParkingFinalizationFailureRow = RowAlgebra.singleton(
+  Type.failureRowPolicy(),
+  Type.failureMemberShape(nonParkingFinalizationFailure),
+  intrinsicContractOrigin,
+)
+const nonParkingFinalizationProtectedRow = RowAlgebra.parameter<
+  Type.Requirement,
+  Type.Parameter,
+  Type.RequirementMemberShape
+>(nonParkingFinalizationProtectedRequirements)
+const nonParkingFinalizationFinalizerRow = RowAlgebra.parameter<
+  Type.Requirement,
+  Type.Parameter,
+  Type.RequirementMemberShape
+>(nonParkingFinalizationFinalizerRequirements)
+const nonParkingFinalizationEnvironment = {
+  environment: contractLifetime('finalizeEffectNonParking'),
+  lifetimeBinders: [],
+}
+const nonParkingFinalizerBound = Type.effectWithRows(
+  Type.unit,
+  RowAlgebra.concrete(Type.failureRowPolicy(), []),
+  nonParkingFinalizationEnvironment,
+  'Take',
+  nonParkingFinalizationFinalizerRow,
+)
+const nonParkingFinalizer = Type.parameter(
+  nonParkingFinalizationOwner,
+  4,
+  'F',
+  'EffectRepresentation',
+  nonParkingFinalizerBound,
+  Object.freeze(['Intrinsic.NonParking']),
+)
+const representedNonParkingFinalizer = Type.represented(
+  nonParkingFinalizerBound,
+  nonParkingFinalizerBound,
+  Type.representationParameterArgument(nonParkingFinalizer),
+)
 
 const catchOwner = Object.freeze({ module: 'silk/core', name: '$CatchFailure' })
 const catchSelected = Type.parameter(catchOwner, 0, 'S')
@@ -2114,6 +2175,45 @@ const intrinsicOperations = Object.freeze([
           Type.requirementRowPolicy(),
           finalizationProtectedRow,
           finalizationFinalizerRow,
+        ),
+      ),
+    }),
+    builtin({
+      actor: 'Effect',
+      name: 'finalizeEffectNonParking',
+      operation: 'EffectFinalizeNonParking',
+      typeParameters: Object.freeze(['A', 'E', '?R', '?S', 'F']),
+      semanticTypeParameters: Object.freeze([
+        nonParkingFinalizationSuccess,
+        nonParkingFinalizationFailure,
+        nonParkingFinalizationProtectedRequirements,
+        nonParkingFinalizationFinalizerRequirements,
+        nonParkingFinalizer,
+      ]),
+      parameters: Object.freeze([
+        valueParameter('protected', 'once Effect<A ! E ? R>'),
+        valueParameter('finalizer', 'F'),
+      ]),
+      semanticParameters: Object.freeze([
+        Type.effectWithRows(
+          nonParkingFinalizationSuccess,
+          nonParkingFinalizationFailureRow,
+          nonParkingFinalizationEnvironment,
+          'Take',
+          nonParkingFinalizationProtectedRow,
+        ),
+        representedNonParkingFinalizer,
+      ]),
+      result: 'once Effect<A ! E ? R | S>',
+      semanticResult: Type.effectWithRows(
+        nonParkingFinalizationSuccess,
+        nonParkingFinalizationFailureRow,
+        nonParkingFinalizationEnvironment,
+        'Take',
+        RowAlgebra.union(
+          Type.requirementRowPolicy(),
+          nonParkingFinalizationProtectedRow,
+          nonParkingFinalizationFinalizerRow,
         ),
       ),
     }),

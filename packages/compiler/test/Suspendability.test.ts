@@ -637,6 +637,48 @@ pub fn main() -> i32 { return invoke(application) }`
   }),
 )
 
+it.effect('requires a nonparking exact Effect representation for cancellation finalization', () =>
+  Effect.gen(function* () {
+    const accepted = yield* snapshot(`import silk.effect { Effect }
+effect fn protected() -> i32 { return 42 }
+effect fn release() -> () { return () }
+pub fn main() -> i32 { return run Effect.ensuringNonParking(protected(), release()) }`)
+    assert.deepEqual(Analysis.diagnostics(accepted), [])
+
+    const rejected = yield* snapshot(`import silk.effect { Effect }
+import silk.execution { Execution }
+fn register(wake: Intrinsic.Wake) -> () { drop wake return () }
+effect fn protected() -> i32 { return 42 }
+effect fn release() -> () { run Execution.park(register) return () }
+pub fn main() -> i32 { return run Effect.ensuringNonParking(protected(), release()) }`)
+    assert.include(
+      Analysis.diagnostics(rejected).map((diagnostic) => diagnostic.code),
+      'SEM0139',
+    )
+  }),
+)
+
+it.effect('checks an abstract finalizer service call after concrete provider selection', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect { Effect }
+service Duplex { effect fn close() -> () ? &mut Duplex }
+struct MemoryDuplex { closed: bool }
+impl Duplex for MemoryDuplex {
+  effect fn close(self: &mut Self) -> () { self.closed = true return () }
+}
+effect fn protected() -> i32 { return 42 }
+effect fn release() -> () ? &mut Duplex { return run Duplex.close() }
+effect fn scoped() -> i32 ? &mut Duplex {
+  return run Effect.ensuringNonParking(protected(), release())
+}
+pub fn main() -> i32 {
+  let mut duplex = MemoryDuplex {closed: false}
+  return run scoped() |> Effect.provideMut<Duplex>(&mut duplex)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
 it.effect('keeps synchronous controls empty', () =>
   Effect.gen(function* () {
     const source = `import silk.effect { Effect }

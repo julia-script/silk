@@ -1097,7 +1097,8 @@ const controlsOfExpressions = (
       ordinal += 1
       if (
         expression.subject._tag === 'BuiltinCall' &&
-        expression.subject.operation === 'EffectFinalize'
+        (expression.subject.operation === 'EffectFinalize' ||
+          expression.subject.operation === 'EffectFinalizeNonParking')
       ) {
         for (const [inputOrdinal, argument] of expression.subject.arguments.entries()) {
           const runner = runnerOf(argument, context)
