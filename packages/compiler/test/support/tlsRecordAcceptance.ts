@@ -12,7 +12,7 @@ interface RecordFixture {
 const fixtureFile = JSON.parse(
   readFileSync(
     new URL(
-      '../../../../openspec/changes/implement-tls13-record-driving/fixtures.json',
+      '../../../../openspec/changes/archive/2026-09-12-implement-tls13-record-driving/fixtures.json',
       import.meta.url,
     ),
     'utf8',

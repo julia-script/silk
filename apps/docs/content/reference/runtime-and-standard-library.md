@@ -1002,7 +1002,7 @@ public ASN.1 tooling is outside this API.
 
 **Evidence:** [certificate actor](../../../../packages/compiler/stdlib/silk/certificate.silk),
 [bundle actor](../../../../packages/compiler/stdlib/silk/certificate_bundle.silk),
-[decoding contract and fixture provenance](../../../../openspec/changes/specify-bounded-certificate-decoding/design.md).
+[decoding contract and fixture provenance](../../../../openspec/changes/archive/2026-09-12-specify-bounded-certificate-decoding/design.md).
 
 ## Certificate semantic profiles and trust anchors
 
@@ -1037,7 +1037,7 @@ claim equivalence with an operating system's trust policy.
 
 **Evidence:** [profile actor](../../../../packages/compiler/stdlib/silk/certificate_profile.silk),
 [trust-anchor actor](../../../../packages/compiler/stdlib/silk/trust_anchor.silk),
-[implementation contract](../../../../openspec/changes/implement-certificate-profiles-trust-anchors/specs/certificate-profiles-trust-anchors/spec.md),
+[implementation contract](../../../../openspec/changes/archive/2026-09-12-implement-certificate-profiles-trust-anchors/specs/certificate-profiles-trust-anchors/spec.md),
 [pinned x509-limbo fixtures](../../../../packages/compiler/test/fixtures/certificate-profile-limbo.json).
 Profile comparisons also preserve the fixed Zig HTTP snapshot
 `1bc892110da738d6137b3f0b7e8e3a586ce09928`; it is provenance, not a full-path or trust-policy
@@ -1079,7 +1079,7 @@ and Finished messages before accepting application data. `revocationStatus()` is
 revocation, or transparency equivalence.
 
 **Evidence:** [path actor](../../../../packages/compiler/stdlib/silk/certificate_path.silk),
-[implementation contract](../../../../openspec/changes/implement-bounded-certificate-path-validation/specs/bounded-certificate-path-validation/spec.md),
+[implementation contract](../../../../openspec/changes/archive/2026-09-12-implement-bounded-certificate-path-validation/specs/bounded-certificate-path-validation/spec.md),
 [fixture provenance](../../../../packages/compiler/test/fixtures/certificate-path-limbo.json), and
 [offline importer](../../../../packages/compiler/scripts/import-certificate-path-fixtures.mjs).
 
@@ -1121,7 +1121,7 @@ not reproduce that system's trust policy.
 **Evidence:** [snapshot actor](../../../../packages/compiler/stdlib/silk/trust_snapshot.silk),
 [service actor](../../../../packages/compiler/stdlib/silk/trust_source.silk),
 [memory provider](../../../../packages/compiler/stdlib/silk/memory_trust_source.silk),
-[implementation contract](../../../../openspec/changes/implement-owned-trust-snapshots/specs/owned-trust-snapshots/spec.md),
+[implementation contract](../../../../openspec/changes/archive/2026-09-12-implement-owned-trust-snapshots/specs/owned-trust-snapshots/spec.md),
 [shared native acceptance](../../../../packages/compiler/test/support/trustSourceAcceptance.ts).
 
 ## Deferred directions

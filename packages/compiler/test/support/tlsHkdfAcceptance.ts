@@ -1,4 +1,4 @@
-// Committed fixtures and provenance: openspec/changes/implement-tls13-hkdf-labels/fixtures.json
+// Committed fixtures and provenance: openspec/changes/archive/2026-09-12-implement-tls13-hkdf-labels/fixtures.json
 export const tlsHkdfAcceptanceSource = `import silk.tls_hkdf { TlsHkdfSha256, TlsHkdfSha384, LabelError }
 import silk.sha2 { Sha256, Sha384 }
 import silk.result { Result }
