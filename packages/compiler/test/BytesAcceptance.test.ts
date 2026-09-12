@@ -280,7 +280,7 @@ it('keeps focused TLS client witnesses independent and bounded', () => {
   assert.include(tlsClientDemandRequestNativeSource, 'let coalesced = run loadFixture(65)')
   assert.include(
     tlsClientDemandRequestNativeSource,
-    'feedToDemand(&mut client.*, Bytes.asSlice(&coalesced), Demand.NeedOutput)',
+    'feedToDemand(&mut client, Bytes.asSlice(&coalesced), Demand.NeedOutput)',
   )
   assert.include(tlsClientResourcePolicyNativeSource, 'TlsLimitKind.Alpn, 1024)')
   for (const kind of [
@@ -314,7 +314,7 @@ it('keeps focused TLS client witnesses independent and bounded', () => {
   assert.include(tlsClientHandshakePolicyNativeSource, 'random.filled != expectedEntropy')
   assert.include(
     tlsClientDemandRequestNativeSource,
-    'feedToDemand(&mut client.*, Bytes.asSlice(&flight), Demand.NeedOutput)',
+    'feedToDemand(&mut client, Bytes.asSlice(&flight), Demand.NeedOutput)',
   )
   assert.include(tlsClientDemandRequestNativeSource, 'while id <= 8')
   const demandDriven = tlsClientDemandRequestNativeSource.slice(
@@ -323,6 +323,7 @@ it('keeps focused TLS client witnesses independent and bounded', () => {
   )
   assert.isNotEmpty(demandDriven)
   assert.notInclude(demandDriven, 'Client.progress')
+  assert.include(demandDriven, 'progress.demand == expected && expected != Demand.NeedInput')
   for (const fixtureId of [58, 59, 60, 61, 62, 63, 64, 65, 66]) {
     assert.include(tlsClientNativeFixtureSource, `case ${fixtureId}:`)
   }

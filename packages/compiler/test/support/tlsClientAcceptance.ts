@@ -1673,6 +1673,7 @@ const tlsClientDemandDrivenHelper = `effect fn feedToDemand(
     }
     if progress.consumed == usize.ZERO { return 21 }
     offset = offset + progress.consumed
+    if progress.demand == expected && expected != Demand.NeedInput { return 0 }
     if offset < input.length && progress.demand != Demand.NeedInput { return 20 }
     if offset == input.length {
       if progress.demand == expected { return 0 }
@@ -1726,7 +1727,7 @@ effect fn demandRequestCase<'a>(
 
   if id == 0 {
     let flight = run loadFixture(${nativeFixtureIds.aes128ServerFlight})
-    if (run feedToDemand(&mut client.*, Bytes.asSlice(&flight), Demand.NeedOutput)) != 0 {
+    if (run feedToDemand(&mut client, Bytes.asSlice(&flight), Demand.NeedOutput)) != 0 {
       return false
     }
     let expected = run loadFixture(${nativeFixtureIds.expectedEmptyCertificateRecord})
@@ -1735,7 +1736,7 @@ effect fn demandRequestCase<'a>(
 
   if id == 1 {
     let flight = run loadFixture(${nativeFixtureIds.serverFlight})
-    if (run authenticate(&mut client.*, Bytes.asSlice(&flight))) != 0 { return false }
+    if (run authenticate(&mut client, Bytes.asSlice(&flight))) != 0 { return false }
     let mut plaintext: [u8; 40] = [
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
       0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -1747,7 +1748,7 @@ effect fn demandRequestCase<'a>(
     }
     if !validPlaintext(&plaintext, written) { return false }
     let coalesced = run loadFixture(${nativeFixtureIds.coalescedTicketKeyUpdateRecord})
-    if (run feedToDemand(&mut client.*, Bytes.asSlice(&coalesced), Demand.NeedOutput)) != 0 {
+    if (run feedToDemand(&mut client, Bytes.asSlice(&coalesced), Demand.NeedOutput)) != 0 {
       return false
     }
     let expected = run loadFixture(
@@ -1761,7 +1762,7 @@ effect fn demandRequestCase<'a>(
   }
 
   let input = run loadFixture(requestFixture(id))
-  let code = run feedToDemand(&mut client.*, Bytes.asSlice(&input), Demand.NeedInput)
+  let code = run feedToDemand(&mut client, Bytes.asSlice(&input), Demand.NeedInput)
   if id == 2 || id == 3 { return code == 0 }
   return code == 47 && isFailureCode(run client.progress(), 47)
 }

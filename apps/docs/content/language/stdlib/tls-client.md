@@ -748,7 +748,7 @@ Compatibility CCS is outside its window or not exactly `{1}`.
 CertificateRequest = 7
 ```
 
-A peer CertificateRequest violates this no-credential profile.
+A CertificateRequest has invalid framing, duplication, or a profile-forbidden extension.
 
 <a id="declaration-73696c6b2f746c735f636c69656e743a3a50726f746f636f6c526561736f6e3a3a6d656d6265723a38"></a>
 
@@ -929,6 +929,56 @@ Alpn = 13
 ```
 
 One ALPN protocol or list.
+
+<a id="declaration-73696c6b2f746c735f636c69656e743a3a546c734c696d69744b696e643a3a6d656d6265723a3134"></a>
+
+### `CertificateDecode`
+
+```silk
+CertificateDecode = 14
+```
+
+The configured certificate-decoder policy.
+
+<a id="declaration-73696c6b2f746c735f636c69656e743a3a546c734c696d69744b696e643a3a6d656d6265723a3135"></a>
+
+### `CertificateSanDecode`
+
+```silk
+CertificateSanDecode = 15
+```
+
+The configured certificate-SAN decoder policy.
+
+<a id="declaration-73696c6b2f746c735f636c69656e743a3a546c734c696d69744b696e643a3a6d656d6265723a3136"></a>
+
+### `CertificateIdentity`
+
+```silk
+CertificateIdentity = 16
+```
+
+The configured HTTPS identity policy.
+
+<a id="declaration-73696c6b2f746c735f636c69656e743a3a546c734c696d69744b696e643a3a6d656d6265723a3137"></a>
+
+### `CertificatePath`
+
+```silk
+CertificatePath = 17
+```
+
+The configured certificate-path search policy.
+
+<a id="declaration-73696c6b2f746c735f636c69656e743a3a546c734c696d69744b696e643a3a6d656d6265723a3138"></a>
+
+### `CertificateProfile`
+
+```silk
+CertificateProfile = 18
+```
+
+The configured semantic certificate-profile policy.
 
 <a id="declaration-73696c6b2f746c735f636c69656e743a3a43657274696669636174654964656e746974794661696c757265"></a>
 
@@ -1452,7 +1502,9 @@ Feeds a peer-ciphertext prefix without retaining the caller slice.
 #### Details
 
 The returned `consumed` count identifies the exact accepted prefix. A clean peer close
-consumes and ignores all later transport bytes as required by TLS 1.3.
+consumes and ignores all later transport bytes as required by TLS 1.3. Before requesting
+more input, the client drains every complete handshake message exposed by the accepted
+record and schedules mandatory response output.
 
 <a id="declaration-73696c6b2f746c735f636c69656e743a3a436c69656e742e70726f6772657373"></a>
 
@@ -1462,7 +1514,7 @@ consumes and ignores all later transport bytes as required by TLS 1.3.
 pub effect<'life0> fn progress<'life0>(self: &'life0 mut Client) -> silk/result.Result<silk/tls_client.Progress, silk/tls_client.TlsError> ! OutOfMemoryError ? &mut Allocator | &mut Random
 ```
 
-Advances one complete buffered handshake or mandatory control transition without new input.
+Drains complete buffered handshake work and schedules mandatory control output without input.
 
 <a id="declaration-73696c6b2f746c735f636c69656e743a3a436c69656e742e61636b5772697474656e"></a>
 

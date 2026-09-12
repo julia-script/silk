@@ -528,6 +528,21 @@ pub fn pendingOutput<'owner>(self: &'owner TlsRecordSender) -> &'owner [u8]
 Borrows the exact unacknowledged output suffix.
 Repeated inspection and inspection before any queued record are idempotent.
 
+<a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726453656e6465722e63616e63656c50656e64696e67"></a>
+
+### Method `TlsRecordSender.cancelPending`
+
+```silk
+pub fn cancelPending<'life0>(self: &'life0 mut TlsRecordSender) -> ()
+```
+
+Cancels the complete pending suffix without changing the traffic-key epoch.
+
+#### Gotchas
+
+Callers must close a transport after canceling a partially written record; its already-written
+prefix cannot be completed or reused. Authenticated protocols use this only on terminal failure.
+
 <a id="declaration-73696c6b2f746c735f7265636f72643a3a546c735265636f726453656e6465722e7265636f72647352656d61696e696e67"></a>
 
 ### Method `TlsRecordSender.recordsRemaining`
