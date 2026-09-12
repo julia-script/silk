@@ -4615,6 +4615,21 @@ const contractRowInferenceMessage = (problem: ContractRowInferenceProblem): stri
   }
 }
 
+/** Preserves the first failed inference obligation instead of attributing every open row to it. */
+export const inferenceFailure = (
+  problem:
+    | ContractRowInferenceProblem
+    | {
+        readonly _tag: 'EnvironmentMismatch'
+        readonly longer: string
+        readonly shorter: string
+      },
+  span: SourceSpan.SourceSpan,
+): Diagnostic =>
+  problem._tag === 'EnvironmentMismatch'
+    ? unsatisfiedLifetimeBound(problem.longer, problem.shorter, span)
+    : contractRowInference(problem, span)
+
 export const contractRowInference = (
   problem: ContractRowInferenceProblem,
   span: SourceSpan.SourceSpan,

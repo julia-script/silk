@@ -150,6 +150,23 @@ failure `E`, requirement row `R`, and run access. Omitted environments are elabo
 header or local context. An Effect that retains borrowed data is not detached merely because its
 success and failure types contain no views.
 
+Effect environment positions also accept finite intersections: `Effect<'call & 'env; A ! E ? R>`
+and `effect<'a & 'b> fn`. An intersection is valid only while every constituent is valid. It is
+associative, commutative, and idempotent; `'static` is its identity. Canonical identity does not
+depend on ambient outlives assumptions.
+
+Each constituent outlives the intersection. The intersection outlives another region when every
+constituent outlives that region. It cannot be promoted to a longer constituent without proof.
+For example, `for<'call> once fn<'env>(&'call mut Resource) -> once Effect<'call & 'env; A ! E ? R>`
+retains both a fresh resource loan and captured data. Anonymous effect callables derive this
+intersection from their capture validity and retained inputs; generic contents keep their own
+outlives obligations. The intersection introduces no additional binder or runtime field.
+
+`Effect.useReleaseNonParking` uses this result contract for both callbacks. It disposes the use
+Effect and ends its loan before creating the release loan; neither callback may export the resource
+loan as an outcome. Release remains non-parking and runs during cancellation with the original
+outcome preserved.
+
 **Boundary:** Nested quantified callable signatures and unconstrained higher-rank inference are
 unsupported. A callback cannot store a fresh invocation borrow into longer-lived surrounding
 storage. An outcome may outlive its computation when it borrows independently valid external data;

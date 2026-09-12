@@ -570,6 +570,8 @@ const decodeExecutableOwner = (value: unknown): Type.ExecutableSpecializationOwn
 
 function encodeLifetime(value: Lifetime.Lifetime): SerializedRecord {
   switch (value._tag) {
+    case 'IntersectionLifetime':
+      return { tag: 'IntersectionLifetime', members: value.members.map(encodeLifetime) }
     case 'StaticLifetime':
       return { tag: 'StaticLifetime' }
     case 'BoundLifetime':
@@ -600,6 +602,10 @@ function decodeLifetime(value: unknown): Lifetime.Lifetime {
   const encoded = serializedRecord(value, 'lifetime')
   const tag = serializedTag(encoded, 'lifetime')
   if (tag === 'StaticLifetime') return Lifetime.staticLifetime
+  if (tag === 'IntersectionLifetime')
+    return Lifetime.intersection(
+      serializedArray(encoded.members, 'intersection members').map(decodeLifetime),
+    )
   if (tag === 'PlaceholderLifetime') {
     const parameter = decodeLifetime(encoded.parameter)
     if (parameter._tag !== 'BoundLifetime')

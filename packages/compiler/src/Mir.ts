@@ -303,7 +303,8 @@ export type PlaceSelector =
     }
 
 /** One exact nonparking Effect retained for structured cancellation of a protected run. */
-export interface CancellationFinalizer {
+export interface EffectCancellationFinalizer {
+  readonly _tag: 'EffectCancellationFinalizer'
   readonly effect: LocalId
   readonly runner: DeclarationFacts.CanonicalId
   readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
@@ -311,6 +312,22 @@ export interface CancellationFinalizer {
   readonly arguments: ReadonlyArray<LocalId>
   readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
 }
+
+/** One owned resource and release builder retained until a protected borrow has ended. */
+export interface ResourceCancellationFinalizer {
+  readonly _tag: 'ResourceCancellationFinalizer'
+  readonly resource: LocalId
+  readonly release: LocalId
+  readonly releaseTarget: DeclarationFacts.CanonicalId
+  readonly releaseTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+  readonly runner: DeclarationFacts.CanonicalId
+  readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+  readonly runnerStaticArguments?: ReadonlyArray<StaticValue.Value>
+  readonly arguments: ReadonlyArray<LocalId>
+  readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+}
+
+export type CancellationFinalizer = EffectCancellationFinalizer | ResourceCancellationFinalizer
 
 export type Operation =
   | {

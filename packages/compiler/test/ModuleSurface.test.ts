@@ -490,6 +490,30 @@ it.effect('round-trips constrained callable schemas without source origins', () 
   }),
 )
 
+it.effect('round trips finite intersection environments inside quantified callback results', () =>
+  Effect.gen(function* () {
+    const owner = { module: 'surface/Intersection', name: 'callback' }
+    const env = Lifetime.bound(owner, 0, 'env')
+    const scope = Lifetime.bound(owner, 1, 'scope')
+    const type = Type.callable(
+      [Type.reference('Exclusive', 'i32', scope)],
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.intersection([env, scope]), lifetimeBinders: [] },
+        'Take',
+      ),
+      { environment: env, lifetimeBinders: [scope] },
+      'Take',
+    )
+    const encoded = ModuleSurface.encodeSemanticType(type)
+    const decoded = yield* ModuleSurface.decodeSemanticType(encoded)
+    assert.strictEqual(Type.key(decoded), Type.key(type))
+    assert.strictEqual(ModuleSurface.encodeSemanticType(decoded), encoded)
+    assert.strictEqual(Type.runtimeKey(decoded), Type.runtimeKey(type))
+  }),
+)
+
 it.effect('validates canonical substitutions against their local parameter scope', () =>
   Effect.gen(function* () {
     const owner = { module: 'surface/Substitution', name: 'callable' }

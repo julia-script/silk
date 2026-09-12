@@ -417,6 +417,32 @@ export const concreteMembers = <Member, RowParameter, SymbolicMember, MemberPara
   return FiniteRow.make(policy.finite, members).members
 }
 
+/** Collects concrete members retained positively by an open expression. */
+export const positiveConcreteMembers = <Member, RowParameter, SymbolicMember, MemberParameter>(
+  policy: Policy<Member, RowParameter, SymbolicMember, MemberParameter>,
+  self: Row<Member, RowParameter, SymbolicMember>,
+): ReadonlyArray<Member> => {
+  const members: Array<Member> = []
+  const visit = (expression: Expression<Member, RowParameter, SymbolicMember>): void => {
+    switch (expression._tag) {
+      case 'Concrete':
+        members.push(...expression.row.members)
+        return
+      case 'RowParameter':
+      case 'Singleton':
+        return
+      case 'Union':
+        for (const operand of expression.operands) visit(operand)
+        return
+      case 'Without':
+        visit(expression.source)
+        return
+    }
+  }
+  visit(self.expression)
+  return FiniteRow.make(policy.finite, members).members
+}
+
 /** Rewrites concrete members structurally and renormalizes substitution-created collisions. */
 export const mapConcreteMembers = <Member, RowParameter, SymbolicMember, MemberParameter>(
   policy: Policy<Member, RowParameter, SymbolicMember, MemberParameter>,

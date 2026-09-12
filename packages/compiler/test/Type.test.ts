@@ -75,6 +75,65 @@ it('canonicalizes lifetime binders without erasing declaration, scope or assumpt
   )
 })
 
+it('canonicalizes finite environment intersections without promoting their validity', () => {
+  const owner = { module: 'lifetimes', name: 'intersection' }
+  const a = Lifetime.bound(owner, 0, 'a')
+  const b = Lifetime.bound(owner, 1, 'b')
+  const c = Lifetime.bound(owner, 2, 'c')
+  const meet = Lifetime.intersection([a, b])
+  assert.strictEqual(
+    Lifetime.key(meet),
+    Lifetime.key(
+      Lifetime.intersection([b, Lifetime.intersection([a, b]), Lifetime.staticLifetime]),
+    ),
+  )
+  assert.strictEqual(Lifetime.key(Lifetime.intersection([a, a])), Lifetime.key(a))
+  const empty = Lifetime.assumptions([])
+  assert.isTrue(Lifetime.outlives(empty, a, meet))
+  assert.isTrue(Lifetime.outlives(empty, b, meet))
+  assert.isFalse(Lifetime.outlives(empty, meet, a))
+  assert.isFalse(Lifetime.outlives(empty, meet, b))
+  assert.isFalse(Lifetime.outlives(empty, meet, c))
+  assert.isTrue(
+    Lifetime.outlives(
+      Lifetime.assumptions([
+        { longer: a, shorter: c },
+        { longer: b, shorter: c },
+      ]),
+      meet,
+      c,
+    ),
+  )
+  assert.isFalse(Lifetime.outlives(Lifetime.assumptions([{ longer: a, shorter: c }]), meet, c))
+  assert.isTrue(
+    Lifetime.outlives(
+      Lifetime.assumptions([{ longer: a, shorter: Lifetime.staticLifetime }]),
+      meet,
+      b,
+    ),
+  )
+  const opened = Lifetime.placeholder(a, 'intersection invocation')
+  assert.strictEqual(
+    Lifetime.key(Lifetime.substitute(meet, new Map([[Lifetime.key(a), opened]]))),
+    Lifetime.key(Lifetime.intersection([opened, b])),
+  )
+  const effect = Type.effectWithRows(
+    'i32',
+    RowAlgebra.concrete(Type.failureRowPolicy(), []),
+    { environment: meet, lifetimeBinders: [] },
+    'Take',
+    RowAlgebra.concrete(Type.requirementRowPolicy(), []),
+  )
+  assert.deepEqual(
+    Type.freeLifetimes(effect).map(Lifetime.key).sort(),
+    [Lifetime.key(a), Lifetime.key(b)].sort(),
+  )
+  assert.strictEqual(
+    Type.runtimeKey(effect),
+    Type.runtimeKey(Type.substitute(effect, new Map([[Lifetime.key(a), Lifetime.staticLifetime]]))),
+  )
+})
+
 it('propagates later lifetime requirements through finite cycles and reports expired sources', () => {
   const owner = { module: 'lifetimes', name: 'reset' }
   const source = Lifetime.local(owner, 'body', 0)
@@ -97,6 +156,24 @@ it('propagates later lifetime requirements through finite cycles and reports exp
   assert.deepEqual(solution.violations, [{ lifetime: source, point: 3 }])
   assert.deepEqual(solution.required.get(Lifetime.key(source)), new Set([0, 1, 3]))
   assert.strictEqual(solution.work.propagatedPoints, 4)
+})
+
+it('requires every intersection constituent at concrete loan use points', () => {
+  const owner = { module: 'lifetimes', name: 'intersection-use' }
+  const a = Lifetime.local(owner, 'short', 0)
+  const b = Lifetime.local(owner, 'long', 1)
+  const meet = Lifetime.intersection([a, b])
+  const solution = Lifetime.solve({
+    pointCount: 3,
+    regions: [
+      { lifetime: a, available: new Set([0, 1]), required: new Set() },
+      { lifetime: b, available: new Set([0, 1, 2]), required: new Set() },
+      { lifetime: meet, available: new Set([0, 1, 2]), required: new Set([2]) },
+    ],
+    constraints: [],
+  })
+  if (solution._tag !== 'Solved') return unreachable('expected a finite intersection solution')
+  assert.deepEqual(solution.violations, [{ lifetime: a, point: 2 }])
 })
 
 it('rejects missing lifetime solver inputs instead of treating them as unconstrained validity', () => {
@@ -1567,6 +1644,77 @@ it('checks finite callable binders with rigid placeholders and rejects stronger 
   })
   assert.isFalse(TypeCompatibility.isCompatible(TypeCompatibility.check(captured, selected)))
   assert.isFalse(TypeInference.infer(selected, captured, new Map()))
+})
+
+it('keeps intersection invocation regions rigid while shortening free capture validity', () => {
+  const owner = { module: 'lifetimes', name: 'scoped-environment' }
+  const env = Lifetime.bound(owner, 0, 'env')
+  const call = Lifetime.bound(owner, 1, 'call')
+  const other = Lifetime.bound({ ...owner, name: 'other' }, 0, 'other')
+  const local = Lifetime.local(owner, 'capture', 0)
+  const make = (scope: Lifetime.Bound, capture: Lifetime.Lifetime) =>
+    Type.callable(
+      [Type.reference('Exclusive', 'i32', scope)],
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.intersection([scope, capture]), lifetimeBinders: [] },
+        'Take',
+      ),
+      { environment: capture, lifetimeBinders: [scope] },
+      'Take',
+    )
+  const offered = make(call, env)
+  const alpha = make(other, env)
+  assert.strictEqual(Type.key(offered), Type.key(make(Lifetime.bound(owner, 1, 'renamed'), env)))
+  assert.isTrue(TypeCompatibility.isCompatible(TypeCompatibility.check(offered, alpha)))
+  assert.deepEqual(Type.freeLifetimes(offered).map(Lifetime.key), [Lifetime.key(env)])
+  const obligations: Array<Lifetime.Outlives> = []
+  const context = TypeCompatibility.context({
+    outlives: (longer, shorter) =>
+      longer._tag === 'LocalLifetime' || shorter._tag === 'LocalLifetime',
+    commitOutlives: (longer, shorter) => obligations.push({ longer, shorter }),
+  })
+  assert.isTrue(
+    TypeCompatibility.isCompatible(TypeCompatibility.check(offered, make(other, local), context)),
+  )
+  assert.isNotEmpty(obligations)
+  assert.isTrue(
+    obligations.every((bound) =>
+      [bound.longer, bound.shorter].every(
+        (region) => region._tag !== 'PlaceholderLifetime' && region._tag !== 'IntersectionLifetime',
+      ),
+    ),
+  )
+  const promoted = Type.callable(
+    alpha.parameters,
+    Type.effect('i32', [], { environment: other, lifetimeBinders: [] }, 'Take'),
+    alpha,
+    'Take',
+  )
+  assert.isFalse(
+    TypeCompatibility.isCompatible(TypeCompatibility.check(offered, promoted, context)),
+  )
+  assert.strictEqual(TypeInference.inferenceFailure(promoted, offered)?._tag, 'EnvironmentMismatch')
+  assert.isFalse(
+    TypeCompatibility.isCompatible(
+      TypeCompatibility.check(
+        Type.reference('Exclusive', offered.result, Lifetime.staticLifetime),
+        Type.reference('Exclusive', promoted.result, Lifetime.staticLifetime),
+        context,
+      ),
+    ),
+  )
+  const result = Type.parameter(owner, 2, 'A')
+  const escape = Type.callable(alpha.parameters, result, alpha, 'Take')
+  assert.isFalse(TypeInference.infer(escape, offered, new Map()))
+  const literal = Type.callable(
+    alpha.parameters,
+    alpha.result,
+    { ...alpha, lifetimeBinders: [] },
+    'Take',
+  )
+  assert.isTrue(Type.lifetimes(literal).some((region) => Lifetime.equals(region, other)))
 })
 
 it('infers a selected call with a common local region and preserves mutable pointee invariance', () => {

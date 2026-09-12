@@ -626,7 +626,12 @@ const planFor = (
   }
   const retained = new Set([...live, ...(parkGuard === undefined ? [] : [parkGuard])])
   if ('cancellationFinalizer' in operation && operation.cancellationFinalizer !== undefined) {
-    retained.add(operation.cancellationFinalizer.effect.ordinal)
+    if (operation.cancellationFinalizer._tag === 'EffectCancellationFinalizer')
+      retained.add(operation.cancellationFinalizer.effect.ordinal)
+    else {
+      retained.add(operation.cancellationFinalizer.resource.ordinal)
+      retained.add(operation.cancellationFinalizer.release.ordinal)
+    }
     for (const argument of operation.cancellationFinalizer.arguments) retained.add(argument.ordinal)
   }
   // A suspended child still uses its borrowed captures even when the parent never

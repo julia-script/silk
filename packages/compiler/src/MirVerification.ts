@@ -18,6 +18,7 @@ import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import * as Match from './Match.js'
 import type {
   CleanupRegion,
+  CancellationFinalizer,
   Execution,
   CoroutineFrameRelease,
   EndLoanOperation,
@@ -1007,6 +1008,21 @@ const outcomeOf = (region: Region): Outcome | undefined =>
   region._tag === 'OperationRegion' || region._tag === 'CleanupRegion' ? region.outcome : undefined
 
 /** Every local named by one operation, including definitions and structured child results. */
+const cancellationFinalizerLocals = (finalizer: CancellationFinalizer): ReadonlyArray<LocalId> => [
+  ...(finalizer._tag === 'EffectCancellationFinalizer'
+    ? [finalizer.effect]
+    : [finalizer.resource, finalizer.release]),
+  ...finalizer.arguments,
+]
+
+/** Locals read while arming a cancellation action; an owned resource is only retained, not read. */
+const cancellationFinalizerAccesses = (
+  finalizer: CancellationFinalizer,
+): ReadonlyArray<LocalId> => [
+  ...(finalizer._tag === 'EffectCancellationFinalizer' ? [finalizer.effect] : [finalizer.release]),
+  ...finalizer.arguments,
+]
+
 export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
     case 'SetInitialized':
@@ -1195,7 +1211,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         ...operation.arguments,
         ...(operation.cancellationFinalizer === undefined
           ? []
-          : [operation.cancellationFinalizer.effect, ...operation.cancellationFinalizer.arguments]),
+          : cancellationFinalizerLocals(operation.cancellationFinalizer)),
       ]
     case 'RunEffectComposite':
       return [
@@ -1221,7 +1237,7 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         ...operation.arguments,
         ...(operation.cancellationFinalizer === undefined
           ? []
-          : [operation.cancellationFinalizer.effect, ...operation.cancellationFinalizer.arguments]),
+          : cancellationFinalizerLocals(operation.cancellationFinalizer)),
       ]
     case 'Construct':
     case 'ConstructUnionVariant':
@@ -2188,6 +2204,11 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
               ...operation.cancellationFinalizer.runnerTypeArguments.filter(
                 SilkType.isTypeArgument,
               ),
+              ...(operation.cancellationFinalizer._tag === 'ResourceCancellationFinalizer'
+                ? operation.cancellationFinalizer.releaseTypeArguments.filter(
+                    SilkType.isTypeArgument,
+                  )
+                : []),
             ]),
       ]
     case 'RunEffectComposite':
@@ -2223,6 +2244,11 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
               ...operation.cancellationFinalizer.runnerTypeArguments.filter(
                 SilkType.isTypeArgument,
               ),
+              ...(operation.cancellationFinalizer._tag === 'ResourceCancellationFinalizer'
+                ? operation.cancellationFinalizer.releaseTypeArguments.filter(
+                    SilkType.isTypeArgument,
+                  )
+                : []),
             ]),
       ]
     case 'Construct':
@@ -2410,7 +2436,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
         ...operation.arguments,
         ...(operation.cancellationFinalizer === undefined
           ? []
-          : [operation.cancellationFinalizer.effect, ...operation.cancellationFinalizer.arguments]),
+          : cancellationFinalizerAccesses(operation.cancellationFinalizer)),
       ]
     case 'RunEffectComposite':
       return [
@@ -2425,7 +2451,7 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
         ...operation.arguments,
         ...(operation.cancellationFinalizer === undefined
           ? []
-          : [operation.cancellationFinalizer.effect, ...operation.cancellationFinalizer.arguments]),
+          : cancellationFinalizerAccesses(operation.cancellationFinalizer)),
       ]
     case 'Construct':
     case 'ConstructUnionVariant':
@@ -2694,6 +2720,16 @@ const suspensionCallTargets = (
               }),
             ]
           : []),
+        ...('cancellationFinalizer' in operation &&
+        operation.cancellationFinalizer?._tag === 'ResourceCancellationFinalizer'
+          ? [
+              Object.freeze({
+                declaration: operation.cancellationFinalizer.releaseTarget,
+                typeArguments: operation.cancellationFinalizer.releaseTypeArguments,
+                staticArguments: Object.freeze([]),
+              }),
+            ]
+          : []),
       ]
     case 'RunEffectComposite':
       return operation.alternatives.map((alternative) =>
@@ -2903,7 +2939,21 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
       const retained = new Set(state.slots.map((slot) => slot.local.ordinal))
       const finalizer = state.cancellationFinalizer
       const finalizerEffect =
-        finalizer === undefined ? undefined : fn.localTypes.at(finalizer.effect.ordinal)
+        finalizer?._tag === 'EffectCancellationFinalizer'
+          ? fn.localTypes.at(finalizer.effect.ordinal)
+          : undefined
+      const finalizerRelease =
+        finalizer?._tag === 'ResourceCancellationFinalizer'
+          ? fn.localTypes.at(finalizer.release.ordinal)
+          : undefined
+      const finalizerResource =
+        finalizer?._tag === 'ResourceCancellationFinalizer'
+          ? fn.localTypes.at(finalizer.resource.ordinal)
+          : undefined
+      const resourceReleaseParameter =
+        finalizerRelease?._tag === 'CallableValue'
+          ? finalizerRelease.type.parameters.at(0)
+          : undefined
       const finalizerRunner =
         finalizer === undefined
           ? undefined
@@ -2930,11 +2980,32 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
       }
       const finalizerValid =
         finalizer === undefined ||
-        (finalizerEffect?._tag === 'EffectValue' &&
-          SilkType.equals(finalizerEffect.type, finalizer.outcomeType.type) &&
-          finalizerRunner !== undefined &&
-          retainedOrZeroLane(finalizer.effect) &&
-          finalizer.arguments.every(retainedOrZeroLane))
+        (finalizer._tag === 'EffectCancellationFinalizer'
+          ? finalizerEffect?._tag === 'EffectValue' &&
+            SilkType.equals(finalizerEffect.type, finalizer.outcomeType.type) &&
+            finalizerRunner !== undefined &&
+            retainedOrZeroLane(finalizer.effect) &&
+            finalizer.arguments.every(retainedOrZeroLane)
+          : finalizerRelease?._tag === 'CallableValue' &&
+            finalizerResource !== undefined &&
+            finalizerResource._tag !== 'EffectOutcome' &&
+            resourceReleaseParameter !== undefined &&
+            SilkType.isReference(resourceReleaseParameter) &&
+            resourceReleaseParameter.access === 'Exclusive' &&
+            SilkType.runtimeKey(resourceReleaseParameter.target) ===
+              SilkType.runtimeKey(semanticType(finalizerResource)) &&
+            SilkType.isEffect(finalizerRelease.type.result) &&
+            // Applying a reusable effect function constructs one affine Effect value. The selected
+            // runner therefore records `Take` even when the callable declaration returns `Shared`;
+            // access is compile-time ownership and is absent from the emitted outcome ABI.
+            SilkType.runtimeKey({
+              ...finalizer.outcomeType.type,
+              access: finalizerRelease.type.result.access,
+            }) === SilkType.runtimeKey(finalizerRelease.type.result) &&
+            finalizerRunner !== undefined &&
+            retainedOrZeroLane(finalizer.resource) &&
+            retainedOrZeroLane(finalizer.release) &&
+            finalizer.arguments.every(retainedOrZeroLane))
       return (
         payloadValid &&
         finalizerValid &&

@@ -6,7 +6,7 @@ Define bounded partial-byte duplex I/O and one scoped adapter that publishes an 
 
 ### Requirement: ByteDuplex exposes exact partial reliable-byte transfers
 
-Canonical `silk.byte_duplex` SHALL expose the exclusive `ByteDuplex` service with `readSome(output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer`, `writeSome(input: &[u8], deadline: Option<Instant>) -> usize`, `flush(deadline: Option<Instant>) -> ()`, `shutdownWrite(deadline: Option<Instant>) -> ()`, and `close() -> ()`. `close` SHALL declare the sealed argument-free `Intrinsic.nonParking()` Effect-operation property; every selected implementation SHALL exclude external parking while nested transfer remains admissible. Each deadline-bearing operation SHALL require `&mut MonotonicClock`; each operation SHALL fail only with typed `ByteIoError`. `ReadTransfer` SHALL distinguish `Data { count }` from orderly underlying `End`. A successful nonempty read or write SHALL report a positive count no greater than the supplied slice length. Empty calls SHALL make no provider I/O request. Existing `Writer` all-or-error behavior SHALL remain unchanged.
+Canonical `silk.byte_duplex` SHALL expose the exclusive `ByteDuplex` actor with safe inherent `readSome(output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer`, `writeSome(input: &[u8], deadline: Option<Instant>) -> usize`, `flush(deadline: Option<Instant>) -> ()`, `shutdownWrite(deadline: Option<Instant>) -> ()`, and `close() -> ()` operations over unsafe raw provider hooks. The raw close hook SHALL declare the sealed argument-free `Intrinsic.nonParking()` Effect-operation property; every selected implementation SHALL exclude external parking while nested transfer remains admissible. Each deadline-bearing operation SHALL require `&mut MonotonicClock`; each operation SHALL fail only with typed `ByteIoError`. `ReadTransfer` SHALL distinguish `Data { count }` from orderly underlying `End`. The safe wrappers SHALL validate every provider: a successful nonempty read or write SHALL report a positive count no greater than the supplied slice length, and an impossible count SHALL attempt terminal close before preserving `InvalidTransferCount` even when close fails. Empty calls SHALL make no provider I/O request. Existing `Writer` all-or-error behavior SHALL remain unchanged.
 
 #### Scenario: Accept one short transfer
 
@@ -44,7 +44,7 @@ An absolute deadline SHALL belong to the active `MonotonicClock` provider's time
 
 ### Requirement: Duplex closure is directional before terminal close
 
-`flush` SHALL ensure that accepted bytes reach the provider's documented transport boundary, not peer application receipt. `shutdownWrite` SHALL occur after preceding accepted output is flushed and SHALL close only the write direction. `close` SHALL be terminal and idempotent. A close failure SHALL remain typed when observed directly and SHALL NOT replace an earlier protected scope outcome during finalization. Orderly `ReadTransfer.End` SHALL describe underlying transport EOF, not TLS `close_notify`.
+`flush` SHALL ensure that accepted bytes reach the provider's documented transport boundary, not peer application receipt. `shutdownWrite` SHALL occur after preceding accepted output is flushed and SHALL close only the write direction. `close` SHALL be terminal and idempotent. A close failure SHALL remain typed when observed directly and SHALL NOT replace an earlier protected scope outcome during finalization. Orderly `ReadTransfer.End` SHALL describe sticky underlying transport EOF for the read direction, not TLS `close_notify`.
 
 #### Scenario: Flush before directional shutdown
 
@@ -58,7 +58,7 @@ An absolute deadline SHALL belong to the active `MonotonicClock` provider's time
 
 ### Requirement: withClient publishes only one authenticated scoped connection
 
-Canonical `silk.tls_connection` SHALL expose a scoped `withClient` operation that exclusively borrows one `ByteDuplex`, loads exactly one `TrustSource` snapshot, samples `SystemClock` exactly once, constructs the private TLS `Client` under explicit `Allocator` and `Random` providers, completes the handshake, and only then invokes one callback with an authenticated connection. The callback SHALL NOT access the borrowed byte service independently or retain the connection after the scope. A failed lease SHALL never be reused.
+Canonical `silk.tls_connection` SHALL expose a scoped `withClient` operation that takes and exclusively borrows one explicit concrete `ByteDuplex` provider, loads exactly one `TrustSource` snapshot, samples `SystemClock` exactly once, constructs the private TLS `Client` under explicit `Allocator` and `Random` providers, completes the handshake, and only then invokes one higher-ranked callback with an authenticated `Connection<'transport, P>`. Connection operations SHALL bind their private provider reborrow internally and omit `ByteDuplex` from their public service rows. The callback SHALL preserve its exact arbitrary service row `R` under the absence constraint `R in Without<R, &mut ByteDuplex>`, reject independent ambient access to the borrowed byte service, and prevent retaining the connection or provider reborrow after the scope. A failed lease SHALL never be reused.
 
 #### Scenario: Delay callback publication
 
@@ -119,7 +119,7 @@ After peer `close_notify`, connection reads SHALL drain already verified plainte
 
 ### Requirement: Scoped finalization covers every structured Effect exit
 
-The runtime SHALL expose only the smallest target-neutral sealed intrinsic needed for ordinary `silk.effect` source to attach one nonparking synchronous finalizer to a protected Effect. The finalizer SHALL run exactly once after success or typed failure and during structured Execution cancellation or interruption, with the required provider environment still valid. It SHALL preserve the original success, failure, or cancellation outcome. A recovered finalizer failure SHALL NOT replace that outcome. Fatal traps SHALL remain outside this guarantee and SHALL continue to bypass finalizers and Drop hooks.
+The runtime SHALL expose only the smallest target-neutral sealed intrinsic needed for ordinary `silk.effect` source to attach one nonparking synchronous finalizer to a protected Effect. Ordinary source SHALL also expose a scoped resource/use/release bracket built on that primitive, lending one exclusively owned resource separately to higher-ranked use and release callbacks. The finalizer SHALL run exactly once after success or typed failure and during structured Execution cancellation or interruption, with the resource and required provider environment still valid. It SHALL preserve the original success, failure, or cancellation outcome. A recovered finalizer failure SHALL NOT replace that outcome. Fatal traps SHALL remain outside this guarantee and SHALL continue to bypass finalizers and Drop hooks.
 
 #### Scenario: Preserve success after release
 

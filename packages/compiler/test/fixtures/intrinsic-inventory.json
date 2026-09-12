@@ -5358,6 +5358,14 @@
       "identity": "EffectFinalizeNonParking"
     },
     {
+      "operation": "Intrinsic.useReleaseNonParking",
+      "signature": "fn Intrinsic.useReleaseNonParking<Resource, A, E, ?R, ?S>(resource: Resource, use: for<'scope> once fn<'env>(&'scope mut Resource) -> once Effect<'scope & 'env; A ! E ? R>, release: for<'scope> once fn<'env>(&'scope mut Resource) -> once Effect<'scope & 'env; () ? S>) -> once Effect<A ! E ? R | S>",
+      "unsafe": false,
+      "admission": "Effect",
+      "consumer": "silk/effect.useReleaseNonParking",
+      "identity": "EffectUseReleaseNonParking"
+    },
+    {
       "operation": "Intrinsic.observeDiagnostics",
       "signature": "fn Intrinsic.observeDiagnostics<S, A, ?R, F>(state: S, observer: F, protected: once Effect<A ? R>) -> once Effect<A ? R>",
       "unsafe": false,

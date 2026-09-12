@@ -32,6 +32,7 @@ import {
   lowerEffectCatch,
   lowerEffectExecution,
   lowerFinalizedEffect,
+  lowerUseReleaseNonParking,
   lowerPlace,
   lowerRunEffectComposite,
   lowerRunEffectValue,
@@ -1559,6 +1560,18 @@ function lowerRunExpression(
         finalizerExpression.span,
         availableRequirements,
         recipe.operation === 'EffectFinalizeNonParking',
+      )
+    }
+    if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectUseReleaseNonParking') {
+      const [resource, use, release] = recipe.arguments
+      if (resource === undefined || use === undefined || release === undefined) return undefined
+      return lowerUseReleaseNonParking(
+        fn,
+        resource,
+        use,
+        release,
+        expression.span,
+        availableRequirements,
       )
     }
     if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectObserveDiagnostics') {

@@ -31,6 +31,7 @@ import type { LinearOperation } from './MirLinearization.js'
 import * as MirVerification from './MirVerification.js'
 import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeCall from './NativeCall.js'
+import * as NativeCallable from './NativeCallable.js'
 import * as NativeResult from './NativeResult.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
@@ -586,8 +587,58 @@ const runCancellationFinalizer = Effect.fnUntraced(function* (
       `${tag}_local${local.ordinal}_value`,
     )
   })
+  let effectValues: ReadonlyArray<Value.Input>
+  if (finalizer._tag === 'EffectCancellationFinalizer') {
+    effectValues = yield* materialize(finalizer.effect)
+  } else {
+    const releaseType = owner.localTypes.at(finalizer.release.ordinal)
+    if (releaseType?._tag !== 'CallableValue')
+      throw new RangeError('LLVM resource finalizer lost its release callable')
+    const releaseTarget = declared.find((candidate) =>
+      Mir.matchesInstance(candidate.fn, finalizer.releaseTarget, finalizer.releaseTypeArguments),
+    )
+    if (releaseTarget === undefined)
+      throw new RangeError('LLVM resource finalizer lost its release builder target')
+    const releaseValues = yield* materialize(finalizer.release)
+    const captures = yield* NativeCallable.capturedArguments(
+      context,
+      releaseType,
+      releaseValues,
+      `${tag}_release`,
+    )
+    const resourceField = layout.payload.find(
+      (candidate) => candidate.local.ordinal === finalizer.resource.ordinal,
+    )
+    if (resourceField === undefined)
+      throw new RangeError('LLVM resource finalizer lost its retained resource')
+    const resourcePlace = yield* NativeFrame.place(
+      context.storage,
+      frame,
+      resourceField,
+      `${tag}_resource`,
+    )
+    const resourceReference = yield* NativePlace.base(
+      resourcePlace,
+      context.storage,
+      `${tag}_resource_ref`,
+    )
+    const releaseResult = yield* NativeCall.callValues(
+      context.call,
+      releaseTarget,
+      NativeArgument.fromValues(
+        Mir.applyOperands(
+          captures.map((capture) =>
+            Object.freeze({ parameterOrdinal: capture.parameterOrdinal, items: capture.values }),
+          ),
+          [Object.freeze([resourceReference])],
+        ),
+      ),
+      `${tag}_build`,
+    )
+    effectValues = NativeResult.sourceValues(releaseResult)
+  }
   const inputs = [
-    ...(yield* materialize(finalizer.effect)),
+    ...effectValues,
     ...(yield* Effect.forEach(finalizer.arguments, materialize)).flat(),
   ]
   const lowered = yield* NativeArgument.lower(
@@ -605,7 +656,12 @@ const runCancellationFinalizer = Effect.fnUntraced(function* (
     yield* NativeCall.argumentsFor(context.call.synchronous, target, lowered),
     `${tag}_run`,
   )
-  return new Set([finalizer.effect.ordinal, ...finalizer.arguments.map((local) => local.ordinal)])
+  return new Set([
+    ...(finalizer._tag === 'EffectCancellationFinalizer'
+      ? [finalizer.effect.ordinal]
+      : [finalizer.release.ordinal]),
+    ...finalizer.arguments.map((local) => local.ordinal),
+  ])
 })
 
 const dropFrames = Effect.fnUntraced(function* (

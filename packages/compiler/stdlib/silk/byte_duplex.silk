@@ -18,8 +18,8 @@
 
 import silk.monotonic_clock {MonotonicClock}
 import silk.option {Option}
-import silk.system_clock {Instant}
-import silk.u8
+import silk.effect {Effect}
+import silk.system_clock {Instant, SystemClock}
 import silk.usize
 
 /// The operation associated with one portable byte-I/O failure.
@@ -77,43 +77,104 @@ pub union ReadTransfer {
   End,
 }
 
-/// An exclusive reliable-byte transport with partial progress and absolute deadlines.
+/// Unsafe provider hooks for one exclusive reliable-byte transport.
+///
+/// # Details
+///
+/// Ordinary callers use the safe inherent operations with the corresponding names. Provider
+/// implementations satisfy these hooks; calling one directly acknowledges that its raw transfer
+/// count has not passed the canonical boundary validation.
 pub service ByteDuplex {
-  /// Reads one positive prefix or reports orderly transport end.
-  ///
-  /// # Gotchas
-  ///
-  /// An empty output completes locally. A nonempty success must report at most `output.length`.
-  effect fn readSome(
+  /// Performs one provider read before canonical transfer validation.
+  unsafe effect fn readSomeRaw(
     output: &mut [u8],
     deadline: Option<Instant>
   ) -> ReadTransfer ! ByteIoError ? &mut ByteDuplex | &mut MonotonicClock
 
-  /// Writes one positive prefix and returns its exact length.
-  ///
-  /// # Gotchas
-  ///
-  /// An empty input completes locally. A nonempty success must not report zero or exceed the input.
-  effect fn writeSome(
+  /// Performs one provider write before canonical transfer validation.
+  unsafe effect fn writeSomeRaw(
     input: &[u8],
     deadline: Option<Instant>
   ) -> usize ! ByteIoError ? &mut ByteDuplex | &mut MonotonicClock
 
-  /// Flushes accepted output to the provider's documented transport boundary.
-  effect fn flush(
+  /// Performs the provider's transport-boundary flush.
+  unsafe effect fn flushRaw(
     deadline: Option<Instant>
   ) -> () ! ByteIoError ? &mut ByteDuplex | &mut MonotonicClock
 
-  /// Flushes accepted output and then closes only the write direction.
-  effect fn shutdownWrite(
+  /// Closes only the provider's write direction after the canonical wrapper has flushed.
+  unsafe effect fn shutdownWriteRaw(
     deadline: Option<Instant>
   ) -> () ! ByteIoError ? &mut ByteDuplex | &mut MonotonicClock
 
-  /// Closes the complete transport lease. Repeated calls remain terminal.
-  effect fn close() -> () ! ByteIoError ? &mut ByteDuplex with Intrinsic.nonParking()
+  /// Closes the complete transport lease. Implementations must remain terminal and idempotent.
+  unsafe effect fn closeRaw() -> () ! ByteIoError ? &mut ByteDuplex with Intrinsic.nonParking()
 }
 
 impl ByteDuplex {
+  /// Reads one positive prefix or reports orderly transport end.
+  ///
+  /// # Details
+  ///
+  /// Empty output completes without calling the provider. An impossible provider count terminally
+  /// closes the lease and returns `InvalidTransferCount`, even if that close itself fails.
+  pub effect fn readSome(
+    output: &mut [u8],
+    deadline: Option<Instant>
+  ) -> ReadTransfer ! ByteIoError ? &mut ByteDuplex | &mut MonotonicClock {
+    if output.length == usize.ZERO { return ReadTransfer.Data {count: usize.ZERO} }
+    let limit = output.length
+    let transfer = run unsafe ByteDuplex.readSomeRaw(move output, move deadline)
+    match move transfer {
+      ReadTransfer.End => { return ReadTransfer.End }
+      ReadTransfer.Data {count} => {
+        if count == usize.ZERO || count > limit {
+          return run invalidReadCount(count, limit)
+        }
+        return ReadTransfer.Data {count: count}
+      }
+    }
+    return ReadTransfer.End
+  }
+
+  /// Writes one positive prefix and returns its exact length.
+  ///
+  /// # Details
+  ///
+  /// Empty input completes without calling the provider. An impossible provider count terminally
+  /// closes the lease and returns `InvalidTransferCount`, even if that close itself fails.
+  pub effect fn writeSome(
+    input: &[u8],
+    deadline: Option<Instant>
+  ) -> usize ! ByteIoError ? &mut ByteDuplex | &mut MonotonicClock {
+    if input.length == usize.ZERO { return usize.ZERO }
+    let count = run unsafe ByteDuplex.writeSomeRaw(input, move deadline)
+    if count == usize.ZERO || count > input.length {
+      return run invalidWriteCount(count, input.length)
+    }
+    return count
+  }
+
+  /// Flushes accepted output to the provider's documented transport boundary.
+  pub effect fn flush(
+    deadline: Option<Instant>
+  ) -> () ! ByteIoError ? &mut ByteDuplex | &mut MonotonicClock {
+    return run unsafe ByteDuplex.flushRaw(move deadline)
+  }
+
+  /// Flushes accepted output and then closes only the write direction.
+  pub effect fn shutdownWrite(
+    deadline: Option<Instant>
+  ) -> () ! ByteIoError ? &mut ByteDuplex | &mut MonotonicClock {
+    run ByteDuplex.flush(copyDeadline(&deadline))
+    return run unsafe ByteDuplex.shutdownWriteRaw(move deadline)
+  }
+
+  /// Closes the complete transport lease. Repeated calls remain terminal.
+  pub effect fn close() -> () ! ByteIoError ? &mut ByteDuplex {
+    return run unsafe ByteDuplex.closeRaw()
+  }
+
   /// Constructs a timeout failure for `operation`.
   pub fn timeout(operation: ByteIoOperation) -> ByteIoError {
     return ByteIoError.Timeout {operation: move operation}
@@ -140,5 +201,32 @@ impl ByteDuplex {
   /// Constructs a provider failure with one provider-defined diagnostic code.
   pub fn provider(operation: ByteIoOperation, code: i32) -> ByteIoError {
     return ByteIoError.Provider {operation: move operation, code: code}
+  }
+}
+
+effect fn invalidReadCount(count: usize, limit: usize) -> ReadTransfer
+! ByteIoError
+? &mut ByteDuplex {
+  let closed = run Effect.result(ByteDuplex.close())
+  drop closed
+  fail ByteDuplex.invalidTransferCount(ByteIoOperation.Read, count, limit)
+}
+
+effect fn invalidWriteCount(count: usize, limit: usize) -> usize
+! ByteIoError
+? &mut ByteDuplex {
+  let closed = run Effect.result(ByteDuplex.close())
+  drop closed
+  fail ByteDuplex.invalidTransferCount(ByteIoOperation.Write, count, limit)
+}
+
+fn copyInstant(value: &Instant) -> Instant {
+  return SystemClock.make(SystemClock.seconds(value), SystemClock.nanoseconds(value))
+}
+
+fn copyDeadline(value: &Option<Instant>) -> Option<Instant> {
+  return match &value.* {
+    Option<Instant>.None => Option.none<Instant>()
+    Option<Instant>.Some {value: present} => Option.some<Instant>(copyInstant(&present))
   }
 }

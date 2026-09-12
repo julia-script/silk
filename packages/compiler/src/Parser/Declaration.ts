@@ -25,6 +25,7 @@ import { parseImportDeclaration } from './Import.js'
 import { parseBlock, parseImplicitUnitReturnStatement } from './Statement.js'
 import {
   parseFailureRow,
+  parseEffectEnvironmentLifetimes,
   parseParameterList,
   parseRequirementRow,
   parseReturnType,
@@ -742,7 +743,7 @@ const parseCallableContractTail = (
 
 const parseEffectDeclarationEnvironment = (initial: State): NodeResult => {
   const left = expect(initial, 'Less', ['Lifetime', 'Greater', 'FnKeyword'])
-  const lifetime = expect(left.state, 'Lifetime', ['Greater', 'FnKeyword'])
+  const lifetime = parseEffectEnvironmentLifetimes(left.state, ['Greater', 'FnKeyword'])
   const right = expect(lifetime.state, 'Greater', ['FnKeyword', 'Identifier'])
   return Object.freeze({
     state: right.state,

@@ -1890,8 +1890,30 @@ export const discover = (
   const finalGraph = suspensionGraph(instances, results, index)
   const summaries = ExecutableOrigin.suspensionSummaries(finalGraph)
   const observing = ExecutableOrigin.observingExecutions(finalGraph)
+  const effects = concreteEffects(
+    instances,
+    summaries,
+    results,
+    index,
+    Object.freeze([...recordedCallables.values()]),
+  )
+  const knownExecutionNodes = new Set([
+    ...instances.map((instance) => instanceNode(instance.key)),
+    ...effects.map((effect) => effectNode(effect.identity)),
+    ...finalGraph.permitted.keys(),
+  ])
+  const unavailableSummary: SuspensionMode.Summary = Object.freeze({
+    _tag: 'SuspensionModeSummary',
+    availability: 'Unavailable',
+    modes: Object.freeze([]),
+    causes: Object.freeze([]),
+  })
   const summaryOfNode = (node: string): SuspensionMode.Summary =>
     summaries.get(node) ?? SuspensionMode.direct
+  const nonParkingSummaryOfNode = (node: string): SuspensionMode.Summary =>
+    knownExecutionNodes.has(node)
+      ? (summaries.get(node) ?? SuspensionMode.direct)
+      : unavailableSummary
   const callInstances = Object.freeze([...recordedCalls.values(), ...providerCalls.values()])
   return Object.freeze({
     _tag: 'InstanceDiscovery',
@@ -1900,13 +1922,7 @@ export const discover = (
     instances,
     unavailableOwnership,
     callables: Object.freeze([...recordedCallables.values()]),
-    effects: concreteEffects(
-      instances,
-      summaries,
-      results,
-      index,
-      Object.freeze([...recordedCallables.values()]),
-    ),
+    effects,
     calls: callInstances,
     intrinsics: ExecutableOrigin.reachableIntrinsics(instances, index),
     foreignCalls: ExecutableOrigin.reachableForeignCalls(instances, index, target),
@@ -1952,7 +1968,7 @@ export const discover = (
     ]),
     nonParkingObligations: Object.freeze(
       finalGraph.nonParkingObligations.map((obligation) =>
-        Object.freeze({ span: obligation.span, summary: summaryOfNode(obligation.node) }),
+        Object.freeze({ span: obligation.span, summary: nonParkingSummaryOfNode(obligation.node) }),
       ),
     ),
     residualizationDiagnostics: Object.freeze([...residualizationDiagnostics.values()]),

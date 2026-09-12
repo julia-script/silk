@@ -2,6 +2,7 @@ import { rsaWasmSource } from './support/rsaAcceptance.js'
 import { aesGcmWasmAcceptanceSource } from './support/aesGcmAcceptance.js'
 import { tlsHkdfWasmSource } from './support/tlsHkdfAcceptance.js'
 import { tlsRecordWasmSource } from './support/tlsRecordAcceptance.js'
+import { tlsConnectionAcceptanceSource } from './support/tlsConnectionAcceptance.js'
 import { x25519WasmAcceptanceSource } from './support/x25519Acceptance.js'
 import * as AbiManifest from '../src/AbiManifest.js'
 import * as ForeignContract from '../src/ForeignContract.js'
@@ -930,4 +931,28 @@ it.effect('executes bounded TLS record framing through LLVM-to-Wasm', () =>
       if (typeof main === 'function') assert.strictEqual(main(), 0)
     })
   }),
+)
+
+it.effect(
+  'executes the scoped authenticated TLS connection through LLVM-to-Wasm',
+  () =>
+    Effect.gen(function* () {
+      const outcome = yield* compileSource('tls-connection.wasm', tlsConnectionAcceptanceSource, {
+        compilation: {
+          root: SourceFile.make('memory/tls-connection-wasm', ascii(tlsConnectionAcceptanceSource)),
+          target: 'wasm32-unknown-unknown',
+        },
+        artifactKind: 'WebAssemblyModule',
+      })
+      assert.strictEqual(outcome._tag, 'Compiled')
+      if (outcome._tag !== 'Compiled') return
+      yield* Effect.sync(() => {
+        const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+        assert.deepEqual(WebAssembly.Module.imports(module), [])
+        const main = new WebAssembly.Instance(module).exports['main']
+        assert.isFunction(main)
+        if (typeof main === 'function') assert.strictEqual(main(), 42)
+      })
+    }),
+  { timeout: 600_000 },
 )

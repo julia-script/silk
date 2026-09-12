@@ -996,15 +996,14 @@ const printNode = (
         printToken(context, tokenOf(node, 'Greater')),
       )
     case 'EffectEnvironment':
-      if (directTokens(node).some((token) => token.kind === 'Less'))
-        return FormatDocument.concat(
-          printToken(context, tokenOf(node, 'Less'), prefix, preserveBlank),
-          printToken(context, tokenOf(node, 'Lifetime')),
-          printToken(context, tokenOf(node, 'Greater')),
-        )
       return FormatDocument.concat(
-        printToken(context, tokenOf(node, 'Lifetime'), prefix, preserveBlank),
-        printToken(context, tokenOf(node, 'Semicolon')),
+        ...directTokens(node).map((token, index, tokens) => {
+          let tokenPrefix = FormatDocument.empty
+          if (index === 0) tokenPrefix = prefix
+          else if (token.kind === 'Ampersand' || tokens.at(index - 1)?.kind === 'Ampersand')
+            tokenPrefix = FormatDocument.text(' ')
+          return printToken(context, token, tokenPrefix, index === 0 && preserveBlank)
+        }),
       )
     case 'RequirementSelector': {
       const [capability, role] = directNodes(node)

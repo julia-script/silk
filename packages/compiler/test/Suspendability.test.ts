@@ -8,6 +8,7 @@ import * as Hir from '../src/Hir.js'
 import * as Instances from '../src/Instances.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Lifetime from '../src/Lifetime.js'
+import * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SuspensionMode from '../src/SuspensionMode.js'
 import * as Type from '../src/Type.js'
@@ -645,6 +646,22 @@ effect fn release() -> () { return () }
 pub fn main() -> i32 { return run Effect.ensuringNonParking(protected(), release()) }`)
     assert.deepEqual(Analysis.diagnostics(accepted), [])
 
+    const genericAccepted = yield* snapshot(`import silk.effect { Effect }
+effect fn protected() -> i32 { return 42 }
+effect fn guard<
+  'env,
+  A,
+  E,
+  ?R,
+  ?S,
+  F: once Effect<'env; () ? S> + Intrinsic.NonParking,
+>(body: once Effect<'env; A ! E ? R>, finalizer: F) -> A ! E ? R | S {
+  return run Effect.ensuringNonParking(move body, move finalizer)
+}
+effect fn release() -> () { return () }
+pub fn main() -> i32 { return run guard(protected(), release()) }`)
+    assert.deepEqual(Analysis.diagnostics(genericAccepted), [])
+
     const rejected = yield* snapshot(`import silk.effect { Effect }
 import silk.execution { Execution }
 fn register(wake: Intrinsic.Wake) -> () { drop wake return () }
@@ -655,6 +672,129 @@ pub fn main() -> i32 { return run Effect.ensuringNonParking(protected(), release
       Analysis.diagnostics(rejected).map((diagnostic) => diagnostic.code),
       'SEM0139',
     )
+  }),
+)
+
+it.effect('retains one owned resource and forms disjoint use and release loans', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect { Effect }
+import silk.execution { Execution }
+struct Resource { value: i32 }
+fn register(wake: Intrinsic.Wake) -> () { drop wake return () }
+effect fn use(resource: &mut Resource) -> i32 {
+  resource.value = 41
+  run Execution.park(register)
+  return resource.value + 1
+}
+effect fn release(resource: &mut Resource) -> () {
+  resource.value = 0
+  return ()
+}
+pub fn main() -> i32 {
+  return run Effect.useReleaseNonParking(Resource { value: 0 }, use, release)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const bracket = mir.functions
+      .flatMap((fn) => Mir.regionsTree(fn.regions).flatMap(Mir.operationsOf))
+      .find(
+        (operation) =>
+          (operation._tag === 'RunEffectValue' || operation._tag === 'CatchEffect') &&
+          operation.cancellationFinalizer?._tag === 'ResourceCancellationFinalizer',
+      )
+    assert.isDefined(bracket)
+    if (
+      bracket === undefined ||
+      (bracket._tag !== 'RunEffectValue' && bracket._tag !== 'CatchEffect') ||
+      bracket.cancellationFinalizer?._tag !== 'ResourceCancellationFinalizer'
+    )
+      return
+    const owner = mir.functions.find((fn) =>
+      Mir.regionsTree(fn.regions)
+        .flatMap(Mir.operationsOf)
+        .some((operation) => operation === bracket),
+    )
+    assert.isDefined(owner)
+    if (owner === undefined) return
+    const loans = Mir.regionsTree(owner.regions)
+      .flatMap(Mir.operationsOf)
+      .filter((operation) => operation._tag === 'BeginLoan')
+    assert.lengthOf(loans, 2)
+    assert.notStrictEqual(loans.at(0)?.borrow.ordinal, loans.at(1)?.borrow.ordinal)
+    assert.strictEqual(loans.at(0)?.root.ordinal, loans.at(1)?.root.ordinal)
+    const armed = owner.suspension?.frame?.states.filter(
+      (state) => state.cancellationFinalizer?._tag === 'ResourceCancellationFinalizer',
+    )
+    assert.lengthOf(armed ?? [], 1)
+
+    const rejectedSource = `import silk.effect { Effect }
+import silk.execution { Execution }
+struct Resource {}
+fn register(wake: Intrinsic.Wake) -> () { drop wake return () }
+effect fn use(resource: &mut Resource) -> i32 { return 42 }
+effect fn release(resource: &mut Resource) -> () {
+  run Execution.park(register)
+  return ()
+}
+pub fn main() -> i32 {
+  return run Effect.useReleaseNonParking(Resource {}, use, release)
+}`
+    const rejected = yield* snapshot(rejectedSource)
+    const diagnostics = Analysis.diagnostics(rejected)
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0139'],
+    )
+    assert.strictEqual(
+      diagnostics.at(0)?.span.start,
+      rejectedSource.indexOf(' Effect.useReleaseNonParking'),
+    )
+  }),
+)
+
+it.effect('fails closed through unresolved finalizer Effect forwarding shapes', () =>
+  Effect.gen(function* () {
+    const prelude = `import silk.effect { Effect }
+service FinalizerSource {
+  effect fn acquire() -> once Effect<'static; ()> ? &FinalizerSource
+}
+effect fn protected() -> i32 { return 42 }`
+    const direct = `${prelude}
+pub effect fn main() -> i32 ? &FinalizerSource {
+  let finalizer = run FinalizerSource.acquire()
+  return run Effect.ensuringNonParking(protected(), move finalizer)
+}`
+    const forwarded = `${prelude}
+fn forward<'env>(finalizer: once Effect<'env; ()>) -> once Effect<'env; ()> {
+  return move finalizer
+}
+pub effect fn main() -> i32 ? &FinalizerSource {
+  let finalizer = run FinalizerSource.acquire()
+  return run Effect.ensuringNonParking(protected(), forward(move finalizer))
+}`
+    const stored = `${prelude}
+struct Deferred<F: once fn(once Effect<'static; ()>) -> once Effect<'static; ()>> { forward: F }
+fn pass(finalizer: once Effect<'static; ()>) -> once Effect<'static; ()> {
+  return move finalizer
+}
+pub effect fn main() -> i32 ? &FinalizerSource {
+  let finalizer = run FinalizerSource.acquire()
+  let deferred = Deferred { forward: pass }
+  return run Effect.ensuringNonParking(protected(), deferred.forward(move finalizer))
+}`
+    for (const source of [direct, forwarded, stored]) {
+      const self = yield* snapshot(source)
+      const diagnostics = Analysis.diagnostics(self)
+      assert.deepEqual(
+        diagnostics.map((diagnostic) => diagnostic.code),
+        ['SEM0139'],
+      )
+      assert.strictEqual(
+        diagnostics.at(0)?.span.start,
+        source.indexOf(' Effect.ensuringNonParking'),
+      )
+    }
   }),
 )
 
@@ -920,5 +1060,78 @@ pub fn main() -> i32 {
       (instance) => instance.key.declaration.name === 'delayed',
     )
     assert.isUndefined(delayed)
+  }),
+)
+
+const capturedScopedResourceSource = `import silk.effect { Effect }
+struct Resource { value: i32 }
+struct Config { value: i32 }
+service Probe { effect fn read() -> i32 ? &Probe }
+effect fn release(resource: &mut Resource) -> () { return () }
+effect fn scoped<'env, A, E, ?R>(
+  config: &'env Config,
+  callback: for<'call> once fn<'env>(&'call mut Resource) -> once Effect<'call; A ! E ? R>,
+) -> A ! E ? R {
+  let use = effect fn(resource: &mut Resource) -> A ! E ? R {
+    resource.value = config.value
+    return run callback(move resource)
+  }
+  return run Effect.useReleaseNonParking(Resource { value: 0 }, move use, release)
+}
+effect fn read(resource: &mut Resource) -> i32 ? &Probe {
+  return resource.value + run Probe.read()
+}
+pub effect fn main() -> i32 ? &Probe {
+  let config = Config { value: 42 }
+  return run scoped(&config, read)
+}`
+
+it.effect('preserves symbolic bracket rows without extending captured or resource lifetimes', () =>
+  Effect.gen(function* () {
+    const direct =
+      capturedScopedResourceSource.slice(
+        0,
+        capturedScopedResourceSource.indexOf('  let use = effect fn'),
+      ) +
+      '  return run Effect.useReleaseNonParking(Resource { value: 0 }, move callback, release)' +
+      capturedScopedResourceSource.slice(
+        capturedScopedResourceSource.indexOf('\n}\neffect fn read'),
+      )
+    const programs = [
+      ['captured', capturedScopedResourceSource],
+      ['direct', direct],
+      [
+        'escape',
+        `import silk.effect { Effect }
+struct Resource { value: i32 }
+effect fn use<'scope>(resource: &'scope mut Resource) -> &'scope i32 { return &resource.value }
+effect fn release(resource: &mut Resource) -> () { return () }
+pub fn main() -> i32 {
+  let escaped = run Effect.useReleaseNonParking(Resource { value: 42 }, use, release)
+  return escaped.*
+}`,
+      ],
+    ] as const
+    for (const [name, program] of programs) {
+      const self = yield* snapshot(program)
+      const diagnostics = Analysis.diagnostics(self)
+      assert.deepEqual(
+        diagnostics.map((diagnostic) => diagnostic.code),
+        name === 'escape' ? ['SEM0089'] : [],
+      )
+      if (name === 'escape') {
+        assert.strictEqual(
+          diagnostics.at(0)?.span.start,
+          program.indexOf(' Effect.useReleaseNonParking'),
+        )
+        assert.strictEqual(
+          diagnostics.at(0)?.span.end,
+          program.indexOf('\n', program.indexOf(' Effect.useReleaseNonParking')),
+        )
+      }
+      if (name !== 'escape') {
+        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+      }
+    }
   }),
 )
