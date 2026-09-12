@@ -1572,16 +1572,23 @@ export const complete = (
                       declaration.conformanceImplementation?.ordinal === conformance.ordinal &&
                       declaration.conformanceImplementation.operation === contractName,
                   )
-                : interfaceProviderModule?.declarations.find(
+                : (interfaceProviderModule?.declarations.find(
                     (declaration) =>
                       targetName !== undefined &&
                       declaration.name._tag === 'Present' &&
                       declaration.name.spelling === targetName &&
-                      (declaration.associatedMember === undefined ||
-                        (declaration.associatedMember.owner?.name ??
-                          declaration.associatedMember.ownerSpelling) ===
-                          target.segments.at(0)?.spelling),
-                  )
+                      declaration.associatedMember !== undefined &&
+                      (declaration.associatedMember.owner?.name ??
+                        declaration.associatedMember.ownerSpelling) ===
+                        target.segments.at(0)?.spelling,
+                  ) ??
+                  interfaceProviderModule?.declarations.find(
+                    (declaration) =>
+                      targetName !== undefined &&
+                      declaration.name._tag === 'Present' &&
+                      declaration.name.spelling === targetName &&
+                      declaration.associatedMember === undefined,
+                  ))
             if (implementation === undefined) {
               diagnostics.push(
                 invalidDiagnostic(

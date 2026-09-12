@@ -122,6 +122,9 @@ it.effect('resolves same-named mapped operations within each provider', () =>
 service Counter { effect fn get() -> i32 ? &Counter }
 struct First { value: i32 }
 struct Second { value: i32 }
+struct Third { value: i32 }
+effect fn get(self: &Third) -> i32 { return self.value }
+impl Counter for Third { get: Third.get }
 impl First { effect fn get(self: &Self) -> i32 { return self.value } }
 impl Second { effect fn get(self: &Self) -> i32 { return self.value } }
 impl Counter for First { get: First.get }

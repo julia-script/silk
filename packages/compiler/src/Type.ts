@@ -926,19 +926,19 @@ export const callable = (
     // A well-formed borrowed input supplies validity of its stored parameters for that borrow.
     typeOutlives: normalizeTypeOutlives([
       ...(lifetimes.typeOutlives ?? []),
-      ...parameters_.flatMap((parameter) =>
-        isReference(parameter)
-          ? storageParameters(parameter.target).map((type) => ({
-              type,
-              lifetime: parameter.lifetime,
-            }))
-          : isSlice(parameter)
-            ? storageParameters(parameter.element).map((type) => ({
-                type,
-                lifetime: parameter.lifetime,
-              }))
-            : [],
-      ),
+      ...parameters_.flatMap((parameter) => {
+        if (isReference(parameter))
+          return storageParameters(parameter.target).map((type) => ({
+            type,
+            lifetime: parameter.lifetime,
+          }))
+        if (isSlice(parameter))
+          return storageParameters(parameter.element).map((type) => ({
+            type,
+            lifetime: parameter.lifetime,
+          }))
+        return []
+      }),
     ]),
     unsafe,
     parameters: Object.freeze(Array.from(parameters_)),
