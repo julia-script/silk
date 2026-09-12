@@ -2491,7 +2491,10 @@ effect fn limitsCase<'a>(
   if id == 20 { limits.tickets = usize.ONE }
   if id == 21 { limits.ticketBytes = ${validTicketMessage.length} }
   if id == 22 { limits.postHandshakeControls = usize.ONE }
-  if id == 23 { limits.handshakeBodyBytes = ${rsaHandshakeBodyBytes - 1} }
+  if id == 23 {
+    limits.handshakeBodyBytes = ${rsaHandshakeBodyBytes - 1}
+    limits.cookieBytes = ${rsaExactBoundaryCookieBytes - 1}
+  }
   if id == 19 {
     limits.handshakeBodyBytes = ${rsaHandshakeBodyBytes}
     limits.cookieBytes = ${rsaExactBoundaryCookieBytes}
