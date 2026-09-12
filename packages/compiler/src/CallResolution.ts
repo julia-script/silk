@@ -2339,14 +2339,31 @@ export const analyzeFunctionItem = (
     const partial = new Map<string, Type.GenericArgument>(callLifetimes.substitution)
     const attempt = (): boolean => {
       const parametersCompatible =
-        contextualPattern.parameters.length === expectedCallable.parameters.length &&
-        contextualPattern.parameters.every((parameter, ordinal) => {
-          const expectedParameter = expectedCallable.parameters.at(ordinal)
-          return (
-            expectedParameter !== undefined &&
-            TypeInference.infer(parameter, expectedParameter, partial, itemInference)
-          )
-        })
+        contextualPattern.lifetimeBinders.length > 0
+          ? TypeInference.infer(
+              Type.callable(
+                contextualPattern.parameters,
+                Type.unit,
+                contextualPattern,
+                contextualPattern.mode,
+              ),
+              Type.callable(
+                expectedCallable.parameters,
+                Type.unit,
+                expectedCallable,
+                expectedCallable.mode,
+              ),
+              partial,
+              itemInference,
+            )
+          : contextualPattern.parameters.length === expectedCallable.parameters.length &&
+            contextualPattern.parameters.every((parameter, ordinal) => {
+              const expectedParameter = expectedCallable.parameters.at(ordinal)
+              return (
+                expectedParameter !== undefined &&
+                TypeInference.infer(parameter, expectedParameter, partial, itemInference)
+              )
+            })
       const patternResult = contextualPattern.result
       const expectedResult = expectedCallable.result
       // The inputs may determine the named callback before the enclosing combinator has
@@ -2363,8 +2380,12 @@ export const analyzeFunctionItem = (
             )
           : Type.isParameter(expectedResult) ||
             TypeInference.infer(patternResult, expectedResult, partial, itemInference)
-      const allBindersDetermined = (contract?.binders ?? []).every((parameter) =>
-        partial.has(Type.key(parameter)),
+      const allBindersDetermined = (contract?.binders ?? []).every(
+        (parameter) =>
+          partial.has(Type.key(parameter)) ||
+          contextualPattern.lifetimeBinders.some(
+            (binder) => Lifetime.key(binder) === Type.key(parameter),
+          ),
       )
       return parametersCompatible && resultCompatible && allBindersDetermined
     }
@@ -2400,11 +2421,45 @@ export const analyzeFunctionItem = (
   const typeArguments = Object.freeze(
     specialized
       ? (contract?.binders ?? []).flatMap((parameter) => {
-          const argument = contextual.get(Type.key(parameter))
+          const argument =
+            contextual.get(Type.key(parameter)) ??
+            callable?.lifetimeBinders.find((binder) => Lifetime.key(binder) === Type.key(parameter))
           return argument === undefined ? [] : [argument]
         })
       : [],
   )
+  // A fully selected function item needs no runtime constraint dictionary. Discharge its
+  // declaration obligations before erasing the schema; open items keep their existing checks.
+  const closedConstraints =
+    specialized &&
+    typeArguments.length === contract?.binders.length &&
+    typeArguments.every(Type.isRuntimeConcreteGenericArgument) &&
+    callable?.schema !== undefined &&
+    callable.schema.constraints.length > 0
+      ? solveCallableConstraints(
+          callable.schema.constraints,
+          callable.schema.origins,
+          contextual,
+          caller,
+          resolution,
+          node.span,
+        )
+      : undefined
+  if (
+    callable !== undefined &&
+    closedConstraints !== undefined &&
+    closedConstraints.diagnostics.length === 0 &&
+    closedConstraints.evidence.every((evidence) => evidence._tag !== 'Assumed')
+  ) {
+    callable = Type.callable(
+      callable.parameters,
+      callable.result,
+      callable,
+      callable.mode,
+      undefined,
+      callable.unsafe,
+    )
+  }
   // A foreign function is callable only; the call path discards this item and resolves the
   // declaration directly, so the diagnostic survives exactly at first-class uses.
   // A static function has no runtime function item either (STATIC-001).
@@ -2432,7 +2487,10 @@ export const analyzeFunctionItem = (
           node.span,
           formation.typeOutlives,
         )
-  const available = firstClass === undefined && lifetimeDiagnostics.length === 0
+  const available =
+    firstClass === undefined &&
+    lifetimeDiagnostics.length === 0 &&
+    (closedConstraints?.diagnostics.length ?? 0) === 0
   const type =
     callable === undefined || !available
       ? unavailableExpressionType
@@ -2449,6 +2507,7 @@ export const analyzeFunctionItem = (
     }),
     diagnostics: Object.freeze([
       ...constraints.diagnostics,
+      ...(closedConstraints?.diagnostics ?? []),
       ...lifetimeDiagnostics,
       ...(firstClass === undefined ? [] : [firstClass]),
     ]),

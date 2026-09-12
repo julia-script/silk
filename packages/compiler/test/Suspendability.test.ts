@@ -1101,6 +1101,30 @@ it.effect('preserves symbolic bracket rows without extending captured or resourc
       ['captured', capturedScopedResourceSource],
       ['direct', direct],
       [
+        'borrowed-generic-resource',
+        `import silk.effect { Effect }
+struct Resource<'storage, P> { provider: &'storage mut P }
+effect fn scoped<'env, A, E, ?R, P>(
+  provider: &'env mut P,
+  callback: once fn<'env>() -> once Effect<'env; A ! E ? R>,
+) -> A ! E ? R {
+  let use = effect fn(owned: &mut Resource<'env, P>) -> A ! E ? R {
+    drop owned
+    return run callback()
+  }
+  let release = effect fn(owned: &mut Resource<'env, P>) -> () { drop owned return () }
+  return run Effect.useReleaseNonParking(
+    Resource<'env, P> { provider: move provider }, move use, move release,
+  )
+}
+pub effect fn main() -> i32 {
+  let mut provider = 0
+  let value = 42
+  let callback = effect fn() -> i32 { return value }
+  return run scoped(&mut provider, move callback)
+}`,
+      ],
+      [
         'escape',
         `import silk.effect { Effect }
 struct Resource { value: i32 }

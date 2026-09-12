@@ -923,7 +923,23 @@ export const callable = (
     environment: lifetimes.environment,
     lifetimeBinders: Object.freeze([...lifetimes.lifetimeBinders]),
     lifetimeBounds: Lifetime.assumptions(lifetimes.lifetimeBounds ?? []).bounds,
-    typeOutlives: normalizeTypeOutlives(lifetimes.typeOutlives ?? []),
+    // A well-formed borrowed input supplies validity of its stored parameters for that borrow.
+    typeOutlives: normalizeTypeOutlives([
+      ...(lifetimes.typeOutlives ?? []),
+      ...parameters_.flatMap((parameter) =>
+        isReference(parameter)
+          ? storageParameters(parameter.target).map((type) => ({
+              type,
+              lifetime: parameter.lifetime,
+            }))
+          : isSlice(parameter)
+            ? storageParameters(parameter.element).map((type) => ({
+                type,
+                lifetime: parameter.lifetime,
+              }))
+            : [],
+      ),
+    ]),
     unsafe,
     parameters: Object.freeze(Array.from(parameters_)),
     result,
@@ -2590,6 +2606,7 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
         else binderScope.set(Lifetime.key(binder), count - 1)
       }
     } else if (isCallable(type)) {
+      if (type.schema !== undefined) pushBinders(type.schema.binders)
       visitArgument(type.environment)
       for (const binder of type.lifetimeBinders)
         binderScope.set(Lifetime.key(binder), (binderScope.get(Lifetime.key(binder)) ?? 0) + 1)
@@ -2602,7 +2619,6 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
         visitType(bound.type)
         visitArgument(bound.lifetime)
       }
-      if (type.schema !== undefined) pushBinders(type.schema.binders)
       for (const parameter_ of type.parameters) visitType(parameter_)
       visitType(type.result)
       if (type.schema !== undefined) {
@@ -3815,7 +3831,12 @@ export const satisfiesOutlives = (
   proves: (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime) => boolean,
 ): boolean => {
   const assumed = (type: Type): boolean =>
-    bounds.some((bound) => equals(bound.type, type) && proves(bound.lifetime, lifetime))
+    bounds.some(
+      (bound) =>
+        (equals(bound.type, type) ||
+          storageParameters(bound.type).some((parameter) => equals(parameter, type))) &&
+        proves(bound.lifetime, lifetime),
+    )
   if (assumed(self)) return true
   if (!storageLifetimes(self).every((region) => proves(region, lifetime))) return false
   return storageParameters(self).every(

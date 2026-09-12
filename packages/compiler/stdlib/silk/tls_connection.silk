@@ -86,7 +86,9 @@
 //!   }
 //! }
 //!
-//! effect fn inspect<'transport, P>(connection: &mut Connection<'transport, P>) -> i32 {
+//! effect<'transport> fn inspect<'transport, P>(
+//!   connection: &'transport mut Connection<'transport, P>,
+//! ) -> i32 {
 //!   drop connection
 //!   return 0
 //! }
@@ -114,7 +116,12 @@
 //!     alpn: AlpnConfig.defaults(),
 //!     limits: ClientLimits.defaults(),
 //!   }
-//!   let attempt = withClient(&mut transport, &config, ConnectionOptions.defaults(), inspect)
+//!   let attempt = withClient<i32, never>(
+//!     &mut transport,
+//!     &config,
+//!     ConnectionOptions.defaults(),
+//!     inspect,
+//!   )
 //!     |> Effect.provideMut<TrustSource>(&mut trust)
 //!     |> Effect.provideMut<SystemClock>(&mut wall)
 //!     |> Effect.provideMut<MonotonicClock>(&mut monotonic)
@@ -224,13 +231,16 @@ impl<'transport, P> Connection<'transport, P> {
   ) -> ReadTransfer
   ! ConnectionError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random
-  where &mut P provides &mut ByteDuplex from &mut ByteDuplex {
+  where &mut P provides &ByteDuplex from &mut ByteDuplex
+    | &mut MonotonicClock
+    | &mut Allocator
+    | &mut Random {
     if output.length == usize.ZERO { return ReadTransfer.Data {count: usize.ZERO} }
     if self.state.phaseValue == ConnectionPhase.Invalid {
       fail connectionIo(ByteDuplex.closed(ByteIoOperation.Read))
     }
     let operation = readSomeLoop(&mut self.state, move output, &deadline)
-    return run operation
+    return run move operation
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
   }
 
@@ -242,13 +252,16 @@ impl<'transport, P> Connection<'transport, P> {
   ) -> usize
   ! ConnectionError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random
-  where &mut P provides &mut ByteDuplex from &mut ByteDuplex {
+  where &mut P provides &ByteDuplex from &mut ByteDuplex
+    | &mut MonotonicClock
+    | &mut Allocator
+    | &mut Random {
     if input.length == usize.ZERO { return usize.ZERO }
     if self.state.phaseValue != ConnectionPhase.Open {
       fail connectionIo(ByteDuplex.closed(ByteIoOperation.Write))
     }
     let operation = writeSomeLoop(&mut self.state, move input, &deadline)
-    return run operation
+    return run move operation
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
   }
 
@@ -259,12 +272,15 @@ impl<'transport, P> Connection<'transport, P> {
   ) -> ()
   ! ConnectionError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random
-  where &mut P provides &mut ByteDuplex from &mut ByteDuplex {
+  where &mut P provides &ByteDuplex from &mut ByteDuplex
+    | &mut MonotonicClock
+    | &mut Allocator
+    | &mut Random {
     if self.state.phaseValue == ConnectionPhase.Invalid {
       fail connectionIo(ByteDuplex.closed(ByteIoOperation.Flush))
     }
     let operation = flushConnection(&mut self.state, move deadline)
-    return run operation
+    return run move operation
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
   }
 
@@ -275,13 +291,16 @@ impl<'transport, P> Connection<'transport, P> {
   ) -> ()
   ! ConnectionError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random
-  where &mut P provides &mut ByteDuplex from &mut ByteDuplex {
+  where &mut P provides &ByteDuplex from &mut ByteDuplex
+    | &mut MonotonicClock
+    | &mut Allocator
+    | &mut Random {
     if self.state.phaseValue == ConnectionPhase.Invalid {
       fail connectionIo(ByteDuplex.closed(ByteIoOperation.ShutdownWrite))
     }
     if self.state.phaseValue == ConnectionPhase.WriteShutdown { return () }
     let operation = shutdownConnection(&mut self.state, move deadline)
-    return run operation
+    return run move operation
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
   }
 }
@@ -386,8 +405,12 @@ pub effect fn withClient<
   | &mut MonotonicClock
   | &mut Allocator
   | &mut Random
-where &'env mut P provides &mut ByteDuplex from &mut ByteDuplex,
-  CallbackRequirements in Without<CallbackRequirements, &mut ByteDuplex> {
+where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut P provides &ByteDuplex from &mut ByteDuplex
+    | &mut MonotonicClock
+    | &mut Allocator
+    | &mut Random,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
   let lease = TransportLease<'env, P> {provider: move transport}
   let use = effect fn(owned: &mut TransportLease<'env, P>) -> A
   ! E | ConnectionError | TrustSourceError | OutOfMemoryError
@@ -438,8 +461,11 @@ effect fn acquireAndUse<
   | &mut MonotonicClock
   | &mut Allocator
   | &mut Random
-where &'transport mut P provides &mut ByteDuplex from &mut ByteDuplex,
-  CallbackRequirements in Without<CallbackRequirements, &mut ByteDuplex> {
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex
+    | &mut MonotonicClock
+    | &mut Allocator
+    | &mut Random,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
   let trust = run TrustSource.load(options.trust)
   let validationTime = run SystemClock.now()
   let made = run Client.make(config, move trust, move validationTime)
@@ -452,9 +478,9 @@ where &'transport mut P provides &mut ByteDuplex from &mut ByteDuplex,
     inputLength: usize.ZERO,
     phaseValue: ConnectionPhase.Open,
   }
-  let mut connection = Connection<'transport, P> {
+  let mut connection = Connection {
     state: move state,
-    transport: move transport,
+    transport: &mut transport.*,
   }
   let start = run MonotonicClock.now()
   let deadline = MonotonicClock.deadlineAfter(&start, options.handshakeTimeoutNanoseconds)

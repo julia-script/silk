@@ -1576,7 +1576,11 @@ export const complete = (
                     (declaration) =>
                       targetName !== undefined &&
                       declaration.name._tag === 'Present' &&
-                      declaration.name.spelling === targetName,
+                      declaration.name.spelling === targetName &&
+                      (declaration.associatedMember === undefined ||
+                        (declaration.associatedMember.owner?.name ??
+                          declaration.associatedMember.ownerSpelling) ===
+                          target.segments.at(0)?.spelling),
                   )
             if (implementation === undefined) {
               diagnostics.push(

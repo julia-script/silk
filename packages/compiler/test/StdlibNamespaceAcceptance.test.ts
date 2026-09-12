@@ -70,8 +70,8 @@ effect fn makeProvider() -> MemoryByteDuplex ! OutOfMemoryError ? &mut Allocator
   })
   return run MemoryByteDuplex.make(move reads, move writes, 16, 8, Option.none<i32>())
 }
-effect fn authenticated<'transport, P>(
-  connection: &mut Connection<'transport, P>
+effect<'transport> fn authenticated<'transport, P>(
+  connection: &'transport mut Connection<'transport, P>
 ) -> i32 ? &mut Audit {
   if connection.phase() == ConnectionPhase.Invalid { return 0 }
   run Audit.record()
@@ -89,8 +89,12 @@ effect fn connect<'env, P>(
   | &mut MonotonicClock
   | &mut Allocator
   | &mut Random
-where &'env mut P provides &mut ByteDuplex from &mut ByteDuplex {
-  return run withClient(move transport, config, move options, authenticated)
+where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut P provides &ByteDuplex from &mut ByteDuplex
+    | &mut MonotonicClock
+    | &mut Allocator
+    | &mut Random {
+  return run withClient<i32, never>(move transport, config, move options, authenticated)
 }
 pub fn main() -> i32 { return 42 }`
     const snapshot = yield* AnalysisFixture.retainingMain(
@@ -209,8 +213,8 @@ import silk.tls_client { ClientConfig }
 import silk.tls_connection { Connection, ConnectionError, ConnectionOptions, withClient }
 import silk.trust_snapshot { TrustSourceError }
 import silk.trust_source { TrustSource }
-effect fn bypass<'transport, P>(
-  connection: &mut Connection<'transport, P>
+effect<'transport> fn bypass<'transport, P>(
+  connection: &'transport mut Connection<'transport, P>
 ) -> i32 ? &mut ByteDuplex {
   drop connection
   let closed = run Effect.result(ByteDuplex.close())
@@ -228,8 +232,12 @@ effect fn rejected<'env, P>(
   | &mut MonotonicClock
   | &mut Allocator
   | &mut Random
-where &'env mut P provides &mut ByteDuplex from &mut ByteDuplex {
-  return run withClient(move transport, config, move options, bypass)
+where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut P provides &ByteDuplex from &mut ByteDuplex
+    | &mut MonotonicClock
+    | &mut Allocator
+    | &mut Random {
+  return run withClient<i32, never>(move transport, config, move options, bypass)
 }
 pub fn main() -> i32 { return 42 }`
     const bypassSnapshot = yield* AnalysisFixture.retainingMain(
@@ -243,7 +251,7 @@ pub fn main() -> i32 { return 42 }`
     )
     assert.strictEqual(
       bypassDiagnostics.at(0)?.span.start,
-      bypassSource.indexOf(' withClient(move transport'),
+      bypassSource.indexOf(' withClient<i32, never>(move transport'),
     )
   }),
 )

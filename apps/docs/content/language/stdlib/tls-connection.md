@@ -92,7 +92,9 @@ fn emptyTrust() -> TrustSnapshot {
   }
 }
 
-effect fn inspect<'transport, P>(connection: &mut Connection<'transport, P>) -> i32 {
+effect<'transport> fn inspect<'transport, P>(
+  connection: &'transport mut Connection<'transport, P>,
+) -> i32 {
   drop connection
   return 0
 }
@@ -120,7 +122,12 @@ pub fn main() -> i32 {
     alpn: AlpnConfig.defaults(),
     limits: ClientLimits.defaults(),
   }
-  let attempt = withClient(&mut transport, &config, ConnectionOptions.defaults(), inspect)
+  let attempt = withClient<i32, never>(
+    &mut transport,
+    &config,
+    ConnectionOptions.defaults(),
+    inspect,
+  )
     |> Effect.provideMut<TrustSource>(&mut trust)
     |> Effect.provideMut<SystemClock>(&mut wall)
     |> Effect.provideMut<MonotonicClock>(&mut monotonic)
@@ -327,7 +334,7 @@ Borrows the authenticated session evidence retained by this connection.
 ### Method `Connection.readSome`
 
 ```silk
-pub effect<'env> fn readSome<'transport: 'env, P: 'env, 'life2: 'env, 'life3: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, output: &'life3 mut [u8], deadline: silk/option.Option<silk/system_clock.Instant>) -> ReadTransfer ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &mut ByteDuplex from &mut ByteDuplex
+pub effect<'env> fn readSome<'transport: 'env, P: 'env, 'life2: 'env, 'life3: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, output: &'life3 mut [u8], deadline: silk/option.Option<silk/system_clock.Instant>) -> ReadTransfer ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
 ```
 
 Reads one verified plaintext prefix or clean authenticated peer end.
@@ -341,7 +348,7 @@ Mandatory TLS output is sent first. Underlying end without `close_notify` is tru
 ### Method `Connection.writeSome`
 
 ```silk
-pub effect<'env> fn writeSome<'transport: 'env, P: 'env, 'life2: 'env, 'life3: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, input: &'life3 [u8], deadline: silk/option.Option<silk/system_clock.Instant>) -> usize ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &mut ByteDuplex from &mut ByteDuplex
+pub effect<'env> fn writeSome<'transport: 'env, P: 'env, 'life2: 'env, 'life3: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, input: &'life3 [u8], deadline: silk/option.Option<silk/system_clock.Instant>) -> usize ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
 ```
 
 Encrypts and transmits one positive application prefix.
@@ -351,7 +358,7 @@ Encrypts and transmits one positive application prefix.
 ### Method `Connection.flush`
 
 ```silk
-pub effect<'env> fn flush<'transport: 'env, P: 'env, 'life2: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, deadline: silk/option.Option<silk/system_clock.Instant>) -> () ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &mut ByteDuplex from &mut ByteDuplex
+pub effect<'env> fn flush<'transport: 'env, P: 'env, 'life2: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, deadline: silk/option.Option<silk/system_clock.Instant>) -> () ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
 ```
 
 Drains mandatory TLS output and flushes the underlying byte boundary.
@@ -361,7 +368,7 @@ Drains mandatory TLS output and flushes the underlying byte boundary.
 ### Method `Connection.shutdownWrite`
 
 ```silk
-pub effect<'env> fn shutdownWrite<'transport: 'env, P: 'env, 'life2: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, deadline: silk/option.Option<silk/system_clock.Instant>) -> () ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &mut ByteDuplex from &mut ByteDuplex
+pub effect<'env> fn shutdownWrite<'transport: 'env, P: 'env, 'life2: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, deadline: silk/option.Option<silk/system_clock.Instant>) -> () ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
 ```
 
 Sends and flushes TLS `close_notify`, then closes only the transport write direction.
@@ -371,7 +378,7 @@ Sends and flushes TLS `close_notify`, then closes only the transport write direc
 ## `withClient`
 
 ```silk
-pub effect<'env1> fn withClient<'env: 'env1, A, E, ?CallbackRequirements, P: 'env1, 'life5: 'env1, 'life6: 'env1, 'env1>(transport: &'env mut P, config: &'life5 silk/tls_client.ClientConfig<'life6>, options: ConnectionOptions, callback: for<'call> once fn<'env>(&'call mut silk/tls_connection.Connection<'call, P>) -> once Effect<'call; A ! E ? CallbackRequirements>) -> A ! E | ConnectionError | TrustSourceError | OutOfMemoryError ? CallbackRequirements | &mut TrustSource | &mut SystemClock | &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &mut ByteDuplex from &mut ByteDuplex, CallbackRequirements in Without<CallbackRequirements, &mut ByteDuplex>
+pub effect<'env1> fn withClient<'env: 'env1, A, E, ?CallbackRequirements, P: 'env1, 'life5: 'env1, 'life6: 'env1, 'env1>(transport: &'env mut P, config: &'life5 silk/tls_client.ClientConfig<'life6>, options: ConnectionOptions, callback: for<'call> once fn<'env>(&'call mut silk/tls_connection.Connection<'call, P>) -> once Effect<'call; A ! E ? CallbackRequirements>) -> A ! E | ConnectionError | TrustSourceError | OutOfMemoryError ? CallbackRequirements | &mut TrustSource | &mut SystemClock | &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random, CallbackRequirements in Without<CallbackRequirements, &ByteDuplex>
 ```
 
 Acquires, authenticates, uses, and terminally closes one scoped TLS client.

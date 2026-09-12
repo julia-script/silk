@@ -355,13 +355,16 @@ fn validAuthentication<'a>(value: &Authentication<'a>) -> bool {
     && value.sanIndex() == usize.ZERO
 }
 
-effect fn useAuthenticated<'transport, P>(
-  connection: &mut Connection<'transport, P>,
+effect<'transport> fn useAuthenticated<'transport, P>(
+  connection: &'transport mut Connection<'transport, P>,
 ) -> i32
 ! ConnectionError | OutOfMemoryError
 ? &mut MonotonicClock | &mut Allocator | &mut Random
-where &mut P provides &mut ByteDuplex from &mut ByteDuplex {
-  let authentication = connection.authentication()
+where &mut P provides &ByteDuplex from &mut ByteDuplex
+  | &mut MonotonicClock
+  | &mut Allocator
+  | &mut Random {
+  let authentication = Connection.authentication(&connection.*)
   match move authentication {
     Option.None => { return 1 }
     Option.Some {value} => { if !validAuthentication(&value) { return 2 } }
@@ -370,9 +373,9 @@ where &mut P provides &mut ByteDuplex from &mut ByteDuplex {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let read = run connection.readSome(&mut plaintext, Option.none<Instant>())
+  let read = run Connection.readSome(&mut connection.*, &mut plaintext, Option.none<Instant>())
   let count = match move read {
-    ReadTransfer.Data {count} => count
+    ReadTransfer.Data {count: transferred} => transferred
     ReadTransfer.End => { return 3 }
   }
   let expected = b"coalesced authenticated plaintext"
@@ -382,35 +385,38 @@ where &mut P provides &mut ByteDuplex from &mut ByteDuplex {
     if plaintext[index] != expected[index] { return 5 }
     index = index + usize.ONE
   }
-  let written = run connection.writeSome(&b"ping", Option.none<Instant>())
+  let written = run Connection.writeSome(&mut connection.*, &b"ping", Option.none<Instant>())
   if written != 4 { return 6 }
-  run connection.flush(Option.none<Instant>())
-  run connection.shutdownWrite(Option.none<Instant>())
-  let ended = run connection.readSome(&mut plaintext, Option.none<Instant>())
+  run Connection.flush(&mut connection.*, Option.none<Instant>())
+  run Connection.shutdownWrite(&mut connection.*, Option.none<Instant>())
+  let ended = run Connection.readSome(&mut connection.*, &mut plaintext, Option.none<Instant>())
   match move ended {
-    ReadTransfer.Data {count} => { return 7 }
+    ReadTransfer.Data {count: unexpectedCount} => { drop unexpectedCount return 7 }
     ReadTransfer.End => {}
   }
   return 42
 }
 
-effect fn expectTruncation<'transport, P>(
-  connection: &mut Connection<'transport, P>,
+effect<'transport> fn expectTruncation<'transport, P>(
+  connection: &'transport mut Connection<'transport, P>,
 ) -> i32
 ! ConnectionError | OutOfMemoryError
 ? &mut MonotonicClock | &mut Allocator | &mut Random
-where &mut P provides &mut ByteDuplex from &mut ByteDuplex {
+where &mut P provides &ByteDuplex from &mut ByteDuplex
+  | &mut MonotonicClock
+  | &mut Allocator
+  | &mut Random {
   let mut plaintext: [u8; 40] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  let first = run connection.readSome(&mut plaintext, Option.none<Instant>())
+  let first = run Connection.readSome(&mut connection.*, &mut plaintext, Option.none<Instant>())
   match move first {
     ReadTransfer.Data {count} => { if count != b"coalesced authenticated plaintext".length { return 1 } }
     ReadTransfer.End => { return 2 }
   }
   let truncated = run Effect.result(
-    connection.readSome(&mut plaintext, Option.none<Instant>())
+    Connection.readSome(&mut connection.*, &mut plaintext, Option.none<Instant>())
   )
   match move truncated {
     Result<ReadTransfer, ConnectionError | OutOfMemoryError>.Success {value} => { return 3 }
@@ -425,19 +431,19 @@ where &mut P provides &mut ByteDuplex from &mut ByteDuplex {
   return 42
 }
 
-effect fn failAuthenticated<'transport, P>(
-  connection: &mut Connection<'transport, P>,
+effect<'transport> fn failAuthenticated<'transport, P>(
+  connection: &'transport mut Connection<'transport, P>,
 ) -> i32
 ! CallbackFailure {
-  match move connection.authentication() {
+  match move Connection.authentication(&connection.*) {
     Option.None => { return 1 }
     Option.Some {value} => { drop value }
   }
   fail CallbackFailure {code: 77}
 }
 
-effect fn shouldNotRun<'transport, P>(
-  connection: &mut Connection<'transport, P>,
+effect<'transport> fn shouldNotRun<'transport, P>(
+  connection: &'transport mut Connection<'transport, P>,
 ) -> i32 ? &mut CallbackAudit {
   drop connection
   run CallbackAudit.invoked()
@@ -646,7 +652,7 @@ effect fn runCases(
 
 effect fn failed<E>(error: E) -> i32 { drop error return -1 }
 
-pub fn main() -> i32 {
+effect fn program() -> i32 ! TrustSourceError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let snapshot = run rootTrust()
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -675,4 +681,8 @@ pub fn main() -> i32 {
   if result != 42 { return result }
   if trust.loads != 5 || wall.calls != 5 { return -2 }
   return 42
+}
+
+pub fn main() -> i32 {
+  return run Effect.catchAll(program(), failed)
 }`

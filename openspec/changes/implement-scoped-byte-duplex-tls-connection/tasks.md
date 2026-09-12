@@ -22,7 +22,7 @@
 - [ ] 4.1 Add the documented `Connection`, `ConnectionOptions`, connection state/error actors, and scoped `withClient` signature over the existing JUL-187 `Client`, and verify structured analysis proves callback lifetime and explicit service/error rows.
 - [ ] 4.2 Implement one-snapshot/one-wall-clock acquisition, private client construction, the single default 30-second absolute handshake deadline, authenticated-only publication, and typed timeout mapping, and verify deterministic handshake cases observe acquisition count, identical deadlines, and no early callback.
 - [ ] 4.3 Implement exact pending-output draining and acknowledgments, plaintext reads, partial application writes, flush, peer `close_notify`, transport truncation, and directional local shutdown, and verify one compact table-driven acceptance source proves byte identity, error mapping, and event order.
-- [ ] 4.4 Scope terminal duplex close with `Effect.ensuringNonParking`, suppress release failure only while preserving the protected outcome, invalidate ambiguous transfers, and verify success, callback failure, handshake failure, suspended cancellation, and repeated-close cases each record exactly one terminal release.
+- [ ] 4.4 Scope terminal duplex close with `Effect.useReleaseNonParking`, suppress release failure only while preserving the protected outcome, invalidate ambiguous transfers, and verify success, callback failure, handshake failure, suspended cancellation, and repeated-close cases each record exactly one terminal release.
 
 ## 5. Portable Evidence and Documentation
 
@@ -33,7 +33,7 @@
 
 ## 6. Delivery and Revalidation
 
-- [ ] 6.1 Publish a coherent task-scoped commit and draft PR stacked on the published JUL-187 head, verify the PR is draft with the intended base/head, and keep its description truthful about provisional ancestry and current checks.
+- [ ] 6.1 Publish a coherent task-scoped commit and draft PR containing the verified JUL-187 implementation, verify the PR is draft with the intended base/head, and keep its description truthful about ancestry and current checks.
 - [ ] 6.2 Run local focused behavior tests plus `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, and measured test-economics commands only; record exact commands, results, and timing deltas without running full `pnpm test` or `pnpm check` locally.
 - [ ] 6.3 Obtain an independent security/correctness review of the exact committed issue diff against its actual stack parent, fix valid findings, and repeat affected focused checks and review after each committed change.
 - [ ] 6.4 Obtain a distinct mandatory `TEST_REVIEW.md` test-economics approval of the exact committed issue diff, fix valid findings, and record the approved evidence/timing delta.

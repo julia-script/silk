@@ -1307,3 +1307,30 @@ pub fn main() -> i32 { let flag = identity(true) if flag { return identity<i32>(
     )
   }),
 )
+
+it.effect('infers the service row of a named generic scoped callback', () =>
+  Effect.gen(function* () {
+    const source = `struct Resource<'data, P> { provider: &'data mut P }
+service ByteDuplex { effect fn read() -> i32 ? &ByteDuplex }
+service Audit { effect fn record() -> () ? &mut Audit }
+fn accept<'env, A, E, ?R, P>(
+  provider: &'env mut P,
+  callback: for<'call> once fn<'env>(&'call mut Resource<'call, P>) -> once Effect<'call; A ! E ? R>,
+) -> () where R in Without<R, ByteDuplex> {
+  drop provider
+  drop callback
+  return ()
+}
+effect<'transport> fn authenticated<'transport, P>(resource: &'transport mut Resource<'transport, P>) -> i32 ? &mut Audit {
+  drop resource
+  run Audit.record()
+  return 42
+}
+fn connect<'env, P>(provider: &'env mut P) -> () {
+  return accept<i32, never>(move provider, authenticated)
+}
+pub fn main() -> i32 { return 42 }`
+    const snapshot = yield* Analysis.ofSource('row-probe', new TextEncoder().encode(source))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)

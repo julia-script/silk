@@ -408,6 +408,26 @@ export const analyze = (
           return true
         })
         for (const failure of failures) {
+          // Nominals below an invocation binder are validated under the callable's declared
+          // preconditions. Free lifetimes and captured values retain the ordinary scope checks.
+          const value = Type.isRepresented(expression.type.type)
+            ? expression.type.type.contract
+            : expression.type.type
+          if (
+            Type.isCallable(value) &&
+            Lifetime.atoms(failure.required).some((region) =>
+              value.lifetimeBinders.some((binder) => Lifetime.equals(binder, region)),
+            ) &&
+            Type.isTypeArgument(failure.argument) &&
+            Type.satisfiesOutlives(
+              failure.argument,
+              failure.required,
+              value.typeOutlives,
+              (longer, shorter) =>
+                Lifetime.outlives(Lifetime.assumptions(value.lifetimeBounds), longer, shorter),
+            )
+          )
+            continue
           const diagnostic = Diagnostic.unsatisfiedLifetimeBound(
             Type.encodeGenericArgument(failure.argument),
             Lifetime.display(failure.required),

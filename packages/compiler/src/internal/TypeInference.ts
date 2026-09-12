@@ -710,10 +710,42 @@ const inferQuantifiedExecutable = (
         )
   }
   const trial = new Map(inferred)
-  if (
-    !inferType(open(pattern, patternSubstitution), open(actual, actualSubstitution), trial, context)
-  )
-    return false
+  // Expected invocation preconditions stay in scope while checking the returned Effect.
+  // Only the rigid comparison uses these assumptions; the escape check below still prevents
+  // an invocation binder from entering the caller's specialization.
+  const openedPattern = open(pattern, patternSubstitution)
+  const proves = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime): boolean =>
+    Lifetime.outlives(
+      Lifetime.assumptions(
+        openedPattern.lifetimeBounds.map((bound) => ({
+          longer: substituteLifetime(bound.longer, trial),
+          shorter: substituteLifetime(bound.shorter, trial),
+        })),
+      ),
+      longer,
+      shorter,
+    ) ||
+    (context.lifetimes?.accepts(longer, shorter, false) ?? false)
+  const scoped: InferenceContext = {
+    ...context,
+    lifetimes: {
+      ...context.lifetimes,
+      accepts: (longer, shorter, invariant) =>
+        proves(longer, shorter) && (!invariant || proves(shorter, longer)),
+      typeOutlives: (type, lifetime) =>
+        satisfiesOutlives(
+          type,
+          lifetime,
+          openedPattern.typeOutlives.map((bound) => ({
+            type: substitute(bound.type, trial),
+            lifetime: substituteLifetime(bound.lifetime, trial),
+          })),
+          proves,
+        ) ||
+        (context.lifetimes?.typeOutlives?.(type, lifetime) ?? false),
+    },
+  }
+  if (!inferType(openedPattern, open(actual, actualSubstitution), trial, scoped)) return false
   for (const [identity, argument] of trial) {
     if (inferred.has(identity)) continue
     const regions = argumentLifetimes(argument)
