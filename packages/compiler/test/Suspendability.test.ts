@@ -1159,3 +1159,33 @@ pub fn main() -> i32 {
     }
   }),
 )
+
+it.effect('proves a scoped generic provider release through recovered service failure', () =>
+  Effect.gen(function* () {
+    const source = `import silk.effect { Effect }
+struct CloseError {}
+service Transport {
+  effect fn close() -> () ! CloseError ? &mut Transport with Intrinsic.nonParking()
+}
+struct Provider {}
+effect fn close(self: &mut Provider) -> () ! CloseError { return () }
+impl Transport for Provider { close: Provider.close }
+struct Resource<'env, P> { provider: &'env mut P }
+effect fn discard(error: CloseError) -> () { drop error return () }
+effect fn scoped<'env, P>(provider: &'env mut P) -> i32
+where &'env mut P provides &Transport from &mut Transport {
+  let use = effect fn(owned: &mut Resource<'env, P>) -> i32 { drop owned return 42 }
+  let release = effect fn(owned: &mut Resource<'env, P>) -> () {
+    let closed = Transport.close() |> Effect.provideMut<Transport>(&mut owned.provider.*)
+    return run Effect.catchAll(move closed, discard)
+  }
+  return run Effect.useReleaseNonParking(
+    Resource<'env, P> { provider: move provider }, move use, move release,
+  )
+}
+pub fn main() -> i32 { let mut provider = Provider {} return run scoped(&mut provider) }`
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+  }),
+)

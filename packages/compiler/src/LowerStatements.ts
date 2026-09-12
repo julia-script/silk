@@ -445,11 +445,16 @@ const lowerStatement = (
       forwardedRequirement === undefined
         ? undefined
         : effectRecipe(fn, forwardedRequirement.binding.protected)
+    // A borrowed provider can materialize its service Effect at construction through
+    // forwardedServiceProvision. Keeping that value only as a recipe loses it when a
+    // later combinator (such as catchAll) consumes the binding as an ordinary operand.
     const forwardedRequirementNeedsRecipe =
       forwardedRequirement !== undefined &&
       (forwardedResultEffect === undefined ||
         effectValueByIdentity(fn.layout, forwardedResultEffect) === undefined ||
-        protectedRecipe?._tag === 'ServiceEffectConstruct' ||
+        (protectedRecipe?._tag === 'ServiceEffectConstruct' &&
+          (forwardedRequirement.selection.access === 'Take' ||
+            forwardedRequirement.provider._tag !== 'ValueBorrow')) ||
         protectedRecipe !== forwardedRequirement.binding.protected)
     if (
       forwardedRequirementNeedsRecipe ||
