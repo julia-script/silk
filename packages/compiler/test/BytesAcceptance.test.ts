@@ -312,6 +312,8 @@ it('keeps focused TLS client witnesses independent and bounded', () => {
   )
   assert.include(tlsClientHandshakePolicyNativeSource, 'let expectedFinished = run loadFixture(47)')
   assert.include(tlsClientHandshakePolicyNativeSource, 'random.filled != expectedEntropy')
+  assert.include(tlsClientHandshakePolicyNativeSource, 'return run matchesHello(&client, 52)')
+  assert.notInclude(tlsClientHandshakePolicyNativeSource, 'let expected = run loadFixture(52)')
   assert.include(
     tlsClientDemandRequestNativeSource,
     'feedToDemand(&mut client, Bytes.asSlice(&flight), Demand.NeedOutput)',
@@ -343,6 +345,32 @@ it('keeps focused TLS client witnesses independent and bounded', () => {
     'let code = run feedFragments(&mut client, Bytes.asSlice(&malformed))',
   )
   assert.include(tlsClientClosureControlNativeSource, 'TlsError.HandshakeTruncated')
+  assert.include(tlsClientClosureControlNativeSource, 'fn isEmptyBuffer(')
+  assert.include(
+    tlsClientClosureControlNativeSource,
+    '&& isEmptyBuffer(client.readPlaintext(&mut empty))',
+  )
+  assert.include(
+    tlsClientClosureControlNativeSource,
+    '&& isTruncated(client.readPlaintext(&mut plaintext))',
+  )
+  const resourceOwnerStart = tlsClientResourcePolicyNativeSource.indexOf('effect fn limitsCase')
+  const resourceHelpersStart = tlsClientResourcePolicyNativeSource.indexOf(
+    'effect fn feedComplete',
+    resourceOwnerStart,
+  )
+  const resourceOwner = tlsClientResourcePolicyNativeSource.slice(
+    resourceOwnerStart,
+    resourceHelpersStart,
+  )
+  assert.isNotEmpty(resourceOwner)
+  assert.notInclude(resourceOwner, '&mut client.*')
+  assert.lengthOf(resourceOwner.match(/&mut client/g) ?? [], 14)
+  const resourceHelpers = tlsClientResourcePolicyNativeSource.slice(
+    resourceHelpersStart,
+    tlsClientResourcePolicyNativeSource.indexOf('effect fn runLimitCase', resourceHelpersStart),
+  )
+  assert.lengthOf(resourceHelpers.match(/&mut client\.\*/g) ?? [], 2)
   assert.include(tlsClientNativeFixtureSource, 'static const uint8_t fixture_0[]')
   assert.notInclude(tlsClientNativeFixtureSource, 'silk_tls_mark')
 })

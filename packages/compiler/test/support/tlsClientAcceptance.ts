@@ -2174,9 +2174,7 @@ effect fn handshakePolicyCase<'a>(
   if id == 2 {
     let retry = run loadFixture(${nativeFixtureIds.cookieRetry})
     if (run feedAll(&mut client, Bytes.asSlice(&retry))) != 0 { return false }
-    let expected = run loadFixture(${nativeFixtureIds.cookieClientRetry})
-    let actual = client.pendingOutput()
-    return sameBytes(actual, Bytes.asSlice(&expected))
+    return run matchesHello(&client, ${nativeFixtureIds.cookieClientRetry})
   }
 
   if id == 1 || id == 27 || id == 28 {
@@ -2271,6 +2269,16 @@ fn isHandshakeTruncated(result: Result<Progress, TlsError>) -> bool {
   }
 }
 
+fn isEmptyBuffer(result: Result<Progress, TlsError>) -> bool {
+  return match move result {
+    Result<Progress, TlsError>.Success {value} => false
+    Result<Progress, TlsError>.Failure {error} => match move error {
+      TlsError.EmptyBuffer => true
+      _ => false
+    }
+  }
+}
+
 effect fn closureControlCase(id: i32, master: &TrustSnapshot) -> bool
 ! OutOfMemoryError
 ? &mut Allocator | &mut Random {
@@ -2317,7 +2325,7 @@ effect fn closureControlCase(id: i32, master: &TrustSnapshot) -> bool
     }
     let mut empty: [u8; 0] = []
     return validPlaintext(&plaintext, written)
-      && isTruncated(client.readPlaintext(&mut empty))
+      && isEmptyBuffer(client.readPlaintext(&mut empty))
       && isTruncated(client.readPlaintext(&mut plaintext))
   }
 
@@ -2521,13 +2529,13 @@ effect fn limitsCase<'a>(
   drop client.ackWritten(helloLength)
   if id == 19 {
     let exactFlight = run loadFixture(${nativeFixtureIds.serverFlight})
-    return run authenticateWithinLimits(&mut client.*, Bytes.asSlice(&exactFlight))
+    return run authenticateWithinLimits(&mut client, Bytes.asSlice(&exactFlight))
   }
   if id >= 20 && id <= 22 {
     let exactFlight = run loadFixture(${nativeFixtureIds.serverFlight})
-    if !(run authenticateWithinLimits(&mut client.*, Bytes.asSlice(&exactFlight))) { return false }
+    if !(run authenticateWithinLimits(&mut client, Bytes.asSlice(&exactFlight))) { return false }
     let first = run loadFixture(${nativeFixtureIds.validTicketRecord1})
-    if !(run feedComplete(&mut client.*, Bytes.asSlice(&first), usize.ONE)) { return false }
+    if !(run feedComplete(&mut client, Bytes.asSlice(&first), usize.ONE)) { return false }
     let second = run loadFixture(${nativeFixtureIds.validTicketRecord2})
     let mut kind = TlsLimitKind.TicketBytes
     let mut limit: usize = ${validTicketMessage.length}
@@ -2538,12 +2546,12 @@ effect fn limitsCase<'a>(
       kind = TlsLimitKind.PostHandshakeControls
       limit = usize.ONE
     }
-    return run feedExpectedLimit(&mut client.*, Bytes.asSlice(&second), kind, limit)
+    return run feedExpectedLimit(&mut client, Bytes.asSlice(&second), kind, limit)
   }
   if id == 15 {
     let retry = run loadFixture(${nativeFixtureIds.cookieRetry})
     return run feedExpectedLimit(
-      &mut client.*,
+      &mut client,
       Bytes.asSlice(&retry),
       TlsLimitKind.CookieBytes,
       ${retryCookieLength - 1},
@@ -2551,9 +2559,9 @@ effect fn limitsCase<'a>(
   }
   if id == 16 {
     let ccs = run loadFixture(${nativeFixtureIds.validCcs})
-    if !(run feedComplete(&mut client.*, Bytes.asSlice(&ccs), 8)) { return false }
+    if !(run feedComplete(&mut client, Bytes.asSlice(&ccs), 8)) { return false }
     return run feedExpectedLimit(
-      &mut client.*,
+      &mut client,
       Bytes.asSlice(&ccs),
       TlsLimitKind.EmptyRecords,
       usize.ONE,
@@ -2562,7 +2570,7 @@ effect fn limitsCase<'a>(
   let flight = run loadFixture(${nativeFixtureIds.serverFlight})
   if id == 10 {
     return run feedExpectedLimit(
-      &mut client.*,
+      &mut client,
       Bytes.asSlice(&flight),
       TlsLimitKind.HandshakeMessages,
       usize.ONE,
@@ -2570,7 +2578,7 @@ effect fn limitsCase<'a>(
   }
   if id == 23 {
     return run feedExpectedLimit(
-      &mut client.*,
+      &mut client,
       Bytes.asSlice(&flight),
       TlsLimitKind.HandshakeBodyBytes,
       ${rsaHandshakeBodyBytes - 1},
@@ -2578,7 +2586,7 @@ effect fn limitsCase<'a>(
   }
   if id == 11 {
     return run feedExpectedLimit(
-      &mut client.*,
+      &mut client,
       Bytes.asSlice(&flight),
       TlsLimitKind.PeerCertificates,
       usize.ONE,
@@ -2586,7 +2594,7 @@ effect fn limitsCase<'a>(
   }
   if id == 12 {
     return run feedExpectedLimit(
-      &mut client.*,
+      &mut client,
       Bytes.asSlice(&flight),
       TlsLimitKind.CertificateBytes,
       ${rsaCertificateBytes - 1},
@@ -2594,7 +2602,7 @@ effect fn limitsCase<'a>(
   }
   if id == 13 {
     return run feedExpectedLimit(
-      &mut client.*,
+      &mut client,
       Bytes.asSlice(&flight),
       TlsLimitKind.CertificateTotalBytes,
       ${rsaCertificateTotalBytes - 1},
@@ -2602,14 +2610,14 @@ effect fn limitsCase<'a>(
   }
   if id == 14 {
     return run feedExpectedLimit(
-      &mut client.*,
+      &mut client,
       Bytes.asSlice(&flight),
       TlsLimitKind.ExtensionBytes,
       ${serverHelloExtensionLength - 1},
     )
   }
   return run feedExpectedLimit(
-    &mut client.*,
+    &mut client,
     Bytes.asSlice(&flight),
     TlsLimitKind.HandshakeBytes,
     ${rsaHandshakeBytes - 1},

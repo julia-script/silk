@@ -47,19 +47,19 @@
   `main() == 42` in 306.62 seconds with 4,436,836,352 bytes maximum RSS. The final independently
   composed source is 22,086 bytes/281 lines, has no native fixture bridge or negative matrix, and
   awaits its exact-source rerun.
-- At published head `807246955578db8f1dbae2f639be69468bf4c892` plus the local evidence-only
-  driver correction, the focused sources are: core 17,705 bytes/557 lines at
+- At candidate head `a8df45f455ff9cb34e743bd4ee316022c7a6f198` plus the current
+  acceptance-only corrections, the focused sources are: core 17,705 bytes/557 lines at
   `0ec8aff9e37229d3a83a95a103d967b3d3484a05bdbf1e7ad4ffc55110e13f55`;
   demand-request 14,473 bytes/471 lines at
   `8ca4a5a381978680658386f7f9236ebdf1a7d728ec4e48d2f12d3bfc3b14a75c`;
   key-update 17,289 bytes/522 lines at
   `f4965a168845b503fefebb8c7024a80d9abc5d792f841b92cc3fe5cd43792c3a`;
-  closure-control 17,713 bytes/535 lines at
-  `0225f60519fe438fa42f836cf71f74c446920ecf3811de5923230a055896e078`;
-  handshake-policy 17,470 bytes/550 lines at
-  `2560d26cd0257e174a6405391a0ffe9706738b87bb1cf6a7a3ac7a7334e6116d`;
-  and resource-policy 17,879 bytes/576 lines at
-  `c8bf2ac2218336f5d6a91d0fc6952e192aaa5179f9a88346805a4fa4d42d2e22`.
+  closure-control 17,997 bytes/545 lines at
+  `49ffe20939a882c0944bf188d196385700646e529cb164f88e85f5d28bec5508`;
+  handshake-policy 17,377 bytes/548 lines at
+  `1a982db67d6e24a86cd0af9c3224dcdb928ca477cf7e164c13a79e09c84fe808`;
+  and resource-policy 17,851 bytes/576 lines at
+  `323e0b9335d9e11efe578f9c9a459181047fc80083745fbdd8469b6876268bcb`.
   Each contains one `Client.make`; core, demand-request, key-update, closure-control, and
   handshake-policy contain one allocator and one random provider. Resource-policy contains three
   allocator providers for its rejecting audits and one random provider. The representative Wasm
