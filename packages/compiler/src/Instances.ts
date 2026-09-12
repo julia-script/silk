@@ -1411,12 +1411,23 @@ export const discover = (
   const violationKeys = new Set<string>()
   const specializationFailures = new Map<string, NonConcreteSpecialization>()
   const recordedContexts = new Map<string, Map<string, WorkItem>>()
+  // TLS connection discovery repeats the same long specialization identities across tens of
+  // thousands of paths. Intern the identity atoms locally so path keys retain exact equality
+  // without copying those strings into every ancestor context. These IDs never leave discovery.
+  const contextAtoms = new Map<string, number>()
+  const contextAtom = (value: string): number => {
+    const known = contextAtoms.get(value)
+    if (known !== undefined) return known
+    const identity = contextAtoms.size
+    contextAtoms.set(value, identity)
+    return identity
+  }
   const contextText = (item: WorkItem): string =>
     `${
       item.cleanupMeasure === undefined
         ? 'ordinary'
-        : item.cleanupMeasure.roots.map(Type.runtimeKey).sort().join('\u0000')
-    }\u0001${keyText(item.key)}\u0001${[...item.ancestors.entries()]
+        : contextAtom(item.cleanupMeasure.roots.map(Type.runtimeKey).sort().join('\u0000'))
+    }\u0001${contextAtom(keyText(item.key))}\u0001${[...item.ancestors.entries()]
       .sort(([left], [right]) => {
         if (left < right) return -1
         if (left > right) return 1
@@ -1424,7 +1435,7 @@ export const discover = (
       })
       .map(
         ([declaration, ancestor]) =>
-          `${declaration}\u0002${keyText(ancestor.key)}\u0002${ancestor.structuralProvider === undefined ? '' : Type.key(ancestor.structuralProvider)}`,
+          `${contextAtom(declaration)}\u0002${contextAtom(keyText(ancestor.key))}\u0002${ancestor.structuralProvider === undefined ? '' : contextAtom(Type.key(ancestor.structuralProvider))}`,
       )
       .join('\u0003')}`
   const pending: Array<{ readonly item: WorkItem; readonly context: string }> = []

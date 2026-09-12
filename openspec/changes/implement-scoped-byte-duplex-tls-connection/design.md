@@ -118,7 +118,7 @@ ordinary ambient transport-driving helper, so its public service row omits `Byte
 ambient byte service, wraps it in private `TransportLease`, and passes only
 `&mut Connection<'transport, P>` to a higher-ranked callback. The callback preserves its exact
 `CallbackRequirements` row while the
-constraint `CallbackRequirements in Without<CallbackRequirements, &mut ByteDuplex>` proves that
+constraint `CallbackRequirements in Without<CallbackRequirements, ByteDuplex>` proves that
 the row does not contain an independent ambient transport. Arbitrary unrelated services therefore
 remain available, Connection methods can still use their private provider reborrow, and a callback
 that requests the ambient duplex is rejected. The callback's `'call` lifetime also prevents
