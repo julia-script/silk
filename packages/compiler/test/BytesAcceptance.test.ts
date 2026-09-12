@@ -296,7 +296,6 @@ it('keeps focused TLS client witnesses independent and bounded', () => {
     'PostHandshakeControls',
     'Tickets',
     'TicketBytes',
-    'Arithmetic',
     'Alpn',
     'CertificateDecode',
     'CertificateSanDecode',
@@ -306,6 +305,9 @@ it('keeps focused TLS client witnesses independent and bounded', () => {
   ]) {
     assert.include(tlsClientResourcePolicyNativeSource, `TlsLimitKind.${kind}`)
   }
+  // The production-source guard above owns Arithmetic: no wire-valid configured value can reach
+  // that fallback on current targets, so the native resource witness must not invent one.
+  assert.notInclude(tlsClientResourcePolicyNativeSource, 'TlsLimitKind.Arithmetic')
   assert.include(
     tlsClientHandshakePolicyNativeSource,
     'let expectedCertificate = run loadFixture(46)',

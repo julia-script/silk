@@ -125,8 +125,10 @@ jobs:
       - run: pnpm --filter @silklang/compiler run documentation:check
       - run: pnpm --filter @silklang/compiler run documentation:examples
 
-  # Pull requests run a representative compile/link/execute smoke set. Main keeps the complete
-  # corpus, split by SILK_NATIVE_SHARD because every case lives in one Vitest file.
+  # Pull requests run a representative compile/link/execute smoke set. The bounded TLS witnesses
+  # use separate processes so their realized compiler graphs do not accumulate in one V8 heap.
+  # Main keeps the complete corpus, split by SILK_NATIVE_SHARD because every case lives in one
+  # Vitest file.
   native-acceptance:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     name: Native acceptance / ${{ matrix.name }}
@@ -137,7 +139,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"smoke","cases":"literal,direct-recursion,effect-ensuring-outcomes-and-order,foreign-c-layout-clock,scheduler-fiber-semantics,certificate-profile-and-trust-anchor,tls-record,certificate-path-validation,owned-trust-snapshots,authenticated-tls-client-core,authenticated-tls-client-demand-request,authenticated-tls-client-key-update,authenticated-tls-client-closure-control,authenticated-tls-client-handshake-policy,authenticated-tls-client-resource-policy"}]' || '[{"name":"1-of-3","shard":"1/3"},{"name":"2-of-3","shard":"2/3"},{"name":"3-of-3","shard":"3/3"}]') }}
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"smoke","cases":"literal,direct-recursion,effect-ensuring-outcomes-and-order,foreign-c-layout-clock,scheduler-fiber-semantics,certificate-profile-and-trust-anchor,tls-record,certificate-path-validation,owned-trust-snapshots"},{"name":"tls-client-driving","cases":"authenticated-tls-client-core,authenticated-tls-client-demand-request,authenticated-tls-client-key-update"},{"name":"tls-client-policy","cases":"authenticated-tls-client-closure-control,authenticated-tls-client-handshake-policy,authenticated-tls-client-resource-policy"}]' || '[{"name":"1-of-3","shard":"1/3"},{"name":"2-of-3","shard":"2/3"},{"name":"3-of-3","shard":"3/3"}]') }}
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
