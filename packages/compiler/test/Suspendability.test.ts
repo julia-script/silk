@@ -1315,7 +1315,9 @@ pub effect fn main() -> i32 ! Fault {
                 base: {
                   ...fn.effectRunner.base,
                   typeArguments: fn.effectRunner.base.typeArguments.map((argument) =>
-                    argument._tag === 'NominalType' && argument.name === 'Provider'
+                    Type.isTypeArgument(argument) &&
+                    Type.isNominal(argument) &&
+                    argument.name === 'Provider'
                       ? Type.nominal('suspendability/main', 'Recorder')
                       : argument,
                   ),
