@@ -1,6 +1,11 @@
 {
   "$schema": "https://turborepo.com/schema.json",
-  "globalPassThroughEnv": ["NPM_REGISTRY", "PUBLISHED_PACKAGES"],
+  "globalPassThroughEnv": [
+    "NPM_REGISTRY",
+    "PUBLISHED_PACKAGES",
+    "NODE_OPTIONS",
+    "VITEST_MAX_WORKERS"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

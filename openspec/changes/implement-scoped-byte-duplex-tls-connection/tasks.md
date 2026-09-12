@@ -2,7 +2,7 @@
 
 - [x] 1.1 Add the sealed nonparking Effect-finalizer intrinsic, the argument-free nonparking Effect-operation property, and exact finalizer/provider implementation obligations; verify focused parser, surface, generic-forwarding, and suspension tests accept direct/nested executions and reject malformed, parking, or unavailable implementations.
 - [x] 1.2 Lower `Effect.ensuringNonParking` with armed exact-once finalizer metadata retained across every protected suspension state, and verify focused MIR/ownership tests cover provider captures, disarming, and nested LIFO order.
-- [ ] 1.3 Run armed finalizers through the generated nonparking driver during structured `Execution` cancellation before ordinary frame cleanup, and verify the existing finalized-destroy native and LLVM-to-Wasm fixture proves success, typed failure, dormant cancellation, original-outcome preservation, and fatal-trap exclusion.
+- [x] 1.3 Run armed finalizers through the generated nonparking driver during structured `Execution` cancellation before ordinary frame cleanup, and verify the existing finalized-destroy native and LLVM-to-Wasm fixture proves success, typed failure, dormant cancellation, original-outcome preservation, and fatal-trap exclusion.
 - [x] 1.4 Add the documented ordinary-source `Effect.ensuringNonParking` combinator without changing existing `Effect.ensuring`, and verify public API analysis plus executable source evidence.
 
 ## 2. Partial Byte Duplex

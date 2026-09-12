@@ -40,6 +40,18 @@ exposed distinct correctness failures rather than a timing gate. The final repre
 4 GiB after 324.10 s and is rerunning with the existing CI TLS allowance of 6 GiB. Final native
 outcomes and the exact CI head are recorded in the PR and implementation handoff.
 
+## CI scheduling correction
+
+The implementation CI's last compiler shard passed 566 tests but timed out the single test that
+bundled six invalid-generic driver cases under one 60-second budget. That group passed locally in
+17.44 s. Each corpus entry now has its own named test and unchanged diagnostic/phase assertions;
+the number of compiler invocations is unchanged.
+
+Full verification also timed out an LSP workspace test. Its requested one-worker setting never
+reached Vitest because Turbo used strict environment filtering. Before/after dry-run output proves
+that `NODE_OPTIONS` and `VITEST_MAX_WORKERS` are now passed to package tasks. The existing concurrency
+and configuration checks pass (11 tests). No global timeout or correctness assertion was relaxed.
+
 ## Assessment
 
 The tests use the cheapest available tier for the observed failures and keep runtime evidence in

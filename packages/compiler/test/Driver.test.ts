@@ -338,12 +338,12 @@ it.effect('names the failing native stage with command provenance', () =>
   }),
 )
 
-it.effect('rejects invalid generic specialization before layout and MIR', () =>
-  Effect.gen(function* () {
-    for (const program of invalidGenericCorpus) {
+for (const program of invalidGenericCorpus) {
+  it.effect(`rejects ${program.name} before layout and MIR`, () =>
+    Effect.gen(function* () {
       const outcome = yield* compileSource(program.name, program.source)
       assert.strictEqual(outcome._tag, 'Rejected', program.name)
-      if (outcome._tag !== 'Rejected') continue
+      if (outcome._tag !== 'Rejected') return
       const codes = outcome.diagnostics.map((diagnostic) => diagnostic.code)
       for (const code of program.codes) assert.include(codes, code, program.name)
       const phases = outcome.report.map((entry) => entry.phase)
@@ -353,9 +353,9 @@ it.effect('rejects invalid generic specialization before layout and MIR', () =>
       if (!program.codes.includes('SEM0053')) {
         assert.notInclude(phases, 'instance-discovery', program.name)
       }
-    }
-  }),
-)
+    }),
+  )
+}
 
 it.effect('stops unsupported targets before MIR or native tools', () =>
   Effect.gen(function* () {
