@@ -302,6 +302,33 @@ export type PlaceSelector =
       readonly provenance: Provenance
     }
 
+/** One exact nonparking Effect retained for structured cancellation of a protected run. */
+export interface EffectCancellationFinalizer {
+  readonly _tag: 'EffectCancellationFinalizer'
+  readonly effect: LocalId
+  readonly runner: DeclarationFacts.CanonicalId
+  readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+  readonly runnerStaticArguments?: ReadonlyArray<StaticValue.Value>
+  readonly arguments: ReadonlyArray<LocalId>
+  readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+}
+
+/** One owned resource and release builder retained until a protected borrow has ended. */
+export interface ResourceCancellationFinalizer {
+  readonly _tag: 'ResourceCancellationFinalizer'
+  readonly resource: LocalId
+  readonly release: LocalId
+  readonly releaseTarget: DeclarationFacts.CanonicalId
+  readonly releaseTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+  readonly runner: DeclarationFacts.CanonicalId
+  readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
+  readonly runnerStaticArguments?: ReadonlyArray<StaticValue.Value>
+  readonly arguments: ReadonlyArray<LocalId>
+  readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
+}
+
+export type CancellationFinalizer = EffectCancellationFinalizer | ResourceCancellationFinalizer
+
 export type Operation =
   | {
       readonly _tag: 'NativeAssembly'
@@ -1100,6 +1127,8 @@ export type Operation =
       }>
       /** Statically selected service-provider references appended after the Effect captures. */
       readonly arguments: ReadonlyArray<LocalId>
+      /** Armed exact-once release retained only while this protected run can be cancelled. */
+      readonly cancellationFinalizer?: CancellationFinalizer
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly propagationType?: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly tagMappings: ReadonlyArray<{
@@ -1172,6 +1201,8 @@ export type Operation =
       readonly runnerTypeArguments: ReadonlyArray<SilkType.GenericArgument>
       readonly runnerStaticArguments?: ReadonlyArray<StaticValue.Value>
       readonly arguments: ReadonlyArray<LocalId>
+      /** Armed exact-once release retained only while this protected run can be cancelled. */
+      readonly cancellationFinalizer?: CancellationFinalizer
       readonly outcomeType: Extract<Type, { readonly _tag: 'EffectOutcome' }>
       readonly failureValueType: SilkType.Type
       readonly successShape: Layout.CallingShape
@@ -1505,6 +1536,8 @@ export interface CoroutineFrameState {
   readonly runner: SuspensionRunner
   readonly outcome: SilkType.Effect
   readonly slots: ReadonlyArray<CoroutineFrameSlot>
+  /** Present exactly when cancellation must run an armed nonparking finalizer before cleanup. */
+  readonly cancellationFinalizer?: CancellationFinalizer
   readonly success: CoroutineFramePathPlan & { readonly resume: ResumePointId }
   readonly failure: CoroutineFramePathPlan & { readonly resume: ResumePointId }
 }

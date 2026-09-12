@@ -36,7 +36,15 @@ export interface Placeholder {
 }
 
 /** Static proof information; concrete loan identity and access belong to ownership analysis. */
-export type Lifetime = Static | Bound | Local | Placeholder
+export type Atom = Static | Bound | Local | Placeholder
+
+/** Common validity of a finite set of independent regions; it extends none of its sources. */
+export interface Intersection {
+  readonly _tag: 'IntersectionLifetime'
+  readonly members: ReadonlyArray<Atom>
+}
+
+export type Lifetime = Atom | Intersection
 
 export const staticLifetime: Static = Object.freeze({ _tag: 'StaticLifetime' })
 
@@ -71,7 +79,33 @@ export const isLifetime = (self: string | { readonly _tag: string }): self is Li
   (self._tag === 'StaticLifetime' ||
     self._tag === 'BoundLifetime' ||
     self._tag === 'LocalLifetime' ||
-    self._tag === 'PlaceholderLifetime')
+    self._tag === 'PlaceholderLifetime' ||
+    self._tag === 'IntersectionLifetime')
+
+/** Enumerates constituent regions, including placeholders hidden by an intersection. */
+export const atoms = (self: Lifetime): ReadonlyArray<Atom> =>
+  self._tag === 'IntersectionLifetime' ? self.members : [self]
+
+/** Forms an assumption-independent canonical intersection; static validity is its identity. */
+export const intersection = (members: ReadonlyArray<Lifetime>): Lifetime => {
+  const unique = new Map(
+    members
+      .flatMap(atoms)
+      .filter((member) => member._tag !== 'StaticLifetime')
+      .map((member) => [key(member), member]),
+  )
+  const ordered = [...unique]
+    .sort(([left], [right]) => {
+      if (left < right) return -1
+      if (left > right) return 1
+      return 0
+    })
+    .map(([, member]) => member)
+  if (ordered.length === 0) return staticLifetime
+  const sole = ordered.at(0)
+  if (ordered.length === 1 && sole !== undefined) return sole
+  return Object.freeze({ _tag: 'IntersectionLifetime', members: Object.freeze(ordered) })
+}
 
 const ownerKey = (self: Owner): string => Canonical.record('Declaration', [self.module, self.name])
 
@@ -94,6 +128,8 @@ export const key = (self: Lifetime): string => {
       ])
     case 'PlaceholderLifetime':
       return Canonical.record('PlaceholderLifetime', [self.universe, key(self.parameter)])
+    case 'IntersectionLifetime':
+      return Canonical.record('IntersectionLifetime', self.members.map(key))
   }
 }
 
@@ -110,13 +146,16 @@ export const display = (self: Lifetime): string => {
       return `'_local${self.ordinal}`
     case 'PlaceholderLifetime':
       return display(self.parameter)
+    case 'IntersectionLifetime':
+      return self.members.map(display).join(' & ')
   }
 }
 
-export const substitute = (
-  self: Lifetime,
-  substitution: ReadonlyMap<string, Lifetime>,
-): Lifetime => (self._tag === 'StaticLifetime' ? self : (substitution.get(key(self)) ?? self))
+export const substitute = (self: Lifetime, substitution: ReadonlyMap<string, Lifetime>): Lifetime =>
+  substitution.get(key(self)) ??
+  (self._tag === 'IntersectionLifetime'
+    ? intersection(self.members.map((member) => substitute(member, substitution)))
+    : self)
 
 /** The longer region must contain every use required by the shorter region. */
 export interface Outlives {
@@ -146,30 +185,71 @@ export const assumptions = (bounds: ReadonlyArray<Outlives>): Assumptions => {
   })
 }
 
-/** Proves a declared relationship using only reflexivity, static validity and known bounds. */
+/** Proves finite outlives relationships, including the introduction/elimination rules of meet. */
 export const outlives = (self: Assumptions, longer: Lifetime, shorter: Lifetime): boolean => {
   if (longer._tag === 'StaticLifetime' || equals(longer, shorter)) return true
   const destination = key(shorter)
   const edges = new Map<string, Array<string>>()
+  const intersections = new Map<string, Intersection>()
+  for (const region of [
+    longer,
+    shorter,
+    ...self.bounds.flatMap((bound) => [bound.longer, bound.shorter]),
+  ]) {
+    if (region._tag !== 'IntersectionLifetime') continue
+    intersections.set(key(region), region)
+    for (const member of region.members) {
+      const from = key(member)
+      edges.set(from, [...(edges.get(from) ?? []), key(region)])
+    }
+  }
   for (const bound of self.bounds) {
     const from = key(bound.longer)
     const next = edges.get(from) ?? []
     next.push(key(bound.shorter))
     edges.set(from, next)
   }
-  const pending = [key(longer)]
-  const visited = new Set(pending)
-  for (let index = 0; index < pending.length; index += 1) {
-    const current = pending.at(index)
-    if (current === undefined) continue
-    for (const next of edges.get(current) ?? []) {
-      if (next === destination || next === key(staticLifetime)) return true
-      if (visited.has(next)) continue
-      visited.add(next)
-      pending.push(next)
+  const allNodes = new Set([
+    key(longer),
+    key(shorter),
+    ...edges.keys(),
+    ...[...edges.values()].flat(),
+  ])
+  const reachable = (source: string): Set<string> => {
+    const pending = [source]
+    const visited = new Set(pending)
+    for (let index = 0; index < pending.length; index += 1) {
+      const current = pending.at(index)
+      if (current === undefined) continue
+      for (const next of edges.get(current) ?? []) {
+        if (visited.has(next)) continue
+        visited.add(next)
+        pending.push(next)
+      }
     }
+    return visited.has(key(staticLifetime)) ? new Set(allNodes) : visited
   }
-  return false
+  // Each added edge is justified by every constituent and there are only finitely many region
+  // pairs. Keeping declared meet edges in this graph also handles cyclic assumptions soundly.
+  while (true) {
+    const reached = reachable(key(longer))
+    if (reached.has(destination) || reached.has(key(staticLifetime))) return true
+    let changed = false
+    for (const [identity, region] of intersections) {
+      const closures = region.members.map((member) => reachable(key(member)))
+      const first = closures.at(0)
+      const successors = edges.get(identity) ?? []
+      for (const target of first ?? []) {
+        if (target === identity || successors.includes(target)) continue
+        if (!closures.every((closure) => closure.has(target) || closure.has(key(staticLifetime))))
+          continue
+        successors.push(target)
+        changed = true
+      }
+      edges.set(identity, successors)
+    }
+    if (!changed) return false
+  }
 }
 
 /** A finite local region's permitted points and the uses which demand its validity. */
@@ -249,6 +329,11 @@ export const solve = (input: Input): Solution => {
   }
   const constraints: ReadonlyArray<Outlives & { readonly points?: ReadonlySet<number> }> = [
     ...input.constraints,
+    ...input.regions.flatMap((region) =>
+      region.lifetime._tag === 'IntersectionLifetime'
+        ? region.lifetime.members.map((longer) => ({ longer, shorter: region.lifetime }))
+        : [],
+    ),
     ...(input.activatedConstraints ?? []),
   ]
   for (const constraint of constraints) {

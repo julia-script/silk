@@ -256,6 +256,8 @@ const lowerBuiltinOperation = (
   if (
     expression.operation === 'EffectSuspend' ||
     expression.operation === 'EffectFinalize' ||
+    expression.operation === 'EffectFinalizeNonParking' ||
+    expression.operation === 'EffectUseReleaseNonParking' ||
     expression.operation === 'EffectObserveDiagnostics' ||
     expression.operation === 'StorageAcquire'
   )

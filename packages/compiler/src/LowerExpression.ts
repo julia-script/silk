@@ -32,6 +32,7 @@ import {
   lowerEffectCatch,
   lowerEffectExecution,
   lowerFinalizedEffect,
+  lowerUseReleaseNonParking,
   lowerPlace,
   lowerRunEffectComposite,
   lowerRunEffectValue,
@@ -1531,7 +1532,10 @@ function lowerRunExpression(
             availableRequirements,
           )
     }
-    if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectFinalize') {
+    if (
+      recipe?._tag === 'BuiltinCall' &&
+      (recipe.operation === 'EffectFinalize' || recipe.operation === 'EffectFinalizeNonParking')
+    ) {
       const [protectedExpression, finalizerExpression] = recipe.arguments
       if (protectedExpression === undefined || finalizerExpression === undefined) return undefined
       const protectedValue = lowerExpression(fn, protectedExpression, availableRequirements)
@@ -1554,6 +1558,19 @@ function lowerRunExpression(
         expression.span,
         protectedExpression.span,
         finalizerExpression.span,
+        availableRequirements,
+        recipe.operation === 'EffectFinalizeNonParking',
+      )
+    }
+    if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectUseReleaseNonParking') {
+      const [resource, use, release] = recipe.arguments
+      if (resource === undefined || use === undefined || release === undefined) return undefined
+      return lowerUseReleaseNonParking(
+        fn,
+        resource,
+        use,
+        release,
+        expression.span,
         availableRequirements,
       )
     }
@@ -2338,12 +2355,13 @@ function lowerMatchExpression(
       const candidates = decision.candidates.flatMap((candidate) => {
         const arm = arms.find((entry) => entry.id.ordinal === candidate.ordinal)
         const armState = armStates.get(candidate.ordinal)
-        return arm === undefined || armState === undefined ? [] : [{ arm, armState }]
+        return arm === undefined ? [] : [{ arm, armState }]
       })
       return (
         candidates.length === decision.candidates.length &&
         candidates.some(({ arm }) => arm.guard === undefined) &&
-        candidates.every(({ armState }) => !armState.loanLocals.has(key))
+        // Transferring arms never reach the join; their exit already releases its loans.
+        candidates.every(({ armState }) => armState === undefined || !armState.loanLocals.has(key))
       )
     })
     if (endedOnEveryPath) fn.loanLocals.delete(key)

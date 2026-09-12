@@ -18,6 +18,7 @@ import * as LocalSharedPayloadCleanup from './LocalSharedPayloadCleanup.js'
 import * as Match from './Match.js'
 import type {
   CleanupRegion,
+  CancellationFinalizer,
   Execution,
   CoroutineFrameRelease,
   EndLoanOperation,
@@ -52,6 +53,7 @@ import {
   isCopy,
   matchesInstance,
   matchesInstanceKey,
+  runtimeArgumentsEqual,
   operationChildren,
   operationsOf,
   operationTree,
@@ -1007,6 +1009,21 @@ const outcomeOf = (region: Region): Outcome | undefined =>
   region._tag === 'OperationRegion' || region._tag === 'CleanupRegion' ? region.outcome : undefined
 
 /** Every local named by one operation, including definitions and structured child results. */
+const cancellationFinalizerLocals = (finalizer: CancellationFinalizer): ReadonlyArray<LocalId> => [
+  ...(finalizer._tag === 'EffectCancellationFinalizer'
+    ? [finalizer.effect]
+    : [finalizer.resource, finalizer.release]),
+  ...finalizer.arguments,
+]
+
+/** Locals read while arming a cancellation action; an owned resource is only retained, not read. */
+const cancellationFinalizerAccesses = (
+  finalizer: CancellationFinalizer,
+): ReadonlyArray<LocalId> => [
+  ...(finalizer._tag === 'EffectCancellationFinalizer' ? [finalizer.effect] : [finalizer.release]),
+  ...finalizer.arguments,
+]
+
 export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> => {
   switch (operation._tag) {
     case 'SetInitialized':
@@ -1188,7 +1205,15 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'RunEffect':
       return [operation.destination, operation.outcome, ...operation.arguments]
     case 'RunEffectValue':
-      return [operation.destination, operation.outcome, operation.effect, ...operation.arguments]
+      return [
+        operation.destination,
+        operation.outcome,
+        operation.effect,
+        ...operation.arguments,
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : cancellationFinalizerLocals(operation.cancellationFinalizer)),
+      ]
     case 'RunEffectComposite':
       return [
         operation.destination,
@@ -1211,6 +1236,9 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         operation.failureValue,
         operation.effect,
         ...operation.arguments,
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : cancellationFinalizerLocals(operation.cancellationFinalizer)),
       ]
     case 'Construct':
     case 'ConstructUnionVariant':
@@ -2170,6 +2198,19 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
         ...(operation.runnerBase?.typeArguments.filter(SilkType.isTypeArgument) ?? []),
         ...operation.providers.flatMap((provider) => [provider.capability, provider.providerType]),
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : [
+              semanticType(operation.cancellationFinalizer.outcomeType),
+              ...operation.cancellationFinalizer.runnerTypeArguments.filter(
+                SilkType.isTypeArgument,
+              ),
+              ...(operation.cancellationFinalizer._tag === 'ResourceCancellationFinalizer'
+                ? operation.cancellationFinalizer.releaseTypeArguments.filter(
+                    SilkType.isTypeArgument,
+                  )
+                : []),
+            ]),
       ]
     case 'RunEffectComposite':
       return [
@@ -2197,6 +2238,19 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         semanticType(operation.outcomeType),
         operation.failureValueType,
         ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : [
+              semanticType(operation.cancellationFinalizer.outcomeType),
+              ...operation.cancellationFinalizer.runnerTypeArguments.filter(
+                SilkType.isTypeArgument,
+              ),
+              ...(operation.cancellationFinalizer._tag === 'ResourceCancellationFinalizer'
+                ? operation.cancellationFinalizer.releaseTypeArguments.filter(
+                    SilkType.isTypeArgument,
+                  )
+                : []),
+            ]),
       ]
     case 'Construct':
     case 'ConstructUnionVariant':
@@ -2251,7 +2305,29 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
 interface ActiveLoan {
   readonly operation: Extract<Operation, { readonly _tag: 'BeginLoan' }>
   readonly root: LocalId
+  readonly selectors: ReadonlyArray<PlaceSelector>
   readonly parent?: string
+}
+
+const loanPlacesOverlap = (
+  left: ReadonlyArray<PlaceSelector>,
+  right: ReadonlyArray<PlaceSelector>,
+): boolean => {
+  for (const [ordinal, selector] of left.entries()) {
+    const other = right.at(ordinal)
+    if (other === undefined) return true
+    if (selector._tag === 'FieldSelector' && other._tag === 'FieldSelector') {
+      if (!DeclarationFacts.sameFieldId(selector.field, other.field)) return false
+    } else if (
+      selector._tag === 'ElementSelector' &&
+      other._tag === 'ElementSelector' &&
+      selector.index._tag === 'Proven' &&
+      other.index._tag === 'Proven'
+    ) {
+      if (selector.index.value !== other.index.value) return false
+    } else if (!samePlaceSelector(selector, other)) return true
+  }
+  return true
 }
 
 const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
@@ -2378,7 +2454,13 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'RunEffect':
       return operation.arguments
     case 'RunEffectValue':
-      return [operation.effect, ...operation.arguments]
+      return [
+        operation.effect,
+        ...operation.arguments,
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : cancellationFinalizerAccesses(operation.cancellationFinalizer)),
+      ]
     case 'RunEffectComposite':
       return [
         operation.effect,
@@ -2387,7 +2469,13 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'RunStaticEffect':
       return [...operation.captures.map((capture) => capture.source), ...operation.arguments]
     case 'CatchEffect':
-      return [operation.effect, ...operation.arguments]
+      return [
+        operation.effect,
+        ...operation.arguments,
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : cancellationFinalizerAccesses(operation.cancellationFinalizer)),
+      ]
     case 'Construct':
     case 'ConstructUnionVariant':
       return operation.fields.map((field) => field.value)
@@ -2461,7 +2549,8 @@ const loanViolations = (
       const liveChild = [...currentActive.values()].some((candidate) => candidate.parent === key)
       if (
         beginning === undefined ||
-        currentCompleted.has(key) ||
+        // Endpoint multiplicity is proved by loanPathsValid over the CFG. Nested execution
+        // traversal can visit mutually exclusive endings in the same structural sequence.
         beginning.destination.ordinal !== operation.slice.ordinal ||
         (loan !== undefined && !currentCalls.has(call)) ||
         liveChild
@@ -2530,9 +2619,11 @@ const loanViolations = (
           invalid(`loan ${key} has inconsistent root, slice type, access, or reborrow facts`)
         }
         const root = parent?.[1].root ?? operation.root
+        const selectors = [...(parent?.[1].selectors ?? []), ...operation.selectors]
         const conflicts = [...active.entries()].some(([candidateKey, candidate]) => {
           if (candidate.root.ordinal !== root.ordinal) return false
           if (parent?.[0] === candidateKey && operation.suspendsParent) return false
+          if (!loanPlacesOverlap(candidate.selectors, selectors)) return false
           return candidate.operation.access === 'Exclusive' || operation.access === 'Exclusive'
         })
         if (conflicts) invalid(`loan ${key} conflicts with an active loan of %${root.ordinal}`)
@@ -2541,6 +2632,7 @@ const loanViolations = (
           Object.freeze({
             operation,
             root,
+            selectors,
             ...(parent === undefined ? {} : { parent: parent[0] }),
           }),
         )
@@ -2568,7 +2660,12 @@ const loanViolations = (
 
       for (const local of accessedOwnerLocals(operation)) {
         const loan = [...active.values()].find(
-          (candidate) => candidate.root.ordinal === local.ordinal,
+          (candidate) =>
+            candidate.root.ordinal === local.ordinal &&
+            ((operation._tag !== 'ReadPlace' &&
+              operation._tag !== 'CheckPlace' &&
+              operation._tag !== 'WritePlace') ||
+              loanPlacesOverlap(candidate.selectors, operation.selectors)),
         )
         if (loan !== undefined) {
           invalid(
@@ -2645,6 +2742,26 @@ const suspensionCallTargets = (
           typeArguments: operation.runnerTypeArguments,
           staticArguments: operation.runnerStaticArguments ?? Object.freeze([]),
         }),
+        ...('cancellationFinalizer' in operation && operation.cancellationFinalizer !== undefined
+          ? [
+              Object.freeze({
+                declaration: operation.cancellationFinalizer.runner,
+                typeArguments: operation.cancellationFinalizer.runnerTypeArguments,
+                staticArguments:
+                  operation.cancellationFinalizer.runnerStaticArguments ?? Object.freeze([]),
+              }),
+            ]
+          : []),
+        ...('cancellationFinalizer' in operation &&
+        operation.cancellationFinalizer?._tag === 'ResourceCancellationFinalizer'
+          ? [
+              Object.freeze({
+                declaration: operation.cancellationFinalizer.releaseTarget,
+                typeArguments: operation.cancellationFinalizer.releaseTypeArguments,
+                staticArguments: Object.freeze([]),
+              }),
+            ]
+          : []),
       ]
     case 'RunEffectComposite':
       return operation.alternatives.map((alternative) =>
@@ -2820,6 +2937,20 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
           field.size === wordSize &&
           field.alignment === wordAlignment,
       )
+    const offsets = new Map<number, number>()
+    const slots = new Map(
+      descriptor.states.flatMap((state) =>
+        state.slots.map((slot) => [slot.local.ordinal, slot] as const),
+      ),
+    )
+    let payloadCursor = roles.length * wordSize
+    for (const [local, slot] of [...slots].sort(([left], [right]) => left - right)) {
+      const physical = CoroutineFrame.storageOf(self, slot)
+      if (physical === undefined || physical.alignment < 1 || physical.size < 0) continue
+      const offset = Math.ceil(payloadCursor / physical.alignment) * physical.alignment
+      offsets.set(local, offset)
+      payloadCursor = offset + physical.size
+    }
     const stateValid = descriptor.states.every((state) => {
       const candidates = entry.states.filter((layout) =>
         sameSuspensionPoint(layout.point, state.point),
@@ -2835,7 +2966,8 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
           if (slot === undefined) return false
           const physical = CoroutineFrame.storageOf(self, slot)
           if (physical === undefined) return false
-          const offset = Math.ceil(cursor / physical.alignment) * physical.alignment
+          const offset = offsets.get(slot.local.ordinal)
+          if (offset === undefined || offset < cursor) return false
           const valid =
             field.slot === slot.ordinal &&
             field.local.ordinal === slot.local.ordinal &&
@@ -2851,8 +2983,79 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
           return valid
         })
       const size = Math.ceil(cursor / alignment) * alignment
+      const retained = new Set(state.slots.map((slot) => slot.local.ordinal))
+      const finalizer = state.cancellationFinalizer
+      const finalizerEffect =
+        finalizer?._tag === 'EffectCancellationFinalizer'
+          ? fn.localTypes.at(finalizer.effect.ordinal)
+          : undefined
+      const finalizerRelease =
+        finalizer?._tag === 'ResourceCancellationFinalizer'
+          ? fn.localTypes.at(finalizer.release.ordinal)
+          : undefined
+      const finalizerResource =
+        finalizer?._tag === 'ResourceCancellationFinalizer'
+          ? fn.localTypes.at(finalizer.resource.ordinal)
+          : undefined
+      const resourceReleaseParameter =
+        finalizerRelease?._tag === 'CallableValue'
+          ? finalizerRelease.type.parameters.at(0)
+          : undefined
+      const finalizerRunner =
+        finalizer === undefined
+          ? undefined
+          : self.functions.find((candidate) =>
+              matchesInstance(
+                candidate,
+                finalizer.runner,
+                finalizer.runnerTypeArguments,
+                finalizer.runnerStaticArguments,
+              ),
+            )
+      const retainedOrZeroLane = (local: LocalId): boolean => {
+        if (retained.has(local.ordinal)) return true
+        const type = fn.localTypes.at(local.ordinal)
+        if (type === undefined) return false
+        if (type._tag === 'EffectValue')
+          return Layout.effectEnvironmentLanes(self.layout, type.environment).length === 0
+        if (type._tag === 'CallableValue')
+          return (
+            type.environment === undefined ||
+            Layout.callableEnvironmentLanes(self.layout, type.environment).length === 0
+          )
+        return (Layout.callingShape(self.layout, semanticType(type))?.lanes.length ?? 0) === 0
+      }
+      const finalizerValid =
+        finalizer === undefined ||
+        (finalizer._tag === 'EffectCancellationFinalizer'
+          ? finalizerEffect?._tag === 'EffectValue' &&
+            SilkType.equals(finalizerEffect.type, finalizer.outcomeType.type) &&
+            finalizerRunner !== undefined &&
+            retainedOrZeroLane(finalizer.effect) &&
+            finalizer.arguments.every(retainedOrZeroLane)
+          : finalizerRelease?._tag === 'CallableValue' &&
+            finalizerResource !== undefined &&
+            finalizerResource._tag !== 'EffectOutcome' &&
+            resourceReleaseParameter !== undefined &&
+            SilkType.isReference(resourceReleaseParameter) &&
+            resourceReleaseParameter.access === 'Exclusive' &&
+            SilkType.runtimeKey(resourceReleaseParameter.target) ===
+              SilkType.runtimeKey(semanticType(finalizerResource)) &&
+            SilkType.isEffect(finalizerRelease.type.result) &&
+            // Applying a reusable effect function constructs one affine Effect value. The selected
+            // runner therefore records `Take` even when the callable declaration returns `Shared`;
+            // access is compile-time ownership and is absent from the emitted outcome ABI.
+            SilkType.runtimeKey({
+              ...finalizer.outcomeType.type,
+              access: finalizerRelease.type.result.access,
+            }) === SilkType.runtimeKey(finalizerRelease.type.result) &&
+            finalizerRunner !== undefined &&
+            retainedOrZeroLane(finalizer.resource) &&
+            retainedOrZeroLane(finalizer.release) &&
+            finalizer.arguments.every(retainedOrZeroLane))
       return (
         payloadValid &&
+        finalizerValid &&
         layout.size === size &&
         layout.alignment === alignment &&
         layout.tailPadding === size - cursor
@@ -6946,13 +7149,9 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                     runnerBinding !== undefined &&
                     runnerBinding.base.declaration.module === selectedBase.module &&
                     runnerBinding.base.declaration.name === selectedBase.name &&
-                    runnerBinding.base.typeArguments.length === selectedArguments.length &&
-                    runnerBinding.base.typeArguments.every((argument, ordinal) => {
-                      const expected = selectedArguments.at(ordinal)
-                      return (
-                        expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
-                      )
-                    }) &&
+                    // Generated runners share machine code across invocation lifetimes. The
+                    // stored contract/base above still checks the exact call's semantic arguments.
+                    runtimeArgumentsEqual(runnerBinding.base.typeArguments, selectedArguments) &&
                     runnerBinding.providers.length === operation.providers.length &&
                     runnerBinding.providers.every((bound, ordinal) => {
                       const claimed = operation.providers.at(ordinal)

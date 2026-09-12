@@ -275,6 +275,8 @@ const nonScalarBuiltinOperations = Object.freeze([
   'ExecutionPark',
   'EffectSuspend',
   'EffectFinalize',
+  'EffectFinalizeNonParking',
+  'EffectUseReleaseNonParking',
   'EffectObserveDiagnostics',
   'EffectObserveUnhandled',
   'StorageAcquire',
@@ -413,6 +415,14 @@ export type GenericArgument =
 export type Substitution = ReadonlyMap<string, GenericArgument>
 
 /** A row-specific explanation for one failed generic decomposition. */
+export type InferenceFailure =
+  | RowInferenceFailure
+  | {
+      readonly _tag: 'EnvironmentMismatch'
+      readonly longer: string
+      readonly shorter: string
+    }
+
 export type RowInferenceFailure =
   | { readonly _tag: 'AbsentFailureMember'; readonly member: string }
   | {
@@ -913,7 +923,23 @@ export const callable = (
     environment: lifetimes.environment,
     lifetimeBinders: Object.freeze([...lifetimes.lifetimeBinders]),
     lifetimeBounds: Lifetime.assumptions(lifetimes.lifetimeBounds ?? []).bounds,
-    typeOutlives: normalizeTypeOutlives(lifetimes.typeOutlives ?? []),
+    // A well-formed borrowed input supplies validity of its stored parameters for that borrow.
+    typeOutlives: normalizeTypeOutlives([
+      ...(lifetimes.typeOutlives ?? []),
+      ...parameters_.flatMap((parameter) => {
+        if (isReference(parameter))
+          return storageParameters(parameter.target).map((type) => ({
+            type,
+            lifetime: parameter.lifetime,
+          }))
+        if (isSlice(parameter))
+          return storageParameters(parameter.element).map((type) => ({
+            type,
+            lifetime: parameter.lifetime,
+          }))
+        return []
+      }),
+    ]),
     unsafe,
     parameters: Object.freeze(Array.from(parameters_)),
     result,
@@ -1218,6 +1244,15 @@ export const requirementMembers = (
   self: Effect | RequirementRowArgument,
 ): ReadonlyArray<Requirement> =>
   RowAlgebra.concreteMembers(
+    requirementRowPolicy(),
+    self._tag === 'EffectType' ? self.requirementRow : self.row,
+  )
+
+/** Concrete requirements retained positively rather than only named by a computed subtraction. */
+export const positiveRequirementMembers = (
+  self: Effect | RequirementRowArgument,
+): ReadonlyArray<Requirement> =>
+  RowAlgebra.positiveConcreteMembers(
     requirementRowPolicy(),
     self._tag === 'EffectType' ? self.requirementRow : self.row,
   )
@@ -2435,7 +2470,9 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
   const visitArgument = (argument: GenericArgument): void => {
     append(visitor.argument?.(argument, inBinderScope))
     if (visitor.descendArgument?.(argument) === false) return
-    if (isTypeArgument(argument)) visitType(argument)
+    if (Lifetime.isLifetime(argument) && argument._tag === 'IntersectionLifetime')
+      for (const member of argument.members) visitArgument(member)
+    else if (isTypeArgument(argument)) visitType(argument)
     else if (isRepresentationParameterArgument(argument)) visitType(argument.parameter)
     else if (isOpaqueRepresentationArgument(argument)) {
       visitType(argument.contract)
@@ -2569,6 +2606,7 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
         else binderScope.set(Lifetime.key(binder), count - 1)
       }
     } else if (isCallable(type)) {
+      if (type.schema !== undefined) pushBinders(type.schema.binders)
       visitArgument(type.environment)
       for (const binder of type.lifetimeBinders)
         binderScope.set(Lifetime.key(binder), (binderScope.get(Lifetime.key(binder)) ?? 0) + 1)
@@ -2581,7 +2619,6 @@ const fold = <A>(self: Type, visitor: FoldVisitor<A>): ReadonlyArray<A> => {
         visitType(bound.type)
         visitArgument(bound.lifetime)
       }
-      if (type.schema !== undefined) pushBinders(type.schema.binders)
       for (const parameter_ of type.parameters) visitType(parameter_)
       visitType(type.result)
       if (type.schema !== undefined) {
@@ -3139,8 +3176,24 @@ export const specializeFailureRow = (
         })
       if (isTypeArgument(replacement) && !isUnion(replacement) && !isNever(replacement))
         return Object.freeze({ _tag: 'Concrete', member: replacement })
-      if (isTypeArgument(replacement) && isUnion(replacement))
-        return Object.freeze({ _tag: 'ConcreteRow', members: replacement.members })
+      if (isTypeArgument(replacement) && isUnion(replacement)) {
+        const row = replacement.members.reduce<FailureRow>(
+          (current, failure) =>
+            RowAlgebra.union(
+              failureRowPolicy(),
+              current,
+              isParameter(failure) && failure.kind === 'Value'
+                ? RowAlgebra.singleton(
+                    failureRowPolicy(),
+                    failureMemberShape(failure),
+                    implicitRowOrigin,
+                  )
+                : RowAlgebra.concrete(failureRowPolicy(), [failure]),
+            ),
+          RowAlgebra.concrete(failureRowPolicy(), []),
+        )
+        return Object.freeze({ _tag: 'Row', row })
+      }
       if (isTypeArgument(replacement) && isNever(replacement))
         return Object.freeze({ _tag: 'ConcreteRow', members: Object.freeze([]) })
       return Object.freeze({
@@ -3615,7 +3668,9 @@ export const freeLifetimes = (self: Type): ReadonlyArray<Lifetime.Lifetime> =>
     ...new Map(
       fold(self, {
         argument: (argument, inBinderScope) =>
-          Lifetime.isLifetime(argument) && !inBinderScope(Lifetime.key(argument))
+          Lifetime.isLifetime(argument) &&
+          argument._tag !== 'IntersectionLifetime' &&
+          !inBinderScope(Lifetime.key(argument))
             ? argument
             : undefined,
       }).map((lifetime) => [Lifetime.key(lifetime), lifetime]),
@@ -3636,7 +3691,9 @@ export const executableFormationRequirements = (
   // Inference opens invocation binders to rigid placeholders before comparing contracts. Those
   // placeholders still denote invocation requirements even after the binder list has been opened.
   const independent = (lifetime: Lifetime.Lifetime): boolean =>
-    lifetime._tag !== 'PlaceholderLifetime' && !invocation.has(Lifetime.key(lifetime))
+    Lifetime.atoms(lifetime).every(
+      (member) => member._tag !== 'PlaceholderLifetime' && !invocation.has(Lifetime.key(member)),
+    )
   return {
     lifetimeBounds: self.lifetimeBounds.filter(
       (bound) => independent(bound.longer) && independent(bound.shorter),
@@ -3736,7 +3793,10 @@ export const substituteLifetime = (
   substitution: Substitution,
 ): Lifetime.Lifetime => {
   const replacement = substitution.get(Lifetime.key(self))
-  return replacement !== undefined && Lifetime.isLifetime(replacement) ? replacement : self
+  if (replacement !== undefined && Lifetime.isLifetime(replacement)) return replacement
+  return self._tag === 'IntersectionLifetime'
+    ? Lifetime.intersection(self.members.map((member) => substituteLifetime(member, substitution)))
+    : self
 }
 
 /** Canonicalizes data-validity predicates without dropping them from semantic identity. */
@@ -3771,7 +3831,12 @@ export const satisfiesOutlives = (
   proves: (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime) => boolean,
 ): boolean => {
   const assumed = (type: Type): boolean =>
-    bounds.some((bound) => equals(bound.type, type) && proves(bound.lifetime, lifetime))
+    bounds.some(
+      (bound) =>
+        (equals(bound.type, type) ||
+          storageParameters(bound.type).some((parameter) => equals(parameter, type))) &&
+        proves(bound.lifetime, lifetime),
+    )
   if (assumed(self)) return true
   if (!storageLifetimes(self).every((region) => proves(region, lifetime))) return false
   return storageParameters(self).every(

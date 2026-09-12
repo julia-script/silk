@@ -434,6 +434,79 @@ impl Effect {
     return run Intrinsic.finalizeEffect(move self, move finalizer)
   }
 
+  /// Runs a nonparking finalizer on every structured Effect exit and preserves the original outcome.
+  ///
+  /// # When to use
+  ///
+  /// Use this operation when structured cancellation must release a scoped resource before it
+  /// destroys the protected execution. Use [`ensuring`] when the finalizer can suspend.
+  ///
+  /// # Details
+  ///
+  /// The finalizer runs exactly once after success or typed failure. It also runs when an owner
+  /// cancels a parked `Execution`. Required providers remain valid until the finalizer completes.
+  /// Nested scopes finalize in reverse order. The original outcome remains unchanged.
+  ///
+  /// # Gotchas
+  ///
+  /// The finalizer must satisfy `Intrinsic.NonParking`. Fatal traps bypass this finalizer and all
+  /// Drop hooks. Recover a fallible release before you pass it to this operation.
+  pub effect fn ensuringNonParking<
+    'env,
+    A,
+    E,
+    ?R,
+    ?S,
+    F: once Effect<'env; () ! never ? S> + Intrinsic.NonParking,
+  >(
+    self: once Effect<'env; A ! E ? R>,
+    finalizer: F
+  ) -> A ! E ? R | S {
+    return run Intrinsic.finalizeEffectNonParking<A, E, R, S>(move self, move finalizer)
+  }
+
+  /// Uses one owned resource and releases it after every structured Effect exit.
+  ///
+  /// # When to use
+  ///
+  /// Use this operation when suspended work needs an exclusive resource borrow and cancellation
+  /// must release the owned resource before its frame is destroyed.
+  ///
+  /// # Details
+  ///
+  /// `use` receives one temporary exclusive borrow. That borrow ends before `release` receives a
+  /// fresh exclusive borrow after success, typed failure, or structured cancellation. Release runs
+  /// exactly once, nested brackets release in reverse order, and the protected outcome is
+  /// preserved. The release Effect must satisfy `Intrinsic.NonParking`.
+  ///
+  /// # Gotchas
+  ///
+  /// Fatal traps bypass release and all Drop hooks. Recover a fallible release to `! never` before
+  /// returning it from the callback.
+  pub effect fn useReleaseNonParking<
+    'env,
+    Resource: 'env,
+    A,
+    E,
+    ?R,
+    ?S,
+    Release: for<'scope> once fn<'env>(
+      &'scope mut Resource
+    ) -> once Effect<'scope & 'env; () ! never ? S> + Intrinsic.NonParking,
+  >(
+    resource: Resource,
+    use: for<'scope> once fn<'env>(
+      &'scope mut Resource
+    ) -> once Effect<'scope & 'env; A ! E ? R>,
+    release: Release
+  ) -> A ! E ? R | S {
+    return run Intrinsic.useReleaseNonParking<Resource, A, E, R, S>(
+      move resource,
+      move use,
+      move release,
+    )
+  }
+
   /// Runs exactly one of two suspended branches, selected by a condition.
   ///
   /// # Details

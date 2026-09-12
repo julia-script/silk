@@ -2,10 +2,11 @@ import * as FiniteRow from './FiniteRow.js'
 import * as Canonical from './internal/Canonical.js'
 import * as SourceSpan from './SourceSpan.js'
 
-export type MemberSubstitution<Member, SymbolicMember> =
+export type MemberSubstitution<Member, SymbolicMember, RowParameter = never> =
   | { readonly _tag: 'Residual'; readonly member: SymbolicMember }
   | { readonly _tag: 'Concrete'; readonly member: Member }
   | { readonly _tag: 'ConcreteRow'; readonly members: ReadonlyArray<Member> }
+  | { readonly _tag: 'Row'; readonly row: Row<Member, RowParameter, SymbolicMember> }
   | { readonly _tag: 'InvalidSingleton'; readonly reason: string }
 
 /** Domain behavior for one kind-preserving symbolic row algebra. */
@@ -49,7 +50,9 @@ export interface Row<Member, RowParameter, SymbolicMember> {
 
 export interface Substitution<Member, RowParameter, SymbolicMember> {
   readonly row: (parameter: RowParameter) => Row<Member, RowParameter, SymbolicMember> | undefined
-  readonly member: (member: SymbolicMember) => MemberSubstitution<Member, SymbolicMember>
+  readonly member: (
+    member: SymbolicMember,
+  ) => MemberSubstitution<Member, SymbolicMember, RowParameter>
 }
 
 export interface InvalidMemberSpecialization {
@@ -414,6 +417,32 @@ export const concreteMembers = <Member, RowParameter, SymbolicMember, MemberPara
   return FiniteRow.make(policy.finite, members).members
 }
 
+/** Collects concrete members retained positively by an open expression. */
+export const positiveConcreteMembers = <Member, RowParameter, SymbolicMember, MemberParameter>(
+  policy: Policy<Member, RowParameter, SymbolicMember, MemberParameter>,
+  self: Row<Member, RowParameter, SymbolicMember>,
+): ReadonlyArray<Member> => {
+  const members: Array<Member> = []
+  const visit = (expression: Expression<Member, RowParameter, SymbolicMember>): void => {
+    switch (expression._tag) {
+      case 'Concrete':
+        members.push(...expression.row.members)
+        return
+      case 'RowParameter':
+      case 'Singleton':
+        return
+      case 'Union':
+        for (const operand of expression.operands) visit(operand)
+        return
+      case 'Without':
+        visit(expression.source)
+        return
+    }
+  }
+  visit(self.expression)
+  return FiniteRow.make(policy.finite, members).members
+}
+
 /** Rewrites concrete members structurally and renormalizes substitution-created collisions. */
 export const mapConcreteMembers = <Member, RowParameter, SymbolicMember, MemberParameter>(
   policy: Policy<Member, RowParameter, SymbolicMember, MemberParameter>,
@@ -467,6 +496,11 @@ export const substitute = <Member, RowParameter, SymbolicMember, MemberParameter
         const result = substitution.member(expression.member)
         if (result._tag === 'Concrete') return concrete(policy, [result.member])
         if (result._tag === 'ConcreteRow') return concrete(policy, result.members)
+        if (result._tag === 'Row')
+          return Object.freeze({
+            expression: result.row.expression,
+            memberWellFormed: Object.freeze([]),
+          })
         if (result._tag === 'Residual') {
           const residualExpression: Expression<Member, RowParameter, SymbolicMember> =
             Object.freeze({ _tag: 'Singleton', member: result.member })
@@ -517,6 +551,16 @@ export const substitute = <Member, RowParameter, SymbolicMember, MemberParameter
           member: result.member,
           origins: obligation.origins,
         }),
+      )
+    if (result._tag === 'Row')
+      obligations.push(
+        ...result.row.memberWellFormed.map((mapped) =>
+          Object.freeze({
+            key: mapped.key,
+            member: mapped.member,
+            origins: obligation.origins,
+          }),
+        ),
       )
   }
   if (invalid.size > 0)

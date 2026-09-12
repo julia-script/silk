@@ -333,9 +333,20 @@ export const lowerProgram = (
   const staticData = Object.freeze(
     [...staticDataById.values()].sort((left, right) => left.id.localeCompare(right.id)),
   )
+  // Discovery retains separate proof contexts so every call is checked. Once contracts are
+  // concrete, contexts with the same emitted arguments and contract share one machine body.
+  const runtimeInstances = new Map<string, Instances.Instance>()
+  for (const instance of discovery.instances) {
+    const key = `${instanceText(
+      instance.key.declaration,
+      instance.key.typeArguments,
+      instance.key.staticArguments,
+    )}\u0002${instance.key.contractRow.join('\u0000')}`
+    runtimeInstances.set(key, instance)
+  }
   const effectResults = new Map<string, ExecutableEffectType>()
   const generatedRunners: Array<GeneratedEffectRunner> = []
-  for (const instance of discovery.instances) {
+  for (const instance of runtimeInstances.values()) {
     const resultKey = instanceText(
       instance.key.declaration,
       instance.key.typeArguments,
@@ -366,7 +377,7 @@ export const lowerProgram = (
     )
     if (returned?._tag === 'EffectComposite') effectResults.set(resultKey, returned)
   }
-  const functions = discovery.instances.map((instance) =>
+  const functions = [...runtimeInstances.values()].map((instance) =>
     lowerInstance(
       instance,
       ownershipOf(instance),

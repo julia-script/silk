@@ -2,6 +2,8 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as DeclarationFacts from '../src/DeclarationFacts.js'
+import * as Type from '../src/Type.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -35,6 +37,230 @@ it.effect('resolves Option, Result, and Vector operations through their namespac
       assert.strictEqual(occurrence?.declaration?.module, expectedModule, spelling)
     }
   }),
+)
+
+it.effect(
+  'resolves the bounded byte duplex and scripted memory provider surfaces',
+  () =>
+    Effect.gen(function* () {
+      const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.byte_duplex { ByteDuplex, ByteIoError, ReadTransfer }
+import silk.bytes { Bytes }
+import silk.effect { Effect }
+import silk.memory_byte_duplex { MemoryByteDuplex, MemoryReadEvent, MemoryWriteAction, MemoryWriteEvent }
+import silk.monotonic_clock { MonotonicClock }
+import silk.option { Option }
+import silk.random { Random }
+import silk.system_clock { SystemClock }
+import silk.tls_client { ClientConfig }
+import silk.tls_connection { Connection, ConnectionError, ConnectionOptions, ConnectionPhase, withClient }
+import silk.trust_snapshot { TrustSourceError }
+import silk.trust_source { TrustSource }
+import silk.vector { Vector }
+service Audit { effect fn record() -> () ? &mut Audit }
+effect fn makeProvider() -> MemoryByteDuplex ! OutOfMemoryError ? &mut Allocator {
+  let data = run Bytes.copy(&b"hello")
+  let mut reads = Vector.make<MemoryReadEvent>()
+  run Vector.append<MemoryReadEvent>(&mut reads, MemoryReadEvent.Data {
+    readyAt: SystemClock.make(1, 0),
+    bytes: move data,
+  })
+  let mut writes = Vector.make<MemoryWriteEvent>()
+  run Vector.append<MemoryWriteEvent>(&mut writes, MemoryWriteEvent {
+    readyAt: SystemClock.make(1, 0),
+    action: MemoryWriteAction.Accept {count: 2},
+  })
+  return run MemoryByteDuplex.make(move reads, move writes, 16, 8, Option.none<i32>())
+}
+effect<'transport> fn authenticated<'transport, P>(
+  connection: &'transport mut Connection<'transport, P>
+) -> i32 ? &mut Audit {
+  if connection.phase() == ConnectionPhase.Invalid { return 0 }
+  run Audit.record()
+  return 42
+}
+effect fn connect<'env, P>(
+  transport: &'env mut P,
+  config: &ClientConfig,
+  options: ConnectionOptions,
+) -> i32
+! ConnectionError | TrustSourceError | OutOfMemoryError
+? &mut Audit
+  | &mut TrustSource
+  | &mut SystemClock
+  | &mut MonotonicClock
+  | &mut Allocator
+  | &mut Random
+where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut P provides &ByteDuplex from &mut ByteDuplex
+    | &mut MonotonicClock
+    | &mut Allocator
+    | &mut Random {
+  return run withClient<i32, never>(move transport, config, move options, authenticated)
+}
+pub fn main() -> i32 { return 42 }`
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        'stdlib-namespace/byte-duplex',
+        ascii(source),
+      )
+      const index = Analysis.declarationIndex(snapshot)
+      const module = index.modules.find((candidate) => candidate.module === 'silk/byte_duplex')
+      const service = module?.services.find(
+        (candidate) =>
+          candidate.name._tag === 'Present' && candidate.name.spelling === 'ByteDuplex',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.deepEqual(
+        service?.operations.map((operation) => ({
+          name: operation.name._tag === 'Present' ? operation.name.spelling : 'missing',
+          unsafe: operation.unsafe,
+          properties: operation.staticProperties,
+        })),
+        [
+          { name: 'readSomeRaw', unsafe: true, properties: [] },
+          { name: 'writeSomeRaw', unsafe: true, properties: [] },
+          { name: 'flushRaw', unsafe: true, properties: [] },
+          { name: 'shutdownWriteRaw', unsafe: true, properties: [] },
+          { name: 'closeRaw', unsafe: true, properties: ['Intrinsic.NonParking'] },
+        ],
+      )
+      const wrappers = new Map(
+        (module?.declarations ?? []).flatMap((declaration) =>
+          declaration.associatedMember?.owner?.name === 'ByteDuplex'
+            ? [[declaration.associatedMember.name, DeclarationFacts.callableContract(declaration)]]
+            : [],
+        ),
+      )
+      for (const name of ['readSome', 'writeSome', 'flush', 'shutdownWrite'] as const) {
+        const result = wrappers.get(name)?.result
+        assert.isTrue(result !== undefined && Type.isEffect(result), name)
+        if (result === undefined || !Type.isEffect(result)) continue
+        assert.deepEqual(Type.failureMembers(result).map(Type.encode), [
+          'silk/byte_duplex.ByteIoError',
+        ])
+        assert.deepEqual(
+          Type.requirementMembers(result).map((requirement) => ({
+            capability: Type.encode(requirement.capability),
+            access: requirement.access,
+          })),
+          [
+            { capability: 'silk/byte_duplex.ByteDuplex', access: 'Exclusive' },
+            { capability: 'silk/monotonic_clock.MonotonicClock', access: 'Exclusive' },
+          ],
+        )
+      }
+      const closeResult = wrappers.get('close')?.result
+      assert.isTrue(closeResult !== undefined && Type.isEffect(closeResult))
+      if (closeResult !== undefined && Type.isEffect(closeResult)) {
+        assert.deepEqual(Type.failureMembers(closeResult).map(Type.encode), [
+          'silk/byte_duplex.ByteIoError',
+        ])
+        assert.deepEqual(
+          Type.requirementMembers(closeResult).map((requirement) =>
+            Type.encode(requirement.capability),
+          ),
+          ['silk/byte_duplex.ByteDuplex'],
+        )
+      }
+      const tlsModule = index.modules.find(
+        (candidate) => candidate.module === 'silk/tls_connection',
+      )
+      const connectionOperations = (tlsModule?.declarations ?? []).filter(
+        (declaration) => declaration.associatedMember?.owner?.name === 'Connection',
+      )
+      for (const name of ['readSome', 'writeSome', 'flush', 'shutdownWrite'] as const) {
+        const operation = connectionOperations.find(
+          (declaration) => declaration.associatedMember?.name === name,
+        )
+        const result =
+          operation === undefined ? undefined : DeclarationFacts.callableContract(operation).result
+        assert.isTrue(result !== undefined && Type.isEffect(result), name)
+        if (result === undefined || !Type.isEffect(result)) continue
+        assert.deepEqual(
+          Type.requirementMembers(result).map((requirement) => Type.encode(requirement.capability)),
+          ['silk/allocator.Allocator', 'silk/monotonic_clock.MonotonicClock', 'silk/random.Random'],
+        )
+      }
+      const withClient = tlsModule?.declarations.find(
+        (declaration) =>
+          declaration.name._tag === 'Present' && declaration.name.spelling === 'withClient',
+      )
+      assert.isDefined(withClient)
+      if (withClient !== undefined) {
+        const contract = DeclarationFacts.callableContract(withClient)
+        assert.include(
+          Type.encode(contract.parameters.at(3)?.type ?? 'never'),
+          'CallbackRequirements',
+        )
+        assert.include(Type.encode(contract.parameters.at(3)?.type ?? 'never'), 'Connection')
+        assert.include(Type.encode(contract.result), 'CallbackRequirements')
+        const exclusion = withClient.constraints.find(
+          (constraint) =>
+            constraint._tag === 'MembershipConstraint' && constraint.domain === 'Requirement',
+        )
+        assert.strictEqual(exclusion?.selected._tag, 'RowParameterExpression')
+        if (exclusion?.selected._tag === 'RowParameterExpression')
+          assert.strictEqual(exclusion.selected.parameter.name, 'CallbackRequirements')
+        assert.strictEqual(exclusion?.source._tag, 'WithoutRowExpression')
+        if (exclusion?.source._tag === 'WithoutRowExpression') {
+          assert.strictEqual(exclusion.source.source._tag, 'RowParameterExpression')
+          assert.strictEqual(exclusion.source.selected._tag, 'RequirementMemberExpression')
+        }
+      }
+
+      const bypassSource = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.byte_duplex { ByteDuplex }
+import silk.effect { Effect }
+import silk.monotonic_clock { MonotonicClock }
+import silk.random { Random }
+import silk.system_clock { SystemClock }
+import silk.tls_client { ClientConfig }
+import silk.tls_connection { Connection, ConnectionError, ConnectionOptions, withClient }
+import silk.trust_snapshot { TrustSourceError }
+import silk.trust_source { TrustSource }
+effect<'transport> fn bypass<'transport, P>(
+  connection: &'transport mut Connection<'transport, P>
+) -> i32 ? &mut ByteDuplex {
+  drop connection
+  let closed = run Effect.result(ByteDuplex.close())
+  drop closed
+  return 42
+}
+effect fn rejected<'env, P>(
+  transport: &'env mut P,
+  config: &ClientConfig,
+  options: ConnectionOptions,
+) -> i32
+! ConnectionError | TrustSourceError | OutOfMemoryError
+? &mut TrustSource
+  | &mut SystemClock
+  | &mut MonotonicClock
+  | &mut Allocator
+  | &mut Random
+where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut P provides &ByteDuplex from &mut ByteDuplex
+    | &mut MonotonicClock
+    | &mut Allocator
+    | &mut Random {
+  return run withClient<i32, never>(move transport, config, move options, bypass)
+}
+pub fn main() -> i32 { return 42 }`
+      const bypassSnapshot = yield* AnalysisFixture.retainingMain(
+        'stdlib-namespace/byte-duplex-bypass',
+        ascii(bypassSource),
+      )
+      const bypassDiagnostics = Analysis.diagnostics(bypassSnapshot)
+      assert.deepEqual(
+        bypassDiagnostics.map((diagnostic) => diagnostic.code),
+        ['SEM0074'],
+      )
+      assert.strictEqual(
+        bypassDiagnostics.at(0)?.span.start,
+        bypassSource.indexOf(' withClient<i32, never>(move transport'),
+      )
+    }),
+  // Both the accepted callback and the bypass rejection analyze the TLS dependency graph.
+  180_000,
 )
 
 it.effect('resolves selected scope actors for nonprimitive operation modules', () =>

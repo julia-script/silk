@@ -42,6 +42,8 @@ import {
   tlsClientResourcePolicyNativeSource,
   tlsClientWasmSource,
 } from './tlsClientAcceptance.js'
+import { byteDuplexAcceptanceSource } from './byteDuplexAcceptance.js'
+import { tlsConnectionAcceptanceSource } from './tlsConnectionAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
@@ -8050,6 +8052,16 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     source: tlsClientNativeOnlySource,
     nativeSource: tlsClientResourcePolicyNativeSource,
     nativeCSources: { tls_client_fixtures: tlsClientNativeFixtureSource },
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'bounded-byte-duplex',
+    source: byteDuplexAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'authenticated-tls-connection',
+    source: tlsConnectionAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

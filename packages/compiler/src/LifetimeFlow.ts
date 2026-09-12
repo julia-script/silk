@@ -235,6 +235,12 @@ export const analyze = (
     if (previous !== undefined) return previous
     const region: Region = { lifetime, available: new Set(allPoints), required: new Set() }
     regions.set(key, region)
+    if (lifetime._tag === 'IntersectionLifetime')
+      for (const member of lifetime.members) {
+        ensure(member)
+        const bound = { longer: member, shorter: lifetime }
+        constraints.set(Lifetime.assumptions([bound]).key, bound)
+      }
     return region
   }
   const constrain = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime): void => {
@@ -386,13 +392,42 @@ export const analyze = (
       for (const nominal of Type.nominals(expression.type.type)) {
         const failures = TypeOutlives.application(nominal, outlivesScope, (longer, shorter) => {
           if (Lifetime.outlives(outlivesScope.assumptions, longer, shorter)) return true
-          if (longer._tag === 'PlaceholderLifetime' || shorter._tag === 'PlaceholderLifetime')
+          if (
+            [...Lifetime.atoms(longer), ...Lifetime.atoms(shorter)].some(
+              (member) => member._tag === 'PlaceholderLifetime',
+            )
+          )
             return false
-          if (longer._tag !== 'LocalLifetime' && shorter._tag !== 'LocalLifetime') return false
+          if (
+            ![...Lifetime.atoms(longer), ...Lifetime.atoms(shorter)].some(
+              (member) => member._tag === 'LocalLifetime',
+            )
+          )
+            return false
           constrain(longer, shorter)
           return true
         })
         for (const failure of failures) {
+          // Nominals below an invocation binder are validated under the callable's declared
+          // preconditions. Free lifetimes and captured values retain the ordinary scope checks.
+          const value = Type.isRepresented(expression.type.type)
+            ? expression.type.type.contract
+            : expression.type.type
+          if (
+            Type.isCallable(value) &&
+            Lifetime.atoms(failure.required).some((region) =>
+              value.lifetimeBinders.some((binder) => Lifetime.equals(binder, region)),
+            ) &&
+            Type.isTypeArgument(failure.argument) &&
+            Type.satisfiesOutlives(
+              failure.argument,
+              failure.required,
+              value.typeOutlives,
+              (longer, shorter) =>
+                Lifetime.outlives(Lifetime.assumptions(value.lifetimeBounds), longer, shorter),
+            )
+          )
+            continue
           const diagnostic = Diagnostic.unsatisfiedLifetimeBound(
             Type.encodeGenericArgument(failure.argument),
             Lifetime.display(failure.required),
@@ -789,7 +824,11 @@ export const analyze = (
       const required = pending.pop()
       if (required === undefined || visited.has(Lifetime.key(required))) continue
       visited.add(Lifetime.key(required))
-      if (required._tag === 'BoundLifetime' || required._tag === 'StaticLifetime') {
+      if (
+        Lifetime.atoms(required).every(
+          (member) => member._tag === 'BoundLifetime' || member._tag === 'StaticLifetime',
+        )
+      ) {
         publicObligations += 1
         const bounds = (body.parameterBounds.get(Type.key(parameter)) ?? []).map((region) => ({
           type: parameter,
@@ -816,7 +855,11 @@ export const analyze = (
     restrict(lifetime, available, { lifetime, span: root.span })
   }
   for (const target of regions.values()) {
-    if (target.lifetime._tag !== 'BoundLifetime' && target.lifetime._tag !== 'StaticLifetime')
+    if (
+      !Lifetime.atoms(target.lifetime).every(
+        (member) => member._tag === 'BoundLifetime' || member._tag === 'StaticLifetime',
+      )
+    )
       continue
     const pending = [...(incoming.get(Lifetime.key(target.lifetime)) ?? [])]
     const visited = new Set<string>()

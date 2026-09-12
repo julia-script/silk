@@ -4639,6 +4639,17 @@ export const coverageFieldSlots = (
       )
 }
 
+/** Selects a binding's full carrier when cleanup retains the original matched value. */
+export const coverageBindingSlots = (
+  shape: CallingShape,
+  member: Match.CoverageIdentity,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
+  type: DeclarationFacts.SemanticType,
+): ReadonlyArray<number> | undefined =>
+  path.length === 0 && Type.runtimeKey(type) === Type.runtimeKey(shape.type)
+    ? Object.freeze(Array.from({ length: shape.laneCount }, (_, ordinal) => ordinal))
+    : coverageFieldSlots(shape, member, path)
+
 /** Looks up one available or unavailable nominal catalog entry. */
 export const catalogEntry = (
   self: Catalog,

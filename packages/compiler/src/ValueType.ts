@@ -622,9 +622,10 @@ export const directCallableSectionValueType = (
   section: Extract<Hir.Expression, { readonly _tag: 'CallableSection' }>,
   applicationSubstitution: Type.Substitution,
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
-  const type = Type.substitute(
-    fn.semantic(section.type),
-    new Map([...section.substitution, ...applicationSubstitution]),
+  // Resolve application arguments before the enclosing instance: an argument may
+  // still refer to a captured generic parameter of the anonymous callable.
+  const type = fn.semantic(
+    Type.substitute(section.type, new Map([...section.substitution, ...applicationSubstitution])),
   )
   return Type.isCallable(type) && Type.isRuntimeConcrete(type)
     ? Object.freeze({ _tag: 'CallableValue', type, target: section.target })

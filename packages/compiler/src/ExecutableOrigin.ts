@@ -34,6 +34,11 @@ export interface SuspensionGraph {
   readonly effectIdentities: ReadonlySet<string>
   readonly permitted: ReadonlyMap<string, ReadonlySet<SuspensionMode.Mode>>
   readonly unavailable: ReadonlySet<string>
+  /** Exact finalizer executions required to exclude external parking. */
+  readonly nonParkingObligations: ReadonlyArray<{
+    readonly node: string
+    readonly span: SourceSpan.SourceSpan
+  }>
   /** Exact operations and constructor specializations selected by lexical service providers. */
   readonly providedTargets: ReadonlyArray<Omit<Instances.CallInstance, '_tag' | 'resultEffect'>>
 }
@@ -2341,9 +2346,18 @@ export const make = (operations: Operations) => {
     const invocationBinders = new Set(
       DeclarationFacts.executableLifetimes(fn.declaration).lifetimeBinders.map(Lifetime.key),
     )
+    // Anonymous declarations also retain outer lifetimes. Only their own invocation
+    // binders may be absent; captured outer arguments still select the environment.
     const invocation = (parameter: DeclarationFacts.TypeParameterFact): boolean => {
       const argument = Type.parameterArgument(parameter.type)
-      return Lifetime.isLifetime(argument) && invocationBinders.has(Lifetime.key(argument))
+      const owner = fn.declaration.canonical
+      return (
+        owner._tag === 'Canonical' &&
+        parameter.type.owner.module === owner.id.module &&
+        parameter.type.owner.name === owner.id.name &&
+        Lifetime.isLifetime(argument) &&
+        invocationBinders.has(Lifetime.key(argument))
+      )
     }
     if (arguments_.length !== parameters.filter((parameter) => !invocation(parameter)).length)
       return undefined
@@ -3182,6 +3196,7 @@ export const make = (operations: Operations) => {
     instances: ReadonlyArray<Instance>,
     results: ReadonlyMap<string, Elaboration.Result>,
     index: DeclarationIndex.Index,
+    callables: ReadonlyArray<CallableInstance>,
   ): SuspensionGraph => {
     const nestedRoots = new Set<string>()
     const diagnosticObservations = new Set<string>()
@@ -3201,6 +3216,10 @@ export const make = (operations: Operations) => {
     const effectIdentities = new Set<string>()
     const permitted = new Map<string, Set<SuspensionMode.Mode>>()
     const unavailable = new Set<string>()
+    const nonParkingObligations = new Map<
+      string,
+      SuspensionGraph['nonParkingObligations'][number]
+    >()
     const providedTargets = new Map<string, SuspensionGraph['providedTargets'][number]>()
     let cleanupEffects: ReadonlyMap<string, EffectInstance> | undefined
     const effectForCleanup = (identity: string): EffectInstance | undefined => {
@@ -3228,6 +3247,7 @@ export const make = (operations: Operations) => {
         readonly role: string
         readonly access: 'Shared' | 'Exclusive'
         readonly operation: string
+        readonly nonParking: boolean
         readonly expression: Extract<Hir.Expression, { readonly _tag: 'ServiceEffectConstruct' }>
         readonly context: EffectOriginContext
       }
@@ -3435,14 +3455,34 @@ export const make = (operations: Operations) => {
         const arguments_ =
           target === undefined ? undefined : callableTargetArguments(target, origin.typeArguments)
         if (target === undefined || arguments_ === undefined) return undefined
-        return instanceNode(
-          keyOf(
-            declaration,
-            target.contract,
-            target.declaration.typeParameters.map((parameter) => parameter.type),
-            arguments_,
-          ),
+        // Builtin callback edges use the same captured callable identities as the concrete
+        // environment's runtime target. Omitting them loses the callback's provider graph.
+        const environment = origin.environment
+        const captured =
+          environment === undefined
+            ? undefined
+            : callables.find(
+                (candidate) =>
+                  Type.runtimeCallableEnvironmentIdentityKey(
+                    operations.callableEnvironmentIdentity(candidate),
+                  ) === Type.runtimeCallableEnvironmentIdentityKey(environment) &&
+                  Hir.matchesCallableTargetIdentity(candidate.target, origin.target) &&
+                  sameVisibleTypeArguments(candidate.typeArguments, arguments_),
+              )
+        if (environment !== undefined && captured === undefined) return undefined
+        const capturedCallables = (captured?.captures ?? [])
+          .slice()
+          .sort((left, right) => left.parameterOrdinal - right.parameterOrdinal)
+          .flatMap((capture) =>
+            capture.callableIdentity === undefined ? [] : [capture.callableIdentity],
+          )
+        const selectedKey = keyOf(
+          declaration,
+          target.contract,
+          target.declaration.typeParameters.map((parameter) => parameter.type),
+          [...arguments_, ...capturedCallables],
         )
+        return executionNodeForKey(selectedKey)
       }
       const addBuiltinCallbacks = (
         expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
@@ -3457,6 +3497,9 @@ export const make = (operations: Operations) => {
             ordinals = [0]
             break
           case 'SharedWithMut':
+            ordinals = [1, 2]
+            break
+          case 'EffectUseReleaseNonParking':
             ordinals = [1, 2]
             break
           default:
@@ -3580,6 +3623,19 @@ export const make = (operations: Operations) => {
           )
           if (!Type.isNominal(service)) return []
           const node = serviceCallNode(instance.key, expression)
+          const operation = index.modules
+            .find((module) => module.module === service.module)
+            ?.services.find(
+              (candidate) =>
+                candidate.canonical._tag === 'Canonical' &&
+                candidate.canonical.id.name === service.name,
+            )
+            ?.operations.find(
+              (candidate) =>
+                candidate.name._tag === 'Present' &&
+                candidate.name.spelling === expression.operation,
+            )
+          const nonParking = operation?.staticProperties.includes('Intrinsic.NonParking') === true
           serviceCalls.set(
             node,
             Object.freeze({
@@ -3587,14 +3643,78 @@ export const make = (operations: Operations) => {
               role: expression.role,
               access: expression.access,
               operation: expression.operation,
+              nonParking,
               expression,
               context,
             }),
           )
+          if (nonParking) permitted.set(node, new Set<SuspensionMode.Mode>(['NestedTransfer']))
           return Object.freeze([node])
         }
         return Object.freeze(effectOrigins(expression).map(effectNode))
       }
+
+      const nonParkingExecutionTargets = (
+        expression: Hir.Expression,
+      ): { readonly targets: ReadonlyArray<string>; readonly complete: boolean } => {
+        if (expression._tag === 'BindingReference') {
+          const initializer = bindings.get(expression.binding.ordinal)
+          return initializer === undefined
+            ? Object.freeze({ targets: Object.freeze([]), complete: false })
+            : nonParkingExecutionTargets(initializer)
+        }
+        if (expression._tag === 'Move') return nonParkingExecutionTargets(expression.subject)
+        if (expression._tag === 'UnionConvert') return nonParkingExecutionTargets(expression.source)
+        if (expression._tag === 'Match') {
+          const reachable = expression.arms.filter((arm) => arm.reachable)
+          const selected = reachable.map((arm) =>
+            arm.body._tag === 'Expression'
+              ? nonParkingExecutionTargets(arm.body.expression)
+              : Object.freeze({
+                  targets: Object.freeze<ReadonlyArray<string>>([]),
+                  complete: false,
+                }),
+          )
+          return Object.freeze({
+            targets: Object.freeze([
+              ...new Set(selected.flatMap((candidate) => candidate.targets)),
+            ]),
+            complete:
+              selected.length === reachable.length &&
+              selected.length > 0 &&
+              selected.every((candidate) => candidate.complete),
+          })
+        }
+        const composite = compositeEffectRepresentationOf(expression, context)
+        if (composite !== undefined) {
+          const identities = composite.alternatives.map((alternative) =>
+            Type.isEffectIdentityArgument(alternative.identity)
+              ? resolveEffectIdentity(alternative.identity)
+              : undefined,
+          )
+          return Object.freeze({
+            targets: Object.freeze([
+              ...new Set(
+                identities.flatMap((identity) =>
+                  identity === undefined ? [] : [effectNode(identity)],
+                ),
+              ),
+            ]),
+            complete:
+              identities.length > 0 && identities.every((identity) => identity !== undefined),
+          })
+        }
+        const targets = executionTargets(expression)
+        return Object.freeze({ targets, complete: targets.length > 0 })
+      }
+
+      const carriesNonParkingProof = (expression: Hir.Expression): boolean =>
+        expression._tag !== 'Unavailable' &&
+        Type.isRepresented(expression.type) &&
+        Type.isRepresentationParameterArgument(expression.type.representation.argument) &&
+        expression.type.representation.argument.parameter.staticProperties.includes(
+          'Intrinsic.NonParking',
+        )
 
       const isSuspensionSubject = (expression: Hir.Expression): boolean => {
         if (expression._tag === 'BuiltinCall') return expression.operation === 'EffectSuspend'
@@ -3881,6 +4001,47 @@ export const make = (operations: Operations) => {
           if (expression.operation === 'EffectObserveUnhandled')
             terminalObservations.push(Object.freeze({ execution, span: expression.span }))
           const targets = executionTargets(expression)
+          if (expression.operation === 'EffectFinalizeNonParking') {
+            const finalizer = expression.arguments.at(1)
+            if (finalizer === undefined || !carriesNonParkingProof(finalizer)) {
+              const resolved =
+                finalizer === undefined
+                  ? Object.freeze({
+                      targets: Object.freeze<ReadonlyArray<string>>([]),
+                      complete: false,
+                    })
+                  : nonParkingExecutionTargets(finalizer)
+              if (!resolved.complete) {
+                const node = `nonparking-finalizer\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
+                unavailable.add(node)
+                nonParkingObligations.set(node, Object.freeze({ node, span: expression.span }))
+              }
+              for (const node of resolved.targets)
+                nonParkingObligations.set(
+                  `${node}\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`,
+                  Object.freeze({ node, span: expression.span }),
+                )
+            }
+          }
+          if (expression.operation === 'EffectUseReleaseNonParking') {
+            const release = expression.arguments.at(2)
+            if (release === undefined || !carriesNonParkingProof(release)) {
+              const node = release === undefined ? undefined : callableApplicationTarget(release)
+              if (node === undefined) {
+                const unavailableNode = `nonparking-resource-release\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`
+                unavailable.add(unavailableNode)
+                nonParkingObligations.set(
+                  unavailableNode,
+                  Object.freeze({ node: unavailableNode, span: expression.span }),
+                )
+              } else {
+                nonParkingObligations.set(
+                  `${node}\u0000${expression.span.sourceId}:${expression.span.start}:${expression.span.end}`,
+                  Object.freeze({ node, span: expression.span }),
+                )
+              }
+            }
+          }
           if (!Type.isEffect(Type.substitute(expression.type, instance.substitution)))
             addBuiltinCallbacks(expression, execution)
           // Observation starts when its returned Effect runs. Construction only records the
@@ -4076,8 +4237,20 @@ export const make = (operations: Operations) => {
               }),
             )
             const targetNode = executionNodeForKey(target)
+            if (serviceCall.nonParking)
+              nonParkingObligations.set(
+                `${targetNode}\u0000${serviceCall.expression.span.sourceId}:${serviceCall.expression.span.start}:${serviceCall.expression.span.end}`,
+                Object.freeze({ node: targetNode, span: serviceCall.expression.span }),
+              )
             selectedEdges.push(Object.freeze([binding.execution, targetNode]))
             pendingProviders.push(Object.freeze({ node: targetNode, environment }))
+          } else if (serviceCall.nonParking) {
+            const node = `nonparking-provider\u0000${serviceCall.expression.span.sourceId}:${serviceCall.expression.span.start}:${serviceCall.expression.span.end}`
+            unavailable.add(node)
+            nonParkingObligations.set(
+              node,
+              Object.freeze({ node, span: serviceCall.expression.span }),
+            )
           }
         }
       }
@@ -4130,6 +4303,7 @@ export const make = (operations: Operations) => {
       effectIdentities,
       permitted,
       unavailable,
+      nonParkingObligations: Object.freeze([...nonParkingObligations.values()]),
       providedTargets: Object.freeze([...providedTargets.values()]),
     })
   }

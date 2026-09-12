@@ -12,6 +12,7 @@ import type {
   RequirementRowArgument,
   RequirementsRow,
   RowInferenceFailure,
+  InferenceFailure,
   SealedStaticProperty,
   Substitution,
   TypeOutlives,
@@ -99,6 +100,7 @@ export interface LifetimeInference {
 }
 
 interface InferenceContext {
+  readonly environmentFailure?: (bound: Lifetime.Outlives) => void
   readonly lifetimes?: LifetimeInference | undefined
   readonly invariant?: boolean
   readonly contravariant?: boolean
@@ -191,8 +193,6 @@ const inferFailureRow = (
   allowOpenActual: boolean,
   context: InferenceContext,
 ): boolean => {
-  if (!allowOpenActual && RowAlgebra.concretize(failureRowPolicy(), actual)._tag !== 'Concrete')
-    return false
   if (RowAlgebra.key(failureRowPolicy(), pattern) === RowAlgebra.key(failureRowPolicy(), actual)) {
     // An open witness receiver still supplies evidence when its failure row is identical to
     // the implementation's pattern. Retain those identity bindings, just as inferType does
@@ -211,24 +211,15 @@ const inferFailureRow = (
   )
     return true
   if (pattern.expression._tag === 'Singleton') {
-    if (actual.expression._tag === 'Singleton')
-      return bindGenericArgument(
-        pattern.expression.member.parameter,
-        actual.expression.member.parameter,
-        inferred,
-        context,
-      )
-    const concrete = RowAlgebra.concretize(failureRowPolicy(), actual)
-    if (concrete._tag !== 'Concrete') return false
-    const normalized = union(concrete.row.members)
+    const parameter = pattern.expression.member.parameter
+    const normalized = union([...failureMembers(actual), ...failureMemberParameters(actual)])
     if (normalized._tag !== 'Normalized') return false
-    return bindGenericArgument(
-      pattern.expression.member.parameter,
-      normalized.type,
-      inferred,
-      context,
-    )
+    if (someSubterm(normalized.type, (part) => isParameter(part) && key(part) === key(parameter)))
+      return false
+    return bindGenericArgument(parameter, normalized.type, inferred, context)
   }
+  if (!allowOpenActual && RowAlgebra.concretize(failureRowPolicy(), actual)._tag !== 'Concrete')
+    return false
   if (
     pattern.expression._tag === 'Without' ||
     (pattern.expression._tag === 'Union' &&
@@ -263,11 +254,6 @@ const inferRequirementRowArgument = (
   allowOpenActual: boolean,
   context: InferenceContext,
 ): boolean => {
-  if (
-    !allowOpenActual &&
-    RowAlgebra.concretize(requirementRowPolicy(), actual.row)._tag !== 'Concrete'
-  )
-    return false
   if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
   const substitutedPattern = requirementRowArgumentFromRow(
     substituteRequirementsRow(pattern.row, inferred),
@@ -285,6 +271,11 @@ const inferRequirementRowArgument = (
       return false
     return bindGenericArgument(pattern.row.expression.parameter, actual, inferred, context)
   }
+  if (
+    !allowOpenActual &&
+    RowAlgebra.concretize(requirementRowPolicy(), actual.row)._tag !== 'Concrete'
+  )
+    return false
   if (substitutedPattern.row.expression._tag === 'Union') {
     const rowParameters = substitutedPattern.row.expression.operands.filter(
       (operand): operand is Extract<typeof operand, { readonly _tag: 'RowParameter' }> =>
@@ -404,7 +395,7 @@ const inferLifetime = (
     return true
   }
   if (context.lifetimes !== undefined) {
-    const expected = previous === undefined ? pattern : previous
+    const expected = previous === undefined ? substituteLifetime(pattern, inferred) : previous
     return (
       Lifetime.isLifetime(expected) &&
       context.lifetimes.accepts(
@@ -473,10 +464,11 @@ const inferRequirementRows = (
   )
 
 /** Explains a failed Effect-row decomposition without replacing ordinary type diagnostics. */
-export const rowInferenceFailure = (
-  pattern: Type,
-  actual: Type,
-): RowInferenceFailure | undefined => {
+const rowInferenceFailure = (pattern: Type, actual: Type): RowInferenceFailure | undefined => {
+  // A generic forwarding site may preserve the exact caller-owned row identity. It is open, but
+  // it requires no decomposition or inference, so rejecting it as non-finite would make ordinary
+  // wrappers less expressive than the declaration they forward to.
+  if (equals(pattern, actual)) return undefined
   if (isNominal(pattern) && isNominal(actual)) {
     if (
       pattern.module !== actual.module ||
@@ -561,9 +553,54 @@ export const rowInferenceFailure = (
   return undefined
 }
 
+/** Reports the failed environment proof before considering a later symbolic row. */
+export const inferenceFailure = (
+  pattern: Type,
+  actual: Type,
+  inferred: Substitution = new Map(),
+  lifetimes?: LifetimeInference,
+): InferenceFailure | undefined => {
+  let failure: Lifetime.Outlives | undefined
+  const diagnose = () =>
+    inferType(pattern, actual, new Map(inferred), {
+      allowOpenGenericArguments: false,
+      lifetimes,
+      environmentFailure: (bound) => {
+        failure ??= bound
+      },
+    })
+  const matched =
+    lifetimes?.compatibility === undefined
+      ? diagnose()
+      : TypeCompatibility.commitWhen(lifetimes.compatibility, diagnose, () => false)
+  if (matched) return undefined
+  if (failure !== undefined)
+    return {
+      _tag: 'EnvironmentMismatch',
+      longer: Lifetime.display(failure.longer),
+      shorter: Lifetime.display(failure.shorter),
+    }
+  return rowInferenceFailure(pattern, actual)
+}
+
+const inferEnvironment = (
+  pattern: Lifetime.Lifetime,
+  actual: Lifetime.Lifetime,
+  inferred: Map<string, GenericArgument>,
+  context: InferenceContext,
+): boolean => {
+  if (inferLifetime(pattern, actual, inferred, context)) return true
+  const expected = substituteLifetime(pattern, inferred)
+  context.environmentFailure?.({
+    longer: context.contravariant ? expected : actual,
+    shorter: context.contravariant ? actual : expected,
+  })
+  return false
+}
+
 /** Includes hidden representation identities when checking whether a rigid region escaped. */
 const argumentLifetimes = (argument: GenericArgument): ReadonlyArray<Lifetime.Lifetime> => {
-  if (Lifetime.isLifetime(argument)) return [argument]
+  if (Lifetime.isLifetime(argument)) return Lifetime.atoms(argument)
   if (
     (typeof argument !== 'string' && argument._tag === 'TypeParameter') ||
     isTypeArgument(argument)
@@ -673,10 +710,42 @@ const inferQuantifiedExecutable = (
         )
   }
   const trial = new Map(inferred)
-  if (
-    !inferType(open(pattern, patternSubstitution), open(actual, actualSubstitution), trial, context)
-  )
-    return false
+  // Expected invocation preconditions stay in scope while checking the returned Effect.
+  // Only the rigid comparison uses these assumptions; the escape check below still prevents
+  // an invocation binder from entering the caller's specialization.
+  const openedPattern = open(pattern, patternSubstitution)
+  const proves = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime): boolean =>
+    Lifetime.outlives(
+      Lifetime.assumptions(
+        openedPattern.lifetimeBounds.map((bound) => ({
+          longer: substituteLifetime(bound.longer, trial),
+          shorter: substituteLifetime(bound.shorter, trial),
+        })),
+      ),
+      longer,
+      shorter,
+    ) ||
+    (context.lifetimes?.accepts(longer, shorter, false) ?? false)
+  const scoped: InferenceContext = {
+    ...context,
+    lifetimes: {
+      ...context.lifetimes,
+      accepts: (longer, shorter, invariant) =>
+        proves(longer, shorter) && (!invariant || proves(shorter, longer)),
+      typeOutlives: (type, lifetime) =>
+        satisfiesOutlives(
+          type,
+          lifetime,
+          openedPattern.typeOutlives.map((bound) => ({
+            type: substitute(bound.type, trial),
+            lifetime: substituteLifetime(bound.lifetime, trial),
+          })),
+          proves,
+        ) ||
+        (context.lifetimes?.typeOutlives?.(type, lifetime) ?? false),
+    },
+  }
+  if (!inferType(openedPattern, open(actual, actualSubstitution), trial, scoped)) return false
   for (const [identity, argument] of trial) {
     if (inferred.has(identity)) continue
     const regions = argumentLifetimes(argument)
@@ -943,7 +1012,7 @@ const inferSelectedType = (
     if (pattern.lifetimeBinders.length !== 0 || actual.lifetimeBinders.length !== 0)
       return inferQuantifiedExecutable(pattern, actual, inferred, context)
     return (
-      inferLifetime(pattern.environment, actual.environment, inferred, context) &&
+      inferEnvironment(pattern.environment, actual.environment, inferred, context) &&
       (!actual.unsafe || pattern.unsafe) &&
       compareAccess(pattern.mode, actual.mode) &&
       pattern.parameters.length === actual.parameters.length &&
@@ -965,7 +1034,7 @@ const inferSelectedType = (
     if (pattern.lifetimeBinders.length !== 0 || actual.lifetimeBinders.length !== 0)
       return inferQuantifiedExecutable(pattern, actual, inferred, context)
     return (
-      inferLifetime(pattern.environment, actual.environment, inferred, context) &&
+      inferEnvironment(pattern.environment, actual.environment, inferred, context) &&
       compareAccess(pattern.access, actual.access) &&
       inferType(pattern.success, actual.success, inferred, context) &&
       inferFailureRows(pattern, actual, inferred, context) &&

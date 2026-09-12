@@ -3769,6 +3769,55 @@ const collectModule = (
           const constraints = collectConstraints(source, operation, environment)
           const body = SyntaxTree.directNode(operation, 'Block')
           const parameterFacts = Object.freeze(parameters.map((parameter) => parameter.fact))
+          const functionKind =
+            SyntaxTree.directToken(operation, 'EffectKeyword') === undefined
+              ? ('Ordinary' as const)
+              : ('Effect' as const)
+          const propertyClauses = DeclarationProperty.clauses(operation)
+          const validNonParking = propertyClauses.filter((clause) => {
+            const owner = DeclarationProperty.owner(source, clause)
+            const arguments_ = SyntaxTree.directNodes(clause, 'FunctionProperty')
+            if (owner !== 'Intrinsic.nonParking') {
+              diagnostics.push(
+                Diagnostic.invalidServiceDeclaration(
+                  `unsupported operation property ${owner || '<missing>'}`,
+                  clause.span,
+                ),
+              )
+              return false
+            }
+            if (arguments_.length > 0) {
+              diagnostics.push(
+                Diagnostic.invalidServiceDeclaration(
+                  'Intrinsic.nonParking takes no arguments on an operation',
+                  clause.span,
+                ),
+              )
+              return false
+            }
+            if (functionKind !== 'Effect') {
+              diagnostics.push(
+                Diagnostic.invalidServiceDeclaration(
+                  'Intrinsic.nonParking applies only to effect operations',
+                  clause.span,
+                ),
+              )
+              return false
+            }
+            return true
+          })
+          if (validNonParking.length > 1)
+            for (const duplicate of validNonParking.slice(1))
+              diagnostics.push(
+                Diagnostic.invalidServiceDeclaration(
+                  'duplicate Intrinsic.nonParking operation property',
+                  duplicate.span,
+                ),
+              )
+          const staticProperties: ReadonlyArray<Type.SealedStaticProperty> =
+            validNonParking.length === 0
+              ? Object.freeze([])
+              : Object.freeze(['Intrinsic.NonParking'])
           const operatorSyntax = SyntaxTree.directNode(operation, 'OperatorMarker')
           const operatorToken = operatorSyntax?.children.find(
             (element): element is Token.Token =>
@@ -3818,11 +3867,9 @@ const collectModule = (
             _tag: 'ServiceOperation',
             id: operationId,
             state: operationState,
-            functionKind:
-              SyntaxTree.directToken(operation, 'EffectKeyword') === undefined
-                ? 'Ordinary'
-                : 'Effect',
+            functionKind,
             unsafe: SyntaxTree.directToken(operation, 'UnsafeKeyword') !== undefined,
+            staticProperties,
             typeParameters: operationTypeParameters.facts,
             lifetimeElaboration: Object.freeze({
               ...operationTypeParameters.lifetimeContext,

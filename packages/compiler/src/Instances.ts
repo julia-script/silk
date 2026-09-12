@@ -240,6 +240,11 @@ export interface Discovery {
   readonly constants: ReadonlyArray<SelectedConstant>
   /** Exact direct/nested/external-park summaries in canonical subject order. */
   readonly suspension: ReadonlyArray<SuspensionFact>
+  /** Exact finalizer and service-operation implementations required to exclude external parking. */
+  readonly nonParkingObligations: ReadonlyArray<{
+    readonly span: SourceSpan.SourceSpan
+    readonly summary: SuspensionMode.Summary
+  }>
   /** Function bodies whose executed closure enters diagnostic observation. */
   readonly contextFreeTerminalObservations: ReadonlyArray<SourceSpan.SourceSpan>
   readonly observingExecutions: ReadonlyArray<InstanceKey>
@@ -343,6 +348,7 @@ export const invalid = (rootModule: string): Discovery =>
     foreignExports: Object.freeze([]),
     constants: Object.freeze([]),
     suspension: Object.freeze([]),
+    nonParkingObligations: Object.freeze([]),
     contextFreeTerminalObservations: Object.freeze([]),
     observingExecutions: Object.freeze([]),
     residualizationDiagnostics: Object.freeze([]),
@@ -1405,12 +1411,23 @@ export const discover = (
   const violationKeys = new Set<string>()
   const specializationFailures = new Map<string, NonConcreteSpecialization>()
   const recordedContexts = new Map<string, Map<string, WorkItem>>()
+  // TLS connection discovery repeats the same long specialization identities across tens of
+  // thousands of paths. Intern the identity atoms locally so path keys retain exact equality
+  // without copying those strings into every ancestor context. These IDs never leave discovery.
+  const contextAtoms = new Map<string, number>()
+  const contextAtom = (value: string): number => {
+    const known = contextAtoms.get(value)
+    if (known !== undefined) return known
+    const identity = contextAtoms.size
+    contextAtoms.set(value, identity)
+    return identity
+  }
   const contextText = (item: WorkItem): string =>
     `${
       item.cleanupMeasure === undefined
         ? 'ordinary'
-        : item.cleanupMeasure.roots.map(Type.runtimeKey).sort().join('\u0000')
-    }\u0001${keyText(item.key)}\u0001${[...item.ancestors.entries()]
+        : contextAtom(item.cleanupMeasure.roots.map(Type.runtimeKey).sort().join('\u0000'))
+    }\u0001${contextAtom(keyText(item.key))}\u0001${[...item.ancestors.entries()]
       .sort(([left], [right]) => {
         if (left < right) return -1
         if (left > right) return 1
@@ -1418,7 +1435,7 @@ export const discover = (
       })
       .map(
         ([declaration, ancestor]) =>
-          `${declaration}\u0002${keyText(ancestor.key)}\u0002${ancestor.structuralProvider === undefined ? '' : Type.key(ancestor.structuralProvider)}`,
+          `${contextAtom(declaration)}\u0002${contextAtom(keyText(ancestor.key))}\u0002${ancestor.structuralProvider === undefined ? '' : contextAtom(Type.key(ancestor.structuralProvider))}`,
       )
       .join('\u0003')}`
   const pending: Array<{ readonly item: WorkItem; readonly context: string }> = []
@@ -1747,7 +1764,9 @@ export const discover = (
     const currentInstances = Object.freeze(
       [...prepared.values()].map((candidate) => candidate.instance),
     )
-    const currentGraph = suspensionGraph(currentInstances, results, index)
+    const currentGraph = suspensionGraph(currentInstances, results, index, [
+      ...recordedCallables.values(),
+    ])
     providerCalls.clear()
     for (const provided of currentGraph.providedTargets) {
       const target = functionByKey(results, provided.target)
@@ -1881,11 +1900,33 @@ export const discover = (
       })
     }),
   )
-  const finalGraph = suspensionGraph(instances, results, index)
+  const finalGraph = suspensionGraph(instances, results, index, [...recordedCallables.values()])
   const summaries = ExecutableOrigin.suspensionSummaries(finalGraph)
   const observing = ExecutableOrigin.observingExecutions(finalGraph)
+  const effects = concreteEffects(
+    instances,
+    summaries,
+    results,
+    index,
+    Object.freeze([...recordedCallables.values()]),
+  )
+  const knownExecutionNodes = new Set([
+    ...instances.map((instance) => instanceNode(instance.key)),
+    ...effects.map((effect) => effectNode(effect.identity)),
+    ...finalGraph.permitted.keys(),
+  ])
+  const unavailableSummary: SuspensionMode.Summary = Object.freeze({
+    _tag: 'SuspensionModeSummary',
+    availability: 'Unavailable',
+    modes: Object.freeze([]),
+    causes: Object.freeze([]),
+  })
   const summaryOfNode = (node: string): SuspensionMode.Summary =>
     summaries.get(node) ?? SuspensionMode.direct
+  const nonParkingSummaryOfNode = (node: string): SuspensionMode.Summary =>
+    knownExecutionNodes.has(node)
+      ? (summaries.get(node) ?? SuspensionMode.direct)
+      : unavailableSummary
   const callInstances = Object.freeze([...recordedCalls.values(), ...providerCalls.values()])
   return Object.freeze({
     _tag: 'InstanceDiscovery',
@@ -1894,13 +1935,7 @@ export const discover = (
     instances,
     unavailableOwnership,
     callables: Object.freeze([...recordedCallables.values()]),
-    effects: concreteEffects(
-      instances,
-      summaries,
-      results,
-      index,
-      Object.freeze([...recordedCallables.values()]),
-    ),
+    effects,
     calls: callInstances,
     intrinsics: ExecutableOrigin.reachableIntrinsics(instances, index),
     foreignCalls: ExecutableOrigin.reachableForeignCalls(instances, index, target),
@@ -1944,6 +1979,11 @@ export const discover = (
         }),
       ),
     ]),
+    nonParkingObligations: Object.freeze(
+      finalGraph.nonParkingObligations.map((obligation) =>
+        Object.freeze({ span: obligation.span, summary: nonParkingSummaryOfNode(obligation.node) }),
+      ),
+    ),
     residualizationDiagnostics: Object.freeze([...residualizationDiagnostics.values()]),
     specializationFailures: Object.freeze([...specializationFailures.values()]),
     violations: Object.freeze(violations),

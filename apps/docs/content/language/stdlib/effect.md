@@ -470,6 +470,59 @@ remaining captures exactly once; it does not resume or finish the finalizer.
 A trap is not an outcome. It bypasses the finalizer exactly as it bypasses `Effect.catch` and
 every Drop hook.
 
+<a id="declaration-73696c6b2f6566666563743a3a4566666563742e656e737572696e674e6f6e5061726b696e67"></a>
+
+### Associated function `Effect.ensuringNonParking`
+
+```silk
+pub effect<'env> fn ensuringNonParking<'env, A, E, ?R, ?S, F>(self: once Effect<'env; A ! E ? R>, finalizer: F) -> A ! E ? R | S
+```
+
+Runs a nonparking finalizer on every structured Effect exit and preserves the original outcome.
+
+#### When to use
+
+Use this operation when structured cancellation must release a scoped resource before it
+destroys the protected execution. Use [`ensuring`](#declaration-73696c6b2f6566666563743a3a4566666563742e656e737572696e67) when the finalizer can suspend.
+
+#### Details
+
+The finalizer runs exactly once after success or typed failure. It also runs when an owner
+cancels a parked `Execution`. Required providers remain valid until the finalizer completes.
+Nested scopes finalize in reverse order. The original outcome remains unchanged.
+
+#### Gotchas
+
+The finalizer must satisfy `Intrinsic.NonParking`. Fatal traps bypass this finalizer and all
+Drop hooks. Recover a fallible release before you pass it to this operation.
+
+<a id="declaration-73696c6b2f6566666563743a3a4566666563742e75736552656c656173654e6f6e5061726b696e67"></a>
+
+### Associated function `Effect.useReleaseNonParking`
+
+```silk
+pub effect<'env> fn useReleaseNonParking<'env, Resource: 'env, A, E, ?R, ?S, Release>(resource: Resource, use: for<'scope> once fn<'env>(&'scope mut Resource) -> once Effect<'scope & 'env; A ! E ? R>, release: Release) -> A ! E ? R | S
+```
+
+Uses one owned resource and releases it after every structured Effect exit.
+
+#### When to use
+
+Use this operation when suspended work needs an exclusive resource borrow and cancellation
+must release the owned resource before its frame is destroyed.
+
+#### Details
+
+`use` receives one temporary exclusive borrow. That borrow ends before `release` receives a
+fresh exclusive borrow after success, typed failure, or structured cancellation. Release runs
+exactly once, nested brackets release in reverse order, and the protected outcome is
+preserved. The release Effect must satisfy `Intrinsic.NonParking`.
+
+#### Gotchas
+
+Fatal traps bypass release and all Drop hooks. Recover a fallible release to `! never` before
+returning it from the callback.
+
 <a id="declaration-73696c6b2f6566666563743a3a4566666563742e69665468656e456c7365"></a>
 
 ### Associated function `Effect.ifThenElse`

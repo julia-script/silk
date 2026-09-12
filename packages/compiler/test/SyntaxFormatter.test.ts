@@ -188,7 +188,7 @@ it.effect(
   text: string < 'c >
   omitted: &T
 }
-effect < 'env > fn apply <'env,T>(callback: for < 'call > once fn < 'env > (& 'call T)-> & 'call T, pending: Effect < 'env ; // environment
+effect < 'env & 'other > fn apply <'env,'other,T>(callback: for < 'call > once fn < 'env > (& 'call T)-> & 'call T, pending: Effect < 'env & 'other ; // environment
 T ! Error ? &Clock >) -> () {drop pending}
 fn inspect(value: Choice)->i32{return match place value {Choice.Some{field}=>field Choice.None=>0}}`
       const original = parse('memory://format-lifetimes.silk', source)
@@ -202,9 +202,9 @@ fn inspect(value: Choice)->i32{return match place value {Choice.Some{field}=>fie
       assert.include(text, "text: string<'c>")
       assert.include(text, 'omitted: &T')
       assert.include(text, "for<'call> once fn<'env>(&'call T) -> &'call T")
-      assert.include(text, "Effect<'env;")
+      assert.include(text, "Effect<'env & 'other;")
       assert.include(text, 'match place value')
-      assert.include(text, "effect<'env> fn apply<'env, T>")
+      assert.include(text, "effect<'env & 'other> fn apply<'env, 'other, T>")
       const reparsed = parse('memory://format-lifetimes.silk', text)
       assert.deepEqual(reparsed.parserDiagnostics, [])
       assert.deepEqual(normalized(reparsed, reparsed.root), normalized(original, original.root))
@@ -407,6 +407,25 @@ unsafe extern "C" fn tick() with Intrinsic.foreign(memory: "none", noReturn: tru
 `,
     )
     const second = yield* SyntaxFormatter.format(parse('memory://foreign-format.silk', text))
+    assert.strictEqual(formattedText(second), text)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
+it.effect('formats service operation executable properties canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'service Duplex{effect fn close( )->() ? &mut Duplex with Intrinsic.nonParking( )}'
+    const first = yield* SyntaxFormatter.format(parse('memory://service-property.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `service Duplex {
+  effect fn close() -> () ? &mut Duplex with Intrinsic.nonParking()
+}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://service-property.silk', text))
     assert.strictEqual(formattedText(second), text)
     assert.strictEqual(second.changed, false)
   }),

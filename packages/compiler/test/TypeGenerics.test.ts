@@ -255,6 +255,69 @@ it('checks computed rows forward-only without reconstructing their operands', ()
     Type.encode(Type.failureType(Type.substituteFailureRow(computed, independentlyBound))),
     'generics/ForwardRows.Other',
   )
+
+  const requirementSource = Type.parameter(owner, 2, 'R', 'RequirementRow')
+  const transport = {
+    capability: Type.nominal('generics/ForwardRows', 'Transport'),
+    role: 'DefaultRole',
+    access: 'Exclusive' as const,
+  }
+  const audit = {
+    capability: Type.nominal('generics/ForwardRows', 'Audit'),
+    role: 'DefaultRole',
+    access: 'Exclusive' as const,
+  }
+  const requirementPattern = Type.effectWithRows(
+    'i32',
+    RowAlgebra.concrete(Type.failureRowPolicy(), []),
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    RowAlgebra.without(
+      Type.requirementRowPolicy(),
+      RowAlgebra.parameter(requirementSource),
+      RowAlgebra.concrete(Type.requirementRowPolicy(), [transport]),
+    ),
+  )
+  const requirementActual = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    [audit],
+  )
+  assert.isFalse(TypeInference.infer(requirementPattern, requirementActual, new Map()))
+})
+
+it('preserves symbolic failure members when a singleton specializes to a mixed union', () => {
+  const owner = { module: 'generics/MixedFailureSpecialization', name: 'forward' }
+  const inner = Type.parameter(owner, 0, 'InnerE')
+  const outer = Type.parameter(owner, 1, 'OuterE')
+  const fixed = Type.nominal('generics/MixedFailureSpecialization', 'FixedFailure')
+  const origin =
+    SourceSpan.fromOffsets('generics/MixedFailureSpecialization', 20, 26) ??
+    unreachable('expected a valid source span')
+  const source = RowAlgebra.singleton(
+    Type.failureRowPolicy(),
+    Type.failureMemberShape(inner),
+    origin,
+  )
+
+  const specialized = Type.specializeFailureRow(
+    source,
+    new Map([[Type.key(inner), Type.failureValue([fixed, outer])]]),
+  )
+
+  assert.strictEqual(specialized._tag, 'Substituted')
+  if (specialized._tag !== 'Substituted') return
+  assert.deepEqual(Type.failureMembers(specialized.row), [fixed])
+  assert.deepEqual(Type.failureMemberParameters(specialized.row), [outer])
+  assert.deepEqual(
+    specialized.row.memberWellFormed.map((obligation) => ({
+      parameter: obligation.member.parameter,
+      origins: obligation.origins,
+    })),
+    [{ parameter: outer, origins: [origin] }],
+  )
 })
 
 it('infers failure and requirement row arguments nested in nominal applications', () => {
@@ -413,7 +476,7 @@ it('distinguishes row inference failure causes deterministically', () => {
     { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
     'Shared',
   )
-  const absentFailure = TypeInference.rowInferenceFailure(
+  const absentFailure = TypeInference.inferenceFailure(
     Type.effect('i32', [problem], { environment: Lifetime.staticLifetime, lifetimeBinders: [] }),
     closed,
   )
@@ -422,19 +485,15 @@ it('distinguishes row inference failure causes deterministically', () => {
   if (absentFailure !== undefined)
     assert.deepEqual(
       {
-        code: Diagnostic.contractRowInference(
-          absentFailure,
-          Parser.parse(Lexer.lex(file)).root.span,
-        ).code,
-        reason: Diagnostic.contractRowInference(
-          absentFailure,
-          Parser.parse(Lexer.lex(file)).root.span,
-        ).reason._tag,
+        code: Diagnostic.inferenceFailure(absentFailure, Parser.parse(Lexer.lex(file)).root.span)
+          .code,
+        reason: Diagnostic.inferenceFailure(absentFailure, Parser.parse(Lexer.lex(file)).root.span)
+          .reason._tag,
       },
       { code: 'SEM0089', reason: 'ContractRowInference' },
     )
   assert.strictEqual(
-    TypeInference.rowInferenceFailure(
+    TypeInference.inferenceFailure(
       Type.effect(
         'i32',
         [],
@@ -447,7 +506,7 @@ it('distinguishes row inference failure causes deterministically', () => {
     'AbsentRequirementMember',
   )
   assert.strictEqual(
-    TypeInference.rowInferenceFailure(
+    TypeInference.inferenceFailure(
       Type.effect(
         'i32',
         [],
@@ -466,7 +525,7 @@ it('distinguishes row inference failure causes deterministically', () => {
     'IncompatibleRequirementRole',
   )
   assert.strictEqual(
-    TypeInference.rowInferenceFailure(
+    TypeInference.inferenceFailure(
       Type.effect(
         'i32',
         [],
@@ -485,7 +544,7 @@ it('distinguishes row inference failure causes deterministically', () => {
     'IncompatibleRequirementAccess',
   )
   assert.strictEqual(
-    TypeInference.rowInferenceFailure(
+    TypeInference.inferenceFailure(
       Type.effect(
         'i32',
         [],
@@ -499,14 +558,14 @@ it('distinguishes row inference failure causes deterministically', () => {
     'AmbiguousRequirementRemainder',
   )
   assert.strictEqual(
-    TypeInference.rowInferenceFailure(
+    TypeInference.inferenceFailure(
       Type.effect(
         'i32',
         [],
         { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
         'Shared',
         [],
-        [firstRequirement],
+        [],
       ),
       Type.effect(
         'i32',
@@ -518,6 +577,144 @@ it('distinguishes row inference failure causes deterministically', () => {
       ),
     )?._tag,
     'NonFiniteRequirementRow',
+  )
+  const forwarded = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    [],
+    [firstRequirement],
+  )
+  assert.strictEqual(TypeInference.inferenceFailure(forwarded, forwarded), undefined)
+
+  const callee = { module: 'generics/Rows', name: 'callee' }
+  const calleeFailure = Type.parameter(callee, 0, 'E')
+  const outerFailure = Type.parameter(owner, 4, 'OuterE')
+  const failureInference = new Map<string, Type.GenericArgument>()
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect('i32', [calleeFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      Type.effect('i32', [problem, outerFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      failureInference,
+    ),
+    true,
+  )
+  const inferredFailure = failureInference.get(Type.key(calleeFailure))
+  const expectedFailure = Type.union([problem, outerFailure])
+  assert.strictEqual(expectedFailure._tag, 'Normalized')
+  assert.strictEqual(
+    inferredFailure === undefined ? undefined : Type.encodeGenericArgument(inferredFailure),
+    expectedFailure._tag === 'Normalized' ? Type.encode(expectedFailure.type) : undefined,
+  )
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect('i32', [calleeFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      Type.effect('i32', [problem, calleeFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      new Map(),
+    ),
+    false,
+  )
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect('i32', [problem, calleeFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      Type.effect('i32', [problem, outerFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      new Map(),
+    ),
+    false,
+  )
+
+  const calleeRequirement = Type.parameter(callee, 1, 'R', 'RequirementRow')
+  const outerRequirement = Type.parameter(owner, 5, 'OuterR', 'RequirementRow')
+  const requirementInference = new Map<string, Type.GenericArgument>()
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [],
+        [calleeRequirement],
+      ),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [requirement],
+        [outerRequirement],
+      ),
+      requirementInference,
+    ),
+    true,
+  )
+  const inferredRequirement = requirementInference.get(Type.key(calleeRequirement))
+  assert.strictEqual(
+    inferredRequirement === undefined ? undefined : Type.encodeGenericArgument(inferredRequirement),
+    Type.encodeGenericArgument(Type.requirementRowArgument([requirement], [outerRequirement])),
+  )
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [],
+        [calleeRequirement],
+      ),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [requirement],
+        [calleeRequirement],
+      ),
+      new Map(),
+    ),
+    false,
+  )
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [],
+        [calleeRequirement, secondRequirement],
+      ),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [requirement],
+        [outerRequirement],
+      ),
+      new Map(),
+    ),
+    false,
   )
 })
 
@@ -1108,5 +1305,32 @@ pub fn main() -> i32 { let flag = identity(true) if flag { return identity<i32>(
       nativeArtifact.symbols.map(({ symbol, declaration }) => ({ symbol, declaration })),
       wasmArtifact.symbols.map(({ symbol, declaration }) => ({ symbol, declaration })),
     )
+  }),
+)
+
+it.effect('infers the service row of a named generic scoped callback', () =>
+  Effect.gen(function* () {
+    const source = `struct Resource<'data, P> { provider: &'data mut P }
+service ByteDuplex { effect fn read() -> i32 ? &ByteDuplex }
+service Audit { effect fn record() -> () ? &mut Audit }
+fn accept<'env, A, E, ?R, P>(
+  provider: &'env mut P,
+  callback: for<'call> once fn<'env>(&'call mut Resource<'call, P>) -> once Effect<'call; A ! E ? R>,
+) -> () where R in Without<R, ByteDuplex> {
+  drop provider
+  drop callback
+  return ()
+}
+effect<'transport> fn authenticated<'transport, P>(resource: &'transport mut Resource<'transport, P>) -> i32 ? &mut Audit {
+  drop resource
+  run Audit.record()
+  return 42
+}
+fn connect<'env, P>(provider: &'env mut P) -> () {
+  return accept<i32, never>(move provider, authenticated)
+}
+pub fn main() -> i32 { return 42 }`
+    const snapshot = yield* Analysis.ofSource('row-probe', new TextEncoder().encode(source))
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
   }),
 )

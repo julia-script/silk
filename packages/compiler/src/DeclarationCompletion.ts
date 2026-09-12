@@ -24,6 +24,7 @@ import type {
 } from './DeclarationFacts.js'
 import {
   closeConformanceSelf,
+  providerOperation,
   interfaceApplication,
   interfaceOperationContracts,
 } from './DeclarationFacts.js'
@@ -1565,19 +1566,20 @@ export const complete = (
           const inlineTarget = mapping.form === 'Inline' && target._tag === 'TypePath'
           if (inlineTarget || mappedProviderTarget) {
             const targetName = target.segments.at(1)?.spelling
-            const implementation =
-              mapping.form === 'Inline'
-                ? conformanceModule?.declarations.find(
-                    (declaration) =>
-                      declaration.conformanceImplementation?.ordinal === conformance.ordinal &&
-                      declaration.conformanceImplementation.operation === contractName,
-                  )
-                : interfaceProviderModule?.declarations.find(
-                    (declaration) =>
-                      targetName !== undefined &&
-                      declaration.name._tag === 'Present' &&
-                      declaration.name.spelling === targetName,
-                  )
+            let implementation: DeclarationFact | undefined
+            if (mapping.form === 'Inline') {
+              implementation = conformanceModule?.declarations.find(
+                (declaration) =>
+                  declaration.conformanceImplementation?.ordinal === conformance.ordinal &&
+                  declaration.conformanceImplementation.operation === contractName,
+              )
+            } else if (interfaceProviderModule !== undefined && targetName !== undefined) {
+              implementation = providerOperation(
+                interfaceProviderModule,
+                target.segments.at(0)?.spelling ?? '',
+                targetName,
+              )
+            }
             if (implementation === undefined) {
               diagnostics.push(
                 invalidDiagnostic(

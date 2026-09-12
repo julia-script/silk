@@ -107,6 +107,22 @@ export const forHeader = (
     else regions.set(node, lifetime)
     return lifetime
   }
+  const resolveEnvironment = (
+    node: SyntaxTree.Node,
+    scope: ReadonlyMap<string, Lifetime.Lifetime>,
+  ): Lifetime.Lifetime | undefined => {
+    const tokens = node.children
+      .filter(SyntaxTree.isToken)
+      .filter((token) => token.kind === 'Lifetime')
+    const members = tokens.flatMap((token) => {
+      const member = resolve(node, token, scope)
+      return member === undefined ? [] : [member]
+    })
+    if (members.length === 0 || members.length !== tokens.length) return undefined
+    const value = Lifetime.intersection(members)
+    regions.set(node, value)
+    return value
+  }
   const region = (
     node: SyntaxTree.Node,
     scope: ReadonlyMap<string, Lifetime.Lifetime>,
@@ -115,7 +131,10 @@ export const forHeader = (
     allocate: (node: SyntaxTree.Node) => Lifetime.Lifetime | undefined,
   ): Lifetime.Lifetime | undefined => {
     const explicit = SyntaxTree.directToken(node, 'Lifetime')
-    if (explicit !== undefined) return resolve(node, explicit, scope)
+    if (explicit !== undefined)
+      return node.kind === 'EffectEnvironment'
+        ? resolveEnvironment(node, scope)
+        : resolve(node, explicit, scope)
     const value = output && body === undefined ? defaultOutput : allocate(node)
     if (value === undefined) diagnostics.push(Diagnostic.ambiguousLifetimeElision(node.span))
     else regions.set(node, value)
@@ -156,7 +175,11 @@ export const forHeader = (
         node.kind === 'ImplOperation')
     )
       return
-    if (node.kind === 'LifetimeType' || node.kind === 'EffectEnvironment') {
+    if (node.kind === 'EffectEnvironment') {
+      resolveEnvironment(node, scope)
+      return
+    }
+    if (node.kind === 'LifetimeType') {
       const token = SyntaxTree.directToken(node, 'Lifetime')
       if (token !== undefined) resolve(node, token, scope)
       return
@@ -355,7 +378,7 @@ export const forHeader = (
     environmentNode === undefined ? undefined : SyntaxTree.directToken(environmentNode, 'Lifetime')
   const explicitEnvironment =
     environmentNode !== undefined && environmentToken !== undefined
-      ? resolve(environmentNode, environmentToken, bindings)
+      ? resolveEnvironment(environmentNode, bindings)
       : undefined
   return Object.freeze({
     owner,

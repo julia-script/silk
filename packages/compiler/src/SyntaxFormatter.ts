@@ -594,6 +594,7 @@ const printServiceOperation = (
   const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
   const requirementRow = directNodes(node).find((child) => child.kind === 'RequirementRow')
   const whereClause = directNodes(node).find((child) => child.kind === 'WhereClause')
+  const properties = directNodes(node).filter((child) => child.kind === 'FunctionPropertyClause')
   const body = directNodes(node).find((child) => child.kind === 'Block')
   return FormatDocument.concat(
     ...(operatorKeyword === undefined || operatorToken === undefined
@@ -646,6 +647,7 @@ const printServiceOperation = (
     ...(whereClause === undefined
       ? []
       : [printNode(context, whereClause, FormatDocument.text(' '))]),
+    ...properties.map((property) => printNode(context, property, FormatDocument.text(' '))),
     ...(body === undefined ? [] : [printNode(context, body, FormatDocument.text(' '))]),
   )
 }
@@ -994,15 +996,14 @@ const printNode = (
         printToken(context, tokenOf(node, 'Greater')),
       )
     case 'EffectEnvironment':
-      if (directTokens(node).some((token) => token.kind === 'Less'))
-        return FormatDocument.concat(
-          printToken(context, tokenOf(node, 'Less'), prefix, preserveBlank),
-          printToken(context, tokenOf(node, 'Lifetime')),
-          printToken(context, tokenOf(node, 'Greater')),
-        )
       return FormatDocument.concat(
-        printToken(context, tokenOf(node, 'Lifetime'), prefix, preserveBlank),
-        printToken(context, tokenOf(node, 'Semicolon')),
+        ...directTokens(node).map((token, index, tokens) => {
+          let tokenPrefix = FormatDocument.empty
+          if (index === 0) tokenPrefix = prefix
+          else if (token.kind === 'Ampersand' || tokens.at(index - 1)?.kind === 'Ampersand')
+            tokenPrefix = FormatDocument.text(' ')
+          return printToken(context, token, tokenPrefix, index === 0 && preserveBlank)
+        }),
       )
     case 'RequirementSelector': {
       const [capability, role] = directNodes(node)

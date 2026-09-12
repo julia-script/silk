@@ -181,6 +181,7 @@ export interface Context {
     {
       readonly handle: FunctionActor.Function
       readonly layout: Mir.CoroutineFrameTargetStateLayout
+      readonly region: Mir.RunSuspendableEffectRegion
     }
   >
   readonly declared: ReadonlyArray<NativeLoweringContext.DeclaredFunction>

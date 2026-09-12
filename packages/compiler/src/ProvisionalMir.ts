@@ -938,6 +938,122 @@ const catchHandlerRunner = (
       })
 }
 
+const callableIdentityOf = (
+  expression: Hir.Expression,
+  context: BuildContext,
+): Type.CallableIdentityArgument | undefined => {
+  if (expression._tag === 'Unavailable') return undefined
+  const specialized = Type.substitute(
+    expression.type,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
+  if (
+    Type.isRepresented(specialized) &&
+    Type.isExactRepresentationArgument(specialized.representation.argument) &&
+    Type.isCallableIdentityArgument(specialized.representation.argument.identity)
+  )
+    return specialized.representation.argument.identity
+  if (expression._tag === 'BindingReference') {
+    const initializer = context.bindings.get(expression.binding.ordinal)
+    return initializer === undefined ? undefined : callableIdentityOf(initializer, context)
+  }
+  if (expression._tag === 'Move') return callableIdentityOf(expression.subject, context)
+  if (expression._tag === 'UnionConvert') return callableIdentityOf(expression.source, context)
+  if (expression._tag === 'ParameterReference')
+    return Instances.parameterCallableIdentity(
+      context.instance.function,
+      context.instance.key,
+      expression.parameter.ordinal,
+    )
+  if (expression._tag !== 'CallableSection' && expression._tag !== 'FunctionItem') return undefined
+  const target = Hir.callableTargetIdentity(expression.target)
+  const callable =
+    expression._tag !== 'CallableSection'
+      ? undefined
+      : context.discovery.callables.find(
+          (candidate) =>
+            Instances.keyText(candidate.owner) === Instances.keyText(context.instance.key) &&
+            Hir.executableSiteKey(candidate.site) === Hir.executableSiteKey(expression.site),
+        )
+  if (
+    expression._tag === 'CallableSection' &&
+    expression.captures.length > 0 &&
+    callable === undefined
+  )
+    return undefined
+  return Type.callableIdentityArgument(
+    target._tag === 'Declaration'
+      ? `declaration:${target.module}:${target.name}`
+      : `builtin:${target.actor}:${target.operation}`,
+    target,
+    callable?.typeArguments ??
+      expression.typeArguments.map((argument) =>
+        Type.substituteGenericArgument(
+          argument,
+          context.instance.substitution,
+          context.instance.specialization.compatibility,
+        ),
+      ),
+    callable === undefined ? undefined : Instances.callableEnvironmentIdentity(callable),
+  )
+}
+
+const builtinEffectCallbackRunner = (
+  expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
+  argumentOrdinal: number,
+  context: BuildContext,
+): Runner | undefined => {
+  const argument = expression.arguments.at(argumentOrdinal)
+  if (argument === undefined || argument._tag === 'Unavailable') return undefined
+  const callableIdentity = callableIdentityOf(argument, context)
+  const specialized = Type.substitute(
+    argument.type,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
+  const callableType = Type.isRepresented(specialized) ? specialized.contract : specialized
+  if (
+    callableIdentity?.target._tag !== 'Declaration' ||
+    !Type.isCallable(callableType) ||
+    !Type.isEffect(callableType.result)
+  )
+    return undefined
+  const declaration: DeclarationFacts.CanonicalId = Object.freeze({
+    _tag: 'CanonicalDeclarationId',
+    module: callableIdentity.target.module,
+    name: callableIdentity.target.name,
+  })
+  const environment =
+    callableIdentity.environment === undefined
+      ? undefined
+      : Layout.callableEnvironmentByIdentity(context.layout, callableIdentity.environment)
+  if (callableIdentity.environment !== undefined && environment?._tag !== 'CallableEnvironment')
+    return undefined
+  const typeArguments =
+    environment?._tag === 'CallableEnvironment'
+      ? Layout.callableTargetArguments(environment)
+      : callableIdentity.typeArguments
+  const identities = [
+    ...new Set(
+      Instances.matchingSpecialization(context.discovery, {
+        declaration,
+        typeArguments,
+      }).flatMap((candidate) =>
+        candidate.resultEffect === undefined ? [] : [candidate.resultEffect],
+      ),
+    ),
+  ]
+  const identity = identities.length === 1 ? identities.at(0) : undefined
+  return identity === undefined
+    ? undefined
+    : runnerOf(argument, context, {
+        identity,
+        effect: callableType.result,
+        providers: context.ambientProviders,
+      })
+}
+
 const controlsOfCatch = (
   expression: Extract<Hir.Expression, { readonly _tag: 'EffectCatch' }>,
   execution: ExecutionKey,
@@ -1097,7 +1213,8 @@ const controlsOfExpressions = (
       ordinal += 1
       if (
         expression.subject._tag === 'BuiltinCall' &&
-        expression.subject.operation === 'EffectFinalize'
+        (expression.subject.operation === 'EffectFinalize' ||
+          expression.subject.operation === 'EffectFinalizeNonParking')
       ) {
         for (const [inputOrdinal, argument] of expression.subject.arguments.entries()) {
           const runner = runnerOf(argument, context)
@@ -1113,6 +1230,57 @@ const controlsOfExpressions = (
           if (policy === undefined) continue
           const id = controlId(execution, argument.span, idOrdinal + inputOrdinal, 'Invoke')
           const complete = controlId(execution, argument.span, idOrdinal + inputOrdinal, 'Complete')
+          regions.push(
+            Object.freeze({
+              _tag: 'ProvisionalRegion',
+              id,
+              outcome: Object.freeze({
+                _tag: 'RunSuspendableEffect',
+                runner,
+                completion: policy,
+                complete,
+                relay: Object.freeze({
+                  _tag: 'RelayExistingTransfer',
+                  preserves: ['Child', 'Origin', 'TypedOutcome'] as const,
+                }),
+                span: argument.span,
+              }),
+            }),
+            Object.freeze({
+              _tag: 'ProvisionalRegion',
+              id: complete,
+              outcome: Object.freeze({ _tag: 'Complete', policy }),
+            }),
+          )
+        }
+        ordinal += 1
+        for (const child of Hir.expressionChildren(expression.subject)) visit(child)
+        return
+      }
+      if (
+        expression.subject._tag === 'BuiltinCall' &&
+        expression.subject.operation === 'EffectUseReleaseNonParking'
+      ) {
+        for (const [offset, argumentOrdinal] of [1, 2].entries()) {
+          const argument = expression.subject.arguments.at(argumentOrdinal)
+          const runner = builtinEffectCallbackRunner(expression.subject, argumentOrdinal, context)
+          if (
+            argument === undefined ||
+            runner === undefined ||
+            runner.classification === 'Synchronous'
+          )
+            continue
+          const policy =
+            offset === 0 && Type.failureMembers(runner.outcome).length > 0
+              ? reifyPolicy(runner.outcome, context)
+              : Object.freeze({
+                  _tag: 'Propagate' as const,
+                  outcome: runner.outcome,
+                  failureMappings: Object.freeze([]),
+                })
+          if (policy === undefined) continue
+          const id = controlId(execution, argument.span, idOrdinal + offset, 'Invoke')
+          const complete = controlId(execution, argument.span, idOrdinal + offset, 'Complete')
           regions.push(
             Object.freeze({
               _tag: 'ProvisionalRegion',
@@ -1290,21 +1458,38 @@ const builtinExecution = (
 }
 
 const providedRunnersOf = (
-  statements: ReadonlyArray<Hir.Statement>,
+  expressions: ReadonlyArray<Hir.Expression>,
   context: BuildContext,
 ): ReadonlyArray<Runner> => {
   const runners: Array<Runner> = []
   const visit = (expression: Hir.Expression): void => {
     if (expression._tag === 'EffectBlock') return
+    if (expression._tag === 'EffectCatch') {
+      const protectedRunner = runnerOf(expression.protected, context)
+      const handler = catchHandlerRunner(expression, context)
+      for (const runner of [protectedRunner, handler])
+        if (runner?.execution._tag === 'ProvidedEffectRunnerExecution') runners.push(runner)
+    }
     if (expression._tag === 'Run') {
       const protected_ = expression.subject
+      if (
+        protected_._tag === 'BuiltinCall' &&
+        protected_.operation === 'EffectUseReleaseNonParking'
+      ) {
+        // Directly run brackets do not construct a retained Effect environment. Follow both
+        // callback arguments even when their open execution is currently synchronous: a selected
+        // provider in a nested callback can introduce parking during the classification fixpoint.
+        for (const ordinal of [1, 2]) {
+          const callback = builtinEffectCallbackRunner(protected_, ordinal, context)
+          if (callback?.execution._tag === 'ProvidedEffectRunnerExecution') runners.push(callback)
+        }
+      }
       const runner = runnerOf(protected_, context)
       if (runner.execution._tag === 'ProvidedEffectRunnerExecution') runners.push(runner)
     }
     for (const child of Hir.expressionChildren(expression)) visit(child)
   }
-  for (const statement of statements)
-    for (const expression of Hir.statementExpressions(statement)) visit(expression)
+  for (const expression of expressions) visit(expression)
   return Object.freeze(runners)
 }
 
@@ -1466,7 +1651,12 @@ export const build = (
         instanceClassification,
         context,
       )
-      observedProvided.push(...providedRunnersOf(instance.function.statements, context))
+      observedProvided.push(
+        ...providedRunnersOf(
+          instance.function.statements.flatMap(Hir.statementExpressions),
+          context,
+        ),
+      )
       executions.push(
         Object.freeze({
           _tag: 'ProvisionalExecution',
@@ -1540,7 +1730,12 @@ export const build = (
                 runSpanOfCatch(instance.function.statements, expression, runnerContext),
               )
         if (expression._tag === 'EffectBlock')
-          observedProvided.push(...providedRunnersOf(expression.statements, runnerContext))
+          observedProvided.push(
+            ...providedRunnersOf(
+              expression.statements.flatMap(Hir.statementExpressions),
+              runnerContext,
+            ),
+          )
         else
           observedProvided.push(
             ...regions.flatMap((region) =>
@@ -1629,8 +1824,12 @@ export const build = (
               0,
               runSpanOfCatch(owner.function.statements, body, context),
             )
-      if (body._tag === 'EffectBlock')
-        pendingProvided.push(...providedRunnersOf(body.statements, context))
+      pendingProvided.push(
+        ...providedRunnersOf(
+          body._tag === 'EffectBlock' ? body.statements.flatMap(Hir.statementExpressions) : [body],
+          context,
+        ),
+      )
       const relaysProvidedRunner = regions.some(
         (region) =>
           region.outcome._tag === 'RunSuspendableEffect' &&

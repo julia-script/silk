@@ -478,7 +478,7 @@ fn main() -> i32 { let pending = work(Problem { code: 1 }) return run pending }`
 it('parses source service contracts with complete operation rows losslessly', () => {
   const source = `/// A portable logging contract.
 pub service Logger<T> {
-  effect fn log(message: &[u8], value: T) -> () ! WriteFailure ? &mut Logger<T>
+  effect fn log(message: &[u8], value: T) -> () ! WriteFailure ? &mut Logger<T> with Intrinsic.nonParking()
   fn enabled() -> bool
 }
 fn after() -> i32 { return 1 }`
@@ -504,6 +504,10 @@ fn after() -> i32 { return 1 }`
   assert.strictEqual(
     SyntaxTree.directNode(operations[0] ?? result.root, 'RequirementRow')?.kind,
     'RequirementRow',
+  )
+  assert.strictEqual(
+    SyntaxTree.directNodes(operations[0] ?? result.root, 'FunctionPropertyClause').length,
+    1,
   )
   assert.strictEqual(directFunctionDeclarations(result.root).length, 1)
   assert.deepEqual(result.parserDiagnostics, [])

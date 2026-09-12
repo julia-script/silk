@@ -99,7 +99,10 @@ jobs:
       - uses: ./.github/actions/setup-linux-llvm
         if: matrix.llvm
       - run: pnpm install --frozen-lockfile
-      - run: node scripts/turbo.mjs run test --filter=${{ matrix.package }}
+      # These compiler consumers exceeded their 60 s assertion deadlines while competing with
+      # another test file. Preserve every test and give each file the dedicated runner.
+      - run: node scripts/turbo.mjs run build --filter=${{ matrix.package }}...
+      - run: pnpm --filter ${{ matrix.package }} exec vitest run --passWithNoTests --maxWorkers=1
 
   compiler-documentation:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
@@ -139,7 +142,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"smoke","cases":"literal,direct-recursion,effect-ensuring-outcomes-and-order,foreign-c-layout-clock,scheduler-fiber-semantics,certificate-profile-and-trust-anchor,tls-record,certificate-path-validation,owned-trust-snapshots"},{"name":"tls-client-driving","cases":"authenticated-tls-client-core,authenticated-tls-client-demand-request,authenticated-tls-client-key-update"},{"name":"tls-client-policy","cases":"authenticated-tls-client-closure-control,authenticated-tls-client-handshake-policy,authenticated-tls-client-resource-policy"}]' || '[{"name":"1-of-3","shard":"1/3"},{"name":"2-of-3","shard":"2/3"},{"name":"3-of-3","shard":"3/3"}]') }}
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"smoke","cases":"literal,direct-recursion,effect-ensuring-outcomes-and-order,foreign-c-layout-clock,scheduler-fiber-semantics,independent-execution-finalized-destroy,bounded-byte-duplex,certificate-profile-and-trust-anchor,tls-record,certificate-path-validation,owned-trust-snapshots"},{"name":"tls-connection","cases":"authenticated-tls-connection"},{"name":"tls-client-driving","cases":"authenticated-tls-client-core,authenticated-tls-client-demand-request,authenticated-tls-client-key-update"},{"name":"tls-client-policy","cases":"authenticated-tls-client-closure-control,authenticated-tls-client-handshake-policy,authenticated-tls-client-resource-policy"}]' || '[{"name":"1-of-3","shard":"1/3"},{"name":"2-of-3","shard":"2/3"},{"name":"3-of-3","shard":"3/3"}]') }}
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -171,7 +174,7 @@ jobs:
           # The bounded TLS programs peak just above V8's default ~4 GiB old-space limit. Keep the
           # extra headroom scoped to their fresh-process jobs; the ordinary smoke lane stays at the
           # default so it continues to expose unrelated regressions.
-          NODE_OPTIONS: ${{ startsWith(matrix.name, 'tls-client-') && '--max-old-space-size=6144' || '' }}
+          NODE_OPTIONS: ${{ startsWith(matrix.name, 'tls-') && '--max-old-space-size=6144' || '' }}
           SILK_NATIVE_SHARD: ${{ matrix.shard }}
           SILK_NATIVE_CORPUS_CASES: ${{ matrix.cases }}
           SILK_NATIVE_FIXED_TESTS: ${{ github.event_name == 'pull_request' && 'false' || 'true' }}
@@ -213,6 +216,8 @@ jobs:
       - run: >
           pnpm --filter @silklang/compiler exec vitest run
           --passWithNoTests --exclude test/DriverNativeAcceptance.test.ts
+          --exclude test/DriverTlsClientWasmAcceptance.test.ts
+          --exclude test/DriverTlsConnectionWasmAcceptance.test.ts
           --shard=${{ matrix.shard }}/4
           --reporter=default --reporter=json
           --outputFile.json=compiler-shard-${{ matrix.shard }}.json
@@ -225,6 +230,40 @@ jobs:
           name: compiler-shard-${{ matrix.shard }}-timings-a${{ github.run_attempt }}
           path: packages/compiler/compiler-shard-${{ matrix.shard }}.json
           if-no-files-found: warn
+
+  tls-wasm:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    name: TLS Wasm / ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: client
+            script: test:tls-client-wasm
+          - name: connection
+            script: test:tls-connection-wasm
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: ./.github/actions/setup-linux-llvm
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}-tls-wasm-${{ matrix.name }}
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
+            turbo-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/turbo.mjs run build
+      - run: pnpm --filter @silklang/compiler run ${{ matrix.script }}
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
 
   macos-native-os:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
@@ -327,6 +366,9 @@ jobs:
           restore-keys: silk-native-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+          VITEST_MAX_WORKERS: 1
       - run: pnpm release:candidate
 
   platform-supplies:

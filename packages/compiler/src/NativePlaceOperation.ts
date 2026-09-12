@@ -158,6 +158,27 @@ const ownedAddress = Effect.fnUntraced(function* (
   return base
 })
 
+/** A selected reference field stores an address; reborrowing follows it instead of its slot. */
+const referenceAddress = Effect.fnUntraced(function* (
+  context: Context,
+  operation: Extract<Operation, { readonly _tag: 'BeginLoan' }>,
+  projected: Value.Input,
+) {
+  if (
+    operation.reborrow &&
+    operation.sourceType._tag === 'Reference' &&
+    operation.selectors.length > 0 &&
+    !Mir.borrowsDescriptor(operation)
+  )
+    return yield* FunctionBody.load(
+      context.body,
+      context.pointer,
+      projected,
+      `borrow${operation.destination.ordinal}_reference`,
+    )
+  return projected
+})
+
 export const emit = Effect.fnUntraced(function* (context: Context, operation: Operation) {
   const {
     arith,
@@ -315,7 +336,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* NativeStorage.writeLocal(
           nativeStorage,
           operation.destination.ordinal,
-          Object.freeze([projected]),
+          Object.freeze([yield* referenceAddress(context, operation, projected)]),
         )
         checkOrdinal += 1
         break
@@ -457,7 +478,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* NativeStorage.writeLocal(
           nativeStorage,
           operation.destination.ordinal,
-          Object.freeze([projected]),
+          Object.freeze([yield* referenceAddress(context, operation, projected)]),
         )
         break
       }

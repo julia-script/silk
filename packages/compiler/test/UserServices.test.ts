@@ -115,3 +115,56 @@ pub fn main() -> i32 { return 0 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
   }),
 )
+
+it.effect('resolves same-named mapped operations within each provider', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect { Effect }
+service Counter { effect fn get() -> i32 ? &Counter }
+struct First { value: i32 }
+struct Second { value: i32 }
+struct Third { value: i32 }
+effect fn get(self: &Third) -> i32 { return self.value }
+impl Counter for Third { get: Third.get }
+impl First { effect fn get(self: &Self) -> i32 { return self.value } }
+impl Second { effect fn get(self: &Self) -> i32 { return self.value } }
+impl Counter for First { get: First.get }
+impl Counter for Second { get: Second.get }
+effect fn read() -> i32 ? &Counter { return run Counter.get() }
+pub fn main() -> i32 {
+  let first = First { value: 20 }
+  let second = Second { value: 22 }
+  let left = run Effect.provide(read(), &first)
+  let right = run Effect.provide(read(), &second)
+  return left + right
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+  }),
+)
+
+it.effect('discharges a concrete named callback provider constraint before passing its value', () =>
+  Effect.gen(function* () {
+    const source = `import silk.effect { Effect }
+service Counter { effect fn get() -> i32 ? &Counter }
+struct Fixed { value: i32 }
+effect fn get(self: &Fixed) -> i32 { return self.value }
+impl Counter for Fixed { get: Fixed.get }
+effect<'call> fn callback<'call, P>(provider: &'call P) -> i32
+where &'call P provides &Counter from &Counter {
+  return run Effect.provide<Counter>(Counter.get(), move provider)
+}
+fn invoke<P>(
+  provider: P,
+  callback: for<'call> fn(&'call P) -> Effect<'call; i32>,
+) -> i32 { return run callback(&provider) }
+pub fn main() -> i32 { return invoke(Fixed { value: 42 }, callback) }`
+    const accepted = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(accepted), [])
+    const rejected = yield* snapshot(
+      source.replace('impl Counter for Fixed { get: Fixed.get }', ''),
+    )
+    assert.include(
+      Analysis.diagnostics(rejected).map((diagnostic) => diagnostic.code),
+      'SEM0123',
+    )
+  }),
+)

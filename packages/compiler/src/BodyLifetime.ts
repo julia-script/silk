@@ -69,9 +69,18 @@ export const compatibility = (
 ): TypeCompatibility.Context => {
   const proves = (longer: Lifetime.Lifetime, shorter: Lifetime.Lifetime): boolean => {
     if (Lifetime.outlives(assumptions, longer, shorter)) return true
-    if (longer._tag === 'PlaceholderLifetime' || shorter._tag === 'PlaceholderLifetime')
+    if (
+      [...Lifetime.atoms(longer), ...Lifetime.atoms(shorter)].some(
+        (member) => member._tag === 'PlaceholderLifetime',
+      )
+    )
       return false
-    if (longer._tag !== 'LocalLifetime' && shorter._tag !== 'LocalLifetime') return false
+    if (
+      ![...Lifetime.atoms(longer), ...Lifetime.atoms(shorter)].some(
+        (member) => member._tag === 'LocalLifetime',
+      )
+    )
+      return false
     return true
   }
   const declaredTypeOutlives = (type: Type.Type, lifetime: Lifetime.Lifetime): boolean => {
@@ -93,7 +102,8 @@ export const compatibility = (
     commitOutlives: (longer, shorter) => constrain(self, longer, shorter),
     typeOutlives: (type, lifetime) => {
       if (declaredTypeOutlives(type, lifetime)) return true
-      if (lifetime._tag === 'PlaceholderLifetime') return false
+      if (Lifetime.atoms(lifetime).some((member) => member._tag === 'PlaceholderLifetime'))
+        return false
       if (!Type.storageLifetimes(type).every((region) => proves(region, lifetime))) return false
       return true
     },

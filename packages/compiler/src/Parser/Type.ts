@@ -34,6 +34,32 @@ const parseLifetime = (initial: State, following: ReadonlyArray<Token.TokenKind>
   })
 }
 
+/** Parses a finite intersection only in an Effect environment position. */
+export const parseEffectEnvironmentLifetimes = (
+  initial: State,
+  following: ReadonlyArray<Token.TokenKind>,
+): ElementsResult => {
+  let result = expect(initial, 'Lifetime', ['Ampersand', ...following])
+  while (nextSignificantKind(result.state) === 'Ampersand') {
+    const separator = expect(result.state, 'Ampersand', ['Lifetime', ...following])
+    const member = expect(separator.state, 'Lifetime', ['Ampersand', ...following])
+    result = {
+      state: member.state,
+      elements: [...result.elements, ...separator.elements, ...member.elements],
+    }
+  }
+  return result
+}
+
+const hasEffectEnvironment = (state: State): boolean => {
+  if (nextSignificantKind(state) === 'Semicolon') return true
+  let offset = 0
+  if (peek(state, offset) !== 'Lifetime') return false
+  offset += 1
+  while (peek(state, offset) === 'Ampersand' && peek(state, offset + 1) === 'Lifetime') offset += 2
+  return peek(state, offset) === 'Semicolon'
+}
+
 export const parseTypePath = (
   initial: State,
   following: ReadonlyArray<Token.TokenKind>,
@@ -91,12 +117,12 @@ export const parseTypeArgumentList = (
   ])
   let state = left.state
   let children: ReadonlyArray<SyntaxTree.Element> = left.elements
-  if (
-    kind === 'TypeArgumentList' &&
-    (nextSignificantKind(state) === 'Semicolon' ||
-      (nextSignificantKind(state) === 'Lifetime' && peek(state, 1) === 'Semicolon'))
-  ) {
-    const lifetime = expect(state, 'Lifetime', ['Semicolon', ...typeStarts, ...following])
+  if (kind === 'TypeArgumentList' && hasEffectEnvironment(state)) {
+    const lifetime = parseEffectEnvironmentLifetimes(state, [
+      'Semicolon',
+      ...typeStarts,
+      ...following,
+    ])
     const separator = expect(lifetime.state, 'Semicolon', [...typeStarts, 'Greater', ...following])
     state = separator.state
     children = Object.freeze([

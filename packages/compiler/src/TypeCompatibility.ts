@@ -164,7 +164,24 @@ const outlives = (
 ): boolean => {
   self.work.outlivesObligations += 1
   if (Lifetime.outlives(self.assumptions, longer, shorter)) return true
-  if (longer._tag === 'PlaceholderLifetime' || shorter._tag === 'PlaceholderLifetime') return false
+  // Discharge compound obligations through their constituents. Only free atomic obligations
+  // reach the local-region solver; a rigid invocation region cannot be committed into its graph.
+  if (longer._tag === 'IntersectionLifetime')
+    return commitWhen(
+      self,
+      () => longer.members.every((member) => outlives(self, member, shorter)),
+      Boolean,
+    )
+  if (shorter._tag === 'IntersectionLifetime')
+    return shorter.members.some((member) =>
+      commitWhen(self, () => outlives(self, longer, member), Boolean),
+    )
+  if (
+    [...Lifetime.atoms(longer), ...Lifetime.atoms(shorter)].some(
+      (member) => member._tag === 'PlaceholderLifetime',
+    )
+  )
+    return false
   const proven = self.outlives?.(longer, shorter) ?? false
   if (proven && self.commitOutlives !== undefined)
     retain(self, [() => self.commitOutlives?.(longer, shorter)])

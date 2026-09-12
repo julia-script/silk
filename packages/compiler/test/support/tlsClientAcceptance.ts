@@ -14,9 +14,12 @@ const fixture = (name: string): Uint8Array =>
 const silkBytes = (bytes: Uint8Array): string =>
   `b"${[...bytes].map((byte) => `\\x${byte.toString(16).padStart(2, '0')}`).join('')}"`
 
-const rootPem = fixture('keys/root-cert.pem')
-const clientHello = fixture('captures/rsa-x25519-client-hello.bin')
-const serverFlight = fixture('captures/rsa-x25519-server-flight.bin')
+export const tlsClientRsaRootPem = fixture('keys/root-cert.pem')
+export const tlsClientRsaClientHello = fixture('captures/rsa-x25519-client-hello.bin')
+export const tlsClientRsaServerFlight = fixture('captures/rsa-x25519-server-flight.bin')
+const rootPem = tlsClientRsaRootPem
+const clientHello = tlsClientRsaClientHello
+const serverFlight = tlsClientRsaServerFlight
 const wrongNameClientHello = fixture('captures/rsa-x25519-wrong-name-client-hello.bin')
 const wrongNameServerFlight = fixture('captures/rsa-x25519-wrong-name-server-flight.bin')
 const ipClientHello = fixture('captures/rsa-x25519-ip-client-hello.bin')
@@ -517,6 +520,20 @@ const applicationSecret = (id: string): Buffer => keyLogSecret(id, 'SERVER_TRAFF
 const clientApplicationSecret = (id: string): Buffer => keyLogSecret(id, 'CLIENT_TRAFFIC_SECRET_0')
 const postHandshakeRecord = (id: string, suite: Suite, body: Uint8Array, sequence = 1): Buffer =>
   protectRecord(body, 22, applicationSecret(id), suite, sequence)
+export const tlsClientRsaApplicationWrite = protectRecord(
+  Buffer.from('ping'),
+  23,
+  keyLogSecret('rsa-x25519', 'CLIENT_TRAFFIC_SECRET_0'),
+  'chacha',
+  0,
+)
+export const tlsClientRsaServerCloseNotify = protectRecord(
+  Buffer.from([1, 0]),
+  21,
+  applicationSecret('rsa-x25519'),
+  'chacha',
+  1,
+)
 const malformedTicketRecord = postHandshakeRecord(
   'rsa-x25519',
   'chacha',

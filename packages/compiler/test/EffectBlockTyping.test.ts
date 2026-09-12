@@ -68,6 +68,72 @@ pub fn main() -> i32 { return wrap<Boom>(true, Boom { code: 7 }) }`)
   }),
 )
 
+it.effect('propagates fixed and outer generic failures through ensuringNonParking', () =>
+  Effect.gen(function* () {
+    const accepted = yield* analyze(`import silk.effect { Effect }
+struct FixedFailure { code: i32 }
+effect fn forward<'env, A, E>(
+  protected: once Effect<'env; A ! E | FixedFailure>,
+  finalizer: once Effect<'env; ()>,
+) -> A ! E | FixedFailure {
+  return run Effect.ensuringNonParking(move protected, move finalizer)
+}
+pub fn main() -> i32 { return 42 }`)
+    assert.notInclude(codes(accepted), 'SEM0066')
+
+    const rejected = yield* analyze(`struct FixedFailure { code: i32 }
+effect fn reject<'env, A, E>(protected: once Effect<'env; A ! E | FixedFailure>) -> A ! E {
+  return run move protected
+}
+pub fn main() -> i32 { return 42 }`)
+    assert.include(codes(rejected), 'SEM0066')
+  }),
+)
+
+it.effect('excludes one service from an otherwise open callback requirement row', () =>
+  Effect.gen(function* () {
+    const accepted = yield* analyze(`struct Lease {}
+service Duplex { effect fn touch() -> () ? &mut Duplex }
+service Audit { effect fn record() -> () ? &mut Audit }
+effect fn scoped<'env, A, E, ?R>(
+  lease: &'env mut Lease,
+  callback: for<'call> once fn<'env>(
+    &'call mut Lease
+  ) -> once Effect<'call; A ! E ? R>,
+) -> A ! E ? R | &mut Duplex
+where R in Without<R, &mut Duplex> {
+  return run callback(move lease)
+}
+effect fn forward<'env, A, E, ?R>(
+  lease: &'env mut Lease,
+  callback: for<'call> once fn<'env>(&'call mut Lease) -> once Effect<'call; A ! E ? R>,
+) -> A ! E ? R | &mut Duplex
+where R in Without<R, &mut Duplex> {
+  return run scoped(move lease, move callback)
+}
+effect fn audited(lease: &mut Lease) -> i32 ? &mut Audit { drop lease run Audit.record() return 42 }
+effect fn accepted(lease: &mut Lease) -> i32 ? &mut Audit | &mut Duplex { return run forward(move lease, audited) }
+pub fn main() -> i32 { return 42 }`)
+    assert.deepEqual(codes(accepted), [])
+
+    const rejected = yield* analyze(`struct Lease {}
+service Duplex { effect fn touch() -> () ? &mut Duplex }
+effect fn scoped<'env, A, E, ?R>(
+  lease: &'env mut Lease,
+  callback: for<'call> once fn<'env>(
+    &'call mut Lease
+  ) -> once Effect<'call; A ! E ? R>,
+) -> A ! E ? R | &mut Duplex
+where R in Without<R, &mut Duplex> {
+  return run callback(move lease)
+}
+effect fn bypass(lease: &mut Lease) -> i32 ? &mut Duplex { drop lease run Duplex.touch() return 42 }
+effect fn rejected(lease: &mut Lease) -> i32 ? &mut Duplex { return run scoped(move lease, bypass) }
+pub fn main() -> i32 { return 42 }`)
+    assert.deepEqual(codes(rejected), ['SEM0074'])
+  }),
+)
+
 it.effect('retains failure and service rows of operations run inside a deferred block', () =>
   Effect.gen(function* () {
     const self = yield* analyze(`import silk.host_input { HostInput, HostInputError }
