@@ -62,6 +62,7 @@ const planState = (
   program: Mir.Module,
   state: Mir.CoroutineFrameState,
   headerSize: number,
+  offsets: ReadonlyMap<number, number>,
 ): Mir.CoroutineFrameTargetStateLayout | undefined => {
   let cursor = headerSize
   let alignment: number = program.layout.target.pointerAlignment
@@ -69,7 +70,8 @@ const planState = (
   for (const slot of state.slots) {
     const storage = storageOf(program, slot)
     if (storage === undefined || storage.alignment < 1 || storage.size < 0) return undefined
-    const offset = alignUp(cursor, storage.alignment)
+    const offset = offsets.get(slot.local.ordinal)
+    if (offset === undefined || offset < cursor) return undefined
     payload.push(
       Object.freeze({
         _tag: 'CoroutineFramePayloadField',
@@ -116,8 +118,25 @@ const planDescriptor = (
       }),
     ),
   )
+  // A live borrow can retain a local's frame address across several states. Assign one home
+  // per retained local for the whole invocation; independently packing each live set can move
+  // that home when an earlier temporary dies. States still store and clean up only live slots.
+  const offsets = new Map<number, number>()
+  const slots = new Map(
+    descriptor.states.flatMap((state) =>
+      state.slots.map((slot) => [slot.local.ordinal, slot] as const),
+    ),
+  )
+  let cursor = header.length * wordSize
+  for (const [local, slot] of [...slots].sort(([left], [right]) => left - right)) {
+    const storage = storageOf(program, slot)
+    if (storage === undefined || storage.alignment < 1 || storage.size < 0) return undefined
+    const offset = alignUp(cursor, storage.alignment)
+    offsets.set(local, offset)
+    cursor = offset + storage.size
+  }
   const states = descriptor.states.flatMap((state) => {
-    const planned = planState(program, state, header.length * wordSize)
+    const planned = planState(program, state, header.length * wordSize, offsets)
     return planned === undefined ? [] : [planned]
   })
   if (states.length !== descriptor.states.length) return undefined

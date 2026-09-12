@@ -2937,6 +2937,20 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
           field.size === wordSize &&
           field.alignment === wordAlignment,
       )
+    const offsets = new Map<number, number>()
+    const slots = new Map(
+      descriptor.states.flatMap((state) =>
+        state.slots.map((slot) => [slot.local.ordinal, slot] as const),
+      ),
+    )
+    let payloadCursor = roles.length * wordSize
+    for (const [local, slot] of [...slots].sort(([left], [right]) => left - right)) {
+      const physical = CoroutineFrame.storageOf(self, slot)
+      if (physical === undefined || physical.alignment < 1 || physical.size < 0) continue
+      const offset = Math.ceil(payloadCursor / physical.alignment) * physical.alignment
+      offsets.set(local, offset)
+      payloadCursor = offset + physical.size
+    }
     const stateValid = descriptor.states.every((state) => {
       const candidates = entry.states.filter((layout) =>
         sameSuspensionPoint(layout.point, state.point),
@@ -2952,7 +2966,8 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
           if (slot === undefined) return false
           const physical = CoroutineFrame.storageOf(self, slot)
           if (physical === undefined) return false
-          const offset = Math.ceil(cursor / physical.alignment) * physical.alignment
+          const offset = offsets.get(slot.local.ordinal)
+          if (offset === undefined || offset < cursor) return false
           const valid =
             field.slot === slot.ordinal &&
             field.local.ordinal === slot.local.ordinal &&

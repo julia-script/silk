@@ -4,7 +4,7 @@ import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as CoroutineFrame from '../src/CoroutineFrame.js'
 import * as Instances from '../src/Instances.js'
-import type * as Mir from '../src/Mir.js'
+import * as Mir from '../src/Mir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 
@@ -166,5 +166,48 @@ it.effect('rejects missing, stale, and physically incomplete frame plans', () =>
     assert.isTrue(
       MirVerification.verify(stale).some((violation) => violation.rule === 'InvalidCoroutineFrame'),
     )
+  }),
+)
+
+it.effect('keeps borrowed local addresses stable across changing live sets', () =>
+  Effect.gen(function* () {
+    const self = yield* analyze(`import silk.effect { Effect }
+effect fn delayed(value: &i32) -> i32 {
+  return run Effect.suspend(effect { return value.* })
+}
+effect fn program() -> i32 {
+  let prefix = 40
+  let value = 1
+  let first = run delayed(&value)
+  let total = prefix + first
+  let second = run delayed(&value)
+  return total + second
+}
+pub fn main() -> i32 { return run program() }`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const program = Analysis.loweredMir(self)
+    const owner = program.functions.find((fn) => fn.id.name.startsWith('program$effect$'))
+    assert.isDefined(owner)
+    if (owner === undefined) return
+    const frame = program.coroutineFrames?.entries.find(
+      (entry) => Instances.keyText(entry.function) === Instances.keyText(owner.instance),
+    )
+    assert.isDefined(frame)
+    if (frame === undefined) return
+    const borrowedRoots = owner.blocks
+      .flatMap((block) => block.operations)
+      .flatMap(Mir.operationTree)
+      .flatMap((operation) => (operation._tag === 'BeginLoan' ? [operation.root.ordinal] : []))
+    const retained = [...new Set(borrowedRoots)]
+      .map((local) =>
+        frame.states.flatMap((state) =>
+          state.payload.filter((field) => field.local.ordinal === local),
+        ),
+      )
+      .filter((fields) => fields.length > 1)
+    assert.isNotEmpty(retained)
+    for (const fields of retained)
+      assert.strictEqual(new Set(fields.map((field) => field.offset)).size, 1)
   }),
 )

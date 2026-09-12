@@ -85,3 +85,19 @@ initially synchronous, including retained catch bodies. LLVM generation then pas
 The permanent regression checks both the nested service runner and outer recovered runner under
 parking versus synchronous providers. These changes extend the same finite classification worklist;
 no provider-wide parking approximation or backend TLS recognition is used.
+
+### Invocation-stable coroutine payload
+
+After provider propagation was repaired, the native matrix reached frame emission and rejected a
+borrowed root that changed offset between resume states (648.30 s). A two-suspension source with
+changing live temporaries reproduced the same LLVM failure without TLS (5.41 s). The first attempt
+used a mutation inside a borrowed capture and was rejected by ownership analysis; the read-only
+reproduction isolates layout without that separate source issue.
+
+Frame planning now assigns every retained local one deterministic invocation-wide location. Each
+state still contains only its live slots, initialization flags, and cleanup actions. MIR verification
+checks these shared offsets instead of requiring independently packed states. This may retain holes
+for locals absent from a state; the frame remains bounded by the invocation's retained locals.
+The reproduction passed LLVM generation and all five frame tests passed (19.75 s test time).
+Its permanent regression checks repeated borrowed-root offsets structurally, without adding a native
+process. The full native TLS matrix and CI remain pending on this correction.
