@@ -2659,6 +2659,14 @@ effect fn authenticateWithinLimits(client: &mut Client, flight: &[u8]) -> bool
   if !(run feedComplete(&mut client.*, flight, 8)) { return false }
   let mut steps = usize.ZERO
   while steps < 3 {
+    let mut progressSteps = usize.ZERO
+    while client.pendingOutput().length == 0 && progressSteps < 8 {
+      let advanced = run Client.progress(&mut client.*)
+      if let Result<Progress, TlsError>.Failure {error} = move advanced {
+        return false
+      }
+      progressSteps = progressSteps + usize.ONE
+    }
     let length = client.pendingOutput().length
     if length == 0 { return false }
     let acknowledged = Client.ackWritten(&mut client.*, length)
