@@ -2656,7 +2656,7 @@ effect fn authenticateWithinLimits(client: &mut Client, flight: &[u8]) -> bool
   while steps < 3 {
     let length = client.pendingOutput().length
     if length == 0 { return false }
-    let acknowledged = client.ackWritten(length)
+    let acknowledged = Client.ackWritten(&mut client.*, length)
     if let Result<Progress, TlsError>.Success {value} = move acknowledged {
       if value.demand == Demand.Authenticated { return true }
     }

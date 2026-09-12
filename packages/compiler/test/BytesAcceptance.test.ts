@@ -370,7 +370,8 @@ it('keeps focused TLS client witnesses independent and bounded', () => {
     resourceHelpersStart,
     tlsClientResourcePolicyNativeSource.indexOf('effect fn runLimitCase', resourceHelpersStart),
   )
-  assert.lengthOf(resourceHelpers.match(/&mut client\.\*/g) ?? [], 2)
+  assert.lengthOf(resourceHelpers.match(/&mut client\.\*/g) ?? [], 3)
+  assert.include(resourceHelpers, 'Client.ackWritten(&mut client.*, length)')
   assert.include(tlsClientNativeFixtureSource, 'static const uint8_t fixture_0[]')
   assert.notInclude(tlsClientNativeFixtureSource, 'silk_tls_mark')
 })
