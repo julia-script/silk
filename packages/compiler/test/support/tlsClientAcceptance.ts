@@ -2113,12 +2113,12 @@ fn policyFailure(id: i32) -> i32 {
   if id == 7 { return 51 }
   if id == 8 { return 54 }
   if id == 9 { return 55 }
-  if id == 10 || id == 21 || id == 22 || id == 30 { return 43 }
+  if id == 10 || id == 21 || id == 30 { return 43 }
   if id >= 11 && id <= 15 { return 47 }
   if id == 16 { return 44 }
   if id == 17 || id == 18 { return 56 }
   if id == 19 || id == 20 { return 45 }
-  if id == 23 || id == 24 { return 56 }
+  if id == 22 || id == 23 || id == 24 { return 56 }
   if id == 29 { return 52 }
   return 0
 }

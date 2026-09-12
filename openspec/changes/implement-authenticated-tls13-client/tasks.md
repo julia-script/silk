@@ -57,7 +57,7 @@
   closure-control 17,997 bytes/545 lines at
   `49ffe20939a882c0944bf188d196385700646e529cb164f88e85f5d28bec5508`;
   handshake-policy 17,377 bytes/548 lines at
-  `1a982db67d6e24a86cd0af9c3224dcdb928ca477cf7e164c13a79e09c84fe808`;
+  `1a3f8ef635309b21f6941122d13bb6bb83ffe55fd4ade142e2e3bd86658e4406`;
   and resource-policy 17,851 bytes/576 lines at
   `323e0b9335d9e11efe578f9c9a459181047fc80083745fbdd8469b6876268bcb`.
   Each contains one `Client.make`; core, demand-request, key-update, closure-control, and
