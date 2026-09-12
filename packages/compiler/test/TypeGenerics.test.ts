@@ -255,6 +255,37 @@ it('checks computed rows forward-only without reconstructing their operands', ()
     Type.encode(Type.failureType(Type.substituteFailureRow(computed, independentlyBound))),
     'generics/ForwardRows.Other',
   )
+
+  const requirementSource = Type.parameter(owner, 2, 'R', 'RequirementRow')
+  const transport = {
+    capability: Type.nominal('generics/ForwardRows', 'Transport'),
+    role: 'DefaultRole',
+    access: 'Exclusive' as const,
+  }
+  const audit = {
+    capability: Type.nominal('generics/ForwardRows', 'Audit'),
+    role: 'DefaultRole',
+    access: 'Exclusive' as const,
+  }
+  const requirementPattern = Type.effectWithRows(
+    'i32',
+    RowAlgebra.concrete(Type.failureRowPolicy(), []),
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    RowAlgebra.without(
+      Type.requirementRowPolicy(),
+      RowAlgebra.parameter(requirementSource),
+      RowAlgebra.concrete(Type.requirementRowPolicy(), [transport]),
+    ),
+  )
+  const requirementActual = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    [audit],
+  )
+  assert.isFalse(TypeInference.infer(requirementPattern, requirementActual, new Map()))
 })
 
 it('preserves symbolic failure members when a singleton specializes to a mixed union', () => {

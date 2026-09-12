@@ -1223,6 +1223,15 @@ export const requirementMembers = (
     self._tag === 'EffectType' ? self.requirementRow : self.row,
   )
 
+/** Concrete requirements retained positively rather than only named by a computed subtraction. */
+export const positiveRequirementMembers = (
+  self: Effect | RequirementRowArgument,
+): ReadonlyArray<Requirement> =>
+  RowAlgebra.positiveConcreteMembers(
+    requirementRowPolicy(),
+    self._tag === 'EffectType' ? self.requirementRow : self.row,
+  )
+
 /** Whole-row parameters projected from one symbolic requirement row. */
 export const requirementRowParameters = (
   self: Effect | RequirementRowArgument,

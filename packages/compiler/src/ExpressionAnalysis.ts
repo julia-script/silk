@@ -9409,10 +9409,13 @@ export function analyzeExpression(
       )
     const allowedRequirements =
       declaration.functionKind === 'Effect'
-        ? declaration.requirementRow.requirements
+        ? RowAlgebra.positiveConcreteMembers(
+            Type.requirementRowPolicy(),
+            declaration.requirementRow.row,
+          )
         : Object.freeze<Type.Requirement[]>([])
     const unsatisfiedRequirements =
-      (effect === undefined ? [] : Type.requirementMembers(effect)).filter(
+      (effect === undefined ? [] : Type.positiveRequirementMembers(effect)).filter(
         (requirement) =>
           !allowedRequirements.some(
             (allowed) =>

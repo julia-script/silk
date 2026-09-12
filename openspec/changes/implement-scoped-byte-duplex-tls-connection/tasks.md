@@ -9,13 +9,13 @@
 
 - [ ] 2.1 Add `silk.byte_duplex` with documented transfer/error/operation actors and the exclusive service signatures, and verify structured standard-library analysis asserts the exact return, error, and requirement rows.
 - [ ] 2.2 Implement public empty-call short-circuiting, positive bounded count validation, deadline forwarding, lease invalidation, directional shutdown, and idempotent close behavior, and verify focused analysis/acceptance cases distinguish every boundary.
-- [x] 2.3 Register `byte_duplex` in the standard-library manifest, namespace expectations, and generated embedding, and verify generation/check commands produce a clean diff.
+- [ ] 2.3 Register `byte_duplex` in the standard-library manifest, namespace expectations, and generated embedding, and verify generation/check commands produce a clean diff.
 
 ## 3. Deterministic Memory Provider
 
 - [ ] 3.1 Add `silk.memory_byte_duplex` with allocator-backed bounded construction, scripted absolute-time read/write events, outbound bytes, phase, and observable audit state, and verify focused analysis covers public shapes and allocation-free service rows.
 - [ ] 3.2 Implement fragmented reads, short writes, real readiness suspension, deadline-wins-on-equality, EOF, typed errors, invalid counts, flush/shutdown ordering, terminal close, and cancellation cleanup, and verify deterministic virtual-clock/local-scheduler cases cover each behavior.
-- [x] 3.3 Register the memory provider and generated source, and verify manifest/generated-source checks preserve both new modules.
+- [ ] 3.3 Register the memory provider and generated source, and verify manifest/generated-source checks preserve both new modules.
 
 ## 4. Authenticated TLS Connection Adapter
 
@@ -29,7 +29,7 @@
 - [ ] 5.1 Extend the shared native acceptance corpus with one authenticated memory-transport connection case and the existing execution finalization fixture, and verify focused corpus selection passes without adding a per-feature process test.
 - [ ] 5.2 Add or fold one representative LLVM-to-Wasm connection witness into existing TLS target coverage, and verify focused Wasm acceptance passes without duplicating the full TLS matrix.
 - [ ] 5.3 Add executable public API documentation showing explicit memory transport, trust, wall/monotonic time, random, and allocator providers; regenerate reference/index artifacts; and verify documentation generation plus doc-comment checks pass.
-- [ ] 5.4 Inspect and update CI selection so exact-head CI covers the full test suite, `pnpm check`, and release-candidate verification, and verify the workflow names the new corpus/target evidence rather than assuming implicit coverage.
+- [x] 5.4 Inspect and update CI selection so exact-head CI covers the full test suite, `pnpm check`, and release-candidate verification, and verify the workflow names the new corpus/target evidence rather than assuming implicit coverage.
 
 ## 6. Delivery and Revalidation
 

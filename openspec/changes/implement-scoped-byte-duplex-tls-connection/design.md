@@ -49,7 +49,8 @@ verified head, and the exact rebased diff must be re-reviewed and reverified.
 ### 1. Model transport as one exclusive service with validated public wrappers
 
 `silk.byte_duplex` defines `ReadTransfer`, `ByteIoOperation`, `ByteIoError`, and the exclusive
-`ByteDuplex` service. The public operations are:
+`ByteDuplex` actor. Its service contract consists of unsafe raw provider hooks, while its safe
+inherent API preserves the canonical public operation names:
 
 ```silk
 readSome(output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
@@ -60,9 +61,12 @@ close() -> ()
 ```
 
 Deadline-bearing operations require the same exclusive `MonotonicClock` timeline. Empty reads and
-writes complete before service dispatch. Nonempty successful transfers are checked at the module
-boundary: `0 < count <= slice.length`. An impossible count returns `InvalidTransferCount`, moves
-the lease into a terminal invalid state, and is never retried.
+writes complete before service dispatch. Nonempty successful transfers are checked by the safe
+inherent wrappers at the module boundary: `0 < count <= slice.length`. An impossible raw-provider
+count causes a best-effort terminal close and then returns `InvalidTransferCount`, preserving that
+boundary error even if close also fails. Unsafe `readSomeRaw`, `writeSomeRaw`, `flushRaw`,
+`shutdownWriteRaw`, and `closeRaw` hooks remain provider-conformance surface, not ordinary client
+operations. `shutdownWrite` performs the required flush before invoking its raw directional hook.
 
 This keeps providers honest without changing the existing `Writer` all-or-error contract.
 Returning `Option<usize>` was rejected because it conflates temporary unavailability, transport
@@ -104,10 +108,21 @@ one concrete actor with state, scripts, and inspection operations of its own.
 
 ### 4. Let `Connection` own TLS state while the scope owns the duplex lease
 
-`silk.tls_connection` defines a `Connection` actor containing the existing TLS `Client`, bounded
-input scratch/state, and an `Open | PeerEnded | WriteShutdown | Invalid` phase. `withClient` borrows
-the exclusive `ByteDuplex` for the complete scope and passes only `&mut Connection` to the callback;
-the callback cannot independently access or retain the duplex.
+`silk.tls_connection` keeps the existing TLS `Client`, bounded input scratch, and an
+`Open | PeerEnded | WriteShutdown | Invalid` phase in private `ConnectionState`. Public
+`Connection<'transport, P>` pairs that state with an exclusive reborrow of the caller's explicit
+provider `P`. Each Connection operation binds the private provider to `ByteDuplex` only around the
+ordinary ambient transport-driving helper, so its public service row omits `ByteDuplex`.
+
+`withClient(transport, config, options, callback)` takes the concrete provider borrow instead of an
+ambient byte service, wraps it in private `TransportLease`, and passes only
+`&mut Connection<'transport, P>` to a higher-ranked callback. The callback preserves its exact
+`CallbackRequirements` row while the
+constraint `CallbackRequirements in Without<CallbackRequirements, &mut ByteDuplex>` proves that
+the row does not contain an independent ambient transport. Arbitrary unrelated services therefore
+remain available, Connection methods can still use their private provider reborrow, and a callback
+that requests the ambient duplex is rejected. The callback's `'call` lifetime also prevents
+retaining either Connection or its provider borrow beyond the scope.
 
 `ConnectionOptions` carries `TrustLoadLimits` and `handshakeTimeoutNanoseconds`, with a constructor
 that selects the 30-second default. `withClient` preserves callback error and service rows
@@ -136,9 +151,9 @@ Underlying `End` is passed to `Client.endInput`, preserving the existing distinc
 handshake truncation, post-authentication truncation, and authenticated `close_notify`.
 
 `flush` drains TLS output before the provider flush. `shutdownWrite` asks the client to create
-`close_notify`, drains and flushes it, and only then invokes the provider's directional shutdown;
-the read side remains usable. Scope finalization calls terminal `ByteDuplex.close` and makes no
-graceful TLS promise.
+`close_notify`, drains it, and then invokes the safe `ByteDuplex.shutdownWrite`, whose wrapper
+flushes before the provider's directional shutdown; the read side remains usable. Scope
+finalization calls terminal `ByteDuplex.close` and makes no graceful TLS promise.
 
 An all-at-once write helper was rejected because it would erase the TLS client's explicit output
 acknowledgment boundary. Treating transport EOF as clean TLS EOF was rejected because it would turn
@@ -146,11 +161,14 @@ truncation into apparent authentication success.
 
 ### 6. Add one cancellation-safe nonparking Effect finalizer primitive
 
-Ordinary `silk.effect` exposes `Effect.ensuringNonParking(protected, finalizer)`. Its finalizer is an
-ordinary `once Effect<'env; () ! never ? S>`; the protected result remains `A ! E ? R | S`.
-Every reachable call records a sealed nonparking obligation for that exact finalizer execution.
-`tls_connection` recovers any typed `ByteDuplex.close` failure before supplying the finalizer, so
-cleanup cannot replace the protected outcome.
+Ordinary `silk.effect` exposes `Effect.ensuringNonParking(protected, finalizer)` and the scoped
+`Effect.useReleaseNonParking(resource, use, release)` bracket built on it. The finalizer/release is
+an ordinary `once Effect<'env; () ! never ? S>`; the protected/use result remains
+`A ! E ? R | S`. Every reachable call records a sealed nonparking obligation for that exact
+finalizer execution. The bracket owns a resource, lends `&mut Resource` separately to one
+higher-ranked use callback and one higher-ranked release callback, and keeps that resource alive
+for structured cancellation. `tls_connection` uses it for `TransportLease` and recovers any typed
+`ByteDuplex.close` failure inside release, so cleanup cannot replace the protected outcome.
 
 Effect service and interface operations may declare the argument-free property
 `with Intrinsic.nonParking()`. Unresolved calls to a marked operation permit nested transfer but not
@@ -175,7 +193,9 @@ Strengthening existing `Effect.ensuring` was rejected because it currently permi
 finalizers and has documented cancellation semantics. A pure `ensuringSync` was rejected because a
 pure closure cannot call the Effectful `ByteDuplex` service. A Drop-owned transport lease was
 rejected because it would move provider policy into a synchronous destructor and could not preserve
-typed boundary behavior.
+typed boundary behavior. Constructing protected and release Effects from the same provider borrow
+before either runs was also rejected: the scoped bracket must reborrow its owned lease separately
+for use and release rather than aliasing one exclusive transport loan.
 
 ### 7. Prove behavior at the cheapest discriminating layer
 

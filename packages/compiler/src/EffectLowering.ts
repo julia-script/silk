@@ -549,11 +549,14 @@ export const lowerFinalizedEffect = (
           cancellationSafe,
         ),
     )
-  const cancellationFinalizer = cancellationSafe
-    ? finalizerType._tag === 'EffectValue'
-      ? cancellationFinalizerOf(fn, finalizer, finalizerType, availableRequirements)
-      : undefined
-    : undefined
+  let cancellationFinalizer: Mir.CancellationFinalizer | undefined
+  if (cancellationSafe && finalizerType._tag === 'EffectValue')
+    cancellationFinalizer = cancellationFinalizerOf(
+      fn,
+      finalizer,
+      finalizerType,
+      availableRequirements,
+    )
   if (cancellationSafe && cancellationFinalizer === undefined) return undefined
   const finalize = (): LoweredExpression | undefined =>
     finalizerType._tag === 'EffectComposite'
