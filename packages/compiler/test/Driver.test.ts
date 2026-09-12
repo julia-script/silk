@@ -23,7 +23,7 @@ import * as PhaseReport from '../src/PhaseReport.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import * as ToolchainIntegrity from '../src/ToolchainIntegrity.js'
-import { invalidGenericCorpus } from './support/corpus.js'
+import { independentExecutionFinalizedDestroy, invalidGenericCorpus } from './support/corpus.js'
 import { ecdsaP256WasmSource } from './support/ecdsaP256Acceptance.js'
 import { p256WasmAcceptanceSource } from './support/p256Acceptance.js'
 import { chacha20Poly1305WasmSource } from './support/chacha20Poly1305Acceptance.js'
@@ -721,6 +721,36 @@ it.effect(
               .join('\n')
           : undefined,
       )
+      if (outcome._tag !== 'Compiled') return
+      const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+      assert.deepEqual(WebAssembly.Module.imports(module), [])
+      const instance = new WebAssembly.Instance(module)
+      const main = instance.exports['main']
+      assert.isFunction(main)
+      if (typeof main === 'function') assert.strictEqual(main(), 42)
+    }),
+  300_000,
+)
+
+it.effect(
+  'runs structured cancellation finalizers through LLVM-to-Wasm',
+  () =>
+    Effect.gen(function* () {
+      const outcome = yield* compileSource(
+        'execution-finalized-destroy.wasm',
+        independentExecutionFinalizedDestroy,
+        {
+          compilation: {
+            root: SourceFile.make(
+              'memory/execution-finalized-destroy-wasm',
+              ascii(independentExecutionFinalizedDestroy),
+            ),
+            target: 'wasm32-unknown-unknown',
+          },
+          artifactKind: 'WebAssemblyModule',
+        },
+      )
+      assert.strictEqual(outcome._tag, 'Compiled')
       if (outcome._tag !== 'Compiled') return
       const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
       assert.deepEqual(WebAssembly.Module.imports(module), [])

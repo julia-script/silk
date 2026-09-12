@@ -128,6 +128,36 @@ export interface LoweredPlace {
   readonly selectors: ReadonlyArray<Mir.PlaceSelector>
 }
 
+const cancellationFinalizerOf = (
+  fn: FunctionLowering,
+  effect: Mir.LocalId,
+  effectType: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
+  availableRequirements: ReadonlyArray<ProvidedRequirement>,
+): Mir.CancellationFinalizer | undefined => {
+  const provided = requirementsFor(availableRequirements, effectType.type)
+  if (provided === undefined) return undefined
+  const runner =
+    provided.length === 0
+      ? (effectType.storage?.realization.runner ??
+        Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site))
+      : ensureProvidedRunner(fn, effectType, provided)
+  if (runner === undefined) return undefined
+  const runnerInstance =
+    effectType.storage?.realization.runnerInstance ?? effectType.environment.instance
+  return Object.freeze({
+    effect,
+    runner,
+    runnerTypeArguments:
+      effectType.storage?.realization.runnerArguments ??
+      effectType.environment.instance.typeArguments,
+    ...(runnerInstance.staticArguments.length === 0
+      ? {}
+      : { runnerStaticArguments: runnerInstance.staticArguments }),
+    arguments: runtimeRequirementArguments(provided),
+    outcomeType: Object.freeze({ _tag: 'EffectOutcome', type: effectType.type }),
+  })
+}
+
 export const lowerRunEffectValue = (
   fn: FunctionLowering,
   effect: Mir.LocalId,
@@ -136,6 +166,7 @@ export const lowerRunEffectValue = (
   span: SourceSpan.SourceSpan,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.activeRequirements ??
     fn.providedRequirements,
+  cancellationFinalizer?: Mir.CancellationFinalizer,
 ): LoweredExpression | undefined => {
   // A success that is itself an Effect is the value the environment's success identity names.
   const successType = Type.isEffect(fn.semantic(success))
@@ -207,6 +238,7 @@ export const lowerRunEffectValue = (
           }),
       providers: providerBindings(provided),
       arguments: runtimeRequirementArguments(provided),
+      ...(cancellationFinalizer === undefined ? {} : { cancellationFinalizer }),
       outcomeType,
       ...(propagationType === undefined ? {} : { propagationType }),
       tagMappings: Object.freeze(tagMappings),
@@ -350,6 +382,7 @@ export const runCaughtEffectValue = (
   span: SourceSpan.SourceSpan,
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.activeRequirements ??
     fn.providedRequirements,
+  cancellationFinalizer?: Mir.CancellationFinalizer,
 ): CaughtEffect | undefined => {
   const provided = requirementsFor(availableRequirements, effectType.type)
   if (provided === undefined) return undefined
@@ -404,6 +437,7 @@ export const runCaughtEffectValue = (
         ? {}
         : { runnerStaticArguments: runnerInstance.staticArguments }),
       arguments: runtimeRequirementArguments(provided),
+      ...(cancellationFinalizer === undefined ? {} : { cancellationFinalizer }),
       outcomeType,
       failureValueType,
       successShape,
@@ -492,6 +526,7 @@ export const lowerFinalizedEffect = (
   protectedSpan: SourceSpan.SourceSpan,
   finalizerSpan: SourceSpan.SourceSpan,
   availableRequirements: ReadonlyArray<ProvidedRequirement>,
+  cancellationSafe = false,
 ): LoweredExpression | undefined => {
   if (protectedType._tag === 'EffectComposite')
     return lowerWithEffectValue(
@@ -511,8 +546,15 @@ export const lowerFinalizedEffect = (
           protectedSpan,
           finalizerSpan,
           availableRequirements,
+          cancellationSafe,
         ),
     )
+  const cancellationFinalizer = cancellationSafe
+    ? finalizerType._tag === 'EffectValue'
+      ? cancellationFinalizerOf(fn, finalizer, finalizerType, availableRequirements)
+      : undefined
+    : undefined
+  if (cancellationSafe && cancellationFinalizer === undefined) return undefined
   const finalize = (): LoweredExpression | undefined =>
     finalizerType._tag === 'EffectComposite'
       ? lowerWithEffectValue(
@@ -541,6 +583,7 @@ export const lowerFinalizedEffect = (
       protectedType.type.success,
       protectedSpan,
       availableRequirements,
+      cancellationFinalizer,
     )
     if (protectedResult === undefined || protectedResult === 'Transferred') return protectedResult
     const finalized = finalize()
@@ -552,6 +595,7 @@ export const lowerFinalizedEffect = (
     protectedType,
     protectedSpan,
     availableRequirements,
+    cancellationFinalizer,
   )
   if (caught === undefined || fn.effectOutcome === undefined) return undefined
   const successType = fn.localTypes.at(caught.success.ordinal)

@@ -684,27 +684,6 @@ const nonParkingFinalizationEnvironment = {
   environment: contractLifetime('finalizeEffectNonParking'),
   lifetimeBinders: [],
 }
-const nonParkingFinalizerBound = Type.effectWithRows(
-  Type.unit,
-  RowAlgebra.concrete(Type.failureRowPolicy(), []),
-  nonParkingFinalizationEnvironment,
-  'Take',
-  nonParkingFinalizationFinalizerRow,
-)
-const nonParkingFinalizer = Type.parameter(
-  nonParkingFinalizationOwner,
-  4,
-  'F',
-  'EffectRepresentation',
-  nonParkingFinalizerBound,
-  Object.freeze(['Intrinsic.NonParking']),
-)
-const representedNonParkingFinalizer = Type.represented(
-  nonParkingFinalizerBound,
-  nonParkingFinalizerBound,
-  Type.representationParameterArgument(nonParkingFinalizer),
-)
-
 const catchOwner = Object.freeze({ module: 'silk/core', name: '$CatchFailure' })
 const catchSelected = Type.parameter(catchOwner, 0, 'S')
 const catchSuccess = Type.parameter(catchOwner, 1, 'A')
@@ -2182,17 +2161,16 @@ const intrinsicOperations = Object.freeze([
       actor: 'Effect',
       name: 'finalizeEffectNonParking',
       operation: 'EffectFinalizeNonParking',
-      typeParameters: Object.freeze(['A', 'E', '?R', '?S', 'F']),
+      typeParameters: Object.freeze(['A', 'E', '?R', '?S']),
       semanticTypeParameters: Object.freeze([
         nonParkingFinalizationSuccess,
         nonParkingFinalizationFailure,
         nonParkingFinalizationProtectedRequirements,
         nonParkingFinalizationFinalizerRequirements,
-        nonParkingFinalizer,
       ]),
       parameters: Object.freeze([
         valueParameter('protected', 'once Effect<A ! E ? R>'),
-        valueParameter('finalizer', 'F'),
+        valueParameter('finalizer', 'once Effect<() ? S>'),
       ]),
       semanticParameters: Object.freeze([
         Type.effectWithRows(
@@ -2202,7 +2180,13 @@ const intrinsicOperations = Object.freeze([
           'Take',
           nonParkingFinalizationProtectedRow,
         ),
-        representedNonParkingFinalizer,
+        Type.effectWithRows(
+          Type.unit,
+          RowAlgebra.concrete(Type.failureRowPolicy(), []),
+          nonParkingFinalizationEnvironment,
+          'Take',
+          nonParkingFinalizationFinalizerRow,
+        ),
       ]),
       result: 'once Effect<A ! E ? R | S>',
       semanticResult: Type.effectWithRows(

@@ -797,11 +797,12 @@ export const parseServiceOperation = (initial: State): NodeResult => {
     ...serviceOperationFollowing,
   ])
   const contract = parseCallableContractTail(name.state, serviceOperationFollowing)
+  const properties = parseFunctionPropertyList(contract.state)
   const body =
-    nextSignificantKind(contract.state) === 'LeftBrace'
-      ? parseBlock(contract.state, false)
+    nextSignificantKind(properties.state) === 'LeftBrace'
+      ? parseBlock(properties.state, false)
       : undefined
-  const state = body?.state ?? contract.state
+  const state = body?.state ?? properties.state
   return Object.freeze({
     state,
     node: syntaxNode(state, 'ServiceOperation', [
@@ -817,6 +818,7 @@ export const parseServiceOperation = (initial: State): NodeResult => {
       ...(contract.failureRow === undefined ? [] : [contract.failureRow.node]),
       ...(contract.requirementRow === undefined ? [] : [contract.requirementRow.node]),
       ...(contract.whereClause === undefined ? [] : [contract.whereClause.node]),
+      ...properties.elements,
       ...(body === undefined ? [] : [body.node]),
     ]),
   })

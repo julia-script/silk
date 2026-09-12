@@ -146,10 +146,18 @@ truncation into apparent authentication success.
 
 ### 6. Add one cancellation-safe nonparking Effect finalizer primitive
 
-Ordinary `silk.effect` exposes `Effect.ensuringNonParking(protected, finalizer)`. Its finalizer has
-the form `once Effect<'env; () ! never ? S> + Intrinsic.NonParking`; the protected result remains
-`A ! E ? R | S`. `tls_connection` recovers any typed `ByteDuplex.close` failure before supplying
-the finalizer, so cleanup cannot replace the protected outcome.
+Ordinary `silk.effect` exposes `Effect.ensuringNonParking(protected, finalizer)`. Its finalizer is an
+ordinary `once Effect<'env; () ! never ? S>`; the protected result remains `A ! E ? R | S`.
+Every reachable call records a sealed nonparking obligation for that exact finalizer execution.
+`tls_connection` recovers any typed `ByteDuplex.close` failure before supplying the finalizer, so
+cleanup cannot replace the protected outcome.
+
+Effect service and interface operations may declare the argument-free property
+`with Intrinsic.nonParking()`. Unresolved calls to a marked operation permit nested transfer but not
+external parking. When a lexical provider selects an implementation, the compiler proves the exact
+mapped implementation against that contract and rejects parking or unavailable implementations.
+`ByteDuplex.close` carries this property, preserving its Effect service signature while making an
+abstract close finalizer statically representable.
 
 The compiler recognizes only sealed `Intrinsic.finalizeEffectNonParking`. The intrinsic arms a
 finalizer frame before protected execution. Normal completion runs it and disarms the frame only
@@ -191,9 +199,10 @@ shared corpus and make the compiler suite slower without adding a distinct oracl
 - **[Cancellation finalization changes frame ownership and teardown]** → Arm before entering the
   protected region, verify retention in MIR, run through the generated nonparking driver before
   ordinary frame cleanup, and test nested LIFO/exact-once behavior on native and WebAssembly.
-- **[A finalizer incorrectly marked nonparking could stall cancellation]** → Require the sealed
-  `Intrinsic.NonParking` property at compile time and reject finalizers that can reach an external
-  park. Keep the new combinator distinct from general `ensuring`.
+- **[A finalizer or promised service implementation could park cancellation]** → Record a sealed
+  nonparking obligation on every exact finalizer, permit only argument-free
+  `Intrinsic.nonParking()` on Effect operations, and reject selected implementations that park or
+  cannot be resolved. Keep the new combinator distinct from general `ensuring`.
 - **[Provider cancellation can leave an external transfer ambiguous]** → Invalidate and close the
   connection; never acknowledge or retry the affected TLS buffer.
 - **[Absolute deadlines are meaningless across clock providers]** → Require all deadline creation,

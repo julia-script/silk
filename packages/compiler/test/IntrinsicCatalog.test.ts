@@ -295,6 +295,13 @@ fn inspectCatch() -> once Effect<'static; i32> {
   return Intrinsic.catchFailure<CatalogProblem>(catalogRisky(), catalogRecover)
 }
 pub fn main() -> i32 { return 42 }`,
+  `import silk.effect { Effect }
+effect fn protected() -> i32 { return 42 }
+effect fn release() -> () { return () }
+fn inspectFinalize() -> once Effect<'static; i32> {
+  return Intrinsic.finalizeEffectNonParking(protected(), release())
+}
+pub fn main() -> i32 { return 42 }`,
   `import silk.allocator { Allocator, OutOfMemoryError }
 struct SuspendProblem {}
 service SuspendClock {}

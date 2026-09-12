@@ -1558,6 +1558,7 @@ function lowerRunExpression(
         protectedExpression.span,
         finalizerExpression.span,
         availableRequirements,
+        recipe.operation === 'EffectFinalizeNonParking',
       )
     }
     if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectObserveDiagnostics') {

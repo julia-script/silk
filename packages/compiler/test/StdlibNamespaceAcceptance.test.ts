@@ -46,6 +46,7 @@ import silk.effect { Effect }
 import silk.memory_byte_duplex { MemoryByteDuplex, MemoryReadEvent, MemoryWriteAction, MemoryWriteEvent }
 import silk.option { Option }
 import silk.system_clock { SystemClock }
+import silk.tls_connection { Connection, ConnectionError, ConnectionOptions, ConnectionPhase }
 import silk.vector { Vector }
 effect fn makeProvider() -> MemoryByteDuplex ! OutOfMemoryError ? &mut Allocator {
   let data = run Bytes.copy(&b"hello")

@@ -644,6 +644,12 @@
     ]
   },
   {
+    "module": "silk/tls_connection",
+    "path": "silk/tls_connection.silk",
+    "namespace": "Connection",
+    "aliases": ["ConnectionError", "ConnectionOptions", "ConnectionPhase"]
+  },
+  {
     "module": "silk/tls_hkdf",
     "path": "silk/tls_hkdf.silk",
     "namespace": "TlsHkdfSha256",

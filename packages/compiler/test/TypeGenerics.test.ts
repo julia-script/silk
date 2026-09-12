@@ -257,6 +257,38 @@ it('checks computed rows forward-only without reconstructing their operands', ()
   )
 })
 
+it('preserves symbolic failure members when a singleton specializes to a mixed union', () => {
+  const owner = { module: 'generics/MixedFailureSpecialization', name: 'forward' }
+  const inner = Type.parameter(owner, 0, 'InnerE')
+  const outer = Type.parameter(owner, 1, 'OuterE')
+  const fixed = Type.nominal('generics/MixedFailureSpecialization', 'FixedFailure')
+  const origin =
+    SourceSpan.fromOffsets('generics/MixedFailureSpecialization', 20, 26) ??
+    unreachable('expected a valid source span')
+  const source = RowAlgebra.singleton(
+    Type.failureRowPolicy(),
+    Type.failureMemberShape(inner),
+    origin,
+  )
+
+  const specialized = Type.specializeFailureRow(
+    source,
+    new Map([[Type.key(inner), Type.failureValue([fixed, outer])]]),
+  )
+
+  assert.strictEqual(specialized._tag, 'Substituted')
+  if (specialized._tag !== 'Substituted') return
+  assert.deepEqual(Type.failureMembers(specialized.row), [fixed])
+  assert.deepEqual(Type.failureMemberParameters(specialized.row), [outer])
+  assert.deepEqual(
+    specialized.row.memberWellFormed.map((obligation) => ({
+      parameter: obligation.member.parameter,
+      origins: obligation.origins,
+    })),
+    [{ parameter: outer, origins: [origin] }],
+  )
+})
+
 it('infers failure and requirement row arguments nested in nominal applications', () => {
   const owner = { module: 'generics/NominalRows', name: 'Carrier' }
   const failures = Type.parameter(owner, 0, 'E')
@@ -518,6 +550,144 @@ it('distinguishes row inference failure causes deterministically', () => {
       ),
     )?._tag,
     'NonFiniteRequirementRow',
+  )
+  const forwarded = Type.effect(
+    'i32',
+    [],
+    { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+    'Shared',
+    [],
+    [firstRequirement],
+  )
+  assert.strictEqual(TypeInference.rowInferenceFailure(forwarded, forwarded), undefined)
+
+  const callee = { module: 'generics/Rows', name: 'callee' }
+  const calleeFailure = Type.parameter(callee, 0, 'E')
+  const outerFailure = Type.parameter(owner, 4, 'OuterE')
+  const failureInference = new Map<string, Type.GenericArgument>()
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect('i32', [calleeFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      Type.effect('i32', [problem, outerFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      failureInference,
+    ),
+    true,
+  )
+  const inferredFailure = failureInference.get(Type.key(calleeFailure))
+  const expectedFailure = Type.union([problem, outerFailure])
+  assert.strictEqual(expectedFailure._tag, 'Normalized')
+  assert.strictEqual(
+    inferredFailure === undefined ? undefined : Type.encodeGenericArgument(inferredFailure),
+    expectedFailure._tag === 'Normalized' ? Type.encode(expectedFailure.type) : undefined,
+  )
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect('i32', [calleeFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      Type.effect('i32', [problem, calleeFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      new Map(),
+    ),
+    false,
+  )
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect('i32', [problem, calleeFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      Type.effect('i32', [problem, outerFailure], {
+        environment: Lifetime.staticLifetime,
+        lifetimeBinders: [],
+      }),
+      new Map(),
+    ),
+    false,
+  )
+
+  const calleeRequirement = Type.parameter(callee, 1, 'R', 'RequirementRow')
+  const outerRequirement = Type.parameter(owner, 5, 'OuterR', 'RequirementRow')
+  const requirementInference = new Map<string, Type.GenericArgument>()
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [],
+        [calleeRequirement],
+      ),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [requirement],
+        [outerRequirement],
+      ),
+      requirementInference,
+    ),
+    true,
+  )
+  const inferredRequirement = requirementInference.get(Type.key(calleeRequirement))
+  assert.strictEqual(
+    inferredRequirement === undefined ? undefined : Type.encodeGenericArgument(inferredRequirement),
+    Type.encodeGenericArgument(Type.requirementRowArgument([requirement], [outerRequirement])),
+  )
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [],
+        [calleeRequirement],
+      ),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [requirement],
+        [calleeRequirement],
+      ),
+      new Map(),
+    ),
+    false,
+  )
+  assert.strictEqual(
+    TypeInference.infer(
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [],
+        [calleeRequirement, secondRequirement],
+      ),
+      Type.effect(
+        'i32',
+        [],
+        { environment: Lifetime.staticLifetime, lifetimeBinders: [] },
+        'Shared',
+        [requirement],
+        [outerRequirement],
+      ),
+      new Map(),
+    ),
+    false,
   )
 })
 

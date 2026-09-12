@@ -1188,7 +1188,15 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
     case 'RunEffect':
       return [operation.destination, operation.outcome, ...operation.arguments]
     case 'RunEffectValue':
-      return [operation.destination, operation.outcome, operation.effect, ...operation.arguments]
+      return [
+        operation.destination,
+        operation.outcome,
+        operation.effect,
+        ...operation.arguments,
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : [operation.cancellationFinalizer.effect, ...operation.cancellationFinalizer.arguments]),
+      ]
     case 'RunEffectComposite':
       return [
         operation.destination,
@@ -1211,6 +1219,9 @@ export const operationLocals = (operation: Operation): ReadonlyArray<LocalId> =>
         operation.failureValue,
         operation.effect,
         ...operation.arguments,
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : [operation.cancellationFinalizer.effect, ...operation.cancellationFinalizer.arguments]),
       ]
     case 'Construct':
     case 'ConstructUnionVariant':
@@ -2170,6 +2181,14 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
         ...(operation.runnerBase?.typeArguments.filter(SilkType.isTypeArgument) ?? []),
         ...operation.providers.flatMap((provider) => [provider.capability, provider.providerType]),
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : [
+              semanticType(operation.cancellationFinalizer.outcomeType),
+              ...operation.cancellationFinalizer.runnerTypeArguments.filter(
+                SilkType.isTypeArgument,
+              ),
+            ]),
       ]
     case 'RunEffectComposite':
       return [
@@ -2197,6 +2216,14 @@ const operationTypes = (operation: Operation): ReadonlyArray<DeclarationFacts.Se
         semanticType(operation.outcomeType),
         operation.failureValueType,
         ...operation.runnerTypeArguments.filter(SilkType.isTypeArgument),
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : [
+              semanticType(operation.cancellationFinalizer.outcomeType),
+              ...operation.cancellationFinalizer.runnerTypeArguments.filter(
+                SilkType.isTypeArgument,
+              ),
+            ]),
       ]
     case 'Construct':
     case 'ConstructUnionVariant':
@@ -2378,7 +2405,13 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'RunEffect':
       return operation.arguments
     case 'RunEffectValue':
-      return [operation.effect, ...operation.arguments]
+      return [
+        operation.effect,
+        ...operation.arguments,
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : [operation.cancellationFinalizer.effect, ...operation.cancellationFinalizer.arguments]),
+      ]
     case 'RunEffectComposite':
       return [
         operation.effect,
@@ -2387,7 +2420,13 @@ const accessedOwnerLocals = (operation: Operation): ReadonlyArray<LocalId> => {
     case 'RunStaticEffect':
       return [...operation.captures.map((capture) => capture.source), ...operation.arguments]
     case 'CatchEffect':
-      return [operation.effect, ...operation.arguments]
+      return [
+        operation.effect,
+        ...operation.arguments,
+        ...(operation.cancellationFinalizer === undefined
+          ? []
+          : [operation.cancellationFinalizer.effect, ...operation.cancellationFinalizer.arguments]),
+      ]
     case 'Construct':
     case 'ConstructUnionVariant':
       return operation.fields.map((field) => field.value)
@@ -2645,6 +2684,16 @@ const suspensionCallTargets = (
           typeArguments: operation.runnerTypeArguments,
           staticArguments: operation.runnerStaticArguments ?? Object.freeze([]),
         }),
+        ...('cancellationFinalizer' in operation && operation.cancellationFinalizer !== undefined
+          ? [
+              Object.freeze({
+                declaration: operation.cancellationFinalizer.runner,
+                typeArguments: operation.cancellationFinalizer.runnerTypeArguments,
+                staticArguments:
+                  operation.cancellationFinalizer.runnerStaticArguments ?? Object.freeze([]),
+              }),
+            ]
+          : []),
       ]
     case 'RunEffectComposite':
       return operation.alternatives.map((alternative) =>
@@ -2851,8 +2900,44 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
           return valid
         })
       const size = Math.ceil(cursor / alignment) * alignment
+      const retained = new Set(state.slots.map((slot) => slot.local.ordinal))
+      const finalizer = state.cancellationFinalizer
+      const finalizerEffect =
+        finalizer === undefined ? undefined : fn.localTypes.at(finalizer.effect.ordinal)
+      const finalizerRunner =
+        finalizer === undefined
+          ? undefined
+          : self.functions.find((candidate) =>
+              matchesInstance(
+                candidate,
+                finalizer.runner,
+                finalizer.runnerTypeArguments,
+                finalizer.runnerStaticArguments,
+              ),
+            )
+      const retainedOrZeroLane = (local: LocalId): boolean => {
+        if (retained.has(local.ordinal)) return true
+        const type = fn.localTypes.at(local.ordinal)
+        if (type === undefined) return false
+        if (type._tag === 'EffectValue')
+          return Layout.effectEnvironmentLanes(self.layout, type.environment).length === 0
+        if (type._tag === 'CallableValue')
+          return (
+            type.environment === undefined ||
+            Layout.callableEnvironmentLanes(self.layout, type.environment).length === 0
+          )
+        return (Layout.callingShape(self.layout, semanticType(type))?.lanes.length ?? 0) === 0
+      }
+      const finalizerValid =
+        finalizer === undefined ||
+        (finalizerEffect?._tag === 'EffectValue' &&
+          SilkType.equals(finalizerEffect.type, finalizer.outcomeType.type) &&
+          finalizerRunner !== undefined &&
+          retainedOrZeroLane(finalizer.effect) &&
+          finalizer.arguments.every(retainedOrZeroLane))
       return (
         payloadValid &&
+        finalizerValid &&
         layout.size === size &&
         layout.alignment === alignment &&
         layout.tailPadding === size - cursor

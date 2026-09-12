@@ -5350,6 +5350,14 @@
       "identity": "EffectFinalize"
     },
     {
+      "operation": "Intrinsic.finalizeEffectNonParking",
+      "signature": "fn Intrinsic.finalizeEffectNonParking<A, E, ?R, ?S>(protected: once Effect<A ! E ? R>, finalizer: once Effect<() ? S>) -> once Effect<A ! E ? R | S>",
+      "unsafe": false,
+      "admission": "Effect",
+      "consumer": "silk/effect.ensuringNonParking",
+      "identity": "EffectFinalizeNonParking"
+    },
+    {
       "operation": "Intrinsic.observeDiagnostics",
       "signature": "fn Intrinsic.observeDiagnostics<S, A, ?R, F>(state: S, observer: F, protected: once Effect<A ? R>) -> once Effect<A ? R>",
       "unsafe": false,

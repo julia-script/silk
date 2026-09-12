@@ -913,6 +913,7 @@ export interface ServiceOperationFact {
   readonly state: ServiceOperationState
   readonly functionKind: 'Ordinary' | 'Effect'
   readonly unsafe: boolean
+  readonly staticProperties: ReadonlyArray<Type.SealedStaticProperty>
   readonly typeParameters: ReadonlyArray<TypeParameterFact>
   readonly parameterCount: number
   readonly parameters: ReadonlyArray<ParameterFact>

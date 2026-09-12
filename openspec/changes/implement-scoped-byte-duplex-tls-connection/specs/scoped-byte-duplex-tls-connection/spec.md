@@ -6,7 +6,7 @@ Define bounded partial-byte duplex I/O and one scoped adapter that publishes an 
 
 ### Requirement: ByteDuplex exposes exact partial reliable-byte transfers
 
-Canonical `silk.byte_duplex` SHALL expose the exclusive `ByteDuplex` service with `readSome(output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer`, `writeSome(input: &[u8], deadline: Option<Instant>) -> usize`, `flush(deadline: Option<Instant>) -> ()`, `shutdownWrite(deadline: Option<Instant>) -> ()`, and `close() -> ()`. Each deadline-bearing operation SHALL require `&mut MonotonicClock`; each operation SHALL fail only with typed `ByteIoError`. `ReadTransfer` SHALL distinguish `Data { count }` from orderly underlying `End`. A successful nonempty read or write SHALL report a positive count no greater than the supplied slice length. Empty calls SHALL make no provider I/O request. Existing `Writer` all-or-error behavior SHALL remain unchanged.
+Canonical `silk.byte_duplex` SHALL expose the exclusive `ByteDuplex` service with `readSome(output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer`, `writeSome(input: &[u8], deadline: Option<Instant>) -> usize`, `flush(deadline: Option<Instant>) -> ()`, `shutdownWrite(deadline: Option<Instant>) -> ()`, and `close() -> ()`. `close` SHALL declare the sealed argument-free `Intrinsic.nonParking()` Effect-operation property; every selected implementation SHALL exclude external parking while nested transfer remains admissible. Each deadline-bearing operation SHALL require `&mut MonotonicClock`; each operation SHALL fail only with typed `ByteIoError`. `ReadTransfer` SHALL distinguish `Data { count }` from orderly underlying `End`. A successful nonempty read or write SHALL report a positive count no greater than the supplied slice length. Empty calls SHALL make no provider I/O request. Existing `Writer` all-or-error behavior SHALL remain unchanged.
 
 #### Scenario: Accept one short transfer
 
@@ -163,4 +163,3 @@ The new modules SHALL be registered in the standard-library manifest and generat
 
 - **WHEN** manifest, generated source, generated reference, documentation examples, and target coverage checks run
 - **THEN** both modules and every public member are present, documented, resolvable, and behaviorally covered without a physical socket
-

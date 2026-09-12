@@ -696,8 +696,22 @@ export const violationDiagnostics = (
         })
       }),
   )
+  const nonParkingObligations = self.nonParkingObligations.flatMap(({ span, summary }) => {
+    const property = nonParkingOfSummary(summary)
+    const unavailable = summary.availability === 'Unavailable'
+    if (property._tag === 'Satisfied' && !unavailable) return []
+    const failed =
+      property._tag === 'Unsatisfied'
+        ? property.causes.map((entry) => `${entry.reason}:${entry.path.join(' -> ')}`)
+        : ['Unavailable:exact execution target']
+    return [Diagnostic.unsatisfiedExecutableProperty('Intrinsic.NonParking', failed, span)]
+  })
   const distinct = new Map<string, Diagnostic.Diagnostic>()
-  for (const diagnostic of [...functionApplications, ...nominalApplications_]) {
+  for (const diagnostic of [
+    ...functionApplications,
+    ...nominalApplications_,
+    ...nonParkingObligations,
+  ]) {
     const key = `${diagnostic.code}\0${diagnostic.message}`
     const current = distinct.get(key)
     if (

@@ -3140,8 +3140,24 @@ export const specializeFailureRow = (
         })
       if (isTypeArgument(replacement) && !isUnion(replacement) && !isNever(replacement))
         return Object.freeze({ _tag: 'Concrete', member: replacement })
-      if (isTypeArgument(replacement) && isUnion(replacement))
-        return Object.freeze({ _tag: 'ConcreteRow', members: replacement.members })
+      if (isTypeArgument(replacement) && isUnion(replacement)) {
+        const row = replacement.members.reduce<FailureRow>(
+          (current, failure) =>
+            RowAlgebra.union(
+              failureRowPolicy(),
+              current,
+              isParameter(failure) && failure.kind === 'Value'
+                ? RowAlgebra.singleton(
+                    failureRowPolicy(),
+                    failureMemberShape(failure),
+                    implicitRowOrigin,
+                  )
+                : RowAlgebra.concrete(failureRowPolicy(), [failure]),
+            ),
+          RowAlgebra.concrete(failureRowPolicy(), []),
+        )
+        return Object.freeze({ _tag: 'Row', row })
+      }
       if (isTypeArgument(replacement) && isNever(replacement))
         return Object.freeze({ _tag: 'ConcreteRow', members: Object.freeze([]) })
       return Object.freeze({

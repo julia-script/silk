@@ -545,6 +545,69 @@ const dropStoredPackage = Effect.fnUntraced(function* (
   }
 })
 
+/** Runs one armed nonparking finalizer from its retained frame before consuming those fields. */
+const runCancellationFinalizer = Effect.fnUntraced(function* (
+  context: NativeAggregate.Context,
+  owner: Mir.MirFunction,
+  layout: Mir.CoroutineFrameTargetStateLayout,
+  frame: Value.Input,
+  finalizer: Mir.CancellationFinalizer | undefined,
+  tag: string,
+) {
+  if (finalizer === undefined) return new Set<number>()
+  const { body, declared } = context
+  const target = declared.find((candidate) =>
+    Mir.matchesInstance(
+      candidate.fn,
+      finalizer.runner,
+      finalizer.runnerTypeArguments,
+      finalizer.runnerStaticArguments,
+    ),
+  )
+  if (target === undefined)
+    throw new RangeError('LLVM cancellation finalizer lost its exact Effect runner')
+  const materialize = Effect.fnUntraced(function* (local: Mir.LocalId) {
+    const type = owner.localTypes.at(local.ordinal)
+    if (type === undefined) throw new RangeError('LLVM cancellation finalizer lost a local type')
+    const field = layout.payload.find((candidate) => candidate.local.ordinal === local.ordinal)
+    if (field === undefined) {
+      if (NativeType.valueLanesFor(context.types, type).length === 0) return []
+      throw new RangeError('LLVM cancellation finalizer lost a retained frame field')
+    }
+    const place = yield* NativeFrame.place(
+      context.storage,
+      frame,
+      field,
+      `${tag}_local${local.ordinal}`,
+    )
+    return yield* NativePayload.materialize(
+      NativePayload.place(context.types, place),
+      context,
+      `${tag}_local${local.ordinal}_value`,
+    )
+  })
+  const inputs = [
+    ...(yield* materialize(finalizer.effect)),
+    ...(yield* Effect.forEach(finalizer.arguments, materialize)).flat(),
+  ]
+  const lowered = yield* NativeArgument.lower(
+    context.storage,
+    target.argumentParameters,
+    NativeArgument.fromValues(inputs),
+    `${tag}_arguments`,
+  )
+  const callable = target.suspendable ? target.driver : target.handle
+  if (callable === undefined)
+    throw new RangeError('LLVM nonparking cancellation finalizer lost its machine driver')
+  yield* FunctionBody.callDirect(
+    body,
+    callable,
+    yield* NativeCall.argumentsFor(context.call.synchronous, target, lowered),
+    `${tag}_run`,
+  )
+  return new Set([finalizer.effect.ordinal, ...finalizer.arguments.map((local) => local.ordinal)])
+})
+
 const dropFrames = Effect.fnUntraced(function* (
   context: NativeAggregate.Context,
   package_: ExecutionPackage.Plan,
@@ -695,7 +758,17 @@ const dropFrames = Effect.fnUntraced(function* (
       Mir.matchesInstanceKey(fn, generated.layout.point.owner),
     )
     if (owner === undefined) throw new RangeError('LLVM execution frame cleanup lost its owner')
-    const releases = CoroutineFrame.cleanupReleases(owner, generated.layout)
+    const consumed = yield* runCancellationFinalizer(
+      context,
+      owner,
+      generated.layout,
+      head,
+      generated.region.relay.state?.cancellationFinalizer,
+      `${tag}_frame_${ordinal}_finalizer`,
+    )
+    const releases = CoroutineFrame.cleanupReleases(owner, generated.layout).filter(
+      (field) => !consumed.has(field.local.ordinal),
+    )
     const initializationValues = new Map<number, Value.Input>()
     const flags = new Set(
       releases.flatMap(

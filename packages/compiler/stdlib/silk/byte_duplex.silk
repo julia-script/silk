@@ -110,7 +110,7 @@ pub service ByteDuplex {
   ) -> () ! ByteIoError ? &mut ByteDuplex | &mut MonotonicClock
 
   /// Closes the complete transport lease. Repeated calls remain terminal.
-  effect fn close() -> () ! ByteIoError ? &mut ByteDuplex
+  effect fn close() -> () ! ByteIoError ? &mut ByteDuplex with Intrinsic.nonParking()
 }
 
 impl ByteDuplex {
