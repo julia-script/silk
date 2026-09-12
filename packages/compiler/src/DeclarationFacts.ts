@@ -2229,6 +2229,27 @@ export const unionByName = (self: Index, module: string, name: string): UnionLoo
       })
 }
 
+/** Resolves a mapped provider operation, preferring its inherent member to a module sibling. */
+export const providerOperation = (
+  self: ModuleHeaders,
+  provider: string,
+  operation: string,
+): DeclarationFact | undefined =>
+  self.declarations.find(
+    (declaration) =>
+      declaration.name._tag === 'Present' &&
+      declaration.name.spelling === operation &&
+      declaration.associatedMember !== undefined &&
+      (declaration.associatedMember.owner?.name ?? declaration.associatedMember.ownerSpelling) ===
+        provider,
+  ) ??
+  self.declarations.find(
+    (declaration) =>
+      declaration.name._tag === 'Present' &&
+      declaration.name.spelling === operation &&
+      declaration.associatedMember === undefined,
+  )
+
 /** Looks up one completed declaration by canonical identity. */
 export const byCanonical = (self: Index, id: CanonicalId): MemberFact | undefined => {
   const generated = self.generatedAggregates.get(`${id.module}:${id.name}`)

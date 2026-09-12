@@ -1172,8 +1172,11 @@ impl Transport {
     return run unsafe Transport.closeRaw()
   }
 }
+struct Other {}
+impl Other { unsafe effect fn close(self: &mut Self) -> () ! CloseError { return () } }
+impl Transport for Other { closeRaw: Other.close }
 struct Provider {}
-unsafe effect fn close(self: &mut Provider) -> () ! CloseError { return () }
+impl Provider { unsafe effect fn close(self: &mut Self) -> () ! CloseError { return () } }
 impl Transport for Provider { closeRaw: Provider.close }
 struct Resource<'env, P> { provider: &'env mut P }
 effect fn discard(error: CloseError) -> () { drop error return () }

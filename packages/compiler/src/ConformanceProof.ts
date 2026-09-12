@@ -10,7 +10,7 @@ import type {
   FieldFact,
   UnionVariantFact,
 } from './DeclarationFacts.js'
-import { byCanonical } from './DeclarationFacts.js'
+import { byCanonical, providerOperation } from './DeclarationFacts.js'
 import type { Index } from './DeclarationIndex.js'
 import { declaredRequirements, memberByNominal } from './DeclarationResolution.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -622,14 +622,11 @@ const witnessImplementation = (
   )
     return undefined
   const targetName = target.segments.at(1)?.spelling
-  const declaration = self.modules
-    .find((module) => module.module === provider.module)
-    ?.declarations.find(
-      (candidate) =>
-        targetName !== undefined &&
-        candidate.name._tag === 'Present' &&
-        candidate.name.spelling === targetName,
-    )
+  const module = self.modules.find((module) => module.module === provider.module)
+  const declaration =
+    module === undefined || targetName === undefined
+      ? undefined
+      : providerOperation(module, provider.name, targetName)
   return declaration?.canonical._tag === 'Canonical' ? declaration.canonical.id : undefined
 }
 
