@@ -308,6 +308,18 @@ impl TlsRecordSender {
     return RawBuffer.view<u8>(&self.pending, acknowledged, remaining)
   }
 
+  /// Cancels the complete pending suffix without changing the traffic-key epoch.
+  ///
+  /// # Gotchas
+  ///
+  /// Callers must close a transport after canceling a partially written record; its already-written
+  /// prefix cannot be completed or reused. Authenticated protocols use this only on terminal failure.
+  pub fn cancelPending(self: &mut Self) -> () {
+    self.pendingLength = 0
+    self.acknowledged = 0
+    return ()
+  }
+
   /// Returns the number of records that this protected epoch can still encode.
   /// Plaintext framing returns zero because it has no traffic-key epoch.
   pub fn recordsRemaining(self: &Self) -> u64 {

@@ -11,8 +11,11 @@ These files are immutable, offline interoperability evidence for `silk/tls_clien
   an IP reference with no SNI extension. Default tests only read committed bytes, verify their
   certificate chains and ClientHello identity fields, and check their SHA-256 values; they require
   neither Rust nor network access.
-- `manifest.json` records the generator command, peer profile, fixed Silk random script, fixture
-  provenance, and every immutable file hash.
+- `manifest.json` records each capture's exact generator command/configuration, named intermediate
+  transcript digests, peer profile,
+  fixed Silk random script, fixture provenance, and every immutable file hash. The final
+  application record is generated locally from rustls's logged server traffic secret at sequence
+  zero; it is not emitted by `ServerConnection`.
 
 rustls uses OS entropy for ephemeral key agreement. Running the opt-in generator checks the same
 semantic TLS outcomes but intentionally creates different peer bytes. It does not promise

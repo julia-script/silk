@@ -48,12 +48,12 @@ Local and peer closure bits are independent. Receiving close_notify freezes inpu
 
 ### Deterministic replay is the interoperability boundary
 
-An opt-in rustls capture tool records fresh peer sessions because ring key exchange uses OS randomness. The default suite verifies immutable file hashes and replays committed bytes, transcript checkpoints and expected results without Rust or network. One shared native program owns the behavioral matrix; one Wasm source covers only a representative deterministic memory path. Analysis tests prove affine borrows and provider rows without compiling extra binaries.
+An opt-in rustls capture tool records fresh peer sessions because ring key exchange uses OS randomness. The default suite verifies immutable file hashes and replays committed bytes, transcript checkpoints and expected results without Rust or network. The chosen validation implementation uses one small core native program for a complete authenticated byte-driver path and four independently bounded programs for handshake policy, key updates, closure and post-handshake controls, and resource policy. Each uses one constructor call graph and remains no larger than the core program. This topology and its size bounds are evidence-engineering choices, not protocol or public-API contracts. One Wasm source covers only a representative deterministic memory path. Analysis tests prove affine borrows and provider rows without compiling extra binaries.
 
 ## Risks / Trade-offs
 
 - **[The composed client is state-dense.]** → Keep parsing and scheduling helpers private, one-purpose, and table-driven; expose only the driver and authenticated getters.
-- **[Handshake vectors can overgrow the default compiler suite.]** → Reuse one analysis snapshot, one native corpus process, a small case table, and one Wasm witness. Do not duplicate JUL-171 fragmentation matrices.
+- **[Handshake vectors can overgrow the default compiler suite.]** → Keep each focused native program below ordinary source-realization capacity, reuse lower-layer evidence, and keep one Wasm witness. Do not duplicate JUL-171 fragmentation matrices.
 - **[Committed rustls sessions are not byte-regenerable.]** → Pin the rustls source and lockfile, record one capture, verify immutable checksums offline, and describe fresh generation as semantic-only.
 - **[Logical secret invalidation is not physical erasure.]** → Keep secrets private and affine, release all storage on drop, and document the absence of guaranteed zeroization.
 - **[Best-effort alerts can conflict with partially sent records.]** → Never splice. Surface the original failure immediately and emit an alert only when record framing remains valid.

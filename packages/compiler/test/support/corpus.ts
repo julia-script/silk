@@ -32,8 +32,13 @@ import {
   tlsRecordNativeAcceptanceSource,
 } from './tlsRecordAcceptance.js'
 import {
+  tlsClientClosureControlNativeSource,
+  tlsClientCoreNativeSource,
+  tlsClientHandshakePolicyNativeSource,
+  tlsClientKeyUpdateNativeSource,
   tlsClientNativeFixtureSource,
-  tlsClientNativeSource,
+  tlsClientNativeOnlySource,
+  tlsClientResourcePolicyNativeSource,
   tlsClientWasmSource,
 } from './tlsClientAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
@@ -8005,9 +8010,37 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     expected: { _tag: 'Completes', result: 42 },
   },
   {
-    name: 'authenticated-tls-client',
+    name: 'authenticated-tls-client-core',
     source: tlsClientWasmSource,
-    nativeSource: tlsClientNativeSource,
+    nativeSource: tlsClientCoreNativeSource,
+    nativeCSources: { tls_client_fixtures: tlsClientNativeFixtureSource },
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'authenticated-tls-client-key-update',
+    source: tlsClientNativeOnlySource,
+    nativeSource: tlsClientKeyUpdateNativeSource,
+    nativeCSources: { tls_client_fixtures: tlsClientNativeFixtureSource },
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'authenticated-tls-client-closure-control',
+    source: tlsClientNativeOnlySource,
+    nativeSource: tlsClientClosureControlNativeSource,
+    nativeCSources: { tls_client_fixtures: tlsClientNativeFixtureSource },
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'authenticated-tls-client-handshake-policy',
+    source: tlsClientNativeOnlySource,
+    nativeSource: tlsClientHandshakePolicyNativeSource,
+    nativeCSources: { tls_client_fixtures: tlsClientNativeFixtureSource },
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'authenticated-tls-client-resource-policy',
+    source: tlsClientNativeOnlySource,
+    nativeSource: tlsClientResourcePolicyNativeSource,
     nativeCSources: { tls_client_fixtures: tlsClientNativeFixtureSource },
     expected: { _tag: 'Completes', result: 42 },
   },

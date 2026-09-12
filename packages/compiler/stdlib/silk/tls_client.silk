@@ -378,6 +378,16 @@ pub enum TlsLimitKind {
   Arithmetic,
   /// One ALPN protocol or list.
   Alpn,
+  /// The configured certificate-decoder policy.
+  CertificateDecode,
+  /// The configured certificate-SAN decoder policy.
+  CertificateSanDecode,
+  /// The configured HTTPS identity policy.
+  CertificateIdentity,
+  /// The configured certificate-path search policy.
+  CertificatePath,
+  /// The configured semantic certificate-profile policy.
+  CertificateProfile,
 }
 
 /// A certificate identity failure that preserves its originating actor.
@@ -717,6 +727,14 @@ impl Client {
       alpnCount,
       config.limits.cookieBytes,
     )
+    if generatedBody - 47 > 65535 {
+      return Result.failResult<Client, TlsError>(
+        TlsError.LimitExceeded {
+          kind: TlsLimitKind.CookieBytes,
+          limit: config.limits.cookieBytes,
+        },
+      )
+    }
     if generatedBody > config.limits.handshakeBodyBytes {
       return Result.failResult<Client, TlsError>(
         TlsError.LimitExceeded {
@@ -953,11 +971,11 @@ impl Client {
     self: &mut Self,
     output: &mut [u8],
   ) -> Result<Progress, TlsError> {
-    if output.length == 0 {
-      return Result.failResult<Progress, TlsError>(TlsError.EmptyBuffer)
-    }
     if let Option<TlsError>.Some {value: error} = move terminalError(&self.*) {
       return Result.failResult<Progress, TlsError>(move error)
+    }
+    if output.length == 0 {
+      return Result.failResult<Progress, TlsError>(TlsError.EmptyBuffer)
     }
     if !self.authenticatedPublished {
       return invalidState(ClientOperation.ReadPlaintext)
@@ -1195,6 +1213,8 @@ fn terminalFailure(
 ) -> Result<Progress, TlsError> {
   let returned = copyTlsError(&error)
   client.terminal = Option.some<TlsError>(move error)
+  TlsRecordSender.cancelPending(&mut client.sender)
+  client.pendingKind = PendingKind.None
   client.applicationLength = 0
   client.applicationRead = 0
   return Result.failResult<Progress, TlsError>(move returned)
@@ -1203,6 +1223,8 @@ fn terminalFailure(
 fn unitFailure(client: &mut Client, error: TlsError) -> Result<(), TlsError> {
   let returned = copyTlsError(&error)
   client.terminal = Option.some<TlsError>(move error)
+  TlsRecordSender.cancelPending(&mut client.sender)
+  client.pendingKind = PendingKind.None
   client.applicationLength = 0
   client.applicationRead = 0
   return Result.failResult<(), TlsError>(move returned)
@@ -1277,11 +1299,98 @@ fn validateLimits(limits: ClientLimits) -> Option<TlsError> {
   if limits.ticketBytes == 0 {
     return limitOption(TlsLimitKind.TicketBytes, limits.ticketBytes)
   }
+  if limits.certificateDecode.inputBytes == 0 {
+    return limitOption(TlsLimitKind.CertificateDecode, limits.certificateDecode.inputBytes)
+  }
+  if limits.certificateDecode.certificateBytes == 0 {
+    return limitOption(TlsLimitKind.CertificateDecode, limits.certificateDecode.certificateBytes)
+  }
+  if limits.certificateDecode.totalDerBytes == 0 {
+    return limitOption(TlsLimitKind.CertificateDecode, limits.certificateDecode.totalDerBytes)
+  }
+  if limits.certificateDecode.certificates == 0 {
+    return limitOption(TlsLimitKind.CertificateDecode, limits.certificateDecode.certificates)
+  }
+  if limits.certificateDecode.fieldBytes == 0 {
+    return limitOption(TlsLimitKind.CertificateDecode, limits.certificateDecode.fieldBytes)
+  }
+  if limits.certificateDecode.extensions == 0 {
+    return limitOption(TlsLimitKind.CertificateDecode, limits.certificateDecode.extensions)
+  }
+  if limits.certificateDecode.depth == 0 {
+    return limitOption(TlsLimitKind.CertificateDecode, limits.certificateDecode.depth)
+  }
+  if limits.certificateDecode.nodes == 0 {
+    return limitOption(TlsLimitKind.CertificateDecode, limits.certificateDecode.nodes)
+  }
+  if limits.sanDecode.extensions == 0 {
+    return limitOption(TlsLimitKind.CertificateSanDecode, limits.sanDecode.extensions)
+  }
+  if limits.sanDecode.inputBytes == 0 {
+    return limitOption(TlsLimitKind.CertificateSanDecode, limits.sanDecode.inputBytes)
+  }
   if limits.sanDecode.identities == 0 || limits.sanDecode.identities > SAN_STORAGE_LIMIT {
-    return limitOption(TlsLimitKind.PeerCertificates, limits.sanDecode.identities)
+    return limitOption(TlsLimitKind.CertificateSanDecode, limits.sanDecode.identities)
+  }
+  if limits.sanDecode.nodes == 0 {
+    return limitOption(TlsLimitKind.CertificateSanDecode, limits.sanDecode.nodes)
+  }
+  if limits.sanDecode.depth == 0 || limits.sanDecode.depth > 32 {
+    return limitOption(TlsLimitKind.CertificateSanDecode, limits.sanDecode.depth)
   }
   if limits.identity.maxSanCount == 0 || limits.identity.maxSanCount > SAN_STORAGE_LIMIT {
-    return limitOption(TlsLimitKind.PeerCertificates, limits.identity.maxSanCount)
+    return limitOption(TlsLimitKind.CertificateIdentity, limits.identity.maxSanCount)
+  }
+  if limits.identity.maxSanBytes == 0 {
+    return limitOption(TlsLimitKind.CertificateIdentity, limits.identity.maxSanBytes)
+  }
+  if limits.path.peerCertificates == 0 {
+    return limitOption(TlsLimitKind.CertificatePath, limits.path.peerCertificates)
+  }
+  if limits.path.certificateBytes == 0 {
+    return limitOption(TlsLimitKind.CertificatePath, limits.path.certificateBytes)
+  }
+  if limits.path.peerBytes == 0 {
+    return limitOption(TlsLimitKind.CertificatePath, limits.path.peerBytes)
+  }
+  if limits.path.anchors == 0 {
+    return limitOption(TlsLimitKind.CertificatePath, limits.path.anchors)
+  }
+  if limits.path.anchorBytes == 0 {
+    return limitOption(TlsLimitKind.CertificatePath, limits.path.anchorBytes)
+  }
+  if limits.path.pathCertificates == 0 {
+    return limitOption(TlsLimitKind.CertificatePath, limits.path.pathCertificates)
+  }
+  if limits.path.issuerCandidates == 0 {
+    return limitOption(TlsLimitKind.CertificatePath, limits.path.issuerCandidates)
+  }
+  if limits.path.signatureVerifications == 0 {
+    return limitOption(TlsLimitKind.CertificatePath, limits.path.signatureVerifications)
+  }
+  if limits.path.completePaths == 0 {
+    return limitOption(TlsLimitKind.CertificatePath, limits.path.completePaths)
+  }
+  if limits.path.nameComparisons == 0 {
+    return limitOption(TlsLimitKind.CertificatePath, limits.path.nameComparisons)
+  }
+  if limits.path.profile.extensions == 0 {
+    return limitOption(TlsLimitKind.CertificateProfile, limits.path.profile.extensions)
+  }
+  if limits.path.profile.extensionBytes == 0 {
+    return limitOption(TlsLimitKind.CertificateProfile, limits.path.profile.extensionBytes)
+  }
+  if limits.path.profile.sanNames == 0 {
+    return limitOption(TlsLimitKind.CertificateProfile, limits.path.profile.sanNames)
+  }
+  if limits.path.profile.constraintSubtrees == 0 {
+    return limitOption(TlsLimitKind.CertificateProfile, limits.path.profile.constraintSubtrees)
+  }
+  if limits.path.profile.nodes == 0 {
+    return limitOption(TlsLimitKind.CertificateProfile, limits.path.profile.nodes)
+  }
+  if limits.path.profile.depth == 0 {
+    return limitOption(TlsLimitKind.CertificateProfile, limits.path.profile.depth)
   }
   if limits.handshakeBodyBytes > usize.MAX - HANDSHAKE_HEADER_LENGTH {
     return limitOption(TlsLimitKind.Arithmetic, usize.MAX)
@@ -2275,6 +2384,11 @@ fn readU24Raw(buffer: &RawBuffer<u8>, offset: usize) -> usize {
 effect fn handleServerHello(client: &mut Client, messageLength: usize) -> Result<(), TlsError>
 ! OutOfMemoryError
 ? &mut Allocator | &mut Random {
+  if messageLength != client.handshakeLength {
+    return Result.failResult<(), TlsError>(
+      TlsError.ProtocolViolation {reason: ProtocolReason.ServerHello},
+    )
+  }
   let parsedResult = parseServerHello(&client.*, messageLength)
   let parsed = match move parsedResult {
     Result<ParsedServerHello, TlsError>.Failure {error} => {
@@ -2447,7 +2561,15 @@ fn parseServerHello(
     )
   }
   let extensionsLength = readU16Raw(&client.handshake, 42)
-  if extensionsLength > client.limits.extensionBytes || extensionsLength + 44 != messageLength {
+  if extensionsLength > client.limits.extensionBytes {
+    return Result.failResult<ParsedServerHello, TlsError>(
+      TlsError.LimitExceeded {
+        kind: TlsLimitKind.ExtensionBytes,
+        limit: client.limits.extensionBytes,
+      },
+    )
+  }
+  if extensionsLength + 44 != messageLength {
     return Result.failResult<ParsedServerHello, TlsError>(
       TlsError.ProtocolViolation {reason: ProtocolReason.Extension},
     )
@@ -2496,6 +2618,11 @@ fn parseServerHello(
           )
         }
         let groupCode = readU16Raw(&client.handshake, cursor)
+        if groupCode == 29 {
+          return Result.failResult<ParsedServerHello, TlsError>(
+            TlsError.ProtocolViolation {reason: ProtocolReason.HelloRetryRequest},
+          )
+        }
         if groupCode != 23 {
           return Result.failResult<ParsedServerHello, TlsError>(TlsError.UnsupportedProfile)
         }
@@ -2806,7 +2933,15 @@ fn handleEncryptedExtensions(client: &mut Client, messageLength: usize) -> Resul
     )
   }
   let vectorLength = readU16Raw(&client.handshake, 4)
-  if vectorLength > client.limits.extensionBytes || vectorLength + 6 != messageLength {
+  if vectorLength > client.limits.extensionBytes {
+    return Result.failResult<(), TlsError>(
+      TlsError.LimitExceeded {
+        kind: TlsLimitKind.ExtensionBytes,
+        limit: client.limits.extensionBytes,
+      },
+    )
+  }
+  if vectorLength + 6 != messageLength {
     return Result.failResult<(), TlsError>(
       TlsError.ProtocolViolation {reason: ProtocolReason.Extension},
     )
@@ -2898,7 +3033,15 @@ fn handleCertificateRequest(client: &mut Client, messageLength: usize) -> Result
     )
   }
   let extensionsLength = readU16Raw(&client.handshake, 5)
-  if extensionsLength > client.limits.extensionBytes || extensionsLength + 7 != messageLength {
+  if extensionsLength > client.limits.extensionBytes {
+    return Result.failResult<(), TlsError>(
+      TlsError.LimitExceeded {
+        kind: TlsLimitKind.ExtensionBytes,
+        limit: client.limits.extensionBytes,
+      },
+    )
+  }
+  if extensionsLength + 7 != messageLength {
     return Result.failResult<(), TlsError>(
       TlsError.ProtocolViolation {reason: ProtocolReason.CertificateRequest},
     )
@@ -3057,7 +3200,15 @@ effect fn handleCertificate(client: &mut Client, messageLength: usize) -> Result
     cursor = cursor + derLength
     let extensionLength = readU16Raw(&client.handshake, cursor)
     cursor = cursor + 2
-    if extensionLength > client.limits.extensionBytes || extensionLength > messageLength - cursor {
+    if extensionLength > client.limits.extensionBytes {
+      return Result.failResult<(), TlsError>(
+        TlsError.LimitExceeded {
+          kind: TlsLimitKind.ExtensionBytes,
+          limit: client.limits.extensionBytes,
+        },
+      )
+    }
+    if extensionLength > messageLength - cursor {
       return Result.failResult<(), TlsError>(
         TlsError.ProtocolViolation {reason: ProtocolReason.Certificate},
       )
@@ -3108,6 +3259,9 @@ effect fn authenticatePeerCertificates(client: &mut Client) -> Result<(), TlsErr
   }
   if pathLimits.peerBytes > client.limits.certificateTotalBytes {
     pathLimits.peerBytes = client.limits.certificateTotalBytes
+  }
+  if pathLimits.pathCertificates > client.limits.peerCertificates {
+    pathLimits.pathCertificates = client.limits.peerCertificates
   }
   let validatedResult = run collectPathEvidence(
     leaf,
@@ -3656,7 +3810,15 @@ fn handleNewSessionTicket(client: &mut Client, messageLength: usize) -> Result<(
   if messageLength - cursor < 2 { return postHandshakeFailure() }
   let extensionLength = readU16Raw(&client.handshake, cursor)
   cursor = cursor + 2
-  if extensionLength > client.limits.extensionBytes || extensionLength != messageLength - cursor {
+  if extensionLength > client.limits.extensionBytes {
+    return Result.failResult<(), TlsError>(
+      TlsError.LimitExceeded {
+        kind: TlsLimitKind.ExtensionBytes,
+        limit: client.limits.extensionBytes,
+      },
+    )
+  }
+  if extensionLength != messageLength - cursor {
     return postHandshakeFailure()
   }
   let extensionsStart = cursor

@@ -17,7 +17,7 @@
 ## 4. Evidence and integration
 
 - [x] 4.1 Add immutable pinned-rustls fixture files, lockfile and generator metadata with exact checksums, test-only key markings, RFC 8448 component evidence, and an offline integrity check.
-- [x] 4.2 Consolidate contract evidence into one shared native corpus matrix, one representative LLVM-to-Wasm witness, and cheap structural assertions; measure focused base/branch runtime and add the native case to scoped PR CI.
+- [x] 4.2 Partition contract evidence into one complete core and four independently bounded handshake-policy, key-update, closure-control, and resource-policy native corpus programs, one representative LLVM-to-Wasm witness, and cheap structural assertions; measure focused base/branch runtime and add the native cases to scoped PR CI.
 - [x] 4.3 Register the module, generate source and public reference documentation, extract/check/format/run every new example, and verify generated inventories and links.
 
 ## 5. Delivery
@@ -33,13 +33,40 @@
   implementation now snapshots that offset before borrowing the buffer and copies inline, matching
   the established record-consumption ownership shape. The same speed-profile rustls replay then
   passed with authenticated coalesced application data and closure assertions intact.
-- The mandatory economics revision keeps one corpus registration and one `Client.make` path. A
-  30-scenario runtime loop reads capture and mutation bytes from one data-only C translation unit;
-  C exports only exact size/copy operations and never decides TLS outcomes. The final optimized
-  native run passed in 360.59 seconds with 3,067,117,568 bytes maximum RSS. The representative
-  Wasm source is independently composed (21,895 bytes, 266 lines), has no native fixture bridge or
-  negative matrix, and passed compile, zero-import instantiation, and `main() == 42` in 306.62
-  seconds with 4,436,836,352 bytes maximum RSS.
+- The superseded 30-scenario native matrix passed in 360.59 seconds with 3,067,117,568 bytes maximum
+  RSS. It remains useful regression evidence, but it does not verify later production repairs. The
+  replacement uses one 17,705-byte/557-line complete core plus four independently bounded programs
+  for key updates, closure and post-handshake controls, handshake policy, and resource policy. Each
+  program has one `Client.make` call path, is no larger than the core, and reads immutable fixture
+  bytes through the same data-only C translation unit. C exports only exact size/copy operations and
+  never decides TLS outcomes. The exact final focused-source sizes and hashes are recorded after the
+  source-only freeze below; native execution remains pending except for the core, which passed in
+  135.67 seconds (141.45 seconds command wall, 3,075,080,192 bytes maximum RSS). Its preceding
+  default-heap Analysis pass took 76.02 seconds (80.89 seconds command wall, 2,378,481,664 bytes
+  maximum RSS). A prior representative Wasm source passed compile, zero-import instantiation, and
+  `main() == 42` in 306.62 seconds with 4,436,836,352 bytes maximum RSS. The final independently
+  composed source is 22,086 bytes/281 lines, has no native fixture bridge or negative matrix, and
+  awaits its exact-source rerun.
+- The post-core source-only freeze is: key-update 16,898 bytes/509 lines at
+  `c38ba8ba840b404e9eafb3a2895f918fd21ccaefee17cc5b6159a7ca0688a9e4`;
+  closure-control 17,322 bytes/522 lines at
+  `364e524c8292f8ae21becdbc2a5475c71111f6a71c737b8f59b15c15fd72eacd`;
+  handshake-policy 17,591 bytes/553 lines at
+  `3d335c779d2b38b15ac516babbd767590702790aa2bf20a8c84b45f715424c59`;
+  and resource-policy 17,396 bytes/563 lines at
+  `1dbd6d333f29a860a077025961269210350fb7ecbb77e248197e326705e59131`.
+  Each contains one `Client.make`; the first three contain one allocator and one random provider,
+  while resource-policy contains two allocator providers for its rejecting audit and one random
+  provider. All remain below the 17,705-byte core. The deterministic data-only C carrier is 284,504
+  bytes/195 lines at `2f07c3992f8c95dfc881f28cae06a8536e79a8787f4d7fa3bfb888c4cf2bc003`.
+  Analysis and native execution of these four exact sources remain pending.
+- Final review expansion adds sole-record ServerHello/HRR epoch guards, exact nested configuration
+  taxonomy, terminal-before-buffer precedence, pending-output cancellation, and focused negatives
+  for retry, key-share, ALPN, certificate/control/ticket limits, closure, and exact client control
+  bytes. A superseded 63-scenario evidence program exceeded the default compiler heap during source
+  realization. That result is an evidence-machinery limit, not a TLS runtime failure. The focused
+  replacement does not retain or execute that program; delivery and CI checkboxes remain pending
+  until exact-head evidence is read back.
 - The complete rustls matrix exposed and fixed two HRR integration defects: retry ClientHello
   construction no longer resets the outer dispatcher's buffered handshake length, and a valid
   compatibility CCS is accepted while retry output is pending. Malformed CCS syntax remains owned

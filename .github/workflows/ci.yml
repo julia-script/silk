@@ -8,6 +8,16 @@ on:
   schedule:
     - cron: '17 4 * * 1-5'
   workflow_dispatch:
+    inputs:
+      full_verification:
+        description: Run the exact-head full verification lane
+        required: true
+        type: boolean
+        default: false
+      expected_sha:
+        description: Exact commit SHA authorized for full verification
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -127,7 +137,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"smoke","cases":"literal,direct-recursion,effect-ensuring-outcomes-and-order,foreign-c-layout-clock,scheduler-fiber-semantics,certificate-profile-and-trust-anchor,tls-record,certificate-path-validation,owned-trust-snapshots,authenticated-tls-client"}]' || '[{"name":"1-of-3","shard":"1/3"},{"name":"2-of-3","shard":"2/3"},{"name":"3-of-3","shard":"3/3"}]') }}
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"smoke","cases":"literal,direct-recursion,effect-ensuring-outcomes-and-order,foreign-c-layout-clock,scheduler-fiber-semantics,certificate-profile-and-trust-anchor,tls-record,certificate-path-validation,owned-trust-snapshots,authenticated-tls-client-core,authenticated-tls-client-key-update,authenticated-tls-client-closure-control,authenticated-tls-client-handshake-policy,authenticated-tls-client-resource-policy"}]' || '[{"name":"1-of-3","shard":"1/3"},{"name":"2-of-3","shard":"2/3"},{"name":"3-of-3","shard":"3/3"}]') }}
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -272,7 +282,49 @@ jobs:
       - run: pnpm --filter @silklang/platform-webcontainer exec playwright install --with-deps chromium
       - run: pnpm --filter @silklang/platform-webcontainer test:browser
 
+  full-verification:
+    if: github.event_name == 'workflow_dispatch' && inputs.full_verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    concurrency:
+      group: full-verification-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+      - name: Confirm the authorized exact head
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          test "${{ github.sha }}" = "$EXPECTED_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: ./.github/actions/setup-linux-llvm
+      - uses: actions/cache@v4
+        with:
+          path: .turbo/cache
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}-full
+          restore-keys: |
+            turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
+            turbo-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/silk-effect/native
+          key: silk-native-${{ runner.os }}-full-${{ github.sha }}
+          restore-keys: silk-native-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm release:candidate
+
   platform-supplies:
+    if: github.event_name != 'workflow_dispatch' || !inputs.full_verification
     name: Platform supply / ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
