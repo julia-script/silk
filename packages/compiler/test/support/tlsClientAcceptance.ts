@@ -574,8 +574,21 @@ const postHandshakeCertificateRequestRecord = postHandshakeRecord(
 )
 const validTicketMessage = handshakeMessage(
   4,
-  Buffer.from([0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 1, 1, 0, 1, 1, 0, 0]),
+  Buffer.from([0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 1, 1, 0, 0]),
 )
+const validTicketBody = validTicketMessage.subarray(4)
+const validTicketNonceLength = validTicketBody[8]
+if (validTicketNonceLength === undefined) throw new Error('missing NewSessionTicket nonce length')
+const validTicketLengthOffset = 9 + validTicketNonceLength
+const validTicketLength = validTicketBody.readUInt16BE(validTicketLengthOffset)
+const validTicketExtensionsOffset = validTicketLengthOffset + 2 + validTicketLength
+const validTicketExtensionsLength = validTicketBody.readUInt16BE(validTicketExtensionsOffset)
+if (
+  validTicketLength === 0 ||
+  validTicketExtensionsOffset + 2 + validTicketExtensionsLength !== validTicketBody.length
+) {
+  throw new Error('malformed valid NewSessionTicket fixture')
+}
 const coalescedTicketKeyUpdateRecord = postHandshakeRecord(
   'rsa-x25519',
   'chacha',

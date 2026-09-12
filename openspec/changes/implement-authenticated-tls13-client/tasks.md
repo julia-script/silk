@@ -65,8 +65,8 @@
   allocator providers for its rejecting audits and one random provider. The representative Wasm
   source is 22,086 bytes/281 lines at
   `6fcd884c9999309f795f4b845fc347a42ddd78fa453ed4f9de01b1031f970b47`.
-  The deterministic data-only C carrier is 294,311 bytes/222 lines at
-  `7a28225c680f002d2c13da0c3f09ece20ec9c4fca4e72b18ed76b2856d68933d`.
+  The deterministic data-only C carrier is 294,266 bytes/222 lines at
+  `2fd39e2122d4d3041b9da8e815dd89d080ad31adfbb39cfa232463f27426d2b2`.
 - Final review expansion adds sole-record ServerHello/HRR epoch guards, exact nested configuration
   taxonomy, terminal-before-buffer precedence, pending-output cancellation, and focused negatives
   for retry, key-share, ALPN, certificate/control/ticket limits, closure, and exact client control
@@ -82,8 +82,10 @@
   rejects profile-known extensions that are illegal at that location. Static fixture/source guards
   pass. In the local demand-request native replay, the initial CertificateRequest case reaches its
   exact `NeedOutput` and empty client Certificate assertion. The next combined authenticated
-  NewSessionTicket plus KeyUpdate case returns false, so direct KeyUpdate-response scheduling,
-  exact response bytes, and the remaining CertificateRequest matrix are not locally verified and
+  NewSessionTicket plus KeyUpdate case returned false because its purportedly valid ticket fixture
+  encoded an extension-vector length that did not match the remaining body. The fixture now has
+  the intended empty extension vector and a construction-time envelope guard; direct
+  KeyUpdate-response scheduling, exact response bytes, and the remaining CertificateRequest matrix
   require exact-head CI evidence.
 - The complete rustls matrix exposed and fixed two HRR integration defects: retry ClientHello
   construction no longer resets the outer dispatcher's buffered handshake length, and a valid
