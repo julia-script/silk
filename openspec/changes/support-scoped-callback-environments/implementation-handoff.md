@@ -1,121 +1,73 @@
 # Scoped callback implementation handoff
 
-## Outcome and scope
+## Integrated outcome
 
-The approved finite-intersection contract is implemented on `julia/scoped-resource-callback`, based
-on the preserved local checkpoint `d1d707e629a25316f0189cd65e5481114908d8aa`. The tiny resource,
-borrowed config, captured once-callback, and symbolic requirement-row program analyzes and lowers
-to valid MIR. Direct forwarding still works, resource-borrow escape is rejected, and ambient
-`ByteDuplex` remains excluded. No runtime bracket mechanism or TLS implementation was changed.
+PR [#427](https://github.com/julia-script/silk/pull/427) was merged into JUL-188's
+PR [#424](https://github.com/julia-script/silk/pull/424) at
+`234cba3870ca39a88cfbc0bc6fa6422d3cce73af`. The user then authorized completing JUL-188 in this
+checkout. Verified JUL-187 merge `6ab7959ad15841f390f326b8bdc1338a5f732624` is an ancestor.
+There is no remaining integration step for the paused implementer.
 
-The actual preserved JUL-188 caller is **still blocked**. Its bracket `SEM0089` is gone, but the
-namespace witness retains `SEM0074` and `SEM0122` at the outer `withClient` application. It does
-not pass analysis, so successful lowering of that actual caller is not claimed.
+The original finite-intersection change removed the resource-bracket lifetime failure. Subsequent
+JUL-188 fixes resolved the independent named-callback row/provider failure and the lowering/runtime
+failures exposed after it. The actual TLS namespace witness accepts the intended callback and
+rejects ambient ByteDuplex access. The authenticated LLVM-to-Wasm connection witness passes at
+`a843c5d3f7e8f09d2fa9e4245d52f303f451cb8e` (232.61 s), including plaintext I/O, exact outbound bytes,
+directional shutdown, and terminal close. Full native/CI conclusions are tracked in the
+[JUL-188 handoff](../implement-scoped-byte-duplex-tls-connection/implementation-handoff.md) and PR.
 
-## Why the change is sound
+## Lifetime and callback contract
 
-The old callback promised its returned Effect was valid for the whole fresh resource loan. A
-captured environment can be shorter. Both source helper and sealed intrinsic now return
-`Effect<'scope & 'env; ...>` from each callback. Anonymous effect callables derive their returned
-environment from established capture validity (including borrowed owners and unknown generic
-contents) and retained input lifetimes. Generic content predicates remain separately checked.
+A resource borrow and a captured environment can have different validities. Source helpers and the
+sealed intrinsic return `Effect<'scope & 'env; ...>` from resource callbacks. Intersections remain
+finite, flattened, sorted, and deduplicated, with static identity. Their proof rules do not reverse
+an arbitrary lower-bound edge or promote a meet to a constituent. Substitution, free-lifetime
+traversal, rigid-placeholder escape detection, semantic encoding, and finite loan requirements
+visit constituents. Runtime lifetime erasure is unchanged.
 
-Intersections are finite, flattened, sorted and deduplicated, with static identity. Their proof
-rules never reverse an arbitrary lower-bound edge or promote a meet to a constituent. Substitution,
-free-lifetime traversal, rigid-placeholder escape detection, semantic encoding, and finite loan
-requirements recurse into constituents. Contextual comparison commits only free constituent
-obligations; rigid invocation regions stay within their comparison universe. Runtime lifetime
-erasure and the existing resource-finalizer lowering are unchanged.
+Named callback specialization retains invocation binders and their established validity relations
+while inferring value/service-row arguments. Concrete provider obligations are proven before a
+fully selected callable loses schema metadata. Open or assumed evidence remains subject to escape
+checks. The current TLS source and examples explicitly use one callback invocation lifetime;
+this handoff does not claim every historical unannotated callback spelling is accepted unchanged.
+Ambient transport access remains excluded at every service access level.
 
-Failed environment inference now reports the missing outlives relation before the fallback row
-diagnostic. Actual ambiguous/non-finite row failures retain the existing diagnostic family.
+The historical `evidence/remaining-callback-row.silk` records the isolated failure found at the end
+of the original prerequisite investigation. The active handoff is the integrated implementation,
+not the earlier statement that JUL-188 remains blocked on SEM0074/SEM0122.
 
-## Separate remaining failure
+## Subsequent general compiler corrections
 
-`evidence/remaining-callback-row.silk` reproduces the remaining two diagnostics without TLS,
-certificates, an implemented transport, or any resource bracket. It accepts a generic named callback
-through a higher-ranked callback parameter and requires `R in Without<R, ByteDuplex>`.
+- Provider operation resolution and witness construction share the associated-owner selection.
+- Captured callback identities and outer lifetime arguments survive acquisition-runner discovery.
+- Returned-view loans join only continuing paths; disjoint field/index access is distinguished from
+  whole-owner access. The existing control-flow proof still checks exact loan endpoints.
+- Whole-value union cleanup retains the complete tagged carrier; actual field bindings project
+  their fields. Selected stored-reference reborrows load the referent address.
+- Exact context-atom interning bounds instance-discovery keys without changing published identities.
 
-For module `row-probe`, analysis reports:
+Small analysis, MIR, and layout regressions cover these defects. Shared native byte-duplex and
+finalized-destroy cases cover borrowed-provider addressing and release ordering. The integrated
+TLS source also observes authentication already published during output acknowledgment.
 
-- `SEM0074` at offsets 628–677, the `accept<i32, never>(move provider, authenticated)` application.
-- `SEM0122` at offsets 662–676, the supplied `authenticated` callable.
+## Preserved user state
 
-Temporary instrumentation (removed) at `CallResolution.solveCallableConstraints` found the exact
-failed proof: `R` remained the callee-owned row parameter, so structural checking received
-`R ⊆ Without<R, ByteDuplex>`. The substitution contained the selected local environment, `A = i32`,
-`E = never`, and `P = connect.P`; **it contained no substitution for R**. The offered named callback
-has an `&mut Audit` row, but specialization had not propagated it before the exclusion check.
+The original worktree `/Users/juliaortiz/.codex/silk-manager/worktrees/jul-188` remains at
+`d1d707e629a25316f0189cd65e5481114908d8aa`, with the same five modified files:
+`ExpressionAnalysis.ts`, `Stdlib.generated.ts`, `tls_connection.silk`,
+`StdlibNamespaceAcceptance.test.ts`, and `support/tlsConnectionAcceptance.ts`.
+The two experimental stashes remain `a8c0572105521ac61a7767d15a86c332c92bfc20` and
+`9a2144084596c6c02967100bb79d6bbcb39a62ae`. Completion work uses the separate JUL-188 checkout.
 
-This establishes a separate callback-specialization/evidence blocker. It does not establish the
-correct repair or authorize weakening the exclusion. Follow-up work should diagnose named generic
-callback specialization and row propagation using this small source. The approved intersection
-change does not alter those rules.
+## Verification and delivery
 
-## Verification
+The original 25 focused compiler checks, finalized-export MIR check, capture/escape controls,
+semantic round trips, and generated Effect documentation passed. Later integration verification is
+recorded in the JUL-188 handoff and its `TEST_REVIEW.md`; overlapping groups are not additive.
+The earlier ByteDuplex documentation violations have been corrected: standard-library documentation
+generation checked 123 modules with no policy violations, and the TLS module example passes target
+analysis. Analysis-only examples are not runtime evidence.
 
-Passed locally:
-
-- Compiler TypeScript build and test typecheck.
-- 25 focused checks across Type, TypeGenerics, ModuleSurface, AnonymousCaptureStabilization,
-  SyntaxFormatter, Suspendability, and IntrinsicCatalog (seven files).
-- The existing OwnedAllocationAcceptance finalized-export check: analysis plus MIR verification of
-  success, typed failure, nested cleanup, cancellation, and a new captured-owner cancellation path.
-  The new path checks captured-owner destruction before resource release and resource destruction.
-- Positive captured generic content with `T: 'env`; removing the bound and promoting the returned
-  environment are rejected. Invocation-placeholder escape and exclusive-payload invariance remain
-  rejected. Semantic surface round trips, alpha renaming within the same binder identity, and
-  runtime lifetime erasure are covered.
-
-The shared native acceptance and existing Wasm finalized-destroy witnesses use the extended
-cancellation source. Their execution belongs in CI; local MIR verification is not runtime evidence.
-Broad `pnpm check` and `pnpm release:candidate` have not been run locally, per the task constraint.
-Changed-file Oxfmt and Oxlint passed. The affected Effect page was generated through the canonical
-DocumentationProject/DocumentationReference model for all six profiles; its policy check passed.
-Full documentation generation was attempted and stopped before writing because unchanged
-`byte_duplex.silk` has three SummaryShape violations (ByteDuplex, readSome, writeSome, at lines 82,
-115, 138). This predates the scoped change. Exact-revision CI remains outstanding.
-
-## Preserved integration state
-
-The exact five uncommitted JUL-188 files were copied to
-`/private/tmp/silk-scoped-callback-integration`, then the focused compiler patch was applied there.
-The original worktree was not changed. The namespace witness was refreshed against final implementation commit
-`1eb65b662a40a6884fd905591ba6a300fc5e7576`. It reports only `SEM0074` at offsets 2054–2130 and
-`SEM0122` at offsets 2115–2129 of `stdlib-namespace/byte-duplex`, confirming that the bracket
-`SEM0089` is absent at the delivered compiler revision.
-
-The original worktree still has exactly the five expected modified files. The two experimental
-stashes remain `a8c0572105521ac61a7767d15a86c332c92bfc20` and
-`9a2144084596c6c02967100bb79d6bbcb39a62ae`.
-
-The paused implementer should integrate the focused commits into another checkout with the
-preserved five-file correction set. The lexical constraint-forwarding hunk from commit `81eb4667`
-already exists in that correction set; retain it once. Regenerate the stdlib embedding after
-combining the TLS source corrections with the new Effect helper signature. Do not overwrite the
-preserved generated file with this branch's embedding, which intentionally omits those TLS edits.
-Do not mark JUL-188 ready or merge it while the separate row/evidence failure remains.
-
-## Delivered revisions and CI handoff
-
-- `81eb46676f74ba656ca2f5b766a2a035f7d4f15b`: lexical constraint visibility and regression controls.
-- `00da6e84ee23a5ef585c3734030e6d9d3de4bcf4`: approved OpenSpec proposal and investigation.
-- `1eb65b662a40a6884fd905591ba6a300fc5e7576`: finite intersections, callback derivation, bracket,
-  diagnostics, documentation, and regressions.
-
-The implementation is published to `origin/julia/scoped-resource-callback`. The final compiler test
-typecheck, stdlib embedding check, and strict OpenSpec validation passed at this revision. Three
-post-format checks also passed; they repeat only the affected canonicalization, formatter, and
-generic-capture assertions.
-
-The user explicitly approved the additional review-base branch on 2026-09-12, resolving the prior
-automatic approval rejection. `origin/julia/scoped-resource-callback-base` is pinned to
-`d1d707e629a25316f0189cd65e5481114908d8aa`. The draft PR targets that branch so its diff contains
-only this compiler change, investigation, and regression evidence. It must not be merged as a
-completion of JUL-188; the independent callback-row blocker remains.
-
-Broad verification runs through the repository's PR CI, including package/compiler suites, native
-acceptance, and the validation job's `pnpm release:candidate` step. The workflow distributes the
-build/lint/typecheck/test components; it does not invoke the literal `pnpm check` command. Its result
-must be read before treating broad validation as passed. CI links and terminal status belong in the
-PR description so reporting them does not itself move the code revision under verification.
+The user instructed this session not to start another review-agent cycle. Delivery records a direct
+assessment, not independent approval. Full `pnpm check` and `pnpm release:candidate` run in exact-head
+CI; broad suites are not run locally. PR #424 remains the draft implementation delivery target.

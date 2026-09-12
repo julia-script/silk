@@ -1,5 +1,9 @@
 # JUL-188 completion progress
 
+This is a chronological investigation log. For current outcomes and remaining gates, see
+[implementation-handoff.md](implementation-handoff.md). Earlier pending/failure statements record
+the state of those earlier revisions.
+
 The user authorized taking over JUL-188 and merging the scoped callback prerequisite into its branch. PR #427 was merged through commit `234cba3870ca39a88cfbc0bc6fa6422d3cce73af` on PR #424. The verified JUL-187 implementation from main is an ancestor. The original worktree and both stashes remain intact.
 
 ## Corrections after the merge
