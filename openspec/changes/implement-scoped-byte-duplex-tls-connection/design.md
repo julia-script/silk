@@ -15,9 +15,11 @@ Two existing constraints determine the shape of this change:
   through the same typed boundary as its other operations. A pure `Drop` hook or `once fn` cannot
   obtain the borrowed service or execute that Effect.
 
-JUL-188 is developed provisionally on JUL-187 PR #422 head
-`9e2e9a893078743d90d5215828b3610763418f0c`. Its final branch must be rebased onto JUL-187's final
-verified head, and the exact rebased diff must be re-reviewed and reverified.
+JUL-188 contains JUL-187's verified merge at
+`6ab7959ad15841f390f326b8bdc1338a5f732624` and the scoped-callback prerequisite PR #427. Verify
+that ancestry and the exact committed diff before handoff. The user instructed this takeover not
+to start a new review-agent cycle: record direct correctness and test-economics assessments without
+claiming independent approval, and retain all required local and exact-head CI checks.
 
 ## Goals / Non-Goals
 
@@ -230,9 +232,8 @@ shared corpus and make the compiler suite slower without adding a distinct oracl
   `Instant` is provider-relative.
 - **[The scripted provider could accidentally become a production transport abstraction]** → Keep
   it explicitly deterministic and memory-only, with no socket or host error translation policy.
-- **[JUL-187 may change before it is verified]** → Keep JUL-188's initial base SHA recorded, do not
-  modify JUL-187, and require a final rebase plus exact-parent review, local focused checks, and
-  exact-head CI before handoff.
+- **[Dependency evidence can become stale]** → Verify the published JUL-187 merge is an ancestor,
+  assess the exact task diff, and require local focused checks plus exact-head CI before handoff.
 
 ## Migration Plan
 
@@ -242,9 +243,9 @@ shared corpus and make the compiler suite slower without adding a distinct oracl
 3. Add `tls_connection` over the published JUL-187 client API and add focused/source acceptance
    evidence.
 4. Generate standard-library embedding and reference documentation, update manifest/index/CI
-   selection, and publish the coherent draft stacked on JUL-187.
-5. When JUL-187 reaches its final verified head, rebase JUL-188 onto it, resolve only task-owned
-   conflicts, regenerate artifacts, and rerun exact-diff reviews and required verification.
+   selection, and publish the coherent draft containing JUL-187.
+5. Verify JUL-187 ancestry, regenerate artifacts, record direct assessments under the user's
+   no-review-agent-cycle instruction, and run the required exact-head verification.
 
 Rollback is removal of the single JUL-188 stack commit(s) and their generated registrations. No
 persistent format or compatibility migration is introduced.

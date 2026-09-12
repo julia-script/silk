@@ -9,6 +9,10 @@ import {
 const silkBytes = (bytes: Uint8Array): string =>
   `b"${[...bytes].map((byte) => `\\x${byte.toString(16).padStart(2, '0')}`).join('')}"`
 
+// The capture's first record uses 0x0301; Silk emits 0x0303, as the TLS-client
+// acceptance witness asserts. Preserve every handshake byte and compare the full output prefix.
+const clientHello = tlsClientRsaClientHello.map((byte, index) => (index === 2 ? 3 : byte))
+
 const firstFlight = tlsClientRsaServerFlight.subarray(0, 64)
 const secondFlight = tlsClientRsaServerFlight.subarray(64, 576)
 const thirdFlight = tlsClientRsaServerFlight.subarray(576)
@@ -537,11 +541,11 @@ effect fn runCases(
       return run failed(move error)
     }
   }
-  if completed != 42 { return 10 + completed }
+  if completed != 42 { return 1000 + completed }
   if MemoryByteDuplex.closeAttempts(&success) != usize.ONE { return 11 }
   if MemoryByteDuplex.phase(&success) != MemoryByteDuplexPhase.Closed { return 12 }
   let outbound = MemoryByteDuplex.outbound(&success)
-  let hello = ${silkBytes(tlsClientRsaClientHello)}
+  let hello = ${silkBytes(clientHello)}
   if outbound.length < hello.length { return 13 }
   let mut index = usize.ZERO
   while index < hello.length {
