@@ -2531,7 +2531,7 @@ effect fn limitsCase<'a>(
     return invalidLimit(move made, TlsLimitKind.CertificateProfile, usize.ZERO)
   }
   if id == 8 { return invalidLimit(move made, TlsLimitKind.CookieBytes, 65535) }
-  if id == 9 { return invalidLimit(move made, TlsLimitKind.Arithmetic, usize.MAX) }
+  if id == 9 { return invalidLimit(move made, TlsLimitKind.HandshakeBodyBytes, usize.MAX) }
   let mut client = match move made {
     Result<Client, TlsError>.Success {value} => move value
     Result<Client, TlsError>.Failure {error} => { return false }
