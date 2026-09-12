@@ -3012,7 +3012,7 @@ export const tlsClientResourcePolicyNativeSource = composeFocusedNative(
     'feedOutcome',
     'feedExpectedLimit',
   ]),
-  ['scenarioReference', 'validPlaintext', 'feedFragments', 'authenticateFragments'],
+  ['scenarioReference', 'feedFragments', 'authenticateFragments'],
 )
 export const tlsClientNativeOnlySource = `pub fn main() -> i32 { return 42 }`
 export const tlsClientAcceptanceSource = tlsClientWasmSource
