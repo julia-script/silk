@@ -25,6 +25,20 @@ Each issue receives two independent passes:
 2. **Skeptical review** — a different agent tries to refute the proposed verdict, find an existing
    owner or simpler framing, and challenge the proposed grouping and acceptance.
 
+These passes include the research required to make an implementation ticket actionable. Resolve
+public contracts, ownership and failures, finite bounds, target availability, dependencies, and
+test or interoperability evidence where relevant. Pin primary authorities and informative source
+or fixture revisions for protocol, language, runtime, and ABI work. Record decisions, deliberate
+divergences, investigator evidence, and the independent skeptical verdict on the issue before
+queue-ready admission; transient agent notes alone are insufficient. Scale this research to the
+actual uncertainty rather than requiring external comparisons for mechanical work.
+
+Do not create research, specification, or definition tickets. A split creates concrete
+implementation children in Triage; every child receives its own investigation and skeptical pass
+before admission. Shared findings may be reused with explicit attribution, but a parent's review
+does not automatically admit its children. Existing Todo placement or explicit selection changes
+scheduling, not this research gate. Preserve the manual tier while completing a missing review.
+
 Every selected issue must receive its investigation from a subagent. Every proposed Backlog,
 Duplicate, or Canceled verdict must then receive skeptical review from a different subagent. The
 coordinator adjudicates the two passes against primary evidence but does not substitute for either

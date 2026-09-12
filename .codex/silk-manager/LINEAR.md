@@ -84,8 +84,12 @@ automatically.
 
 The native Triage inbox became the intake boundary on 2026-09-02. Before selecting from Backlog,
 move any preexisting issue whose `Triage disposition` is missing, `intake`, or
-`needs-more-investigation` into Triage. Preserve existing Todo as Julia's curated queue; its manual
-placement is sufficient for selection even before the durable field is added during a later review.
+`needs-more-investigation` into Triage. Preserve existing Todo as Julia's curated queue. Manual
+placement is sufficient for selection, but not for implementation admission: every implementation
+ticket must have completed triage research and independent skeptical review. If that evidence or
+the durable queue-ready marker is missing, complete triage before claiming or editing
+implementation, preserving Todo membership while it is reviewed. Explicit selection changes
+scheduling, not this research gate.
 
 ## Mutations
 
