@@ -52,6 +52,14 @@ reached Vitest because Turbo used strict environment filtering. Before/after dry
 that `NODE_OPTIONS` and `VITEST_MAX_WORKERS` are now passed to package tasks. The existing concurrency
 and configuration checks pass (11 tests). No global timeout or correctness assertion was relaxed.
 
+## Shared-runner regression
+
+The full native TLS matrix completed compilation work within 6 GiB and exposed an invocation-lifetime
+mismatch in the MIR verifier (607.46 s locally; 1019.17 s in CI). Two scoped callbacks and a recovered
+borrowed method call reproduce it without TLS in 2.03 s. The positive case requires lifetime-erased
+runner reuse, and a corrupted provider-type binding still requires `InvalidEffectOperation`.
+The native matrix is being repeated after the correction; the failed timings are not runtime passes.
+
 ## Assessment
 
 The tests use the cheapest available tier for the observed failures and keep runtime evidence in

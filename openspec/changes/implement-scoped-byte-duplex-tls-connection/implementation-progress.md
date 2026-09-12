@@ -47,3 +47,12 @@ found that Turbo's strict environment filtered out the requested worker/heap set
 an LSP timeout; both execution settings now pass through. Eleven existing scheduling/configuration
 checks pass. The full native TLS matrix exceeded 4 GiB and is rerunning with the CI TLS allowance
 of 6 GiB. Exact-head CI is being restarted after these corrections.
+
+The full native TLS matrix reaches MIR verification in 6 GiB (607.46 s locally; 1019.17 s in CI)
+but rejects `expectTruncation` and its recovered Effect because a reused provider runner retains
+another invocation's lexical lifetime arguments. A two-second source with two scoped callbacks,
+a borrowed generic connection, and direct/recovered method calls reproduces both violations.
+Runner reuse intentionally erases lifetime-only arguments; verification now uses the existing
+`runtimeArgumentsEqual` for the shared wrapper binding while preserving exact stored-contract and
+selected-base checks. The same regression corrupts the provider type and still requires rejection.
+It passes in 2.03 s; native acceptance and affected checks are being repeated.

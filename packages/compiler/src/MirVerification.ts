@@ -53,6 +53,7 @@ import {
   isCopy,
   matchesInstance,
   matchesInstanceKey,
+  runtimeArgumentsEqual,
   operationChildren,
   operationsOf,
   operationTree,
@@ -7133,13 +7134,9 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                     runnerBinding !== undefined &&
                     runnerBinding.base.declaration.module === selectedBase.module &&
                     runnerBinding.base.declaration.name === selectedBase.name &&
-                    runnerBinding.base.typeArguments.length === selectedArguments.length &&
-                    runnerBinding.base.typeArguments.every((argument, ordinal) => {
-                      const expected = selectedArguments.at(ordinal)
-                      return (
-                        expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
-                      )
-                    }) &&
+                    // Generated runners share machine code across invocation lifetimes. The
+                    // stored contract/base above still checks the exact call's semantic arguments.
+                    runtimeArgumentsEqual(runnerBinding.base.typeArguments, selectedArguments) &&
                     runnerBinding.providers.length === operation.providers.length &&
                     runnerBinding.providers.every((bound, ordinal) => {
                       const claimed = operation.providers.at(ordinal)

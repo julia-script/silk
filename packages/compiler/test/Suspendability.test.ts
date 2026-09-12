@@ -1245,3 +1245,90 @@ pub fn main() -> i32 {
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
+
+it.effect('retains provider contracts for direct and recovered borrowed method calls', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect { Effect }
+pub struct Fault {}
+service Work { effect fn read() -> i32 ! Fault ? &mut Work }
+service Audit { effect fn record() -> () ? &mut Audit }
+struct Provider {}
+impl Work for Provider { effect fn read(self: &mut Self) -> i32 ! Fault { fail Fault {} } }
+struct Recorder {}
+impl Audit for Recorder { effect fn record(self: &mut Self) -> () { return () } }
+effect fn perform(output: &mut [i32]) -> i32 ! Fault ? &mut Work | &mut Audit {
+  run Audit.record()
+  return run Work.read()
+}
+struct Connection<'env, P> { provider: &'env mut P }
+impl<'env, P> Connection<'env, P> {
+  effect fn read(self: &mut Self, output: &mut [i32]) -> i32 ! Fault ? &mut Audit
+  where &mut P provides &Work from &mut Work | &mut Audit {
+    if output.length == 0 { return 0 }
+    let operation = perform(move output)
+    return run move operation |> Effect.provideMut<Work>(&mut self.provider.*)
+  }
+}
+effect<'call> fn used<'call, P>(connection: &'call mut Connection<'call, P>) -> i32 ! Fault ? &mut Audit
+where &mut P provides &Work from &mut Work | &mut Audit {
+  let mut output = [0]
+  let first = run Connection.read(&mut connection.*, &mut output)
+  let recovered = run Effect.result(Connection.read(&mut connection.*, &mut output))
+  drop recovered
+  return first
+}
+effect fn scoped<'env, A, E, ?R, P>(
+  provider: &'env mut P,
+  callback: for<'call> once fn<'env>(
+    &'call mut Connection<'call, P>
+  ) -> once Effect<'call; A ! E ? R>,
+) -> A ! E ? R {
+  let mut connection = Connection { provider: &mut provider.* }
+  return run callback(&mut connection)
+}
+effect<'call> fn direct<'call, P>(connection: &'call mut Connection<'call, P>) -> i32 ! Fault ? &mut Audit
+where &mut P provides &Work from &mut Work | &mut Audit {
+  let mut output = [0]
+  return run Connection.read(&mut connection.*, &mut output)
+}
+pub effect fn main() -> i32 ! Fault {
+  let mut provider = Provider {}
+  let mut audit = Recorder {}
+  let first = run scoped(&mut provider, direct) |> Effect.provideMut<Audit>(&mut audit)
+  return run scoped(&mut provider, used) |> Effect.provideMut<Audit>(&mut audit)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const runners = mir.functions.filter(
+      (fn) => fn.effectRunner?.base.declaration.name === 'Connection.read$effect$-1',
+    )
+    assert.isNotEmpty(runners)
+    const corrupted = {
+      ...mir,
+      functions: mir.functions.map((fn) =>
+        runners.includes(fn) && fn.effectRunner !== undefined
+          ? {
+              ...fn,
+              effectRunner: {
+                ...fn.effectRunner,
+                base: {
+                  ...fn.effectRunner.base,
+                  typeArguments: fn.effectRunner.base.typeArguments.map((argument) =>
+                    argument._tag === 'NominalType' && argument.name === 'Provider'
+                      ? Type.nominal('suspendability/main', 'Recorder')
+                      : argument,
+                  ),
+                },
+              },
+            }
+          : fn,
+      ),
+    }
+    assert.isTrue(
+      MirVerification.verify(corrupted).some(
+        (failure) => failure.rule === 'InvalidEffectOperation',
+      ),
+    )
+  }),
+)
