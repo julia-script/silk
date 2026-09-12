@@ -142,9 +142,10 @@ effect fn parkedOperation(reading: bool) -> i32 ! ByteIoError | OutOfMemoryError
     drop transfer
     return 1
   }
-  return run ByteDuplex.writeSome(&b"x", Option.none<Instant>())
+  let written = run ByteDuplex.writeSome(&b"x", Option.none<Instant>())
     |> Effect.provideMut<ByteDuplex>(&mut provider)
     |> Effect.provideMut<MonotonicClock>(&mut clock)
+  return usize.toI32(written)
 }
 
 effect fn suspensionFailed<E>(error: E) -> i32 { drop error return -1 }

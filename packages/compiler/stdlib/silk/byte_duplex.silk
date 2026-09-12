@@ -79,6 +79,8 @@ pub union ReadTransfer {
 
 /// Unsafe provider hooks for one exclusive reliable-byte transport.
 ///
+/// # Details
+///
 /// Ordinary callers use the safe inherent operations with the corresponding names. Provider
 /// implementations satisfy these hooks; calling one directly acknowledges that its raw transfer
 /// count has not passed the canonical boundary validation.
@@ -112,6 +114,8 @@ pub service ByteDuplex {
 impl ByteDuplex {
   /// Reads one positive prefix or reports orderly transport end.
   ///
+  /// # Details
+  ///
   /// Empty output completes without calling the provider. An impossible provider count terminally
   /// closes the lease and returns `InvalidTransferCount`, even if that close itself fails.
   pub effect fn readSome(
@@ -134,6 +138,8 @@ impl ByteDuplex {
   }
 
   /// Writes one positive prefix and returns its exact length.
+  ///
+  /// # Details
   ///
   /// Empty input completes without calling the provider. An impossible provider count terminally
   /// closes the lease and returns `InvalidTransferCount`, even if that close itself fails.
