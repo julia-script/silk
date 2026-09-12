@@ -1165,11 +1165,16 @@ it.effect('proves a scoped generic provider release through recovered service fa
     const source = `import silk.effect { Effect }
 struct CloseError {}
 service Transport {
-  effect fn close() -> () ! CloseError ? &mut Transport with Intrinsic.nonParking()
+  unsafe effect fn closeRaw() -> () ! CloseError ? &mut Transport with Intrinsic.nonParking()
+}
+impl Transport {
+  effect fn close() -> () ! CloseError ? &mut Transport {
+    return run unsafe Transport.closeRaw()
+  }
 }
 struct Provider {}
-effect fn close(self: &mut Provider) -> () ! CloseError { return () }
-impl Transport for Provider { close: Provider.close }
+unsafe effect fn close(self: &mut Provider) -> () ! CloseError { return () }
+impl Transport for Provider { closeRaw: Provider.close }
 struct Resource<'env, P> { provider: &'env mut P }
 effect fn discard(error: CloseError) -> () { drop error return () }
 effect fn scoped<'env, P>(provider: &'env mut P) -> i32

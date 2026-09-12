@@ -33,7 +33,7 @@ fails and `main` returns `1`. A real application supplies authenticated peer byt
 trust through the same lexical boundaries.
 
 ```silk
-import silk.allocator { Allocator }
+import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.https_identity { HttpsIdentity, OriginHost, ReferenceIdentity }
 import silk.memory_byte_duplex { MemoryByteDuplex, MemoryReadEvent, MemoryWriteEvent }
@@ -101,7 +101,7 @@ effect<'transport> fn inspect<'transport, P>(
 
 effect fn failed<E>(error: E) -> i32 { drop error return 1 }
 
-pub fn main() -> i32 {
+effect fn program() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let reads = Vector.make<MemoryReadEvent>()
   let writes = Vector.make<MemoryWriteEvent>()
@@ -135,6 +135,8 @@ pub fn main() -> i32 {
     |> Effect.provideMut<Allocator>(&mut allocator)
   return run Effect.catchAll(move attempt, failed)
 }
+
+pub fn main() -> i32 { return run Effect.catchAll(program(), failed) }
 ```
 
 Import as `Connection` with `import silk.tls_connection { Connection }`.
