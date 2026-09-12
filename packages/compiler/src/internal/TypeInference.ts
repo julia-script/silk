@@ -209,21 +209,12 @@ const inferFailureRow = (
   )
     return true
   if (pattern.expression._tag === 'Singleton') {
+    const parameter = pattern.expression.member.parameter
     const normalized = union([...failureMembers(actual), ...failureMemberParameters(actual)])
     if (normalized._tag !== 'Normalized') return false
-    if (
-      someSubterm(
-        normalized.type,
-        (part) => isParameter(part) && key(part) === key(pattern.expression.member.parameter),
-      )
-    )
+    if (someSubterm(normalized.type, (part) => isParameter(part) && key(part) === key(parameter)))
       return false
-    return bindGenericArgument(
-      pattern.expression.member.parameter,
-      normalized.type,
-      inferred,
-      context,
-    )
+    return bindGenericArgument(parameter, normalized.type, inferred, context)
   }
   if (!allowOpenActual && RowAlgebra.concretize(failureRowPolicy(), actual)._tag !== 'Concrete')
     return false
