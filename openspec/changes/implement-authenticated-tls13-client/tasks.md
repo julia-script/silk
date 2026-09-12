@@ -58,8 +58,8 @@
   `49ffe20939a882c0944bf188d196385700646e529cb164f88e85f5d28bec5508`;
   handshake-policy 17,642 bytes/553 lines at
   `7ddbaf8faa28830c57135eb1997b22dde0bc7bcb7901b3db8fe772a90be6977f`;
-  and resource-policy 17,874 bytes/576 lines at
-  `314159da568f67749400c38ed83d7e99d0b12b4a2a4abf7ea566c42b15d847e2`.
+  and resource-policy 17,904 bytes/577 lines at
+  `efd5e0f9acc48879f9dac2535b0b7eb0591fa715d198b2bc57aee5dbff0c3d3a`.
   Each contains one `Client.make`; core, demand-request, key-update, closure-control, and
   handshake-policy contain one allocator and one random provider. Resource-policy contains three
   allocator providers for its rejecting audits and one random provider. The representative Wasm

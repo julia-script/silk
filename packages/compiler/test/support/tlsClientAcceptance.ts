@@ -626,6 +626,9 @@ const rsaHandshakeMessages = rsaHandshakeRanges.length
 const rsaHandshakeBodyBytes = Math.max(
   ...rsaHandshakeRanges.map((range) => range.end - range.start - 4),
 )
+// Keep the exact incoming body boundary compatible with Client.make's worst-case
+// retry ClientHello: 161 fixed bytes + 11 DNS bytes + 9 DNS framing + 6 cookie framing.
+const rsaExactBoundaryCookieBytes = rsaHandshakeBodyBytes - (161 + 11 + 9 + 6)
 const rsaCertificateBytes = Math.max(...capturedRsaChain.map((certificate) => certificate.length))
 const rsaCertificateTotalBytes = capturedRsaChain.reduce(
   (total, certificate) => total + certificate.length,
@@ -2491,6 +2494,7 @@ effect fn limitsCase<'a>(
   if id == 23 { limits.handshakeBodyBytes = ${rsaHandshakeBodyBytes - 1} }
   if id == 19 {
     limits.handshakeBodyBytes = ${rsaHandshakeBodyBytes}
+    limits.cookieBytes = ${rsaExactBoundaryCookieBytes}
     limits.handshakeBytes = ${rsaHandshakeBytes}
     limits.handshakeMessages = ${rsaHandshakeMessages}
     limits.peerCertificates = ${capturedRsaChain.length}
@@ -2659,14 +2663,6 @@ effect fn authenticateWithinLimits(client: &mut Client, flight: &[u8]) -> bool
   if !(run feedComplete(&mut client.*, flight, 8)) { return false }
   let mut steps = usize.ZERO
   while steps < 3 {
-    let mut progressSteps = usize.ZERO
-    while client.pendingOutput().length == 0 && progressSteps < 8 {
-      let advanced = run Client.progress(&mut client.*)
-      if let Result<Progress, TlsError>.Failure {error} = move advanced {
-        return false
-      }
-      progressSteps = progressSteps + usize.ONE
-    }
     let length = client.pendingOutput().length
     if length == 0 { return false }
     let acknowledged = Client.ackWritten(&mut client.*, length)
