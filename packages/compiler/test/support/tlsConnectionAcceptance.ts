@@ -521,12 +521,22 @@ effect fn runCases(
   | &mut MonotonicClock
   | &mut Allocator {
   let mut success = run memoryTransport(Option.none<i32>(), true)
-  let completed = run withClient(
+  let attempted = run Effect.result(withClient(
     &mut success,
     config,
     ConnectionOptions.defaults(),
     useAuthenticated,
-  ) |> Effect.provideMut<Random>(&mut random.*)
+  ) |> Effect.provideMut<Random>(&mut random.*))
+  let completed = match move attempted {
+    Result<i32, ConnectionError | TrustSourceError | OutOfMemoryError>.Success {value} => value
+    Result<i32, ConnectionError | TrustSourceError | OutOfMemoryError>.Failure {error} => {
+      let failedAudit = MemoryByteDuplex.audit(&success)
+      if failedAudit.length == usize.ONE && failedAudit[0].operation == ByteIoOperation.Close {
+        return -950
+      }
+      return run failed(move error)
+    }
+  }
   if completed != 42 { return 10 + completed }
   if MemoryByteDuplex.closeAttempts(&success) != usize.ONE { return 11 }
   if MemoryByteDuplex.phase(&success) != MemoryByteDuplexPhase.Closed { return 12 }
@@ -662,7 +672,13 @@ effect fn failed(error: ConnectionError | TrustSourceError | OutOfMemoryError) -
     ConnectionError.Io {error: io} => match move io {
       ByteIoError.Timeout {operation} => { return -201 }
       ByteIoError.InvalidTransferCount {operation, count, limit} => { return -202 }
-      ByteIoError.Closed {operation} => { return -203 }
+      ByteIoError.Closed {operation} => match operation {
+        ByteIoOperation.Read => { return -2031 }
+        ByteIoOperation.Write => { return -2032 }
+        ByteIoOperation.Flush => { return -2033 }
+        ByteIoOperation.ShutdownWrite => { return -2034 }
+        ByteIoOperation.Close => { return -2035 }
+      }
       ByteIoError.Provider {operation, code} => { return -300 - code }
     }
     ConnectionError.Tls {error: tlsError} => match move tlsError {

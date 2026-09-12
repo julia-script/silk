@@ -116,14 +116,21 @@ impl Drop for Resource {
     return ()
   }
 }
+fn recordResourceUse(audit: &mut ResourceAudit) -> () {
+  if audit.released != 0 || audit.dropped != 0 { audit.bad = audit.bad + 1 }
+  return ()
+}
 effect fn useResource(resource: &mut Resource) -> i32 {
+  Shared.withMut(&resource.audit, recordResourceUse)
   run Execution.park(register)
   return 1
 }
 effect fn useResourceSuccess(resource: &mut Resource) -> i32 {
+  Shared.withMut(&resource.audit, recordResourceUse)
   return 17
 }
 effect fn useResourceFailure(resource: &mut Resource) -> i32 ! ResourceFailure {
+  Shared.withMut(&resource.audit, recordResourceUse)
   fail ResourceFailure {}
 }
 fn recordResourceRelease(audit: &mut ResourceAudit) -> () {

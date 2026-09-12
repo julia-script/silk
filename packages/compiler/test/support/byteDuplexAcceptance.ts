@@ -291,7 +291,55 @@ effect fn closeFailureBoundary() -> i32 ! ByteIoError | OutOfMemoryError ? &mut 
   return 0
 }
 
+struct TransportLease<'env, P> { provider: &'env mut P }
+effect fn discardClose(error: ByteIoError) -> () { drop error return () }
+effect fn scopedTransport<'env, P>(provider: &'env mut P) -> usize
+! ByteIoError
+? &mut MonotonicClock
+where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let lease = TransportLease<'env, P> {provider: move provider}
+  let use = effect fn(owned: &mut TransportLease<'env, P>) -> usize
+  ! ByteIoError ? &mut MonotonicClock {
+    return run ByteDuplex.writeSome(&b"x", Option.none<Instant>())
+      |> Effect.provideMut<ByteDuplex>(&mut owned.provider.*)
+  }
+  let release = effect fn(owned: &mut TransportLease<'env, P>) -> () {
+    let closed = ByteDuplex.close() |> Effect.provideMut<ByteDuplex>(&mut owned.provider.*)
+    return run Effect.catchAll(move closed, discardClose)
+  }
+  return run Effect.useReleaseNonParking(move lease, move use, move release)
+}
+effect fn scopedProviderBoundary() -> i32
+! ByteIoError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock {
+  let reads = Vector.make<MemoryReadEvent>()
+  let mut writes = Vector.make<MemoryWriteEvent>()
+  run Vector.append<MemoryWriteEvent>(&mut writes, MemoryWriteEvent {
+    readyAt: SystemClock.make(0, 0), action: MemoryWriteAction.Accept {count: usize.ONE},
+  })
+  let mut provider = run MemoryByteDuplex.make(move reads, move writes, 1, 4, Option.none<i32>())
+  let attempted = run Effect.result(scopedTransport(&mut provider))
+  let count = match move attempted {
+    Result<usize, ByteIoError>.Success {value} => value
+    Result<usize, ByteIoError>.Failure {error} => match move error {
+      ByteIoError.Closed {operation} => {
+        let failedAudit = MemoryByteDuplex.audit(&provider)
+        if failedAudit.length == usize.ONE && failedAudit[0].operation == ByteIoOperation.Close { return 10 }
+        return 11
+      }
+      _ => { return 12 }
+    }
+  }
+  if count != usize.ONE { return 1 }
+  if MemoryByteDuplex.closeAttempts(&provider) != usize.ONE { return 2 }
+  let audit = MemoryByteDuplex.audit(&provider)
+  if audit.length != 2 || audit[0].operation != ByteIoOperation.Write || audit[1].operation != ByteIoOperation.Close { return 3 }
+  return 0
+}
+
 effect fn program() -> i32 ! ByteIoError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock {
+  let scoped = run scopedProviderBoundary()
+  if scoped != 0 { return 70 + scoped }
   let first = run Bytes.copy(&b"abc")
   let second = run Bytes.copy(&b"de")
   let mut reads = Vector.make<MemoryReadEvent>()
@@ -404,6 +452,7 @@ pub fn main() -> i32 {
       |> Effect.provideMut<MonotonicClock>(&mut clock),
     failed,
   )
-  if result != 42 || clock.nowCalls != 13 || clock.waitCalls != 4 { return -2 }
+  if result != 42 { return result }
+  if clock.nowCalls != 14 || clock.waitCalls != 4 { return -2 }
   return result
 }`
