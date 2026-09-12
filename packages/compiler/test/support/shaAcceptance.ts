@@ -352,6 +352,41 @@ fn streaming() -> bool {
   return equalBytes(&sha3Segmented, &sha3Whole)
 }
 
+fn checkpointsContinueWithoutConsuming() -> bool {
+  let a: [u8; 1] = [97]
+  let bc: [u8; 2] = [98, 99]
+  let expected256Prefix: [u8; 32] = ${silkArray(
+    hexBytes('ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb'),
+  )}
+  let expected256Final: [u8; 32] = ${silkArray(
+    hexBytes('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'),
+  )}
+  let expected384Prefix: [u8; 48] = ${silkArray(
+    hexBytes(
+      '54a59b9f22b0b80880d8427e548b7c23abd873486e1f035dce9cd697e85175033caa88e6d57bc35efae0b5afd3145f31',
+    ),
+  )}
+  let expected384Final: [u8; 48] = ${silkArray(
+    hexBytes(
+      'cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7',
+    ),
+  )}
+  let mut sha256 = Sha256.make()
+  sha256.update(&a)
+  let prefix256 = sha256.checkpoint()
+  sha256.update(&bc)
+  let final256 = sha256.finish()
+  let mut sha384 = Sha384.make()
+  sha384.update(&a)
+  let prefix384 = sha384.checkpoint()
+  sha384.update(&bc)
+  let final384 = sha384.finish()
+  return equalBytes(&prefix256, &expected256Prefix)
+    && equalBytes(&final256, &expected256Final)
+    && equalBytes(&prefix384, &expected384Prefix)
+    && equalBytes(&final384, &expected384Final)
+}
+
 fn repeatedSmallUpdates() -> bool {
   let a: [u8; 1] = [97]
   let expectedInput: [u8; 200] = ${silkArray(inputBytes(200))}
@@ -385,5 +420,6 @@ pub fn main() -> i32 {
 ${vectorCalls}
   if !streaming() { return 100 }
   if !repeatedSmallUpdates() { return 101 }
+  if !checkpointsContinueWithoutConsuming() { return 102 }
   return 42
 }`

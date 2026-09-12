@@ -1234,7 +1234,9 @@ suffix through `pendingOutput`, and advances it only through a valid `ackWritten
 The receiver's `feedInput` consumes an exact caller prefix, admits the five-byte header before body
 bytes, stops after one complete record when input is coalesced, and publishes plaintext only after
 authentication plus inner-type and padding validation. `record` returns an owner-borrowed view;
-`consumeRecord` releases that view and permits the next record. Empty application fragments are
+`consumeRecord` releases that view, while `readyContentType`, `readyLength`, and
+`consumeRecordInto` permit an outer owner to inspect and copy the same authenticated record without
+retaining a view. An undersized copy destination preserves the ready record. Empty application fragments are
 valid, handshake fragments are nonempty, alerts contain exactly two bytes, and protected records
 use outer type 23, legacy version `0x0303`, and the exact header as AEAD additional data.
 
@@ -1244,3 +1246,26 @@ header, authentication, inner-content, and receive key-use failures make the rec
 The actor performs framing and proves possession of installed traffic secrets only. It does not
 perform a handshake, authenticate a server identity, validate certificates, select trust anchors,
 drive network resources, reserve client KeyUpdate policy, or decide `close_notify` behavior.
+
+### STDLIB-012 — authenticated bounded TLS 1.3 client
+
+`silk/tls_client` composes the record directions, explicit `TrustSnapshot`, caller-supplied
+`Instant`, HTTPS reference identity, bounded certificate path, selected signature primitives, and
+TLS key schedule into one affine transport-independent client. `Client.make` consumes trust and
+copies the validated reference and ALPN configuration; DNS uses one owned lowercase A-label for
+both SNI and certificate identity, while IP references omit SNI. No protocol step reads ambient
+trust or time, accepts a verification bypass, or substitutes deterministic entropy.
+
+The byte driver exposes exact input consumption, a stable pending ciphertext suffix with explicit
+acknowledgment, bounded plaintext reads and writes, KeyUpdate, directional close, and transport EOF.
+It publishes `Authenticated` only after path, SAN identity, CertificateVerify, server Finished, and
+complete acknowledgment of client Finished. Infallible authenticated getters then expose the exact
+suite, group, optional ALPN, leaf DER, selected path indices and anchor, validation instant,
+revocation status, and SAN match. There is no caller-supplied boolean authentication token.
+
+The selected profile offers the three TLS 1.3 AEAD suites, X25519 with bounded P-256 retry, ECDSA
+P-256/SHA-256 and RSA-PSS-RSAE/SHA-256 CertificateVerify, empty initial client-certificate decline,
+bounded ticket discard, traffic-key updates before epoch exhaustion, and strict close-notify and
+truncation handling. Typed failures preserve certificate decode, path, identity, and signature
+causes. This is a deliberately selected TLS 1.3 and certificate profile, not complete browser Web
+PKI, a socket adapter, resumption, TLS 1.2, or a physical secret-zeroization guarantee.

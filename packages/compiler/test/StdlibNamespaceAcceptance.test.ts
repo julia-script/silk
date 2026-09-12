@@ -93,8 +93,13 @@ pub fn main() -> i32 {
   let empty: [u8; 0] = []
   let mut state = Sha256.make()
   state.update(&empty)
+  let checkpoint = state.checkpoint()
+  state.update(&empty)
+  let checkpointAgain = state.checkpoint()
   let digest = state.finish()
   state.update(&empty)
+  drop checkpoint
+  drop checkpointAgain
   drop digest
   let mut hmac256 = HmacSha256.make(&empty)
   let tag256 = hmac256.finish()
@@ -269,9 +274,11 @@ pub fn main() -> i32 {
   }),
 )
 
-it.effect('keeps TLS record views tied to their receive owner', () =>
-  Effect.gen(function* () {
-    const source = `import silk.tls_record { TlsRecordReceiver }
+it.effect(
+  'keeps TLS record views tied to their receive owner and rotates epochs by ownership',
+  () =>
+    Effect.gen(function* () {
+      const source = `import silk.tls_record { CipherSuite, TlsRecordReceiver, TlsRecordSender }
 fn inspect(receiver: &mut TlsRecordReceiver, input: &[u8]) -> i32 {
   let record = TlsRecordReceiver.record(&receiver.*)
   let progress = TlsRecordReceiver.feedInput(move receiver, input)
@@ -279,9 +286,67 @@ fn inspect(receiver: &mut TlsRecordReceiver, input: &[u8]) -> i32 {
   drop progress
   return 42
 }
+fn rotateSender(sender: &mut TlsRecordSender, secret: &[u8]) -> i32 {
+  let replaced = TlsRecordSender.replaceEpoch(
+    &mut sender.*,
+    CipherSuite.Aes128GcmSha256,
+    secret,
+  )
+  let remaining = sender.recordsRemaining()
+  let pending = sender.pendingOutput()
+  drop replaced
+  drop remaining
+  drop pending
+  return 42
+}
+fn rotateReceiver(receiver: &mut TlsRecordReceiver, secret: &[u8]) -> i32 {
+  let replaced = TlsRecordReceiver.replaceEpoch(
+    &mut receiver.*,
+    CipherSuite.Aes128GcmSha256,
+    secret,
+  )
+  let record = receiver.record()
+  drop replaced
+  drop record
+  return 42
+}
+pub fn main() -> i32 { return 42 }`
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        'stdlib-namespace/tls-record-view',
+        ascii(source),
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => ({
+          code: diagnostic.code,
+          span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+        })),
+        [{ code: 'OWN0011', span: 'receiver' }],
+      )
+    }),
+)
+
+it.effect('pins the authenticated TLS client provider row and output lifetime', () =>
+  Effect.gen(function* () {
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.random { Random }
+import silk.result { Result }
+import silk.system_clock { Instant }
+import silk.tls_client { Client, ClientConfig, TlsError }
+import silk.trust_snapshot { TrustSnapshot }
+import silk.usize
+effect fn construct<'a>(config: &ClientConfig<'a>, trust: TrustSnapshot, time: Instant) -> Result<Client, TlsError>
+! OutOfMemoryError
+? &mut Allocator | &mut Random {
+  return run Client.make(config, move trust, move time)
+}
+fn retainAcrossMutation(client: &mut Client) -> usize {
+  let pending = Client.pendingOutput(&client.*)
+  drop Client.ackWritten(&mut client.*, usize.ZERO)
+  return pending.length
+}
 pub fn main() -> i32 { return 42 }`
     const snapshot = yield* AnalysisFixture.retainingMain(
-      'stdlib-namespace/tls-record-view',
+      'stdlib-namespace/authenticated-tls-client',
       ascii(source),
     )
     assert.deepEqual(
@@ -289,7 +354,7 @@ pub fn main() -> i32 { return 42 }`
         code: diagnostic.code,
         span: source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
       })),
-      [{ code: 'OWN0011', span: 'receiver' }],
+      [{ code: 'OWN0010', span: '&mut client.*' }],
     )
   }),
 )

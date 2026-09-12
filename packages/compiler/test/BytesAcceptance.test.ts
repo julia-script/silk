@@ -9,9 +9,374 @@ import * as Analysis from '../src/Analysis.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
 import certificateProfileFixtures from './fixtures/certificate-profile-limbo.json' with { type: 'json' }
 import certificatePathFixtures from './fixtures/certificate-path-limbo.json' with { type: 'json' }
+import tlsClientFixtures from './fixtures/tls-client/manifest.json' with { type: 'json' }
+import {
+  tlsClientClosureControlNativeSource,
+  tlsClientEmptyCookieRetry,
+  tlsClientFragmentationKinds,
+  tlsClientCoreNativeSource,
+  tlsClientDemandRequestNativeSource,
+  tlsClientHandshakePolicyNativeSource,
+  tlsClientKeyUpdateNativeSource,
+  tlsClientNativeFixtureSource,
+  tlsClientResourcePolicyNativeSource,
+  tlsClientWasmSource,
+} from './support/tlsClientAcceptance.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
+
+const serverHelloExtensions = (record: Uint8Array): ReadonlyMap<number, Uint8Array> => {
+  assert.strictEqual(record[0], 22)
+  const recordLength = (record[3] ?? 0) * 256 + (record[4] ?? 0) + 5
+  assert.isAtMost(recordLength, record.length)
+  const message = record.subarray(5, recordLength)
+  assert.strictEqual(message[0], 2)
+  assert.strictEqual(
+    (message[1] ?? 0) * 65_536 + (message[2] ?? 0) * 256 + (message[3] ?? 0) + 4,
+    message.length,
+  )
+  const sessionIdLength = message[38] ?? 0
+  const extensionsLengthOffset = 39 + sessionIdLength + 3
+  const extensionsLength =
+    (message[extensionsLengthOffset] ?? 0) * 256 + (message[extensionsLengthOffset + 1] ?? 0)
+  const extensionsEnd = extensionsLengthOffset + 2 + extensionsLength
+  assert.strictEqual(extensionsEnd, message.length)
+  const extensions = new Map<number, Uint8Array>()
+  let cursor = extensionsLengthOffset + 2
+  while (cursor < extensionsEnd) {
+    const kind = (message[cursor] ?? 0) * 256 + (message[cursor + 1] ?? 0)
+    const length = (message[cursor + 2] ?? 0) * 256 + (message[cursor + 3] ?? 0)
+    const value = message.subarray(cursor + 4, cursor + 4 + length)
+    assert.strictEqual(value.length, length)
+    assert.isFalse(extensions.has(kind))
+    extensions.set(kind, value)
+    cursor += 4 + length
+  }
+  assert.strictEqual(cursor, extensionsEnd)
+  return extensions
+}
+
+it('pins authenticated TLS client replay provenance and every offline file digest', () => {
+  assert.strictEqual(tlsClientFixtures.rustls.version, '0.23.35')
+  assert.strictEqual(tlsClientFixtures.rustls.commit, '7768cd2b44049e040685d48318d13bfa7f7d32a8')
+  assert.strictEqual(tlsClientFixtures.rustls.provider, 'ring')
+  assert.deepEqual(tlsClientFixtures.rustls.protocolVersions, ['TLSv1.3'])
+  assert.strictEqual(
+    tlsClientFixtures.rustls.generatorCommand,
+    'cd generator && cargo run --locked',
+  )
+  assert.match(tlsClientFixtures.rustls.regeneration, /semantic-only/)
+  assert.strictEqual(
+    tlsClientFixtures.comparison.zigHttpParityCommit,
+    '1bc892110da738d6137b3f0b7e8e3a586ce09928',
+  )
+  assert.strictEqual(tlsClientFixtures.shared.privateKeys, 'TEST ONLY')
+  assert.deepEqual(
+    tlsClientFixtures.captures.map((capture) => capture.suite),
+    [
+      'TLS_CHACHA20_POLY1305_SHA256',
+      'TLS_CHACHA20_POLY1305_SHA256',
+      'TLS_CHACHA20_POLY1305_SHA256',
+      'TLS_AES_128_GCM_SHA256',
+      'TLS_AES_128_GCM_SHA256',
+      'TLS_AES_256_GCM_SHA384',
+    ],
+  )
+  assert.match(tlsClientFixtures.captures.at(-1)?.group ?? '', /HelloRetryRequest/)
+  for (const capture of tlsClientFixtures.captures) {
+    assert.strictEqual(capture.generator.command, tlsClientFixtures.rustls.generatorCommand)
+    assert.isNotEmpty(capture.generator.captureId)
+    const expectedLength = capture.peerTranscript.hash === 'SHA-384' ? 96 : 64
+    for (const [checkpoint, digest] of Object.entries(capture.peerTranscript)) {
+      if (checkpoint === 'hash') continue
+      assert.strictEqual(digest.length, expectedLength, `${capture.id}:${checkpoint}`)
+      assert.match(digest, /^[0-9a-f]+$/, `${capture.id}:${checkpoint}`)
+    }
+  }
+  const lock = readFileSync(
+    new URL('./fixtures/tls-client/generator/Cargo.lock', import.meta.url),
+    'utf8',
+  )
+  assert.include(
+    lock,
+    'git+https://github.com/rustls/rustls.git?rev=7768cd2b44049e040685d48318d13bfa7f7d32a8#7768cd2b44049e040685d48318d13bfa7f7d32a8',
+  )
+  for (const [path, expected] of Object.entries(tlsClientFixtures.files)) {
+    const bytes = readFileSync(new URL(`./fixtures/tls-client/${path}`, import.meta.url))
+    assert.strictEqual(createHash('sha256').update(bytes).digest('hex'), expected, path)
+  }
+})
+
+it('keeps the empty-cookie HRR otherwise valid and independently distinguishable', () => {
+  const extensions = serverHelloExtensions(tlsClientEmptyCookieRetry)
+  assert.deepEqual(extensions.get(51), Uint8Array.from([0, 23]))
+  assert.deepEqual(extensions.get(44), Uint8Array.from([0, 0]))
+})
+
+it('pins TLS client control-slot and encoded-ALPN boundary guards in ordinary Silk', () => {
+  const source = readFileSync(new URL('../stdlib/silk/tls_client.silk', import.meta.url), 'utf8')
+  const recordSource = readFileSync(
+    new URL('../stdlib/silk/tls_record.silk', import.meta.url),
+    'utf8',
+  )
+  assert.match(source, /if bytes\.length \+ usize\.ONE > ALPN_BYTES_LIMIT - total/)
+  assert.match(source, /total = total \+ bytes\.length \+ usize\.ONE/)
+  const write = source.slice(
+    source.indexOf('pub fn writePlaintext'),
+    source.indexOf('pub fn requestKeyUpdate'),
+  )
+  assert.include(write, 'scheduleControl')
+  assert.include(write, 'queueRecord')
+  assert.isBelow(write.indexOf('scheduleControl'), write.indexOf('queueRecord'))
+  assert.notInclude(write, 'ProtocolReason.Record')
+  const schedule = source.slice(
+    source.indexOf('fn scheduleControl'),
+    source.indexOf('fn updateTrafficSecret'),
+  )
+  assert.match(schedule, /recordsRemaining\(&client\.sender\) == 1/)
+  assert.match(recordSource, /pub const RECORDS_PER_EPOCH: u64 = 8388608/)
+  const make = source.slice(
+    source.indexOf('pub effect fn make'),
+    source.indexOf('fn validateLimits'),
+  )
+  assert.include(make, 'validateLimits(config.limits)')
+  assert.include(make, 'allocateBytes')
+  assert.include(make, 'Random.fillBytes')
+  assert.isBelow(make.indexOf('validateLimits(config.limits)'), make.indexOf('allocateBytes'))
+  assert.isBelow(make.indexOf('validateLimits(config.limits)'), make.indexOf('Random.fillBytes'))
+  const hello = source.slice(
+    source.indexOf('effect fn queueClientHello'),
+    source.indexOf('fn putU8'),
+  )
+  assert.isNotEmpty(hello)
+  assert.notInclude(hello, 'handshakeLength = 0')
+  assert.match(source, /shiftHandshake\(&mut client\.\*, messageLength\)/)
+  const compatibility = source.slice(
+    source.indexOf('fn compatibilityWindow'),
+    source.indexOf('fn completeHandshakeAvailable'),
+  )
+  assert.include(compatibility, 'ClientState.RetryClientHelloPending')
+  const serverHello = source.slice(
+    source.indexOf('effect fn handleServerHello'),
+    source.indexOf('fn deriveSharedSecret'),
+  )
+  assert.match(serverHello, /messageLength != client\.handshakeLength/)
+  const progress = source.slice(
+    source.indexOf('pub effect fn progress'),
+    source.indexOf('pub fn ackWritten'),
+  )
+  assert.include(progress, 'while completeHandshakeAvailable(&self.*)')
+  assert.isBelow(progress.indexOf('processHandshake'), progress.indexOf('scheduleControl'))
+  const readyRecord = source.slice(
+    source.indexOf('effect fn handleReadyRecord'),
+    source.indexOf('fn compatibilityWindow'),
+  )
+  assert.include(readyRecord, 'while completeHandshakeAvailable(&client.*)')
+  const certificateRequest = source.slice(
+    source.indexOf('fn handleCertificateRequest'),
+    source.indexOf('effect fn handleCertificate'),
+  )
+  assert.include(certificateRequest, 'certificateRequestExtensionSeen')
+  assert.include(certificateRequest, 'kind == 5 || kind == 18')
+  assert.include(certificateRequest, 'if length != 0')
+  assert.include(certificateRequest, 'kind == 48')
+  assert.include(certificateRequest, 'validOidFilters')
+  const forbiddenRequest = certificateRequest.slice(
+    certificateRequest.indexOf('fn forbiddenCertificateRequestExtension'),
+    certificateRequest.indexOf('fn validRequestedSignatureSchemes'),
+  )
+  assert.include(forbiddenRequest, 'kind == 51')
+  assert.notMatch(forbiddenRequest, /kind == 5\b/)
+  assert.notMatch(forbiddenRequest, /kind == 18\b/)
+  const read = source.slice(
+    source.indexOf('pub fn readPlaintext'),
+    source.indexOf('pub fn writePlaintext'),
+  )
+  assert.isBelow(read.indexOf('terminalError'), read.indexOf('output.length == 0'))
+  assert.match(source, /TlsRecordSender\.cancelPending\(&mut client\.sender\)/)
+  for (const configuredDefault of [
+    'handshakeBodyBytes: 262144',
+    'handshakeBytes: 1048576',
+    'handshakeMessages: 32',
+    'peerCertificates: 16',
+    'certificateBytes: 65536',
+    'certificateTotalBytes: 262144',
+    'cookieBytes: 4096',
+    'extensionBytes: 65535',
+    'emptyRecords: 32',
+    'postHandshakeControls: 64',
+    'tickets: 8',
+    'ticketBytes: 262144',
+  ]) {
+    assert.include(source, configuredDefault)
+  }
+  for (const kind of [
+    'HandshakeBodyBytes',
+    'HandshakeBytes',
+    'HandshakeMessages',
+    'PeerCertificates',
+    'CertificateBytes',
+    'CertificateTotalBytes',
+    'CookieBytes',
+    'ExtensionBytes',
+    'EmptyRecords',
+    'PostHandshakeControls',
+    'Tickets',
+    'TicketBytes',
+    'Arithmetic',
+    'Alpn',
+    'CertificateDecode',
+    'CertificateSanDecode',
+    'CertificateIdentity',
+    'CertificatePath',
+    'CertificateProfile',
+  ]) {
+    assert.include(source, `TlsLimitKind.${kind}`)
+  }
+  assert.include(tlsClientClosureControlNativeSource, 'exactPeerAlert(move failed, 40)')
+  assert.include(tlsClientClosureControlNativeSource, 'TlsError.BadRecordMac')
+  assert.include(tlsClientClosureControlNativeSource, 'TlsError.HandshakeTruncated')
+})
+
+it('keeps focused TLS client witnesses independent and bounded', () => {
+  const nativeSources = [
+    tlsClientCoreNativeSource,
+    tlsClientDemandRequestNativeSource,
+    tlsClientKeyUpdateNativeSource,
+    tlsClientClosureControlNativeSource,
+    tlsClientHandshakePolicyNativeSource,
+    tlsClientResourcePolicyNativeSource,
+  ]
+  assert.notStrictEqual(tlsClientWasmSource, tlsClientCoreNativeSource)
+  assert.include(tlsClientWasmSource, 'value.suite() == CipherSuite.ChaCha20Poly1305Sha256')
+  assert.include(tlsClientWasmSource, 'client.readPlaintext(&mut plaintext)')
+  assert.notInclude(tlsClientWasmSource, 'let aes128Flight =')
+  assert.notInclude(tlsClientWasmSource, 'let retryFlight =')
+  for (const source of nativeSources) {
+    assert.include(source, 'silk_tls_fixture_copy')
+    assert.lengthOf(source.match(/Client\.make\(/g) ?? [], 1)
+    assert.notInclude(source, 'while id <= 62')
+    assert.notMatch(source, /if run [^\n]+ !=/)
+  }
+  assert.lengthOf(tlsClientKeyUpdateNativeSource.match(/provideMut<Allocator>/g) ?? [], 1)
+  assert.lengthOf(tlsClientKeyUpdateNativeSource.match(/provideMut<Random>/g) ?? [], 1)
+  assert.lengthOf(tlsClientDemandRequestNativeSource.match(/provideMut<Allocator>/g) ?? [], 1)
+  assert.lengthOf(tlsClientDemandRequestNativeSource.match(/provideMut<Random>/g) ?? [], 1)
+  assert.isBelow(tlsClientDemandRequestNativeSource.length, tlsClientCoreNativeSource.length)
+  assert.lengthOf(tlsClientClosureControlNativeSource.match(/provideMut<Allocator>/g) ?? [], 1)
+  assert.lengthOf(tlsClientClosureControlNativeSource.match(/provideMut<Random>/g) ?? [], 1)
+  assert.lengthOf(tlsClientHandshakePolicyNativeSource.match(/provideMut<Allocator>/g) ?? [], 1)
+  assert.lengthOf(tlsClientHandshakePolicyNativeSource.match(/provideMut<Random>/g) ?? [], 1)
+  assert.lengthOf(tlsClientResourcePolicyNativeSource.match(/provideMut<Allocator>/g) ?? [], 3)
+  assert.lengthOf(tlsClientResourcePolicyNativeSource.match(/provideMut<Random>/g) ?? [], 1)
+  assert.include(tlsClientKeyUpdateNativeSource, 'let oversized = run Bytes.zeroed(16385)')
+  assert.include(tlsClientKeyUpdateNativeSource, 'value.consumed == 16384')
+  assert.include(tlsClientKeyUpdateNativeSource, 'value.consumed == usize.ONE')
+  assert.include(
+    tlsClientKeyUpdateNativeSource,
+    'sameBytes(client.pendingOutput(), Bytes.asSlice(&stable))',
+  )
+  assert.include(tlsClientDemandRequestNativeSource, 'let coalesced = run loadFixture(65)')
+  assert.include(
+    tlsClientDemandRequestNativeSource,
+    'feedToDemand(&mut client, Bytes.asSlice(&coalesced), Demand.NeedOutput)',
+  )
+  assert.include(tlsClientResourcePolicyNativeSource, 'TlsLimitKind.Alpn, 1024)')
+  for (const kind of [
+    'HandshakeBodyBytes',
+    'HandshakeBytes',
+    'HandshakeMessages',
+    'PeerCertificates',
+    'CertificateBytes',
+    'CertificateTotalBytes',
+    'CookieBytes',
+    'ExtensionBytes',
+    'EmptyRecords',
+    'PostHandshakeControls',
+    'Tickets',
+    'TicketBytes',
+    'Alpn',
+    'CertificateDecode',
+    'CertificateSanDecode',
+    'CertificateIdentity',
+    'CertificatePath',
+    'CertificateProfile',
+  ]) {
+    assert.include(tlsClientResourcePolicyNativeSource, `TlsLimitKind.${kind}`)
+  }
+  // The production-source guard above owns Arithmetic: no wire-valid configured value can reach
+  // that fallback on current targets, so the native resource witness must not invent one.
+  assert.notInclude(tlsClientResourcePolicyNativeSource, 'TlsLimitKind.Arithmetic')
+  assert.include(
+    tlsClientHandshakePolicyNativeSource,
+    'let expectedCertificate = run loadFixture(46)',
+  )
+  assert.include(tlsClientHandshakePolicyNativeSource, 'let expectedFinished = run loadFixture(47)')
+  assert.include(tlsClientHandshakePolicyNativeSource, 'random.filled != expectedEntropy')
+  assert.include(tlsClientHandshakePolicyNativeSource, 'return run matchesHello(&client, 52)')
+  assert.notInclude(tlsClientHandshakePolicyNativeSource, 'let expected = run loadFixture(52)')
+  assert.include(
+    tlsClientDemandRequestNativeSource,
+    'feedToDemand(&mut client, Bytes.asSlice(&flight), Demand.NeedOutput)',
+  )
+  assert.include(tlsClientDemandRequestNativeSource, 'while id <= 8')
+  const demandDriven = tlsClientDemandRequestNativeSource.slice(
+    tlsClientDemandRequestNativeSource.indexOf('effect fn feedToDemand'),
+    tlsClientDemandRequestNativeSource.indexOf('fn requestFixture'),
+  )
+  assert.isNotEmpty(demandDriven)
+  assert.notInclude(demandDriven, 'Client.progress')
+  assert.include(demandDriven, 'progress.demand == expected && expected != Demand.NeedInput')
+  for (const fixtureId of [58, 59, 60, 61, 62, 63, 64, 65, 66]) {
+    assert.include(tlsClientNativeFixtureSource, `case ${fixtureId}:`)
+  }
+  assert.deepEqual(tlsClientFragmentationKinds.initialFlight, [2, 8, 11, 15, 20])
+  assert.deepEqual(tlsClientFragmentationKinds.keyUpdate, [24])
+  assert.include(
+    tlsClientCoreNativeSource,
+    'run feedCoreFragments(&mut client, Bytes.asSlice(&flight))',
+  )
+  assert.include(
+    tlsClientCoreNativeSource,
+    'let fragment = Slice.view<u8>(input, offset, usize.ONE)',
+  )
+  assert.include(tlsClientCoreNativeSource, 'let mut index: usize = 5')
+  assert.include(
+    tlsClientKeyUpdateNativeSource,
+    'let code = run feedFragments(&mut client, Bytes.asSlice(&malformed))',
+  )
+  assert.include(tlsClientClosureControlNativeSource, 'TlsError.HandshakeTruncated')
+  assert.include(tlsClientClosureControlNativeSource, 'fn isEmptyBuffer(')
+  assert.include(
+    tlsClientClosureControlNativeSource,
+    '&& isEmptyBuffer(client.readPlaintext(&mut empty))',
+  )
+  assert.include(
+    tlsClientClosureControlNativeSource,
+    '&& isTruncated(client.readPlaintext(&mut plaintext))',
+  )
+  const resourceOwnerStart = tlsClientResourcePolicyNativeSource.indexOf('effect fn limitsCase')
+  const resourceHelpersStart = tlsClientResourcePolicyNativeSource.indexOf(
+    'effect fn feedComplete',
+    resourceOwnerStart,
+  )
+  const resourceOwner = tlsClientResourcePolicyNativeSource.slice(
+    resourceOwnerStart,
+    resourceHelpersStart,
+  )
+  assert.isNotEmpty(resourceOwner)
+  assert.notInclude(resourceOwner, '&mut client.*')
+  assert.lengthOf(resourceOwner.match(/&mut client/g) ?? [], 14)
+  const resourceHelpers = tlsClientResourcePolicyNativeSource.slice(
+    resourceHelpersStart,
+    tlsClientResourcePolicyNativeSource.indexOf('effect fn runLimitCase', resourceHelpersStart),
+  )
+  assert.lengthOf(resourceHelpers.match(/&mut client\.\*/g) ?? [], 3)
+  assert.include(resourceHelpers, 'Client.ackWritten(&mut client.*, length)')
+  assert.include(tlsClientNativeFixtureSource, 'static const uint8_t fixture_0[]')
+  assert.notInclude(tlsClientNativeFixtureSource, 'silk_tls_mark')
+})
 
 it('pins certificate-profile fixture provenance and DER digests', () => {
   assert.strictEqual(

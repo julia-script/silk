@@ -346,6 +346,33 @@ effect fn authenticatedPadding() -> bool ! OutOfMemoryError {
   return unitError(TlsRecordReceiver.consumeRecord(&mut receiver)) == 0
 }
 
+effect fn protectedCompatibilityCcs(
+  secret: &[u8],
+  protectedContent: &[u8],
+  protectedWire: &[u8],
+) -> bool ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let created = run (TlsRecordReceiver.make(CipherSuite.Aes128GcmSha256, secret)
+    |> Effect.provideMut(&mut allocator))
+  let mut receiver = match move created {
+    Result<TlsRecordReceiver, RecordError>.Failure {error} => { return false }
+    Result<TlsRecordReceiver, RecordError>.Success {value} => move value
+  }
+  let ccs: [u8; 6] = [20, 3, 3, 0, 1, 1]
+  let ccsContent: [u8; 1] = [1]
+  if !fed(TlsRecordReceiver.feedInput(&mut receiver, &ccs), 6, InputDemand.RecordReady) {
+    return false
+  }
+  if !recordIs(&receiver, ContentType.ChangeCipherSpec, &ccsContent) { return false }
+  if unitError(TlsRecordReceiver.consumeRecord(&mut receiver)) != 0 { return false }
+  if !fed(
+    TlsRecordReceiver.feedInput(&mut receiver, protectedWire),
+    protectedWire.length,
+    InputDemand.RecordReady,
+  ) { return false }
+  return recordIs(&receiver, ContentType.Handshake, protectedContent)
+}
+
 effect fn sequenceOneAfterPartialAck() -> bool ! OutOfMemoryError {
   let secret: [u8; 32] = ${array(sequenceOne.trafficSecret)}
   let firstContent: [u8; 1] = ${array(sequenceZero.content)}
@@ -512,6 +539,7 @@ effect fn publicCases() -> i32 ! OutOfMemoryError {
   if !(run protectedHeaderBounds()) { return 9 }
   if !(run maximumContent()) { return 10 }
   if !(run constructorBounds()) { return 11 }
+  if !(run protectedCompatibilityCcs(&rfcSecret, &rfcContent, &rfcWire)) { return 12 }
   return 42
 }
 

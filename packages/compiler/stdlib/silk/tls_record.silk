@@ -226,6 +226,43 @@ impl TlsRecordSender {
     }
   }
 
+  /// Installs a fresh protected traffic epoch on an idle sender without allocation.
+  ///
+  /// # Details
+  ///
+  /// The replacement reuses the owned wire and staging storage and starts at sequence zero. The
+  /// traffic secret must have the selected suite hash width.
+  ///
+  /// # Gotchas
+  ///
+  /// Pending output makes the replacement invalid. Every failure leaves the complete old epoch
+  /// unchanged. A successful replacement is allowed after the old epoch exhausts its record budget.
+  pub fn replaceEpoch(
+    self: &mut Self,
+    suite: CipherSuite,
+    trafficSecret: &[u8],
+  ) -> Result<(), RecordError> {
+    if self.acknowledged < self.pendingLength {
+      return Result.failResult<(), RecordError>(RecordError.InvalidState)
+    }
+    let derived = deriveMaterial(suite, trafficSecret)
+    let material = match move derived {
+      Result<KeyMaterial, RecordError>.Failure {error} => {
+        return Result.failResult<(), RecordError>(move error)
+      }
+      Result<KeyMaterial, RecordError>.Success {value} => move value
+    }
+    self.suite = suite
+    self.key = material.key
+    self.keyLength = material.keyLength
+    self.iv = material.iv
+    self.sequence = 0
+    self.protected = true
+    self.pendingLength = 0
+    self.acknowledged = 0
+    return Result.succeed<(), RecordError>(())
+  }
+
   /// Queues at most one content fragment without retaining the caller input.
   ///
   /// # Details
@@ -269,6 +306,25 @@ impl TlsRecordSender {
     let acknowledged = self.acknowledged
     let remaining = self.pendingLength - acknowledged
     return RawBuffer.view<u8>(&self.pending, acknowledged, remaining)
+  }
+
+  /// Cancels the complete pending suffix without changing the traffic-key epoch.
+  ///
+  /// # Gotchas
+  ///
+  /// Callers must close a transport after canceling a partially written record; its already-written
+  /// prefix cannot be completed or reused. Authenticated protocols use this only on terminal failure.
+  pub fn cancelPending(self: &mut Self) -> () {
+    self.pendingLength = 0
+    self.acknowledged = 0
+    return ()
+  }
+
+  /// Returns the number of records that this protected epoch can still encode.
+  /// Plaintext framing returns zero because it has no traffic-key epoch.
+  pub fn recordsRemaining(self: &Self) -> u64 {
+    if !self.protected { return 0 }
+    return RECORDS_PER_EPOCH - self.sequence
   }
 
   /// Acknowledges a written prefix, or leaves all state unchanged when the count is excessive.
@@ -374,13 +430,55 @@ impl TlsRecordReceiver {
     }
   }
 
+  /// Installs a fresh protected traffic epoch on an idle receiver without allocation.
+  ///
+  /// # Details
+  ///
+  /// The replacement reuses the owned wire and plaintext storage and starts at sequence zero. The
+  /// traffic secret must have the selected suite hash width.
+  ///
+  /// # Gotchas
+  ///
+  /// A partial, ready, or terminal receiver makes the replacement invalid. Every failure leaves
+  /// the complete old epoch unchanged. A successful replacement is allowed after exhaustion.
+  pub fn replaceEpoch(
+    self: &mut Self,
+    suite: CipherSuite,
+    trafficSecret: &[u8],
+  ) -> Result<(), RecordError> {
+    if self.wireLength != 0 || self.ready || self.terminal {
+      return Result.failResult<(), RecordError>(RecordError.InvalidState)
+    }
+    let derived = deriveMaterial(suite, trafficSecret)
+    let material = match move derived {
+      Result<KeyMaterial, RecordError>.Failure {error} => {
+        return Result.failResult<(), RecordError>(move error)
+      }
+      Result<KeyMaterial, RecordError>.Success {value} => move value
+    }
+    self.suite = suite
+    self.key = material.key
+    self.keyLength = material.keyLength
+    self.iv = material.iv
+    self.sequence = 0
+    self.protected = true
+    self.wireLength = 0
+    self.expectedLength = 0
+    self.recordLength = 0
+    self.recordType = ContentType.Handshake
+    self.ready = false
+    return Result.succeed<(), RecordError>(())
+  }
+
   /// Copies a prefix for the current record and reports the exact next receive action.
   ///
   /// # Details
   ///
   /// Empty input reports zero-consumption `NeedInput`. Header admission occurs after exactly five
   /// bytes and before any body byte is copied. Completion stops before a coalesced following record.
-  /// A ready record causes zero-consumption `NeedRecordConsumption` until [`consumeRecord`] succeeds.
+  /// A ready record causes zero-consumption `NeedRecordConsumption` until [`consumeRecord`] or
+  /// [`consumeRecordInto`] succeeds. During a protected epoch, exact plaintext compatibility CCS
+  /// `{1}` is admitted without consuming a protected sequence; every other record remains protected.
   ///
   /// # Gotchas
   ///
@@ -444,6 +542,49 @@ impl TlsRecordReceiver {
         content: RawBuffer.view<u8>(&self.plaintext, 0, length),
       },
     )
+  }
+
+  /// Returns the ready record's authenticated content type without borrowing its content.
+  pub fn readyContentType(self: &Self) -> Option<ContentType> {
+    if !self.ready { return Option.none<ContentType>() }
+    return Option.some<ContentType>(self.recordType)
+  }
+
+  /// Returns the ready record's authenticated content length, or zero when no record is ready.
+  pub fn readyLength(self: &Self) -> usize {
+    if !self.ready { return 0 }
+    return self.recordLength
+  }
+
+  /// Copies and consumes one complete authenticated record without retaining an owner-tied view.
+  ///
+  /// # Gotchas
+  ///
+  /// A destination smaller than the ready content returns `RecordOverflow` and leaves the record
+  /// ready and unchanged. No ready record returns `InvalidState`.
+  pub fn consumeRecordInto(
+    self: &mut Self,
+    destination: &mut [u8],
+  ) -> Result<usize, RecordError> {
+    if !self.ready {
+      return Result.failResult<usize, RecordError>(RecordError.InvalidState)
+    }
+    if destination.length < self.recordLength {
+      return Result.failResult<usize, RecordError>(
+        RecordError.RecordOverflow {requested: self.recordLength, maximum: destination.length},
+      )
+    }
+    let length = self.recordLength
+    let mut index = usize.ZERO
+    while index < length {
+      destination[index] = RawBuffer.read<u8>(&self.plaintext, index)
+      index = index + usize.ONE
+    }
+    self.wireLength = 0
+    self.expectedLength = 0
+    self.recordLength = 0
+    self.ready = false
+    return Result.succeed<usize, RecordError>(length)
   }
 
   /// Releases the current record and permits input for the next record.
@@ -576,6 +717,9 @@ fn admitHeader(receiver: &TlsRecordReceiver) -> Result<usize, RecordError> {
   let payload = u8.toUsize(RawBuffer.read<u8>(&receiver.wire, 3)) * 256
     + u8.toUsize(RawBuffer.read<u8>(&receiver.wire, 4))
   if receiver.protected {
+    if outerType == 20 && major == 3 && minor == 3 && payload == 1 {
+      return Result.succeed<usize, RecordError>(payload)
+    }
     if outerType != 23 || major != 3 || minor != 3 {
       return Result.failResult<usize, RecordError>(RecordError.InvalidContent)
     }
@@ -620,6 +764,18 @@ fn admitHeader(receiver: &TlsRecordReceiver) -> Result<usize, RecordError> {
 
 fn finishRecord(receiver: &mut TlsRecordReceiver) -> Result<(), RecordError> {
   if receiver.protected {
+    let outerType = RawBuffer.read<u8>(&receiver.wire, 0)
+    if outerType == 20 {
+      let value = RawBuffer.read<u8>(&receiver.wire, HEADER_LENGTH)
+      if value != 1 {
+        return Result.failResult<(), RecordError>(RecordError.InvalidContent)
+      }
+      RawBuffer.fill(&mut receiver.plaintext, 0, 1, value)
+      receiver.recordType = ContentType.ChangeCipherSpec
+      receiver.recordLength = 1
+      receiver.ready = true
+      return Result.succeed<(), RecordError>(())
+    }
     return finishProtected(&mut receiver)
   }
   let outerType = RawBuffer.read<u8>(&receiver.wire, 0)

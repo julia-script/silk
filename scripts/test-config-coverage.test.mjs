@@ -126,3 +126,45 @@ void test('every Linux native test job selects the complete verified LLVM toolch
   assert.match(setup, /SILK_TEST_CLANG=.*\/bin\/clang/)
   assert.match(setup, /SILK_TEST_LLVM_AR=.*\/bin\/llvm-ar/)
 })
+
+void test('exact-head full verification remains explicit and complete', () => {
+  assert.match(
+    ciWorkflow,
+    /^      full_verification:\n        description:[^\n]+\n        required: true\n        type: boolean\n        default: false$/m,
+  )
+  assert.match(
+    ciWorkflow,
+    /^      expected_sha:\n        description:[^\n]+\n        required: true\n        type: string$/m,
+  )
+  const full = ciJobBody('full-verification')
+  assert.match(
+    full,
+    /^    if: github\.event_name == 'workflow_dispatch' && inputs\.full_verification$/m,
+  )
+  assert.match(full, /ref: \$\{\{ github\.sha \}\}/)
+  assert.match(full, /^          EXPECTED_SHA: \$\{\{ inputs\.expected_sha \}\}$/m)
+  assert.match(full, /test "\$\{\{ github\.sha \}\}" = "\$EXPECTED_SHA"/)
+  assert.match(full, /test "\$\(git rev-parse HEAD\)" = "\$EXPECTED_SHA"/)
+  assert.match(full, /uses: \.\/\.github\/actions\/setup-linux-llvm/)
+  assert.match(full, /^      - run: pnpm check$/m)
+  assert.match(full, /^      - run: pnpm release:candidate$/m)
+  assert.match(full, /timeout-minutes: 240/)
+  assert.match(
+    ciJobBody('platform-supplies'),
+    /^    if: github\.event_name != 'workflow_dispatch' \|\| !inputs\.full_verification$/m,
+  )
+})
+
+void test('TLS client smoke coverage uses only the bounded focused witnesses', () => {
+  for (const name of [
+    'authenticated-tls-client-core',
+    'authenticated-tls-client-demand-request',
+    'authenticated-tls-client-key-update',
+    'authenticated-tls-client-closure-control',
+    'authenticated-tls-client-handshake-policy',
+    'authenticated-tls-client-resource-policy',
+  ]) {
+    assert.match(ciWorkflow, new RegExp(`(?:^|,|"cases":")${name}(?:,|"})`))
+  }
+  assert.doesNotMatch(ciWorkflow, /authenticated-tls-client-(?:traffic|limits)/)
+})
