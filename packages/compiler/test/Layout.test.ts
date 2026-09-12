@@ -292,6 +292,47 @@ pub union Problem {
   }),
 )
 
+it.effect('retains the outer union tag when binding a whole value for cleanup', () =>
+  Effect.gen(function* () {
+    const self = yield* AnalysisFixture.retainingMain(
+      'layout/nested-error',
+      ascii(`
+import silk.vector { Vector }
+union Problem { Value { value: i32 }, Owned { values: Vector<i32> } }
+struct Other {}
+fn inspect(problem: Problem | Other) -> i32 {
+  return match move problem {
+    Problem.Value {value} => value
+    _ => 0
+  }
+}
+pub fn main() -> i32 { return inspect(Problem.Value {value: 42}) }
+`),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const module = Analysis.loweredMir(self)
+    const bindings = module.functions
+      .flatMap(MirLinearization.linearize)
+      .flatMap((block) => block.operations)
+      .filter((operation) => operation._tag === 'BindMatch')
+    assert.isNotEmpty(bindings)
+    for (const operation of bindings) {
+      const physical = Layout.coverageBindingSlots(
+        operation.shape,
+        operation.member,
+        operation.path,
+        Mir.semanticType(operation.type),
+      )
+      const target = Layout.callingShape(module.layout, Mir.semanticType(operation.type))
+      assert.strictEqual(
+        physical?.length,
+        target?.lanes.length,
+        Type.encode(Mir.semanticType(operation.type)),
+      )
+    }
+  }),
+)
+
 it('plans transport from its actual start without treating tail padding as payload', () => {
   const lanes: ReadonlyArray<Layout.CallingLane> = [
     { _tag: 'CallingLane', path: [], type: 'u8' },
