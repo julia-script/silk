@@ -2241,6 +2241,11 @@ effect fn handshakePolicyCase<'a>(
   }
   if (run authenticate(&mut client, Bytes.asSlice(&flight))) != 0 { return false }
   if id == 26 {
+    let mut plaintext: [u8; 40] = [
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]
+    if !hasDemand(client.readPlaintext(&mut plaintext), Demand.NeedInput) { return false }
     let ccs = run loadFixture(${nativeFixtureIds.validCcs})
     let code = run feedAll(&mut client, Bytes.asSlice(&ccs))
     return code == 46 && isFailureCode(run client.progress(), 46)

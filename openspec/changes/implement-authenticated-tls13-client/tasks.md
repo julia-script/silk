@@ -56,8 +56,8 @@
   `f4965a168845b503fefebb8c7024a80d9abc5d792f841b92cc3fe5cd43792c3a`;
   closure-control 17,997 bytes/545 lines at
   `49ffe20939a882c0944bf188d196385700646e529cb164f88e85f5d28bec5508`;
-  handshake-policy 17,377 bytes/548 lines at
-  `1a3f8ef635309b21f6941122d13bb6bb83ffe55fd4ade142e2e3bd86658e4406`;
+  handshake-policy 17,642 bytes/553 lines at
+  `7ddbaf8faa28830c57135eb1997b22dde0bc7bcb7901b3db8fe772a90be6977f`;
   and resource-policy 17,874 bytes/576 lines at
   `314159da568f67749400c38ed83d7e99d0b12b4a2a4abf7ea566c42b15d847e2`.
   Each contains one `Client.make`; core, demand-request, key-update, closure-control, and
