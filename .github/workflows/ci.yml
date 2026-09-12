@@ -168,6 +168,10 @@ jobs:
       - run: node scripts/turbo.mjs run build
       - run: pnpm --filter @silklang/compiler run test:native-acceptance
         env:
+          # The bounded TLS programs peak just above V8's default ~4 GiB old-space limit. Keep the
+          # extra headroom scoped to their fresh-process jobs; the ordinary smoke lane stays at the
+          # default so it continues to expose unrelated regressions.
+          NODE_OPTIONS: ${{ startsWith(matrix.name, 'tls-client-') && '--max-old-space-size=6144' || '' }}
           SILK_NATIVE_SHARD: ${{ matrix.shard }}
           SILK_NATIVE_CORPUS_CASES: ${{ matrix.cases }}
           SILK_NATIVE_FIXED_TESTS: ${{ github.event_name == 'pull_request' && 'false' || 'true' }}

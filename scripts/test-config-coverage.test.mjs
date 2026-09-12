@@ -164,7 +164,7 @@ void test('TLS client smoke coverage uses only the bounded focused witnesses', (
     'authenticated-tls-client-handshake-policy',
     'authenticated-tls-client-resource-policy',
   ]) {
-    assert.match(ciWorkflow, new RegExp(`(?:^|,)${name}(?:,|"})`))
+    assert.match(ciWorkflow, new RegExp(`(?:^|,|"cases":")${name}(?:,|"})`))
   }
   assert.doesNotMatch(ciWorkflow, /authenticated-tls-client-(?:traffic|limits)/)
 })
