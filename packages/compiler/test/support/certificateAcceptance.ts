@@ -1,5 +1,5 @@
 // Inputs reconstructed from the 65 SHA-256-pinned recipes in
-// openspec/changes/specify-bounded-certificate-decoding/fixtures.json.
+// openspec/changes/archive/2026-09-12-specify-bounded-certificate-decoding/fixtures.json.
 // Provenance: RFC 7468 §5.1 Figure 1; modifications are the manifest's exact patches.
 // Packed byte literals and one table-driven program avoid a compiler pipeline per fixture.
 import { unreachable } from './raise.js'

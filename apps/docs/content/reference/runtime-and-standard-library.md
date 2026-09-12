@@ -1002,7 +1002,7 @@ public ASN.1 tooling is outside this API.
 
 **Evidence:** [certificate actor](../../../../packages/compiler/stdlib/silk/certificate.silk),
 [bundle actor](../../../../packages/compiler/stdlib/silk/certificate_bundle.silk),
-[decoding contract and fixture provenance](../../../../openspec/changes/specify-bounded-certificate-decoding/design.md).
+[decoding contract and fixture provenance](../../../../openspec/changes/archive/2026-09-12-specify-bounded-certificate-decoding/design.md).
 
 ## Certificate semantic profiles and trust anchors
 

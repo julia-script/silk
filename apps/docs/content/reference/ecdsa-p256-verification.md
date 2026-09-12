@@ -53,6 +53,6 @@ All arithmetic uses ordinary Silk source with bounded inline storage at the P-25
 Verification works on public data and makes no fixed-work promise. Existing secret agreement
 arithmetic keeps its stronger fixed-schedule requirement. Native and LLVM-to-Wasm witnesses, pinned
 NIST vectors, Zig reproduction and precise generated-output inspection scope are recorded in the
-[implementation evidence](../../../../openspec/changes/implement-ecdsa-p256-verification/validation.md).
+[implementation evidence](../../../../openspec/changes/archive/2026-09-12-implement-ecdsa-p256-verification/validation.md).
 Passing vectors do not establish constant time, physical erasure, production security or FIPS
 validation.

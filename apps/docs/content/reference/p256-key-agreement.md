@@ -40,7 +40,7 @@ scalar admission have data-dependent rejection branches; scalar admission and ge
 before secret multiplication.
 
 The generated-code inspection and its exact target/mode limits live in the
-[implementation evidence](../../../../openspec/changes/implement-p256-key-agreement/validation.md).
+[implementation evidence](../../../../openspec/changes/archive/2026-09-12-implement-p256-key-agreement/validation.md).
 A fixed source schedule and passing vectors do not establish constant time, secure erasure,
 production security or FIPS validation. Compiler transformations and host/JIT behavior need their
 own review. Owning and consuming a scalar bounds use, not physical retention of compiler copies.
@@ -52,6 +52,6 @@ separate operations. This actor provides no signing, certificates, trust policy 
 The shared native corpus checks RFC 5903 §8.1 in both directions, NIST ECCCDH P-256 COUNT0,
 scalar1/n−1, a leading-zero x-coordinate, admission errors, and scripted rejection generation.
 The RFC's IKE x||y values receive an explicit SEC1 `0x04` prefix; IKE payload framing is excluded.
-The [fixture manifest](../../../../openspec/changes/implement-p256-key-agreement/fixtures.json)
+The [fixture manifest](../../../../openspec/changes/archive/2026-09-12-implement-p256-key-agreement/fixtures.json)
 pins inputs, expected bytes, archive/member checksums, exact Zig source hashes and reproduction.
 These informal component vectors do not constitute CAVP validation.
