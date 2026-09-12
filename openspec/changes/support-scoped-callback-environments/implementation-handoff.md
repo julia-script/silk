@@ -80,8 +80,10 @@ Full documentation generation was attempted and stopped before writing because u
 
 The exact five uncommitted JUL-188 files were copied to
 `/private/tmp/silk-scoped-callback-integration`, then the focused compiler patch was applied there.
-The original worktree was not changed. The namespace witness ran once after resolving checkout
-package links; two earlier attempts failed at module loading before any test executed.
+The original worktree was not changed. The namespace witness was refreshed against final implementation commit
+`1eb65b662a40a6884fd905591ba6a300fc5e7576`. It reports only `SEM0074` at offsets 2054–2130 and
+`SEM0122` at offsets 2115–2129 of `stdlib-namespace/byte-duplex`, confirming that the bracket
+`SEM0089` is absent at the delivered compiler revision.
 
 The original worktree still has exactly the five expected modified files. The two experimental
 stashes remain `a8c0572105521ac61a7767d15a86c332c92bfc20` and
@@ -93,3 +95,22 @@ already exists in that correction set; retain it once. Regenerate the stdlib emb
 combining the TLS source corrections with the new Effect helper signature. Do not overwrite the
 preserved generated file with this branch's embedding, which intentionally omits those TLS edits.
 Do not mark JUL-188 ready or merge it while the separate row/evidence failure remains.
+
+## Delivered revisions and remaining approval
+
+- `81eb46676f74ba656ca2f5b766a2a035f7d4f15b`: lexical constraint visibility and regression controls.
+- `00da6e84ee23a5ef585c3734030e6d9d3de4bcf4`: approved OpenSpec proposal and investigation.
+- `1eb65b662a40a6884fd905591ba6a300fc5e7576`: finite intersections, callback derivation, bracket,
+  diagnostics, documentation, and regressions.
+
+The implementation is published to `origin/julia/scoped-resource-callback`. The final compiler test
+typecheck, stdlib embedding check, and strict OpenSpec validation passed at this revision. Three
+post-format checks also passed; they repeat only the affected canonicalization, formatter, and
+generic-capture assertions.
+
+No draft PR or CI run has been created. Automatic approval review rejected pushing the already
+preserved checkpoint to an additional `julia/scoped-resource-callback-base` branch, stating that
+prior approval covered the scoped branch but not this new destination containing TLS checkpoint
+code. Explicit approval for that base branch is pending. A base at `d1d707e6` keeps the draft PR
+limited to the compiler fix and gives CI the exact intended branch. Do not infer approval from
+elapsed time or publish that additional branch until the user responds.

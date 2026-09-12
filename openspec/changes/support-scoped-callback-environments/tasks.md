@@ -22,7 +22,7 @@ Approval recorded 2026-09-12: the user approved the finite-intersection design a
 ## 4. Preserved caller and delivery
 
 - [ ] 4.1 After the tiny program both analyzes and lowers, copy the exact five-file JUL-188 correction set into an isolated integration checkout and apply the focused change; verify the actual preserved caller's analysis and lowering once, without changing the original worktree/stashes or rebuilding the broad TLS implementation.
-- [ ] 4.2 If a distinct provider/generic ownership obligation remains, record its minimal source and exact failing proof and stop for scope/design review; verify no TLS-specific rule, ambient service fallback, signature weakening, or manual cleanup was introduced.
+- [x] 4.2 If a distinct provider/generic ownership obligation remains, record its minimal source and exact failing proof and stop for scope/design review; verify no TLS-specific rule, ambient service fallback, signature weakening, or manual cleanup was introduced.
 - [ ] 4.3 Publish the coherent focused commit range only with publication authorization and run broad delivery checks in CI, including `pnpm check` and package-content validation when applicable; record exact revisions and outcomes and hand integration instructions to the paused implementer without merging or completing JUL-188.
 
 ## Implementation status
