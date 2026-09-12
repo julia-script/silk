@@ -1371,15 +1371,20 @@ where &'env mut P provides &Transport from &mut Transport | &mut Clock {
   return run Effect.useReleaseNonParking(Lease<'env, P> { provider: move provider }, move use, move release)
 }
 effect<'call> fn callback<'call, P>(provider: &'call mut P) -> i32 { drop provider return 42 }
+effect fn recovered(reader: &mut Reader) -> i32 ? &mut Clock {
+  let result = run Effect.result(scoped(&mut reader.*, callback))
+  drop result
+  return 42
+}
 effect fn program() -> i32 {
   let mut clock = ParkingClock {}
   let mut reader = Reader {}
-  return run scoped(&mut reader, callback) |> Effect.provideMut<Clock>(&mut clock)
+  return run recovered(&mut reader) |> Effect.provideMut<Clock>(&mut clock)
 }
 effect fn immediate() -> i32 {
   let mut clock = ReadyClock {}
   let mut reader = Reader {}
-  return run scoped(&mut reader, callback) |> Effect.provideMut<Clock>(&mut clock)
+  return run recovered(&mut reader) |> Effect.provideMut<Clock>(&mut clock)
 }
 fn ready(state: &()) -> () { return () }
 fn completed(state: &mut i32, value: i32) -> () { state.* = value return () }
@@ -1402,25 +1407,27 @@ pub fn main() -> i32 {
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
-    const readers = Analysis.loweredMir(self).functions.filter(
-      (fn) =>
-        fn.id.name.includes('.read$effect$') &&
-        fn.instance.contractRow.some((entry) => entry.startsWith('provided:')),
-    )
-    const parkedReader = readers.find((fn) =>
-      fn.instance.contractRow.some((entry) => entry.includes('.ParkingClock<>')),
-    )
-    const immediateReader = readers.find((fn) =>
-      fn.instance.contractRow.some((entry) => entry.includes('.ReadyClock<>')),
-    )
-    assert.isDefined(parkedReader)
-    assert.isDefined(immediateReader)
-    assert.strictEqual(parkedReader?.suspension?.classification, 'Suspendable')
-    assert.isTrue(
-      parkedReader?.suspension?.regions.some(
-        (region) => region._tag === 'RunSuspendableEffectRegion',
-      ),
-    )
-    assert.isUndefined(immediateReader?.suspension)
+    for (const name of ['.read$effect$', 'recovered$effect$']) {
+      const readers = Analysis.loweredMir(self).functions.filter(
+        (fn) =>
+          fn.id.name.includes(name) &&
+          fn.instance.contractRow.some((entry) => entry.startsWith('provided:')),
+      )
+      const parkedReader = readers.find((fn) =>
+        fn.instance.contractRow.some((entry) => entry.includes('.ParkingClock<>')),
+      )
+      const immediateReader = readers.find((fn) =>
+        fn.instance.contractRow.some((entry) => entry.includes('.ReadyClock<>')),
+      )
+      assert.isDefined(parkedReader)
+      assert.isDefined(immediateReader)
+      assert.strictEqual(parkedReader?.suspension?.classification, 'Suspendable')
+      assert.isTrue(
+        parkedReader?.suspension?.regions.some(
+          (region) => region._tag === 'RunSuspendableEffectRegion',
+        ),
+      )
+      assert.isUndefined(immediateReader?.suspension)
+    }
   }),
 )

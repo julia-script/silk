@@ -77,3 +77,11 @@ and follows both callback providers even when the open callback is initially syn
 reproduction passed LLVM generation (5.55 s); its retained regression uses cheaper structural MIR
 assertions for the parking runner and synchronous control. Full native and exact-head CI remain
 pending while those runs complete.
+
+The next native run passed the callback edge and failed at an outer `Effect.result` relay (654.11 s).
+Moving the Clock provider outside a small recovered helper reproduced the missing propagation in
+4.88 s. The provided-runner worklist now follows recovery's protected Effect and handler even when
+initially synchronous, including retained catch bodies. LLVM generation then passed in 5.76 s.
+The permanent regression checks both the nested service runner and outer recovered runner under
+parking versus synchronous providers. These changes extend the same finite classification worklist;
+no provider-wide parking approximation or backend TLS recognition is used.

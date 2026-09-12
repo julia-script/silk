@@ -1458,12 +1458,18 @@ const builtinExecution = (
 }
 
 const providedRunnersOf = (
-  statements: ReadonlyArray<Hir.Statement>,
+  expressions: ReadonlyArray<Hir.Expression>,
   context: BuildContext,
 ): ReadonlyArray<Runner> => {
   const runners: Array<Runner> = []
   const visit = (expression: Hir.Expression): void => {
     if (expression._tag === 'EffectBlock') return
+    if (expression._tag === 'EffectCatch') {
+      const protectedRunner = runnerOf(expression.protected, context)
+      const handler = catchHandlerRunner(expression, context)
+      for (const runner of [protectedRunner, handler])
+        if (runner?.execution._tag === 'ProvidedEffectRunnerExecution') runners.push(runner)
+    }
     if (expression._tag === 'Run') {
       const protected_ = expression.subject
       if (
@@ -1483,8 +1489,7 @@ const providedRunnersOf = (
     }
     for (const child of Hir.expressionChildren(expression)) visit(child)
   }
-  for (const statement of statements)
-    for (const expression of Hir.statementExpressions(statement)) visit(expression)
+  for (const expression of expressions) visit(expression)
   return Object.freeze(runners)
 }
 
@@ -1646,7 +1651,12 @@ export const build = (
         instanceClassification,
         context,
       )
-      observedProvided.push(...providedRunnersOf(instance.function.statements, context))
+      observedProvided.push(
+        ...providedRunnersOf(
+          instance.function.statements.flatMap(Hir.statementExpressions),
+          context,
+        ),
+      )
       executions.push(
         Object.freeze({
           _tag: 'ProvisionalExecution',
@@ -1720,7 +1730,12 @@ export const build = (
                 runSpanOfCatch(instance.function.statements, expression, runnerContext),
               )
         if (expression._tag === 'EffectBlock')
-          observedProvided.push(...providedRunnersOf(expression.statements, runnerContext))
+          observedProvided.push(
+            ...providedRunnersOf(
+              expression.statements.flatMap(Hir.statementExpressions),
+              runnerContext,
+            ),
+          )
         else
           observedProvided.push(
             ...regions.flatMap((region) =>
@@ -1809,8 +1824,12 @@ export const build = (
               0,
               runSpanOfCatch(owner.function.statements, body, context),
             )
-      if (body._tag === 'EffectBlock')
-        pendingProvided.push(...providedRunnersOf(body.statements, context))
+      pendingProvided.push(
+        ...providedRunnersOf(
+          body._tag === 'EffectBlock' ? body.statements.flatMap(Hir.statementExpressions) : [body],
+          context,
+        ),
+      )
       const relaysProvidedRunner = regions.some(
         (region) =>
           region.outcome._tag === 'RunSuspendableEffect' &&
