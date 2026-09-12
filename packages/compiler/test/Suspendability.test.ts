@@ -1336,3 +1336,91 @@ pub effect fn main() -> i32 ! Fault {
     )
   }),
 )
+
+it.effect('retains parking control through a provided service implementation', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect { Effect }
+import silk.execution { Execution }
+import silk.allocator { Allocator, OutOfMemoryError }
+service Clock { effect fn wait() -> () ? &mut Clock }
+service Transport { effect fn read() -> i32 ? &mut Transport | &mut Clock }
+struct Guard { wake: Intrinsic.Wake }
+fn register(wake: Intrinsic.Wake) -> Guard { return Guard { wake: move wake } }
+struct ParkingClock {}
+impl Clock for ParkingClock {
+  effect fn wait(self: &mut Self) -> () { run Execution.park(register) return () }
+}
+struct ReadyClock {}
+impl Clock for ReadyClock { effect fn wait(self: &mut Self) -> () { return () } }
+struct Reader {}
+impl Transport for Reader {
+  effect fn read(self: &mut Self) -> i32 ? &mut Clock { run Clock.wait() return 42 }
+}
+effect fn read() -> i32 ? &mut Transport | &mut Clock { return run Transport.read() }
+struct Lease<'env, P> { provider: &'env mut P }
+effect fn scoped<'env, A, E, ?R, P>(
+  provider: &'env mut P,
+  callback: for<'call> once fn<'env>(&'call mut P) -> once Effect<'call; A ! E ? R>,
+) -> A ! E ? R | &mut Clock
+where &'env mut P provides &Transport from &mut Transport | &mut Clock {
+  let use = effect fn(owned: &mut Lease<'env, P>) -> A ! E ? R | &mut Clock {
+    let readValue = run read() |> Effect.provideMut<Transport>(&mut owned.provider.*)
+    return run callback(&mut owned.provider.*)
+  }
+  let release = effect fn(owned: &mut Lease<'env, P>) -> () { drop owned return () }
+  return run Effect.useReleaseNonParking(Lease<'env, P> { provider: move provider }, move use, move release)
+}
+effect<'call> fn callback<'call, P>(provider: &'call mut P) -> i32 { drop provider return 42 }
+effect fn program() -> i32 {
+  let mut clock = ParkingClock {}
+  let mut reader = Reader {}
+  return run scoped(&mut reader, callback) |> Effect.provideMut<Clock>(&mut clock)
+}
+effect fn immediate() -> i32 {
+  let mut clock = ReadyClock {}
+  let mut reader = Reader {}
+  return run scoped(&mut reader, callback) |> Effect.provideMut<Clock>(&mut clock)
+}
+fn ready(state: &()) -> () { return () }
+fn completed(state: &mut i32, value: i32) -> () { state.* = value return () }
+fn parked(state: &mut i32, execution: Intrinsic.Execution<i32>) -> () {
+  drop move execution
+  state.* = 42
+  return ()
+}
+effect fn canceled() -> i32 ! OutOfMemoryError ? &mut Allocator {
+  let immediateValue = run immediate()
+  let execution = run Execution.make(program(), (), ready)
+  let mut state = 0
+  run Execution.drive(move execution, &mut state, completed, parked)
+  return state
+}
+effect fn failed(error: OutOfMemoryError) -> i32 { drop error return -1 }
+pub fn main() -> i32 {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  return run Effect.catchAll(canceled(), failed) |> Effect.provideMut<Allocator>(&mut allocator)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+    const readers = Analysis.loweredMir(self).functions.filter(
+      (fn) =>
+        fn.id.name.includes('.read$effect$') &&
+        fn.instance.contractRow.some((entry) => entry.startsWith('provided:')),
+    )
+    const parkedReader = readers.find((fn) =>
+      fn.instance.contractRow.some((entry) => entry.includes('.ParkingClock<>')),
+    )
+    const immediateReader = readers.find((fn) =>
+      fn.instance.contractRow.some((entry) => entry.includes('.ReadyClock<>')),
+    )
+    assert.isDefined(parkedReader)
+    assert.isDefined(immediateReader)
+    assert.strictEqual(parkedReader?.suspension?.classification, 'Suspendable')
+    assert.isTrue(
+      parkedReader?.suspension?.regions.some(
+        (region) => region._tag === 'RunSuspendableEffectRegion',
+      ),
+    )
+    assert.isUndefined(immediateReader?.suspension)
+  }),
+)

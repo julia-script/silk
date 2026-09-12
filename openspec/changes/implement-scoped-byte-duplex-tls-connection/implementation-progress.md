@@ -65,3 +65,15 @@ contracts. Lowering now chooses one machine-body instance per emitted specializa
 leaving semantic discovery and its proof checks intact. The small regression asserts unique emitted
 symbols and preserves its corrupted-provider negative control; it passes in 2.06 s. Native acceptance
 and affected lowering/backend tests are being rerun.
+
+### Native parking callback control
+
+The native matrix then reached LLVM and exposed missing transfer control in the provided
+`ParkingDuplex.read` runner (631.01 s locally; confirmed by PR CI). A small scoped-use callback with
+captured callback identity and alternate synchronous/parking Clock providers reproduced the error.
+Directly run `EffectUseReleaseNonParking` has no retained Effect object for capture lookup.
+Provisional lowering now resolves the callable argument and its complete captured target arguments,
+and follows both callback providers even when the open callback is initially synchronous. The small
+reproduction passed LLVM generation (5.55 s); its retained regression uses cheaper structural MIR
+assertions for the parking runner and synchronous control. Full native and exact-head CI remain
+pending while those runs complete.

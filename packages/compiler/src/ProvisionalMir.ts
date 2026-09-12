@@ -938,6 +938,67 @@ const catchHandlerRunner = (
       })
 }
 
+const callableIdentityOf = (
+  expression: Hir.Expression,
+  context: BuildContext,
+): Type.CallableIdentityArgument | undefined => {
+  if (expression._tag === 'Unavailable') return undefined
+  const specialized = Type.substitute(
+    expression.type,
+    context.instance.substitution,
+    context.instance.specialization.compatibility,
+  )
+  if (
+    Type.isRepresented(specialized) &&
+    Type.isExactRepresentationArgument(specialized.representation.argument) &&
+    Type.isCallableIdentityArgument(specialized.representation.argument.identity)
+  )
+    return specialized.representation.argument.identity
+  if (expression._tag === 'BindingReference') {
+    const initializer = context.bindings.get(expression.binding.ordinal)
+    return initializer === undefined ? undefined : callableIdentityOf(initializer, context)
+  }
+  if (expression._tag === 'Move') return callableIdentityOf(expression.subject, context)
+  if (expression._tag === 'UnionConvert') return callableIdentityOf(expression.source, context)
+  if (expression._tag === 'ParameterReference')
+    return Instances.parameterCallableIdentity(
+      context.instance.function,
+      context.instance.key,
+      expression.parameter.ordinal,
+    )
+  if (expression._tag !== 'CallableSection' && expression._tag !== 'FunctionItem') return undefined
+  const target = Hir.callableTargetIdentity(expression.target)
+  const callable =
+    expression._tag !== 'CallableSection'
+      ? undefined
+      : context.discovery.callables.find(
+          (candidate) =>
+            Instances.keyText(candidate.owner) === Instances.keyText(context.instance.key) &&
+            Hir.executableSiteKey(candidate.site) === Hir.executableSiteKey(expression.site),
+        )
+  if (
+    expression._tag === 'CallableSection' &&
+    expression.captures.length > 0 &&
+    callable === undefined
+  )
+    return undefined
+  return Type.callableIdentityArgument(
+    target._tag === 'Declaration'
+      ? `declaration:${target.module}:${target.name}`
+      : `builtin:${target.actor}:${target.operation}`,
+    target,
+    callable?.typeArguments ??
+      expression.typeArguments.map((argument) =>
+        Type.substituteGenericArgument(
+          argument,
+          context.instance.substitution,
+          context.instance.specialization.compatibility,
+        ),
+      ),
+    callable === undefined ? undefined : Instances.callableEnvironmentIdentity(callable),
+  )
+}
+
 const builtinEffectCallbackRunner = (
   expression: Extract<Hir.Expression, { readonly _tag: 'BuiltinCall' }>,
   argumentOrdinal: number,
@@ -945,17 +1006,13 @@ const builtinEffectCallbackRunner = (
 ): Runner | undefined => {
   const argument = expression.arguments.at(argumentOrdinal)
   if (argument === undefined || argument._tag === 'Unavailable') return undefined
-  const effect = context.discovery.effects.find(
-    (candidate) => candidate.identity === effectIdentityOf(expression, context),
-  )
-  const callableIdentity = effect?.captures.find(
-    (capture) => capture.sourceOrdinal === argumentOrdinal,
-  )?.callableIdentity
-  const callableType = Type.substitute(
+  const callableIdentity = callableIdentityOf(argument, context)
+  const specialized = Type.substitute(
     argument.type,
     context.instance.substitution,
     context.instance.specialization.compatibility,
   )
+  const callableType = Type.isRepresented(specialized) ? specialized.contract : specialized
   if (
     callableIdentity?.target._tag !== 'Declaration' ||
     !Type.isCallable(callableType) ||
@@ -967,11 +1024,21 @@ const builtinEffectCallbackRunner = (
     module: callableIdentity.target.module,
     name: callableIdentity.target.name,
   })
+  const environment =
+    callableIdentity.environment === undefined
+      ? undefined
+      : Layout.callableEnvironmentByIdentity(context.layout, callableIdentity.environment)
+  if (callableIdentity.environment !== undefined && environment?._tag !== 'CallableEnvironment')
+    return undefined
+  const typeArguments =
+    environment?._tag === 'CallableEnvironment'
+      ? Layout.callableTargetArguments(environment)
+      : callableIdentity.typeArguments
   const identities = [
     ...new Set(
       Instances.matchingSpecialization(context.discovery, {
         declaration,
-        typeArguments: callableIdentity.typeArguments,
+        typeArguments,
       }).flatMap((candidate) =>
         candidate.resultEffect === undefined ? [] : [candidate.resultEffect],
       ),
@@ -1399,6 +1466,18 @@ const providedRunnersOf = (
     if (expression._tag === 'EffectBlock') return
     if (expression._tag === 'Run') {
       const protected_ = expression.subject
+      if (
+        protected_._tag === 'BuiltinCall' &&
+        protected_.operation === 'EffectUseReleaseNonParking'
+      ) {
+        // Directly run brackets do not construct a retained Effect environment. Follow both
+        // callback arguments even when their open execution is currently synchronous: a selected
+        // provider in a nested callback can introduce parking during the classification fixpoint.
+        for (const ordinal of [1, 2]) {
+          const callback = builtinEffectCallbackRunner(protected_, ordinal, context)
+          if (callback?.execution._tag === 'ProvidedEffectRunnerExecution') runners.push(callback)
+        }
+      }
       const runner = runnerOf(protected_, context)
       if (runner.execution._tag === 'ProvidedEffectRunnerExecution') runners.push(runner)
     }
