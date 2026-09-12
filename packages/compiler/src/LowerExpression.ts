@@ -1531,7 +1531,10 @@ function lowerRunExpression(
             availableRequirements,
           )
     }
-    if (recipe?._tag === 'BuiltinCall' && recipe.operation === 'EffectFinalize') {
+    if (
+      recipe?._tag === 'BuiltinCall' &&
+      (recipe.operation === 'EffectFinalize' || recipe.operation === 'EffectFinalizeNonParking')
+    ) {
       const [protectedExpression, finalizerExpression] = recipe.arguments
       if (protectedExpression === undefined || finalizerExpression === undefined) return undefined
       const protectedValue = lowerExpression(fn, protectedExpression, availableRequirements)

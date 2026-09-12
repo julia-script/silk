@@ -22,6 +22,12 @@
     "namespace": "Box"
   },
   {
+    "module": "silk/byte_duplex",
+    "path": "silk/byte_duplex.silk",
+    "namespace": "ByteDuplex",
+    "aliases": ["ByteIoError", "ByteIoOperation", "ReadTransfer"]
+  },
+  {
     "module": "silk/bytes",
     "path": "silk/bytes.silk",
     "namespace": "Bytes"
@@ -303,6 +309,18 @@
     "path": "silk/logger.silk",
     "namespace": "Logger",
     "aliases": ["InMemoryLogger", "LogError", "LogLevel"]
+  },
+  {
+    "module": "silk/memory_byte_duplex",
+    "path": "silk/memory_byte_duplex.silk",
+    "namespace": "MemoryByteDuplex",
+    "aliases": [
+      "MemoryByteDuplexAudit",
+      "MemoryByteDuplexPhase",
+      "MemoryReadEvent",
+      "MemoryWriteAction",
+      "MemoryWriteEvent"
+    ]
   },
   {
     "module": "silk/memory_trust_source",

@@ -37,6 +37,39 @@ it.effect('resolves Option, Result, and Vector operations through their namespac
   }),
 )
 
+it.effect('resolves the bounded byte duplex and scripted memory provider surfaces', () =>
+  Effect.gen(function* () {
+    const source = `import silk.allocator { Allocator, OutOfMemoryError }
+import silk.byte_duplex { ByteDuplex, ByteIoError, ReadTransfer }
+import silk.bytes { Bytes }
+import silk.effect { Effect }
+import silk.memory_byte_duplex { MemoryByteDuplex, MemoryReadEvent, MemoryWriteAction, MemoryWriteEvent }
+import silk.option { Option }
+import silk.system_clock { SystemClock }
+import silk.vector { Vector }
+effect fn makeProvider() -> MemoryByteDuplex ! OutOfMemoryError ? &mut Allocator {
+  let data = run Bytes.copy(&b"hello")
+  let mut reads = Vector.make<MemoryReadEvent>()
+  run Vector.append<MemoryReadEvent>(&mut reads, MemoryReadEvent.Data {
+    readyAt: SystemClock.make(1, 0),
+    bytes: move data,
+  })
+  let mut writes = Vector.make<MemoryWriteEvent>()
+  run Vector.append<MemoryWriteEvent>(&mut writes, MemoryWriteEvent {
+    readyAt: SystemClock.make(1, 0),
+    action: MemoryWriteAction.Accept {count: 2},
+  })
+  return run MemoryByteDuplex.make(move reads, move writes, 16, 8, Option.none<i32>())
+}
+pub fn main() -> i32 { return 42 }`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/byte-duplex',
+      ascii(source),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+  }),
+)
+
 it.effect('resolves selected scope actors for nonprimitive operation modules', () =>
   Effect.gen(function* () {
     const source = `import silk.execution { Execution }
