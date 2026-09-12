@@ -67,6 +67,13 @@
   realization. That result is an evidence-machinery limit, not a TLS runtime failure. The focused
   replacement does not retain or execute that program; delivery and CI checkboxes remain pending
   until exact-head evidence is read back.
+- Final demand review requires `feedInput` and `progress` to drain every immediately complete
+  buffered handshake message before advertising `NeedInput`, then schedule any KeyUpdate response
+  produced by that work. CertificateRequest review also admits empty `status_request` and
+  `signed_certificate_timestamp` requests plus bounded valid `oid_filters`, ignores framed
+  unrecognized extensions, rejects every duplicate type including unrecognized types, and
+  rejects profile-known extensions that are illegal at that location. Focused exact-head evidence
+  for these two repairs remains pending.
 - The complete rustls matrix exposed and fixed two HRR integration defects: retry ClientHello
   construction no longer resets the outer dispatcher's buffered handshake length, and a valid
   compatibility CCS is accepted while retry output is pending. Malformed CCS syntax remains owned

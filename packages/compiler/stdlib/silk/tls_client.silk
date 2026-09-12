@@ -338,7 +338,7 @@ pub enum ProtocolReason {
   HelloRetryRequest,
   /// Compatibility CCS is outside its window or not exactly `{1}`.
   CompatibilityCcs,
-  /// A peer CertificateRequest violates this no-credential profile.
+  /// A CertificateRequest has invalid framing, duplication, or a profile-forbidden extension.
   CertificateRequest,
   /// A peer Certificate message violates its TLS envelope.
   Certificate,
@@ -874,7 +874,9 @@ impl Client {
   /// # Details
   ///
   /// The returned `consumed` count identifies the exact accepted prefix. A clean peer close
-  /// consumes and ignores all later transport bytes as required by TLS 1.3.
+  /// consumes and ignores all later transport bytes as required by TLS 1.3. Before requesting
+  /// more input, the client drains every complete handshake message exposed by the accepted
+  /// record and schedules mandatory response output.
   pub effect fn feedInput(
     self: &mut Self,
     input: &[u8],
@@ -917,24 +919,24 @@ impl Client {
     return success(progress.consumed, 0, demand(&mut self.*))
   }
 
-  /// Advances one complete buffered handshake or mandatory control transition without new input.
+  /// Drains complete buffered handshake work and schedules mandatory control output without input.
   pub effect fn progress(self: &mut Self) -> Result<Progress, TlsError>
   ! OutOfMemoryError
   ? &mut Allocator | &mut Random {
     if let Option<TlsError>.Some {value: error} = move terminalError(&self.*) {
       return Result.failResult<Progress, TlsError>(move error)
     }
-    let scheduled = scheduleControl(&mut self.*)
-    if let Result<(), TlsError>.Failure {error} = move scheduled {
-      return Result.failResult<Progress, TlsError>(move error)
-    }
-    if completeHandshakeAvailable(&self.*) {
+    while completeHandshakeAvailable(&self.*) {
       let processed = run processHandshake(&mut self.*)
       if let Result<(), TlsError>.Failure {error} = move processed {
         return Result.failResult<Progress, TlsError>(move error)
       }
     }
-    return success(0, 0, demand(&mut self.*))
+    let scheduled = scheduleControl(&mut self.*)
+    return match move scheduled {
+      Result<(), TlsError>.Failure {error} => Result.failResult<Progress, TlsError>(move error)
+      Result<(), TlsError>.Success {value} => success(0, 0, demand(&mut self.*))
+    }
   }
 
   /// Acknowledges one transmitted prefix without acknowledging bytes implicitly.
@@ -2109,7 +2111,7 @@ effect fn handleReadyRecord(client: &mut Client) -> Result<Progress, TlsError>
     }
     client.handshakeLength = client.handshakeLength + contentLength
     client.emptyRecords = 0
-    if completeHandshakeAvailable(&client.*) {
+    while completeHandshakeAvailable(&client.*) {
       let processed = run processHandshake(&mut client.*)
       if let Result<(), TlsError>.Failure {error} = move processed {
         return Result.failResult<Progress, TlsError>(move error)
@@ -3048,14 +3050,13 @@ fn handleCertificateRequest(client: &mut Client, messageLength: usize) -> Result
   }
   let mut cursor: usize = 7
   let mut seen13 = false
-  let mut seen47 = false
-  let mut seen50 = false
   while cursor < messageLength {
     if messageLength - cursor < 4 {
       return Result.failResult<(), TlsError>(
         TlsError.ProtocolViolation {reason: ProtocolReason.CertificateRequest},
       )
     }
+    let extensionStart = cursor
     let kind = readU16Raw(&client.handshake, cursor)
     let length = readU16Raw(&client.handshake, cursor + 2)
     cursor = cursor + 4
@@ -3064,22 +3065,29 @@ fn handleCertificateRequest(client: &mut Client, messageLength: usize) -> Result
         TlsError.ProtocolViolation {reason: ProtocolReason.CertificateRequest},
       )
     }
+    if certificateRequestExtensionSeen(&client.*, extensionStart, kind) {
+      return certificateRequestFailure()
+    }
     if kind == 13 {
-      if seen13 || !validRequestedSignatureSchemes(&client.*, cursor, length) {
+      if !validRequestedSignatureSchemes(&client.*, cursor, length) {
         return certificateRequestFailure()
       }
       seen13 = true
+    } else if kind == 5 || kind == 18 {
+      if length != 0 { return certificateRequestFailure() }
     } else if kind == 47 {
-      if seen47 || !validCertificateAuthorities(&client.*, cursor, length) {
+      if !validCertificateAuthorities(&client.*, cursor, length) {
         return certificateRequestFailure()
       }
-      seen47 = true
+    } else if kind == 48 {
+      if !validOidFilters(&client.*, cursor, length) {
+        return certificateRequestFailure()
+      }
     } else if kind == 50 {
-      if seen50 || !validRequestedSignatureSchemes(&client.*, cursor, length) {
+      if !validRequestedSignatureSchemes(&client.*, cursor, length) {
         return certificateRequestFailure()
       }
-      seen50 = true
-    } else {
+    } else if forbiddenCertificateRequestExtension(kind) {
       return certificateRequestFailure()
     }
     cursor = cursor + length
@@ -3094,6 +3102,31 @@ fn certificateRequestFailure() -> Result<(), TlsError> {
   return Result.failResult<(), TlsError>(
     TlsError.ProtocolViolation {reason: ProtocolReason.CertificateRequest},
   )
+}
+
+fn certificateRequestExtensionSeen(client: &Client, end: usize, kind: usize) -> bool {
+  let mut cursor: usize = 7
+  while cursor < end {
+    let priorKind = readU16Raw(&client.handshake, cursor)
+    let priorLength = readU16Raw(&client.handshake, cursor + 2)
+    if priorKind == kind { return true }
+    cursor = cursor + 4 + priorLength
+  }
+  return false
+}
+
+fn forbiddenCertificateRequestExtension(kind: usize) -> bool {
+  return kind == 0
+    || kind == 10
+    || kind == 16
+    || kind == 28
+    || kind == 41
+    || kind == 42
+    || kind == 43
+    || kind == 44
+    || kind == 45
+    || kind == 49
+    || kind == 51
 }
 
 fn validRequestedSignatureSchemes(
@@ -3126,6 +3159,26 @@ fn validCertificateAuthorities(client: &Client, start: usize, length: usize) -> 
     cursor = cursor + 2
     if nameLength == 0 || nameLength > end - cursor { return false }
     cursor = cursor + nameLength
+  }
+  return cursor == end
+}
+
+fn validOidFilters(client: &Client, start: usize, length: usize) -> bool {
+  if length < 2 { return false }
+  let vectorLength = readU16Raw(&client.handshake, start)
+  if vectorLength + 2 != length { return false }
+  let mut cursor = start + 2
+  let end = start + length
+  while cursor < end {
+    let oidLength = u8.toUsize(RawBuffer.read<u8>(&client.handshake, cursor))
+    cursor = cursor + usize.ONE
+    if oidLength == 0 || oidLength > end - cursor { return false }
+    cursor = cursor + oidLength
+    if end - cursor < 2 { return false }
+    let valuesLength = readU16Raw(&client.handshake, cursor)
+    cursor = cursor + 2
+    if valuesLength > end - cursor { return false }
+    cursor = cursor + valuesLength
   }
   return cursor == end
 }

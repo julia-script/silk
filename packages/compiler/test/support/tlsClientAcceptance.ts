@@ -398,6 +398,119 @@ const unsolicitedRequestExtensionFlight = mutateCertificateRequest((message) => 
   return changed
 })
 
+const encodedExtension = (kind: number, body: Uint8Array): Buffer =>
+  Buffer.concat([Buffer.from([kind >> 8, kind & 0xff, body.length >> 8, body.length & 0xff]), body])
+
+const appendCertificateRequestExtensions = (
+  message: Buffer,
+  extensions: ReadonlyArray<readonly [number, Uint8Array]>,
+): Buffer => {
+  const existingLength = (message[5] ?? 0) * 256 + (message[6] ?? 0)
+  if (existingLength + 7 !== message.length) throw new Error('malformed CertificateRequest')
+  const appended = Buffer.concat(extensions.map(([kind, body]) => encodedExtension(kind, body)))
+  const combined = Buffer.concat([message.subarray(7), appended])
+  return handshakeMessage(
+    13,
+    Buffer.concat([
+      message.subarray(4, 5),
+      Buffer.from([combined.length >> 8, combined.length & 0xff]),
+      combined,
+    ]),
+  )
+}
+
+const certificateRequestPrefix = (
+  extensions: ReadonlyArray<readonly [number, Uint8Array]>,
+): Buffer => {
+  const flight = mutateCertificateRequest((message) =>
+    appendCertificateRequestExtensions(message, extensions),
+  )
+  const ranges = recordRanges(flight)
+  const protectedHandshake = ranges.find((range) => range.contentType === 23)
+  if (protectedHandshake === undefined) throw new Error('missing CertificateRequest prefix record')
+  const secret = keyLogSecret('ecdsa-x25519-aes128', 'SERVER_HANDSHAKE_TRAFFIC_SECRET')
+  const plaintext = unprotectRecord(
+    flight.subarray(protectedHandshake.start, protectedHandshake.end),
+    secret,
+    'aes128',
+    0,
+  )
+  const messages = plaintext.subarray(0, -1)
+  const request = handshakeRanges(messages).find((range) => range.kind === 13)
+  if (request === undefined) throw new Error('missing mutated CertificateRequest')
+  const prefix = messages.subarray(0, request.end)
+  return Buffer.concat([
+    flight.subarray(0, protectedHandshake.start),
+    protectRecord(prefix, 22, secret, 'aes128', 0),
+  ])
+}
+
+const validOptionalRequestPrefix = certificateRequestPrefix([
+  [5, Buffer.alloc(0)],
+  [18, Buffer.alloc(0)],
+  [48, Buffer.from([0, 4, 1, 42, 0, 0])],
+])
+const validUnknownRequestPrefix = certificateRequestPrefix([[65000, Buffer.from([1, 2, 3])]])
+const duplicateUnknownRequestPrefix = certificateRequestPrefix([
+  [65000, Buffer.from([1])],
+  [65000, Buffer.from([2])],
+])
+const malformedStatusRequestPrefix = certificateRequestPrefix([[5, Buffer.from([0])]])
+const malformedSctRequestPrefix = certificateRequestPrefix([[18, Buffer.from([0])]])
+const malformedOidFiltersPrefix = certificateRequestPrefix([[48, Buffer.from([0, 1, 0])]])
+const illegalKeyShareRequestPrefix = certificateRequestPrefix([[51, Buffer.alloc(0)]])
+
+const certificateRequestExtensionEntries = (
+  flight: Uint8Array,
+): ReadonlyArray<readonly [number, Buffer]> => {
+  const protectedHandshake = recordRanges(flight).find((range) => range.contentType === 23)
+  if (protectedHandshake === undefined) throw new Error('missing CertificateRequest record')
+  const plaintext = unprotectRecord(
+    flight.subarray(protectedHandshake.start, protectedHandshake.end),
+    keyLogSecret('ecdsa-x25519-aes128', 'SERVER_HANDSHAKE_TRAFFIC_SECRET'),
+    'aes128',
+    0,
+  )
+  const messages = plaintext.subarray(0, -1)
+  const range = handshakeRanges(messages).find((candidate) => candidate.kind === 13)
+  if (range === undefined) throw new Error('missing CertificateRequest message')
+  const request = messages.subarray(range.start, range.end)
+  const extensionsLength = (request[5] ?? 0) * 256 + (request[6] ?? 0)
+  if (extensionsLength + 7 !== request.length) throw new Error('malformed CertificateRequest')
+  const entries: Array<readonly [number, Buffer]> = []
+  let cursor = 7
+  while (cursor < request.length) {
+    const kind = (request[cursor] ?? 0) * 256 + (request[cursor + 1] ?? 0)
+    const length = (request[cursor + 2] ?? 0) * 256 + (request[cursor + 3] ?? 0)
+    cursor += 4
+    const end = cursor + length
+    if (end > request.length) throw new Error('truncated CertificateRequest extension')
+    entries.push([kind, Buffer.from(request.subarray(cursor, end))])
+    cursor = end
+  }
+  return entries
+}
+
+const optionalRequestEntries = certificateRequestExtensionEntries(validOptionalRequestPrefix)
+for (const kind of [5, 18]) {
+  const entry = optionalRequestEntries.find(([candidate]) => candidate === kind)
+  if (entry === undefined || entry[1].length !== 0) {
+    throw new Error(`CertificateRequest extension ${kind} is not empty`)
+  }
+}
+if (!optionalRequestEntries.some(([kind, body]) => kind === 48 && body.length === 6)) {
+  throw new Error('CertificateRequest oid_filters fixture is absent or malformed')
+}
+if (
+  certificateRequestExtensionEntries(validUnknownRequestPrefix).filter(([kind]) => kind === 65000)
+    .length !== 1 ||
+  certificateRequestExtensionEntries(duplicateUnknownRequestPrefix).filter(
+    ([kind]) => kind === 65000,
+  ).length !== 2
+) {
+  throw new Error('CertificateRequest unknown-extension fixture identity is wrong')
+}
+
 const invalidCcs = Buffer.from([20, 3, 3, 0, 1, 2])
 const validCcs = Buffer.from([20, 3, 3, 0, 1, 1])
 const applicationSecret = (id: string): Buffer => keyLogSecret(id, 'SERVER_TRAFFIC_SECRET_0')
@@ -462,6 +575,11 @@ const postHandshakeCertificateRequestRecord = postHandshakeRecord(
 const validTicketMessage = handshakeMessage(
   4,
   Buffer.from([0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 1, 1, 0, 1, 1, 0, 0]),
+)
+const coalescedTicketKeyUpdateRecord = postHandshakeRecord(
+  'rsa-x25519',
+  'chacha',
+  Buffer.concat([validTicketMessage, handshakeMessage(24, Buffer.from([1]))]),
 )
 const validTicketRecord1 = postHandshakeRecord('rsa-x25519', 'chacha', validTicketMessage, 1)
 const validTicketRecord2 = postHandshakeRecord('rsa-x25519', 'chacha', validTicketMessage, 2)
@@ -694,6 +812,13 @@ const expectedInitialKeyUpdateRecord = protectRecord(
   'chacha',
   0,
 )
+const expectedInitialPeerKeyUpdateResponseRecord = protectRecord(
+  handshakeMessage(24, Buffer.from([0])),
+  22,
+  rsaClientSecret,
+  'chacha',
+  0,
+)
 const expectedPeerKeyUpdateResponseRecord = protectRecord(
   handshakeMessage(24, Buffer.from([0])),
   22,
@@ -820,6 +945,15 @@ const nativeFixtureIds = {
   unsupportedSuiteFlight: 55,
   alpnBoundaryBytes: 56,
   malformedAlpnFlight: 57,
+  validOptionalRequestPrefix: 58,
+  validUnknownRequestPrefix: 59,
+  duplicateUnknownRequestPrefix: 60,
+  malformedStatusRequestPrefix: 61,
+  malformedSctRequestPrefix: 62,
+  malformedOidFiltersPrefix: 63,
+  illegalKeyShareRequestPrefix: 64,
+  coalescedTicketKeyUpdateRecord: 65,
+  expectedInitialPeerKeyUpdateResponseRecord: 66,
 } as const
 
 const nativeFixtures: ReadonlyArray<readonly [number, Uint8Array]> = [
@@ -881,6 +1015,18 @@ const nativeFixtures: ReadonlyArray<readonly [number, Uint8Array]> = [
   [nativeFixtureIds.unsupportedSuiteFlight, unsupportedSuiteFlight],
   [nativeFixtureIds.alpnBoundaryBytes, alpnBoundaryBytes],
   [nativeFixtureIds.malformedAlpnFlight, malformedAlpnFlight],
+  [nativeFixtureIds.validOptionalRequestPrefix, validOptionalRequestPrefix],
+  [nativeFixtureIds.validUnknownRequestPrefix, validUnknownRequestPrefix],
+  [nativeFixtureIds.duplicateUnknownRequestPrefix, duplicateUnknownRequestPrefix],
+  [nativeFixtureIds.malformedStatusRequestPrefix, malformedStatusRequestPrefix],
+  [nativeFixtureIds.malformedSctRequestPrefix, malformedSctRequestPrefix],
+  [nativeFixtureIds.malformedOidFiltersPrefix, malformedOidFiltersPrefix],
+  [nativeFixtureIds.illegalKeyShareRequestPrefix, illegalKeyShareRequestPrefix],
+  [nativeFixtureIds.coalescedTicketKeyUpdateRecord, coalescedTicketKeyUpdateRecord],
+  [
+    nativeFixtureIds.expectedInitialPeerKeyUpdateResponseRecord,
+    expectedInitialPeerKeyUpdateResponseRecord,
+  ],
 ]
 
 const cBytes = (bytes: Uint8Array): string =>
@@ -1510,6 +1656,133 @@ effect fn authenticateFragments(client: &mut Client, flight: &[u8]) -> i32
 
 `
 
+const tlsClientDemandDrivenHelper = `effect fn feedToDemand(
+  client: &mut Client,
+  input: &[u8],
+  expected: Demand,
+) -> i32
+! OutOfMemoryError
+? &mut Allocator | &mut Random {
+  let mut offset = usize.ZERO
+  while offset < input.length {
+    let remaining = Slice.view<u8>(input, offset, input.length - offset)
+    let fed = run Client.feedInput(&mut client.*, remaining)
+    let progress = match move fed {
+      Result<Progress, TlsError>.Success {value} => value
+      Result<Progress, TlsError>.Failure {error} => { return feedFailureCode(move error) }
+    }
+    if progress.consumed == usize.ZERO { return 21 }
+    offset = offset + progress.consumed
+    if offset < input.length && progress.demand != Demand.NeedInput { return 20 }
+    if offset == input.length {
+      if progress.demand == expected { return 0 }
+      return 20
+    }
+  }
+  return 21
+}
+`
+
+const tlsClientDemandRequestCases = `${tlsClientNativeCommon}${tlsClientDemandDrivenHelper}
+fn requestFixture(id: i32) -> i32 {
+  if id == 2 { return ${nativeFixtureIds.validOptionalRequestPrefix} }
+  if id == 3 { return ${nativeFixtureIds.validUnknownRequestPrefix} }
+  if id == 4 { return ${nativeFixtureIds.duplicateUnknownRequestPrefix} }
+  if id == 5 { return ${nativeFixtureIds.malformedStatusRequestPrefix} }
+  if id == 6 { return ${nativeFixtureIds.malformedSctRequestPrefix} }
+  if id == 7 { return ${nativeFixtureIds.malformedOidFiltersPrefix} }
+  return ${nativeFixtureIds.illegalKeyShareRequestPrefix}
+}
+
+effect fn demandRequestCase<'a>(
+  id: i32,
+  master: &TrustSnapshot,
+  protocols: &'a [AlpnProtocol<'a>],
+) -> bool
+! OutOfMemoryError
+? &mut Allocator | &mut Random {
+  let host = b"ExAmPlE.com"
+  let mut alpn = AlpnConfig.defaults()
+  let mut helloFixture = ${nativeFixtureIds.clientHello}
+  if id != 1 {
+    alpn = AlpnConfig.Offered {protocols: protocols, required: true}
+    helloFixture = ${nativeFixtureIds.aes128ClientHello}
+  }
+  let made = run makeClient(
+    master,
+    true,
+    reference(&host),
+    alpn,
+    ClientLimits.defaults(),
+    1789156800,
+  )
+  let mut client = match move made {
+    Result<Client, TlsError>.Success {value} => move value
+    Result<Client, TlsError>.Failure {error} => { return false }
+  }
+  if !(run matchesHello(&client, helloFixture)) { return false }
+  let helloLength = client.pendingOutput().length
+  drop client.ackWritten(helloLength)
+
+  if id == 0 {
+    let flight = run loadFixture(${nativeFixtureIds.aes128ServerFlight})
+    if (run feedToDemand(&mut client.*, Bytes.asSlice(&flight), Demand.NeedOutput)) != 0 {
+      return false
+    }
+    let expected = run loadFixture(${nativeFixtureIds.expectedEmptyCertificateRecord})
+    return sameBytes(client.pendingOutput(), Bytes.asSlice(&expected))
+  }
+
+  if id == 1 {
+    let flight = run loadFixture(${nativeFixtureIds.serverFlight})
+    if (run authenticate(&mut client.*, Bytes.asSlice(&flight))) != 0 { return false }
+    let mut plaintext: [u8; 40] = [
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]
+    let read = client.readPlaintext(&mut plaintext)
+    let written = match move read {
+      Result<Progress, TlsError>.Success {value} => value.written
+      Result<Progress, TlsError>.Failure {error} => usize.ZERO
+    }
+    if !validPlaintext(&plaintext, written) { return false }
+    let coalesced = run loadFixture(${nativeFixtureIds.coalescedTicketKeyUpdateRecord})
+    if (run feedToDemand(&mut client.*, Bytes.asSlice(&coalesced), Demand.NeedOutput)) != 0 {
+      return false
+    }
+    let expected = run loadFixture(
+      ${nativeFixtureIds.expectedInitialPeerKeyUpdateResponseRecord},
+    )
+    let response = client.pendingOutput()
+    if !sameBytes(response, Bytes.asSlice(&expected)) { return false }
+    let responseLength = response.length
+    drop response
+    return isNeedInput(client.ackWritten(responseLength))
+  }
+
+  let input = run loadFixture(requestFixture(id))
+  let code = run feedToDemand(&mut client.*, Bytes.asSlice(&input), Demand.NeedInput)
+  if id == 2 || id == 3 { return code == 0 }
+  return code == 47 && isFailureCode(run client.progress(), 47)
+}
+
+effect fn cases<'a>(protocols: &'a [AlpnProtocol<'a>]) -> i32
+! OutOfMemoryError
+? &mut Allocator {
+  let master = run rootTrust()
+  let mut random = ScriptedRandom {filled: 0}
+  let mut id = 0
+  while id <= 8 {
+    random.filled = usize.ZERO
+    let passed = run demandRequestCase(id, &master, protocols)
+      |> Effect.provideMut<Random>(&mut random)
+    if !passed || random.filled != 64 { return id + 1 }
+    id = id + 1
+  }
+  return 42
+}
+`
+
 const tlsClientCoreCases = `fn coreAuthenticationHidden(client: &Client) -> bool {
   let metadata = client.authentication()
   return match move metadata {
@@ -1908,11 +2181,8 @@ effect fn handshakePolicyCase<'a>(
   if id == 1 || id == 27 || id == 28 {
     let retry = run loadFixture(${nativeFixtureIds.aes256ServerRetry})
     if (run feedAll(&mut client, Bytes.asSlice(&retry))) != 0 { return false }
-    let expectedRetry = run loadFixture(${nativeFixtureIds.aes256ClientRetry})
-    let actualRetry = client.pendingOutput()
-    if !sameBytes(actualRetry, Bytes.asSlice(&expectedRetry)) { return false }
-    let retryLength = actualRetry.length
-    drop actualRetry
+    if !(run matchesHello(&client, ${nativeFixtureIds.aes256ClientRetry})) { return false }
+    let retryLength = client.pendingOutput().length
     drop client.ackWritten(retryLength)
     if id == 27 {
       let changed = run loadFixture(${nativeFixtureIds.changedSuiteAfterRetryFlight})
@@ -2156,8 +2426,8 @@ struct CountingAllocator {calls: usize}
 
 effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   self.calls = self.calls + usize.ONE
-  let invalid = 1 / 0
-  return run CountingAllocator.allocate(self, move layout)
+  let mut system = Allocator.systemAllocatorProvider()
+  return run Allocator.allocate(move layout) |> Effect.provideMut<Allocator>(&mut system)
 }
 
 impl Allocator for CountingAllocator {allocate: CountingAllocator.allocate}
@@ -2250,13 +2520,13 @@ effect fn limitsCase<'a>(
   drop client.ackWritten(helloLength)
   if id == 19 {
     let exactFlight = run loadFixture(${nativeFixtureIds.serverFlight})
-    return run authenticateWithinLimits(&mut client, Bytes.asSlice(&exactFlight))
+    return run authenticateWithinLimits(&mut client.*, Bytes.asSlice(&exactFlight))
   }
   if id >= 20 && id <= 22 {
     let exactFlight = run loadFixture(${nativeFixtureIds.serverFlight})
-    if !(run authenticateWithinLimits(&mut client, Bytes.asSlice(&exactFlight))) { return false }
+    if !(run authenticateWithinLimits(&mut client.*, Bytes.asSlice(&exactFlight))) { return false }
     let first = run loadFixture(${nativeFixtureIds.validTicketRecord1})
-    if !(run feedComplete(&mut client, Bytes.asSlice(&first), usize.ONE)) { return false }
+    if !(run feedComplete(&mut client.*, Bytes.asSlice(&first), usize.ONE)) { return false }
     let second = run loadFixture(${nativeFixtureIds.validTicketRecord2})
     let mut kind = TlsLimitKind.TicketBytes
     let mut limit: usize = ${validTicketMessage.length}
@@ -2267,12 +2537,12 @@ effect fn limitsCase<'a>(
       kind = TlsLimitKind.PostHandshakeControls
       limit = usize.ONE
     }
-    return run feedExpectedLimit(&mut client, Bytes.asSlice(&second), kind, limit)
+    return run feedExpectedLimit(&mut client.*, Bytes.asSlice(&second), kind, limit)
   }
   if id == 15 {
     let retry = run loadFixture(${nativeFixtureIds.cookieRetry})
     return run feedExpectedLimit(
-      &mut client,
+      &mut client.*,
       Bytes.asSlice(&retry),
       TlsLimitKind.CookieBytes,
       ${retryCookieLength - 1},
@@ -2280,9 +2550,9 @@ effect fn limitsCase<'a>(
   }
   if id == 16 {
     let ccs = run loadFixture(${nativeFixtureIds.validCcs})
-    if !(run feedComplete(&mut client, Bytes.asSlice(&ccs), 8)) { return false }
+    if !(run feedComplete(&mut client.*, Bytes.asSlice(&ccs), 8)) { return false }
     return run feedExpectedLimit(
-      &mut client,
+      &mut client.*,
       Bytes.asSlice(&ccs),
       TlsLimitKind.EmptyRecords,
       usize.ONE,
@@ -2291,7 +2561,7 @@ effect fn limitsCase<'a>(
   let flight = run loadFixture(${nativeFixtureIds.serverFlight})
   if id == 10 {
     return run feedExpectedLimit(
-      &mut client,
+      &mut client.*,
       Bytes.asSlice(&flight),
       TlsLimitKind.HandshakeMessages,
       usize.ONE,
@@ -2299,7 +2569,7 @@ effect fn limitsCase<'a>(
   }
   if id == 23 {
     return run feedExpectedLimit(
-      &mut client,
+      &mut client.*,
       Bytes.asSlice(&flight),
       TlsLimitKind.HandshakeBodyBytes,
       ${rsaHandshakeBodyBytes - 1},
@@ -2307,7 +2577,7 @@ effect fn limitsCase<'a>(
   }
   if id == 11 {
     return run feedExpectedLimit(
-      &mut client,
+      &mut client.*,
       Bytes.asSlice(&flight),
       TlsLimitKind.PeerCertificates,
       usize.ONE,
@@ -2315,7 +2585,7 @@ effect fn limitsCase<'a>(
   }
   if id == 12 {
     return run feedExpectedLimit(
-      &mut client,
+      &mut client.*,
       Bytes.asSlice(&flight),
       TlsLimitKind.CertificateBytes,
       ${rsaCertificateBytes - 1},
@@ -2323,7 +2593,7 @@ effect fn limitsCase<'a>(
   }
   if id == 13 {
     return run feedExpectedLimit(
-      &mut client,
+      &mut client.*,
       Bytes.asSlice(&flight),
       TlsLimitKind.CertificateTotalBytes,
       ${rsaCertificateTotalBytes - 1},
@@ -2331,14 +2601,14 @@ effect fn limitsCase<'a>(
   }
   if id == 14 {
     return run feedExpectedLimit(
-      &mut client,
+      &mut client.*,
       Bytes.asSlice(&flight),
       TlsLimitKind.ExtensionBytes,
       ${serverHelloExtensionLength - 1},
     )
   }
   return run feedExpectedLimit(
-    &mut client,
+    &mut client.*,
     Bytes.asSlice(&flight),
     TlsLimitKind.HandshakeBytes,
     ${rsaHandshakeBytes - 1},
@@ -2616,10 +2886,28 @@ const composeFocusedNative = (
 }
 
 export const tlsClientCoreNativeSource = composeNative(tlsClientCoreCases, tlsClientCoreMain)
+export const tlsClientDemandRequestNativeSource = composeFocusedNative(
+  tlsClientDemandRequestCases,
+  tlsClientSimpleMain,
+  new Set([
+    'emptyTrust',
+    'isNeedInput',
+    'isFailureCode',
+    'sameBytes',
+    'protocolFailureCode',
+    'feedFailureCode',
+    'alpnProtocol',
+    'feedOutcome',
+    'feedAll',
+    'authenticate',
+  ]),
+  ['scenarioReference', 'feedFragments', 'authenticateFragments'],
+)
 export const tlsClientKeyUpdateNativeSource = composeFocusedNative(
   tlsClientKeyUpdateCases,
   tlsClientCoreMain,
   new Set([
+    'emptyTrust',
     'isNeedOutput',
     'isNeedInput',
     'hasDemand',
@@ -2637,6 +2925,7 @@ export const tlsClientClosureControlNativeSource = composeFocusedNative(
   tlsClientClosureControlCases,
   tlsClientCoreMain,
   new Set([
+    'emptyTrust',
     'isNeedOutput',
     'hasDemand',
     'isPrematureWrite',
@@ -2674,6 +2963,7 @@ export const tlsClientResourcePolicyNativeSource = composeFocusedNative(
   tlsClientResourcePolicyCases,
   tlsClientResourcePolicyMain,
   new Set([
+    'emptyTrust',
     'isInvalidTime',
     'invalidLimit',
     'exactLimitFailure',

@@ -34,6 +34,7 @@ import {
 import {
   tlsClientClosureControlNativeSource,
   tlsClientCoreNativeSource,
+  tlsClientDemandRequestNativeSource,
   tlsClientHandshakePolicyNativeSource,
   tlsClientKeyUpdateNativeSource,
   tlsClientNativeFixtureSource,
@@ -8013,6 +8014,13 @@ pub fn main() -> i32 { return run Effect.catchAll(measure(), recoverAllocation) 
     name: 'authenticated-tls-client-core',
     source: tlsClientWasmSource,
     nativeSource: tlsClientCoreNativeSource,
+    nativeCSources: { tls_client_fixtures: tlsClientNativeFixtureSource },
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'authenticated-tls-client-demand-request',
+    source: tlsClientNativeOnlySource,
+    nativeSource: tlsClientDemandRequestNativeSource,
     nativeCSources: { tls_client_fixtures: tlsClientNativeFixtureSource },
     expected: { _tag: 'Completes', result: 42 },
   },

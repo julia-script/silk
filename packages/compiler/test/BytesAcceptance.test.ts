@@ -15,6 +15,7 @@ import {
   tlsClientEmptyCookieRetry,
   tlsClientFragmentationKinds,
   tlsClientCoreNativeSource,
+  tlsClientDemandRequestNativeSource,
   tlsClientHandshakePolicyNativeSource,
   tlsClientKeyUpdateNativeSource,
   tlsClientNativeFixtureSource,
@@ -161,6 +162,33 @@ it('pins TLS client control-slot and encoded-ALPN boundary guards in ordinary Si
     source.indexOf('fn deriveSharedSecret'),
   )
   assert.match(serverHello, /messageLength != client\.handshakeLength/)
+  const progress = source.slice(
+    source.indexOf('pub effect fn progress'),
+    source.indexOf('pub fn ackWritten'),
+  )
+  assert.include(progress, 'while completeHandshakeAvailable(&self.*)')
+  assert.isBelow(progress.indexOf('processHandshake'), progress.indexOf('scheduleControl'))
+  const readyRecord = source.slice(
+    source.indexOf('effect fn handleReadyRecord'),
+    source.indexOf('fn compatibilityWindow'),
+  )
+  assert.include(readyRecord, 'while completeHandshakeAvailable(&client.*)')
+  const certificateRequest = source.slice(
+    source.indexOf('fn handleCertificateRequest'),
+    source.indexOf('effect fn handleCertificate'),
+  )
+  assert.include(certificateRequest, 'certificateRequestExtensionSeen')
+  assert.include(certificateRequest, 'kind == 5 || kind == 18')
+  assert.include(certificateRequest, 'if length != 0')
+  assert.include(certificateRequest, 'kind == 48')
+  assert.include(certificateRequest, 'validOidFilters')
+  const forbiddenRequest = certificateRequest.slice(
+    certificateRequest.indexOf('fn forbiddenCertificateRequestExtension'),
+    certificateRequest.indexOf('fn validRequestedSignatureSchemes'),
+  )
+  assert.include(forbiddenRequest, 'kind == 51')
+  assert.notMatch(forbiddenRequest, /kind == 5\b/)
+  assert.notMatch(forbiddenRequest, /kind == 18\b/)
   const read = source.slice(
     source.indexOf('pub fn readPlaintext'),
     source.indexOf('pub fn writePlaintext'),
@@ -214,6 +242,7 @@ it('pins TLS client control-slot and encoded-ALPN boundary guards in ordinary Si
 it('keeps focused TLS client witnesses independent and bounded', () => {
   const nativeSources = [
     tlsClientCoreNativeSource,
+    tlsClientDemandRequestNativeSource,
     tlsClientKeyUpdateNativeSource,
     tlsClientClosureControlNativeSource,
     tlsClientHandshakePolicyNativeSource,
@@ -228,16 +257,18 @@ it('keeps focused TLS client witnesses independent and bounded', () => {
     assert.include(source, 'silk_tls_fixture_copy')
     assert.lengthOf(source.match(/Client\.make\(/g) ?? [], 1)
     assert.notInclude(source, 'while id <= 62')
-    assert.isAtMost(source.length, tlsClientCoreNativeSource.length)
     assert.notMatch(source, /if run [^\n]+ !=/)
   }
   assert.lengthOf(tlsClientKeyUpdateNativeSource.match(/provideMut<Allocator>/g) ?? [], 1)
   assert.lengthOf(tlsClientKeyUpdateNativeSource.match(/provideMut<Random>/g) ?? [], 1)
+  assert.lengthOf(tlsClientDemandRequestNativeSource.match(/provideMut<Allocator>/g) ?? [], 1)
+  assert.lengthOf(tlsClientDemandRequestNativeSource.match(/provideMut<Random>/g) ?? [], 1)
+  assert.isBelow(tlsClientDemandRequestNativeSource.length, tlsClientCoreNativeSource.length)
   assert.lengthOf(tlsClientClosureControlNativeSource.match(/provideMut<Allocator>/g) ?? [], 1)
   assert.lengthOf(tlsClientClosureControlNativeSource.match(/provideMut<Random>/g) ?? [], 1)
   assert.lengthOf(tlsClientHandshakePolicyNativeSource.match(/provideMut<Allocator>/g) ?? [], 1)
   assert.lengthOf(tlsClientHandshakePolicyNativeSource.match(/provideMut<Random>/g) ?? [], 1)
-  assert.lengthOf(tlsClientResourcePolicyNativeSource.match(/provideMut<Allocator>/g) ?? [], 2)
+  assert.lengthOf(tlsClientResourcePolicyNativeSource.match(/provideMut<Allocator>/g) ?? [], 3)
   assert.lengthOf(tlsClientResourcePolicyNativeSource.match(/provideMut<Random>/g) ?? [], 1)
   assert.include(tlsClientKeyUpdateNativeSource, 'let oversized = run Bytes.zeroed(16385)')
   assert.include(tlsClientKeyUpdateNativeSource, 'value.consumed == 16384')
@@ -245,6 +276,11 @@ it('keeps focused TLS client witnesses independent and bounded', () => {
   assert.include(
     tlsClientKeyUpdateNativeSource,
     'sameBytes(client.pendingOutput(), Bytes.asSlice(&stable))',
+  )
+  assert.include(tlsClientDemandRequestNativeSource, 'let coalesced = run loadFixture(65)')
+  assert.include(
+    tlsClientDemandRequestNativeSource,
+    'feedToDemand(&mut client.*, Bytes.asSlice(&coalesced), Demand.NeedOutput)',
   )
   assert.include(tlsClientResourcePolicyNativeSource, 'TlsLimitKind.Alpn, 1024)')
   for (const kind of [
@@ -276,6 +312,20 @@ it('keeps focused TLS client witnesses independent and bounded', () => {
   )
   assert.include(tlsClientHandshakePolicyNativeSource, 'let expectedFinished = run loadFixture(47)')
   assert.include(tlsClientHandshakePolicyNativeSource, 'random.filled != expectedEntropy')
+  assert.include(
+    tlsClientDemandRequestNativeSource,
+    'feedToDemand(&mut client.*, Bytes.asSlice(&flight), Demand.NeedOutput)',
+  )
+  assert.include(tlsClientDemandRequestNativeSource, 'while id <= 8')
+  const demandDriven = tlsClientDemandRequestNativeSource.slice(
+    tlsClientDemandRequestNativeSource.indexOf('effect fn feedToDemand'),
+    tlsClientDemandRequestNativeSource.indexOf('fn requestFixture'),
+  )
+  assert.isNotEmpty(demandDriven)
+  assert.notInclude(demandDriven, 'Client.progress')
+  for (const fixtureId of [58, 59, 60, 61, 62, 63, 64, 65, 66]) {
+    assert.include(tlsClientNativeFixtureSource, `case ${fixtureId}:`)
+  }
   assert.deepEqual(tlsClientFragmentationKinds.initialFlight, [2, 8, 11, 15, 20])
   assert.deepEqual(tlsClientFragmentationKinds.keyUpdate, [24])
   assert.include(

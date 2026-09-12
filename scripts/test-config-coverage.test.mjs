@@ -158,6 +158,7 @@ void test('exact-head full verification remains explicit and complete', () => {
 void test('TLS client smoke coverage uses only the bounded focused witnesses', () => {
   for (const name of [
     'authenticated-tls-client-core',
+    'authenticated-tls-client-demand-request',
     'authenticated-tls-client-key-update',
     'authenticated-tls-client-closure-control',
     'authenticated-tls-client-handshake-policy',
