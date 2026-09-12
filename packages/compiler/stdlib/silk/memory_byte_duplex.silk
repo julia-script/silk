@@ -283,7 +283,6 @@ impl MemoryByteDuplex {
     }
     if self.phaseValue == MemoryByteDuplexPhase.WriteShutdown { return () }
     run checkDeadline(&deadline, ByteIoOperation.ShutdownWrite)
-    let flushed = record(&mut self.*, ByteIoOperation.Flush, usize.ZERO)
     let recorded = record(&mut self.*, ByteIoOperation.ShutdownWrite, usize.ZERO)
     self.phaseValue = MemoryByteDuplexPhase.WriteShutdown
     return ()

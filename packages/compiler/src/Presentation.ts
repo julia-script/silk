@@ -462,10 +462,17 @@ export const serviceOperation = (self: DeclarationFacts.ServiceOperationFact): P
       return `${parameter.phase === 'Static' ? 'static ' : ''}${parameterName}: ${declaredType(parameter.declaredType)}`
     })
     .join(', ')
+  const properties = self.staticProperties
+    .map((property) =>
+      property === 'Intrinsic.NonParking'
+        ? ' with Intrinsic.nonParking()'
+        : ' with Intrinsic.detached()',
+    )
+    .join('')
   return Object.freeze({
     _tag: 'ServiceOperationPresentation',
     name,
-    text: `${operator}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}`,
+    text: `${operator}${kind} ${name}${typeParameters}(${parameters}) -> ${declaredType(self.returnType)}${failureRow(self.failureRow)}${requirementRow(self.requirementRow)}${constraints(self.constraints)}${properties}`,
   })
 }
 

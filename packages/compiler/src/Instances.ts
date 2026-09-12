@@ -240,6 +240,11 @@ export interface Discovery {
   readonly constants: ReadonlyArray<SelectedConstant>
   /** Exact direct/nested/external-park summaries in canonical subject order. */
   readonly suspension: ReadonlyArray<SuspensionFact>
+  /** Exact finalizer and service-operation implementations required to exclude external parking. */
+  readonly nonParkingObligations: ReadonlyArray<{
+    readonly span: SourceSpan.SourceSpan
+    readonly summary: SuspensionMode.Summary
+  }>
   /** Function bodies whose executed closure enters diagnostic observation. */
   readonly contextFreeTerminalObservations: ReadonlyArray<SourceSpan.SourceSpan>
   readonly observingExecutions: ReadonlyArray<InstanceKey>
@@ -343,6 +348,7 @@ export const invalid = (rootModule: string): Discovery =>
     foreignExports: Object.freeze([]),
     constants: Object.freeze([]),
     suspension: Object.freeze([]),
+    nonParkingObligations: Object.freeze([]),
     contextFreeTerminalObservations: Object.freeze([]),
     observingExecutions: Object.freeze([]),
     residualizationDiagnostics: Object.freeze([]),
@@ -1944,6 +1950,11 @@ export const discover = (
         }),
       ),
     ]),
+    nonParkingObligations: Object.freeze(
+      finalGraph.nonParkingObligations.map((obligation) =>
+        Object.freeze({ span: obligation.span, summary: summaryOfNode(obligation.node) }),
+      ),
+    ),
     residualizationDiagnostics: Object.freeze([...residualizationDiagnostics.values()]),
     specializationFailures: Object.freeze([...specializationFailures.values()]),
     violations: Object.freeze(violations),

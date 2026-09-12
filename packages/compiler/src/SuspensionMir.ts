@@ -203,6 +203,10 @@ const descriptorOf = (
     runner,
     outcome: runner.outcome,
     slots: plan.slots,
+    ...('cancellationFinalizer' in plan.operation &&
+    plan.operation.cancellationFinalizer !== undefined
+      ? { cancellationFinalizer: plan.operation.cancellationFinalizer }
+      : {}),
     success: Object.freeze({
       ...pathPlanOf(plan.success),
       resume: resumeOf(point, 'Success'),

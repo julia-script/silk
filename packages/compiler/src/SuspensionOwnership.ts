@@ -625,6 +625,10 @@ const planFor = (
     }
   }
   const retained = new Set([...live, ...(parkGuard === undefined ? [] : [parkGuard])])
+  if ('cancellationFinalizer' in operation && operation.cancellationFinalizer !== undefined) {
+    retained.add(operation.cancellationFinalizer.effect.ordinal)
+    for (const argument of operation.cancellationFinalizer.arguments) retained.add(argument.ordinal)
+  }
   // A suspended child still uses its borrowed captures even when the parent never
   // reads them again. Follow represented environments to the actual referents;
   // retaining only locals live after the run leaves these pointers on the stack.

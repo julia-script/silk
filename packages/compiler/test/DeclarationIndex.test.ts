@@ -339,7 +339,7 @@ it.effect('indexes source services and their operation contracts as distinct can
         'root',
         `pub struct WriteFailure {}
 pub service Logger<T> {
-  effect fn log(static template: string<'static>, message: &[u8], value: T) -> () ! WriteFailure ? &mut Logger<T>
+  effect fn log(static template: string<'static>, message: &[u8], value: T) -> () ! WriteFailure ? &mut Logger<T> with Intrinsic.nonParking()
   fn enabled() -> bool
 }`,
       ],
@@ -356,6 +356,7 @@ pub service Logger<T> {
         name: operation.name._tag === 'Present' ? operation.name.spelling : 'Unavailable',
         state: operation.state._tag,
         kind: operation.functionKind,
+        properties: operation.staticProperties,
         parameters: operation.parameters.map((parameter) =>
           parameter.declaredType._tag === 'Resolved'
             ? Type.encode(parameter.declaredType.type)
@@ -376,6 +377,7 @@ pub service Logger<T> {
           name: 'log',
           state: 'Unique',
           kind: 'Effect',
+          properties: ['Intrinsic.NonParking'],
           parameters: ["string<'static>", "&'life1 [u8]", 'T'],
           result: '()',
           failures: ['root.WriteFailure'],
@@ -385,6 +387,7 @@ pub service Logger<T> {
           name: 'enabled',
           state: 'Unique',
           kind: 'Ordinary',
+          properties: [],
           parameters: [],
           result: 'bool',
           failures: [],
@@ -395,9 +398,30 @@ pub service Logger<T> {
     const log = service?.operations.at(0)
     assert.strictEqual(
       log === undefined ? undefined : Presentation.serviceOperation(log).text,
-      "effect<'env> fn log<'life1: 'env, 'env>(static template: string<'static>, message: &'life1 [u8], value: T) -> () ! WriteFailure ? &mut root.Logger<T>",
+      "effect<'env> fn log<'life1: 'env, 'env>(static template: string<'static>, message: &'life1 [u8], value: T) -> () ! WriteFailure ? &mut root.Logger<T> with Intrinsic.nonParking()",
     )
     assert.deepEqual(index.diagnostics, [])
+  }),
+)
+
+it.effect('rejects malformed service operation executable properties', () =>
+  Effect.gen(function* () {
+    const index = yield* collect('root', [
+      [
+        'root',
+        `service Invalid {
+  fn ordinary() -> () with Intrinsic.nonParking()
+  effect fn arguments() -> () with Intrinsic.nonParking(value: true)
+  effect fn unsupported() -> () with Intrinsic.detached()
+  effect fn duplicate() -> () with Intrinsic.nonParking() with Intrinsic.nonParking()
+}`,
+      ],
+    ])
+
+    assert.deepEqual(
+      index.diagnostics.map((diagnostic) => diagnostic.code),
+      ['SEM0090', 'SEM0090', 'SEM0090', 'SEM0090'],
+    )
   }),
 )
 

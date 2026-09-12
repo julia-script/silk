@@ -191,8 +191,6 @@ const inferFailureRow = (
   allowOpenActual: boolean,
   context: InferenceContext,
 ): boolean => {
-  if (!allowOpenActual && RowAlgebra.concretize(failureRowPolicy(), actual)._tag !== 'Concrete')
-    return false
   if (RowAlgebra.key(failureRowPolicy(), pattern) === RowAlgebra.key(failureRowPolicy(), actual)) {
     // An open witness receiver still supplies evidence when its failure row is identical to
     // the implementation's pattern. Retain those identity bindings, just as inferType does
@@ -211,17 +209,15 @@ const inferFailureRow = (
   )
     return true
   if (pattern.expression._tag === 'Singleton') {
-    if (actual.expression._tag === 'Singleton')
-      return bindGenericArgument(
-        pattern.expression.member.parameter,
-        actual.expression.member.parameter,
-        inferred,
-        context,
-      )
-    const concrete = RowAlgebra.concretize(failureRowPolicy(), actual)
-    if (concrete._tag !== 'Concrete') return false
-    const normalized = union(concrete.row.members)
+    const normalized = union([...failureMembers(actual), ...failureMemberParameters(actual)])
     if (normalized._tag !== 'Normalized') return false
+    if (
+      someSubterm(
+        normalized.type,
+        (part) => isParameter(part) && key(part) === key(pattern.expression.member.parameter),
+      )
+    )
+      return false
     return bindGenericArgument(
       pattern.expression.member.parameter,
       normalized.type,
@@ -229,6 +225,8 @@ const inferFailureRow = (
       context,
     )
   }
+  if (!allowOpenActual && RowAlgebra.concretize(failureRowPolicy(), actual)._tag !== 'Concrete')
+    return false
   if (
     pattern.expression._tag === 'Without' ||
     (pattern.expression._tag === 'Union' &&
@@ -263,11 +261,6 @@ const inferRequirementRowArgument = (
   allowOpenActual: boolean,
   context: InferenceContext,
 ): boolean => {
-  if (
-    !allowOpenActual &&
-    RowAlgebra.concretize(requirementRowPolicy(), actual.row)._tag !== 'Concrete'
-  )
-    return false
   if (genericArgumentKey(pattern) === genericArgumentKey(actual)) return true
   const substitutedPattern = requirementRowArgumentFromRow(
     substituteRequirementsRow(pattern.row, inferred),
@@ -285,6 +278,11 @@ const inferRequirementRowArgument = (
       return false
     return bindGenericArgument(pattern.row.expression.parameter, actual, inferred, context)
   }
+  if (
+    !allowOpenActual &&
+    RowAlgebra.concretize(requirementRowPolicy(), actual.row)._tag !== 'Concrete'
+  )
+    return false
   if (substitutedPattern.row.expression._tag === 'Union') {
     const rowParameters = substitutedPattern.row.expression.operands.filter(
       (operand): operand is Extract<typeof operand, { readonly _tag: 'RowParameter' }> =>
@@ -477,6 +475,10 @@ export const rowInferenceFailure = (
   pattern: Type,
   actual: Type,
 ): RowInferenceFailure | undefined => {
+  // A generic forwarding site may preserve the exact caller-owned row identity. It is open, but
+  // it requires no decomposition or inference, so rejecting it as non-finite would make ordinary
+  // wrappers less expressive than the declaration they forward to.
+  if (equals(pattern, actual)) return undefined
   if (isNominal(pattern) && isNominal(actual)) {
     if (
       pattern.module !== actual.module ||

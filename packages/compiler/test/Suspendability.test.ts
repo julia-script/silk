@@ -637,7 +637,7 @@ pub fn main() -> i32 { return invoke(application) }`
   }),
 )
 
-it.effect('requires a nonparking exact Effect representation for cancellation finalization', () =>
+it.effect('requires an exact nonparking execution for cancellation finalization', () =>
   Effect.gen(function* () {
     const accepted = yield* snapshot(`import silk.effect { Effect }
 effect fn protected() -> i32 { return 42 }
@@ -661,7 +661,7 @@ pub fn main() -> i32 { return run Effect.ensuringNonParking(protected(), release
 it.effect('checks an abstract finalizer service call after concrete provider selection', () =>
   Effect.gen(function* () {
     const self = yield* snapshot(`import silk.effect { Effect }
-service Duplex { effect fn close() -> () ? &mut Duplex }
+service Duplex { effect fn close() -> () ? &mut Duplex with Intrinsic.nonParking() }
 struct MemoryDuplex { closed: bool }
 impl Duplex for MemoryDuplex {
   effect fn close(self: &mut Self) -> () { self.closed = true return () }
@@ -676,6 +676,81 @@ pub fn main() -> i32 {
   return run scoped() |> Effect.provideMut<Duplex>(&mut duplex)
 }`)
     assert.deepEqual(Analysis.diagnostics(self), [])
+
+    const parked = yield* snapshot(`import silk.effect { Effect }
+import silk.execution { Execution }
+service Duplex { effect fn close() -> () ? &mut Duplex with Intrinsic.nonParking() }
+struct ParkingDuplex {}
+fn register(wake: Intrinsic.Wake) -> () { drop wake return () }
+impl Duplex for ParkingDuplex {
+  effect fn close(self: &mut Self) -> () { run Execution.park(register) return () }
+}
+effect fn protected() -> i32 { return 42 }
+effect fn release() -> () ? &mut Duplex { return run Duplex.close() }
+effect fn scoped() -> i32 ? &mut Duplex {
+  return run Effect.ensuringNonParking(protected(), release())
+}
+pub fn main() -> i32 {
+  let mut duplex = ParkingDuplex {}
+  return run scoped() |> Effect.provideMut<Duplex>(&mut duplex)
+}`)
+    assert.include(
+      Analysis.diagnostics(parked).map((diagnostic) => diagnostic.code),
+      'SEM0139',
+    )
+
+    const nested = yield* snapshot(`import silk.effect { Effect }
+service Duplex { effect fn close() -> () ? &mut Duplex with Intrinsic.nonParking() }
+struct NestedDuplex {}
+impl Duplex for NestedDuplex {
+  effect fn close(self: &mut Self) -> () { return run Effect.suspend(effect { return () }) }
+}
+effect fn protected() -> i32 { return 42 }
+effect fn release() -> () ? &mut Duplex { return run Duplex.close() }
+effect fn scoped() -> i32 ? &mut Duplex {
+  return run Effect.ensuringNonParking(protected(), release())
+}
+pub fn main() -> i32 {
+  let mut duplex = NestedDuplex {}
+  return run scoped() |> Effect.provideMut<Duplex>(&mut duplex)
+}`)
+    assert.deepEqual(Analysis.diagnostics(nested), [])
+  }),
+)
+
+it.effect('retains an armed cancellation finalizer and its selected provider', () =>
+  Effect.gen(function* () {
+    const self = yield* snapshot(`import silk.effect { Effect }
+import silk.execution { Execution }
+fn register(wake: Intrinsic.Wake) -> () { drop wake return () }
+service Duplex { effect fn close() -> () ? &mut Duplex with Intrinsic.nonParking() }
+struct MemoryDuplex { closed: bool }
+impl Duplex for MemoryDuplex {
+  effect fn close(self: &mut Self) -> () { self.closed = true return () }
+}
+effect fn protected() -> i32 { run Execution.park(register) return 42 }
+effect fn release() -> () ? &mut Duplex { return run Duplex.close() }
+effect fn scoped() -> i32 ? &mut Duplex {
+  return run Effect.ensuringNonParking(protected(), release())
+}
+pub fn main() -> i32 {
+  let mut duplex = MemoryDuplex {closed: false}
+  return run scoped() |> Effect.provideMut<Duplex>(&mut duplex)
+}`)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const states = mir.functions.flatMap((fn) => fn.suspension?.frame?.states ?? [])
+    const armed = states.filter((state) => state.cancellationFinalizer !== undefined)
+    assert.lengthOf(armed, 1)
+    const state = armed.at(0)
+    assert.isDefined(state)
+    const finalizer = state?.cancellationFinalizer
+    assert.isDefined(finalizer)
+    if (state === undefined || finalizer === undefined) return
+    const retained = new Set(state.slots.map((slot) => slot.local.ordinal))
+    assert.isNotEmpty(finalizer.arguments)
+    for (const provider of finalizer.arguments) assert.isTrue(retained.has(provider.ordinal))
   }),
 )
 

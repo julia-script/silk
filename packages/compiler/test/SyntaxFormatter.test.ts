@@ -412,6 +412,25 @@ unsafe extern "C" fn tick() with Intrinsic.foreign(memory: "none", noReturn: tru
   }),
 )
 
+it.effect('formats service operation executable properties canonically and idempotently', () =>
+  Effect.gen(function* () {
+    const source =
+      'service Duplex{effect fn close( )->() ? &mut Duplex with Intrinsic.nonParking( )}'
+    const first = yield* SyntaxFormatter.format(parse('memory://service-property.silk', source))
+    const text = formattedText(first)
+    assert.strictEqual(
+      text,
+      `service Duplex {
+  effect fn close() -> () ? &mut Duplex with Intrinsic.nonParking()
+}
+`,
+    )
+    const second = yield* SyntaxFormatter.format(parse('memory://service-property.silk', text))
+    assert.strictEqual(formattedText(second), text)
+    assert.strictEqual(second.changed, false)
+  }),
+)
+
 it.effect('formats C-layout struct declarations canonically and idempotently', () =>
   Effect.gen(function* () {
     const source = 'pub   extern  "C"struct Timespec{seconds:i64 nanoseconds:i64}'

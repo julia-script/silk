@@ -68,6 +68,28 @@ pub fn main() -> i32 { return wrap<Boom>(true, Boom { code: 7 }) }`)
   }),
 )
 
+it.effect('propagates fixed and outer generic failures through ensuringNonParking', () =>
+  Effect.gen(function* () {
+    const accepted = yield* analyze(`import silk.effect { Effect }
+struct FixedFailure { code: i32 }
+effect fn forward<'env, A, E>(
+  protected: once Effect<'env; A ! E | FixedFailure>,
+  finalizer: once Effect<'env; ()>,
+) -> A ! E | FixedFailure {
+  return run Effect.ensuringNonParking(move protected, move finalizer)
+}
+pub fn main() -> i32 { return 42 }`)
+    assert.notInclude(codes(accepted), 'SEM0066')
+
+    const rejected = yield* analyze(`struct FixedFailure { code: i32 }
+effect fn reject<'env, A, E>(protected: once Effect<'env; A ! E | FixedFailure>) -> A ! E {
+  return run move protected
+}
+pub fn main() -> i32 { return 42 }`)
+    assert.include(codes(rejected), 'SEM0066')
+  }),
+)
+
 it.effect('retains failure and service rows of operations run inside a deferred block', () =>
   Effect.gen(function* () {
     const self = yield* analyze(`import silk.host_input { HostInput, HostInputError }

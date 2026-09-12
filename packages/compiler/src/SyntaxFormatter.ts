@@ -594,6 +594,7 @@ const printServiceOperation = (
   const failureRow = directNodes(node).find((child) => child.kind === 'FailureRow')
   const requirementRow = directNodes(node).find((child) => child.kind === 'RequirementRow')
   const whereClause = directNodes(node).find((child) => child.kind === 'WhereClause')
+  const properties = directNodes(node).filter((child) => child.kind === 'FunctionPropertyClause')
   const body = directNodes(node).find((child) => child.kind === 'Block')
   return FormatDocument.concat(
     ...(operatorKeyword === undefined || operatorToken === undefined
@@ -646,6 +647,7 @@ const printServiceOperation = (
     ...(whereClause === undefined
       ? []
       : [printNode(context, whereClause, FormatDocument.text(' '))]),
+    ...properties.map((property) => printNode(context, property, FormatDocument.text(' '))),
     ...(body === undefined ? [] : [printNode(context, body, FormatDocument.text(' '))]),
   )
 }

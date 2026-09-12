@@ -457,12 +457,11 @@ impl Effect {
     E,
     ?R,
     ?S,
-    F: once Effect<'env; () ! never ? S> + Intrinsic.NonParking,
   >(
     self: once Effect<'env; A ! E ? R>,
-    finalizer: F
+    finalizer: once Effect<'env; () ! never ? S>
   ) -> A ! E ? R | S {
-    return run Intrinsic.finalizeEffectNonParking<A, E, R, S, F>(move self, move finalizer)
+    return run Intrinsic.finalizeEffectNonParking(move self, move finalizer)
   }
 
   /// Runs exactly one of two suspended branches, selected by a condition.
