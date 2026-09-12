@@ -7,7 +7,7 @@ import * as Effect from 'effect/Effect'
 import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
-import { tlsConnectionAcceptanceSource } from './support/tlsConnectionAcceptance.js'
+import { tlsConnectionWasmSource } from './support/tlsConnectionAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
 const defaultClang = (): string => {
@@ -42,7 +42,7 @@ it.effect(
     Effect.gen(function* () {
       const outcome = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make('memory/tls-connection-wasm', ascii(tlsConnectionAcceptanceSource)),
+          root: SourceFile.make('memory/tls-connection-wasm', ascii(tlsConnectionWasmSource)),
           target: 'wasm32-unknown-unknown',
         },
         toolchain,

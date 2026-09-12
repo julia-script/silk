@@ -13,7 +13,9 @@ const firstFlight = tlsClientRsaServerFlight.subarray(0, 64)
 const secondFlight = tlsClientRsaServerFlight.subarray(64, 576)
 const thirdFlight = tlsClientRsaServerFlight.subarray(576)
 
-export const tlsConnectionAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
+const connectionSource = (
+  includeFailureCases: boolean,
+): string => `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.bytes {Bytes}
 import silk.effect {Effect}
@@ -553,7 +555,9 @@ effect fn runCases(
   }
   if !shutdownFound { return 110 }
 
-  random.filled = usize.ZERO
+${
+  includeFailureCases
+    ? `  random.filled = usize.ZERO
   let mut failing = run memoryTransport(Option.some<i32>(91), false)
   let failed = run Effect.result(withClient(
     &mut failing,
@@ -647,7 +651,9 @@ effect fn runCases(
   if timeout.deadlineSeconds != 130 || timeout.deadlineNanoseconds != 0 { return 36 }
   let canceled = run cancelSuspendedConnection()
   if canceled != 42 { return 37 }
-  return 42
+`
+    : ''
+}  return 42
 }
 
 effect fn failed<E>(error: E) -> i32 { drop error return -1 }
@@ -679,10 +685,16 @@ effect fn program() -> i32 ! TrustSourceError | OutOfMemoryError {
     failed,
   )
   if result != 42 { return result }
-  if trust.loads != 5 || wall.calls != 5 { return -2 }
+  if trust.loads != ${includeFailureCases ? 5 : 1} || wall.calls != ${includeFailureCases ? 5 : 1} { return -2 }
   return 42
 }
 
 pub fn main() -> i32 {
   return run Effect.catchAll(program(), failed)
 }`
+
+/** Full target-neutral behavior and structured-cancellation matrix for the native corpus. */
+export const tlsConnectionAcceptanceSource = connectionSource(true)
+
+/** One authenticated exchange, application I/O, and terminal release through LLVM-to-Wasm. */
+export const tlsConnectionWasmSource = connectionSource(false)
