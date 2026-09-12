@@ -60,6 +60,11 @@ borrowed method call reproduce it without TLS in 2.03 s. The positive case requi
 runner reuse, and a corrupted provider-type binding still requires `InvalidEffectOperation`.
 The native matrix is being repeated after the correction; the failed timings are not runtime passes.
 
+The same small source also reproduced duplicate LLVM body emission once MIR verification passed.
+A structural unique-symbol assertion now catches that defect without adding a native process or
+another source compilation. It passes in 2.06 s after lowering merges proof contexts that have the
+same emitted arguments and concrete contracts. The full native matrix is still a pending gate.
+
 ## Assessment
 
 The tests use the cheapest available tier for the observed failures and keep runtime evidence in

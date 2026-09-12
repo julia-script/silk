@@ -42,6 +42,8 @@ It is not independent approval or a production-security certification.
   for returning arms and disjoint selectors while the CFG verifier checks endpoint multiplicity.
   Shared runner bindings compare emitted arguments after lifetime erasure, while each stored Effect
   and selected base retain exact semantic checks; a corrupted provider type remains rejected.
+  Lowering retains one emitted body for identical runtime arguments and concrete contracts;
+  contextual proof obligations remain separately checked during discovery.
 - Bounds and portability: memory transport storage/audit is bounded and allocation is explicit.
   Scripted readiness and deadline equality use the provided clock. TLS policy and cryptographic
   verification remain in the existing ordinary-source client, without a compiler-known TLS actor.

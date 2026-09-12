@@ -2,6 +2,7 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Backend from '../src/Backend.js'
 import * as ExecutableProperty from '../src/ExecutableProperty.js'
 import * as ExecutionBoundary from '../src/ExecutionBoundary.js'
 import * as Hir from '../src/Hir.js'
@@ -1304,6 +1305,7 @@ pub effect fn main() -> i32 ! Fault {
       (fn) => fn.effectRunner?.base.declaration.name === 'Connection.read$effect$-1',
     )
     assert.isNotEmpty(runners)
+    assert.strictEqual(new Set(mir.functions.map(Backend.symbolFor)).size, mir.functions.length)
     const corrupted = {
       ...mir,
       functions: mir.functions.map((fn) =>

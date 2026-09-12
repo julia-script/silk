@@ -56,3 +56,12 @@ Runner reuse intentionally erases lifetime-only arguments; verification now uses
 `runtimeArgumentsEqual` for the shared wrapper binding while preserving exact stored-contract and
 selected-base checks. The same regression corrupts the provider type and still requires rejection.
 It passes in 2.03 s; native acceptance and affected checks are being repeated.
+
+After the wrapper comparison fix, full TLS native acceptance passes MIR verification and reaches
+LLVM emission (611.85 s), where duplicate method builders attempt to commit the same function body.
+The existing two-second reproduction also reproduces this backend failure. Discovery must retain
+separate contextual proofs, but those contexts have identical emitted arguments and concrete
+contracts. Lowering now chooses one machine-body instance per emitted specialization/contract,
+leaving semantic discovery and its proof checks intact. The small regression asserts unique emitted
+symbols and preserves its corrupted-provider negative control; it passes in 2.06 s. Native acceptance
+and affected lowering/backend tests are being rerun.
