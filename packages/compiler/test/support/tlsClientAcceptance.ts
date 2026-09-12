@@ -2556,6 +2556,16 @@ effect fn limitsCase<'a>(
   if id >= 20 && id <= 22 {
     let exactFlight = run loadFixture(${nativeFixtureIds.serverFlight})
     if !(run authenticateWithinLimits(&mut client, Bytes.asSlice(&exactFlight))) { return false }
+    let mut plaintext: [u8; 40] = [
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]
+    let read = client.readPlaintext(&mut plaintext)
+    let written = match move read {
+      Result<Progress, TlsError>.Success {value} => value.written
+      Result<Progress, TlsError>.Failure {error} => usize.ZERO
+    }
+    if !validPlaintext(&plaintext, written) { return false }
     let first = run loadFixture(${nativeFixtureIds.validTicketRecord1})
     if !(run feedComplete(&mut client, Bytes.asSlice(&first), usize.ONE)) { return false }
     let second = run loadFixture(${nativeFixtureIds.validTicketRecord2})
