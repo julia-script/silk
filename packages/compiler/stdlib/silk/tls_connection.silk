@@ -530,6 +530,13 @@ effect fn readSomeLoop(
   return ReadTransfer.End
 }
 
+fn authenticated(client: &Client) -> bool {
+  return match move Client.authentication(client) {
+    Option.None => false
+    Option.Some {value} => { drop value return true }
+  }
+}
+
 effect fn driveHandshake(
   connection: &mut ConnectionState,
   deadline: &Instant,
@@ -538,6 +545,9 @@ effect fn driveHandshake(
 ? &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random {
   while true {
     run checkHandshakeDeadline(&mut connection.*, deadline)
+    // Output acknowledgment can publish the one-shot authentication event. Its borrowed
+    // metadata remains available after drainOutput consumes that progress result.
+    if authenticated(&connection.client) { return () }
     let advanced = run Client.progress(&mut connection.client)
     let progress = run requireProgress(&mut connection.*, move advanced)
     match progress.demand {

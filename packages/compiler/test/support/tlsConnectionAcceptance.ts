@@ -656,7 +656,36 @@ ${
 }  return 42
 }
 
-effect fn failed<E>(error: E) -> i32 { drop error return -1 }
+effect fn failed(error: ConnectionError | TrustSourceError | OutOfMemoryError) -> i32 {
+  match move error {
+    ConnectionError.HandshakeTimeout => { return -100 }
+    ConnectionError.Io {error: io} => match move io {
+      ByteIoError.Timeout {operation} => { return -201 }
+      ByteIoError.InvalidTransferCount {operation, count, limit} => { return -202 }
+      ByteIoError.Closed {operation} => { return -203 }
+      ByteIoError.Provider {operation, code} => { return -300 - code }
+    }
+    ConnectionError.Tls {error: tlsError} => match move tlsError {
+      TlsError.PeerAlert {code} => { return -101 }
+      TlsError.BadRecordMac => { return -102 }
+      TlsError.ProtocolViolation {reason} => { return -103 }
+      TlsError.CertificateDecode {error: detail} => { return -104 }
+      TlsError.CertificatePath {error: detail} => { return -105 }
+      TlsError.CertificateIdentity {error: detail} => { return -106 }
+      TlsError.CertificateVerify {error: detail} => { return -107 }
+      TlsError.Finished => { return -108 }
+      TlsError.UnsupportedProfile => { return -109 }
+      TlsError.LimitExceeded {kind, limit} => { return -110 }
+      TlsError.InvalidState {operation} => { return -111 }
+      TlsError.EmptyBuffer => { return -112 }
+      TlsError.HandshakeTruncated => { return -113 }
+      TlsError.Truncated => { return -114 }
+      TlsError.NoApplicationProtocol => { return -115 }
+    }
+    OutOfMemoryError {} => { return -901 }
+    _ => { return -902 }
+  }
+}
 
 effect fn program() -> i32 ! TrustSourceError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -689,8 +718,15 @@ effect fn program() -> i32 ! TrustSourceError | OutOfMemoryError {
   return 42
 }
 
+effect fn startupFailed(error: TrustSourceError | OutOfMemoryError) -> i32 {
+  match move error {
+    OutOfMemoryError {} => { return -903 }
+    _ => { return -904 }
+  }
+}
+
 pub fn main() -> i32 {
-  return run Effect.catchAll(program(), failed)
+  return run Effect.catchAll(program(), startupFailed)
 }`
 
 /** Full target-neutral behavior and structured-cancellation matrix for the native corpus. */
