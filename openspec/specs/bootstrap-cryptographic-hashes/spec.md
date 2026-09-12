@@ -32,12 +32,7 @@ functions MUST NOT be exposed by these actors.
 
 ### Requirement: Every SHA actor supports one streaming lifecycle
 
-Every SHA actor SHALL expose a pure `make() -> Self`, an inherent
-`update(self: &mut Self, bytes: &[u8])` method, a consuming `finish(self: Self)` method returning
-the actor's exact digest type, and a one-shot `hash(bytes: &[u8])` member returning the same digest
-type. `update` SHALL absorb bytes in call order, SHALL accept an empty slice without changing the
-digest, and SHALL permit any chunking that represents the same byte sequence. `finish` SHALL consume
-the state so a finalized state cannot be updated or finalized again.
+Every SHA actor SHALL expose a pure `make() -> Self`, an inherent `update(self: &mut Self, bytes: &[u8])` method, a consuming `finish(self: Self)` method returning the actor's exact digest type, and a one-shot `hash(bytes: &[u8])` member returning the same digest type. `update` SHALL absorb bytes in call order, SHALL accept an empty slice without changing the digest, and SHALL permit any chunking that represents the same byte sequence. `finish` SHALL consume the state so a finalized state cannot be updated or finalized again. SHA-256 and SHA-384 SHALL additionally expose a non-consuming `checkpoint(self: &Self)` method that returns the digest for all bytes supplied so far while leaving the state available for subsequent updates and checkpoints.
 
 #### Scenario: Hash incrementally through the inherent update method
 
@@ -53,6 +48,11 @@ the state so a finalized state cannot be updated or finalized again.
 
 - **WHEN** source finishes an owned state and then attempts to use that state again
 - **THEN** ownership analysis rejects the later use
+
+#### Scenario: Checkpoint one transcript without consumption
+
+- **WHEN** source checkpoints SHA-256 or SHA-384, then appends more bytes and checkpoints again
+- **THEN** each digest matches its exact prefix and the original streaming state remains usable
 
 ### Requirement: Streaming padding and length accounting cover the complete admitted domains
 

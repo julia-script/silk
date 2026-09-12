@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change native-assembly-entry-contracts. Update Purpose after archive.
+Define the typed unsafe boundary for native assembly and naked entry functions, including explicit machine effects, target restrictions, and independently checked ABI obligations.
 
 ## Requirements
 

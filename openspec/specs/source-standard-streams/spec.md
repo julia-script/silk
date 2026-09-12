@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change source-owned-standard-streams. Update Purpose after archive.
+Define ordinary-source standard-stream providers that preserve exact read/write progress and borrowed process descriptors through explicit, target-selected native ABI declarations.
 
 ## Requirements
 
