@@ -195,8 +195,8 @@ pub fn main() -> i32 { return run program() }`)
     )
     assert.isDefined(frame)
     if (frame === undefined) return
-    const borrowedRoots = owner.blocks
-      .flatMap((block) => block.operations)
+    const borrowedRoots = owner.regions
+      .flatMap(Mir.operationsOf)
       .flatMap(Mir.operationTree)
       .flatMap((operation) => (operation._tag === 'BeginLoan' ? [operation.root.ordinal] : []))
     const retained = [...new Set(borrowedRoots)]
