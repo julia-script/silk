@@ -215,6 +215,8 @@ enum HeadKind { Request, Response }
 
 enum Phase { StartLine, Fields }
 
+enum StartPart { First, Second, Third }
+
 struct ParserCore {
   kind: HeadKind
   storage: Bytes
@@ -223,6 +225,14 @@ struct ParserCore {
   lineStart: usize
   pendingCr: bool
   phase: Phase
+  startPart: StartPart
+  componentLength: usize
+  fieldColonSeen: bool
+  fieldNameLength: usize
+  fieldValueStarted: bool
+  fieldValueLength: usize
+  fieldPendingOws: usize
+  lineCompletesHead: bool
   state: ParserState
   failureReason: ParseReason
   failureComponent: ParseComponent
@@ -783,6 +793,14 @@ effect fn makeCore(kind: HeadKind, limits: Limits) -> Result<ParserCore, ParseEr
     lineStart: usize.ZERO,
     pendingCr: false,
     phase: Phase.StartLine,
+    startPart: StartPart.First,
+    componentLength: usize.ZERO,
+    fieldColonSeen: false,
+    fieldNameLength: usize.ZERO,
+    fieldValueStarted: false,
+    fieldValueLength: usize.ZERO,
+    fieldPendingOws: usize.ZERO,
+    lineCompletesHead: false,
     state: ParserState.Active,
     failureReason: ParseReason.InvalidState,
     failureComponent: ParseComponent.Parser,
@@ -835,18 +853,24 @@ fn feedCore(core: &mut ParserCore, input: &[u8], final: bool) -> Result<Progress
         )
         return poison(&mut core.*, move error, callStart)
       }
-      let admitted = admitByte(&mut core.*, value)
-      if let Result<(), ParseError>.Failure {error} = move admitted {
+      let capacity = checkByteCapacity(&core.*)
+      if let Result<(), ParseError>.Failure {error} = move capacity {
         return poison(&mut core.*, move error, callStart)
       }
-      inputIndex = inputIndex + usize.ONE
-      core.pendingCr = false
-      let lineLength = core.length - core.lineStart - 2
+      let lineLength = core.length - core.lineStart - usize.ONE
       let validated = finishLine(&mut core.*, lineLength)
       if let Result<(), ParseError>.Failure {error} = move validated {
         return poison(&mut core.*, move error, callStart)
       }
+      storeByte(&mut core.*, value)
+      inputIndex = inputIndex + usize.ONE
+      core.pendingCr = false
       core.lineStart = core.length
+      resetLineLexicalState(&mut core.*)
+      if core.lineCompletesHead {
+        core.lineCompletesHead = false
+        core.state = ParserState.Complete
+      }
       if core.state == ParserState.Complete {
         return Result.succeed<Progress, ParseError>(Progress {
           consumed: inputIndex,
@@ -866,10 +890,17 @@ fn feedCore(core: &mut ParserCore, input: &[u8], final: bool) -> Result<Progress
       )
       return poison(&mut core.*, move error, callStart)
     }
-    let admitted = admitByte(&mut core.*, value)
-    if let Result<(), ParseError>.Failure {error} = move admitted {
+    let capacity = checkByteCapacity(&core.*)
+    if let Result<(), ParseError>.Failure {error} = move capacity {
       return poison(&mut core.*, move error, callStart)
     }
+    if value != 13 {
+      let lexical = validateIncrementalByte(&mut core.*, value)
+      if let Result<(), ParseError>.Failure {error} = move lexical {
+        return poison(&mut core.*, move error, callStart)
+      }
+    }
+    storeByte(&mut core.*, value)
     inputIndex = inputIndex + usize.ONE
     if value == 13 { core.pendingCr = true }
   }
@@ -890,7 +921,7 @@ fn feedCore(core: &mut ParserCore, input: &[u8], final: bool) -> Result<Progress
   })
 }
 
-fn admitByte(core: &mut ParserCore, byte: u8) -> Result<(), ParseError> {
+fn checkByteCapacity(core: &ParserCore) -> Result<(), ParseError> {
   let attemptedHead = match move usize.checkedAdd(core.length, usize.ONE) {
     Option<usize>.None => {
       return Result.failResult<(), ParseError>(parseError(
@@ -935,10 +966,408 @@ fn admitByte(core: &mut ParserCore, byte: u8) -> Result<(), ParseError> {
       fieldIndex(&core.*),
     ))
   }
+  return Result.succeed<(), ParseError>(())
+}
+
+fn storeByte(core: &mut ParserCore, byte: u8) -> () {
   let storage = Bytes.asMutSlice(&mut core.storage)
   storage[core.length] = byte
-  core.length = attemptedHead
+  core.length = core.length + usize.ONE
+  return ()
+}
+
+fn resetLineLexicalState(core: &mut ParserCore) -> () {
+  if core.phase == Phase.Fields {
+    core.fieldColonSeen = false
+    core.fieldNameLength = usize.ZERO
+    core.fieldValueStarted = false
+    core.fieldValueLength = usize.ZERO
+    core.fieldPendingOws = usize.ZERO
+  }
+  return ()
+}
+
+fn validateIncrementalByte(core: &mut ParserCore, byte: u8) -> Result<(), ParseError> {
+  return match core.phase {
+    Phase.StartLine => validateStartLineByte(&mut core.*, byte)
+    Phase.Fields => validateFieldByte(&mut core.*, byte)
+  }
+}
+
+fn validateStartLineByte(core: &mut ParserCore, byte: u8) -> Result<(), ParseError> {
+  return match core.kind {
+    HeadKind.Request => validateRequestLineByte(&mut core.*, byte)
+    HeadKind.Response => validateResponseLineByte(&mut core.*, byte)
+  }
+}
+
+fn validateRequestLineByte(core: &mut ParserCore, byte: u8) -> Result<(), ParseError> {
+  return match core.startPart {
+    StartPart.First => {
+      if byte == 32 {
+        if core.componentLength == usize.ZERO {
+          return Result.failResult<(), ParseError>(parseError(
+            ParseReason.InvalidStartLine,
+            ParseComponent.StartLine,
+            core.length,
+            Option.none<usize>(),
+          ))
+        }
+        core.startPart = StartPart.Second
+        core.componentLength = usize.ZERO
+        return Result.succeed<(), ParseError>(())
+      }
+      if !tokenByte(byte) {
+        return Result.failResult<(), ParseError>(parseError(
+          ParseReason.InvalidMethod,
+          ParseComponent.Method,
+          core.length,
+          Option.none<usize>(),
+        ))
+      }
+      let attempted = core.componentLength + usize.ONE
+      if attempted > core.limits.values.maxMethodBytes {
+        return Result.failResult<(), ParseError>(limitParseError(
+          ParseLimitKind.MethodBytes,
+          core.limits.values.maxMethodBytes,
+          attempted,
+          ParseComponent.Method,
+          core.length,
+          Option.none<usize>(),
+        ))
+      }
+      core.componentLength = attempted
+      return Result.succeed<(), ParseError>(())
+    }
+    StartPart.Second => {
+      if byte == 32 {
+        if core.componentLength == usize.ZERO {
+          return Result.failResult<(), ParseError>(parseError(
+            ParseReason.InvalidStartLine,
+            ParseComponent.Target,
+            core.length,
+            Option.none<usize>(),
+          ))
+        }
+        core.startPart = StartPart.Third
+        core.componentLength = usize.ZERO
+        return Result.succeed<(), ParseError>(())
+      }
+      if byte < 33 || byte > 126 {
+        return Result.failResult<(), ParseError>(parseError(
+          ParseReason.InvalidTarget,
+          ParseComponent.Target,
+          core.length,
+          Option.none<usize>(),
+        ))
+      }
+      let attempted = core.componentLength + usize.ONE
+      if attempted > core.limits.values.maxTargetBytes {
+        return Result.failResult<(), ParseError>(limitParseError(
+          ParseLimitKind.TargetBytes,
+          core.limits.values.maxTargetBytes,
+          attempted,
+          ParseComponent.Target,
+          core.length,
+          Option.none<usize>(),
+        ))
+      }
+      core.componentLength = attempted
+      return Result.succeed<(), ParseError>(())
+    }
+    StartPart.Third => {
+      if core.componentLength >= 8 {
+        return Result.failResult<(), ParseError>(parseError(
+          ParseReason.InvalidStartLine,
+          ParseComponent.StartLine,
+          core.length,
+          Option.none<usize>(),
+        ))
+      }
+      if !versionByte(core.componentLength, byte) {
+        return Result.failResult<(), ParseError>(parseError(
+          ParseReason.UnsupportedVersion,
+          ParseComponent.Version,
+          core.length,
+          Option.none<usize>(),
+        ))
+      }
+      core.componentLength = core.componentLength + usize.ONE
+      return Result.succeed<(), ParseError>(())
+    }
+  }
+}
+
+fn validateResponseLineByte(core: &mut ParserCore, byte: u8) -> Result<(), ParseError> {
+  return match core.startPart {
+    StartPart.First => {
+      if core.componentLength < 8 {
+        if !versionByte(core.componentLength, byte) {
+          return Result.failResult<(), ParseError>(parseError(
+            ParseReason.UnsupportedVersion,
+            ParseComponent.Version,
+            core.length,
+            Option.none<usize>(),
+          ))
+        }
+        core.componentLength = core.componentLength + usize.ONE
+        return Result.succeed<(), ParseError>(())
+      }
+      if byte != 32 {
+        return Result.failResult<(), ParseError>(parseError(
+          ParseReason.InvalidStartLine,
+          ParseComponent.StartLine,
+          core.length,
+          Option.none<usize>(),
+        ))
+      }
+      core.startPart = StartPart.Second
+      core.componentLength = usize.ZERO
+      return Result.succeed<(), ParseError>(())
+    }
+    StartPart.Second => {
+      if core.componentLength < 3 {
+        if byte < 48 || byte > 57 {
+          return Result.failResult<(), ParseError>(parseError(
+            ParseReason.InvalidStatus,
+            ParseComponent.Status,
+            core.length,
+            Option.none<usize>(),
+          ))
+        }
+        if core.componentLength == 2 {
+          let bytes = Bytes.asSlice(&core.storage)
+          let first = u8.toU16(bytes[core.length - 2])
+          let second = u8.toU16(bytes[core.length - usize.ONE])
+          let status = (first - 48) * 100 + (second - 48) * 10 + (u8.toU16(byte) - 48)
+          if status < 100 || status > 599 {
+            return Result.failResult<(), ParseError>(parseError(
+              ParseReason.InvalidStatus,
+              ParseComponent.Status,
+              core.length - 2,
+              Option.none<usize>(),
+            ))
+          }
+        }
+        core.componentLength = core.componentLength + usize.ONE
+        return Result.succeed<(), ParseError>(())
+      }
+      if byte != 32 {
+        return Result.failResult<(), ParseError>(parseError(
+          ParseReason.InvalidStartLine,
+          ParseComponent.StartLine,
+          core.length,
+          Option.none<usize>(),
+        ))
+      }
+      core.startPart = StartPart.Third
+      core.componentLength = usize.ZERO
+      return Result.succeed<(), ParseError>(())
+    }
+    StartPart.Third => {
+      if byte != 9 && (byte < 32 || byte == 127) {
+        return Result.failResult<(), ParseError>(parseError(
+          ParseReason.InvalidReasonPhrase,
+          ParseComponent.ReasonPhrase,
+          core.length,
+          Option.none<usize>(),
+        ))
+      }
+      let attempted = core.componentLength + usize.ONE
+      if attempted > core.limits.values.maxValueBytes {
+        return Result.failResult<(), ParseError>(limitParseError(
+          ParseLimitKind.ValueBytes,
+          core.limits.values.maxValueBytes,
+          attempted,
+          ParseComponent.ReasonPhrase,
+          core.length,
+          Option.none<usize>(),
+        ))
+      }
+      core.componentLength = attempted
+      return Result.succeed<(), ParseError>(())
+    }
+  }
+}
+
+fn validateFieldByte(core: &mut ParserCore, byte: u8) -> Result<(), ParseError> {
+  if !core.fieldColonSeen {
+    if core.fieldNameLength == usize.ZERO {
+      let attemptedFields = core.fieldCount + usize.ONE
+      if attemptedFields > core.limits.values.maxFields {
+        return Result.failResult<(), ParseError>(limitParseError(
+          ParseLimitKind.Fields,
+          core.limits.values.maxFields,
+          attemptedFields,
+          ParseComponent.HeaderName,
+          core.length,
+          Option.some<usize>(core.fieldCount),
+        ))
+      }
+      if byte == 32 || byte == 9 {
+        return Result.failResult<(), ParseError>(parseError(
+          ParseReason.ObsFold,
+          ParseComponent.HeaderName,
+          core.length,
+          Option.some<usize>(core.fieldCount),
+        ))
+      }
+    }
+    if byte == 58 {
+      if core.fieldNameLength == usize.ZERO {
+        return Result.failResult<(), ParseError>(parseError(
+          ParseReason.InvalidFieldName,
+          ParseComponent.HeaderName,
+          core.length,
+          Option.some<usize>(core.fieldCount),
+        ))
+      }
+      core.fieldColonSeen = true
+      return Result.succeed<(), ParseError>(())
+    }
+    if byte == 32 || byte == 9 {
+      return Result.failResult<(), ParseError>(parseError(
+        ParseReason.WhitespaceBeforeColon,
+        ParseComponent.HeaderName,
+        core.length,
+        Option.some<usize>(core.fieldCount),
+      ))
+    }
+    if !tokenByte(byte) {
+      return Result.failResult<(), ParseError>(parseError(
+        ParseReason.InvalidFieldName,
+        ParseComponent.HeaderName,
+        core.length,
+        Option.some<usize>(core.fieldCount),
+      ))
+    }
+    let attemptedName = core.fieldNameLength + usize.ONE
+    if attemptedName > core.limits.values.maxNameBytes {
+      return Result.failResult<(), ParseError>(limitParseError(
+        ParseLimitKind.NameBytes,
+        core.limits.values.maxNameBytes,
+        attemptedName,
+        ParseComponent.HeaderName,
+        core.length,
+        Option.some<usize>(core.fieldCount),
+      ))
+    }
+    let aggregate = match move usize.checkedAdd(core.fieldBytes, attemptedName) {
+      Option<usize>.None => {
+        return Result.failResult<(), ParseError>(parseError(
+          ParseReason.SizeOverflow,
+          ParseComponent.HeaderName,
+          core.length,
+          Option.some<usize>(core.fieldCount),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    if aggregate > core.limits.values.maxFieldBytes {
+      return Result.failResult<(), ParseError>(limitParseError(
+        ParseLimitKind.FieldBytes,
+        core.limits.values.maxFieldBytes,
+        aggregate,
+        ParseComponent.HeaderName,
+        core.length,
+        Option.some<usize>(core.fieldCount),
+      ))
+    }
+    core.fieldNameLength = attemptedName
+    return Result.succeed<(), ParseError>(())
+  }
+  if byte != 9 && (byte < 32 || byte == 127) {
+    return Result.failResult<(), ParseError>(parseError(
+      ParseReason.InvalidFieldValue,
+      ParseComponent.HeaderValue,
+      core.length,
+      Option.some<usize>(core.fieldCount),
+    ))
+  }
+  if byte == 32 || byte == 9 {
+    if core.fieldValueStarted { core.fieldPendingOws = core.fieldPendingOws + usize.ONE }
+    return Result.succeed<(), ParseError>(())
+  }
+  let withPending = match move usize.checkedAdd(core.fieldValueLength, core.fieldPendingOws) {
+    Option<usize>.None => {
+      return Result.failResult<(), ParseError>(parseError(
+        ParseReason.SizeOverflow,
+        ParseComponent.HeaderValue,
+        core.length,
+        Option.some<usize>(core.fieldCount),
+      ))
+    }
+    Option<usize>.Some {value} => value
+  }
+  let attemptedValue = match move usize.checkedAdd(withPending, usize.ONE) {
+    Option<usize>.None => {
+      return Result.failResult<(), ParseError>(parseError(
+        ParseReason.SizeOverflow,
+        ParseComponent.HeaderValue,
+        core.length,
+        Option.some<usize>(core.fieldCount),
+      ))
+    }
+    Option<usize>.Some {value} => value
+  }
+  if attemptedValue > core.limits.values.maxValueBytes {
+    return Result.failResult<(), ParseError>(limitParseError(
+      ParseLimitKind.ValueBytes,
+      core.limits.values.maxValueBytes,
+      attemptedValue,
+      ParseComponent.HeaderValue,
+      core.length,
+      Option.some<usize>(core.fieldCount),
+    ))
+  }
+  let nameAndValue = match move usize.checkedAdd(core.fieldNameLength, attemptedValue) {
+    Option<usize>.None => {
+      return Result.failResult<(), ParseError>(parseError(
+        ParseReason.SizeOverflow,
+        ParseComponent.HeaderValue,
+        core.length,
+        Option.some<usize>(core.fieldCount),
+      ))
+    }
+    Option<usize>.Some {value} => value
+  }
+  let aggregate = match move usize.checkedAdd(core.fieldBytes, nameAndValue) {
+    Option<usize>.None => {
+      return Result.failResult<(), ParseError>(parseError(
+        ParseReason.SizeOverflow,
+        ParseComponent.HeaderValue,
+        core.length,
+        Option.some<usize>(core.fieldCount),
+      ))
+    }
+    Option<usize>.Some {value} => value
+  }
+  if aggregate > core.limits.values.maxFieldBytes {
+    return Result.failResult<(), ParseError>(limitParseError(
+      ParseLimitKind.FieldBytes,
+      core.limits.values.maxFieldBytes,
+      aggregate,
+      ParseComponent.HeaderValue,
+      core.length,
+      Option.some<usize>(core.fieldCount),
+    ))
+  }
+  core.fieldValueStarted = true
+  core.fieldValueLength = attemptedValue
+  core.fieldPendingOws = usize.ZERO
   return Result.succeed<(), ParseError>(())
+}
+
+fn versionByte(index: usize, byte: u8) -> bool {
+  if index == usize.ZERO { return byte == 72 }
+  if index == usize.ONE { return byte == 84 }
+  if index == 2 { return byte == 84 }
+  if index == 3 { return byte == 80 }
+  if index == 4 { return byte == 47 }
+  if index == 5 { return byte == 49 }
+  if index == 6 { return byte == 46 }
+  if index == 7 { return byte == 48 || byte == 49 }
+  return false
 }
 
 fn finishLine(core: &mut ParserCore, lineLength: usize) -> Result<(), ParseError> {
@@ -974,7 +1403,7 @@ fn finishLine(core: &mut ParserCore, lineLength: usize) -> Result<(), ParseError
             return Result.failResult<(), ParseError>(move error)
           }
         }
-        core.state = ParserState.Complete
+        core.lineCompletesHead = true
         return Result.succeed<(), ParseError>(())
       }
       return validateFieldLine(&mut core.*, lineLength)
@@ -1702,6 +2131,14 @@ fn resetCore(core: &mut ParserCore) -> Result<(), ParseError> {
   core.lineStart = usize.ZERO
   core.pendingCr = false
   core.phase = Phase.StartLine
+  core.startPart = StartPart.First
+  core.componentLength = usize.ZERO
+  core.fieldColonSeen = false
+  core.fieldNameLength = usize.ZERO
+  core.fieldValueStarted = false
+  core.fieldValueLength = usize.ZERO
+  core.fieldPendingOws = usize.ZERO
+  core.lineCompletesHead = false
   core.state = ParserState.Active
   core.failureReason = ParseReason.InvalidState
   core.failureComponent = ParseComponent.Parser

@@ -83,6 +83,7 @@ fn equalPrefix(left: &[u8], right: &[u8]) -> bool {
 enum ExpectedReason {
   InvalidFieldName,
   InvalidHost,
+  InvalidMethod,
   DuplicateHost,
   InvalidLineEnding,
   InvalidStartLine,
@@ -106,6 +107,10 @@ fn reasonIs(reason: ParseReason, expected: ExpectedReason) -> bool {
     }
     ExpectedReason.InvalidHost => match move reason {
       ParseReason.InvalidHost => true
+      _ => false
+    }
+    ExpectedReason.InvalidMethod => match move reason {
+      ParseReason.InvalidMethod => true
       _ => false
     }
     ExpectedReason.DuplicateHost => match move reason {
@@ -160,6 +165,41 @@ fn reasonIs(reason: ParseReason, expected: ExpectedReason) -> bool {
       ParseReason.Truncated => true
       _ => false
     }
+  }
+}
+
+fn unindexedParseError(
+  error: ParseError,
+  expected: ExpectedReason,
+  component: ParseComponent,
+  offset: usize,
+  consumed: usize,
+) -> bool {
+  if !reasonIs(error.reason, expected) || error.component != component
+    || error.offset != offset || error.consumed != consumed {
+    return false
+  }
+  return match move error.fieldIndex {
+    Option<usize>.None => true
+    Option<usize>.Some {value} => false
+  }
+}
+
+fn indexedParseError(
+  error: ParseError,
+  expected: ExpectedReason,
+  component: ParseComponent,
+  fieldIndex: usize,
+  offset: usize,
+  consumed: usize,
+) -> bool {
+  if !reasonIs(error.reason, expected) || error.component != component
+    || error.offset != offset || error.consumed != consumed {
+    return false
+  }
+  return match move error.fieldIndex {
+    Option<usize>.None => false
+    Option<usize>.Some {value} => value == fieldIndex
   }
 }
 
@@ -357,6 +397,190 @@ effect fn failuresAndReset() -> bool ! OutOfMemoryError ? &mut Allocator {
         && error.offset == 16
         && error.consumed == 16
     }
+  }
+}
+
+effect fn incrementalLexicalFailures() -> bool ! OutOfMemoryError ? &mut Allocator {
+  let made = run RequestParser.make(limits())
+  let mut parser = match move made {
+    Result<RequestParser, ParseError>.Failure {error} => { return false }
+    Result<RequestParser, ParseError>.Success {value} => move value
+  }
+  let invalidMethod = RequestParser.feed(&mut parser, b"GET\\t", false)
+  match move invalidMethod {
+    Result<Progress, ParseError>.Success {value} => { return false }
+    Result<Progress, ParseError>.Failure {error} => {
+      if !reasonIs(error.reason, ExpectedReason.InvalidMethod)
+        || error.component != ParseComponent.Method
+        || error.offset != 3
+        || error.consumed != 3 {
+        return false
+      }
+    }
+  }
+  let emptyFinal = RequestParser.feed(&mut parser, b"", true)
+  match move emptyFinal {
+    Result<Progress, ParseError>.Success {value} => { return false }
+    Result<Progress, ParseError>.Failure {error} => {
+      if !reasonIs(error.reason, ExpectedReason.InvalidState)
+        || error.consumed != usize.ZERO {
+        return false
+      }
+    }
+  }
+
+  let reset = RequestParser.reset(&mut parser)
+  if let Result<(), ParseError>.Failure {error} = move reset { return false }
+  let prefix = RequestParser.feed(&mut parser, b"GET / HTTP/1.1\\r\\nHo", false)
+  match move prefix {
+    Result<Progress, ParseError>.Failure {error} => { return false }
+    Result<Progress, ParseError>.Success {value} => {
+      if value.consumed != 18 || value.state != ProgressState.NeedInput { return false }
+    }
+  }
+  let invalidName = RequestParser.feed(&mut parser, b"st\\t: a\\r\\n\\r\\n", false)
+  match move invalidName {
+    Result<Progress, ParseError>.Success {value} => { return false }
+    Result<Progress, ParseError>.Failure {error} => {
+      if !reasonIs(error.reason, ExpectedReason.WhitespaceBeforeColon)
+        || error.component != ParseComponent.HeaderName
+        || error.offset != 20
+        || error.consumed != 2 {
+        return false
+      }
+    }
+  }
+
+  let tight = Limits {
+    maxHeadBytes: 1024,
+    maxStartLineBytes: 256,
+    maxFieldLineBytes: 256,
+    maxOwnedBytes: 1152,
+    values: ValueLimits {
+      maxMethodBytes: 3,
+      maxTargetBytes: 256,
+      maxNameBytes: 64,
+      maxValueBytes: 256,
+      maxFields: 4,
+      maxFieldBytes: 512,
+      maxOwnedBytes: 1024,
+    },
+  }
+  let tightMade = run RequestParser.make(tight)
+  let mut tightParser = match move tightMade {
+    Result<RequestParser, ParseError>.Failure {error} => { return false }
+    Result<RequestParser, ParseError>.Success {value} => move value
+  }
+  return match move RequestParser.feed(&mut tightParser, b"GETX", false) {
+    Result<Progress, ParseError>.Success {value} => false
+    Result<Progress, ParseError>.Failure {error} => {
+      return reasonIs(error.reason, ExpectedReason.LimitExceeded)
+        && error.component == ParseComponent.Method
+        && error.offset == 3
+        && error.consumed == 3
+    }
+  }
+}
+
+effect fn lineCompletionAtomicity() -> bool ! OutOfMemoryError ? &mut Allocator {
+  let made = run RequestParser.make(limits())
+  let mut parser = match move made {
+    Result<RequestParser, ParseError>.Failure {error} => { return false }
+    Result<RequestParser, ParseError>.Success {value} => move value
+  }
+
+  let missingPrefix = RequestParser.feed(&mut parser, b"GET / HTTP/1.1\\r\\n\\r", false)
+  match move missingPrefix {
+    Result<Progress, ParseError>.Failure {error} => { return false }
+    Result<Progress, ParseError>.Success {value} => {
+      if value.consumed != 17 || value.state != ProgressState.NeedInput { return false }
+    }
+  }
+  let missing = RequestParser.feed(&mut parser, b"\\n", false)
+  match move missing {
+    Result<Progress, ParseError>.Success {value} => { return false }
+    Result<Progress, ParseError>.Failure {error} => {
+      if !unindexedParseError(
+        move error,
+        ExpectedReason.MissingHost,
+        ParseComponent.Host,
+        16,
+        usize.ZERO,
+      ) { return false }
+    }
+  }
+
+  let reset = RequestParser.reset(&mut parser)
+  if let Result<(), ParseError>.Failure {error} = move reset { return false }
+  let missingBeforeInvalidEnding = RequestParser.feed(
+    &mut parser,
+    b"GET / HTTP/1.1\\r\\n\\r",
+    false,
+  )
+  if let Result<Progress, ParseError>.Failure {error} = move missingBeforeInvalidEnding {
+    return false
+  }
+  let invalidEmptyLineEnding = RequestParser.feed(&mut parser, b"X", false)
+  match move invalidEmptyLineEnding {
+    Result<Progress, ParseError>.Success {value} => { return false }
+    Result<Progress, ParseError>.Failure {error} => {
+      if !indexedParseError(
+        move error,
+        ExpectedReason.InvalidLineEnding,
+        ParseComponent.LineEnding,
+        usize.ZERO,
+        16,
+        usize.ZERO,
+      ) { return false }
+    }
+  }
+
+  let resetAgain = RequestParser.reset(&mut parser)
+  if let Result<(), ParseError>.Failure {error} = move resetAgain { return false }
+  let startPrefix = RequestParser.feed(&mut parser, b"GET / HTTP/1.1\\r", false)
+  match move startPrefix {
+    Result<Progress, ParseError>.Failure {error} => { return false }
+    Result<Progress, ParseError>.Success {value} => {
+      if value.consumed != 15 || value.state != ProgressState.NeedInput { return false }
+    }
+  }
+  let invalidStartEnding = RequestParser.feed(&mut parser, b"X", false)
+  match move invalidStartEnding {
+    Result<Progress, ParseError>.Success {value} => { return false }
+    Result<Progress, ParseError>.Failure {error} => {
+      if !unindexedParseError(
+        move error,
+        ExpectedReason.InvalidLineEnding,
+        ParseComponent.LineEnding,
+        14,
+        usize.ZERO,
+      ) { return false }
+    }
+  }
+
+  let resetThird = RequestParser.reset(&mut parser)
+  if let Result<(), ParseError>.Failure {error} = move resetThird { return false }
+  let fieldPrefix = RequestParser.feed(
+    &mut parser,
+    b"GET / HTTP/1.1\\r\\nHost: a\\r",
+    false,
+  )
+  match move fieldPrefix {
+    Result<Progress, ParseError>.Failure {error} => { return false }
+    Result<Progress, ParseError>.Success {value} => {
+      if value.consumed != 24 || value.state != ProgressState.NeedInput { return false }
+    }
+  }
+  return match move RequestParser.feed(&mut parser, b"X", false) {
+    Result<Progress, ParseError>.Success {value} => false
+    Result<Progress, ParseError>.Failure {error} => indexedParseError(
+      move error,
+      ExpectedReason.InvalidLineEnding,
+      ParseComponent.LineEnding,
+      usize.ZERO,
+      23,
+      usize.ZERO,
+    )
   }
 }
 
@@ -566,6 +790,8 @@ effect fn checks() -> i32 ! OutOfMemoryError ? &mut Allocator {
   if !run splitMatrix() { return 1 }
   if !run oneByteDelivery() { return 2 }
   if !run failuresAndReset() { return 3 }
+  if !run incrementalLexicalFailures() { return 14 }
+  if !run lineCompletionAtomicity() { return 15 }
   if !run strictFailures() { return 4 }
   if !run responseWholeSlice() { return 5 }
   if !run copyAndSerialize() { return 6 }
