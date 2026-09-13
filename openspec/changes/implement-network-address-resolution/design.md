@@ -62,6 +62,8 @@ than public mutable storage.
 when admitting a stable-distinct matching-family endpoint and return a status that distinguishes
 duplicate, admitted, and one-distinct-too-many. Public operations expose length, indexed copied
 endpoints, and a borrowed slice. `Endpoint` is Copy; the vector remains the sole allocation owner.
+The common `Resolver.resolve` never trusts a provider's pre-filtering or capacity choice: it
+re-admits the returned sequence into a fresh request-bounded result before publication.
 
 A fixed 64-endpoint public array was considered. It would avoid allocation but impose a large
 always-present payload and could not exercise the required post-lookup allocation refusal cleanup.
@@ -84,6 +86,11 @@ Delegating formatting to `inet_ntop` or parsing to `inet_pton` was rejected beca
 would make portable value semantics platform-selected and would not prove rejection of libc's
 legacy IPv4 spellings.
 
+An ASCII label beginning case-insensitively with `xn--` is additionally decoded with checked RFC
+3492 arithmetic to validate its payload syntax and Unicode-scalar range. The admitted source bytes
+remain unchanged. This deliberately does not implement Unicode mapping, normalization, or the IDNA
+contextual, bidirectional, and code-point-table rules.
+
 ### 4. Deadline precedence is decided before each observable branch
 
 The common resolver validates request capacity first. Numeric resolution then checks family and,
@@ -100,6 +107,12 @@ Automatically dropping an expired deadline for native DNS was rejected because t
 after a caller explicitly asserted an overall bound. Sampling a clock before returning
 `DeadlineUnsupported` was rejected because it changes precedence and makes unsupported deadlines
 perform observable work.
+
+The portable request actor exposes an owned reconstructed optional deadline for capable providers.
+The deterministic capable-provider witness compares it before result allocation or registration,
+then uses an affine `Wake` guard and result-owner Drop hook. Native execution covers reached
+deadline, parked cancellation, and resumed success, including exact registration, cleanup,
+readiness, and completion counters.
 
 ### 5. One move-only chain owner brackets all post-lookup exits
 

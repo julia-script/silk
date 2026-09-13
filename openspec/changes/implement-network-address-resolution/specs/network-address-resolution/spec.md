@@ -16,7 +16,9 @@ A domain host SHALL preserve its admitted source spelling in owned storage of at
 compare ASCII case-insensitively, and retain no borrow from URI or resolver input. Domain labels
 SHALL contain 1 through 63 ASCII letters, digits, or hyphens, start and end with a letter or digit,
 and total 1 through 253 bytes. Empty labels, trailing dots, NUL, non-ASCII, escapes, Unicode
-mapping, invalid A-label syntax, edge hyphens, and an all-decimal final label SHALL be rejected.
+mapping, invalid RFC 3492 payload syntax in an `xn--` A-label, edge hyphens, and an all-decimal
+final label SHALL be rejected. A-label validation SHALL NOT claim Unicode mapping, normalization,
+or IDNA contextual, bidirectional, or code-point-table validation.
 
 #### Scenario: Boundary values remain owned and distinct
 
@@ -30,6 +32,13 @@ mapping, invalid A-label syntax, edge hyphens, and an all-decimal final label SH
 - **WHEN** a host is empty, oversized, has a 64-byte label, trailing dot, Unicode, percent escape,
   zone identifier, IPvFuture spelling, userinfo, port delimiter, edge hyphen, or decimal final label
 - **THEN** construction fails with an invalid-host or unsupported-form reason before resolution
+
+#### Scenario: Validate an ASCII A-label payload without rewriting it
+
+- **WHEN** `xn--bcher-kva.example`, its uppercase spelling, and malformed `xn---a.example` are
+  admitted
+- **THEN** the two valid RFC 3492 payloads preserve their source bytes and compare
+  case-insensitively, while the malformed payload fails `InvalidALabel` at its label start
 
 ### Requirement: Textual IP parsing and formatting are exact
 
@@ -103,6 +112,13 @@ resolver error.
   under `maxResults = 2`
 - **THEN** duplicates do not consume capacity, A and B preserve order, and C causes
   `LimitExceeded`
+
+#### Scenario: Common policy distrusts a provider's family and capacity
+
+- **WHEN** a domain provider returns a wrong-family endpoint, A, duplicate A, and B for a V4
+  request
+- **THEN** common resolution filters the wrong family, preserves A then B, ignores the duplicate,
+  and applies `maxResults` only to the matching distinct sequence
 
 #### Scenario: Distinguish no address from name failure
 

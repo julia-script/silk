@@ -36,9 +36,11 @@ forms, zones, and IPvFuture syntax. `formatInto` writes canonical text into call
 the Display implementations stream that canonical form through the current Writer.
 
 `DomainHost.make` copies at most 253 bytes of prepared ASCII LDH/A-label spelling. It rejects empty
-labels, edge hyphens, trailing dots, NUL, non-ASCII bytes, and an all-decimal final label. Equality
-is ASCII case-insensitive while display preserves the admitted spelling. IDNA mapping and search
-suffix expansion are outside this profile.
+labels, edge hyphens, trailing dots, NUL, non-ASCII bytes, an all-decimal final label, and an
+`xn--` label whose payload is not syntactically valid RFC 3492 Punycode. Equality is ASCII
+case-insensitive while display preserves the admitted spelling. This is syntax admission for an
+already prepared ASCII A-label: Unicode-to-ASCII mapping, normalization, IDNA code-point tables,
+contextual and bidirectional rules, and search-suffix expansion are outside this profile.
 
 `Host.parse` classifies bracketed IPv6 and strict IPv4 before admitting a domain. The resulting Host
 is the origin identity: resolution never replaces it with a CNAME, reverse lookup, or endpoint.
@@ -52,10 +54,18 @@ Create a `ResolveRequest` with an owned Host, checked Port, `Any`/`V4`/`V6` fami
 request carries a deadline, it samples MonotonicClock exactly once and treats an equal or past mark
 as `Timeout`. A successful numeric result contains one endpoint after family filtering.
 
-Domain requests dispatch to the lexically supplied Resolver service. Providers return owned
-endpoints in stable order. Exact duplicates do not consume capacity; the next distinct endpoint
-beyond `maxResults` fails `LimitExceeded` instead of silently truncating. An empty result fails
-`NoAddress`. Allocation refusal remains `OutOfMemoryError`.
+Domain requests dispatch to the lexically supplied Resolver service. Before publication,
+`Resolver.resolve` re-admits every provider endpoint through the requested family selection,
+stable exact deduplication, and the caller's capacity. Wrong-family and duplicate candidates do not
+consume capacity; the next matching distinct endpoint beyond `maxResults` fails `LimitExceeded`
+instead of silently truncating. An empty admitted result fails `NoAddress`. Allocation refusal
+remains `OutOfMemoryError`.
+
+A provider that accepts a domain deadline can inspect the owned copy returned by
+`ResolveRequest.deadline`. It must compare the deadline before query allocation or registration,
+and bracket any parked work so cancellation releases its registration, sole affine `Wake`, and
+result owner. A provider that cannot provide that lifecycle must return `DeadlineUnsupported`
+before observable work.
 
 ## NativeSystemResolver
 

@@ -123,6 +123,19 @@ it.effect(
           assert.deepEqual(imports, ['__errno_location', 'freeaddrinfo', 'getaddrinfo'])
         }
       }
+      const rejectedImport = yield* AnalysisFixture.retainingMain(
+        'network-address/native-public-import-wasm',
+        encoder.encode(`import silk.native_resolver {NativeSystemResolver}
+pub fn main() -> i32 { return 42 }`),
+        'wasm32-unknown-unknown',
+      )
+      assert.deepEqual(
+        Analysis.diagnostics(rejectedImport).map((diagnostic) => ({
+          code: diagnostic.code,
+          start: diagnostic.span.start,
+        })),
+        [{ code: 'SEM0014', start: 29 }],
+      )
     }),
   30_000,
 )
@@ -146,12 +159,6 @@ it.effect(
         .filter((operation) => operation._tag === 'ExecutionPark')
       assert.lengthOf(parks, 2)
       assert.isTrue(parks.every((park) => park.guardCleanup._tag !== 'NoCleanup'))
-      const retainedWake = parks.find(
-        (park) =>
-          park.guardCleanup._tag === 'StructCleanup' &&
-          park.guardCleanup.fields.some((field) => field.cleanup._tag === 'WakeCleanup'),
-      )
-      assert.isDefined(retainedWake)
     }),
   30_000,
 )

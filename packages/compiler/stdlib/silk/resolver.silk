@@ -174,6 +174,17 @@ impl ResolveRequest {
       Option<Instant>.Some {value} => true
     }
   }
+
+  /// Returns the optional absolute deadline for a provider that can enforce it.
+  pub fn deadline(self: &Self) -> Option<Instant> {
+    return match & self.deadlineValue {
+      Option<Instant>.None => Option.none<Instant>()
+      Option<Instant>.Some {value} => Option.some<Instant>(SystemClock.make(
+        SystemClock.seconds(&value),
+        SystemClock.nanoseconds(&value),
+      ))
+    }
+  }
 }
 
 impl ResolvedEndpoints {
@@ -244,12 +255,22 @@ impl Resolver {
     }
     return match & request.hostValue {
       Host.Domain {value: domain} => {
-        let resolved = run Resolver.resolveDomain(request, &domain)
-        let length = ResolvedEndpoints.length(&resolved)
-        if length > request.maxResultsValue {
-          fail ResolverError.LimitExceeded {maximum: request.maxResultsValue}
+        let provided = run Resolver.resolveDomain(request, &domain)
+        let made = ResolvedEndpoints.make(request.maxResultsValue)
+        let mut resolved = match move made {
+          Result<ResolvedEndpoints, ResolverError>.Failure {error} => { fail move error }
+          Result<ResolvedEndpoints, ResolverError>.Success {value} => value
         }
-        if length == usize.ZERO {
+        let mut index = usize.ZERO
+        while index < ResolvedEndpoints.length(&provided) {
+          let endpoint = ResolvedEndpoints.get(&provided, index)
+          let address = Endpoint.address(&endpoint)
+          if familyAllows(request.familyValue, &address) {
+            let admitted = run ResolvedEndpoints.admit(&mut resolved, move endpoint)
+          }
+          index = index + usize.ONE
+        }
+        if ResolvedEndpoints.length(&resolved) == usize.ZERO {
           fail ResolverError.NoAddress
         }
         return move resolved

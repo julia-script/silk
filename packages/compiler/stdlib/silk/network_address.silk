@@ -16,6 +16,7 @@
 //! Unicode mapping, escapes, zones, IPvFuture, userinfo, ports, and legacy libc IPv4 spellings.
 
 import silk.format {Display, Format, Formatter}
+import silk.option {Option}
 import silk.result {Result}
 import silk.slice {Slice}
 import silk.u16
@@ -45,6 +46,7 @@ pub enum HostReason {
   NonAscii,
   InvalidCharacter,
   EdgeHyphen,
+  InvalidALabel,
   TrailingDot,
   NumericFinalLabel,
 }
@@ -166,6 +168,114 @@ fn folded(value: u8) -> u8 {
 }
 fn isLdh(value: u8) -> bool {
   return (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || isDecimal(value) || value == 45
+}
+
+fn punycodeDigit(value: u8) -> usize {
+  let normalized = folded(value)
+  if normalized >= 97 && normalized <= 122 { return u8.toUsize(normalized - 97) }
+  if normalized >= 48 && normalized <= 57 { return u8.toUsize(normalized - 48 + 26) }
+  return 36
+}
+
+fn punycodeThreshold(k: usize, bias: usize) -> usize {
+  if k <= bias { return usize.ONE }
+  let offset = k - bias
+  if offset >= 26 { return 26 }
+  return offset
+}
+
+fn adaptPunycodeBias(deltaValue: usize, points: usize, first: bool) -> Option<usize> {
+  let mut delta = deltaValue / 2
+  if first { delta = deltaValue / 700 }
+  delta = match move usize.checkedAdd(delta, delta / points) {
+    Option<usize>.None => { return Option.none<usize>() }
+    Option<usize>.Some {value} => value
+  }
+  let mut scale = usize.ZERO
+  while delta > 455 {
+    delta = delta / 35
+    scale = match move usize.checkedAdd(scale, 36) {
+      Option<usize>.None => { return Option.none<usize>() }
+      Option<usize>.Some {value} => value
+    }
+  }
+  let numerator = match move usize.checkedMultiply(36, delta) {
+    Option<usize>.None => { return Option.none<usize>() }
+    Option<usize>.Some {value} => value
+  }
+  return usize.checkedAdd(scale, numerator / (delta + 38))
+}
+
+// This checks the RFC 3492 bootstring payload carried by an ASCII `xn--` label. DomainHost does
+// not perform Unicode mapping or the IDNA contextual, bidirectional, or code-point-table checks.
+fn validALabel(bytes: &[u8], start: usize, end: usize) -> bool {
+  let payload = start + 4
+  if payload >= end { return false }
+  let mut delimiter = end
+  let mut scan = payload
+  while scan < end {
+    if bytes[scan] == 45 { delimiter = scan }
+    scan = scan + usize.ONE
+  }
+  let mut outputLength = usize.ZERO
+  let mut cursor = payload
+  if delimiter < end {
+    if delimiter == payload || delimiter + usize.ONE >= end { return false }
+    outputLength = delimiter - payload
+    cursor = delimiter + usize.ONE
+  }
+  let mut codePoint: usize = 128
+  let mut insertion = usize.ZERO
+  let mut bias: usize = 72
+  let mut decoded = false
+  while cursor < end {
+    let oldInsertion = insertion
+    let mut weight = usize.ONE
+    let mut k: usize = 36
+    while true {
+      if cursor >= end { return false }
+      let digit = punycodeDigit(bytes[cursor])
+      if digit >= 36 { return false }
+      cursor = cursor + usize.ONE
+      let weighted = match move usize.checkedMultiply(digit, weight) {
+        Option<usize>.None => { return false }
+        Option<usize>.Some {value} => value
+      }
+      insertion = match move usize.checkedAdd(insertion, weighted) {
+        Option<usize>.None => { return false }
+        Option<usize>.Some {value} => value
+      }
+      let threshold = punycodeThreshold(k, bias)
+      if digit < threshold { break }
+      weight = match move usize.checkedMultiply(weight, 36 - threshold) {
+        Option<usize>.None => { return false }
+        Option<usize>.Some {value} => value
+      }
+      k = match move usize.checkedAdd(k, 36) {
+        Option<usize>.None => { return false }
+        Option<usize>.Some {value} => value
+      }
+    }
+    outputLength = match move usize.checkedAdd(outputLength, usize.ONE) {
+      Option<usize>.None => { return false }
+      Option<usize>.Some {value} => value
+    }
+    bias = match move adaptPunycodeBias(insertion - oldInsertion, outputLength, oldInsertion == usize.ZERO) {
+      Option<usize>.None => { return false }
+      Option<usize>.Some {value} => value
+    }
+    codePoint = match move usize.checkedAdd(codePoint, insertion / outputLength) {
+      Option<usize>.None => { return false }
+      Option<usize>.Some {value} => value
+    }
+    if codePoint > 1114111 || (codePoint >= 55296 && codePoint <= 57343) { return false }
+    insertion = match move usize.checkedAdd(insertion % outputLength, usize.ONE) {
+      Option<usize>.None => { return false }
+      Option<usize>.Some {value} => value
+    }
+    decoded = true
+  }
+  return decoded
 }
 struct ParsedIpv4 {
   value: Ipv4Address
@@ -598,6 +708,12 @@ impl DomainHost {
         }
         if bytes[at - usize.ONE] == 45 {
           return Result.failResult<DomainHost, AddressError>(invalidHost(HostReason.EdgeHyphen, at - usize.ONE))
+        }
+        if labelLength >= 4 && folded(bytes[labelStart]) == 120
+          && folded(bytes[labelStart + usize.ONE]) == 110
+          && bytes[labelStart + 2] == 45 && bytes[labelStart + 3] == 45
+          && !validALabel(bytes, labelStart, at) {
+          return Result.failResult<DomainHost, AddressError>(invalidHost(HostReason.InvalidALabel, labelStart))
         }
         if at < length {
           labelStart = at + usize.ONE

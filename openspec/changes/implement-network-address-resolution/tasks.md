@@ -11,13 +11,14 @@
 
 - [x] 2.1 Add the `resolver` actor with finite requests/results, semantic errors, stable exact
       deduplication, and the replaceable domain Resolver service; verify invalid forged capacities and
-      more-than-capacity behavior fail before partial publication.
+      more-than-capacity behavior fail before partial publication, including wrong-family and duplicate
+      output from a nonconforming provider.
 - [x] 2.2 Implement numeric provider bypass, family filtering, and exact monotonic deadline
       preflight; verify a deterministic provider records zero calls and a deterministic clock records
       exactly one sample for numeric deadlines.
 - [x] 2.3 Add a deadline-capable deterministic provider fixture with structured parking ownership;
-      verify success and cancellation release the registration, Wake, and result owner without false
-      success.
+      execute reached-deadline, success, and cancellation paths and verify exact registration, Wake,
+      result-owner, readiness, and completion counters without late false success.
 
 ## 3. Selected synchronous native provider
 
@@ -27,8 +28,9 @@
 - [x] 3.2 Implement target-layout-aware chain validation, family filtering, stable deduplication,
       finite capacity, and one move-only addrinfo owner; verify focused analysis exposes the expected
       libc imports on GNU and none on Wasm.
-- [x] 3.3 Add shared native-acceptance C stubs for success, invalid shape, limit, EAI_SYSTEM, and
-      allocation refusal; verify exactly-once release in debug and optimized corpus runs.
+- [x] 3.3 Add shared native-acceptance C stubs for both family hints/filtering, every specified EAI
+      mapping, exact native-error fields, null/unknown/short shapes, success, limit, and allocation
+      refusal; verify ABI layout and exactly-once release in debug and optimized corpus runs.
 
 ## 4. Publication and integration
 
