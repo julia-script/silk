@@ -1,0 +1,3147 @@
+//! Strict bounded HTTP/1 message-body framing without transport or content-decoding policy.
+//!
+//! Select framing from a validated head, then drive Decoder or Encoder with caller buffers.
+//! Construction owns every working allocation. Streaming calls retain no caller borrow and do not
+//! allocate. Completion evidence proves only a framing boundary, never transport health.
+
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.bytes { Bytes }
+import silk.http { Header, Method, Status, ValueError, Version }
+import silk.http_head { HeaderIterator as HeadHeaderIterator, RequestHead, ResponseHead }
+import silk.http_headers {
+  HeaderIterator as ValueHeaderIterator,
+  Headers,
+  Limits as ValueLimits,
+}
+import silk.option { Option }
+import silk.result { Result }
+import silk.slice { Slice }
+import silk.string { String }
+import silk.u64
+import silk.u8
+import silk.usize
+import silk.vector { Vector }
+
+const FIELD_RECORD_BYTES: usize = 32
+const NAME_RECORD_BYTES: usize = 16
+const ENCODER_SYNTAX_BYTES: usize = 32
+const TWO: usize = 2
+const THREE: usize = 3
+const FOUR: usize = 4
+
+/// The selected body delimiter.
+pub union Framing {
+  Empty,
+  Fixed { pub length: u64 },
+  Chunked,
+  CloseDelimited,
+  Tunnel,
+}
+
+impl Copy for Framing {}
+
+/// Receiving metadata that makes an otherwise empty response non-reusable.
+pub enum Anomaly { None, ProhibitedFraming, Http10TransferEncoding }
+
+/// A borrowed framing selection.
+pub struct Selection<'head> {
+  framingValue: Framing
+  anomalyValue: Anomaly
+  statsFields: HeadHeaderIterator<'head>
+  copyFields: HeadHeaderIterator<'head>
+}
+
+impl<'head> Selection<'head> {
+  pub fn framing(self: &Self) -> Framing { return self.framingValue }
+  pub fn anomaly(self: &Self) -> Anomaly { return self.anomalyValue }
+}
+
+/// Every finite framing and owned-storage budget.
+pub struct Limits {
+  pub maxWireBytes: u64
+  pub maxPayloadBytes: u64
+  pub maxChunkBytes: usize
+  pub maxChunks: usize
+  pub maxChunkLineBytes: usize
+  pub maxExtensionBytes: u64
+  pub maxTrailerBytes: usize
+  pub maxTrailerFields: usize
+  pub maxOwnedBytes: usize
+  pub trailerValues: ValueLimits
+}
+
+impl Copy for Limits {}
+
+pub enum ProgressState { NeedInput, NeedOutput, Complete, Tunnel }
+
+/// Exact local and cumulative committed progress.
+pub struct Progress {
+  pub consumed: usize
+  pub written: usize
+  pub totalWire: u64
+  pub totalPayload: u64
+  pub state: ProgressState
+}
+
+pub enum CompletionKind { Delimited, CloseDelimited, Tunnel }
+
+/// Opaque positive evidence borrowed from a completed owner.
+pub struct Completion<'owner> {
+  kindValue: CompletionKind
+  marker: &'owner u8
+}
+
+impl<'owner> Completion<'owner> {
+  pub fn kind(self: &Self) -> CompletionKind { return self.kindValue }
+}
+
+pub enum BodyComponent {
+  Selection,
+  ContentLength,
+  TransferEncoding,
+  ChunkLine,
+  ChunkPayload,
+  ChunkDelimiter,
+  TrailerName,
+  TrailerValue,
+  TrailerPolicy,
+  Decoder,
+  Encoder,
+  Discard,
+}
+
+pub enum BodyLimitKind {
+  WireBytes,
+  PayloadBytes,
+  ChunkBytes,
+  Chunks,
+  ChunkLineBytes,
+  ExtensionBytes,
+  TrailerBytes,
+  TrailerFields,
+  OwnedBytes,
+}
+
+pub union BodyReason {
+  InvalidFraming,
+  ConflictingFraming,
+  UnsupportedTransferCoding,
+  InvalidLength,
+  SizeOverflow,
+  ChunkSyntax,
+  TrailerSyntax,
+  TrailerPolicy,
+  Truncated,
+  FixedLengthUnderrun,
+  FixedLengthOverrun,
+  UnexpectedPayload,
+  UnsupportedTunnelEncoding,
+  DiscardLimit { pub allowed: u64, pub attempted: u64 },
+  LimitExceeded { pub limit: BodyLimitKind, pub allowed: u64, pub attempted: u64 },
+  InvalidState,
+}
+
+impl Copy for BodyReason {}
+
+/// A terminal failure with exact committed coordinates.
+pub struct BodyError {
+  pub reason: BodyReason
+  pub component: BodyComponent
+  pub wireOffset: u64
+  pub consumed: usize
+  pub written: usize
+  pub totalWire: u64
+  pub totalPayload: u64
+  pub fieldIndex: Option<usize>
+}
+
+/// An explicit trailer-name allowlist.
+pub union TrailerPolicy<'names> {
+  Default,
+  Explicit { names: &'names [string<'names>] },
+}
+
+impl<'names> Copy for TrailerPolicy<'names> {}
+
+impl<'names> TrailerPolicy<'names> {
+  pub fn defaultPolicy() -> TrailerPolicy<'names> { return TrailerPolicy<'names>.Default }
+
+  pub fn fromNames(
+    names: &'names [string<'names>],
+  ) -> Result<TrailerPolicy<'names>, BodyError> {
+    let mut index = usize.ZERO
+    while index < names.length {
+      let bytes = String.utf8Bytes(names[index])
+      if !validToken(bytes) || staticallyForbidden(bytes) {
+        return Result.failResult<TrailerPolicy<'names>, BodyError>(baseError(
+          BodyReason.TrailerPolicy,
+          BodyComponent.TrailerPolicy,
+          usize.toU64(index),
+          Option.some<usize>(index),
+        ))
+      }
+      index = index + usize.ONE
+    }
+    return Result.succeed<TrailerPolicy<'names>, BodyError>(
+      TrailerPolicy<'names>.Explicit {names: names},
+    )
+  }
+}
+
+struct HeadMetadata {
+  hasLength: bool
+  length: u64
+  hasTransfer: bool
+}
+
+/// Selects receiving request framing.
+pub fn selectRequest<'value>(
+  head: RequestHead<'value>,
+  policy: TrailerPolicy,
+) -> Result<Selection<'value>, BodyError> {
+  let metadata = match move scanRequestHead(head, policy) {
+    Result<HeadMetadata, BodyError>.Failure {error} => {
+      return Result.failResult<Selection<'value>, BodyError>(move error)
+    }
+    Result<HeadMetadata, BodyError>.Success {value} => move value
+  }
+  let framing = match move ordinaryFraming(move metadata, true) {
+    Result<Framing, BodyError>.Failure {error} => {
+      return Result.failResult<Selection<'value>, BodyError>(move error)
+    }
+    Result<Framing, BodyError>.Success {value} => value
+  }
+  return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
+    framingValue: framing,
+    anomalyValue: Anomaly.None,
+    statsFields: head.fields(),
+    copyFields: head.fields(),
+  })
+}
+
+/// Selects receiving response framing.
+pub fn selectResponse<'value>(
+  head: ResponseHead<'value>,
+  requestMethod: &Method,
+  policy: TrailerPolicy,
+) -> Result<Selection<'value>, BodyError> {
+  let version = head.version()
+  let statusValue = head.status()
+  let status = Status.code(&statusValue)
+  if semanticallyEmpty(statusValue, requestMethod) {
+    let mut anomaly = Anomaly.None
+    let hasLength = hasHeader(head.fields(), b"content-length")
+    let hasTransfer = hasHeader(head.fields(), b"transfer-encoding")
+    if version == Version.Http10 && hasTransfer {
+      anomaly = Anomaly.Http10TransferEncoding
+    }
+    if ((status >= 100 && status < 200) || status == 204) && (hasLength || hasTransfer) {
+      anomaly = Anomaly.ProhibitedFraming
+    }
+    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
+      framingValue: Framing.Empty,
+      anomalyValue: anomaly,
+      statsFields: head.fields(),
+      copyFields: head.fields(),
+    })
+  }
+  if Method.format(requestMethod) == "CONNECT" && status >= 200 && status < 300 {
+    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
+      framingValue: Framing.Tunnel,
+      anomalyValue: Anomaly.None,
+      statsFields: head.fields(),
+      copyFields: head.fields(),
+    })
+  }
+  let metadata = match move scanResponseHead(head, policy) {
+    Result<HeadMetadata, BodyError>.Failure {error} => {
+      return Result.failResult<Selection<'value>, BodyError>(move error)
+    }
+    Result<HeadMetadata, BodyError>.Success {value} => move value
+  }
+  let framing = match move ordinaryFraming(move metadata, false) {
+    Result<Framing, BodyError>.Failure {error} => {
+      return Result.failResult<Selection<'value>, BodyError>(move error)
+    }
+    Result<Framing, BodyError>.Success {value} => value
+  }
+  return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
+    framingValue: framing,
+    anomalyValue: Anomaly.None,
+    statsFields: head.fields(),
+    copyFields: head.fields(),
+  })
+}
+
+pub fn validateOutgoingRequest<'value>(
+  head: RequestHead<'value>,
+  policy: TrailerPolicy,
+) -> Result<Selection<'value>, BodyError> {
+  return selectRequest(head, policy)
+}
+
+pub fn validateOutgoingResponse<'value>(
+  head: ResponseHead<'value>,
+  requestMethod: &Method,
+  policy: TrailerPolicy,
+) -> Result<Selection<'value>, BodyError> {
+  let statusValue = head.status()
+  let status = Status.code(&statusValue)
+  let prohibited = (status >= 100 && status < 200) || status == 204
+    || (Method.format(requestMethod) == "CONNECT" && status >= 200 && status < 300)
+  if prohibited && (hasHeader(head.fields(), b"content-length")
+    || hasHeader(head.fields(), b"transfer-encoding")) {
+    return Result.failResult<Selection<'value>, BodyError>(baseError(
+      BodyReason.InvalidFraming,
+      BodyComponent.Selection,
+      u64.MIN,
+      Option.none<usize>(),
+    ))
+  }
+  if semanticallyEmpty(statusValue, requestMethod) {
+    let validated = scanResponseHead(head, policy)
+    if let Result<HeadMetadata, BodyError>.Failure {error} = move validated {
+      return Result.failResult<Selection<'value>, BodyError>(move error)
+    }
+    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
+      framingValue: Framing.Empty,
+      anomalyValue: Anomaly.None,
+      statsFields: head.fields(),
+      copyFields: head.fields(),
+    })
+  }
+  if Method.format(requestMethod) == "CONNECT" && status >= 200 && status < 300 {
+    return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
+      framingValue: Framing.Tunnel,
+      anomalyValue: Anomaly.None,
+      statsFields: head.fields(),
+      copyFields: head.fields(),
+    })
+  }
+  return selectResponse(move head, requestMethod, policy)
+}
+
+fn scanRequestHead<'value>(
+  head: RequestHead<'value>,
+  policy: TrailerPolicy,
+) -> Result<HeadMetadata, BodyError> {
+  let metadata = match move scanHead(head.fields(), head.version(), policy) {
+    Result<HeadMetadata, BodyError>.Failure {error} => {
+      return Result.failResult<HeadMetadata, BodyError>(move error)
+    }
+    Result<HeadMetadata, BodyError>.Success {value} => value
+  }
+  let exclusions = validateRequestTrailerExclusions(head)
+  if let Result<(), BodyError>.Failure {error} = move exclusions {
+    return Result.failResult<HeadMetadata, BodyError>(move error)
+  }
+  return Result.succeed<HeadMetadata, BodyError>(move metadata)
+}
+
+fn scanResponseHead<'value>(
+  head: ResponseHead<'value>,
+  policy: TrailerPolicy,
+) -> Result<HeadMetadata, BodyError> {
+  let metadata = match move scanHead(head.fields(), head.version(), policy) {
+    Result<HeadMetadata, BodyError>.Failure {error} => {
+      return Result.failResult<HeadMetadata, BodyError>(move error)
+    }
+    Result<HeadMetadata, BodyError>.Success {value} => value
+  }
+  let exclusions = validateResponseTrailerExclusions(head)
+  if let Result<(), BodyError>.Failure {error} = move exclusions {
+    return Result.failResult<HeadMetadata, BodyError>(move error)
+  }
+  return Result.succeed<HeadMetadata, BodyError>(move metadata)
+}
+
+fn scanHead<'value>(
+  fields: HeadHeaderIterator<'value>,
+  version: Version,
+  policy: TrailerPolicy,
+) -> Result<HeadMetadata, BodyError> {
+  let mut lengthCount = usize.ZERO
+  let mut transferCount = usize.ZERO
+  let mut length: u64 = 0
+  let mut iterator = move fields
+  let mut index = usize.ZERO
+  while true {
+    let field = match move HeadHeaderIterator.next(&mut iterator) {
+      Option<Header<'value>>.None => { break }
+      Option<Header<'value>>.Some {value: fieldValue} => fieldValue
+    }
+    let name = String.utf8Bytes(Header.name(&field))
+    let value = Header.value(&field)
+    if asciiName(name, b"content-length") {
+      lengthCount = lengthCount + usize.ONE
+      if lengthCount > usize.ONE {
+        return Result.failResult<HeadMetadata, BodyError>(selectionError(
+          BodyReason.InvalidLength,
+          BodyComponent.ContentLength,
+          index,
+        ))
+      }
+      length = match move parseContentLength(value, index) {
+        Result<u64, BodyError>.Failure {error} => {
+          return Result.failResult<HeadMetadata, BodyError>(move error)
+        }
+        Result<u64, BodyError>.Success {value: parsed} => parsed
+      }
+    } else if asciiName(name, b"transfer-encoding") {
+      transferCount = transferCount + usize.ONE
+      if transferCount > usize.ONE || !asciiTrimmed(value, b"chunked") {
+        return Result.failResult<HeadMetadata, BodyError>(selectionError(
+          BodyReason.UnsupportedTransferCoding,
+          BodyComponent.TransferEncoding,
+          index,
+        ))
+      }
+    } else if asciiName(name, b"trailer") {
+      let declared = validateNameList(value, policy, index)
+      if let Result<(), BodyError>.Failure {error} = move declared {
+        return Result.failResult<HeadMetadata, BodyError>(move error)
+      }
+    } else if asciiName(name, b"connection") {
+      let nominated = validateConnectionList(value, index)
+      if let Result<(), BodyError>.Failure {error} = move nominated {
+        return Result.failResult<HeadMetadata, BodyError>(move error)
+      }
+    }
+    index = index + usize.ONE
+  }
+  if transferCount > usize.ZERO && version == Version.Http10 {
+    return Result.failResult<HeadMetadata, BodyError>(baseError(
+      BodyReason.UnsupportedTransferCoding,
+      BodyComponent.TransferEncoding,
+      u64.MIN,
+      Option.none<usize>(),
+    ))
+  }
+  return Result.succeed<HeadMetadata, BodyError>(HeadMetadata {
+    hasLength: lengthCount == usize.ONE,
+    length: length,
+    hasTransfer: transferCount == usize.ONE,
+  })
+}
+
+fn validateConnectionList(value: &[u8], fieldIndex: usize) -> Result<(), BodyError> {
+  let mut cursor = usize.ZERO
+  let mut count = usize.ZERO
+  while cursor < value.length {
+    while cursor < value.length && (value[cursor] == 32 || value[cursor] == 9) {
+      cursor = cursor + usize.ONE
+    }
+    let start = cursor
+    while cursor < value.length && tokenByte(value[cursor]) { cursor = cursor + usize.ONE }
+    if cursor == start {
+      return Result.failResult<(), BodyError>(selectionError(
+        BodyReason.TrailerPolicy,
+        BodyComponent.TrailerPolicy,
+        fieldIndex,
+      ))
+    }
+    count = count + usize.ONE
+    while cursor < value.length && (value[cursor] == 32 || value[cursor] == 9) {
+      cursor = cursor + usize.ONE
+    }
+    if cursor < value.length {
+      if value[cursor] != 44 {
+        return Result.failResult<(), BodyError>(selectionError(
+          BodyReason.TrailerPolicy,
+          BodyComponent.TrailerPolicy,
+          fieldIndex,
+        ))
+      }
+      cursor = cursor + usize.ONE
+      if cursor == value.length {
+        return Result.failResult<(), BodyError>(selectionError(
+          BodyReason.TrailerPolicy,
+          BodyComponent.TrailerPolicy,
+          fieldIndex,
+        ))
+      }
+    }
+  }
+  if count == usize.ZERO {
+    return Result.failResult<(), BodyError>(selectionError(
+      BodyReason.TrailerPolicy,
+      BodyComponent.TrailerPolicy,
+      fieldIndex,
+    ))
+  }
+  return Result.succeed<(), BodyError>(())
+}
+
+fn ordinaryFraming(metadata: HeadMetadata, request: bool) -> Result<Framing, BodyError> {
+  if metadata.hasLength && metadata.hasTransfer {
+    return Result.failResult<Framing, BodyError>(baseError(
+      BodyReason.ConflictingFraming,
+      BodyComponent.Selection,
+      u64.MIN,
+      Option.none<usize>(),
+    ))
+  }
+  if metadata.hasTransfer { return Result.succeed<Framing, BodyError>(Framing.Chunked) }
+  if metadata.hasLength {
+    return Result.succeed<Framing, BodyError>(Framing.Fixed {length: metadata.length})
+  }
+  if request { return Result.succeed<Framing, BodyError>(Framing.Empty) }
+  return Result.succeed<Framing, BodyError>(Framing.CloseDelimited)
+}
+
+fn semanticallyEmpty(status: Status, method: &Method) -> bool {
+  let code = Status.code(&status)
+  return Method.format(method) == "HEAD"
+    || (code >= 100 && code < 200)
+    || code == 204
+    || code == 304
+}
+
+fn parseContentLength(value: &[u8], fieldIndex: usize) -> Result<u64, BodyError> {
+  if value.length == usize.ZERO {
+    return Result.failResult<u64, BodyError>(selectionError(
+      BodyReason.InvalidLength,
+      BodyComponent.ContentLength,
+      fieldIndex,
+    ))
+  }
+  let mut parsed: u64 = 0
+  let mut index = usize.ZERO
+  while index < value.length {
+    let byte = value[index]
+    if byte < 48 || byte > 57 {
+      return Result.failResult<u64, BodyError>(selectionError(
+        BodyReason.InvalidLength,
+        BodyComponent.ContentLength,
+        fieldIndex,
+      ))
+    }
+    if parsed > u64.MAX / 10 {
+      return Result.failResult<u64, BodyError>(selectionError(
+        BodyReason.SizeOverflow,
+        BodyComponent.ContentLength,
+        fieldIndex,
+      ))
+    }
+    let product = parsed * 10
+    let digit = u8.toU64(byte - 48)
+    if digit > u64.MAX - product {
+      return Result.failResult<u64, BodyError>(selectionError(
+        BodyReason.SizeOverflow,
+        BodyComponent.ContentLength,
+        fieldIndex,
+      ))
+    }
+    parsed = product + digit
+    index = index + usize.ONE
+  }
+  return Result.succeed<u64, BodyError>(parsed)
+}
+
+fn validateNameList<'value>(
+  value: &[u8],
+  policy: TrailerPolicy,
+  fieldIndex: usize,
+) -> Result<(), BodyError> {
+  let mut cursor = usize.ZERO
+  let mut count = usize.ZERO
+  while cursor < value.length {
+    while cursor < value.length && (value[cursor] == 32 || value[cursor] == 9) {
+      cursor = cursor + usize.ONE
+    }
+    let start = cursor
+    while cursor < value.length && tokenByte(value[cursor]) { cursor = cursor + usize.ONE }
+    if cursor == start {
+      return Result.failResult<(), BodyError>(selectionError(
+        BodyReason.TrailerPolicy,
+        BodyComponent.TrailerPolicy,
+        fieldIndex,
+      ))
+    }
+    let name = Slice.view<u8>(value, start, cursor - start)
+    if staticallyForbidden(name) || !policyAllows(policy, name) {
+      return Result.failResult<(), BodyError>(selectionError(
+        BodyReason.TrailerPolicy,
+        BodyComponent.TrailerPolicy,
+        fieldIndex,
+      ))
+    }
+    count = count + usize.ONE
+    while cursor < value.length && (value[cursor] == 32 || value[cursor] == 9) {
+      cursor = cursor + usize.ONE
+    }
+    if cursor < value.length {
+      if value[cursor] != 44 {
+        return Result.failResult<(), BodyError>(selectionError(
+          BodyReason.TrailerPolicy,
+          BodyComponent.TrailerPolicy,
+          fieldIndex,
+        ))
+      }
+      cursor = cursor + usize.ONE
+      if cursor == value.length {
+        return Result.failResult<(), BodyError>(selectionError(
+          BodyReason.TrailerPolicy,
+          BodyComponent.TrailerPolicy,
+          fieldIndex,
+        ))
+      }
+    }
+  }
+  if count == usize.ZERO {
+    return Result.failResult<(), BodyError>(selectionError(
+      BodyReason.TrailerPolicy,
+      BodyComponent.TrailerPolicy,
+      fieldIndex,
+    ))
+  }
+  return Result.succeed<(), BodyError>(())
+}
+
+fn validateRequestTrailerExclusions<'value>(
+  head: RequestHead<'value>,
+) -> Result<(), BodyError> {
+  let mut iterator = head.fields()
+  let mut fieldIndex = usize.ZERO
+  while true {
+    let field = match move HeadHeaderIterator.next(&mut iterator) {
+      Option<Header<'value>>.None => { break }
+      Option<Header<'value>>.Some {value} => value
+    }
+    if asciiName(String.utf8Bytes(Header.name(&field)), b"trailer") {
+      let value = Header.value(&field)
+      let mut cursor = usize.ZERO
+      while cursor < value.length {
+        while cursor < value.length && (value[cursor] == 32 || value[cursor] == 9) {
+          cursor = cursor + usize.ONE
+        }
+        let start = cursor
+        while cursor < value.length && tokenByte(value[cursor]) { cursor = cursor + usize.ONE }
+        let name = Slice.view<u8>(value, start, cursor - start)
+        if connectionNominates(head.fields(), name) {
+          return Result.failResult<(), BodyError>(selectionError(
+            BodyReason.TrailerPolicy,
+            BodyComponent.TrailerPolicy,
+            fieldIndex,
+          ))
+        }
+        while cursor < value.length && value[cursor] != 44 { cursor = cursor + usize.ONE }
+        if cursor < value.length { cursor = cursor + usize.ONE }
+      }
+    }
+    fieldIndex = fieldIndex + usize.ONE
+  }
+  return Result.succeed<(), BodyError>(())
+}
+
+fn validateResponseTrailerExclusions<'value>(
+  head: ResponseHead<'value>,
+) -> Result<(), BodyError> {
+  let mut iterator = head.fields()
+  let mut fieldIndex = usize.ZERO
+  while true {
+    let field = match move HeadHeaderIterator.next(&mut iterator) {
+      Option<Header<'value>>.None => { break }
+      Option<Header<'value>>.Some {value} => value
+    }
+    if asciiName(String.utf8Bytes(Header.name(&field)), b"trailer") {
+      let value = Header.value(&field)
+      let mut cursor = usize.ZERO
+      while cursor < value.length {
+        while cursor < value.length && (value[cursor] == 32 || value[cursor] == 9) {
+          cursor = cursor + usize.ONE
+        }
+        let start = cursor
+        while cursor < value.length && tokenByte(value[cursor]) { cursor = cursor + usize.ONE }
+        let name = Slice.view<u8>(value, start, cursor - start)
+        if connectionNominates(head.fields(), name) {
+          return Result.failResult<(), BodyError>(selectionError(
+            BodyReason.TrailerPolicy,
+            BodyComponent.TrailerPolicy,
+            fieldIndex,
+          ))
+        }
+        while cursor < value.length && value[cursor] != 44 { cursor = cursor + usize.ONE }
+        if cursor < value.length { cursor = cursor + usize.ONE }
+      }
+    }
+    fieldIndex = fieldIndex + usize.ONE
+  }
+  return Result.succeed<(), BodyError>(())
+}
+
+fn policyAllows(policy: TrailerPolicy, name: &[u8]) -> bool {
+  return match move policy {
+    TrailerPolicy.Default => {
+      return asciiName(name, b"content-digest") || asciiName(name, b"repr-digest")
+    }
+    TrailerPolicy.Explicit {names} => {
+      let mut index = usize.ZERO
+      while index < names.length {
+        if asciiName(name, String.utf8Bytes(names[index])) { return true }
+        index = index + usize.ONE
+      }
+      return false
+    }
+  }
+}
+
+fn connectionNominates<'value>(fields: HeadHeaderIterator<'value>, candidate: &[u8]) -> bool {
+  let mut iterator = move fields
+  while true {
+    let field = match move HeadHeaderIterator.next(&mut iterator) {
+      Option<Header<'value>>.None => { return false }
+      Option<Header<'value>>.Some {value: fieldValue} => fieldValue
+    }
+    if asciiName(String.utf8Bytes(Header.name(&field)), b"connection")
+      && listContains(Header.value(&field), candidate) {
+      return true
+    }
+  }
+  return false
+}
+
+fn listContains(value: &[u8], candidate: &[u8]) -> bool {
+  let mut cursor = usize.ZERO
+  while cursor < value.length {
+    while cursor < value.length
+      && (value[cursor] == 32 || value[cursor] == 9 || value[cursor] == 44) {
+      cursor = cursor + usize.ONE
+    }
+    let start = cursor
+    while cursor < value.length && tokenByte(value[cursor]) { cursor = cursor + usize.ONE }
+    if cursor > start && asciiName(Slice.view<u8>(value, start, cursor - start), candidate) {
+      return true
+    }
+    while cursor < value.length && value[cursor] != 44 { cursor = cursor + usize.ONE }
+  }
+  return false
+}
+
+fn hasHeader<'value>(fields: HeadHeaderIterator<'value>, name: &[u8]) -> bool {
+  let mut iterator = move fields
+  while true {
+    let field = match move HeadHeaderIterator.next(&mut iterator) {
+      Option<Header<'value>>.None => { return false }
+      Option<Header<'value>>.Some {value: fieldValue} => fieldValue
+    }
+    if asciiName(String.utf8Bytes(Header.name(&field)), name) { return true }
+  }
+  return false
+}
+
+fn selectionError(
+  reason: BodyReason,
+  component: BodyComponent,
+  fieldIndex: usize,
+) -> BodyError {
+  return baseError(reason, component, u64.MIN, Option.some<usize>(fieldIndex))
+}
+
+fn baseError(
+  reason: BodyReason,
+  component: BodyComponent,
+  offset: u64,
+  fieldIndex: Option<usize>,
+) -> BodyError {
+  return BodyError {
+    reason: reason,
+    component: component,
+    wireOffset: offset,
+    consumed: usize.ZERO,
+    written: usize.ZERO,
+    totalWire: u64.MIN,
+    totalPayload: u64.MIN,
+    fieldIndex: move fieldIndex,
+  }
+}
+
+fn asciiTrimmed(value: &[u8], expected: &[u8]) -> bool {
+  let mut start = usize.ZERO
+  let mut end = value.length
+  while start < end && (value[start] == 32 || value[start] == 9) { start = start + usize.ONE }
+  while end > start && (value[end - usize.ONE] == 32 || value[end - usize.ONE] == 9) {
+    end = end - usize.ONE
+  }
+  return asciiName(Slice.view<u8>(value, start, end - start), expected)
+}
+
+fn asciiName(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length { return false }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if asciiLower(left[index]) != asciiLower(right[index]) { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn asciiLower(value: u8) -> u8 {
+  if value >= 65 && value <= 90 { return value + 32 }
+  return value
+}
+
+fn validToken(value: &[u8]) -> bool {
+  if value.length == usize.ZERO { return false }
+  let mut index = usize.ZERO
+  while index < value.length {
+    if !tokenByte(value[index]) { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn tokenByte(value: u8) -> bool {
+  if value >= 65 && value <= 90 { return true }
+  if value >= 97 && value <= 122 { return true }
+  if value >= 48 && value <= 57 { return true }
+  return value == 33 || value == 35 || value == 36 || value == 37 || value == 38
+    || value == 39 || value == 42 || value == 43 || value == 45 || value == 46
+    || value == 94 || value == 95 || value == 96 || value == 124 || value == 126
+}
+
+fn staticallyForbidden(name: &[u8]) -> bool {
+  return asciiName(name, b"content-length")
+    || asciiName(name, b"transfer-encoding")
+    || asciiName(name, b"host")
+    || asciiName(name, b"connection")
+    || asciiName(name, b"te")
+    || asciiName(name, b"trailer")
+    || asciiName(name, b"upgrade")
+    || asciiName(name, b"authorization")
+    || asciiName(name, b"proxy-authorization")
+    || asciiName(name, b"www-authenticate")
+    || asciiName(name, b"proxy-authenticate")
+    || asciiName(name, b"cookie")
+    || asciiName(name, b"set-cookie")
+    || asciiName(name, b"content-encoding")
+    || asciiName(name, b"content-type")
+    || asciiName(name, b"content-range")
+    || asciiName(name, b"content-location")
+    || asciiName(name, b"range")
+    || asciiName(name, b"cache-control")
+    || asciiName(name, b"max-forwards")
+    || asciiName(name, b"expect")
+}
+
+struct NameRecord {
+  start: usize
+  length: usize
+}
+
+impl Copy for NameRecord {}
+
+struct StoredNames {
+  bytes: Bytes
+  records: Vector<NameRecord>
+  defaultPolicy: bool
+}
+
+enum DecoderPhase {
+  Fixed,
+  Close,
+  ChunkLine,
+  ChunkData,
+  ChunkDataCr,
+  ChunkDataLf,
+  TrailerLine,
+  Complete,
+  Tunnel,
+  Failed,
+  Abandoned,
+}
+
+fn initialDecoderPhase(framing: Framing) -> DecoderPhase {
+  return match framing {
+    Framing.Empty => { return DecoderPhase.Complete }
+    Framing.Fixed {length} => {
+      if length == u64.MIN { return DecoderPhase.Complete }
+      return DecoderPhase.Fixed
+    }
+    Framing.Chunked => { return DecoderPhase.ChunkLine }
+    Framing.CloseDelimited => { return DecoderPhase.Close }
+    Framing.Tunnel => { return DecoderPhase.Tunnel }
+  }
+}
+
+fn isEmptyFraming(framing: Framing) -> bool {
+  return match framing {
+    Framing.Empty => true
+    _ => false
+  }
+}
+
+fn isFixedFraming(framing: Framing) -> bool {
+  return match framing {
+    Framing.Fixed {length} => { drop length return true }
+    _ => false
+  }
+}
+
+fn isChunkedFraming(framing: Framing) -> bool {
+  return match framing {
+    Framing.Chunked => true
+    _ => false
+  }
+}
+
+fn isCloseFraming(framing: Framing) -> bool {
+  return match framing {
+    Framing.CloseDelimited => true
+    _ => false
+  }
+}
+
+fn isTunnelFraming(framing: Framing) -> bool {
+  return match framing {
+    Framing.Tunnel => true
+    _ => false
+  }
+}
+
+struct DecoderCore {
+  framing: Framing
+  limits: Limits
+  phase: DecoderPhase
+  remaining: u64
+  currentChunk: u64
+  chunks: usize
+  extensions: u64
+  line: Bytes
+  lineLength: usize
+  linePendingCr: bool
+  trailerBytes: Bytes
+  trailerLength: usize
+  trailerLineStart: usize
+  trailerPendingCr: bool
+  trailerRecords: Bytes
+  trailerCount: usize
+  allowedNames: StoredNames
+  forbiddenNames: StoredNames
+  totalWire: u64
+  totalPayload: u64
+  finalSeen: bool
+  completionKind: CompletionKind
+  completionMarker: u8
+  failureReason: BodyReason
+  failureComponent: BodyComponent
+  failureOffset: u64
+  failureField: usize
+  failureHasField: bool
+}
+
+/// Affine allocation-free incremental body decoder.
+pub struct Decoder { core: DecoderCore }
+
+impl Decoder {
+  /// Acquires every decoder buffer and copies trailer policy and Connection exclusions.
+  pub effect fn make<'head>(
+    selection: Selection<'head>,
+    limits: Limits,
+    policy: TrailerPolicy,
+  ) -> Result<Decoder, BodyError> ! OutOfMemoryError ? &mut Allocator {
+    let framing = selection.framingValue
+    let recordBytes = match move usize.checkedMultiply(limits.maxTrailerFields, FIELD_RECORD_BYTES) {
+      Option<usize>.None => {
+        return Result.failResult<Decoder, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Decoder,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    let policyStats = policyNameStats(policy)
+    let connectionStats = connectionNameStats(move selection.statsFields)
+    let mut owned = match move usize.checkedAdd(limits.maxChunkLineBytes, limits.maxTrailerBytes) {
+      Option<usize>.None => {
+        return Result.failResult<Decoder, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Decoder,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    owned = match move usize.checkedAdd(owned, recordBytes) {
+      Option<usize>.None => {
+        return Result.failResult<Decoder, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Decoder,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    let policyRecords = match move usize.checkedMultiply(policyStats.count, NAME_RECORD_BYTES) {
+      Option<usize>.None => {
+        return Result.failResult<Decoder, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Decoder,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    let connectionRecords = match move usize.checkedMultiply(
+      connectionStats.count,
+      NAME_RECORD_BYTES,
+    ) {
+      Option<usize>.None => {
+        return Result.failResult<Decoder, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Decoder,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    owned = checkedOwnedAdd(owned, policyStats.bytes, limits.maxOwnedBytes)
+    owned = checkedOwnedAdd(owned, policyRecords, limits.maxOwnedBytes)
+    owned = checkedOwnedAdd(owned, connectionStats.bytes, limits.maxOwnedBytes)
+    owned = checkedOwnedAdd(owned, connectionRecords, limits.maxOwnedBytes)
+    if owned > limits.maxOwnedBytes {
+      return Result.failResult<Decoder, BodyError>(baseError(
+        BodyReason.LimitExceeded {
+          limit: BodyLimitKind.OwnedBytes,
+          allowed: usize.toU64(limits.maxOwnedBytes),
+          attempted: usize.toU64(owned),
+        },
+        BodyComponent.Decoder,
+        u64.MIN,
+        Option.none<usize>(),
+      ))
+    }
+    let line = run Bytes.zeroed(limits.maxChunkLineBytes)
+    let trailerBytes = run Bytes.zeroed(limits.maxTrailerBytes)
+    let trailerRecords = run Bytes.zeroed(recordBytes)
+    let allowedNames = run copyPolicyNames(policy, move policyStats)
+    let forbiddenNames = run copyConnectionNames(move selection.copyFields, move connectionStats)
+    let phase = initialDecoderPhase(framing)
+    let remaining = match framing {
+      Framing.Fixed {length} => length
+      _ => u64.MIN
+    }
+    let completion = match framing {
+      Framing.Empty => CompletionKind.Delimited
+      Framing.Fixed {length} => CompletionKind.Delimited
+      Framing.Tunnel => CompletionKind.Tunnel
+      _ => CompletionKind.Delimited
+    }
+    return Result.succeed<Decoder, BodyError>(Decoder {
+      core: DecoderCore {
+        framing: framing,
+        limits: limits,
+        phase: phase,
+        remaining: remaining,
+        currentChunk: u64.MIN,
+        chunks: usize.ZERO,
+        extensions: u64.MIN,
+        line: move line,
+        lineLength: usize.ZERO,
+        linePendingCr: false,
+        trailerBytes: move trailerBytes,
+        trailerLength: usize.ZERO,
+        trailerLineStart: usize.ZERO,
+        trailerPendingCr: false,
+        trailerRecords: move trailerRecords,
+        trailerCount: usize.ZERO,
+        allowedNames: move allowedNames,
+        forbiddenNames: move forbiddenNames,
+        totalWire: u64.MIN,
+        totalPayload: u64.MIN,
+        finalSeen: false,
+        completionKind: completion,
+        completionMarker: 0,
+        failureReason: BodyReason.InvalidState,
+        failureComponent: BodyComponent.Decoder,
+        failureOffset: u64.MIN,
+        failureField: usize.ZERO,
+        failureHasField: false,
+      },
+    })
+  }
+
+  /// Decodes into caller output without consuming unwritten payload.
+  pub fn step(
+    self: &mut Self,
+    input: &[u8],
+    output: &mut [u8],
+    finalInput: bool,
+  ) -> Result<Progress, BodyError> {
+    return decodeCore(&mut self.core, input, &mut output, finalInput, false, u64.MAX)
+  }
+
+  /// Discards wire bytes under an explicit cumulative framing-byte budget.
+  pub fn discard(
+    self: &mut Self,
+    input: &[u8],
+    finalInput: bool,
+    maxDiscardWireBytes: u64,
+  ) -> Result<Progress, BodyError> {
+    let mut empty: [u8; 0] = []
+    return decodeCore(
+      &mut self.core,
+      input,
+      &mut empty,
+      finalInput,
+      true,
+      maxDiscardWireBytes,
+    )
+  }
+
+  /// Returns positive evidence only after a successful terminal boundary.
+  pub fn completion<'owner>(self: &'owner Self) -> Option<Completion<'owner>> {
+    if self.core.phase != DecoderPhase.Complete && self.core.phase != DecoderPhase.Tunnel {
+      return Option.none<Completion<'owner>>()
+    }
+    return Option.some<Completion<'owner>>(Completion<'owner> {
+      kindValue: self.core.completionKind,
+      marker: &self.core.completionMarker,
+    })
+  }
+
+  /// Returns completed chunk trailers without merging them into initial fields.
+  pub fn trailers<'owner>(self: &'owner Self) -> Option<Trailers<'owner>> {
+    if self.core.phase != DecoderPhase.Complete {
+      return Option.none<Trailers<'owner>>()
+    }
+    return Option.some<Trailers<'owner>>(Trailers<'owner> {
+      bytes: Slice.view<u8>(
+        Bytes.asSlice(&self.core.trailerBytes),
+        usize.ZERO,
+        self.core.trailerLength,
+      ),
+      records: Slice.view<u8>(
+        Bytes.asSlice(&self.core.trailerRecords),
+        usize.ZERO,
+        self.core.trailerCount * FIELD_RECORD_BYTES,
+      ),
+      countValue: self.core.trailerCount,
+      limits: self.core.limits.trailerValues,
+    })
+  }
+
+  /// Reuses acquired storage for a distinct framing instance.
+  pub fn reset(self: &mut Self, framing: Framing) -> Result<(), BodyError> {
+    if self.core.phase != DecoderPhase.Complete && self.core.phase != DecoderPhase.Failed
+      && self.core.phase != DecoderPhase.Abandoned && self.core.phase != DecoderPhase.Tunnel {
+      return Result.failResult<(), BodyError>(decoderStateError(&self.core))
+    }
+    self.core.framing = framing
+    self.core.phase = initialDecoderPhase(framing)
+    self.core.remaining = match framing {
+      Framing.Fixed {length} => length
+      _ => u64.MIN
+    }
+    self.core.currentChunk = u64.MIN
+    self.core.chunks = usize.ZERO
+    self.core.extensions = u64.MIN
+    self.core.lineLength = usize.ZERO
+    self.core.linePendingCr = false
+    self.core.trailerLength = usize.ZERO
+    self.core.trailerLineStart = usize.ZERO
+    self.core.trailerPendingCr = false
+    self.core.trailerCount = usize.ZERO
+    self.core.totalWire = u64.MIN
+    self.core.totalPayload = u64.MIN
+    self.core.finalSeen = false
+    self.core.completionKind = match framing {
+      Framing.Tunnel => CompletionKind.Tunnel
+      _ => CompletionKind.Delimited
+    }
+    return Result.succeed<(), BodyError>(())
+  }
+
+  /// Makes the decoder terminal without performing transport work.
+  pub fn abandon(self: &mut Self) -> () {
+    if self.core.phase != DecoderPhase.Complete && self.core.phase != DecoderPhase.Tunnel {
+      self.core.phase = DecoderPhase.Abandoned
+    }
+    return ()
+  }
+}
+
+struct NameStats {
+  bytes: usize
+  count: usize
+}
+
+fn policyNameStats(policy: TrailerPolicy) -> NameStats {
+  return match move policy {
+    TrailerPolicy.Default => NameStats {bytes: usize.ZERO, count: usize.ZERO}
+    TrailerPolicy.Explicit {names} => {
+      let mut total = usize.ZERO
+      let mut index = usize.ZERO
+      while index < names.length {
+        total = total + String.byteLength(names[index])
+        index = index + usize.ONE
+      }
+      return NameStats {bytes: total, count: names.length}
+    }
+  }
+}
+
+fn connectionNameStats<'value>(fields: HeadHeaderIterator<'value>) -> NameStats {
+  let mut total = usize.ZERO
+  let mut count = usize.ZERO
+  let mut iterator = move fields
+  while true {
+    let field = match move HeadHeaderIterator.next(&mut iterator) {
+      Option<Header<'value>>.None => { break }
+      Option<Header<'value>>.Some {value} => value
+    }
+    if asciiName(String.utf8Bytes(Header.name(&field)), b"connection") {
+      let value = Header.value(&field)
+      let mut cursor = usize.ZERO
+      while cursor < value.length {
+        while cursor < value.length
+          && (value[cursor] == 32 || value[cursor] == 9 || value[cursor] == 44) {
+          cursor = cursor + usize.ONE
+        }
+        let start = cursor
+        while cursor < value.length && tokenByte(value[cursor]) { cursor = cursor + usize.ONE }
+        if cursor > start {
+          total = total + (cursor - start)
+          count = count + usize.ONE
+        }
+        while cursor < value.length && value[cursor] != 44 { cursor = cursor + usize.ONE }
+      }
+    }
+  }
+  return NameStats {bytes: total, count: count}
+}
+
+effect fn copyPolicyNames(
+  policy: TrailerPolicy,
+  stats: NameStats,
+) -> StoredNames ! OutOfMemoryError ? &mut Allocator {
+  let mut bytes = Bytes.make()
+  let reservedBytes = run Bytes.reserveExact(&mut bytes, stats.bytes)
+  let mut records = Vector.make<NameRecord>()
+  let reservedRecords = run Vector.reserveExact<NameRecord>(&mut records, stats.count)
+  let mut defaults = false
+  match & policy {
+    TrailerPolicy.Default => { defaults = true }
+    TrailerPolicy.Explicit {names} => {}
+  }
+  match move policy {
+    TrailerPolicy.Default => {}
+    TrailerPolicy.Explicit {names} => {
+      let mut index = usize.ZERO
+      while index < names.length {
+        let value = String.utf8Bytes(names[index])
+        let start = Bytes.length(&bytes)
+        let appended = run Bytes.append(&mut bytes, value)
+        let recorded = run Vector.append<NameRecord>(&mut records, NameRecord {
+          start: start,
+          length: value.length,
+        })
+        index = index + usize.ONE
+      }
+    }
+  }
+  return StoredNames {bytes: move bytes, records: move records, defaultPolicy: defaults}
+}
+
+effect fn copyConnectionNames<'value>(
+  fields: HeadHeaderIterator<'value>,
+  stats: NameStats,
+) -> StoredNames ! OutOfMemoryError ? &mut Allocator {
+  let mut bytes = Bytes.make()
+  let reservedBytes = run Bytes.reserveExact(&mut bytes, stats.bytes)
+  let mut records = Vector.make<NameRecord>()
+  let reservedRecords = run Vector.reserveExact<NameRecord>(&mut records, stats.count)
+  let mut iterator = move fields
+  while true {
+    let field = match move HeadHeaderIterator.next(&mut iterator) {
+      Option<Header<'value>>.None => { break }
+      Option<Header<'value>>.Some {value} => value
+    }
+    if asciiName(String.utf8Bytes(Header.name(&field)), b"connection") {
+      let value = Header.value(&field)
+      let mut cursor = usize.ZERO
+      while cursor < value.length {
+        while cursor < value.length
+          && (value[cursor] == 32 || value[cursor] == 9 || value[cursor] == 44) {
+          cursor = cursor + usize.ONE
+        }
+        let start = cursor
+        while cursor < value.length && tokenByte(value[cursor]) { cursor = cursor + usize.ONE }
+        if cursor > start {
+          let recordStart = Bytes.length(&bytes)
+          let token = Slice.view<u8>(value, start, cursor - start)
+          let appended = run Bytes.append(&mut bytes, token)
+          let recorded = run Vector.append<NameRecord>(&mut records, NameRecord {
+            start: recordStart,
+            length: token.length,
+          })
+        }
+        while cursor < value.length && value[cursor] != 44 { cursor = cursor + usize.ONE }
+      }
+    }
+  }
+  return StoredNames {bytes: move bytes, records: move records, defaultPolicy: false}
+}
+
+fn checkedOwnedAdd(current: usize, added: usize, maximum: usize) -> usize {
+  return match move usize.checkedAdd(current, added) {
+    Option<usize>.None => usize.MAX
+    Option<usize>.Some {value} => {
+      if value > maximum { return value }
+      return value
+    }
+  }
+}
+
+fn decodeCore(
+  core: &mut DecoderCore,
+  input: &[u8],
+  output: &mut [u8],
+  finalInput: bool,
+  discarding: bool,
+  discardLimit: u64,
+) -> Result<Progress, BodyError> {
+  if core.phase == DecoderPhase.Failed || core.phase == DecoderPhase.Abandoned {
+    return Result.failResult<Progress, BodyError>(decoderStateError(&core.*))
+  }
+  if core.phase == DecoderPhase.Complete {
+    return Result.succeed<Progress, BodyError>(decoderProgress(
+      &core.*,
+      usize.ZERO,
+      usize.ZERO,
+      ProgressState.Complete,
+    ))
+  }
+  if core.phase == DecoderPhase.Tunnel {
+    return Result.succeed<Progress, BodyError>(decoderProgress(
+      &core.*,
+      usize.ZERO,
+      usize.ZERO,
+      ProgressState.Tunnel,
+    ))
+  }
+  let mut consumed = usize.ZERO
+  let mut written = usize.ZERO
+  while consumed < input.length {
+    if core.phase == DecoderPhase.Complete || core.phase == DecoderPhase.Tunnel { break }
+    if core.phase == DecoderPhase.Fixed || core.phase == DecoderPhase.Close
+      || core.phase == DecoderPhase.ChunkData {
+      if core.phase == DecoderPhase.Fixed && core.remaining == 0 {
+        completeDecoder(&mut core.*, CompletionKind.Delimited)
+        break
+      }
+      if core.phase == DecoderPhase.ChunkData && core.currentChunk == 0 {
+        core.phase = DecoderPhase.ChunkDataCr
+        continue
+      }
+      if !discarding && written >= output.length {
+        return Result.succeed<Progress, BodyError>(decoderProgress(
+          &core.*,
+          consumed,
+          written,
+          ProgressState.NeedOutput,
+        ))
+      }
+      let payload = commitPayloadWire(
+        &mut core.*,
+        discarding,
+        discardLimit,
+        consumed,
+        written,
+        BodyComponent.ChunkPayload,
+      )
+      if let Result<(), BodyError>.Failure {error} = move payload {
+        return Result.failResult<Progress, BodyError>(move error)
+      }
+      if !discarding {
+        output[written] = input[consumed]
+        written = written + usize.ONE
+      }
+      consumed = consumed + usize.ONE
+      if core.phase == DecoderPhase.Fixed {
+        core.remaining = core.remaining - 1
+        if core.remaining == 0 { completeDecoder(&mut core.*, CompletionKind.Delimited) }
+      } else if core.phase == DecoderPhase.ChunkData {
+        core.currentChunk = core.currentChunk - 1
+        if core.currentChunk == 0 { core.phase = DecoderPhase.ChunkDataCr }
+      }
+      continue
+    }
+    if core.phase == DecoderPhase.ChunkDataCr || core.phase == DecoderPhase.ChunkDataLf {
+      let mut expected: u8 = 13
+      if core.phase == DecoderPhase.ChunkDataLf { expected = 10 }
+      if input[consumed] != expected {
+        return Result.failResult<Progress, BodyError>(decoderFailure(
+          &mut core.*,
+          BodyReason.ChunkSyntax,
+          BodyComponent.ChunkDelimiter,
+          consumed,
+          written,
+          Option.none<usize>(),
+        ))
+      }
+      let wire = commitWire(
+        &mut core.*,
+        discarding,
+        discardLimit,
+        consumed,
+        written,
+        BodyComponent.ChunkDelimiter,
+      )
+      if let Result<(), BodyError>.Failure {error} = move wire {
+        return Result.failResult<Progress, BodyError>(move error)
+      }
+      consumed = consumed + usize.ONE
+      if core.phase == DecoderPhase.ChunkDataCr {
+        core.phase = DecoderPhase.ChunkDataLf
+      } else {
+        core.phase = DecoderPhase.ChunkLine
+      }
+      continue
+    }
+    if core.phase == DecoderPhase.ChunkLine {
+      let byte = input[consumed]
+      if core.linePendingCr && byte != 10 {
+        return Result.failResult<Progress, BodyError>(decoderFailure(
+          &mut core.*,
+          BodyReason.ChunkSyntax,
+          BodyComponent.ChunkLine,
+          consumed,
+          written,
+          Option.none<usize>(),
+        ))
+      }
+      if !core.linePendingCr && byte == 10 {
+        return Result.failResult<Progress, BodyError>(decoderFailure(
+          &mut core.*,
+          BodyReason.ChunkSyntax,
+          BodyComponent.ChunkLine,
+          consumed,
+          written,
+          Option.none<usize>(),
+        ))
+      }
+      let attempted = core.lineLength + usize.ONE
+      if attempted > core.limits.maxChunkLineBytes {
+        let allowed = core.limits.maxChunkLineBytes
+        return Result.failResult<Progress, BodyError>(decoderLimitFailure(
+          &mut core.*,
+          BodyLimitKind.ChunkLineBytes,
+          usize.toU64(allowed),
+          usize.toU64(attempted),
+          BodyComponent.ChunkLine,
+          consumed,
+          written,
+          Option.none<usize>(),
+        ))
+      }
+      let wire = commitWire(
+        &mut core.*,
+        discarding,
+        discardLimit,
+        consumed,
+        written,
+        BodyComponent.ChunkLine,
+      )
+      if let Result<(), BodyError>.Failure {error} = move wire {
+        return Result.failResult<Progress, BodyError>(move error)
+      }
+      let mut lineStorage = Bytes.asMutSlice(&mut core.line)
+      lineStorage[core.lineLength] = byte
+      drop lineStorage
+      core.lineLength = attempted
+      consumed = consumed + usize.ONE
+      if byte == 13 {
+        core.linePendingCr = true
+      } else if byte == 10 {
+        core.linePendingCr = false
+        let parsed = parseChunkLine(
+          Slice.view<u8>(Bytes.asSlice(&core.line), usize.ZERO, core.lineLength - 2),
+        )
+        let chunk = match move parsed {
+          Result<ChunkInfo, BodyError>.Failure {error} => {
+            return Result.failResult<Progress, BodyError>(poisonWith(
+              &mut core.*,
+              move error,
+              consumed,
+              written,
+            ))
+          }
+          Result<ChunkInfo, BodyError>.Success {value} => value
+        }
+        let attemptedChunks = core.chunks + usize.ONE
+        if attemptedChunks > core.limits.maxChunks {
+          let allowed = core.limits.maxChunks
+          return Result.failResult<Progress, BodyError>(decoderLimitFailure(
+            &mut core.*,
+            BodyLimitKind.Chunks,
+            usize.toU64(allowed),
+            usize.toU64(attemptedChunks),
+            BodyComponent.ChunkLine,
+            consumed,
+            written,
+            Option.none<usize>(),
+          ))
+        }
+        if chunk.size > usize.toU64(core.limits.maxChunkBytes) {
+          let allowed = core.limits.maxChunkBytes
+          return Result.failResult<Progress, BodyError>(decoderLimitFailure(
+            &mut core.*,
+            BodyLimitKind.ChunkBytes,
+            usize.toU64(allowed),
+            chunk.size,
+            BodyComponent.ChunkLine,
+            consumed,
+            written,
+            Option.none<usize>(),
+          ))
+        }
+        let nextExtensions = match move u64.checkedAdd(core.extensions, chunk.extensions) {
+          Option<u64>.None => {
+            return Result.failResult<Progress, BodyError>(decoderFailure(
+              &mut core.*,
+              BodyReason.SizeOverflow,
+              BodyComponent.ChunkLine,
+              consumed,
+              written,
+              Option.none<usize>(),
+            ))
+          }
+          Option<u64>.Some {value} => value
+        }
+        if nextExtensions > core.limits.maxExtensionBytes {
+          let allowed = core.limits.maxExtensionBytes
+          return Result.failResult<Progress, BodyError>(decoderLimitFailure(
+            &mut core.*,
+            BodyLimitKind.ExtensionBytes,
+            allowed,
+            nextExtensions,
+            BodyComponent.ChunkLine,
+            consumed,
+            written,
+            Option.none<usize>(),
+          ))
+        }
+        let payloadAfter = match move u64.checkedAdd(core.totalPayload, chunk.size) {
+          Option<u64>.None => {
+            return Result.failResult<Progress, BodyError>(decoderFailure(
+              &mut core.*,
+              BodyReason.SizeOverflow,
+              BodyComponent.ChunkLine,
+              consumed,
+              written,
+              Option.none<usize>(),
+            ))
+          }
+          Option<u64>.Some {value} => value
+        }
+        if payloadAfter > core.limits.maxPayloadBytes {
+          let allowed = core.limits.maxPayloadBytes
+          return Result.failResult<Progress, BodyError>(decoderLimitFailure(
+            &mut core.*,
+            BodyLimitKind.PayloadBytes,
+            allowed,
+            payloadAfter,
+            BodyComponent.ChunkPayload,
+            consumed,
+            written,
+            Option.none<usize>(),
+          ))
+        }
+        core.chunks = attemptedChunks
+        core.extensions = nextExtensions
+        core.currentChunk = chunk.size
+        core.lineLength = usize.ZERO
+        if chunk.size == 0 {
+          core.phase = DecoderPhase.TrailerLine
+          core.trailerLineStart = core.trailerLength
+        } else {
+          core.phase = DecoderPhase.ChunkData
+        }
+      }
+      continue
+    }
+    if core.phase == DecoderPhase.TrailerLine {
+      let byte = input[consumed]
+      if core.trailerPendingCr && byte != 10 {
+        let fieldIndex = core.trailerCount
+        return Result.failResult<Progress, BodyError>(decoderFailure(
+          &mut core.*,
+          BodyReason.TrailerSyntax,
+          BodyComponent.TrailerValue,
+          consumed,
+          written,
+          Option.some<usize>(fieldIndex),
+        ))
+      }
+      if !core.trailerPendingCr && byte == 10 {
+        let fieldIndex = core.trailerCount
+        return Result.failResult<Progress, BodyError>(decoderFailure(
+          &mut core.*,
+          BodyReason.TrailerSyntax,
+          BodyComponent.TrailerValue,
+          consumed,
+          written,
+          Option.some<usize>(fieldIndex),
+        ))
+      }
+      let attempted = core.trailerLength + usize.ONE
+      if attempted > core.limits.maxTrailerBytes {
+        let allowed = core.limits.maxTrailerBytes
+        let fieldIndex = core.trailerCount
+        return Result.failResult<Progress, BodyError>(decoderLimitFailure(
+          &mut core.*,
+          BodyLimitKind.TrailerBytes,
+          usize.toU64(allowed),
+          usize.toU64(attempted),
+          BodyComponent.TrailerValue,
+          consumed,
+          written,
+          Option.some<usize>(fieldIndex),
+        ))
+      }
+      let wire = commitWire(
+        &mut core.*,
+        discarding,
+        discardLimit,
+        consumed,
+        written,
+        BodyComponent.TrailerValue,
+      )
+      if let Result<(), BodyError>.Failure {error} = move wire {
+        return Result.failResult<Progress, BodyError>(move error)
+      }
+      let mut trailerStorage = Bytes.asMutSlice(&mut core.trailerBytes)
+      trailerStorage[core.trailerLength] = byte
+      drop trailerStorage
+      core.trailerLength = attempted
+      consumed = consumed + usize.ONE
+      if byte == 13 {
+        core.trailerPendingCr = true
+      } else if byte == 10 {
+        core.trailerPendingCr = false
+        let lineLength = core.trailerLength - core.trailerLineStart - 2
+        if lineLength == usize.ZERO {
+          completeDecoder(&mut core.*, CompletionKind.Delimited)
+          break
+        }
+        let accepted = acceptTrailerLine(&mut core.*, lineLength)
+        if let Result<(), BodyError>.Failure {error} = move accepted {
+          return Result.failResult<Progress, BodyError>(poisonWith(
+            &mut core.*,
+            move error,
+            consumed,
+            written,
+          ))
+        }
+        core.trailerLineStart = core.trailerLength
+      }
+      continue
+    }
+  }
+  if finalInput && consumed == input.length {
+    core.finalSeen = true
+    if core.phase == DecoderPhase.Close {
+      completeDecoder(&mut core.*, CompletionKind.CloseDelimited)
+    } else if core.phase != DecoderPhase.Complete && core.phase != DecoderPhase.Tunnel {
+      return Result.failResult<Progress, BodyError>(decoderFailure(
+        &mut core.*,
+        BodyReason.Truncated,
+        BodyComponent.Decoder,
+        consumed,
+        written,
+        Option.none<usize>(),
+      ))
+    }
+  }
+  let mut state = ProgressState.NeedInput
+  if core.phase == DecoderPhase.Complete { state = ProgressState.Complete }
+  if core.phase == DecoderPhase.Tunnel { state = ProgressState.Tunnel }
+  return Result.succeed<Progress, BodyError>(decoderProgress(
+    &core.*,
+    consumed,
+    written,
+    state,
+  ))
+}
+
+struct ChunkInfo {
+  size: u64
+  extensions: u64
+}
+
+fn parseChunkLine(line: &[u8]) -> Result<ChunkInfo, BodyError> {
+  let mut cursor = usize.ZERO
+  let mut size: u64 = 0
+  while cursor < line.length && hexDigit(line[cursor]) {
+    if size > u64.MAX / 16 {
+      return Result.failResult<ChunkInfo, BodyError>(baseError(
+        BodyReason.SizeOverflow,
+        BodyComponent.ChunkLine,
+        usize.toU64(cursor),
+        Option.none<usize>(),
+      ))
+    }
+    let product = size * 16
+    let digit = hexValue(line[cursor])
+    if digit > u64.MAX - product {
+      return Result.failResult<ChunkInfo, BodyError>(baseError(
+        BodyReason.SizeOverflow,
+        BodyComponent.ChunkLine,
+        usize.toU64(cursor),
+        Option.none<usize>(),
+      ))
+    }
+    size = product + digit
+    cursor = cursor + usize.ONE
+  }
+  if cursor == usize.ZERO {
+    return Result.failResult<ChunkInfo, BodyError>(baseError(
+      BodyReason.ChunkSyntax,
+      BodyComponent.ChunkLine,
+      u64.MIN,
+      Option.none<usize>(),
+    ))
+  }
+  let extensionStart = cursor
+  while cursor < line.length {
+    if line[cursor] != 59 {
+      return Result.failResult<ChunkInfo, BodyError>(baseError(
+        BodyReason.ChunkSyntax,
+        BodyComponent.ChunkLine,
+        usize.toU64(cursor),
+        Option.none<usize>(),
+      ))
+    }
+    cursor = cursor + usize.ONE
+    let nameStart = cursor
+    while cursor < line.length && tokenByte(line[cursor]) { cursor = cursor + usize.ONE }
+    if cursor == nameStart {
+      return Result.failResult<ChunkInfo, BodyError>(baseError(
+        BodyReason.ChunkSyntax,
+        BodyComponent.ChunkLine,
+        usize.toU64(cursor),
+        Option.none<usize>(),
+      ))
+    }
+    if cursor < line.length && line[cursor] == 61 {
+      cursor = cursor + usize.ONE
+      if cursor >= line.length {
+        return Result.failResult<ChunkInfo, BodyError>(baseError(
+          BodyReason.ChunkSyntax,
+          BodyComponent.ChunkLine,
+          usize.toU64(cursor),
+          Option.none<usize>(),
+        ))
+      }
+      if line[cursor] == 34 {
+        cursor = cursor + usize.ONE
+        let mut closed = false
+        while cursor < line.length {
+          let byte = line[cursor]
+          if byte == 34 {
+            cursor = cursor + usize.ONE
+            closed = true
+            break
+          }
+          if byte == 92 {
+            cursor = cursor + usize.ONE
+            if cursor >= line.length || !quotedPairByte(line[cursor]) {
+              return Result.failResult<ChunkInfo, BodyError>(baseError(
+                BodyReason.ChunkSyntax,
+                BodyComponent.ChunkLine,
+                usize.toU64(cursor),
+                Option.none<usize>(),
+              ))
+            }
+          } else if !quotedByte(byte) {
+            return Result.failResult<ChunkInfo, BodyError>(baseError(
+              BodyReason.ChunkSyntax,
+              BodyComponent.ChunkLine,
+              usize.toU64(cursor),
+              Option.none<usize>(),
+            ))
+          }
+          cursor = cursor + usize.ONE
+        }
+        if !closed {
+          return Result.failResult<ChunkInfo, BodyError>(baseError(
+            BodyReason.ChunkSyntax,
+            BodyComponent.ChunkLine,
+            usize.toU64(cursor),
+            Option.none<usize>(),
+          ))
+        }
+      } else {
+        let valueStart = cursor
+        while cursor < line.length && tokenByte(line[cursor]) { cursor = cursor + usize.ONE }
+        if cursor == valueStart {
+          return Result.failResult<ChunkInfo, BodyError>(baseError(
+            BodyReason.ChunkSyntax,
+            BodyComponent.ChunkLine,
+            usize.toU64(cursor),
+            Option.none<usize>(),
+          ))
+        }
+      }
+    }
+  }
+  return Result.succeed<ChunkInfo, BodyError>(ChunkInfo {
+    size: size,
+    extensions: usize.toU64(line.length - extensionStart),
+  })
+}
+
+fn acceptTrailerLine(core: &mut DecoderCore, lineLength: usize) -> Result<(), BodyError> {
+  let bytes = Bytes.asSlice(&core.trailerBytes)
+  let start = core.trailerLineStart
+  let end = start + lineLength
+  let mut colon = start
+  while colon < end && bytes[colon] != 58 { colon = colon + usize.ONE }
+  if colon == start || colon >= end {
+    return Result.failResult<(), BodyError>(baseError(
+      BodyReason.TrailerSyntax,
+      BodyComponent.TrailerName,
+      usize.toU64(start),
+      Option.some<usize>(core.trailerCount),
+    ))
+  }
+  let name = Slice.view<u8>(bytes, start, colon - start)
+  if !validToken(name) {
+    return Result.failResult<(), BodyError>(baseError(
+      BodyReason.TrailerSyntax,
+      BodyComponent.TrailerName,
+      usize.toU64(start),
+      Option.some<usize>(core.trailerCount),
+    ))
+  }
+  if !decoderAllows(&core.*, name) {
+    return Result.failResult<(), BodyError>(baseError(
+      BodyReason.TrailerPolicy,
+      BodyComponent.TrailerPolicy,
+      usize.toU64(start),
+      Option.some<usize>(core.trailerCount),
+    ))
+  }
+  let mut valueStart = colon + usize.ONE
+  while valueStart < end && (bytes[valueStart] == 32 || bytes[valueStart] == 9) {
+    valueStart = valueStart + usize.ONE
+  }
+  let mut valueEnd = end
+  while valueEnd > valueStart && (bytes[valueEnd - usize.ONE] == 32
+    || bytes[valueEnd - usize.ONE] == 9) {
+    valueEnd = valueEnd - usize.ONE
+  }
+  let mut cursor = valueStart
+  while cursor < valueEnd {
+    let byte = bytes[cursor]
+    if byte != 9 && (byte < 32 || byte == 127) {
+      return Result.failResult<(), BodyError>(baseError(
+        BodyReason.TrailerSyntax,
+        BodyComponent.TrailerValue,
+        usize.toU64(cursor),
+        Option.some<usize>(core.trailerCount),
+      ))
+    }
+    cursor = cursor + usize.ONE
+  }
+  let attempted = core.trailerCount + usize.ONE
+  if attempted > core.limits.maxTrailerFields {
+    return Result.failResult<(), BodyError>(baseError(
+      BodyReason.LimitExceeded {
+        limit: BodyLimitKind.TrailerFields,
+        allowed: usize.toU64(core.limits.maxTrailerFields),
+        attempted: usize.toU64(attempted),
+      },
+      BodyComponent.TrailerName,
+      usize.toU64(start),
+      Option.some<usize>(core.trailerCount),
+    ))
+  }
+  writeFieldRecord(
+    &mut core.trailerRecords,
+    core.trailerCount,
+    FieldRecord {
+      nameStart: start,
+      nameLength: colon - start,
+      valueStart: valueStart,
+      valueLength: valueEnd - valueStart,
+    },
+  )
+  core.trailerCount = attempted
+  return Result.succeed<(), BodyError>(())
+}
+
+fn decoderAllows(core: &DecoderCore, name: &[u8]) -> bool {
+  if staticallyForbidden(name) || storedContains(&core.forbiddenNames, name) { return false }
+  if core.allowedNames.defaultPolicy {
+    return asciiName(name, b"content-digest") || asciiName(name, b"repr-digest")
+  }
+  return storedContains(&core.allowedNames, name)
+}
+
+fn storedPolicyAllows(allowed: &StoredNames, forbidden: &StoredNames, name: &[u8]) -> bool {
+  if staticallyForbidden(name) || storedContains(forbidden, name) { return false }
+  if allowed.defaultPolicy {
+    return asciiName(name, b"content-digest") || asciiName(name, b"repr-digest")
+  }
+  return storedContains(allowed, name)
+}
+
+fn storedContains(names: &StoredNames, candidate: &[u8]) -> bool {
+  let records = Vector.asSlice<NameRecord>(&names.records)
+  let bytes = Bytes.asSlice(&names.bytes)
+  let mut index = usize.ZERO
+  while index < records.length {
+    let record = records[index]
+    if asciiName(Slice.view<u8>(bytes, record.start, record.length), candidate) { return true }
+    index = index + usize.ONE
+  }
+  return false
+}
+
+fn commitWire(
+  core: &mut DecoderCore,
+  discarding: bool,
+  discardLimit: u64,
+  consumed: usize,
+  written: usize,
+  component: BodyComponent,
+) -> Result<(), BodyError> {
+  let attempted = match move u64.checkedAdd(core.totalWire, 1) {
+    Option<u64>.None => {
+      return Result.failResult<(), BodyError>(decoderFailure(
+        &mut core.*,
+        BodyReason.SizeOverflow,
+        component,
+        consumed,
+        written,
+        Option.none<usize>(),
+      ))
+    }
+    Option<u64>.Some {value} => value
+  }
+  if discarding && attempted > discardLimit {
+    return Result.failResult<(), BodyError>(decoderFailure(
+      &mut core.*,
+      BodyReason.DiscardLimit {allowed: discardLimit, attempted: attempted},
+      BodyComponent.Discard,
+      consumed,
+      written,
+      Option.none<usize>(),
+    ))
+  }
+  if attempted > core.limits.maxWireBytes {
+    let allowed = core.limits.maxWireBytes
+    return Result.failResult<(), BodyError>(decoderLimitFailure(
+      &mut core.*,
+      BodyLimitKind.WireBytes,
+      allowed,
+      attempted,
+      component,
+      consumed,
+      written,
+      Option.none<usize>(),
+    ))
+  }
+  core.totalWire = attempted
+  return Result.succeed<(), BodyError>(())
+}
+
+fn commitPayloadWire(
+  core: &mut DecoderCore,
+  discarding: bool,
+  discardLimit: u64,
+  consumed: usize,
+  written: usize,
+  component: BodyComponent,
+) -> Result<(), BodyError> {
+  let nextWire = match move u64.checkedAdd(core.totalWire, 1) {
+    Option<u64>.None => {
+      return Result.failResult<(), BodyError>(decoderFailure(
+        &mut core.*,
+        BodyReason.SizeOverflow,
+        component,
+        consumed,
+        written,
+        Option.none<usize>(),
+      ))
+    }
+    Option<u64>.Some {value} => value
+  }
+  let nextPayload = match move u64.checkedAdd(core.totalPayload, 1) {
+    Option<u64>.None => {
+      return Result.failResult<(), BodyError>(decoderFailure(
+        &mut core.*,
+        BodyReason.SizeOverflow,
+        component,
+        consumed,
+        written,
+        Option.none<usize>(),
+      ))
+    }
+    Option<u64>.Some {value} => value
+  }
+  if discarding && nextWire > discardLimit {
+    return Result.failResult<(), BodyError>(decoderFailure(
+      &mut core.*,
+      BodyReason.DiscardLimit {allowed: discardLimit, attempted: nextWire},
+      BodyComponent.Discard,
+      consumed,
+      written,
+      Option.none<usize>(),
+    ))
+  }
+  if nextWire > core.limits.maxWireBytes {
+    let allowed = core.limits.maxWireBytes
+    return Result.failResult<(), BodyError>(decoderLimitFailure(
+      &mut core.*,
+      BodyLimitKind.WireBytes,
+      allowed,
+      nextWire,
+      component,
+      consumed,
+      written,
+      Option.none<usize>(),
+    ))
+  }
+  if nextPayload > core.limits.maxPayloadBytes {
+    let allowed = core.limits.maxPayloadBytes
+    return Result.failResult<(), BodyError>(decoderLimitFailure(
+      &mut core.*,
+      BodyLimitKind.PayloadBytes,
+      allowed,
+      nextPayload,
+      component,
+      consumed,
+      written,
+      Option.none<usize>(),
+    ))
+  }
+  core.totalWire = nextWire
+  core.totalPayload = nextPayload
+  return Result.succeed<(), BodyError>(())
+}
+
+fn completeDecoder(core: &mut DecoderCore, kind: CompletionKind) -> () {
+  core.phase = DecoderPhase.Complete
+  core.completionKind = kind
+  return ()
+}
+
+fn decoderProgress(
+  core: &DecoderCore,
+  consumed: usize,
+  written: usize,
+  state: ProgressState,
+) -> Progress {
+  return Progress {
+    consumed: consumed,
+    written: written,
+    totalWire: core.totalWire,
+    totalPayload: core.totalPayload,
+    state: state,
+  }
+}
+
+fn decoderFailure(
+  core: &mut DecoderCore,
+  reason: BodyReason,
+  component: BodyComponent,
+  consumed: usize,
+  written: usize,
+  field: Option<usize>,
+) -> BodyError {
+  let offset = core.totalWire
+  return decoderFailureAt(
+    &mut core.*,
+    reason,
+    component,
+    offset,
+    consumed,
+    written,
+    move field,
+  )
+}
+
+fn decoderFailureAt(
+  core: &mut DecoderCore,
+  reason: BodyReason,
+  component: BodyComponent,
+  offset: u64,
+  consumed: usize,
+  written: usize,
+  field: Option<usize>,
+) -> BodyError {
+  core.phase = DecoderPhase.Failed
+  core.failureReason = reason
+  core.failureComponent = component
+  core.failureOffset = offset
+  core.failureHasField = false
+  match & field {
+    Option<usize>.None => {}
+    Option<usize>.Some {value} => {
+      core.failureField = value
+      core.failureHasField = true
+    }
+  }
+  return BodyError {
+    reason: reason,
+    component: component,
+    wireOffset: offset,
+    consumed: consumed,
+    written: written,
+    totalWire: core.totalWire,
+    totalPayload: core.totalPayload,
+    fieldIndex: move field,
+  }
+}
+
+fn decoderLimitFailure(
+  core: &mut DecoderCore,
+  limit: BodyLimitKind,
+  allowed: u64,
+  attempted: u64,
+  component: BodyComponent,
+  consumed: usize,
+  written: usize,
+  field: Option<usize>,
+) -> BodyError {
+  return decoderFailure(
+    &mut core.*,
+    BodyReason.LimitExceeded {limit: limit, allowed: allowed, attempted: attempted},
+    component,
+    consumed,
+    written,
+    move field,
+  )
+}
+
+fn poisonWith(
+  core: &mut DecoderCore,
+  error: BodyError,
+  consumed: usize,
+  written: usize,
+) -> BodyError {
+  let mut offset = core.totalWire
+  if error.component == BodyComponent.ChunkLine {
+    offset = core.totalWire - usize.toU64(core.lineLength) + error.wireOffset
+  } else if error.component == BodyComponent.TrailerName
+    || error.component == BodyComponent.TrailerValue
+    || error.component == BodyComponent.TrailerPolicy {
+    offset = core.totalWire - usize.toU64(core.trailerLength) + error.wireOffset
+  }
+  return decoderFailureAt(
+    &mut core.*,
+    error.reason,
+    error.component,
+    offset,
+    consumed,
+    written,
+    move error.fieldIndex,
+  )
+}
+
+fn decoderStateError(core: &DecoderCore) -> BodyError {
+  return BodyError {
+    reason: BodyReason.InvalidState,
+    component: BodyComponent.Decoder,
+    wireOffset: core.totalWire,
+    consumed: usize.ZERO,
+    written: usize.ZERO,
+    totalWire: core.totalWire,
+    totalPayload: core.totalPayload,
+    fieldIndex: Option.none<usize>(),
+  }
+}
+
+fn hexDigit(value: u8) -> bool {
+  return (value >= 48 && value <= 57)
+    || (value >= 65 && value <= 70)
+    || (value >= 97 && value <= 102)
+}
+
+fn hexValue(value: u8) -> u64 {
+  if value >= 48 && value <= 57 { return u8.toU64(value - 48) }
+  if value >= 65 && value <= 70 { return u8.toU64(value - 65 + 10) }
+  return u8.toU64(value - 97 + 10)
+}
+
+fn quotedByte(value: u8) -> bool {
+  return value == 9 || value == 32 || value == 33
+    || (value >= 35 && value <= 91)
+    || (value >= 93 && value <= 126)
+    || value >= 128
+}
+
+fn quotedPairByte(value: u8) -> bool {
+  return value == 9 || value == 32 || (value >= 33 && value <= 126) || value >= 128
+}
+
+struct FieldRecord {
+  nameStart: usize
+  nameLength: usize
+  valueStart: usize
+  valueLength: usize
+}
+
+impl Copy for FieldRecord {}
+
+fn writeFieldRecord(storage: &mut Bytes, index: usize, record: FieldRecord) -> () {
+  let output = Bytes.asMutSlice(&mut storage.*)
+  let base = index * FIELD_RECORD_BYTES
+  writeUsize(&mut output, base, record.nameStart)
+  writeUsize(&mut output, base + 8, record.nameLength)
+  writeUsize(&mut output, base + 16, record.valueStart)
+  writeUsize(&mut output, base + 24, record.valueLength)
+  return ()
+}
+
+fn readFieldRecord(storage: &[u8], index: usize) -> FieldRecord {
+  let base = index * FIELD_RECORD_BYTES
+  return FieldRecord {
+    nameStart: readUsize(storage, base),
+    nameLength: readUsize(storage, base + 8),
+    valueStart: readUsize(storage, base + 16),
+    valueLength: readUsize(storage, base + 24),
+  }
+}
+
+fn writeUsize(output: &mut [u8], offset: usize, value: usize) -> () {
+  let wide = usize.toU64(value)
+  let mut index = usize.ZERO
+  while index < 8 {
+    output[offset + index] = u64.toU8(u64.shiftRight(wide, usize.toU64(index * 8)))
+    index = index + usize.ONE
+  }
+  return ()
+}
+
+fn readUsize(input: &[u8], offset: usize) -> usize {
+  let mut value: u64 = 0
+  let mut index = usize.ZERO
+  while index < 8 {
+    value = u64.bitOr(
+      value,
+      u64.shiftLeft(u8.toU64(input[offset + index]), usize.toU64(index * 8)),
+    )
+    index = index + usize.ONE
+  }
+  return u64.toUsize(value)
+}
+
+/// A decoder-borrowed trailer section.
+pub struct Trailers<'owner> {
+  bytes: &'owner [u8]
+  records: &'owner [u8]
+  countValue: usize
+  limits: ValueLimits
+}
+
+impl<'owner> Trailers<'owner> {
+  pub fn count(self: &Self) -> usize { return self.countValue }
+
+  pub fn fields(self: &'owner Self) -> TrailerIterator<'owner> {
+    return TrailerIterator<'owner> {
+      bytes: self.bytes,
+      records: self.records,
+      count: self.countValue,
+      index: usize.ZERO,
+      limits: self.limits,
+    }
+  }
+
+  pub effect fn copy(
+    self: &'owner Self,
+    limits: ValueLimits,
+  ) -> Result<OwnedTrailers, BodyError> ! OutOfMemoryError ? &mut Allocator {
+    let recordBytes = match move usize.checkedMultiply(self.countValue, FIELD_RECORD_BYTES) {
+      Option<usize>.None => {
+        return Result.failResult<OwnedTrailers, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.TrailerValue,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    let required = match move usize.checkedAdd(self.bytes.length, recordBytes) {
+      Option<usize>.None => {
+        return Result.failResult<OwnedTrailers, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.TrailerValue,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    if required > limits.maxOwnedBytes {
+      return Result.failResult<OwnedTrailers, BodyError>(baseError(
+        BodyReason.LimitExceeded {
+          limit: BodyLimitKind.OwnedBytes,
+          allowed: usize.toU64(limits.maxOwnedBytes),
+          attempted: usize.toU64(required),
+        },
+        BodyComponent.TrailerValue,
+        u64.MIN,
+        Option.none<usize>(),
+      ))
+    }
+    let bytes = run Bytes.copy(self.bytes)
+    let records = run Bytes.copy(self.records)
+    return Result.succeed<OwnedTrailers, BodyError>(OwnedTrailers {
+      bytes: move bytes,
+      records: move records,
+      countValue: self.countValue,
+      limits: limits,
+    })
+  }
+}
+
+/// An independently owned trailer section.
+pub struct OwnedTrailers {
+  bytes: Bytes
+  records: Bytes
+  countValue: usize
+  limits: ValueLimits
+}
+
+impl OwnedTrailers {
+  /// Borrows a trailer view tied to this owner.
+  pub fn view<'owner>(self: &'owner Self) -> Trailers<'owner> {
+    return Trailers<'owner> {
+      bytes: Bytes.asSlice(&self.bytes),
+      records: Bytes.asSlice(&self.records),
+      countValue: self.countValue,
+      limits: self.limits,
+    }
+  }
+}
+
+pub struct TrailerIterator<'owner> {
+  bytes: &'owner [u8]
+  records: &'owner [u8]
+  count: usize
+  index: usize
+  limits: ValueLimits
+}
+
+impl<'owner> TrailerIterator<'owner> {
+  pub fn next(self: &mut Self) -> Option<Header<'owner>> {
+    if self.index >= self.count { return Option.none<Header<'owner>>() }
+    let record = readFieldRecord(self.records, self.index)
+    self.index = self.index + usize.ONE
+    let name = unsafe String.fromUtf8Unchecked(
+      Slice.view<u8>(self.bytes, record.nameStart, record.nameLength),
+    )
+    let value = Slice.view<u8>(self.bytes, record.valueStart, record.valueLength)
+    return match move Header.make(name, value, self.limits) {
+      Result<Header<'owner>, ValueError>.Failure {error} => {
+        return Option.none<Header<'owner>>()
+      }
+      Result<Header<'owner>, ValueError>.Success {value: header} => {
+        return Option.some<Header<'owner>>(move header)
+      }
+    }
+  }
+}
+
+enum EncoderPhase { Active, Finishing, Complete, Failed, Abandoned }
+
+struct EncoderCore {
+  framing: Framing
+  limits: Limits
+  phase: EncoderPhase
+  remaining: u64
+  chunks: usize
+  chunk: Bytes
+  chunkLength: usize
+  chunkOffset: usize
+  finish: Bytes
+  finishLength: usize
+  finishOffset: usize
+  allowedNames: StoredNames
+  forbiddenNames: StoredNames
+  totalWire: u64
+  totalPayload: u64
+  completionKind: CompletionKind
+  completionMarker: u8
+}
+
+/// Affine allocation-free incremental body encoder.
+pub struct Encoder { core: EncoderCore }
+
+impl Encoder {
+  /// Acquires bounded chunk and finish-snapshot storage.
+  pub effect fn make<'head>(
+    selection: Selection<'head>,
+    limits: Limits,
+    policy: TrailerPolicy,
+  ) -> Result<Encoder, BodyError> ! OutOfMemoryError ? &mut Allocator {
+    let framing = selection.framingValue
+    if isTunnelFraming(framing) {
+      return Result.failResult<Encoder, BodyError>(baseError(
+        BodyReason.UnsupportedTunnelEncoding,
+        BodyComponent.Encoder,
+        u64.MIN,
+        Option.none<usize>(),
+      ))
+    }
+    let chunkCapacity = match move usize.checkedAdd(limits.maxChunkBytes, ENCODER_SYNTAX_BYTES) {
+      Option<usize>.None => {
+        return Result.failResult<Encoder, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Encoder,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    let finishCapacity = match move usize.checkedAdd(limits.maxTrailerBytes, THREE) {
+      Option<usize>.None => {
+        return Result.failResult<Encoder, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Encoder,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    let policyStats = policyNameStats(policy)
+    let connectionStats = connectionNameStats(move selection.statsFields)
+    let policyRecords = match move usize.checkedMultiply(policyStats.count, NAME_RECORD_BYTES) {
+      Option<usize>.None => {
+        return Result.failResult<Encoder, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Encoder,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    let connectionRecords = match move usize.checkedMultiply(
+      connectionStats.count,
+      NAME_RECORD_BYTES,
+    ) {
+      Option<usize>.None => {
+        return Result.failResult<Encoder, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Encoder,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    let mut owned = match move usize.checkedAdd(chunkCapacity, finishCapacity) {
+      Option<usize>.None => usize.MAX
+      Option<usize>.Some {value} => value
+    }
+    owned = checkedOwnedAdd(owned, policyStats.bytes, limits.maxOwnedBytes)
+    owned = checkedOwnedAdd(owned, policyRecords, limits.maxOwnedBytes)
+    owned = checkedOwnedAdd(owned, connectionStats.bytes, limits.maxOwnedBytes)
+    owned = checkedOwnedAdd(owned, connectionRecords, limits.maxOwnedBytes)
+    if owned > limits.maxOwnedBytes {
+      return Result.failResult<Encoder, BodyError>(baseError(
+        BodyReason.LimitExceeded {
+          limit: BodyLimitKind.OwnedBytes,
+          allowed: usize.toU64(limits.maxOwnedBytes),
+          attempted: usize.toU64(owned),
+        },
+        BodyComponent.Encoder,
+        u64.MIN,
+        Option.none<usize>(),
+      ))
+    }
+    let chunk = run Bytes.zeroed(chunkCapacity)
+    let finish = run Bytes.zeroed(finishCapacity)
+    let allowedNames = run copyPolicyNames(policy, move policyStats)
+    let forbiddenNames = run copyConnectionNames(move selection.copyFields, move connectionStats)
+    let remaining = match framing {
+      Framing.Fixed {length} => length
+      _ => u64.MIN
+    }
+    return Result.succeed<Encoder, BodyError>(Encoder {
+      core: EncoderCore {
+        framing: framing,
+        limits: limits,
+        phase: EncoderPhase.Active,
+        remaining: remaining,
+        chunks: usize.ZERO,
+        chunk: move chunk,
+        chunkLength: usize.ZERO,
+        chunkOffset: usize.ZERO,
+        finish: move finish,
+        finishLength: usize.ZERO,
+        finishOffset: usize.ZERO,
+        allowedNames: move allowedNames,
+        forbiddenNames: move forbiddenNames,
+        totalWire: u64.MIN,
+        totalPayload: u64.MIN,
+        completionKind: CompletionKind.Delimited,
+        completionMarker: 0,
+      },
+    })
+  }
+
+  /// Accepts payload and emits as much framed output as fits.
+  pub fn step(self: &mut Self, input: &[u8], output: &mut [u8]) -> Result<Progress, BodyError> {
+    if self.core.phase != EncoderPhase.Active {
+      return Result.failResult<Progress, BodyError>(encoderStateError(&self.core))
+    }
+    if isEmptyFraming(self.core.framing) {
+      if input.length > usize.ZERO {
+        return Result.failResult<Progress, BodyError>(encoderFailure(
+          &mut self.core,
+          BodyReason.UnexpectedPayload,
+          usize.ZERO,
+          usize.ZERO,
+        ))
+      }
+      return Result.succeed<Progress, BodyError>(encoderProgress(
+        &self.core,
+        usize.ZERO,
+        usize.ZERO,
+        ProgressState.NeedInput,
+      ))
+    }
+    if isChunkedFraming(self.core.framing) {
+      return encodeChunked(&mut self.core, input, &mut output)
+    }
+    let available = usize.toU64(input.length)
+    if let Framing.Fixed {length} = self.core.framing {
+      if available > self.core.remaining {
+        return Result.failResult<Progress, BodyError>(encoderFailure(
+          &mut self.core,
+          BodyReason.FixedLengthOverrun,
+          usize.ZERO,
+          usize.ZERO,
+        ))
+      }
+    }
+    let mut count = input.length
+    if count > output.length { count = output.length }
+    let mut index = usize.ZERO
+    while index < count {
+      let committed = encoderCommitByte(&mut self.core, input[index], &mut output, index)
+      if let Result<(), BodyError>.Failure {error} = move committed {
+        return Result.failResult<Progress, BodyError>(move error)
+      }
+      index = index + usize.ONE
+      if isFixedFraming(self.core.framing) {
+        self.core.remaining = self.core.remaining - 1
+      }
+    }
+    let mut state = ProgressState.NeedInput
+    if count < input.length { state = ProgressState.NeedOutput }
+    return Result.succeed<Progress, BodyError>(encoderProgress(
+      &self.core,
+      count,
+      count,
+      state,
+    ))
+  }
+
+  /// Validates and snapshots all finish trailers before any finish byte is emitted.
+  pub fn beginFinish<'value>(
+    self: &mut Self,
+    trailers: &Headers<'value>,
+  ) -> Result<(), BodyError> {
+    if self.core.phase != EncoderPhase.Active || self.core.chunkOffset < self.core.chunkLength {
+      return Result.failResult<(), BodyError>(encoderStateError(&self.core))
+    }
+    if isFixedFraming(self.core.framing) && self.core.remaining > u64.MIN {
+      return Result.failResult<(), BodyError>(encoderFailure(
+        &mut self.core,
+        BodyReason.FixedLengthUnderrun,
+        usize.ZERO,
+        usize.ZERO,
+      ))
+    }
+    if !isChunkedFraming(self.core.framing) && Headers.count(trailers) > usize.ZERO {
+      return Result.failResult<(), BodyError>(encoderFailure(
+        &mut self.core,
+        BodyReason.TrailerPolicy,
+        usize.ZERO,
+        usize.ZERO,
+      ))
+    }
+    if isEmptyFraming(self.core.framing) || isFixedFraming(self.core.framing) {
+      self.core.phase = EncoderPhase.Complete
+      self.core.completionKind = CompletionKind.Delimited
+      return Result.succeed<(), BodyError>(())
+    }
+    if isCloseFraming(self.core.framing) {
+      self.core.phase = EncoderPhase.Complete
+      self.core.completionKind = CompletionKind.CloseDelimited
+      return Result.succeed<(), BodyError>(())
+    }
+    let terminalChunks = match move usize.checkedAdd(self.core.chunks, usize.ONE) {
+      Option<usize>.None => {
+        return Result.failResult<(), BodyError>(encoderFailure(
+          &mut self.core,
+          BodyReason.SizeOverflow,
+          usize.ZERO,
+          usize.ZERO,
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    if terminalChunks > self.core.limits.maxChunks {
+      let allowed = self.core.limits.maxChunks
+      return Result.failResult<(), BodyError>(encoderLimitFailure(
+        &mut self.core,
+        BodyLimitKind.Chunks,
+        usize.toU64(allowed),
+        usize.toU64(terminalChunks),
+        usize.ZERO,
+        usize.ZERO,
+      ))
+    }
+    if THREE > self.core.limits.maxChunkLineBytes {
+      let allowed = self.core.limits.maxChunkLineBytes
+      return Result.failResult<(), BodyError>(encoderLimitFailure(
+        &mut self.core,
+        BodyLimitKind.ChunkLineBytes,
+        usize.toU64(allowed),
+        usize.toU64(THREE),
+        usize.ZERO,
+        usize.ZERO,
+      ))
+    }
+    let required = match move validateFinishTrailers(
+      trailers,
+      &self.core.allowedNames,
+      &self.core.forbiddenNames,
+      self.core.limits,
+    ) {
+      Result<usize, BodyError>.Failure {error} => {
+        return Result.failResult<(), BodyError>(encoderPoison(&mut self.core, move error))
+      }
+      Result<usize, BodyError>.Success {value} => value
+    }
+    let mut output = Bytes.asMutSlice(&mut self.core.finish)
+    output[usize.ZERO] = 48
+    output[usize.ONE] = 13
+    output[TWO] = 10
+    let mut cursor = THREE
+    let mut iterator = Headers.iter(trailers)
+    while true {
+      let field = match move ValueHeaderIterator.next(&mut iterator) {
+        Option<Header<'value>>.None => { break }
+        Option<Header<'value>>.Some {value} => value
+      }
+      let name = String.utf8Bytes(Header.name(&field))
+      let value = Header.value(&field)
+      cursor = copyInto(&mut output, cursor, name)
+      output[cursor] = 58
+      output[cursor + usize.ONE] = 32
+      cursor = cursor + TWO
+      cursor = copyInto(&mut output, cursor, value)
+      output[cursor] = 13
+      output[cursor + usize.ONE] = 10
+      cursor = cursor + TWO
+    }
+    output[cursor] = 13
+    output[cursor + usize.ONE] = 10
+    self.core.finishLength = required
+    self.core.finishOffset = usize.ZERO
+    self.core.chunks = terminalChunks
+    self.core.phase = EncoderPhase.Finishing
+    return Result.succeed<(), BodyError>(())
+  }
+
+  /// Drains the immutable finish snapshot.
+  pub fn continueFinish(self: &mut Self, output: &mut [u8]) -> Result<Progress, BodyError> {
+    if self.core.phase != EncoderPhase.Finishing {
+      return Result.failResult<Progress, BodyError>(encoderStateError(&self.core))
+    }
+    let mut written = usize.ZERO
+    while written < output.length && self.core.finishOffset < self.core.finishLength {
+      let nextWire = match move u64.checkedAdd(self.core.totalWire, 1) {
+        Option<u64>.None => {
+          return Result.failResult<Progress, BodyError>(encoderFailure(
+            &mut self.core,
+            BodyReason.SizeOverflow,
+            usize.ZERO,
+            written,
+          ))
+        }
+        Option<u64>.Some {value} => value
+      }
+      if nextWire > self.core.limits.maxWireBytes {
+        let allowed = self.core.limits.maxWireBytes
+        return Result.failResult<Progress, BodyError>(encoderLimitFailure(
+          &mut self.core,
+          BodyLimitKind.WireBytes,
+          allowed,
+          nextWire,
+          usize.ZERO,
+          written,
+        ))
+      }
+      let finishBytes = Bytes.asSlice(&self.core.finish)
+      let byte = finishBytes[self.core.finishOffset]
+      drop finishBytes
+      output[written] = byte
+      self.core.finishOffset = self.core.finishOffset + usize.ONE
+      self.core.totalWire = nextWire
+      written = written + usize.ONE
+    }
+    if self.core.finishOffset == self.core.finishLength {
+      self.core.phase = EncoderPhase.Complete
+      self.core.completionKind = CompletionKind.Delimited
+      return Result.succeed<Progress, BodyError>(encoderProgress(
+        &self.core,
+        usize.ZERO,
+        written,
+        ProgressState.Complete,
+      ))
+    }
+    return Result.succeed<Progress, BodyError>(encoderProgress(
+      &self.core,
+      usize.ZERO,
+      written,
+      ProgressState.NeedOutput,
+    ))
+  }
+
+  pub fn completion<'owner>(self: &'owner Self) -> Option<Completion<'owner>> {
+    if self.core.phase != EncoderPhase.Complete {
+      return Option.none<Completion<'owner>>()
+    }
+    return Option.some<Completion<'owner>>(Completion<'owner> {
+      kindValue: self.core.completionKind,
+      marker: &self.core.completionMarker,
+    })
+  }
+
+  pub fn abandon(self: &mut Self) -> () {
+    if self.core.phase != EncoderPhase.Complete { self.core.phase = EncoderPhase.Abandoned }
+    return ()
+  }
+}
+
+fn encodeChunked(
+  core: &mut EncoderCore,
+  input: &[u8],
+  output: &mut [u8],
+) -> Result<Progress, BodyError> {
+  let mut consumed = usize.ZERO
+  let firstDrain = drainChunk(&mut core.*, &mut output, usize.ZERO, usize.ZERO)
+  let mut written = match move firstDrain {
+    Result<usize, BodyError>.Failure {error} => {
+      return Result.failResult<Progress, BodyError>(move error)
+    }
+    Result<usize, BodyError>.Success {value} => value
+  }
+  if core.chunkOffset < core.chunkLength {
+    return Result.succeed<Progress, BodyError>(encoderProgress(
+      &core.*,
+      consumed,
+      written,
+      ProgressState.NeedOutput,
+    ))
+  }
+  if input.length == usize.ZERO {
+    return Result.succeed<Progress, BodyError>(encoderProgress(
+      &core.*,
+      consumed,
+      written,
+      ProgressState.NeedInput,
+    ))
+  }
+  if core.limits.maxChunkBytes == usize.ZERO {
+    return Result.failResult<Progress, BodyError>(encoderLimitFailure(
+      &mut core.*,
+      BodyLimitKind.ChunkBytes,
+      u64.MIN,
+      usize.toU64(input.length),
+      usize.ZERO,
+      written,
+    ))
+  }
+  let mut accepted = input.length
+  if accepted > core.limits.maxChunkBytes { accepted = core.limits.maxChunkBytes }
+  let attemptedChunks = match move usize.checkedAdd(core.chunks, usize.ONE) {
+    Option<usize>.None => {
+      return Result.failResult<Progress, BodyError>(encoderFailure(
+        &mut core.*,
+        BodyReason.SizeOverflow,
+        usize.ZERO,
+        written,
+      ))
+    }
+    Option<usize>.Some {value} => value
+  }
+  if attemptedChunks > core.limits.maxChunks {
+    let allowed = core.limits.maxChunks
+    return Result.failResult<Progress, BodyError>(encoderLimitFailure(
+      &mut core.*,
+      BodyLimitKind.Chunks,
+      usize.toU64(allowed),
+      usize.toU64(attemptedChunks),
+      usize.ZERO,
+      written,
+    ))
+  }
+  let payloadAfter = match move u64.checkedAdd(core.totalPayload, usize.toU64(accepted)) {
+    Option<u64>.None => {
+      return Result.failResult<Progress, BodyError>(encoderFailure(
+        &mut core.*,
+        BodyReason.SizeOverflow,
+        usize.ZERO,
+        written,
+      ))
+    }
+    Option<u64>.Some {value} => value
+  }
+  if payloadAfter > core.limits.maxPayloadBytes {
+    let allowed = core.limits.maxPayloadBytes
+    return Result.failResult<Progress, BodyError>(encoderLimitFailure(
+      &mut core.*,
+      BodyLimitKind.PayloadBytes,
+      allowed,
+      payloadAfter,
+      usize.ZERO,
+      written,
+    ))
+  }
+  let maximumLine = core.limits.maxChunkLineBytes
+  let mut storage = Bytes.asMutSlice(&mut core.chunk)
+  let headerLength = writeHexLine(accepted, &mut storage)
+  if headerLength > maximumLine {
+    drop storage
+    return Result.failResult<Progress, BodyError>(encoderLimitFailure(
+      &mut core.*,
+      BodyLimitKind.ChunkLineBytes,
+      usize.toU64(maximumLine),
+      usize.toU64(headerLength),
+      usize.ZERO,
+      written,
+    ))
+  }
+  let mut index = usize.ZERO
+  while index < accepted {
+    storage[headerLength + index] = input[index]
+    index = index + usize.ONE
+  }
+  storage[headerLength + accepted] = 13
+  storage[headerLength + accepted + usize.ONE] = 10
+  let framedLength = headerLength + accepted + TWO
+  drop storage
+  core.chunkLength = framedLength
+  core.chunkOffset = usize.ZERO
+  core.totalPayload = payloadAfter
+  core.chunks = attemptedChunks
+  consumed = accepted
+  if written < output.length {
+    let drained = drainChunk(&mut core.*, &mut output, written, accepted)
+    let additional = match move drained {
+      Result<usize, BodyError>.Failure {error} => {
+        return Result.failResult<Progress, BodyError>(move error)
+      }
+      Result<usize, BodyError>.Success {value} => value
+    }
+    written = written + additional
+  }
+  let mut state = ProgressState.NeedInput
+  if core.chunkOffset < core.chunkLength { state = ProgressState.NeedOutput }
+  return Result.succeed<Progress, BodyError>(encoderProgress(
+    &core.*,
+    consumed,
+    written,
+    state,
+  ))
+}
+
+fn drainChunk(
+  core: &mut EncoderCore,
+  output: &mut [u8],
+  start: usize,
+  consumed: usize,
+) -> Result<usize, BodyError> {
+  let mut written = usize.ZERO
+  while start + written < output.length && core.chunkOffset < core.chunkLength {
+    let nextWire = match move u64.checkedAdd(core.totalWire, 1) {
+      Option<u64>.None => {
+        return Result.failResult<usize, BodyError>(encoderFailure(
+          &mut core.*,
+          BodyReason.SizeOverflow,
+          consumed,
+          start + written,
+        ))
+      }
+      Option<u64>.Some {value} => value
+    }
+    if nextWire > core.limits.maxWireBytes {
+      let allowed = core.limits.maxWireBytes
+      return Result.failResult<usize, BodyError>(encoderLimitFailure(
+        &mut core.*,
+        BodyLimitKind.WireBytes,
+        allowed,
+        nextWire,
+        consumed,
+        start + written,
+      ))
+    }
+    let chunkBytes = Bytes.asSlice(&core.chunk)
+    let byte = chunkBytes[core.chunkOffset]
+    drop chunkBytes
+    output[start + written] = byte
+    core.chunkOffset = core.chunkOffset + usize.ONE
+    core.totalWire = nextWire
+    written = written + usize.ONE
+  }
+  return Result.succeed<usize, BodyError>(written)
+}
+
+fn encoderCommitByte(
+  core: &mut EncoderCore,
+  byte: u8,
+  output: &mut [u8],
+  index: usize,
+) -> Result<(), BodyError> {
+  let nextWire = match move u64.checkedAdd(core.totalWire, 1) {
+    Option<u64>.None => {
+      return Result.failResult<(), BodyError>(encoderFailure(
+        &mut core.*,
+        BodyReason.SizeOverflow,
+        index,
+        index,
+      ))
+    }
+    Option<u64>.Some {value} => value
+  }
+  let nextPayload = match move u64.checkedAdd(core.totalPayload, 1) {
+    Option<u64>.None => {
+      return Result.failResult<(), BodyError>(encoderFailure(
+        &mut core.*,
+        BodyReason.SizeOverflow,
+        index,
+        index,
+      ))
+    }
+    Option<u64>.Some {value} => value
+  }
+  if nextWire > core.limits.maxWireBytes {
+    let allowed = core.limits.maxWireBytes
+    return Result.failResult<(), BodyError>(encoderLimitFailure(
+      &mut core.*,
+      BodyLimitKind.WireBytes,
+      allowed,
+      nextWire,
+      index,
+      index,
+    ))
+  }
+  if nextPayload > core.limits.maxPayloadBytes {
+    let allowed = core.limits.maxPayloadBytes
+    return Result.failResult<(), BodyError>(encoderLimitFailure(
+      &mut core.*,
+      BodyLimitKind.PayloadBytes,
+      allowed,
+      nextPayload,
+      index,
+      index,
+    ))
+  }
+  output[index] = byte
+  core.totalWire = nextWire
+  core.totalPayload = nextPayload
+  return Result.succeed<(), BodyError>(())
+}
+
+fn validateFinishTrailers<'value>(
+  trailers: &Headers<'value>,
+  allowed: &StoredNames,
+  forbidden: &StoredNames,
+  limits: Limits,
+) -> Result<usize, BodyError> {
+  let count = Headers.count(trailers)
+  if count > limits.maxTrailerFields {
+    return Result.failResult<usize, BodyError>(baseError(
+      BodyReason.LimitExceeded {
+        limit: BodyLimitKind.TrailerFields,
+        allowed: usize.toU64(limits.maxTrailerFields),
+        attempted: usize.toU64(count),
+      },
+      BodyComponent.TrailerName,
+      u64.MIN,
+      Option.some<usize>(limits.maxTrailerFields),
+    ))
+  }
+  let mut required = TWO
+  let mut iterator = Headers.iter(trailers)
+  let mut index = usize.ZERO
+  while true {
+    let field = match move ValueHeaderIterator.next(&mut iterator) {
+      Option<Header<'value>>.None => { break }
+      Option<Header<'value>>.Some {value} => value
+    }
+    let name = String.utf8Bytes(Header.name(&field))
+    if !storedPolicyAllows(allowed, forbidden, name) {
+      return Result.failResult<usize, BodyError>(baseError(
+        BodyReason.TrailerPolicy,
+        BodyComponent.TrailerPolicy,
+        u64.MIN,
+        Option.some<usize>(index),
+      ))
+    }
+    let line = match move usize.checkedAdd(name.length, Header.value(&field).length) {
+      Option<usize>.None => {
+        return Result.failResult<usize, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Encoder,
+          u64.MIN,
+          Option.some<usize>(index),
+        ))
+      }
+      Option<usize>.Some {value} => value + FOUR
+    }
+    required = match move usize.checkedAdd(required, line) {
+      Option<usize>.None => {
+        return Result.failResult<usize, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Encoder,
+          u64.MIN,
+          Option.some<usize>(index),
+        ))
+      }
+      Option<usize>.Some {value} => value
+    }
+    index = index + usize.ONE
+  }
+  if required > limits.maxTrailerBytes {
+    return Result.failResult<usize, BodyError>(baseError(
+      BodyReason.LimitExceeded {
+        limit: BodyLimitKind.TrailerBytes,
+        allowed: usize.toU64(limits.maxTrailerBytes),
+        attempted: usize.toU64(required),
+      },
+      BodyComponent.TrailerValue,
+      u64.MIN,
+      Option.none<usize>(),
+    ))
+  }
+  return Result.succeed<usize, BodyError>(required + THREE)
+}
+
+fn writeHexLine(value: usize, output: &mut [u8]) -> usize {
+  let mut digits = usize.ONE
+  let mut remaining = value
+  while remaining >= 16 {
+    digits = digits + usize.ONE
+    remaining = remaining / 16
+  }
+  let mut index = digits
+  remaining = value
+  while index > usize.ZERO {
+    index = index - usize.ONE
+    let digit = remaining % 16
+    let mut encoded = usize.toU8(digit + 48)
+    if digit >= 10 { encoded = usize.toU8(digit - 10 + 97) }
+    output[index] = encoded
+    remaining = remaining / 16
+  }
+  output[digits] = 13
+  output[digits + usize.ONE] = 10
+  return digits + 2
+}
+
+fn copyInto(output: &mut [u8], start: usize, input: &[u8]) -> usize {
+  let mut index = usize.ZERO
+  while index < input.length {
+    output[start + index] = input[index]
+    index = index + usize.ONE
+  }
+  return start + input.length
+}
+
+fn encoderProgress(
+  core: &EncoderCore,
+  consumed: usize,
+  written: usize,
+  state: ProgressState,
+) -> Progress {
+  return Progress {
+    consumed: consumed,
+    written: written,
+    totalWire: core.totalWire,
+    totalPayload: core.totalPayload,
+    state: state,
+  }
+}
+
+fn encoderFailure(
+  core: &mut EncoderCore,
+  reason: BodyReason,
+  consumed: usize,
+  written: usize,
+) -> BodyError {
+  core.phase = EncoderPhase.Failed
+  return BodyError {
+    reason: reason,
+    component: BodyComponent.Encoder,
+    wireOffset: core.totalWire,
+    consumed: consumed,
+    written: written,
+    totalWire: core.totalWire,
+    totalPayload: core.totalPayload,
+    fieldIndex: Option.none<usize>(),
+  }
+}
+
+fn encoderPoison(core: &mut EncoderCore, error: BodyError) -> BodyError {
+  core.phase = EncoderPhase.Failed
+  return BodyError {
+    reason: error.reason,
+    component: error.component,
+    wireOffset: core.totalWire,
+    consumed: usize.ZERO,
+    written: usize.ZERO,
+    totalWire: core.totalWire,
+    totalPayload: core.totalPayload,
+    fieldIndex: move error.fieldIndex,
+  }
+}
+
+fn encoderLimitFailure(
+  core: &mut EncoderCore,
+  limit: BodyLimitKind,
+  allowed: u64,
+  attempted: u64,
+  consumed: usize,
+  written: usize,
+) -> BodyError {
+  return encoderFailure(
+    &mut core.*,
+    BodyReason.LimitExceeded {limit: limit, allowed: allowed, attempted: attempted},
+    consumed,
+    written,
+  )
+}
+
+fn encoderStateError(core: &EncoderCore) -> BodyError {
+  return BodyError {
+    reason: BodyReason.InvalidState,
+    component: BodyComponent.Encoder,
+    wireOffset: core.totalWire,
+    consumed: usize.ZERO,
+    written: usize.ZERO,
+    totalWire: core.totalWire,
+    totalPayload: core.totalPayload,
+    fieldIndex: Option.none<usize>(),
+  }
+}

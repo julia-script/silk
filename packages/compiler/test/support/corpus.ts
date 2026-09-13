@@ -50,6 +50,7 @@ import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
 import { httpValuesAcceptanceSource } from './httpValuesAcceptance.js'
 import { httpHeadAcceptanceSource } from './httpHeadAcceptance.js'
+import { httpBodyAcceptanceSource } from './httpBodyAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
 import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
 import { nativeSocketCorpusProgram } from './nativeSocketAcceptance.js'
@@ -6320,6 +6321,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'http-head-parsing',
     source: httpHeadAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'http-body-framing',
+    source: httpBodyAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
   },
   {

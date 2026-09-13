@@ -270,6 +270,30 @@
     ]
   },
   {
+    "module": "silk/http_body",
+    "path": "silk/http_body.silk",
+    "namespace": "Decoder",
+    "aliases": [
+      "Encoder",
+      "Framing",
+      "Selection",
+      "Anomaly",
+      "Limits",
+      "Progress",
+      "ProgressState",
+      "Completion",
+      "CompletionKind",
+      "TrailerPolicy",
+      "Trailers",
+      "TrailerIterator",
+      "OwnedTrailers",
+      "BodyError",
+      "BodyReason",
+      "BodyComponent",
+      "BodyLimitKind"
+    ]
+  },
+  {
     "module": "silk/http_head",
     "path": "silk/http_head.silk",
     "namespace": "RequestParser",
