@@ -270,6 +270,27 @@
     ]
   },
   {
+    "module": "silk/http_head",
+    "path": "silk/http_head.silk",
+    "namespace": "RequestParser",
+    "aliases": [
+      "ResponseParser",
+      "Limits",
+      "Progress",
+      "ProgressState",
+      "ParserState",
+      "ParseComponent",
+      "ParseLimitKind",
+      "ParseReason",
+      "ParseError",
+      "RequestHead",
+      "ResponseHead",
+      "HeaderIterator",
+      "ParsedRequest",
+      "ParsedResponse"
+    ]
+  },
+  {
     "module": "silk/http_headers",
     "path": "silk/http_headers.silk",
     "namespace": "Headers",
