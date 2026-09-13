@@ -51,6 +51,7 @@ import { uriAcceptanceSource } from './uriAcceptance.js'
 import { httpValuesAcceptanceSource } from './httpValuesAcceptance.js'
 import { httpHeadAcceptanceSource } from './httpHeadAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
+import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
 import { ecdsaP256AcceptanceSource } from './ecdsaP256Acceptance.js'
 import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
@@ -214,6 +215,13 @@ export interface NativeRun {
   readonly closeStderr?: boolean
 }
 
+/** Native compilation profiles required to distinguish one corpus program's contract. */
+export interface NativeProfile {
+  readonly name: string
+  readonly optimization: 'none' | 'speed'
+  readonly debug: boolean
+}
+
 export interface CorpusProgram {
   readonly name: string
   readonly source: string
@@ -226,6 +234,7 @@ export interface CorpusProgram {
   readonly nativeStdout?: string
   readonly nativeStderr?: string
   readonly nativeRuns?: ReadonlyArray<NativeRun>
+  readonly nativeProfiles?: ReadonlyArray<NativeProfile>
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
     | { readonly _tag: 'Trap' }
@@ -6321,6 +6330,13 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     name: 'buffered-byte-io',
     source: bufferedByteIoAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    ...networkAddressResolutionCorpusProgram,
+    nativeProfiles: [
+      { name: 'debug', optimization: 'none', debug: true },
+      { name: 'optimized', optimization: 'speed', debug: false },
+    ],
   },
   {
     name: 'borrowed-temporary-stream-suspension',

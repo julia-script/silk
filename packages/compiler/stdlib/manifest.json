@@ -459,9 +459,32 @@
     "namespace": "NativeReport"
   },
   {
+    "module": "silk/native_resolver",
+    "path": "silk/native_resolver.silk",
+    "namespace": "NativeSystemResolver"
+  },
+  {
     "module": "silk/native_start",
     "path": "silk/native_start.silk",
     "namespace": "NativeStart"
+  },
+  {
+    "module": "silk/network_address",
+    "path": "silk/network_address.silk",
+    "namespace": "NetworkAddress",
+    "aliases": [
+      "AddressError",
+      "AddressReason",
+      "DomainHost",
+      "Endpoint",
+      "Host",
+      "HostReason",
+      "IpAddress",
+      "Ipv4Address",
+      "Ipv6Address",
+      "Port",
+      "UnsupportedHostForm"
+    ]
   },
   {
     "module": "silk/numeric",
@@ -577,6 +600,21 @@
     "module": "silk/reflect",
     "path": "silk/reflect.silk",
     "namespace": "Reflect"
+  },
+  {
+    "module": "silk/resolver",
+    "path": "silk/resolver.silk",
+    "namespace": "Resolver",
+    "aliases": [
+      "Admission",
+      "FamilySelection",
+      "NativeResolverOperation",
+      "NativeResultReason",
+      "ResolveRequest",
+      "ResolvedEndpoints",
+      "ResolverError",
+      "ResolverInputReason"
+    ]
   },
   {
     "module": "silk/result",

@@ -1,0 +1,288 @@
+//! Finite, provider-replaceable host resolution policy.
+//!
+//! # When to use
+//!
+//! Build a ResolveRequest from an owned Host and call Resolver.resolve. Numeric hosts are handled
+//! locally; domain hosts dispatch to the lexically supplied Resolver provider.
+//!
+//! # Details
+//!
+//! Results own at most 64 endpoints, preserve provider order, and deduplicate exact addresses.
+//! A deadline on a numeric host is checked against exactly one MonotonicClock sample. Domain
+//! providers either enforce their deadline with structured cancellation or reject it before work.
+//!
+//! # Gotchas
+//!
+//! The result bound limits published endpoints only. It does not bound a provider's internal
+//! allocation, traversal, elapsed time, or host-scheduler blockage.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.monotonic_clock {MonotonicClock}
+import silk.network_address {DomainHost, Endpoint, Host, IpAddress, Port}
+import silk.option {Option}
+import silk.result {Result}
+import silk.system_clock {Instant, SystemClock}
+import silk.vector {Vector}
+import silk.usize
+
+/// The admitted address families for one resolution.
+pub enum FamilySelection {
+  Any,
+  V4,
+  V6,
+}
+
+/// The failed request admission rule.
+pub enum ResolverInputReason {
+  ZeroResults,
+  TooManyResults,
+}
+
+/// The native operation that produced a wrapped host failure.
+pub enum NativeResolverOperation {
+  GetAddrInfo,
+}
+
+/// The reason a successful native result chain was rejected.
+pub enum NativeResultReason {
+  NullChain,
+  UnknownFamily,
+  NullAddress,
+  ShortAddress,
+}
+
+/// A typed host-resolution failure.
+pub union ResolverError {
+  InvalidInput {
+    pub reason: ResolverInputReason,
+    pub value: usize,
+  },
+  UnsupportedForm,
+  Timeout,
+  DeadlineUnsupported,
+  NoAddress,
+  NameNotFound,
+  TemporaryFailure,
+  FamilyUnsupported,
+  SystemResources,
+  LimitExceeded {
+    pub maximum: usize,
+  },
+  InvalidNativeResult {
+    pub reason: NativeResultReason,
+    pub index: usize,
+  },
+  NativeFailure {
+    pub operation: NativeResolverOperation,
+    pub eai: i32,
+    pub errno: Option<i32>,
+  },
+}
+
+/// One finite owned resolution request.
+pub struct ResolveRequest {
+  hostValue: Host
+  portValue: Port
+  familyValue: FamilySelection
+  maxResultsValue: usize
+  deadlineValue: Option<Instant>
+}
+
+/// One finite owned sequence of resolved endpoints.
+pub struct ResolvedEndpoints {
+  values: Vector<Endpoint>
+  maximum: usize
+}
+
+/// Whether one candidate changed a result builder.
+pub enum Admission {
+  Added,
+  Duplicate,
+}
+
+fn validateMaximum(maximum: usize) -> Result<usize, ResolverError> {
+  if maximum == usize.ZERO {
+    return Result.failResult<usize, ResolverError>(ResolverError.InvalidInput {
+      reason: ResolverInputReason.ZeroResults,
+      value: maximum,
+    })
+  }
+  if maximum > 64 {
+    return Result.failResult<usize, ResolverError>(ResolverError.InvalidInput {
+      reason: ResolverInputReason.TooManyResults,
+      value: maximum,
+    })
+  }
+  return Result.succeed<usize, ResolverError>(maximum)
+}
+
+fn familyAllows(selection: FamilySelection, address: &IpAddress) -> bool {
+  return match selection {
+    FamilySelection.Any => true
+    FamilySelection.V4 => IpAddress.isV4(address)
+    FamilySelection.V6 => !IpAddress.isV4(address)
+  }
+}
+
+fn deadlineReached(now: &Instant, deadline: &Instant) -> bool {
+  let nowSeconds = SystemClock.seconds(now)
+  let deadlineSeconds = SystemClock.seconds(deadline)
+  if nowSeconds > deadlineSeconds { return true }
+  if nowSeconds < deadlineSeconds { return false }
+  return SystemClock.nanoseconds(now) >= SystemClock.nanoseconds(deadline)
+}
+
+impl ResolveRequest {
+  /// Admits an owned host, checked port, finite capacity, family, and optional absolute deadline.
+  pub fn make(
+    host: Host,
+    port: Port,
+    family: FamilySelection,
+    maxResults: usize,
+    deadline: Option<Instant>,
+  ) -> Result<ResolveRequest, ResolverError> {
+    return match move validateMaximum(maxResults) {
+      Result<usize, ResolverError>.Failure {error} => {
+        return Result.failResult<ResolveRequest, ResolverError>(move error)
+      }
+      Result<usize, ResolverError>.Success {value} => Result.succeed<ResolveRequest, ResolverError>(ResolveRequest {
+          hostValue: move host,
+          portValue: move port,
+          familyValue: move family,
+          maxResultsValue: value,
+          deadlineValue: move deadline,
+        })
+    }
+  }
+
+  /// Returns the owned host by value.
+  pub fn host(self: &Self) -> Host { return self.hostValue }
+
+  /// Returns the checked port by value.
+  pub fn port(self: &Self) -> Port { return self.portValue }
+
+  /// Returns the selected address family.
+  pub fn family(self: &Self) -> FamilySelection { return self.familyValue }
+
+  /// Returns the finite result capacity.
+  pub fn maxResults(self: &Self) -> usize { return self.maxResultsValue }
+
+  /// Reports whether the request carries an absolute deadline.
+  pub fn hasDeadline(self: &Self) -> bool {
+    return match & self.deadlineValue {
+      Option<Instant>.None => false
+      Option<Instant>.Some {value} => true
+    }
+  }
+}
+
+impl ResolvedEndpoints {
+  /// Creates an empty finite builder after validating its capacity.
+  pub fn make(maximum: usize) -> Result<ResolvedEndpoints, ResolverError> {
+    return match move validateMaximum(maximum) {
+      Result<usize, ResolverError>.Failure {error} => {
+        return Result.failResult<ResolvedEndpoints, ResolverError>(move error)
+      }
+      Result<usize, ResolverError>.Success {value} => Result.succeed<ResolvedEndpoints, ResolverError>(ResolvedEndpoints {
+          values: Vector.make<Endpoint>(),
+          maximum: value,
+        })
+    }
+  }
+
+  /// Returns the number of admitted endpoints.
+  pub fn length(self: &Self) -> usize { return Vector.length<Endpoint>(&self.values) }
+
+  /// Returns a copied endpoint at a valid index.
+  pub fn get(self: &Self, index: usize) -> Endpoint {
+    return Vector.get<Endpoint>(&self.values, index)
+  }
+
+  /// Borrows the admitted endpoint prefix.
+  pub fn asSlice(self: &Self) -> &[Endpoint] {
+    return Vector.asSlice<Endpoint>(&self.values)
+  }
+
+  /// Adds one stable-distinct endpoint, or fails instead of truncating beyond the capacity.
+  pub effect fn admit(self: &mut Self, endpoint: Endpoint) -> Admission
+  ! ResolverError | OutOfMemoryError
+  ? &mut Allocator {
+    let values = Vector.asSlice<Endpoint>(&self.values)
+    let mut index = usize.ZERO
+    while index < values.length {
+      if Endpoint.equals(&values[index], &endpoint) { return Admission.Duplicate }
+      index = index + usize.ONE
+    }
+    if values.length >= self.maximum {
+      fail ResolverError.LimitExceeded {maximum: self.maximum}
+    }
+    run Vector.append<Endpoint>(&mut self.values, move endpoint)
+    return Admission.Added
+  }
+}
+
+/// A replaceable domain-only resolver provider.
+pub service Resolver {
+  /// Resolves one admitted domain request and owns all returned endpoint storage.
+  effect fn resolveDomain(
+    request: &ResolveRequest,
+    domain: &DomainHost,
+  ) -> ResolvedEndpoints
+  ! ResolverError | OutOfMemoryError
+  ? &mut Resolver | &mut Allocator
+}
+
+impl Resolver {
+  /// Resolves one owned host with finite results and exact numeric deadline preflight.
+  pub effect fn resolve(request: &ResolveRequest) -> ResolvedEndpoints
+  ! ResolverError | OutOfMemoryError
+  ? &mut Resolver | &mut Allocator | &mut MonotonicClock {
+    let checked = validateMaximum(request.maxResultsValue)
+    match move checked {
+      Result<usize, ResolverError>.Failure {error} => { fail move error }
+      Result<usize, ResolverError>.Success {value} => {}
+    }
+    return match & request.hostValue {
+      Host.Domain {value: domain} => {
+        let resolved = run Resolver.resolveDomain(request, &domain)
+        let length = ResolvedEndpoints.length(&resolved)
+        if length > request.maxResultsValue {
+          fail ResolverError.LimitExceeded {maximum: request.maxResultsValue}
+        }
+        if length == usize.ZERO {
+          fail ResolverError.NoAddress
+        }
+        return move resolved
+      }
+      Host.Ipv4 {value: address} => {
+        return run numeric(request, IpAddress.V4 {value: address})
+      }
+      Host.Ipv6 {value: address} => {
+        return run numeric(request, IpAddress.V6 {value: address})
+      }
+    }
+  }
+}
+
+effect fn numeric(request: &ResolveRequest, address: IpAddress) -> ResolvedEndpoints
+! ResolverError | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock {
+  match & request.deadlineValue {
+    Option<Instant>.None => {}
+    Option<Instant>.Some {value: deadline} => {
+      let now = run MonotonicClock.now()
+      if deadlineReached(&now, &deadline) { fail ResolverError.Timeout }
+    }
+  }
+  if !familyAllows(request.familyValue, &address) { fail ResolverError.NoAddress }
+  let made = ResolvedEndpoints.make(request.maxResultsValue)
+  let mut resolved = match move made {
+    Result<ResolvedEndpoints, ResolverError>.Failure {error} => { fail move error }
+    Result<ResolvedEndpoints, ResolverError>.Success {value} => value
+  }
+  let admitted = run ResolvedEndpoints.admit(
+    &mut resolved,
+    Endpoint.make(move address, request.portValue),
+  )
+  return move resolved
+}
