@@ -488,7 +488,11 @@ const effectIdentityOf = (
         Instances.callMatchesProviders(call, context.ambientProviders),
     )?.resultEffect
   }
-  if (expression._tag === 'Call' || expression._tag === 'EffectConstruct') {
+  if (
+    expression._tag === 'Call' ||
+    expression._tag === 'EffectConstruct' ||
+    expression._tag === 'CallableApply'
+  ) {
     return context.discovery.calls.find(
       (call) =>
         Instances.keyText(call.owner) === Instances.keyText(context.instance.key) &&

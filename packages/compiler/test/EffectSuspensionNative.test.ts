@@ -59,6 +59,39 @@ pub fn main() -> i32 {
   return run retainOwner(&mut owner, ${depth})
 }`
 
+const providedBorrowedCallbackSource = `import silk.effect { Effect }
+unsafe extern "C" fn observe(value: i32) -> i32
+service Value { effect fn get() -> i32 ? &mut Value }
+struct SuspendedValue { value: i32 }
+effect fn get(self: &mut SuspendedValue) -> i32 {
+  return run Effect.suspend(effect { return self.value })
+}
+impl Value for SuspendedValue { get: SuspendedValue.get }
+struct Resource { value: i32 }
+effect fn borrowedRead(resource: &mut Resource) -> i32 ? &mut Value {
+  let stable = resource.value
+  while true {
+    let observed = unsafe observe(stable)
+    if observed == 0 { return 0 }
+    let ignored = run Value.get()
+    drop ignored
+  }
+  return 0
+}
+effect fn scoped<'env, A, E, ?R>(
+  callback: for<'call> once fn<'env>(
+    &'call mut Resource
+  ) -> once Effect<'call; A ! E ? R>,
+) -> A ! E ? R {
+  let mut resource = Resource { value: 42 }
+  return run callback(&mut resource)
+}
+effect fn child() -> i32 ? &mut Value { return run scoped(borrowedRead) }
+pub fn main() -> i32 {
+  let mut provider = SuspendedValue { value: 42 }
+  return run Effect.provideMut<Value>(child(), &mut provider)
+}`
+
 it.effect('runs one million suspended native recursive frames with bounded machine stack', () =>
   Effect.gen(function* () {
     const compiled = yield* Driver.compile({
@@ -112,6 +145,33 @@ it.effect('uses a private iterative native coroutine-frame protocol', () =>
     assert.notInclude(artifact.ir, 'setjmp')
     assert.notInclude(artifact.ir, 'longjmp')
   }),
+)
+
+it.effect(
+  'retains loop-carried state through a provided scoped borrowed callback',
+  () =>
+    Effect.gen(function* () {
+      const analysis = yield* Analysis.ofSourceRealized(
+        'suspension-native/provided-borrowed-callback',
+        ascii(providedBorrowedCallbackSource),
+        'aarch64-apple-darwin',
+      )
+      assert.deepEqual(Analysis.diagnostics(analysis), [])
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(analysis)), [])
+      const provided = Analysis.loweredMir(analysis).functions.find(
+        (fn) =>
+          fn.id.name.startsWith('borrowedRead$effect$-1$provided$') &&
+          fn.suspension?.classification === 'Suspendable',
+      )
+      assert.isDefined(provided)
+      assert.isTrue(
+        provided.suspension?.frame?.states.some((state) =>
+          state.slots.some((slot) => slot.type._tag === 'i32'),
+        ),
+      )
+      yield* Analysis.codegen(analysis, { mode: 'debug' })
+    }),
+  30_000,
 )
 
 it.effect('propagates a failure after a resumed retry into its native handler', () =>

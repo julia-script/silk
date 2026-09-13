@@ -273,33 +273,9 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
       return root === ordinal ? [] : [[ordinal, root] as const]
     }),
   )
-  const edges = Mir.controlEdges(fn)
-  const liveIn = new Map<number, Set<number>>(
-    fn.regions.map((region) => [region.id.ordinal, new Set()]),
-  )
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const region of [...fn.regions].reverse()) {
-      const successors = edges
-        .filter((edge) => edge.from.ordinal === region.id.ordinal)
-        .flatMap((edge) => [...(liveIn.get(edge.to.ordinal) ?? [])])
-      const before = transferSequence(
-        regionOperations(region),
-        SetOf.union(new Set(successors), outcomeUses(region)),
-        borrowedRoots,
-      )
-      const current = liveIn.get(region.id.ordinal) ?? new Set()
-      if (!SetOf.equal(before, current)) {
-        liveIn.set(region.id.ordinal, before)
-        changed = true
-      }
-    }
-  }
-
   const liveAfter = new Map<Mir.Operation, ReadonlySet<number>>()
   const analyzeExecution = (
-    execution: Mir.Execution,
+    execution: Pick<Mir.Execution, 'entry' | 'regions'>,
     following: ReadonlySet<number>,
   ): Set<number> => {
     const loops = new Map(
@@ -430,12 +406,7 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
     return live
   }
 
-  for (const region of fn.regions) {
-    const successors = edges
-      .filter((edge) => edge.from.ordinal === region.id.ordinal)
-      .flatMap((edge) => [...(liveIn.get(edge.to.ordinal) ?? [])])
-    analyzeSequence(regionOperations(region), SetOf.union(new Set(successors), outcomeUses(region)))
-  }
+  analyzeExecution(fn, new Set())
   return liveAfter
 }
 
