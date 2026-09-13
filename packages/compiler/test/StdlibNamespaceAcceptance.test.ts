@@ -386,6 +386,28 @@ pub fn main() -> i32 {
   }),
 )
 
+it.effect('rejects overlapping Base64 input and output borrows', () =>
+  Effect.gen(function* () {
+    const source = `import silk.base64 { Base64 }
+pub fn main() -> i32 {
+  let mut bytes: [u8; 4] = [90, 103, 61, 61]
+  let encoded = Base64.encodeInto(&mut bytes, &bytes)
+  let decoded = Base64.decodeInto(&mut bytes, &bytes)
+  drop encoded
+  drop decoded
+  return 42
+}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/base64-overlapping-borrows',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['OWN0010', 'OWN0010'],
+    )
+  }),
+)
+
 it.effect('enforces P-256 scalar ownership and explicit Random', () =>
   Effect.gen(function* () {
     const source = `import silk.p256 { P256, P256Error }

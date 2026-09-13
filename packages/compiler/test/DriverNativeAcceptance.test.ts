@@ -15,6 +15,7 @@ import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { nativeCorpus, type NativeRun } from './support/corpus.js'
+import { base64AcceptanceSource } from './support/base64Acceptance.js'
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
@@ -152,8 +153,13 @@ const selectedNativeCases = new Set(
 const selectedCorpus = shardedCorpus.filter(
   (program) => selectedNativeCases.size === 0 || selectedNativeCases.has(program.name),
 )
-const runHttpValuesWasm =
-  selectedNativeCases.has('http-values') || (selectedNativeCases.size === 0 && runFixedTests)
+const portableWasmCorpus = [
+  { name: 'http-values', source: httpValuesAcceptanceSource, expected: 0 },
+  { name: 'base64-rfc4648', source: base64AcceptanceSource, expected: 42 },
+] as const
+const selectedWasmCorpus = portableWasmCorpus.filter(({ name }) =>
+  selectedNativeCases.size === 0 ? runFixedTests : selectedNativeCases.has(name),
+)
 
 it('finds every requested native corpus case', () => {
   assert.deepStrictEqual(
@@ -453,18 +459,18 @@ it.effect.each(selectedCorpus)(
   1_500_000,
 )
 
-it.effect.skipIf(!runHttpValuesWasm)(
-  'runs the shared HTTP values corpus case through LLVM-to-Wasm',
-  () =>
+it.effect.each(selectedWasmCorpus)(
+  'runs the shared portable corpus case $name through LLVM-to-Wasm',
+  ({ name, source, expected }) =>
     Effect.gen(function* () {
       const outcome = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make('memory/http-values-wasm', ascii(httpValuesAcceptanceSource)),
+          root: SourceFile.make(`memory/${name}-wasm`, ascii(source)),
           target: 'wasm32-unknown-unknown',
         },
         toolchain,
         optimization: 'release',
-        destination: join(destinationRoot, 'http-values.wasm'),
+        destination: join(destinationRoot, `${name}.wasm`),
         cache: false,
         artifactKind: 'WebAssemblyModule',
       }).pipe(Effect.provide(SourceResolver.empty))
@@ -483,7 +489,7 @@ it.effect.skipIf(!runHttpValuesWasm)(
         assert.deepEqual(WebAssembly.Module.imports(module), [])
         const main = new WebAssembly.Instance(module).exports['main']
         assert.isFunction(main)
-        if (typeof main === 'function') assert.strictEqual(main(), 0)
+        if (typeof main === 'function') assert.strictEqual(main(), expected)
       })
     }),
   600_000,
