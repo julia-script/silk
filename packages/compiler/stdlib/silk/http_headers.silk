@@ -1,0 +1,845 @@
+//! Ordered, bounded HTTP fields with borrowed iteration and explicit owned copies.
+//!
+//! # When to use
+//!
+//! Use [`Headers.make`] over validated borrowed fields, or [`Headers.copy`] when the collection must
+//! outlive its source. Lookup is ASCII case-insensitive and never combines repeated values.
+//!
+//! # Details
+//!
+//! Owned collections store payload bytes plus offsets rather than self-references. Formatting emits
+//! only `name: value\r\n` field lines and is mutation-atomic when caller output is too small.
+
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.bytes { Bytes }
+import silk.http {
+  Header,
+  LimitKind,
+  ValueComponent,
+  ValueError,
+  ValueReason,
+}
+import silk.layout { Layout }
+import silk.option { Option }
+import silk.result { Result }
+import silk.slice { Slice }
+import silk.string { String }
+import silk.u8
+import silk.usize
+import silk.vector { Vector }
+
+/// Explicit finite limits for HTTP values, fields, and owned storage.
+pub struct Limits {
+  /// Maximum method bytes.
+  pub maxMethodBytes: usize
+  /// Maximum request-target bytes.
+  pub maxTargetBytes: usize
+  /// Maximum field-name bytes.
+  pub maxNameBytes: usize
+  /// Maximum field-value and reason bytes.
+  pub maxValueBytes: usize
+  /// Maximum fields in a collection.
+  pub maxFields: usize
+  /// Maximum aggregate name-plus-value bytes.
+  pub maxFieldBytes: usize
+  /// Maximum owned payload capacities plus index storage bytes.
+  pub maxOwnedBytes: usize
+}
+
+impl Copy for Limits {}
+
+fn failure(reason: ValueReason, component: ValueComponent, offset: usize) -> ValueError {
+  return ValueError {
+    reason: reason,
+    component: component,
+    fieldIndex: Option.none<usize>(),
+    offset: offset,
+  }
+}
+
+fn indexedFailure(
+  reason: ValueReason,
+  component: ValueComponent,
+  fieldIndex: usize,
+  offset: usize,
+) -> ValueError {
+  return ValueError {
+    reason: reason,
+    component: component,
+    fieldIndex: Option.some<usize>(fieldIndex),
+    offset: offset,
+  }
+}
+
+fn limitFailure(
+  component: ValueComponent,
+  limit: LimitKind,
+  allowed: usize,
+  attempted: usize,
+) -> ValueError {
+  return failure(
+    ValueReason.LimitExceeded { limit: limit, allowed: allowed, attempted: attempted },
+    component,
+    attempted,
+  )
+}
+
+fn outputFailure(component: ValueComponent, required: usize, available: usize) -> ValueError {
+  return failure(
+    ValueReason.OutputTooSmall { required: required, available: available },
+    component,
+    available,
+  )
+}
+
+fn sizeFailure(component: ValueComponent) -> ValueError {
+  return failure(ValueReason.SizeOverflow, component, usize.MAX)
+}
+
+fn tokenByte(value: u8) -> bool {
+  if value >= 65 && value <= 90 { return true }
+  if value >= 97 && value <= 122 { return true }
+  if value >= 48 && value <= 57 { return true }
+  return value == 33 || value == 35 || value == 36 || value == 37 || value == 38
+    || value == 39 || value == 42 || value == 43 || value == 45 || value == 46
+    || value == 94 || value == 95 || value == 96 || value == 124 || value == 126
+}
+
+fn asciiEqual(left: string, right: string) -> bool {
+  let leftBytes = String.utf8Bytes(left)
+  let rightBytes = String.utf8Bytes(right)
+  if leftBytes.length != rightBytes.length { return false }
+  let mut index = usize.ZERO
+  while index < leftBytes.length {
+    if asciiLower(leftBytes[index]) != asciiLower(rightBytes[index]) { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn asciiLower(value: u8) -> u8 {
+  if value >= 65 && value <= 90 { return value + 32 }
+  return value
+}
+
+struct HeaderRecord {
+  nameStart: usize
+  nameLength: usize
+  valueStart: usize
+  valueLength: usize
+}
+
+impl Copy for HeaderRecord {}
+
+union HeaderStorage<'value> {
+  Borrowed { entries: &'value [Header<'value>] },
+  Packed { bytes: &'value [u8], records: &'value [HeaderRecord] },
+}
+
+impl<'value> Copy for HeaderStorage<'value> {}
+
+/// An ordered borrowed collection of validated HTTP fields.
+pub struct Headers<'value> {
+  storage: HeaderStorage<'value>
+  countValue: usize
+  fieldBytesValue: usize
+}
+
+impl<'value> Copy for Headers<'value> {}
+
+impl<'value> Headers<'value> {
+  /// Validates collection budgets and borrows an existing field slice without allocating.
+  pub fn make(
+    entries: &'value [Header<'value>],
+    limits: Limits,
+  ) -> Result<Headers<'value>, ValueError> {
+    if entries.length > limits.maxFields {
+      return Result.failResult<Headers<'value>, ValueError>(limitFailure(
+        ValueComponent.Headers,
+        LimitKind.Fields,
+        limits.maxFields,
+        entries.length,
+      ))
+    }
+    let mut total = usize.ZERO
+    let mut index = usize.ZERO
+    while index < entries.length {
+      let header = entries[index]
+      let nameLength = String.byteLength(Header.name(&header))
+      let valueLength = Header.value(&header).length
+      if nameLength > limits.maxNameBytes {
+        return Result.failResult<Headers<'value>, ValueError>(indexedLimitFailure(
+          ValueComponent.HeaderName,
+          LimitKind.NameBytes,
+          limits.maxNameBytes,
+          nameLength,
+          index,
+        ))
+      }
+      if valueLength > limits.maxValueBytes {
+        return Result.failResult<Headers<'value>, ValueError>(indexedLimitFailure(
+          ValueComponent.HeaderValue,
+          LimitKind.ValueBytes,
+          limits.maxValueBytes,
+          valueLength,
+          index,
+        ))
+      }
+      let fieldSize = match move checkedAdd(nameLength, valueLength, ValueComponent.Headers) {
+        Result<usize, ValueError>.Failure { error } => {
+          return Result.failResult<Headers<'value>, ValueError>(move error)
+        }
+        Result<usize, ValueError>.Success { value } => value
+      }
+      total = match move checkedAdd(total, fieldSize, ValueComponent.Headers) {
+        Result<usize, ValueError>.Failure { error } => {
+          return Result.failResult<Headers<'value>, ValueError>(move error)
+        }
+        Result<usize, ValueError>.Success { value } => value
+      }
+      if total > limits.maxFieldBytes {
+        return Result.failResult<Headers<'value>, ValueError>(indexedLimitFailure(
+          ValueComponent.Headers,
+          LimitKind.FieldBytes,
+          limits.maxFieldBytes,
+          total,
+          index,
+        ))
+      }
+      index = index + usize.ONE
+    }
+    return Result.succeed<Headers<'value>, ValueError>(Headers<'value> {
+      storage: HeaderStorage<'value>.Borrowed { entries: entries },
+      countValue: entries.length,
+      fieldBytesValue: total,
+    })
+  }
+
+  /// Returns the number of fields, including duplicates.
+  pub fn count(self: &Self) -> usize { return self.countValue }
+
+  /// Returns aggregate field-name plus field-value bytes.
+  pub fn fieldBytes(self: &Self) -> usize { return self.fieldBytesValue }
+
+  /// Iterates every field in insertion order.
+  pub fn iter(self: &Self) -> HeaderIterator<'value> {
+    return HeaderIterator<'value> {
+      headers: Headers<'value> {
+        storage: self.storage,
+        countValue: self.countValue,
+        fieldBytesValue: self.fieldBytesValue,
+      },
+      filter: Option.none<string<'value>>(),
+      index: usize.ZERO,
+      sourceIndex: usize.MAX,
+    }
+  }
+
+  /// Iterates every field whose name matches `name` ASCII case-insensitively.
+  pub fn getAll(self: &Self, name: string<'value>) -> HeaderIterator<'value> {
+    return HeaderIterator<'value> {
+      headers: Headers<'value> {
+        storage: self.storage,
+        countValue: self.countValue,
+        fieldBytesValue: self.fieldBytesValue,
+      },
+      filter: Option.some<string<'value>>(name),
+      index: usize.ZERO,
+      sourceIndex: usize.MAX,
+    }
+  }
+
+  /// Returns the first matching field without combining duplicates.
+  pub fn getFirst(self: &Self, name: string) -> Option<Header<'value>> {
+    let mut index = usize.ZERO
+    while index < self.countValue {
+      let value = entryAt(self, index)
+      if asciiEqual(Header.name(&value), name) { return Option.some<Header<'value>>(value) }
+      index = index + usize.ONE
+    }
+    return Option.none<Header<'value>>()
+  }
+
+  /// Returns an absent or unique matching field and rejects a second match.
+  pub fn getUnique(self: &Self, name: string) -> Result<Option<Header<'value>>, ValueError> {
+    let mut found = Option.none<Header<'value>>()
+    let mut count = usize.ZERO
+    let mut index = usize.ZERO
+    while index < self.countValue {
+      let value = entryAt(self, index)
+      if asciiEqual(Header.name(&value), name) {
+        count = count + usize.ONE
+        if count > usize.ONE {
+          return Result.failResult<Option<Header<'value>>, ValueError>(indexedFailure(
+            ValueReason.LimitExceeded {
+              limit: LimitKind.UniqueField,
+              allowed: usize.ONE,
+              attempted: count,
+            },
+            ValueComponent.Headers,
+            index,
+            usize.ZERO,
+          ))
+        }
+        found = Option.some<Header<'value>>(value)
+      }
+      index = index + usize.ONE
+    }
+    return Result.succeed<Option<Header<'value>>, ValueError>(move found)
+  }
+
+  /// Copies fields into independent byte and index storage under `maxOwnedBytes`.
+  pub effect fn copy(
+    self: &Self,
+    limits: Limits,
+  ) -> Result<OwnedHeaders, ValueError> ! OutOfMemoryError ? &mut Allocator {
+    let validated = validateExisting(self, limits)
+    match move validated {
+      Result<(), ValueError>.Failure { error } => {
+        return Result.failResult<OwnedHeaders, ValueError>(move error)
+      }
+      Result<(), ValueError>.Success { value } => {}
+    }
+    let recordLayout = Layout.of<HeaderRecord>()
+    let recordBytes = match move usize.checkedMultiply(recordLayout.bytes, self.countValue) {
+      Option<usize>.None => {
+        return Result.failResult<OwnedHeaders, ValueError>(sizeFailure(ValueComponent.Headers))
+      }
+      Option<usize>.Some { value } => value
+    }
+    let ownedBytes = match move checkedAdd(
+      self.fieldBytesValue,
+      recordBytes,
+      ValueComponent.Headers,
+    ) {
+      Result<usize, ValueError>.Failure { error } => {
+        return Result.failResult<OwnedHeaders, ValueError>(move error)
+      }
+      Result<usize, ValueError>.Success { value } => value
+    }
+    if ownedBytes > limits.maxOwnedBytes {
+      return Result.failResult<OwnedHeaders, ValueError>(limitFailure(
+        ValueComponent.Headers,
+        LimitKind.OwnedBytes,
+        limits.maxOwnedBytes,
+        ownedBytes,
+      ))
+    }
+    let mut payload = Bytes.make()
+    let reservedPayload = run Bytes.reserveExact(&mut payload, self.fieldBytesValue)
+    let mut records = Vector.make<HeaderRecord>()
+    let reservedRecords = run Vector.reserveExact<HeaderRecord>(&mut records, self.countValue)
+    let mut index = usize.ZERO
+    while index < self.countValue {
+      let header = entryAt(self, index)
+      let name = String.utf8Bytes(Header.name(&header))
+      let value = Header.value(&header)
+      let nameStart = Bytes.length(&payload)
+      let wroteName = run Bytes.append(&mut payload, name)
+      let valueStart = Bytes.length(&payload)
+      let wroteValue = run Bytes.append(&mut payload, value)
+      let wroteRecord = run Vector.append<HeaderRecord>(&mut records, HeaderRecord {
+        nameStart: nameStart,
+        nameLength: name.length,
+        valueStart: valueStart,
+        valueLength: value.length,
+      })
+      index = index + usize.ONE
+    }
+    return Result.succeed<OwnedHeaders, ValueError>(OwnedHeaders {
+      payload: move payload,
+      records: move records,
+      fieldBytesValue: self.fieldBytesValue,
+      ownedBytesValue: ownedBytes,
+    })
+  }
+
+  /// Computes the payload-plus-index bytes required by an owned copy without allocating.
+  pub fn requiredOwnedBytes(self: &Self) -> Result<usize, ValueError> {
+    let recordLayout = Layout.of<HeaderRecord>()
+    let recordBytes = match move usize.checkedMultiply(recordLayout.bytes, self.countValue) {
+      Option<usize>.None => {
+        return Result.failResult<usize, ValueError>(sizeFailure(ValueComponent.Headers))
+      }
+      Option<usize>.Some {value} => value
+    }
+    return checkedAdd(self.fieldBytesValue, recordBytes, ValueComponent.Headers)
+  }
+
+  /// Formats only ordered field lines into caller storage after a complete sizing pass.
+  pub fn formatInto(self: &Self, output: &mut [u8]) -> Result<usize, ValueError> {
+    let mut required = usize.ZERO
+    let mut index = usize.ZERO
+    while index < self.countValue {
+      let header = entryAt(self, index)
+      let nameLength = String.byteLength(Header.name(&header))
+      let withName = match move checkedAdd(required, nameLength, ValueComponent.Headers) {
+        Result<usize, ValueError>.Failure { error } => {
+          return Result.failResult<usize, ValueError>(move error)
+        }
+        Result<usize, ValueError>.Success { value } => value
+      }
+      let withSyntax = match move checkedAdd(withName, 4, ValueComponent.Headers) {
+        Result<usize, ValueError>.Failure { error } => {
+          return Result.failResult<usize, ValueError>(move error)
+        }
+        Result<usize, ValueError>.Success { value } => value
+      }
+      required = match move checkedAdd(
+        withSyntax,
+        Header.value(&header).length,
+        ValueComponent.Headers,
+      ) {
+        Result<usize, ValueError>.Failure { error } => {
+          return Result.failResult<usize, ValueError>(move error)
+        }
+        Result<usize, ValueError>.Success { value } => value
+      }
+      index = index + usize.ONE
+    }
+    if output.length < required {
+      return Result.failResult<usize, ValueError>(outputFailure(
+        ValueComponent.Headers,
+        required,
+        output.length,
+      ))
+    }
+    let mut cursor = usize.ZERO
+    index = usize.ZERO
+    while index < self.countValue {
+      let header = entryAt(self, index)
+      let name = String.utf8Bytes(Header.name(&header))
+      cursor = copyBytes(&mut output, cursor, name)
+      output[cursor] = 58
+      output[cursor + usize.ONE] = 32
+      cursor = cursor + 2
+      cursor = copyBytes(&mut output, cursor, Header.value(&header))
+      output[cursor] = 13
+      output[cursor + usize.ONE] = 10
+      cursor = cursor + 2
+      index = index + usize.ONE
+    }
+    return Result.succeed<usize, ValueError>(cursor)
+  }
+
+  /// Iterates Connection field tokens while retaining extension spelling.
+  pub fn connectionTokens(self: &Self) -> MetadataIterator<'value> {
+    return metadata(self, MetadataKind.Connection)
+  }
+
+  /// Iterates Content-Encoding codings while retaining extensions.
+  pub fn contentCodings(self: &Self) -> MetadataIterator<'value> {
+    return metadata(self, MetadataKind.ContentEncoding)
+  }
+
+  /// Iterates Transfer-Encoding codings and validates transfer parameters.
+  pub fn transferCodings(self: &Self) -> MetadataIterator<'value> {
+    return metadata(self, MetadataKind.TransferEncoding)
+  }
+}
+
+/// Independently owned HTTP field payloads and offset records.
+pub struct OwnedHeaders {
+  payload: Bytes
+  records: Vector<HeaderRecord>
+  fieldBytesValue: usize
+  ownedBytesValue: usize
+}
+
+impl OwnedHeaders {
+  /// Borrows an ordered collection view tied to this owner.
+  pub fn view<'value>(self: &'value Self) -> Headers<'value> {
+    return Headers<'value> {
+      storage: HeaderStorage<'value>.Packed {
+        bytes: Bytes.asSlice(&self.payload),
+        records: Vector.asSlice<HeaderRecord>(&self.records),
+      },
+      countValue: Vector.length<HeaderRecord>(&self.records),
+      fieldBytesValue: self.fieldBytesValue,
+    }
+  }
+
+  /// Returns accounted payload-capacity plus record-storage bytes.
+  pub fn ownedBytes(self: &Self) -> usize { return self.ownedBytesValue }
+}
+
+/// An insertion-order iterator over all fields or one case-insensitive name.
+pub struct HeaderIterator<'value> {
+  headers: Headers<'value>
+  filter: Option<string<'value>>
+  index: usize
+  sourceIndex: usize
+}
+
+impl<'value> HeaderIterator<'value> {
+  /// Returns the next matching field, preserving original name and value bytes.
+  pub fn next(self: &mut Self) -> Option<Header<'value>> {
+    while self.index < self.headers.countValue {
+      let index = self.index
+      self.index = self.index + usize.ONE
+      let header = entryAt(&self.headers, index)
+      match & self.filter {
+        Option<string<'value>>.None => {
+          self.sourceIndex = index
+          return Option.some<Header<'value>>(header)
+        }
+        Option<string<'value>>.Some { value } => {
+          if asciiEqual(Header.name(&header), value) {
+            self.sourceIndex = index
+            return Option.some<Header<'value>>(header)
+          }
+        }
+      }
+    }
+    return Option.none<Header<'value>>()
+  }
+
+  /// Returns the source field index of the last yielded entry.
+  pub fn fieldIndex(self: &Self) -> usize { return self.sourceIndex }
+}
+
+enum MetadataKind { Connection, ContentEncoding, TransferEncoding }
+
+/// One parsed metadata token borrowed from its source field.
+pub struct MetadataToken<'value> {
+  tokenBytes: &'value [u8]
+  rawBytes: &'value [u8]
+  sourceField: usize
+  sourceOffset: usize
+}
+
+impl<'value> Copy for MetadataToken<'value> {}
+
+impl<'value> MetadataToken<'value> {
+  /// Borrows the coding or connection-option token without parameters.
+  pub fn token(self: &Self) -> &'value [u8] { return self.tokenBytes }
+  /// Borrows the complete list member, including validated transfer parameters.
+  pub fn raw(self: &Self) -> &'value [u8] { return self.rawBytes }
+  /// Returns the source collection field index.
+  pub fn fieldIndex(self: &Self) -> usize { return self.sourceField }
+  /// Returns the token's byte offset within the source field value.
+  pub fn offset(self: &Self) -> usize { return self.sourceOffset }
+  /// Recognizes a known token ASCII case-insensitively without erasing extensions.
+  pub fn matches(self: &Self, known: string) -> bool {
+    return bytesAsciiEqual(self.tokenBytes, String.utf8Bytes(known))
+  }
+}
+
+/// A lazy ordered iterator over selected HTTP metadata fields.
+pub struct MetadataIterator<'value> {
+  headers: Headers<'value>
+  kind: MetadataKind
+  fieldIndex: usize
+  valueOffset: usize
+}
+
+impl<'value> MetadataIterator<'value> {
+  /// Parses and returns the next metadata token or a located grammar failure.
+  pub fn next(self: &mut Self) -> Result<Option<MetadataToken<'value>>, ValueError> {
+    while self.fieldIndex < self.headers.countValue {
+      let header = entryAt(&self.headers, self.fieldIndex)
+      if !metadataName(self.kind, Header.name(&header)) {
+        self.fieldIndex = self.fieldIndex + usize.ONE
+        self.valueOffset = usize.ZERO
+      } else {
+        let value = Header.value(&header)
+        while self.valueOffset < value.length {
+          while self.valueOffset < value.length && (value[self.valueOffset] == 32 || value[self.valueOffset] == 9 || value[self.valueOffset] == 44) {
+            self.valueOffset = self.valueOffset + usize.ONE
+          }
+          if self.valueOffset >= value.length { break }
+          let tokenStart = self.valueOffset
+          while self.valueOffset < value.length && tokenByte(value[self.valueOffset]) {
+            self.valueOffset = self.valueOffset + usize.ONE
+          }
+          if self.valueOffset == tokenStart {
+            return Result.failResult<Option<MetadataToken<'value>>, ValueError>(metadataFailure(
+              self.fieldIndex,
+              self.valueOffset,
+            ))
+          }
+          let tokenEnd = self.valueOffset
+          while self.valueOffset < value.length && (value[self.valueOffset] == 32 || value[self.valueOffset] == 9) {
+            self.valueOffset = self.valueOffset + usize.ONE
+          }
+          if self.valueOffset < value.length && value[self.valueOffset] == 59 {
+            if self.kind != MetadataKind.TransferEncoding {
+              return Result.failResult<Option<MetadataToken<'value>>, ValueError>(metadataFailure(
+                self.fieldIndex,
+                self.valueOffset,
+              ))
+            }
+            let parameters = validateParameters(value, self.fieldIndex, self.valueOffset)
+            match move parameters {
+              Result<usize, ValueError>.Failure { error } => {
+                return Result.failResult<Option<MetadataToken<'value>>, ValueError>(move error)
+              }
+              Result<usize, ValueError>.Success { value: end } => {
+                self.valueOffset = end
+              }
+            }
+          }
+          while self.valueOffset < value.length && (value[self.valueOffset] == 32 || value[self.valueOffset] == 9) {
+            self.valueOffset = self.valueOffset + usize.ONE
+          }
+          let rawEnd = self.valueOffset
+          if self.valueOffset < value.length {
+            if value[self.valueOffset] != 44 {
+              return Result.failResult<Option<MetadataToken<'value>>, ValueError>(metadataFailure(
+                self.fieldIndex,
+                self.valueOffset,
+              ))
+            }
+            self.valueOffset = self.valueOffset + usize.ONE
+          }
+          return Result.succeed<Option<MetadataToken<'value>>, ValueError>(
+            Option.some<MetadataToken<'value>>(MetadataToken<'value> {
+              tokenBytes: Slice.view<u8>(value, tokenStart, tokenEnd - tokenStart),
+              rawBytes: Slice.view<u8>(value, tokenStart, rawEnd - tokenStart),
+              sourceField: self.fieldIndex,
+              sourceOffset: tokenStart,
+            }),
+          )
+        }
+        self.fieldIndex = self.fieldIndex + usize.ONE
+        self.valueOffset = usize.ZERO
+      }
+    }
+    return Result.succeed<Option<MetadataToken<'value>>, ValueError>(
+      Option.none<MetadataToken<'value>>(),
+    )
+  }
+}
+
+fn metadata<'value>(headers: &Headers<'value>, kind: MetadataKind) -> MetadataIterator<'value> {
+  return MetadataIterator<'value> {
+    headers: Headers<'value> {
+      storage: headers.storage,
+      countValue: headers.countValue,
+      fieldBytesValue: headers.fieldBytesValue,
+    },
+    kind: kind,
+    fieldIndex: usize.ZERO,
+    valueOffset: usize.ZERO,
+  }
+}
+
+fn metadataName(kind: MetadataKind, name: string) -> bool {
+  return match move kind {
+    MetadataKind.Connection => asciiEqual(name, "Connection")
+    MetadataKind.ContentEncoding => asciiEqual(name, "Content-Encoding")
+    MetadataKind.TransferEncoding => asciiEqual(name, "Transfer-Encoding")
+  }
+}
+
+fn validateParameters(
+  value: &[u8],
+  fieldIndex: usize,
+  start: usize,
+) -> Result<usize, ValueError> {
+  let mut index = start
+  while index < value.length && value[index] == 59 {
+    index = index + usize.ONE
+    while index < value.length && (value[index] == 32 || value[index] == 9) { index = index + usize.ONE }
+    let nameStart = index
+    while index < value.length && tokenByte(value[index]) { index = index + usize.ONE }
+    if index == nameStart { return Result.failResult<usize, ValueError>(metadataFailure(fieldIndex, index)) }
+    while index < value.length && (value[index] == 32 || value[index] == 9) { index = index + usize.ONE }
+    if index >= value.length || value[index] != 61 {
+      return Result.failResult<usize, ValueError>(metadataFailure(fieldIndex, index))
+    }
+    index = index + usize.ONE
+    while index < value.length && (value[index] == 32 || value[index] == 9) { index = index + usize.ONE }
+    if index < value.length && value[index] == 34 {
+      index = index + usize.ONE
+      let mut closed = false
+      while index < value.length && !closed {
+        let byte = value[index]
+        if byte == 34 {
+          closed = true
+          index = index + usize.ONE
+        } else if byte == 92 {
+          index = index + usize.ONE
+          if index >= value.length || !quotedPairByte(value[index]) {
+            return Result.failResult<usize, ValueError>(metadataFailure(fieldIndex, index))
+          }
+          index = index + usize.ONE
+        } else if quotedTextByte(byte) {
+          index = index + usize.ONE
+        } else {
+          return Result.failResult<usize, ValueError>(metadataFailure(fieldIndex, index))
+        }
+      }
+      if !closed { return Result.failResult<usize, ValueError>(metadataFailure(fieldIndex, index)) }
+    } else {
+      let valueStart = index
+      while index < value.length && tokenByte(value[index]) { index = index + usize.ONE }
+      if index == valueStart { return Result.failResult<usize, ValueError>(metadataFailure(fieldIndex, index)) }
+    }
+    while index < value.length && (value[index] == 32 || value[index] == 9) { index = index + usize.ONE }
+    if index >= value.length || value[index] == 44 { return Result.succeed<usize, ValueError>(index) }
+    if value[index] != 59 { return Result.failResult<usize, ValueError>(metadataFailure(fieldIndex, index)) }
+  }
+  return Result.succeed<usize, ValueError>(index)
+}
+
+fn quotedTextByte(value: u8) -> bool {
+  return value == 9 || value == 32 || value == 33 || (value >= 35 && value <= 91)
+    || (value >= 93 && value <= 126) || value >= 128
+}
+
+fn quotedPairByte(value: u8) -> bool {
+  return value == 9 || (value >= 32 && value <= 126) || value >= 128
+}
+
+fn metadataFailure(fieldIndex: usize, offset: usize) -> ValueError {
+  return indexedFailure(ValueReason.InvalidToken, ValueComponent.Metadata, fieldIndex, offset)
+}
+
+fn entryAt<'value>(headers: &Headers<'value>, index: usize) -> Header<'value> {
+  return match headers.storage {
+    HeaderStorage<'value>.Borrowed { entries } => entries[index]
+    HeaderStorage<'value>.Packed { bytes, records } => {
+      let record = records[index]
+      let nameBytes = Slice.view<u8>(bytes, record.nameStart, record.nameLength)
+      let valueBytes = Slice.view<u8>(bytes, record.valueStart, record.valueLength)
+      unsafe {
+        let name = String.fromUtf8Unchecked(nameBytes)
+        let limits = exactLimits(record.nameLength, record.valueLength)
+        let made = Header.make(name, valueBytes, limits)
+        return match move made {
+          Result<Header<'value>, ValueError>.Success { value } => value
+          Result<Header<'value>, ValueError>.Failure { error } => absurd<Header<'value>>()
+        }
+      }
+      return absurd<Header<'value>>()
+    }
+  }
+}
+
+fn exactLimits(nameLength: usize, valueLength: usize) -> Limits {
+  let total = match move usize.checkedAdd(nameLength, valueLength) {
+    Option<usize>.Some { value } => value
+    Option<usize>.None => usize.MAX
+  }
+  return Limits {
+    maxMethodBytes: usize.MAX,
+    maxTargetBytes: usize.MAX,
+    maxNameBytes: nameLength,
+    maxValueBytes: valueLength,
+    maxFields: usize.ONE,
+    maxFieldBytes: total,
+    maxOwnedBytes: usize.MAX,
+  }
+}
+
+fn validateExisting<'value>(headers: &Headers<'value>, limits: Limits) -> Result<(), ValueError> {
+  // This helper must remain allocation-free; validate directly instead of constructing a slice.
+  if headers.countValue > limits.maxFields {
+    return Result.failResult<(), ValueError>(limitFailure(
+      ValueComponent.Headers,
+      LimitKind.Fields,
+      limits.maxFields,
+      headers.countValue,
+    ))
+  }
+  let mut total = usize.ZERO
+  let mut index = usize.ZERO
+  while index < headers.countValue {
+    let header = entryAt(headers, index)
+    let nameLength = String.byteLength(Header.name(&header))
+    let valueLength = Header.value(&header).length
+    if nameLength > limits.maxNameBytes {
+      return Result.failResult<(), ValueError>(indexedLimitFailure(
+        ValueComponent.HeaderName,
+        LimitKind.NameBytes,
+        limits.maxNameBytes,
+        nameLength,
+        index,
+      ))
+    }
+    if valueLength > limits.maxValueBytes {
+      return Result.failResult<(), ValueError>(indexedLimitFailure(
+        ValueComponent.HeaderValue,
+        LimitKind.ValueBytes,
+        limits.maxValueBytes,
+        valueLength,
+        index,
+      ))
+    }
+    total = match move checkedAdd(total, nameLength, ValueComponent.Headers) {
+      Result<usize, ValueError>.Failure { error } => {
+        return Result.failResult<(), ValueError>(move error)
+      }
+      Result<usize, ValueError>.Success { value } => value
+    }
+    total = match move checkedAdd(total, valueLength, ValueComponent.Headers) {
+      Result<usize, ValueError>.Failure { error } => {
+        return Result.failResult<(), ValueError>(move error)
+      }
+      Result<usize, ValueError>.Success { value } => value
+    }
+    if total > limits.maxFieldBytes {
+      return Result.failResult<(), ValueError>(indexedLimitFailure(
+        ValueComponent.Headers,
+        LimitKind.FieldBytes,
+        limits.maxFieldBytes,
+        total,
+        index,
+      ))
+    }
+    index = index + usize.ONE
+  }
+  return Result.succeed<(), ValueError>(())
+}
+
+fn indexedLimitFailure(
+  component: ValueComponent,
+  limit: LimitKind,
+  allowed: usize,
+  attempted: usize,
+  fieldIndex: usize,
+) -> ValueError {
+  return indexedFailure(
+    ValueReason.LimitExceeded { limit: limit, allowed: allowed, attempted: attempted },
+    component,
+    fieldIndex,
+    attempted,
+  )
+}
+
+fn checkedAdd(left: usize, right: usize, component: ValueComponent) -> Result<usize, ValueError> {
+  return match move usize.checkedAdd(left, right) {
+    Option<usize>.None => Result.failResult<usize, ValueError>(sizeFailure(component))
+    Option<usize>.Some { value } => Result.succeed<usize, ValueError>(value)
+  }
+}
+
+fn copyBytes(output: &mut [u8], start: usize, source: &[u8]) -> usize {
+  let mut index = usize.ZERO
+  while index < source.length {
+    output[start + index] = source[index]
+    index = index + usize.ONE
+  }
+  return start + source.length
+}
+
+fn bytesAsciiEqual(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length { return false }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if lower(left[index]) != lower(right[index]) { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn lower(value: u8) -> u8 {
+  if value >= 65 && value <= 90 { return value + 32 }
+  return value
+}
+
+fn absurd<T>() -> T {
+  let boom = 1 / 0
+  return absurd<T>()
+}

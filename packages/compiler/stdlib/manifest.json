@@ -223,6 +223,37 @@
     "aliases": ["HostInputError"]
   },
   {
+    "module": "silk/http",
+    "path": "silk/http.silk",
+    "namespace": "Version",
+    "aliases": [
+      "Method",
+      "Status",
+      "StatusClass",
+      "Header",
+      "RequestHead",
+      "OwnedRequestHead",
+      "ResponseHead",
+      "OwnedResponseHead",
+      "ValueError",
+      "ValueReason",
+      "ValueComponent",
+      "LimitKind"
+    ]
+  },
+  {
+    "module": "silk/http_headers",
+    "path": "silk/http_headers.silk",
+    "namespace": "Headers",
+    "aliases": ["OwnedHeaders", "HeaderIterator", "MetadataIterator", "MetadataToken", "Limits"]
+  },
+  {
+    "module": "silk/http_target",
+    "path": "silk/http_target.silk",
+    "namespace": "RequestTarget",
+    "aliases": ["HttpAuthority", "TargetForm"]
+  },
+  {
     "module": "silk/https_identity",
     "path": "silk/https_identity.silk",
     "namespace": "HttpsIdentity",

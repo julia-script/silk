@@ -1,0 +1,808 @@
+//! Validated, byte-preserving HTTP/1.x scalar values, fields, and message heads.
+//!
+//! # When to use
+//!
+//! Use these values to share HTTP semantics between parsers, clients, and servers. Parsing and
+//! validation borrow caller storage; use the owned head copies when values must outlive that input.
+//!
+//! # Details
+//!
+//! Methods remain open case-sensitive tokens, fields retain exact octets, and statuses retain every
+//! code from 100 through 599. This module applies no framing, transport, or connection policy.
+//!
+//! # Gotchas
+//!
+//! `Header.make` receives semantic field values after wire OWS has been removed. It rejects CR,
+//! LF, NUL, DEL, other forbidden controls, and leading or trailing OWS.
+//!
+//! # Examples
+//! ## Preserve protocol spelling
+//! ```silk
+//! import silk.http { Method, Version }
+//!
+//! pub fn main() -> i32 {
+//!   let version = Version.Http11
+//!   let method = Method.patch()
+//!   if Version.format(&version) != "HTTP/1.1" { return 1 }
+//!   if Method.format(&method) != "PATCH" { return 2 }
+//!   return 42
+//! }
+//! ```
+
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.bytes { Bytes }
+import silk.http_headers { Headers, Limits, OwnedHeaders }
+import silk.http_target { HttpAuthority, RequestTarget, validateRequestHost }
+import silk.option { Option }
+import silk.result { Result }
+import silk.string { String }
+import silk.u16
+import silk.u8
+import silk.usize
+
+/// The component of an HTTP value that failed validation.
+pub enum ValueComponent {
+  /// An HTTP version token.
+  Version,
+  /// A request method token.
+  Method,
+  /// A numeric response status.
+  Status,
+  /// A field name.
+  HeaderName,
+  /// A field value.
+  HeaderValue,
+  /// An optional response reason phrase.
+  ReasonPhrase,
+  /// An ordered field collection.
+  Headers,
+  /// A request target.
+  Target,
+  /// An HTTP authority.
+  Authority,
+  /// A Host field.
+  Host,
+  /// A structured metadata field value.
+  Metadata,
+}
+
+/// The finite limit whose allowed count was exceeded.
+pub enum LimitKind {
+  /// Maximum method bytes.
+  MethodBytes,
+  /// Maximum request-target bytes.
+  TargetBytes,
+  /// Maximum field-name bytes.
+  NameBytes,
+  /// Maximum field-value or reason bytes.
+  ValueBytes,
+  /// Maximum field count.
+  Fields,
+  /// Maximum aggregate name-plus-value bytes.
+  FieldBytes,
+  /// Maximum owned payload and index bytes.
+  OwnedBytes,
+  /// At most one matching field was required.
+  UniqueField,
+}
+
+/// A closed semantic HTTP value failure reason.
+pub union ValueReason {
+  /// A token is empty or contains a byte outside `tchar`.
+  InvalidToken,
+  /// A value contains a forbidden byte.
+  InvalidValueByte,
+  /// A version is not HTTP/1.0 or HTTP/1.1.
+  UnsupportedVersion,
+  /// A response code is outside 100 through 599.
+  InvalidStatus,
+  /// A request target has invalid syntax.
+  InvalidTarget,
+  /// An HTTP authority has invalid syntax.
+  InvalidAuthority,
+  /// A port is absent, empty, nonnumeric, or outside its accepted range.
+  InvalidPort,
+  /// The request method cannot use the supplied target form.
+  MethodTargetMismatch,
+  /// HTTP/1.1 has no Host field.
+  MissingHost,
+  /// More than one Host field is present.
+  DuplicateHost,
+  /// One explicit finite limit was exceeded.
+  LimitExceeded {
+    /// The rejected limit.
+    pub limit: LimitKind,
+    /// The configured maximum.
+    pub allowed: usize,
+    /// The attempted count.
+    pub attempted: usize,
+  },
+  /// Checked size arithmetic overflowed `usize`.
+  SizeOverflow,
+  /// Caller-owned output cannot hold the complete serialization.
+  OutputTooSmall {
+    /// Complete required output bytes.
+    pub required: usize,
+    /// Available caller output bytes.
+    pub available: usize,
+  },
+}
+
+impl Copy for ValueReason {}
+
+/// A semantic HTTP value failure with source location information.
+pub struct ValueError {
+  /// The recovery-oriented failure category.
+  pub reason: ValueReason
+  /// The value component being validated.
+  pub component: ValueComponent
+  /// The source field ordinal when the error came from a collection.
+  pub fieldIndex: Option<usize>
+  /// The zero-based component byte offset.
+  pub offset: usize
+}
+
+/// One supported HTTP protocol version.
+pub enum Version {
+  /// HTTP/1.0.
+  Http10,
+  /// HTTP/1.1.
+  Http11,
+}
+
+impl Version {
+  /// Parses exactly `HTTP/1.0` or `HTTP/1.1`.
+  pub fn parse(text: string) -> Result<Version, ValueError> {
+    if text == "HTTP/1.0" {
+      return Result.succeed<Version, ValueError>(Version.Http10)
+    }
+    if text == "HTTP/1.1" {
+      return Result.succeed<Version, ValueError>(Version.Http11)
+    }
+    return Result.failResult<Version, ValueError>(failure(
+      ValueReason.UnsupportedVersion,
+      ValueComponent.Version,
+      usize.ZERO,
+    ))
+  }
+
+  /// Formats one supported version as its exact protocol token.
+  pub fn format(self: &Self) -> string<'static> {
+    return match & self.* {
+      Version.Http10 => "HTTP/1.0"
+      Version.Http11 => "HTTP/1.1"
+    }
+  }
+}
+
+/// A borrowed open HTTP method token with preserved spelling.
+pub struct Method<'text> {
+  text: string<'text>
+}
+
+impl<'text> Copy for Method<'text> {}
+
+impl<'text> Method<'text> {
+  /// Validates a nonempty `tchar` token within `maxBytes` and borrows it unchanged.
+  pub fn parse(text: string<'text>, maxBytes: usize) -> Result<Method<'text>, ValueError> {
+    let bytes = String.utf8Bytes(text)
+    if bytes.length > maxBytes {
+      return Result.failResult<Method<'text>, ValueError>(limitFailure(
+        ValueComponent.Method,
+        LimitKind.MethodBytes,
+        maxBytes,
+        bytes.length,
+      ))
+    }
+    if bytes.length == usize.ZERO {
+      return Result.failResult<Method<'text>, ValueError>(failure(
+        ValueReason.InvalidToken,
+        ValueComponent.Method,
+        usize.ZERO,
+      ))
+    }
+    let mut index = usize.ZERO
+    while index < bytes.length {
+      if !tokenByte(bytes[index]) {
+        return Result.failResult<Method<'text>, ValueError>(failure(
+          ValueReason.InvalidToken,
+          ValueComponent.Method,
+          index,
+        ))
+      }
+      index = index + usize.ONE
+    }
+    return Result.succeed<Method<'text>, ValueError>(Method<'text> { text: text })
+  }
+
+  /// Borrows the original method spelling.
+  pub fn format(self: &Self) -> string<'text> {
+    return self.text
+  }
+
+  /// Compares method spelling case-sensitively.
+  pub fn equals(self: &Self, other: &Method) -> bool {
+    return self.text == other.text
+  }
+
+  /// Returns the standard GET method value.
+  pub fn get() -> Method<'static> { return Method<'static> { text: "GET" } }
+  /// Returns the standard HEAD method value.
+  pub fn head() -> Method<'static> { return Method<'static> { text: "HEAD" } }
+  /// Returns the standard POST method value.
+  pub fn post() -> Method<'static> { return Method<'static> { text: "POST" } }
+  /// Returns the standard PUT method value.
+  pub fn put() -> Method<'static> { return Method<'static> { text: "PUT" } }
+  /// Returns the standard DELETE method value.
+  pub fn delete() -> Method<'static> { return Method<'static> { text: "DELETE" } }
+  /// Returns the standard CONNECT method value.
+  pub fn connect() -> Method<'static> { return Method<'static> { text: "CONNECT" } }
+  /// Returns the standard OPTIONS method value.
+  pub fn options() -> Method<'static> { return Method<'static> { text: "OPTIONS" } }
+  /// Returns the standard TRACE method value.
+  pub fn trace() -> Method<'static> { return Method<'static> { text: "TRACE" } }
+  /// Returns the standard PATCH method value.
+  pub fn patch() -> Method<'static> { return Method<'static> { text: "PATCH" } }
+}
+
+/// The protocol class of a response status.
+pub enum StatusClass {
+  /// 1xx informational.
+  Informational,
+  /// 2xx successful.
+  Successful,
+  /// 3xx redirection.
+  Redirection,
+  /// 4xx client error.
+  ClientError,
+  /// 5xx server error.
+  ServerError,
+}
+
+/// A response status retaining registered and unregistered valid codes.
+pub struct Status {
+  value: u16
+}
+
+impl Copy for Status {}
+
+impl Status {
+  /// Constructs a status from any code in the inclusive 100 through 599 range.
+  pub fn fromCode(code: u16) -> Result<Status, ValueError> {
+    if code < 100 || code > 599 {
+      return Result.failResult<Status, ValueError>(failure(
+        ValueReason.InvalidStatus,
+        ValueComponent.Status,
+        usize.ZERO,
+      ))
+    }
+    return Result.succeed<Status, ValueError>(Status { value: code })
+  }
+
+  /// Returns the preserved numeric status code.
+  pub fn code(self: &Self) -> u16 { return self.value }
+
+  /// Returns the status class derived from the hundreds digit.
+  pub fn class(self: &Self) -> StatusClass {
+    let hundreds = self.value / 100
+    if hundreds == 1 { return StatusClass.Informational }
+    if hundreds == 2 { return StatusClass.Successful }
+    if hundreds == 3 { return StatusClass.Redirection }
+    if hundreds == 4 { return StatusClass.ClientError }
+    return StatusClass.ServerError
+  }
+}
+
+/// A validated header field borrowing its exact name spelling and raw value octets.
+pub struct Header<'value> {
+  nameText: string<'value>
+  valueBytes: &'value [u8]
+}
+
+impl<'value> Copy for Header<'value> {}
+
+impl<'value> Header<'value> {
+  /// Validates one semantic field after wire OWS removal and borrows it unchanged.
+  pub fn make(
+    name: string<'value>,
+    value: &'value [u8],
+    limits: Limits,
+  ) -> Result<Header<'value>, ValueError> {
+    let nameBytes = String.utf8Bytes(name)
+    if nameBytes.length > limits.maxNameBytes {
+      return Result.failResult<Header<'value>, ValueError>(limitFailure(
+        ValueComponent.HeaderName,
+        LimitKind.NameBytes,
+        limits.maxNameBytes,
+        nameBytes.length,
+      ))
+    }
+    if value.length > limits.maxValueBytes {
+      return Result.failResult<Header<'value>, ValueError>(limitFailure(
+        ValueComponent.HeaderValue,
+        LimitKind.ValueBytes,
+        limits.maxValueBytes,
+        value.length,
+      ))
+    }
+    if nameBytes.length == usize.ZERO {
+      return Result.failResult<Header<'value>, ValueError>(failure(
+        ValueReason.InvalidToken,
+        ValueComponent.HeaderName,
+        usize.ZERO,
+      ))
+    }
+    let mut index = usize.ZERO
+    while index < nameBytes.length {
+      if !tokenByte(nameBytes[index]) {
+        return Result.failResult<Header<'value>, ValueError>(failure(
+          ValueReason.InvalidToken,
+          ValueComponent.HeaderName,
+          index,
+        ))
+      }
+      index = index + usize.ONE
+    }
+    index = usize.ZERO
+    while index < value.length {
+      if !fieldValueByte(value[index]) {
+        return Result.failResult<Header<'value>, ValueError>(failure(
+          ValueReason.InvalidValueByte,
+          ValueComponent.HeaderValue,
+          index,
+        ))
+      }
+      index = index + usize.ONE
+    }
+    if value.length > usize.ZERO {
+      if value[usize.ZERO] == 9 || value[usize.ZERO] == 32 {
+        return Result.failResult<Header<'value>, ValueError>(failure(
+          ValueReason.InvalidValueByte,
+          ValueComponent.HeaderValue,
+          usize.ZERO,
+        ))
+      }
+      let last = value.length - usize.ONE
+      if value[last] == 9 || value[last] == 32 {
+        return Result.failResult<Header<'value>, ValueError>(failure(
+          ValueReason.InvalidValueByte,
+          ValueComponent.HeaderValue,
+          last,
+        ))
+      }
+    }
+    return Result.succeed<Header<'value>, ValueError>(Header<'value> {
+      nameText: name,
+      valueBytes: value,
+    })
+  }
+
+  /// Borrows the original field-name spelling.
+  pub fn name(self: &Self) -> string<'value> { return self.nameText }
+
+  /// Borrows the exact validated field-value octets.
+  pub fn value(self: &Self) -> &'value [u8] { return self.valueBytes }
+}
+
+fn failure(reason: ValueReason, component: ValueComponent, offset: usize) -> ValueError {
+  return ValueError {
+    reason: reason,
+    component: component,
+    fieldIndex: Option.none<usize>(),
+    offset: offset,
+  }
+}
+
+fn indexedFailure(
+  reason: ValueReason,
+  component: ValueComponent,
+  fieldIndex: usize,
+  offset: usize,
+) -> ValueError {
+  return ValueError {
+    reason: reason,
+    component: component,
+    fieldIndex: Option.some<usize>(fieldIndex),
+    offset: offset,
+  }
+}
+
+fn limitFailure(
+  component: ValueComponent,
+  limit: LimitKind,
+  allowed: usize,
+  attempted: usize,
+) -> ValueError {
+  return failure(
+    ValueReason.LimitExceeded { limit: limit, allowed: allowed, attempted: attempted },
+    component,
+    attempted,
+  )
+}
+
+fn outputFailure(component: ValueComponent, required: usize, available: usize) -> ValueError {
+  return failure(
+    ValueReason.OutputTooSmall { required: required, available: available },
+    component,
+    available,
+  )
+}
+
+fn sizeFailure(component: ValueComponent) -> ValueError {
+  return failure(ValueReason.SizeOverflow, component, usize.MAX)
+}
+
+fn tokenByte(value: u8) -> bool {
+  if value >= 65 && value <= 90 { return true }
+  if value >= 97 && value <= 122 { return true }
+  if value >= 48 && value <= 57 { return true }
+  return value == 33 || value == 35 || value == 36 || value == 37 || value == 38
+    || value == 39 || value == 42 || value == 43 || value == 45 || value == 46
+    || value == 94 || value == 95 || value == 96 || value == 124 || value == 126
+}
+
+fn fieldValueByte(value: u8) -> bool {
+  return value == 9 || (value >= 32 && value <= 126) || value >= 128
+}
+
+fn asciiEqual(left: string, right: string) -> bool {
+  let leftBytes = String.utf8Bytes(left)
+  let rightBytes = String.utf8Bytes(right)
+  if leftBytes.length != rightBytes.length { return false }
+  let mut index = usize.ZERO
+  while index < leftBytes.length {
+    if asciiLower(leftBytes[index]) != asciiLower(rightBytes[index]) { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn asciiLower(value: u8) -> u8 {
+  if value >= 65 && value <= 90 { return value + 32 }
+  return value
+}
+
+/// A validated request head without body, framing, connection, or exchange state.
+pub struct RequestHead<'value> {
+  versionValue: Version
+  methodValue: Method<'value>
+  targetValue: RequestTarget<'value>
+  headerValues: Headers<'value>
+}
+
+impl<'value> Copy for RequestHead<'value> {}
+
+impl<'value> RequestHead<'value> {
+  /// Combines validated request components and enforces the HTTP/1.1 Host requirement.
+  pub fn make(
+    version: Version,
+    method: Method<'value>,
+    target: RequestTarget<'value>,
+    headers: Headers<'value>,
+  ) -> Result<RequestHead<'value>, ValueError> {
+    let targetValidation = RequestTarget.validateForMethod(&method, target)
+    match move targetValidation {
+      Result<(), ValueError>.Failure {error} => {
+        return Result.failResult<RequestHead<'value>, ValueError>(move error)
+      }
+      Result<(), ValueError>.Success {value} => {}
+    }
+    let host = validateRequestHost(version, &target, &headers)
+    match move host {
+      Result<Option<HttpAuthority<'value>>, ValueError>.Failure {error} => {
+        return Result.failResult<RequestHead<'value>, ValueError>(move error)
+      }
+      Result<Option<HttpAuthority<'value>>, ValueError>.Success {value} => { drop value }
+    }
+    return Result.succeed<RequestHead<'value>, ValueError>(RequestHead<'value> {
+      versionValue: version,
+      methodValue: method,
+      targetValue: move target,
+      headerValues: headers,
+    })
+  }
+
+  /// Returns the request version.
+  pub fn version(self: &Self) -> Version { return self.versionValue }
+
+  /// Returns the borrowed request method.
+  pub fn method(self: &Self) -> Method<'value> { return self.methodValue }
+
+  /// Returns the borrowed request target.
+  pub fn target(self: &Self) -> RequestTarget<'value> { return self.targetValue }
+
+  /// Returns the borrowed ordered fields.
+  pub fn headers(self: &Self) -> Headers<'value> { return self.headerValues }
+
+  /// Copies the complete request head into independent bounded storage.
+  pub effect fn copy(
+    self: &Self,
+    limits: Limits,
+  ) -> Result<OwnedRequestHead, ValueError> ! OutOfMemoryError ? &mut Allocator {
+    let methodText = Method.format(&self.methodValue)
+    let targetText = RequestTarget.format(self.targetValue)
+    let methodLength = String.byteLength(methodText)
+    if methodLength > limits.maxMethodBytes {
+      return Result.failResult<OwnedRequestHead, ValueError>(limitFailure(
+        ValueComponent.Method,
+        LimitKind.MethodBytes,
+        limits.maxMethodBytes,
+        methodLength,
+      ))
+    }
+    let targetLength = String.byteLength(targetText)
+    if targetLength > limits.maxTargetBytes {
+      return Result.failResult<OwnedRequestHead, ValueError>(limitFailure(
+        ValueComponent.Target,
+        LimitKind.TargetBytes,
+        limits.maxTargetBytes,
+        targetLength,
+      ))
+    }
+    let total = headOwnedBytes(
+      &self.headerValues,
+      methodLength,
+      targetLength,
+      usize.ZERO,
+      limits,
+    )
+    match move total {
+      Result<usize, ValueError>.Failure {error} => {
+        return Result.failResult<OwnedRequestHead, ValueError>(move error)
+      }
+      Result<usize, ValueError>.Success {value} => { drop value }
+    }
+    let headerCopy = run Headers.copy(&self.headerValues, limits)
+    return match move headerCopy {
+      Result<OwnedHeaders, ValueError>.Failure {error} => {
+        return Result.failResult<OwnedRequestHead, ValueError>(move error)
+      }
+      Result<OwnedHeaders, ValueError>.Success {value} => {
+        let methodOwned = run String.copy(methodText)
+        let targetOwned = run String.copy(targetText)
+        return Result.succeed<OwnedRequestHead, ValueError>(OwnedRequestHead {
+          versionValue: self.versionValue,
+          methodValue: move methodOwned,
+          targetValue: move targetOwned,
+          headerValues: move value,
+          limitsValue: limits,
+        })
+      }
+    }
+  }
+}
+
+/// An independently owned request head whose views borrow only this value.
+pub struct OwnedRequestHead {
+  versionValue: Version
+  methodValue: String
+  targetValue: String
+  headerValues: OwnedHeaders
+  limitsValue: Limits
+}
+
+impl OwnedRequestHead {
+  /// Reconstructs a validated request view tied to this owner without allocation.
+  pub fn view<'value>(self: &'value Self) -> RequestHead<'value> {
+    let methodText = String.view(&self.methodValue)
+    let method = match move Method.parse(methodText, self.limitsValue.maxMethodBytes) {
+      Result<Method<'value>, ValueError>.Failure {error} => {
+        drop error
+        return absurd<RequestHead<'value>>()
+      }
+      Result<Method<'value>, ValueError>.Success {value} => value
+    }
+    let targetText = String.view(&self.targetValue)
+    let target = match move RequestTarget.parse(
+      &method,
+      targetText,
+      self.limitsValue.maxTargetBytes,
+    ) {
+      Result<RequestTarget<'value>, ValueError>.Failure {error} => {
+        drop error
+        return absurd<RequestHead<'value>>()
+      }
+      Result<RequestTarget<'value>, ValueError>.Success {value} => value
+    }
+    return RequestHead<'value> {
+      versionValue: self.versionValue,
+      methodValue: method,
+      targetValue: move target,
+      headerValues: OwnedHeaders.view(&self.headerValues),
+    }
+  }
+}
+
+/// A validated response head without body, framing, connection, or exchange state.
+pub struct ResponseHead<'value> {
+  versionValue: Version
+  statusValue: Status
+  reasonValue: Option<&'value [u8]>
+  headerValues: Headers<'value>
+}
+
+impl<'value> ResponseHead<'value> {
+  /// Validates an optional reason phrase and combines response metadata.
+  pub fn make(
+    version: Version,
+    status: Status,
+    reason: Option<&'value [u8]>,
+    headers: Headers<'value>,
+    limits: Limits,
+  ) -> Result<ResponseHead<'value>, ValueError> {
+    match & reason {
+      Option<&[u8]>.None => {}
+      Option<&[u8]>.Some { value } => {
+        if value.length > limits.maxValueBytes {
+          return Result.failResult<ResponseHead<'value>, ValueError>(limitFailure(
+            ValueComponent.ReasonPhrase,
+            LimitKind.ValueBytes,
+            limits.maxValueBytes,
+            value.length,
+          ))
+        }
+        let mut index = usize.ZERO
+        while index < value.length {
+          if !fieldValueByte(value[index]) {
+            return Result.failResult<ResponseHead<'value>, ValueError>(ValueError {
+              reason: ValueReason.InvalidValueByte,
+              component: ValueComponent.ReasonPhrase,
+              fieldIndex: Option.none<usize>(),
+              offset: index,
+            })
+          }
+          index = index + usize.ONE
+        }
+      }
+    }
+    return Result.succeed<ResponseHead<'value>, ValueError>(ResponseHead<'value> {
+      versionValue: version,
+      statusValue: status,
+      reasonValue: move reason,
+      headerValues: headers,
+    })
+  }
+
+  /// Returns the response version.
+  pub fn version(self: &Self) -> Version { return self.versionValue }
+
+  /// Returns the response status.
+  pub fn status(self: &Self) -> Status { return self.statusValue }
+
+  /// Returns the exact optional reason-phrase bytes.
+  pub fn reason(self: &Self) -> Option<&'value [u8]> {
+    return match & self.reasonValue {
+      Option<&[u8]>.None => Option.none<&'value [u8]>()
+      Option<&[u8]>.Some {value} => Option.some<&'value [u8]>(value)
+    }
+  }
+
+  /// Returns the borrowed ordered fields.
+  pub fn headers(self: &Self) -> Headers<'value> { return self.headerValues }
+
+  /// Copies the complete response head into independent bounded storage.
+  pub effect fn copy(
+    self: &Self,
+    limits: Limits,
+  ) -> Result<OwnedResponseHead, ValueError> ! OutOfMemoryError ? &mut Allocator {
+    let reasonLength = match & self.reasonValue {
+      Option<&[u8]>.None => usize.ZERO
+      Option<&[u8]>.Some {value} => value.length
+    }
+    if reasonLength > limits.maxValueBytes {
+      return Result.failResult<OwnedResponseHead, ValueError>(limitFailure(
+        ValueComponent.ReasonPhrase,
+        LimitKind.ValueBytes,
+        limits.maxValueBytes,
+        reasonLength,
+      ))
+    }
+    let total = headOwnedBytes(
+      &self.headerValues,
+      usize.ZERO,
+      usize.ZERO,
+      reasonLength,
+      limits,
+    )
+    match move total {
+      Result<usize, ValueError>.Failure {error} => {
+        return Result.failResult<OwnedResponseHead, ValueError>(move error)
+      }
+      Result<usize, ValueError>.Success {value} => { drop value }
+    }
+    let headerCopy = run Headers.copy(&self.headerValues, limits)
+    return match move headerCopy {
+      Result<OwnedHeaders, ValueError>.Failure {error} => {
+        return Result.failResult<OwnedResponseHead, ValueError>(move error)
+      }
+      Result<OwnedHeaders, ValueError>.Success {value: headers} => {
+        let reason = match & self.reasonValue {
+          Option<&[u8]>.None => OwnedReason.None
+          Option<&[u8]>.Some {value} => OwnedReason.Some {bytes: run Bytes.copy(value)}
+        }
+        return Result.succeed<OwnedResponseHead, ValueError>(OwnedResponseHead {
+          versionValue: self.versionValue,
+          statusValue: self.statusValue,
+          reasonValue: move reason,
+          headerValues: move headers,
+        })
+      }
+    }
+  }
+}
+
+union OwnedReason {
+  None,
+  Some {bytes: Bytes},
+}
+
+/// An independently owned response head whose views borrow only this value.
+pub struct OwnedResponseHead {
+  versionValue: Version
+  statusValue: Status
+  reasonValue: OwnedReason
+  headerValues: OwnedHeaders
+}
+
+impl OwnedResponseHead {
+  /// Reconstructs a validated response view tied to this owner without allocation.
+  pub fn view<'value>(self: &'value Self) -> ResponseHead<'value> {
+    let reason = match & self.reasonValue {
+      OwnedReason.None => Option.none<&'value [u8]>()
+      OwnedReason.Some {bytes} => Option.some<&'value [u8]>(Bytes.asSlice(&bytes))
+    }
+    return ResponseHead<'value> {
+      versionValue: self.versionValue,
+      statusValue: self.statusValue,
+      reasonValue: move reason,
+      headerValues: OwnedHeaders.view(&self.headerValues),
+    }
+  }
+}
+
+fn headOwnedBytes(
+  headers: &Headers,
+  first: usize,
+  second: usize,
+  third: usize,
+  limits: Limits,
+) -> Result<usize, ValueError> {
+  let headerBytes = match move Headers.requiredOwnedBytes(headers) {
+    Result<usize, ValueError>.Failure {error} => {
+      return Result.failResult<usize, ValueError>(move error)
+    }
+    Result<usize, ValueError>.Success {value} => value
+  }
+  let firstTotal = match move usize.checkedAdd(headerBytes, first) {
+    Option<usize>.None => {
+      return Result.failResult<usize, ValueError>(sizeFailure(ValueComponent.Headers))
+    }
+    Option<usize>.Some {value} => value
+  }
+  let secondTotal = match move usize.checkedAdd(firstTotal, second) {
+    Option<usize>.None => {
+      return Result.failResult<usize, ValueError>(sizeFailure(ValueComponent.Headers))
+    }
+    Option<usize>.Some {value} => value
+  }
+  let total = match move usize.checkedAdd(secondTotal, third) {
+    Option<usize>.None => {
+      return Result.failResult<usize, ValueError>(sizeFailure(ValueComponent.Headers))
+    }
+    Option<usize>.Some {value} => value
+  }
+  if total > limits.maxOwnedBytes {
+    return Result.failResult<usize, ValueError>(limitFailure(
+      ValueComponent.Headers,
+      LimitKind.OwnedBytes,
+      limits.maxOwnedBytes,
+      total,
+    ))
+  }
+  return Result.succeed<usize, ValueError>(total)
+}
+
+fn absurd<T>() -> T {
+  let boom = 1 / 0
+  return absurd<T>()
+}
