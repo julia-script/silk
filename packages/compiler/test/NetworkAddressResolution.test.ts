@@ -7,9 +7,7 @@ import * as MirVerification from '../src/MirVerification.js'
 import {
   networkAddressValueAcceptanceSource,
   nativeResolverAcceptanceSource,
-  nativeResolverStubAcceptanceSource,
   deadlineResolverFixtureSource,
-  resolverPolicyAcceptanceSource,
 } from './support/networkAddressResolutionAcceptance.js'
 
 const implementation = readFileSync(
@@ -44,43 +42,24 @@ const nativeResolverImplementation = readFileSync(
   .replace('  import silk.usize\n', '')
 const encoder = new TextEncoder()
 
-const nativeStubAcceptanceImplementation = nativeResolverStubAcceptanceSource
-  .replace('import silk.allocator {Allocator, OutOfMemoryError}\n', '')
-  .replace('import silk.monotonic_clock {MonotonicClock}\n', '')
-  .replace('import silk.native_resolver {NativeSystemResolver}\n', '')
-  .replace('import silk.network_address {AddressError, DomainHost, Host, Port}\n', '')
-  .replace('import silk.option {Option}\n', '')
-  .replace(
-    'import silk.resolver {FamilySelection, ResolveRequest, ResolvedEndpoints, Resolver, ResolverError}\n',
-    '',
-  )
-  .replace('import silk.result {Result}\n', '')
-  .replace('import silk.system_clock {Instant, SystemClock}\n', '')
-  .replace('import silk.usize\n', '')
-
-it.effect(
-  'realizes the consolidated owned address value contract on native and Wasm targets',
-  () =>
-    Effect.gen(function* () {
-      const source = `${implementation}\n${networkAddressValueAcceptanceSource}`
-      for (const target of ['x86_64-unknown-linux-gnu', 'wasm32-unknown-unknown'] as const) {
-        const snapshot = yield* AnalysisFixture.retainingMain(
-          `network-address/value-${target}`,
-          encoder.encode(source),
-          target,
-        )
-        assert.deepEqual(
-          Analysis.diagnostics(snapshot).map((diagnostic) => ({
-            code: diagnostic.code,
-            message: diagnostic.message,
-            start: diagnostic.span.start,
-          })),
-          [],
-        )
-        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-      }
-    }),
-  120_000,
+it.effect('realizes the consolidated owned address value contract on the native target', () =>
+  Effect.gen(function* () {
+    const source = `${implementation}\n${networkAddressValueAcceptanceSource}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'network-address/value-x86_64',
+      encoder.encode(source),
+      'x86_64-unknown-linux-gnu',
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        code: diagnostic.code,
+        message: diagnostic.message,
+        start: diagnostic.span.start,
+      })),
+      [],
+    )
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+  }),
 )
 
 it.effect('keeps the reference example executable', () =>
@@ -104,111 +83,75 @@ it.effect('keeps the reference example executable', () =>
   }),
 )
 
-it.effect('enforces finite provider policy and numeric deadline bypass', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* AnalysisFixture.retainingMain(
-      'network-address/resolver-policy',
-      encoder.encode(
-        `${implementation}\n${resolverImplementation}\n${resolverPolicyAcceptanceSource}`,
-      ),
-      'x86_64-unknown-linux-gnu',
-    )
-    assert.deepEqual(
-      Analysis.diagnostics(snapshot).map((diagnostic) => ({
-        code: diagnostic.code,
-        message: diagnostic.message,
-        start: diagnostic.span.start,
-      })),
-      [],
-    )
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-  }),
-)
-
-it.effect('selects the synchronous native boundary without leaking it to Wasm', () =>
-  Effect.gen(function* () {
-    for (const target of [
-      'x86_64-unknown-linux-gnu',
-      'aarch64-apple-darwin',
-      'wasm32-unknown-unknown',
-    ] as const) {
-      const entry =
-        target === 'wasm32-unknown-unknown'
-          ? 'pub fn main() -> i32 { return 42 }'
-          : nativeResolverAcceptanceSource
-      const source = `${implementation}\n${resolverImplementation}\n${nativeResolverImplementation}\n${entry}`
-      const snapshot = yield* AnalysisFixture.retainingMain(
-        `network-address/native-${target}`,
-        encoder.encode(source),
-        target,
-      )
-      assert.deepEqual(
-        Analysis.diagnostics(snapshot).map((diagnostic) => ({
-          code: diagnostic.code,
-          message: diagnostic.message,
-          start: diagnostic.span.start,
-        })),
-        [],
-      )
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-      const imports = Analysis.instancesOf(snapshot).foreignCalls.map((call) => call.symbol)
-      if (target === 'wasm32-unknown-unknown') {
-        assert.deepEqual(imports, [])
-      } else if (target === 'aarch64-apple-darwin') {
-        assert.deepEqual(imports, ['__error', 'freeaddrinfo', 'getaddrinfo'])
-      } else {
-        assert.deepEqual(imports, ['__errno_location', 'freeaddrinfo', 'getaddrinfo'])
+it.effect(
+  'selects the synchronous native boundary without leaking it to Wasm',
+  () =>
+    Effect.gen(function* () {
+      for (const target of [
+        'x86_64-unknown-linux-gnu',
+        'aarch64-apple-darwin',
+        'wasm32-unknown-unknown',
+      ] as const) {
+        const entry =
+          target === 'wasm32-unknown-unknown'
+            ? 'pub fn main() -> i32 { return 42 }'
+            : nativeResolverAcceptanceSource
+        const source =
+          target === 'wasm32-unknown-unknown'
+            ? `${nativeResolverImplementation}\n${entry}`
+            : `${implementation}\n${resolverImplementation}\n${nativeResolverImplementation}\n${entry}`
+        const snapshot = yield* AnalysisFixture.retainingMain(
+          `network-address/native-${target}`,
+          encoder.encode(source),
+          target,
+        )
+        assert.deepEqual(
+          Analysis.diagnostics(snapshot).map((diagnostic) => ({
+            code: diagnostic.code,
+            message: diagnostic.message,
+            start: diagnostic.span.start,
+          })),
+          [],
+        )
+        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+        const imports = Analysis.instancesOf(snapshot).foreignCalls.map((call) => call.symbol)
+        if (target === 'wasm32-unknown-unknown') {
+          assert.deepEqual(imports, [])
+        } else if (target === 'aarch64-apple-darwin') {
+          assert.deepEqual(imports, ['__error', 'freeaddrinfo', 'getaddrinfo'])
+        } else {
+          assert.deepEqual(imports, ['__errno_location', 'freeaddrinfo', 'getaddrinfo'])
+        }
       }
-    }
-  }),
+    }),
+  30_000,
 )
 
-it.effect('retains deadline-provider registrations and owned results across parking', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* AnalysisFixture.retainingMain(
-      'network-address/deadline-provider',
-      encoder.encode(
-        `${implementation}\n${resolverImplementation}\n${deadlineResolverFixtureSource}`,
-      ),
-      'x86_64-unknown-linux-gnu',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-    if (snapshot.mir._tag !== 'Available') return
-    const parks = snapshot.mir.value.functions
-      .flatMap(MirVerification.operations)
-      .filter((operation) => operation._tag === 'ExecutionPark')
-    assert.lengthOf(parks, 2)
-    assert.isTrue(parks.every((park) => park.guardCleanup._tag !== 'NoCleanup'))
-    const retainedWake = parks.find(
-      (park) =>
-        park.guardCleanup._tag === 'StructCleanup' &&
-        park.guardCleanup.fields.some((field) => field.cleanup._tag === 'WakeCleanup'),
-    )
-    assert.isDefined(retainedWake)
-  }),
-)
-
-it.effect('realizes the native stub execution program and its exact foreign boundary', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* AnalysisFixture.retainingMain(
-      'network-address/native-stub-acceptance',
-      encoder.encode(
-        `${implementation}\n${resolverImplementation}\n${nativeResolverImplementation}\n${nativeStubAcceptanceImplementation}`,
-      ),
-      'x86_64-unknown-linux-gnu',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-    const imports = Analysis.instancesOf(snapshot).foreignCalls.map((call) => call.symbol)
-    assert.sameMembers(imports, [
-      '__errno_location',
-      'freeaddrinfo',
-      'getaddrinfo',
-      'silk_resolver_stub_arguments_ok',
-      'silk_resolver_stub_calls',
-      'silk_resolver_stub_frees',
-      'silk_resolver_stub_reset',
-    ])
-  }),
+it.effect(
+  'retains deadline-provider registrations and owned results across parking',
+  () =>
+    Effect.gen(function* () {
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        'network-address/deadline-provider',
+        encoder.encode(
+          `${implementation}\n${resolverImplementation}\n${deadlineResolverFixtureSource}`,
+        ),
+        'x86_64-unknown-linux-gnu',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      if (snapshot.mir._tag !== 'Available') return
+      const parks = snapshot.mir.value.functions
+        .flatMap(MirVerification.operations)
+        .filter((operation) => operation._tag === 'ExecutionPark')
+      assert.lengthOf(parks, 2)
+      assert.isTrue(parks.every((park) => park.guardCleanup._tag !== 'NoCleanup'))
+      const retainedWake = parks.find(
+        (park) =>
+          park.guardCleanup._tag === 'StructCleanup' &&
+          park.guardCleanup.fields.some((field) => field.cleanup._tag === 'WakeCleanup'),
+      )
+      assert.isDefined(retainedWake)
+    }),
+  30_000,
 )

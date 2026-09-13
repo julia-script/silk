@@ -135,9 +135,7 @@ import silk.usize
 ${networkAddressValueAcceptanceSource}
 `
 
-export const resolverPolicyAcceptanceSource = `
-import silk.effect {Effect}
-
+const resolverPolicyNativeSource = `
 struct ProbeResolver { calls: usize }
 
 impl Resolver for ProbeResolver {
@@ -269,14 +267,6 @@ effect fn policyProgram() -> i32
   return 42
 }
 
-effect fn recoverResolver(error: ResolverError) -> i32 ! OutOfMemoryError { return 0 }
-effect fn recoverAllocation(error: OutOfMemoryError) -> i32 { return 0 }
-
-pub fn main() -> i32 {
-  return run policyProgram()
-    |> Effect.catch<ResolverError>(recoverResolver)
-    |> Effect.catchAll(recoverAllocation)
-}
 `
 
 export const nativeResolverAcceptanceSource = `
@@ -496,12 +486,15 @@ import silk.effect {Effect}
 import silk.layout {Layout}
 import silk.monotonic_clock {MonotonicClock}
 import silk.native_resolver {NativeSystemResolver}
-import silk.network_address {AddressError, DomainHost, Host, Port}
+import silk.network_address {AddressError, DomainHost, Host, Ipv4Address, Port}
 import silk.option {Option}
 import silk.resolver {FamilySelection, ResolveRequest, ResolvedEndpoints, Resolver, ResolverError}
 import silk.result {Result}
 import silk.system_clock {Instant, SystemClock}
+import silk.u64
 import silk.usize
+
+${resolverPolicyNativeSource}
 
 unsafe extern "C" fn silk_resolver_stub_reset(mode: i32) -> ()
 unsafe extern "C" fn silk_resolver_stub_calls() -> i32
@@ -573,6 +566,17 @@ fn counters(calls: i32, frees: i32, arguments: i32) -> bool {
 }
 
 effect fn nativeCases() -> i32 {
+  let policy = run Effect.result(policyProgram())
+  match move policy {
+    Result<i32, ResolverError | OutOfMemoryError>.Failure {error} => {
+      drop error
+      return 21
+    }
+    Result<i32, ResolverError | OutOfMemoryError>.Success {value} => {
+      if value != 42 { return 22 }
+    }
+  }
+
   unsafe { silk_resolver_stub_reset(0) }
   let success = run Effect.result(resolveSystem(2, Option.none<Instant>()))
   match move success {
