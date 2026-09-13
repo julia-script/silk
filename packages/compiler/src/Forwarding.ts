@@ -499,11 +499,13 @@ export const inlineForwardedRequirement = (
     forwarded.provider.selectionAccess,
     proof.provider,
   )
+  // Pattern-rooted borrows remain valid here: the inline path lowers the original provider while
+  // the selected match arm's ownership place is active, so it does not need a stored binding or
+  // parameter identity in the synthetic requirement metadata below.
   if (
-    (borrowedProvider === undefined &&
-      referenceProvider === undefined &&
-      forwarded.provider.selectionAccess !== 'Take') ||
-    borrowedProvider?.root._tag === 'PatternSliceRoot'
+    borrowedProvider === undefined &&
+    referenceProvider === undefined &&
+    forwarded.provider.selectionAccess !== 'Take'
   )
     return undefined
   const selected = proof.selected

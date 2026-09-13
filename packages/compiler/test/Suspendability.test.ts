@@ -1199,6 +1199,55 @@ pub fn main() -> i32 { let mut provider = Provider {} return run scoped(&mut pro
   }),
 )
 
+it.effect('retains call shapes for an owned generic provider bracket', () =>
+  Effect.gen(function* () {
+    const source = `import silk.effect { Effect }
+import silk.option { Option }
+service Transport { effect fn work() -> i32 ? &mut Transport }
+struct Provider {}
+impl Provider { effect fn work(self: &mut Self) -> i32 { return 42 } }
+impl Transport for Provider { work: Provider.work }
+struct UnusedProvider {}
+impl UnusedProvider { effect fn work(self: &mut Self) -> i32 { return 7 } }
+impl Transport for UnusedProvider { work: UnusedProvider.work }
+struct Guard<P> { provider: Option<P> }
+effect fn scoped<P>(provider: P) -> i32
+where &mut P provides &Transport from &mut Transport {
+  let use = effect fn(owned: &mut Guard<P>) -> i32 {
+    return match &mut owned.provider {
+      Option<P>.None => 0
+      Option<P>.Some {value} => run Transport.work()
+        |> Effect.provideMut<Transport>(&mut value)
+    }
+  }
+  let release = effect fn(owned: &mut Guard<P>) -> () { drop owned return () }
+  return run Effect.useReleaseNonParking(
+    Guard<P> {provider: Option.some<P>(move provider)},
+    move use,
+    move release,
+  )
+}
+pub fn main() -> i32 { return run scoped<Provider>(Provider {}) }`
+    const self = yield* snapshot(source)
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const module = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(module), [])
+    const callbackRunners = module.functions.filter(
+      (fn) => fn.id.name === 'scoped$callable$0$effect$-1',
+    )
+    assert.lengthOf(callbackRunners, 1)
+    const providedRuns = callbackRunners
+      .flatMap(MirVerification.operations)
+      .filter(
+        (operation): operation is Extract<Mir.Operation, { readonly _tag: 'RunEffectValue' }> =>
+          operation._tag === 'RunEffectValue' &&
+          operation.runner.name === 'Provider.work$effect$-1',
+      )
+    assert.lengthOf(providedRuns, 1)
+    assert.isFalse(module.functions.some((fn) => fn.id.name === 'UnusedProvider.work$effect$-1'))
+  }),
+)
+
 it.effect('lowers a scoped callback forwarded through a generic acquisition helper', () =>
   Effect.gen(function* () {
     const source = `import silk.effect { Effect }
