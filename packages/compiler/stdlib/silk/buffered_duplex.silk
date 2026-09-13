@@ -1,0 +1,241 @@
+//! One scoped buffered session over an exclusive concrete ByteDuplex provider.
+//!
+//! `withBuffered` owns separate fixed input and output state for the callback and terminally closes
+//! the provider on every structured exit. Release intentionally performs no implicit flush.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.buffered_input {BufferError, BufferedInput, DiscardOutcome, FillOutcome}
+import silk.buffered_output {BufferedOutput}
+import silk.byte_duplex {ByteDuplex, ByteIoError, ReadTransfer}
+import silk.effect {Effect}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.system_clock {Instant}
+import silk.usize
+
+/// The default fixed capacity for each duplex direction.
+pub const DEFAULT_CAPACITY: usize = 8192
+
+/// One callback-scoped buffered session owning direction states and borrowing a private provider.
+pub struct BufferedDuplex<'transport, P> {
+  inputState: BufferedInput
+  outputState: BufferedOutput
+  transport: &'transport mut P
+}
+
+impl<'transport, P> BufferedDuplex<'transport, P> {
+  /// Borrows the initialized unread prefix.
+  pub fn peek<'a>(self: &'a Self) -> &'a [u8] {
+    return BufferedInput.peek(&self.inputState)
+  }
+
+  /// Returns the unread input count.
+  pub fn unread(self: &Self) -> usize { return BufferedInput.unread(&self.inputState) }
+
+  /// Returns the pending output count.
+  pub fn pending(self: &Self) -> usize { return BufferedOutput.pending(&self.outputState) }
+
+  /// Consumes exactly an initialized unread prefix.
+  pub effect fn consume(self: &mut Self, count: usize) -> () ! BufferError {
+    return run BufferedInput.consume(&mut self.inputState, count)
+  }
+
+  /// Retains at least `minimum` input bytes or reports sticky source end.
+  pub effect fn fill(
+    self: &mut Self,
+    minimum: usize,
+    deadline: Option<Instant>,
+  ) -> FillOutcome
+  ! BufferError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    return run BufferedInput.fill(&mut self.inputState, minimum, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+  }
+
+  /// Copies one retained or newly read prefix.
+  pub effect fn readSome(
+    self: &mut Self,
+    output: &mut [u8],
+    deadline: Option<Instant>,
+  ) -> ReadTransfer
+  ! BufferError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    return run BufferedInput.readSome(&mut self.inputState, move output, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+  }
+
+  /// Fills the complete destination or reports its exact copied prefix.
+  pub effect fn readExact(
+    self: &mut Self,
+    output: &mut [u8],
+    deadline: Option<Instant>,
+  ) -> ()
+  ! BufferError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    return run BufferedInput.readExact(&mut self.inputState, move output, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+  }
+
+  /// Discards no more than one finite limit.
+  pub effect fn discardAtMost(
+    self: &mut Self,
+    limit: usize,
+    deadline: Option<Instant>,
+  ) -> DiscardOutcome
+  ! BufferError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    return run BufferedInput.discardAtMost(&mut self.inputState, limit, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+  }
+
+  /// Discards exactly one finite count.
+  pub effect fn discardExact(
+    self: &mut Self,
+    count: usize,
+    deadline: Option<Instant>,
+  ) -> ()
+  ! BufferError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    return run BufferedInput.discardExact(&mut self.inputState, count, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+  }
+
+  /// Accepts one positive input prefix into owned pending storage.
+  pub effect fn writeSome(
+    self: &mut Self,
+    input: &[u8],
+    deadline: Option<Instant>,
+  ) -> usize
+  ! BufferError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    return run BufferedOutput.writeSome(&mut self.outputState, move input, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+  }
+
+  /// Accepts one complete finite input in order.
+  pub effect fn writeAll(
+    self: &mut Self,
+    input: &[u8],
+    deadline: Option<Instant>,
+  ) -> ()
+  ! BufferError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    return run BufferedOutput.writeAll(&mut self.outputState, move input, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+  }
+
+  /// Writes pending bytes exactly once and then flushes the provider boundary.
+  pub effect fn flush(
+    self: &mut Self,
+    deadline: Option<Instant>,
+  ) -> ()
+  ! BufferError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    return run BufferedOutput.flush(&mut self.outputState, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+  }
+
+  /// Explicitly finishes pending output.
+  pub effect fn finish(
+    self: &mut Self,
+    deadline: Option<Instant>,
+  ) -> ()
+  ! BufferError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    return run BufferedOutput.finish(&mut self.outputState, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+  }
+}
+
+struct TransportLease<'env, P> {
+  provider: &'env mut P
+}
+
+/// Runs one callback with default 8,192-byte input and output buffers.
+pub effect fn withBuffered<'env, A, E, ?CallbackRequirements, P>(
+  transport: &'env mut P,
+  callback: for<'call> once fn<'env>(
+    &'call mut BufferedDuplex<'call, P>
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> A
+! E | BufferError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator
+where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  return run withBufferedCapacity<A, E, CallbackRequirements, P>(
+    move transport,
+    DEFAULT_CAPACITY,
+    DEFAULT_CAPACITY,
+    move callback,
+  )
+}
+
+/// Runs one callback with explicitly bounded direction capacities.
+pub effect fn withBufferedCapacity<'env, A, E, ?CallbackRequirements, P>(
+  transport: &'env mut P,
+  inputCapacity: usize,
+  outputCapacity: usize,
+  callback: for<'call> once fn<'env>(
+    &'call mut BufferedDuplex<'call, P>
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> A
+! E | BufferError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator
+where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  let lease = TransportLease<'env, P> {provider: move transport}
+  let use = effect fn(owned: &mut TransportLease<'env, P>) -> A
+  ! E | BufferError | OutOfMemoryError
+  ? CallbackRequirements | &mut Allocator {
+    return run acquireAndUse(
+      &mut owned.provider.*,
+      inputCapacity,
+      outputCapacity,
+      move callback,
+    )
+  }
+  let release = effect fn(owned: &mut TransportLease<'env, P>) -> () {
+    let closed = ByteDuplex.close()
+      |> Effect.provideMut<ByteDuplex>(&mut owned.provider.*)
+    return run Effect.catchAll(move closed, discardCloseFailure)
+  }
+  return run Effect.useReleaseNonParking(move lease, move use, move release)
+}
+
+effect fn acquireAndUse<'env, 'transport, A, E, ?CallbackRequirements, P>(
+  transport: &'transport mut P,
+  inputCapacity: usize,
+  outputCapacity: usize,
+  callback: for<'call> once fn<'env>(
+    &'call mut BufferedDuplex<'call, P>
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> A
+! E | BufferError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  let input = run BufferedInput.make(inputCapacity)
+  let output = run BufferedOutput.make(outputCapacity)
+  let mut session = BufferedDuplex {
+    inputState: move input,
+    outputState: move output,
+    transport: &mut transport.*,
+  }
+  return run callback(&mut session)
+}
+
+effect fn discardCloseFailure(error: ByteIoError) -> () {
+  drop error
+  return ()
+}

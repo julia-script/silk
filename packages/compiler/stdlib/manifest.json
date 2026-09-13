@@ -28,6 +28,28 @@
     "namespace": "Box"
   },
   {
+    "module": "silk/buffered_duplex",
+    "path": "silk/buffered_duplex.silk",
+    "namespace": "BufferedDuplex"
+  },
+  {
+    "module": "silk/buffered_input",
+    "path": "silk/buffered_input.silk",
+    "namespace": "BufferedInput",
+    "aliases": ["BufferError", "DiscardOutcome", "FillOutcome"]
+  },
+  {
+    "module": "silk/buffered_output",
+    "path": "silk/buffered_output.silk",
+    "namespace": "BufferedOutput"
+  },
+  {
+    "module": "silk/buffered_transfer",
+    "path": "silk/buffered_transfer.silk",
+    "namespace": "BufferedTransfer",
+    "aliases": ["TransferOutcome"]
+  },
+  {
     "module": "silk/byte_duplex",
     "path": "silk/byte_duplex.silk",
     "namespace": "ByteDuplex",

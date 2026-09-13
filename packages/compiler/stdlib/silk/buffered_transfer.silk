@@ -1,0 +1,153 @@
+//! Bounded byte transfer coupled to retained input and exact-prefix buffered output.
+
+import silk.buffered_duplex {BufferedDuplex}
+import silk.buffered_input {BufferError, FillOutcome}
+import silk.byte_duplex {ByteDuplex}
+import silk.effect {Effect}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.result {Result}
+import silk.slice {Slice}
+import silk.system_clock {Instant, SystemClock}
+import silk.usize
+
+/// One finite transfer result.
+pub struct TransferOutcome {
+  /// The exact destination-accepted and source-consumed count.
+  pub count: usize
+  /// True only when the operation actually observed source end.
+  pub endObserved: bool
+}
+
+/// The owner of bounded exact-prefix transfer operations.
+pub struct BufferedTransfer {}
+
+impl BufferedTransfer {
+/// Transfers no more than `limit`, consuming only destination-accepted bytes.
+pub effect fn transferAtMost<'source, 'destination, SP, DP>(
+  source: &mut BufferedDuplex<'source, SP>,
+  destination: &mut BufferedDuplex<'destination, DP>,
+  limit: usize,
+  deadline: Option<Instant>,
+) -> TransferOutcome
+! BufferError
+? &mut MonotonicClock
+where &mut SP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  &mut DP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let mut transferred = usize.ZERO
+  while transferred < limit {
+    let filling = run Effect.result(BufferedDuplex.fill(
+      &mut source.*,
+      usize.ONE,
+      copyDeadline(&deadline),
+    ))
+    let fill = match move filling {
+      Result<FillOutcome, BufferError>.Success {value} => move value
+      Result<FillOutcome, BufferError>.Failure {error} => {
+        fail addProgress(move error, transferred)
+      }
+    }
+    let unread = BufferedDuplex.unread(&source.*)
+    if unread == usize.ZERO {
+      drop fill
+      return TransferOutcome {count: transferred, endObserved: true}
+    }
+    let count = minimum(unread, limit - transferred)
+    let available = BufferedDuplex.peek(&source.*)
+    let offered = Slice.view<u8>(available, usize.ZERO, count)
+    let writing = run Effect.result(BufferedDuplex.writeSome(
+      &mut destination.*,
+      offered,
+      copyDeadline(&deadline),
+    ))
+    drop offered
+    drop available
+    let accepted = match move writing {
+      Result<usize, BufferError>.Success {value} => value
+      Result<usize, BufferError>.Failure {error} => {
+        fail addProgress(move error, transferred)
+      }
+    }
+    run BufferedDuplex.consume(&mut source.*, accepted)
+    transferred = transferred + accepted
+    drop fill
+  }
+  return TransferOutcome {count: transferred, endObserved: false}
+}
+
+/// Transfers exactly `count` bytes or reports early end with the transferred prefix.
+pub effect fn transferExact<'source, 'destination, SP, DP>(
+  source: &mut BufferedDuplex<'source, SP>,
+  destination: &mut BufferedDuplex<'destination, DP>,
+  count: usize,
+  deadline: Option<Instant>,
+) -> ()
+! BufferError
+? &mut MonotonicClock
+where &mut SP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  &mut DP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let outcome = run BufferedTransfer.transferAtMost(
+    move source,
+    move destination,
+    count,
+    move deadline,
+  )
+  if outcome.count != count {
+    fail BufferError.UnexpectedEnd {progress: outcome.count}
+  }
+  return ()
+}
+}
+
+fn minimum(left: usize, right: usize) -> usize {
+  if left < right { return left }
+  return right
+}
+
+fn copyInstant(value: &Instant) -> Instant {
+  return SystemClock.make(SystemClock.seconds(value), SystemClock.nanoseconds(value))
+}
+
+fn copyDeadline(value: &Option<Instant>) -> Option<Instant> {
+  return match &value.* {
+    Option<Instant>.None => Option.none<Instant>()
+    Option<Instant>.Some {value: present} => Option.some<Instant>(copyInstant(&present))
+  }
+}
+
+fn addProgress(failure: BufferError, prior: usize) -> BufferError {
+  return match move failure {
+    BufferError.ReadFailed {progress, error: cause} => BufferError.ReadFailed {
+      progress: prior + progress,
+      error: move cause,
+    }
+    BufferError.InputFailed {progress, error: cause} => BufferError.InputFailed {
+      progress: prior + progress,
+      error: move cause,
+    }
+    BufferError.WriteFailed {progress, error: cause} => BufferError.WriteFailed {
+      progress: prior + progress,
+      error: move cause,
+    }
+    BufferError.UnknownExternalTransfer {progress, error: cause} => BufferError.UnknownExternalTransfer {
+      progress: prior + progress,
+      error: move cause,
+    }
+    BufferError.UnexpectedEnd {progress} => BufferError.UnexpectedEnd {progress: prior + progress}
+    BufferError.InvalidCapacity {capacity} => BufferError.InvalidCapacity {capacity: capacity}
+    BufferError.BufferTooSmall {requested, capacity} => BufferError.BufferTooSmall {
+      requested: requested,
+      capacity: capacity,
+    }
+    BufferError.InvalidConsumption {requested, available} => BufferError.InvalidConsumption {
+      requested: requested,
+      available: available,
+    }
+    BufferError.InvalidReadCount {count, limit} => BufferError.InvalidReadCount {
+      count: count,
+      limit: limit,
+    }
+    BufferError.LengthOverflow => BufferError.LengthOverflow
+    BufferError.Terminal => BufferError.Terminal
+  }
+}

@@ -43,6 +43,7 @@ import {
   tlsClientWasmSource,
 } from './tlsClientAcceptance.js'
 import { byteDuplexAcceptanceSource } from './byteDuplexAcceptance.js'
+import { bufferedByteIoAcceptanceSource } from './bufferedByteIoAcceptance.js'
 import { tlsConnectionAcceptanceSource } from './tlsConnectionAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
@@ -6309,6 +6310,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     name: 'base64-rfc4648',
     source: base64AcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'buffered-byte-io',
+    source: bufferedByteIoAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
   },
   {
     name: 'borrowed-temporary-stream-suspension',
