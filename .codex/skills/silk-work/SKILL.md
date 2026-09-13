@@ -76,17 +76,26 @@ issue, and keep it a draft. Follow the Pull request quality bar in `WORKFLOW.md`
 implementation, checks, and reviews explicitly pending. Link the draft from Linear while keeping
 the issue In Progress and preserving its work-admission Review baseline until handoff.
 
-Before starting the final local verification pass, commit and push all latest intended issue
-changes to that draft. CI is slow; let it run alongside local checks and final reviews. Focused
-tests during development may run before a push. After verification or review fixes, audit, commit,
-and push the updates before rerunning affected final checks.
+Use early pushes to get CI feedback while implementation continues. Before the final push, finish
+all repository mutations, including generated artifacts and OpenSpec implementation-task
+checkboxes, then audit, commit, and push the intended issue head. After a review or CI fix, run the
+affected focused checks, audit, commit, and push the replacement head.
 
 ## Verification and review
 
-Use the cheapest tests that falsify each claim, while following the repository's required order:
-`pnpm typecheck`, `pnpm format:check`, `pnpm lint`, `pnpm test`, then `pnpm check`. Run
-`pnpm release:candidate` when package contents or exports change. Do not say work is complete when a
-required check was skipped or failed; name the exact gap and whether it predates the change.
+Use the cheapest focused tests that falsify each claim. Run a broader local command only when it
+provides change-specific evidence that pull-request CI does not, reproduces or diagnoses a CI
+failure, or Julia explicitly requests it. Required pull-request CI on the exact final head is the
+authoritative full-repository completion guard; do not duplicate its full suite locally as handoff
+ceremony. Do not say work is complete while required CI is pending or failed; name the exact gap
+and whether it predates the change.
+
+OpenSpec task lists contain implementation deliverables, not workflow gates. Never add or retain a
+task whose sole action is running or recording verification commands, obtaining review approval,
+waiting for CI, updating the PR or Linear issue, or reporting handoff. Test code and other durable
+acceptance evidence may be implementation tasks; executing the eventual gate is not. Complete all
+implementation-task checkboxes before the final push so a green CI result never requires a
+follow-up repository edit or empty push.
 
 Do not add tests by default merely because production code changed. Every new or expanded test must
 justify its unique signal, execution complexity, optimization state, and measured contribution to
@@ -97,7 +106,7 @@ than the code it replaces, and would the tests fail if the behavior regressed? U
 reviewer subagent when it materially improves confidence, especially for medium, large,
 cross-package, or high-risk changes. Independently verify its findings.
 
-After focused verification stabilizes, assign a separate mandatory test-economics reviewer
+After focused implementation checks stabilize, assign a separate mandatory test-economics reviewer
 subagent. It must follow `TEST_REVIEW.md`, inspect the exact issue-scoped diff and affected test
 execution, measure the runtime cost, and return `approve` before handoff. The coordinator verifies
 and fixes valid findings, reruns affected checks, and repeats the review until the final committed
@@ -105,24 +114,28 @@ PR diff is approved. A general reviewer cannot double as the test-economics revi
 
 ## Draft PR and handoff
 
-A `silk-work` run is not finished until the completed change has a confirmed draft pull request and
-the required verification and reviews are complete. Finalize the draft opened during implementation:
+A `silk-work` run is not finished until the completed change has a confirmed draft pull request,
+required CI is green on its exact final head, and the required reviews are complete. Finalize the
+draft opened during implementation:
 
-1. Confirm the latest intended issue changes are committed and pushed on the non-`main` branch.
+1. Confirm every implementation task is complete and the latest intended issue changes are
+   committed and pushed on the non-`main` branch.
 2. Give the test-economics reviewer the exact committed issue diff. If commit hooks, generated
    artifacts, or review fixes alter it, audit, commit, and push the update before rerunning affected
-   checks and repeating review until the committed diff is approved.
-3. Update the draft PR under the Pull request quality bar in `WORKFLOW.md`. Include the Linear
-   issue link, outcome, acceptance evidence, exact checks run, current CI status for the latest head,
+   focused checks and repeating review until the committed diff is approved.
+3. Wait for every required CI job to pass on that exact pushed head. A failure starts a new
+   fix-and-push cycle; a pass requires no repository change.
+4. Update the draft PR under the Pull request quality bar in `WORKFLOW.md`. Include the Linear
+   issue link, outcome, acceptance evidence, focused checks run, exact-head CI result,
    test-review verdict and timing delta, risks or deferred checks, and relevant OpenSpec change.
    Strongly prefer concise `Before` and `After` code or output examples when they materially clarify
    the delivered change; omit them only when examples would add no useful signal or would
    misrepresent the work.
-4. Reuse the branch's existing PR rather than creating a duplicate and ensure it is
+5. Reuse the branch's existing PR rather than creating a duplicate and ensure it is
    still a draft. Never mark the PR ready for review as part of this skill.
-5. Read the PR back and confirm its URL, draft state, and head SHA match the verified committed
-   change before treating the run as complete. Report pending CI truthfully.
-6. Add the confirmed draft PR link and the same verification evidence to Linear. Update Review
+6. Read the PR back and confirm its URL, draft state, head SHA, and required CI result match the
+   verified committed change before treating the run as complete.
+7. Add the confirmed draft PR link and the same verification evidence to Linear. Update Review
    baseline to the exact committed PR-head SHA with `Context: PR <number> head`,
    `Stage: implementation handoff`, and `Outcome: implementation complete`; then move the issue to In
    Review and read it back.

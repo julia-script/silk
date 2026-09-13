@@ -240,16 +240,24 @@ history. Keep the description as the current specification rather than an activi
 ## Pull request quality bar
 
 Prefer creating the draft PR during implementation, as soon as a coherent issue-scoped commit can
-be published. Commit and push the latest intended changes before the final local checks so slow CI
-can run alongside them. Focused development tests may run earlier. Audit the staged changes and
-complete branch diff for scope before publishing; final verification and reviewer approval gate
-handoff, not the first draft push. Commit and push fixes before rerunning affected final checks.
+be published, so CI can start while implementation and review continue. Run focused development
+checks where they give useful feedback. Before the final push, finish every repository mutation,
+including generated artifacts and OpenSpec implementation-task checkboxes, then audit the staged
+changes and complete branch diff. Required pull-request CI on the exact intended head and reviewer
+approval gate handoff. Do not duplicate the complete CI-covered suite locally as ceremony; use
+broader local runs only for change-specific evidence, CI diagnosis, or an explicit request.
 
-An early draft describes the current implementation and explicitly marks remaining work, local
-checks, CI, and reviews as pending where appropriate. Refresh that evidence for the final PR head
-at handoff. Keep the Linear issue In Progress until the required implementation, verification, and
+An early draft describes the current implementation and explicitly marks remaining work, focused
+local checks, CI, and reviews as pending where appropriate. After the final push, wait for required
+CI to pass on that exact head. If it fails, fix the cause, run affected focused checks, push the new
+head, and wait again. Keep the Linear issue In Progress until the required implementation, CI, and
 reviews are complete; merely opening a draft does not justify In Review or advancing the Review
 baseline to implementation complete.
+
+CI, review, PR updates, and handoff are workflow gates, not OpenSpec implementation tasks. Never
+add a task-list item whose sole action is running or recording checks, obtaining approval, waiting
+for CI, or reporting the handoff. Complete all implementation-task checkboxes before the final
+push. A passing gate must not cause a follow-up repository edit or empty push.
 
 A draft PR must be understandable to a reviewer who has not read the agent conversation. Give it a
 specific outcome-oriented title. In the body, explain the problem and why it mattered, summarize

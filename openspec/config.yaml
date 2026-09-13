@@ -11,13 +11,12 @@ schema: spec-driven
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+rules:
+  tasks:
+    - Describe repository implementation deliverables and their acceptance evidence. Do not add
+      standalone tasks for running or recording verification commands, obtaining review approval,
+      waiting for CI, updating a PR or issue, or performing handoff; those are workflow gates, not
+      implementation work.
 
 # Per-operation guidance (optional)
 # Add advisory guidance for how apply and archive work should be conducted.

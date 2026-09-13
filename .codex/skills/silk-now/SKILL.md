@@ -35,8 +35,8 @@ At the start, publish and maintain a task plan covering:
 1. demand capture and deduplication;
 2. independent investigation and skeptical triage;
 3. specification and Linear admission;
-4. implementation, early draft PR, and local verification alongside CI;
-5. independent code and test-economics reviews, draft PR update, and Linear handoff.
+4. implementation, early draft PR, focused checks, and independent reviews;
+5. exact-head CI guard, draft PR update, and Linear handoff.
 
 Only one phase is in progress at a time. Do not begin repository edits while intake or triage is
 unfinished.
@@ -108,19 +108,20 @@ Then follow the full `silk-work` implementation contract:
 - implement the clean green-field design, including callers, tests, fixtures, generated artifacts,
   and documentation, and delete the superseded path;
 - keep the Linear specification current when implementation evidence changes the correct scope;
-- follow the early draft publication steps below, committing and pushing the latest intended
-  changes before the final local verification pass so slow CI runs alongside local checks;
-- run focused checks plus every repository-required verification command, including
-  `pnpm release:candidate` when package contents or exports change.
+- follow the early draft publication steps below, using focused checks during implementation and
+  completing all repository mutations and OpenSpec implementation-task checkboxes before the
+  final push;
+- treat required pull-request CI on the exact final head as the authoritative full-repository
+  completion guard; do not duplicate the complete CI-covered suite locally as handoff ceremony.
 
 Do not let the word “immediate” justify skipping design work, characterization, required tests, or
-the repository's verification order.
+the repository's CI guard.
 
 ### Publish the draft early
 
 Prefer opening the draft as soon as there is a coherent issue-scoped commit during implementation.
-Focused tests may run during development; do not wait for the final local checks or independent
-review approvals to publish the draft.
+Focused tests may run during development; do not wait for independent review approvals to publish
+the draft.
 
 1. Resolve the actual intended PR base, verify its current remote commit, and compute the issue
    branch's merge-base with it. Do not assume a possibly stale local `main` is the comparison base.
@@ -133,16 +134,17 @@ review approvals to publish the draft.
    only when its head branch and complete scope belong to this issue. Never repurpose an unrelated
    PR or turn a PR that is already ready for review back into a draft.
 4. Follow the Pull request quality bar in `WORKFLOW.md`, linking the Linear issue and relevant
-   OpenSpec change and describing the current implementation. Mark remaining work, local checks,
+   OpenSpec change and describing the current implementation. Mark remaining work, focused checks,
    CI, and reviews as pending where appropriate. Confirm the PR URL, base, head branch, and draft
    state, and link it from Linear. Keep the issue In Progress until the verified handoff.
-5. Commit and push the latest intended changes before starting final local checks. If isolation,
-   commit hooks, formatting, generated artifacts, or review fixes change the branch diff, audit,
-   commit, and push the update before rerunning affected final checks and independent reviews.
+5. Complete every repository mutation and OpenSpec implementation-task checkbox before the final
+   push. If isolation, commit hooks, formatting, generated artifacts, or review fixes change the
+   branch diff, audit, run affected focused checks, commit, push, and repeat the independent
+   reviews as needed.
 
 ## 4. Review and hand off
 
-After implementation and verification, require an independent reviewer subagent to inspect the
+After implementation and focused checks, require an independent reviewer subagent to inspect the
 complete diff against the Linear problem, rationale, acceptance criteria, repository policy, test
 strength, and accidental scope. The reviewer does not edit. Verify every finding yourself, fix valid
 issues, commit and push fixes, and rerun affected checks. Repeat independent review after fixes. A
@@ -155,19 +157,21 @@ not fill this role. Both reviewers must approve the exact final committed PR dif
 
 Finish exactly as `silk-work` requires:
 
-1. Confirm the intended issue changes are committed and pushed and the required local checks have
-   run on that change. Require both reviewers to approve the exact committed three-dot diff with
-   no unresolved material finding before handoff. For further fixes, push before repeating affected
-   final checks as above, and obtain updated reviews.
-2. Update the existing draft under the Pull request quality bar in `WORKFLOW.md`. Include the
-   Linear link, accepted outcome, local verification evidence, current CI status for the latest
-   head, test-review verdict and timing delta, risks, and relevant OpenSpec change in a clear PR
-   body. Strongly prefer concise `Before` and `After` code or output examples when they
+1. Confirm every implementation task is complete and the intended issue changes are committed and
+   pushed. Require both reviewers to approve the exact committed three-dot diff with no unresolved
+   material finding. For further fixes, run affected focused checks, push, and obtain updated
+   reviews.
+2. Wait for every required CI job to pass on that exact pushed head. A failure starts a new
+   fix-and-push cycle; a pass requires no repository edit.
+3. Update the existing draft under the Pull request quality bar in `WORKFLOW.md`. Include the
+   Linear link, accepted outcome, focused local evidence, exact-head CI result, test-review verdict
+   and timing delta, risks, and relevant OpenSpec change in a clear PR body. Strongly prefer concise
+   `Before` and `After` code or output examples when they
    materially clarify the delivered change; omit them only when examples would add no useful signal
    or would misrepresent the work.
-3. Read the PR back and confirm its URL, verified base, expected head branch and SHA, draft state,
-   and issue-scoped diff. Report pending CI truthfully.
-4. Comment on Linear with the PR and verification evidence, move the issue to In Review, and read it
+4. Read the PR back and confirm its URL, verified base, expected head branch and SHA, draft state,
+   required CI result, and issue-scoped diff.
+5. Comment on Linear with the PR and verification evidence, move the issue to In Review, and read it
    back. The description must now carry the exact committed PR-head SHA as its
    `implementation handoff` Review baseline.
 

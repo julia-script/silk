@@ -32,19 +32,21 @@ language definition and reference live in `apps/docs/content/reference/`.
 - Put public LLVM code in `packages/llvm/src` and tests in `packages/llvm/test`.
 - Keep the public barrel at `packages/llvm/src/index.ts` explicit.
 - Prefer opening a draft PR early, as soon as there is a coherent task-scoped commit to publish.
-  Reuse the task's existing PR when available. CI is slow: commit and push the latest intended
-  changes before starting the final local verification pass so CI and local checks run in parallel.
-  Focused tests during implementation are still encouraged; do not wait for the full local suite
-  or final review before starting CI.
-- Keep the draft PR's implementation, local-check, and CI status truthful. After fixes, commit and
-  push again before rerunning affected final checks. Early publication does not replace required
-  verification or mean the work is ready for handoff.
-- Verify changes in this order: `pnpm typecheck`, `pnpm format:check`, `pnpm lint`, then
-  `pnpm test`.
-- Run `pnpm check` before handoff. Run `pnpm release:candidate` when package contents or exports
-  change.
-- Do not describe changes as complete when a required check was not run. Report the exact failure
-  and whether it predates the change.
+  Reuse the task's existing PR when available so CI starts while implementation and review
+  continue.
+- Run the cheapest relevant focused checks while implementing. Run a broader local command only
+  when it gives change-specific evidence that CI does not provide, reproduces or diagnoses a CI
+  failure, or Julia explicitly requests it. Do not rerun the complete CI-covered suite locally as
+  handoff ceremony.
+- Before the final push, finish every repository mutation, including generated artifacts and
+  OpenSpec implementation-task checkboxes, then audit, commit, and push the intended head. Required
+  pull-request CI on that exact head is the authoritative full-repository completion guard; wait
+  for it to pass before handoff. If it fails, fix the cause, run affected focused checks, push the
+  new head, and wait for that head's CI.
+- CI, review, PR updates, and handoff are workflow gates, not implementation tasks. Do not add
+  OpenSpec task-list items whose sole action is running or recording checks, obtaining approval,
+  waiting for CI, or reporting the handoff. A passing gate never requires a follow-up repository
+  edit or empty push. Report the exact failure and whether it predates the change.
 
 ## Minimal compiler privilege
 
