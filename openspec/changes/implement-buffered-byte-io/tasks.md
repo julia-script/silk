@@ -5,7 +5,7 @@
 
 ## 2. Scoped composition and transfer
 
-- [x] 2.1 Implement scoped `BufferedDuplex.withBuffered` with separate direction buffers, one exclusive provider lease, internal provider binding, and nonparking terminal close; verify structured ownership rejects session/peek escape and ambient provider aliases.
+- [x] 2.1 Implement scoped `BufferedDuplex.withBuffered` and explicitly bounded paired acquisition with separate direction buffers, exclusive provider leases, internal provider binding, and nonparking terminal close on success, typed failure, and structured cancellation/interruption; verify all capacities are validated before allocation and structured ownership rejects session/peek escape and provider aliases.
 - [x] 2.2 Implement bounded and exact `BufferedTransfer` operations that consume only destination-accepted source prefixes; verify partial destination failure retains the complete unaccepted suffix and zero limit performs no I/O.
 
 ## 3. Public delivery

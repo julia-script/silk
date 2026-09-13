@@ -8,8 +8,9 @@ transport prefixes.
 ## What Changes
 
 - Add fixed-capacity buffered input and output actors over exact-prefix `ByteDuplex` operations.
-- Add a scoped duplex session that exclusively retains one concrete transport and closes it on every
-  structured exit without implicitly flushing pending output.
+- Add a scoped duplex session that exclusively retains one concrete transport and closes it after
+  success, typed failure, or structured cancellation/interruption without implicitly flushing
+  pending output; fatal traps follow the language rule that bypasses finalizers and `Drop`.
 - Add input-only and output-only adapters that preserve the distinct `StandardInput` partial-read
   and `Writer` all-or-error contracts.
 - Add bounded and exact transfer operations that consume source bytes only after the destination

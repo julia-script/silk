@@ -67,6 +67,17 @@ double-counting already buffered bytes or fabricating certainty.
 only terminal `ByteDuplex.close` and recovers close failure so it cannot replace the protected
 outcome. The callback requirement row excludes `ByteDuplex`.
 
+`withBufferedPairCapacity` applies the same bracket once to a pair of exclusive transport leases.
+It validates all four capacities before constructing the pair lease or allocating either session,
+then gives one higher-ranked callback two independently scoped sessions. Its nonparking release
+attempts terminal close on both providers, suppressing only typed close failures so neither can
+replace the protected outcome. This makes the two-endpoint transfer API constructible without
+nesting a recursively specialized single-session acquisition.
+
+For both scopes, the protected outcomes are the structured Effect exits: success, typed failure,
+and structured cancellation/interruption. Fatal traps intentionally bypass finalizers and `Drop`
+under the language's resource-lifetime contract and are not a release guarantee.
+
 Implicit flush was rejected because a blocked flush would violate the nonparking finalizer contract
 and could turn abandonment into an externally visible duplicate/partial transfer.
 

@@ -13,7 +13,8 @@ MUST be validated before allocation, MUST allocate once through `Allocator`, and
 Duplex convenience construction SHALL default each direction to 8,192 bytes. A zero or excessive
 capacity SHALL fail with `InvalidCapacity`. Duplex construction SHALL validate both capacities
 before allocating either direction or acquiring the transport lease. A memory-input view MAY
-borrow immutable caller storage.
+borrow immutable caller storage. Paired duplex construction SHALL validate all four capacities
+before allocating either session or acquiring either transport lease.
 
 #### Scenario: Reject invalid capacity before allocation
 
@@ -129,7 +130,11 @@ them. It SHALL preserve every unaccepted source byte after partial destination f
 transfer SHALL report early end with the transferred count. Zero limit SHALL perform no I/O. The
 ownership system SHALL reject aliased endpoints or an aliased underlying exclusive lease. The API
 SHALL NOT accept Writer as an exact-prefix destination or claim zero-copy, sendfile, seek, pread, or
-streaming filesystem support.
+streaming filesystem support. Canonical `silk.buffered_duplex` SHALL provide one explicitly bounded
+paired scope that publishes both sessions to one higher-ranked callback and terminally closes both
+leases after every structured Effect exit (success, typed failure, or structured
+cancellation/interruption) without implicitly flushing either output. Fatal traps SHALL follow the
+language rule that bypasses finalizers and `Drop` and are outside this release guarantee.
 
 #### Scenario: Preserve source suffix after destination failure
 

@@ -1,7 +1,8 @@
 //! One scoped buffered session over an exclusive concrete ByteDuplex provider.
 //!
 //! `withBuffered` owns separate fixed input and output state for the callback and terminally closes
-//! the provider on every structured exit. Release intentionally performs no implicit flush.
+//! the provider after success, typed failure, or structured cancellation/interruption. Fatal traps
+//! bypass finalizers and Drop. Release intentionally performs no implicit flush.
 
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.buffered_input {BufferError, BufferedInput, DiscardOutcome, FillOutcome, MAX_CAPACITY}
@@ -217,6 +218,11 @@ struct TransportLease<'env, P> {
   provider: &'env mut P
 }
 
+struct TransportPairLease<'env, SP, DP> {
+  source: &'env mut SP
+  destination: &'env mut DP
+}
+
 /// Runs one callback with default 8,192-byte input and output buffers.
 pub effect fn withBuffered<'env, A, E, ?CallbackRequirements, P>(
   transport: &'env mut P,
@@ -271,6 +277,68 @@ where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
   return run Effect.useReleaseNonParking(move lease, move use, move release)
 }
 
+/// Runs one callback with two explicitly bounded buffered sessions.
+///
+/// All four capacities are validated before allocation or lease acquisition. Both transports are
+/// terminally closed exactly once after success, typed failure, or structured
+/// cancellation/interruption; fatal traps bypass finalizers and Drop. Neither pending output is
+/// implicitly flushed.
+pub effect fn withBufferedPairCapacity<
+  'env,
+  A,
+  E,
+  ?CallbackRequirements,
+  SP,
+  DP,
+>(
+  source: &'env mut SP,
+  sourceInputCapacity: usize,
+  sourceOutputCapacity: usize,
+  destination: &'env mut DP,
+  destinationInputCapacity: usize,
+  destinationOutputCapacity: usize,
+  callback: for<'sourceCall, 'destinationCall> once fn<'env>(
+    &'sourceCall mut BufferedDuplex<'sourceCall, SP>,
+    &'destinationCall mut BufferedDuplex<'destinationCall, DP>,
+  ) -> once Effect<'sourceCall & 'destinationCall; A ! E ? CallbackRequirements>,
+) -> A
+! E | BufferError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator
+where &'env mut SP provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut DP provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut SP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  &'env mut DP provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  run validateCapacities(sourceInputCapacity, sourceOutputCapacity)
+  run validateCapacities(destinationInputCapacity, destinationOutputCapacity)
+  let lease = TransportPairLease<'env, SP, DP> {
+    source: move source,
+    destination: move destination,
+  }
+  let use = effect fn(owned: &mut TransportPairLease<'env, SP, DP>) -> A
+  ! E | BufferError | OutOfMemoryError
+  ? CallbackRequirements | &mut Allocator {
+    return run acquireAndUsePair(
+      &mut owned.source.*,
+      sourceInputCapacity,
+      sourceOutputCapacity,
+      &mut owned.destination.*,
+      destinationInputCapacity,
+      destinationOutputCapacity,
+      move callback,
+    )
+  }
+  let release = effect fn(owned: &mut TransportPairLease<'env, SP, DP>) -> () {
+    let sourceClosed = ByteDuplex.close()
+      |> Effect.provideMut<ByteDuplex>(&mut owned.source.*)
+    run Effect.catchAll(move sourceClosed, discardCloseFailure)
+    let destinationClosed = ByteDuplex.close()
+      |> Effect.provideMut<ByteDuplex>(&mut owned.destination.*)
+    return run Effect.catchAll(move destinationClosed, discardCloseFailure)
+  }
+  return run Effect.useReleaseNonParking(move lease, move use, move release)
+}
+
 effect fn acquireAndUse<'env, 'transport, A, E, ?CallbackRequirements, P>(
   transport: &'transport mut P,
   inputCapacity: usize,
@@ -292,6 +360,53 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     terminal: false,
   }
   return run callback(&mut session)
+}
+
+effect fn acquireAndUsePair<
+  'env,
+  'sourceTransport,
+  'destinationTransport,
+  A,
+  E,
+  ?CallbackRequirements,
+  SP,
+  DP,
+>(
+  source: &'sourceTransport mut SP,
+  sourceInputCapacity: usize,
+  sourceOutputCapacity: usize,
+  destination: &'destinationTransport mut DP,
+  destinationInputCapacity: usize,
+  destinationOutputCapacity: usize,
+  callback: for<'sourceCall, 'destinationCall> once fn<'env>(
+    &'sourceCall mut BufferedDuplex<'sourceCall, SP>,
+    &'destinationCall mut BufferedDuplex<'destinationCall, DP>,
+  ) -> once Effect<'sourceCall & 'destinationCall; A ! E ? CallbackRequirements>,
+) -> A
+! E | BufferError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator
+where &'sourceTransport mut SP provides &ByteDuplex
+    from &mut ByteDuplex | &mut MonotonicClock,
+  &'destinationTransport mut DP provides &ByteDuplex
+    from &mut ByteDuplex | &mut MonotonicClock,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  let sourceInput = run BufferedInput.make(sourceInputCapacity)
+  let sourceOutput = run BufferedOutput.make(sourceOutputCapacity)
+  let destinationInput = run BufferedInput.make(destinationInputCapacity)
+  let destinationOutput = run BufferedOutput.make(destinationOutputCapacity)
+  let mut sourceSession = BufferedDuplex {
+    inputState: move sourceInput,
+    outputState: move sourceOutput,
+    transport: &mut source.*,
+    terminal: false,
+  }
+  let mut destinationSession = BufferedDuplex {
+    inputState: move destinationInput,
+    outputState: move destinationOutput,
+    transport: &mut destination.*,
+    terminal: false,
+  }
+  return run callback(&mut sourceSession, &mut destinationSession)
 }
 
 effect fn validateCapacities(inputCapacity: usize, outputCapacity: usize) -> () ! BufferError {

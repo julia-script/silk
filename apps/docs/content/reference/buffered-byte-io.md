@@ -10,16 +10,21 @@ transfer contract or turn `Writer` and `StandardInput` into a duplex service.
 They validate the capacity before allocating, allocate one fully initialized buffer through the
 active `Allocator`, and never grow it. `BufferedDuplex.withBuffered` uses 8,192 bytes for each
 direction; `withBufferedCapacity` accepts explicit direction capacities and validates both before
-allocating either buffer or acquiring the transport lease.
+allocating either buffer or acquiring the transport lease. `withBufferedPairCapacity` accepts two
+transports plus four explicit direction capacities, validates all four before allocation or lease
+acquisition, and publishes both sessions to one callback.
 
 The duplex operations exclusively retain one concrete transport for the callback scope. The
 session and any slice returned by `peek` borrow that scope and cannot escape it. While a peek is
 live, Silk's ordinary ownership rules reject `consume`, `fill`, `readSome`, and other conflicting
 mutations. Callback requirements exclude independent ambient `ByteDuplex` access.
 
-Structured callback exit terminally closes the provider through the nonparking resource bracket.
-It never flushes pending output. Call `finish` when pending bytes must reach the provider's flush
-boundary.
+Success, typed failure, and structured cancellation or interruption terminally close the provider
+through the nonparking resource bracket. Fatal traps bypass finalizers and `Drop`, as they do for
+other Silk resource brackets. Release never flushes pending output. Call `finish` when pending
+bytes must reach the provider's flush boundary. The paired scope applies the same rule to both
+transports and attempts terminal close on each exactly once without replacing the protected
+structured outcome.
 
 This complete example opens an empty in-memory transport, performs a zero-byte buffered operation,
 and lets the scope close the transport:
@@ -139,7 +144,9 @@ zero prefix and never retries the uncertain value. It neither flushes nor closes
 `BufferedTransfer.transferAtMost` peeks the source, offers no more than the remaining finite limit,
 and consumes only the prefix the destination reports accepting. If the destination later fails,
 the complete unaccepted suffix remains in the source's unread allocation. `transferExact` adds
-precise early-end reporting. A zero limit performs no I/O.
+precise early-end reporting. A zero limit performs no I/O. Acquire the two live endpoints together
+with `BufferedDuplex.withBufferedPairCapacity`; nesting the generic single-session constructor is
+not required.
 
 Both endpoints are exclusive borrows. Ownership analysis therefore rejects the same session as both
 source and destination and rejects two sessions that alias one exclusive provider lease. Writer is

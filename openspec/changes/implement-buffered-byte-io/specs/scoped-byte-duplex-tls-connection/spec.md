@@ -6,9 +6,14 @@ Canonical `silk.buffered_duplex` SHALL expose `withBuffered`, which exclusively 
 concrete `ByteDuplex` provider, allocates separate fixed input and output buffers, and invokes one
 higher-ranked callback with a scoped session. The session SHALL bind its private provider reborrow
 internally, SHALL omit ByteDuplex from callback requirements, and SHALL prevent the session,
-provider loan, or peeked view from escaping. Structured exit SHALL terminally close the provider
-through the delivered nonparking bracket while preserving the callback outcome; it SHALL NOT
-implicitly flush pending buffered output.
+provider loan, or peeked view from escaping. Every structured Effect exit (success, typed failure,
+or structured cancellation/interruption) SHALL terminally close the provider through the delivered
+nonparking bracket while preserving the callback outcome; it SHALL NOT implicitly flush pending
+buffered output. Fatal traps SHALL follow the language rule that bypasses finalizers and `Drop` and
+are outside this release guarantee. The same actor SHALL expose an explicitly bounded paired scope
+for transfer, validate all four capacities before allocation or lease acquisition, publish two
+independently borrowed sessions to one higher-ranked callback, and close both providers exactly once
+on every structured Effect exit without replacing the callback outcome.
 
 #### Scenario: Close after callback success or failure
 
@@ -19,6 +24,31 @@ implicitly flush pending buffered output.
 
 - **WHEN** a callback attempts independent ByteDuplex access while the scoped session retains its lease
 - **THEN** requirement-row ownership rejects the program before execution
+
+#### Scenario: Acquire two transfer sessions atomically
+
+- **WHEN** paired buffered acquisition receives four valid capacities and distinct transports
+- **THEN** it publishes both sessions together and closes both transports exactly once after the callback
+
+#### Scenario: Reject an invalid paired capacity before allocation
+
+- **WHEN** any of the four paired capacities is invalid
+- **THEN** neither session allocates and neither transport lease is acquired
+
+#### Scenario: Release a suspended pair after structured cancellation
+
+- **WHEN** a paired callback suspends and its execution is structurally canceled or interrupted
+- **THEN** terminal close runs exactly once for each transport
+
+#### Scenario: Preserve the paired callback outcome across close failures
+
+- **WHEN** either transport close returns a typed failure after paired acquisition has completed its callback
+- **THEN** release still attempts the other close and preserves the callback's structured outcome
+
+#### Scenario: Exclude fatal traps from resource unwinding
+
+- **WHEN** execution ends in a fatal trap instead of a structured Effect exit
+- **THEN** the scope makes no finalizer or `Drop` execution guarantee
 
 ### Requirement: Buffered byte delivery remains portable and bounded
 
