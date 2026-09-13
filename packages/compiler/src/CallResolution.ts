@@ -938,6 +938,110 @@ export const commitSpecialization = (
   for (const [identity, argument] of source) target.set(identity, argument)
 }
 
+interface KnownProviderBoundInference {
+  readonly substitution: Type.Substitution
+  readonly diagnostic?: Diagnostic.Diagnostic
+}
+
+const sameNominalDeclaration = (left: Type.Nominal, right: Type.Nominal): boolean =>
+  left.module === right.module && left.name === right.name && left.sealed === right.sealed
+
+/**
+ * Fills call binders from direct interface bounds after operands have fixed their provider.
+ *
+ * A provider may contain parameters owned by the enclosing declaration, but none owned by the call
+ * being specialized. Candidate discovery stays keyed to that provider and the bound's canonical
+ * interface identity, so this cannot become backwards provider inference.
+ */
+const inferKnownProviderBounds = (
+  target: string,
+  parameters: ReadonlyArray<DeclarationFacts.TypeParameterFact>,
+  initial: Type.Substitution,
+  resolution: ResolutionContext,
+  span: SourceSpan.SourceSpan,
+): KnownProviderBoundInference => {
+  const substitution = new Map(initial)
+  const callBinders = new Set(parameters.map((parameter) => Type.key(parameter.type)))
+  let progressed = true
+  while (progressed) {
+    progressed = false
+    for (const parameter of parameters) {
+      const providerArgument = substitution.get(Type.key(parameter.type))
+      if (providerArgument === undefined || !Type.isTypeArgument(providerArgument)) continue
+      const provider = providerArgument
+      if (
+        !Type.isNominal(provider) ||
+        Type.parameters(provider).some((nested) => callBinders.has(Type.key(nested)))
+      )
+        continue
+      for (const bound of parameter.bounds) {
+        if (bound._tag !== 'ResolvedBound' || !bound.application.providerMatches) continue
+        const pattern = Type.substitute(bound.application.capability, substitution)
+        if (!Type.isNominal(pattern)) continue
+        const candidates = ConformanceProof.knownProviderContracts(
+          resolution.index,
+          resolution.scope.module,
+          provider,
+        ).filter((candidate) => sameNominalDeclaration(candidate, pattern))
+        const matching = candidates.flatMap((candidate) => {
+          const trial = new Map(substitution)
+          return TypeInference.inferOpenGenericArguments(pattern, candidate, trial, callBinders)
+            .matches
+            ? [Object.freeze({ candidate, trial })]
+            : []
+        })
+        const selected = matching.length === 1 ? matching.at(0) : undefined
+        if (selected !== undefined) {
+          const before = substitution.size
+          commitSpecialization(substitution, selected.trial)
+          if (substitution.size > before) progressed = true
+          continue
+        }
+        if (candidates.length !== 1 || matching.length !== 0) continue
+        const candidate = candidates.at(0)
+        if (candidate === undefined) continue
+        const implied = new Map<string, Type.GenericArgument>()
+        if (
+          !TypeInference.inferOpenGenericArguments(
+            bound.application.capability,
+            candidate,
+            implied,
+            callBinders,
+          ).matches
+        )
+          continue
+        const conflict = parameters.find((candidateParameter) => {
+          const identity = Type.key(candidateParameter.type)
+          const existing = substitution.get(identity)
+          const inferred = implied.get(identity)
+          return (
+            existing !== undefined &&
+            inferred !== undefined &&
+            Type.genericArgumentKey(existing) !== Type.genericArgumentKey(inferred)
+          )
+        })
+        if (conflict === undefined) continue
+        const identity = Type.key(conflict.type)
+        const existing = substitution.get(identity)
+        const inferred = implied.get(identity)
+        if (existing === undefined || inferred === undefined) continue
+        return Object.freeze({
+          substitution,
+          diagnostic: Diagnostic.typeArgumentConflict(
+            target,
+            conflict.type.name,
+            Type.encodeGenericArgument(existing),
+            Type.encodeGenericArgument(inferred),
+            span,
+            bound.path.syntax.span,
+          ),
+        })
+      }
+    }
+  }
+  return Object.freeze({ substitution })
+}
+
 export const contractSpecializationSites = (
   arguments_: ReadonlyArray<ArgumentFact>,
   contract: CallableContract.CallableContract,
@@ -1463,11 +1567,7 @@ export const analyzeCallContract = (
         return inferredType === undefined ? [] : [inferredType]
       }),
     )
-    const missingFromArguments = declaredTypeParameters.find(
-      (parameter) =>
-        !inferred.has(Type.key(parameter)) && !constraintDeferred.has(Type.key(parameter)),
-    )
-    if (!compatible || missingFromArguments !== undefined) {
+    if (!compatible) {
       const diagnostic =
         representationFailure ??
         (rowFailure === undefined
@@ -1484,6 +1584,71 @@ export const analyzeCallContract = (
       })
     }
     substitution = inferred
+  }
+  const mayInferFromKnownProvider =
+    reference._tag === 'Resolved' &&
+    reference.declaration.typeParameters.some((parameter) =>
+      parameter.bounds.some(
+        (bound) =>
+          bound._tag === 'ResolvedBound' &&
+          bound.application.providerMatches &&
+          Type.parameters(bound.application.capability).some((nested) =>
+            reference.declaration.typeParameters.some(
+              (candidate) => Type.key(candidate.type) === Type.key(nested),
+            ),
+          ),
+      ),
+    )
+  if (reference._tag === 'Resolved' && resolution !== undefined && mayInferFromKnownProvider) {
+    const inferredFromBounds = inferKnownProviderBounds(
+      reference.spelling,
+      reference.declaration.typeParameters,
+      substitution,
+      resolution,
+      call.span,
+    )
+    substitution = inferredFromBounds.substitution
+    const diagnostic = inferredFromBounds.diagnostic
+    if (diagnostic !== undefined)
+      return Object.freeze({
+        mappings,
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          cause: Diagnostic.identity(diagnostic),
+        }),
+        diagnostics: Object.freeze([diagnostic]),
+      })
+    typeArguments = Object.freeze(
+      declaredTypeParameters.flatMap((parameter) => {
+        const argument = substitution.get(Type.key(parameter))
+        return argument === undefined ? [] : [argument]
+      }),
+    )
+    if (
+      declaredTypeParameters.every(
+        (parameter) => substitution.get(Type.key(parameter)) !== undefined,
+      )
+    )
+      unresolvedSpecialization = undefined
+  }
+  if (callTypeArguments?.explicit !== true && !mayInferFromKnownProvider) {
+    const missingAfterKnownProviderInference = declaredTypeParameters.find(
+      (parameter) =>
+        !substitution.has(Type.key(parameter)) && !constraintDeferred.has(Type.key(parameter)),
+    )
+    if (missingAfterKnownProviderInference !== undefined) {
+      const diagnostic = Diagnostic.typeArgumentInference(reference.spelling, call.span)
+      return Object.freeze({
+        mappings,
+        fact: Object.freeze({
+          _tag: 'Unavailable',
+          reason: Object.freeze({ _tag: 'UnavailableCallSyntax', syntax: call }),
+          cause: Diagnostic.identity(diagnostic),
+        }),
+        diagnostics: Object.freeze([diagnostic]),
+      })
+    }
   }
   let evidence: ReadonlyArray<Constraint.ConstraintEvidence> = Object.freeze([])
   let inferredProviderSelectors: ReadonlyArray<InferredProviderSelector> = Object.freeze([])

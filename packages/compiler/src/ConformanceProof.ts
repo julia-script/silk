@@ -108,12 +108,14 @@ const endpointVisible = (
  * shows. Endpoint visibility is applied to the interface declaration rather than the conformance,
  * because coherence is a whole-program property and a conformance carries no module visibility.
  */
-export const implementedContracts = (
+const provedContracts = (
   self: Index,
   requestingModule: string,
   provider: Type.Type,
+  requireRuntimeConcrete: boolean,
 ): ReadonlyArray<Type.Nominal> => {
-  if (!Type.isNominal(provider) || !Type.isRuntimeConcrete(provider)) return Object.freeze([])
+  if (!Type.isNominal(provider) || (requireRuntimeConcrete && !Type.isRuntimeConcrete(provider)))
+    return Object.freeze([])
   const providerDeclaration = memberByNominal(self.modules, provider)
   if (providerDeclaration === undefined || !endpointVisible(providerDeclaration, requestingModule))
     return Object.freeze([])
@@ -135,7 +137,7 @@ export const implementedContracts = (
       const specialized = Type.substitute(conformance.capability.type, substitution)
       if (
         !Type.isNominal(specialized) ||
-        !Type.isRuntimeConcrete(specialized) ||
+        (requireRuntimeConcrete && !Type.isRuntimeConcrete(specialized)) ||
         Type.equals(specialized, Type.copyCapability) ||
         Type.equals(specialized, Type.dropCapability)
       )
@@ -166,6 +168,38 @@ export const implementedContracts = (
       .map(([, capability]) => capability),
   )
 }
+
+/**
+ * Returns the proved, endpoint-visible contracts implemented by one concrete nominal provider.
+ *
+ * This is the shared authority over the same conformance evidence semantic analysis uses. Merely
+ * matching a declared header is insufficient: conditional, invalid, incoherent, and ambiguous
+ * conformances are admitted only when the ordinary proof selects that exact source declaration.
+ *
+ * Receiver-call resolution selects a concrete receiver's interface operations through this query,
+ * and completion offers the same set, so the two cannot drift into offering a member the resolver
+ * then rejects. Changing this filter therefore changes what compiles, not only what an editor
+ * shows. Endpoint visibility is applied to the interface declaration rather than the conformance,
+ * because coherence is a whole-program property and a conformance carries no module visibility.
+ */
+export const implementedContracts = (
+  self: Index,
+  requestingModule: string,
+  provider: Type.Type,
+): ReadonlyArray<Type.Nominal> => provedContracts(self, requestingModule, provider, true)
+
+/**
+ * Returns proved applications for a provider already fixed relative to one generic call.
+ *
+ * The provider may retain parameters owned by the enclosing declaration; call inference separately
+ * proves that none belong to the call being specialized. This query never enumerates providers and
+ * never admits a header that the ordinary conformance proof would reject.
+ */
+export const knownProviderContracts = (
+  self: Index,
+  requestingModule: string,
+  provider: Type.Type,
+): ReadonlyArray<Type.Nominal> => provedContracts(self, requestingModule, provider, false)
 
 const proofMemos = new WeakMap<Index, Map<string, ConformanceGoal.Proof>>()
 

@@ -171,6 +171,14 @@ Inference is positional and must produce one consistent argument for every requi
 Explicit arguments do not suppress checking: the supplied values must still satisfy the resulting
 parameter types and bounds.
 
+After explicit arguments and supplied operands have fixed a provider, one direct applied-interface
+bound may contribute the arguments from that provider's unique visible coherent conformance. For
+example, if `context: C` fixes `C = Inspection` and the only selected conformance is
+`BufferedContext<Transport, usize, BufferError, ?&mut Clock> for Inspection`, a bound
+`C: BufferedContext<P, A, E, ?R>` fills `P`, `A`, `E`, and `R`. This is monotonic constraint
+evidence: it fills holes but must agree with every explicit or operand-derived binding already in
+the call.
+
 This prefix form is required by existing Effect APIs that explicitly choose one service-role key
 while inferring success, failure, requirement, provider, and remainder parameters from their value
 arguments.
@@ -186,7 +194,13 @@ let explicit = empty<i32>()
 ```
 
 Written arguments cannot skip a parameter in the middle, be reordered by name, or follow an
-inferred hole. Inference also does not enumerate every type satisfying a bound and guess one.
+inferred hole. The compiler queries only an already-known provider; it does not enumerate
+conformances to invent an unknown provider, use the expected result to choose one, or solve
+membership, subset, or difference rows backwards. Missing, ambiguous, or conflicting evidence
+leaves the specialization invalid, and declaration or import order never breaks a tie.
+
+Interface evidence remains compile-time-only. Selecting it adds no runtime witness operand,
+service requirement, dispatch slot, or erased higher-ranked callable representation.
 
 **Diagnostics:** Too many explicit arguments report their first excess argument. A wrong-kind
 prefix identifies the corresponding parameter. Conflicting explicit and inferred evidence reports

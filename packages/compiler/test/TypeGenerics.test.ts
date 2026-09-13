@@ -1334,3 +1334,180 @@ pub fn main() -> i32 { return 42 }`
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
   }),
 )
+
+it.effect('infers direct interface arguments only from a known provider conformance', () =>
+  Effect.gen(function* () {
+    const text = `service Clock {}
+struct Transport {}
+struct OtherTransport {}
+struct Output {}
+struct Problem {}
+
+interface Contextual<P, A, E, ?R> {}
+interface Carries<C> {}
+
+struct Positive {}
+impl Contextual<Transport, Output, Problem ? &mut Clock> for Positive {}
+
+struct Ambiguous {}
+impl Contextual<Transport, Output, Problem ? &mut Clock> for Ambiguous {}
+impl Contextual<OtherTransport, Output, Problem ? &mut Clock> for Ambiguous {}
+
+struct Missing {}
+struct Chained {}
+impl Carries<Positive> for Chained {}
+struct GenericContext<P, A, E, ?R> { value: A }
+impl<P, A, E, ?R> Contextual<P, A, E ? R> for GenericContext<P, A, E, R> {}
+
+fn infer<P, A, E, ?R, C: Contextual<P, A, E ? R>>(context: C) -> i32 {
+  drop context
+  return 11
+}
+
+fn inferWithProvider<P, A, E, ?R, C: Contextual<P, A, E ? R>>(
+  provider: &P,
+  context: C,
+) -> i32 {
+  drop provider
+  drop context
+  return 12
+}
+
+fn inferUnknown<P, A, E, ?R, C: Contextual<P, A, E ? R>>() -> i32 { return 13 }
+fn inferChained<P, A, E, ?R, C: Contextual<P, A, E ? R>, W: Carries<C>>(
+  wrapper: W,
+) -> i32 { drop wrapper return 14 }
+fn inferChainedReversed<W: Carries<C>, P, A, E, ?R, C: Contextual<P, A, E ? R>>(
+  wrapper: W,
+) -> i32 { drop wrapper return 16 }
+union Optional<T> { None, Some { value: T } }
+fn resultOnly<T>() -> Optional<T> { return Optional<T>.None }
+fn inverseRows<?S, ?R>() -> i32 where S in R { return 15 }
+
+fn genericAdapter<P, A, E, ?R>(
+  provider: &P,
+  context: GenericContext<P, A, E, R>,
+) -> i32 {
+  return inferWithProvider(provider, move context)
+}
+
+fn positive() -> i32 { return infer(Positive {}) }
+fn explicitAgrees() -> i32 { return infer<Transport>(Positive {}) }
+fn agrees() -> i32 {
+  let transport = Transport {}
+  return inferWithProvider(&transport, Positive {})
+}
+fn chained() -> i32 { return inferChained(Chained {}) }
+fn chainedReversed() -> i32 { return inferChainedReversed(Chained {}) }
+fn conflicts() -> i32 {
+  let transport = OtherTransport {}
+  return inferWithProvider(&transport, Positive {})
+}
+fn explicitConflicts() -> i32 { return infer<OtherTransport>(Positive {}) }
+fn ambiguous() -> i32 { return infer(Ambiguous {}) }
+fn missing() -> i32 { return infer(Missing {}) }
+fn backwards() -> i32 { return inferUnknown() }
+fn expectedResult() -> Optional<i32> { return resultOnly() }
+fn inverseRow() -> i32 { return inverseRows<Clock>() }
+
+pub fn main() -> i32 {
+  return positive() + explicitAgrees() + agrees() + chained() + chainedReversed()
+}`
+    const snapshot = yield* Analysis.ofSource(
+      'generics/known-provider-conformance',
+      new TextEncoder().encode(text),
+    )
+    const root = Analysis.rootAnalysis(snapshot)
+    const returnedCall = (name: string) => {
+      const fn = root.functions.find(
+        (candidate) =>
+          candidate.declaration.name._tag === 'Present' &&
+          candidate.declaration.name.spelling === name,
+      )
+      assert.isDefined(fn)
+      const returned = fn?.returnedExpression
+      assert.strictEqual(returned?._tag, 'Call')
+      return returned?._tag === 'Call' ? returned : undefined
+    }
+    for (const name of ['positive', 'explicitAgrees', 'agrees']) {
+      const call = returnedCall(name)
+      assert.strictEqual(call?.contract._tag, 'Compatible')
+      if (call?.contract._tag !== 'Compatible') continue
+      const arguments_ = call.contract.typeArguments.map(Type.encodeGenericArgument)
+      assert.deepEqual(arguments_.slice(0, 5), [
+        'generics/known-provider-conformance.Transport',
+        'generics/known-provider-conformance.Output',
+        'generics/known-provider-conformance.Problem',
+        '? &mut generics/known-provider-conformance.Clock',
+        'generics/known-provider-conformance.Positive',
+      ])
+      assert.isTrue(arguments_.slice(5).every((argument) => argument.startsWith("'")))
+      assert.strictEqual(call.selectedConformances?.length, 1)
+      assert.isFalse(
+        call.contract.typeArguments.some(
+          (argument) => Type.isTypeArgument(argument) && Type.isRepresented(argument),
+        ),
+      )
+    }
+    const chained = returnedCall('chained')
+    assert.strictEqual(chained?.contract._tag, 'Compatible')
+    const chainedArguments =
+      chained?.contract._tag === 'Compatible'
+        ? chained.contract.typeArguments.map(Type.encodeGenericArgument).slice(0, 6)
+        : []
+    assert.deepEqual(chainedArguments, [
+      'generics/known-provider-conformance.Transport',
+      'generics/known-provider-conformance.Output',
+      'generics/known-provider-conformance.Problem',
+      '? &mut generics/known-provider-conformance.Clock',
+      'generics/known-provider-conformance.Positive',
+      'generics/known-provider-conformance.Chained',
+    ])
+    assert.strictEqual(chained?.selectedConformances?.length, 2)
+    const chainedReversed = returnedCall('chainedReversed')
+    assert.strictEqual(chainedReversed?.contract._tag, 'Compatible')
+    const reversedArguments =
+      chainedReversed?.contract._tag === 'Compatible'
+        ? chainedReversed.contract.typeArguments.map(Type.encodeGenericArgument).slice(0, 6)
+        : []
+    assert.deepEqual(reversedArguments, [
+      'generics/known-provider-conformance.Chained',
+      'generics/known-provider-conformance.Transport',
+      'generics/known-provider-conformance.Output',
+      'generics/known-provider-conformance.Problem',
+      '? &mut generics/known-provider-conformance.Clock',
+      'generics/known-provider-conformance.Positive',
+    ])
+    assert.deepEqual(
+      reversedArguments.length === 6
+        ? [
+            reversedArguments[1],
+            reversedArguments[2],
+            reversedArguments[3],
+            reversedArguments[4],
+            reversedArguments[5],
+            reversedArguments[0],
+          ]
+        : [],
+      chainedArguments,
+    )
+    assert.strictEqual(chainedReversed?.selectedConformances?.length, 2)
+    const genericAdapter = returnedCall('genericAdapter')
+    assert.strictEqual(genericAdapter?.contract._tag, 'Compatible')
+    assert.strictEqual(genericAdapter?.selectedConformances?.length, 1)
+
+    const diagnostics = Analysis.diagnostics(snapshot).map((diagnostic) => ({
+      code: diagnostic.code,
+      source: text.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+    }))
+    assert.deepEqual(diagnostics, [
+      { code: 'SEM0100', source: 'inferWithProvider(&transport, Positive {})' },
+      { code: 'SEM0100', source: 'infer<OtherTransport>(Positive {})' },
+      { code: 'SEM0099', source: 'infer(Ambiguous {})' },
+      { code: 'SEM0099', source: 'infer(Missing {})' },
+      { code: 'SEM0099', source: 'inferUnknown()' },
+      { code: 'SEM0052', source: 'resultOnly()' },
+      { code: 'SEM0074', source: 'inverseRows<Clock>()' },
+    ])
+  }),
+)
