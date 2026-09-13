@@ -15,6 +15,7 @@ import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { nativeCorpus, type NativeRun } from './support/corpus.js'
+import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
 const defaultClang = (): string => {
@@ -151,6 +152,8 @@ const selectedNativeCases = new Set(
 const selectedCorpus = shardedCorpus.filter(
   (program) => selectedNativeCases.size === 0 || selectedNativeCases.has(program.name),
 )
+const runHttpValuesWasm =
+  selectedNativeCases.has('http-values') || (selectedNativeCases.size === 0 && runFixedTests)
 
 it('finds every requested native corpus case', () => {
   assert.deepStrictEqual(
@@ -449,6 +452,43 @@ it.effect.each(selectedCorpus)(
     }),
   1_500_000,
 )
+
+it.effect.skipIf(!runHttpValuesWasm)(
+  'runs the shared HTTP values corpus case through LLVM-to-Wasm',
+  () =>
+    Effect.gen(function* () {
+      const outcome = yield* Driver.compile({
+        compilation: {
+          root: SourceFile.make('memory/http-values-wasm', ascii(httpValuesAcceptanceSource)),
+          target: 'wasm32-unknown-unknown',
+        },
+        toolchain,
+        optimization: 'release',
+        destination: join(destinationRoot, 'http-values.wasm'),
+        cache: false,
+        artifactKind: 'WebAssemblyModule',
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.strictEqual(
+        outcome._tag,
+        'Compiled',
+        outcome._tag === 'Rejected'
+          ? outcome.diagnostics
+              .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+              .join('\n')
+          : outcome._tag,
+      )
+      if (outcome._tag !== 'Compiled') return
+      yield* Effect.sync(() => {
+        const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
+        assert.deepEqual(WebAssembly.Module.imports(module), [])
+        const main = new WebAssembly.Instance(module).exports['main']
+        assert.isFunction(main)
+        if (typeof main === 'function') assert.strictEqual(main(), 0)
+      })
+    }),
+  600_000,
+)
+
 it.effect.skipIf(!runFixedTests)(
   'fails to link a foreign symbol nothing defines and keeps the linker output',
   () =>

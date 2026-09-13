@@ -1,0 +1,631 @@
+//! HTTP request-target forms, authority validation, URI conversion, and Host selection.
+//!
+//! # When to use
+//!
+//! Use [`RequestTarget.parse`] for received or already serialized targets and [`RequestTarget.fromUri`]
+//! for outgoing origin- or absolute-form bytes. Use [`validateRequestHost`] before server routing.
+//!
+//! # Details
+//!
+//! Parsing preserves accepted spelling and percent escapes. URI conversion deliberately omits a
+//! fragment, while raw target parsing rejects one. No operation resolves DNS or connects.
+
+import silk.http {
+  Header,
+  LimitKind,
+  Method,
+  ValueComponent,
+  ValueError,
+  ValueReason,
+  Version,
+}
+import silk.http_headers { HeaderIterator, Headers }
+import silk.option { Option }
+import silk.result { Result }
+import silk.slice { Slice }
+import silk.string { String }
+import silk.u16
+import silk.u8
+import silk.uri { Uri }
+import silk.uri_reference { Component, ParseError, UriReference }
+import silk.usize
+
+fn failure(reason: ValueReason, component: ValueComponent, offset: usize) -> ValueError {
+  return ValueError {
+    reason: reason,
+    component: component,
+    fieldIndex: Option.none<usize>(),
+    offset: offset,
+  }
+}
+
+fn indexedFailure(
+  reason: ValueReason,
+  component: ValueComponent,
+  fieldIndex: usize,
+  offset: usize,
+) -> ValueError {
+  return ValueError {
+    reason: reason,
+    component: component,
+    fieldIndex: Option.some<usize>(fieldIndex),
+    offset: offset,
+  }
+}
+
+fn limitFailure(
+  component: ValueComponent,
+  limit: LimitKind,
+  allowed: usize,
+  attempted: usize,
+) -> ValueError {
+  return failure(
+    ValueReason.LimitExceeded { limit: limit, allowed: allowed, attempted: attempted },
+    component,
+    attempted,
+  )
+}
+
+fn outputFailure(component: ValueComponent, required: usize, available: usize) -> ValueError {
+  return failure(
+    ValueReason.OutputTooSmall { required: required, available: available },
+    component,
+    available,
+  )
+}
+
+fn sizeFailure(component: ValueComponent) -> ValueError {
+  return failure(ValueReason.SizeOverflow, component, usize.MAX)
+}
+
+/// A URI conversion request-target form.
+pub enum TargetForm {
+  /// Origin-form path plus optional query.
+  Origin,
+  /// Absolute-form URI without a fragment.
+  Absolute,
+}
+
+/// A validated HTTP authority retaining lexical host and optional port spelling.
+pub struct HttpAuthority<'text> {
+  textValue: string<'text>
+  hostValue: string<'text>
+  portValue: HttpPort<'text>
+}
+
+impl<'text> Copy for HttpAuthority<'text> {}
+
+impl<'text> HttpAuthority<'text> {
+  /// Validates an authority without userinfo, preserving bracketed IP literals.
+  pub fn parse(text: string<'text>) -> Result<HttpAuthority<'text>, ValueError> {
+    let bytes = String.utf8Bytes(text)
+    let mut index = usize.ZERO
+    while index < bytes.length {
+      let byte = bytes[index]
+      if byte < 33 || byte > 126 || byte == 64 {
+        return Result.failResult<HttpAuthority<'text>, ValueError>(authorityFailure(index))
+      }
+      index = index + usize.ONE
+    }
+    let mut hostEnd = bytes.length
+    let mut portStart = Option.none<usize>()
+    if bytes.length > usize.ZERO && bytes[usize.ZERO] == 91 {
+      index = usize.ONE
+      while index < bytes.length && bytes[index] != 93 { index = index + usize.ONE }
+      if index >= bytes.length {
+        return Result.failResult<HttpAuthority<'text>, ValueError>(authorityFailure(index))
+      }
+      hostEnd = index + usize.ONE
+      if hostEnd < bytes.length {
+        if bytes[hostEnd] != 58 {
+          return Result.failResult<HttpAuthority<'text>, ValueError>(authorityFailure(hostEnd))
+        }
+        portStart = Option.some<usize>(hostEnd + usize.ONE)
+      }
+    } else {
+      index = usize.ZERO
+      while index < bytes.length && bytes[index] != 58 { index = index + usize.ONE }
+      if index < bytes.length {
+        hostEnd = index
+        portStart = Option.some<usize>(index + usize.ONE)
+      }
+    }
+    let parsedPort = parsePort(bytes, move portStart)
+    let port = match move parsedPort {
+      Result<HttpPort<'text>, ValueError>.Failure { error } => {
+        return Result.failResult<HttpAuthority<'text>, ValueError>(move error)
+      }
+      Result<HttpPort<'text>, ValueError>.Success { value } => value
+    }
+    match move UriReference.validateComponent(text, Component.Authority) {
+      Option<ParseError>.Some { value } => {
+        return Result.failResult<HttpAuthority<'text>, ValueError>(authorityFailure(value.offset))
+      }
+      Option<ParseError>.None => {}
+    }
+    let hostBytes = Slice.view<u8>(bytes, usize.ZERO, hostEnd)
+    let host = unsafe String.fromUtf8Unchecked(hostBytes)
+    return Result.succeed<HttpAuthority<'text>, ValueError>(HttpAuthority<'text> {
+      textValue: text,
+      hostValue: host,
+      portValue: port,
+    })
+  }
+
+  /// Borrows the complete authority serialization.
+  pub fn format(self: &Self) -> string<'text> { return self.textValue }
+  /// Borrows the host, retaining brackets around an IP literal.
+  pub fn host(self: &Self) -> string<'text> { return self.hostValue }
+  /// Borrows optional port digits without the colon.
+  pub fn portText(self: &Self) -> Option<string<'text>> {
+    return match & self.portValue {
+      HttpPort<'text>.None => Option.none<string<'text>>()
+      HttpPort<'text>.Some {text, value: _} => Option.some<string<'text>>(text)
+    }
+  }
+  /// Returns the checked optional numeric port.
+  pub fn port(self: &Self) -> Option<u16> {
+    return match & self.portValue {
+      HttpPort<'text>.None => Option.none<u16>()
+      HttpPort<'text>.Some {text: _, value} => Option.some<u16>(value)
+    }
+  }
+}
+
+union HttpPort<'text> {
+  None,
+  Some { text: string<'text>, value: u16 },
+}
+
+impl<'text> Copy for HttpPort<'text> {}
+
+/// One of the four HTTP request-target forms.
+pub union RequestTarget<'text> {
+  /// Origin-form absolute path plus optional query.
+  Origin { text: string<'text> },
+  /// Absolute-form generic URI.
+  Absolute { uri: Uri<'text> },
+  /// CONNECT authority-form destination.
+  Authority { authority: HttpAuthority<'text> },
+  /// Server-wide OPTIONS asterisk-form.
+  Asterisk,
+}
+
+impl<'text> Copy for RequestTarget<'text> {}
+
+impl<'text> RequestTarget<'text> {
+  /// Parses one exact target form using method-specific admission rules.
+  pub fn parse(
+    method: &Method,
+    text: string<'text>,
+    maxBytes: usize,
+  ) -> Result<RequestTarget<'text>, ValueError> {
+    let bytes = String.utf8Bytes(text)
+    if bytes.length > maxBytes {
+      return Result.failResult<RequestTarget<'text>, ValueError>(limitFailure(
+        ValueComponent.Target,
+        LimitKind.TargetBytes,
+        maxBytes,
+        bytes.length,
+      ))
+    }
+    if bytes.length == usize.ZERO {
+      return Result.failResult<RequestTarget<'text>, ValueError>(targetFailure(usize.ZERO))
+    }
+    let mut index = usize.ZERO
+    while index < bytes.length {
+      if bytes[index] < 33 || bytes[index] > 126 {
+        return Result.failResult<RequestTarget<'text>, ValueError>(targetFailure(index))
+      }
+      if bytes[index] == 35 {
+        return Result.failResult<RequestTarget<'text>, ValueError>(targetFailure(index))
+      }
+      index = index + usize.ONE
+    }
+    let methodText = Method.format(method)
+    if text == "*" {
+      if methodText != "OPTIONS" {
+        return Result.failResult<RequestTarget<'text>, ValueError>(mismatch())
+      }
+      return Result.succeed<RequestTarget<'text>, ValueError>(RequestTarget<'text>.Asterisk)
+    }
+    if methodText == "CONNECT" {
+      let parsed = HttpAuthority.parse(text)
+      return match move parsed {
+        Result<HttpAuthority<'text>, ValueError>.Failure { error } => {
+          return Result.failResult<RequestTarget<'text>, ValueError>(move error)
+        }
+        Result<HttpAuthority<'text>, ValueError>.Success { value } => {
+          if String.byteLength(HttpAuthority.host(&value)) == usize.ZERO {
+            return Result.failResult<RequestTarget<'text>, ValueError>(authorityFailure(usize.ZERO))
+          }
+          return match move HttpAuthority.port(&value) {
+            Option<u16>.None => Result.failResult<RequestTarget<'text>, ValueError>(portFailure(bytes.length))
+            Option<u16>.Some { value: port } => {
+              if port == 0 {
+                return Result.failResult<RequestTarget<'text>, ValueError>(portFailure(bytes.length))
+              } else {
+                return Result.succeed<RequestTarget<'text>, ValueError>(RequestTarget<'text>.Authority {
+                  authority: value,
+                })
+              }
+            }
+          }
+        }
+      }
+    }
+    if bytes[usize.ZERO] == 47 {
+      let parsed = UriReference.parse(text)
+      return match move parsed {
+        Result<UriReference<'text>, ParseError>.Failure { error } => {
+          return Result.failResult<RequestTarget<'text>, ValueError>(targetFailure(error.offset))
+        }
+        Result<UriReference<'text>, ParseError>.Success { value } => {
+          if present(UriReference.scheme(&value)) || present(UriReference.authority(&value))
+            || present(UriReference.fragment(&value)) {
+            return Result.failResult<RequestTarget<'text>, ValueError>(targetFailure(usize.ZERO))
+          } else {
+            return Result.succeed<RequestTarget<'text>, ValueError>(RequestTarget<'text>.Origin { text: text })
+          }
+        }
+      }
+    }
+    let parsed = Uri.parse(text)
+    return match move parsed {
+      Result<Uri<'text>, ParseError>.Failure { error } => {
+        return Result.failResult<RequestTarget<'text>, ValueError>(targetFailure(error.offset))
+      }
+      Result<Uri<'text>, ParseError>.Success { value } => {
+        if present(Uri.fragment(&value)) {
+          return Result.failResult<RequestTarget<'text>, ValueError>(targetFailure(bytes.length))
+        }
+        if present(Uri.userinfo(&value)) {
+          return Result.failResult<RequestTarget<'text>, ValueError>(authorityFailure(usize.ZERO))
+        }
+        return Result.succeed<RequestTarget<'text>, ValueError>(RequestTarget<'text>.Absolute { uri: value })
+      }
+    }
+  }
+
+  /// Rejects a validated target form that does not match `method`.
+  pub fn validateForMethod(
+    method: &Method,
+    target: RequestTarget<'text>,
+  ) -> Result<(), ValueError> {
+    let methodText = Method.format(method)
+    match move target {
+      RequestTarget<'text>.Origin {text} => {
+        if methodText == "CONNECT" {
+          return Result.failResult<(), ValueError>(mismatch())
+        }
+      }
+      RequestTarget<'text>.Absolute {uri} => {
+        if methodText == "CONNECT" {
+          return Result.failResult<(), ValueError>(mismatch())
+        }
+      }
+      RequestTarget<'text>.Authority {authority} => {
+        if methodText != "CONNECT" {
+          return Result.failResult<(), ValueError>(mismatch())
+        }
+      }
+      RequestTarget<'text>.Asterisk => {
+        if methodText != "OPTIONS" {
+          return Result.failResult<(), ValueError>(mismatch())
+        }
+      }
+    }
+    return Result.succeed<(), ValueError>(())
+  }
+
+  /// Borrows the accepted lexical request target.
+  pub fn format(self: Self) -> string<'text> {
+    return match move self {
+      RequestTarget<'text>.Origin { text } => text
+      RequestTarget<'text>.Absolute { uri } => Uri.format(&uri)
+      RequestTarget<'text>.Authority { authority } => HttpAuthority.format(&authority)
+      RequestTarget<'text>.Asterisk => "*"
+    }
+  }
+
+  /// Serializes origin- or absolute-form from a generic URI, deliberately omitting its fragment.
+  pub fn fromUri(
+    uri: &Uri,
+    form: TargetForm,
+    output: &mut [u8],
+  ) -> Result<usize, ValueError> {
+    if present(Uri.userinfo(uri)) {
+      return Result.failResult<usize, ValueError>(authorityFailure(usize.ZERO))
+    }
+    let source = String.utf8Bytes(Uri.format(uri))
+    let path = String.utf8Bytes(Uri.path(uri))
+    let query = Uri.query(uri)
+    let mut required = usize.ZERO
+    if form == TargetForm.Origin {
+      required = path.length
+      if required == usize.ZERO { required = usize.ONE }
+      match & query {
+        Option<string>.None => {}
+        Option<string>.Some { value } => {
+          let withMarker = match move usize.checkedAdd(required, usize.ONE) {
+            Option<usize>.None => {
+              return Result.failResult<usize, ValueError>(sizeFailure(ValueComponent.Target))
+            }
+            Option<usize>.Some {value: size} => size
+          }
+          required = match move usize.checkedAdd(withMarker, String.byteLength(value)) {
+            Option<usize>.None => {
+              return Result.failResult<usize, ValueError>(sizeFailure(ValueComponent.Target))
+            }
+            Option<usize>.Some {value: size} => size
+          }
+        }
+      }
+    } else {
+      required = source.length
+      match move Uri.fragment(uri) {
+        Option<string>.None => {}
+        Option<string>.Some { value } => {
+          required = required - String.byteLength(value) - usize.ONE
+        }
+      }
+    }
+    if output.length < required {
+      return Result.failResult<usize, ValueError>(outputFailure(
+        ValueComponent.Target,
+        required,
+        output.length,
+      ))
+    }
+    if form == TargetForm.Absolute {
+      let written = copyBytes(&mut output, usize.ZERO, Slice.view<u8>(source, usize.ZERO, required))
+      drop written
+      return Result.succeed<usize, ValueError>(required)
+    }
+    let mut cursor = usize.ZERO
+    if path.length == usize.ZERO {
+      output[usize.ZERO] = 47
+      cursor = usize.ONE
+    } else {
+      cursor = copyBytes(&mut output, cursor, path)
+    }
+    match & query {
+      Option<string>.None => {}
+      Option<string>.Some { value } => {
+        output[cursor] = 63
+        cursor = cursor + usize.ONE
+        cursor = copyBytes(&mut output, cursor, String.utf8Bytes(value))
+      }
+    }
+    return Result.succeed<usize, ValueError>(cursor)
+  }
+}
+
+/// Validates Host cardinality and syntax, returning the optional parsed Host authority.
+pub fn validateRequestHost<'value>(
+  version: Version,
+  target: &RequestTarget,
+  headers: &Headers<'value>,
+) -> Result<Option<HttpAuthority<'value>>, ValueError> {
+  let mut iterator = Headers.getAll(headers, "Host")
+  let mut found = Option.none<HttpAuthority<'value>>()
+  let mut count = usize.ZERO
+  let mut done = false
+  while !done {
+    let next = HeaderIterator.next(&mut iterator)
+    match move next {
+      Option<Header<'value>>.None => {
+        done = true
+      }
+      Option<Header<'value>>.Some { value } => {
+        let fieldIndex = HeaderIterator.fieldIndex(&iterator)
+        count = count + usize.ONE
+        if count > usize.ONE {
+          return Result.failResult<Option<HttpAuthority<'value>>, ValueError>(indexedFailure(
+            ValueReason.DuplicateHost,
+            ValueComponent.Host,
+            fieldIndex,
+            usize.ZERO,
+          ))
+        }
+        let bytes = Header.value(&value)
+        let mut offset = usize.ZERO
+        while offset < bytes.length {
+          let byte = bytes[offset]
+          if byte < 33 || byte > 126 || byte == 64 {
+            return Result.failResult<Option<HttpAuthority<'value>>, ValueError>(indexedFailure(
+              ValueReason.InvalidAuthority,
+              ValueComponent.Host,
+              fieldIndex,
+              offset,
+            ))
+          }
+          offset = offset + usize.ONE
+        }
+        unsafe {
+          let text = String.fromUtf8Unchecked(bytes)
+          let parsed = HttpAuthority.parse(text)
+          match move parsed {
+            Result<HttpAuthority<'value>, ValueError>.Failure { error } => {
+              return Result.failResult<Option<HttpAuthority<'value>>, ValueError>(indexedFailure(
+                ValueReason.InvalidAuthority,
+                ValueComponent.Host,
+                fieldIndex,
+                error.offset,
+              ))
+            }
+            Result<HttpAuthority<'value>, ValueError>.Success { value: authority } => {
+              found = Option.some<HttpAuthority<'value>>(authority)
+            }
+          }
+        }
+      }
+    }
+  }
+  if count == usize.ZERO && version == Version.Http11 {
+    return Result.failResult<Option<HttpAuthority<'value>>, ValueError>(ValueError {
+      reason: ValueReason.MissingHost,
+      component: ValueComponent.Host,
+      fieldIndex: Option.none<usize>(),
+      offset: usize.ZERO,
+    })
+  }
+  return Result.succeed<Option<HttpAuthority<'value>>, ValueError>(move found)
+}
+
+/// Selects target authority for absolute/CONNECT and Host for origin/asterisk.
+pub fn effectiveAuthority<'value>(
+  target: RequestTarget<'value>,
+  host: Option<HttpAuthority<'value>>,
+) -> Result<Option<HttpAuthority<'value>>, ValueError> {
+  match move target {
+    RequestTarget<'value>.Authority { authority } => {
+      return Result.succeed<Option<HttpAuthority<'value>>, ValueError>(
+        Option.some<HttpAuthority<'value>>(authority),
+      )
+    }
+    RequestTarget<'value>.Absolute { uri } => {
+      match move Uri.authority(&uri) {
+        Option<string<'value>>.None => {
+          return Result.succeed<Option<HttpAuthority<'value>>, ValueError>(Option.none<HttpAuthority<'value>>())
+        }
+        Option<string<'value>>.Some { value } => {
+          let parsed = HttpAuthority.parse(value)
+          match move parsed {
+            Result<HttpAuthority<'value>, ValueError>.Failure { error } => {
+              return Result.failResult<Option<HttpAuthority<'value>>, ValueError>(move error)
+            }
+            Result<HttpAuthority<'value>, ValueError>.Success { value: authority } => {
+              return Result.succeed<Option<HttpAuthority<'value>>, ValueError>(
+                Option.some<HttpAuthority<'value>>(authority),
+              )
+            }
+          }
+        }
+      }
+    }
+    RequestTarget<'value>.Origin { text } => {
+      drop text
+      return Result.succeed<Option<HttpAuthority<'value>>, ValueError>(move host)
+    }
+    RequestTarget<'value>.Asterisk => {
+      return Result.succeed<Option<HttpAuthority<'value>>, ValueError>(move host)
+    }
+  }
+}
+
+/// Serializes outgoing Host from a URI authority after rejecting userinfo.
+pub fn hostForUri<'value>(uri: &Uri<'value>, output: &mut [u8]) -> Result<usize, ValueError> {
+  if present(Uri.userinfo(uri)) {
+    return Result.failResult<usize, ValueError>(authorityFailure(usize.ZERO))
+  }
+  return match move Uri.authority(uri) {
+    Option<string>.None => Result.failResult<usize, ValueError>(authorityFailure(usize.ZERO))
+    Option<string>.Some { value } => {
+      let required = String.byteLength(value)
+      let parsed = HttpAuthority.parse(value)
+      match move parsed {
+        Result<HttpAuthority<'value>, ValueError>.Failure { error } => {
+          return Result.failResult<usize, ValueError>(move error)
+        }
+        Result<HttpAuthority<'value>, ValueError>.Success { value: authority } => {
+          drop authority
+          if output.length < required {
+            return Result.failResult<usize, ValueError>(outputFailure(ValueComponent.Host, required, output.length))
+          } else {
+            return Result.succeed<usize, ValueError>(copyBytes(&mut output, usize.ZERO, String.utf8Bytes(value)))
+          }
+        }
+      }
+    }
+  }
+}
+
+fn parsePort<'text>(
+  bytes: &'text [u8],
+  start: Option<usize>,
+) -> Result<HttpPort<'text>, ValueError> {
+  return match move start {
+    Option<usize>.None => Result.succeed<HttpPort<'text>, ValueError>(HttpPort<'text>.None)
+    Option<usize>.Some { value: offset } => {
+      if offset >= bytes.length {
+        return Result.failResult<HttpPort<'text>, ValueError>(portFailure(offset))
+      }
+      let mut numeric = usize.ZERO
+      let mut index = offset
+      while index < bytes.length {
+        let byte = bytes[index]
+        if byte < 48 || byte > 57 {
+          return Result.failResult<HttpPort<'text>, ValueError>(portFailure(index))
+        }
+        let digit = u8.toUsize(byte - 48)
+        if numeric > 6553 || (numeric == 6553 && digit > 5) {
+          return Result.failResult<HttpPort<'text>, ValueError>(portFailure(index))
+        }
+        numeric = numeric * 10 + digit
+        index = index + usize.ONE
+      }
+      let portBytes = Slice.view<u8>(bytes, offset, bytes.length - offset)
+      let portText = unsafe String.fromUtf8Unchecked(portBytes)
+      return Result.succeed<HttpPort<'text>, ValueError>(HttpPort<'text>.Some {
+        text: portText,
+        value: usize.toU16(numeric),
+      })
+    }
+  }
+}
+
+fn present<T>(option: Option<T>) -> bool {
+  return match move option {
+    Option<T>.None => false
+    Option<T>.Some { value: item } => {
+      drop item
+      return true
+    }
+  }
+}
+
+fn targetFailure(offset: usize) -> ValueError {
+  return ValueError {
+    reason: ValueReason.InvalidTarget,
+    component: ValueComponent.Target,
+    fieldIndex: Option.none<usize>(),
+    offset: offset,
+  }
+}
+
+fn authorityFailure(offset: usize) -> ValueError {
+  return ValueError {
+    reason: ValueReason.InvalidAuthority,
+    component: ValueComponent.Authority,
+    fieldIndex: Option.none<usize>(),
+    offset: offset,
+  }
+}
+
+fn portFailure(offset: usize) -> ValueError {
+  return ValueError {
+    reason: ValueReason.InvalidPort,
+    component: ValueComponent.Authority,
+    fieldIndex: Option.none<usize>(),
+    offset: offset,
+  }
+}
+
+fn mismatch() -> ValueError {
+  return ValueError {
+    reason: ValueReason.MethodTargetMismatch,
+    component: ValueComponent.Target,
+    fieldIndex: Option.none<usize>(),
+    offset: usize.ZERO,
+  }
+}
+
+fn copyBytes(output: &mut [u8], start: usize, source: &[u8]) -> usize {
+  let mut index = usize.ZERO
+  while index < source.length {
+    output[start + index] = source[index]
+    index = index + usize.ONE
+  }
+  return start + source.length
+}

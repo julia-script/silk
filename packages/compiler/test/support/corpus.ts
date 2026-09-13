@@ -47,6 +47,7 @@ import { tlsConnectionAcceptanceSource } from './tlsConnectionAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
+import { httpValuesAcceptanceSource } from './httpValuesAcceptance.js'
 import { ecdsaP256AcceptanceSource } from './ecdsaP256Acceptance.js'
 import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
@@ -6296,6 +6297,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'uri-rfc3986',
     source: uriAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-values',
+    source: httpValuesAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
   },
   {

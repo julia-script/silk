@@ -553,6 +553,55 @@ username/password interpretation, service lookup, and canonicalization are separ
 [percent coding](../../../../packages/compiler/stdlib/silk/uri_percent.silk),
 [component construction](../../../../packages/compiler/stdlib/silk/uri_components.silk).
 
+### STDLIB-010 — HTTP/1.x values preserve bytes, order, and ownership
+
+**Status:** Confirmed
+
+The public HTTP value surface is split into three actors. `silk.http` owns HTTP/1.0 and HTTP/1.1
+versions, open case-sensitive method tokens, status codes from 100 through 599, validated fields,
+and request/response heads. `silk.http_headers` owns ordered borrowed and owned collections,
+lookups, metadata iteration, and field-line formatting. `silk.http_target` owns origin, absolute,
+authority, and asterisk request-target forms, HTTP authority validation, URI conversion, and Host
+selection. All are ordinary target-neutral Silk declarations; there is no HTTP intrinsic or
+target-provider requirement.
+
+Borrowed values retain the caller's exact method spelling, field-name case, raw field-value octets,
+target serialization, and optional reason bytes. Field values may be empty and may contain HTAB or
+obs-text, but reject CR, LF, NUL, DEL, other controls, and leading or trailing OWS. Header lookup is
+ASCII case-insensitive, preserves insertion order, and never concatenates duplicates; this keeps
+fields such as Set-Cookie distinct. Formatting writes only `name: value\r\n` field lines. It sizes
+the complete result before mutation and leaves an insufficient caller buffer unchanged.
+
+Every constructor accepts explicit finite limits for the dimensions it can consume. Collection and
+owned-copy limits distinguish method, target, name, value, field-count, aggregate field-byte, and
+owned-storage budgets. Checked addition reports representation overflow separately. Owned headers
+and heads copy bytes plus offsets into affine storage; their views and iterators borrow that owner,
+so neither can escape it. Semantic validation and sizing complete before the first allocation, and
+allocation failure remains the standard `OutOfMemoryError` Effect channel.
+
+Raw request-target parsing rejects fragments. URI conversion supports origin- and absolute-form,
+omits a URI fragment, emits `/` for an empty origin path, and retains a present empty query.
+Authorities reject userinfo; CONNECT requires a nonempty host and a numeric port from 1 through
+65535, while `*` is exclusive to OPTIONS. HTTP/1.1 requires exactly one valid Host field for every
+request. An authority carried by absolute- or authority-form takes precedence over a different but
+valid Host value.
+
+Connection, Content-Encoding, and Transfer-Encoding metadata are exposed as lazy ordered token
+views with source field and byte offsets on failure. Unknown valid tokens remain values. These
+views deliberately do not decide message framing, content-length precedence, decoder selection,
+connection reuse, or transport behavior.
+
+**Boundary:** This layer does not parse a wire head, serialize a start line or complete head, frame
+a body, decode content, manage trailers or connections, resolve DNS/IDNA, impose HTTP(S) network
+scheme policy, or implement a client, server, or proxy exchange. Those behaviors remain with the
+dependent HTTP issues rather than accruing hidden policy here.
+
+**Evidence:** [HTTP values](../../../../packages/compiler/stdlib/silk/http.silk),
+[ordered headers](../../../../packages/compiler/stdlib/silk/http_headers.silk),
+[request targets](../../../../packages/compiler/stdlib/silk/http_target.silk),
+[shared acceptance](../../../../packages/compiler/test/support/httpValuesAcceptance.ts), and
+[pinned Zig comparison fixture](../../../../packages/compiler/test/fixtures/http-values/comparison.json).
+
 ## Target providers and entry closure
 
 ### PROVIDER-001 — Target providers are ordinary explicit modules
