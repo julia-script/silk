@@ -6,6 +6,7 @@ import silk.buffered_output {BufferedOutput}
 import silk.byte_duplex {ByteDuplex, ReadTransfer}
 import silk.bytes {Bytes}
 import silk.effect {Effect}
+import silk.layout {Layout}
 import silk.memory_byte_duplex {MemoryByteDuplex, MemoryByteDuplexPhase, MemoryReadEvent, MemoryWriteAction, MemoryWriteEvent}
 import silk.monotonic_clock {MonotonicClock}
 import silk.option {Option}
@@ -25,6 +26,16 @@ impl MonotonicClock for FixedClock {
 }
 
 struct FailingWriter { calls: usize }
+
+struct CountingAllocator { calls: usize }
+
+effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
+  self.calls = self.calls + usize.ONE
+  let mut system = Allocator.systemAllocatorProvider()
+  return run Allocator.allocate(move layout) |> Effect.provideMut<Allocator>(&mut system)
+}
+
+impl Allocator for CountingAllocator { allocate: CountingAllocator.allocate }
 
 effect fn rejectWrite(self: &mut FailingWriter, values: &[u8]) -> () ! WriterError {
   drop values
@@ -52,7 +63,9 @@ fn equal(actual: &[u8], expected: &[u8]) -> bool {
 fn failureCode(failure: BufferError) -> usize {
   return match move failure {
     BufferError.ReadFailed {progress, error} => { drop error return 100 + progress }
-    BufferError.WriteFailed {progress, error} => { drop error return 200 + progress }
+    BufferError.WriteFailed {accepted, drained, error} => {
+      drop drained drop error return 200 + accepted
+    }
     BufferError.InputFailed {progress, error} => { drop error return 300 + progress }
     BufferError.UnknownExternalTransfer {progress, error} => { drop error return 400 + progress }
     BufferError.UnexpectedEnd {progress} => 500 + progress
@@ -79,9 +92,59 @@ fn fillResultCode(result: Result<FillOutcome, BufferError>) -> usize {
   }
 }
 
+fn writeFailureMatches(
+  result: Result<(), BufferError>,
+  accepted: usize,
+  drained: usize,
+) -> bool {
+  return match move result {
+    Result<(), BufferError>.Success {value} => { drop value return false }
+    Result<(), BufferError>.Failure {error} => match move error {
+      BufferError.WriteFailed {accepted: actualAccepted, drained: actualDrained, error: cause} => {
+        drop cause
+        return actualAccepted == accepted && actualDrained == drained
+      }
+      BufferError.ReadFailed {progress, error: readCause} => { drop progress drop readCause return false }
+      BufferError.InputFailed {progress, error: inputCause} => { drop progress drop inputCause return false }
+      BufferError.UnknownExternalTransfer {progress, error: writerCause} => { drop progress drop writerCause return false }
+      BufferError.UnexpectedEnd {progress} => { drop progress return false }
+      BufferError.InvalidCapacity {capacity} => { drop capacity return false }
+      BufferError.BufferTooSmall {requested, capacity} => { drop requested drop capacity return false }
+      BufferError.InvalidConsumption {requested, available} => { drop requested drop available return false }
+      BufferError.InvalidReadCount {count, limit} => { drop count drop limit return false }
+      BufferError.LengthOverflow => false
+      BufferError.Terminal => false
+    }
+  }
+}
+
+fn constructionFailureMatches(result: Result<i32, BufferError | OutOfMemoryError>) -> bool {
+  return match move result {
+    Result<i32, BufferError | OutOfMemoryError>.Success {value} => { drop value return false }
+    Result<i32, BufferError | OutOfMemoryError>.Failure {error} => match move error {
+      OutOfMemoryError {} => false
+      BufferError.InvalidCapacity {capacity} => capacity == usize.ZERO
+      BufferError.BufferTooSmall {requested, capacity} => { drop requested drop capacity return false }
+      BufferError.InvalidConsumption {requested, available} => { drop requested drop available return false }
+      BufferError.InvalidReadCount {count, limit} => { drop count drop limit return false }
+      BufferError.UnexpectedEnd {progress} => { drop progress return false }
+      BufferError.ReadFailed {progress, error: readCause} => { drop progress drop readCause return false }
+      BufferError.InputFailed {progress, error: inputCause} => { drop progress drop inputCause return false }
+      BufferError.WriteFailed {accepted, drained, error: writeCause} => {
+        drop accepted drop drained drop writeCause return false
+      }
+      BufferError.UnknownExternalTransfer {progress, error: writerCause} => {
+        drop progress drop writerCause return false
+      }
+      BufferError.LengthOverflow => false
+      BufferError.Terminal => false
+    }
+  }
+}
+
 effect<'session> fn exercise<'session, P>(
   session: &'session mut BufferedDuplex<'session, P>,
-) -> i32 ! BufferError ? &mut MonotonicClock
+) -> i32 ! BufferError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock
 where &'session mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   let oversized = run Effect.result(BufferedDuplex.fill(
     &mut session.*,
@@ -124,9 +187,53 @@ where &'session mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monotonic
     FillOutcome.End {available: remainingAtStickyEnd} => remainingAtStickyEnd
   }
   if stickyEnd != usize.ZERO { return 9 }
-  run BufferedDuplex.writeAll(&mut session.*, b"abcd", Option.none<Instant>())
+  let firstOutput = run Bytes.copy(&b"ab")
+  let secondOutput = run Bytes.copy(&b"cd")
+  let outputs: [Bytes; 2] = [move firstOutput, move secondOutput]
+  run BufferedDuplex.writeVecAll(&mut session.*, &outputs, Option.none<Instant>())
+  drop outputs
   run BufferedDuplex.finish(&mut session.*, Option.none<Instant>())
   return 42
+}
+
+effect<'session> fn readFailureStopsWrites<'session, P>(
+  session: &'session mut BufferedDuplex<'session, P>,
+) -> bool ! BufferError ? &mut MonotonicClock
+where &'session mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let mut output: [u8; 4] = [0, 0, 0, 0]
+  let reading = run Effect.result(BufferedDuplex.readExact(
+    &mut session.*,
+    &mut output,
+    Option.none<Instant>(),
+  ))
+  if unitResultCode(move reading) != 102 { return false }
+  let writing = run Effect.result(BufferedDuplex.writeSome(
+    &mut session.*,
+    b"x",
+    Option.none<Instant>(),
+  ))
+  return match move writing {
+    Result<usize, BufferError>.Success {value} => { drop value return false }
+    Result<usize, BufferError>.Failure {error} => failureCode(move error) == 1100
+  }
+}
+
+effect<'session> fn writeFailureStopsReads<'session, P>(
+  session: &'session mut BufferedDuplex<'session, P>,
+) -> bool ! BufferError ? &mut MonotonicClock
+where &'session mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let writing = run Effect.result(BufferedDuplex.writeAll(
+    &mut session.*,
+    b"abcd",
+    Option.none<Instant>(),
+  ))
+  if !writeFailureMatches(move writing, 2, usize.ONE) { return false }
+  let reading = run Effect.result(BufferedDuplex.fill(
+    &mut session.*,
+    usize.ONE,
+    Option.none<Instant>(),
+  ))
+  return fillResultCode(move reading) == 1100
 }
 
 effect<'session> fn abandon<'session, P>(
@@ -242,12 +349,55 @@ effect fn failingOutputProvider() -> MemoryByteDuplex
   )
 }
 
+effect fn failingSessionInputProvider() -> MemoryByteDuplex
+! OutOfMemoryError
+? &mut Allocator {
+  let bytes = run Bytes.copy(&b"ab")
+  let mut reads = Vector.make<MemoryReadEvent>()
+  run Vector.append<MemoryReadEvent>(&mut reads, MemoryReadEvent.Data {
+    readyAt: SystemClock.make(0, 0),
+    bytes: move bytes,
+  })
+  run Vector.append<MemoryReadEvent>(&mut reads, MemoryReadEvent.Failure {
+    readyAt: SystemClock.make(0, 0),
+    code: 31,
+  })
+  return run MemoryByteDuplex.make(
+    move reads,
+    Vector.make<MemoryWriteEvent>(),
+    usize.ONE,
+    4,
+    Option.none<i32>(),
+  )
+}
+
+effect fn failingSessionOutputProvider() -> MemoryByteDuplex
+! OutOfMemoryError
+? &mut Allocator {
+  let bytes = run Bytes.copy(&b"z")
+  let mut reads = Vector.make<MemoryReadEvent>()
+  run Vector.append<MemoryReadEvent>(&mut reads, MemoryReadEvent.Data {
+    readyAt: SystemClock.make(0, 0),
+    bytes: move bytes,
+  })
+  let mut writes = Vector.make<MemoryWriteEvent>()
+  run Vector.append<MemoryWriteEvent>(&mut writes, MemoryWriteEvent {
+    readyAt: SystemClock.make(0, 0),
+    action: MemoryWriteAction.Accept {count: usize.ONE},
+  })
+  run Vector.append<MemoryWriteEvent>(&mut writes, MemoryWriteEvent {
+    readyAt: SystemClock.make(0, 0),
+    action: MemoryWriteAction.Failure {code: 32},
+  })
+  return run MemoryByteDuplex.make(move reads, move writes, 4, 6, Option.none<i32>())
+}
+
 effect fn program() -> i32 ! BufferError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut clock = FixedClock {}
   let mut provider = run filledProvider()
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let result = run withBufferedCapacity<i32, BufferError>(
+  let result = run withBufferedCapacity<i32, BufferError | OutOfMemoryError>(
     &mut provider,
     8,
     3,
@@ -305,15 +455,15 @@ effect fn program() -> i32 ! BufferError | OutOfMemoryError {
     |> Effect.provideMut<Allocator>(&mut allocator)
   let mut output = run BufferedOutput.make(2)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let accepted = BufferedOutput.writeAll(&mut output, b"ab", Option.none<Instant>())
+  let buffered = BufferedOutput.writeAll(&mut output, b"ab", Option.none<Instant>())
     |> Effect.provideMut<ByteDuplex>(&mut failingOutput)
     |> Effect.provideMut<MonotonicClock>(&mut clock)
-  run accepted
+  run buffered
   let flush = BufferedOutput.flush(&mut output, Option.none<Instant>())
     |> Effect.provideMut<ByteDuplex>(&mut failingOutput)
     |> Effect.provideMut<MonotonicClock>(&mut clock)
   let outputResult = run Effect.result(move flush)
-  if unitResultCode(move outputResult) != 201 { return 53 }
+  if !writeFailureMatches(move outputResult, usize.ZERO, usize.ONE) { return 53 }
   if !BufferedOutput.isTerminal(&output) { return 54 }
   let emitted = MemoryByteDuplex.outbound(&failingOutput)
   if !equal(emitted, b"a") { drop emitted return 55 }
@@ -328,6 +478,49 @@ effect fn program() -> i32 ! BufferError | OutOfMemoryError {
   if unitResultCode(move writerResult) != 402 { return 56 }
   if !BufferedOutput.isTerminal(&writerOutput) { return 57 }
   if writer.calls != usize.ONE { return 58 }
+
+  let mut constructionProvider = run emptyProvider()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut allocationAudit = CountingAllocator {calls: usize.ZERO}
+  let construction = withBufferedCapacity<i32, BufferError>(
+    &mut constructionProvider,
+    4,
+    usize.ZERO,
+    abandon,
+  )
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocationAudit)
+  let constructionResult = run Effect.result(move construction)
+  if !constructionFailureMatches(move constructionResult) { return 61 }
+  if allocationAudit.calls != usize.ZERO { return 62 }
+  if MemoryByteDuplex.closeAttempts(&constructionProvider) != usize.ZERO { return 63 }
+
+  let mut failedReadSession = run failingSessionInputProvider()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let readSession = run withBufferedCapacity<bool, BufferError>(
+    &mut failedReadSession,
+    4,
+    2,
+    readFailureStopsWrites,
+  )
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if !readSession { return 64 }
+  let readSessionOutbound = MemoryByteDuplex.outbound(&failedReadSession)
+  if readSessionOutbound.length != usize.ZERO { drop readSessionOutbound return 65 }
+  drop readSessionOutbound
+
+  let mut failedWriteSession = run failingSessionOutputProvider()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let writeSession = run withBufferedCapacity<bool, BufferError>(
+    &mut failedWriteSession,
+    4,
+    2,
+    writeFailureStopsReads,
+  )
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if !writeSession { return 66 }
   return 0
 }
 

@@ -35,8 +35,15 @@ pub union BufferError {
   ReadFailed { pub progress: usize, pub error: ByteIoError },
   /// A StandardInput read failed after `progress` bytes had already been copied by this operation.
   InputFailed { pub progress: usize, pub error: StreamReadError },
-  /// A ByteDuplex write or flush failed after the reported aggregate accepted prefix.
-  WriteFailed { pub progress: usize, pub error: ByteIoError },
+  /// A ByteDuplex write or flush failed after accepting a caller prefix and draining pending bytes.
+  WriteFailed {
+    /// The exact current caller-input prefix accepted into buffered ownership.
+    pub accepted: usize,
+    /// The exact pending prefix acknowledged by the transport during the failing drain operation.
+    pub drained: usize,
+    /// The underlying transport failure.
+    pub error: ByteIoError,
+  },
   /// Writer failed an all-or-error call after earlier complete arguments were accepted.
   UnknownExternalTransfer { pub progress: usize, pub error: WriterError },
   /// Finite vector-length arithmetic overflowed before output.
@@ -398,8 +405,9 @@ fn addReadProgress(failure: BufferError, prior: usize) -> BufferError {
       count: count,
       limit: limit,
     }
-    BufferError.WriteFailed {progress, error: cause} => BufferError.WriteFailed {
-      progress: progress,
+    BufferError.WriteFailed {accepted, drained, error: cause} => BufferError.WriteFailed {
+      accepted: accepted,
+      drained: drained,
       error: move cause,
     }
     BufferError.UnknownExternalTransfer {progress, error: cause} => BufferError.UnknownExternalTransfer {

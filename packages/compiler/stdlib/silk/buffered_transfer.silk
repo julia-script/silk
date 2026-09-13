@@ -125,8 +125,9 @@ fn addProgress(failure: BufferError, prior: usize) -> BufferError {
       progress: prior + progress,
       error: move cause,
     }
-    BufferError.WriteFailed {progress, error: cause} => BufferError.WriteFailed {
-      progress: prior + progress,
+    BufferError.WriteFailed {accepted, drained, error: cause} => BufferError.WriteFailed {
+      accepted: prior + accepted,
+      drained: drained,
       error: move cause,
     }
     BufferError.UnknownExternalTransfer {progress, error: cause} => BufferError.UnknownExternalTransfer {

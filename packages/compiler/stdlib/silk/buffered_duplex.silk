@@ -4,12 +4,14 @@
 //! the provider on every structured exit. Release intentionally performs no implicit flush.
 
 import silk.allocator {Allocator, OutOfMemoryError}
-import silk.buffered_input {BufferError, BufferedInput, DiscardOutcome, FillOutcome}
+import silk.buffered_input {BufferError, BufferedInput, DiscardOutcome, FillOutcome, MAX_CAPACITY}
 import silk.buffered_output {BufferedOutput}
 import silk.byte_duplex {ByteDuplex, ByteIoError, ReadTransfer}
+import silk.bytes {Bytes}
 import silk.effect {Effect}
 import silk.monotonic_clock {MonotonicClock}
 import silk.option {Option}
+import silk.result {Result}
 import silk.system_clock {Instant}
 import silk.usize
 
@@ -21,6 +23,7 @@ pub struct BufferedDuplex<'transport, P> {
   inputState: BufferedInput
   outputState: BufferedOutput
   transport: &'transport mut P
+  terminal: bool
 }
 
 impl<'transport, P> BufferedDuplex<'transport, P> {
@@ -37,6 +40,7 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
 
   /// Consumes exactly an initialized unread prefix.
   pub effect fn consume(self: &mut Self, count: usize) -> () ! BufferError {
+    if self.terminal { fail BufferError.Terminal }
     return run BufferedInput.consume(&mut self.inputState, count)
   }
 
@@ -49,8 +53,11 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    return run BufferedInput.fill(&mut self.inputState, minimum, move deadline)
+    if self.terminal { fail BufferError.Terminal }
+    let operation = BufferedInput.fill(&mut self.inputState, minimum, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let attempted = run Effect.result(move operation)
+    return run BufferedDuplex.settle(&mut self.*, move attempted)
   }
 
   /// Copies one retained or newly read prefix.
@@ -62,8 +69,11 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    return run BufferedInput.readSome(&mut self.inputState, move output, move deadline)
+    if self.terminal { fail BufferError.Terminal }
+    let operation = BufferedInput.readSome(&mut self.inputState, move output, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let attempted = run Effect.result(move operation)
+    return run BufferedDuplex.settle(&mut self.*, move attempted)
   }
 
   /// Fills the complete destination or reports its exact copied prefix.
@@ -75,8 +85,11 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    return run BufferedInput.readExact(&mut self.inputState, move output, move deadline)
+    if self.terminal { fail BufferError.Terminal }
+    let operation = BufferedInput.readExact(&mut self.inputState, move output, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let attempted = run Effect.result(move operation)
+    return run BufferedDuplex.settle(&mut self.*, move attempted)
   }
 
   /// Discards no more than one finite limit.
@@ -88,8 +101,11 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    return run BufferedInput.discardAtMost(&mut self.inputState, limit, move deadline)
+    if self.terminal { fail BufferError.Terminal }
+    let operation = BufferedInput.discardAtMost(&mut self.inputState, limit, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let attempted = run Effect.result(move operation)
+    return run BufferedDuplex.settle(&mut self.*, move attempted)
   }
 
   /// Discards exactly one finite count.
@@ -101,8 +117,11 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    return run BufferedInput.discardExact(&mut self.inputState, count, move deadline)
+    if self.terminal { fail BufferError.Terminal }
+    let operation = BufferedInput.discardExact(&mut self.inputState, count, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let attempted = run Effect.result(move operation)
+    return run BufferedDuplex.settle(&mut self.*, move attempted)
   }
 
   /// Accepts one positive input prefix into owned pending storage.
@@ -114,8 +133,11 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    return run BufferedOutput.writeSome(&mut self.outputState, move input, move deadline)
+    if self.terminal { fail BufferError.Terminal }
+    let operation = BufferedOutput.writeSome(&mut self.outputState, move input, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let attempted = run Effect.result(move operation)
+    return run BufferedDuplex.settle(&mut self.*, move attempted)
   }
 
   /// Accepts one complete finite input in order.
@@ -127,8 +149,27 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    return run BufferedOutput.writeAll(&mut self.outputState, move input, move deadline)
+    if self.terminal { fail BufferError.Terminal }
+    let operation = BufferedOutput.writeAll(&mut self.outputState, move input, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let attempted = run Effect.result(move operation)
+    return run BufferedDuplex.settle(&mut self.*, move attempted)
+  }
+
+  /// Accepts borrowed byte vectors in order after checking aggregate length arithmetic.
+  pub effect fn writeVecAll(
+    self: &mut Self,
+    inputs: &[Bytes],
+    deadline: Option<Instant>,
+  ) -> ()
+  ! BufferError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    if self.terminal { fail BufferError.Terminal }
+    let operation = BufferedOutput.writeVecAll(&mut self.outputState, move inputs, move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let attempted = run Effect.result(move operation)
+    return run BufferedDuplex.settle(&mut self.*, move attempted)
   }
 
   /// Writes pending bytes exactly once and then flushes the provider boundary.
@@ -139,8 +180,11 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    return run BufferedOutput.flush(&mut self.outputState, move deadline)
+    if self.terminal { fail BufferError.Terminal }
+    let operation = BufferedOutput.flush(&mut self.outputState, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let attempted = run Effect.result(move operation)
+    return run BufferedDuplex.settle(&mut self.*, move attempted)
   }
 
   /// Explicitly finishes pending output.
@@ -151,8 +195,21 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    return run BufferedOutput.finish(&mut self.outputState, move deadline)
+    if self.terminal { fail BufferError.Terminal }
+    let operation = BufferedOutput.finish(&mut self.outputState, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let attempted = run Effect.result(move operation)
+    return run BufferedDuplex.settle(&mut self.*, move attempted)
+  }
+
+  effect fn settle<A>(self: &mut Self, attempted: Result<A, BufferError>) -> A ! BufferError {
+    return match move attempted {
+      Result<A, BufferError>.Success {value} => move value
+      Result<A, BufferError>.Failure {error} => {
+        if terminalizesSession(&error) { self.terminal = true }
+        fail move error
+      }
+    }
   }
 }
 
@@ -194,6 +251,7 @@ pub effect fn withBufferedCapacity<'env, A, E, ?CallbackRequirements, P>(
 where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
   &'env mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
   CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  run validateCapacities(inputCapacity, outputCapacity)
   let lease = TransportLease<'env, P> {provider: move transport}
   let use = effect fn(owned: &mut TransportLease<'env, P>) -> A
   ! E | BufferError | OutOfMemoryError
@@ -231,8 +289,35 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     inputState: move input,
     outputState: move output,
     transport: &mut transport.*,
+    terminal: false,
   }
   return run callback(&mut session)
+}
+
+effect fn validateCapacities(inputCapacity: usize, outputCapacity: usize) -> () ! BufferError {
+  if inputCapacity == usize.ZERO || inputCapacity > MAX_CAPACITY {
+    fail BufferError.InvalidCapacity {capacity: inputCapacity}
+  }
+  if outputCapacity == usize.ZERO || outputCapacity > MAX_CAPACITY {
+    fail BufferError.InvalidCapacity {capacity: outputCapacity}
+  }
+  return ()
+}
+
+fn terminalizesSession(error: &BufferError) -> bool {
+  return match &error.* {
+    BufferError.ReadFailed {progress, error: cause} => true
+    BufferError.WriteFailed {accepted, drained, error: cause} => true
+    BufferError.Terminal => true
+    BufferError.InvalidCapacity {capacity} => false
+    BufferError.BufferTooSmall {requested, capacity} => false
+    BufferError.InvalidConsumption {requested, available} => false
+    BufferError.InvalidReadCount {count, limit} => true
+    BufferError.UnexpectedEnd {progress} => false
+    BufferError.InputFailed {progress, error: cause} => true
+    BufferError.UnknownExternalTransfer {progress, error: cause} => true
+    BufferError.LengthOverflow => false
+  }
 }
 
 effect fn discardCloseFailure(error: ByteIoError) -> () {

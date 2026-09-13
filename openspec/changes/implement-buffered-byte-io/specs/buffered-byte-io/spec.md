@@ -11,7 +11,9 @@ The standard library SHALL expose ordinary-source `BufferedInput`, `BufferedOutp
 `BufferedDuplex` actors. Allocated capacities MUST be between 1 and 1,048,576 bytes inclusive,
 MUST be validated before allocation, MUST allocate once through `Allocator`, and MUST never grow.
 Duplex convenience construction SHALL default each direction to 8,192 bytes. A zero or excessive
-capacity SHALL fail with `InvalidCapacity`. A memory-input view MAY borrow immutable caller storage.
+capacity SHALL fail with `InvalidCapacity`. Duplex construction SHALL validate both capacities
+before allocating either direction or acquiring the transport lease. A memory-input view MAY
+borrow immutable caller storage.
 
 #### Scenario: Reject invalid capacity before allocation
 
@@ -72,7 +74,9 @@ API SHALL provide no unbounded read-to-end or delimiter-reading convenience.
 For nonempty input, duplex `writeSome` SHALL accept one positive prefix into owned pending storage,
 flushing as necessary to make room; empty input SHALL return zero without I/O. `writeAll` and
 `writeVecAll` SHALL process finite inputs in order, validate aggregate length before output, and
-report aggregate progress on failure. `flush` SHALL advance its pending cursor by each exact
+report the exact caller-input prefix accepted on failure separately from the exact pending prefix
+drained during the failing transport operation. `BufferedDuplex` SHALL forward all three operations
+with the same deadline and provider contract. `flush` SHALL advance its pending cursor by each exact
 underlying successful write and then call the provider flush. `finish` SHALL explicitly flush.
 Scope exit and drop SHALL never implicitly flush or park.
 
@@ -93,9 +97,11 @@ Scope exit and drop SHALL never implicitly flush or park.
 
 ### Requirement: Failures make buffered sessions terminal
 
-Any underlying read, write, or flush failure SHALL make the affected session terminal and SHALL
-prevent retry on that or a replacement connection. Exact progress reported before failure SHALL be
-preserved separately from an uncertain current external transfer. A Writer-only adapter SHALL
+Any underlying read, write, or flush failure SHALL make the complete buffered duplex session
+terminal and SHALL prevent input and output retry on that or a replacement connection. Directional
+buffer cursors SHALL remain inspectable for diagnostics. Exact caller-input acceptance and pending
+transport-drain progress reported before failure SHALL remain separate from an uncertain current
+external transfer. A Writer-only adapter SHALL
 preserve Writer's all-or-error boundary: failed `Writer.writeAll` SHALL record unknown external
 progress, SHALL NOT fabricate a zero prefix, and SHALL make the output terminal. StandardInput and
 Writer adapters SHALL NOT independently close their borrowed providers.
@@ -103,7 +109,12 @@ Writer adapters SHALL NOT independently close their borrowed providers.
 #### Scenario: Retain known progress before provider failure
 
 - **WHEN** preceding short writes reported accepted prefixes and a later write fails
-- **THEN** the error preserves their aggregate count and the session rejects every later operation
+- **THEN** the error preserves the caller retry cursor separately from pending-drain progress and the session rejects every later operation
+
+#### Scenario: Terminalize both duplex directions
+
+- **WHEN** an underlying read fails or an underlying write or flush fails
+- **THEN** the opposite direction rejects its next operation without consulting the provider
 
 #### Scenario: Preserve unknown Writer progress
 

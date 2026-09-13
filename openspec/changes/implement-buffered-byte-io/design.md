@@ -27,8 +27,9 @@ higher-ranked scoped callbacks, and source-defined standard-library policy.
 
 `BufferedInput` owns one allocation plus `[start, end)` unread cursors and sticky terminal/end state.
 `BufferedOutput` owns one allocation plus pending cursors, terminal state, and external-progress
-certainty. `BufferedDuplex` combines both states with one exclusive concrete provider borrow for a
-higher-ranked callback. `BufferedTransfer` owns only transfer result/error data and algorithms.
+certainty. `BufferedDuplex` combines both states with one exclusive concrete provider borrow and a
+shared session-terminal gate for a higher-ranked callback. `BufferedTransfer` owns only transfer
+result/error data and algorithms.
 
 Keeping state owners separate makes input-only and output-only adapters possible without inventing
 unsupported directions. A monolithic protocol utility module was rejected because it would obscure
@@ -36,10 +37,12 @@ which mutation invalidates a peek and which actor owns pending bytes.
 
 ### Use one fully initialized fixed allocation per direction
 
-Construction validates capacity first, allocates one raw byte buffer through `Allocator`, initializes
-it once, and retains the same storage until drop. Input compacts unread bytes to offset zero only
-when it needs contiguous tail space. Output advances a pending start cursor after each exact
-provider acknowledgment and compacts only when future input needs the reclaimed prefix.
+Single-direction construction validates capacity first, allocates one raw byte buffer through
+`Allocator`, initializes it once, and retains the same storage until drop. Duplex construction
+validates both direction capacities before allocating either buffer or acquiring the lease. Input
+compacts unread bytes to offset zero only when it needs contiguous tail space. Output advances a
+pending start cursor after each exact provider acknowledgment and compacts only when future input
+needs the reclaimed prefix.
 
 A growable `Vector`/`Bytes` design was rejected because capacity would become an incidental rather
 than enforced contract. Per-operation scratch was rejected because transfer return paths must retain
@@ -48,12 +51,14 @@ unaccepted source bytes.
 ### Reify provider failures before mutating terminal state
 
 Repeated external operations run through `Effect.result`; success updates cursors, while any typed
-provider failure first marks the actor terminal and then returns a `BufferError` variant containing
-the exact earlier progress plus the original typed error. Writer failures use a separate unknown
+provider failure first marks the direction state and complete duplex session terminal and then
+returns a `BufferError` variant containing the exact caller-input prefix separately from pending
+transport-drain progress plus the original typed error. Writer failures use a separate unknown
 external-transfer variant because Writer intentionally exposes no partial prefix.
 
 This is more explicit than returning the underlying error row directly, but it is necessary for
-aggregate `writeAll`, exact reads, and transfer to preserve progress without fabricating certainty.
+aggregate `writeAll`, exact reads, and transfer to preserve the caller retry cursor without
+double-counting already buffered bytes or fabricating certainty.
 
 ### Scoped duplex closes but never flushes during release
 

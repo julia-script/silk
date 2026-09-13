@@ -99,7 +99,7 @@ impl BufferedOutput {
       let count = match move attempted {
         Result<usize, BufferError>.Success {value} => value
         Result<usize, BufferError>.Failure {error} => {
-          fail addWriteProgress(move error, accepted)
+          fail addCallerAcceptance(move error, accepted)
         }
       }
       accepted = accepted + count
@@ -136,7 +136,7 @@ impl BufferedOutput {
       match move attempted {
         Result<(), BufferError>.Success {value} => { drop value }
         Result<(), BufferError>.Failure {error} => {
-          fail addWriteProgress(move error, accepted)
+          fail addCallerAcceptance(move error, accepted)
         }
       }
       accepted = accepted + length
@@ -159,7 +159,11 @@ impl BufferedOutput {
       Result<(), ByteIoError>.Success {value} => { drop value return () }
       Result<(), ByteIoError>.Failure {error} => {
         self.terminal = true
-        fail BufferError.WriteFailed {progress: written, error: move error}
+        fail BufferError.WriteFailed {
+          accepted: usize.ZERO,
+          drained: written,
+          error: move error,
+        }
       }
     }
     return ()
@@ -205,7 +209,7 @@ impl BufferedOutput {
       let count = match move attempted {
         Result<usize, BufferError>.Success {value} => value
         Result<usize, BufferError>.Failure {error} => {
-          fail addWriteProgress(move error, accepted)
+          fail addCallerAcceptance(move error, accepted)
         }
       }
       accepted = accepted + count
@@ -255,7 +259,11 @@ effect fn drainPending(
       Result<usize, ByteIoError>.Success {value} => value
       Result<usize, ByteIoError>.Failure {error} => {
         output.terminal = true
-        fail BufferError.WriteFailed {progress: written, error: move error}
+        fail BufferError.WriteFailed {
+          accepted: usize.ZERO,
+          drained: written,
+          error: move error,
+        }
       }
     }
     output.start = output.start + count
@@ -334,10 +342,11 @@ fn copyDeadline(value: &Option<Instant>) -> Option<Instant> {
   }
 }
 
-fn addWriteProgress(failure: BufferError, prior: usize) -> BufferError {
+fn addCallerAcceptance(failure: BufferError, prior: usize) -> BufferError {
   return match move failure {
-    BufferError.WriteFailed {progress, error: cause} => BufferError.WriteFailed {
-      progress: prior + progress,
+    BufferError.WriteFailed {accepted, drained, error: cause} => BufferError.WriteFailed {
+      accepted: prior + accepted,
+      drained: drained,
       error: move cause,
     }
     BufferError.UnknownExternalTransfer {progress, error: cause} => BufferError.UnknownExternalTransfer {

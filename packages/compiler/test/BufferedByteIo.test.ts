@@ -59,7 +59,9 @@ pub effect fn ticketVectorOverflowProbe() -> bool {
       BufferError.UnexpectedEnd {progress} => { drop progress return false }
       BufferError.ReadFailed {progress, error: cause} => { drop progress drop cause return false }
       BufferError.InputFailed {progress, error: inputCause} => { drop progress drop inputCause return false }
-      BufferError.WriteFailed {progress, error: writeCause} => { drop progress drop writeCause return false }
+      BufferError.WriteFailed {accepted, drained, error: writeCause} => {
+        drop accepted drop drained drop writeCause return false
+      }
       BufferError.UnknownExternalTransfer {progress, error: writerCause} => { drop progress drop writerCause return false }
       BufferError.Terminal => false
     }
@@ -80,6 +82,7 @@ pub effect fn ticketMakeBuffered<'transport, P>(
     inputState: move input,
     outputState: move output,
     transport: move transport,
+    terminal: false,
   }
 }
 `
@@ -89,16 +92,35 @@ pub effect fn ticketMakeBuffered<'transport, P>(
 }
 
 const transferRuntimeProbe = `
-fn transferResultCode(result: Result<TransferOutcome, BufferError>) -> usize {
+fn transferFailureMatches(
+  result: Result<TransferOutcome, BufferError>,
+  accepted: usize,
+  drained: usize,
+) -> bool {
   return match move result {
-    Result<TransferOutcome, BufferError>.Success {value} => { drop value return usize.ZERO }
-    Result<TransferOutcome, BufferError>.Failure {error} => failureCode(move error)
+    Result<TransferOutcome, BufferError>.Success {value} => { drop value return false }
+    Result<TransferOutcome, BufferError>.Failure {error} => match move error {
+      BufferError.WriteFailed {accepted: actualAccepted, drained: actualDrained, error: cause} => {
+        drop cause
+        return actualAccepted == accepted && actualDrained == drained
+      }
+      BufferError.ReadFailed {progress, error: readCause} => { drop progress drop readCause return false }
+      BufferError.InputFailed {progress, error: inputCause} => { drop progress drop inputCause return false }
+      BufferError.UnknownExternalTransfer {progress, error: writerCause} => { drop progress drop writerCause return false }
+      BufferError.UnexpectedEnd {progress} => { drop progress return false }
+      BufferError.InvalidCapacity {capacity} => { drop capacity return false }
+      BufferError.BufferTooSmall {requested, capacity} => { drop requested drop capacity return false }
+      BufferError.InvalidConsumption {requested, available} => { drop requested drop available return false }
+      BufferError.InvalidReadCount {count, limit} => { drop count drop limit return false }
+      BufferError.LengthOverflow => false
+      BufferError.Terminal => false
+    }
   }
 }
 
 fn retainsTransferSuffix<'transport, P>(source: &BufferedDuplex<'transport, P>) -> bool {
   let retained = BufferedDuplex.peek(source)
-  return equal(retained, b"ef")
+  return equal(retained, b"cdef")
 }
 
 effect fn ticketTransferProbe() -> bool
@@ -119,10 +141,6 @@ effect fn ticketTransferProbe() -> bool
   )
 
   let mut writes = Vector.make<MemoryWriteEvent>()
-  run Vector.append<MemoryWriteEvent>(&mut writes, MemoryWriteEvent {
-    readyAt: SystemClock.make(0, 0),
-    action: MemoryWriteAction.Accept {count: usize.ONE},
-  })
   run Vector.append<MemoryWriteEvent>(&mut writes, MemoryWriteEvent {
     readyAt: SystemClock.make(0, 0),
     action: MemoryWriteAction.Accept {count: usize.ONE},
@@ -158,14 +176,14 @@ effect fn ticketTransferProbe() -> bool
     Option.none<Instant>(),
   )
   let attempted = run Effect.result(move transfer)
-  if transferResultCode(move attempted) != 204 { return false }
+  if !transferFailureMatches(move attempted, 2, usize.ONE) { return false }
   if !retainsTransferSuffix(&source) { return false }
   drop source
   drop destination
   if MemoryByteDuplex.audit(&sourceProvider).length != usize.ONE { return false }
-  if MemoryByteDuplex.audit(&destinationProvider).length != 3 { return false }
+  if MemoryByteDuplex.audit(&destinationProvider).length != 2 { return false }
   let emitted = MemoryByteDuplex.outbound(&destinationProvider)
-  if !equal(emitted, b"ab") { drop emitted return false }
+  if !equal(emitted, b"a") { drop emitted return false }
   drop emitted
   return true
 }
@@ -275,7 +293,23 @@ const publicSurfaceSource = `import silk.buffered_duplex {BufferedDuplex, DEFAUL
 import silk.buffered_input {BufferError, BufferedInput, DiscardOutcome, FillOutcome, MAX_CAPACITY}
 import silk.buffered_output {BufferedOutput}
 import silk.buffered_transfer {BufferedTransfer, TransferOutcome}
+import silk.byte_duplex {ByteDuplex}
+import silk.bytes {Bytes}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.system_clock {Instant}
 import silk.usize
+effect fn writeVectors<'session, P>(
+  session: &'session mut BufferedDuplex<'session, P>,
+  values: &[Bytes],
+) -> () ! BufferError ? &mut MonotonicClock
+where &'session mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  return run BufferedDuplex.writeVecAll(
+    &mut session.*,
+    move values,
+    Option.none<Instant>(),
+  )
+}
 pub fn main() -> i32 {
   return usize.toI32(DEFAULT_CAPACITY + MAX_CAPACITY - 1056768)
 }
@@ -395,7 +429,7 @@ it.effect(
 )
 
 it.effect(
-  'executes retained lookahead, short writes, zero-I/O cases, and nonflushing teardown on Wasm',
+  'executes the consolidated portable buffering contract on Wasm',
   () =>
     Effect.gen(function* () {
       const sources = new Map(

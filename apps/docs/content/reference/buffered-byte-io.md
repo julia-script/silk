@@ -9,7 +9,8 @@ transfer contract or turn `Writer` and `StandardInput` into a duplex service.
 `BufferedInput.make` and `BufferedOutput.make` accept capacities from 1 through 1,048,576 bytes.
 They validate the capacity before allocating, allocate one fully initialized buffer through the
 active `Allocator`, and never grow it. `BufferedDuplex.withBuffered` uses 8,192 bytes for each
-direction; `withBufferedCapacity` accepts explicit direction capacities.
+direction; `withBufferedCapacity` accepts explicit direction capacities and validates both before
+allocating either buffer or acquiring the transport lease.
 
 The duplex operations exclusively retain one concrete transport for the callback scope. The
 session and any slice returned by `peek` borrow that scope and cannot escape it. While a peek is
@@ -116,12 +117,18 @@ deadline parameter and without closing the caller-owned provider.
 `writeSome(input, deadline)` accepts a positive prefix into owned pending storage, flushing exact
 pending prefixes only when it needs space. Success means the session owns those bytes; it does not
 mean the peer application has received them. `writeAll` and `writeVecAll` preserve input order, and
-vector aggregate overflow is rejected before output.
+vector aggregate overflow is rejected before output. `BufferedDuplex.writeVecAll` forwards the same
+absolute deadline and private provider contract as the scalar write operations.
 
 `flush` advances its pending cursor after each exact successful `ByteDuplex.writeSome` count, then
-calls `ByteDuplex.flush`. Compaction never repeats a reported prefix. Any underlying read, write, or
-flush failure makes the corresponding direction terminal. `BufferError` preserves the aggregate
-progress known before failure and the complete typed provider error.
+calls `ByteDuplex.flush`. Compaction never repeats a reported prefix. `BufferError.WriteFailed`
+reports `accepted`, the exact current caller-input prefix owned by the buffer, separately from
+`drained`, the exact pending prefix acknowledged during the failing transport drain. This keeps the
+caller retry cursor independent from transport progress.
+
+Any underlying read, write, or flush failure makes the entire `BufferedDuplex` session terminal.
+The opposite direction rejects its next operation without consulting the provider, while `peek`,
+`unread`, and `pending` keep the direction-local state inspectable for diagnostics.
 
 Writer-only operations omit deadlines. Because `Writer.writeAll` is all-or-error, a failed call has
 unknown external progress. The adapter reports `UnknownExternalTransfer`; it never fabricates a
