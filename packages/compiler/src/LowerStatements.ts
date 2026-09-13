@@ -287,7 +287,10 @@ export const lowerSequence = (
     fn.ownerLoop = ownerLoop
     const following = lowerStatement(fn, statement, exits, ownerLoop, terminal, region)
     fn.ownerLoop = previousLoop
-    if (following === undefined) return undefined
+    if (following === undefined) {
+      fn.recordLoweringFailure('Statement', statement._tag, statement.span)
+      return undefined
+    }
     if (following === 'Terminated') return id
     region = following
   }

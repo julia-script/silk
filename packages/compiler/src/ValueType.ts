@@ -546,25 +546,88 @@ export const providerBindings = (
 export const sameSite = (left: Hir.CallableSiteId, right: Hir.CallableSiteId): boolean =>
   Hir.sameExecutableSite(left, right)
 
+const recontextualizedCallableEnvironment = (
+  fn: FunctionLowering,
+  section: Extract<Hir.Expression, { readonly _tag: 'CallableSection' }>,
+  type: Type.Callable,
+  substitution: Type.Substitution,
+  environment: Extract<Layout.CallableEnvironment, { readonly _tag: 'CallableEnvironment' }>,
+): Extract<Layout.CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> | undefined => {
+  // A second proof context can select the same runtime closure while giving its borrowed captures
+  // distinct source lifetimes. Rebind only semantic owner/type facts after proving every runtime
+  // type unchanged; physical placement and callable identity stay canonical.
+  if (Type.runtimeKey(environment.callable.type) !== Type.runtimeKey(type)) return undefined
+  const captureTypes = section.captures.flatMap((capture) =>
+    capture.value._tag === 'Unavailable'
+      ? []
+      : [Type.substitute(fn.semantic(capture.value.type), substitution)],
+  )
+  if (
+    captureTypes.some((capture) => !Type.isRuntimeConcrete(capture)) ||
+    captureTypes.length !== environment.callable.captures.length ||
+    captureTypes.some((capture, ordinal) => {
+      const planned = environment.callable.captures.at(ordinal)
+      return planned === undefined || Type.runtimeKey(capture) !== Type.runtimeKey(planned.type)
+    })
+  )
+    return undefined
+  const captures = environment.callable.captures.map((capture, ordinal) =>
+    Object.freeze({ ...capture, type: captureTypes.at(ordinal) ?? capture.type }),
+  )
+  const fields = environment.fields.map((field) => {
+    const capture = captures.find((candidate) => candidate.ordinal === field.ordinal)
+    return capture === undefined ? field : Object.freeze({ ...field, type: capture.type })
+  })
+  return Object.freeze({
+    ...environment,
+    callable: Object.freeze({
+      ...environment.callable,
+      owner: fn.owner.key,
+      captureTypes: Object.freeze(captureTypes),
+      captures: Object.freeze(captures),
+      type,
+      mode: type.mode,
+    }),
+    fields: Object.freeze(fields),
+  })
+}
+
 export const callableValueType = (
   fn: FunctionLowering,
   section: Extract<Hir.Expression, { readonly _tag: 'CallableSection' }>,
   applicationSubstitution: Type.Substitution = new Map(),
 ): Extract<Mir.Type, { readonly _tag: 'CallableValue' }> | undefined => {
-  const expected = Type.substitute(
-    fn.semantic(section.type),
-    new Map([...section.substitution, ...applicationSubstitution]),
-  )
+  const substitution = new Map([...section.substitution, ...applicationSubstitution])
+  const expected = Type.substitute(fn.semantic(section.type), substitution)
+  if (!Type.isCallable(expected)) return undefined
+  const identity = Hir.callableEnvironmentIdentity(section.site, {
+    declaration: fn.owner.key.declaration,
+    typeArguments: fn.owner.key.typeArguments,
+    staticArgumentKeys: Object.freeze(fn.owner.key.staticArguments.map(StaticValue.key)),
+  })
+  const identityKey = Type.runtimeCallableEnvironmentIdentityKey(identity)
   const candidates = fn.layout.callableEnvironments.filter(
     (
       candidate,
     ): candidate is Extract<Layout.CallableEnvironment, { readonly _tag: 'CallableEnvironment' }> =>
       candidate._tag === 'CallableEnvironment' &&
-      Instances.keyText(candidate.callable.owner) === Instances.keyText(fn.owner.key) &&
-      sameSite(candidate.callable.site, section.site) &&
-      (!Type.isRuntimeConcrete(expected) || Type.equals(candidate.callable.type, expected)),
+      Type.runtimeCallableEnvironmentIdentityKey(
+        Instances.callableEnvironmentIdentity(candidate.callable),
+      ) === identityKey &&
+      (!Type.isRuntimeConcrete(expected) ||
+        Type.runtimeKey(candidate.callable.type) === Type.runtimeKey(expected)),
   )
-  const environment = candidates.length === 1 ? candidates.at(0) : undefined
+  const planned =
+    candidates.find(
+      (candidate) =>
+        !Type.isRuntimeConcrete(expected) || Type.equals(candidate.callable.type, expected),
+    ) ?? candidates.at(0)
+  const environment =
+    planned === undefined ||
+    !Type.isRuntimeConcrete(expected) ||
+    Type.equals(planned.callable.type, expected)
+      ? planned
+      : recontextualizedCallableEnvironment(fn, section, expected, substitution, planned)
   if (environment === undefined) {
     return section.captures.length === 0 &&
       Type.isCallable(expected) &&

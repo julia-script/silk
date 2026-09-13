@@ -22,6 +22,12 @@ import {
   storedEffectValueType,
 } from './ValueType.js'
 
+export interface LoweringFailure {
+  readonly boundary: 'Expression' | 'Statement'
+  readonly construct: Hir.Expression['_tag'] | Hir.Statement['_tag']
+  readonly provenance: Mir.Provenance
+}
+
 export class FunctionLowering {
   /** Only the generated primitive runner may emit the terminal suspension origin. */
   builtinEffectRunner = false
@@ -69,6 +75,7 @@ export class FunctionLowering {
   private syntheticBorrowOrdinal = 0
   private replayBorrowSubstitution: Map<string, Hir.BorrowId> | undefined
   private readonly directBorrowSubstitution = new Map<string, Hir.BorrowId>()
+  loweringFailure: LoweringFailure | undefined
 
   constructor(
     readonly layout: Layout.Plan,
@@ -156,6 +163,18 @@ export class FunctionLowering {
 
   publish(region: Mir.Region): void {
     this.regions[region.id.ordinal] = region
+  }
+
+  recordLoweringFailure(
+    boundary: LoweringFailure['boundary'],
+    construct: LoweringFailure['construct'],
+    span: SourceSpan.SourceSpan,
+  ): void {
+    this.loweringFailure ??= Object.freeze({
+      boundary,
+      construct,
+      provenance: Object.freeze({ span, generated: false }),
+    })
   }
 
   capture<A>(body: () => A): readonly [A, ReadonlyArray<Mir.Operation>] {
@@ -274,7 +293,7 @@ export class FunctionLowering {
               call.target.declaration.name === implementation.name,
           )
     const expected = typeArguments?.filter((argument) => !Type.isHiddenExecutableArgument(argument))
-    const specialized =
+    const exactSpecialized =
       expected === undefined
         ? selected
         : selected.filter((call) => {
@@ -289,6 +308,27 @@ export class FunctionLowering {
               })
             )
           })
+    let usedRuntimeFallback = false
+    let specialized = exactSpecialized
+    if (expected !== undefined && exactSpecialized.length === 0) {
+      usedRuntimeFallback = true
+      // Runtime instance discovery deliberately coalesces proof-only caller lifetimes. If another
+      // proof context supplied the retained call shape, recover only its unique runtime-equivalent
+      // visible arguments so lowering also retains its hidden callable and Effect identities.
+      // Ambiguous physical targets remain unavailable.
+      const expectedRuntime = Type.runtimeArgumentKeys(expected)
+      specialized = selected.filter((call) => {
+        const actualRuntime = Type.runtimeArgumentKeys(
+          call.target.typeArguments.filter(
+            (argument) => !Type.isHiddenExecutableArgument(argument),
+          ),
+        )
+        return (
+          actualRuntime.length === expectedRuntime.length &&
+          actualRuntime.every((argument, ordinal) => argument === expectedRuntime.at(ordinal))
+        )
+      })
+    }
     const staticallySpecialized =
       staticArguments === undefined || staticArguments.length === 0
         ? specialized
@@ -300,6 +340,11 @@ export class FunctionLowering {
                 return wanted !== undefined && StaticValue.equals(argument, wanted)
               }),
           )
-    return staticallySpecialized.length === 1 ? staticallySpecialized.at(0) : undefined
+    if (staticallySpecialized.length === 1) return staticallySpecialized.at(0)
+    if (!usedRuntimeFallback || staticallySpecialized.length === 0) return undefined
+    const targets = new Map(
+      staticallySpecialized.map((call) => [Instances.keyText(call.target), call] as const),
+    )
+    return targets.size === 1 ? [...targets.values()].at(0) : undefined
   }
 }

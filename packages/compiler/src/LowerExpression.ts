@@ -243,6 +243,7 @@ export function lowerExpression(
   fn.activeRequirements = availableRequirements
   const result = expression._tag === 'Run' ? fn.withRecipeReplay(lower) : lower()
   fn.activeRequirements = previousRequirements
+  if (result === undefined) fn.recordLoweringFailure('Expression', expression._tag, expression.span)
   return result
 }
 
@@ -1859,6 +1860,21 @@ function lowerRunExpression(
       return Object.freeze({ result: destination })
     }
     if (recipe?._tag !== 'EffectConstruct') return undefined
+    const authoredTypeArguments = recipe.typeArguments.map((argument) =>
+      fn.semanticArgument(argument),
+    )
+    const call = fn.call(
+      recipe.span,
+      undefined,
+      authoredTypeArguments,
+      recipe.staticArguments,
+      availableRequirements,
+    )
+    // Every Effect constructor carries a hidden executable identity. Never emit an authored-only
+    // target when discovery could not select its complete callable/Effect specialization.
+    if (call === undefined) return undefined
+    const typeArguments = Object.freeze(call.target.typeArguments)
+    const staticArguments = call.target.staticArguments
     const arguments_: Array<Mir.LocalId> = []
     for (const argument of recipe.arguments) {
       const lowered = lowerExpression(fn, argument, availableRequirements)
@@ -1899,12 +1915,8 @@ function lowerRunExpression(
           destination,
           outcome,
           target: recipe.target,
-          typeArguments: Object.freeze(
-            recipe.typeArguments.map((argument) => fn.semanticArgument(argument)),
-          ),
-          ...(recipe.staticArguments.length === 0
-            ? {}
-            : { staticArguments: recipe.staticArguments }),
+          typeArguments,
+          ...(staticArguments.length === 0 ? {} : { staticArguments }),
           arguments: Object.freeze(arguments_),
           outcomeType,
           propagationType,
@@ -1925,10 +1937,8 @@ function lowerRunExpression(
         _tag: 'Call',
         destination: outcome,
         target: recipe.target,
-        typeArguments: Object.freeze(
-          recipe.typeArguments.map((argument) => fn.semanticArgument(argument)),
-        ),
-        ...(recipe.staticArguments.length === 0 ? {} : { staticArguments: recipe.staticArguments }),
+        typeArguments,
+        ...(staticArguments.length === 0 ? {} : { staticArguments }),
         arguments: Object.freeze(arguments_),
         type: outcomeType,
         provenance: authored(expression.span),

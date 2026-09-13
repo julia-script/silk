@@ -441,6 +441,8 @@ export interface EffectEnvironmentField extends PlacedField {
   readonly type: DeclarationFacts.SemanticType
   readonly representation: 'Value' | 'Borrow' | 'Callable'
   readonly effectIdentity?: string
+  /** Canonical environment selected when `effectIdentity` was a representation-site alias. */
+  readonly resolvedEffectIdentity?: string
   readonly callableIdentity?: Type.CallableIdentityArgument
   readonly providedRequirement?: NonNullable<
     FieldRealization.EffectEnvironmentSlot['providedRequirement']
@@ -2782,6 +2784,14 @@ const effectEnvironments = (
               ...(capturedEffectIdentity === undefined
                 ? {}
                 : { effectIdentity: capturedEffectIdentity }),
+              ...(capturedEffectEnvironment === undefined
+                ? {}
+                : {
+                    resolvedEffectIdentity: Instances.effectIdentity(
+                      capturedEffectEnvironment.instance,
+                      capturedEffectEnvironment.site,
+                    ),
+                  }),
               ...(capturedCallableIdentity === undefined
                 ? {}
                 : { callableIdentity: capturedCallableIdentity }),

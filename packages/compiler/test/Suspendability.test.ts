@@ -3,6 +3,7 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as Backend from '../src/Backend.js'
+import * as EntryAssembly from '../src/EntryAssembly.js'
 import * as ExecutableProperty from '../src/ExecutableProperty.js'
 import * as ExecutionBoundary from '../src/ExecutionBoundary.js'
 import * as Hir from '../src/Hir.js'
@@ -11,6 +12,7 @@ import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as Mir from '../src/Mir.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as SourceSpan from '../src/SourceSpan.js'
 import * as SuspensionMode from '../src/SuspensionMode.js'
 import * as Type from '../src/Type.js'
 import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
@@ -44,6 +46,65 @@ const effectNames = (self: Analysis.Snapshot): ReadonlyArray<string> =>
   )
 
 const main = (recipe: string): string => `pub fn main() -> i32 { return run ${recipe} }`
+
+it('fails closed with the first generated-runner lowering provenance', () => {
+  const span = SourceSpan.fromOffsets('suspendability/generated-runner', 10, 20)
+  assert.isDefined(span)
+  if (span === undefined) return
+  const runner = Object.freeze({
+    _tag: 'CanonicalDeclarationId' as const,
+    module: 'suspendability/generated-runner',
+    name: 'operation$effect$0$provided$1',
+  })
+  const base = Object.freeze({
+    _tag: 'CanonicalDeclarationId' as const,
+    module: 'suspendability/generated-runner',
+    name: 'operation$effect$0',
+  })
+  const owner = Object.freeze({
+    _tag: 'InstanceKey' as const,
+    declaration: Object.freeze({ ...base }),
+    typeArguments: Object.freeze([]),
+    evidence: Object.freeze([]),
+    staticArguments: Object.freeze([]),
+    contractRow: Object.freeze([]),
+  })
+  const cause = Object.freeze({
+    boundary: 'Expression' as const,
+    construct: 'CallableSection' as const,
+    provenance: Object.freeze({ span, generated: false }),
+  })
+  const failure = EntryAssembly.unavailableGeneratedEffectRunner({
+    runner,
+    base,
+    owner,
+    cause,
+  })
+  const unreachable = EntryAssembly.unavailableGeneratedEffectRunner({
+    runner: Object.freeze({ ...runner, name: 'unreachable$effect$0$provided$1' }),
+    base,
+    owner,
+    cause,
+  })
+  const retained = new Set([EntryAssembly.generatedEffectRunnerKey(failure.runner, failure.owner)])
+  assert.isUndefined(EntryAssembly.unavailableReferencedEffectRunner([unreachable], retained))
+  const selected = EntryAssembly.unavailableReferencedEffectRunner([unreachable, failure], retained)
+  assert.strictEqual(selected, failure)
+  if (selected === undefined) return
+  let caught: unknown
+  try {
+    EntryAssembly.requireGeneratedEffectRunner(selected)
+  } catch (cause) {
+    caught = cause
+  }
+  assert.instanceOf(caught, EntryAssembly.GeneratedEffectRunnerLoweringError)
+  if (!(caught instanceof EntryAssembly.GeneratedEffectRunnerLoweringError)) return
+  assert.strictEqual(caught.failure, failure)
+  assert.strictEqual(caught.failure.runner, runner)
+  assert.strictEqual(caught.failure.base, base)
+  assert.strictEqual(caught.failure.owner, failure.owner)
+  assert.strictEqual(caught.failure.cause.provenance.span, span)
+})
 
 it('rebinds selected runtime arguments without reopening caller lifetime proofs', () => {
   const owner = { module: 'selected-call', name: 'requireEffect' }
@@ -1298,7 +1359,22 @@ pub fn main() -> i32 {
 
 it.effect('retains provider contracts for direct and recovered borrowed method calls', () =>
   Effect.gen(function* () {
-    const self = yield* snapshot(`import silk.effect { Effect }
+    const callerOrders = Object.freeze([
+      Object.freeze({
+        name: 'direct-first',
+        body: `let first = run direct(&mut directConnection) |> Effect.provideMut<Audit>(&mut audit)
+  return run used(&mut recoveredConnection) |> Effect.provideMut<Audit>(&mut audit)`,
+      }),
+      Object.freeze({
+        name: 'recovered-first',
+        body: `let first = run used(&mut recoveredConnection) |> Effect.provideMut<Audit>(&mut audit)
+  return run direct(&mut directConnection) |> Effect.provideMut<Audit>(&mut audit)`,
+      }),
+    ])
+    const runnerSymbolsByOrder: Array<ReadonlyArray<string>> = []
+    for (const order of callerOrders) {
+      const self = yield* snapshot(`import silk.effect { Effect }
+import silk.result { Result }
 pub struct Fault {}
 service Work { effect fn read() -> i32 ! Fault ? &mut Work }
 service Audit { effect fn record() -> () ? &mut Audit }
@@ -1310,79 +1386,198 @@ effect fn perform(output: &mut [i32]) -> i32 ! Fault ? &mut Work | &mut Audit {
   run Audit.record()
   return run Work.read()
 }
-struct Connection<'env, P> { provider: &'env mut P }
-impl<'env, P> Connection<'env, P> {
-  effect fn read(self: &mut Self, output: &mut [i32]) -> i32 ! Fault ? &mut Audit
+struct OperationGuard<'env, P> { provider: &'env mut P completed: bool }
+struct Connection<P> { provider: P }
+impl<P> Connection<P> {
+  effect fn read<'connection>(self: &'connection mut Self, output: &mut [i32]) -> i32 ! Fault ? &mut Audit
   where &mut P provides &Work from &mut Work | &mut Audit {
     if output.length == 0 { return 0 }
-    let operation = perform(move output)
-    return run move operation |> Effect.provideMut<Work>(&mut self.provider.*)
+    let guard = OperationGuard<'connection, P> {
+      provider: &mut self.provider,
+      completed: false,
+    }
+    let use = effect fn(owned: &mut OperationGuard<'connection, P>) -> i32 ! Fault ? &mut Audit {
+      let operation = perform(move output)
+        |> Effect.provideMut<Work>(&mut owned.provider.*)
+      let attempted = run Effect.result(move operation)
+      owned.completed = true
+      return match move attempted {
+        Result<i32, Fault>.Success {value} => value
+        Result<i32, Fault>.Failure {error} => { fail move error }
+      }
+    }
+    let release = effect fn(owned: &mut OperationGuard<'connection, P>) -> () {
+      drop owned
+      return ()
+    }
+    return run Effect.useReleaseNonParking(move guard, move use, move release)
   }
 }
-effect<'call> fn used<'call, P>(connection: &'call mut Connection<'call, P>) -> i32 ! Fault ? &mut Audit
-where &mut P provides &Work from &mut Work | &mut Audit {
+effect fn used(connection: &mut Connection<Provider>) -> i32 ! Fault ? &mut Audit {
   let mut output = [0]
   let first = run Connection.read(&mut connection.*, &mut output)
   let recovered = run Effect.result(Connection.read(&mut connection.*, &mut output))
   drop recovered
   return first
 }
-effect fn scoped<'env, A, E, ?R, P>(
-  provider: &'env mut P,
-  callback: for<'call> once fn<'env>(
-    &'call mut Connection<'call, P>
-  ) -> once Effect<'call; A ! E ? R>,
-) -> A ! E ? R {
-  let mut connection = Connection { provider: &mut provider.* }
-  return run callback(&mut connection)
-}
-effect<'call> fn direct<'call, P>(connection: &'call mut Connection<'call, P>) -> i32 ! Fault ? &mut Audit
-where &mut P provides &Work from &mut Work | &mut Audit {
+effect fn direct(connection: &mut Connection<Provider>) -> i32 ! Fault ? &mut Audit {
   let mut output = [0]
   return run Connection.read(&mut connection.*, &mut output)
 }
 pub effect fn main() -> i32 ! Fault {
-  let mut provider = Provider {}
+  let mut directConnection = Connection<Provider> {provider: Provider {}}
+  let mut recoveredConnection = Connection<Provider> {provider: Provider {}}
   let mut audit = Recorder {}
-  let first = run scoped(&mut provider, direct) |> Effect.provideMut<Audit>(&mut audit)
-  return run scoped(&mut provider, used) |> Effect.provideMut<Audit>(&mut audit)
+  ${order.body}
 }`)
-    assert.deepEqual(Analysis.diagnostics(self), [])
-    const mir = Analysis.loweredMir(self)
-    assert.deepEqual(MirVerification.verify(mir), [])
-    const runners = mir.functions.filter(
-      (fn) => fn.effectRunner?.base.declaration.name === 'Connection.read$effect$-1',
-    )
-    assert.isNotEmpty(runners)
-    assert.strictEqual(new Set(mir.functions.map(Backend.symbolFor)).size, mir.functions.length)
-    const corrupted = {
-      ...mir,
-      functions: mir.functions.map((fn) =>
-        runners.includes(fn) && fn.effectRunner !== undefined
-          ? {
-              ...fn,
-              effectRunner: {
-                ...fn.effectRunner,
-                base: {
-                  ...fn.effectRunner.base,
-                  typeArguments: fn.effectRunner.base.typeArguments.map((argument) =>
-                    Type.isTypeArgument(argument) &&
-                    Type.isNominal(argument) &&
-                    argument.name === 'Provider'
-                      ? Type.nominal('suspendability/main', 'Recorder')
-                      : argument,
-                  ),
+      assert.deepEqual(Analysis.diagnostics(self), [], order.name)
+      const mir = Analysis.loweredMir(self)
+      assert.deepEqual(MirVerification.verify(mir), [], order.name)
+      const runners = mir.functions.filter(
+        (fn) => fn.effectRunner?.base.declaration.name === 'Connection.read$effect$-1',
+      )
+      assert.isNotEmpty(runners, order.name)
+      const runnerSymbols = runners.map(Backend.symbolFor).sort()
+      runnerSymbolsByOrder.push(Object.freeze(runnerSymbols))
+      assert.strictEqual(new Set(runnerSymbols).size, runners.length, order.name)
+      assert.strictEqual(
+        new Set(mir.functions.map(Backend.symbolFor)).size,
+        mir.functions.length,
+        order.name,
+      )
+      for (const callerName of ['direct', 'used']) {
+        const caller = mir.functions.find((fn) => fn.id.name === callerName)
+        assert.isDefined(caller, `${order.name}: ${callerName} caller`)
+        if (caller === undefined) continue
+        const [constructed] = MirVerification.operations(caller).filter(
+          (operation): operation is Extract<Mir.Operation, { readonly _tag: 'MakeEffect' }> =>
+            operation._tag === 'MakeEffect',
+        )
+        assert.isDefined(constructed, `${order.name}: ${callerName} Effect construction`)
+        if (constructed === undefined) continue
+        assert.lengthOf(constructed.captures, 1, `${order.name}: ${callerName} capture`)
+        const specializedCallers = mir.functions.filter(
+          (fn) => fn.effectRunner?.base.declaration.name === `${callerName}$effect$-1`,
+        )
+        assert.lengthOf(
+          specializedCallers,
+          1,
+          `${order.name}: ${callerName} canonical provided runner`,
+        )
+        const callerRunner = specializedCallers.at(0)
+        if (callerRunner === undefined) continue
+        assert.strictEqual(
+          callerRunner.parameterCount,
+          constructed.captures.length + (callerRunner.effectRunner?.providers.length ?? 0),
+          `${order.name}: ${callerName} captures and caller providers`,
+        )
+        const callerProvider = callerRunner.effectRunner?.providers.at(0)
+        assert.strictEqual(callerProvider?.capability.name, 'Audit', order.name)
+        assert.strictEqual(callerProvider?.providerType.name, 'Recorder', order.name)
+        const [providedRun] = MirVerification.operations(callerRunner).filter(
+          (operation): operation is Extract<Mir.Operation, { readonly _tag: 'RunEffectValue' }> =>
+            operation._tag === 'RunEffectValue' &&
+            operation.runnerBase?.declaration.name === 'Connection.read$effect$-1',
+        )
+        assert.isDefined(providedRun, `${order.name}: ${callerName} Connection.read run target`)
+        if (providedRun === undefined) continue
+        assert.match(
+          providedRun.runner.name,
+          /^Connection\.read\$effect\$-1\$provided\$\d+$/,
+          `${order.name}: ${callerName} provided runner identity`,
+        )
+        assert.strictEqual(
+          providedRun.runnerBase?.declaration.name,
+          'Connection.read$effect$-1',
+          `${order.name}: ${callerName} open runner base`,
+        )
+        assert.lengthOf(providedRun.providers, 1, `${order.name}: ${callerName} provider count`)
+        assert.lengthOf(providedRun.arguments, 1, `${order.name}: ${callerName} provider argument`)
+        const provider = providedRun.providers.at(0)
+        assert.strictEqual(provider?.capability.name, 'Audit', order.name)
+        assert.strictEqual(provider?.providerType.name, 'Recorder', order.name)
+        assert.strictEqual(provider?.witness._tag, 'SourceConformanceWitness', order.name)
+        const effect = callerRunner.localTypes.at(providedRun.effect.ordinal)
+        assert.strictEqual(effect?._tag, 'EffectValue', `${order.name}: ${callerName} Effect value`)
+        if (effect?._tag !== 'EffectValue') continue
+        assert.isAbove(effect.environment.fields.length, 0, `${order.name}: ${callerName} captures`)
+        const selectedRunner = mir.functions.find((fn) =>
+          Mir.matchesInstance(
+            fn,
+            providedRun.runner,
+            providedRun.runnerTypeArguments,
+            providedRun.runnerStaticArguments ?? Object.freeze([]),
+          ),
+        )
+        assert.isDefined(selectedRunner, `${order.name}: ${callerName} published runner`)
+        if (selectedRunner === undefined) continue
+        assert.strictEqual(
+          selectedRunner.parameterCount,
+          effect.environment.fields.length + providedRun.arguments.length,
+          `${order.name}: ${callerName} runner captures and providers`,
+        )
+        assert.include(runners, selectedRunner, order.name)
+        const boundProvider = selectedRunner.effectRunner?.providers.at(0)
+        assert.strictEqual(boundProvider?.role, provider?.role, order.name)
+        assert.strictEqual(boundProvider?.access, provider?.access, order.name)
+        assert.strictEqual(
+          boundProvider?.requirementAccess,
+          provider?.requirementAccess,
+          order.name,
+        )
+        assert.strictEqual(boundProvider?.capability.name, provider?.capability.name, order.name)
+        assert.strictEqual(
+          boundProvider?.providerType.name,
+          provider?.providerType.name,
+          order.name,
+        )
+        assert.strictEqual(boundProvider?.witness._tag, provider?.witness._tag, order.name)
+        if (callerName === 'used') {
+          const recovered = MirVerification.operations(callerRunner).find(
+            (operation) =>
+              operation._tag === 'RunEffectValue' &&
+              operation.runnerBase?.declaration.name === 'Effect.result$effect$-1',
+          )
+          assert.isDefined(recovered, `${order.name}: recovered Effect.result run target`)
+        }
+      }
+      const corrupted = {
+        ...mir,
+        functions: mir.functions.map((fn) =>
+          runners.includes(fn) && fn.effectRunner !== undefined
+            ? {
+                ...fn,
+                effectRunner: {
+                  ...fn.effectRunner,
+                  base: {
+                    ...fn.effectRunner.base,
+                    typeArguments: fn.effectRunner.base.typeArguments.map((argument) =>
+                      Type.isTypeArgument(argument) &&
+                      Type.isNominal(argument) &&
+                      argument.name === 'Provider'
+                        ? Type.nominal('suspendability/main', 'Recorder')
+                        : argument,
+                    ),
+                  },
                 },
-              },
-            }
-          : fn,
-      ),
+              }
+            : fn,
+        ),
+      }
+      assert.isTrue(
+        MirVerification.verify(corrupted).some(
+          (failure) => failure.rule === 'InvalidEffectOperation',
+        ),
+        order.name,
+      )
     }
-    assert.isTrue(
-      MirVerification.verify(corrupted).some(
-        (failure) => failure.rule === 'InvalidEffectOperation',
-      ),
-    )
+    const directFirst = runnerSymbolsByOrder.at(0)
+    const recoveredFirst = runnerSymbolsByOrder.at(1)
+    assert.isDefined(directFirst)
+    assert.isDefined(recoveredFirst)
+    if (directFirst !== undefined && recoveredFirst !== undefined) {
+      assert.deepEqual(directFirst, recoveredFirst)
+    }
   }),
 )
 
