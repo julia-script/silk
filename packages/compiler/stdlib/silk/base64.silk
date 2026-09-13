@@ -1,0 +1,378 @@
+//! Strict standard-padded Base64 operations for caller-provided byte storage.
+//!
+//! # When to use
+//! Use [`Base64`] when a protocol requires the RFC 4648 standard alphabet and required padding.
+//! Use [`encodedLength`] or [`decodedLength`] to calculate exact storage before a write.
+//!
+//! # Details
+//! [`encodeInto`] and [`decodeInto`] write to caller-owned slices without allocation. Decoding
+//! rejects whitespace, URL-safe characters, malformed padding, and nonzero unused pad bits. All
+//! failures occur before destination mutation. A successful write does not change the unused suffix.
+//!
+//! # Gotchas
+//! This module does not implement MIME, PEM whitespace, URL-safe, unpadded, streaming, or
+//! allocating variants. Base64 is an encoding, not encryption.
+
+import silk.option { Option }
+import silk.result { Result }
+import silk.u8
+import silk.usize
+
+/// The reason a Base64 size calculation, validation, or caller-buffer operation failed.
+pub enum Base64Reason {
+  /// A nonempty encoded input does not contain a whole four-byte quantum.
+  InvalidLength,
+  /// An input byte is outside the standard Base64 alphabet.
+  InvalidByte,
+  /// A padding byte is misplaced, excessive, or missing from its required final position.
+  InvalidPadding,
+  /// Unused bits in the final significant sextet are nonzero.
+  NonCanonicalPadBits,
+  /// The encoded result length is not representable as `usize` for the selected target.
+  SizeOverflow,
+  /// The caller-provided output slice cannot hold the complete result.
+  OutputTooSmall,
+}
+
+/// A deterministic Base64 failure with details relevant to its reason.
+///
+/// # Details
+/// Validation failures populate `offset`. `OutputTooSmall` populates `required` and `available`.
+/// `SizeOverflow` has no additional fields, and unused fields are `None`.
+pub struct Base64Error {
+  /// The stable failure category.
+  pub reason: Base64Reason
+  /// The offending input byte, input length, or final significant sextet position.
+  pub offset: Option<usize>
+  /// The exact output length needed by `OutputTooSmall`.
+  pub required: Option<usize>
+  /// The supplied output length reported by `OutputTooSmall`.
+  pub available: Option<usize>
+}
+
+/// The owner of strict standard-padded Base64 operations.
+pub struct Base64 {}
+
+impl Base64 {
+  /// Returns the exact standard-padded encoded length without allocation.
+  ///
+  /// # Details
+  /// Zero returns zero. An unrepresentable result returns `SizeOverflow` without a trap. All
+  /// optional error fields are `None` for `SizeOverflow`.
+  pub fn encodedLength(inputLength: usize) -> Result<usize, Base64Error> {
+    let groups = inputLength / 3
+    let remainder = inputLength % 3
+    let maximumGroups = usize.MAX / 4
+    if groups > maximumGroups {
+      return Result.failResult<usize, Base64Error>(sizeOverflow())
+    }
+    let mut length = groups * 4
+    if remainder != usize.ZERO {
+      if length > usize.MAX - 4 {
+        return Result.failResult<usize, Base64Error>(sizeOverflow())
+      }
+      length = length + 4
+    }
+    return Result.succeed<usize, Base64Error>(length)
+  }
+
+  /// Validates strict standard-padded Base64 and returns its exact decoded byte length.
+  ///
+  /// # Details
+  /// Empty input returns zero. A nonempty input must contain complete four-byte quanta. Validation
+  /// checks bytes from left to right and accepts padding only in the final quantum.
+  ///
+  /// # Gotchas
+  /// The function rejects whitespace, URL-safe bytes, malformed padding, and nonzero unused pad
+  /// bits. The returned error identifies the first failure offset.
+  pub fn decodedLength(input: &[u8]) -> Result<usize, Base64Error> {
+    if input.length == usize.ZERO {
+      return Result.succeed<usize, Base64Error>(usize.ZERO)
+    }
+    if input.length % 4 != usize.ZERO {
+      return Result.failResult<usize, Base64Error>(at(
+        Base64Reason.InvalidLength,
+        input.length,
+      ))
+    }
+
+    let mut index = usize.ZERO
+    let mut length = usize.ZERO
+    while index < input.length {
+      let first = sextetAt(input, index)
+      let firstValue = match move first {
+        Result<u8, Base64Error>.Failure { error } => {
+          return Result.failResult<usize, Base64Error>(move error)
+        }
+        Result<u8, Base64Error>.Success { value } => value
+      }
+      let second = sextetAt(input, index + usize.ONE)
+      let secondValue = match move second {
+        Result<u8, Base64Error>.Failure { error } => {
+          return Result.failResult<usize, Base64Error>(move error)
+        }
+        Result<u8, Base64Error>.Success { value } => value
+      }
+      let finalQuantum = input.length - index == 4
+      if !finalQuantum {
+        let third = sextetAt(input, index + 2)
+        match move third {
+          Result<u8, Base64Error>.Failure { error } => {
+            return Result.failResult<usize, Base64Error>(move error)
+          }
+          Result<u8, Base64Error>.Success { value: _ } => {}
+        }
+        let fourth = sextetAt(input, index + 3)
+        match move fourth {
+          Result<u8, Base64Error>.Failure { error } => {
+            return Result.failResult<usize, Base64Error>(move error)
+          }
+          Result<u8, Base64Error>.Success { value: _ } => {}
+        }
+        length = length + 3
+        index = index + 4
+      } else {
+        let thirdByte = input[index + 2]
+        let fourthByte = input[index + 3]
+        if thirdByte == 61 {
+          if fourthByte != 61 {
+            return Result.failResult<usize, Base64Error>(at(
+              Base64Reason.InvalidPadding,
+              input.length,
+            ))
+          }
+          if u8.bitAnd(secondValue, 15) != 0 {
+            return Result.failResult<usize, Base64Error>(at(
+              Base64Reason.NonCanonicalPadBits,
+              index + usize.ONE,
+            ))
+          }
+          return Result.succeed<usize, Base64Error>(length + usize.ONE)
+        }
+
+        let third = sextetAt(input, index + 2)
+        let thirdValue = match move third {
+          Result<u8, Base64Error>.Failure { error } => {
+            return Result.failResult<usize, Base64Error>(move error)
+          }
+          Result<u8, Base64Error>.Success { value } => value
+        }
+        if fourthByte == 61 {
+          if u8.bitAnd(thirdValue, 3) != 0 {
+            return Result.failResult<usize, Base64Error>(at(
+              Base64Reason.NonCanonicalPadBits,
+              index + 2,
+            ))
+          }
+          return Result.succeed<usize, Base64Error>(length + 2)
+        }
+
+        let fourth = sextetAt(input, index + 3)
+        match move fourth {
+          Result<u8, Base64Error>.Failure { error } => {
+            return Result.failResult<usize, Base64Error>(move error)
+          }
+          Result<u8, Base64Error>.Success { value: _ } => {}
+        }
+        return Result.succeed<usize, Base64Error>(length + 3)
+      }
+    }
+    return Result.succeed<usize, Base64Error>(length)
+  }
+
+  /// Encodes bytes into a caller-owned output prefix and returns the number of written bytes.
+  ///
+  /// # Details
+  /// The function checks the exact size and capacity before the first write. A failure does not
+  /// change `output`. A successful write does not change bytes after the returned prefix.
+  ///
+  /// # Gotchas
+  /// The function returns `SizeOverflow` for an unrepresentable result. It returns `OutputTooSmall`
+  /// with exact `required` and `available` values for insufficient output. It does not add a NUL
+  /// terminator.
+  pub fn encodeInto(output: &mut [u8], input: &[u8]) -> Result<usize, Base64Error> {
+    let checked = Base64.encodedLength(input.length)
+    let required = match move checked {
+      Result<usize, Base64Error>.Failure { error } => {
+        return Result.failResult<usize, Base64Error>(move error)
+      }
+      Result<usize, Base64Error>.Success { value } => value
+    }
+    if output.length < required {
+      return Result.failResult<usize, Base64Error>(tooSmall(required, output.length))
+    }
+
+    let mut source = usize.ZERO
+    let mut target = usize.ZERO
+    while input.length - source >= 3 {
+      let first = input[source]
+      let second = input[source + usize.ONE]
+      let third = input[source + 2]
+      output[target] = alphabet(u8.shiftRight(first, 2))
+      output[target + usize.ONE] = alphabet(u8.bitOr(
+        u8.shiftLeft(u8.bitAnd(first, 3), 4),
+        u8.shiftRight(second, 4),
+      ))
+      output[target + 2] = alphabet(u8.bitOr(
+        u8.shiftLeft(u8.bitAnd(second, 15), 2),
+        u8.shiftRight(third, 6),
+      ))
+      output[target + 3] = alphabet(u8.bitAnd(third, 63))
+      source = source + 3
+      target = target + 4
+    }
+
+    let tail = input.length - source
+    if tail == usize.ONE {
+      let first = input[source]
+      output[target] = alphabet(u8.shiftRight(first, 2))
+      output[target + usize.ONE] = alphabet(u8.shiftLeft(u8.bitAnd(first, 3), 4))
+      output[target + 2] = 61
+      output[target + 3] = 61
+    } else if tail == 2 {
+      let first = input[source]
+      let second = input[source + usize.ONE]
+      output[target] = alphabet(u8.shiftRight(first, 2))
+      output[target + usize.ONE] = alphabet(u8.bitOr(
+        u8.shiftLeft(u8.bitAnd(first, 3), 4),
+        u8.shiftRight(second, 4),
+      ))
+      output[target + 2] = alphabet(u8.shiftLeft(u8.bitAnd(second, 15), 2))
+      output[target + 3] = 61
+    }
+    return Result.succeed<usize, Base64Error>(required)
+  }
+
+  /// Decodes strict standard-padded Base64 into an output prefix and returns the written length.
+  ///
+  /// # Details
+  /// The function completes strict validation and capacity checking before the first write. A
+  /// failure does not change `output`. A successful write does not change the unused suffix.
+  ///
+  /// # Gotchas
+  /// An input-validation error takes precedence over `OutputTooSmall`. The function rejects
+  /// whitespace, URL-safe bytes, malformed padding, and nonzero unused pad bits.
+  pub fn decodeInto(output: &mut [u8], input: &[u8]) -> Result<usize, Base64Error> {
+    let checked = Base64.decodedLength(input)
+    let required = match move checked {
+      Result<usize, Base64Error>.Failure { error } => {
+        return Result.failResult<usize, Base64Error>(move error)
+      }
+      Result<usize, Base64Error>.Success { value } => value
+    }
+    if output.length < required {
+      return Result.failResult<usize, Base64Error>(tooSmall(required, output.length))
+    }
+
+    let mut source = usize.ZERO
+    let mut target = usize.ZERO
+    while source < input.length {
+      let first = validatedSextet(input[source])
+      let second = validatedSextet(input[source + usize.ONE])
+      output[target] = u8.bitOr(
+        u8.shiftLeft(first, 2),
+        u8.shiftRight(second, 4),
+      )
+      target = target + usize.ONE
+
+      if input[source + 2] != 61 {
+        let third = validatedSextet(input[source + 2])
+        output[target] = u8.bitOr(
+          u8.shiftLeft(second, 4),
+          u8.shiftRight(third, 2),
+        )
+        target = target + usize.ONE
+        if input[source + 3] != 61 {
+          let fourth = validatedSextet(input[source + 3])
+          output[target] = u8.bitOr(u8.shiftLeft(third, 6), fourth)
+          target = target + usize.ONE
+        }
+      }
+      source = source + 4
+    }
+    return Result.succeed<usize, Base64Error>(required)
+  }
+}
+
+fn sizeOverflow() -> Base64Error {
+  return Base64Error {
+    reason: Base64Reason.SizeOverflow,
+    offset: Option.none<usize>(),
+    required: Option.none<usize>(),
+    available: Option.none<usize>(),
+  }
+}
+
+fn at(reason: Base64Reason, offset: usize) -> Base64Error {
+  return Base64Error {
+    reason: reason,
+    offset: Option.some<usize>(offset),
+    required: Option.none<usize>(),
+    available: Option.none<usize>(),
+  }
+}
+
+fn tooSmall(required: usize, available: usize) -> Base64Error {
+  return Base64Error {
+    reason: Base64Reason.OutputTooSmall,
+    offset: Option.none<usize>(),
+    required: Option.some<usize>(required),
+    available: Option.some<usize>(available),
+  }
+}
+
+fn sextetAt(input: &[u8], index: usize) -> Result<u8, Base64Error> {
+  let value = input[index]
+  if value == 61 {
+    return Result.failResult<u8, Base64Error>(at(Base64Reason.InvalidPadding, index))
+  }
+  if value >= 65 && value <= 90 {
+    return Result.succeed<u8, Base64Error>(value - 65)
+  }
+  if value >= 97 && value <= 122 {
+    return Result.succeed<u8, Base64Error>(value - 71)
+  }
+  if value >= 48 && value <= 57 {
+    return Result.succeed<u8, Base64Error>(value + 4)
+  }
+  if value == 43 {
+    return Result.succeed<u8, Base64Error>(62)
+  }
+  if value == 47 {
+    return Result.succeed<u8, Base64Error>(63)
+  }
+  return Result.failResult<u8, Base64Error>(at(Base64Reason.InvalidByte, index))
+}
+
+// decodedLength has already proved that every call site supplies a standard-alphabet byte.
+fn validatedSextet(value: u8) -> u8 {
+  if value >= 65 && value <= 90 {
+    return value - 65
+  }
+  if value >= 97 && value <= 122 {
+    return value - 71
+  }
+  if value >= 48 && value <= 57 {
+    return value + 4
+  }
+  if value == 43 {
+    return 62
+  }
+  return 63
+}
+
+fn alphabet(value: u8) -> u8 {
+  if value < 26 {
+    return value + 65
+  }
+  if value < 52 {
+    return value + 71
+  }
+  if value < 62 {
+    return value - 4
+  }
+  if value == 62 {
+    return 43
+  }
+  return 47
+}

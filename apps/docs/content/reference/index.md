@@ -150,5 +150,6 @@ documentation remain separate from this reference.
 - [Native entropy](./native-entropy)
 - [Native filesystem](./native-filesystem)
 
+- [Base64](base64.md) — strict RFC 4648 standard-padded encoding and decoding into caller-owned storage.
 - [P-256 key agreement](p256-key-agreement.md) — scalar ownership, SEC1 admission, explicit entropy and bounded arithmetic.
 - [ECDSA P-256 verification](ecdsa-p256-verification.md) — borrowed messages, strict DER and retained certificate parameter policy.

@@ -12,6 +12,12 @@
     "aliases": ["AllocationFailure", "OutOfMemoryError", "SystemAllocator"]
   },
   {
+    "module": "silk/base64",
+    "path": "silk/base64.silk",
+    "namespace": "Base64",
+    "aliases": ["Base64Error", "Base64Reason"]
+  },
+  {
     "module": "silk/bool",
     "path": "silk/bool.silk",
     "namespace": "bool"

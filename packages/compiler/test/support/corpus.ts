@@ -48,6 +48,7 @@ import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
 import { httpValuesAcceptanceSource } from './httpValuesAcceptance.js'
+import { base64AcceptanceSource } from './base64Acceptance.js'
 import { ecdsaP256AcceptanceSource } from './ecdsaP256Acceptance.js'
 import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
@@ -6303,6 +6304,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     name: 'http-values',
     source: httpValuesAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'base64-rfc4648',
+    source: base64AcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
   },
   {
     name: 'borrowed-temporary-stream-suspension',
