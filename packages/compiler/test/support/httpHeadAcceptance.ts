@@ -17,6 +17,7 @@ import silk.http_head {
   Limits,
   ParseComponent,
   ParseError,
+  ParseLimitKind,
   ParseReason,
   ParserState,
   ParsedResponse,
@@ -33,6 +34,7 @@ import silk.http_head {
   writeResponseInto,
 }
 import silk.http_headers { Limits as ValueLimits }
+import silk.http_target { RequestTarget }
 import silk.option { Option }
 import silk.result { Result }
 import silk.slice { Slice }
@@ -89,7 +91,6 @@ enum ExpectedReason {
   InvalidStartLine,
   InvalidStatus,
   InvalidTarget,
-  LimitExceeded,
   MissingHost,
   ObsFold,
   BareLf,
@@ -135,10 +136,6 @@ fn reasonIs(reason: ParseReason, expected: ExpectedReason) -> bool {
     }
     ExpectedReason.InvalidTarget => match move reason {
       ParseReason.InvalidTarget => true
-      _ => false
-    }
-    ExpectedReason.LimitExceeded => match move reason {
-      ParseReason.LimitExceeded {limit, allowed, attempted} => true
       _ => false
     }
     ExpectedReason.ObsFold => match move reason {
@@ -200,6 +197,57 @@ fn indexedParseError(
   return match move error.fieldIndex {
     Option<usize>.None => false
     Option<usize>.Some {value} => value == fieldIndex
+  }
+}
+
+fn unindexedLimitError(
+  error: ParseError,
+  expectedLimit: ParseLimitKind,
+  allowed: usize,
+  attempted: usize,
+  component: ParseComponent,
+  offset: usize,
+  consumed: usize,
+) -> bool {
+  if error.component != component || error.offset != offset || error.consumed != consumed {
+    return false
+  }
+  match move error.fieldIndex {
+    Option<usize>.Some {value} => { return false }
+    Option<usize>.None => {}
+  }
+  return match move error.reason {
+    ParseReason.LimitExceeded {limit, allowed: actualAllowed, attempted: actualAttempted} => {
+      return limit == expectedLimit && actualAllowed == allowed && actualAttempted == attempted
+    }
+    _ => false
+  }
+}
+
+fn indexedLimitError(
+  error: ParseError,
+  expectedLimit: ParseLimitKind,
+  allowed: usize,
+  attempted: usize,
+  component: ParseComponent,
+  fieldIndex: usize,
+  offset: usize,
+  consumed: usize,
+) -> bool {
+  if error.component != component || error.offset != offset || error.consumed != consumed {
+    return false
+  }
+  match move error.fieldIndex {
+    Option<usize>.None => { return false }
+    Option<usize>.Some {value} => {
+      if value != fieldIndex { return false }
+    }
+  }
+  return match move error.reason {
+    ParseReason.LimitExceeded {limit, allowed: actualAllowed, attempted: actualAttempted} => {
+      return limit == expectedLimit && actualAllowed == allowed && actualAttempted == attempted
+    }
+    _ => false
   }
 }
 
@@ -269,6 +317,20 @@ fn inspectRequest<'value>(result: Result<RequestHead<'value>, ParseError>) -> bo
 }
 
 effect fn splitMatrix() -> bool ! OutOfMemoryError ? &mut Allocator {
+  let emptyMade = run RequestParser.make(limits())
+  let mut emptyParser = match move emptyMade {
+    Result<RequestParser, ParseError>.Failure {error} => { return false }
+    Result<RequestParser, ParseError>.Success {value} => move value
+  }
+  match move RequestParser.feed(&mut emptyParser, b"", false) {
+    Result<Progress, ParseError>.Failure {error} => { return false }
+    Result<Progress, ParseError>.Success {value} => {
+      if value.consumed != usize.ZERO || value.state != ProgressState.NeedInput
+        || RequestParser.state(&emptyParser) != ParserState.Active {
+        return false
+      }
+    }
+  }
   let message = b"GET / HTTP/1.1\\r\\nHost: a\\r\\nX: \\r\\nX: b\\r\\n\\r\\nBODY"
   let headLength = message.length - 4
   let mut split = usize.ZERO
@@ -473,12 +535,15 @@ effect fn incrementalLexicalFailures() -> bool ! OutOfMemoryError ? &mut Allocat
   }
   return match move RequestParser.feed(&mut tightParser, b"GETX", false) {
     Result<Progress, ParseError>.Success {value} => false
-    Result<Progress, ParseError>.Failure {error} => {
-      return reasonIs(error.reason, ExpectedReason.LimitExceeded)
-        && error.component == ParseComponent.Method
-        && error.offset == 3
-        && error.consumed == 3
-    }
+    Result<Progress, ParseError>.Failure {error} => unindexedLimitError(
+      move error,
+      ParseLimitKind.MethodBytes,
+      3,
+      4,
+      ParseComponent.Method,
+      3,
+      3,
+    )
   }
 }
 
@@ -614,17 +679,68 @@ effect fn strictFailures() -> bool ! OutOfMemoryError ? &mut Allocator {
   ) { return false }
   let mut oneField = limits()
   oneField.values.maxFields = usize.ONE
-  if !run requestFails(
+  let oneFieldMade = run RequestParser.make(oneField)
+  let mut oneFieldParser = match move oneFieldMade {
+    Result<RequestParser, ParseError>.Failure {error} => { return false }
+    Result<RequestParser, ParseError>.Success {value} => move value
+  }
+  match move RequestParser.feed(
+    &mut oneFieldParser,
     b"GET / HTTP/1.1\\r\\nHost: a\\r\\nX: b\\r\\n\\r\\n",
-    ExpectedReason.LimitExceeded,
-    oneField,
-  ) { return false }
+    true,
+  ) {
+    Result<Progress, ParseError>.Success {value} => { return false }
+    Result<Progress, ParseError>.Failure {error} => {
+      if !indexedLimitError(
+        move error,
+        ParseLimitKind.Fields,
+        usize.ONE,
+        2,
+        ParseComponent.HeaderName,
+        usize.ONE,
+        25,
+        25,
+      ) { return false }
+    }
+  }
   let mut noOwnedCapacity = limits()
   noOwnedCapacity.maxOwnedBytes = 1151
-  if !run requestFails(b"", ExpectedReason.LimitExceeded, noOwnedCapacity) { return false }
+  let noOwnedMade = run RequestParser.make(noOwnedCapacity)
+  match move noOwnedMade {
+    Result<RequestParser, ParseError>.Success {value} => { return false }
+    Result<RequestParser, ParseError>.Failure {error} => {
+      if !unindexedLimitError(
+        move error,
+        ParseLimitKind.OwnedBytes,
+        1151,
+        1152,
+        ParseComponent.Parser,
+        usize.ZERO,
+        usize.ZERO,
+      ) { return false }
+    }
+  }
   let mut noHeadCapacity = limits()
   noHeadCapacity.maxHeadBytes = usize.ZERO
-  if !run requestFails(b"G", ExpectedReason.LimitExceeded, noHeadCapacity) { return false }
+  let noHeadMade = run RequestParser.make(noHeadCapacity)
+  let mut noHeadParser = match move noHeadMade {
+    Result<RequestParser, ParseError>.Failure {error} => { return false }
+    Result<RequestParser, ParseError>.Success {value} => move value
+  }
+  match move RequestParser.feed(&mut noHeadParser, b"G", true) {
+    Result<Progress, ParseError>.Success {value} => { return false }
+    Result<Progress, ParseError>.Failure {error} => {
+      if !unindexedLimitError(
+        move error,
+        ParseLimitKind.HeadBytes,
+        usize.ZERO,
+        usize.ONE,
+        ParseComponent.Parser,
+        usize.ZERO,
+        usize.ZERO,
+      ) { return false }
+    }
+  }
   if !run responseFails(b"HTTP/0.9 200 ok\\r\\n\\r\\n", ExpectedReason.UnsupportedVersion) {
     return false
   }
@@ -666,6 +782,30 @@ fn inspectResponse<'value>(
   }
   let status = ResponseHead.status(&head)
   return Status.code(&status) == 204
+}
+
+fn inspectAbsoluteTarget<'value>(result: Result<RequestHead<'value>, ParseError>) -> bool {
+  let head = match move result {
+    Result<RequestHead<'value>, ParseError>.Failure {error} => { return false }
+    Result<RequestHead<'value>, ParseError>.Success {value} => value
+  }
+  let target = RequestHead.target(&head)
+  return RequestTarget.format(target) == "http://target.example/path"
+}
+
+effect fn absoluteTargetAuthorityWins() -> bool ! OutOfMemoryError ? &mut Allocator {
+  let made = run RequestParser.make(limits())
+  let mut parser = match move made {
+    Result<RequestParser, ParseError>.Failure {error} => { return false }
+    Result<RequestParser, ParseError>.Success {value} => move value
+  }
+  let fed = RequestParser.feed(
+    &mut parser,
+    b"GET http://target.example/path HTTP/1.1\\r\\nHost: host.example\\r\\n\\r\\n",
+    true,
+  )
+  if let Result<Progress, ParseError>.Failure {error} = move fed { return false }
+  return inspectAbsoluteTarget(RequestParser.head(&parser))
 }
 
 effect fn copyBorrowed<'value>(
@@ -778,11 +918,21 @@ effect fn copyAndSerializeResponse() -> bool ! OutOfMemoryError ? &mut Allocator
       if value != input.length || !equalPrefix(Bytes.asSlice(&output), input) { return false }
     }
   }
-  let mut short: [u8; 1] = [91]
+  let mut short: [u8; 4] = [91,92,93,94]
   let rejected = writeResponseInto(&shared, &mut short, valueLimits())
   return match move rejected {
     Result<usize, ValueError>.Success {value} => false
-    Result<usize, ValueError>.Failure {error} => short[0] == 91
+    Result<usize, ValueError>.Failure {error} => {
+      if short[0] != 91 || short[1] != 92 || short[2] != 93 || short[3] != 94 {
+        return false
+      }
+      return match move error.reason {
+        ValueReason.OutputTooSmall {required: actual, available} => {
+          return actual == required && available == 4
+        }
+        _ => false
+      }
+    }
   }
 }
 
@@ -794,6 +944,7 @@ effect fn checks() -> i32 ! OutOfMemoryError ? &mut Allocator {
   if !run lineCompletionAtomicity() { return 15 }
   if !run strictFailures() { return 4 }
   if !run responseWholeSlice() { return 5 }
+  if !run absoluteTargetAuthorityWins() { return 16 }
   if !run copyAndSerialize() { return 6 }
   if !run copyAndSerializeResponse() { return 7 }
   return 42

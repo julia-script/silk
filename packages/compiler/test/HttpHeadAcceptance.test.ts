@@ -1,35 +1,10 @@
-import { httpHeadAcceptanceSource } from './support/httpHeadAcceptance.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterAll, assert, it } from '@effect/vitest'
+import { readFileSync } from 'node:fs'
+import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
-import type * as NativeToolchain from '../src/NativeToolchain.js'
-import * as SourceFile from '../src/SourceFile.js'
-import * as SourceResolver from '../src/SourceResolver.js'
-import * as MirVerification from '../src/MirVerification.js'
-import * as Driver from './support/TestDriver.js'
 
 const encoder = new TextEncoder()
-const destinationRoot = mkdtempSync(join(tmpdir(), 'silk-http-head-test-'))
-
-afterAll(() => {
-  rmSync(destinationRoot, { recursive: true, force: true })
-})
-
-const defaultClang = (): string => {
-  if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
-  if (existsSync('/usr/local/opt/llvm/bin/clang')) return '/usr/local/opt/llvm/bin/clang'
-  return 'clang'
-}
-
-const toolchain: NativeToolchain.Toolchain = Object.freeze({
-  _tag: 'Toolchain',
-  clang: defaultClang(),
-  llvmAr: 'llvm-ar',
-})
 
 it.effect(
   'compiles the HTTP head reference example',
@@ -49,28 +24,6 @@ it.effect(
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
     }),
   15_000,
-)
-
-it.effect(
-  'realizes one consolidated HTTP head contract on 32-bit and 64-bit targets',
-  () =>
-    Effect.gen(function* () {
-      for (const target of ['wasm32-unknown-unknown', 'x86_64-unknown-linux-gnu'] as const) {
-        const snapshot = yield* AnalysisFixture.retainingMain(
-          `http-head/acceptance-${target}`,
-          encoder.encode(httpHeadAcceptanceSource),
-          target,
-        )
-        assert.deepEqual(Analysis.diagnostics(snapshot), [])
-        if (snapshot.mir._tag === 'Available') {
-          assert.deepEqual(MirVerification.verify(snapshot.mir.value), [])
-        }
-        const artifact = yield* Analysis.codegen(snapshot, { mode: 'debug' })
-        assert.include(artifact.ir, `target triple = "${target}"`)
-        assert.isAbove(artifact.bitcode.length, 0)
-      }
-    }),
-  30_000,
 )
 
 it.effect(
@@ -113,48 +66,28 @@ effect fn program() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return 42
 }
 
+effect fn recover(error: OutOfMemoryError) -> i32 { return 1 }
+
 pub fn main() -> i32 {
   let mut allocator = Allocator.systemAllocatorProvider()
-  return run program() |> Effect.provideMut<Allocator>(&mut allocator)
+  return run Effect.catchAll(
+    program() |> Effect.provideMut<Allocator>(&mut allocator),
+    recover,
+  )
 }`
       const snapshot = yield* AnalysisFixture.retainingMain(
         'http-head/reset-live-head',
         encoder.encode(source),
       )
-      assert.include(
-        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
-        'OWN0010',
+      const diagnostics = Analysis.diagnostics(snapshot)
+      assert.deepEqual(
+        diagnostics.map((diagnostic) => diagnostic.code),
+        ['OWN0010'],
       )
+      const diagnostic = diagnostics.at(0)
+      assert.isDefined(diagnostic)
+      if (diagnostic === undefined) return
+      assert.strictEqual(source.slice(diagnostic.span.start, diagnostic.span.end), '&mut parser')
     }),
   15_000,
-)
-
-it.effect(
-  'executes strict bounded HTTP head parsing through LLVM-to-Wasm',
-  () =>
-    Effect.gen(function* () {
-      const outcome = yield* Driver.compile({
-        compilation: {
-          root: SourceFile.make(
-            'http-head/wasm-acceptance',
-            encoder.encode(httpHeadAcceptanceSource),
-          ),
-          target: 'wasm32-unknown-unknown',
-        },
-        toolchain,
-        optimization: 'release',
-        destination: join(destinationRoot, 'http-head.wasm'),
-        cache: false,
-        artifactKind: 'WebAssemblyModule',
-      }).pipe(Effect.provide(SourceResolver.empty))
-      assert.strictEqual(outcome._tag, 'Compiled')
-      if (outcome._tag !== 'Compiled') return
-      const module = new WebAssembly.Module(Uint8Array.from(readFileSync(outcome.path)))
-      assert.deepEqual(WebAssembly.Module.imports(module), [])
-      const instance = new WebAssembly.Instance(module)
-      const main = instance.exports['main']
-      assert.isFunction(main)
-      if (typeof main === 'function') assert.strictEqual(main(), 42)
-    }),
-  300_000,
 )

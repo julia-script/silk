@@ -16,6 +16,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { nativeCorpus, type NativeRun } from './support/corpus.js'
 import { base64AcceptanceSource } from './support/base64Acceptance.js'
+import { httpHeadAcceptanceSource } from './support/httpHeadAcceptance.js'
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
 import { networkAddressResolutionCorpusProgram } from './support/networkAddressResolutionAcceptance.js'
 import * as Driver from './support/TestDriver.js'
@@ -158,6 +159,7 @@ const selectedCorpus = shardedCorpus.filter(
 )
 const portableWasmCorpus = [
   { name: 'http-values', source: httpValuesAcceptanceSource, expected: 0 },
+  { name: 'http-head-parsing', source: httpHeadAcceptanceSource, expected: 42 },
   { name: 'base64-rfc4648', source: base64AcceptanceSource, expected: 42 },
   {
     name: networkAddressResolutionCorpusProgram.name,
