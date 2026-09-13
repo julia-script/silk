@@ -1,4 +1,9 @@
 import * as AnalysisFixture from './support/AnalysisFixture.js'
+import {
+  linkedForeignDollarCSource,
+  linkedForeignDollarSource,
+} from './support/foreignDollarSymbol.js'
+import * as AbiManifest from '../src/AbiManifest.js'
 import type * as Backend from '../src/Backend.js'
 import * as ForeignContract from '../src/ForeignContract.js'
 import * as Result from 'effect/Result'
@@ -35,6 +40,7 @@ import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as LlvmWasmRuntime from '../src/LlvmWasmRuntime.js'
 import * as Target from '../src/Target.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
+import * as SourceFile from '../src/SourceFile.js'
 
 const defaultClang = (): string => {
   if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
@@ -1118,6 +1124,95 @@ it.effect(
       assert.deepEqual(linked.bytes, readFileSync(linked.path))
       const run = spawnSync(linked.path, [], { encoding: 'utf8' })
       assert.strictEqual(run.status, 42)
+    }),
+  15_000,
+)
+
+it.effect(
+  'preserves dollar-bearing foreign symbols through ABI, objects, and a separate C link',
+  () =>
+    Effect.gen(function* () {
+      const target = yield* NativeToolchain.hostTarget()
+      const snapshot = yield* AnalysisFixture.declarations(
+        'native/dollar-symbols',
+        ascii(linkedForeignDollarSource),
+        target.id,
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+      assert.deepEqual(
+        artifact.foreignImports.map((entry) => entry.symbol),
+        ['close$NOCANCEL', 'helper$version'],
+      )
+      for (const symbol of ['close$NOCANCEL', 'helper$version']) {
+        assert.include(artifact.ir, `@${symbol}`)
+      }
+
+      const manifest = AbiManifest.make(
+        target,
+        artifact.foreignImports,
+        artifact.foreignExports,
+        [],
+      )
+      const supplied = yield* AbiManifest.decode(
+        SourceFile.make('native/dollar-symbols.abi.json', AbiManifest.encode(manifest)),
+      )
+      assert.deepEqual(supplied.manifest, manifest)
+      assert.deepEqual(AbiManifest.check([supplied], Analysis.loweredMir(snapshot)), [])
+
+      const compilation = yield* profileFor(target)
+      const destination = join(testRoot, 'linked-dollar-symbols')
+      const linked = yield* NativeToolchain.withBuildScope('dollar-symbol-link', (scope) =>
+        Effect.gen(function* () {
+          const program = yield* NativeToolchain.emitObject(toolchain, scope, artifact, compilation)
+          const definitions = yield* NativeToolchain.compileCObject(
+            toolchain,
+            scope,
+            target,
+            'dollar-symbol-definitions',
+            linkedForeignDollarCSource,
+          )
+          const inspect = (object: NativeToolchain.PathArtifact): ObjectSymbols.Inventory => {
+            const inventory = ObjectSymbols.inspect(readFileSync(object.path), target)
+            if (Result.isFailure(inventory)) return assert.fail(inventory.failure.detail)
+            return {
+              ...inventory.success,
+              symbols: inventory.success.symbols.map((entry) => ({
+                ...entry,
+                name: HelperCapability.symbolName(target, entry.name),
+              })),
+              references: inventory.success.references.map((name) =>
+                HelperCapability.symbolName(target, name),
+              ),
+            }
+          }
+          const programSymbols = inspect(program.artifact)
+          const definitionSymbols = inspect(definitions.artifact)
+          for (const symbol of ['close$NOCANCEL', 'helper$version']) {
+            assert.isTrue(
+              programSymbols.symbols.some((entry) => entry.name === symbol && !entry.defined),
+              symbol,
+            )
+            assert.include(programSymbols.references, symbol)
+            assert.isTrue(
+              definitionSymbols.symbols.some((entry) => entry.name === symbol && entry.defined),
+              symbol,
+            )
+          }
+          const runtime = yield* NativeToolchain.compileRuntime(toolchain, scope, target)
+          return yield* finalize(
+            toolchain,
+            scope,
+            'NativeExecutable',
+            target,
+            [program.artifact, runtime.artifact, definitions.artifact],
+            [],
+            destination,
+          )
+        }),
+      )
+      const run = spawnSync(linked.path, [], { encoding: 'utf8' })
+      assert.strictEqual(run.status, 42, run.stderr)
     }),
   15_000,
 )

@@ -1,4 +1,5 @@
 import * as AnalysisFixture from './support/AnalysisFixture.js'
+import { selectedForeignDollarSource } from './support/foreignDollarSymbol.js'
 import * as ForeignContract from '../src/ForeignContract.js'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -592,6 +593,34 @@ pub fn main() -> i32 {
 
     const plain = yield* emit(nestedSource, { mode: 'release' })
     assert.deepEqual(plain.foreignImports, [])
+  }),
+)
+
+it.effect('preserves selected dollar-bearing symbols and excludes inactive imports', () =>
+  Effect.gen(function* () {
+    for (const [target, expected] of [
+      ['aarch64-apple-darwin', ['close$NOCANCEL', 'helper$version']],
+      ['x86_64-unknown-linux-gnu', ['helper$version']],
+      ['wasm32-unknown-unknown', []],
+    ] as const) {
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        `backend/foreign-dollar-${target}`,
+        ascii(selectedForeignDollarSource),
+        target,
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [], target)
+      const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+      assert.deepEqual(
+        artifact.foreignImports.map((entry) => entry.symbol),
+        [...expected],
+        target,
+      )
+      for (const symbol of expected) assert.include(artifact.ir, `@${symbol}`, target)
+      for (const symbol of ['close$NOCANCEL', 'helper$version']) {
+        if (!expected.some((candidate) => candidate === symbol))
+          assert.notInclude(artifact.ir, symbol, target)
+      }
+    }
   }),
 )
 

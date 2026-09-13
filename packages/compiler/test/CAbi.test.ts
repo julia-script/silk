@@ -544,13 +544,68 @@ it('encodes exact target-qualified ABI manifests for Darwin and Linux', () => {
 })
 
 it('validates native symbol spelling', () => {
-  for (const symbol of ['abs', '_start', 'silk_test_add', 'A1']) {
+  for (const symbol of ['abs', '_start', 'silk_test_add', 'A1', 'close$NOCANCEL', 'host$v2']) {
     assert.isTrue(ForeignSymbol.isValidSpelling(symbol), symbol)
   }
-  for (const symbol of ['', '1abc', 'not a symbol', 'a-b', 'a\0b', '_abs\n', 'ünï']) {
+  for (const symbol of ['', '1abc', '$leading', 'not a symbol', 'a-b', 'a\0b', '_abs\n', 'ünï']) {
     assert.isFalse(ForeignSymbol.isValidSpelling(symbol), JSON.stringify(symbol))
   }
 })
+
+it.effect('round-trips dollar-bearing function and data ABI catalog entries', () =>
+  Effect.gen(function* () {
+    const manifest = AbiManifest.make(
+      Target.aarch64AppleDarwin,
+      [
+        {
+          variadic: false,
+          symbol: 'close$NOCANCEL',
+          parameters: ['i32'],
+          result: 'i32',
+          contract: ForeignContract.conservative,
+        },
+      ],
+      [
+        {
+          variadic: false,
+          symbol: 'host$answer',
+          parameters: [],
+          result: 'i32',
+          contract: ForeignContract.conservative,
+        },
+      ],
+      [
+        { symbol: 'host$data', type: 'i32', direction: 'Import' },
+        { symbol: 'silk$data', type: 'i32', direction: 'Export' },
+      ],
+    )
+    const source = SourceFile.make('interfaces/dollar.json', AbiManifest.encode(manifest))
+    const decoded = yield* AbiManifest.decode(source)
+    assert.deepEqual(decoded.manifest, manifest)
+
+    for (const [name, symbol] of [
+      ['leading-dollar', '$leading'],
+      ['whitespace', 'not a symbol'],
+      ['nul', 'a\0b'],
+      ['non-ascii', 'ünï'],
+    ] as const) {
+      const invalid = {
+        ...manifest,
+        imports: manifest.imports.map((entry, index) =>
+          index === 0 ? { ...entry, symbol } : entry,
+        ),
+      }
+      const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown))(invalid)
+      const rejected = yield* Effect.result(
+        AbiManifest.decode(
+          SourceFile.make(`interfaces/invalid-${name}.json`, new TextEncoder().encode(encoded)),
+        ),
+      )
+      assert.strictEqual(rejected._tag, 'Failure', name)
+      if (rejected._tag === 'Failure') assert.strictEqual(rejected.failure.code, 'SEM0188')
+    }
+  }),
+)
 
 it('reserves compiler symbols and admits ordinary source entry names', () => {
   for (const symbol of [

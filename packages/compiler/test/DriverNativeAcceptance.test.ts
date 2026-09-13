@@ -19,6 +19,7 @@ import { base64AcceptanceSource } from './support/base64Acceptance.js'
 import { httpHeadAcceptanceSource } from './support/httpHeadAcceptance.js'
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
 import { networkAddressResolutionCorpusProgram } from './support/networkAddressResolutionAcceptance.js'
+import { nativeSocketCorpusProgram } from './support/nativeSocketAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
 const defaultClang = (): string => {
@@ -164,6 +165,11 @@ const portableWasmCorpus = [
   {
     name: networkAddressResolutionCorpusProgram.name,
     source: networkAddressResolutionCorpusProgram.source,
+    expected: 42,
+  },
+  {
+    name: nativeSocketCorpusProgram.name,
+    source: nativeSocketCorpusProgram.source,
     expected: 42,
   },
 ] as const

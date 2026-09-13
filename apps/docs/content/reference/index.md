@@ -154,5 +154,6 @@ documentation remain separate from this reference.
 - [Buffered byte I/O](buffered-byte-io.md) — fixed-capacity lookahead, output buffering, scoped duplex composition, and bounded transfer.
 - [HTTP head parsing](http-head-parsing.md) — bounded incremental request/response heads, borrowed views, and atomic serialization.
 - [Network addresses and resolution](network-address-resolution.md) — owned IP/domain/endpoint values, bounded resolution, and synchronous native DNS limits.
+- [Native socket connections](native-socket-connections.md) — scoped nonblocking TCP and pathname-Unix ByteDuplex connections with bounded cooperative polling.
 - [P-256 key agreement](p256-key-agreement.md) — scalar ownership, SEC1 admission, explicit entropy and bounded arithmetic.
 - [ECDSA P-256 verification](ecdsa-p256-verification.md) — borrowed messages, strict DER and retained certificate parameter policy.

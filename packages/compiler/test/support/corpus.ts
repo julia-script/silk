@@ -52,6 +52,7 @@ import { httpValuesAcceptanceSource } from './httpValuesAcceptance.js'
 import { httpHeadAcceptanceSource } from './httpHeadAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
 import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
+import { nativeSocketCorpusProgram } from './nativeSocketAcceptance.js'
 import { ecdsaP256AcceptanceSource } from './ecdsaP256Acceptance.js'
 import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
@@ -6333,6 +6334,13 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   },
   {
     ...networkAddressResolutionCorpusProgram,
+    nativeProfiles: [
+      { name: 'debug', optimization: 'none', debug: true },
+      { name: 'optimized', optimization: 'speed', debug: false },
+    ],
+  },
+  {
+    ...nativeSocketCorpusProgram,
     nativeProfiles: [
       { name: 'debug', optimization: 'none', debug: true },
       { name: 'optimized', optimization: 'speed', debug: false },

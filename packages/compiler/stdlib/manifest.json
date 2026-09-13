@@ -464,6 +464,22 @@
     "namespace": "NativeSystemResolver"
   },
   {
+    "module": "silk/native_socket",
+    "path": "silk/native_socket.silk",
+    "namespace": "NativeSocket",
+    "aliases": [
+      "AttemptFailure",
+      "ConnectOptions",
+      "ConnectOptionsError",
+      "ConnectOptionsReason",
+      "Connection",
+      "ConnectionPhase",
+      "InvalidEndpointReason",
+      "NativeSocketError",
+      "NativeSocketOperation"
+    ]
+  },
+  {
     "module": "silk/native_start",
     "path": "silk/native_start.silk",
     "namespace": "NativeStart"
