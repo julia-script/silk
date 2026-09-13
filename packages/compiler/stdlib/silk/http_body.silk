@@ -119,6 +119,9 @@ pub enum BodyLimitKind {
   ExtensionBytes,
   TrailerBytes,
   TrailerFields,
+  TrailerNameBytes,
+  TrailerValueBytes,
+  TrailerFieldBytes,
   OwnedBytes,
 }
 
@@ -235,7 +238,7 @@ pub fn selectResponse<'value>(
     if version == Version.Http10 && hasTransfer {
       anomaly = Anomaly.Http10TransferEncoding
     }
-    if ((status >= 100 && status < 200) || status == 204) && (hasLength || hasTransfer) {
+    else if ((status >= 100 && status < 200) || status == 204) && (hasLength || hasTransfer) {
       anomaly = Anomaly.ProhibitedFraming
     }
     return Result.succeed<Selection<'value>, BodyError>(Selection<'value> {
@@ -916,6 +919,7 @@ struct DecoderCore {
   trailerPendingCr: bool
   trailerRecords: Bytes
   trailerCount: usize
+  trailerFieldBytes: usize
   allowedNames: StoredNames
   forbiddenNames: StoredNames
   totalWire: u64
@@ -952,8 +956,14 @@ impl Decoder {
       }
       Option<usize>.Some {value} => value
     }
-    let policyStats = policyNameStats(policy)
-    let connectionStats = connectionNameStats(move selection.statsFields)
+    let policyStats = match move policyNameStats(policy) {
+      Result.Failure {error} => { return Result.failResult<Decoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
+    let connectionStats = match move connectionNameStats(move selection.statsFields) {
+      Result.Failure {error} => { return Result.failResult<Decoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
     let mut owned = match move usize.checkedAdd(limits.maxChunkLineBytes, limits.maxTrailerBytes) {
       Option<usize>.None => {
         return Result.failResult<Decoder, BodyError>(baseError(
@@ -1001,10 +1011,22 @@ impl Decoder {
       }
       Option<usize>.Some {value} => value
     }
-    owned = checkedOwnedAdd(owned, policyStats.bytes, limits.maxOwnedBytes)
-    owned = checkedOwnedAdd(owned, policyRecords, limits.maxOwnedBytes)
-    owned = checkedOwnedAdd(owned, connectionStats.bytes, limits.maxOwnedBytes)
-    owned = checkedOwnedAdd(owned, connectionRecords, limits.maxOwnedBytes)
+    owned = match move checkedOwnedAdd(owned, policyStats.bytes, BodyComponent.Decoder) {
+      Result.Failure {error} => { return Result.failResult<Decoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
+    owned = match move checkedOwnedAdd(owned, policyRecords, BodyComponent.Decoder) {
+      Result.Failure {error} => { return Result.failResult<Decoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
+    owned = match move checkedOwnedAdd(owned, connectionStats.bytes, BodyComponent.Decoder) {
+      Result.Failure {error} => { return Result.failResult<Decoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
+    owned = match move checkedOwnedAdd(owned, connectionRecords, BodyComponent.Decoder) {
+      Result.Failure {error} => { return Result.failResult<Decoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
     if owned > limits.maxOwnedBytes {
       return Result.failResult<Decoder, BodyError>(baseError(
         BodyReason.LimitExceeded {
@@ -1051,6 +1073,7 @@ impl Decoder {
         trailerPendingCr: false,
         trailerRecords: move trailerRecords,
         trailerCount: usize.ZERO,
+        trailerFieldBytes: usize.ZERO,
         allowedNames: move allowedNames,
         forbiddenNames: move forbiddenNames,
         totalWire: u64.MIN,
@@ -1108,7 +1131,7 @@ impl Decoder {
 
   /// Returns completed chunk trailers without merging them into initial fields.
   pub fn trailers<'owner>(self: &'owner Self) -> Option<Trailers<'owner>> {
-    if self.core.phase != DecoderPhase.Complete {
+    if self.core.phase != DecoderPhase.Complete || !isChunkedFraming(self.core.framing) {
       return Option.none<Trailers<'owner>>()
     }
     return Option.some<Trailers<'owner>>(Trailers<'owner> {
@@ -1127,37 +1150,6 @@ impl Decoder {
     })
   }
 
-  /// Reuses acquired storage for a distinct framing instance.
-  pub fn reset(self: &mut Self, framing: Framing) -> Result<(), BodyError> {
-    if self.core.phase != DecoderPhase.Complete && self.core.phase != DecoderPhase.Failed
-      && self.core.phase != DecoderPhase.Abandoned && self.core.phase != DecoderPhase.Tunnel {
-      return Result.failResult<(), BodyError>(decoderStateError(&self.core))
-    }
-    self.core.framing = framing
-    self.core.phase = initialDecoderPhase(framing)
-    self.core.remaining = match framing {
-      Framing.Fixed {length} => length
-      _ => u64.MIN
-    }
-    self.core.currentChunk = u64.MIN
-    self.core.chunks = usize.ZERO
-    self.core.extensions = u64.MIN
-    self.core.lineLength = usize.ZERO
-    self.core.linePendingCr = false
-    self.core.trailerLength = usize.ZERO
-    self.core.trailerLineStart = usize.ZERO
-    self.core.trailerPendingCr = false
-    self.core.trailerCount = usize.ZERO
-    self.core.totalWire = u64.MIN
-    self.core.totalPayload = u64.MIN
-    self.core.finalSeen = false
-    self.core.completionKind = match framing {
-      Framing.Tunnel => CompletionKind.Tunnel
-      _ => CompletionKind.Delimited
-    }
-    return Result.succeed<(), BodyError>(())
-  }
-
   /// Makes the decoder terminal without performing transport work.
   pub fn abandon(self: &mut Self) -> () {
     if self.core.phase != DecoderPhase.Complete && self.core.phase != DecoderPhase.Tunnel {
@@ -1172,22 +1164,40 @@ struct NameStats {
   count: usize
 }
 
-fn policyNameStats(policy: TrailerPolicy) -> NameStats {
+fn policyNameStats(policy: TrailerPolicy) -> Result<NameStats, BodyError> {
   return match move policy {
-    TrailerPolicy.Default => NameStats {bytes: usize.ZERO, count: usize.ZERO}
+    TrailerPolicy.Default => Result.succeed<NameStats, BodyError>(NameStats {
+      bytes: usize.ZERO,
+      count: usize.ZERO,
+    })
     TrailerPolicy.Explicit {names} => {
       let mut total = usize.ZERO
       let mut index = usize.ZERO
       while index < names.length {
-        total = total + String.byteLength(names[index])
+        total = match move usize.checkedAdd(total, String.byteLength(names[index])) {
+          Option.None => {
+            return Result.failResult<NameStats, BodyError>(baseError(
+              BodyReason.SizeOverflow,
+              BodyComponent.TrailerPolicy,
+              usize.toU64(index),
+              Option.some<usize>(index),
+            ))
+          }
+          Option.Some {value} => value
+        }
         index = index + usize.ONE
       }
-      return NameStats {bytes: total, count: names.length}
+      return Result.succeed<NameStats, BodyError>(NameStats {
+        bytes: total,
+        count: names.length,
+      })
     }
   }
 }
 
-fn connectionNameStats<'value>(fields: HeadHeaderIterator<'value>) -> NameStats {
+fn connectionNameStats<'value>(
+  fields: HeadHeaderIterator<'value>,
+) -> Result<NameStats, BodyError> {
   let mut total = usize.ZERO
   let mut count = usize.ZERO
   let mut iterator = move fields
@@ -1207,14 +1217,34 @@ fn connectionNameStats<'value>(fields: HeadHeaderIterator<'value>) -> NameStats 
         let start = cursor
         while cursor < value.length && tokenByte(value[cursor]) { cursor = cursor + usize.ONE }
         if cursor > start {
-          total = total + (cursor - start)
-          count = count + usize.ONE
+          total = match move usize.checkedAdd(total, cursor - start) {
+            Option.None => {
+              return Result.failResult<NameStats, BodyError>(baseError(
+                BodyReason.SizeOverflow,
+                BodyComponent.TrailerPolicy,
+                usize.toU64(count),
+                Option.none<usize>(),
+              ))
+            }
+            Option.Some {value: nextTotal} => nextTotal
+          }
+          count = match move usize.checkedAdd(count, usize.ONE) {
+            Option.None => {
+              return Result.failResult<NameStats, BodyError>(baseError(
+                BodyReason.SizeOverflow,
+                BodyComponent.TrailerPolicy,
+                usize.toU64(count),
+                Option.none<usize>(),
+              ))
+            }
+            Option.Some {value: nextCount} => nextCount
+          }
         }
         while cursor < value.length && value[cursor] != 44 { cursor = cursor + usize.ONE }
       }
     }
   }
-  return NameStats {bytes: total, count: count}
+  return Result.succeed<NameStats, BodyError>(NameStats {bytes: total, count: count})
 }
 
 effect fn copyPolicyNames(
@@ -1289,13 +1319,19 @@ effect fn copyConnectionNames<'value>(
   return StoredNames {bytes: move bytes, records: move records, defaultPolicy: false}
 }
 
-fn checkedOwnedAdd(current: usize, added: usize, maximum: usize) -> usize {
+fn checkedOwnedAdd(
+  current: usize,
+  added: usize,
+  component: BodyComponent,
+) -> Result<usize, BodyError> {
   return match move usize.checkedAdd(current, added) {
-    Option<usize>.None => usize.MAX
-    Option<usize>.Some {value} => {
-      if value > maximum { return value }
-      return value
-    }
+    Option.None => Result.failResult<usize, BodyError>(baseError(
+      BodyReason.SizeOverflow,
+      component,
+      u64.MIN,
+      Option.none<usize>(),
+    ))
+    Option.Some {value} => Result.succeed<usize, BodyError>(value)
   }
 }
 
@@ -1427,7 +1463,19 @@ fn decodeCore(
           Option.none<usize>(),
         ))
       }
-      let attempted = core.lineLength + usize.ONE
+      let attempted = match move usize.checkedAdd(core.lineLength, usize.ONE) {
+        Option.None => {
+          return Result.failResult<Progress, BodyError>(decoderFailure(
+            &mut core.*,
+            BodyReason.SizeOverflow,
+            BodyComponent.ChunkLine,
+            consumed,
+            written,
+            Option.none<usize>(),
+          ))
+        }
+        Option.Some {value} => value
+      }
       if attempted > core.limits.maxChunkLineBytes {
         let allowed = core.limits.maxChunkLineBytes
         return Result.failResult<Progress, BodyError>(decoderLimitFailure(
@@ -1475,7 +1523,19 @@ fn decodeCore(
           }
           Result<ChunkInfo, BodyError>.Success {value} => value
         }
-        let attemptedChunks = core.chunks + usize.ONE
+        let attemptedChunks = match move usize.checkedAdd(core.chunks, usize.ONE) {
+          Option.None => {
+            return Result.failResult<Progress, BodyError>(decoderFailure(
+              &mut core.*,
+              BodyReason.SizeOverflow,
+              BodyComponent.ChunkLine,
+              consumed,
+              written,
+              Option.none<usize>(),
+            ))
+          }
+          Option.Some {value} => value
+        }
         if attemptedChunks > core.limits.maxChunks {
           let allowed = core.limits.maxChunks
           return Result.failResult<Progress, BodyError>(decoderLimitFailure(
@@ -1591,7 +1651,20 @@ fn decodeCore(
           Option.some<usize>(fieldIndex),
         ))
       }
-      let attempted = core.trailerLength + usize.ONE
+      let attempted = match move usize.checkedAdd(core.trailerLength, usize.ONE) {
+        Option.None => {
+          let fieldIndex = core.trailerCount
+          return Result.failResult<Progress, BodyError>(decoderFailure(
+            &mut core.*,
+            BodyReason.SizeOverflow,
+            BodyComponent.TrailerValue,
+            consumed,
+            written,
+            Option.some<usize>(fieldIndex),
+          ))
+        }
+        Option.Some {value} => value
+      }
       if attempted > core.limits.maxTrailerBytes {
         let allowed = core.limits.maxTrailerBytes
         let fieldIndex = core.trailerCount
@@ -1628,6 +1701,48 @@ fn decodeCore(
         core.trailerPendingCr = false
         let lineLength = core.trailerLength - core.trailerLineStart - 2
         if lineLength == usize.ZERO {
+          let retainedRecords = match move usize.checkedMultiply(
+            core.trailerCount,
+            FIELD_RECORD_BYTES,
+          ) {
+            Option.None => {
+              return Result.failResult<Progress, BodyError>(decoderFailure(
+                &mut core.*,
+                BodyReason.SizeOverflow,
+                BodyComponent.TrailerValue,
+                consumed,
+                written,
+                Option.none<usize>(),
+              ))
+            }
+            Option.Some {value} => value
+          }
+          let retainedOwned = match move usize.checkedAdd(core.trailerLength, retainedRecords) {
+            Option.None => {
+              return Result.failResult<Progress, BodyError>(decoderFailure(
+                &mut core.*,
+                BodyReason.SizeOverflow,
+                BodyComponent.TrailerValue,
+                consumed,
+                written,
+                Option.none<usize>(),
+              ))
+            }
+            Option.Some {value} => value
+          }
+          if retainedOwned > core.limits.trailerValues.maxOwnedBytes {
+            let allowed = core.limits.trailerValues.maxOwnedBytes
+            return Result.failResult<Progress, BodyError>(decoderLimitFailure(
+              &mut core.*,
+              BodyLimitKind.OwnedBytes,
+              usize.toU64(allowed),
+              usize.toU64(retainedOwned),
+              BodyComponent.TrailerValue,
+              consumed,
+              written,
+              Option.none<usize>(),
+            ))
+          }
           completeDecoder(&mut core.*, CompletionKind.Delimited)
           break
         }
@@ -1801,7 +1916,17 @@ fn parseChunkLine(line: &[u8]) -> Result<ChunkInfo, BodyError> {
 fn acceptTrailerLine(core: &mut DecoderCore, lineLength: usize) -> Result<(), BodyError> {
   let bytes = Bytes.asSlice(&core.trailerBytes)
   let start = core.trailerLineStart
-  let end = start + lineLength
+  let end = match move usize.checkedAdd(start, lineLength) {
+    Option.None => {
+      return Result.failResult<(), BodyError>(baseError(
+        BodyReason.SizeOverflow,
+        BodyComponent.TrailerValue,
+        usize.toU64(start),
+        Option.some<usize>(core.trailerCount),
+      ))
+    }
+    Option.Some {value} => value
+  }
   let mut colon = start
   while colon < end && bytes[colon] != 58 { colon = colon + usize.ONE }
   if colon == start || colon >= end {
@@ -1813,6 +1938,7 @@ fn acceptTrailerLine(core: &mut DecoderCore, lineLength: usize) -> Result<(), Bo
     ))
   }
   let name = Slice.view<u8>(bytes, start, colon - start)
+  let nameLength = name.length
   if !validToken(name) {
     return Result.failResult<(), BodyError>(baseError(
       BodyReason.TrailerSyntax,
@@ -1827,6 +1953,16 @@ fn acceptTrailerLine(core: &mut DecoderCore, lineLength: usize) -> Result<(), Bo
       BodyComponent.TrailerPolicy,
       usize.toU64(start),
       Option.some<usize>(core.trailerCount),
+    ))
+  }
+  if nameLength > core.limits.trailerValues.maxNameBytes {
+    return Result.failResult<(), BodyError>(trailerLimitError(
+      BodyLimitKind.TrailerNameBytes,
+      core.limits.trailerValues.maxNameBytes,
+      nameLength,
+      BodyComponent.TrailerName,
+      start,
+      core.trailerCount,
     ))
   }
   let mut valueStart = colon + usize.ONE
@@ -1851,31 +1987,146 @@ fn acceptTrailerLine(core: &mut DecoderCore, lineLength: usize) -> Result<(), Bo
     }
     cursor = cursor + usize.ONE
   }
-  let attempted = core.trailerCount + usize.ONE
-  if attempted > core.limits.maxTrailerFields {
-    return Result.failResult<(), BodyError>(baseError(
-      BodyReason.LimitExceeded {
-        limit: BodyLimitKind.TrailerFields,
-        allowed: usize.toU64(core.limits.maxTrailerFields),
-        attempted: usize.toU64(attempted),
-      },
-      BodyComponent.TrailerName,
-      usize.toU64(start),
-      Option.some<usize>(core.trailerCount),
+  let valueLength = valueEnd - valueStart
+  if valueLength > core.limits.trailerValues.maxValueBytes {
+    return Result.failResult<(), BodyError>(trailerLimitError(
+      BodyLimitKind.TrailerValueBytes,
+      core.limits.trailerValues.maxValueBytes,
+      valueLength,
+      BodyComponent.TrailerValue,
+      valueStart,
+      core.trailerCount,
     ))
   }
+  let fieldBytes = match move usize.checkedAdd(nameLength, valueLength) {
+    Option.None => {
+      return Result.failResult<(), BodyError>(baseError(
+        BodyReason.SizeOverflow,
+        BodyComponent.TrailerValue,
+        usize.toU64(start),
+        Option.some<usize>(core.trailerCount),
+      ))
+    }
+    Option.Some {value} => value
+  }
+  let nextFieldBytes = match move usize.checkedAdd(core.trailerFieldBytes, fieldBytes) {
+    Option.None => {
+      return Result.failResult<(), BodyError>(baseError(
+        BodyReason.SizeOverflow,
+        BodyComponent.TrailerValue,
+        usize.toU64(start),
+        Option.some<usize>(core.trailerCount),
+      ))
+    }
+    Option.Some {value} => value
+  }
+  if nextFieldBytes > core.limits.trailerValues.maxFieldBytes {
+    return Result.failResult<(), BodyError>(trailerLimitError(
+      BodyLimitKind.TrailerFieldBytes,
+      core.limits.trailerValues.maxFieldBytes,
+      nextFieldBytes,
+      BodyComponent.TrailerValue,
+      start,
+      core.trailerCount,
+    ))
+  }
+  let attempted = match move usize.checkedAdd(core.trailerCount, usize.ONE) {
+    Option.None => {
+      return Result.failResult<(), BodyError>(baseError(
+        BodyReason.SizeOverflow,
+        BodyComponent.TrailerName,
+        usize.toU64(start),
+        Option.some<usize>(core.trailerCount),
+      ))
+    }
+    Option.Some {value} => value
+  }
+  if attempted > core.limits.maxTrailerFields {
+    return Result.failResult<(), BodyError>(trailerLimitError(
+      BodyLimitKind.TrailerFields,
+      core.limits.maxTrailerFields,
+      attempted,
+      BodyComponent.TrailerName,
+      start,
+      core.trailerCount,
+    ))
+  }
+  if attempted > core.limits.trailerValues.maxFields {
+    return Result.failResult<(), BodyError>(trailerLimitError(
+      BodyLimitKind.TrailerFields,
+      core.limits.trailerValues.maxFields,
+      attempted,
+      BodyComponent.TrailerName,
+      start,
+      core.trailerCount,
+    ))
+  }
+  let retainedRecords = match move usize.checkedMultiply(attempted, FIELD_RECORD_BYTES) {
+    Option.None => {
+      return Result.failResult<(), BodyError>(baseError(
+        BodyReason.SizeOverflow,
+        BodyComponent.TrailerValue,
+        usize.toU64(start),
+        Option.some<usize>(core.trailerCount),
+      ))
+    }
+    Option.Some {value} => value
+  }
+  let retainedOwned = match move usize.checkedAdd(core.trailerLength, retainedRecords) {
+    Option.None => {
+      return Result.failResult<(), BodyError>(baseError(
+        BodyReason.SizeOverflow,
+        BodyComponent.TrailerValue,
+        usize.toU64(start),
+        Option.some<usize>(core.trailerCount),
+      ))
+    }
+    Option.Some {value} => value
+  }
+  if retainedOwned > core.limits.trailerValues.maxOwnedBytes {
+    return Result.failResult<(), BodyError>(trailerLimitError(
+      BodyLimitKind.OwnedBytes,
+      core.limits.trailerValues.maxOwnedBytes,
+      retainedOwned,
+      BodyComponent.TrailerValue,
+      start,
+      core.trailerCount,
+    ))
+  }
+  drop bytes
   writeFieldRecord(
     &mut core.trailerRecords,
     core.trailerCount,
     FieldRecord {
       nameStart: start,
-      nameLength: colon - start,
+      nameLength: nameLength,
       valueStart: valueStart,
-      valueLength: valueEnd - valueStart,
+      valueLength: valueLength,
     },
   )
   core.trailerCount = attempted
+  core.trailerFieldBytes = nextFieldBytes
   return Result.succeed<(), BodyError>(())
+}
+
+fn trailerLimitError(
+  limit: BodyLimitKind,
+  allowed: usize,
+  attempted: usize,
+  component: BodyComponent,
+  offset: usize,
+  fieldIndex: usize,
+) -> BodyError {
+  return baseError(
+    BodyReason.LimitExceeded {
+      limit: limit,
+      allowed: usize.toU64(allowed),
+      attempted: usize.toU64(attempted),
+    },
+    component,
+    usize.toU64(offset),
+    Option.some<usize>(fieldIndex),
+  )
 }
 
 fn decoderAllows(core: &DecoderCore, name: &[u8]) -> bool {
@@ -2261,6 +2512,10 @@ impl<'owner> Trailers<'owner> {
     self: &'owner Self,
     limits: ValueLimits,
   ) -> Result<OwnedTrailers, BodyError> ! OutOfMemoryError ? &mut Allocator {
+    let validated = validateTrailerCopy(self.bytes, self.records, self.countValue, limits)
+    if let Result.Failure {error} = move validated {
+      return Result.failResult<OwnedTrailers, BodyError>(move error)
+    }
     let recordBytes = match move usize.checkedMultiply(self.countValue, FIELD_RECORD_BYTES) {
       Option<usize>.None => {
         return Result.failResult<OwnedTrailers, BodyError>(baseError(
@@ -2345,6 +2600,7 @@ impl<'owner> TrailerIterator<'owner> {
     let value = Slice.view<u8>(self.bytes, record.valueStart, record.valueLength)
     return match move Header.make(name, value, self.limits) {
       Result<Header<'owner>, ValueError>.Failure {error} => {
+        let invariantViolation = 1 / 0
         return Option.none<Header<'owner>>()
       }
       Result<Header<'owner>, ValueError>.Success {value: header} => {
@@ -2352,6 +2608,83 @@ impl<'owner> TrailerIterator<'owner> {
       }
     }
   }
+}
+
+fn validateTrailerCopy(
+  bytes: &[u8],
+  records: &[u8],
+  count: usize,
+  limits: ValueLimits,
+) -> Result<(), BodyError> {
+  if count > limits.maxFields {
+    return Result.failResult<(), BodyError>(trailerLimitError(
+      BodyLimitKind.TrailerFields,
+      limits.maxFields,
+      count,
+      BodyComponent.TrailerName,
+      usize.ZERO,
+      limits.maxFields,
+    ))
+  }
+  let mut total = usize.ZERO
+  let mut index = usize.ZERO
+  while index < count {
+    let record = readFieldRecord(records, index)
+    if record.nameLength > limits.maxNameBytes {
+      return Result.failResult<(), BodyError>(trailerLimitError(
+        BodyLimitKind.TrailerNameBytes,
+        limits.maxNameBytes,
+        record.nameLength,
+        BodyComponent.TrailerName,
+        record.nameStart,
+        index,
+      ))
+    }
+    if record.valueLength > limits.maxValueBytes {
+      return Result.failResult<(), BodyError>(trailerLimitError(
+        BodyLimitKind.TrailerValueBytes,
+        limits.maxValueBytes,
+        record.valueLength,
+        BodyComponent.TrailerValue,
+        record.valueStart,
+        index,
+      ))
+    }
+    let fieldBytes = match move usize.checkedAdd(record.nameLength, record.valueLength) {
+      Option.None => {
+        return Result.failResult<(), BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.TrailerValue,
+          usize.toU64(record.nameStart),
+          Option.some<usize>(index),
+        ))
+      }
+      Option.Some {value} => value
+    }
+    total = match move usize.checkedAdd(total, fieldBytes) {
+      Option.None => {
+        return Result.failResult<(), BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.TrailerValue,
+          usize.toU64(record.nameStart),
+          Option.some<usize>(index),
+        ))
+      }
+      Option.Some {value} => value
+    }
+    if total > limits.maxFieldBytes {
+      return Result.failResult<(), BodyError>(trailerLimitError(
+        BodyLimitKind.TrailerFieldBytes,
+        limits.maxFieldBytes,
+        total,
+        BodyComponent.TrailerValue,
+        record.nameStart,
+        index,
+      ))
+    }
+    index = index + usize.ONE
+  }
+  return Result.succeed<(), BodyError>(())
 }
 
 enum EncoderPhase { Active, Finishing, Complete, Failed, Abandoned }
@@ -2417,8 +2750,14 @@ impl Encoder {
       }
       Option<usize>.Some {value} => value
     }
-    let policyStats = policyNameStats(policy)
-    let connectionStats = connectionNameStats(move selection.statsFields)
+    let policyStats = match move policyNameStats(policy) {
+      Result.Failure {error} => { return Result.failResult<Encoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
+    let connectionStats = match move connectionNameStats(move selection.statsFields) {
+      Result.Failure {error} => { return Result.failResult<Encoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
     let policyRecords = match move usize.checkedMultiply(policyStats.count, NAME_RECORD_BYTES) {
       Option<usize>.None => {
         return Result.failResult<Encoder, BodyError>(baseError(
@@ -2445,13 +2784,32 @@ impl Encoder {
       Option<usize>.Some {value} => value
     }
     let mut owned = match move usize.checkedAdd(chunkCapacity, finishCapacity) {
-      Option<usize>.None => usize.MAX
-      Option<usize>.Some {value} => value
+      Option.None => {
+        return Result.failResult<Encoder, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Encoder,
+          u64.MIN,
+          Option.none<usize>(),
+        ))
+      }
+      Option.Some {value} => value
     }
-    owned = checkedOwnedAdd(owned, policyStats.bytes, limits.maxOwnedBytes)
-    owned = checkedOwnedAdd(owned, policyRecords, limits.maxOwnedBytes)
-    owned = checkedOwnedAdd(owned, connectionStats.bytes, limits.maxOwnedBytes)
-    owned = checkedOwnedAdd(owned, connectionRecords, limits.maxOwnedBytes)
+    owned = match move checkedOwnedAdd(owned, policyStats.bytes, BodyComponent.Encoder) {
+      Result.Failure {error} => { return Result.failResult<Encoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
+    owned = match move checkedOwnedAdd(owned, policyRecords, BodyComponent.Encoder) {
+      Result.Failure {error} => { return Result.failResult<Encoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
+    owned = match move checkedOwnedAdd(owned, connectionStats.bytes, BodyComponent.Encoder) {
+      Result.Failure {error} => { return Result.failResult<Encoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
+    owned = match move checkedOwnedAdd(owned, connectionRecords, BodyComponent.Encoder) {
+      Result.Failure {error} => { return Result.failResult<Encoder, BodyError>(move error) }
+      Result.Success {value} => value
+    }
     if owned > limits.maxOwnedBytes {
       return Result.failResult<Encoder, BodyError>(baseError(
         BodyReason.LimitExceeded {
@@ -2982,7 +3340,18 @@ fn validateFinishTrailers<'value>(
       Option.some<usize>(limits.maxTrailerFields),
     ))
   }
+  if count > limits.trailerValues.maxFields {
+    return Result.failResult<usize, BodyError>(trailerLimitError(
+      BodyLimitKind.TrailerFields,
+      limits.trailerValues.maxFields,
+      count,
+      BodyComponent.TrailerName,
+      usize.ZERO,
+      limits.trailerValues.maxFields,
+    ))
+  }
   let mut required = TWO
+  let mut fieldBytes = usize.ZERO
   let mut iterator = Headers.iter(trailers)
   let mut index = usize.ZERO
   while true {
@@ -2991,6 +3360,27 @@ fn validateFinishTrailers<'value>(
       Option<Header<'value>>.Some {value} => value
     }
     let name = String.utf8Bytes(Header.name(&field))
+    let fieldValue = Header.value(&field)
+    if name.length > limits.trailerValues.maxNameBytes {
+      return Result.failResult<usize, BodyError>(trailerLimitError(
+        BodyLimitKind.TrailerNameBytes,
+        limits.trailerValues.maxNameBytes,
+        name.length,
+        BodyComponent.TrailerName,
+        required,
+        index,
+      ))
+    }
+    if fieldValue.length > limits.trailerValues.maxValueBytes {
+      return Result.failResult<usize, BodyError>(trailerLimitError(
+        BodyLimitKind.TrailerValueBytes,
+        limits.trailerValues.maxValueBytes,
+        fieldValue.length,
+        BodyComponent.TrailerValue,
+        required,
+        index,
+      ))
+    }
     if !storedPolicyAllows(allowed, forbidden, name) {
       return Result.failResult<usize, BodyError>(baseError(
         BodyReason.TrailerPolicy,
@@ -2999,8 +3389,8 @@ fn validateFinishTrailers<'value>(
         Option.some<usize>(index),
       ))
     }
-    let line = match move usize.checkedAdd(name.length, Header.value(&field).length) {
-      Option<usize>.None => {
+    let semantic = match move usize.checkedAdd(name.length, fieldValue.length) {
+      Option.None => {
         return Result.failResult<usize, BodyError>(baseError(
           BodyReason.SizeOverflow,
           BodyComponent.Encoder,
@@ -3008,7 +3398,39 @@ fn validateFinishTrailers<'value>(
           Option.some<usize>(index),
         ))
       }
-      Option<usize>.Some {value} => value + FOUR
+      Option.Some {value: semanticValue} => semanticValue
+    }
+    fieldBytes = match move usize.checkedAdd(fieldBytes, semantic) {
+      Option.None => {
+        return Result.failResult<usize, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Encoder,
+          u64.MIN,
+          Option.some<usize>(index),
+        ))
+      }
+      Option.Some {value: totalFields} => totalFields
+    }
+    if fieldBytes > limits.trailerValues.maxFieldBytes {
+      return Result.failResult<usize, BodyError>(trailerLimitError(
+        BodyLimitKind.TrailerFieldBytes,
+        limits.trailerValues.maxFieldBytes,
+        fieldBytes,
+        BodyComponent.TrailerValue,
+        required,
+        index,
+      ))
+    }
+    let line = match move usize.checkedAdd(semantic, FOUR) {
+      Option.None => {
+        return Result.failResult<usize, BodyError>(baseError(
+          BodyReason.SizeOverflow,
+          BodyComponent.Encoder,
+          u64.MIN,
+          Option.some<usize>(index),
+        ))
+      }
+      Option.Some {value: lineValue} => lineValue
     }
     required = match move usize.checkedAdd(required, line) {
       Option<usize>.None => {
@@ -3035,7 +3457,28 @@ fn validateFinishTrailers<'value>(
       Option.none<usize>(),
     ))
   }
-  return Result.succeed<usize, BodyError>(required + THREE)
+  let finishRequired = match move usize.checkedAdd(required, THREE) {
+    Option.None => {
+      return Result.failResult<usize, BodyError>(baseError(
+        BodyReason.SizeOverflow,
+        BodyComponent.Encoder,
+        u64.MIN,
+        Option.none<usize>(),
+      ))
+    }
+    Option.Some {value} => value
+  }
+  if finishRequired > limits.trailerValues.maxOwnedBytes {
+    return Result.failResult<usize, BodyError>(trailerLimitError(
+      BodyLimitKind.OwnedBytes,
+      limits.trailerValues.maxOwnedBytes,
+      finishRequired,
+      BodyComponent.Encoder,
+      usize.ZERO,
+      usize.ZERO,
+    ))
+  }
+  return Result.succeed<usize, BodyError>(finishRequired)
 }
 
 fn writeHexLine(value: usize, output: &mut [u8]) -> usize {

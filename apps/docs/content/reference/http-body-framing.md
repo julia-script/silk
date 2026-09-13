@@ -185,7 +185,9 @@ decoder's packed storage. `Trailers.count()` returns its field count, and `Trail
 iterates the validated fields without allocation. `Trailers.copy(limits)` is the explicit fallible
 allocation boundary for an independently owned `OwnedTrailers` copy under the supplied HTTP value
 limits. `OwnedTrailers.view()` borrows the same trailer-view interface from the independent owner.
-A live trailer view prevents decoder reset or destruction that requires exclusive ownership.
+A live trailer view prevents decoder destruction or any operation requiring exclusive ownership.
+`Decoder.trailers()` returns `None` for successfully completed Empty, Fixed, and CloseDelimited
+bodies; only successful Chunked completion publishes a trailer section.
 
 ## Encoder
 
@@ -257,13 +259,17 @@ progress from the failing call; `totalWire` and `totalPayload` are cumulative co
 A framing, syntax, limit, discard, or truncation failure terminally poisons the current message;
 subsequent operations fail with `InvalidState` without replacing the original failure or exposing
 completion evidence. `BodyLimitKind` distinguishes `WireBytes`, `PayloadBytes`, `ChunkBytes`,
-`Chunks`, `ChunkLineBytes`, `ExtensionBytes`, `TrailerBytes`, `TrailerFields`, and `OwnedBytes`.
+`Chunks`, `ChunkLineBytes`, `ExtensionBytes`, `TrailerBytes`, `TrailerFields`,
+`TrailerNameBytes`, `TrailerValueBytes`, `TrailerFieldBytes`, and `OwnedBytes`. The nested
+`trailerValues` name, value, field-count, aggregate-field-byte, and owned-byte limits are enforced
+again when receiving trailers, copying completed trailers, and snapshotting encoder trailers; a
+collection constructed under looser limits cannot bypass the body-framing limits.
 
 The separate `OutOfMemoryError` effect failure can occur only during decoder or encoder acquisition
 and explicit trailer copying. It cannot arise from allocation-free stepping, discarding, or finish
 continuation.
 
-## Discard, abandonment, and reset
+## Discard and abandonment
 
 `Decoder.discard(input, finalInput, maxDiscardWireBytes)` advances the same framing machine without
 producing payload. Its explicit finite budget counts every consumed wire byte, including chunk
@@ -275,10 +281,9 @@ flushing, or draining a transport. Abandonment, cancellation, framing failure, a
 provide no reusable completion evidence; the transport owner must close or otherwise retire its
 connection.
 
-`Decoder.reset(framing)` starts a distinct message while reusing the acquired storage. Reset
-requires exclusive decoder ownership, so all borrowed trailer and completion views must have
-ended. Reset never turns completion or failure from the previous message into evidence for the new
-message.
+Each decoder owns exactly one parsed-head `Selection` and trailer policy. A distinct message must
+construct a new decoder from that message's fresh selection and policy. This prevents retained
+Connection-nominated exclusions or allowlists from leaking across messages.
 
 ## Completion evidence
 
@@ -292,8 +297,8 @@ a positive terminal outcome. Callers can inspect `Completion.kind()`:
 | `CompletionKind.Tunnel`         | The decoder handed untouched post-head bytes to a tunnel. |
 
 The evidence cannot be constructed by application code. Active, abandoned, and failed owners
-expose no positive evidence. A live evidence view borrows its owner and cannot outlive reset or
-destruction.
+expose no positive evidence. A live evidence view borrows its owner and cannot outlive destruction
+or overlap exclusive mutation.
 
 Completion evidence establishes only the framing outcome for one body. It does not prove that
 encoded bytes were flushed, that the peer is healthy, that an incoming connection is otherwise

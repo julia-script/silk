@@ -79,7 +79,7 @@ Alternative considered: validate syntax byte-by-byte while accumulating. Rejecte
 
 Trailer lines reuse the strict field grammar: nonempty token name, immediate colon, OWS-trimmed value, strict CRLF, no obs-fold, and the shared field-value byte rules. Each accepted field is copied into packed trailer backing with fixed-width offset records. The terminating empty line is counted in trailer and wire budgets but produces no field record.
 
-`Trailers<'decoder>` borrows the packed bytes and records only after chunked completion. Iteration yields existing validated `Header` values without allocation. `Trailers.copy` uses the allocator to create an independent `OwnedTrailers` owner with the same packed representation and value limits. Reset/destruction requires exclusive decoder ownership, so the language prevents it while a trailer or completion view is live.
+`Trailers<'decoder>` borrows the packed bytes and records only after chunked completion. Iteration yields existing validated `Header` values without allocation; an impossible retained-record violation traps as an internal invariant breach rather than masquerading as iterator EOF. `Trailers.copy` uses the allocator to create an independent `OwnedTrailers` owner with the same packed representation and value limits. Destruction and exclusive mutation require exclusive decoder ownership, so the language prevents them while a trailer or completion view is live.
 
 Alternative considered: reuse the initial `Headers` collection by appending. Rejected because it would erase security provenance and let late trailers alter earlier framing or authentication decisions.
 
@@ -103,13 +103,19 @@ Alternative considered: report only a wire offset. Rejected because a caller wit
 
 The module will expose a public `CompletionKind` but make the evidence struct's discriminant field private. Evidence is obtained only as a view borrowing a completed decoder or encoder, with kinds for `Delimited`, `CloseDelimited`, and `Tunnel`. Active, failed, and abandoned owners return no evidence. The evidence deliberately says nothing about flush, peer health, or whole-connection persistence; the transport owner combines it with its own state.
 
-Alternative considered: return `reusable: bool` in step progress. Rejected because a copied boolean can outlive reset, collapse tunnel and close-delimited outcomes, and be mistaken for proof of transport health.
+Alternative considered: return `reusable: bool` in step progress. Rejected because a copied boolean can outlive its message owner, collapse tunnel and close-delimited outcomes, and be mistaken for proof of transport health.
 
 ### 9. Discard reuses decoder syntax but has a separate finite budget
 
 `discard(input, finalInput, maxDiscardWireBytes)` drives the same phase machine while skipping payload rather than requiring output. It decrements its explicit budget for every consumed wire byte, including size lines, data delimiters, and trailers. Exhaustion is a terminal DiscardLimit failure. `abandon` changes the owner to a terminal state without touching caller buffers or any transport.
 
 Alternative considered: repeatedly call `step` with a scratch output buffer. Rejected because it hides the drain loop and budget from the API and may accidentally authorize unlimited work.
+
+The decoder is deliberately single-message. A subsequent message constructs a fresh owner from its
+own affine `Selection` and `TrailerPolicy`, so Connection-nominated exclusions and explicit
+allowlists cannot leak across head boundaries. Reusing only the byte buffers was considered and
+rejected because an allocation-free reset could not atomically replace variable-sized retained
+policy state under the original capacity contract.
 
 ### 10. Verification uses one analysis program and one portable runtime corpus
 

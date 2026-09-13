@@ -7,9 +7,9 @@ import { httpBodyAcceptanceSource } from './support/httpBodyAcceptance.js'
 
 const encoder = new TextEncoder()
 
-const borrowedResetSource = `${httpBodyAcceptanceSource}
+const contractRejectionSource = `${httpBodyAcceptanceSource}
 
-effect fn resetWhileCompletionBorrowed() -> () ! OutOfMemoryError ? &mut Allocator {
+effect fn mutateWhileCompletionBorrowed() -> () ! OutOfMemoryError ? &mut Allocator {
   let made = run decoderFor(
     b"POST / HTTP/1.1\\r\\nHost: example.com\\r\\nContent-Length: 0\\r\\n\\r\\n",
     bodyLimits(),
@@ -19,19 +19,14 @@ effect fn resetWhileCompletionBorrowed() -> () ! OutOfMemoryError ? &mut Allocat
     Option.Some {value} => move value
   }
   let evidence = Decoder.completion(&decoder)
-  let reset = Decoder.reset(&mut decoder, Framing.Empty)
-  drop reset
+  Decoder.abandon(&mut decoder)
   drop evidence
   return ()
-}`
-
-const opaqueCompletionSource = `import silk.http_body { Completion, CompletionKind }
+}
 
 fn forge<'owner>(marker: &'owner u8) -> Completion<'owner> {
   return Completion<'owner> {kindValue: CompletionKind.Delimited, marker: marker}
-}
-
-pub fn main() -> i32 { return 0 }`
+}`
 
 it.effect(
   'compiles the HTTP body reference example',
@@ -55,60 +50,34 @@ it.effect(
 )
 
 it.effect(
-  'rejects reset while completion evidence remains borrowed',
+  'enforces borrowed completion ownership and opacity in one analysis',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* AnalysisFixture.retainingMain(
-        'http-body/borrowed-reset',
-        encoder.encode(borrowedResetSource),
+        'http-body/contract-rejections',
+        encoder.encode(contractRejectionSource),
       )
-      const start = borrowedResetSource.lastIndexOf('&mut decoder')
-      assert.notStrictEqual(start, -1)
-      assert.deepEqual(
-        Analysis.diagnostics(snapshot).map(({ code, span }) => ({
-          code,
-          start: span.start,
-          end: span.end,
-        })),
-        [{ code: 'OWN0010', start, end: start + '&mut decoder'.length }],
-      )
-    }),
-  20_000,
-)
-
-it.effect(
-  'keeps completion evidence opaque to application code',
-  () =>
-    Effect.gen(function* () {
-      const snapshot = yield* AnalysisFixture.retainingMain(
-        'http-body/opaque-completion',
-        encoder.encode(opaqueCompletionSource),
-      )
+      const loanStart = contractRejectionSource.lastIndexOf('&mut decoder')
+      assert.notStrictEqual(loanStart, -1)
       const construction =
         " Completion<'owner> {kindValue: CompletionKind.Delimited, marker: marker}"
-      const start = opaqueCompletionSource.indexOf(construction)
-      assert.notStrictEqual(start, -1)
+      const constructionStart = contractRejectionSource.indexOf(construction)
+      assert.notStrictEqual(constructionStart, -1)
       assert.deepEqual(
         Analysis.diagnostics(snapshot).map(({ code, span }) => ({
           code,
           start: span.start,
           end: span.end,
         })),
-        [{ code: 'SEM0021', start, end: start + construction.length }],
+        [
+          { code: 'OWN0010', start: loanStart, end: loanStart + '&mut decoder'.length },
+          {
+            code: 'SEM0021',
+            start: constructionStart,
+            end: constructionStart + construction.length,
+          },
+        ],
       )
-    }),
-  20_000,
-)
-
-it.effect(
-  'realizes the portable HTTP body acceptance program through the public module',
-  () =>
-    Effect.gen(function* () {
-      const snapshot = yield* AnalysisFixture.retainingMain(
-        'http-body/acceptance',
-        encoder.encode(httpBodyAcceptanceSource),
-      )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [])
     }),
   20_000,
 )

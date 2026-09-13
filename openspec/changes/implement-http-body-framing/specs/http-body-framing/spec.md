@@ -155,6 +155,12 @@ Limits SHALL include finite maxWireBytes, maxPayloadBytes, maxChunkBytes, maxChu
 
 Completed chunked trailers SHALL remain separate from initial headers and SHALL not alter framing or authentication retrospectively. They SHALL be exposed only after successful completion as a decoder-borrowed view, with an explicit fallible copy to independent ownership. The same explicit trailer policy SHALL validate advisory Trailer declarations and received or emitted trailer fields.
 
+The nested `trailerValues` limits SHALL be revalidated at every retention boundary: received
+trailers, completed-trailer copies, and encoder finish snapshots. This includes field count,
+individual name and value bytes, aggregate field bytes, and owned bytes. Trailer iteration SHALL
+either yield every retained validated field or trap on an internal invariant violation; it SHALL
+never translate an invalid retained record into ordinary end-of-iteration.
+
 #### Scenario: Default policy is narrowly safe
 
 - **WHEN** the default trailer policy is used
@@ -169,21 +175,33 @@ Completed chunked trailers SHALL remain separate from initial headers and SHALL 
 #### Scenario: Borrowed trailers block mutation
 
 - **WHEN** a completed trailer view still borrows decoder-owned storage
-- **THEN** reset or destruction requiring mutable ownership is rejected by the language ownership rules
+- **THEN** destruction or another operation requiring exclusive ownership is rejected by the language ownership rules
 
-### Requirement: Decoder failure and reset have explicit lifecycle semantics
+#### Scenario: Only chunked completion publishes trailers
 
-A framing, syntax, limit, discard, or truncation failure SHALL poison the current decoder message. Later steps SHALL return InvalidState without replacing the original failure with completion. Reset SHALL require all borrowed views to have ended and SHALL never make completion evidence for the failed message reusable.
+- **WHEN** an Empty, Fixed, or CloseDelimited decoder completes successfully
+- **THEN** its trailer accessor returns None
+- **AND WHEN** a Chunked decoder completes successfully with zero or more trailers
+- **THEN** its trailer accessor returns the completed separate trailer section
+
+#### Scenario: Nested limits cannot be bypassed by a looser collection
+
+- **WHEN** received, copied, or encoder-snapshotted trailers exceed any nested trailerValues limit
+- **THEN** the operation fails with the exact limit kind, allowed value, attempted value, field index, and committed progress before allocation or finish emission
+
+### Requirement: Decoder failure and single-message lifecycle have explicit semantics
+
+A framing, syntax, limit, discard, or truncation failure SHALL poison the current decoder message. Later steps SHALL return InvalidState without replacing the original failure with completion. A decoder SHALL own exactly one message's affine Selection and trailer policy; processing a distinct message SHALL require constructing a fresh decoder so retained Connection exclusions and policy state cannot cross message boundaries.
 
 #### Scenario: Failure is terminal
 
 - **WHEN** a decoder fails and step is called again
 - **THEN** the later call fails with InvalidState and exposes no completion evidence
 
-#### Scenario: Reset starts a distinct message
+#### Scenario: A distinct message requires fresh policy state
 
-- **WHEN** exclusive decoder ownership is recovered and reset succeeds
-- **THEN** the decoder can process a new framing instance but cannot produce reusable evidence for the prior failed instance
+- **WHEN** a transport proceeds to another HTTP message
+- **THEN** it constructs a new decoder from that message's Selection and trailer policy rather than resetting the prior owner
 
 ### Requirement: Incremental encoding enforces framing completion
 
