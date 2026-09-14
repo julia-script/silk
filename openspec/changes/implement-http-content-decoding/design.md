@@ -176,10 +176,14 @@ the plan.
   `NeedOutput` forever.
 
 Content `maxOwned` is preflighted before allocation. It charges every staging-buffer reservation,
-fixed composition record, `inflate.MEMORY_BOUND` reservation for each inflate-family stage, and the
+actual inline reader layout, `inflate.MEMORY_BOUND` reservation for each inflate-family stage, and the
 configured `windowBytes + workspaceBytes` reservation for each Zstandard stage. The body decoder's
 own trailer/framing allocations continue to be bounded by `http_body.Limits.maxOwnedBytes` and are
-not double-counted. Caller destinations and allocator bookkeeping are excluded.
+not double-counted. The body decoder inline layout is excluded as well. Each active codec inline
+layout is subtracted from the reader charge before its complete reservation is added, preventing
+duplicate state charges. Inactive stage slots, union padding, edge descriptors, metadata, and the
+transport reference remain in the fixed charge. Caller destinations and allocator bookkeeping are
+excluded.
 
 Charging configured codec reservations rather than inspecting allocations gives deterministic,
 portable admission and does not require widening codec internals. It can conservatively reject a

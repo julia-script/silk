@@ -294,6 +294,31 @@
     ]
   },
   {
+    "module": "silk/http_content",
+    "path": "silk/http_content.silk",
+    "namespace": "ContentReader",
+    "aliases": [
+      "AcceptEncoding",
+      "AppliedPlan",
+      "Coding",
+      "CodingPlan",
+      "CodingPosition",
+      "ContentCompletion",
+      "ContentError",
+      "ContentLimitKind",
+      "ContentProgress",
+      "ContentProgressState",
+      "ContentReason",
+      "EmptyEncodingPolicy",
+      "EnabledCodings",
+      "Limits",
+      "Mode",
+      "RepresentationView",
+      "ResponseContext",
+      "ReuseDisposition"
+    ]
+  },
+  {
     "module": "silk/http_head",
     "path": "silk/http_head.silk",
     "namespace": "RequestParser",

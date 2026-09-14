@@ -51,6 +51,7 @@ import { uriAcceptanceSource } from './uriAcceptance.js'
 import { httpValuesAcceptanceSource } from './httpValuesAcceptance.js'
 import { httpHeadAcceptanceSource } from './httpHeadAcceptance.js'
 import { httpBodyAcceptanceSource } from './httpBodyAcceptance.js'
+import { httpContentAcceptanceSource } from './httpContentAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
 import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
 import { nativeListenerCorpusProgram } from './nativeListenerAcceptance.js'
@@ -6328,6 +6329,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     name: 'http-body-framing',
     source: httpBodyAcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'http-content-decoding',
+    source: httpContentAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
   },
   {
     name: 'base64-rfc4648',
