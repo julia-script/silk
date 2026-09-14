@@ -348,6 +348,7 @@ it.effect('keeps invalid match corpus failures phase-owned and downstream facts 
       )
       const codes = Analysis.diagnostics(self).map((diagnostic) => diagnostic.code)
       for (const code of program.codes) assert.include(codes, code, program.name)
+      assert.strictEqual(Analysis.mirOf(self)._tag, 'Unavailable', program.name)
       assert.isAtLeast(
         Projections.matchesOf(self, `memory/${program.name}`).length,
         1,
