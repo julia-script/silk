@@ -492,15 +492,28 @@
     "path": "silk/native_socket.silk",
     "namespace": "NativeSocket",
     "aliases": [
+      "Accepted",
+      "AcceptedContext",
+      "AcceptedView",
       "AttemptFailure",
+      "BoundAddress",
       "ConnectOptions",
       "ConnectOptionsError",
       "ConnectOptionsReason",
       "Connection",
       "ConnectionPhase",
+      "InvalidBindReason",
       "InvalidEndpointReason",
+      "ListenOptions",
+      "ListenOptionsError",
+      "ListenOptionsReason",
+      "Listener",
+      "ListenerPhase",
       "NativeSocketError",
-      "NativeSocketOperation"
+      "NativeSocketOperation",
+      "PeerAddress",
+      "UnixPeerAddress",
+      "UnixSocketPath"
     ]
   },
   {

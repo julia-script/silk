@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import {
@@ -22,14 +24,18 @@ const reference = readFileSync(
 const encoder = new TextEncoder()
 
 it.effect(
-  'realizes the complete GNU state machine and its cancellation cleanup',
+  'realizes GNU socket boundaries and guarded acquisition cancellation',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* AnalysisFixture.retainingMain(
-        'native-socket/complete-x86_64-unknown-linux-gnu',
-        encoder.encode(nativeSocketAcceptanceSource),
-        'x86_64-unknown-linux-gnu',
-      )
+      const sourceId = 'native-socket/gnu-boundaries'
+      const snapshot = yield* Analysis.makeRealized({
+        root: SourceFile.make(sourceId, encoder.encode(nativeSocketAcceptanceSource)),
+        configuration: AnalysisFixture.configuration(sourceId, 'x86_64-unknown-linux-gnu', [
+          'runResolved',
+          'runUnixRetry',
+          'parkedOwnedAcquisition',
+        ]),
+      }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
       const actorSymbols = Analysis.instancesOf(snapshot)
