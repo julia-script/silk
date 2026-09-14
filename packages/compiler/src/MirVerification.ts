@@ -1826,9 +1826,10 @@ const cleanupMatchesSemanticType = (
       )
     return false
   }
+  // Layout fields and hooks share canonical runtime identity across erased lifetime origins.
   if (isCopy(layout, type) && !SilkType.isUnion(type))
-    return cleanup._tag === 'NoCleanup' && SilkType.equals(cleanup.type, type)
-  if (!SilkType.equals(cleanup.type, type)) return false
+    return cleanup._tag === 'NoCleanup' && sameRuntimeType(cleanup.type, type)
+  if (!sameRuntimeType(cleanup.type, type)) return false
   if (
     SilkType.isBuiltin(type) ||
     SilkType.isString(type) ||
@@ -1846,7 +1847,7 @@ const cleanupMatchesSemanticType = (
     return (
       cleanup._tag === 'LocalSharedCoreCleanup' &&
       element !== undefined &&
-      SilkType.equals(cleanup.element, element) &&
+      sameRuntimeType(cleanup.element, element) &&
       cleanup.allocation._tag === 'AllocationCleanup'
     )
   }
@@ -1869,13 +1870,13 @@ const cleanupMatchesSemanticType = (
         return (
           member !== undefined &&
           entry.ordinal === ordinal &&
-          SilkType.equals(entry.member, member) &&
+          sameRuntimeType(entry.member, member) &&
           cleanupMatchesSemanticType(layout, entry.cleanup, member, seen)
         )
       })
     )
   if (!SilkType.isNominal(type)) return cleanup._tag === 'NoCleanup'
-  const key = SilkType.key(type)
+  const key = SilkType.runtimeKey(type)
   if (seen.has(key)) return cleanup._tag === 'NoCleanup'
   const representation = Layout.entry(layout, type)?.representation
   if (representation?._tag === 'NominalUnion') {
@@ -1888,7 +1889,11 @@ const cleanupMatchesSemanticType = (
         cleanup.typeArguments.length !== requiredHook.typeArguments.length ||
         !cleanup.typeArguments.every((argument, ordinal) => {
           const expected = requiredHook.typeArguments.at(ordinal)
-          return expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
+          return (
+            expected !== undefined &&
+            SilkType.runtimeGenericArgumentKey(argument) ===
+              SilkType.runtimeGenericArgumentKey(expected)
+          )
         })
       )
         return false
@@ -1930,7 +1935,11 @@ const cleanupMatchesSemanticType = (
       cleanup.typeArguments.length !== requiredHook.typeArguments.length ||
       !cleanup.typeArguments.every((argument, ordinal) => {
         const expected = requiredHook.typeArguments.at(ordinal)
-        return expected !== undefined && SilkType.equalsGenericArgument(argument, expected)
+        return (
+          expected !== undefined &&
+          SilkType.runtimeGenericArgumentKey(argument) ===
+            SilkType.runtimeGenericArgumentKey(expected)
+        )
       })
     )
       return false

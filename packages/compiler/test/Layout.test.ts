@@ -220,9 +220,7 @@ pub fn main() -> i32 {
         const payloadOffset = pairEntry.representation.payloadOffset
         assert.deepEqual(
           rightLocation.alternatives.map((alternative) =>
-            alternative.location._tag === 'Slot'
-              ? alternative.location.offset - payloadOffset
-              : -1,
+            alternative.location._tag === 'Slot' ? alternative.location.offset - payloadOffset : -1,
           ),
           [4, 8],
         )
