@@ -55,12 +55,14 @@ pub struct OwnedConnection<P> {
 ```
 
 All fields remain private and the type has no `Copy` or `Clone`. `ConnectionState` continues to own
-the existing TLS `Client` and scratch/cursor/phase data. `AuthenticatedProvenance` records only
-facts established by this TLS client: its original reference identity, fixed offered and negotiated
-ALPN evidence, authentication evidence and validation instant, and association with the provider
-that carried the handshake. It contains no outer origin-admission, route, proxy, credential,
-security-context, or pool identity. Borrowed accessors may expose TLS facts, but no public
-constructor or setter can forge them.
+the existing TLS `Client` and scratch/cursor/phase data. The private zero-state
+`AuthenticatedProvenance` is an unforgeable association marker created only after the final
+authentication and deadline checks, as the exact provider moves beside the client. It deliberately
+does not duplicate facts already owned by `Client`: the original reference identity, fixed offered
+and negotiated ALPN evidence, authentication evidence, and validation instant. The owner contains
+no outer origin-admission, route, proxy, credential, security-context, or pool identity. Borrowed
+accessors expose TLS facts from the retained client, while no public constructor or setter can
+forge either those facts or their association with the provider.
 
 Connection operations take `&mut OwnedConnection<P>`, split-reborrow its private state and provider,
 and bind that provider only around the existing transport-driving helpers. Their service rows
@@ -132,7 +134,10 @@ caller until invocation.
 `externalDeadline: Option<Instant>`. After client construction, `authenticateOwned` samples the
 active monotonic clock immediately before the first ClientHello transport boundary, computes the
 duration deadline, and selects the earlier present deadline. It checks that mark before output,
-after each suspended boundary, between driver steps, and immediately before `Ready` publication.
+after each suspended boundary, between driver steps, and immediately before `Ready` publication. A
+successful handshake read commits its exact transport count, then checks the mark before feeding
+bytes or EOF into the TLS client. Impossible returned counts invalidate the connection before that
+post-read time check, so an equality-time deadline cannot mask a provider contract violation.
 
 The external mark is never converted to a remaining duration and restarted. This makes JUL-23's
 eventual overall deadline composable. Caller-side trust preparation remains outside the handshake
@@ -148,8 +153,8 @@ fragmented peers could extend the handshake indefinitely.
 Every public suspending `readSome`, `writeSome`, `flush`, and `shutdownWrite` operation builds an
 internal operation guard that exclusively borrows `OwnedConnection<P>` before the first provider
 call. The guard begins `Armed`. The protected body may change it to `Completed` only after it has
-committed exact returned progress, or after a returned typed failure has made the connection's
-terminal state observable. The guard is local to one call and adds no caller-visible lease type.
+committed exact returned progress. A returned typed failure keeps the guard armed, so nonparking
+release terminally closes the owner before the original error reaches its caller. The guard is local to one call and adds no caller-visible lease type.
 
 The operation runs through `Effect.useReleaseNonParking` or the equivalent delivered primitive. If
 structured cancellation or interruption reaches an armed operation, release first changes the
@@ -157,7 +162,8 @@ owner phase to `Closed` and invalidates pending TLS transfer cursors so no unkno
 acknowledged or reoffered. It then consumes close authority for exactly one terminal provider close
 attempt and preserves the cancellation outcome. Because the caller still owns the same value after
 the interrupted borrow ends, every later I/O operation observes `Closed` and returns its existing
-typed invalid-state failure before touching the provider.
+typed invalid-state failure before touching the provider. Terminal phase validation precedes
+zero-length read and write fast paths, so empty calls cannot disguise a closed owner as successful.
 
 This conservative rule applies even when cancellation arrives before a transfer is known to have
 occurred; proving that an arbitrary provider performed no external work across suspension is not
@@ -180,8 +186,8 @@ caller; bracket release recovers it so it cannot replace the protected success, 
 cancellation.
 
 `shutdownWrite(deadline)` remains graceful and directional: it queues and drains `close_notify`,
-flushes, invokes provider write shutdown, and leaves reads available. It may park and therefore is
-not the finalizer.
+flushes that ciphertext, invokes provider write shutdown, and leaves reads available. It may park
+and therefore is not the finalizer.
 
 Drop-only cleanup was rejected because generic provider policy belongs to the Effect boundary and
 fatal traps intentionally promise neither finalizers nor Drop. Graceful finalization was rejected

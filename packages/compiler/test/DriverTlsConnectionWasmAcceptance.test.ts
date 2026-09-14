@@ -57,7 +57,12 @@ it.effect(
         compilationMessage = `${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
       } else if (outcome._tag === 'Rejected') {
         compilationMessage = outcome.diagnostics
-          .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+          .map(
+            (diagnostic) =>
+              `${diagnostic.code}@${
+                tlsConnectionWasmSource.slice(0, diagnostic.span.start).split('\n').length
+              }: ${diagnostic.message}`,
+          )
           .join('\n')
       }
       assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)

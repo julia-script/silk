@@ -15,12 +15,15 @@ provider. Its operations SHALL borrow the owner exclusively, bind only its store
 ambient `ByteDuplex` requirement, and preserve `ConnectionError` and allocation failures without
 erasing their nested causes.
 
-The owner's private provenance SHALL contain only TLS-observable facts established by its own
-construction: the original reference identity supplied to the TLS client, the fixed offered and
-negotiated ALPN evidence, authentication evidence and its one validation instant, and association
-with the provider that carried that handshake. Borrowed public accessors MAY expose those facts
-read-only, but callers SHALL NOT forge or replace them. Origin admission, resolved route, proxy,
-outer security-context identity, and pool compatibility are outside this owner and this change.
+The owner's private TLS client SHALL retain only TLS-observable facts established by its own
+construction: the original reference identity supplied to the client, the fixed offered and
+negotiated ALPN evidence, authentication evidence, and its one validation instant. A separate
+private zero-state provenance marker SHALL be constructible only by this module after the final
+authentication and deadline checks, recording the unforgeable association between that retained
+client and the provider that carried its handshake without duplicating the client's evidence.
+Borrowed public accessors MAY expose those facts read-only, but callers SHALL NOT forge or replace
+them or the marker. Origin admission, resolved route, proxy, outer security-context identity, and
+pool compatibility are outside this owner and this change.
 
 #### Scenario: Move one complete authenticated owner
 

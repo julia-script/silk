@@ -842,7 +842,7 @@
   {
     "module": "silk/tls_connection",
     "path": "silk/tls_connection.silk",
-    "namespace": "Connection",
+    "namespace": "OwnedConnection",
     "aliases": ["ConnectionError", "ConnectionOptions", "ConnectionPhase"]
   },
   {
