@@ -1,5 +1,37 @@
 /** Portable client acceptance for owned reuse, staging, bounded reads, deadlines, and tunnels. */
-export const httpClientAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
+interface Scenario {
+  readonly id: number
+  readonly callback: string
+}
+
+const protocol: ReadonlyArray<Scenario> = [
+  { id: 0, callback: 'exchange' },
+  { id: 1, callback: 'continueExchange' },
+  { id: 2, callback: 'earlyExchange' },
+  { id: 3, callback: 'chunkedExchange' },
+  { id: 4, callback: 'tunnelExchange' },
+  { id: 5, callback: 'abandonExchange' },
+  { id: 7, callback: 'upgradeExchange' },
+  { id: 11, callback: 'discardExchange' },
+  { id: 17, callback: 'failExchange' },
+]
+const boundaries: ReadonlyArray<Scenario> = [
+  { id: 6, callback: 'limitedExchange' },
+  { id: 8, callback: 'timeoutExchange' },
+  { id: 9, callback: 'partialExchange' },
+  { id: 10, callback: 'continueTimeoutExchange' },
+  { id: 12, callback: 'wireLimitExchange' },
+  { id: 13, callback: 'expiredCompletedExchange' },
+  { id: 18, callback: 'outputTimeoutExchange' },
+  { id: 19, callback: 'flushFailureExchange' },
+  { id: 20, callback: 'flushFailureExchange' },
+  { id: 21, callback: 'flushFailureExchange' },
+]
+
+// Each program retains only its selected callback graph; provider and assertions stay shared.
+const sourceFor = (
+  scenarios: ReadonlyArray<Scenario>,
+): string => `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.effect {Effect}
 import silk.http {Method, Version, Header}
@@ -608,55 +640,14 @@ effect<'call> fn dispatchExchange<'call, 'exchange: 'call>(
 ) -> i32 ! ClientError | OutOfMemoryError | CallbackFailure
 ? &Scenario | &mut Allocator | &mut MonotonicClock | &mut Random {
   let scenario = run Scenario.selected()
-  if scenario == 19 || scenario == 20 || scenario == 21 {
-    return run flushFailureExchange(&mut value.*)
-  }
-  if scenario == 18 {
-    return run outputTimeoutExchange(&mut value.*)
-  }
-  if scenario == 17 {
-    return run failExchange(&mut value.*)
-  }
-  if scenario == 1 {
-    return run continueExchange(&mut value.*)
-  }
-  if scenario == 2 {
-    return run earlyExchange(&mut value.*)
-  }
-  if scenario == 3 {
-    return run chunkedExchange(&mut value.*)
-  }
-  if scenario == 4 {
-    return run tunnelExchange(&mut value.*)
-  }
-  if scenario == 5 {
-    return run abandonExchange(&mut value.*)
-  }
-  if scenario == 6 {
-    return run limitedExchange(&mut value.*)
-  }
-  if scenario == 7 {
-    return run upgradeExchange(&mut value.*)
-  }
-  if scenario == 8 {
-    return run timeoutExchange(&mut value.*)
-  }
-  if scenario == 9 {
-    return run partialExchange(&mut value.*)
-  }
-  if scenario == 10 {
-    return run continueTimeoutExchange(&mut value.*)
-  }
-  if scenario == 11 {
-    return run discardExchange(&mut value.*)
-  }
-  if scenario == 12 {
-    return run wireLimitExchange(&mut value.*)
-  }
-  if scenario == 13 {
-    return run expiredCompletedExchange(&mut value.*)
-  }
-  return run exchange(&mut value.*)
+${scenarios
+  .map(
+    ({ id, callback }) => `  if scenario == ${id} {
+    return run ${callback}(&mut value.*)
+  }`,
+  )
+  .join('\n')}
+  return 143
 }
 
 effect<'call> fn exchange<'call, 'exchange: 'call>(
@@ -1412,31 +1403,16 @@ fn inputFor(scenario: i32) -> &'static [u8] {
 }
 
 effect fn allCases() -> i32 ! ClientError | RequestError | OutOfMemoryError {
-  let mut scenario = 0
-  while scenario < 14 {
-    let result = run runCase(scenario)
+  let scenarios: [i32; ${scenarios.length}] = [${scenarios.map(({ id }) => id).join(', ')}]
+  let mut index = usize.ZERO
+  while index < ${scenarios.length} {
+    let result = run runCase(scenarios[index])
     if result != 0 {
       return result
     }
-    scenario = scenario + 1
+    index = index + usize.ONE
   }
-  let failed = run runCase(17)
-  if failed != 0 {
-    return failed
-  }
-  let timeout = run runCase(18)
-  if timeout != 0 {
-    return timeout
-  }
-  let headFlush = run runCase(19)
-  if headFlush != 0 {
-    return headFlush
-  }
-  let bodyFlush = run runCase(20)
-  if bodyFlush != 0 {
-    return bodyFlush
-  }
-  return run runCase(21)
+  return 0
 }
 
 effect fn recover(error: ClientError | RequestError | OutOfMemoryError) -> i32 {
@@ -1448,3 +1424,6 @@ pub fn main() -> i32 {
   return run Effect.catchAll(allCases(), recover)
 }
 `
+
+export const httpClientAcceptanceSource = sourceFor(protocol)
+export const httpClientBoundariesAcceptanceSource = sourceFor(boundaries)

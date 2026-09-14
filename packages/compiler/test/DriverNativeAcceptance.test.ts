@@ -16,7 +16,10 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { nativeCorpus, type NativeRun } from './support/corpus.js'
 import { base64AcceptanceSource } from './support/base64Acceptance.js'
-import { httpClientAcceptanceSource } from './support/httpClientAcceptance.js'
+import {
+  httpClientAcceptanceSource,
+  httpClientBoundariesAcceptanceSource,
+} from './support/httpClientAcceptance.js'
 import { httpClientContentAcceptanceSource } from './support/httpClientContentAcceptance.js'
 import { httpRequestAcceptanceSource } from './support/httpRequestAcceptance.js'
 import { bufferedByteIoWasmAcceptanceSource } from './support/bufferedByteIoAcceptance.js'
@@ -167,6 +170,7 @@ const selectedCorpus = shardedCorpus.filter(
 )
 const portableWasmCorpus = [
   { name: 'http-client', source: httpClientAcceptanceSource, expected: 0 },
+  { name: 'http-client-boundaries', source: httpClientBoundariesAcceptanceSource, expected: 0 },
   { name: 'http-client-content', source: httpClientContentAcceptanceSource, expected: 0 },
   { name: 'http-client-request', source: httpRequestAcceptanceSource, expected: 0 },
   { name: 'http-values', source: httpValuesAcceptanceSource, expected: 0 },

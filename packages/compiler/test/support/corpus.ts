@@ -57,7 +57,10 @@ import { websocketUpgradeAcceptanceSource } from './websocketUpgradeAcceptance.j
 import { base64AcceptanceSource } from './base64Acceptance.js'
 import { httpRequestAcceptanceSource } from './httpRequestAcceptance.js'
 import { httpClientOwnershipAcceptanceSource } from './httpClientOwnershipAcceptance.js'
-import { httpClientAcceptanceSource } from './httpClientAcceptance.js'
+import {
+  httpClientAcceptanceSource,
+  httpClientBoundariesAcceptanceSource,
+} from './httpClientAcceptance.js'
 import { httpClientContentAcceptanceSource } from './httpClientContentAcceptance.js'
 import { httpTransportAcceptanceSource } from './httpTransportAcceptance.js'
 import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
@@ -6411,6 +6414,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'http-client',
     source: httpClientAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client-boundaries',
+    source: httpClientBoundariesAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
   },
   {
