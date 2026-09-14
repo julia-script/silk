@@ -79,7 +79,15 @@ export function forEffect(
     const nested =
       field.effectIdentity === undefined
         ? undefined
-        : effectValueByIdentity(fn.layout, field.effectIdentity)
+        : effectValueByIdentity(
+            fn.layout,
+            field.effectIdentity,
+            Type.isEffect(field.type)
+              ? field.type
+              : Type.isRepresented(field.type) && Type.isEffect(field.type.contract)
+                ? field.type.contract
+                : undefined,
+          )
     const callable =
       field.callableIdentity === undefined || !Type.isCallable(field.type)
         ? undefined

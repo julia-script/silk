@@ -7,7 +7,7 @@
       `Connection`, implement scoped helpers through those constructors, and verify structured
       analysis rejects copying and raw descriptor escape while preserving exact error and service
       rows.
-- [ ] 1.3 Extend the existing native acceptance source with distinct owner-retention,
+- [x] 1.3 Extend the existing native acceptance source with distinct owner-retention,
       pre-publication failure/cancellation, move-into-scope, and invalidate-before-close cases, and
       verify the shared native corpus observes one descriptor close with no later syscall activity.
 
@@ -27,9 +27,10 @@
 ## 3. Implement the Owned TLS Connection
 
 - [ ] 3.1 Refactor the existing TLS connection pump to operate on private state plus an explicit
-      provider reborrow, introduce affine `OwnedConnection<P>` with private TLS-only provenance and
-      a `Closed` phase, and verify one analysis snapshot rejects copying, provider/provenance
-      substitution, escaped views, raw construction, and independent ambient `ByteDuplex` access.
+      provider reborrow, introduce affine `OwnedConnection<P>` with a private unforgeable provider
+      association marker and a `Closed` phase, and verify one analysis snapshot rejects copying,
+      provider/provenance substitution, escaped views, raw construction, and independent ambient
+      `ByteDuplex` access.
 - [ ] 3.2 Implement guarded `authenticateOwned` so its guard begins after receiving `P` and one
       prepared independent snapshot, publishes only after complete authentication, and verify typed
       failure and scheduled cancellation close the retained provider once while ordinary ownership

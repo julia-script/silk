@@ -36,24 +36,26 @@ emission, and linker path already exist.
 ### 1. One selected `native_socket` actor owns acquisition and the concrete provider
 
 `native_socket.silk` contains `ConnectOptions`, Unix-path admission, typed socket errors, private
-target layouts/constants/declarations, an affine `Connection`, and the two scoped entry points:
-`connectResolved(endpoints, options, deadline, callback)` and
-`connectUnix(path, options, deadline, callback)`. Each callback receives only a higher-ranked
-`&mut Connection`. `Connection` implements `ByteDuplex`, so callers can pass it directly to
-`tls_connection.withClient`, `buffered_duplex.withBuffered`, or explicitly provide it to ordinary
-ByteDuplex operations. Its fields and descriptor are private, and the callback lifetime prevents
-the provider loan from escaping.
+target layouts/constants/declarations, an affine `Connection`, and the two owned entry points
+`connectResolvedOwned(endpoints, options, deadline)` and
+`connectUnixOwned(path, options, deadline)`. `Connection` implements `ByteDuplex`, so callers can
+transfer it into a higher-level owner such as `tls_connection.authenticateOwned`, retain it across
+multiple exchanges, or explicitly provide it to ordinary ByteDuplex operations. Its fields and
+descriptor remain private.
 
-Both entry points acquire a connection, then run the caller under `Effect.useReleaseNonParking`.
-The release callback terminally closes the same owned connection and recovers close failure so it
-cannot replace the protected outcome. Callback requirements retain the existing
+The shorter `connectResolved` and `connectUnix` scopes acquire through those owned entry points,
+then run the caller under `Effect.useReleaseNonParking`. The release callback terminally closes the
+same owned connection and recovers close failure so it cannot replace the protected outcome.
+Callback requirements retain the existing
 `Without<CallbackRequirements, ByteDuplex>` absence constraint: connection operations may bind the
 private provider internally, while a second ambient ByteDuplex alias is rejected.
 
-Returning an owned connection was rejected because it would move cleanup and cancellation
-obligations onto every caller and would not fit the existing scoped TLS adapter. A new `Socket`
-service was rejected because runtime replacement is not needed: `ByteDuplex` is the replaceable
-contract and native acquisition remains an explicit constructor boundary.
+Owned acquisition publishes only after the descriptor reaches `Open`. Before publication, the
+acquisition guard owns every provisional descriptor and terminally closes it after structured
+failure or cancellation. After publication, the caller owns the affine connection and must either
+transfer it to another structured owner or terminally close it. A new `Socket` service was rejected
+because runtime replacement is not needed: `ByteDuplex` is the replaceable contract and native
+acquisition remains an explicit constructor boundary.
 
 ### 2. Connection state separates descriptor ownership from public error policy
 

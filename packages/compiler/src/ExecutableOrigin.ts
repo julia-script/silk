@@ -716,6 +716,8 @@ export const make = (operations: Operations) => {
               provider,
               capability,
               selection.operation,
+              selection.contract,
+              substitution,
             )
       const dependencies =
         provider === undefined || capability === undefined || !Type.isNominal(capability)
@@ -2186,6 +2188,8 @@ export const make = (operations: Operations) => {
       Type.substitute(bound.provider, context.substitution, context.compatibility),
       capability,
       bound.operation,
+      bound.contract,
+      context.substitution,
     )
     if (witness === undefined) return undefined
     return {
@@ -3430,6 +3434,8 @@ export const make = (operations: Operations) => {
           provider,
           capability,
           bound.operation,
+          bound.contract,
+          instance.substitution,
         )
         const target =
           selected === undefined ? undefined : targetFunction(results, selected.implementation)

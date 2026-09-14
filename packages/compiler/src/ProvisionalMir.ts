@@ -9,6 +9,7 @@ import type * as SourceSpan from './SourceSpan.js'
 import type * as Suspension from './Suspension.js'
 import * as SuspensionMode from './SuspensionMode.js'
 import * as Type from './Type.js'
+import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
 
 /**
  * Monomorphic suspension control before normalization and MIR-local liveness. This is deliberately
@@ -147,8 +148,9 @@ const sameSpan = (left: SourceSpan.SourceSpan, right: SourceSpan.SourceSpan): bo
   left.sourceId === right.sourceId && left.start === right.start && left.end === right.end
 
 const providedBaseName = (name: string): string | undefined => {
-  const marker = name.lastIndexOf('$provided$')
-  return marker < 0 ? undefined : name.slice(0, marker)
+  const matched = /^(.*)\$provided\$[0-9]+$/.exec(name)
+  const base = matched?.at(1)
+  return base === undefined || base.length === 0 ? undefined : base
 }
 
 const executionIndexCache = new WeakMap<ReadonlyArray<Execution>, Map<string, Execution>>()
@@ -593,12 +595,6 @@ const runnerOf = (
 ): Runner => {
   const stored = resolved === undefined ? storedEffectRealizationOf(expression, context) : undefined
   const identity = resolved?.identity ?? effectIdentityOf(expression, context)
-  const environment = context.layout.effectEnvironments.find(
-    (candidate) =>
-      candidate._tag === 'EffectEnvironment' &&
-      identity !== undefined &&
-      Instances.effectIdentity(candidate.instance, candidate.site) === identity,
-  )
   const expressionType =
     'type' in expression
       ? Type.substitute(
@@ -611,16 +607,25 @@ const runnerOf = (
     expressionType !== undefined && Type.isRepresented(expressionType)
       ? expressionType.contract
       : expressionType
-  const effect =
+  const requested =
     resolved?.effect ??
     stored?.contract ??
-    (environment?._tag === 'EffectEnvironment' ? environment.effect : undefined) ??
     (expressionContract !== undefined && Type.isEffect(expressionContract)
       ? expressionContract
       : undefined)
+  const availableProviders = resolved?.providers ?? providersOf(expression, context)
+  const environment = context.layout.effectEnvironments.find(
+    (candidate) =>
+      candidate._tag === 'EffectEnvironment' &&
+      identity !== undefined &&
+      Instances.effectIdentity(candidate.instance, candidate.site) === identity &&
+      (requested === undefined ||
+        EffectExecutionContract.matches(candidate.effect, requested, availableProviders)),
+  )
+  const effect =
+    requested ?? (environment?._tag === 'EffectEnvironment' ? environment.effect : undefined)
   if (effect === undefined)
     throw new RangeError('Provisional runner requires a resolved Effect contract')
-  const availableProviders = resolved?.providers ?? providersOf(expression, context)
   const providers = Object.freeze(
     Type.requirementMembers(effect).flatMap((requirement) => {
       const selected = availableProviders.find(
@@ -1522,6 +1527,8 @@ const witnessExecution = (
     provider,
     capability,
     bound.operation,
+    bound.contract,
+    context.instance.substitution,
   )
   const key: ExecutionKey = Object.freeze({
     _tag: 'WitnessEffectRunnerExecution',

@@ -1359,10 +1359,14 @@ pub fn main() -> i32 {
       Layout.entry(plan.value, firstExclusive),
       Layout.entry(plan.value, secondExclusive),
     )
-    assert.strictEqual(
-      Layout.callingShape(plan.value, first),
-      Layout.callingShape(plan.value, second),
-    )
+    const firstShape =
+      Layout.callingShape(plan.value, first) ?? unreachable('missing first reference shape')
+    const secondShape =
+      Layout.callingShape(plan.value, second) ?? unreachable('missing second reference shape')
+    assert(Type.equals(firstShape.type, first))
+    assert(Type.equals(secondShape.type, second))
+    assert.strictEqual(firstShape.tree, secondShape.tree)
+    assert.strictEqual(firstShape.lanes, secondShape.lanes)
     const fn =
       Analysis.loweredMir(result).functions.find((fn) => fn.id.name === 'read') ??
       unreachable('missing read instance')

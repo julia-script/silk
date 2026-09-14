@@ -130,7 +130,20 @@ const runnerOf = (
   const exact =
     declaration === undefined
       ? undefined
-      : functions.find((fn) => Mir.matchesInstance(fn, declaration, typeArguments, staticArguments))
+      : operation === undefined || operation._tag === 'ExecutionPark'
+        ? functions.find((fn) =>
+            Mir.matchesInstance(fn, declaration, typeArguments, staticArguments),
+          )
+        : functions.find((fn) =>
+            Mir.matchesEffectInstance(
+              fn,
+              declaration,
+              typeArguments,
+              staticArguments,
+              operation.outcomeType.type,
+              operation._tag === 'RunEffectValue' ? operation.providers : undefined,
+            ),
+          )
   let instance = exact?.instance
   if (
     instance === undefined &&

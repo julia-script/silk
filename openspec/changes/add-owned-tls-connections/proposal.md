@@ -13,9 +13,9 @@ state from the transport can pair authenticated state with the wrong or already-
   owner, and a scoped convenience built from the same owner and TLS pump rather than a parallel
   driver. Every suspending direct-owned operation protects ambiguous transfer locally rather than
   relying on the caller to install an outer lease.
-- Limit private authentication provenance to facts established by this TLS session: the original
-  reference identity, fixed and negotiated ALPN evidence, authentication evidence and validation
-  instant, and unity with the provider that carried the handshake.
+- Retain the original reference identity, fixed and negotiated ALPN evidence, authentication
+  evidence, and validation instant in the owned TLS client, plus a private unforgeable association
+  marker created only when that client and the provider that carried its handshake are published.
 - **BREAKING** Make trust preparation explicit: `authenticateOwned` and the scoped convenience
   consume an independently prepared `TrustSnapshot`; remove `ConnectionOptions.trust`, the
   `TrustSource` import and service requirement, and `TrustSourceError` from their errors, callers,

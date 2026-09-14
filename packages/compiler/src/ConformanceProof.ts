@@ -7,7 +7,9 @@ import type {
   ConformanceFact,
   ConformanceWitness,
   ContractFact,
+  DeclarationFact,
   FieldFact,
+  InterfaceOperationApplicationFact,
   UnionVariantFact,
 } from './DeclarationFacts.js'
 import { byCanonical, providerOperation } from './DeclarationFacts.js'
@@ -15,6 +17,7 @@ import type { Index } from './DeclarationIndex.js'
 import { declaredRequirements, memberByNominal } from './DeclarationResolution.js'
 import * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
+import * as Lifetime from './Lifetime.js'
 import * as Specialization from './Specialization.js'
 import * as Type from './Type.js'
 
@@ -48,11 +51,11 @@ interface ConformanceCandidate {
   readonly substitution: Type.Substitution
 }
 
-/** Returns every admitted conformance whose head covers one concrete goal. */
+/** Returns every admitted conformance whose head covers one closed or explicitly symbolic goal. */
 export const conformanceCandidates = (
   self: Index,
   goal: ConformanceGoal.ConformanceGoal,
-  admission: 'Selectable' | 'Declared' = 'Selectable',
+  admission: 'Selectable' | 'Declared' | 'AssumedOpen' = 'Selectable',
 ): ReadonlyArray<ConformanceCandidate> => {
   const work = ResolutionWork.begin(
     ResolutionWork.ofIndex(self),
@@ -70,14 +73,22 @@ export const conformanceCandidates = (
           conformance.capability._tag !== 'Resolved' ||
           !Type.isNominal(conformance.capability.type) ||
           conformance.provider._tag !== 'Resolved' ||
-          (admission === 'Selectable' && conformance.validity._tag !== 'ValidConformance') ||
+          (admission !== 'Declared' && conformance.validity._tag !== 'ValidConformance') ||
           conformance.coherence._tag !== 'Coherent' ||
           conformance.termination._tag !== 'Terminating'
         )
           return []
         const inferred = new Map<string, Type.GenericArgument>()
-        if (!TypeInference.infer(conformance.provider.type, goal.provider, inferred)) return []
-        if (!TypeInference.infer(conformance.capability.type, goal.capability, inferred)) return []
+        const inferHead = (pattern: Type.Type, actual: Type.Type): boolean =>
+          admission === 'AssumedOpen'
+            ? TypeInference.inferOpenGenericArguments(pattern, actual, inferred).matches
+            : TypeInference.infer(pattern, actual, inferred)
+        if (!inferHead(conformance.provider.type, goal.provider)) return []
+        const capabilityPattern =
+          admission === 'AssumedOpen'
+            ? Type.substitute(conformance.capability.type, inferred)
+            : conformance.capability.type
+        if (!inferHead(capabilityPattern, goal.capability)) return []
         ResolutionWork.accept(work)
         return Object.freeze([
           Object.freeze({ module: module.module, conformance, substitution: inferred }),
@@ -95,24 +106,152 @@ const endpointVisible = (
   (declaration.canonical._tag === 'Canonical' &&
     declaration.canonical.id.module === requestingModule)
 
+const boundAssumedBy = (
+  declaration: DeclarationFact,
+  provider: Type.Type,
+  capability: Type.Nominal,
+): boolean =>
+  Type.isParameter(provider) &&
+  declaration.typeParameters.some(
+    (parameter) =>
+      Type.equals(parameter.type, provider) &&
+      parameter.bounds.some(
+        (bound) =>
+          bound._tag === 'ResolvedBound' && Type.equals(bound.application.capability, capability),
+      ),
+  )
+
 /**
- * Returns the proved, endpoint-visible contracts implemented by one concrete nominal provider.
+ * Whether one open conditional head is justified entirely by a generic caller's exact bounds.
  *
- * This is the shared authority over the same conformance evidence semantic analysis uses. Merely
- * matching a declared header is insufficient: conditional, invalid, incoherent, and ambiguous
- * conformances are admitted only when the ordinary proof selects that exact source declaration.
- *
- * Receiver-call resolution selects a concrete receiver's interface operations through this query,
- * and completion offers the same set, so the two cannot drift into offering a member the resolver
- * then rejects. Changing this filter therefore changes what compiles, not only what an editor
- * shows. Endpoint visibility is applied to the interface declaration rather than the conformance,
- * because coherence is a whole-program property and a conformance carries no module visibility.
+ * This is symbolic admission, not a proof object: concrete instance discovery still closes the
+ * ordinary conformance goal and records the canonical witness tree.
  */
+export const assumedConditionalConformance = (
+  self: Index,
+  provider: Type.Type,
+  capability: Type.Nominal,
+  assumptions: DeclarationFact,
+): boolean => {
+  if (Type.isRuntimeConcrete(provider) && Type.isRuntimeConcrete(capability)) return false
+  const candidates = conformanceCandidates(
+    self,
+    ConformanceGoal.make(capability, provider),
+    'AssumedOpen',
+  )
+  if (candidates.length !== 1) return false
+  const selected = candidates.at(0)
+  if (selected === undefined) return false
+  const requirements = declaredRequirements(self.modules, selected.conformance)
+  return (
+    requirements.length > 0 &&
+    requirements.every((requirement) => {
+      const requiredCapability = Type.substitute(requirement.capability, selected.substitution)
+      const requiredProvider = Type.substitute(requirement.provider, selected.substitution)
+      return (
+        Type.isNominal(requiredCapability) &&
+        boundAssumedBy(assumptions, requiredProvider, requiredCapability)
+      )
+    })
+  )
+}
+
+/** One open source conformance selected only from exact enclosing generic assumptions. */
+export interface SymbolicConformanceSelection {
+  readonly capability: Type.Nominal
+  readonly provider: Type.Type
+  readonly selection: Extract<ConformanceGoal.Selection, { readonly _tag: 'SourceSelection' }>
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+}
+
+/** A visible conditional head over one already-known nominal provider. */
+export interface ConditionalContractCandidate extends SymbolicConformanceSelection {
+  readonly requirements: ReadonlyArray<{
+    readonly capability: Type.Nominal
+    readonly provider: Type.Type
+  }>
+}
+
+/**
+ * Returns conditional source heads after provider-only specialization.
+ *
+ * These are deliberately not concrete proof objects: their requirements may mention parameters
+ * owned by the enclosing declaration. Call resolution may use them only as symbolic candidates and
+ * must discharge every returned requirement from exact caller bounds.
+ */
+export const conditionalContractCandidates = (
+  self: Index,
+  requestingModule: string,
+  provider: Type.Type,
+): ReadonlyArray<ConditionalContractCandidate> => {
+  if (!Type.isNominal(provider)) return Object.freeze([])
+  const providerDeclaration = memberByNominal(self.modules, provider)
+  if (providerDeclaration === undefined || !endpointVisible(providerDeclaration, requestingModule))
+    return Object.freeze([])
+  return Object.freeze(
+    self.modules.flatMap((module) =>
+      module.conformances.flatMap((conformance): ReadonlyArray<ConditionalContractCandidate> => {
+        if (
+          conformance.validity._tag !== 'ValidConformance' ||
+          conformance.coherence._tag !== 'Coherent' ||
+          conformance.termination._tag !== 'Terminating' ||
+          conformance.capability._tag !== 'Resolved' ||
+          !Type.isNominal(conformance.capability.type) ||
+          conformance.provider._tag !== 'Resolved'
+        )
+          return []
+        const substitution = new Map<string, Type.GenericArgument>()
+        if (!TypeInference.infer(conformance.provider.type, provider, substitution)) return []
+        const capability = Type.substitute(conformance.capability.type, substitution)
+        if (
+          !Type.isNominal(capability) ||
+          Type.equals(capability, Type.copyCapability) ||
+          Type.equals(capability, Type.dropCapability)
+        )
+          return []
+        const contract = contractByCapability(self, capability)
+        if (contract === undefined || !endpointVisible(contract, requestingModule)) return []
+        const declared = declaredRequirements(self.modules, conformance)
+        const requirements = declared.flatMap((requirement) => {
+          const requiredCapability = Type.substitute(requirement.capability, substitution)
+          return Type.isNominal(requiredCapability)
+            ? [
+                Object.freeze({
+                  capability: requiredCapability,
+                  provider: Type.substitute(requirement.provider, substitution),
+                }),
+              ]
+            : []
+        })
+        if (requirements.length === 0 || requirements.length !== declared.length) return []
+        return [
+          Object.freeze({
+            capability,
+            provider,
+            selection: Object.freeze({
+              _tag: 'SourceSelection' as const,
+              module: module.module,
+              ordinal: conformance.ordinal,
+            }),
+            typeArguments: Object.freeze(
+              conformance.typeParameters
+                .filter((parameter) => parameter.duplicateOf === undefined)
+                .map((parameter) => substitution.get(Type.key(parameter.type)) ?? parameter.type),
+            ),
+            requirements: Object.freeze(requirements),
+          }),
+        ]
+      }),
+    ),
+  )
+}
+
 const provedContracts = (
   self: Index,
   requestingModule: string,
   provider: Type.Type,
   requireRuntimeConcrete: boolean,
+  assumptions?: DeclarationFact,
 ): ReadonlyArray<Type.Nominal> => {
   if (!Type.isNominal(provider) || (requireRuntimeConcrete && !Type.isRuntimeConcrete(provider)))
     return Object.freeze([])
@@ -145,13 +284,24 @@ const provedContracts = (
       const contract = contractByCapability(self, specialized)
       if (contract === undefined || !endpointVisible(contract, requestingModule)) continue
       const proof = prove(self, provider, specialized)
-      if (
-        proof._tag !== 'Proved' ||
-        proof.selection._tag !== 'SourceSelection' ||
-        proof.selection.module !== conformance.module ||
-        proof.selection.ordinal !== conformance.ordinal
-      )
-        continue
+      const concretelySelected =
+        proof._tag === 'Proved' &&
+        proof.selection._tag === 'SourceSelection' &&
+        proof.selection.module === conformance.module &&
+        proof.selection.ordinal === conformance.ordinal
+      const symbolicallySelected =
+        assumptions !== undefined &&
+        assumedConditionalConformance(self, provider, specialized, assumptions) &&
+        conformanceCandidates(
+          self,
+          ConformanceGoal.make(specialized, provider),
+          'AssumedOpen',
+        ).some(
+          (candidate) =>
+            candidate.module === conformance.module &&
+            candidate.conformance.ordinal === conformance.ordinal,
+        )
+      if (!concretelySelected && !symbolicallySelected) continue
       implemented.set(Type.key(specialized), specialized)
     }
   return Object.freeze(
@@ -199,7 +349,9 @@ export const knownProviderContracts = (
   self: Index,
   requestingModule: string,
   provider: Type.Type,
-): ReadonlyArray<Type.Nominal> => provedContracts(self, requestingModule, provider, false)
+  assumptions?: DeclarationFact,
+): ReadonlyArray<Type.Nominal> =>
+  provedContracts(self, requestingModule, provider, false, assumptions)
 
 const proofMemos = new WeakMap<Index, Map<string, ConformanceGoal.Proof>>()
 
@@ -668,14 +820,71 @@ const witnessImplementation = (
 export interface InterfaceWitnessTarget {
   readonly implementation: CanonicalId
   readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  /** Exact source declaration selected again for this concrete goal. */
+  readonly selection: Extract<ConformanceGoal.Selection, { readonly _tag: 'SourceSelection' }>
+  /** Exact concrete specialization of that source declaration. */
+  readonly conformanceTypeArguments: ReadonlyArray<Type.GenericArgument>
   /** The concrete provider whose terminating conditional proof selected this target. */
   readonly structuralProvider?: Type.Type
+}
+
+const invocationLifetimeSubstitution = (
+  mapping: ConformanceFact['operations'][number],
+  application: InterfaceOperationApplicationFact | undefined,
+  headerSubstitution: Type.Substitution,
+  applicationSubstitution: Type.Substitution,
+): Type.Substitution | undefined => {
+  const contract = mapping.contract
+  if (contract === undefined) return undefined
+  const binders = contract.lifetimes.lifetimeBinders
+  if (binders.length === 0) return new Map()
+  if (application === undefined || contract.operands.length !== application.operands.length)
+    return undefined
+  const inferred = new Map(headerSubstitution)
+  const lifetimes: TypeInference.LifetimeInference = Object.freeze({
+    inferable: new Set(binders.map(Lifetime.key)),
+    accepts: (source, target, invariant) =>
+      Lifetime.equals(source, target) && (!invariant || Lifetime.equals(target, source)),
+  })
+  for (const [ordinal, operand] of contract.operands.entries()) {
+    const actual = application.operands.at(ordinal)
+    if (operand.type._tag !== 'Resolved' || actual?.type._tag !== 'Resolved') return undefined
+    if (
+      !TypeInference.infer(
+        Type.substitute(operand.type.type, headerSubstitution),
+        Type.substitute(actual.type.type, applicationSubstitution),
+        inferred,
+        lifetimes,
+      )
+    )
+      return undefined
+  }
+  if (
+    contract.success._tag !== 'Resolved' ||
+    application.success._tag !== 'Resolved' ||
+    !TypeInference.infer(
+      Type.substitute(contract.success.type, headerSubstitution),
+      Type.substitute(application.success.type, applicationSubstitution),
+      inferred,
+      lifetimes,
+    )
+  )
+    return undefined
+  const substitution = new Map<string, Type.GenericArgument>()
+  for (const binder of binders) {
+    const selected = inferred.get(Lifetime.key(binder))
+    if (selected === undefined || !Lifetime.isLifetime(selected)) return undefined
+    substitution.set(Lifetime.key(binder), selected)
+  }
+  return substitution
 }
 
 const inferredTargetArguments = (
   conformance: ConformanceFact,
   mapping: ConformanceFact['operations'][number],
   proof: Extract<ConformanceGoal.Proof, { readonly _tag: 'Proved' }>,
+  application: InterfaceOperationApplicationFact | undefined,
+  applicationSubstitution: Type.Substitution,
 ): ReadonlyArray<Type.GenericArgument> | undefined => {
   if (mapping.targetArguments === undefined) return undefined
   const headerParameters = conformance.typeParameters
@@ -683,9 +892,19 @@ const inferredTargetArguments = (
     .map((parameter) => parameter.type)
   const headerSubstitution = TypeInference.substitution(headerParameters, proof.typeArguments)
   if (headerSubstitution === undefined) return undefined
+  const invocationSubstitution = invocationLifetimeSubstitution(
+    mapping,
+    application,
+    headerSubstitution,
+    applicationSubstitution,
+  )
+  if (invocationSubstitution === undefined) return undefined
   const arguments_ = Object.freeze(
     mapping.targetArguments.map((argument) =>
-      Type.substituteGenericArgument(argument, headerSubstitution),
+      Type.substituteGenericArgument(
+        Type.substituteGenericArgument(argument, headerSubstitution),
+        invocationSubstitution,
+      ),
     ),
   )
   return arguments_.every(Type.isRuntimeConcreteGenericArgument) ? arguments_ : undefined
@@ -704,8 +923,16 @@ export const interfaceWitnessTarget = (
   provider: Type.Type,
   capability: Type.Nominal,
   operation: string,
+  application?: InterfaceOperationApplicationFact,
+  applicationSubstitution: Type.Substitution = new Map(),
 ): InterfaceWitnessTarget | undefined => {
-  return selectedInterfaceTarget(self, prove(self, provider, capability), operation)
+  return selectedInterfaceTarget(
+    self,
+    prove(self, provider, capability),
+    operation,
+    application,
+    applicationSubstitution,
+  )
 }
 
 /** Reads an operation target from an existing proof without initiating conformance discovery. */
@@ -713,6 +940,8 @@ export const selectedInterfaceTarget = (
   self: Index,
   proof: ConformanceGoal.Proof,
   operation: string,
+  application?: InterfaceOperationApplicationFact,
+  applicationSubstitution: Type.Substitution = new Map(),
 ): InterfaceWitnessTarget | undefined => {
   const provider = proof.goal.provider
   if (proof._tag !== 'Proved' || proof.selection._tag !== 'SourceSelection') return undefined
@@ -723,11 +952,19 @@ export const selectedInterfaceTarget = (
   )
   if (mapping === undefined) return undefined
   const implementation = witnessImplementation(self, provider, conformance, operation)
-  const typeArguments = inferredTargetArguments(conformance, mapping, proof)
+  const typeArguments = inferredTargetArguments(
+    conformance,
+    mapping,
+    proof,
+    application,
+    applicationSubstitution,
+  )
   if (implementation === undefined || typeArguments === undefined) return undefined
   return Object.freeze({
     implementation,
     typeArguments,
+    selection: proof.selection,
+    conformanceTypeArguments: proof.typeArguments,
     ...(proof.requirements.length > 0 ? { structuralProvider: provider } : {}),
   })
 }

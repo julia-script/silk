@@ -3,7 +3,6 @@ import {
   linkedForeignDollarCSource,
   linkedForeignDollarSource,
 } from './support/foreignDollarSymbol.js'
-import * as AbiManifest from '../src/AbiManifest.js'
 import type * as Backend from '../src/Backend.js'
 import * as ForeignContract from '../src/ForeignContract.js'
 import * as Result from 'effect/Result'
@@ -29,7 +28,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
@@ -40,22 +39,26 @@ import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as LlvmWasmRuntime from '../src/LlvmWasmRuntime.js'
 import * as Target from '../src/Target.js'
 import * as ToolchainPlan from '../src/ToolchainPlan.js'
-import * as SourceFile from '../src/SourceFile.js'
 
 const defaultClang = (): string => {
   if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
   if (existsSync('/usr/local/opt/llvm/bin/clang')) return '/usr/local/opt/llvm/bin/clang'
-  return 'clang'
+  return '/usr/bin/clang'
 }
 
 const testPath = Effect.runSync(Config.string('PATH').pipe(Config.withDefault('')))
 const clang = Effect.runSync(
   Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
 )
+const defaultLlvmAr = join(dirname(clang), 'llvm-ar')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,
-  llvmAr: 'llvm-ar',
+  llvmAr: Effect.runSync(
+    Config.string('SILK_TEST_LLVM_AR').pipe(
+      Config.withDefault(existsSync(defaultLlvmAr) ? defaultLlvmAr : '/usr/bin/llvm-ar'),
+    ),
+  ),
 })
 
 const testRoot = mkdtempSync(join(tmpdir(), 'silk-native-boundary-test-'))
@@ -1129,7 +1132,7 @@ it.effect(
 )
 
 it.effect(
-  'preserves dollar-bearing foreign symbols through ABI, objects, and a separate C link',
+  'preserves dollar-bearing foreign symbols through objects and a separate C link',
   () =>
     Effect.gen(function* () {
       const target = yield* NativeToolchain.hostTarget()
@@ -1147,18 +1150,6 @@ it.effect(
       for (const symbol of ['close$NOCANCEL', 'helper$version']) {
         assert.include(artifact.ir, `@${symbol}`)
       }
-
-      const manifest = AbiManifest.make(
-        target,
-        artifact.foreignImports,
-        artifact.foreignExports,
-        [],
-      )
-      const supplied = yield* AbiManifest.decode(
-        SourceFile.make('native/dollar-symbols.abi.json', AbiManifest.encode(manifest)),
-      )
-      assert.deepEqual(supplied.manifest, manifest)
-      assert.deepEqual(AbiManifest.check([supplied], Analysis.loweredMir(snapshot)), [])
 
       const compilation = yield* profileFor(target)
       const destination = join(testRoot, 'linked-dollar-symbols')

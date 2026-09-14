@@ -1243,6 +1243,8 @@ export type CallContractFact =
       readonly substitution: Type.Substitution
       readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
       readonly inferredProviderSelectors: ReadonlyArray<InferredProviderSelector>
+      /** Open source selections justified by exact bounds of the enclosing generic declaration. */
+      readonly symbolicConformances?: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection>
     }
   | {
       readonly _tag: 'ArityMismatch'

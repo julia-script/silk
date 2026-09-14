@@ -15,10 +15,11 @@
       constants, affine Connection phases, bounded ConnectOptions, typed attempt/acquisition errors,
       and unsupported-target exclusion; verify focused analysis checks public shapes, option
       precedence, move-only ownership, and exact foreign inventories on each target family.
-- [x] 2.2 Implement the higher-ranked `connectResolved` and `connectUnix` scopes with concrete
-      Connection lending, exclusive ByteDuplex absence constraints, and nonparking
-      use/release ownership; verify analysis rejects copied/escaped connections, raw descriptor
-      transfer, provider aliasing, and callback publication before Open.
+- [x] 2.2 Implement `connectResolvedOwned` and `connectUnixOwned` with pre-publication descriptor
+      guards, then implement the higher-ranked `connectResolved` and `connectUnix` scopes as
+      nonparking use/release conveniences over those owners; verify analysis rejects copied owners,
+      escaped scoped borrows, raw descriptor transfer, provider aliasing, and publication before
+      Open.
 - [x] 2.3 Implement TCP socket setup for nonblocking/CLOEXEC, disabled positive linger, per-platform
       SIGPIPE suppression, default Nagle, and explicit no-delay; verify target fixture records prove
       GNU atomic flags, Darwin pre-publication fcntl, no global signal change, and no reuse/local bind.
@@ -57,6 +58,10 @@
 - [x] 4.4 Implement the closed native-to-ByteIoError translation at the concrete provider boundary;
       verify timeout/count/closure use their canonical variants and other native failures retain the
       exact ByteIoOperation plus stable i32 provider code without widening callback errors.
+- [x] 4.5 Resample one supplied absolute deadline immediately before every later descriptor setup,
+      connect/readiness/SO_ERROR, transfer, and shutdown native boundary; extend the shared native
+      corpus with sequenced-clock, setup-failure, readiness-failure, shutdown, post-close,
+      close-ordering, and scheduled-cancellation counters that distinguish suppressed later work.
 
 ## 5. ABI evidence and publication
 

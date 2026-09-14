@@ -14,7 +14,9 @@ Duplex convenience construction SHALL default each direction to 8,192 bytes. A z
 capacity SHALL fail with `InvalidCapacity`. Duplex construction SHALL validate both capacities
 before allocating either direction or acquiring the transport lease. A memory-input view MAY
 borrow immutable caller storage. Paired duplex construction SHALL validate all four capacities
-before allocating either session or acquiring either transport lease.
+before allocating either session or acquiring either transport lease. Contextual duplex
+construction SHALL consume one generic context value by value and select its named higher-ranked
+session adapter through a compile-time interface witness.
 
 #### Scenario: Reject invalid capacity before allocation
 
@@ -81,6 +83,12 @@ with the same deadline and provider contract. `flush` SHALL advance its pending 
 underlying successful write and then call the provider flush. `finish` SHALL explicitly flush.
 Scope exit and drop SHALL never implicitly flush or park.
 
+`BufferedDuplex.shutdownWrite(deadline)` SHALL flush retained output and then delegate canonical
+`ByteDuplex.shutdownWrite` through the retained provider with the same unchanged absolute deadline.
+Success SHALL leave input readable, make repeated shutdown idempotent, and reject later output
+without provider I/O. A typed drain, flush, or shutdown failure SHALL preserve exact progress and
+terminalize the complete session.
+
 #### Scenario: Preserve pending suffix across short writes
 
 - **WHEN** flushing pending output requires several short provider writes
@@ -95,6 +103,18 @@ Scope exit and drop SHALL never implicitly flush or park.
 
 - **WHEN** a buffered output scope exits with pending bytes and the caller did not call finish
 - **THEN** teardown discards the pending bytes without invoking provider write or flush
+
+#### Scenario: Half-close after buffered output
+
+- **WHEN** pending output is directionally shut down
+- **THEN** every pending byte reaches the provider in order before canonical write shutdown, later
+  output is rejected locally, and retained or future input remains readable
+
+#### Scenario: Terminalize a failed directional shutdown
+
+- **WHEN** provider flush or write shutdown returns a typed failure
+- **THEN** `shutdownWrite` reports precise buffered progress and every later session operation fails
+  terminally without provider I/O
 
 ### Requirement: Failures make buffered sessions terminal
 
@@ -148,7 +168,8 @@ language rule that bypasses finalizers and `Drop` and are outside this release g
 
 ### Requirement: Deadlines match source capabilities
 
-Every ByteDuplex-backed operation SHALL accept an optional absolute `MonotonicClock` deadline,
+Every ByteDuplex-backed operation, including directional shutdown, SHALL accept an optional
+absolute `MonotonicClock` deadline,
 forward the same value unchanged to provider operations, and check it between repeated operations.
 StandardInput and Writer adapters SHALL omit deadline parameters and SHALL NOT inspect provider
 types dynamically or advertise cancellation or deadlines those services do not supply.

@@ -201,12 +201,22 @@ export const emitThunks = Effect.fnUntraced(function* (context: ThunkContext) {
         const transfer = yield* Value.argument(body, 0)
         const target = declared.find((candidate) =>
           origin.region.deferred.instance !== undefined
-            ? Mir.matchesInstanceKey(candidate.fn, origin.region.deferred.instance)
+            ? Mir.matchesEffectInstance(
+                candidate.fn,
+                origin.region.deferred.instance.declaration,
+                origin.region.deferred.instance.typeArguments,
+                origin.region.deferred.instance.staticArguments,
+                origin.region.deferred.outcome,
+                origin.region.deferred.providers,
+              )
             : origin.region.deferred.declaration !== undefined &&
-              Mir.matchesInstance(
+              Mir.matchesEffectInstance(
                 candidate.fn,
                 origin.region.deferred.declaration,
                 origin.region.deferred.typeArguments,
+                undefined,
+                origin.region.deferred.outcome,
+                origin.region.deferred.providers,
               ),
         )
         if (target === undefined) throw new RangeError('LLVM child thunk lost deferred runner')

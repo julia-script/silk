@@ -70,7 +70,7 @@ export const lowerBuiltinExpression = (
       fn.owner.key.declaration,
       expression.span,
     )
-    const type = effectValueAtSite(fn.layout, fn.owner.key, site)
+    const type = effectValueAtSite(fn.layout, fn.owner.key, site, semanticType)
     if (type === undefined) return undefined
     const captures = lowerBuiltinArguments(fn, expression, intrinsic)
     if (captures === 'Transferred') return captures
@@ -96,7 +96,7 @@ export const lowerBuiltinExpression = (
         provenance: generated(expression.span),
       }),
     )
-    const key = baseRunnerKey(fn.owner.key, site)
+    const key = baseRunnerKey(fn.owner.key, site, type.type)
     if (!fn.generatedRunners.some((candidate) => candidate.specializationKey === key))
       fn.generatedRunners.push(
         Object.freeze({

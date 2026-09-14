@@ -51,8 +51,11 @@ import { uriAcceptanceSource } from './uriAcceptance.js'
 import { httpValuesAcceptanceSource } from './httpValuesAcceptance.js'
 import { httpHeadAcceptanceSource } from './httpHeadAcceptance.js'
 import { httpBodyAcceptanceSource } from './httpBodyAcceptance.js'
+import { httpContentAcceptanceSource } from './httpContentAcceptance.js'
+import { httpServerAcceptanceSource } from './httpServerAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
 import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
+import { nativeListenerCorpusProgram } from './nativeListenerAcceptance.js'
 import { nativeSocketCorpusProgram } from './nativeSocketAcceptance.js'
 import { ecdsaP256AcceptanceSource } from './ecdsaP256Acceptance.js'
 import { p256AcceptanceSource } from './p256Acceptance.js'
@@ -6329,6 +6332,17 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     expected: { _tag: 'Completes', result: 42 },
   },
   {
+    name: 'http-content-decoding',
+    source: httpContentAcceptanceSource,
+    nativeProfiles: [{ name: 'optimized', optimization: 'speed', debug: false }],
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-server',
+    source: httpServerAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
     name: 'base64-rfc4648',
     source: base64AcceptanceSource,
     expected: { _tag: 'Completes', result: 42 },
@@ -6347,10 +6361,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   },
   {
     ...nativeSocketCorpusProgram,
-    nativeProfiles: [
-      { name: 'debug', optimization: 'none', debug: true },
-      { name: 'optimized', optimization: 'speed', debug: false },
-    ],
+    nativeProfiles: [{ name: 'optimized', optimization: 'speed', debug: false }],
+  },
+  {
+    ...nativeListenerCorpusProgram,
+    nativeProfiles: [{ name: 'optimized', optimization: 'speed', debug: false }],
   },
   {
     name: 'borrowed-temporary-stream-suspension',

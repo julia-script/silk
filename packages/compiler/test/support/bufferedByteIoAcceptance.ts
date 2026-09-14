@@ -1,10 +1,10 @@
 /** Consolidated portable acceptance program for fixed buffering and scoped teardown. */
 export const bufferedByteIoAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
-import silk.buffered_duplex {BufferedDuplex, withBufferedCapacity, withBufferedPairCapacity}
+import silk.buffered_duplex {BufferedContext, BufferedDuplex, withBufferedCapacity, withBufferedCapacityContext, withBufferedPairCapacity}
 import silk.buffered_input {BufferError, BufferedInput, FillOutcome}
 import silk.buffered_output {BufferedOutput}
 import silk.buffered_transfer {BufferedTransfer, TransferOutcome}
-import silk.byte_duplex {ByteDuplex, ByteIoError, ReadTransfer}
+import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.bytes {Bytes}
 import silk.effect {Effect}
 import silk.execution {Execution}
@@ -30,15 +30,56 @@ impl MonotonicClock for FixedClock {
 
 struct FailingWriter { calls: usize }
 
+struct NominalContext { expected: i32 }
+
 struct CountingAllocator { calls: usize }
 
 struct FailingAllocator { calls: usize failAt: usize }
 
-struct PairCancellationState { sourceCloses: usize destinationCloses: usize }
+struct PairCancellationState {
+  sourceCloses: usize
+  destinationCloses: usize
+  flushCalls: usize
+  shutdownCalls: usize
+  readCalls: usize
+  writeCalls: usize
+  deadlinesMatch: bool
+}
 
-struct PairParkingDuplex { state: Shared<PairCancellationState> source: bool }
+struct PairParkingDuplex {
+  state: Shared<PairCancellationState>
+  source: bool
+  shutdownMode: i32
+}
 
 struct PairParkGuard { wake: Intrinsic.Wake }
+
+struct ParkingClock {}
+
+impl NominalContext {
+  effect<'session> fn use<'session, 'transport: 'session>(
+    context: Self,
+    session: &'session mut BufferedDuplex<'transport, MemoryByteDuplex>,
+  ) -> i32 ! BufferError ? &mut MonotonicClock
+  where &'transport mut MemoryByteDuplex provides &ByteDuplex
+    from &mut ByteDuplex | &mut MonotonicClock {
+    let filled = run BufferedDuplex.fill(
+      &mut session.*,
+      usize.ZERO,
+      Option.none<Instant>(),
+    )
+    drop filled
+    return context.expected
+  }
+}
+
+impl BufferedContext<
+  MemoryByteDuplex,
+  i32,
+  BufferError ? &mut MonotonicClock
+> for NominalContext {
+  use: NominalContext.use
+}
 
 effect fn allocate(self: &mut CountingAllocator, layout: Layout) -> Allocation ! OutOfMemoryError {
   self.calls = self.calls + usize.ONE
@@ -64,6 +105,21 @@ fn retainPairWake(wake: Intrinsic.Wake) -> PairParkGuard {
   return PairParkGuard {wake: move wake}
 }
 
+impl MonotonicClock for ParkingClock {
+  effect fn now(self: &mut Self) -> Instant { return SystemClock.make(0, 0) }
+  effect fn getResolution(self: &mut Self) -> u64 { return u64.toU64(1) }
+  effect fn waitUntil(self: &mut Self, when: Instant) -> () {
+    drop when
+    run Execution.park(retainPairWake)
+    return ()
+  }
+  effect fn waitFor(self: &mut Self, duration: u64) -> () {
+    drop duration
+    run Execution.park(retainPairWake)
+    return ()
+  }
+}
+
 fn recordPairClose(state: &mut PairCancellationState, source: bool) -> () {
   if source {
     state.sourceCloses = state.sourceCloses + usize.ONE
@@ -73,12 +129,45 @@ fn recordPairClose(state: &mut PairCancellationState, source: bool) -> () {
   return ()
 }
 
+fn recordPairFlush(state: &mut PairCancellationState, deadlineMatches: bool) -> () {
+  state.flushCalls = state.flushCalls + usize.ONE
+  state.deadlinesMatch = state.deadlinesMatch && deadlineMatches
+  return ()
+}
+
+fn recordPairShutdown(state: &mut PairCancellationState, deadlineMatches: bool) -> () {
+  state.shutdownCalls = state.shutdownCalls + usize.ONE
+  state.deadlinesMatch = state.deadlinesMatch && deadlineMatches
+  return ()
+}
+
+fn recordPairRead(state: &mut PairCancellationState) -> () {
+  state.readCalls = state.readCalls + usize.ONE
+  return ()
+}
+
+fn recordPairWrite(state: &mut PairCancellationState) -> () {
+  state.writeCalls = state.writeCalls + usize.ONE
+  return ()
+}
+
+fn matchesShutdownDeadline(deadline: &Option<Instant>) -> bool {
+  return match &deadline.* {
+    Option<Instant>.None => false
+    Option<Instant>.Some {value} => {
+      return SystemClock.seconds(&value) == 7 && SystemClock.nanoseconds(&value) == 9
+    }
+  }
+}
+
 impl PairParkingDuplex {
   unsafe effect fn read(
     self: &mut Self,
     output: &mut [u8],
     deadline: Option<Instant>,
   ) -> ReadTransfer ! ByteIoError ? &mut MonotonicClock {
+    let update = fn(state: &mut PairCancellationState) -> () { return recordPairRead(move state) }
+    Shared.withMut(&self.state, move update)
     drop output
     drop deadline
     return ReadTransfer.End
@@ -89,6 +178,8 @@ impl PairParkingDuplex {
     input: &[u8],
     deadline: Option<Instant>,
   ) -> usize ! ByteIoError ? &mut MonotonicClock {
+    let update = fn(state: &mut PairCancellationState) -> () { return recordPairWrite(move state) }
+    Shared.withMut(&self.state, move update)
     drop deadline
     return input.length
   }
@@ -97,6 +188,11 @@ impl PairParkingDuplex {
     self: &mut Self,
     deadline: Option<Instant>,
   ) -> () ! ByteIoError ? &mut MonotonicClock {
+    let deadlineMatches = matchesShutdownDeadline(&deadline)
+    let update = fn(state: &mut PairCancellationState) -> () {
+      return recordPairFlush(move state, deadlineMatches)
+    }
+    Shared.withMut(&self.state, move update)
     drop deadline
     return ()
   }
@@ -105,7 +201,18 @@ impl PairParkingDuplex {
     self: &mut Self,
     deadline: Option<Instant>,
   ) -> () ! ByteIoError ? &mut MonotonicClock {
+    let deadlineMatches = matchesShutdownDeadline(&deadline)
+    let update = fn(state: &mut PairCancellationState) -> () {
+      return recordPairShutdown(move state, deadlineMatches)
+    }
+    Shared.withMut(&self.state, move update)
     drop deadline
+    if self.shutdownMode == 1 {
+      fail ByteDuplex.provider(ByteIoOperation.ShutdownWrite, 41)
+    }
+    if self.shutdownMode == 2 {
+      run MonotonicClock.waitUntil(SystemClock.make(8, 0))
+    }
     return ()
   }
 
@@ -204,6 +311,24 @@ fn writeFailureMatches(
       BufferError.InvalidReadCount {count, limit} => { drop count drop limit return false }
       BufferError.LengthOverflow => false
       BufferError.Terminal => false
+    }
+  }
+}
+
+fn shutdownFailureMatches(result: Result<(), BufferError>) -> bool {
+  return match move result {
+    Result<(), BufferError>.Success {value} => { drop value return false }
+    Result<(), BufferError>.Failure {error} => match move error {
+      BufferError.WriteFailed {accepted, drained, error: cause} => {
+        if accepted != usize.ZERO || drained != usize.ZERO { drop cause return false }
+        return match move cause {
+          ByteIoError.Provider {operation, code} => {
+            return operation == ByteIoOperation.ShutdownWrite && code == 41
+          }
+          _ => false
+        }
+      }
+      _ => false
     }
   }
 }
@@ -343,7 +468,35 @@ where &'session mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monotonic
   let outputs: [Bytes; 2] = [move firstOutput, move secondOutput]
   run BufferedDuplex.writeVecAll(&mut session.*, &outputs, Option.none<Instant>())
   drop outputs
-  run BufferedDuplex.finish(&mut session.*, Option.none<Instant>())
+  let shutdownDeadline = SystemClock.make(7, 9)
+  run BufferedDuplex.shutdownWrite(
+    &mut session.*,
+    Option.some<Instant>(move shutdownDeadline),
+  )
+  run BufferedDuplex.shutdownWrite(&mut session.*, Option.none<Instant>())
+  let rejectedOutput = run Effect.result(BufferedDuplex.writeSome(
+    &mut session.*,
+    b"x",
+    Option.none<Instant>(),
+  ))
+  return match move rejectedOutput {
+    Result<usize, BufferError>.Success {value} => { drop value return 10 }
+    Result<usize, BufferError>.Failure {error} => {
+      if failureCode(move error) != 1100 { return 11 }
+      let readable = run BufferedDuplex.fill(
+        &mut session.*,
+        usize.ONE,
+        Option.none<Instant>(),
+      )
+      return match move readable {
+        FillOutcome.Available {count} => { drop count return 12 }
+        FillOutcome.End {available: afterShutdownAvailable} => {
+          if afterShutdownAvailable != usize.ZERO { return 13 }
+          return 42
+        }
+      }
+    }
+  }
   return 42
 }
 
@@ -463,6 +616,34 @@ effect<'source & 'destination> fn parkPair<'source, 'destination>(
   let now = run MonotonicClock.now()
   drop now
   run Execution.park(retainPairWake)
+  return true
+}
+
+effect<'session> fn failShutdown<'session>(
+  session: &'session mut BufferedDuplex<'session, PairParkingDuplex>,
+) -> bool ! BufferError ? &mut MonotonicClock {
+  let deadline = SystemClock.make(7, 9)
+  let attempted = run Effect.result(BufferedDuplex.shutdownWrite(
+    &mut session.*,
+    Option.some<Instant>(move deadline),
+  ))
+  if !shutdownFailureMatches(move attempted) { return false }
+  let afterFailure = run Effect.result(BufferedDuplex.fill(
+    &mut session.*,
+    usize.ONE,
+    Option.none<Instant>(),
+  ))
+  return fillResultCode(move afterFailure) == 1100
+}
+
+effect<'session> fn parkShutdown<'session>(
+  session: &'session mut BufferedDuplex<'session, PairParkingDuplex>,
+) -> bool ! BufferError ? &mut MonotonicClock {
+  let deadline = SystemClock.make(7, 9)
+  run BufferedDuplex.shutdownWrite(
+    &mut session.*,
+    Option.some<Instant>(move deadline),
+  )
   return true
 }
 
@@ -724,8 +905,16 @@ effect fn canceledPair(state: Shared<PairCancellationState>) -> bool
 ! BufferError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut clock = FixedClock {}
-  let mut source = PairParkingDuplex {state: Shared.clone(&state), source: true}
-  let mut destination = PairParkingDuplex {state: move state, source: false}
+  let mut source = PairParkingDuplex {
+    state: Shared.clone(&state),
+    source: true,
+    shutdownMode: 0,
+  }
+  let mut destination = PairParkingDuplex {
+    state: move state,
+    source: false,
+    shutdownMode: 0,
+  }
   return run withBufferedPairCapacity<bool, BufferError>(
     &mut source,
     2,
@@ -756,11 +945,50 @@ fn pairCancellationResult(state: &mut PairCancellationState) -> i32 {
   return -2
 }
 
+fn shutdownCancellationResult(state: &mut PairCancellationState) -> i32 {
+  if state.sourceCloses != usize.ONE || state.destinationCloses != usize.ZERO { return -3 }
+  if state.flushCalls != 2 || state.shutdownCalls != usize.ONE { return -4 }
+  if state.readCalls != usize.ZERO || state.writeCalls != usize.ZERO { return -5 }
+  if !state.deadlinesMatch { return -6 }
+  return 42
+}
+
+fn shutdownFailureResult(state: &mut PairCancellationState) -> bool {
+  if state.sourceCloses != usize.ONE || state.destinationCloses != usize.ZERO { return false }
+  if state.flushCalls != 2 || state.shutdownCalls != usize.ONE { return false }
+  if state.readCalls != usize.ZERO || state.writeCalls != usize.ZERO { return false }
+  return state.deadlinesMatch
+}
+
+effect fn canceledShutdown(state: Shared<PairCancellationState>) -> bool
+! BufferError | OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut clock = ParkingClock {}
+  let mut provider = PairParkingDuplex {
+    state: move state,
+    source: true,
+    shutdownMode: 2,
+  }
+  return run withBufferedCapacity<bool, BufferError>(
+    &mut provider,
+    2,
+    2,
+    parkShutdown,
+  )
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+}
+
 effect fn cancelSuspendedPair() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let state = run Shared.make<PairCancellationState>(PairCancellationState {
     sourceCloses: usize.ZERO,
     destinationCloses: usize.ZERO,
+    flushCalls: usize.ZERO,
+    shutdownCalls: usize.ZERO,
+    readCalls: usize.ZERO,
+    writeCalls: usize.ZERO,
+    deadlinesMatch: true,
   }) |> Effect.provideMut<Allocator>(&mut allocator)
   let body = Effect.catchAll(canceledPair(Shared.clone(&state)), pairCancellationFailed)
   let execution = run Execution.make(move body, (), pairCancellationReady)
@@ -774,6 +1002,31 @@ effect fn cancelSuspendedPair() -> i32 ! OutOfMemoryError {
   )
   if result != 42 { drop state return result }
   return Shared.withMut(&state, pairCancellationResult)
+}
+
+effect fn cancelSuspendedShutdown() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let state = run Shared.make<PairCancellationState>(PairCancellationState {
+    sourceCloses: usize.ZERO,
+    destinationCloses: usize.ZERO,
+    flushCalls: usize.ZERO,
+    shutdownCalls: usize.ZERO,
+    readCalls: usize.ZERO,
+    writeCalls: usize.ZERO,
+    deadlinesMatch: true,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let body = Effect.catchAll(canceledShutdown(Shared.clone(&state)), pairCancellationFailed)
+  let execution = run Execution.make(move body, (), pairCancellationReady)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut result = 0
+  run Execution.drive(
+    move execution,
+    &mut result,
+    pairCancellationComplete,
+    pairCancellationParked,
+  )
+  if result != 42 { drop state return result }
+  return Shared.withMut(&state, shutdownCancellationResult)
 }
 
 effect fn program() -> i32 ! BufferError | OutOfMemoryError {
@@ -796,8 +1049,33 @@ effect fn program() -> i32 ! BufferError | OutOfMemoryError {
   if !equal(outbound, b"abcd") { drop outbound return 22 }
   drop outbound
   let completedAudit = MemoryByteDuplex.audit(&provider)
-  if completedAudit.length != 8 { drop completedAudit return 23 }
+  if completedAudit.length != 10 { drop completedAudit return 23 }
+  if completedAudit[7].operation != ByteIoOperation.Flush {
+    drop completedAudit
+    return 24
+  }
+  if completedAudit[8].operation != ByteIoOperation.ShutdownWrite {
+    drop completedAudit
+    return 25
+  }
+  if completedAudit[9].operation != ByteIoOperation.Close {
+    drop completedAudit
+    return 26
+  }
   drop completedAudit
+
+  let mut contextualProvider = run emptyProvider()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let contextual = run withBufferedCapacityContext(
+    &mut contextualProvider,
+    2,
+    2,
+    NominalContext {expected: 42},
+  )
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if contextual != 42 { return 96 }
+  if MemoryByteDuplex.closeAttempts(&contextualProvider) != usize.ONE { return 97 }
 
   let mut abandoned = run emptyProvider()
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -966,6 +1244,34 @@ effect fn program() -> i32 ! BufferError | OutOfMemoryError {
   let canceled = run cancelSuspendedPair()
   if canceled != 42 { return 90 }
 
+  let shutdownCanceled = run cancelSuspendedShutdown()
+  if shutdownCanceled != 42 { return 91 }
+
+  let shutdownFailureState = run Shared.make<PairCancellationState>(PairCancellationState {
+    sourceCloses: usize.ZERO,
+    destinationCloses: usize.ZERO,
+    flushCalls: usize.ZERO,
+    shutdownCalls: usize.ZERO,
+    readCalls: usize.ZERO,
+    writeCalls: usize.ZERO,
+    deadlinesMatch: true,
+  }) |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut shutdownFailureProvider = PairParkingDuplex {
+    state: Shared.clone(&shutdownFailureState),
+    source: true,
+    shutdownMode: 1,
+  }
+  let shutdownFailure = run withBufferedCapacity<bool, BufferError>(
+    &mut shutdownFailureProvider,
+    2,
+    2,
+    failShutdown,
+  )
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if !shutdownFailure { drop shutdownFailureState return 92 }
+  if !Shared.withMut(&shutdownFailureState, shutdownFailureResult) { return 93 }
+
   let mut failedReadSession = run failingSessionInputProvider()
     |> Effect.provideMut<Allocator>(&mut allocator)
   let readSession = run withBufferedCapacity<bool, BufferError>(
@@ -1020,6 +1326,176 @@ effect fn program() -> i32 ! BufferError | OutOfMemoryError {
   let transferOutbound = MemoryByteDuplex.outbound(&transferDestination)
   if !equal(transferOutbound, b"a") { drop transferOutbound return 72 }
   drop transferOutbound
+  return 0
+}
+
+effect fn failed<E>(error: E) -> i32 { drop error return 99 }
+
+pub fn main() -> i32 { return run Effect.catchAll(program(), failed) }
+`
+
+/** Compact target-portability witness for public buffered sessions and paired transfer. */
+export const bufferedByteIoWasmAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
+import silk.buffered_duplex {BufferedDuplex, withBufferedPairCapacity}
+import silk.buffered_input {BufferError}
+import silk.buffered_transfer {BufferedTransfer}
+import silk.byte_duplex {ByteDuplex, ByteIoOperation}
+import silk.bytes {Bytes}
+import silk.effect {Effect}
+import silk.memory_byte_duplex {MemoryByteDuplex, MemoryByteDuplexPhase, MemoryReadEvent, MemoryWriteAction, MemoryWriteEvent}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.system_clock {Instant, SystemClock}
+import silk.vector {Vector}
+
+struct FixedClock {}
+
+impl FixedClock {
+  effect fn now(self: &mut Self) -> Instant { return SystemClock.make(0, 0) }
+  effect fn resolution(self: &mut Self) -> u64 { return 1 }
+  effect fn waitUntil(self: &mut Self, when: Instant) -> () { drop when return () }
+  effect fn waitFor(self: &mut Self, duration: u64) -> () { drop duration return () }
+}
+
+impl MonotonicClock for FixedClock {
+  now: FixedClock.now
+  getResolution: FixedClock.resolution
+  waitUntil: FixedClock.waitUntil
+  waitFor: FixedClock.waitFor
+}
+
+fn equal(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length { return false }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if left[index] != right[index] { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+effect fn sourceProvider() -> MemoryByteDuplex
+! OutOfMemoryError
+? &mut Allocator {
+  let bytes = run Bytes.copy(&b"abcdef")
+  let mut reads = Vector.make<MemoryReadEvent>()
+  run Vector.append<MemoryReadEvent>(&mut reads, MemoryReadEvent.Data {
+    readyAt: SystemClock.make(0, 0),
+    bytes: move bytes,
+  })
+  return run MemoryByteDuplex.make(
+    move reads,
+    Vector.make<MemoryWriteEvent>(),
+    usize.ONE,
+    4,
+    Option.none<i32>(),
+  )
+}
+
+effect fn destinationProvider() -> MemoryByteDuplex
+! OutOfMemoryError
+? &mut Allocator {
+  let mut writes = Vector.make<MemoryWriteEvent>()
+  run Vector.append<MemoryWriteEvent>(&mut writes, MemoryWriteEvent {
+    readyAt: SystemClock.make(0, 0),
+    action: MemoryWriteAction.Accept {count: 2},
+  })
+  run Vector.append<MemoryWriteEvent>(&mut writes, MemoryWriteEvent {
+    readyAt: SystemClock.make(0, 0),
+    action: MemoryWriteAction.Accept {count: 2},
+  })
+  return run MemoryByteDuplex.make(
+    Vector.make<MemoryReadEvent>(),
+    move writes,
+    4,
+    8,
+    Option.none<i32>(),
+  )
+}
+
+effect<'source & 'destination> fn transfer<'source, 'destination>(
+  source: &'source mut BufferedDuplex<'source, MemoryByteDuplex>,
+  destination: &'destination mut BufferedDuplex<'destination, MemoryByteDuplex>,
+) -> i32 ! BufferError ? &mut MonotonicClock
+where &'source mut MemoryByteDuplex provides &ByteDuplex
+  from &mut ByteDuplex | &mut MonotonicClock,
+  &'destination mut MemoryByteDuplex provides &ByteDuplex
+  from &mut ByteDuplex | &mut MonotonicClock {
+  let zero = run BufferedTransfer.transferAtMost(
+    &mut source.*,
+    &mut destination.*,
+    usize.ZERO,
+    Option.none<Instant>(),
+  )
+  if zero.count != usize.ZERO || zero.endObserved { return 1 }
+  if BufferedDuplex.unread(&source.*) != usize.ZERO { return 2 }
+  if BufferedDuplex.pending(&destination.*) != usize.ZERO { return 3 }
+
+  let moved = run BufferedTransfer.transferAtMost(
+    &mut source.*,
+    &mut destination.*,
+    4,
+    Option.none<Instant>(),
+  )
+  if moved.count != 4 || moved.endObserved { return 4 }
+  if BufferedDuplex.unread(&source.*) != 2 { return 5 }
+  let suffix = BufferedDuplex.peek(&source.*)
+  if !equal(suffix, b"ef") { drop suffix return 6 }
+  drop suffix
+
+  run BufferedDuplex.flush(&mut destination.*, Option.none<Instant>())
+  let deadline = SystemClock.make(7, 9)
+  run BufferedDuplex.shutdownWrite(
+    &mut destination.*,
+    Option.some<Instant>(move deadline),
+  )
+  run BufferedDuplex.shutdownWrite(&mut destination.*, Option.none<Instant>())
+  return 42
+}
+
+effect fn program() -> i32 ! BufferError | OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut clock = FixedClock {}
+  let mut source = run sourceProvider() |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut destination = run destinationProvider() |> Effect.provideMut<Allocator>(&mut allocator)
+  let result = run withBufferedPairCapacity<i32, BufferError>(
+    &mut source,
+    6,
+    usize.ONE,
+    &mut destination,
+    usize.ONE,
+    2,
+    transfer,
+  )
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if result != 42 { return 10 + result }
+  if MemoryByteDuplex.closeAttempts(&source) != usize.ONE { return 20 }
+  if MemoryByteDuplex.closeAttempts(&destination) != usize.ONE { return 21 }
+  if MemoryByteDuplex.phase(&source) != MemoryByteDuplexPhase.Closed { return 22 }
+  if MemoryByteDuplex.phase(&destination) != MemoryByteDuplexPhase.Closed { return 23 }
+  let outbound = MemoryByteDuplex.outbound(&destination)
+  if !equal(outbound, b"abcd") { drop outbound return 24 }
+  drop outbound
+
+  let sourceAudit = MemoryByteDuplex.audit(&source)
+  if sourceAudit.length != 2 || sourceAudit[0].operation != ByteIoOperation.Read || sourceAudit[1].operation != ByteIoOperation.Close {
+    drop sourceAudit
+    return 25
+  }
+  drop sourceAudit
+  let destinationAudit = MemoryByteDuplex.audit(&destination)
+  if destinationAudit.length != 6 ||
+    destinationAudit[0].operation != ByteIoOperation.Write ||
+    destinationAudit[1].operation != ByteIoOperation.Write ||
+    destinationAudit[2].operation != ByteIoOperation.Flush ||
+    destinationAudit[3].operation != ByteIoOperation.Flush ||
+    destinationAudit[4].operation != ByteIoOperation.ShutdownWrite ||
+    destinationAudit[5].operation != ByteIoOperation.Close {
+    drop destinationAudit
+    return 26
+  }
+  drop destinationAudit
   return 0
 }
 

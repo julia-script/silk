@@ -1,11 +1,11 @@
 ## 1. Public Model and Planning
 
-- [ ] 1.1 Add the ordinary-source `silk.http_content` actor with documented affine
+- [x] 1.1 Add the ordinary-source `silk.http_content` actor with documented affine
       `ResponseContext`, `Mode`, coding, finite content/codec `Limits`, `CodingPlan`,
       progress, error, representation, completion, reuse-disposition, and negotiation types; verify one
       shared analysis snapshot resolves the public API without a new intrinsic, compiler-known actor,
       provider, or target-specific path.
-- [ ] 1.2 Implement the sole `ResponseContext.make(head, method, trailerPolicy)` constructor around
+- [x] 1.2 Implement the sole `ResponseContext.make(head, method, trailerPolicy)` constructor around
       `http_body.selectResponse`, atomically retaining the original inputs, affine selection, framing,
       and anomaly behind `ResponseContext`; make `CodingPlan` consume only that context and
       verify ownership analysis rejects public field construction, separate or mismatched selections,
@@ -56,7 +56,7 @@
 
 ## 3. Scoped Reader, Metadata, and Completion
 
-- [ ] 3.1 Implement `withReader` as a higher-ranked Effect bracket over an exclusive borrowed
+- [x] 3.1 Implement `withReader` as a higher-ranked Effect bracket over an exclusive borrowed
       `BufferedDuplex`, consuming the plan and preserving callback success/error/requirement channels;
       verify ownership analysis rejects escaping readers, plan reuse, concurrent Raw/Decode readers,
       and direct buffered access during the callback.
@@ -81,13 +81,13 @@
 
 ## 4. Request Negotiation and Public Delivery
 
-- [ ] 4.1 Implement pure `Accept-Encoding` generation as
+- [x] 4.1 Implement pure `Accept-Encoding` generation as
       `Result<Option<http.Header>, http.ValueError>` using caller header limits and `Header.make` for
       automatic and borrowed override values; verify all enabled subsets use stable
       `gzip, deflate, zstd` order, never advertise `x-gzip`, Raw automatic mode omits the field, valid
       overrides preserve exact bytes, invalid overrides retain precise `ValueError` coordinates, and
       negotiation never alters response validation.
-- [ ] 4.2 Register `silk.http_content` in the standard-library manifest and regenerate the committed
+- [x] 4.2 Register `silk.http_content` in the standard-library manifest and regenerate the committed
       source table; verify the generated entry matches the ordinary source byte-for-byte and the module
       imports from a fresh compiler analysis.
 - [ ] 4.3 Add one ticket-local structural acceptance file and one consolidated ordinary-source
@@ -96,7 +96,7 @@
       atomic context/selection ownership statically and the required framing, stack, limits, structured-exit
       lifecycle, no-body anomalies, metadata, completion/reuse disposition, and validated negotiation
       behavior at runtime without a per-feature backend pass.
-- [ ] 4.4 Add the public HTTP content-decoding reference with compiler-verified examples and exact
+- [x] 4.4 Add the public HTTP content-decoding reference with compiler-verified examples and exact
       affine response-context construction, Raw/Decode planning, reverse order, limit accounting,
       typed progress/errors, scoped ownership and fatal-trap exclusion, provisional output, anomaly and
       completion/reuse disposition, the caller-supplied encoded-body assumption, the JUL-23 provenance

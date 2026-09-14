@@ -327,7 +327,17 @@ export const lowerInstance = (
             ? representation.identity
             : undefined
         const effectValue =
-          identity === undefined ? undefined : effectValueByIdentity(layout, identity)
+          identity === undefined
+            ? undefined
+            : effectValueByIdentity(
+                layout,
+                identity,
+                Type.isEffect(specialized)
+                  ? specialized
+                  : Type.isRepresented(specialized) && Type.isEffect(specialized.contract)
+                    ? specialized.contract
+                    : undefined,
+              )
         if (effectValue !== undefined) return [effectValue]
         if (Type.isEffect(specialized)) return []
       }
@@ -382,7 +392,9 @@ export const lowerInstance = (
       : undefined
   const returnedBlock = contract._tag === 'Contract' ? returnedEffectBlock(fn) : undefined
   const hiddenEffectValue =
-    returnedBlock === undefined ? undefined : effectValueType(layout, instance.key, returnedBlock)
+    returnedBlock === undefined || effectOutcome === undefined
+      ? undefined
+      : effectValueType(layout, instance.key, returnedBlock, effectOutcome)
   const hiddenCompositeResult = returnedValueType(
     layout,
     opaqueRealizations,
@@ -392,7 +404,7 @@ export const lowerInstance = (
   const specializedEffectValue =
     instance.resultEffect === undefined
       ? undefined
-      : effectValueByIdentity(layout, instance.resultEffect)
+      : effectValueByIdentity(layout, instance.resultEffect, effectOutcome)
   const resultType =
     specializedEffectValue ??
     hiddenEffectValue ??
@@ -483,9 +495,26 @@ const effectCaptureParameterTypes = (
         const resolvedEffectValue =
           field.resolvedEffectIdentity === undefined
             ? undefined
-            : effectValueByIdentity(layout, field.resolvedEffectIdentity)
+            : effectValueByIdentity(
+                layout,
+                field.resolvedEffectIdentity,
+                Type.isEffect(field.type)
+                  ? field.type
+                  : Type.isRepresented(field.type) && Type.isEffect(field.type.contract)
+                    ? field.type.contract
+                    : undefined,
+              )
         const effectValue =
-          resolvedEffectValue ?? effectValueByIdentity(layout, field.effectIdentity)
+          resolvedEffectValue ??
+          effectValueByIdentity(
+            layout,
+            field.effectIdentity,
+            Type.isEffect(field.type)
+              ? field.type
+              : Type.isRepresented(field.type) && Type.isEffect(field.type.contract)
+                ? field.type.contract
+                : undefined,
+          )
         return effectValue === undefined ? [] : [effectValue]
       }
       if (field.callableIdentity !== undefined && Type.isCallable(field.type)) {
@@ -584,6 +613,7 @@ export const lowerEffectRunner = (
         })
       }),
     ),
+    spec.witnessTargets,
   )
   lowering.parameterLocals.clear()
   block.captures.forEach((capture, ordinal) => {

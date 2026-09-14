@@ -1,6 +1,7 @@
 import type * as NativeAssembly from './NativeAssembly.js'
 import * as Lifetime from './Lifetime.js'
 import * as Constraint from './Constraint.js'
+import type * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -717,6 +718,8 @@ export type Expression =
       readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+      /** Symbolic source identities to be checked against the later concrete proof selection. */
+      readonly symbolicConformances: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection>
       readonly staticArguments: ReadonlyArray<StaticValue.Value>
       /** Caller-authored origins aligned with static arguments, excluded from instance identity. */
       readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>

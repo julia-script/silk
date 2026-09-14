@@ -294,6 +294,31 @@
     ]
   },
   {
+    "module": "silk/http_content",
+    "path": "silk/http_content.silk",
+    "namespace": "ContentReader",
+    "aliases": [
+      "AcceptEncoding",
+      "AppliedPlan",
+      "Coding",
+      "CodingPlan",
+      "CodingPosition",
+      "ContentCompletion",
+      "ContentError",
+      "ContentLimitKind",
+      "ContentProgress",
+      "ContentProgressState",
+      "ContentReason",
+      "EmptyEncodingPolicy",
+      "EnabledCodings",
+      "Limits",
+      "Mode",
+      "RepresentationView",
+      "ResponseContext",
+      "ReuseDisposition"
+    ]
+  },
+  {
     "module": "silk/http_head",
     "path": "silk/http_head.silk",
     "namespace": "RequestParser",
@@ -319,6 +344,28 @@
     "path": "silk/http_headers.silk",
     "namespace": "Headers",
     "aliases": ["OwnedHeaders", "HeaderIterator", "MetadataIterator", "MetadataToken", "Limits"]
+  },
+  {
+    "module": "silk/http_server",
+    "path": "silk/http_server.silk",
+    "namespace": "Connection",
+    "aliases": [
+      "Request",
+      "ResponseWriter",
+      "ConnectionHandler",
+      "Limits",
+      "BodyMode",
+      "ReusePolicy",
+      "ConnectionPhase",
+      "ServerLimitKind",
+      "ServerError",
+      "WriteProgress"
+    ]
+  },
+  {
+    "module": "silk/http_server_native",
+    "path": "silk/http_server_native.silk",
+    "namespace": "HttpServerNative"
   },
   {
     "module": "silk/http_target",
@@ -492,15 +539,28 @@
     "path": "silk/native_socket.silk",
     "namespace": "NativeSocket",
     "aliases": [
+      "Accepted",
+      "AcceptedContext",
+      "AcceptedView",
       "AttemptFailure",
+      "BoundAddress",
       "ConnectOptions",
       "ConnectOptionsError",
       "ConnectOptionsReason",
       "Connection",
       "ConnectionPhase",
+      "InvalidBindReason",
       "InvalidEndpointReason",
+      "ListenOptions",
+      "ListenOptionsError",
+      "ListenOptionsReason",
+      "Listener",
+      "ListenerPhase",
       "NativeSocketError",
-      "NativeSocketOperation"
+      "NativeSocketOperation",
+      "PeerAddress",
+      "UnixPeerAddress",
+      "UnixSocketPath"
     ]
   },
   {
@@ -804,7 +864,7 @@
   {
     "module": "silk/tls_connection",
     "path": "silk/tls_connection.silk",
-    "namespace": "Connection",
+    "namespace": "OwnedConnection",
     "aliases": ["ConnectionError", "ConnectionOptions", "ConnectionPhase"]
   },
   {

@@ -282,8 +282,48 @@ import {
   unavailableReferencedEffectRunner,
 } from './EntryAssembly.js'
 import type {} from './Forwarding.js'
-import type { GeneratedEffectRunner } from './ValueType.js'
+import type { GeneratedEffectRunner, SpecializedWitnessEffectTarget } from './ValueType.js'
 import { baseRunnerKey, effectValueType, instanceText } from './ValueType.js'
+
+/**
+ * Re-proves source witness effects while their concrete instance context is still authoritative.
+ *
+ * A generated block runner retains authored HIR, whose interface call remains intentionally
+ * symbolic. Repeating discovery's declaration substitution here, and carrying that exact target
+ * into the runner, prevents lowering's proof-context compatibility from replacing the source
+ * conformance identity when its execution boundary is synthesized later.
+ */
+export const specializedWitnessEffectTargets = (
+  index: DeclarationIndex.Index,
+  owner: Instances.Instance,
+  block: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>,
+): ReadonlyArray<SpecializedWitnessEffectTarget> =>
+  Object.freeze(
+    Hir.runtimeExpressionTree(block).flatMap((expression) => {
+      if (
+        (expression._tag !== 'BuiltinCall' && expression._tag !== 'InterfaceOperationCall') ||
+        expression.witnessEffectSite === undefined
+      )
+        return []
+      const bound =
+        expression._tag === 'InterfaceOperationCall' ? expression : expression.interfaceOperation
+      if (bound === undefined) return []
+      const capability = Type.substitute(bound.capability, owner.substitution)
+      if (!Type.isNominal(capability)) return []
+      const target = ConformanceProof.interfaceWitnessTarget(
+        index,
+        Type.substitute(bound.provider, owner.substitution),
+        capability,
+        bound.operation,
+        bound.contract,
+        owner.substitution,
+      )
+      return target === undefined
+        ? []
+        : [Object.freeze({ site: expression.witnessEffectSite, target })]
+    }),
+  )
+
 export const lowerProgram = (
   discovery: Instances.Discovery,
   layout: Layout.Plan,
@@ -355,7 +395,14 @@ export const lowerProgram = (
       instance.key.staticArguments,
     )
     const block = returnedEffectBlock(instance.function)
-    const type = block === undefined ? undefined : effectValueType(layout, instance.key, block)
+    const blockType =
+      block === undefined
+        ? undefined
+        : Type.substitute(block.type, instance.substitution, instance.specialization.compatibility)
+    const type =
+      block === undefined || blockType === undefined || !Type.isEffect(blockType)
+        ? undefined
+        : effectValueType(layout, instance.key, block, blockType)
     if (type !== undefined && block !== undefined) {
       effectResults.set(resultKey, type)
       generatedRunners.push(
@@ -365,8 +412,9 @@ export const lowerProgram = (
           owner: instance,
           block,
           type,
-          specializationKey: baseRunnerKey(instance.key, block.site),
+          specializationKey: baseRunnerKey(instance.key, block.site, type.type),
           providedRequirements: Object.freeze([]),
+          witnessTargets: specializedWitnessEffectTargets(index, instance, block),
         }),
       )
       continue

@@ -280,6 +280,16 @@ export const proveStructural = (
       })
     }
     case 'RequirementSubsetConstraint': {
+      if (
+        self.selected.memberWellFormed.length === 0 &&
+        self.source.memberWellFormed.length === 0 &&
+        RowAlgebra.isKnownSubset(Type.requirementRowPolicy(), self.selected, self.source)
+      )
+        return Object.freeze({
+          _tag: 'RequirementSubset',
+          selected: self.selected,
+          source: self.source,
+        })
       const selected = RowAlgebra.concretize(Type.requirementRowPolicy(), self.selected)
       const source = RowAlgebra.concretize(Type.requirementRowPolicy(), self.source)
       if (

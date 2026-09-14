@@ -47,7 +47,11 @@ compute the duration deadline, and select the earlier present deadline without c
 external mark to a remaining duration. It SHALL reject an already reached selected deadline before
 transport output. The default handshake duration SHALL be 30,000,000,000 nanoseconds. The same
 `Some(deadline)` SHALL pass through every handshake read, write, and flush, with checks between
-driver steps, after suspended waits, and immediately before authenticated-owner publication.
+driver steps, after suspended waits, and immediately before authenticated-owner publication. A
+successful handshake read SHALL commit its exact transfer count and check the selected deadline
+before feeding returned bytes or EOF into the TLS client. An invalid returned count SHALL be
+reported before that post-read deadline check, including when the clock has reached the selected
+deadline at the same boundary.
 `ByteIoError.Timeout` SHALL map to `HandshakeTimeout` and invalidate and close the unpublished
 owner. `None` for the external deadline SHALL leave the finite handshake duration in force. The
 existing trap-on-unrepresentable-duration-deadline contract SHALL remain unchanged.
@@ -87,8 +91,8 @@ after exact returned progress has been committed or a returned typed failure has
 terminal. If structured cancellation or interruption reaches an armed operation, its nonparking
 release SHALL mark the owner `Closed`, invalidate all pending TLS transfer state before one provider
 close attempt, and preserve the cancellation outcome. Later connection operations SHALL return the
-existing typed invalid-state failure without invoking provider I/O. Fatal traps remain outside this
-guarantee.
+existing typed invalid-state failure without invoking provider I/O, including zero-length reads and
+writes. Fatal traps remain outside this guarantee.
 
 #### Scenario: Send ciphertext without repeats
 

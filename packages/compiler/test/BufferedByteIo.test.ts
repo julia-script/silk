@@ -13,6 +13,40 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 const encoder = new TextEncoder()
 
 const publicSurfaceProbe = `
+struct ServerContext<A, E, ?R> { result: A }
+
+impl<A, E, ?R> ServerContext<A, E, R> {
+  effect<'session> fn use<'session, 'transport: 'session>(
+    context: Self,
+    session: &'session mut BufferedDuplex<'transport, MemoryByteDuplex>,
+  ) -> A ! E ? R
+  where &'transport mut MemoryByteDuplex provides &ByteDuplex
+    from &mut ByteDuplex | &mut MonotonicClock {
+    drop session
+    let ServerContext<A, E, R> {result} = move context
+    return move result
+  }
+}
+
+impl<A, E, ?R> BufferedContext<MemoryByteDuplex, A, E ? R> for ServerContext<A, E, R> {
+  use: ServerContext.use
+}
+
+effect fn realizeServerContext<'env, A, E, ?R>(
+  transport: &'env mut MemoryByteDuplex,
+  context: ServerContext<A, E, R>,
+) -> A
+! E | BufferError | OutOfMemoryError
+? R | &mut Allocator
+where R in Without<R, ByteDuplex> {
+  return run withBufferedCapacityContext(
+    move transport,
+    usize.ONE,
+    usize.ONE,
+    move context,
+  )
+}
+
 effect fn writeVectors<'transport, 'call, P>(
   session: &'call mut BufferedDuplex<'transport, P>,
   values: &[Bytes],
@@ -23,6 +57,14 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     move values,
     Option.none<Instant>(),
   )
+}
+
+effect fn shutdownBufferedWrite<'transport, 'call, P>(
+  session: &'call mut BufferedDuplex<'transport, P>,
+  deadline: Option<Instant>,
+) -> () ! BufferError ? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  return run BufferedDuplex.shutdownWrite(&mut session.*, move deadline)
 }
 
 fn aliases(
@@ -41,9 +83,10 @@ fn aliases(
 `
 
 const ownershipSource = `import silk.allocator {Allocator, OutOfMemoryError}
-import silk.buffered_duplex {BufferedDuplex, withBuffered, withBufferedPairCapacity}
+import silk.buffered_duplex {BufferedContext, BufferedDuplex, withBuffered, withBufferedPairCapacity}
 import silk.buffered_input {BufferError}
 import silk.byte_duplex {ByteDuplex, ByteIoError}
+import silk.memory_byte_duplex {MemoryByteDuplex}
 import silk.monotonic_clock {MonotonicClock}
 import silk.option {Option}
 import silk.system_clock {Instant}
@@ -176,6 +219,26 @@ where &'env mut SP provides &ByteDuplex from &mut ByteDuplex,
   )
 }
 
+struct ContextEscape<'env> {
+  slot: &'env mut Option<&'env mut BufferedDuplex<'env, MemoryByteDuplex>>
+}
+
+impl<'env> ContextEscape<'env> {
+  effect<'session> fn use<'session, 'transport: 'session>(
+    mut context: Self,
+    session: &'session mut BufferedDuplex<'transport, MemoryByteDuplex>,
+  ) -> i32
+  where &'transport mut MemoryByteDuplex provides &ByteDuplex
+    from &mut ByteDuplex | &mut MonotonicClock {
+    context.slot.* = Option.some(move session)
+    return 0
+  }
+}
+
+impl<'env> BufferedContext<MemoryByteDuplex, i32, never> for ContextEscape<'env> {
+  use: ContextEscape.use
+}
+
 pub fn main() -> i32 { return 0 }
 `
 
@@ -192,8 +255,18 @@ it.effect(
       if (example === undefined) return
       const source = example
         .replace(
-          'import silk.buffered_duplex { BufferedDuplex, withBufferedCapacity }',
-          'import silk.buffered_duplex { BufferedDuplex, DEFAULT_CAPACITY, withBuffered, withBufferedCapacity }',
+          `import silk.buffered_duplex {
+  BufferedContext,
+  BufferedDuplex,
+  withBufferedCapacityContext,
+}`,
+          `import silk.buffered_duplex {
+  BufferedContext,
+  BufferedDuplex,
+  DEFAULT_CAPACITY,
+  withBuffered,
+  withBufferedCapacityContext,
+}`,
         )
         .replace(
           'import silk.buffered_input { BufferError, FillOutcome }',
@@ -211,6 +284,7 @@ import silk.bytes { Bytes }`,
           '  let filled = run BufferedDuplex.fill(',
           `  let outputs: [Bytes; 0] = []
   run writeVectors(&mut session.*, &outputs)
+  run shutdownBufferedWrite(&mut session.*, Option.none<Instant>())
   let filled = run BufferedDuplex.fill(`,
         )
       const snapshot = yield* AnalysisFixture.retainingMain(
@@ -272,7 +346,7 @@ import silk.bytes { Bytes }`,
 )
 
 it.effect(
-  'rejects peek mutation, scoped session and peek escape, and ambient duplex aliasing',
+  'rejects peek mutation, scoped session and peek escape, contextual escape, and ambient duplex aliasing',
   () =>
     Effect.gen(function* () {
       const snapshot = yield* AnalysisFixture.declarations(
@@ -287,8 +361,13 @@ it.effect(
         'aliasPair',
         'escapePairSession',
         'escapePairPeek',
+        'contextEscape',
       ] as const
-      const starts = declarations.map((name) => ownershipSource.indexOf(`effect fn ${name}`))
+      const starts = declarations.map((name) =>
+        ownershipSource.indexOf(
+          name === 'contextEscape' ? 'struct ContextEscape' : `effect fn ${name}`,
+        ),
+      )
       const ownerAt = (offset: number): (typeof declarations)[number] | undefined =>
         declarations.findLast((_, index) => (starts.at(index) ?? Number.MAX_SAFE_INTEGER) <= offset)
       assert.deepEqual(
@@ -336,6 +415,19 @@ it.effect(
   )`,
           },
           { code: 'SEM0122', owner: 'escapePairPeek', span: 'leakPairPeek' },
+          {
+            code: 'SEM0037',
+            owner: 'contextEscape',
+            span: 'Option.some(move session)',
+          },
+          {
+            code: 'SEM0083',
+            owner: 'contextEscape',
+            span: `impl<'env> BufferedContext<MemoryByteDuplex, i32, never> for ContextEscape<'env> {
+  use: ContextEscape.use
+}`,
+          },
+          { code: 'SEM0051', owner: 'contextEscape', span: 'BufferedContext' },
         ],
       )
     }),

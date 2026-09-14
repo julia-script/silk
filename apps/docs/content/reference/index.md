@@ -154,7 +154,10 @@ documentation remain separate from this reference.
 - [Buffered byte I/O](buffered-byte-io.md) — fixed-capacity lookahead, output buffering, scoped duplex composition, and bounded transfer.
 - [HTTP head parsing](http-head-parsing.md) — bounded incremental request/response heads, borrowed views, and atomic serialization.
 - [HTTP body framing](http-body-framing.md) — strict bounded message framing, chunked transfer, trailers, and completion evidence.
+- [HTTP content decoding](http-content-decoding.md) — bounded streaming content-coding plans, decoding, metadata, and reuse evidence.
+- [Streaming HTTP server](http-server.md) — bounded serial request handling, framed bodies, explicit response output, graceful shutdown, and scoped protocol handoff.
 - [Network addresses and resolution](network-address-resolution.md) — owned IP/domain/endpoint values, bounded resolution, and synchronous native DNS limits.
 - [Native socket connections](native-socket-connections.md) — scoped nonblocking TCP and pathname-Unix ByteDuplex connections with bounded cooperative polling.
+- [Native socket listeners](native-socket-listeners.md) — scoped nonblocking TCP and pathname-Unix listeners with bounded accept polling.
 - [P-256 key agreement](p256-key-agreement.md) — scalar ownership, SEC1 admission, explicit entropy and bounded arithmetic.
 - [ECDSA P-256 verification](ecdsa-p256-verification.md) — borrowed messages, strict DER and retained certificate parameter policy.

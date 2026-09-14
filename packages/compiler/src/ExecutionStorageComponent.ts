@@ -113,6 +113,17 @@ const bootstrapDemand = (
         pending.push(candidate)
     }
   }
+  const enqueueEffect = (
+    declaration: DeclarationFacts.CanonicalId,
+    arguments_: ReadonlyArray<Type.GenericArgument>,
+    staticArguments: ReadonlyArray<StaticValue.Value> | undefined,
+    effect: Type.Effect,
+  ): void => {
+    for (const candidate of program.functions) {
+      if (Mir.matchesEffectInstance(candidate, declaration, arguments_, staticArguments, effect))
+        pending.push(candidate)
+    }
+  }
   const enqueueSymbol = (symbol: string): void => {
     for (const exported of program.foreignExports) {
       if (exported.symbol !== symbol) continue
@@ -239,22 +250,40 @@ const bootstrapDemand = (
           callable(operation.observer)
           break
         case 'Call':
-        case 'RunEffect':
           enqueue(operation.target, operation.typeArguments, operation.staticArguments)
+          break
+        case 'RunEffect':
+          enqueueEffect(
+            operation.target,
+            operation.typeArguments,
+            operation.staticArguments,
+            operation.outcomeType.type,
+          )
           break
         case 'RunEffectValue':
         case 'RunStaticEffect':
-          enqueue(operation.runner, operation.runnerTypeArguments, operation.runnerStaticArguments)
+          enqueueEffect(
+            operation.runner,
+            operation.runnerTypeArguments,
+            operation.runnerStaticArguments,
+            operation.outcomeType.type,
+          )
           break
         case 'CatchEffect':
-          enqueue(operation.runner, operation.runnerTypeArguments, operation.runnerStaticArguments)
+          enqueueEffect(
+            operation.runner,
+            operation.runnerTypeArguments,
+            operation.runnerStaticArguments,
+            operation.outcomeType.type,
+          )
           break
         case 'RunEffectComposite':
           for (const alternative of operation.alternatives)
-            enqueue(
+            enqueueEffect(
               alternative.runner,
               alternative.runnerTypeArguments,
               alternative.runnerStaticArguments,
+              alternative.type.type,
             )
           break
         case 'ApplyCallable': {

@@ -1,7 +1,8 @@
 ## Purpose
 
-Define source-owned native TCP and pathname-Unix connections that publish one scoped ByteDuplex
-lease with cooperative readiness, bounded retry policy, and exact descriptor cleanup.
+Define source-owned native TCP and pathname-Unix connections that publish one affine ByteDuplex
+owner plus scoped convenience with cooperative readiness, bounded retry policy, and exact
+descriptor cleanup.
 
 ## ADDED Requirements
 
@@ -24,27 +25,28 @@ socket, connection, HTTP actor, provider spelling, or platform socket policy.
 - **WHEN** a program is realized for LLVM-to-Wasm or another unsupported profile
 - **THEN** the native actor contributes no socket member, foreign import, or implicit runtime shim
 
-### Requirement: Connection acquisition publishes one affine scoped lease
+### Requirement: Connection acquisition publishes one affine owner
 
-The actor SHALL expose `connectResolved` for a nonempty bounded ordered slice of owned numeric
-`Endpoint` values and `connectUnix` for a nonempty NUL-free absolute pathname whose encoded bytes fit
-the selected platform's `sun_path` including its terminator. Each operation SHALL acquire one affine
-`Connection`, exclusively install it as `ByteDuplex`, and invoke one higher-ranked callback that
-cannot copy, clone, retain, alias, or extract its raw descriptor or independently request
-`ByteDuplex`. The connection SHALL have the observable phases `Connecting`, `Open`, `WriteClosed`,
-and `Closed`; the callback SHALL run only in `Open`. Structured success, typed failure, or
-cancellation SHALL release the connection exactly once while preserving the protected outcome.
-Fatal traps SHALL remain outside the cleanup guarantee.
+The actor SHALL expose `connectResolvedOwned` for a nonempty bounded ordered slice of owned numeric
+`Endpoint` values and `connectUnixOwned` for a nonempty NUL-free absolute pathname whose encoded
+bytes fit the selected platform's `sun_path` including its terminator. Each operation SHALL acquire
+and return one affine `Connection` only after it reaches `Open`; callers cannot copy, clone, alias,
+or extract its raw descriptor. The actor SHALL also expose `connectResolved` and `connectUnix` as
+higher-ranked scoped conveniences that acquire through the corresponding owned operation,
+exclusively lend the owner as `ByteDuplex`, and release it after every structured callback exit.
+The connection SHALL have the observable phases `Connecting`, `Open`, `WriteClosed`, and `Closed`.
+Fatal traps SHALL remain outside the structured cleanup guarantee.
 
 #### Scenario: Publish only an established connection
 
 - **WHEN** acquisition has not yet completed or has failed
-- **THEN** the callback is not invoked and every provisional descriptor is terminally released
+- **THEN** no owner is returned, the scoped callback is not invoked, and every provisional
+  descriptor is terminally released
 
 #### Scenario: Reject an escaping connection
 
-- **WHEN** a callback attempts to copy the connection, retain its provider loan after the callback,
-  obtain a raw owned descriptor, or request an ambient ByteDuplex alias
+- **WHEN** a caller attempts to copy the owned connection, obtain its raw descriptor, or make a
+  scoped callback retain its provider loan or request an ambient ByteDuplex alias
 - **THEN** ownership, lifetime, or requirement-row analysis rejects the program before execution
 
 #### Scenario: Close after every structured exit
@@ -57,8 +59,9 @@ Fatal traps SHALL remain outside the cleanup guarantee.
 
 `ConnectOptions` SHALL admit `pollInterval` only in `1..1_000_000_000` nanoseconds and
 `maxAttempts` only in `1..1024`, with defaults of 1,000,000 nanoseconds and 64 attempts. A resolved
-endpoint slice SHALL be nonempty and no longer than `maxAttempts`. `connectResolved` SHALL try
-candidates in input order, using a fresh descriptor for every native attempt, and SHALL use one
+endpoint slice SHALL be nonempty and no longer than `maxAttempts`. `connectResolvedOwned` and its
+scoped `connectResolved` wrapper SHALL try candidates in input order, using a fresh descriptor for
+every native attempt, and SHALL use one
 optional absolute `MonotonicClock` deadline for the complete operation without resetting it between
 candidates. Every native `connect` call, including a fresh-descriptor retry after `EINTR` or a full
 GNU Unix backlog, SHALL count toward `maxAttempts`. `None` SHALL permit an established pending
@@ -158,6 +161,11 @@ before native I/O and after every resumed wait; equality SHALL be `Timeout`. It 
 next wake with checked split-field arithmetic and return `TimeRangeError` if no finite future
 `Instant` is representable, never overflow before taking the deadline minimum.
 
+For a supplied deadline, the provider SHALL resample the active clock immediately before every
+subsequent native work boundary: socket creation, each descriptor or socket-option setup call,
+connect, readiness poll, `SO_ERROR` inspection, transfer syscall, and shutdown. If the deadline is
+reached between two such boundaries, the later boundary SHALL not run.
+
 Every unready result, `EINTR`, and ready-but-`EAGAIN` race SHALL take a positive clock wait before
 retrying, so no path spins. Under `LocalScheduler`, the existing task-local clock replacement SHALL
 park only the current task and permit siblings to advance. Outside a scheduler, the selected clock
@@ -174,6 +182,12 @@ throughput are not promised.
 
 - **WHEN** the active clock reaches the absolute deadline during a wait
 - **THEN** the operation returns `Timeout` before another socket syscall or readiness poll
+
+#### Scenario: Expire between native boundaries
+
+- **WHEN** a sequenced clock reaches the absolute deadline after one native boundary completes
+- **THEN** the provider returns `Timeout` before issuing the next setup, poll, `SO_ERROR`, transfer,
+  or shutdown call
 
 #### Scenario: Cancel at the clock wait
 

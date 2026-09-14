@@ -78,8 +78,30 @@ For both scopes, the protected outcomes are the structured Effect exits: success
 and structured cancellation/interruption. Fatal traps intentionally bypass finalizers and `Drop`
 under the language's resource-lifetime contract and are not a release guarantee.
 
+`withBufferedCapacityContext` consumes one context value into the same single-provider bracket. A
+compile-time `BufferedContext<P, A, E, R>` interface witness selects the context actor's named
+adapter, whose generic operation consumes `Self` and receives an independently higher-ranked
+temporary session. Interface selection adds neither runtime dispatch nor an Effect service, and
+the context may own affine or once-callable state. The adapter may return ordinary results or moved
+context-owned values, but cannot return the session or a borrow derived from it.
+
 Implicit flush was rejected because a blocked flush would violate the nonparking finalizer contract
 and could turn abandonment into an externally visible duplicate/partial transfer.
+
+### Directional shutdown drains before delegating
+
+`BufferedDuplex.shutdownWrite(deadline)` first flushes retained output and then invokes canonical
+`ByteDuplex.shutdownWrite` through the session's private provider binding. Both stages receive
+copies of the same absolute deadline. A successful shutdown records that the output direction is
+closed, rejects later buffered output without provider I/O, and leaves input readable. A repeated
+shutdown is idempotent. Any typed drain, provider flush, or provider shutdown failure uses the
+existing precise `BufferError.WriteFailed` accounting and terminalizes the complete session;
+structured cancellation or interruption unwinds the enclosing buffered scope and terminally closes
+the provider.
+
+Calling only the raw provider shutdown was rejected because pending bytes would be abandoned ahead
+of the half-close. Treating successful directional shutdown as complete-session termination was
+rejected because it would discard the underlying duplex contract's still-readable direction.
 
 ### Bounded transfer couples source consumption to destination acknowledgment
 

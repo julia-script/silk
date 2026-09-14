@@ -13,7 +13,7 @@ import silk.effect {Effect}
 import silk.monotonic_clock {MonotonicClock}
 import silk.option {Option}
 import silk.result {Result}
-import silk.system_clock {Instant}
+import silk.system_clock {Instant, SystemClock}
 import silk.usize
 
 /// The default fixed capacity for each duplex direction.
@@ -25,6 +25,21 @@ pub struct BufferedDuplex<'transport, P> {
   outputState: BufferedOutput
   transport: &'transport mut P
   terminal: bool
+  writeShutdown: bool
+}
+
+/// Compile-time adapter from one owned context to a higher-ranked buffered session use.
+///
+/// Implement this interface when a scoped callback owns affine or once-callable state. The
+/// selected operation consumes that context and receives the temporary session independently;
+/// interface selection adds no runtime service or requirement-row member.
+pub interface BufferedContext<P, A, E, ?R> {
+  /// Consumes one owned context while using a temporary buffered session.
+  effect<'session> fn use<'session, 'transport: 'session>(
+    context: Self,
+    session: &'session mut BufferedDuplex<'transport, P>,
+  ) -> A ! E ? R
+  where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock
 }
 
 impl<'transport, P> BufferedDuplex<'transport, P> {
@@ -134,7 +149,7 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    if self.terminal { fail BufferError.Terminal }
+    if self.terminal || self.writeShutdown { fail BufferError.Terminal }
     let operation = BufferedOutput.writeSome(&mut self.outputState, move input, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
     let attempted = run Effect.result(move operation)
@@ -150,7 +165,7 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    if self.terminal { fail BufferError.Terminal }
+    if self.terminal || self.writeShutdown { fail BufferError.Terminal }
     let operation = BufferedOutput.writeAll(&mut self.outputState, move input, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
     let attempted = run Effect.result(move operation)
@@ -166,7 +181,7 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    if self.terminal { fail BufferError.Terminal }
+    if self.terminal || self.writeShutdown { fail BufferError.Terminal }
     let operation = BufferedOutput.writeVecAll(&mut self.outputState, move inputs, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
     let attempted = run Effect.result(move operation)
@@ -181,7 +196,7 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    if self.terminal { fail BufferError.Terminal }
+    if self.terminal || self.writeShutdown { fail BufferError.Terminal }
     let operation = BufferedOutput.flush(&mut self.outputState, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
     let attempted = run Effect.result(move operation)
@@ -196,11 +211,52 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   ! BufferError
   ? &mut MonotonicClock
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-    if self.terminal { fail BufferError.Terminal }
+    if self.terminal || self.writeShutdown { fail BufferError.Terminal }
     let operation = BufferedOutput.finish(&mut self.outputState, move deadline)
       |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
     let attempted = run Effect.result(move operation)
     return run BufferedDuplex.settle(&mut self.*, move attempted)
+  }
+
+  /// Flushes pending output and then closes only the provider's write direction.
+  ///
+  /// A successful shutdown keeps input available but rejects later output operations. Any typed
+  /// transport failure terminalizes the complete session. Structured cancellation is handled by
+  /// the enclosing buffered scope, which terminally closes the retained provider.
+  pub effect fn shutdownWrite(
+    self: &mut Self,
+    deadline: Option<Instant>,
+  ) -> ()
+  ! BufferError
+  ? &mut MonotonicClock
+  where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    if self.terminal { fail BufferError.Terminal }
+    if self.writeShutdown { return () }
+    let flushing = BufferedOutput.flush(
+      &mut self.outputState,
+      copyDeadline(&deadline),
+    ) |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let flushed = run Effect.result(move flushing)
+    run BufferedDuplex.settle(&mut self.*, move flushed)
+    let operation = ByteDuplex.shutdownWrite(move deadline)
+      |> Effect.provideMut<ByteDuplex>(&mut self.transport.*)
+    let attempted = run Effect.result(move operation)
+    match move attempted {
+      Result<(), ByteIoError>.Success {value} => {
+        drop value
+        self.writeShutdown = true
+        return ()
+      }
+      Result<(), ByteIoError>.Failure {error} => {
+        self.terminal = true
+        fail BufferError.WriteFailed {
+          accepted: usize.ZERO,
+          drained: usize.ZERO,
+          error: move error,
+        }
+      }
+    }
+    return ()
   }
 
   effect fn settle<A>(self: &mut Self, attempted: Result<A, BufferError>) -> A ! BufferError {
@@ -218,6 +274,11 @@ struct TransportLease<'env, P> {
   provider: &'env mut P
 }
 
+struct TransportContextLease<'env, P, C> {
+  provider: &'env mut P
+  context: Option<C>
+}
+
 struct TransportPairLease<'env, SP, DP> {
   source: &'env mut SP
   destination: &'env mut DP
@@ -228,7 +289,7 @@ pub effect fn withBuffered<'env, A, E, ?CallbackRequirements, P>(
   transport: &'env mut P,
   callback: for<'call> once fn<'env>(
     &'call mut BufferedDuplex<'call, P>
-  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+  ) -> once Effect<'call & 'env; A ! E ? CallbackRequirements>,
 ) -> A
 ! E | BufferError | OutOfMemoryError
 ? CallbackRequirements | &mut Allocator
@@ -250,7 +311,7 @@ pub effect fn withBufferedCapacity<'env, A, E, ?CallbackRequirements, P>(
   outputCapacity: usize,
   callback: for<'call> once fn<'env>(
     &'call mut BufferedDuplex<'call, P>
-  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+  ) -> once Effect<'call & 'env; A ! E ? CallbackRequirements>,
 ) -> A
 ! E | BufferError | OutOfMemoryError
 ? CallbackRequirements | &mut Allocator
@@ -270,6 +331,57 @@ where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
     )
   }
   let release = effect fn(owned: &mut TransportLease<'env, P>) -> () {
+    let closed = ByteDuplex.close()
+      |> Effect.provideMut<ByteDuplex>(&mut owned.provider.*)
+    return run Effect.catchAll(move closed, discardCloseFailure)
+  }
+  return run Effect.useReleaseNonParking(move lease, move use, move release)
+}
+
+/// Runs one compile-time-selected context adapter with explicit direction capacities.
+///
+/// The context is consumed by value and may own affine or once-callable state. Its selected
+/// [`BufferedContext.use`] operation receives an independently higher-ranked temporary session,
+/// which cannot escape through the context or result.
+pub effect fn withBufferedCapacityContext<
+  'env,
+  A,
+  E,
+  ?CallbackRequirements,
+  P,
+  C: BufferedContext<P, A, E ? CallbackRequirements>,
+>(
+  transport: &'env mut P,
+  inputCapacity: usize,
+  outputCapacity: usize,
+  context: C,
+) -> A
+! E | BufferError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator
+where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  run validateCapacities(inputCapacity, outputCapacity)
+  let lease = TransportContextLease<'env, P, C> {
+    provider: move transport,
+    context: Option.some<C>(move context),
+  }
+  let use = effect fn(owned: &mut TransportContextLease<'env, P, C>) -> A
+  ! E | BufferError | OutOfMemoryError
+  ? CallbackRequirements | &mut Allocator {
+    let stored = Intrinsic.replace(owned.context, Option.none<C>())
+    let ownedContext = match move stored {
+      Option<C>.Some {value} => move value
+      Option<C>.None => unavailableContext<C>()
+    }
+    return run acquireAndUseContext<A, E, CallbackRequirements, P, C>(
+      &mut owned.provider.*,
+      inputCapacity,
+      outputCapacity,
+      move ownedContext,
+    )
+  }
+  let release = effect fn(owned: &mut TransportContextLease<'env, P, C>) -> () {
     let closed = ByteDuplex.close()
       |> Effect.provideMut<ByteDuplex>(&mut owned.provider.*)
     return run Effect.catchAll(move closed, discardCloseFailure)
@@ -345,7 +457,7 @@ effect fn acquireAndUse<'env, 'transport, A, E, ?CallbackRequirements, P>(
   outputCapacity: usize,
   callback: for<'call> once fn<'env>(
     &'call mut BufferedDuplex<'call, P>
-  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+  ) -> once Effect<'call & 'env; A ! E ? CallbackRequirements>,
 ) -> A
 ! E | BufferError | OutOfMemoryError
 ? CallbackRequirements | &mut Allocator
@@ -358,8 +470,41 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     outputState: move output,
     transport: &mut transport.*,
     terminal: false,
+    writeShutdown: false,
   }
   return run callback(&mut session)
+}
+
+effect fn acquireAndUseContext<
+  'transport,
+  A,
+  E,
+  ?CallbackRequirements,
+  P,
+  C: BufferedContext<P, A, E ? CallbackRequirements>,
+>(
+  transport: &'transport mut P,
+  inputCapacity: usize,
+  outputCapacity: usize,
+  context: C,
+) -> A
+! E | BufferError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  let input = run BufferedInput.make(inputCapacity)
+  let output = run BufferedOutput.make(outputCapacity)
+  let mut session = BufferedDuplex {
+    inputState: move input,
+    outputState: move output,
+    transport: &mut transport.*,
+    terminal: false,
+    writeShutdown: false,
+  }
+  return run BufferedContext<P, A, E ? CallbackRequirements>.use(
+    move context,
+    &mut session,
+  )
 }
 
 effect fn acquireAndUsePair<
@@ -399,12 +544,14 @@ where &'sourceTransport mut SP provides &ByteDuplex
     outputState: move sourceOutput,
     transport: &mut source.*,
     terminal: false,
+    writeShutdown: false,
   }
   let mut destinationSession = BufferedDuplex {
     inputState: move destinationInput,
     outputState: move destinationOutput,
     transport: &mut destination.*,
     terminal: false,
+    writeShutdown: false,
   }
   return run callback(&mut sourceSession, &mut destinationSession)
 }
@@ -433,6 +580,22 @@ fn terminalizesSession(error: &BufferError) -> bool {
     BufferError.UnknownExternalTransfer {progress, error: cause} => true
     BufferError.LengthOverflow => false
   }
+}
+
+fn copyInstant(value: &Instant) -> Instant {
+  return SystemClock.make(SystemClock.seconds(value), SystemClock.nanoseconds(value))
+}
+
+fn copyDeadline(value: &Option<Instant>) -> Option<Instant> {
+  return match &value.* {
+    Option<Instant>.None => Option.none<Instant>()
+    Option<Instant>.Some {value: present} => Option.some<Instant>(copyInstant(&present))
+  }
+}
+
+fn unavailableContext<C>() -> C {
+  let impossible = 1 / 0
+  return unavailableContext<C>()
 }
 
 effect fn discardCloseFailure(error: ByteIoError) -> () {

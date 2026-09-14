@@ -412,6 +412,7 @@ const effectInstanceByIdentity = (
 export const effectEnvironmentByIdentity = (
   environments: ReadonlyArray<EffectEnvironment>,
   identity: Type.EffectIdentityArgument,
+  requested?: Type.Effect,
 ): Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> | undefined => {
   const available = environments.filter(
     (candidate): candidate is Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
@@ -422,14 +423,21 @@ export const effectEnvironmentByIdentity = (
       Instances.effectIdentity(candidate.instance, candidate.site) === identity.identity ||
       candidate.successEffectIdentity === identity.identity,
   )
-  if (concrete.length === 1) return concrete.at(0)
+  const semantic =
+    requested === undefined
+      ? undefined
+      : concrete.find((candidate) => Type.equals(candidate.effect, requested))
+  if (semantic !== undefined) return semantic
+  // Semantic Effect variants at one physical site share this layout. Callers that require the
+  // contract select it separately; this helper owns only the capture placement.
+  if (concrete.length > 0) return concrete.at(0)
   const represented = available.filter(
     (candidate) => Hir.effectRepresentationIdentity(candidate.site) === identity.identity,
   )
   const owner = identity.owner
   if (owner === undefined) return represented.length === 1 ? represented.at(0) : undefined
   const exact = represented.filter((candidate) => sameExactOwner(candidate.instance, owner))
-  if (exact.length === 1) return exact.at(0)
+  if (exact.length > 0) return exact.at(0)
   const visible = represented.filter((candidate) => sameVisibleOwner(candidate.instance, owner))
   return visible.length === 1 ? visible.at(0) : undefined
 }
@@ -2421,6 +2429,8 @@ const effectEnvironments = (
   discovery: Instances.Discovery,
   callablePlans: ReadonlyArray<CallableEnvironment>,
 ): ReadonlyArray<EffectEnvironment> => {
+  const environmentKey = (environment: EffectEnvironment): string =>
+    `${Instances.effectIdentity(environment.instance, environment.site)}\u0000${Type.key(environment.effect)}`
   const layouts = new Map(
     entries.map((candidate) => [Type.runtimeKey(candidate.type), candidate] as const),
   )
@@ -2444,9 +2454,7 @@ const effectEnvironments = (
   for (let pass = 0; pass <= discovery.instances.length; pass += 1) {
     const availableBefore = new Set(
       environments.flatMap((environment) =>
-        environment._tag === 'EffectEnvironment'
-          ? [Instances.effectIdentity(environment.instance, environment.site)]
-          : [],
+        environment._tag === 'EffectEnvironment' ? [environmentKey(environment)] : [],
       ),
     ).size
     for (const instance of [...discovery.instances].reverse()) {
@@ -2946,9 +2954,7 @@ const effectEnvironments = (
     }
     const availableAfter = new Set(
       environments.flatMap((environment) =>
-        environment._tag === 'EffectEnvironment'
-          ? [Instances.effectIdentity(environment.instance, environment.site)]
-          : [],
+        environment._tag === 'EffectEnvironment' ? [environmentKey(environment)] : [],
       ),
     ).size
     if (availableAfter === availableBefore) break
@@ -2956,17 +2962,18 @@ const effectEnvironments = (
 
   const resolved = new Map<string, EffectEnvironment>()
   for (const environment of environments) {
-    const identity = Instances.effectIdentity(environment.instance, environment.site)
-    const previous = resolved.get(identity)
+    const key = environmentKey(environment)
+    const previous = resolved.get(key)
     if (previous === undefined || environment._tag === 'EffectEnvironment')
-      resolved.set(identity, environment)
+      resolved.set(key, environment)
   }
   return Object.freeze(
     [...resolved.values()].sort(
       (left, right) =>
         left.instance.declaration.module.localeCompare(right.instance.declaration.module) ||
         left.instance.declaration.name.localeCompare(right.instance.declaration.name) ||
-        Hir.compareExecutableSites(left.site, right.site),
+        Hir.compareExecutableSites(left.site, right.site) ||
+        Type.key(left.effect).localeCompare(Type.key(right.effect)),
     ),
   )
 }
@@ -4225,8 +4232,21 @@ export const entry = (self: Plan, type: DeclarationFacts.SemanticType): Entry | 
 export const callingShape = (
   self: Plan,
   type: DeclarationFacts.SemanticType,
-): CallingShape | undefined =>
-  indexByTypeKey(callingShapeIndexCache, self.callingShapes).get(Type.runtimeKey(type))
+): CallingShape | undefined => {
+  const physical = indexByTypeKey(callingShapeIndexCache, self.callingShapes).get(
+    Type.runtimeKey(type),
+  )
+  if (physical === undefined || Type.equals(physical.type, type)) return physical
+  return Object.freeze({
+    _tag: 'CallingShape',
+    type,
+    tree: physical.tree,
+    laneCount: physical.laneCount,
+    get lanes(): ReadonlyArray<CallingLane> {
+      return physical.lanes
+    },
+  })
+}
 
 /**
  * Plans the bit-exact movement of one nominal failure payload between two tagged carriers.

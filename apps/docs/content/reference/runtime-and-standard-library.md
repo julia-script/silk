@@ -1173,6 +1173,43 @@ not reproduce that system's trust policy.
 [implementation contract](../../../../openspec/changes/archive/2026-09-12-implement-owned-trust-snapshots/specs/owned-trust-snapshots/spec.md),
 [shared native acceptance](../../../../packages/compiler/test/support/trustSourceAcceptance.ts).
 
+## Owned authenticated TLS connections
+
+`silk.tls_connection.authenticateOwned` consumes one `ByteDuplex` provider and one independently
+prepared `TrustSnapshot`, then returns one affine `OwnedConnection<P>` only after TLS 1.3
+authentication and a final deadline check. Trust preparation is deliberately outside the provider
+cleanup guard: applications may load, decode, combine, or copy a snapshot first, and a preparation
+failure retains its trust or allocation error without touching a transport. TLS authentication has
+no ambient `TrustSource` requirement and does not report `TrustSourceError`.
+
+`ConnectionOptions` always contributes a finite handshake-duration deadline and may carry an
+`externalDeadline`. Authentication uses the earlier absolute monotonic instant without renewing it
+across fragmented reads or writes. The owned value privately binds the authenticated TLS state to
+the exact provider. Its TLS client retains the reference, ALPN, authentication, and validation-time
+facts, while a private zero-state marker records their unforgeable association with that provider
+without duplicating them. Borrowed accessors expose only TLS-observable authentication evidence;
+route, proxy, pool, origin, and reuse identities belong to the HTTP client and connection-pool
+actors.
+
+Reads, writes, flushes, authentication metadata, and graceful write shutdown operate on the owner.
+Every suspending direct-owned I/O borrow has an operation-local cleanup guard: structured
+cancellation marks the owner terminal, closes the provider once, and prevents the ambiguous caller
+buffer from being offered again. `shutdownWrite` sends and flushes TLS `close_notify` before closing
+the transport write direction, while `close` first enters the terminal `Closed` phase and then
+performs one nonparking full-provider close without TLS grace. Repeated close is local and
+successful; the first direct provider-close failure remains typed as `ConnectionError`.
+
+`withClient` is the scoped convenience over the same owned constructor. It consumes the provider
+and snapshot, lends only a higher-ranked mutable owner to the callback, and suppresses final close
+failure so cleanup cannot replace callback success, typed failure, or structured cancellation.
+Fatal traps remain outside these structured cleanup guarantees. HTTP exchange borrowing and pool
+return/eviction policy are intentionally deferred to JUL-23 and JUL-197.
+
+**Evidence:** [owned TLS actor](../../../../packages/compiler/stdlib/silk/tls_connection.silk),
+[owned-transport contract](../../../../openspec/changes/add-owned-tls-connections/specs/owned-transport-lifetimes/spec.md),
+[scoped TLS contract](../../../../openspec/changes/add-owned-tls-connections/specs/scoped-byte-duplex-tls-connection/spec.md),
+[portable TLS witness](../../../../packages/compiler/test/support/tlsConnectionAcceptance.ts).
+
 ## Deferred directions
 
 The following are deliberately outside the first stable model:

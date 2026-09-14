@@ -54,7 +54,15 @@ import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type { DelayedEffectState, ProvidedRequirement } from './Lower.js'
-import { bool, borrowKey, character, patternKey, spanKey, usize } from './Lower.js'
+import {
+  bool,
+  borrowKey,
+  character,
+  patternKey,
+  spanKey,
+  specializedWitnessEffectTargets,
+  usize,
+} from './Lower.js'
 import { lowerSequence } from './LowerStatements.js'
 import { lowerBuiltinExpression } from './LowerBuiltin.js'
 import * as Match from './Match.js'
@@ -72,8 +80,9 @@ import {
   stagedCallableValueType,
   effectCompositeShape,
   effectValueByIdentity,
+  effectValueForCall,
   effectValueType,
-  ensureProvidedRunner,
+  ensureEffectRunner,
   functionItemValueType,
   instanceText,
   providerBindings,
@@ -1088,10 +1097,16 @@ function lowerCallableApplyExpression(
     realizedTarget?._tag === 'DeclarationCallableTarget'
       ? fn.effectResults.get(instanceText(realizedTarget.declaration, typeArguments))
       : undefined
+  const semanticType = fn.semantic(expression.type)
   const type =
-    (call?.resultEffect === undefined
+    (call === undefined || !Type.isEffect(semanticType)
       ? undefined
-      : effectValueByIdentity(fn.layout, call.resultEffect)) ??
+      : effectValueForCall(
+          fn.layout,
+          call,
+          semanticType,
+          provision === undefined ? availableRequirements : provision.requirements,
+        )) ??
     declaredEffectValue ??
     fn.type(expression.type) ??
     (realizedTarget?._tag === 'DeclarationCallableTarget'
@@ -1100,7 +1115,7 @@ function lowerCallableApplyExpression(
           fn.instances,
           realizedTarget.declaration,
           typeArguments,
-          fn.semantic(expression.type),
+          semanticType,
         )
       : undefined)
   if (!lowered || type === undefined || callableType === undefined) return undefined
@@ -1245,14 +1260,19 @@ function lowerEffectConstructExpression(
   )
   const typeArguments = call?.target.typeArguments ?? authoredTypeArguments
   const staticArguments = call?.target.staticArguments ?? expression.staticArguments
-  const resultType =
-    (call?.resultEffect === undefined
-      ? undefined
-      : effectValueByIdentity(fn.layout, call.resultEffect)) ??
-    fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments))
-  if (resultType === undefined) return undefined
+  const semanticType = fn.semantic(expression.type)
   const provision = forwardedServiceProvision(fn, expression, availableRequirements)
   if (provision === 'Transferred') return provision
+  const resultType =
+    (call === undefined || !Type.isEffect(semanticType)
+      ? undefined
+      : effectValueForCall(
+          fn.layout,
+          call,
+          semanticType,
+          provision === undefined ? availableRequirements : provision.requirements,
+        )) ?? fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments))
+  if (resultType === undefined) return undefined
   const arguments_: Array<Mir.LocalId> = []
   for (const argument of expression.arguments) {
     const lowered = lowerOperandWithProvision(fn, provision, argument, availableRequirements)
@@ -1280,7 +1300,10 @@ function lowerEffectBlockExpression(
   fn: FunctionLowering,
   expression: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>,
 ): LoweredExpression | undefined {
-  const type = effectValueType(fn.layout, fn.owner.key, expression)
+  const semanticType = fn.semantic(expression.type)
+  const type = Type.isEffect(semanticType)
+    ? effectValueType(fn.layout, fn.owner.key, expression, semanticType)
+    : undefined
   if (type === undefined) return undefined
   const captures: Array<{
     readonly source: Mir.LocalId
@@ -1315,7 +1338,8 @@ function lowerEffectBlockExpression(
   )
   if (
     !fn.generatedRunners.some(
-      (candidate) => candidate.specializationKey === baseRunnerKey(fn.owner.key, expression.site),
+      (candidate) =>
+        candidate.specializationKey === baseRunnerKey(fn.owner.key, expression.site, type.type),
     )
   ) {
     fn.generatedRunners.push(
@@ -1325,8 +1349,9 @@ function lowerEffectBlockExpression(
         owner: fn.owner,
         block: expression,
         type,
-        specializationKey: baseRunnerKey(fn.owner.key, expression.site),
+        specializationKey: baseRunnerKey(fn.owner.key, expression.site, type.type),
         providedRequirements: Object.freeze([]),
+        witnessTargets: specializedWitnessEffectTargets(fn.index, fn.owner, expression),
       }),
     )
   }
@@ -1394,7 +1419,11 @@ function lowerRunExpression(
       })
       const structuralSuccess = fn.semantic(expression.type)
       const successType = Type.isEffect(structuralSuccess)
-        ? effectValueByIdentity(fn.layout, effectValueType.environment.successEffectIdentity ?? '')
+        ? effectValueByIdentity(
+            fn.layout,
+            effectValueType.environment.successEffectIdentity ?? '',
+            structuralSuccess,
+          )
         : fn.type(expression.type)
       if (successType === undefined || successType._tag === 'EffectOutcome') return undefined
       const outcome = fn.alloc(outcomeType)
@@ -1424,12 +1453,9 @@ function lowerRunExpression(
       const releases = propagationReleases(fn, expression.span)
       const failureEnds = propagationLoanEnds(fn, expression.span)
       const provided = requirementsFor(fn.providedRequirements, effectValueType.type)
-      const providedRunner =
-        provided === undefined || provided.length === 0
-          ? undefined
-          : ensureProvidedRunner(fn, effectValueType, provided)
-      if (provided !== undefined && provided.length > 0 && providedRunner === undefined)
-        return undefined
+      const runner =
+        provided === undefined ? undefined : ensureEffectRunner(fn, effectValueType, provided)
+      if (runner === undefined) return undefined
       const baseRunner =
         effectValueType.storage?.realization.runner ??
         Hir.effectRunnerId(effectValueType.environment.instance.declaration, effectValueType.site)
@@ -1444,14 +1470,14 @@ function lowerRunExpression(
           destination,
           outcome,
           effect: loweredSubject.result,
-          runner: providedRunner ?? baseRunner,
+          runner,
           runnerTypeArguments: baseRunnerTypeArguments,
           ...(runnerInstance.staticArguments.length === 0
             ? {}
             : {
                 runnerStaticArguments: runnerInstance.staticArguments,
               }),
-          ...(providedRunner === undefined
+          ...(provided.length === 0
             ? {}
             : {
                 runnerBase: Object.freeze({
@@ -2778,10 +2804,11 @@ function lowerCallExpression(
     )
     const typeArguments = Object.freeze(call?.target.typeArguments ?? authoredTypeArguments)
     const staticArguments = call?.target.staticArguments ?? expression.staticArguments
+    const semanticType = fn.semantic(expression.type)
     const type =
-      (call?.resultEffect === undefined
+      (call === undefined || !Type.isEffect(semanticType)
         ? undefined
-        : effectValueByIdentity(fn.layout, call.resultEffect)) ??
+        : effectValueForCall(fn.layout, call, semanticType, availableRequirements)) ??
       fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments)) ??
       fn.type(expression.type) ??
       resultCallableValueType(
@@ -2789,7 +2816,7 @@ function lowerCallExpression(
         fn.instances,
         expression.target,
         typeArguments,
-        fn.semantic(expression.type),
+        semanticType,
       )
     if (type === undefined) return undefined
     destination = fn.alloc(type)
