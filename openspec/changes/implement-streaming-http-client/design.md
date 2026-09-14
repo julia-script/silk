@@ -29,3 +29,7 @@ Work base e253eaa219856d3bc5809845cac5562d88cf7cf7 delivers the HTTP foundation 
 ## Response content provenance
 
 Expose the existing content/framing core as an owned incremental decoder, leaving transport errors at the HTTP session boundary. A client exchange may select this decoder exactly once, before any raw read or discard. Build its plan only from that exchange's current head and request method. Completion requires codec validation and the framed boundary, and unread suffixes stay with the session. The low-level content reader continues to use this same core.
+
+## Runtime provider identity
+
+The secured adapter exposes the same admitted provider through distinct read and write loans. The compiler retains one provided call across these proof-only lifetime differences. Runtime call lookup must prefer exact provider matches, then compare runtime-equivalent provider shapes after semantic admission, preserving capability, role and nominal provider identity and rejecting ambiguous physical targets. This corrects lowering of ordinary source composition; semantic provider selection and lifetime checking remain strict.

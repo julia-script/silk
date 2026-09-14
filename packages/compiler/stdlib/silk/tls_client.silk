@@ -2976,15 +2976,15 @@ fn handleEncryptedExtensions(client: &mut Client, messageLength: usize) -> Resul
       if sawAlpn || length < 3 {
         return Result.failResult<(), TlsError>(TlsError.UnsupportedProfile)
       }
-      if !client.alpnEnabled {
-        return Result.failResult<(), TlsError>(TlsError.NoApplicationProtocol)
-      }
       let listLength = readU16Raw(&client.handshake, cursor)
       let selectedLength = u8.toUsize(RawBuffer.read<u8>(&client.handshake, cursor + 2))
       if listLength + 2 != length || selectedLength == 0 || selectedLength + 1 != listLength {
         return Result.failResult<(), TlsError>(
           TlsError.ProtocolViolation {reason: ProtocolReason.Extension},
         )
+      }
+      if !client.alpnEnabled {
+        return Result.failResult<(), TlsError>(TlsError.NoApplicationProtocol)
       }
       let mut index = usize.ZERO
       let mut found = false

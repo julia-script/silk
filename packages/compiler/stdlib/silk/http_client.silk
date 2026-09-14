@@ -7,7 +7,8 @@
 
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
-import silk.byte_duplex {ReadTransfer}
+import silk.byte_duplex {ReadTransfer, ByteIoError}
+import silk.tls_connection {ConnectionError}
 import silk.effect {Effect}
 import silk.http {Method, Status, Version}
 import silk.http_head {
@@ -220,6 +221,11 @@ pub union ClientError {
     /// Payload and wire progress for the failed call.
     pub progress: WriteProgress,
   },
+  /// Records a client deadline expiring after payload or wire progress.
+  OutputTimeout {
+    /// The exact accepted payload and committed wire coordinates.
+    pub progress: WriteProgress,
+  },
   /// Records payload accepted by framing before a transport allocation failed.
   OutputAllocation {
     /// The allocator failure from the transport.
@@ -317,6 +323,8 @@ pub struct Exchange<'exchange, P> {
   requestComplete: bool
   responseDelimited: bool
   responseWireTotal: u64
+  requestPayloadTotal: u64
+  requestWireTotal: u64
   reusable: bool
   informationalCount: usize
   informationalWire: u64
@@ -617,6 +625,8 @@ pub effect fn withExchange<'exchange, 'callback, P, A, E, ?R>(
     requestComplete: false,
     responseDelimited: false,
     responseWireTotal: u64.MIN,
+    requestPayloadTotal: u64.MIN,
+    requestWireTotal: u64.MIN,
     reusable: true,
     informationalCount: usize.ZERO,
     informationalWire: u64.MIN,
@@ -652,20 +662,27 @@ where
   if exchange.phaseValue != ExchangePhase.Prepared {
     fail ClientError.InvalidState
   }
-  let previousPhase = exchange.phaseValue
   exchange.phaseValue = ExchangePhase.Aborted
   run checkDeadline(&exchange.options.deadline, false)
-  exchange.phaseValue = previousPhase
-  exchange.phaseValue = ExchangePhase.Aborted
   let bytes = Bytes.asSlice(&exchange.headBytes)
   run writeBytes(&mut exchange.connection.*, bytes, &exchange.options.deadline)
+  let written = bytes.length
   drop bytes
   let required = match & exchange.options.continuePolicy {
     ContinuePolicy.Disabled => false
     ContinuePolicy.Require100 {deadline} => true
   }
   if required {
-    run flushConnection(&mut exchange.connection.*, &exchange.options.deadline)
+    run flushConnection(
+      &mut exchange.connection.*,
+      &exchange.options.deadline,
+      WriteProgress {
+        consumed: usize.ZERO,
+        written: written,
+        totalPayload: u64.MIN,
+        totalWire: usize.toU64(written),
+      },
+    )
     exchange.phaseValue = ExchangePhase.AwaitContinue
   } else {
     exchange.phaseValue = ExchangePhase.Upload
@@ -682,10 +699,8 @@ where
   if exchange.phaseValue != ExchangePhase.Upload {
     fail ClientError.InvalidState
   }
-  let previousPhase = exchange.phaseValue
   exchange.phaseValue = ExchangePhase.Aborted
   run checkDeadline(&exchange.options.deadline, false)
-  exchange.phaseValue = previousPhase
   let scratch = Bytes.asMutSlice(&mut exchange.connection.scratch)
   let stepped = Encoder.step(&mut exchange.encoder, input, &mut scratch)
   drop scratch
@@ -696,11 +711,22 @@ where
     }
     Result.Success {value} => value
   }
+  exchange.requestPayloadTotal = progress.totalPayload
+  exchange.requestWireTotal = progress.totalWire
   let readableScratch = Bytes.asSlice(&exchange.connection.scratch)
   let bytes = Slice.view<u8>(readableScratch, usize.ZERO, progress.written)
   let mut written = usize.ZERO
   exchange.phaseValue = ExchangePhase.Aborted
   while written < bytes.length {
+    run checkOutputDeadline(
+      &exchange.options.deadline,
+      WriteProgress {
+        consumed: progress.consumed,
+        written: written,
+        totalPayload: progress.totalPayload,
+        totalWire: progress.totalWire,
+      },
+    )
     let remaining = Slice.view<u8>(bytes, written, bytes.length - written)
     let result = run Effect.result(
       HttpTransport.writeSome(remaining, copyDeadline(&exchange.options.deadline)),
@@ -758,11 +784,8 @@ where
   if exchange.phaseValue != ExchangePhase.Upload {
     fail ClientError.InvalidState
   }
-  let previousPhase = exchange.phaseValue
   exchange.phaseValue = ExchangePhase.Aborted
   run checkDeadline(&exchange.options.deadline, false)
-  exchange.phaseValue = previousPhase
-  exchange.phaseValue = ExchangePhase.Aborted
   let begun = Encoder.beginFinish(&mut exchange.encoder, trailers)
   if let Result.Failure {error} = move begun {
     fail ClientError.Body {error: move error}
@@ -778,6 +801,8 @@ where
       }
       Result.Success {value} => value
     }
+    exchange.requestPayloadTotal = progress.totalPayload
+    exchange.requestWireTotal = progress.totalWire
     let readableScratch = Bytes.asSlice(&exchange.connection.scratch)
     let bytes = Slice.view<u8>(readableScratch, usize.ZERO, progress.written)
     run writeTransport(
@@ -785,12 +810,19 @@ where
       bytes,
       &exchange.options.deadline,
       written,
+      Option.some<WriteProgress>(progress),
     )
     written = written + progress.written
     drop bytes
     drop readableScratch
   }
-  run flushConnection(&mut exchange.connection.*, &exchange.options.deadline)
+  let flushedProgress = WriteProgress {
+    consumed: usize.ZERO,
+    written: written,
+    totalPayload: exchange.requestPayloadTotal,
+    totalWire: exchange.requestWireTotal,
+  }
+  run flushConnection(&mut exchange.connection.*, &exchange.options.deadline, flushedProgress)
   exchange.requestComplete = true
   exchange.phaseValue = ExchangePhase.AwaitResponse
   return ()
@@ -846,7 +878,10 @@ where
     }
     let filled = run Effect.result(fill(&mut exchange.connection.*, &deadline))
     if let Result.Failure {error} = move filled {
-      run checkDeadline(&deadline, waiting)
+      if waiting && inputTimedOut(&error) {
+        drop error
+        fail ClientError.ContinueTimeout
+      }
       fail move error
     }
   }
@@ -962,10 +997,8 @@ where
     return usize.ZERO
   }
   exchange.bodySelected = true
-  let previousPhase = exchange.phaseValue
   exchange.phaseValue = ExchangePhase.Aborted
   run checkDeadline(&exchange.options.deadline, false)
-  exchange.phaseValue = previousPhase
   while true {
     let input = Bytes.asSlice(&exchange.connection.input)
     let bytes = Slice.view<u8>(
@@ -993,11 +1026,10 @@ where
     exchange.connection.start = exchange.connection.start + progress.consumed
     exchange.responseWireTotal = progress.totalWire
     if progress.written > usize.ZERO || progress.state == ProgressState.Complete {
+      exchange.phaseValue = ExchangePhase.Response
       return progress.written
     }
-    exchange.phaseValue = ExchangePhase.Aborted
     run fill(&mut exchange.connection.*, &exchange.options.deadline)
-    exchange.phaseValue = ExchangePhase.Response
   }
   return usize.ZERO
 }
@@ -1189,6 +1221,45 @@ effect fn checkDeadline(deadline: &Option<Instant>, waiting: bool) -> ()
   return ()
 }
 
+effect fn checkOutputDeadline(deadline: &Option<Instant>, progress: WriteProgress) -> ()
+! ClientError
+? &mut MonotonicClock {
+  if let Option.Some {value} = &deadline.* {
+    let now = run MonotonicClock.now()
+    if !before(&now, &value) {
+      if progress.consumed > usize.ZERO || progress.written > usize.ZERO {
+        fail ClientError.OutputTimeout {progress: progress}
+      }
+      fail ClientError.Timeout
+    }
+  }
+  return ()
+}
+
+fn inputTimedOut(error: &(ClientError | OutOfMemoryError)) -> bool {
+  return match & error.* {
+    ClientError cause => match & cause {
+      ClientError.Timeout => true
+      ClientError.Transport {error: transport} => match & transport {
+        TransportError.Plain {error: plain} => byteTimedOut(&plain)
+        TransportError.Secured {error: secured} => match & secured {
+          ConnectionError.Io {error: io} => byteTimedOut(&io)
+          _ => false
+        }
+      }
+      _ => false
+    }
+    _ => false
+  }
+}
+
+fn byteTimedOut(error: &ByteIoError) -> bool {
+  return match & error.* {
+    ByteIoError.Timeout {operation} => true
+    _ => false
+  }
+}
+
 fn responseCloses(head: ResponseHead) -> bool {
   let mut fields = head.fields()
   return fieldsClose(&mut fields)
@@ -1304,21 +1375,55 @@ effect fn writeBytes<P>(connection: &mut Connection<P>, bytes: &[u8], deadline: 
 ? &mut MonotonicClock | &mut Allocator | &mut Random
 where
   &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
-  return run writeTransport(&mut connection.transport, bytes, deadline, usize.ZERO)
+  return run writeTransport(
+    &mut connection.transport,
+    bytes,
+    deadline,
+    usize.ZERO,
+    Option.none<WriteProgress>(),
+  )
 }
 
-effect fn flushConnection<P>(connection: &mut Connection<P>, deadline: &Option<Instant>) -> ()
+effect fn flushConnection<P>(
+  connection: &mut Connection<P>,
+  deadline: &Option<Instant>,
+  progress: WriteProgress,
+) -> ()
 ! ClientError | OutOfMemoryError
 ? &mut MonotonicClock | &mut Allocator | &mut Random
 where
   &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
-  run checkDeadline(deadline, false)
+  run checkOutputDeadline(deadline, progress)
   let result = run Effect.result(HttpTransport.flush(copyDeadline(deadline)))
     |> Effect.provideMut<HttpTransport>(&mut connection.transport)
   if let Result.Failure {error} = move result {
-    return run transportFailure(move error)
+    return match move error {
+      TransportError cause => {
+        fail ClientError.Output {error: move cause, progress: progress}
+      }
+      OutOfMemoryError allocation => {
+        fail ClientError.OutputAllocation {error: move allocation, progress: progress}
+      }
+    }
   }
   return ()
+}
+
+fn outputProgress(written: usize, encoded: &Option<WriteProgress>) -> WriteProgress {
+  return match & encoded.* {
+    Option.Some {value} => WriteProgress {
+      consumed: value.consumed,
+      written: written,
+      totalPayload: value.totalPayload,
+      totalWire: value.totalWire,
+    }
+    Option.None => WriteProgress {
+      consumed: usize.ZERO,
+      written: written,
+      totalPayload: u64.MIN,
+      totalWire: usize.toU64(written),
+    }
+  }
 }
 
 effect fn writeTransport<P>(
@@ -1326,6 +1431,7 @@ effect fn writeTransport<P>(
   bytes: &[u8],
   deadline: &Option<Instant>,
   priorWritten: usize,
+  encoderProgress: Option<WriteProgress>,
 ) -> ()
 ! ClientError | OutOfMemoryError
 ? &mut MonotonicClock | &mut Allocator | &mut Random
@@ -1333,7 +1439,8 @@ where
   &mut P provides &HttpTransport from &mut HttpTransport | &mut MonotonicClock | &mut Allocator | &mut Random {
   let mut written = usize.ZERO
   while written < bytes.length {
-    run checkDeadline(deadline, false)
+    let progress = outputProgress(priorWritten + written, &encoderProgress)
+    run checkOutputDeadline(deadline, progress)
     let remaining = Slice.view<u8>(bytes, written, bytes.length - written)
     let result = run Effect.result(HttpTransport.writeSome(remaining, copyDeadline(deadline)))
       |> Effect.provideMut<HttpTransport>(&mut transport)
@@ -1342,26 +1449,10 @@ where
       Result.Failure {error} => {
         return match move error {
           TransportError cause => {
-            fail ClientError.Output {
-              error: move cause,
-              progress: WriteProgress {
-                consumed: usize.ZERO,
-                written: priorWritten + written,
-                totalPayload: u64.MIN,
-                totalWire: usize.toU64(priorWritten) + usize.toU64(written),
-              },
-            }
+            fail ClientError.Output {error: move cause, progress: progress}
           }
           OutOfMemoryError allocation => {
-            fail ClientError.OutputAllocation {
-              error: move allocation,
-              progress: WriteProgress {
-                consumed: usize.ZERO,
-                written: priorWritten + written,
-                totalPayload: u64.MIN,
-                totalWire: usize.toU64(priorWritten) + usize.toU64(written),
-              },
-            }
+            fail ClientError.OutputAllocation {error: move allocation, progress: progress}
           }
         }
       }

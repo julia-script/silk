@@ -75,7 +75,10 @@ it.effect(
         `pub fn revised${selectedOrdinal}() -> i32 { return ${selectedOrdinal} }`,
       )
       const revised = yield* WorkspaceCatalog.refresh({
-        configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
+        configuration: {
+          application: document.module,
+          configuration: session.snapshot.configuration,
+        },
         sourceRoot,
         documents: [document],
         previous: inventory,

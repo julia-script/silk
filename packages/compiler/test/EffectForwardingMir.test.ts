@@ -1,3 +1,10 @@
+import * as FunctionLowering from '../src/FunctionLowering.js'
+import * as Instances from '../src/Instances.js'
+import * as Lifetime from '../src/Lifetime.js'
+import * as SourceSpan from '../src/SourceSpan.js'
+import * as Type from '../src/Type.js'
+import * as Option from 'effect/Option'
+import { unreachable } from './support/raise.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -203,3 +210,51 @@ pub fn main() -> i32 {
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )
+
+it('recovers admitted call providers across proof lifetimes without changing physical targets', () => {
+  const key = (name: string): Instances.InstanceKey => ({
+    _tag: 'InstanceKey',
+    declaration: { _tag: 'CanonicalDeclarationId', module: 'provider-lookup', name },
+    typeArguments: [],
+    evidence: [],
+    staticArguments: [],
+    contractRow: [],
+  })
+  const owner = key('caller')
+  const span = Option.getOrElse(
+    SourceSpan.make(SourceFile.make('provider-lookup', encoder.encode('x')), 0, 1),
+    () => unreachable('valid span'),
+  )
+  const capability = Type.nominal('provider-lookup', 'Transport', [])
+  const first = Lifetime.local(owner.declaration, 'read', 0)
+  const second = Lifetime.local(owner.declaration, 'write', 0)
+  const provider = (lifetime: Lifetime.Local, name = 'Loan'): Instances.CallProvider => ({
+    capability,
+    role: 'DefaultRole',
+    providerType: Type.nominal('provider-lookup', name, [lifetime]),
+  })
+  const retained: Instances.CallInstance = {
+    _tag: 'CallInstance',
+    owner,
+    span,
+    target: key('result'),
+    providers: [provider(first)],
+    resultEffect: 'first',
+  }
+  const select = (calls: ReadonlyArray<Instances.CallInstance>, selected: Instances.CallProvider) =>
+    FunctionLowering.selectCall(calls, owner, span, undefined, [], [], [selected])
+  assert.strictEqual(select([retained], provider(first)), retained)
+  assert.strictEqual(select([retained], provider(second)), retained)
+  assert.isUndefined(select([retained], provider(second, 'OtherLoan')))
+  const exact = { ...retained, target: key('exact'), providers: [provider(second)] }
+  assert.strictEqual(select([retained, exact], provider(second)), exact)
+  const ambiguous = { ...retained, target: key('otherTarget') }
+  assert.isUndefined(select([retained, ambiguous], provider(second)))
+  assert.isUndefined(select([retained], { ...provider(second), role: 'OtherRole' }))
+  assert.isUndefined(
+    select([retained], {
+      ...provider(second),
+      capability: Type.nominal('provider-lookup', 'OtherTransport', []),
+    }),
+  )
+})

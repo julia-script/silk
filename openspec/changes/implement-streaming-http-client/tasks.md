@@ -5,7 +5,7 @@
 
 ## 2. Transport and exchanges
 
-- [ ] 2.1 Implement rich plain/secured transport loans and bounded buffering with structured release and preserved errors.
+- [ ] 2.1 Implement rich plain/secured transport loans and bounded buffering with structured release and preserved errors, including runtime lookup of the same admitted provider across local proof lifetimes.
 - [ ] 2.2 Implement staged streaming exchanges, finite informational iteration, Require100, trailers and exclusive tunnel suffix handoff with deterministic execution evidence.
 - [ ] 2.3 Implement native HTTP/HTTPS acquisition, ALPN policy, trust ownership and unchanged phase deadlines; demonstrate resolver refusal and authenticated composition.
 

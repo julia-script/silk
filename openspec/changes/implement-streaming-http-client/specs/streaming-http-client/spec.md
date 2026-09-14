@@ -13,6 +13,11 @@ The HTTP session SHALL own its transport, buffers, origin/security context and c
 - **WHEN** the callback returns with unread framed bytes or fails
 - **THEN** the lease becomes terminal without hidden drain or reusable evidence
 
+#### Scenario: Reuse an admitted provider across local loans
+
+- **WHEN** secured read and write operations borrow the same admitted provider through distinct proof-only lifetimes
+- **THEN** runtime call lookup preserves that provider identity without merging distinct nominal providers or accepting ambiguous targets
+
 ### Requirement: Staged incremental exchange
 
 The client SHALL send validated heads, accept body prefixes, finish requests and trailers, iterate response heads, stream framed bodies, expose completed trailers, finish responses, and abort. Invalid stages SHALL fail before output. Body modes SHALL be Empty, KnownLength, and HTTP/1.1 Chunked; HTTP/1.0 unknown lengths SHALL fail preflight. Prefix progress and next-message suffixes SHALL be preserved. Final 3xx, 4xx and 5xx statuses SHALL remain response values. Reuse SHALL require flushed complete request, framed complete response, permitted persistence, and no anomaly or abandonment.
@@ -42,7 +47,7 @@ Successful CONNECT SHALL be handed off only through an exclusive scoped tunnel o
 
 ### Requirement: Origin and request preflight
 
-Origins SHALL admit only http/https with checked nonempty host and port, reject userinfo, retain TLS reference identity independently of resolution/Host/proxies, use default ports 80/443, map empty path to slash, preserve query and omit fragment. Unix connections SHALL require an HTTP authority. Header controls SHALL distinguish Default/Omit/Value. Defaults SHALL generate Host, silk-http/1 User-Agent and */* Accept. HTTP/1.1 Host omission, conflicting authority/framing, duplicate authorization sources and direct Proxy-Authorization SHALL fail before wire output. Generated fields SHALL count against finite head and credential limits. Raw responses SHALL not negotiate decoding automatically.
+Origins SHALL admit only http/https with checked nonempty host and port, reject userinfo, retain TLS reference identity independently of resolution/Host/proxies, use default ports 80/443, map empty path to slash, preserve query and omit fragment. Unix connections SHALL require an HTTP authority. Header controls SHALL distinguish Default/Omit/Value. Defaults SHALL generate Host, silk-http/1 User-Agent and `*/*` Accept. HTTP/1.1 Host omission, conflicting authority/framing, duplicate authorization sources and direct Proxy-Authorization SHALL fail before wire output. Generated fields SHALL count against finite head and credential limits. Raw responses SHALL not negotiate decoding automatically.
 
 #### Scenario: Invalid authority
 
@@ -72,5 +77,6 @@ The implementation SHALL expose finite request/response byte, copied-header, cre
 The exchange SHALL bind content planning to its own current response head, request method, framing and encoded wire bytes. Decoding SHALL be selectable only once and before any raw body consumption or discard. The client SHALL reuse the delivered content core without erasing rich transport errors or adding automatic negotiation. Reuse SHALL require successful content and framing completion.
 
 #### Scenario: One decoding authority
+
 - **WHEN** a caller selects decoding for the current response
 - **THEN** later decoding selection and raw body operations SHALL fail InvalidState before consuming more bytes, and content errors SHALL permanently prevent reuse.
