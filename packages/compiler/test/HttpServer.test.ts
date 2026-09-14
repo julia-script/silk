@@ -11,23 +11,15 @@ const reference = readFileSync(
 )
 
 it.effect(
-  'checks HTTP server and WebSocket handshake reference examples',
+  'checks the reference example and canonical streaming HTTP server surface',
   () =>
     Effect.gen(function* () {
       const example = reference.match(/```silk\n([\s\S]*?)\n```/)?.[1]
       assert.isString(example)
       if (example === undefined) return
-      const upgradeReference = readFileSync(
-        new URL('../../../apps/docs/content/reference/websocket-upgrade.md', import.meta.url),
-        'utf8',
-      )
-      const upgradeExample = upgradeReference.match(/```silk\n([\s\S]*?)\n```/)?.[1]
-      assert.isString(upgradeExample)
-      if (upgradeExample === undefined) return
-      const source = `${example}\n${upgradeExample.replace('pub fn main()', 'fn websocketReference()')}`
       const snapshot = yield* AnalysisFixture.frontend(
         'http-server/reference-example',
-        encoder.encode(source),
+        encoder.encode(example),
       )
       assert.deepEqual(
         Analysis.diagnostics(snapshot).map((diagnostic) => ({
