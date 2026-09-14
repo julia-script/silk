@@ -1,5 +1,7 @@
 //! Fixed-capacity retained byte output with exact-prefix flushing.
 //!
+//! # Details
+//!
 //! A successful write means this actor owns the reported prefix. Only explicit `flush` or `finish`
 //! promises to drive pending bytes to the provider boundary; drop and scope release never flush.
 

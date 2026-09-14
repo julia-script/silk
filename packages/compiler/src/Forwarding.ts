@@ -175,13 +175,9 @@ const forwardedReferenceProvider = (
     }
   | undefined => {
   const source = provider._tag === 'Move' ? provider.subject : provider
-  if (access !== 'Exclusive' || source._tag !== 'ParameterReference') return undefined
+  if (access === 'Take' || source._tag !== 'ParameterReference') return undefined
   const type = fn.semantic(source.type)
-  if (
-    !Type.isReference(type) ||
-    type.access !== 'Exclusive' ||
-    !Type.equals(type.target, providerType)
-  )
+  if (!Type.isReference(type) || type.access !== access || !Type.equals(type.target, providerType))
     return undefined
   return Object.freeze({
     parameter: source.parameter,

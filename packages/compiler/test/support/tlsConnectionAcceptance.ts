@@ -152,7 +152,7 @@ impl TimeoutDuplex {
   ) -> usize ! ByteIoError ? &mut MonotonicClock {
     Shared.withMut(&self.audit, fn(state: &mut DeadlineAudit) -> () {
       state.writes = state.writes + usize.ONE
-      recordDeadline(state, &deadline)
+      recordDeadline(move state, &deadline)
       return ()
     })
     return input.length
@@ -163,7 +163,7 @@ impl TimeoutDuplex {
   ) -> () ! ByteIoError ? &mut MonotonicClock {
     Shared.withMut(&self.audit, fn(state: &mut DeadlineAudit) -> () {
       state.flushes = state.flushes + usize.ONE
-      recordDeadline(state, &deadline)
+      recordDeadline(move state, &deadline)
       return ()
     })
     fail ByteDuplex.timeout(ByteIoOperation.Flush)
@@ -191,8 +191,7 @@ impl ByteDuplex for TimeoutDuplex {
   closeRaw: TimeoutDuplex.close
 }
 
-enum PostReadResult { Data InvalidCount }
-impl Copy for PostReadResult {}
+enum PostReadResult { Data, InvalidCount }
 
 struct PostReadState {
   readReturned: bool
@@ -235,7 +234,7 @@ impl PostReadDuplex {
     return match self.result {
       PostReadResult.Data => {
         output[usize.ZERO] = 255
-        ReadTransfer.Data {count: usize.ONE}
+        return ReadTransfer.Data {count: usize.ONE}
       }
       PostReadResult.InvalidCount => ReadTransfer.Data {count: output.length + usize.ONE}
     }
@@ -386,7 +385,7 @@ impl OwnedMemoryDuplex {
     deadline: Option<Instant>,
   ) -> ReadTransfer ! ByteIoError ? &mut MonotonicClock {
     Shared.withMut(&self.audit, fn(state: &mut OwnedMemoryAudit) -> () {
-      recordOwnedMemoryIo(state, ByteIoOperation.Read, &deadline)
+      recordOwnedMemoryIo(move state, ByteIoOperation.Read, &deadline)
       return ()
     })
     return run ByteDuplex.readSome(move output, move deadline)
@@ -399,7 +398,7 @@ impl OwnedMemoryDuplex {
     deadline: Option<Instant>,
   ) -> usize ! ByteIoError ? &mut MonotonicClock {
     Shared.withMut(&self.audit, fn(state: &mut OwnedMemoryAudit) -> () {
-      recordOwnedMemoryIo(state, ByteIoOperation.Write, &deadline)
+      recordOwnedMemoryIo(move state, ByteIoOperation.Write, &deadline)
       return ()
     })
     return run ByteDuplex.writeSome(input, move deadline)
@@ -411,7 +410,7 @@ impl OwnedMemoryDuplex {
     deadline: Option<Instant>,
   ) -> () ! ByteIoError ? &mut MonotonicClock {
     Shared.withMut(&self.audit, fn(state: &mut OwnedMemoryAudit) -> () {
-      recordOwnedMemoryIo(state, ByteIoOperation.Flush, &deadline)
+      recordOwnedMemoryIo(move state, ByteIoOperation.Flush, &deadline)
       return ()
     })
     return run ByteDuplex.flush(move deadline)
@@ -423,7 +422,7 @@ impl OwnedMemoryDuplex {
     deadline: Option<Instant>,
   ) -> () ! ByteIoError ? &mut MonotonicClock {
     Shared.withMut(&self.audit, fn(state: &mut OwnedMemoryAudit) -> () {
-      recordOwnedMemoryIo(state, ByteIoOperation.ShutdownWrite, &deadline)
+      recordOwnedMemoryIo(move state, ByteIoOperation.ShutdownWrite, &deadline)
       return ()
     })
     return run ByteDuplex.shutdownWrite(move deadline)
@@ -466,7 +465,6 @@ impl OwnedMemoryDuplex {
       && operations[operations.length - usize.ONE].operation == ByteIoOperation.Close
     let closeAttempts = MemoryByteDuplex.closeAttempts(&self.inner)
     let closed = MemoryByteDuplex.phase(&self.inner) == MemoryByteDuplexPhase.Closed
-    drop outbound
     drop operations
     Shared.withMut(&self.audit, fn(state: &mut OwnedMemoryAudit) -> () {
       state.closes = state.closes + usize.ONE
@@ -1127,16 +1125,15 @@ effect fn postReadBoundaryCase(
   let expected = match move attempted {
     Result<OwnedConnection<PostReadDuplex>, ConnectionError | OutOfMemoryError>.Success {value} => {
       drop value
-      false
+      return false
     }
     Result<OwnedConnection<PostReadDuplex>, ConnectionError | OutOfMemoryError>.Failure {error} => match move error {
       ConnectionError.HandshakeTimeout => result == PostReadResult.Data
-      ConnectionError.Io {error: ByteIoError.InvalidTransferCount {operation, count, limit}} => {
+      ConnectionError.Io {error: ByteIoError.InvalidTransferCount {operation, count, limit}} =>
         result == PostReadResult.InvalidCount
           && operation == ByteIoOperation.Read
           && count == 16385
           && limit == 16384
-      }
       _ => false
     }
   }

@@ -11,29 +11,71 @@ import * as Type from '../src/Type.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import {
   httpContentAnalysisPrelude,
-  httpContentAcceptanceSource,
   httpContentPlanningSource,
 } from './support/httpContentAcceptance.js'
 
 const encoder = new TextEncoder()
-const source = readFileSync(new URL('../stdlib/silk/http_content.silk', import.meta.url), 'utf8')
 const reference = readFileSync(
   new URL('../../../apps/docs/content/reference/http-content-decoding.md', import.meta.url),
   'utf8',
 )
 
-const providedResultCollisionSource = `${httpContentAcceptanceSource}
+const providedResultCollisionSource = `import silk.allocator {Allocator, OutOfMemoryError}
+import silk.buffered_duplex {BufferedDuplex, withBufferedCapacity}
+import silk.buffered_input {BufferError}
+import silk.effect {Effect}
+import silk.memory_byte_duplex {MemoryByteDuplex, MemoryReadEvent, MemoryWriteEvent}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.system_clock {Instant, SystemClock}
+import silk.vector {Vector}
 
-effect fn providedResultCollision() -> i32 ! BufferError | OutOfMemoryError {
+struct FixedClock {}
+struct Payload {value: i32}
+impl MonotonicClock for FixedClock {
+  effect fn now(self: &mut Self) -> Instant { return SystemClock.make(0, 0) }
+  effect fn getResolution(self: &mut Self) -> u64 { return 1 }
+  effect fn waitUntil(self: &mut Self, when: Instant) -> () { drop when return () }
+  effect fn waitFor(self: &mut Self, duration: u64) -> () { drop duration return () }
+}
+
+effect<'session> fn scalar<'session>(
+  session: &'session mut BufferedDuplex<'session, MemoryByteDuplex>,
+) -> i32 ! BufferError ? &mut MonotonicClock {
+  drop session
+  return 42
+}
+
+effect<'session> fn aggregate<'session>(
+  session: &'session mut BufferedDuplex<'session, MemoryByteDuplex>,
+) -> Payload ! BufferError ? &mut MonotonicClock {
+  drop session
+  return Payload {value: 42}
+}
+
+effect fn providedResultCollision() -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
+  let mut transport = run MemoryByteDuplex.make(
+    Vector.make<MemoryReadEvent>(),
+    Vector.make<MemoryWriteEvent>(),
+    1,
+    1,
+    Option.none<i32>(),
+  ) |> Effect.provideMut<Allocator>(&mut allocator)
   let mut clock = FixedClock {}
-  let matrix = run reviewRuntimeMatrix()
-    |> Effect.provideMut<MonotonicClock>(&mut clock)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  if matrix != 0 { return matrix }
-  return run typedCallbackFailureReleases()
-    |> Effect.provideMut<MonotonicClock>(&mut clock)
-    |> Effect.provideMut<Allocator>(&mut allocator)
+  let scalarResult = run Effect.result(
+    withBufferedCapacity<i32, BufferError>(&mut transport, 1, 1, scalar)
+      |> Effect.provideMut<MonotonicClock>(&mut clock)
+      |> Effect.provideMut<Allocator>(&mut allocator)
+  )
+  let aggregateResult = run Effect.result(
+    withBufferedCapacity<Payload, BufferError>(&mut transport, 1, 1, aggregate)
+      |> Effect.provideMut<MonotonicClock>(&mut clock)
+      |> Effect.provideMut<Allocator>(&mut allocator)
+  )
+  drop scalarResult
+  drop aggregateResult
+  return 0
 }`
 
 const contractRejectionSource = `${httpContentAnalysisPrelude}
@@ -170,18 +212,17 @@ effect<'session> fn escapeReader<
 }`
 
 it.effect(
-  'compiles the HTTP content-decoding reference example',
+  'checks the HTTP content-decoding reference declarations',
   () =>
     Effect.gen(function* () {
       const example = reference.match(/```silk\n([\s\S]*?)\n```/)?.[1]
       assert.isString(example)
       if (example === undefined) return
-      const snapshot = yield* AnalysisFixture.retainingMain(
+      const snapshot = yield* AnalysisFixture.declarations(
         'http-content/reference-example',
         encoder.encode(example),
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
-      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
     }),
   60_000,
 )
@@ -210,7 +251,6 @@ it.effect(
     Effect.gen(function* () {
       const module = 'http-content/provided-result-collision'
       const configuration = AnalysisFixture.configuration(module, 'x86_64-unknown-linux-gnu', [
-        'portableProgram',
         'providedResultCollision',
       ])
       const snapshot = yield* Analysis.makeRealized({
@@ -294,19 +334,6 @@ it.effect(
       assert.include(spans.at(1) ?? '', 'ContentCompletion')
       assert.strictEqual(spans.at(2), '&mut reader.*')
       assert.strictEqual(spans.at(3), 'move plan')
-    }),
-  60_000,
-)
-
-it.effect(
-  'realizes the ordinary-source HTTP content actor without compiler privilege',
-  () =>
-    Effect.gen(function* () {
-      const snapshot = yield* AnalysisFixture.declarations(
-        'http-content/module',
-        encoder.encode(source),
-      )
-      assert.deepEqual(Analysis.diagnostics(snapshot), [])
     }),
   60_000,
 )

@@ -11,13 +11,13 @@ const reference = readFileSync(
 )
 
 it.effect(
-  'realizes the reference example and canonical streaming HTTP server surface',
+  'checks the reference example and canonical streaming HTTP server surface',
   () =>
     Effect.gen(function* () {
       const example = reference.match(/```silk\n([\s\S]*?)\n```/)?.[1]
       assert.isString(example)
       if (example === undefined) return
-      const snapshot = yield* AnalysisFixture.retainingMain(
+      const snapshot = yield* AnalysisFixture.declarations(
         'http-server/reference-example',
         encoder.encode(example),
       )
@@ -84,7 +84,8 @@ effect fn overlap<'request, 'connection, 'transport, P>(
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
   let head = run Request.head(&request.*)
   let mut bytes: [u8; 1] = [0]
-  run readSome(&mut request.*, &mut bytes, Option.none<Instant>())
+  let progress = run readSome(&mut request.*, &mut bytes, Option.none<Instant>())
+  drop progress
   drop head
   return ()
 }
@@ -101,7 +102,9 @@ effect fn escape<'loan, 'connection: 'loan, 'transport: 'connection, P>(
 ! ServerError | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  return run withRequest(move connection, Option.none<Instant>(), leak)
+  return run withRequest<&'loan mut Request<'loan, 'connection, 'transport, P>, never>(
+    move connection, Option.none<Instant>(), leak,
+  )
 }
 `
 
@@ -113,11 +116,12 @@ it.effect('keeps the transport private and rejects overlapping and escaping requ
     )
     const diagnostics = Analysis.diagnostics(snapshot).map((diagnostic) => ({
       code: diagnostic.code,
-      span: ownershipSource.slice(diagnostic.span.start, diagnostic.span.end),
+      span: ownershipSource.slice(diagnostic.span.start, diagnostic.span.end).trim(),
     }))
-    assert.includeDeepMembers(diagnostics, [
+    assert.deepEqual(diagnostics, [
       { code: 'SEM0028', span: 'channel' },
       { code: 'OWN0010', span: '&mut request.*' },
+      { code: 'SEM0076', span: 'leak' },
       { code: 'SEM0122', span: 'leak' },
     ])
   }),

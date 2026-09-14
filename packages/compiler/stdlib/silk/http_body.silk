@@ -1,5 +1,7 @@
 //! Strict bounded HTTP/1 message-body framing without transport or content-decoding policy.
 //!
+//! # Details
+//!
 //! Select framing from a validated head, then drive Decoder or Encoder with caller buffers.
 //! Construction owns every working allocation. Streaming calls retain no caller borrow and do not
 //! allocate. Completion evidence proves only a framing boundary, never transport health.

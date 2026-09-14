@@ -411,6 +411,8 @@ impl<P> OwnedConnection<P> {
 
   /// Terminally closes the exact provider without TLS grace or retry.
   ///
+  /// # Details
+  ///
   /// The connection becomes `Closed` before provider dispatch. Repeated close is local and
   /// successful; a first provider close failure remains observable while later I/O stays closed.
   pub effect fn close(
@@ -525,6 +527,8 @@ struct AuthenticationGuard<P> {
 }
 
 /// Consumes a provider and prepared trust snapshot and returns one authenticated affine owner.
+///
+/// # Details
 ///
 /// The provider enters a nonparking guard before time sampling, client construction, allocation,
 /// or transport work. Authentication publishes only after the final deadline check; typed failure

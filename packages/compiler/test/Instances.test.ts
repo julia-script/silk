@@ -1073,7 +1073,7 @@ pub fn main() -> i32 { let value = 42 return choose(move value, value) }`
   }),
 )
 
-it.effect('lowers built-ins and unavailable bodies to explicit trapping MIR', () =>
+it.effect('lowers built-ins and leaves diagnosed bodies unavailable to MIR', () =>
   Effect.gen(function* () {
     const builtins = Analysis.loweredMir(
       yield* snapshot(
@@ -1090,16 +1090,16 @@ it.effect('lowers built-ins and unavailable bodies to explicit trapping MIR', ()
           }),
       ['Literal', 'Literal', 'Binary:Multiply', 'Literal', 'Binary:Subtract'],
     )
-    const unavailable = Analysis.loweredMir(
-      yield* snapshot('pub fn main() -> i32 { return missing() }'),
+    const source = 'pub fn main() -> i32 { return missing() }'
+    const unavailable = yield* snapshot(source)
+    assert.deepEqual(
+      Analysis.diagnostics(unavailable).map((diagnostic) => ({
+        code: diagnostic.code,
+        span: source.slice(diagnostic.span.start, diagnostic.span.end),
+      })),
+      [{ code: 'SEM0004', span: 'missing' }],
     )
-    const unavailableFunction = unavailable.functions.at(0)
-    assert.strictEqual(
-      unavailableFunction === undefined
-        ? undefined
-        : MirVerification.outcomes(unavailableFunction).at(0)?._tag,
-      'Trap',
-    )
+    assert.strictEqual(Analysis.mirOf(unavailable)._tag, 'Unavailable')
   }),
 )
 

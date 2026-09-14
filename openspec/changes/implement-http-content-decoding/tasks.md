@@ -31,8 +31,9 @@
 
 - [ ] 2.1 Implement the fixed four-slot codec representation and Effectful all-before-read
       acquisition for zlib-only deflate, concatenated gzip/x-gzip, and Zstandard with partial-acquisition
-      release; verify allocator/provider counters distinguish successful acquisition, each construction
-      failure ordinal, and exactly-once release with zero body activity.
+      release; verify successful acquisition and the first and late construction-failure boundaries with
+      zero body activity. Keep each acquired decoder, stage, and edge affine and locally owned until
+      its single transfer into the scoped core, so ordinary structured cleanup releases partial state.
 - [ ] 2.2 Implement the private pure core combining `http_body.Decoder`, one fixed-capacity edge per
       active codec, reverse codec stages, and direct Raw/identity paths; verify fixed, chunked, and
       close-delimited runtime cases return the same representation bytes without admitting chunk

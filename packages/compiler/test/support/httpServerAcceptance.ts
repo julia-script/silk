@@ -39,6 +39,7 @@ import silk.memory_byte_duplex {
   MemoryWriteAction,
   MemoryWriteEvent,
 }
+import silk.layout {Layout}
 import silk.monotonic_clock {MonotonicClock}
 import silk.option {Option}
 import silk.result {Result}
@@ -46,6 +47,15 @@ import silk.system_clock {Instant, SystemClock}
 import silk.u64
 import silk.usize
 import silk.vector {Vector}
+
+struct RefusingAllocator {calls: usize}
+impl Allocator for RefusingAllocator {
+  effect fn allocate(self: &mut Self, layout: Layout) -> Allocation ! OutOfMemoryError {
+    drop layout
+    self.calls = self.calls + usize.ONE
+    fail OutOfMemoryError {}
+  }
+}
 
 struct FixedClock {}
 struct NormalHandler {}
@@ -1385,6 +1395,41 @@ effect<'call> fn matrixConnection<
 ) -> i32
 ! ServerError | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock {
+  if scenario == 14 {
+    let mut refusing = RefusingAllocator {calls: usize.ZERO}
+    let attempted = run Effect.result(withRequest(
+      &mut connection.*,
+      Option.none<Instant>(),
+      handleZeroBody,
+    ) |> Effect.provideMut<Allocator>(&mut refusing))
+    match move attempted {
+      Result.Success {value} => { drop value return 260 }
+      Result.Failure {error} => match move error {
+        OutOfMemoryError {} => {}
+        _ => { return 261 }
+      }
+    }
+    if refusing.calls != usize.ONE || connection.phase() != ConnectionPhase.Failed {
+      return 262
+    }
+    let unread = connection.unread()
+    let retried = run Effect.result(withRequest(
+      &mut connection.*,
+      Option.none<Instant>(),
+      handleZeroBody,
+    ))
+    match move retried {
+      Result.Success {value} => { drop value return 263 }
+      Result.Failure {error} => match move error {
+        ServerError.InvalidState {phase} => {
+          if phase != ConnectionPhase.Failed { return 264 }
+        }
+        _ => { return 265 }
+      }
+    }
+    if unread != 4 || connection.unread() != unread { return 266 }
+    return 0
+  }
   if scenario == 6 {
     let outcome = run Effect.result(withRequest(
       &mut connection.*,
@@ -1706,6 +1751,17 @@ effect fn runMatrixCase(
     |> Effect.provideMut<MonotonicClock>(&mut clock)
     |> Effect.provideMut<Allocator>(&mut allocator)
   if code != 0 { return code }
+  if scenario == 14 {
+    let audit = transport.audit()
+    let mut index = usize.ZERO
+    let mut reads = usize.ZERO
+    while index < audit.length {
+      if audit[index].operation == ByteIoOperation.Read { reads = reads + usize.ONE }
+      index = index + usize.ONE
+    }
+    drop audit
+    if reads != usize.ONE { return 267 }
+  }
   if scenario == 11 {
     let audit = transport.audit()
     let mut index = usize.ZERO
@@ -1883,6 +1939,15 @@ effect fn recoverServer(error: ServerError | BufferError | OutOfMemoryError) -> 
 effect fn allCases() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   let validated = runLimitValidation()
   if validated != 0 { return validated }
+  let mut acquisitionLimits = limits()
+  acquisitionLimits.maxRequestsPerConnection = 2
+  let acquisition = run runMatrixCase(
+    b"POST /oom HTTP/1.1\r\nHost: example.test\r\nContent-Length: 4\r\n\r\nBODY",
+    b"",
+    14,
+    acquisitionLimits,
+  )
+  if acquisition != 0 { return acquisition }
   let normal = run runServer()
   if normal != 0 { return normal }
   let expectation = run runExpectation()

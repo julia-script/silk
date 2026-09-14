@@ -1,5 +1,7 @@
 //! One scoped buffered session over an exclusive concrete ByteDuplex provider.
 //!
+//! # Details
+//!
 //! `withBuffered` owns separate fixed input and output state for the callback and terminally closes
 //! the provider after success, typed failure, or structured cancellation/interruption. Fatal traps
 //! bypass finalizers and Drop. Release intentionally performs no implicit flush.
@@ -29,6 +31,8 @@ pub struct BufferedDuplex<'transport, P> {
 }
 
 /// Compile-time adapter from one owned context to a higher-ranked buffered session use.
+///
+/// # Details
 ///
 /// Implement this interface when a scoped callback owns affine or once-callable state. The
 /// selected operation consumes that context and receives the temporary session independently;
@@ -220,6 +224,8 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
 
   /// Flushes pending output and then closes only the provider's write direction.
   ///
+  /// # Details
+  ///
   /// A successful shutdown keeps input available but rejects later output operations. Any typed
   /// transport failure terminalizes the complete session. Structured cancellation is handled by
   /// the enclosing buffered scope, which terminally closes the retained provider.
@@ -341,8 +347,10 @@ where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
 
 /// Runs one compile-time-selected context adapter with explicit direction capacities.
 ///
-/// The context is consumed by value and may own affine or once-callable state. Its selected
-/// [`BufferedContext.use`] operation receives an independently higher-ranked temporary session,
+/// # Details
+///
+/// The context is consumed by value and may own affine or once-callable state. The selected `use`
+/// operation on [`BufferedContext`] receives an independently higher-ranked temporary session,
 /// which cannot escape through the context or result.
 pub effect fn withBufferedCapacityContext<
   'env,
@@ -391,6 +399,8 @@ where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
 }
 
 /// Runs one callback with two explicitly bounded buffered sessions.
+///
+/// # Details
 ///
 /// All four capacities are validated before allocation or lease acquisition. Both transports are
 /// terminally closed exactly once after success, typed failure, or structured

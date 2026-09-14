@@ -1,5 +1,7 @@
 //! Fixed-capacity retained byte input for incremental protocol parsing.
 //!
+//! # Details
+//!
 //! `BufferedInput` owns one reusable initialized allocation. `peek` borrows only the unread prefix;
 //! `consume` advances it explicitly, so bytes read beyond a protocol delimiter remain available.
 

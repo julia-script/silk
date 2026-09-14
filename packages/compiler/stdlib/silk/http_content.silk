@@ -2069,6 +2069,17 @@ effect fn acquireCore<'head, 'method, 'names>(
   let coding3 = plan.coding3
   let decoderCount = plan.decoderCount
   let capacity = plan.limits.intermediateCapacity
+  // Reject body configuration before allocating any content codec or edge.
+  let bodyAttempt = run Effect.result(BodyDecoder.make(move selection, bodyLimits, policy))
+  let bodyDecoder = match move bodyAttempt {
+    Result<Result<BodyDecoder, BodyError>, OutOfMemoryError>.Failure {error} => { fail move error }
+    Result<Result<BodyDecoder, BodyError>, OutOfMemoryError>.Success {value: created} => match move created {
+      Result<BodyDecoder, BodyError>.Failure {error} => {
+        fail contentError<'head>(ContentReason<'head>.Body {error: move error})
+      }
+      Result<BodyDecoder, BodyError>.Success {value: decoder} => move decoder
+    }
+  }
   let mut stage0 = emptyStage()
   let mut stage1 = emptyStage()
   let mut stage2 = emptyStage()
@@ -2089,16 +2100,6 @@ effect fn acquireCore<'head, 'method, 'names>(
   let edge1 = run acquireEdge(decoderCount > usize.ONE, capacity)
   let edge2 = run acquireEdge(decoderCount > 2, capacity)
   let edge3 = run acquireEdge(decoderCount > 3, capacity)
-  let bodyAttempt = run Effect.result(BodyDecoder.make(move selection, bodyLimits, policy))
-  let bodyDecoder = match move bodyAttempt {
-    Result<Result<BodyDecoder, BodyError>, OutOfMemoryError>.Failure {error} => { fail move error }
-    Result<Result<BodyDecoder, BodyError>, OutOfMemoryError>.Success {value: created} => match move created {
-      Result<BodyDecoder, BodyError>.Failure {error} => {
-        fail contentError<'head>(ContentReason<'head>.Body {error: move error})
-      }
-      Result<BodyDecoder, BodyError>.Success {value: decoder} => move decoder
-    }
-  }
   let complete = isEmpty(framing)
   let mut phase = ReaderPhase.Live
   if complete { phase = ReaderPhase.Complete }

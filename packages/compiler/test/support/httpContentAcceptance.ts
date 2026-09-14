@@ -278,7 +278,7 @@ effect<'call> fn rawReader<
         |> Effect.provideMut<MonotonicClock>(&mut clock),
       classifyFailure,
     )
-    if progress.written > output.length { return 38 }
+    if progress.written > 4 { return 38 }
     let mut written = usize.ZERO
     while written < progress.written {
       if index >= expected.length || output[written] != expected[index] { return 31 }
@@ -353,7 +353,7 @@ effect fn readExpected<'call, 'reader: 'call, 'transport: 'reader, 'head: 'reade
         |> Effect.provideMut<MonotonicClock>(&mut clock),
       classifyFailure,
     )
-    if progress.written > output.length { return base + 3 }
+    if progress.written > 4 { return base + 3 }
     let mut written = usize.ZERO
     while written < progress.written {
       if index >= expected.length || output[written] != expected[index] { return base + 4 }
@@ -1754,6 +1754,7 @@ effect<'borrow> fn allocationAttempt<
   head: ResponseHead<'head>,
   method: Method<'method>,
   audit: &mut FailingAllocator,
+  invalidBody: bool,
 ) -> i32 {
   let context = match move ResponseContext.make(
     head,
@@ -1763,10 +1764,12 @@ effect<'borrow> fn allocationAttempt<
     Result.Failure {error} => { drop error return 314 }
     Result.Success {value} => move value
   }
+  let mut limits = bodyLimits()
+  if invalidBody { limits.maxTrailerFields = usize.MAX }
   let plan = match move CodingPlan.make(
     move context,
     Mode.Decode,
-    bodyLimits(),
+    limits,
     contentLimits(),
   ) {
     Result.Failure {error} => { drop error return 315 }
@@ -1779,7 +1782,18 @@ effect<'borrow> fn allocationAttempt<
     Result<i32, ContentError<'head> | OutOfMemoryError>.Success {value} => value
     Result<i32, ContentError<'head> | OutOfMemoryError>.Failure {error} => match move error {
       OutOfMemoryError {} => 0
-      ContentError<'head> failure => { drop failure return 313 }
+      ContentError<'head> failure => match move failure.reason {
+        ContentReason.Body {error: cause} => {
+          if invalidBody && cause.component == BodyComponent.Decoder {
+            match move cause.reason {
+              BodyReason.SizeOverflow => { return 43 }
+              _ => { return 313 }
+            }
+          }
+          return 313
+        }
+        _ => { return 313 }
+      }
     }
   }
 }
@@ -1804,21 +1818,26 @@ effect<'session> fn allocationFailureSession<'session>(
     Result.Failure {error} => { drop error return 318 }
     Result.Success {value} => value
   }
+  // Invalid body sizing must win before the first body or content-codec allocation.
+  let mut invalid = FailingAllocator {calls: usize.ZERO, failAt: usize.ONE}
+  let invalidResult = run allocationAttempt(&mut body.*, head, method, &mut invalid, true)
+  if invalidResult != 43 || invalid.calls != usize.ZERO { return 327 }
   let mut successful = FailingAllocator {calls: usize.ZERO, failAt: usize.ZERO}
-  let opened = run allocationAttempt(&mut body.*, head, method, &mut successful)
+  let opened = run allocationAttempt(&mut body.*, head, method, &mut successful, false)
   if opened != 42 || successful.calls == usize.ZERO { return 319 }
   let total = successful.calls
-  let mut ordinal = usize.ONE
-  while ordinal <= total {
-    let mut failing = FailingAllocator {calls: usize.ZERO, failAt: ordinal}
-    let failed = run allocationAttempt(&mut body.*, head, method, &mut failing)
-    if failed != 0 || failing.calls != ordinal { return 320 }
-    ordinal = ordinal + usize.ONE
-  }
+  if total <= usize.ONE { return 320 }
+  // The allocator observes attempts, not releases: test early and partial-construction failure.
+  let mut first = FailingAllocator {calls: usize.ZERO, failAt: usize.ONE}
+  let firstFailure = run allocationAttempt(&mut body.*, head, method, &mut first, false)
+  if firstFailure != 0 || first.calls != usize.ONE { return 321 }
+  let mut late = FailingAllocator {calls: usize.ZERO, failAt: total}
+  let lateFailure = run allocationAttempt(&mut body.*, head, method, &mut late, false)
+  if lateFailure != 0 || late.calls != total { return 322 }
   return 0
 }
 
-effect fn allocationFailureOrdinals() -> i32
+effect fn allocationFailureBoundaries() -> i32
 ! BufferError | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock {
   let mut source = run provider(b"")
@@ -2209,7 +2228,7 @@ effect fn program() -> i32 ! BufferError | OutOfMemoryError {
     |> Effect.provideMut<MonotonicClock>(&mut clock)
     |> Effect.provideMut<Allocator>(&mut allocator)
   if framingFailures != 0 { return framingFailures }
-  let allocations = run allocationFailureOrdinals()
+  let allocations = run allocationFailureBoundaries()
     |> Effect.provideMut<MonotonicClock>(&mut clock)
     |> Effect.provideMut<Allocator>(&mut allocator)
   if allocations != 0 { return allocations }

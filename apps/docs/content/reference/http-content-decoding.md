@@ -105,14 +105,14 @@ encoded suffix fails with `TrailingEncodedData`.
 
 Content `Limits` apply independently:
 
-| Field                  | Accounting boundary                                                                                         |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `maxEncoded`           | Representation bytes emitted by body deframing                                                              |
-| `maxIntermediate`      | Sum of bytes produced by every nonfinal decoder stage                                                       |
-| `maxDecoded`           | Bytes returned by the final representation stage                                                            |
+| Field                  | Accounting boundary                                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `maxEncoded`           | Representation bytes emitted by body deframing                                                             |
+| `maxIntermediate`      | Sum of bytes produced by every nonfinal decoder stage                                                      |
+| `maxDecoded`           | Bytes returned by the final representation stage                                                           |
 | `maxOwned`             | Inline reader state, every staging reservation, inflate storage, and configured Zstandard window/workspace |
-| `maxDepth`             | All declared codings, including `identity`, from one through four                                           |
-| `intermediateCapacity` | Each active staging edge, from one through 65,536 bytes                                                     |
+| `maxDepth`             | All declared codings, including `identity`, from one through four                                          |
+| `intermediateCapacity` | Each active staging edge, from one through 65,536 bytes                                                    |
 
 Codec-specific limits remain part of the same plan. Body-decoder storage remains governed by
 `http_body.Limits.maxOwnedBytes` and is not double-counted. The inline reader charge excludes that

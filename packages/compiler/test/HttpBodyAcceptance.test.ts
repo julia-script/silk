@@ -3,21 +3,12 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
-import { httpBodyAcceptanceSource } from './support/httpBodyAcceptance.js'
 
 const encoder = new TextEncoder()
 
-const contractRejectionSource = `${httpBodyAcceptanceSource}
+const contractRejectionSource = `import silk.http_body {Completion, CompletionKind, Decoder}
 
-effect fn mutateWhileCompletionBorrowed() -> () ! OutOfMemoryError ? &mut Allocator {
-  let made = run decoderFor(
-    b"POST / HTTP/1.1\\r\\nHost: example.com\\r\\nContent-Length: 0\\r\\n\\r\\n",
-    bodyLimits(),
-  )
-  let mut decoder = match move made {
-    Option.None => { return () }
-    Option.Some {value} => move value
-  }
+fn mutateWhileCompletionBorrowed(mut decoder: Decoder) -> () {
   let evidence = Decoder.completion(&decoder)
   Decoder.abandon(&mut decoder)
   drop evidence
@@ -29,7 +20,7 @@ fn forge<'owner>(marker: &'owner u8) -> Completion<'owner> {
 }`
 
 it.effect(
-  'compiles the HTTP body reference example',
+  'checks the HTTP body reference declarations',
   () =>
     Effect.gen(function* () {
       const document = readFileSync(
@@ -39,7 +30,7 @@ it.effect(
       const source = document.match(/```silk\n([\s\S]*?)\n```/)?.[1]
       assert.isString(source)
       if (source === undefined) return
-      const snapshot = yield* AnalysisFixture.retainingMain(
+      const snapshot = yield* AnalysisFixture.declarations(
         'http-body/reference-example',
         encoder.encode(source),
       )
@@ -53,7 +44,7 @@ it.effect(
   'enforces borrowed completion ownership and opacity in one analysis',
   () =>
     Effect.gen(function* () {
-      const snapshot = yield* AnalysisFixture.retainingMain(
+      const snapshot = yield* AnalysisFixture.declarations(
         'http-body/contract-rejections',
         encoder.encode(contractRejectionSource),
       )

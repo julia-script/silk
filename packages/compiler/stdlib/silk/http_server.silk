@@ -1,5 +1,7 @@
 //! Scoped bounded streaming HTTP/1.0 and HTTP/1.1 server connections.
 //!
+//! # Details
+//!
 //! `withConnection` binds one concrete byte provider and one buffered session for a serial
 //! connection lifetime. `withRequest` lends one request at a time; its parsed head, body decoder,
 //! response writer, and upgraded channel cannot escape their nested callbacks. Scope release closes
@@ -484,6 +486,8 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
   }
   let framing = selection.framing()
   let facts = requestFacts(head, framing)
+  // The consumed head cannot be admitted again if body storage acquisition fails.
+  connection.phaseValue = ConnectionPhase.Failed
   let made = run Decoder.make(move selection, connection.limits.body, policy)
   let decoder = match move made {
     Result<Decoder, BodyError>.Failure {error} => {

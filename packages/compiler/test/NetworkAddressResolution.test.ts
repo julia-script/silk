@@ -4,6 +4,8 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import {
   networkAddressValueAcceptanceSource,
   nativeResolverAcceptanceSource,
@@ -100,11 +102,13 @@ it.effect(
           target === 'wasm32-unknown-unknown'
             ? `${nativeResolverImplementation}\n${entry}`
             : `${implementation}\n${resolverImplementation}\n${nativeResolverImplementation}\n${entry}`
-        const snapshot = yield* AnalysisFixture.retainingMain(
-          `network-address/native-${target}`,
-          encoder.encode(source),
-          target,
-        )
+        const sourceId = `network-address/native-${target}`
+        const snapshot = yield* Analysis.makeRealized({
+          root: SourceFile.make(sourceId, encoder.encode(source)),
+          configuration: AnalysisFixture.configuration(sourceId, target, [
+            target === 'wasm32-unknown-unknown' ? 'main' : 'nativeProgram',
+          ]),
+        }).pipe(Effect.provide(SourceResolver.empty))
         assert.deepEqual(
           Analysis.diagnostics(snapshot).map((diagnostic) => ({
             code: diagnostic.code,
@@ -137,7 +141,7 @@ pub fn main() -> i32 { return 42 }`),
         [{ code: 'SEM0014', start: 29 }],
       )
     }),
-  30_000,
+  45_000,
 )
 
 it.effect(

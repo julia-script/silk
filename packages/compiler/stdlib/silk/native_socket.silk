@@ -626,6 +626,8 @@ pub struct AcceptedView<'a> {
 
 /// Compile-time adapter from one owned context to an accepted-connection use.
 ///
+/// # Details
+///
 /// Implement this interface when the scoped use owns affine or once-callable state. The first row
 /// preserves caller-selected requirements and the second records requirements introduced by the
 /// concrete context. Selection adds no runtime service or requirement-row member: `context` is
@@ -2004,6 +2006,8 @@ effect<'call> fn invokeAcceptedContext<
 }
 
 /// Consumes one compile-time-selected context with temporary accepted-connection loans.
+///
+/// # Details
 ///
 /// The context is captured by the once-callable protected use and consumed exactly once. Structured
 /// success, typed failure, and cancellation close the connection once; close failure never
