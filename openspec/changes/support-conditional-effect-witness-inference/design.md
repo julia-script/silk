@@ -115,7 +115,9 @@ requirement access. Provisional service selection applies the same relation when
 implementation discharges the source service requirement.
 
 Constructor and static-run verification compare executable channels and physical closure identity
-explicitly. Calling-shape roots retain the requested semantic type while sharing physical lanes.
+explicitly, using the same operand relation in verification and native selection. Identity-based
+lookup requires one physical environment with matching execution channels. Base runner references
+use the canonical layout identity independently of source declaration order. Calling-shape roots retain the requested semantic type while sharing physical lanes.
 An Effect constructor's captured parameter types come from the exact owner/parameter capture facts
 when provider specialization has already replaced the source service Effect. Requirement-row
 parameters do not denote stored values and cannot introduce type-outlives obligations.

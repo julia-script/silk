@@ -6,7 +6,7 @@ import type * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as ExecutionPackage from './ExecutionPackage.js'
 import type * as ExecutionTransition from './ExecutionTransition.js'
-import type * as Hir from './Hir.js'
+import * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
 import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
 import * as Layout from './Layout.js'
@@ -2181,3 +2181,65 @@ export const diagnosticScopeLocals = (fn: MirFunction): ReadonlyArray<LocalId> =
       ).values(),
     ].sort((left, right) => left.ordinal - right.ordinal),
   )
+
+export const callArgumentCompatible = (actual: Type, expected: Type): boolean => {
+  const actualSemantic = semanticType(actual)
+  const expectedSemantic = semanticType(expected)
+  const actualContract =
+    SilkType.isRepresented(actualSemantic) &&
+    (SilkType.isCallable(actualSemantic.contract) || SilkType.isEffect(actualSemantic.contract))
+      ? actualSemantic.contract
+      : actualSemantic
+  const expectedContract =
+    SilkType.isRepresented(expectedSemantic) &&
+    (SilkType.isCallable(expectedSemantic.contract) || SilkType.isEffect(expectedSemantic.contract))
+      ? expectedSemantic.contract
+      : expectedSemantic
+  if (acceptsRuntimeOperand(actualContract, expectedContract)) return true
+  if (
+    actual._tag !== 'EffectValue' ||
+    expected._tag !== 'EffectValue' ||
+    actual.storage !== undefined ||
+    expected.storage?._tag !== 'StoredEffectField'
+  )
+    return false
+  const realization = expected.storage.realization
+  return (
+    SilkType.equals(actual.type, realization.contract) &&
+    Hir.sameExecutableSite(actual.site, realization.site) &&
+    instanceText(actual.environment.instance) === instanceText(realization.runnerInstance)
+  )
+}
+
+// Executable captures carry a semantic view of an already selected physical closure. Running
+// that closure consumes the capture; outer access and invocation lifetime proofs do not select
+// another machine. Keep the source identity and all execution channels exact.
+export const executionArgumentCompatible = (actual: Type, expected: Type): boolean => {
+  if (actual._tag === 'EffectValue' && expected._tag === 'EffectValue')
+    return (
+      EffectExecutionContract.equals(actual.type, expected.type) &&
+      Hir.sameExecutableSite(actual.site, expected.site) &&
+      instanceText(actual.environment.instance) === instanceText(expected.environment.instance) &&
+      actual.storage === expected.storage
+    )
+  if (
+    actual._tag === 'CallableValue' &&
+    expected._tag === 'CallableValue' &&
+    SilkType.isEffect(actual.type.result) &&
+    SilkType.isEffect(expected.type.result)
+  )
+    return (
+      Hir.sameCallableTarget(actual.target, expected.target) &&
+      runtimeArgumentsEqual(actual.typeArguments ?? [], expected.typeArguments ?? []) &&
+      actual.environment === expected.environment &&
+      actual.type.unsafe === expected.type.unsafe &&
+      SilkType.compareAccess(expected.type.mode, actual.type.mode) &&
+      actual.type.parameters.length === expected.type.parameters.length &&
+      actual.type.parameters.every((parameter, ordinal) => {
+        const compared = expected.type.parameters.at(ordinal)
+        return compared !== undefined && SilkType.equals(parameter, compared)
+      }) &&
+      EffectExecutionContract.equals(actual.type.result, expected.type.result)
+    )
+  return callArgumentCompatible(actual, expected)
+}

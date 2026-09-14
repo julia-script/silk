@@ -869,7 +869,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
                 return (
                   actual !== undefined &&
                   expected !== undefined &&
-                  Mir.acceptsRuntimeOperand(Mir.semanticType(actual), Mir.semanticType(expected))
+                  Mir.executionArgumentCompatible(actual, expected)
                 )
               }))),
       )

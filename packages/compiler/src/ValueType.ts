@@ -227,11 +227,13 @@ export const effectValueByIdentity = (
   owner?: Type.ExecutableSpecializationOwner,
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
   const candidates = effectEnvironmentsByIdentity(layout, identity, owner)
-  if (requested === undefined && candidates.length !== 1) return undefined
-  const exact =
+  const matching =
     requested === undefined
-      ? candidates.at(0)
-      : candidates.find((candidate) => Type.equals(candidate.effect, requested))
+      ? candidates
+      : candidates.filter((candidate) =>
+          EffectExecutionContract.equals(candidate.effect, requested),
+        )
+  const exact = matching.length === 1 ? matching.at(0) : undefined
   return exact === undefined
     ? undefined
     : Object.freeze({
@@ -583,6 +585,17 @@ export const ensureEffectRunner = (
     requirements.length === 0 ? effectRunnerKey(type) : providedRunnerKey(type, requirements)
   const existing = fn.generatedRunners.find((candidate) => candidate.specializationKey === key)
   if (existing !== undefined) return existing.id
+  // A caller can precede the source declaration that registers its builtin runner. The
+  // layout already selects the physical closure; its canonical base id does not depend on
+  // registration order. Provider wrappers still require a concrete base recipe below.
+  if (
+    requirements.length === 0 &&
+    EffectExecutionContract.equals(type.environment.effect, type.type)
+  )
+    return (
+      type.storage?.realization.runner ??
+      Hir.effectRunnerId(type.environment.instance.declaration, type.site)
+    )
   const physical = fn.generatedRunners.filter(
     (candidate) =>
       candidate.providedRequirements.length === 0 &&

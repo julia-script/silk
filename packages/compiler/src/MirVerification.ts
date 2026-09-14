@@ -41,6 +41,8 @@ import type {
 } from './Mir.js'
 import {
   acceptsRuntimeOperand,
+  callArgumentCompatible,
+  executionArgumentCompatible,
   coroutineFrameHeaderRoles,
   diagnosticScopeWords,
   diagnosticOutcomeWords,
@@ -1564,68 +1566,6 @@ const localText = (local: LocalId): string => `%${local.ordinal}`
 // MIR verifies physical contracts after source lifetime obligations have been discharged.
 const sameRuntimeType = (left: SilkType.Type, right: SilkType.Type): boolean =>
   SilkType.runtimeKey(left) === SilkType.runtimeKey(right)
-
-const callArgumentCompatible = (actual: Type, expected: Type): boolean => {
-  const actualSemantic = semanticType(actual)
-  const expectedSemantic = semanticType(expected)
-  const actualContract =
-    SilkType.isRepresented(actualSemantic) &&
-    (SilkType.isCallable(actualSemantic.contract) || SilkType.isEffect(actualSemantic.contract))
-      ? actualSemantic.contract
-      : actualSemantic
-  const expectedContract =
-    SilkType.isRepresented(expectedSemantic) &&
-    (SilkType.isCallable(expectedSemantic.contract) || SilkType.isEffect(expectedSemantic.contract))
-      ? expectedSemantic.contract
-      : expectedSemantic
-  if (acceptsRuntimeOperand(actualContract, expectedContract)) return true
-  if (
-    actual._tag !== 'EffectValue' ||
-    expected._tag !== 'EffectValue' ||
-    actual.storage !== undefined ||
-    expected.storage?._tag !== 'StoredEffectField'
-  )
-    return false
-  const realization = expected.storage.realization
-  return (
-    SilkType.equals(actual.type, realization.contract) &&
-    Hir.sameExecutableSite(actual.site, realization.site) &&
-    instanceText(actual.environment.instance) === instanceText(realization.runnerInstance)
-  )
-}
-
-// Executable captures carry a semantic view of an already selected physical closure. Running
-// that closure consumes the capture; outer access and invocation lifetime proofs do not select
-// another machine. Keep the source identity and all execution channels exact.
-const executionArgumentCompatible = (actual: Type, expected: Type): boolean => {
-  if (actual._tag === 'EffectValue' && expected._tag === 'EffectValue')
-    return (
-      EffectExecutionContract.equals(actual.type, expected.type) &&
-      Hir.sameExecutableSite(actual.site, expected.site) &&
-      instanceText(actual.environment.instance) === instanceText(expected.environment.instance) &&
-      actual.storage === expected.storage
-    )
-  if (
-    actual._tag === 'CallableValue' &&
-    expected._tag === 'CallableValue' &&
-    SilkType.isEffect(actual.type.result) &&
-    SilkType.isEffect(expected.type.result)
-  )
-    return (
-      callableTargetText(actual.target) === callableTargetText(expected.target) &&
-      runtimeArgumentsEqual(actual.typeArguments ?? [], expected.typeArguments ?? []) &&
-      actual.environment === expected.environment &&
-      actual.type.unsafe === expected.type.unsafe &&
-      SilkType.compareAccess(expected.type.mode, actual.type.mode) &&
-      actual.type.parameters.length === expected.type.parameters.length &&
-      actual.type.parameters.every((parameter, ordinal) => {
-        const compared = expected.type.parameters.at(ordinal)
-        return compared !== undefined && SilkType.equals(parameter, compared)
-      }) &&
-      EffectExecutionContract.equals(actual.type.result, expected.type.result)
-    )
-  return callArgumentCompatible(actual, expected)
-}
 
 const cleanupTypes = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<SilkType.Type> => {
   switch (cleanup._tag) {

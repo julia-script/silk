@@ -2,6 +2,8 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 
@@ -138,5 +140,19 @@ pub fn main() -> i32 {
     assert.isTrue(
       MirVerification.verify(corrupted).some((violation) => violation.rule === 'InvalidCallShape'),
     )
+  }),
+)
+
+it.effect('preserves observed application closure parameters through native startup', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.makeRealized({
+      root: SourceFile.make(
+        'effect-forwarding/native-start',
+        encoder.encode('pub fn main() -> i32 { return 42 }'),
+      ),
+      configuration: { profile: { target: 'x86_64-unknown-linux-gnu', artifact: 'executable' } },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
