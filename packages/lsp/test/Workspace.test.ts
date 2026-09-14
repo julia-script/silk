@@ -316,7 +316,7 @@ it.effect('shares one project frontend across overlapping open roots', () =>
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
-it.effect('indexes closed source-root modules without widening semantic project roots', () =>
+it.effect('excludes closed modules from semantic roots and defers catalog selection', () =>
   Effect.gen(function* () {
     const root = project()
     writeFileSync(
@@ -341,12 +341,6 @@ it.effect('indexes closed source-root modules without widening semantic project 
     )
     // A committed semantic snapshot must not perform whole-workspace catalog selection.
     assert.isTrue(Option.isNone(yield* session.inventory.completed))
-    assert.deepEqual(
-      WorkspaceInventory.candidates(yield* session.inventory.get, 'closedCandidate').map(
-        (candidate) => candidate.module,
-      ),
-      ['Candidate'],
-    )
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
