@@ -5,6 +5,7 @@ import {
   generated,
   ownershipLocal,
   lowerOwnershipPath,
+  lowerReferencePlace,
   propagationLoanEnds,
   propagationReleases,
 } from './CleanupEmission.js'
@@ -1456,8 +1457,12 @@ export const lowerPlacePath = (
       : Object.freeze({ root: root.result, selectors: Object.freeze([]) })
   }
   if (expression._tag === 'Project') {
-    const subject = lowerPlacePath(fn, expression.subject, availableRequirements)
-    if (subject === 'Transferred') return subject
+    const path = lowerPlacePath(fn, expression.subject, availableRequirements)
+    if (path === 'Transferred') return path
+    const subject =
+      path === undefined
+        ? undefined
+        : lowerReferencePlace(fn, path.root, path.selectors, authored(expression.span))
     if (subject === undefined) return undefined
     return Object.freeze({
       root: subject.root,
@@ -1472,8 +1477,12 @@ export const lowerPlacePath = (
     })
   }
   if (expression._tag === 'IndexPlace') {
-    const subject = lowerPlacePath(fn, expression.subject, availableRequirements)
-    if (subject === 'Transferred') return subject
+    const path = lowerPlacePath(fn, expression.subject, availableRequirements)
+    if (path === 'Transferred') return path
+    const subject =
+      path === undefined
+        ? undefined
+        : lowerReferencePlace(fn, path.root, path.selectors, authored(expression.span))
     if (subject === undefined) return undefined
     const index:
       | Extract<Mir.PlaceSelector, { readonly _tag: 'ElementSelector' }>['index']
@@ -1539,8 +1548,9 @@ export const lowerPlace = (
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.activeRequirements ??
     fn.providedRequirements,
 ): LoweredExpression | undefined => {
-  const place = lowerPlacePath(fn, expression, availableRequirements)
-  if (place === 'Transferred') return place
+  const path = lowerPlacePath(fn, expression, availableRequirements)
+  if (path === 'Transferred') return path
+  const place = path === undefined ? undefined : lowerReferencePlace(fn, path.root, path.selectors)
   const type = fn.type(expression.type)
   if (place === undefined || type === undefined) return undefined
   const destination = fn.alloc(type)

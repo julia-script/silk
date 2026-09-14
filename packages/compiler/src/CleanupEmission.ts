@@ -9,6 +9,7 @@ import type { FunctionLowering } from './FunctionLowering.js'
 import type * as Hir from './Hir.js'
 import * as TypeInference from './internal/TypeInference.js'
 import * as Instances from './Instances.js'
+import * as Layout from './Layout.js'
 import type { DelayedEffectState } from './Lower.js'
 import { bool, borrowKey, patternKey, spanKey } from './Lower.js'
 import type {} from './LowerExpression.js'
@@ -597,6 +598,73 @@ export const generated = (span: SourceSpan.SourceSpan): Mir.Provenance =>
 export const authored = (span: SourceSpan.SourceSpan): Mir.Provenance =>
   Object.freeze({ span, generated: false })
 
+/** Splits a projected place at stored references so each path addresses one allocation. */
+export const lowerReferencePlace = (
+  fn: FunctionLowering,
+  initialRoot: Mir.LocalId,
+  selectors: ReadonlyArray<Mir.PlaceSelector>,
+  continuation?: Mir.Provenance,
+):
+  | { readonly root: Mir.LocalId; readonly selectors: ReadonlyArray<Mir.PlaceSelector> }
+  | undefined => {
+  const rootType = fn.localTypes.at(initialRoot.ordinal)
+  if (rootType === undefined) return undefined
+  let current = Mir.semanticType(rootType)
+  if (Type.isReference(current)) current = current.target
+  let root = initialRoot
+  let remaining: Array<Mir.PlaceSelector> = []
+  let variant:
+    | Extract<Layout.Representation, { readonly _tag: 'NominalUnion' }>['variants'][number]
+    | undefined
+  const loadReferences = (provenance: Mir.Provenance): boolean => {
+    while (Type.isReference(current)) {
+      const type = fn.type(current)
+      if (type === undefined) return false
+      const destination = fn.alloc(type)
+      fn.emit({
+        _tag: 'ReadPlace',
+        destination,
+        root,
+        selectors: Object.freeze(remaining),
+        type,
+        provenance,
+      })
+      root = destination
+      remaining = []
+      current = current.target
+    }
+    return true
+  }
+  for (const selector of selectors) {
+    if (!loadReferences(selector.provenance)) return undefined
+    remaining.push(selector)
+    const representation = Layout.entry(fn.layout, current)?.representation
+    if (selector._tag === 'VariantSelector') {
+      if (Type.isUnion(current)) {
+        const member = current.members.at(selector.ordinal)
+        if (member === undefined) return undefined
+        current = member
+      } else {
+        variant =
+          representation?._tag === 'NominalUnion'
+            ? representation.variants.find((candidate) => candidate.ordinal === selector.ordinal)
+            : undefined
+        if (variant === undefined) return undefined
+      }
+    } else if (selector._tag === 'FieldSelector') {
+      const field = (
+        variant?.fields ?? (representation?._tag === 'Aggregate' ? representation.fields : [])
+      ).find((candidate) => DeclarationFacts.sameFieldId(candidate.id, selector.field))
+      if (field === undefined) return undefined
+      current = field.type
+      variant = undefined
+    } else if (Type.isFixedArray(current) || Type.isSlice(current)) current = current.element
+    else return undefined
+  }
+  if (continuation !== undefined && !loadReferences(continuation)) return undefined
+  return { root, selectors: Object.freeze(remaining) }
+}
+
 /** Loads stored reference descriptors before continuing a checked write through their referents. */
 export const lowerBorrowedWritePlace = (
   fn: FunctionLowering,
@@ -702,58 +770,66 @@ export const lowerWriteSelectors = (
   return Object.freeze(lowered)
 }
 
-export const lowerBorrowSelectors = (
+/** Evaluates each borrow selector only after loading the preceding reference boundary. */
+export const lowerBorrowPlace = (
   fn: FunctionLowering,
+  initialRoot: Mir.LocalId,
   selectors: ReadonlyArray<Hir.BorrowSelector>,
-): ReadonlyArray<Mir.PlaceSelector> | 'Transferred' | undefined => {
-  const lowered: Array<Mir.PlaceSelector> = []
+  prefix: ReadonlyArray<Mir.PlaceSelector> = [],
+):
+  | { readonly root: Mir.LocalId; readonly selectors: ReadonlyArray<Mir.PlaceSelector> }
+  | 'Transferred'
+  | undefined => {
+  let place = { root: initialRoot, selectors: prefix }
   for (const selector of selectors) {
-    if (selector._tag === 'Field') {
-      lowered.push(
-        Object.freeze({
-          _tag: 'FieldSelector',
-          field: selector.field,
-          provenance: authored(selector.span),
-        }),
-      )
-      continue
+    const preceding = lowerReferencePlace(fn, place.root, place.selectors, authored(selector.span))
+    if (preceding === undefined) return undefined
+    const selected = lowerBorrowSelector(fn, selector)
+    if (selected === undefined || selected === 'Transferred') return selected
+    place = { root: preceding.root, selectors: [...preceding.selectors, selected] }
+  }
+  return place
+}
+
+const lowerBorrowSelector = (
+  fn: FunctionLowering,
+  selector: Hir.BorrowSelector,
+): Mir.PlaceSelector | 'Transferred' | undefined => {
+  if (selector._tag === 'Field')
+    return {
+      _tag: 'FieldSelector',
+      field: selector.field,
+      provenance: authored(selector.span),
     }
-    if (selector._tag === 'SliceIndex') {
-      const index = lowerExpression(fn, selector.index)
-      if (index === 'Transferred') return index
-      if (index === undefined) return undefined
-      lowered.push(
-        Object.freeze({
+  if (selector._tag === 'SliceIndex') {
+    const index = lowerExpression(fn, selector.index)
+    if (index === 'Transferred') return index
+    return index === undefined
+      ? undefined
+      : {
           _tag: 'SliceElementSelector',
           index: index.result,
           access: selector.slice.access,
           provenance: authored(selector.span),
-        }),
-      )
-      continue
-    }
-    const index =
-      selector.bounds._tag === 'Proven'
-        ? Object.freeze({ _tag: 'Proven' as const, value: selector.bounds.index })
-        : (() => {
-            const expression = lowerExpression(fn, selector.index)
-            if (expression === 'Transferred') return expression
-            return expression === undefined
-              ? undefined
-              : Object.freeze({ _tag: 'Runtime' as const, local: expression.result })
-          })()
-    if (index === 'Transferred') return index
-    if (index === undefined) return undefined
-    lowered.push(
-      Object.freeze({
-        _tag: 'ElementSelector',
-        length: selector.array.length,
-        index,
-        provenance: authored(selector.span),
-      }),
-    )
+        }
   }
-  return Object.freeze(lowered)
+  const index =
+    selector.bounds._tag === 'Proven'
+      ? Object.freeze({ _tag: 'Proven' as const, value: selector.bounds.index })
+      : (() => {
+          const expression = lowerExpression(fn, selector.index)
+          if (expression === 'Transferred') return expression
+          return expression === undefined
+            ? undefined
+            : Object.freeze({ _tag: 'Runtime' as const, local: expression.result })
+        })()
+  if (index === undefined || index === 'Transferred') return index
+  return {
+    _tag: 'ElementSelector',
+    length: selector.array.length,
+    index,
+    provenance: authored(selector.span),
+  }
 }
 
 export const lowerBorrowedWriteSelectors = (

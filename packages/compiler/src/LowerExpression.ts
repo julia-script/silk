@@ -8,7 +8,7 @@ import {
   initializeBinding,
   matchCleanupKey,
   ownerFields,
-  lowerBorrowSelectors,
+  lowerBorrowPlace,
   lowerWriteSelectors,
   lowerOwnershipPath,
   ownershipLocal,
@@ -2619,17 +2619,15 @@ function lowerSliceBorrowExpression(
   }
   const destination = fn.alloc(type)
   const borrow = fn.beginRecipeBorrow(expression.borrow)
-  const selected = lowerBorrowSelectors(fn, expression.selectors)
-  if (selected === 'Transferred') return selected
-  if (selected === undefined) return undefined
-  const selectors = [...(alias?.selectors ?? []), ...selected]
+  const place = lowerBorrowPlace(fn, root, expression.selectors, alias?.selectors)
+  if (place === undefined || place === 'Transferred') return place
   fn.emit(
     Object.freeze({
       _tag: 'BeginLoan',
       borrow,
       destination,
-      root,
-      selectors,
+      root: place.root,
+      selectors: place.selectors,
       sourceType,
       type,
       access: expression.access,
@@ -2688,17 +2686,15 @@ function lowerValueBorrowExpression(
   }
   const destination = fn.alloc(type)
   const borrow = fn.beginRecipeBorrow(expression.borrow)
-  const selected = lowerBorrowSelectors(fn, expression.selectors)
-  if (selected === 'Transferred') return selected
-  if (selected === undefined) return undefined
-  const selectors = [...(alias?.selectors ?? []), ...selected]
+  const place = lowerBorrowPlace(fn, root, expression.selectors, alias?.selectors)
+  if (place === undefined || place === 'Transferred') return place
   fn.emit(
     Object.freeze({
       _tag: 'BeginLoan',
       borrow,
       destination,
-      root,
-      selectors,
+      root: place.root,
+      selectors: place.selectors,
       sourceType,
       type,
       access: expression.access,

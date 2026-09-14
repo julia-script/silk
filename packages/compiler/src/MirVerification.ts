@@ -6365,12 +6365,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           const valid =
             operation.elements.length === semantic.length &&
             destination !== undefined &&
-            SilkType.equals(semanticType(destination), semantic) &&
+            sameRuntimeType(semanticType(destination), semantic) &&
             operation.elements.every((element) => {
               const elementType = fn.localTypes.at(element.ordinal)
               return (
                 elementType !== undefined &&
-                SilkType.equals(semanticType(elementType), semantic.element)
+                sameRuntimeType(semanticType(elementType), semantic.element)
               )
             })
           if (!valid) {
@@ -6487,7 +6487,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               return (
                 (candidate._tag === 'ReadPlace' ||
                   candidate._tag === 'CheckPlace' ||
-                  candidate._tag === 'WritePlace') &&
+                  candidate._tag === 'WritePlace' ||
+                  (candidate._tag === 'BeginLoan' && !borrowsDescriptor(candidate))) &&
                 candidate.root.ordinal === operation.destination.ordinal &&
                 (candidate._tag !== 'WritePlace' ||
                   candidate.source.ordinal !== operation.destination.ordinal)
