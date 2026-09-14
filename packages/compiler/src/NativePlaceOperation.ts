@@ -243,17 +243,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
         break
       }
-      const place = yield* NativePlaceAddress.resolve(
+      const { address: projected } = yield* NativePlaceAddress.resolve(
         context,
         operation.root,
         operation.selectors,
         `borrow${operation.destination.ordinal}`,
         descriptor,
-      )
-      const projected = yield* NativePlace.base(
-        place,
-        nativeStorage,
-        `borrow${operation.destination.ordinal}_address`,
       )
       if (operation.type._tag === 'Reference') {
         yield* NativeStorage.writeLocal(
@@ -413,7 +408,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       )).flat()
       const sourceLanes = operation.fields.flatMap((field) => {
         const fieldType = entry.fn.localTypes.at(field.value.ordinal)
-        return fieldType === undefined ? [] : [...NativeType.lanesFor(types, fieldType)]
+        return fieldType === undefined ? [] : [...NativeType.valueLanesFor(types, fieldType)]
       })
       const payload: Array<Value.Input> = []
       for (let ordinal = 1; ordinal < targetLanes.length; ordinal += 1) {

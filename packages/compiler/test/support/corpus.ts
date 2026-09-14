@@ -2216,6 +2216,10 @@ pub fn main() -> i32 {
     source: `struct Narrow {first: i32 second: i32}
 struct Wide {first: i64 second: i64}
 union Choice { Left { value: Narrow }, Right { value: Wide } }
+union ScalarChoice { Value {value: i32} }
+fn copyScalar(input: &ScalarChoice) -> ScalarChoice {
+  return match &input.* { ScalarChoice.Value {value} => ScalarChoice.Value {value: value} }
+}
 struct Choices { values: [Choice; 1] }
 interface Merge { operator + fn add(left: Self, right: Self) -> Self }
 fn add(left: Choice, right: Choice) -> Choice { return move left }
@@ -2237,6 +2241,9 @@ fn readSlice(values: &[Choice], index: usize) -> i32 {
   }
 }
 pub fn main() -> i32 {
+  let original = ScalarChoice.Value {value: 42}
+  let copied = copyScalar(&original)
+  match move copied { ScalarChoice.Value {value} => { if value != 42 { return 1 } } }
   let mut combined = Choice.Left { value: Narrow {first: 20, second: 20} }
     + Choice.Right { value: Wide {first: 0, second: 0} }
   match &mut combined {

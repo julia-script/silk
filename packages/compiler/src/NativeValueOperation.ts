@@ -76,16 +76,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           for (const field of operation.path)
             selectors.push({ _tag: 'FieldSelector', field, provenance: operation.provenance })
         }
-        const place = yield* NativePlaceAddress.resolve(
+        const { address } = yield* NativePlaceAddress.resolve(
           context,
           operation.scrutinee,
           selectors,
           `match${operation.destination.ordinal}`,
-        )
-        const address = yield* NativePlace.base(
-          place,
-          nativeStorage,
-          `match${operation.destination.ordinal}_payload`,
         )
         const slot = nativeStorage.addressStorage.get(operation.destination.ordinal)
         if (slot === undefined) throw new RangeError('Borrowed match lost its entry slot')
@@ -109,7 +104,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const values = direct
         ? yield* NativeStorage.materialize(nativeStorage, operation.scrutinee)
         : undefined
-      const storage = direct
+      const resolved = direct
         ? undefined
         : yield* NativePlaceAddress.resolve(
             context,
@@ -117,6 +112,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
             operation.selectors ?? [],
             `match${operation.destination.ordinal}`,
           )
+      const storage =
+        resolved === undefined
+          ? undefined
+          : NativePlace.stored(context.program.layout, resolved.type, resolved.address)
       const sourceLanes = operation.shape.lanes
       const targetLanes = NativeType.lanesFor(types, operation.type)
       const selected: Array<Value.Input> = []

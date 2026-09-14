@@ -9,7 +9,6 @@ import * as Mir from './Mir.js'
 import * as NativeDebug from './NativeDebug.js'
 import * as NativeLanePointer from './NativeLanePointer.js'
 import type * as NativeOperationContext from './NativeOperationContext.js'
-import * as NativePlace from './NativePlace.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as Type from './Type.js'
@@ -194,5 +193,5 @@ export const resolve = Effect.fnUntraced(function* (
       `${tag}_element`,
     )
   }
-  return NativePlace.stored(program.layout, selected, projected)
+  return Object.freeze({ address: projected, type: selected })
 })

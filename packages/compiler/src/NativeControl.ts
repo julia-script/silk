@@ -52,7 +52,7 @@ const discriminants = Effect.fnUntraced(function* (
   const type = context.entry.fn.localTypes.at(local.ordinal)
   if (selectors.length === 0 && type !== undefined && !SilkType.isReference(Mir.semanticType(type)))
     return (yield* read(context, local)).slice(0, count)
-  const storage = yield* NativePlaceAddress.resolve(
+  const resolved = yield* NativePlaceAddress.resolve(
     {
       ...context.cleanup,
       debug: context.debug,
@@ -61,6 +61,11 @@ const discriminants = Effect.fnUntraced(function* (
     local,
     selectors,
     tag,
+  )
+  const storage = NativePlace.stored(
+    context.cleanup.program.layout,
+    resolved.type,
+    resolved.address,
   )
   const values: Array<Value.Input> = []
   for (let ordinal = 0; ordinal < count; ordinal += 1)
