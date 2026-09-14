@@ -1,3 +1,4 @@
+import * as AncestorHistory from './AncestorHistory.js'
 import type * as ArtifactComposition from './ArtifactComposition.js'
 import * as ConfigurationError from './ConfigurationError.js'
 import * as ConfigurationOrigin from './ConfigurationOrigin.js'
@@ -277,16 +278,30 @@ export interface NonConcreteSpecialization {
   readonly span: Hir.HirFunction['declaration']['syntax']['span']
 }
 
+const requirementBindingsCache = new WeakMap<
+  Hir.HirFunction,
+  ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>>
+>()
+
 export const requirementBindings = (
   fn: Hir.HirFunction,
-): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>> =>
-  fn.statements.flatMap((statement) =>
-    Hir.statementExpressions(statement).flatMap((expression) =>
-      Hir.expressionTree(expression).flatMap((candidate) =>
-        candidate._tag === 'EffectBindRequirement' ? [candidate] : [],
+): ReadonlyArray<Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>> => {
+  const cached = requirementBindingsCache.get(fn)
+  if (cached !== undefined) return cached
+  // Discovery revisits one immutable residual body under different ancestor contexts. Its
+  // binding sites are structural; witness selection still runs with each caller's inputs.
+  const bindings = Object.freeze(
+    fn.statements.flatMap((statement) =>
+      Hir.statementExpressions(statement).flatMap((expression) =>
+        Hir.expressionTree(expression).flatMap((candidate) =>
+          candidate._tag === 'EffectBindRequirement' ? [candidate] : [],
+        ),
       ),
     ),
   )
+  requirementBindingsCache.set(fn, bindings)
+  return bindings
+}
 
 const selectedRequirement = (
   binding: Extract<Hir.Expression, { readonly _tag: 'EffectBindRequirement' }>,
@@ -1174,7 +1189,10 @@ export const discover = (
   }
   const recordedCalls = new Map<string, CallInstance>()
   const providerCalls = new Map<string, CallInstance>()
-  const scheduledContexts = new Set<string>()
+  const scheduledContexts = new Map<string, WorkItem>()
+  const queuedContexts = new Set<string>()
+  const histories = AncestorHistory.make()
+  const ancestorValues = new Map<string, Ancestor>()
   interface Ancestor {
     readonly key: InstanceKey
     readonly structuralProvider?: Type.Type
@@ -1186,7 +1204,7 @@ export const discover = (
   interface WorkItem {
     readonly key: InstanceKey
     readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
-    readonly ancestors: ReadonlyMap<string, Ancestor>
+    readonly ancestors: AncestorHistory.History
     /** Ordinary type arguments retained as the finite structural measure of a cleanup path. */
     readonly cleanupMeasure?: CleanupMeasure
   }
@@ -1216,12 +1234,17 @@ export const discover = (
     return needed
   }
   const withAncestor = (
-    ancestors: ReadonlyMap<string, Ancestor>,
+    history: AncestorHistory.History,
     ancestor: Ancestor,
-  ): ReadonlyMap<string, Ancestor> =>
-    ancestor.structuralProvider === undefined && !needsAncestor(ancestor.key)
-      ? ancestors
-      : new Map(ancestors).set(declarationText(ancestor.key), ancestor)
+  ): AncestorHistory.History => {
+    if (ancestor.structuralProvider === undefined && !needsAncestor(ancestor.key)) return history
+    const value = JSON.stringify([
+      keyText(ancestor.key),
+      ancestor.structuralProvider === undefined ? null : Type.key(ancestor.structuralProvider),
+    ])
+    ancestorValues.set(value, ancestor)
+    return AncestorHistory.set(histories, history, declarationText(ancestor.key), value)
+  }
   const sameArguments = (left: InstanceKey, right: InstanceKey): boolean =>
     left.typeArguments.length === right.typeArguments.length &&
     left.typeArguments.every((argument, index) => {
@@ -1428,7 +1451,7 @@ export const discover = (
   const rootItem = (key: InstanceKey): WorkItem =>
     Object.freeze({
       key,
-      ancestors: withAncestor(new Map(), Object.freeze({ key })),
+      ancestors: withAncestor(histories.initial, Object.freeze({ key })),
     })
   const roots: Array<WorkItem> = retention.map(rootItem)
   // Retain exactly the export implementations admitted by the selected target's C contract.
@@ -1438,44 +1461,31 @@ export const discover = (
   const violationKeys = new Set<string>()
   const specializationFailures = new Map<string, NonConcreteSpecialization>()
   const recordedContexts = new Map<string, Map<string, WorkItem>>()
-  // TLS connection discovery repeats the same long specialization identities across tens of
-  // thousands of paths. Intern the identity atoms locally so path keys retain exact equality
-  // without copying those strings into every ancestor context. These IDs never leave discovery.
-  const contextAtoms = new Map<string, number>()
-  const contextAtom = (value: string): number => {
-    const known = contextAtoms.get(value)
-    if (known !== undefined) return known
-    const identity = contextAtoms.size
-    contextAtoms.set(value, identity)
-    return identity
-  }
+  // Histories are exact correlated sets. Only the non-history execution context determines
+  // a queue bucket; a new canonical history root revisits that bucket's outgoing guards.
   const contextText = (item: WorkItem): string =>
-    `${
-      item.cleanupMeasure === undefined
-        ? 'ordinary'
-        : contextAtom(item.cleanupMeasure.roots.map(Type.runtimeKey).sort().join('\u0000'))
-    }\u0001${contextAtom(keyText(item.key))}\u0001${[...item.ancestors.entries()]
-      .sort(([left], [right]) => {
-        if (left < right) return -1
-        if (left > right) return 1
-        return 0
-      })
-      .map(
-        ([declaration, ancestor]) =>
-          `${contextAtom(declaration)}\u0002${contextAtom(keyText(ancestor.key))}\u0002${ancestor.structuralProvider === undefined ? '' : contextAtom(Type.key(ancestor.structuralProvider))}`,
-      )
-      .join('\u0003')}`
-  const pending: Array<{ readonly item: WorkItem; readonly context: string }> = []
-  // Deduplicate when scheduling, not when draining: shared callees must not fill the queue with
-  // identical work. A cursor keeps FIFO instance order without shifting the remaining array.
+    JSON.stringify([
+      keyText(item.key),
+      item.cleanupMeasure?.roots.map(Type.runtimeKey).sort() ?? null,
+      item.staticArgumentOrigins ?? null,
+    ])
+  const pending: Array<string> = []
   const schedule = (item: WorkItem): boolean => {
     const context = contextText(item)
-    if (scheduledContexts.has(context)) return false
-    scheduledContexts.add(context)
-    pending.push({ item, context })
+    const prior = scheduledContexts.get(context)
+    const ancestors =
+      prior === undefined
+        ? item.ancestors
+        : AncestorHistory.union(histories, prior.ancestors, item.ancestors)
+    if (prior?.ancestors === ancestors) return false
+    scheduledContexts.set(context, Object.freeze({ ...item, ancestors }))
+    if (!queuedContexts.has(context)) {
+      queuedContexts.add(context)
+      pending.push(context)
+    }
     return true
   }
-  for (const item of roots) schedule(item)
+  for (const root of roots) schedule(root)
   const cleanupPrepassTargets = (
     fn: Hir.HirFunction,
     fact: Elaboration.FunctionFact,
@@ -1520,9 +1530,11 @@ export const discover = (
     )
   while (true) {
     for (let cursor = 0; cursor < pending.length; cursor += 1) {
-      const queued = pending[cursor]
-      if (queued === undefined) continue
-      const { item, context } = queued
+      const context = pending[cursor]
+      if (context === undefined) continue
+      queuedContexts.delete(context)
+      const item = scheduledContexts.get(context)
+      if (item === undefined) continue
       const key = item.key
       const ownerContexts = recordedContexts.get(keyText(key)) ?? new Map<string, WorkItem>()
       ownerContexts.set(context, item)
@@ -1733,57 +1745,67 @@ export const discover = (
           call.staticArguments ?? Object.freeze([]),
           call.evidence ?? Object.freeze([]),
         )
-        const ancestor = item.ancestors.get(declarationText(targetKey))
-        const structurallyDescending =
-          call.structuralProvider !== undefined &&
-          ancestor?.structuralProvider !== undefined &&
-          Type.isStrictStructuralSubterm(call.structuralProvider, ancestor.structuralProvider)
-        const cleanup = cleanupTransition(
-          item.cleanupMeasure,
-          targetKey,
-          ordinaryIdentities.has(identity) ? Object.freeze([]) : (cleanupRoots.get(identity) ?? []),
-        )
-        const terminalCallableSpecialization =
-          ancestor !== undefined && sameRuntimeNonCallableArguments(ancestor.key, targetKey)
-        const cleanupSpecialization = cleanupPermitsSpecialization(
-          ancestor?.key,
-          targetKey,
-          cleanup,
-        )
-        if (
-          ancestor !== undefined &&
-          !sameArguments(ancestor.key, targetKey) &&
-          !structurallyDescending &&
-          !cleanupSpecialization &&
-          !terminalCallableSpecialization
-        ) {
-          const violationKey = `${keyText(key)}\u0000${keyText(targetKey)}`
-          if (!violationKeys.has(violationKey)) {
-            violationKeys.add(violationKey)
-            violations.push(
-              Object.freeze({ _tag: 'PolymorphicRecursion', caller: key, target: targetKey }),
-            )
+        for (const [value, branchHistory] of AncestorHistory.partition(
+          histories,
+          item.ancestors,
+          declarationText(targetKey),
+        )) {
+          const ancestor = value === undefined ? undefined : ancestorValues.get(value)
+          const structurallyDescending =
+            call.structuralProvider !== undefined &&
+            ancestor?.structuralProvider !== undefined &&
+            Type.isStrictStructuralSubterm(call.structuralProvider, ancestor.structuralProvider)
+          const cleanup = cleanupTransition(
+            item.cleanupMeasure,
+            targetKey,
+            ordinaryIdentities.has(identity)
+              ? Object.freeze([])
+              : (cleanupRoots.get(identity) ?? []),
+          )
+          const terminalCallableSpecialization =
+            ancestor !== undefined && sameRuntimeNonCallableArguments(ancestor.key, targetKey)
+          const cleanupSpecialization = cleanupPermitsSpecialization(
+            ancestor?.key,
+            targetKey,
+            cleanup,
+          )
+          if (
+            ancestor !== undefined &&
+            !sameArguments(ancestor.key, targetKey) &&
+            !structurallyDescending &&
+            !cleanupSpecialization &&
+            !terminalCallableSpecialization
+          ) {
+            const violationKey = `${keyText(key)}\u0000${keyText(targetKey)}`
+            if (!violationKeys.has(violationKey)) {
+              violationKeys.add(violationKey)
+              violations.push(
+                Object.freeze({ _tag: 'PolymorphicRecursion', caller: key, target: targetKey }),
+              )
+            }
+            continue
           }
-          continue
+          schedule(
+            Object.freeze({
+              key: targetKey,
+              ...(call.staticArgumentOrigins === undefined
+                ? {}
+                : { staticArgumentOrigins: call.staticArgumentOrigins }),
+              ancestors: withAncestor(
+                branchHistory,
+                Object.freeze({
+                  key: targetKey,
+                  ...(call.structuralProvider === undefined
+                    ? {}
+                    : { structuralProvider: call.structuralProvider }),
+                }),
+              ),
+              ...(cleanupSpecialization && cleanup !== undefined
+                ? { cleanupMeasure: cleanup }
+                : {}),
+            }),
+          )
         }
-        schedule(
-          Object.freeze({
-            key: targetKey,
-            ...(call.staticArgumentOrigins === undefined
-              ? {}
-              : { staticArgumentOrigins: call.staticArgumentOrigins }),
-            ancestors: withAncestor(
-              item.ancestors,
-              Object.freeze({
-                key: targetKey,
-                ...(call.structuralProvider === undefined
-                  ? {}
-                  : { structuralProvider: call.structuralProvider }),
-              }),
-            ),
-            ...(cleanupSpecialization && cleanup !== undefined ? { cleanupMeasure: cleanup } : {}),
-          }),
-        )
       }
     }
     pending.length = 0
@@ -1820,48 +1842,54 @@ export const discover = (
     for (const provided of currentGraph.providedTargets) {
       for (const ownerContext of recordedContexts.get(keyText(provided.owner))?.values() ?? []) {
         const declaration = declarationText(provided.target)
-        const ancestor = ownerContext.ancestors.get(declaration)
-        // A cleanup implementation can select another specialization of the same lexical service
-        // operation while recursively releasing a field. Admit only targets proved reachable from
-        // the providing owner's finite cleanup plan; unrelated provider recursion stays guarded.
-        const cleanupRoots = cleanupRootsOf(provided.owner, provided.target)
-        const cleanup = cleanupTransition(
-          ownerContext.cleanupMeasure,
-          provided.target,
-          cleanupRoots,
-        )
-        const cleanupSpecialization = cleanupPermitsSpecialization(
-          ancestor?.key,
-          provided.target,
-          cleanup,
-        )
-        if (
-          ancestor !== undefined &&
-          !sameArguments(ancestor.key, provided.target) &&
-          !cleanupSpecialization
-        ) {
-          const violationKey = `${keyText(provided.owner)}\u0000${keyText(provided.target)}`
-          if (!violationKeys.has(violationKey)) {
-            violationKeys.add(violationKey)
-            violations.push(
-              Object.freeze({
-                _tag: 'PolymorphicRecursion',
-                caller: provided.owner,
-                target: provided.target,
-              }),
-            )
+        for (const [value, branchHistory] of AncestorHistory.partition(
+          histories,
+          ownerContext.ancestors,
+          declaration,
+        )) {
+          const ancestor = value === undefined ? undefined : ancestorValues.get(value)
+          // A cleanup implementation can select another specialization of the same lexical service
+          // operation while recursively releasing a field. Admit only targets proved reachable from
+          // the providing owner's finite cleanup plan; unrelated provider recursion stays guarded.
+          const cleanupRoots = cleanupRootsOf(provided.owner, provided.target)
+          const cleanup = cleanupTransition(
+            ownerContext.cleanupMeasure,
+            provided.target,
+            cleanupRoots,
+          )
+          const cleanupSpecialization = cleanupPermitsSpecialization(
+            ancestor?.key,
+            provided.target,
+            cleanup,
+          )
+          if (
+            ancestor !== undefined &&
+            !sameArguments(ancestor.key, provided.target) &&
+            !cleanupSpecialization
+          ) {
+            const violationKey = `${keyText(provided.owner)}\u0000${keyText(provided.target)}`
+            if (!violationKeys.has(violationKey)) {
+              violationKeys.add(violationKey)
+              violations.push(
+                Object.freeze({
+                  _tag: 'PolymorphicRecursion',
+                  caller: provided.owner,
+                  target: provided.target,
+                }),
+              )
+            }
+            continue
           }
-          continue
+          const item = Object.freeze({
+            key: provided.target,
+            ...(provided.staticArgumentOrigins === undefined
+              ? {}
+              : { staticArgumentOrigins: provided.staticArgumentOrigins }),
+            ancestors: withAncestor(branchHistory, Object.freeze({ key: provided.target })),
+            ...(cleanupSpecialization && cleanup !== undefined ? { cleanupMeasure: cleanup } : {}),
+          })
+          if (schedule(item)) scheduledProvided = true
         }
-        const item = Object.freeze({
-          key: provided.target,
-          ...(provided.staticArgumentOrigins === undefined
-            ? {}
-            : { staticArgumentOrigins: provided.staticArgumentOrigins }),
-          ancestors: withAncestor(ownerContext.ancestors, Object.freeze({ key: provided.target })),
-          ...(cleanupSpecialization && cleanup !== undefined ? { cleanupMeasure: cleanup } : {}),
-        })
-        if (schedule(item)) scheduledProvided = true
       }
     }
     if (!scheduledProvided) {

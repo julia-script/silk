@@ -767,6 +767,8 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
       // Running a captured Effect is an execution edge even when no ordinary call targets its
       // owner. Recovery combinators, for example, execute a protected Effect parameter. Follow
       // its specialized identity rather than recognizing the combinator's declaration spelling.
+      // A source wrapper may first store the bound recipe in an immutable local; resolve that
+      // binding through the same execution-source graph before following its protected parameter.
       return candidate.function.statements
         .flatMap(Hir.statementExpressions)
         .flatMap(Hir.expressionTree)
@@ -774,7 +776,8 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
           (expression) =>
             expression._tag === 'Run' &&
             Hir.expressionTree(expression.subject).some((nested) => {
-              if (nested._tag !== 'ParameterReference') return false
+              if (nested._tag !== 'ParameterReference' && nested._tag !== 'BindingReference')
+                return false
               return executionSources(candidate, nested).some((owner) =>
                 reachesExecutionOwner(owner, expected, seen),
               )
@@ -794,7 +797,7 @@ export const plan = (discovery: Instances.Discovery, index: DeclarationIndex.Ind
               .flatMap((candidate): ReadonlyArray<Provider> => {
                 if (candidate._tag !== 'EffectBindRequirement') return []
                 const reachesOwner = Hir.expressionTree(candidate.protected).some((nested) => {
-                  if (nested._tag === 'ParameterReference') {
+                  if (nested._tag === 'ParameterReference' || nested._tag === 'BindingReference') {
                     return executionSources(caller, nested).some((owner) =>
                       reachesExecutionOwner(owner, origin.owner),
                     )
