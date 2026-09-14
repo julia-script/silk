@@ -698,6 +698,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         throw new RangeError('Backend place read lost its root type')
       }
       const sourceSemantic = Mir.semanticType(sourceType)
+      if (sourceType._tag === 'Slice' && operation.selectors.length === 0) {
+        yield* NativeStorage.copyLocal(nativeStorage, operation.destination, operation.root)
+        break
+      }
       if (
         !SilkType.isReference(sourceSemantic) &&
         !SilkType.isSlice(sourceSemantic) &&
@@ -1088,6 +1092,8 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     }
     case 'CheckPlace': {
       const rootType = entry.fn.localTypes.at(operation.root.ordinal)
+      // Rebinding the descriptor selects no element and therefore has no bounds check.
+      if (rootType?._tag === 'Slice' && operation.selectors.length === 0) break
       if (rootType?._tag === 'Slice') {
         const selector = operation.selectors.at(0)
         const length = (yield* NativeStorage.materialize(nativeStorage, operation.root)).at(1)
@@ -1160,6 +1166,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       break
     }
     case 'WritePlace': {
+      if (operation.rootType._tag === 'Slice' && operation.selectors.length === 0) {
+        yield* NativeStorage.copyLocal(nativeStorage, operation.root, operation.source)
+        break
+      }
       if (
         operation.rootType._tag !== 'Reference' &&
         operation.rootType._tag !== 'Slice' &&

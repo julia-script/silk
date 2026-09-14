@@ -2,6 +2,7 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as MirVerification from '../src/MirVerification.js'
 
 const ascii = (value: string): Uint8Array =>
   Uint8Array.from(value, (character) => character.charCodeAt(0))
@@ -73,5 +74,43 @@ pub fn main() -> i32 {
       artifact.ir,
       /%slice(\d+)_selected = getelementptr i8, ptr %slice\1_element, i32 4\n\s+%\w+ = load i32, ptr %slice\1_selected/,
     )
+  }),
+)
+
+it.effect('rebinds a whole slice descriptor without treating it as an indexed write', () =>
+  Effect.gen(function* () {
+    const self = yield* AnalysisFixture.retainingMain(
+      'runtime-slice-native/rebind',
+      ascii(`import silk.u8
+pub fn main() -> i32 {
+  let mut view: &[u8] = b"old"
+  view = b"new value"
+  return u8.toI32(view[1])
+}`),
+      'aarch64-apple-darwin',
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const main = mir.functions.find((fn) => fn.id.name === 'main')
+    assert.ok(main)
+    const operations = MirVerification.operations(main)
+    assert.isTrue(
+      operations.some(
+        (operation) =>
+          operation._tag === 'CheckPlace' &&
+          operation.selectors.length === 0 &&
+          main.localTypes.at(operation.root.ordinal)?._tag === 'Slice',
+      ),
+    )
+    assert.isTrue(
+      operations.some(
+        (operation) =>
+          operation._tag === 'WritePlace' &&
+          operation.selectors.length === 0 &&
+          operation.rootType._tag === 'Slice',
+      ),
+    )
+    yield* Analysis.codegen(self, { mode: 'debug' })
   }),
 )
