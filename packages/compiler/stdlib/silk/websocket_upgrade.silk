@@ -1,0 +1,1168 @@
+//! Bounded WebSocket server handshake inspection and explicit application acceptance.
+//!
+//! # Details
+//!
+//! `inspect` borrows a parsed HTTP head without allocation. `withUpgrade` runs the application
+//! decision before output, flushes the switching response, then lends the existing buffered channel.
+//! Origin is policy input, not authentication. Valid extension offers are declined; frames and
+//! compression are outside this module.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.base64 {Base64}
+import silk.buffered_duplex {BufferedDuplex}
+import silk.byte_duplex {ByteDuplex}
+import silk.effect {Effect}
+import silk.http {Header, Version, Status, ResponseHead, OwnedResponseHead, ValueError}
+import silk.http_head {RequestHead, responseSerializedSize}
+import silk.http_headers {Headers}
+import silk.http_headers as HttpHeaders
+import silk.http_server {Request, ServerError}
+import silk.http_server as HttpServer
+import silk.http_target {RequestTarget, HttpAuthority}
+import silk.layout {Layout}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.result {Result}
+import silk.sha1 {Sha1}
+import silk.slice {Slice}
+import silk.string {String}
+import silk.system_clock {Instant}
+import silk.usize
+import silk.vector {Vector}
+
+/// Finite handshake budgets. Zero forbids the corresponding resource.
+pub struct Limits {
+  /// Maximum offered subprotocol tokens across all fields.
+  pub maxProtocols: usize
+  /// Maximum bytes in each offered subprotocol token.
+  pub maxProtocolBytes: usize
+  /// Maximum aggregate extension field-value bytes.
+  pub maxExtensionBytes: usize
+  /// Maximum serialized response bytes, including generated fields.
+  pub maxResponseBytes: usize
+  /// Maximum simultaneous owned payload and index capacities for the response plan.
+  pub maxOwnedBytes: usize
+}
+
+impl Copy for Limits {}
+
+impl Limits {
+  /// Returns the default finite handshake budgets.
+  ///
+  /// # Details
+  ///
+  /// The defaults are 32 protocols, 128 token bytes, 4096 extension bytes, 8192 response bytes, and 16384 owned bytes.
+  pub fn default() -> Limits {
+    return Limits {
+      maxProtocols: 32,
+      maxProtocolBytes: 128,
+      maxExtensionBytes: 4096,
+      maxResponseBytes: 8192,
+      maxOwnedBytes: 16384,
+    }
+  }
+}
+
+/// The peer-input rule that rejected an offer.
+pub enum ValidationReason {
+  /// The method or HTTP version is unsupported.
+  Request,
+  /// A required field is absent or a singleton field repeats.
+  Singleton,
+  /// Host is not a valid HTTP authority.
+  Host,
+  /// A comma-token field has invalid syntax or lacks a required token.
+  Tokens,
+  /// Connection explicitly requests closure.
+  ConnectionClose,
+  /// The version field has invalid decimal syntax.
+  Version,
+  /// The key is not canonical padded Base64 for sixteen bytes.
+  Key,
+  /// Request framing permits a nonempty body.
+  Body,
+  /// An Expect field is present.
+  Expect,
+  /// Origin is not one serialized HTTP(S) origin or null.
+  Origin,
+  /// A subprotocol token occurs more than once.
+  DuplicateProtocol,
+  /// The extension field grammar is malformed.
+  Extensions,
+}
+
+/// The finite budget that rejected the handshake.
+pub enum LimitKind {
+  /// Too many offered protocols.
+  Protocols,
+  /// An offered protocol is too long.
+  ProtocolBytes,
+  /// Extension fields exceed their aggregate budget.
+  ExtensionBytes,
+  /// Serialized response bytes exceed the budget.
+  ResponseBytes,
+  /// Owned capacities exceed the budget.
+  OwnedBytes,
+  /// Checked size arithmetic overflowed.
+  SizeOverflow,
+}
+
+/// The application decision rule that failed before output.
+pub enum DecisionReason {
+  /// The selected protocol is not exactly one offered token.
+  Protocol,
+  /// An extra response field overrides a generated or framing field.
+  Header,
+  /// Application rejection must use a final response status.
+  Status,
+}
+
+/// A typed inspection or decision failure. No variant writes a response by itself.
+pub union UpgradeError {
+  /// Peer metadata violates the selected WebSocket handshake profile.
+  Validation {
+    /// The failed peer-input rule.
+    pub reason: ValidationReason,
+  },
+  /// A well-formed version is unsupported; the server supports version 13.
+  UnsupportedVersion {
+    /// The supported protocol version, always 13.
+    pub supported: u16,
+  },
+  /// A finite budget or checked size operation failed.
+  Limit {
+    /// The exceeded budget or overflow category.
+    pub kind: LimitKind,
+  },
+  /// Application acceptance cannot be serialized as a valid handshake.
+  InvalidDecision {
+    /// The failed application decision rule.
+    pub reason: DecisionReason,
+  },
+  /// Application acceptance requested an unimplemented extension.
+  UnsupportedNegotiation,
+  /// Shared HTTP value validation rejected response metadata.
+  Value {
+    /// The original structured HTTP value failure.
+    pub error: ValueError,
+  },
+}
+
+/// Validated metadata that borrows one parsed request and cannot authorize another request.
+pub struct Offer<'head> {
+  head: RequestHead<'head>
+  key: &'head [u8]
+  hostValue: &'head [u8]
+  originValue: Option<&'head [u8]>
+  count: usize
+  extensions: bool
+}
+
+impl<'head> Offer<'head> {
+  /// Returns the request target borrowed from the parsed head.
+  pub fn target(self: &Self) -> RequestTarget<'head> {
+    return self.head.target()
+  }
+  /// Returns the validated Host field bytes.
+  pub fn host(self: &Self) -> &'head [u8] {
+    return self.hostValue
+  }
+  /// Returns absent Origin or its exact validated bytes, including literal null.
+  pub fn origin(self: &Self) -> Option<&'head [u8]> {
+    return match & self.originValue {
+      Option.None => Option.none<&'head [u8]>()
+      Option.Some {value} => Option.some<&'head [u8]>(value)
+    }
+  }
+  /// Returns the number of unique protocols in combined wire order.
+  pub fn protocolCount(self: &Self) -> usize {
+    return self.count
+  }
+  /// Returns one protocol by combined wire index, or None for an absent index.
+  pub fn protocolAt(self: &Self, index: usize) -> Option<&'head [u8]> {
+    return protocolAt(&self.head, index)
+  }
+  /// Returns whether at least one syntactically valid extension field was supplied.
+  pub fn extensionsPresent(self: &Self) -> bool {
+    return self.extensions
+  }
+  /// Writes the 28-byte accept value into caller storage without allocation.
+  pub fn acceptInto(self: &Self, output: &mut [u8]) -> Result<usize, UpgradeError> {
+    return acceptInto(self.key, &mut output)
+  }
+}
+
+/// Validates a canonical sixteen-byte WebSocket key and writes its 28-byte accept value.
+///
+/// # Details
+///
+/// This pure transformation trims outer HTTP OWS and hashes the original encoded key. It does not
+/// authorize an upgrade. Invalid input or insufficient output capacity leaves output unchanged.
+pub fn acceptInto(key: &[u8], output: &mut [u8]) -> Result<usize, UpgradeError> {
+  let bytes = trim(key)
+  let length = match move Base64.decodedLength(bytes) {
+    Result.Failure {error} => {
+      drop error
+      return invalid<usize>(ValidationReason.Key)
+    }
+    Result.Success {value} => value
+  }
+  if length != 16 {
+    return invalid<usize>(ValidationReason.Key)
+  }
+  if output.length < 28 {
+    return limited<usize>(LimitKind.ResponseBytes)
+  }
+  let mut hash = Sha1.make()
+  hash.update(bytes)
+  hash.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+  let digest = hash.finish()
+  return match move Base64.encodeInto(&mut output, &digest) {
+    Result.Failure {error} => {
+      drop error
+      return invalid<usize>(ValidationReason.Key)
+    }
+    Result.Success {value} => Result.succeed<usize, UpgradeError>(value)
+  }
+}
+
+/// The completed handshake outcome, including ordinary application rejection.
+pub union Outcome<A> {
+  /// The upgraded channel callback completed successfully.
+  Upgraded {
+    /// The callback's result.
+    pub value: A,
+  },
+  /// The application rejection was sent as an ordinary HTTP response.
+  Rejected {
+    /// The sent HTTP status code.
+    pub status: u16,
+  },
+}
+
+/// An explicit application decision whose values borrow caller configuration, not the request.
+pub union Decision<'config> {
+  /// Accepts an optional offered protocol and ordinary response headers. Extensions must be false.
+  Accept {
+    /// No protocol, or exactly one case-sensitive offered token.
+    pub protocol: Option<string<'config>>,
+    /// Validated extra fields; repeated ordinary fields remain in order.
+    pub headers: Option<Headers<'config>>,
+    /// Requests extension negotiation. True fails with UnsupportedNegotiation.
+    pub extensions: bool,
+  },
+  /// Sends an ordinary final body-free rejection and does not lend the channel.
+  Reject {
+    /// The application-selected final HTTP status.
+    pub status: Status,
+    /// Optional ordinary response fields, including authentication headers.
+    pub headers: Option<Headers<'config>>,
+  },
+}
+
+/// A compile-time policy that makes one explicit decision from a scoped request offer.
+pub interface DecisionHandler<'config, D, ?R> {
+  /// Consumes policy context and preserves its failure and requirement channels.
+  effect<'call> fn decide<'call, 'head: 'call>(handler: Self, offer: &'call Offer<'head>) -> Decision<
+    'config,
+  > ! D ? R
+}
+
+/// Validates one borrowed parsed request without allocation or ambient services.
+pub fn inspect<'head>(head: &RequestHead<'head>, limits: Limits) -> Result<
+  Offer<'head>,
+  UpgradeError,
+> {
+  let method = head.method()
+  if head.version() != Version.Http11 || method.format() != "GET" {
+    return invalid<Offer<'head>>(ValidationReason.Request)
+  }
+  let mut host = Option.none<&'head [u8]>()
+  let mut key = Option.none<&'head [u8]>()
+  let mut origin = Option.none<&'head [u8]>()
+  let mut hosts = usize.ZERO
+  let mut keys = usize.ZERO
+  let mut versions = usize.ZERO
+  let mut origins = usize.ZERO
+  let mut lengths = usize.ZERO
+  let mut connection = false
+  let mut upgrade = false
+  let mut unsupported = false
+  let mut protocols = usize.ZERO
+  let mut extensionBytes = usize.ZERO
+  let mut extensions = false
+  let mut fields = head.fields()
+  while true {
+    let field = match move fields.next() {
+      Option.None => {
+        break
+      }
+      Option.Some {value} => value
+    }
+    let name = field.name()
+    let bytes = trim(field.value())
+    if nameIs(name, "host") {
+      hosts = hosts + usize.ONE
+      if hosts > usize.ONE {
+        return invalid<Offer<'head>>(ValidationReason.Singleton)
+      }
+      if !authority(bytes) {
+        return invalid<Offer<'head>>(ValidationReason.Host)
+      }
+      host = Option.some<&'head [u8]>(bytes)
+    } else if nameIs(name, "sec-websocket-key") {
+      keys = keys + usize.ONE
+      if keys > usize.ONE {
+        return invalid<Offer<'head>>(ValidationReason.Singleton)
+      }
+      let decoded = Base64.decodedLength(bytes)
+      let length = match move decoded {
+        Result.Failure {error} => {
+          drop error
+          return invalid<Offer<'head>>(ValidationReason.Key)
+        }
+        Result.Success {value} => value
+      }
+      if length != 16 {
+        return invalid<Offer<'head>>(ValidationReason.Key)
+      }
+      key = Option.some<&'head [u8]>(bytes)
+    } else if nameIs(name, "sec-websocket-version") {
+      versions = versions + usize.ONE
+      if versions > usize.ONE {
+        return invalid<Offer<'head>>(ValidationReason.Singleton)
+      }
+      if !decimal(bytes) || bytes.length > 3 || (bytes.length > usize.ONE && bytes[0] == 48) {
+        return invalid<Offer<'head>>(ValidationReason.Version)
+      }
+      if bytes.length == 3 && (bytes[0] > 50 || (bytes[0] == 50 && (bytes[1] > 53 || (bytes[1] == 53 && bytes[2] > 53)))) {
+        return invalid<Offer<'head>>(ValidationReason.Version)
+      }
+      unsupported = !equal(bytes, b"13", false)
+    } else if nameIs(name, "connection") || nameIs(name, "upgrade") {
+      if !tokenList(bytes) {
+        return invalid<Offer<'head>>(ValidationReason.Tokens)
+      }
+      if nameIs(name, "connection") {
+        if contains(bytes, b"close", true) {
+          return invalid<Offer<'head>>(ValidationReason.ConnectionClose)
+        }
+        if contains(bytes, b"upgrade", true) {
+          connection = true
+        }
+      } else if contains(bytes, b"websocket", true) {
+        upgrade = true
+      }
+    } else if nameIs(name, "transfer-encoding") {
+      return invalid<Offer<'head>>(ValidationReason.Body)
+    } else if nameIs(name, "content-length") {
+      lengths = lengths + usize.ONE
+      if lengths > usize.ONE || !decimal(bytes) {
+        return invalid<Offer<'head>>(ValidationReason.Body)
+      }
+      let mut index = usize.ZERO
+      while index < bytes.length {
+        if bytes[index] != 48 {
+          return invalid<Offer<'head>>(ValidationReason.Body)
+        }
+        index = index + usize.ONE
+      }
+    } else if nameIs(name, "expect") {
+      return invalid<Offer<'head>>(ValidationReason.Expect)
+    } else if nameIs(name, "origin") {
+      origins = origins + usize.ONE
+      if origins > usize.ONE {
+        return invalid<Offer<'head>>(ValidationReason.Singleton)
+      }
+      if !validOrigin(bytes) {
+        return invalid<Offer<'head>>(ValidationReason.Origin)
+      }
+      origin = Option.some<&'head [u8]>(bytes)
+    } else if nameIs(name, "sec-websocket-protocol") {
+      if !tokenList(bytes) {
+        return invalid<Offer<'head>>(ValidationReason.Tokens)
+      }
+      let mut cursor = usize.ZERO
+      while cursor < bytes.length {
+        let span = segment(bytes, cursor)
+        let value = trim(Slice.view<u8>(bytes, cursor, span - cursor))
+        if protocols >= limits.maxProtocols {
+          return limited<Offer<'head>>(LimitKind.Protocols)
+        }
+        if value.length > limits.maxProtocolBytes {
+          return limited<Offer<'head>>(LimitKind.ProtocolBytes)
+        }
+        let mut previous = usize.ZERO
+        while previous < protocols {
+          let earlier = protocolAt(head, previous)
+          if let Option.Some {value: token} = move earlier {
+            if equal(token, value, false) {
+              return invalid<Offer<'head>>(ValidationReason.DuplicateProtocol)
+            }
+          }
+          previous = previous + usize.ONE
+        }
+        protocols = protocols + usize.ONE
+        if span == bytes.length {
+          break
+        }
+        cursor = span + usize.ONE
+      }
+    } else if nameIs(name, "sec-websocket-extensions") {
+      extensions = true
+      extensionBytes = match move usize.checkedAdd(extensionBytes, field.value().length) {
+        Option.None => {
+          return limited<Offer<'head>>(LimitKind.SizeOverflow)
+        }
+        Option.Some {value} => value
+      }
+      if extensionBytes > limits.maxExtensionBytes {
+        return limited<Offer<'head>>(LimitKind.ExtensionBytes)
+      }
+      if !validExtensions(bytes) {
+        return invalid<Offer<'head>>(ValidationReason.Extensions)
+      }
+    }
+  }
+  if hosts != usize.ONE || keys != usize.ONE || versions != usize.ONE {
+    return invalid<Offer<'head>>(ValidationReason.Singleton)
+  }
+  if !connection || !upgrade {
+    return invalid<Offer<'head>>(ValidationReason.Tokens)
+  }
+  if unsupported {
+    return Result.failResult<Offer<'head>, UpgradeError>(
+      UpgradeError.UnsupportedVersion {supported: 13},
+    )
+  }
+  let hostBytes = match move host {
+    Option.None => {
+      return invalid<Offer<'head>>(ValidationReason.Singleton)
+    }
+    Option.Some {value} => value
+  }
+  let keyBytes = match move key {
+    Option.None => {
+      return invalid<Offer<'head>>(ValidationReason.Singleton)
+    }
+    Option.Some {value} => value
+  }
+  return Result.succeed<Offer<'head>, UpgradeError>(
+    Offer {
+      head: head.*,
+      key: keyBytes,
+      hostValue: hostBytes,
+      originValue: move origin,
+      count: protocols,
+      extensions: extensions,
+    },
+  )
+}
+
+/// Returns the default rejection status without writing: 417 for Expect, 426 for version, otherwise 400.
+pub fn rejectionStatus(error: &UpgradeError) -> u16 {
+  return match & error.* {
+    UpgradeError.UnsupportedVersion {supported} => {
+      drop supported
+      return 426
+    }
+    UpgradeError.Validation {reason} => {
+      if reason == ValidationReason.Expect {
+        return 417
+      }
+      return 400
+    }
+    _ => 400
+  }
+}
+
+fn invalid<T>(reason: ValidationReason) -> Result<T, UpgradeError> {
+  return Result.failResult<T, UpgradeError>(UpgradeError.Validation {reason: reason})
+}
+
+fn limited<T>(kind: LimitKind) -> Result<T, UpgradeError> {
+  return Result.failResult<T, UpgradeError>(UpgradeError.Limit {kind: kind})
+}
+
+fn lower(value: u8) -> u8 {
+  if value >= 65 && value <= 90 {
+    return value + 32
+  }
+  return value
+}
+
+fn equal(left: &[u8], right: &[u8], insensitive: bool) -> bool {
+  if left.length != right.length {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if insensitive {
+      if lower(left[index]) != lower(right[index]) {
+        return false
+      }
+    } else if left[index] != right[index] {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn nameIs(left: string, right: string) -> bool {
+  return equal(String.utf8Bytes(left), String.utf8Bytes(right), true)
+}
+
+fn trim<'a>(bytes: &'a [u8]) -> &'a [u8] {
+  let mut start = usize.ZERO
+  let mut end = bytes.length
+  while start < end && (bytes[start] == 32 || bytes[start] == 9) {
+    start = start + usize.ONE
+  }
+  while end > start && (bytes[end - usize.ONE] == 32 || bytes[end - usize.ONE] == 9) {
+    end = end - usize.ONE
+  }
+  return Slice.view<u8>(bytes, start, end - start)
+}
+
+fn token(value: u8) -> bool {
+  return (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || (value >= 48 && value <= 57) || value == 33 || value == 35 || value == 36 || value == 37 || value == 38 || value == 39 || value == 42 || value == 43 || value == 45 || value == 46 || value == 94 || value == 95 || value == 96 || value == 124 || value == 126
+}
+
+fn segment(bytes: &[u8], start: usize) -> usize {
+  let mut end = start
+  while end < bytes.length && bytes[end] != 44 {
+    end = end + usize.ONE
+  }
+  return end
+}
+
+fn tokenList(bytes: &[u8]) -> bool {
+  if bytes.length == usize.ZERO {
+    return false
+  }
+  let mut start = usize.ZERO
+  while true {
+    let end = segment(bytes, start)
+    let value = trim(Slice.view<u8>(bytes, start, end - start))
+    if value.length == usize.ZERO {
+      return false
+    }
+    let mut index = usize.ZERO
+    while index < value.length {
+      if !token(value[index]) {
+        return false
+      }
+      index = index + usize.ONE
+    }
+    if end == bytes.length {
+      return true
+    }
+    start = end + usize.ONE
+  }
+  return false
+}
+
+fn contains(bytes: &[u8], wanted: &[u8], insensitive: bool) -> bool {
+  let mut start = usize.ZERO
+  while start < bytes.length {
+    let end = segment(bytes, start)
+    if equal(trim(Slice.view<u8>(bytes, start, end - start)), wanted, insensitive) {
+      return true
+    }
+    if end == bytes.length {
+      break
+    }
+    start = end + usize.ONE
+  }
+  return false
+}
+
+fn protocolAt<'head>(head: &RequestHead<'head>, wanted: usize) -> Option<&'head [u8]> {
+  let mut fields = head.fields()
+  let mut index = usize.ZERO
+  while true {
+    let field = match move fields.next() {
+      Option.None => {
+        return Option.none<&'head [u8]>()
+      }
+      Option.Some {value} => value
+    }
+    if nameIs(field.name(), "sec-websocket-protocol") {
+      let bytes = field.value()
+      let mut start = usize.ZERO
+      while start < bytes.length {
+        let end = segment(bytes, start)
+        if index == wanted {
+          return Option.some<&'head [u8]>(trim(Slice.view<u8>(bytes, start, end - start)))
+        }
+        index = index + usize.ONE
+        if end == bytes.length {
+          break
+        }
+        start = end + usize.ONE
+      }
+    }
+  }
+  return Option.none<&'head [u8]>()
+}
+
+fn decimal(bytes: &[u8]) -> bool {
+  if bytes.length == usize.ZERO {
+    return false
+  }
+  let mut index = usize.ZERO
+  while index < bytes.length {
+    if bytes[index] < 48 || bytes[index] > 57 {
+      return false
+    }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn authority(bytes: &[u8]) -> bool {
+  let text = match move String.fromUtf8(bytes) {
+    Result.Failure {error} => {
+      drop error
+      return false
+    }
+    Result.Success {value} => value
+  }
+  return match move HttpAuthority.parse(text) {
+    Result.Failure {error} => {
+      drop error
+      return false
+    }
+    Result.Success {value} => {
+      drop value
+      return true
+    }
+  }
+}
+
+fn validOrigin(bytes: &[u8]) -> bool {
+  if equal(bytes, b"null", false) {
+    return true
+  }
+  let mut offset = usize.ZERO
+  if bytes.length >= 7 && equal(Slice.view<u8>(bytes, 0, 7), b"http://", false) {
+    offset = 7
+  } else if bytes.length >= 8 && equal(Slice.view<u8>(bytes, 0, 8), b"https://", false) {
+    offset = 8
+  } else {
+    return false
+  }
+  return authority(Slice.view<u8>(bytes, offset, bytes.length - offset))
+}
+
+fn skipOws(bytes: &[u8], start: usize) -> usize {
+  let mut index = start
+  while index < bytes.length && (bytes[index] == 32 || bytes[index] == 9) {
+    index = index + usize.ONE
+  }
+  return index
+}
+
+fn scanToken(bytes: &[u8], start: usize) -> usize {
+  let mut index = start
+  while index < bytes.length && token(bytes[index]) {
+    index = index + usize.ONE
+  }
+  return index
+}
+
+fn validExtensions(bytes: &[u8]) -> bool {
+  let mut index = usize.ZERO
+  if bytes.length == usize.ZERO {
+    return false
+  }
+  while index < bytes.length {
+    let start = skipOws(bytes, index)
+    index = scanToken(bytes, start)
+    if index == start {
+      return false
+    }
+    index = skipOws(bytes, index)
+    while index < bytes.length && bytes[index] == 59 {
+      index = skipOws(bytes, index + usize.ONE)
+      let parameter = index
+      index = scanToken(bytes, index)
+      if index == parameter {
+        return false
+      }
+      index = skipOws(bytes, index)
+      if index < bytes.length && bytes[index] == 61 {
+        index = skipOws(bytes, index + usize.ONE)
+        if index >= bytes.length {
+          return false
+        }
+        if bytes[index] == 34 {
+          index = index + usize.ONE
+          let mut count = usize.ZERO
+          while index < bytes.length && bytes[index] != 34 {
+            if bytes[index] == 92 {
+              index = index + usize.ONE
+              if index >= bytes.length {
+                return false
+              }
+            }
+            if !token(bytes[index]) {
+              return false
+            }
+            count = count + usize.ONE
+            index = index + usize.ONE
+          }
+          if index >= bytes.length || count == usize.ZERO {
+            return false
+          }
+          index = index + usize.ONE
+        } else {
+          let value = index
+          index = scanToken(bytes, index)
+          if index == value {
+            return false
+          }
+        }
+        index = skipOws(bytes, index)
+      }
+    }
+    if index == bytes.length {
+      return true
+    }
+    if bytes[index] != 44 {
+      return false
+    }
+    index = index + usize.ONE
+    if skipOws(bytes, index) == bytes.length {
+      return false
+    }
+  }
+  return false
+}
+
+struct ResponsePlan {
+  response: OwnedResponseHead
+  accepted: bool
+}
+
+/// Runs explicit acceptance and lends the existing channel only after the complete 101 flush.
+///
+/// # Details
+///
+/// The decision borrows caller configuration. Request metadata cannot escape either callback.
+/// Rejected retains the sent application status. Errors before output leave HTTP active.
+/// Use the same absolute deadline for the enclosing HTTP request acquisition.
+///
+/// # Gotchas
+///
+/// After switching output starts, transport failure is terminal. The enclosing server scope keeps
+/// its close authority armed. This operation provides no frame or native TLS server implementation.
+pub effect fn withUpgrade<
+  'loan,
+  'request: 'loan,
+  'connection: 'request,
+  'transport: 'connection,
+  'config,
+  'callback,
+  A,
+  D,
+  E,
+  ?DecisionRequirements,
+  ?CallbackRequirements,
+  P,
+  H: DecisionHandler<'config, D ? DecisionRequirements>,
+>(
+  request: &'loan mut Request<'request, 'connection, 'transport, P>,
+  limits: Limits,
+  deadline: Option<Instant>,
+  handler: H,
+  use: for<'call, 'transportView: 'call> once fn<'callback>(
+    &'call mut BufferedDuplex<'transportView, P>,
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> Outcome<A>
+! D | E | UpgradeError | ServerError | OutOfMemoryError
+? DecisionRequirements | CallbackRequirements | &mut Allocator | &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let head = run request.head()
+  let offer = match move inspect(&head, limits) {
+    Result.Failure {error} => {
+      fail move error
+    }
+    Result.Success {value} => value
+  }
+  let decision = run DecisionHandler<'config, D ? DecisionRequirements>.decide(move handler, &offer)
+  let plan = run planDecision(&offer, move decision, limits)
+  drop offer
+  drop head
+  let response = plan.response.view()
+  if !plan.accepted {
+    run HttpServer.reject(&mut request.*, &response, move deadline)
+    let status = response.status()
+    return Outcome<A>.Rejected {status: status.code()}
+  }
+  let value = run HttpServer.withUpgrade(
+    &mut request.*,
+    "websocket",
+    &response,
+    move deadline,
+    move use,
+  )
+  return Outcome<A>.Upgraded {value: move value}
+}
+
+/// Sends the deterministic body-free HTTP rejection for a typed handshake failure.
+///
+/// # Details
+///
+/// UnsupportedVersion sends 426 with Sec-WebSocket-Version: 13. Expect sends 417; other failures
+/// send 400. This operation is available only before switching output starts.
+pub effect fn reject<'loan, 'request: 'loan, 'connection: 'request, 'transport: 'connection, P>(
+  request: &'loan mut Request<'request, 'connection, 'transport, P>,
+  error: &UpgradeError,
+  limits: Limits,
+  deadline: Option<Instant>,
+) -> ()
+! UpgradeError | ServerError | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let requestHead = run request.head()
+  let responseVersion = requestHead.version()
+  drop requestHead
+  let code = rejectionStatus(error)
+  let mut count: usize = 2
+  let mut payload: usize = 30
+  if code == 426 {
+    count = 3
+    payload = 53
+  }
+  run preflight(count, payload, usize.ZERO, limits)
+  let valueLimits = httpLimits(limits)
+  let connection = run take(Header.make("Connection", b"close", valueLimits))
+  let version = run take(Header.make("Sec-WebSocket-Version", b"13", valueLimits))
+  let length = run take(Header.make("Content-Length", b"0", valueLimits))
+  let entries = [connection, length, version]
+  let headers = run take(Headers.make(Slice.view<Header>(&entries, 0, count), valueLimits))
+  let status = run take(Status.fromCode(code))
+  let response = run take(
+    ResponseHead.make(responseVersion, status, Option.none<&[u8]>(), headers, valueLimits),
+  )
+  let plan = run copyPlan(&response, limits, false)
+  let view = plan.response.view()
+  return run HttpServer.reject(&mut request.*, &view, move deadline)
+}
+
+effect fn planDecision<'head, 'config>(
+  offer: &Offer<'head>,
+  decision: Decision<'config>,
+  limits: Limits,
+) -> ResponsePlan ! UpgradeError | OutOfMemoryError ? &mut Allocator {
+  let values = httpLimits(limits)
+  let empty: [Header<'static>; 0] = []
+  let fallback = run take(Headers.make(&empty, values))
+  return match move decision {
+    Decision.Reject {status, headers} => {
+      return match move headers {
+        Option.None => {
+          return run planRejection(status, fallback, limits)
+        }
+        Option.Some {value} => {
+          return run planRejection(status, value, limits)
+        }
+      }
+    }
+    Decision.Accept {protocol, headers, extensions} => {
+      if extensions {
+        fail UpgradeError.UnsupportedNegotiation
+      }
+      return match move headers {
+        Option.None => {
+          return run planAcceptance(offer, move protocol, fallback, limits)
+        }
+        Option.Some {value} => {
+          return run planAcceptance(offer, move protocol, value, limits)
+        }
+      }
+    }
+  }
+}
+
+effect fn planRejection<'fields>(status: Status, fields: Headers<'fields>, limits: Limits) -> ResponsePlan
+! UpgradeError | OutOfMemoryError
+? &mut Allocator {
+  if status.code() < 200 {
+    fail UpgradeError.InvalidDecision {reason: DecisionReason.Status}
+  }
+  run validateExtra(&fields)
+  let values = httpLimits(limits)
+  let response = run take(
+    ResponseHead.make(Version.Http11, status, Option.none<&[u8]>(), fields, values),
+  )
+  return run augmentPlan(&response, limits, false)
+}
+
+effect fn planAcceptance<'head, 'config, 'fields>(
+  offer: &Offer<'head>,
+  protocol: Option<string<'config>>,
+  fields: Headers<'fields>,
+  limits: Limits,
+) -> ResponsePlan ! UpgradeError | OutOfMemoryError ? &mut Allocator {
+  let values = httpLimits(limits)
+  run validateExtra(&fields)
+  let hasProtocol = match & protocol {
+    Option.None => false
+    Option.Some {value: _} => true
+  }
+  let protocolBytes: &'config [u8] = match move protocol {
+    Option.None => b""
+    Option.Some {value} => String.utf8Bytes(value)
+  }
+  if hasProtocol {
+    let mut found = false
+    let mut index = usize.ZERO
+    while index < offer.count {
+      if let Option.Some {value: offered} = move offer.protocolAt(index) {
+        if equal(offered, protocolBytes, false) {
+          found = true
+        }
+      }
+      index = index + usize.ONE
+    }
+    if !found {
+      fail UpgradeError.InvalidDecision {reason: DecisionReason.Protocol}
+    }
+  }
+  let mut accept: [u8; 28] = [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+  ]
+  let checked = offer.acceptInto(&mut accept)
+  if let Result.Failure {error} = move checked {
+    fail move error
+  }
+  let mut generated: usize = 3
+  if hasProtocol {
+    generated = 4
+  }
+  let count = run add(fields.count(), generated)
+  let mut protocolLength = usize.ZERO
+  let mut protocolName = usize.ZERO
+  if hasProtocol {
+    protocolLength = protocolBytes.length
+    protocolName = 22
+  }
+  let payload = run add(run add(fields.fieldBytes(), 81), run add(protocolLength, protocolName))
+  run preflight(count, payload, 19, limits)
+  let mut entries = Vector.make<Header>()
+  run Vector.reserveExact<Header>(&mut entries, count)
+  run Vector.append<Header>(&mut entries, run take(Header.make("Upgrade", b"websocket", values)))
+  run Vector.append<Header>(&mut entries, run take(Header.make("Connection", b"Upgrade", values)))
+  run Vector.append<Header>(
+    &mut entries,
+    run take(Header.make("Sec-WebSocket-Accept", &accept, values)),
+  )
+  if hasProtocol {
+    run Vector.append<Header>(
+      &mut entries,
+      run take(Header.make("Sec-WebSocket-Protocol", protocolBytes, values)),
+    )
+  }
+  let mut extra = fields.iter()
+  while true {
+    let next = extra.next()
+    match move next {
+      Option.None => {
+        break
+      }
+      Option.Some {value} => {
+        run Vector.append<Header>(&mut entries, value)
+      }
+    }
+  }
+  let all = run take(Headers.make(Vector.asSlice<Header>(&entries), values))
+  let status = run take(Status.fromCode(101))
+  let response = run take(
+    ResponseHead.make(
+      Version.Http11,
+      status,
+      Option.some<&[u8]>(b"Switching Protocols"),
+      all,
+      values,
+    ),
+  )
+  return run copyPlan(&response, limits, true)
+}
+
+effect fn augmentPlan<'value>(response: &ResponseHead<'value>, limits: Limits, accepted: bool) -> ResponsePlan
+! UpgradeError | OutOfMemoryError
+? &mut Allocator {
+  let source = response.headers()
+  let status = response.status()
+  let needsLength = status.code() != 204 && status.code() != 304
+  let mut generated = usize.ONE
+  let mut generatedBytes: usize = 15
+  if needsLength {
+    generated = 2
+    generatedBytes = 30
+  }
+  let count = run add(source.count(), generated)
+  let bytes = run add(source.fieldBytes(), generatedBytes)
+  let reason = response.reason()
+  let reasonLength = match & reason {
+    Option.None => usize.ZERO
+    Option.Some {value} => value.length
+  }
+  run preflight(count, bytes, reasonLength, limits)
+  let values = httpLimits(limits)
+  let mut entries = Vector.make<Header>()
+  run Vector.reserveExact<Header>(&mut entries, count)
+  let mut fields = source.iter()
+  while true {
+    match move fields.next() {
+      Option.None => {
+        break
+      }
+      Option.Some {value} => {
+        run Vector.append<Header>(&mut entries, value)
+      }
+    }
+  }
+  run Vector.append<Header>(&mut entries, run take(Header.make("Connection", b"close", values)))
+  if needsLength {
+    run Vector.append<Header>(&mut entries, run take(Header.make("Content-Length", b"0", values)))
+  }
+  let headers = run take(Headers.make(Vector.asSlice<Header>(&entries), values))
+  let complete = run take(
+    ResponseHead.make(response.version(), response.status(), move reason, headers, values),
+  )
+  return run copyPlan(&complete, limits, accepted)
+}
+
+effect fn copyPlan<'value>(response: &ResponseHead<'value>, limits: Limits, accepted: bool) -> ResponsePlan
+! UpgradeError | OutOfMemoryError
+? &mut Allocator {
+  let fields = response.headers()
+  let reason = response.reason()
+  let reasonLength = match & reason {
+    Option.None => usize.ZERO
+    Option.Some {value} => value.length
+  }
+  run preflight(fields.count(), fields.fieldBytes(), reasonLength, limits)
+  let values = httpLimits(limits)
+  let serialized = run take(responseSerializedSize(response, values))
+  if serialized > limits.maxResponseBytes {
+    fail UpgradeError.Limit {kind: LimitKind.ResponseBytes}
+  }
+  let owned = run take(run response.copy(values))
+  return ResponsePlan {response: move owned, accepted: accepted}
+}
+
+effect fn validateExtra(headers: &Headers) -> () ! UpgradeError {
+  let mut fields = headers.iter()
+  while true {
+    let field = match move fields.next() {
+      Option.None => {
+        return ()
+      }
+      Option.Some {value} => value
+    }
+    let name = field.name()
+    if nameIs(name, "connection") || nameIs(name, "upgrade") || nameIs(name, "sec-websocket-accept") || nameIs(
+      name,
+      "sec-websocket-protocol",
+    ) || nameIs(name, "sec-websocket-extensions") || nameIs(name, "sec-websocket-version") || nameIs(
+      name,
+      "sec-websocket-key",
+    ) || nameIs(name, "content-length") || nameIs(name, "transfer-encoding") || nameIs(
+      name,
+      "trailer",
+    ) {
+      fail UpgradeError.InvalidDecision {reason: DecisionReason.Header}
+    }
+  }
+  return ()
+}
+
+effect fn preflight(count: usize, payload: usize, reason: usize, limits: Limits) -> ()
+! UpgradeError {
+  let fields = run multiply(count, 4)
+  let serialized = run add(run add(run add(17, reason), fields), payload)
+  if serialized > limits.maxResponseBytes {
+    fail UpgradeError.Limit {kind: LimitKind.ResponseBytes}
+  }
+  // Shared owned fields use four usize offsets. The transient Header vector is live either here
+  // or in http_server normalization. Their maximum capacity is included with the complete plan.
+  let records = Layout.of<[usize; 4]>()
+  let header = Layout.of<Header>()
+  let indices = run multiply(count, run add(records.bytes, header.bytes))
+  let owned = run add(run add(payload, reason), indices)
+  if owned > limits.maxOwnedBytes {
+    fail UpgradeError.Limit {kind: LimitKind.OwnedBytes}
+  }
+  return ()
+}
+
+fn httpLimits(limits: Limits) -> HttpHeaders.Limits {
+  return HttpHeaders.Limits {
+    maxMethodBytes: limits.maxResponseBytes,
+    maxTargetBytes: limits.maxResponseBytes,
+    maxNameBytes: limits.maxResponseBytes,
+    maxValueBytes: limits.maxResponseBytes,
+    maxFields: limits.maxResponseBytes,
+    maxFieldBytes: limits.maxResponseBytes,
+    maxOwnedBytes: limits.maxOwnedBytes,
+  }
+}
+
+effect fn take<T>(result: Result<T, ValueError>) -> T ! UpgradeError {
+  return match move result {
+    Result.Failure {error} => {
+      fail UpgradeError.Value {error: move error}
+    }
+    Result.Success {value} => move value
+  }
+}
+
+effect fn add(left: usize, right: usize) -> usize ! UpgradeError {
+  return match move usize.checkedAdd(left, right) {
+    Option.None => {
+      fail UpgradeError.Limit {kind: LimitKind.SizeOverflow}
+    }
+    Option.Some {value} => value
+  }
+}
+
+effect fn multiply(left: usize, right: usize) -> usize ! UpgradeError {
+  return match move usize.checkedMultiply(left, right) {
+    Option.None => {
+      fail UpgradeError.Limit {kind: LimitKind.SizeOverflow}
+    }
+    Option.Some {value} => value
+  }
+}

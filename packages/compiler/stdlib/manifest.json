@@ -983,6 +983,11 @@
     "namespace": "WasmStart"
   },
   {
+    "module": "silk/websocket_upgrade",
+    "path": "silk/websocket_upgrade.silk",
+    "namespace": "WebSocketUpgrade"
+  },
+  {
     "module": "silk/writer",
     "path": "silk/writer.silk",
     "namespace": "Writer",
