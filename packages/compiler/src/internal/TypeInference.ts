@@ -1088,7 +1088,11 @@ export const inferOpenGenericArguments = (
     pattern,
     actual,
     inferred,
-    Object.freeze({ allowOpenGenericArguments: true, inferableGenericArguments, conflicts }),
+    Object.freeze({
+      allowOpenGenericArguments: true,
+      ...(inferableGenericArguments === undefined ? {} : { inferableGenericArguments }),
+      conflicts,
+    }),
   )
   return Object.freeze({ matches, conflicts: Object.freeze(conflicts) })
 }
