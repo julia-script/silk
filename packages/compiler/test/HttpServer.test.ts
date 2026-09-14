@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as Frontend from '../src/Frontend.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 
 const encoder = new TextEncoder()
@@ -17,12 +20,13 @@ it.effect(
       const example = reference.match(/```silk\n([\s\S]*?)\n```/)?.[1]
       assert.isString(example)
       if (example === undefined) return
-      const snapshot = yield* AnalysisFixture.frontend(
-        'http-server/reference-example',
-        encoder.encode(example),
-      )
+      const sourceId = 'http-server/reference-example'
+      const snapshot = yield* Frontend.frontend({
+        root: SourceFile.make(sourceId, encoder.encode(example)),
+        configuration: AnalysisFixture.configuration(sourceId, 'x86_64-unknown-linux-gnu', []),
+      }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(
-        Analysis.diagnostics(snapshot).map((diagnostic) => ({
+        snapshot.diagnostics.map((diagnostic) => ({
           code: diagnostic.code,
           message: diagnostic.message,
           sourceId: diagnostic.span.sourceId,
