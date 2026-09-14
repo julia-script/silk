@@ -19,6 +19,7 @@ import { base64AcceptanceSource } from './support/base64Acceptance.js'
 import {
   httpClientAcceptanceSource,
   httpClientBoundariesAcceptanceSource,
+  httpClientOutputFailuresAcceptanceSource,
 } from './support/httpClientAcceptance.js'
 import { httpClientContentAcceptanceSource } from './support/httpClientContentAcceptance.js'
 import { httpRequestAcceptanceSource } from './support/httpRequestAcceptance.js'
@@ -171,6 +172,11 @@ const selectedCorpus = shardedCorpus.filter(
 const portableWasmCorpus = [
   { name: 'http-client', source: httpClientAcceptanceSource, expected: 0 },
   { name: 'http-client-boundaries', source: httpClientBoundariesAcceptanceSource, expected: 0 },
+  {
+    name: 'http-client-output-failures',
+    source: httpClientOutputFailuresAcceptanceSource,
+    expected: 0,
+  },
   { name: 'http-client-content', source: httpClientContentAcceptanceSource, expected: 0 },
   { name: 'http-client-request', source: httpRequestAcceptanceSource, expected: 0 },
   { name: 'http-values', source: httpValuesAcceptanceSource, expected: 0 },

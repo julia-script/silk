@@ -60,6 +60,7 @@ import { httpClientOwnershipAcceptanceSource } from './httpClientOwnershipAccept
 import {
   httpClientAcceptanceSource,
   httpClientBoundariesAcceptanceSource,
+  httpClientOutputFailuresAcceptanceSource,
 } from './httpClientAcceptance.js'
 import { httpClientContentAcceptanceSource } from './httpClientContentAcceptance.js'
 import { httpTransportAcceptanceSource } from './httpTransportAcceptance.js'
@@ -6419,6 +6420,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'http-client-boundaries',
     source: httpClientBoundariesAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-client-output-failures',
+    source: httpClientOutputFailuresAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
   },
   {

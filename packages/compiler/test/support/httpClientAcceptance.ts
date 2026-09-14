@@ -18,10 +18,12 @@ const protocol: ReadonlyArray<Scenario> = [
 const boundaries: ReadonlyArray<Scenario> = [
   { id: 6, callback: 'limitedExchange' },
   { id: 8, callback: 'timeoutExchange' },
-  { id: 9, callback: 'partialExchange' },
   { id: 10, callback: 'continueTimeoutExchange' },
   { id: 12, callback: 'wireLimitExchange' },
   { id: 13, callback: 'expiredCompletedExchange' },
+]
+const outputFailures: ReadonlyArray<Scenario> = [
+  { id: 9, callback: 'partialExchange' },
   { id: 18, callback: 'outputTimeoutExchange' },
   { id: 19, callback: 'flushFailureExchange' },
   { id: 20, callback: 'flushFailureExchange' },
@@ -1427,3 +1429,4 @@ pub fn main() -> i32 {
 
 export const httpClientAcceptanceSource = sourceFor(protocol)
 export const httpClientBoundariesAcceptanceSource = sourceFor(boundaries)
+export const httpClientOutputFailuresAcceptanceSource = sourceFor(outputFailures)
