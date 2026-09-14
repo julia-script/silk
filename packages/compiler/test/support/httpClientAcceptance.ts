@@ -16,10 +16,10 @@ const protocol: ReadonlyArray<Scenario> = [
   { id: 17, callback: 'failExchange' },
 ]
 const boundaries: ReadonlyArray<Scenario> = [
-  { id: 6, callback: 'limitedExchange' },
+  { id: 6, callback: 'receiveBoundaryExchange' },
   { id: 8, callback: 'timeoutExchange' },
-  { id: 10, callback: 'continueTimeoutExchange' },
-  { id: 12, callback: 'wireLimitExchange' },
+  { id: 10, callback: 'receiveBoundaryExchange' },
+  { id: 12, callback: 'receiveBoundaryExchange' },
   { id: 13, callback: 'expiredCompletedExchange' },
 ]
 const outputFailures: ReadonlyArray<Scenario> = [
@@ -788,41 +788,6 @@ effect<'call> fn abandonExchange<'call, 'exchange: 'call>(
   return 0
 }
 
-effect<'call> fn limitedExchange<'call, 'exchange: 'call>(
-  exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
-) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
-  run Client.send(&mut exchangeValue.*)
-  let trailerEntries: [Header<'static>; 0] = []
-  let trailers = match move Headers.make(&trailerEntries, valueLimits()) {
-    Result.Failure {error} => {
-      drop error
-      return 23
-    }
-    Result.Success {value} => value
-  }
-  run Client.finishRequest(&mut exchangeValue.*, &trailers)
-  let observed10 = run Client.receive(&mut exchangeValue.*)
-  if observed10 != 103 {
-    return 81
-  }
-  let result = run Effect.result(Client.receive(&mut exchangeValue.*))
-  return match move result {
-    Result.Success {value} => {
-      drop value
-      return 82
-    }
-    Result.Failure {error} => match move error {
-      ClientError cause => match move cause {
-        ClientError.LimitExceeded => 0
-        _ => 83
-      }
-      OutOfMemoryError allocation => {
-        fail move allocation
-      }
-    }
-  }
-}
-
 effect<'call> fn upgradeExchange<'call, 'exchange: 'call>(
   exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
 ) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
@@ -954,6 +919,67 @@ effect<'call> fn outputTimeoutExchange<'call, 'exchange: 'call>(
   }
 }
 
+effect<'call> fn receiveBoundaryExchange<'call, 'exchange: 'call>(
+  exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
+) -> i32
+! ClientError | OutOfMemoryError
+? &Scenario | &mut Allocator | &mut MonotonicClock | &mut Random {
+  let scenario = run Scenario.selected()
+  run Client.send(&mut exchangeValue.*)
+  if scenario != 10 {
+    let trailerEntries: [Header<'static>; 0] = []
+    let trailers = match move Headers.make(&trailerEntries, valueLimits()) {
+      Result.Failure {error} => {
+        drop error
+        return 23
+      }
+      Result.Success {value} => value
+    }
+    run Client.finishRequest(&mut exchangeValue.*, &trailers)
+  }
+  if scenario == 6 {
+    let observed = run Client.receive(&mut exchangeValue.*)
+    if observed != 103 {
+      return 81
+    }
+  }
+  let result = run Effect.result(Client.receive(&mut exchangeValue.*))
+  return match move result {
+    Result.Success {value} => {
+      drop value
+      if scenario == 6 {
+        return 82
+      }
+      if scenario == 10 {
+        return 92
+      }
+      return 95
+    }
+    Result.Failure {error} => match move error {
+      ClientError cause => {
+        let matched = match move cause {
+          ClientError.ContinueTimeout => scenario == 10
+          ClientError.LimitExceeded => scenario == 6 || scenario == 12
+          _ => false
+        }
+        if matched {
+          return 0
+        }
+        if scenario == 6 {
+          return 83
+        }
+        if scenario == 10 {
+          return 93
+        }
+        return 96
+      }
+      OutOfMemoryError allocation => {
+        fail move allocation
+      }
+    }
+  }
+}
+
 effect<'call> fn timeoutExchange<'call, 'exchange: 'call>(
   exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
 ) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
@@ -1013,28 +1039,6 @@ effect<'call> fn partialExchange<'call, 'exchange: 'call>(
   }
 }
 
-effect<'call> fn continueTimeoutExchange<'call, 'exchange: 'call>(
-  exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
-) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
-  run Client.send(&mut exchangeValue.*)
-  let result = run Effect.result(Client.receive(&mut exchangeValue.*))
-  return match move result {
-    Result.Success {value} => {
-      drop value
-      return 92
-    }
-    Result.Failure {error} => match move error {
-      ClientError cause => match move cause {
-        ClientError.ContinueTimeout => 0
-        _ => 93
-      }
-      OutOfMemoryError allocation => {
-        fail move allocation
-      }
-    }
-  }
-}
-
 effect<'call> fn discardExchange<'call, 'exchange: 'call>(
   exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
 ) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
@@ -1055,37 +1059,6 @@ effect<'call> fn discardExchange<'call, 'exchange: 'call>(
   run Client.discardRemaining(&mut exchangeValue.*, 4)
   run Client.finishResponse(&mut exchangeValue.*)
   return 0
-}
-
-effect<'call> fn wireLimitExchange<'call, 'exchange: 'call>(
-  exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
-) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
-  run Client.send(&mut exchangeValue.*)
-  let trailerEntries: [Header<'static>; 0] = []
-  let trailers = match move Headers.make(&trailerEntries, valueLimits()) {
-    Result.Failure {error} => {
-      drop error
-      return 23
-    }
-    Result.Success {value} => value
-  }
-  run Client.finishRequest(&mut exchangeValue.*, &trailers)
-  let result = run Effect.result(Client.receive(&mut exchangeValue.*))
-  return match move result {
-    Result.Success {value} => {
-      drop value
-      return 95
-    }
-    Result.Failure {error} => match move error {
-      ClientError cause => match move cause {
-        ClientError.LimitExceeded => 0
-        _ => 96
-      }
-      OutOfMemoryError allocation => {
-        fail move allocation
-      }
-    }
-  }
 }
 
 effect<'call> fn expiredCompletedExchange<'call, 'exchange: 'call>(
