@@ -94,8 +94,8 @@ fn emptyTrust() -> TrustSnapshot {
   }
 }
 
-effect fn inspect<P>(
-  connection: &mut OwnedConnection<P>,
+effect fn inspect(
+  connection: &mut OwnedConnection<MemoryByteDuplex>,
 ) -> i32 {
   drop connection
   return 0
