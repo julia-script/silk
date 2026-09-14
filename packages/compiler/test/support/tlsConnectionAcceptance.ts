@@ -268,7 +268,8 @@ impl PostReadDuplex {
   ) -> () ! ByteIoError ? &mut MonotonicClock { drop deadline return () }
   unsafe effect fn close(self: &mut Self) -> () ! ByteIoError {
     Shared.withMut(&self.state, fn(state: &mut PostReadState) -> () {
-      state.closes = state.closes + usize.ONE
+      // Invalid-count validation can close before the owning scope releases the provider.
+      if state.closes == usize.ZERO { state.closes = usize.ONE }
       return ()
     })
     return ()

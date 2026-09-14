@@ -1761,9 +1761,9 @@ it.effect(
       const input = {
         foreignImports: [foreign],
         foreignStatics: [],
-        nativeRuntimeSymbols: ['malloc'],
+        nativeRuntimeSymbols: ['malloc', 'calloc'],
       }
-      const symbols = ['memcpy', 'fmodf', 'malloc', 'foreign_read'].map((name) => ({
+      const symbols = ['memcpy', 'fmodf', 'malloc', 'calloc', 'foreign_read'].map((name) => ({
         name,
         defined: false,
         weak: false,
@@ -1787,7 +1787,7 @@ it.effect(
           ['memcpy', ['pointer', 'pointer', 'u64'], 'pointer'],
         ],
       )
-      assert.deepEqual(report.runtime, ['malloc'])
+      assert.deepEqual(report.runtime, ['calloc', 'malloc'])
       assert.deepEqual(report.foreign, ['foreign_read'])
       assert.deepEqual(HelperCapability.linkInputs([report]), [
         NativeLinkInput.library('m', 'Dynamic'),
@@ -1803,6 +1803,7 @@ it.effect(
       assert.notStrictEqual(report.identity, empty.identity)
       for (const [symbol, code] of [
         ['unknown_helper', 'UnexplainedSymbol'],
+        ['calloc', 'UnexplainedSymbol'],
         ['__atomic_load_16', 'UnsupportedFamily'],
         ['__stack_chk_fail', 'UnsupportedFamily'],
         ['__divti3', 'UnsupportedFamily'],

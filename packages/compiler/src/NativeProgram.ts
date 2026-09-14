@@ -653,7 +653,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       }),
     ),
     nativeRuntimeSymbols: Object.freeze([
-      ...(malloc === undefined ? [] : ['malloc']),
+      // LLVM may fold allocation followed by zero initialization into calloc.
+      ...(malloc === undefined ? [] : ['malloc', 'calloc']),
       ...(free === undefined ? [] : ['free']),
     ]),
     runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),

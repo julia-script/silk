@@ -29,6 +29,16 @@ void *malloc(size_t size) {
   return (void *)aligned;
 }
 
+// Keep this implementation from folding its allocation and zeroing back into calloc.
+__attribute__((optnone)) void *calloc(size_t count, size_t size) {
+  if (count != 0 && size > (__SIZE_MAX__) / count) return (void *)0;
+  const size_t bytes = count * size;
+  unsigned char *allocation = (unsigned char *)malloc(bytes);
+  if (allocation == (void *)0) return (void *)0;
+  for (size_t index = 0; index < bytes; index += 1) allocation[index] = 0;
+  return allocation;
+}
+
 void free(void *allocation) { (void)allocation; }
 
 __attribute__((optnone)) void *memcpy(void *destination, const void *source, size_t count) {
