@@ -314,299 +314,69 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
   ! ClientError | OutOfMemoryError | CallbackFailure
   ? &mut Allocator | &mut MonotonicClock | &mut Random {
     let Handler {request, scenario} = move handler
-    if scenario == 19 || scenario == 20 || scenario == 21 {
-      let mut selectedOptions = RequestOptions.defaults()
-      if scenario == 19 {
-        selectedOptions.continuePolicy = ContinuePolicy.Require100 {
-          deadline: SystemClock.make(10, 0),
+    let mut options = RequestOptions.defaults()
+    if scenario == 1 || scenario == 2 || scenario == 10 || scenario == 19 {
+      options.continuePolicy = ContinuePolicy.Require100 {deadline: SystemClock.make(10, 0)}
+    }
+    if scenario == 13 || scenario == 18 {
+      options.deadline = Option.some<Instant>(SystemClock.make(5, 0))
+    }
+    let attempted = run Effect.result(
+      invokeExchange(&mut connection.*, &request, move options, scenario),
+    )
+    let result = match move attempted {
+      Result.Success {value} => value
+      Result.Failure {error} => match move error {
+        CallbackFailure cause => {
+          if scenario == 17 && (cause.code != 739 || connection.phase() != ConnectionPhase.Closed) {
+            return 125
+          }
+          fail move cause
+        }
+        ClientError cause => {
+          fail move cause
+        }
+        OutOfMemoryError allocation => {
+          fail move allocation
         }
       }
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
+    }
+    if scenario == 17 {
+      return 124
+    }
+    if scenario == 0 {
+      if result != 200 {
         return result
       }
-      if connection.phase() != ConnectionPhase.Closed {
-        return 132
+      if connection.phase() != ConnectionPhase.Ready {
+        return 12
+      }
+      let second = run invokeExchange(
+        &mut connection.*,
+        &request,
+        RequestOptions.defaults(),
+        scenario,
+      )
+      if second != 404 {
+        return second
       }
       return 0
     }
+    if result != 0 {
+      return result
+    }
     if scenario == 18 {
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        RequestOptions {
-          deadline: Option.some<Instant>(SystemClock.make(5, 0)),
-          continuePolicy: ContinuePolicy.Disabled,
-        },
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
       if connection.phase() != ConnectionPhase.Closed {
         return 128
       }
-      return 0
-    }
-    if scenario == 17 {
-      let attempted = run Effect.result(
-        invokeExchange(&mut connection.*, &request, RequestOptions.defaults(), scenario),
-      )
-      match move attempted {
-        Result.Success {value} => {
-          drop value
-          return 124
-        }
-        Result.Failure {error} => match move error {
-          CallbackFailure cause => {
-            if cause.code != 739 || connection.phase() != ConnectionPhase.Closed {
-              return 125
-            }
-            fail move cause
-          }
-          ClientError cause => {
-            fail move cause
-          }
-          OutOfMemoryError allocation => {
-            fail move allocation
-          }
-        }
+    } else if scenario == 19 || scenario == 20 || scenario == 21 {
+      if connection.phase() != ConnectionPhase.Closed {
+        return 132
       }
-    }
-    if scenario == 1 {
-      let selectedOptions = RequestOptions {
-        deadline: Option.none<Instant>(),
-        continuePolicy: ContinuePolicy.Require100 {deadline: SystemClock.make(10, 0)},
-      }
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      return 0
-    }
-    if scenario == 2 {
-      let selectedOptions = RequestOptions {
-        deadline: Option.none<Instant>(),
-        continuePolicy: ContinuePolicy.Require100 {deadline: SystemClock.make(10, 0)},
-      }
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
+    } else if scenario == 2 || scenario == 4 || scenario == 5 || scenario == 6 || scenario == 7 || scenario == 8 || scenario == 9 || scenario == 10 || scenario == 12 || scenario == 13 {
       if connection.phase() != ConnectionPhase.Closed {
         return 18
       }
-      return 0
-    }
-    if scenario == 3 {
-      let selectedOptions = RequestOptions.defaults()
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      return 0
-    }
-    if scenario == 4 {
-      let selectedOptions = RequestOptions.defaults()
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      if connection.phase() != ConnectionPhase.Closed {
-        return 18
-      }
-      return 0
-    }
-    if scenario == 5 {
-      let selectedOptions = RequestOptions.defaults()
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      if connection.phase() != ConnectionPhase.Closed {
-        return 18
-      }
-      return 0
-    }
-    if scenario == 6 {
-      let selectedOptions = RequestOptions.defaults()
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      if connection.phase() != ConnectionPhase.Closed {
-        return 18
-      }
-      return 0
-    }
-    if scenario == 7 {
-      let selectedOptions = RequestOptions.defaults()
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      if connection.phase() != ConnectionPhase.Closed {
-        return 18
-      }
-      return 0
-    }
-    if scenario == 8 {
-      let selectedOptions = RequestOptions.defaults()
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      if connection.phase() != ConnectionPhase.Closed {
-        return 18
-      }
-      return 0
-    }
-    if scenario == 9 {
-      let selectedOptions = RequestOptions.defaults()
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      if connection.phase() != ConnectionPhase.Closed {
-        return 18
-      }
-      return 0
-    }
-    if scenario == 10 {
-      let selectedOptions = RequestOptions {
-        deadline: Option.none<Instant>(),
-        continuePolicy: ContinuePolicy.Require100 {deadline: SystemClock.make(10, 0)},
-      }
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      if connection.phase() != ConnectionPhase.Closed {
-        return 18
-      }
-      return 0
-    }
-    if scenario == 11 {
-      let selectedOptions = RequestOptions.defaults()
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      return 0
-    }
-    if scenario == 12 {
-      let selectedOptions = RequestOptions.defaults()
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      if connection.phase() != ConnectionPhase.Closed {
-        return 18
-      }
-      return 0
-    }
-    if scenario == 13 {
-      let selectedOptions = RequestOptions {
-        deadline: Option.some<Instant>(SystemClock.make(5, 0)),
-        continuePolicy: ContinuePolicy.Disabled,
-      }
-      let result = run invokeExchange(
-        &mut connection.*,
-        &request,
-        move selectedOptions,
-        scenario,
-      )
-      if result != 0 {
-        return result
-      }
-      if connection.phase() != ConnectionPhase.Closed {
-        return 18
-      }
-      return 0
-    }
-    let options = RequestOptions {
-      deadline: Option.none<Instant>(),
-      continuePolicy: ContinuePolicy.Disabled,
-    }
-    let result = run invokeExchange(&mut connection.*, &request, move options, scenario)
-    if result != 200 {
-      return result
-    }
-    if connection.phase() != ConnectionPhase.Ready {
-      return 12
-    }
-    let options2 = RequestOptions {
-      deadline: Option.none<Instant>(),
-      continuePolicy: ContinuePolicy.Disabled,
-    }
-    let second = run invokeExchange(&mut connection.*, &request, move options2, scenario)
-    if second != 404 {
-      return second
     }
     return 0
   }
