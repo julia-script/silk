@@ -11,7 +11,7 @@
 - [x] 2.1 Lower shared and exclusive matches from their original scrutinee place and represent
       pattern bindings as borrowed descriptors; verify projected fields, ordinary reads, reborrows,
       scoped captures, and suspension preserve the original payload without relaxing ownership errors.
-- [ ] 2.2 Add economical structural and shared-corpus regression evidence for mutation through a
+- [x] 2.2 Add economical structural and shared-corpus regression evidence for mutation through a
       borrowed payload and later owner publication; preserve the owned TLS native and Wasm audit
       predicates and remove temporary investigation programs.
 - [x] 2.3 Retain nested variant tests and canonical field paths through matching and lowering;

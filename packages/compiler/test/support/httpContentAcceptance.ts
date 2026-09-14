@@ -201,7 +201,9 @@ effect fn provider(values: &[u8]) -> MemoryByteDuplex
     move reads,
     Vector.make<MemoryWriteEvent>(),
     1,
-    32,
+    // One-byte buffered reads may consume one audit entry per input byte.
+    // Reserve the EOF read and scoped flush/close operations as well.
+    values.length + 8,
     Option.none<i32>(),
   )
 }
@@ -992,7 +994,13 @@ effect<'borrow> fn decodeSession<
     Result.Failure {error} => { return 62 }
     Result.Success {value} => value
   }
-  let context = match move ResponseContext.make(head, method, TrailerPolicy.defaultPolicy()) {
+  // The chunked scenario deliberately exercises an application-selected trailer name.
+  let trailerNames: [string<'static>; 1] = ["X-End"]
+  let trailerPolicy = match move TrailerPolicy.fromNames(&trailerNames) {
+    Result.Failure {error} => { drop error return 66 }
+    Result.Success {value} => value
+  }
+  let context = match move ResponseContext.make(head, method, trailerPolicy) {
     Result.Failure {error} => { return 63 }
     Result.Success {value} => move value
   }
@@ -1203,7 +1211,16 @@ effect<'session> fn chunkedSession<'session>(
 ? &mut Allocator {
   let result = run scenarioSession(&mut body.*, 10)
   if result != 0 { return result }
-  if BufferedDuplex.unread(&body.*) != 4 { return 299 }
+  // The suffix may still be in the provider when the read buffer holds only two bytes.
+  let mut suffix: [u8; 4] = [0, 0, 0, 0]
+  let mut clock = FixedClock {}
+  let read = BufferedDuplex.readExact(&mut body.*, &mut suffix, Option.none<Instant>())
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+  match move (run Effect.result(move read)) {
+    Result.Failure {error} => { drop error return 299 }
+    Result.Success {value} => {}
+  }
+  if !bytesEqual(&suffix, b"NEXT") { return 299 }
   return 0
 }
 
