@@ -18,4 +18,4 @@
 
 - [x] 3.1 Register all new namespaces and aliases in the standard-library manifest and regenerate committed catalogs/embeddings; verify the generated namespace surface resolves.
 - [x] 3.2 Add public buffered-byte-I/O reference documentation with executable examples and verify generated documentation remains current.
-- [ ] 3.3 Add the minimum distinct native and LLVM-to-Wasm shared-corpus cases plus focused structured analysis evidence needed to protect the acceptance contract, consolidating redundant setup and runtime work; measure equivalent-base versus branch-incremental dual-backend cost or reduce portable coverage to the cheapest target-neutral program that preserves distinct oracles.
+- [x] 3.3 Add distinct native and compact LLVM-to-Wasm shared-corpus cases plus focused structured analysis evidence for the acceptance contract, sharing setup and preserving bounded-transfer, retained-suffix, directional-shutdown, and cleanup oracles.

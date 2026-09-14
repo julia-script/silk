@@ -320,7 +320,7 @@ fn shutdownFailureMatches(result: Result<(), BufferError>) -> bool {
     Result<(), BufferError>.Success {value} => { drop value return false }
     Result<(), BufferError>.Failure {error} => match move error {
       BufferError.WriteFailed {accepted, drained, error: cause} => {
-        if accepted != usize.ZERO || drained != usize.ZERO { drop cause return false }
+        if accepted != usize.ZERO || drained != 2 { drop cause return false }
         return match move cause {
           ByteIoError.Provider {operation, code} => {
             return operation == ByteIoOperation.ShutdownWrite && code == 41
@@ -622,6 +622,7 @@ effect<'source & 'destination> fn parkPair<'source, 'destination>(
 effect<'session> fn failShutdown<'session>(
   session: &'session mut BufferedDuplex<'session, PairParkingDuplex>,
 ) -> bool ! BufferError ? &mut MonotonicClock {
+  run BufferedDuplex.writeAll(&mut session.*, b"ok", Option.none<Instant>())
   let deadline = SystemClock.make(7, 9)
   let attempted = run Effect.result(BufferedDuplex.shutdownWrite(
     &mut session.*,
@@ -956,7 +957,7 @@ fn shutdownCancellationResult(state: &mut PairCancellationState) -> i32 {
 fn shutdownFailureResult(state: &mut PairCancellationState) -> bool {
   if state.sourceCloses != usize.ONE || state.destinationCloses != usize.ZERO { return false }
   if state.flushCalls != 2 || state.shutdownCalls != usize.ONE { return false }
-  if state.readCalls != usize.ZERO || state.writeCalls != usize.ZERO { return false }
+  if state.readCalls != usize.ZERO || state.writeCalls != usize.ONE { return false }
   return state.deadlinesMatch
 }
 
@@ -1444,7 +1445,6 @@ where &'source mut MemoryByteDuplex provides &ByteDuplex
   if !equal(suffix, b"ef") { drop suffix return 6 }
   drop suffix
 
-  run BufferedDuplex.flush(&mut destination.*, Option.none<Instant>())
   let deadline = SystemClock.make(7, 9)
   run BufferedDuplex.shutdownWrite(
     &mut destination.*,
@@ -1486,13 +1486,14 @@ effect fn program() -> i32 ! BufferError | OutOfMemoryError {
   }
   drop sourceAudit
   let destinationAudit = MemoryByteDuplex.audit(&destination)
-  if destinationAudit.length != 6 ||
+  if destinationAudit.length != 7 ||
     destinationAudit[0].operation != ByteIoOperation.Write ||
-    destinationAudit[1].operation != ByteIoOperation.Write ||
-    destinationAudit[2].operation != ByteIoOperation.Flush ||
+    destinationAudit[1].operation != ByteIoOperation.Flush ||
+    destinationAudit[2].operation != ByteIoOperation.Write ||
     destinationAudit[3].operation != ByteIoOperation.Flush ||
-    destinationAudit[4].operation != ByteIoOperation.ShutdownWrite ||
-    destinationAudit[5].operation != ByteIoOperation.Close {
+    destinationAudit[4].operation != ByteIoOperation.Flush ||
+    destinationAudit[5].operation != ByteIoOperation.ShutdownWrite ||
+    destinationAudit[6].operation != ByteIoOperation.Close {
     drop destinationAudit
     return 26
   }

@@ -232,6 +232,7 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
   where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
     if self.terminal { fail BufferError.Terminal }
     if self.writeShutdown { return () }
+    let drained = BufferedOutput.pending(&self.outputState)
     let flushing = BufferedOutput.flush(
       &mut self.outputState,
       copyDeadline(&deadline),
@@ -251,7 +252,7 @@ impl<'transport, P> BufferedDuplex<'transport, P> {
         self.terminal = true
         fail BufferError.WriteFailed {
           accepted: usize.ZERO,
-          drained: usize.ZERO,
+          drained: drained,
           error: move error,
         }
       }
