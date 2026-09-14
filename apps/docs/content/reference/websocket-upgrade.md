@@ -83,8 +83,9 @@ apply their own allowlist. A selected subprotocol must exactly match one offered
 offers remain ordered across repeated fields, and duplicate tokens are rejected.
 
 `DecisionHandler` carries the application's policy context into its higher-ranked `decide`
-operation. That context can borrow configured response headers. The request offer cannot escape
-the decision call. Extra headers are optional; a rejection decision selects a status, and the
+operation. The wrapper owns that context and borrows it together with the offer for the decision
+call. The decision may borrow configured headers or an offered protocol token; the wrapper copies
+the response plan before those borrows end. Extra headers are optional; a rejection decision selects a status, and the
 library supplies the request's HTTP version and body-free response framing.
 
 Valid unsupported extension offers, including ordinary browser permessage-deflate offers, can be
@@ -94,7 +95,8 @@ select an unsupported extension fail before switching output.
 The default bounds are 32 offered protocols, 128 bytes per protocol, 4096 aggregate extension
 bytes, 8192 serialized response bytes, and 16384 owned bytes. Overrides are finite `usize` values;
 zero is a real bound. Inherited HTTP head and field bounds also apply. Response planning accounts
-for copied values and header storage before output. Applications cannot override handshake,
+for copied values and header storage before output. The owned-capacity budget covers dynamic
+response storage; the fixed-size hash and accept scratch remain on the stack. Applications cannot override handshake,
 connection, or framing fields with extra response headers. Valid repeated Set-Cookie fields keep
 their order.
 

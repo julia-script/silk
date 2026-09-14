@@ -53,6 +53,7 @@ import { httpHeadAcceptanceSource } from './httpHeadAcceptance.js'
 import { httpBodyAcceptanceSource } from './httpBodyAcceptance.js'
 import { httpContentAcceptanceSource } from './httpContentAcceptance.js'
 import { httpServerAcceptanceSource } from './httpServerAcceptance.js'
+import { websocketUpgradeAcceptanceSource } from './websocketUpgradeAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
 import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
 import { nativeListenerCorpusProgram } from './nativeListenerAcceptance.js'
@@ -6400,6 +6401,11 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   {
     name: 'http-server',
     source: httpServerAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'websocket-upgrade',
+    source: websocketUpgradeAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
   },
   {

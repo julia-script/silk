@@ -8,19 +8,21 @@ Preserve the generic server lifetime and callback rows, keep peer validation pur
 
 ## Decisions
 
-- Represent the decision callback as a nominal higher-ranked `DecisionHandler` that consumes its
-  policy context, following the delivered `ConnectionHandler` pattern. Its fields can borrow
-  caller-configured headers without allowing a request borrow to escape. A bare function pointer
-  cannot express those captures in the current source language. Optional headers avoid requiring
-  an empty borrowed array for the common no-extra-headers decision. Rejection supplies a status
-  and optional fields; the wrapper selects the request version and generates zero-body framing.
+- Represent the decision callback as a nominal higher-ranked `DecisionHandler`. The wrapper owns
+  the policy context and lends it with the offer to `decide`, whose `Decision` borrows for that
+  call. Copy the private response plan before ending either borrow. This binds configuration and
+  request metadata to an explicit input loan instead of inferring an unrelated configuration
+  lifetime from a conformance bound. Optional headers avoid an empty borrowed array for the common
+  no-extra-headers decision. Rejection supplies a status and optional fields; the wrapper selects
+  the request version and generates zero-body framing.
 
 - Borrow request metadata in `Offer`; iterate repeated fields without allocating. Validate singleton counts, token grammar and duplicates before application code.
 - Use explicit application decision and channel callbacks. Copy accepted metadata and response values into a private bounded plan before ending request-head borrows. No public plan constructor or validation Boolean can authorize a different request.
+- Split shared HTTP response selection from body-encoder construction so body-free rejection validates the same framing without allocating unused chunk/trailer buffers outside the handshake budget.
 - Reuse shared HTTP values and generic server handoff. This preserves serial request ownership and unread suffix rather than introducing a second socket or buffer path.
 - Keep typed inspection errors independent from writing. Deterministic HTTP mappings are available for rejection. Application rejection is an ordinary HTTP response; callback errors keep their original channels.
 - Defaults and zero limits follow the issue contract. Preflight response and allocation sizes with checked arithmetic, including header/index storage, before reserving memory or output.
-- Use existing acceptance infrastructure for runtime and transport proofs; narrow structured analysis proves ownership, and pure StaticEvaluation proves compile-time claims.
+- Use existing acceptance infrastructure for runtime and transport proofs; narrow structured analysis proves ownership, and the public RFC example shares declaration analysis. The ordinary runtime API makes no compile-time execution claim; StaticEvaluation is reserved for APIs explicitly available in that phase.
 
 ## Risks / Trade-offs
 

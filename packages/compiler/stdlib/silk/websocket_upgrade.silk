@@ -240,14 +240,14 @@ pub union Outcome<A> {
   },
 }
 
-/// An explicit application decision whose values borrow caller configuration, not the request.
-pub union Decision<'config> {
+/// An explicit application decision whose values borrow the scoped policy or request offer.
+pub union Decision<'value> {
   /// Accepts an optional offered protocol and ordinary response headers. Extensions must be false.
   Accept {
     /// No protocol, or exactly one case-sensitive offered token.
-    pub protocol: Option<string<'config>>,
+    pub protocol: Option<string<'value>>,
     /// Validated extra fields; repeated ordinary fields remain in order.
-    pub headers: Option<Headers<'config>>,
+    pub headers: Option<Headers<'value>>,
     /// Requests extension negotiation. True fails with UnsupportedNegotiation.
     pub extensions: bool,
   },
@@ -256,15 +256,15 @@ pub union Decision<'config> {
     /// The application-selected final HTTP status.
     pub status: Status,
     /// Optional ordinary response fields, including authentication headers.
-    pub headers: Option<Headers<'config>>,
+    pub headers: Option<Headers<'value>>,
   },
 }
 
 /// A compile-time policy that makes one explicit decision from a scoped request offer.
-pub interface DecisionHandler<'config, D, ?R> {
-  /// Consumes policy context and preserves its failure and requirement channels.
-  effect<'call> fn decide<'call, 'head: 'call>(handler: Self, offer: &'call Offer<'head>) -> Decision<
-    'config,
+pub interface DecisionHandler<D, ?R> {
+  /// Borrows policy and offer data for one decision and preserves failure and requirement channels.
+  effect<'call> fn decide<'call, 'head: 'call>(handler: &'call Self, offer: &'call Offer<'head>) -> Decision<
+    'call,
   > ! D ? R
 }
 
@@ -462,15 +462,10 @@ pub fn inspect<'head>(head: &RequestHead<'head>, limits: Limits) -> Result<
 /// Returns the default rejection status without writing: 417 for Expect, 426 for version, otherwise 400.
 pub fn rejectionStatus(error: &UpgradeError) -> u16 {
   return match & error.* {
-    UpgradeError.UnsupportedVersion {supported} => {
-      drop supported
-      return 426
-    }
-    UpgradeError.Validation {reason} => {
-      if reason == ValidationReason.Expect {
-        return 417
-      }
-      return 400
+    UpgradeError.UnsupportedVersion {supported} => 426
+    UpgradeError.Validation {reason} => match reason {
+      ValidationReason.Expect => 417
+      _ => 400
     }
     _ => 400
   }
@@ -635,8 +630,7 @@ fn authority(bytes: &[u8]) -> bool {
       return false
     }
     Result.Success {value} => {
-      drop value
-      return true
+      return String.byteLength(value.host()) > usize.ZERO
     }
   }
 }
@@ -750,7 +744,8 @@ struct ResponsePlan {
 ///
 /// # Details
 ///
-/// The decision borrows caller configuration. Request metadata cannot escape either callback.
+/// The decision borrows the policy or current offer. The operation copies its response before
+/// the HTTP handoff, so borrowed metadata cannot escape the handshake.
 /// Rejected retains the sent application status. Errors before output leave HTTP active.
 /// Use the same absolute deadline for the enclosing HTTP request acquisition.
 ///
@@ -763,7 +758,6 @@ pub effect fn withUpgrade<
   'request: 'loan,
   'connection: 'request,
   'transport: 'connection,
-  'config,
   'callback,
   A,
   D,
@@ -771,7 +765,7 @@ pub effect fn withUpgrade<
   ?DecisionRequirements,
   ?CallbackRequirements,
   P,
-  H: DecisionHandler<'config, D ? DecisionRequirements>,
+  H: DecisionHandler<D ? DecisionRequirements>,
 >(
   request: &'loan mut Request<'request, 'connection, 'transport, P>,
   limits: Limits,
@@ -791,7 +785,7 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     }
     Result.Success {value} => value
   }
-  let decision = run DecisionHandler<'config, D ? DecisionRequirements>.decide(move handler, &offer)
+  let decision = run DecisionHandler.decide(&handler, &offer)
   let plan = run planDecision(&offer, move decision, limits)
   drop offer
   drop head

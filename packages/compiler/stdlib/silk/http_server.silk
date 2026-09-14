@@ -38,6 +38,7 @@ import silk.http_body {
   Limits as BodyLimits,
   Progress as BodyProgress,
   ProgressState as BodyProgressState,
+  Selection,
   TrailerPolicy,
   validateOutgoingResponse,
   selectRequest,
@@ -1072,11 +1073,6 @@ pub effect fn reject<
 ! ServerError | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock
 where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  let emptyEntries: [Header<'static>; 0] = []
-  let empty = match move Headers.make(&emptyEntries, request.connection.limits.values) {
-    Result.Failure {error} => { fail ServerError.Value {error: move error} }
-    Result.Success {value} => value
-  }
   if request.connection.phaseValue != ConnectionPhase.RequestActive {
     fail ServerError.InvalidState {phase: request.connection.phaseValue}
   }
@@ -1085,34 +1081,14 @@ where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut Monoton
     fail ServerError.InvalidBodyMode
   }
   let size = run normalizeResponse(&mut request.connection.*, head, true, false, false)
-  let encoder = run makeResponseEncoder(
+  let selection = run selectResponse(
     &mut request.*,
     size,
     BodyMode.NoBody,
     TrailerPolicy.defaultPolicy(),
   )
+  drop selection
   run writeScratch(&mut request.connection.*, size, &deadline)
-  let mut finishing = move encoder
-  let begun = Encoder.beginFinish(&mut finishing, &empty)
-  if let Result.Failure {error} = move begun {
-    request.connection.phaseValue = ConnectionPhase.Failed
-    fail ServerError.Body {error: move error}
-  }
-  while !encoderComplete(&finishing) {
-    let scratch = Bytes.asMutSlice(&mut request.connection.responseScratch)
-    let continued = Encoder.continueFinish(&mut finishing, &mut scratch)
-    drop scratch
-    let progress = match move continued {
-      Result.Failure {error} => {
-        request.connection.phaseValue = ConnectionPhase.Failed
-        fail ServerError.Body {error: move error}
-      }
-      Result.Success {value} => value
-    }
-    if progress.written > usize.ZERO {
-      run writeScratch(&mut request.connection.*, progress.written, &deadline)
-    }
-  }
   run flushServer(&mut request.connection.*, &deadline)
   request.responseFinished = true
   request.connection.closeSelected = true
@@ -1505,9 +1481,22 @@ effect fn makeResponseEncoder<'request, 'connection, 'transport, 'names, P>(
   size: usize,
   mode: BodyMode,
   trailerPolicy: TrailerPolicy<'names>,
-) -> Encoder
-! ServerError | OutOfMemoryError
-? &mut Allocator {
+) -> Encoder ! ServerError | OutOfMemoryError ? &mut Allocator {
+  let limits = request.connection.limits.body
+  let selection = run selectResponse(&mut request.*, size, mode, trailerPolicy)
+  let made = run Encoder.make(move selection, limits, trailerPolicy)
+  return match move made {
+    Result<Encoder, BodyError>.Failure {error} => {
+      fail ServerError.Body {error: move error}
+    }
+    Result<Encoder, BodyError>.Success {value} => move value
+  }
+}
+
+effect fn prepareResponse<'request, 'connection, 'transport, P>(
+  request: &mut Request<'request, 'connection, 'transport, P>,
+  size: usize,
+) -> () ! ServerError {
   if request.connection.responseParserUsed {
     let reset = ResponseParser.reset(&mut request.connection.responseParser)
     if let Result<(), ParseError>.Failure {error} = move reset {
@@ -1521,16 +1510,41 @@ effect fn makeResponseEncoder<'request, 'connection, 'transport, 'names, P>(
   drop bytes
   drop scratch
   let progress = match move fed {
-    Result.Failure {error} => { fail ServerError.Head {error: move error} }
+    Result.Failure {error} => {
+      fail ServerError.Head {error: move error}
+    }
     Result.Success {value} => value
   }
-  if progress.state != HeadProgressState.Complete { fail ServerError.TruncatedHead }
+  if progress.state != HeadProgressState.Complete {
+    fail ServerError.TruncatedHead
+  }
+  return ()
+}
+
+effect fn selectResponse<
+  'selection,
+  'request: 'selection,
+  'connection: 'request,
+  'transport: 'connection,
+  'names,
+  P,
+>(
+  request: &'selection mut Request<'request, 'connection, 'transport, P>,
+  size: usize,
+  mode: BodyMode,
+  trailerPolicy: TrailerPolicy<'names>,
+) -> Selection<'selection> ! ServerError {
+  run prepareResponse(&mut request.*, size)
   let response = match move ResponseParser.head(&request.connection.responseParser) {
-    Result.Failure {error} => { fail ServerError.Head {error: move error} }
+    Result.Failure {error} => {
+      fail ServerError.Head {error: move error}
+    }
     Result.Success {value} => value
   }
   let requestHead = match move RequestParser.head(&request.connection.requestParser) {
-    Result.Failure {error} => { fail ServerError.Head {error: move error} }
+    Result.Failure {error} => {
+      fail ServerError.Head {error: move error}
+    }
     Result.Success {value} => value
   }
   let method = requestHead.method()
@@ -1539,15 +1553,15 @@ effect fn makeResponseEncoder<'request, 'connection, 'transport, 'names, P>(
   drop requestHead
   drop response
   let selection = match move selected {
-    Result.Failure {error} => { fail ServerError.Body {error: move error} }
+    Result.Failure {error} => {
+      fail ServerError.Body {error: move error}
+    }
     Result.Success {value} => move value
   }
-  if !modeMatches(mode, selection.framing()) { fail ServerError.InvalidBodyMode }
-  let made = run Encoder.make(move selection, request.connection.limits.body, trailerPolicy)
-  return match move made {
-    Result<Encoder, BodyError>.Failure {error} => { fail ServerError.Body {error: move error} }
-    Result<Encoder, BodyError>.Success {value} => move value
+  if !modeMatches(mode, selection.framing()) {
+    fail ServerError.InvalidBodyMode
   }
+  return move selection
 }
 
 effect fn normalizeResponse<'connection, 'transport, 'value, P>(
