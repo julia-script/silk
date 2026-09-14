@@ -5,6 +5,8 @@ import * as Analysis from '../src/Analysis.js'
 import * as CompilationProfile from '../src/CompilationProfile.js'
 import * as MirVerification from '../src/MirVerification.js'
 import * as SourceSpan from '../src/SourceSpan.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as StaticEvaluation from '../src/StaticEvaluation.js'
 import * as StaticValue from '../src/StaticValue.js'
 import * as Target from '../src/Target.js'
@@ -243,7 +245,7 @@ pub fn main() -> i32 { return 0 }
 `
 
 it.effect(
-  'realizes the reference example and public buffered signatures together',
+  'checks reference/public declarations and lowers bounded aggregate overflow',
   () =>
     Effect.gen(function* () {
       const reference = readFileSync(
@@ -287,10 +289,18 @@ import silk.bytes { Bytes }`,
   run shutdownBufferedWrite(&mut session.*, Option.none<Instant>())
   let filled = run BufferedDuplex.fill(`,
         )
-      const snapshot = yield* AnalysisFixture.retainingMain(
-        'buffered-byte-io/reference-and-public-surface',
-        encoder.encode(source),
-      )
+      const sourceId = 'buffered-byte-io/reference-and-public-surface'
+      const selected = AnalysisFixture.configuration(sourceId)
+      const snapshot = yield* Analysis.makeRealized({
+        root: SourceFile.make(sourceId, encoder.encode(source)),
+        configuration: {
+          ...selected,
+          composition: {
+            ...selected.composition,
+            retention: [{ module: 'silk/buffered_output', declaration: 'checkedAggregateLength' }],
+          },
+        },
+      }).pipe(Effect.provide(SourceResolver.empty))
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
       const mir = Analysis.loweredMir(snapshot)
       const aggregate = mir.functions.find(
