@@ -412,9 +412,16 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
 
 const definitionMap = (fn: Mir.MirFunction): ReadonlyMap<number, Mir.Operation> =>
   new Map(
-    MirVerification.operations(fn).flatMap((operation) =>
-      'destination' in operation ? [[operation.destination.ordinal, operation] as const] : [],
-    ),
+    MirVerification.operations(fn).flatMap((operation) => [
+      ...('destination' in operation ? [[operation.destination.ordinal, operation] as const] : []),
+      ...(operation._tag === 'Match'
+        ? operation.arms.flatMap((arm) =>
+            arm.bindings
+              .filter((binding) => binding.type._tag === 'EnvironmentBorrow')
+              .map((binding) => [binding.destination.ordinal, operation] as const),
+          )
+        : []),
+    ]),
   )
 
 const borrowOf = (
@@ -444,6 +451,10 @@ const borrowOf = (
     })
   const next = new Set(seen).add(local.ordinal)
   const definition = definitions.get(local.ordinal)
+  if (definition?._tag === 'Match') {
+    const parent = borrowOf(fn, definitions, definition.scrutinee, next)
+    return Object.freeze({ ...parent, access })
+  }
   if (definition?._tag === 'BeginLoan') {
     const parent = borrowOf(fn, definitions, definition.root, next)
     return Object.freeze({

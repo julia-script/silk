@@ -84,10 +84,10 @@ export const conformanceCandidates = (
             ? TypeInference.inferOpenGenericArguments(pattern, actual, inferred).matches
             : TypeInference.infer(pattern, actual, inferred)
         if (!inferHead(conformance.provider.type, goal.provider)) return []
-        const capabilityPattern =
-          admission === 'AssumedOpen'
-            ? Type.substitute(conformance.capability.type, inferred)
-            : conformance.capability.type
+        // The provider may fix a parameter nested in a normalized capability argument (such as
+        // E | FixedError). Apply those bindings before matching the second head; comparing the
+        // unsubstituted union would reject the same witness when its goal becomes concrete.
+        const capabilityPattern = Type.substitute(conformance.capability.type, inferred)
         if (!inferHead(capabilityPattern, goal.capability)) return []
         ResolutionWork.accept(work)
         return Object.freeze([

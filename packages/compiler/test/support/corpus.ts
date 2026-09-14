@@ -1812,9 +1812,15 @@ pub fn main() -> i32 {
 union Deferred<F: once Effect<'static; i32>> { Empty, Ready { operation: F } }
 union Flag { Empty, Value { value: i32 } }
 impl Copy for Flag {}
-struct Token {}
-impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
-union Owner { Empty, Present { token: Token, value: i32 } }
+struct Token<'a> { first: i32 second: i32 audit: &'a mut i32 }
+impl<'a> Drop for Token<'a> {
+  fn drop(self: &mut Token<'a>) -> () {
+    self.second = self.first + self.second
+    self.audit.* = self.second
+    return ()
+  }
+}
+union Owner<'a> { Empty, Present { token: Token<'a>, value: i32 }, Wide { first: i64, second: i64, third: i64 } }
 
 fn increment(value: i32) -> i32 { return value + 1 }
 fn parse<F: once fn<'static>(i32) -> i32>(parser: Parser<F>) -> i32 {
@@ -1833,14 +1839,17 @@ fn copyFlag(flag: Flag) -> i32 {
   let copied = flag
   return match move copied { Flag.Empty => 0 Flag.Value { value } => value }
 }
-fn consume(owner: Owner) -> i32 {
-  return match move owner { Owner.Empty => 0 Owner.Present { value, .. } => value }
+fn consume<'a>(owner: Owner<'a>) -> i32 {
+  return match move owner { Owner<'a>.Empty => 0 Owner<'a>.Present { value, .. } => value Owner<'a>.Wide {..} => 0 }
 }
 pub fn main() -> i32 {
   let parser = Parser.Ready { parse: increment }
   let deferred = Deferred.Ready { operation: effect { return 18 } }
-  let owner = Owner.Present { token: Token {}, value: 2 }
-  return parse(move parser) + force(move deferred) + copyFlag(Flag.Value { value: 2 }) + consume(move owner)
+  let mut audit = 0
+  let owner = Owner.Present { token: Token {first: 17, second: 25, audit: &mut audit}, value: 2 }
+  let consumed = consume(move owner)
+  if audit != 42 { return 0 }
+  return parse(move parser) + force(move deferred) + copyFlag(Flag.Value { value: 2 }) + consumed
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -2204,16 +2213,41 @@ pub fn main() -> i32 {
   },
   {
     name: 'nominal-union-operator-provider',
-    source: `union Choice { Left { value: i32 }, Right { value: i32 } }
+    source: `struct Narrow {first: i32 second: i32}
+struct Wide {first: i64 second: i64}
+union Choice { Left { value: Narrow }, Right { value: Wide } }
+struct Choices { values: [Choice; 1] }
 interface Merge { operator + fn add(left: Self, right: Self) -> Self }
 fn add(left: Choice, right: Choice) -> Choice { return move left }
 impl Merge for Choice { add: Choice.add }
-pub fn main() -> i32 {
-  let combined = Choice.Left { value: 42 } + Choice.Right { value: 0 }
-  return match move combined {
-    Choice.Left { value } => value
-    Choice.Right { value } => value
+fn increment(value: &mut Narrow) -> () {
+  value.first = value.first + 1
+  value.second = value.second + 1
+}
+fn readArray(values: &Choices, index: usize) -> i32 {
+  return match &values.values[index] {
+    Choice.Left {value} => value.first + value.second
+    Choice.Right {..} => 0
   }
+}
+fn readSlice(values: &[Choice], index: usize) -> i32 {
+  return match &values[index] {
+    Choice.Left {value} => value.first + value.second
+    Choice.Right {..} => 0
+  }
+}
+pub fn main() -> i32 {
+  let mut combined = Choice.Left { value: Narrow {first: 20, second: 20} }
+    + Choice.Right { value: Wide {first: 0, second: 0} }
+  match &mut combined {
+    Choice.Left {value} => { increment(&mut value) }
+    Choice.Right {..} => {}
+  }
+  let mut values = Choices {values: [move combined]}
+  let arrayValue = readArray(&values, 0)
+  let sliceValue = readSlice(&values.values, 0)
+  if arrayValue == sliceValue { return arrayValue }
+  return 0
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -4501,7 +4535,14 @@ import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.raw_buffer { RawBuffer }
 import silk.slot { Slot }
-struct Element { value: i32 }
+union Element { Narrow { first: i32, second: i32 }, Wide { first: i64, second: i64 } }
+impl Copy for Element {}
+fn score(value: Element) -> i32 {
+  return match move value {
+    Element.Narrow {first, second} => first + second
+    Element.Wide {first, second} => { if first + second == 31 { return 31 } return 0 }
+  }
+}
 
 effect fn build(count: usize) -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -4510,14 +4551,14 @@ effect fn build(count: usize) -> i32 ! OutOfMemoryError {
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<Element>(move allocation, 4)
-    let head0 = Element { value: 11 }
-    let tail0 = Element { value: 31 }
+    let head0 = Element.Narrow { first: 10, second: 1 }
+    let tail0 = Element.Wide { first: 30, second: 1 }
     let first = Slot.write(RawBuffer.slot(&mut buffer, 0), move head0)
     let second = Slot.write(RawBuffer.slot(&mut buffer, 1), move tail0)
     let head = Slot.take(RawBuffer.slot(&mut buffer, 0))
-    let tail = Slot.take(RawBuffer.slot(&mut buffer, 1))
+    let tail = RawBuffer.read<Element>(&buffer, 1)
     drop buffer
-    return head.value + tail.value
+    return score(move head) + score(move tail)
   }
   return 0
 }

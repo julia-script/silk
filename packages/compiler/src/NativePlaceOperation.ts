@@ -17,6 +17,7 @@ import * as NativeStorage from './NativeStorage.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
 import * as NativePlace from './NativePlace.js'
+import * as NativePlaceAddress from './NativePlaceAddress.js'
 import * as SilkType from './Type.js'
 
 type Operation = Extract<
@@ -242,238 +243,18 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
         break
       }
-      const rootType = entry.fn.localTypes.at(operation.root.ordinal)
-      const rootSemantic = rootType === undefined ? undefined : Mir.semanticType(rootType)
-      if (rootSemantic === undefined)
-        throw new RangeError('LLVM borrow formation lost its root type')
-      if (!descriptor && SilkType.isSlice(rootSemantic)) {
-        const [selector, ...suffixSelectors] = operation.selectors
-        const [base, length] = yield* NativeStorage.materialize(nativeStorage, operation.root)
-        if (
-          selector?._tag !== 'SliceElementSelector' ||
-          base === undefined ||
-          length === undefined ||
-          operation.type._tag !== 'Reference'
-        ) {
-          throw new RangeError('LLVM slice borrow lost its canonical lanes')
-        }
-        trapBlock = yield* NativeTermination.trapBlock(
-          context.termination,
-          'index out of bounds',
-          selector.provenance.span,
-        )
-        const index = yield* NativeStorage.readScalar(nativeStorage, selector.index)
-        const inBounds = yield* FunctionBody.integerCompare(
-          body,
-          'ult',
-          index,
-          length,
-          `borrow${checkOrdinal}_in_bounds`,
-        )
-        yield* NativeDebug.locate(
-          debug,
-          selector.provenance.span,
-          yield* Value.instruction(body, inBounds),
-        )
-        const continuation = yield* LlvmBlock.make(body, `borrow${checkOrdinal}_ok`)
-        yield* FunctionBody.conditionalBranch(body, inBounds, continuation, trapBlock)
-        yield* LlvmBlock.setInsertionPoint(body, continuation)
-        const sliceLayout = Layout.entry(program.layout, rootSemantic)
-        if (sliceLayout?.representation._tag !== 'Slice') {
-          throw new RangeError('LLVM slice borrow lost its compiler layout')
-        }
-        const elementOffset = yield* FunctionBody.binary(
-          body,
-          'mul',
-          index,
-          yield* Constant.integerUnsigned(
-            builder,
-            usizeType ?? i32,
-            BigInt(sliceLayout.representation.stride),
-          ),
-          `borrow${operation.destination.ordinal}_element_offset`,
-        )
-        const staticSelectors: Array<Layout.Selector> = []
-        for (const candidate of suffixSelectors) {
-          if (candidate._tag === 'FieldSelector') {
-            staticSelectors.push(candidate.field)
-          } else if (candidate._tag === 'ElementSelector' && candidate.index._tag === 'Proven') {
-            staticSelectors.push(
-              Object.freeze({
-                _tag: 'ElementSelector',
-                index: candidate.index.value,
-              }),
-            )
-          } else {
-            throw new RangeError('LLVM nested runtime slice borrow is not canonical')
-          }
-        }
-        const staticOffset = LayoutVerify.laneOffset(
-          program.layout,
-          rootSemantic.element,
-          staticSelectors,
-        )
-        if (staticOffset === undefined) {
-          throw new RangeError('LLVM slice borrow lost its selected layout')
-        }
-        const offset =
-          staticOffset === 0
-            ? elementOffset
-            : yield* FunctionBody.binary(
-                body,
-                'add',
-                elementOffset,
-                yield* Constant.integerUnsigned(builder, usizeType ?? i32, BigInt(staticOffset)),
-                `borrow${operation.destination.ordinal}_static_offset`,
-              )
-        const projected = yield* NativeLanePointer.lanePointer(
-          lanePointers,
-          body,
-          base,
-          offset,
-          `borrow${operation.destination.ordinal}_projected`,
-        )
-        yield* NativeStorage.writeLocal(
-          nativeStorage,
-          operation.destination.ordinal,
-          Object.freeze([yield* referenceAddress(context, operation, projected)]),
-        )
-        checkOrdinal += 1
-        break
-      }
-      let selected =
-        !descriptor && SilkType.isReference(rootSemantic) ? rootSemantic.target : rootSemantic
-      let rootBase: Value.Input | undefined
-      if (!descriptor && SilkType.isReference(rootSemantic)) {
-        const address = (yield* NativeStorage.materialize(nativeStorage, operation.root)).at(0)
-        if (address === undefined)
-          throw new RangeError('LLVM rootBase borrow lost its reference address')
-        rootBase = yield* FunctionBody.cast(
-          body,
-          'inttoptr',
-          address,
-          pointer,
-          `borrow${operation.destination.ordinal}_base`,
-        )
-      } else {
-        yield* NativeStorage.materializeAddressRoot(nativeStorage, operation.root)
-        rootBase = yield* NativeStorage.addressOf(nativeStorage, operation.root)
-      }
-      if (rootBase === undefined) throw new RangeError('LLVM borrow formation lost its root')
-      let projected: Value.Input = rootBase
-      for (const [ordinal, selector] of operation.selectors.entries()) {
-        const selectedLayout = Layout.entry(program.layout, selected)
-        const tag = `borrow${operation.destination.ordinal}_${ordinal}`
-        if (selector._tag === 'FieldSelector') {
-          if (selectedLayout?.representation._tag !== 'Aggregate')
-            throw new RangeError('LLVM borrow field lost its aggregate layout')
-          const field = selectedLayout.representation.fields.find((candidate) =>
-            DeclarationFacts.sameFieldId(candidate.id, selector.field),
-          )
-          if (field === undefined) throw new RangeError('LLVM borrow field lost its field layout')
-          projected = yield* NativeLanePointer.lanePointer(
-            lanePointers,
-            body,
-            projected,
-            field.offset,
-            `${tag}_field`,
-          )
-          selected = field.type
-          continue
-        }
-        let index: Value.Input
-        let length: Value.Input
-        let stride: number
-        if (selector._tag === 'SliceElementSelector') {
-          if (selectedLayout?.representation._tag !== 'Slice')
-            throw new RangeError('LLVM borrowed slice field lost its descriptor layout')
-          const descriptorLayout = selectedLayout.representation
-          // Crossing a slice descriptor changes the allocation being addressed. Prefix field
-          // offsets belong to the descriptor; suffix selectors belong to its backing elements.
-          const base: Value.Input = yield* FunctionBody.load(
-            body,
-            pointer,
-            projected,
-            `${tag}_data`,
-          )
-          length = yield* FunctionBody.load(
-            body,
-            usizeType ?? i32,
-            yield* NativeLanePointer.lanePointer(
-              lanePointers,
-              body,
-              projected,
-              descriptorLayout.length.offset,
-              `${tag}_length_ptr`,
-            ),
-            `${tag}_length`,
-          )
-          projected = base
-          index = yield* NativeStorage.readScalar(nativeStorage, selector.index)
-          stride = descriptorLayout.stride
-          selected = descriptorLayout.element
-        } else {
-          if (
-            selector._tag !== 'ElementSelector' ||
-            selectedLayout?.representation._tag !== 'Repeated'
-          )
-            throw new RangeError('LLVM borrow element lost its repeated layout')
-          const repeated = selectedLayout.representation
-          selected = repeated.element
-          stride = repeated.stride
-          if (selector.index._tag === 'Proven') {
-            projected = yield* NativeLanePointer.lanePointer(
-              lanePointers,
-              body,
-              projected,
-              selector.index.value * stride,
-              `${tag}_element`,
-            )
-            continue
-          }
-          index = yield* NativeStorage.readScalar(nativeStorage, selector.index.local)
-          length = yield* Constant.integerUnsigned(
-            builder,
-            usizeType ?? i32,
-            BigInt(selector.length),
-          )
-        }
-        trapBlock = yield* NativeTermination.trapBlock(
-          context.termination,
-          'index out of bounds',
-          selector.provenance.span,
-        )
-        const inBounds = yield* FunctionBody.integerCompare(
-          body,
-          'ult',
-          index,
-          length,
-          `${tag}_in_bounds`,
-        )
-        yield* NativeDebug.locate(
-          debug,
-          selector.provenance.span,
-          yield* Value.instruction(body, inBounds),
-        )
-        const continuation = yield* LlvmBlock.make(body, `${tag}_ok`)
-        yield* FunctionBody.conditionalBranch(body, inBounds, continuation, trapBlock)
-        yield* LlvmBlock.setInsertionPoint(body, continuation)
-        const offset = yield* FunctionBody.binary(
-          body,
-          'mul',
-          index,
-          yield* Constant.integerUnsigned(builder, usizeType ?? i32, BigInt(stride)),
-          `${tag}_offset`,
-        )
-        projected = yield* NativeLanePointer.lanePointer(
-          lanePointers,
-          body,
-          projected,
-          offset,
-          `${tag}_element`,
-        )
-        checkOrdinal += 1
-      }
+      const place = yield* NativePlaceAddress.resolve(
+        context,
+        operation.root,
+        operation.selectors,
+        `borrow${operation.destination.ordinal}`,
+        descriptor,
+      )
+      const projected = yield* NativePlace.base(
+        place,
+        nativeStorage,
+        `borrow${operation.destination.ordinal}_address`,
+      )
       if (operation.type._tag === 'Reference') {
         yield* NativeStorage.writeLocal(
           nativeStorage,

@@ -5820,6 +5820,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             self.layout,
             operation.scrutinee,
             operation.selectors ?? [],
+            operation.access === 'Shared' || operation.access === 'Exclusive',
           )
           const destination =
             operation.destination === undefined

@@ -216,31 +216,21 @@ const bodyOperands = Effect.fnUntraced(function* (
   const { environment, target } = exactEffect(context, package_)
   const bodyOffset = componentOffset(package_, 'BodyEnvironment')
   if (bodyOffset === undefined) throw new RangeError('LLVM execution drive lost body storage')
-  const values: Array<Value.Input> = []
-  for (const [ordinal, placement] of Layout.effectEnvironmentLanePlacements(
-    context.program.layout,
-    environment,
-  ).entries()) {
-    const laneOffset =
-      placement.root === undefined
-        ? 0
-        : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
-    if (laneOffset === undefined) throw new RangeError('LLVM execution body lost a capture lane')
-    values.push(
-      yield* FunctionBody.load(
+  const values = yield* NativePlace.loadLanes(
+    NativePlace.stored(
+      context.program.layout,
+      package_.specialization.body,
+      yield* NativeLanePointer.lanePointer(
+        context.lanePointers,
         context.body,
-        NativeType.laneType(context.types, placement.lane),
-        yield* NativeLanePointer.lanePointer(
-          context.lanePointers,
-          context.body,
-          base,
-          bodyOffset + placement.byteOffset + laneOffset,
-          `${tag}_${ordinal}_ptr`,
-        ),
-        `${tag}_${ordinal}`,
+        base,
+        bodyOffset,
+        `${tag}_body`,
       ),
-    )
-  }
+    ),
+    context,
+    tag,
+  )
   return Object.freeze({ environment, target, values: Object.freeze(values) })
 })
 
@@ -300,37 +290,34 @@ const notifyReady = Effect.fnUntraced(function* (
     readonly parameterOrdinal: number
     readonly items: ReadonlyArray<Value.Input>
   }> = []
-  for (const field of environment?.fields ?? []) {
-    const values: Array<Value.Input> = []
-    // Mirrors the placement-driven storePackageValue so nested callable captures agree.
-    for (const [ordinal, placement] of Layout.callableFieldLanePlacements(
-      context.program.layout,
-      field,
-    ).entries()) {
-      const laneOffset =
-        placement.root === undefined
-          ? 0
-          : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
-      if (laneOffset === undefined)
-        throw new RangeError('LLVM readiness callback lost a capture lane')
-      values.push(
-        yield* FunctionBody.load(
-          context.body,
-          NativeType.laneType(context.types, placement.lane),
-          yield* NativeLanePointer.lanePointer(
-            context.lanePointers,
-            context.body,
-            base,
-            (callbackOffset ?? 0) + placement.byteOffset + laneOffset,
-            `${tag}_capture${field.parameterOrdinal}_${ordinal}_ptr`,
+  const callbackValues =
+    environment === undefined
+      ? []
+      : yield* NativePlace.loadLanes(
+          NativePlace.stored(
+            context.program.layout,
+            callback,
+            yield* NativeLanePointer.lanePointer(
+              context.lanePointers,
+              context.body,
+              base,
+              callbackOffset ?? 0,
+              `${tag}_callback`,
+            ),
           ),
-          `${tag}_capture${field.parameterOrdinal}_${ordinal}`,
-        ),
-      )
-    }
+          context,
+          `${tag}_callback`,
+        )
+  let captureOrdinal = 0
+  for (const field of environment?.fields ?? []) {
+    const count = Layout.callableFieldLanes(context.program.layout, field).length
     captures.push(
-      Object.freeze({ parameterOrdinal: field.parameterOrdinal, items: Object.freeze(values) }),
+      Object.freeze({
+        parameterOrdinal: field.parameterOrdinal,
+        items: Object.freeze(callbackValues.slice(captureOrdinal, captureOrdinal + count)),
+      }),
     )
+    captureOrdinal += count
   }
   const endpoint = yield* NativeLanePointer.lanePointer(
     context.lanePointers,

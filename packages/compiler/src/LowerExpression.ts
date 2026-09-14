@@ -34,6 +34,7 @@ import {
   lowerFinalizedEffect,
   lowerUseReleaseNonParking,
   lowerPlace,
+  lowerPlacePath,
   lowerRunEffectComposite,
   lowerRunEffectValue,
   lowerServiceEffectValue,
@@ -2087,7 +2088,12 @@ function lowerMatchExpression(
   if (expression.scrutinee._tag === 'Unavailable') return undefined
   let scrutinee: LoweredExpression | undefined
   let selectors: ReadonlyArray<Mir.PlaceSelector> | undefined
-  if (expression.access === 'Place') {
+  if (expression.access === 'Shared' || expression.access === 'Exclusive') {
+    const place = lowerPlacePath(fn, expression.scrutinee, availableRequirements)
+    if (place === undefined || place === 'Transferred') return place
+    scrutinee = { result: place.root }
+    selectors = place.selectors
+  } else if (expression.access === 'Place') {
     const source = Ownership.placeOf(expression.scrutinee)
     if (source === undefined) return undefined
     const alias = Ownership.allBindings(fn.ownership).find(
@@ -2195,7 +2201,14 @@ function lowerMatchExpression(
     const after = transition.after
     const bindings: Array<Mir.MatchBinding> = []
     for (const binding of executes && expression.access !== 'Place' ? arm.bindings : []) {
-      const type = fn.type(binding.type)
+      const type =
+        binding.access === 'Shared' || binding.access === 'Exclusive'
+          ? {
+              _tag: 'EnvironmentBorrow' as const,
+              type: fn.semantic(binding.type),
+              access: binding.access,
+            }
+          : fn.type(binding.type)
       if (type === undefined) return undefined
       const destination = fn.alloc(type)
       fn.patternLocals.set(patternKey(binding.id), destination)

@@ -152,6 +152,15 @@ export const discoverRoots = (
   const address = new Set([
     ...blocks.flatMap((block) =>
       block.operations.flatMap((operation) =>
+        operation._tag === 'BindMatch' &&
+        operation.type._tag === 'EnvironmentBorrow' &&
+        fn.localTypes.at(operation.scrutinee.ordinal)?._tag !== 'Reference'
+          ? [operation.scrutinee.ordinal]
+          : [],
+      ),
+    ),
+    ...blocks.flatMap((block) =>
+      block.operations.flatMap((operation) =>
         operation._tag === 'EnterDiagnosticScope'
           ? [operation.state.ordinal, operation.observer.ordinal]
           : [],
@@ -562,7 +571,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
         const addressStorage = new Map<number, Value.Input>()
         const transientOutcomes = NativeOutcomeStorage.transientLocals(entry.fn, entry.linear)
         const placeRoots = entry.fn.localTypes.flatMap((type, ordinal) =>
-          NativeValue.classify(program.layout, type) === 'Place' && !transientOutcomes.has(ordinal)
+          (NativeValue.classify(program.layout, type) === 'Place' ||
+            type._tag === 'EnvironmentBorrow') &&
+          !transientOutcomes.has(ordinal)
             ? [ordinal]
             : [],
         )
@@ -570,7 +581,13 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           (left, right) => left - right,
         )) {
           const logicalType = entry.fn.localTypes.at(root)
-          if (logicalType?._tag === 'EnvironmentBorrow') continue
+          if (logicalType?._tag === 'EnvironmentBorrow') {
+            addressStorage.set(
+              root,
+              yield* FunctionBody.alloca(body, pointer, `borrow${root}_slot`),
+            )
+            continue
+          }
           if (
             logicalType !== undefined &&
             NativeValue.classify(program.layout, logicalType) === 'Place'
@@ -691,7 +708,8 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
             const base = values.at(0)
             if (base === undefined)
               throw new RangeError(`Backend lost environment borrow %${ordinal}`)
-            const slot = yield* FunctionBody.alloca(body, pointer, `borrow${ordinal}_slot`)
+            const slot = addressStorage.get(ordinal)
+            if (slot === undefined) throw new RangeError('Environment borrow lost its entry slot')
             yield* FunctionBody.store(body, base, slot)
             addressStorage.set(ordinal, slot)
             continue

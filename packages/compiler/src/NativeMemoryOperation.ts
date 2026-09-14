@@ -333,9 +333,7 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         yield* Constant.integerUnsigned(builder, usizeType, 0n),
       )
       const allocationLanes = Layout.callingShape(program.layout, SilkType.allocation)?.lanes
-      const valueLanes = Layout.callingShape(program.layout, operation.element)?.lanes
-      const payload = yield* NativeStorage.materialize(nativeStorage, operation.value)
-      if (allocationLanes === undefined || valueLanes === undefined)
+      if (allocationLanes === undefined)
         throw new RangeError('LLVM local-shared initialization lost its calling shapes')
       for (const [ordinal, lane] of allocationLanes.entries()) {
         const value = allocation.at(ordinal)
@@ -344,13 +342,21 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           throw new RangeError('LLVM local-shared initialization lost reclaim provenance')
         yield* storeWord(operation.block.allocationOffset + offset, value)
       }
-      for (const [ordinal, lane] of valueLanes.entries()) {
-        const value = payload.at(ordinal)
-        const offset = LayoutVerify.laneOffset(program.layout, operation.element, lane.path)
-        if (value === undefined || offset === undefined)
-          throw new RangeError('LLVM local-shared initialization lost its payload')
-        yield* storeWord(operation.block.valueOffset + offset, value)
-      }
+      yield* NativeStorage.sendPlace(
+        nativeStorage,
+        NativePlace.stored(
+          program.layout,
+          operation.element,
+          yield* NativeLanePointer.lanePointer(
+            lanePointers,
+            body,
+            base,
+            operation.block.valueOffset,
+            `shared${operation.destination.ordinal}_payload`,
+          ),
+        ),
+        operation.value,
+      )
       yield* NativeStorage.writeLocal(
         nativeStorage,
         operation.destination.ordinal,
@@ -617,33 +623,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         pointer,
         `raw_read${operation.destination.ordinal}_element_ptr`,
       )
-      const lanes = Layout.callingShape(program.layout, operation.element)?.lanes
-      if (lanes === undefined) throw new RangeError('LLVM RawBuffer.read lost its shape')
-      const values: Array<Value.Input> = []
-      for (const [ordinal, lane] of lanes.entries()) {
-        const laneOffset = LayoutVerify.laneOffset(program.layout, operation.element, lane.path)
-        if (laneOffset === undefined) {
-          throw new RangeError('LLVM RawBuffer.read lost an element lane')
-        }
-        values.push(
-          yield* FunctionBody.load(
-            body,
-            NativeType.laneType(types, lane),
-            yield* NativeLanePointer.lanePointer(
-              lanePointers,
-              body,
-              base,
-              laneOffset,
-              `raw_read${operation.destination.ordinal}_${ordinal}_ptr`,
-            ),
-            `raw_read${operation.destination.ordinal}_${ordinal}`,
-          ),
-        )
-      }
-      yield* NativeStorage.writeLocal(
+      yield* NativeStorage.receivePlace(
         nativeStorage,
-        operation.destination.ordinal,
-        Object.freeze(values),
+        operation.destination,
+        NativePlace.stored(program.layout, operation.element, base),
       )
       break
     }
@@ -1108,27 +1091,11 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         pointer,
         `slot_write${operation.destination.ordinal}_base`,
       )
-      const values = yield* NativeStorage.materialize(nativeStorage, operation.value)
-      const lanes = Layout.callingShape(program.layout, operation.element)?.lanes
-      if (lanes === undefined) throw new RangeError('LLVM Slot.write lost its shape')
-      for (const [ordinal, lane] of lanes.entries()) {
-        const value = values.at(ordinal)
-        const offset = LayoutVerify.laneOffset(program.layout, operation.element, lane.path)
-        if (value === undefined || offset === undefined) {
-          throw new RangeError('LLVM Slot.write lost an element lane')
-        }
-        yield* FunctionBody.store(
-          body,
-          value,
-          yield* NativeLanePointer.lanePointer(
-            lanePointers,
-            body,
-            base,
-            offset,
-            `slot_write${operation.destination.ordinal}_${ordinal}_ptr`,
-          ),
-        )
-      }
+      yield* NativeStorage.sendPlace(
+        nativeStorage,
+        NativePlace.stored(program.layout, operation.element, base),
+        operation.value,
+      )
       yield* NativeStorage.writeLocal(
         nativeStorage,
         operation.destination.ordinal,

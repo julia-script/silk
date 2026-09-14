@@ -937,9 +937,15 @@ Each concrete nominal-union application has one target layout containing a priva
 aligned payload storage for its largest variant. Source order determines private variant ordinals.
 Generic applications receive concrete layouts only when reachable and fully specialized.
 
+The active variant's stored fields use their ordinary aggregate offsets. Borrowing a payload field
+therefore refers to the original field, including when another variant has wider fields. Calls use
+the compiler's separate unified lane mapping, with loads and stores translating between that mapping
+and the active variant's storage.
+
 No source operation observes a tag value, payload offset, padding, or ABI choice. Construction,
-calls, returns, matching, copying, and cleanup all use the compiler's verified calling shape. Inline
-cycles across structs and unions are rejected unless source names an explicit finite indirection.
+calls, returns, matching, copying, and cleanup all use the compiler's verified layout and calling
+shapes. Inline cycles across structs and unions are rejected unless source names an explicit finite
+indirection.
 
 **Boundary:** Layout equivalence does not create type compatibility, serialization stability, a C
 ABI, or permission to reinterpret values. A backend cannot invent a fallback tag or offset that is

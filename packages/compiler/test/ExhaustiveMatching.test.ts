@@ -5,6 +5,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as Mir from '../src/Mir.js'
 import * as MirLinearization from '../src/MirLinearization.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as NativeFunction from '../src/NativeFunction.js'
 import * as Elaboration from '../src/Elaboration.js'
 import * as Hir from '../src/Hir.js'
 import * as Lexer from '../src/Lexer.js'
@@ -788,6 +789,110 @@ fn conflict(value: Holder) { match value { Holder { item } => { let item = 1 dro
     result.diagnostics.some((diagnostic) => diagnostic.span.start >= source.indexOf('fn illegal')),
   )
 })
+
+it.effect('borrows exclusive match payloads from the original projected owner', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'borrowed-match-payload',
+      new TextEncoder().encode(`struct Counter { value: i32 }
+struct Empty {}
+struct Guard { provider: Counter | Empty }
+struct Guards { values: [Guard; 1] }
+fn increment(counter: &mut Counter) -> () { counter.value = counter.value + 1 }
+fn readWhole(provider: &(Counter | Empty)) -> i32 {
+  return match &provider.* {
+    Counter {value} => value
+    Empty {} => 0
+  }
+}
+fn update(guard: &mut Guard) -> () {
+  match &mut guard.provider {
+    Counter counter => { increment(&mut counter) }
+    Empty {} => {}
+  }
+}
+fn readSlice(guards: &[Guard], index: usize) -> i32 {
+  return match &guards[index].provider {
+    Counter {value} => value
+    Empty {} => 0
+  }
+}
+fn own(input: Guard) -> i32 {
+  let mut guard = move input
+  match &mut guard.provider {
+    Counter counter => { increment(&mut counter) }
+    Empty {} => {}
+  }
+  return match move guard.provider { Counter {value} => value Empty {} => 0 }
+}
+pub fn main() -> i32 {
+  let mut guard = Guard {provider: Counter {value: 41}}
+  update(&mut guard)
+  let whole = readWhole(&guard.provider)
+  drop whole
+  let mut guards = Guards {values: [Guard {provider: Counter {value: 1}}]}
+  let copied = readSlice(&guards.values, 0)
+  drop copied
+  return own(move guard)
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const program = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(program), [])
+    const fn =
+      program.functions.find((candidate) => candidate.id.name === 'update') ??
+      raise('expected update MIR')
+    const operations = MirVerification.operations(fn)
+    const match =
+      operations.find((operation) => operation._tag === 'Match') ?? raise('expected borrowed match')
+    const loan =
+      operations.find((operation) => operation._tag === 'BeginLoan') ??
+      raise('expected payload loan')
+    const binding =
+      match.arms.flatMap((arm) => arm.bindings).at(0) ?? raise('expected borrowed payload')
+    assert.strictEqual(binding.type._tag, 'EnvironmentBorrow')
+    assert.deepEqual(loan.root, binding.destination)
+    assert.strictEqual(match.scrutinee.ordinal, 0)
+    assert.deepEqual(
+      match.selectors?.map((selector) => selector._tag),
+      ['FieldSelector'],
+    )
+    const indexed =
+      program.functions.find((candidate) => candidate.id.name === 'readSlice') ??
+      raise('expected indexed match')
+    const indexedMatch =
+      MirVerification.operations(indexed).find((operation) => operation._tag === 'Match') ??
+      raise('expected match')
+    assert.isTrue(
+      indexedMatch.selectors?.some((candidate) => candidate._tag === 'SliceElementSelector'),
+    )
+    assert.strictEqual(
+      indexedMatch.arms.flatMap((arm) => arm.bindings).at(0)?.type._tag,
+      'EnvironmentBorrow',
+    )
+    const whole =
+      program.functions.find((candidate) => candidate.id.name === 'readWhole') ??
+      raise('expected whole reference match')
+    const wholeMatch =
+      MirVerification.operations(whole).find((operation) => operation._tag === 'Match') ??
+      raise('expected match')
+    assert.strictEqual(wholeMatch.scrutinee.ordinal, 0)
+    assert.deepEqual(wholeMatch.selectors ?? [], [])
+    const owned =
+      program.functions.find((candidate) => candidate.id.name === 'own') ??
+      raise('expected owned match')
+    const ownedMatch =
+      MirVerification.operations(owned).find(
+        (operation) => operation._tag === 'Match' && operation.access === 'Exclusive',
+      ) ?? raise('expected exclusive owned match')
+    if (ownedMatch._tag !== 'Match') return raise('expected match operation')
+    assert.isTrue(
+      NativeFunction.discoverRoots(owned, MirLinearization.linearize(owned)).address.has(
+        ownedMatch.scrutinee.ordinal,
+      ),
+    )
+  }),
+)
 
 it.effect(
   'lowers an all-transferring argument without its outer call or a match result local',

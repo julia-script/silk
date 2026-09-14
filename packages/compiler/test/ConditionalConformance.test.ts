@@ -51,6 +51,7 @@ effect fn acquire<P, A, E, ?R, C: Contextual<P, A, E ? R>>(
 const splitContext = `service ByteDuplex {}
 service Clock {}
 struct Problem {}
+struct OtherProblem {}
 interface SplitHandler<A, E, ?R> {
   effect fn handle(handler: Self) -> A ! E ? R
 }
@@ -107,7 +108,17 @@ impl Handler<Provider, i32, never ? never> for ConcreteHandler {
   }
 }
 
+struct SplitValue {}
+impl SplitHandler<i32, Problem | OtherProblem ? never> for SplitValue {
+  effect fn handle(handler: Self) -> i32 ! Problem | OtherProblem {
+    drop handler
+    return 42
+  }
+}
+
 pub fn main() -> i32 {
+  let pending = splitBridge(SplitValue {})
+  drop pending
   let mut provider = Provider {}
   return run bridge(&mut provider, ConcreteHandler {})
 }`,
@@ -124,6 +135,10 @@ pub fn main() -> i32 {
       [],
     )
     assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    // The concrete provider fixes E before E | Problem is normalized in the capability head.
+    assert.isTrue(
+      discovery.instances.some((instance) => instance.key.declaration.name === 'splitBridge'),
+    )
     const conformance = Analysis.declarationIndex(snapshot)
       .modules.flatMap((module) => module.conformances)
       .find((candidate) =>

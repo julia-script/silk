@@ -907,6 +907,8 @@ reports `OWN0007`. An invalid borrowed scrutinee place reports `OWN0009`. Using 
 
 In a borrowed match, pattern bindings are borrowed projections valid only within their selected arm.
 Copy leaves may be read, but an affine borrowed payload cannot be consumed or escape the arm.
+An exclusive binding mutates the original selected payload. A scoped call or Effect capture retains
+that same referent across suspension, so moving the owner after the match preserves those mutations.
 
 In a consuming match, the complete active payload enters the selected arm. Bound non-Copy fields
 become arm-local owners. Copy fields are ordinary Copy bindings. Fields omitted with `..` remain

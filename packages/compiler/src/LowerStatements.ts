@@ -32,6 +32,7 @@ import {
   endReturnedViewLoans,
   ownedWriteRoot,
   retainedEffectLoans,
+  lowerPlacePath,
 } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
@@ -68,7 +69,14 @@ export const lowerPatternSelection = (
   result: 'Unit' | 'Bool',
 ): LoweredPatternSelection | 'Transferred' | undefined => {
   if (selection.subject._tag === 'Unavailable') return undefined
-  const subject = lowerExpression(fn, selection.subject)
+  const borrowed = selection.access === 'Shared' || selection.access === 'Exclusive'
+  const place = borrowed ? lowerPlacePath(fn, selection.subject) : undefined
+  if (place === 'Transferred') return place
+  const subject = borrowed
+    ? place === undefined
+      ? undefined
+      : { result: place.root }
+    : lowerExpression(fn, selection.subject)
   if (subject === 'Transferred') return subject
   const semanticSubject = fn.semantic(selection.subject.type)
   const subjectType = fn.type(selection.subject.type)
@@ -118,7 +126,14 @@ export const lowerPatternSelection = (
   )
   const selectedBindings: Array<Mir.MatchBinding> = []
   for (const binding of selection.bindings) {
-    const type = fn.type(binding.type)
+    const type =
+      binding.access === 'Shared' || binding.access === 'Exclusive'
+        ? {
+            _tag: 'EnvironmentBorrow' as const,
+            type: fn.semantic(binding.type),
+            access: binding.access,
+          }
+        : fn.type(binding.type)
     if (type === undefined) return undefined
     const destination = fn.alloc(type)
     fn.patternLocals.set(patternKey(binding.id), destination)
@@ -228,6 +243,7 @@ export const lowerPatternSelection = (
       id: selection.id,
       destination,
       scrutinee: subject.result,
+      ...(place === undefined ? {} : { selectors: place.selectors }),
       scrutineeType: subjectType,
       scrutineeShape: subjectShape,
       access: selection.access,

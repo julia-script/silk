@@ -181,37 +181,6 @@ export type Representation =
       readonly cleanupHook?: CleanupHook
     }
 
-/** Canonical struct-like storage used transiently for one selected nominal-union variant. */
-export interface NominalUnionMaterialization {
-  readonly payloadOffset: number
-  readonly payloadSize: number
-  readonly payloadAlignment: number
-  readonly size: number
-  readonly alignment: number
-}
-
-export const nominalUnionMaterialization = (
-  representation: Extract<Representation, { readonly _tag: 'NominalUnion' }>,
-): NominalUnionMaterialization => {
-  const payloadSize = representation.variants.reduce(
-    (maximum, variant) => Math.max(maximum, variant.size),
-    0,
-  )
-  const payloadAlignment = representation.variants.reduce(
-    (maximum, variant) => Math.max(maximum, variant.alignment),
-    1,
-  )
-  const payloadOffset = alignUp(4, payloadAlignment)
-  const alignment = Math.max(4, payloadAlignment)
-  return Object.freeze({
-    payloadOffset,
-    payloadSize,
-    payloadAlignment,
-    size: alignUp(payloadOffset + payloadSize, alignment),
-    alignment,
-  })
-}
-
 /** One compiler-owned concrete layout entry. */
 export interface Entry {
   readonly _tag: 'LayoutEntry'
@@ -1438,44 +1407,11 @@ export const catalog = (
         completed.set(key, failure)
         return failure
       }
-      const callingEntries = new Map(
-        [...completed].flatMap(([entryKey, candidate]) =>
-          candidate._tag === 'LayoutEntry' ? [[entryKey, candidate] as const] : [],
-        ),
+      const payloadAlignment = variants.reduce(
+        (maximum, variant) => Math.max(maximum, variant.alignment),
+        1,
       )
-      const callingContext = Object.freeze({
-        target,
-        entries: callingEntries,
-        effectEnvironments: Object.freeze([]),
-        callableEnvironments: Object.freeze([]),
-        active: new Set<string>(),
-      })
-      const variantShapes = variants.map((variant): CallingShapeNode => {
-        const fields = Object.freeze(
-          variant.fields.map((field) =>
-            Object.freeze({ field: field.id, shape: shapeNode(field.type, callingContext) }),
-          ),
-        )
-        return Object.freeze({
-          _tag: 'ProductShape',
-          type,
-          fields,
-          laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
-        })
-      })
-      const payloadTypes = unifyPayloadTypes(variantShapes, target)
-      const payload = Packing.pack(
-        payloadTypes.map((payloadType) => {
-          const scalar = scalarEntry(target, payloadType)
-          return Object.freeze({
-            value: payloadType,
-            size: scalar.size,
-            alignment: scalar.alignment,
-          })
-        }),
-      )
-      const payloadAlignment = payload.alignment
-      const payloadSize = payload.size
+      const payloadSize = variants.reduce((maximum, variant) => Math.max(maximum, variant.size), 0)
       const payloadOffset = alignUp(4, payloadAlignment)
       const alignment = Math.max(4, payloadAlignment)
       const size = alignUp(payloadOffset + payloadSize, alignment)
