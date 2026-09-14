@@ -22,7 +22,10 @@ Preserve the generic server lifetime and callback rows, keep peer validation pur
 - Reuse shared HTTP values and generic server handoff. This preserves serial request ownership and unread suffix rather than introducing a second socket or buffer path.
 - Keep typed inspection errors independent from writing. Deterministic HTTP mappings are available for rejection. Application rejection is an ordinary HTTP response; callback errors keep their original channels.
 - Defaults and zero limits follow the issue contract. Preflight response and allocation sizes with checked arithmetic, including header/index storage, before reserving memory or output.
-- Use existing acceptance infrastructure for runtime and transport proofs; narrow structured analysis proves ownership, and the public RFC example shares declaration analysis. The ordinary runtime API makes no compile-time execution claim; StaticEvaluation is reserved for APIs explicitly available in that phase.
+- Use existing acceptance infrastructure for runtime and transport proofs; narrow structured analysis proves ownership. Check the HTTP and WebSocket reference examples together at the frontend phase, which includes resolution, elaboration, and ownership diagnostics without unnecessary runtime realization. A focused standalone run executes the complete RFC example. The ordinary runtime API makes no compile-time execution claim; StaticEvaluation is reserved for APIs explicitly available in that phase.
+- Express SHA-1 bit-length scaling directly as checked multiplication by eight. This preserves overflow behavior while avoiding a retained generic dynamic multiplication helper on LLVM-to-Wasm.
+- Encode HTTP parser metadata with a low-byte mask before checked narrowing. Long WebSocket request heads put field offsets above 255; the shared native/Wasm request exercises that boundary.
+- Preserve lexical provider identity when planning and lowering interface witness Effect runners. Traverse the selected witness implementation to retain its suspension regions, so a parked transport flush remains cancellable through the generic connection handler.
 
 ## Risks / Trade-offs
 

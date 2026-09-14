@@ -974,6 +974,7 @@ export const lowerWitnessEffectRunner = (
     contractRow: Object.freeze([
       ...spec.owner.key.contractRow,
       `witness-effect-site:${Hir.executableSiteKey(spec.type.site)}`,
+      ...spec.providedRequirements.map(providedContractEntry),
     ]),
   })
   const lowering = new FunctionLowering(

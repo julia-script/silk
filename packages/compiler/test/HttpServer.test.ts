@@ -25,7 +25,7 @@ it.effect(
       assert.isString(upgradeExample)
       if (upgradeExample === undefined) return
       const source = `${example}\n${upgradeExample.replace('pub fn main()', 'fn websocketReference()')}`
-      const snapshot = yield* AnalysisFixture.declarations(
+      const snapshot = yield* AnalysisFixture.frontend(
         'http-server/reference-example',
         encoder.encode(source),
       )

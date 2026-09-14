@@ -15,14 +15,13 @@ import silk.http_body {Limits as BodyLimits}
 import silk.http_head {Limits as HeadLimits, RequestParser}
 import silk.http_headers {Headers, Limits as ValueLimits}
 import silk.http_server {Connection, ConnectionHandler, Limits as ServerLimits, Request, ServerError, withConnection, withRequest}
-import silk.memory_byte_duplex {MemoryByteDuplex, MemoryByteDuplexPhase, MemoryReadEvent, MemoryWriteAction, MemoryWriteEvent}
 import silk.monotonic_clock {MonotonicClock}
 import silk.option {Option}
 import silk.result {Result}
 import silk.system_clock {Instant, SystemClock}
 import silk.u64
 import silk.usize
-import silk.vector {Vector}
+import silk.slice {Slice}
 import silk.websocket_upgrade {Decision, DecisionHandler, DecisionReason, LimitKind, Limits, Offer, Outcome, UpgradeError, inspect, reject, rejectionStatus, withUpgrade}
 
 struct FixedClock {}
@@ -189,7 +188,79 @@ fn observeHandoff(state: &mut TransportAudit) -> bool {
 impl HandoffAudit for AuditProvider {
   effect fn observe(self: &mut Self) -> bool { return Shared.withMut(&self.state, observeHandoff) }
 }
-struct UpgradeTransport {inner: MemoryByteDuplex mode: i32 state: Shared<TransportAudit>}
+// Owned buffers are allocated once; this script only copies bytes and records calls.
+struct ScriptedDuplex {
+  first: Bytes remainder: Bytes output: Bytes readOffset: usize outputLength: usize
+  mode: i32 writes: usize failed: bool writesAfterFailure: usize
+  flushes: usize closed: bool closes: usize
+}
+impl ScriptedDuplex {
+  fn outbound<'a>(self: &'a Self) -> &'a [u8] {
+    return Slice.view<u8>(Bytes.asSlice(&self.output), usize.ZERO, self.outputLength)
+  }
+  unsafe effect fn read(self: &mut Self, output: &mut [u8], mark: Option<Instant>)
+  -> ReadTransfer ! ByteIoError ? &mut MonotonicClock {
+    drop mark
+    let firstLength = Bytes.length(&self.first)
+    let mut source = Bytes.asSlice(&self.first)
+    let mut offset = self.readOffset
+    if offset >= firstLength {
+      source = Bytes.asSlice(&self.remainder)
+      offset = offset - firstLength
+    }
+    if offset >= source.length { return ReadTransfer.End }
+    let mut count = source.length - offset
+    if count > output.length { count = output.length }
+    let mut index = usize.ZERO
+    while index < count {
+      output[index] = source[offset + index]
+      index = index + usize.ONE
+    }
+    drop source
+    self.readOffset = self.readOffset + count
+    return ReadTransfer.Data {count: count}
+  }
+  unsafe effect fn write(self: &mut Self, input: &[u8], mark: Option<Instant>)
+  -> usize ! ByteIoError ? &mut MonotonicClock {
+    drop mark
+    if self.failed { self.writesAfterFailure = self.writesAfterFailure + usize.ONE }
+    self.writes = self.writes + usize.ONE
+    if self.mode == 3 && self.writes > usize.ONE {
+      self.failed = true
+      fail ByteDuplex.provider(ByteIoOperation.Write, 73)
+    }
+    let mut count = input.length
+    if self.writes == usize.ONE && count > 3 { count = 3 }
+    let start = self.outputLength
+    let mut target = Bytes.asMutSlice(&mut self.output)
+    if count > target.length - start { fail ByteDuplex.provider(ByteIoOperation.Write, 74) }
+    let mut index = usize.ZERO
+    while index < count {
+      target[start + index] = input[index]
+      index = index + usize.ONE
+    }
+    drop target
+    self.outputLength = start + count
+    return count
+  }
+  unsafe effect fn flush(self: &mut Self, mark: Option<Instant>) -> () ! ByteIoError ? &mut MonotonicClock {
+    drop mark self.flushes = self.flushes + usize.ONE return ()
+  }
+  unsafe effect fn shutdown(self: &mut Self, mark: Option<Instant>) -> () ! ByteIoError ? &mut MonotonicClock {
+    drop mark return ()
+  }
+  unsafe effect fn close(self: &mut Self) -> () ! ByteIoError {
+    self.closed = true self.closes = self.closes + usize.ONE return ()
+  }
+}
+impl ByteDuplex for ScriptedDuplex {
+  readSomeRaw: ScriptedDuplex.read
+  writeSomeRaw: ScriptedDuplex.write
+  flushRaw: ScriptedDuplex.flush
+  shutdownWriteRaw: ScriptedDuplex.shutdown
+  closeRaw: ScriptedDuplex.close
+}
+struct UpgradeTransport {inner: ScriptedDuplex mode: i32 state: Shared<TransportAudit>}
 fn auditValid(state: &mut TransportAudit) -> bool { return state.closes == usize.ONE && state.deadlines }
 fn canceledValid(state: &mut TransportAudit) -> i32 {
   if state.closes == usize.ONE && state.flushes == usize.ONE && state.deadlines && state.complete && state.handoffs == usize.ZERO { return 42 }
@@ -210,7 +281,7 @@ impl UpgradeTransport {
   }
   unsafe effect fn flush(self: &mut Self, mark: Option<Instant>) -> () ! ByteIoError ? &mut MonotonicClock {
     let valid = sameDeadline(&mark)
-    let complete = equal(MemoryByteDuplex.outbound(&self.inner), b"HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\\r\\nSec-WebSocket-Protocol: chat\\r\\nSet-Cookie: a=1\\r\\nSet-Cookie: b=2\\r\\nConnection: upgrade\\r\\n\\r\\n")
+    let complete = equal(ScriptedDuplex.outbound(&self.inner), b"HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\\r\\nSec-WebSocket-Protocol: chat\\r\\nSet-Cookie: a=1\\r\\nSet-Cookie: b=2\\r\\nConnection: upgrade\\r\\n\\r\\n")
     Shared.withMut(&self.state, fn(state: &mut TransportAudit) -> () {
       state.complete = complete
       state.deadlines = state.deadlines && valid state.flushes = state.flushes + usize.ONE return ()
@@ -367,33 +438,19 @@ impl ConnectionHandler<UpgradeTransport, i32, PolicyError | UpgradeError | Serve
   }
 }
 
-effect fn provider(input: &[u8], mode: i32) -> MemoryByteDuplex
+effect fn provider(input: &[u8], mode: i32) -> ScriptedDuplex
 ! OutOfMemoryError ? &mut Allocator {
-  let mut reads = Vector.make<MemoryReadEvent>()
   let mut firstLine = b"GET /chat HTTP/1.1\\r"
   if mode == 10 { firstLine = b"GET /chat HTTP/1.0\\r" }
   let first = run Bytes.copy(firstLine)
   let remainder = run Bytes.copy(input)
-  run Vector.append(&mut reads, MemoryReadEvent.Data {readyAt: SystemClock.make(0, 0), bytes: move first})
-  run Vector.append(&mut reads, MemoryReadEvent.Data {readyAt: SystemClock.make(0, 0), bytes: move remainder})
-  let mut writes = Vector.make<MemoryWriteEvent>()
-  // A three-byte first write distinguishes exact short-write continuation.
-  run Vector.append(&mut writes, MemoryWriteEvent {
-    readyAt: SystemClock.make(0, 0), action: MemoryWriteAction.Accept {count: 3},
-  })
-  if mode == 3 {
-    run Vector.append(&mut writes, MemoryWriteEvent {
-      readyAt: SystemClock.make(0, 0), action: MemoryWriteAction.Failure {code: 73},
-    })
-  } else {
-    run Vector.append(&mut writes, MemoryWriteEvent {
-      readyAt: SystemClock.make(0, 0), action: MemoryWriteAction.Accept {count: 512},
-    })
-    run Vector.append(&mut writes, MemoryWriteEvent {
-      readyAt: SystemClock.make(0, 0), action: MemoryWriteAction.Accept {count: 512},
-    })
+  let output = run Bytes.zeroed(512)
+  return ScriptedDuplex {
+    first: move first, remainder: move remainder, output: move output,
+    readOffset: usize.ZERO, outputLength: usize.ZERO, mode: mode,
+    writes: usize.ZERO, failed: false, writesAfterFailure: usize.ZERO,
+    flushes: usize.ZERO, closed: false, closes: usize.ZERO,
   }
-  return run MemoryByteDuplex.make(move reads, move writes, 512, 32, Option.none<i32>())
 }
 
 effect fn runtimeCase(input: &[u8], expected: &[u8], mode: i32) -> i32
@@ -462,23 +519,12 @@ effect fn runtimeCase(input: &[u8], expected: &[u8], mode: i32) -> i32
       } else { drop error return 158 }
     }
   }
-  if !equal(MemoryByteDuplex.outbound(&transport.inner), expected) { return 200 + mode }
-  if MemoryByteDuplex.phase(&transport.inner) != MemoryByteDuplexPhase.Closed || MemoryByteDuplex.closeAttempts(&transport.inner) != usize.ONE { return 160 }
+  if !equal(ScriptedDuplex.outbound(&transport.inner), expected) { return 200 + mode }
+  if !transport.inner.closed || transport.inner.closes != usize.ONE { return 160 }
   if !Shared.withMut(&auditState, auditValid) { return 164 }
-  let audit = MemoryByteDuplex.audit(&transport.inner)
-  let mut index = usize.ZERO
-  let mut flushes = usize.ZERO
-  let mut writesAfterFailure = usize.ZERO
-  let mut failed = false
-  while index < audit.length {
-    if audit[index].operation == ByteIoOperation.Flush { flushes = flushes + usize.ONE }
-    if audit[index].operation == ByteIoOperation.Write {
-      if failed { writesAfterFailure = writesAfterFailure + usize.ONE }
-      if audit[index].count == usize.ZERO { failed = true }
-    }
-    index = index + usize.ONE
-  }
-  drop audit
+  let flushes = transport.inner.flushes
+  let failed = transport.inner.failed
+  let writesAfterFailure = transport.inner.writesAfterFailure
   if mode == 0 && flushes != usize.ONE { return 161 }
   if (mode == 2 || mode == 6 || mode == 7 || mode == 8 || mode == 12 || mode == 13) && flushes != usize.ZERO { return 162 }
   if mode == 3 && (!failed || writesAfterFailure != usize.ZERO || flushes != usize.ZERO) { return 163 }
