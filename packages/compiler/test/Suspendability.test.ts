@@ -1216,7 +1216,58 @@ pub fn main() -> i32 {
         )
       }
       if (name !== 'escape') {
-        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+        const mir = Analysis.loweredMir(self)
+        assert.deepEqual(MirVerification.verify(mir), [])
+        if (name === 'borrowed-generic-resource') {
+          let changed = 0
+          const withSourceArgument = (argument: Type.GenericArgument): Mir.Module => ({
+            ...mir,
+            functions: mir.functions.map((fn) => ({
+              ...fn,
+              regions: fn.regions.map((region) =>
+                region._tag !== 'OperationRegion'
+                  ? region
+                  : {
+                      ...region,
+                      operations: region.operations.map((operation): Mir.Operation => {
+                        if (
+                          operation._tag !== 'BeginLoan' ||
+                          operation.sourceType._tag !== 'Nominal' ||
+                          operation.sourceType.type.name !== 'Resource'
+                        )
+                          return operation
+                        changed += 1
+                        return {
+                          ...operation,
+                          sourceType: {
+                            ...operation.sourceType,
+                            type: {
+                              ...operation.sourceType.type,
+                              arguments: [
+                                argument,
+                                ...operation.sourceType.type.arguments.slice(1),
+                              ],
+                            },
+                          },
+                        }
+                      }),
+                    },
+              ),
+            })),
+          })
+          // Runtime specialization may retain a different proof-only lifetime for the owned resource.
+          const equivalent = withSourceArgument(Lifetime.staticLifetime)
+          assert.isAbove(changed, 0)
+          assert.notInclude(
+            MirVerification.verify(equivalent).map((violation) => violation.rule),
+            'InvalidLoan',
+          )
+          const different = withSourceArgument('bool')
+          assert.include(
+            MirVerification.verify(different).map((violation) => violation.rule),
+            'InvalidLoan',
+          )
+        }
       }
     }
   }),

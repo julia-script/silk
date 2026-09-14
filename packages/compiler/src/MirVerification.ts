@@ -2573,7 +2573,7 @@ const loanViolations = (
           borrowed.access !== operation.access ||
           (SilkType.isSlice(borrowed)
             ? sourceElement === undefined || !SilkType.equals(borrowed.element, sourceElement)
-            : !SilkType.equals(borrowed.target, sourceReferenceTarget ?? sourceSemantic)) ||
+            : !sameRuntimeType(borrowed.target, sourceReferenceTarget ?? sourceSemantic)) ||
           (reborrowSource &&
             operation.sourceType.type.access === 'Shared' &&
             operation.access === 'Exclusive') ||
