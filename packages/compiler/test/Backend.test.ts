@@ -388,7 +388,7 @@ pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left:
     assert.include(first.ir, 'icmp ult')
     assert.notInclude(first.ir, 'select i1')
     assert.match(first.ir, /%owned_read\d+_stride0 = mul i64 %\w+, 8/)
-    assert.match(first.ir, /getelementptr i32, ptr %addr0, i64 %owned_read\d+_stride0/)
+    assert.match(first.ir, /getelementptr i8, ptr %addr0, i64 %owned_read\d+_stride0/)
     assert.match(first.ir, /%project\w+ = load i32, ptr %owned_read\d+_field/)
     assert.include(first.ir, '@llvm.trap()')
     assert.deepEqual(first.bitcode, second.bitcode)
