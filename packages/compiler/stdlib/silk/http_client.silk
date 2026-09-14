@@ -810,7 +810,14 @@ where
       bytes,
       &exchange.options.deadline,
       written,
-      Option.some<WriteProgress>(progress),
+      Option.some<WriteProgress>(
+        WriteProgress {
+          consumed: progress.consumed,
+          written: progress.written,
+          totalPayload: progress.totalPayload,
+          totalWire: progress.totalWire,
+        },
+      ),
     )
     written = written + progress.written
     drop bytes

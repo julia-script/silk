@@ -1,4 +1,4 @@
-/** Portable client acceptance for owned reuse, staging, bounded reads, deadlines, tunnels, and content decoding. */
+/** Portable client acceptance for owned reuse, staging, bounded reads, deadlines, cancellation, and tunnels. */
 export const httpClientAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.bytes {Bytes}
@@ -1583,7 +1583,7 @@ effect fn structuredCancellation() -> i32 ! OutOfMemoryError {
   return Shared.with(&audit, cancellationAuditResult)
 }
 
-effect fn allCases() -> i32 ! ClientError | RequestError | OutOfMemoryError with Intrinsic.nonParking() {
+effect fn allCases() -> i32 ! ClientError | RequestError | OutOfMemoryError {
   // Scheduling has its own portable backend suite; this case observes the native owner release.
   static if Intrinsic.targetArchitecture() != "wasm32" {
     let canceled = run structuredCancellation()
