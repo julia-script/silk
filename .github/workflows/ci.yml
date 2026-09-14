@@ -107,8 +107,12 @@ jobs:
   compiler-documentation:
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
-    # Cold generation checks 140 modules in ~27 minutes; doctests need their remaining budget.
+    # Each independent check gets the existing bound; generation must not consume doctest time.
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [check, examples]
     steps:
       - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
@@ -119,15 +123,14 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .turbo/cache
-          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}-documentation
+          key: turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-${{ github.sha }}-documentation-${{ matrix.check }}
           restore-keys: |
             turbo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'turbo.json', 'vitest.shared.ts') }}-
             turbo-${{ runner.os }}-
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @silklang/cli... run build
-      # Generation and maintained policy share one project-analysis pass.
-      - run: pnpm --filter @silklang/compiler run documentation:check
-      - run: pnpm --filter @silklang/compiler run documentation:examples
+      # Generation and maintained policy still share one project-analysis pass in the check leg.
+      - run: pnpm --filter @silklang/compiler run documentation:${{ matrix.check }}
 
   # Pull requests run a representative compile/link/execute smoke set. The bounded TLS witnesses
   # use separate processes so their realized compiler graphs do not accumulate in one V8 heap.

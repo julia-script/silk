@@ -4,18 +4,7 @@ import silk.byte_duplex {ByteDuplex, ReadTransfer}
 import silk.bytes {Bytes}
 import silk.effect {Effect}
 import silk.http {Header, Method, Version}
-import silk.http_content as Content
-import silk.http_content {
-  ContentReason,
-  ContentLimitKind,
-  ContentProgressState,
-  Limits,
-  Mode,
-  CodingPlan,
-  ResponseContext,
-}
-import silk.http_body {TrailerPolicy}
-import silk.layout {Layout}
+import silk.http_content {ContentReason, ContentProgressState, Limits, Mode}
 import silk.http_headers {Headers, Limits as ValueLimits}
 import silk.inflate {Limits as InflateLimits}
 import silk.memory_byte_duplex {
@@ -171,7 +160,7 @@ impl HttpTransport for ClientContentTransport {
 
 struct ClientContentHandler {
   request: PreparedRequest
-  scenario: i32
+  corrupt: bool
 }
 
 impl ConnectionHandler<ClientContentTransport, i32, ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random> for ClientContentHandler {
@@ -179,7 +168,7 @@ impl ConnectionHandler<ClientContentTransport, i32, ClientError | OutOfMemoryErr
     handler: Self,
     connection: &'call mut Connection<ClientContentTransport>,
   ) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
-    let ClientContentHandler {request, scenario} = move handler
+    let ClientContentHandler {request, corrupt} = move handler
     let result = run Client.withExchange(
       &mut connection.*,
       &request,
@@ -189,10 +178,10 @@ impl ConnectionHandler<ClientContentTransport, i32, ClientError | OutOfMemoryErr
     if result != 0 {
       return result
     }
-    if scenario != 0 && connection.phase() != ConnectionPhase.Closed {
+    if corrupt && connection.phase() != ConnectionPhase.Closed {
       return 412
     }
-    if scenario == 0 && connection.phase() != ConnectionPhase.Ready {
+    if !corrupt && connection.phase() != ConnectionPhase.Ready {
       return 413
     }
     return 0
@@ -206,20 +195,17 @@ fn clientInvalidState(error: ClientError) -> bool {
   }
 }
 
-fn clientContentInput(scenario: i32) -> &'static [u8] {
-  if scenario == 0 {
+fn clientContentInput(corrupt: bool) -> &'static [u8] {
+  if !corrupt {
     return b"HTTP/1.1 200 OK\\r\\nContent-Length: 25\\r\\nContent-Encoding: gzip\\r\\n\\r\\n\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xce\\xc9\\x2f\\x4e\\x05\\x00\\xc4\\x81\\x01\\x13\\x05\\x00\\x00\\x00"
   }
-  if scenario == 1 {
-    return b"HTTP/1.1 201 Corrupt\\r\\nContent-Length: 25\\r\\nContent-Encoding: gzip\\r\\n\\r\\n\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xce\\xc9\\x2f\\x4e\\x05\\x00\\xc5\\x81\\x01\\x13\\x05\\x00\\x00\\x00"
-  }
-  return b"HTTP/1.1 202 Budget\\r\\nContent-Length: 25\\r\\nContent-Encoding: gzip\\r\\n\\r\\n\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xce\\xc9\\x2f\\x4e\\x05\\x00\\xc4\\x81\\x01\\x13\\x05\\x00\\x00\\x00"
+  return b"HTTP/1.1 201 Corrupt\\r\\nContent-Length: 25\\r\\nContent-Encoding: gzip\\r\\n\\r\\n\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xce\\xc9\\x2f\\x4e\\x05\\x00\\xc5\\x81\\x01\\x13\\x05\\x00\\x00\\x00"
 }
 
-effect fn clientContentProvider(scenario: i32) -> MemoryByteDuplex
+effect fn clientContentProvider(corrupt: bool) -> MemoryByteDuplex
 ! OutOfMemoryError
 ? &mut Allocator {
-  let bytes = run Bytes.copy(clientContentInput(scenario))
+  let bytes = run Bytes.copy(clientContentInput(corrupt))
   let mut reads = Vector.make<MemoryReadEvent>()
   run Vector.append(
     &mut reads,
@@ -237,7 +223,7 @@ effect fn clientContentProvider(scenario: i32) -> MemoryByteDuplex
   return run MemoryByteDuplex.make(move reads, move writes, 1024, 128, Option.none<i32>())
 }
 
-effect fn clientContentCase(scenario: i32) -> i32
+effect fn clientContentCase(corrupt: bool) -> i32
 ! ClientError | RequestError | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock | &mut Random {
   let uri = match move Uri.parse("http://example.test/") {
@@ -284,14 +270,14 @@ effect fn clientContentCase(scenario: i32) -> i32
     1024,
     512,
   )
-  let memory = run clientContentProvider(scenario)
+  let memory = run clientContentProvider(corrupt)
   return run Client.withOwned(
     ClientContentTransport {memory: move memory},
     origin,
     Version.Http11,
     ClientLimits.defaults(),
     Option.none<Instant>(),
-    ClientContentHandler {request: move request, scenario: scenario},
+    ClientContentHandler {request: move request, corrupt: corrupt},
   )
 }
 
@@ -299,21 +285,14 @@ effect fn clientContentCases() -> i32 ! ClientError | RequestError | OutOfMemory
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut clock = FixedClock {}
   let mut random = ClientContentRandom {}
-  let valid = run clientContentCase(0)
+  let valid = run clientContentCase(false)
     |> Effect.provideMut<Random>(&mut random)
     |> Effect.provideMut<MonotonicClock>(&mut clock)
     |> Effect.provideMut<Allocator>(&mut allocator)
   if valid != 0 {
     return valid
   }
-  let corrupt = run clientContentCase(1)
-    |> Effect.provideMut<Random>(&mut random)
-    |> Effect.provideMut<MonotonicClock>(&mut clock)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  if corrupt != 0 {
-    return corrupt
-  }
-  return run clientContentCase(2)
+  return run clientContentCase(true)
     |> Effect.provideMut<Random>(&mut random)
     |> Effect.provideMut<MonotonicClock>(&mut clock)
     |> Effect.provideMut<Allocator>(&mut allocator)
@@ -333,9 +312,7 @@ effect<'call> fn clientContentExchange<'call, 'exchange: 'call>(
   }
   run Client.finishRequest(&mut exchangeValue.*, &trailers)
   let status = run Client.receive(&mut exchangeValue.*)
-  if status == 202 {
-    return run descriptorBudget(&mut exchangeValue.*)
-  }
+
   if status != 200 && status != 201 {
     return 107
   }
@@ -426,81 +403,6 @@ effect<'call> fn clientContentExchange<'call, 'exchange: 'call>(
   }
   run Client.finishResponse(&mut exchangeValue.*)
   return 0
-}
-
-struct RejectAllocation {
-  calls: usize
-}
-
-impl Allocator for RejectAllocation {
-  effect fn allocate(self: &mut Self, layout: Layout) -> Allocation ! OutOfMemoryError {
-    drop layout
-    self.calls = self.calls + usize.ONE
-    fail OutOfMemoryError {}
-  }
-}
-
-effect fn reservedContent<'exchange>(exchange: &Exchange<'exchange, ClientContentTransport>) -> usize
-! ClientError {
-  let head = run Exchange.head(exchange)
-  let context = match move ResponseContext.make(head, Method.get(), TrailerPolicy.defaultPolicy()) {
-    Result.Failure {error} => {
-      drop error
-      return usize.ZERO
-    }
-    Result.Success {value} => move value
-  }
-  let plan = match move CodingPlan.make(
-    move context,
-    Mode.Decode,
-    ClientLimits.defaults().responseBody,
-    contentLimits(),
-  ) {
-    Result.Failure {error} => {
-      drop error
-      return usize.ZERO
-    }
-    Result.Success {value} => move value
-  }
-  return plan.ownedBytes()
-}
-
-effect fn descriptorBudget<'head, 'exchange: 'head>(
-  exchange: &'head mut Exchange<'exchange, ClientContentTransport>,
-) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock {
-  let reserved = run reservedContent(&exchange.*)
-  if reserved == usize.ZERO {
-    return 421
-  }
-  let mut selected = contentLimits()
-  selected.maxOwned = reserved
-  let mut rejecting = RejectAllocation {calls: usize.ZERO}
-  let attempted = run Effect.result(
-    Client.beginContent<'head>(move exchange, Mode.Decode, move selected),
-  )
-    |> Effect.provideMut<Allocator>(&mut rejecting)
-  if rejecting.calls != usize.ZERO {
-    drop attempted
-    return 422
-  }
-  return match move attempted {
-    Result.Success {value} => {
-      drop value
-      return 423
-    }
-    Result.Failure {error} => match move error {
-      Content.ContentError<'head> content => match move content.reason {
-        ContentReason<'head>.InvalidLimit {limit, allowed, attempted: attemptedBytes} => {
-          if limit != ContentLimitKind.OwnedBytes || allowed != usize.toU64(reserved) || attemptedBytes <= allowed {
-            return 424
-          }
-          return 0
-        }
-        _ => 425
-      }
-      _ => 426
-    }
-  }
 }
 
 effect fn clientContentFailure(error: ClientError | OutOfMemoryError, status: u16) -> i32

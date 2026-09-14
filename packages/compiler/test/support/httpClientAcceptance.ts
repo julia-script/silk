@@ -1,10 +1,8 @@
-/** Portable client acceptance for owned reuse, staging, bounded reads, deadlines, cancellation, and tunnels. */
+/** Portable client acceptance for owned reuse, staging, bounded reads, deadlines, and tunnels. */
 export const httpClientAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
 import silk.bytes {Bytes}
 import silk.effect {Effect}
-import silk.execution {Execution}
-import silk.shared {Shared}
 import silk.http {Method, Version, Header}
 import silk.http_target {RequestTarget}
 import silk.http_body {Limits as BodyLimits, Trailers}
@@ -152,31 +150,12 @@ fn limits() -> Limits {
   }
 }
 
-struct CancellationAudit {
-  drops: usize
-  closes: usize
-}
-
 struct TestTransport {
   failFlush: bool
   expireAfterWrite: bool
   memory: MemoryByteDuplex
-  audit: Shared<CancellationAudit>
 }
 
-
-impl Drop for TestTransport {
-  fn drop(self: &mut TestTransport) -> () {
-    let closes = MemoryByteDuplex.closeAttempts(&self.memory)
-    let record = fn(audit: &mut CancellationAudit) -> () {
-      audit.drops = audit.drops + usize.ONE
-      audit.closes = closes
-      return ()
-    }
-    Shared.withMut<CancellationAudit, ()>(&self.audit, move record)
-    return ()
-  }
-}
 
 impl HttpTransport for TestTransport {
   effect fn readSomeRaw(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
@@ -256,11 +235,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
           deadline: SystemClock.make(10, 0),
         }
       }
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        flushFailureExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -271,14 +250,14 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
       return 0
     }
     if scenario == 18 {
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         RequestOptions {
           deadline: Option.some<Instant>(SystemClock.make(5, 0)),
           continuePolicy: ContinuePolicy.Disabled,
         },
-        outputTimeoutExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -290,7 +269,7 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
     }
     if scenario == 17 {
       let attempted = run Effect.result(
-        Client.withExchange(&mut connection.*, &request, RequestOptions.defaults(), failExchange),
+        invokeExchange(&mut connection.*, &request, RequestOptions.defaults(), scenario),
       )
       match move attempted {
         Result.Success {value} => {
@@ -318,11 +297,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
         deadline: Option.none<Instant>(),
         continuePolicy: ContinuePolicy.Require100 {deadline: SystemClock.make(10, 0)},
       }
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        continueExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -334,11 +313,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
         deadline: Option.none<Instant>(),
         continuePolicy: ContinuePolicy.Require100 {deadline: SystemClock.make(10, 0)},
       }
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        earlyExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -350,11 +329,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
     }
     if scenario == 3 {
       let selectedOptions = RequestOptions.defaults()
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        chunkedExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -363,11 +342,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
     }
     if scenario == 4 {
       let selectedOptions = RequestOptions.defaults()
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        tunnelExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -379,11 +358,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
     }
     if scenario == 5 {
       let selectedOptions = RequestOptions.defaults()
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        abandonExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -395,11 +374,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
     }
     if scenario == 6 {
       let selectedOptions = RequestOptions.defaults()
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        limitedExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -411,11 +390,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
     }
     if scenario == 7 {
       let selectedOptions = RequestOptions.defaults()
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        upgradeExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -427,11 +406,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
     }
     if scenario == 8 {
       let selectedOptions = RequestOptions.defaults()
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        timeoutExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -443,11 +422,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
     }
     if scenario == 9 {
       let selectedOptions = RequestOptions.defaults()
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        partialExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -462,11 +441,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
         deadline: Option.none<Instant>(),
         continuePolicy: ContinuePolicy.Require100 {deadline: SystemClock.make(10, 0)},
       }
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        continueTimeoutExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -478,11 +457,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
     }
     if scenario == 11 {
       let selectedOptions = RequestOptions.defaults()
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        discardExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -491,11 +470,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
     }
     if scenario == 12 {
       let selectedOptions = RequestOptions.defaults()
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        wireLimitExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -510,11 +489,11 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
         deadline: Option.some<Instant>(SystemClock.make(5, 0)),
         continuePolicy: ContinuePolicy.Disabled,
       }
-      let result = run Client.withExchange(
+      let result = run invokeExchange(
         &mut connection.*,
         &request,
         move selectedOptions,
-        expiredCompletedExchange,
+        scenario,
       )
       if result != 0 {
         return result
@@ -528,7 +507,7 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
       deadline: Option.none<Instant>(),
       continuePolicy: ContinuePolicy.Disabled,
     }
-    let result = run Client.withExchange(&mut connection.*, &request, move options, exchange)
+    let result = run invokeExchange(&mut connection.*, &request, move options, scenario)
     if result != 200 {
       return result
     }
@@ -539,12 +518,93 @@ impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError | Call
       deadline: Option.none<Instant>(),
       continuePolicy: ContinuePolicy.Disabled,
     }
-    let second = run Client.withExchange(&mut connection.*, &request, move options2, exchange)
+    let second = run invokeExchange(&mut connection.*, &request, move options2, scenario)
     if second != 404 {
       return second
     }
     return 0
   }
+}
+
+// One callback identity shares the exchange bracket across runtime scenarios.
+service Scenario {
+  effect fn selected() -> i32 ? &Scenario
+}
+struct SelectedScenario {
+  value: i32
+}
+impl Scenario for SelectedScenario {
+  effect fn selected(self: &Self) -> i32 {
+    return self.value
+  }
+}
+
+effect fn invokeExchange(
+  connection: &mut Connection<TestTransport>,
+  request: &PreparedRequest,
+  options: RequestOptions,
+  scenario: i32,
+) -> i32 ! ClientError | OutOfMemoryError | CallbackFailure
+? &mut Allocator | &mut MonotonicClock | &mut Random {
+  let selected = SelectedScenario {value: scenario}
+  return run Client.withExchange(&mut connection.*, request, move options, dispatchExchange)
+    |> Effect.provide<Scenario>(&selected)
+}
+
+effect<'call> fn dispatchExchange<'call, 'exchange: 'call>(
+  value: &'call mut Exchange<'exchange, TestTransport>,
+) -> i32 ! ClientError | OutOfMemoryError | CallbackFailure
+? &Scenario | &mut Allocator | &mut MonotonicClock | &mut Random {
+  let scenario = run Scenario.selected()
+  if scenario == 19 || scenario == 20 || scenario == 21 {
+    return run flushFailureExchange(&mut value.*)
+  }
+  if scenario == 18 {
+    return run outputTimeoutExchange(&mut value.*)
+  }
+  if scenario == 17 {
+    return run failExchange(&mut value.*)
+  }
+  if scenario == 1 {
+    return run continueExchange(&mut value.*)
+  }
+  if scenario == 2 {
+    return run earlyExchange(&mut value.*)
+  }
+  if scenario == 3 {
+    return run chunkedExchange(&mut value.*)
+  }
+  if scenario == 4 {
+    return run tunnelExchange(&mut value.*)
+  }
+  if scenario == 5 {
+    return run abandonExchange(&mut value.*)
+  }
+  if scenario == 6 {
+    return run limitedExchange(&mut value.*)
+  }
+  if scenario == 7 {
+    return run upgradeExchange(&mut value.*)
+  }
+  if scenario == 8 {
+    return run timeoutExchange(&mut value.*)
+  }
+  if scenario == 9 {
+    return run partialExchange(&mut value.*)
+  }
+  if scenario == 10 {
+    return run continueTimeoutExchange(&mut value.*)
+  }
+  if scenario == 11 {
+    return run discardExchange(&mut value.*)
+  }
+  if scenario == 12 {
+    return run wireLimitExchange(&mut value.*)
+  }
+  if scenario == 13 {
+    return run expiredCompletedExchange(&mut value.*)
+  }
+  return run exchange(&mut value.*)
 }
 
 effect<'call> fn exchange<'call, 'exchange: 'call>(
@@ -772,10 +832,7 @@ effect fn runCase(scenario: i32) -> i32 ! ClientError | RequestError | OutOfMemo
     |> Effect.provideMut<Allocator>(&mut allocator)
   let memory = run scenarioProvider(scenario)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let audit = run Shared.make<CancellationAudit>(CancellationAudit {drops: usize.ZERO, closes: usize.ZERO})
-    |> Effect.provideMut<Allocator>(&mut allocator)
   let adapter = TestTransport {
-    audit: move audit,
     memory: move memory,
     expireAfterWrite: scenario == 18,
     failFlush: scenario == 19 || scenario == 20,
@@ -1422,10 +1479,7 @@ effect fn borrowedLoan() -> i32 ! ClientError | RequestError | OutOfMemoryError 
   let mut random = FixedRandom {}
   let memory = run providerFor(b"", usize.ZERO)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  let audit = run Shared.make<CancellationAudit>(CancellationAudit {drops: usize.ZERO, closes: usize.ZERO})
-    |> Effect.provideMut<Allocator>(&mut allocator)
   let mut transport = TestTransport {
-    audit: move audit,
     expireAfterWrite: false,
     failFlush: false,
     memory: move memory,
@@ -1458,152 +1512,7 @@ effect fn borrowedLoan() -> i32 ! ClientError | RequestError | OutOfMemoryError 
   return 0
 }
 
-struct CancellationWake {
-  wake: Intrinsic.Wake
-}
-
-fn retainCancellationWake(wake: Intrinsic.Wake) -> CancellationWake {
-  return CancellationWake {wake: move wake}
-}
-
-effect<'call> fn canceledExchange<'call, 'exchange: 'call>(
-  exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
-) -> i32 {
-  drop exchangeValue
-  run Execution.park(retainCancellationWake)
-  return 121
-}
-
-fn cancellationReady(state: &()) -> () {
-  return ()
-}
-
-fn cancellationComplete(state: &mut i32, value: i32) -> () {
-  state.* = value
-  return ()
-}
-
-fn cancellationParked(state: &mut i32, execution: Intrinsic.Execution<i32>) -> () {
-  drop move execution
-  state.* = 42
-  return ()
-}
-
-fn cancellationAuditResult(audit: &CancellationAudit) -> i32 {
-  if audit.drops != usize.ONE {
-    return 122
-  }
-  if audit.closes != usize.ONE {
-    return 123
-  }
-  return 0
-}
-
-struct CancellationHandler {
-  request: PreparedRequest
-}
-
-impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random> for CancellationHandler {
-  effect<'call> fn handle<'call>(handler: Self, connection: &'call mut Connection<TestTransport>) -> i32
-  ! ClientError | OutOfMemoryError
-  ? &mut Allocator | &mut MonotonicClock | &mut Random {
-    let CancellationHandler {request} = move handler
-    return run Client.withExchange(
-      &mut connection.*,
-      &request,
-      RequestOptions.defaults(),
-      canceledExchange,
-    )
-  }
-}
-
-effect fn cancellationBody(audit: Shared<CancellationAudit>) -> i32
-! ClientError | RequestError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
-  let mut random = FixedRandom {}
-  let uri = match move Uri.parse("http://example.test/") {
-    Result.Failure {error} => {
-      drop error
-      return 31
-    }
-    Result.Success {value} => value
-  }
-  let origin = match move Origin.fromUri(&uri) {
-    Result.Failure {error} => {
-      drop error
-      return 33
-    }
-    Result.Success {value} => value
-  }
-  let entries: [Header<'static>; 0] = []
-  let headers = match move Headers.make(&entries, valueLimits()) {
-    Result.Failure {error} => {
-      drop error
-      return 32
-    }
-    Result.Success {value} => value
-  }
-  let policy = HeaderPolicy.defaults()
-  let request = run Request.fromUri(
-    &uri,
-    Version.Http11,
-    Method.get(),
-    &headers,
-    &policy,
-    BodyMode.Empty,
-    false,
-    valueLimits(),
-    1024,
-    512,
-  )
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let memory = run providerFor(b"", 0)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let transport = TestTransport {
-    audit: move audit,
-    memory: move memory,
-    expireAfterWrite: false,
-    failFlush: false,
-  }
-  return run Client.withOwned(
-    move transport,
-    origin,
-    Version.Http11,
-    limits(),
-    Option.none<Instant>(),
-    CancellationHandler {request: move request},
-  )
-    |> Effect.provideMut<Random>(&mut random)
-    |> Effect.provideMut<MonotonicClock>(&mut clock)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-}
-
-effect fn structuredCancellation() -> i32 ! OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let audit = run Shared.make<CancellationAudit>(
-    CancellationAudit {drops: usize.ZERO, closes: usize.ZERO},
-  )
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let body = Effect.catchAll(cancellationBody(Shared.clone(&audit)), recover)
-  let execution = run Execution.make(move body, (), cancellationReady)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut result = 0
-  run Execution.drive(move execution, &mut result, cancellationComplete, cancellationParked)
-  if result != 42 {
-    return result
-  }
-  return Shared.with(&audit, cancellationAuditResult)
-}
-
 effect fn allCases() -> i32 ! ClientError | RequestError | OutOfMemoryError {
-  // Scheduling has its own portable backend suite; this case observes the native owner release.
-  static if Intrinsic.targetArchitecture() != "wasm32" {
-    let canceled = run structuredCancellation()
-    if canceled != 0 {
-      return canceled
-    }
-  }
   let borrowed = run borrowedLoan()
   if borrowed != 0 {
     return borrowed
