@@ -1,25 +1,17 @@
 /** Minimal client response-provenance integration, isolated from the codec matrix to bound compiler memory. */
 export const httpClientContentAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
-import silk.byte_duplex {ByteDuplex, ReadTransfer}
-import silk.bytes {Bytes}
+import silk.byte_duplex {ReadTransfer}
 import silk.effect {Effect}
 import silk.http {Header, Method, Version}
 import silk.http_content {ContentReason, ContentProgressState, Limits, Mode}
 import silk.http_headers {Headers, Limits as ValueLimits}
 import silk.inflate {Limits as InflateLimits}
-import silk.memory_byte_duplex {
-  MemoryByteDuplex,
-  MemoryReadEvent,
-  MemoryWriteEvent,
-  MemoryWriteAction,
-}
 import silk.monotonic_clock {MonotonicClock}
 import silk.option {Option}
 import silk.result {Result}
 import silk.system_clock {Instant, SystemClock}
 import silk.usize
 import silk.u64
-import silk.vector {Vector}
 import silk.zstd {ZstdLimits}
 import silk.http_client as Client
 import silk.http_client {
@@ -97,7 +89,8 @@ fn contentLimits() -> Limits {
 }
 
 struct ClientContentTransport {
-  memory: MemoryByteDuplex
+  input: &'static [u8]
+  offset: usize
 }
 
 struct ClientContentRandom {}
@@ -113,48 +106,32 @@ impl HttpTransport for ClientContentTransport {
   effect fn readSomeRaw(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
   ! TransportError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random {
-    let attempted = run Effect.result(ByteDuplex.readSome(&mut output, move deadline))
-      |> Effect.provideMut<ByteDuplex>(&mut self.memory)
-    return match move attempted {
-      Result.Success {value} => move value
-      Result.Failure {error} => {
-        fail TransportError.Plain {error: move error}
-      }
+    drop deadline
+    if self.offset == self.input.length {
+      return ReadTransfer.End
     }
+    let mut count = usize.ZERO
+    while count < output.length && self.offset < self.input.length {
+      output[count] = self.input[self.offset]
+      self.offset = self.offset + usize.ONE
+      count = count + usize.ONE
+    }
+    return ReadTransfer.Data {count: count}
   }
   effect fn writeSomeRaw(self: &mut Self, input: &[u8], deadline: Option<Instant>) -> usize
   ! TransportError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random {
-    let attempted = run Effect.result(ByteDuplex.writeSome(input, move deadline))
-      |> Effect.provideMut<ByteDuplex>(&mut self.memory)
-    return match move attempted {
-      Result.Success {value} => value
-      Result.Failure {error} => {
-        fail TransportError.Plain {error: move error}
-      }
-    }
+    drop deadline
+    return input.length
   }
   effect fn flush(self: &mut Self, deadline: Option<Instant>) -> ()
   ! TransportError | OutOfMemoryError
   ? &mut MonotonicClock | &mut Allocator | &mut Random {
-    let attempted = run Effect.result(ByteDuplex.flush(move deadline))
-      |> Effect.provideMut<ByteDuplex>(&mut self.memory)
-    return match move attempted {
-      Result.Success {value} => value
-      Result.Failure {error} => {
-        fail TransportError.Plain {error: move error}
-      }
-    }
+    drop deadline
+    return ()
   }
   effect fn close(self: &mut Self) -> () ! TransportError {
-    let attempted = run Effect.result(ByteDuplex.close())
-      |> Effect.provideMut<ByteDuplex>(&mut self.memory)
-    return match move attempted {
-      Result.Success {value} => value
-      Result.Failure {error} => {
-        fail TransportError.Plain {error: move error}
-      }
-    }
+    return ()
   }
 }
 
@@ -200,27 +177,6 @@ fn clientContentInput(corrupt: bool) -> &'static [u8] {
     return b"HTTP/1.1 200 OK\\r\\nContent-Length: 25\\r\\nContent-Encoding: gzip\\r\\n\\r\\n\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xce\\xc9\\x2f\\x4e\\x05\\x00\\xc4\\x81\\x01\\x13\\x05\\x00\\x00\\x00"
   }
   return b"HTTP/1.1 201 Corrupt\\r\\nContent-Length: 25\\r\\nContent-Encoding: gzip\\r\\n\\r\\n\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xce\\xc9\\x2f\\x4e\\x05\\x00\\xc5\\x81\\x01\\x13\\x05\\x00\\x00\\x00"
-}
-
-effect fn clientContentProvider(corrupt: bool) -> MemoryByteDuplex
-! OutOfMemoryError
-? &mut Allocator {
-  let bytes = run Bytes.copy(clientContentInput(corrupt))
-  let mut reads = Vector.make<MemoryReadEvent>()
-  run Vector.append(
-    &mut reads,
-    MemoryReadEvent.Data {readyAt: SystemClock.make(0, 0), bytes: move bytes},
-  )
-  run Vector.append(&mut reads, MemoryReadEvent.End {readyAt: SystemClock.make(0, 0)})
-  let mut writes = Vector.make<MemoryWriteEvent>()
-  run Vector.append(
-    &mut writes,
-    MemoryWriteEvent {
-      readyAt: SystemClock.make(0, 0),
-      action: MemoryWriteAction.Accept {count: 1024},
-    },
-  )
-  return run MemoryByteDuplex.make(move reads, move writes, 1024, 128, Option.none<i32>())
 }
 
 effect fn clientContentCase(corrupt: bool) -> i32
@@ -270,9 +226,8 @@ effect fn clientContentCase(corrupt: bool) -> i32
     1024,
     512,
   )
-  let memory = run clientContentProvider(corrupt)
   return run Client.withOwned(
-    ClientContentTransport {memory: move memory},
+    ClientContentTransport {input: clientContentInput(corrupt), offset: usize.ZERO},
     origin,
     Version.Http11,
     ClientLimits.defaults(),
