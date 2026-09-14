@@ -3641,13 +3641,7 @@ const checkFunction = (
       const key = siteKey(site)
       state.bindings.set(key, mutable)
       state.order.push(mutable)
-      // Borrowed pattern bindings observe the owner's payload; only moved values own cleanup.
-      if (
-        pattern.access !== 'Shared' &&
-        pattern.access !== 'Exclusive' &&
-        pattern.access !== 'Place'
-      )
-        frame.push(key)
+      frame.push(key)
       live.set(key, MovePath.make())
       sites.push(site)
     }
@@ -4609,6 +4603,13 @@ const checkFunction = (
             const fact = bindingBySite.get(site)
             const mutable = state.bindings.get(site)
             if (fact === undefined || mutable === undefined) return []
+            // Scope frames track borrowed bindings too, but their owner retains cleanup authority.
+            if (
+              mutable.matchAccess === 'Shared' ||
+              mutable.matchAccess === 'Exclusive' ||
+              mutable.matchAccess === 'Place'
+            )
+              return []
             return [
               Object.freeze({
                 _tag: 'Release' as const,

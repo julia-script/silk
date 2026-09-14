@@ -518,6 +518,7 @@ union Maybe { Some { token: Token }, None }
 struct Wrapped { maybe: Maybe }
 fn touch(token: &mut Token) -> i32 { return token.value }
 fn inspectBorrowed(owned: &mut Wrapped, early: bool) -> i32 {
+  if !early { let Wrapped { maybe } = &owned.* }
   if let Maybe.Some { token } = &owned.maybe {
     if early { return token.value }
   }
