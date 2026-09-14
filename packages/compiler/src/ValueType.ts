@@ -595,11 +595,14 @@ export const ensureEffectRunner = (
       type.storage?.realization.runner ??
       Hir.effectRunnerId(type.environment.instance.declaration, type.site)
     )
+  // Layout entries can differ in caller-local proof evidence while selecting the same
+  // physical owner and site. Match that identity and the exact execution channels;
+  // concreteSpecialization re-solves provider witnesses from these complete runtime
+  // arguments; object identity would reject equivalent contextual specializations.
   const physical = fn.generatedRunners.filter(
     (candidate) =>
       candidate.providedRequirements.length === 0 &&
       effectRunnerSiteKey(candidate.type) === effectRunnerSiteKey(type) &&
-      candidate.type.environment === type.environment &&
       EffectExecutionContract.matches(candidate.type.type, type.type, requirements),
   )
   const base = physical.length === 1 ? physical.at(0) : undefined

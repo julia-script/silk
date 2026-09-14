@@ -156,3 +156,47 @@ it.effect('preserves observed application closure parameters through native star
     assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
   }),
 )
+
+it.effect('reuses exact provider runners across distinct lexical proof origins', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'effect-forwarding/contextual-provider',
+      encoder.encode(`import silk.effect {Effect}
+service Clock { effect fn tick() -> i32 ? &mut Clock }
+service Input { effect fn read() -> i32 ? &mut Input | &mut Clock }
+struct ClockProvider {}
+struct InputProvider {}
+impl Clock for ClockProvider {
+  effect fn tick(self: &mut Self) -> i32 { return 21 }
+}
+impl Input for InputProvider {
+  effect fn read(self: &mut Self) -> i32 ? &mut Clock { return run Clock.tick() }
+}
+struct Holder<P> { provider: P }
+impl<P> Holder<P> {
+  effect fn read(self: &mut Self) -> i32 ? &mut Clock
+  where &mut P provides &Input from &mut Input | &mut Clock {
+    return run Input.read() |> Effect.provideMut<Input>(&mut self.provider)
+  }
+}
+effect fn first<P>(holder: &mut Holder<P>) -> i32 ? &mut Clock
+where &mut P provides &Input from &mut Input | &mut Clock {
+  return run Holder.read(&mut holder.*)
+}
+effect fn second<P>(holder: &mut Holder<P>) -> i32 ? &mut Clock
+where &mut P provides &Input from &mut Input | &mut Clock {
+  return run Holder.read(&mut holder.*)
+}
+pub fn main() -> i32 {
+  let mut clock = ClockProvider {}
+  let mut holder = Holder {provider: InputProvider {}}
+  let a = run first(&mut holder) |> Effect.provideMut<Clock>(&mut clock)
+  let b = run second(&mut holder) |> Effect.provideMut<Clock>(&mut clock)
+  return a + b
+}
+`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+  }),
+)
