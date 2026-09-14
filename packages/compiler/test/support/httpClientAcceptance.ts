@@ -23,11 +23,9 @@ import silk.http_client {
   Tunnel,
 }
 import silk.http_client as Client
-import silk.http_transport {HttpTransport, TransportError, Plain, Loan}
-import silk.http_transport as Transport
+import silk.http_transport {HttpTransport, TransportError}
 import silk.memory_byte_duplex {
   MemoryByteDuplex,
-  MemoryByteDuplexPhase,
   MemoryReadEvent,
   MemoryWriteEvent,
   MemoryWriteAction,
@@ -1439,84 +1437,7 @@ fn inputFor(scenario: i32) -> &'static [u8] {
   return b"HTTP/1.1 200 OK\\r\\nContent-Length: 4\\r\\n\\r\\nWikiHTTP/1.1 404 Not Found\\r\\nContent-Length: 4\\r\\n\\r\\nWiki"
 }
 
-struct LoanHandler<'marker, 'transport> {
-  marker: &'marker i32
-}
-
-impl<'marker, 'transport> ConnectionHandler<Loan<'transport, TestTransport>, i32, ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random> for LoanHandler<
-  'marker,
-  'transport,
-> {
-  effect<'call> fn handle<'call>(
-    handler: Self,
-    connection: &'call mut Connection<Loan<'transport, TestTransport>>,
-  ) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
-    let result = handler.marker.* + 9
-    drop handler
-    drop connection
-    return result
-  }
-}
-
-effect<'transport> fn withBorrowedMarker<'marker, 'transport>(
-  transport: &'transport mut TestTransport,
-  marker: &'marker i32,
-  origin: Origin,
-) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
-  return run Client.withConnected<'transport>(
-    move transport,
-    origin,
-    Version.Http11,
-    limits(),
-    Option.none<Instant>(),
-    LoanHandler<'marker, 'transport> {marker: marker},
-  )
-}
-
-effect fn borrowedLoan() -> i32 ! ClientError | RequestError | OutOfMemoryError {
-  let mut allocator = Allocator.systemAllocatorProvider()
-  let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
-  let mut random = FixedRandom {}
-  let memory = run providerFor(b"", usize.ZERO)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut transport = TestTransport {
-    expireAfterWrite: false,
-    failFlush: false,
-    memory: move memory,
-  }
-  let uri = match move Uri.parse("http://example.test/") {
-    Result.Failure {error} => {
-      drop error
-      return 103
-    }
-    Result.Success {value} => value
-  }
-  let origin = match move Origin.fromUri(&uri) {
-    Result.Failure {error} => {
-      drop error
-      return 104
-    }
-    Result.Success {value} => value
-  }
-  let marker = 7
-  let result = run withBorrowedMarker(&mut transport, &marker, origin)
-    |> Effect.provideMut<Random>(&mut random)
-    |> Effect.provideMut<MonotonicClock>(&mut clock)
-    |> Effect.provideMut<Allocator>(&mut allocator)
-  if result != 16 {
-    return 105
-  }
-  if transport.memory.phase() != MemoryByteDuplexPhase.Closed || transport.memory.closeAttempts() != usize.ONE {
-    return 106
-  }
-  return 0
-}
-
 effect fn allCases() -> i32 ! ClientError | RequestError | OutOfMemoryError {
-  let borrowed = run borrowedLoan()
-  if borrowed != 0 {
-    return borrowed
-  }
   let mut scenario = 0
   while scenario < 14 {
     let result = run runCase(scenario)

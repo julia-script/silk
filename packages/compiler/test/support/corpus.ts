@@ -56,7 +56,7 @@ import { httpServerAcceptanceSource } from './httpServerAcceptance.js'
 import { websocketUpgradeAcceptanceSource } from './websocketUpgradeAcceptance.js'
 import { base64AcceptanceSource } from './base64Acceptance.js'
 import { httpRequestAcceptanceSource } from './httpRequestAcceptance.js'
-import { httpClientCancellationAcceptanceSource } from './httpClientCancellationAcceptance.js'
+import { httpClientOwnershipAcceptanceSource } from './httpClientOwnershipAcceptance.js'
 import { httpClientAcceptanceSource } from './httpClientAcceptance.js'
 import { httpClientContentAcceptanceSource } from './httpClientContentAcceptance.js'
 import { httpTransportAcceptanceSource } from './httpTransportAcceptance.js'
@@ -6414,8 +6414,8 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     expected: { _tag: 'Completes', result: 0 },
   },
   {
-    name: 'http-client-cancellation',
-    source: httpClientCancellationAcceptanceSource,
+    name: 'http-client-ownership',
+    source: httpClientOwnershipAcceptanceSource,
     expected: { _tag: 'Completes', result: 0 },
   },
   {

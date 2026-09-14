@@ -1,5 +1,5 @@
-/** Native cancellation oracle: dropping a parked client execution closes and drops its owned transport once. */
-export const httpClientCancellationAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
+/** Native ownership oracles: borrowed captures and exact-once release of a canceled client execution. */
+export const httpClientOwnershipAcceptanceSource = `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.byte_duplex {ByteDuplex, ReadTransfer}
 import silk.effect {Effect}
 import silk.execution {Execution}
@@ -20,9 +20,10 @@ import silk.http_client {
   RequestOptions,
 }
 import silk.http_client as Client
-import silk.http_transport {HttpTransport, TransportError}
+import silk.http_transport {HttpTransport, TransportError, Loan}
 import silk.memory_byte_duplex {
   MemoryByteDuplex,
+  MemoryByteDuplexPhase,
   MemoryReadEvent,
   MemoryWriteEvent,
 }
@@ -330,17 +331,94 @@ effect fn structuredCancellation() -> i32 ! OutOfMemoryError {
   return Shared.with(&audit, cancellationAuditResult)
 }
 
+struct LoanHandler<'marker, 'transport> {
+  marker: &'marker i32
+}
+
+impl<'marker, 'transport> ConnectionHandler<Loan<'transport, TestTransport>, i32, ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random> for LoanHandler<
+  'marker,
+  'transport,
+> {
+  effect<'call> fn handle<'call>(
+    handler: Self,
+    connection: &'call mut Connection<Loan<'transport, TestTransport>>,
+  ) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
+    let result = handler.marker.* + 9
+    drop handler
+    drop connection
+    return result
+  }
+}
+
+effect<'transport> fn withBorrowedMarker<'marker, 'transport>(
+  transport: &'transport mut TestTransport,
+  marker: &'marker i32,
+  origin: Origin,
+) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
+  return run Client.withConnected<'transport>(
+    move transport,
+    origin,
+    Version.Http11,
+    limits(),
+    Option.none<Instant>(),
+    LoanHandler<'marker, 'transport> {marker: marker},
+  )
+}
+
+effect fn borrowedLoan() -> i32 ! ClientError | RequestError | OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut clock = FixedClock {mark: SystemClock.make(0, 0)}
+  let mut random = FixedRandom {}
+  let memory = run providerFor()
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let audit = run Shared.make<CancellationAudit>(CancellationAudit {drops: usize.ZERO, closes: usize.ZERO})
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  let mut transport = TestTransport {
+    audit: move audit,
+    memory: move memory,
+  }
+  let uri = match move Uri.parse("http://example.test/") {
+    Result.Failure {error} => {
+      drop error
+      return 103
+    }
+    Result.Success {value} => value
+  }
+  let origin = match move Origin.fromUri(&uri) {
+    Result.Failure {error} => {
+      drop error
+      return 104
+    }
+    Result.Success {value} => value
+  }
+  let marker = 7
+  let result = run withBorrowedMarker(&mut transport, &marker, origin)
+    |> Effect.provideMut<Random>(&mut random)
+    |> Effect.provideMut<MonotonicClock>(&mut clock)
+    |> Effect.provideMut<Allocator>(&mut allocator)
+  if result != 16 {
+    return 105
+  }
+  if transport.memory.phase() != MemoryByteDuplexPhase.Closed || transport.memory.closeAttempts() != usize.ONE {
+    return 106
+  }
+  return 0
+}
+
 effect fn recover(error: ClientError | RequestError | OutOfMemoryError) -> i32 {
   drop error
   return 51
 }
 
-effect fn allocationFailed(error: OutOfMemoryError) -> i32 {
-  drop error
-  return 51
+effect fn ownershipCases() -> i32 ! ClientError | RequestError | OutOfMemoryError {
+  let borrowed = run borrowedLoan()
+  if borrowed != 0 {
+    return borrowed
+  }
+  return run structuredCancellation()
 }
 
 pub fn main() -> i32 {
-  return run Effect.catchAll(structuredCancellation(), allocationFailed)
+  return run Effect.catchAll(ownershipCases(), recover)
 }
 `
