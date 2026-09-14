@@ -800,7 +800,6 @@ const verifyEntry = (
         ),
       )
     }
-    let variantFieldsValid = true
     for (const [ordinal, variant] of representation.variants.entries()) {
       const expected = variant.fields.map((field) => {
         const fieldLayout = Type.isBuiltin(field.type)
@@ -835,7 +834,6 @@ const verifyEntry = (
         variant.alignment !== packed.alignment ||
         variant.tailPadding !== packed.tailPadding
       ) {
-        variantFieldsValid = false
         unionViolations.push(
           invalid(
             'InvalidAggregate',
@@ -845,24 +843,14 @@ const verifyEntry = (
         )
       }
     }
-    const unionShape = variantFieldsValid
-      ? callingShapes(target, [...available.values()], [candidate.type]).at(0)?.tree
-      : undefined
-    const payload =
-      unionShape?._tag === 'NominalUnionShape'
-        ? Packing.pack(
-            unionShape.payloadTypes.map((payloadType) => {
-              const scalar = scalarEntry(target, payloadType)
-              return Object.freeze({
-                value: payloadType,
-                size: scalar.size,
-                alignment: scalar.alignment,
-              })
-            }),
-          )
-        : undefined
-    const payloadAlignment = payload?.alignment ?? 1
-    const payloadSize = payload?.size ?? 0
+    const payloadAlignment = representation.variants.reduce(
+      (maximum, variant) => Math.max(maximum, variant.alignment),
+      1,
+    )
+    const payloadSize = representation.variants.reduce(
+      (maximum, variant) => Math.max(maximum, variant.size),
+      0,
+    )
     const payloadOffset = alignUp(4, payloadAlignment)
     const alignment = Math.max(4, payloadAlignment)
     const size = alignUp(payloadOffset + payloadSize, alignment)
@@ -1235,25 +1223,8 @@ export const laneOffset = (
         ? offset
         : undefined
     }
-    if (selector._tag === 'NominalUnionPayloadSelector') {
-      if (ordinal !== path.length - 1 || candidate.representation._tag !== 'NominalUnion') {
-        return undefined
-      }
-      const shape = callingShape(self, current)
-      if (shape?.tree._tag !== 'NominalUnionShape') return undefined
-      let payloadOffset = 0
-      for (let slot = 0; slot <= selector.slot; slot += 1) {
-        const type = shape.tree.payloadTypes.at(slot)
-        if (type === undefined) return undefined
-        const scalar = scalarEntry(self.target, type)
-        payloadOffset = alignUp(payloadOffset, scalar.alignment)
-        if (slot === selector.slot) {
-          return offset + candidate.representation.payloadOffset + payloadOffset
-        }
-        payloadOffset += scalar.size
-      }
-      return undefined
-    }
+    // A nominal carrier lane has no single stored offset across active variants.
+    if (selector._tag === 'NominalUnionPayloadSelector') return undefined
     if (selector._tag === 'SliceAddressSelector') {
       return ordinal === path.length - 1 && candidate.representation._tag === 'Slice'
         ? offset + candidate.representation.address.offset

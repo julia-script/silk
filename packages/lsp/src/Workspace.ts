@@ -10,7 +10,7 @@ import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as SourceOrigin from '@silklang/compiler/SourceOrigin'
 import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as Effect from 'effect/Effect'
-import type * as FileSystem from 'effect/FileSystem'
+import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
@@ -247,20 +247,29 @@ export const analyzeProject = Effect.fn('Workspace.analyzeProject')(function* (
     SourceFile.make(document.module, document.bytes, SourceOrigin.memory(document.uri)),
   )
   const previousProject = previous.values().next().value?.project
-  const previousInventory = previous.values().next().value?.inventory
+  const priorCatalog = previous.values().next().value?.inventory
+  const previousInventory =
+    priorCatalog === undefined ? undefined : Option.getOrUndefined(yield* priorCatalog.completed)
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
   const selectedConfiguration = yield* configuration(first)
   yield* onProgress?.('ConfigurationSelected') ?? Effect.void
-  const inventory = yield* WorkspaceCatalog.refresh({
-    sourceRoot: first.sourceRoot,
-    documents,
-    configuration: selectedConfiguration,
-    ...(previousInventory === undefined ? {} : { previous: previousInventory }),
-    invalidation: {
-      dirtyPaths: invalidation.dirtyPaths,
-      rediscover: invalidation.rediscover,
-    },
-  }).pipe(Effect.provide(resolver(first.sourceRoot, overlays)))
-  yield* onProgress?.('CatalogSelected') ?? Effect.void
+  const inventory = yield* WorkspaceCatalog.defer(
+    WorkspaceCatalog.refresh({
+      sourceRoot: first.sourceRoot,
+      documents,
+      configuration: selectedConfiguration,
+      ...(previousInventory === undefined ? {} : { previous: previousInventory }),
+      invalidation: {
+        dirtyPaths: invalidation.dirtyPaths,
+        rediscover: invalidation.rediscover,
+      },
+    }).pipe(
+      Effect.provide(resolver(first.sourceRoot, overlays)),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    ),
+  )
   const project = yield* (
     previousProject === undefined
       ? ProjectAnalysis.make(roots, selectedConfiguration)

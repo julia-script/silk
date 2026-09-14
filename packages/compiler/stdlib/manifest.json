@@ -12,6 +12,12 @@
     "aliases": ["AllocationFailure", "OutOfMemoryError", "SystemAllocator"]
   },
   {
+    "module": "silk/base64",
+    "path": "silk/base64.silk",
+    "namespace": "Base64",
+    "aliases": ["Base64Error", "Base64Reason"]
+  },
+  {
     "module": "silk/bool",
     "path": "silk/bool.silk",
     "namespace": "bool"
@@ -20,6 +26,28 @@
     "module": "silk/box",
     "path": "silk/box.silk",
     "namespace": "Box"
+  },
+  {
+    "module": "silk/buffered_duplex",
+    "path": "silk/buffered_duplex.silk",
+    "namespace": "BufferedDuplex"
+  },
+  {
+    "module": "silk/buffered_input",
+    "path": "silk/buffered_input.silk",
+    "namespace": "BufferedInput",
+    "aliases": ["BufferError", "DiscardOutcome", "FillOutcome"]
+  },
+  {
+    "module": "silk/buffered_output",
+    "path": "silk/buffered_output.silk",
+    "namespace": "BufferedOutput"
+  },
+  {
+    "module": "silk/buffered_transfer",
+    "path": "silk/buffered_transfer.silk",
+    "namespace": "BufferedTransfer",
+    "aliases": ["TransferOutcome"]
   },
   {
     "module": "silk/byte_duplex",
@@ -242,10 +270,102 @@
     ]
   },
   {
+    "module": "silk/http_body",
+    "path": "silk/http_body.silk",
+    "namespace": "Decoder",
+    "aliases": [
+      "Encoder",
+      "Framing",
+      "Selection",
+      "Anomaly",
+      "Limits",
+      "Progress",
+      "ProgressState",
+      "Completion",
+      "CompletionKind",
+      "TrailerPolicy",
+      "Trailers",
+      "TrailerIterator",
+      "OwnedTrailers",
+      "BodyError",
+      "BodyReason",
+      "BodyComponent",
+      "BodyLimitKind"
+    ]
+  },
+  {
+    "module": "silk/http_content",
+    "path": "silk/http_content.silk",
+    "namespace": "ContentReader",
+    "aliases": [
+      "AcceptEncoding",
+      "AppliedPlan",
+      "Coding",
+      "CodingPlan",
+      "CodingPosition",
+      "ContentCompletion",
+      "ContentError",
+      "ContentLimitKind",
+      "ContentProgress",
+      "ContentProgressState",
+      "ContentReason",
+      "EmptyEncodingPolicy",
+      "EnabledCodings",
+      "Limits",
+      "Mode",
+      "RepresentationView",
+      "ResponseContext",
+      "ReuseDisposition"
+    ]
+  },
+  {
+    "module": "silk/http_head",
+    "path": "silk/http_head.silk",
+    "namespace": "RequestParser",
+    "aliases": [
+      "ResponseParser",
+      "Limits",
+      "Progress",
+      "ProgressState",
+      "ParserState",
+      "ParseComponent",
+      "ParseLimitKind",
+      "ParseReason",
+      "ParseError",
+      "RequestHead",
+      "ResponseHead",
+      "HeaderIterator",
+      "ParsedRequest",
+      "ParsedResponse"
+    ]
+  },
+  {
     "module": "silk/http_headers",
     "path": "silk/http_headers.silk",
     "namespace": "Headers",
     "aliases": ["OwnedHeaders", "HeaderIterator", "MetadataIterator", "MetadataToken", "Limits"]
+  },
+  {
+    "module": "silk/http_server",
+    "path": "silk/http_server.silk",
+    "namespace": "Connection",
+    "aliases": [
+      "Request",
+      "ResponseWriter",
+      "ConnectionHandler",
+      "Limits",
+      "BodyMode",
+      "ReusePolicy",
+      "ConnectionPhase",
+      "ServerLimitKind",
+      "ServerError",
+      "WriteProgress"
+    ]
+  },
+  {
+    "module": "silk/http_server_native",
+    "path": "silk/http_server_native.silk",
+    "namespace": "HttpServerNative"
   },
   {
     "module": "silk/http_target",
@@ -410,9 +530,61 @@
     "namespace": "NativeReport"
   },
   {
+    "module": "silk/native_resolver",
+    "path": "silk/native_resolver.silk",
+    "namespace": "NativeSystemResolver"
+  },
+  {
+    "module": "silk/native_socket",
+    "path": "silk/native_socket.silk",
+    "namespace": "NativeSocket",
+    "aliases": [
+      "Accepted",
+      "AcceptedContext",
+      "AcceptedView",
+      "AttemptFailure",
+      "BoundAddress",
+      "ConnectOptions",
+      "ConnectOptionsError",
+      "ConnectOptionsReason",
+      "Connection",
+      "ConnectionPhase",
+      "InvalidBindReason",
+      "InvalidEndpointReason",
+      "ListenOptions",
+      "ListenOptionsError",
+      "ListenOptionsReason",
+      "Listener",
+      "ListenerPhase",
+      "NativeSocketError",
+      "NativeSocketOperation",
+      "PeerAddress",
+      "UnixPeerAddress",
+      "UnixSocketPath"
+    ]
+  },
+  {
     "module": "silk/native_start",
     "path": "silk/native_start.silk",
     "namespace": "NativeStart"
+  },
+  {
+    "module": "silk/network_address",
+    "path": "silk/network_address.silk",
+    "namespace": "NetworkAddress",
+    "aliases": [
+      "AddressError",
+      "AddressReason",
+      "DomainHost",
+      "Endpoint",
+      "Host",
+      "HostReason",
+      "IpAddress",
+      "Ipv4Address",
+      "Ipv6Address",
+      "Port",
+      "UnsupportedHostForm"
+    ]
   },
   {
     "module": "silk/numeric",
@@ -528,6 +700,21 @@
     "module": "silk/reflect",
     "path": "silk/reflect.silk",
     "namespace": "Reflect"
+  },
+  {
+    "module": "silk/resolver",
+    "path": "silk/resolver.silk",
+    "namespace": "Resolver",
+    "aliases": [
+      "Admission",
+      "FamilySelection",
+      "NativeResolverOperation",
+      "NativeResultReason",
+      "ResolveRequest",
+      "ResolvedEndpoints",
+      "ResolverError",
+      "ResolverInputReason"
+    ]
   },
   {
     "module": "silk/result",
@@ -677,7 +864,7 @@
   {
     "module": "silk/tls_connection",
     "path": "silk/tls_connection.silk",
-    "namespace": "Connection",
+    "namespace": "OwnedConnection",
     "aliases": ["ConnectionError", "ConnectionOptions", "ConnectionPhase"]
   },
   {

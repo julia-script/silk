@@ -24,6 +24,7 @@ export interface DeclaredTarget {
   readonly argumentParameters?: ReadonlyArray<NativeArgument.Parameter>
   readonly handle: FunctionActor.Function
   readonly resultLaneCount: number
+  readonly resultStorage?: NativeResult.Storage
   readonly diagnosticResult?: LlvmType.Type
   readonly suspendable: boolean
   readonly diagnosticParameter?: number
@@ -86,23 +87,20 @@ export const callSynchronous = Effect.fnUntraced(function* (
 ): Effect.fn.Return<NativeResult.NativeResult, LlvmError.LlvmError> {
   if (target.suspendable)
     throw new RangeError('LLVM synchronous helper selected a suspendable target')
+  const resultAddress = yield* NativeResult.allocate(context.body, target, `${name}_result`)
   const result = yield* FunctionBody.callDirect(
     context.body,
     target.handle,
-    yield* lowerArguments(context, target, arguments_),
+    NativeResult.argumentsFor(
+      target,
+      yield* lowerArguments(context, target, arguments_),
+      resultAddress,
+    ),
     name,
   )
   for (const root of [...context.storage.addressRoots].sort((left, right) => left - right))
     yield* NativeStorage.reloadAddressRoot(context.storage, root)
-  const unpacked = yield* NativeResult.unpack(
-    context.body,
-    {
-      resultLaneCount: target.resultLaneCount,
-      diagnosticResult: target.diagnosticResult !== undefined,
-    },
-    result,
-    name,
-  )
+  const unpacked = yield* NativeResult.read(context.body, target, result, resultAddress, name)
   return unpacked
 })
 
@@ -271,12 +269,17 @@ export const callValues = Effect.fnUntraced(function* (
     throw new RangeError(
       `LLVM suspension-aware call from ${entry.fn.id.module}.${entry.fn.id.name} to ${target.fn.id.module}.${target.fn.id.name} lost transfer control`,
     )
+  const resultAddress = yield* NativeResult.allocate(body, target, `${name}_result`)
   const nullPointer = yield* Constant.nullValue(builder, pointer)
   const result = yield* FunctionBody.callDirect(
     body,
     target.handle,
     [
-      ...(yield* lowerArguments(context.synchronous, target, arguments_)),
+      ...NativeResult.argumentsFor(
+        target,
+        yield* lowerArguments(context.synchronous, target, arguments_),
+        resultAddress,
+      ),
       transferPointer,
       nullPointer,
       yield* Constant.integerUnsigned(builder, i32, 0n),
@@ -288,7 +291,7 @@ export const callValues = Effect.fnUntraced(function* (
   // consuming a completed result or spilling the caller's continuation payload.
   for (const root of [...storage.addressRoots].sort((left, right) => left - right))
     yield* NativeStorage.reloadAddressRoot(storage, root)
-  const status = yield* FunctionBody.extractValue(body, result, [0], `${name}_status`)
+  const status = yield* NativeResult.status(body, target, result, `${name}_status`)
   const completed = yield* LlvmBlock.make(body, `${name}_complete`)
   const transferred = yield* LlvmBlock.make(body, `${name}_transfer`)
   yield* FunctionBody.conditionalBranch(
@@ -324,13 +327,11 @@ export const callValues = Effect.fnUntraced(function* (
   yield* LlvmBlock.setInsertionPoint(body, nested)
   yield* NativeSuspension.returnStep(context.returns, 1n, Object.freeze([]), `${name}_relayed`)
   yield* LlvmBlock.setInsertionPoint(body, completed)
-  const unpacked = yield* NativeResult.unpack(
+  const unpacked = yield* NativeResult.read(
     body,
-    {
-      resultLaneCount: target.resultLaneCount,
-      diagnosticResult: target.diagnosticResult !== undefined,
-    },
+    target,
     result,
+    resultAddress,
     name,
     'SuspensionStep',
   )

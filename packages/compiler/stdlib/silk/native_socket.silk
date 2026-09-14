@@ -1,0 +1,2380 @@
+//! Scoped nonblocking TCP and pathname-Unix connections and listeners over ByteDuplex.
+//!
+//! # When to use
+//!
+//! Use connectResolvedOwned or connectUnixOwned when the caller must retain an outbound connection.
+//! The shorter connectResolved and connectUnix operations consume the same owner into a protected
+//! callback scope. Use listen or listenUnix for one affine listener, then accept one independently
+//! owned Connection at a time.
+//!
+//! # Details
+//!
+//! Every native syscall is nonblocking. Temporary unavailability uses zero-time poll followed by a
+//! positive MonotonicClock wait. One acquisition deadline is shared by every sequential candidate
+//! or accept retry. Socket flush means kernel acceptance, not delivery to the peer.
+//!
+//! # Gotchas
+//!
+//! Timer polling trades readiness latency for a bounded idle poll rate. A None deadline may wait
+//! indefinitely. Listener close never unlinks a pathname. Structured Effect exits close once;
+//! fatal traps carry no cleanup guarantee. Darwin setup is single-threaded and does not promise
+//! cross-thread fork safety.
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
+import silk.effect {Effect}
+import silk.i16
+import silk.i32
+import silk.i64
+import silk.isize
+import silk.monotonic_clock {MonotonicClock}
+import silk.network_address {Endpoint, IpAddress, Ipv4Address, Ipv6Address, Port}
+import silk.option {Option}
+import silk.pointer {Pointer}
+import silk.result {Result}
+import silk.slice {Slice}
+import silk.system_clock {Instant, SystemClock}
+import silk.u16
+import silk.u32
+import silk.u64
+import silk.u8
+import silk.usize
+
+/// The visible directional lifetime of one native connection.
+pub enum ConnectionPhase {
+  /// Native connection establishment has not completed.
+  Connecting,
+  /// The descriptor is available for its permitted operations.
+  Open,
+  /// The local write direction is closed; reads remain available.
+  WriteClosed,
+  /// The descriptor is terminally closed.
+  Closed,
+}
+
+/// The native boundary that produced a socket failure.
+pub enum NativeSocketOperation {
+  /// Native socket creation.
+  Socket,
+  /// Native descriptor or socket-option setup.
+  Configure,
+  /// Native outbound connection establishment.
+  Connect,
+  /// Native local-address binding.
+  Bind,
+  /// Native listener activation.
+  Listen,
+  /// Native bound-address inspection.
+  GetSocketName,
+  /// Native incoming connection acceptance.
+  Accept,
+  /// Conversion of a returned native address.
+  ConvertAddress,
+  /// Native zero-time readiness inspection.
+  Poll,
+  /// Native socket error inspection.
+  GetSocketOption,
+  /// Native input transfer.
+  Read,
+  /// Native output transfer.
+  Write,
+  /// Native write-direction shutdown.
+  ShutdownWrite,
+  /// Native terminal descriptor release.
+  Close,
+}
+
+/// The visible lifetime of one native listener.
+pub enum ListenerPhase {
+  /// The descriptor is available for its permitted operations.
+  Open,
+  /// The descriptor is terminally closed.
+  Closed,
+}
+
+/// The rejected ListenOptions field.
+pub enum ListenOptionsReason {
+  /// The kernel backlog is outside 1..65535.
+  KernelBacklog,
+  /// The polling interval is outside 1..1,000,000,000 nanoseconds.
+  PollInterval,
+}
+
+/// A typed ListenOptions admission failure.
+pub struct ListenOptionsError {
+  /// The input admission rule that failed.
+  pub reason: ListenOptionsReason
+  /// The rejected option value.
+  pub value: u64
+}
+
+/// The rejected local pathname condition.
+pub enum InvalidBindReason {
+  /// The pathname contains no bytes.
+  EmptyPath,
+  /// The pathname does not start with a slash.
+  RelativePath,
+  /// The pathname contains a NUL byte.
+  NulPath,
+  /// The pathname requests an unsupported abstract address.
+  AbstractPath,
+}
+
+/// The rejected ConnectOptions field.
+pub enum ConnectOptionsReason {
+  /// The polling interval is outside 1..1,000,000,000 nanoseconds.
+  PollInterval,
+  /// The connection attempt limit is outside 1..1024.
+  MaxAttempts,
+}
+
+/// A typed ConnectOptions admission failure.
+pub struct ConnectOptionsError {
+  /// The input admission rule that failed.
+  pub reason: ConnectOptionsReason
+  /// The rejected option value.
+  pub value: u64
+}
+
+/// The rejected endpoint or pathname condition.
+pub enum InvalidEndpointReason {
+  /// The endpoint list is empty.
+  EmptyEndpoints,
+  /// The endpoint count exceeds the attempt limit.
+  TooManyEndpoints,
+  /// The pathname contains no bytes.
+  EmptyPath,
+  /// The pathname does not start with a slash.
+  RelativePath,
+  /// The pathname contains a NUL byte.
+  NulPath,
+  /// The pathname and its terminator exceed native address capacity.
+  PathTooLong,
+  /// The pathname requests an unsupported abstract address.
+  AbstractPath,
+}
+
+/// One nonrecursive failure retained when the attempt budget is exhausted.
+pub union AttemptFailure {
+  /// The peer refused the connection.
+  ConnectionRefused,
+  /// The destination network is unreachable.
+  NetworkUnreachable,
+  /// The requested address is unavailable.
+  AddressUnavailable,
+  /// A native boundary failed with the retained operation and error number.
+  NativeFailure {
+    /// The native or byte-I/O operation that failed.
+    pub operation: NativeSocketOperation,
+    /// The native error number reported by the selected platform.
+    pub errno: i32,
+  },
+}
+
+/// A native socket acquisition or explicit lifecycle failure.
+pub union NativeSocketError {
+  /// The admitted connection attempt budget is exhausted.
+  AttemptsExhausted {
+    /// The number of native connect attempts already made.
+    pub attempted: usize,
+    /// The failure from the final attempted candidate.
+    pub last: AttemptFailure,
+  },
+  /// The next positive wake time is not representable.
+  TimeRangeError,
+  /// An endpoint list or Unix pathname failed admission.
+  InvalidEndpoint {
+    /// The input admission rule that failed.
+    pub reason: InvalidEndpointReason,
+    /// The zero-based byte offset of the rejected pathname input.
+    pub offset: usize,
+    /// The admitted maximum for this input or transfer.
+    pub limit: usize,
+  },
+  /// A Unix bind pathname failed admission.
+  InvalidBindAddress {
+    /// The input admission rule that failed.
+    pub reason: InvalidBindReason,
+    /// The zero-based byte offset of the rejected pathname input.
+    pub offset: usize,
+  },
+  /// The pathname and its terminator exceed native address capacity.
+  PathTooLong {
+    /// The pathname or returned native address length in bytes.
+    pub length: usize,
+    /// The admitted maximum for this input or transfer.
+    pub limit: usize,
+  },
+  /// The requested local address is already in use.
+  AddressInUse,
+  /// The returned native address has an invalid family or length.
+  InvalidNativeAddress {
+    /// The native address family, or -1 when the header is too short.
+    pub family: i32,
+    /// The pathname or returned native address length in bytes.
+    pub length: usize,
+  },
+  /// The returned peer uses an unsupported address form.
+  UnsupportedPeerAddress {
+    /// The native address family, or -1 when the header is too short.
+    pub family: i32,
+    /// The pathname or returned native address length in bytes.
+    pub length: usize,
+  },
+  /// The requested address family is unsupported.
+  FamilyUnsupported,
+  /// The operating system denied the operation.
+  PermissionDenied,
+  /// The peer refused the connection.
+  ConnectionRefused,
+  /// The destination network is unreachable.
+  NetworkUnreachable,
+  /// The requested address is unavailable.
+  AddressUnavailable,
+  /// The operating system cannot supply the required resources.
+  SystemResources,
+  /// The supplied absolute deadline has been reached.
+  Timeout,
+  /// The descriptor is terminally closed.
+  Closed,
+  /// The local write direction is closed; reads remain available.
+  WriteClosed,
+  /// A native success reported an impossible transfer count.
+  InvalidTransferCount {
+    /// The native or byte-I/O operation that failed.
+    pub operation: ByteIoOperation,
+    /// The invalid successful transfer count reported by the native operation.
+    pub count: usize,
+    /// The admitted maximum for this input or transfer.
+    pub limit: usize,
+  },
+  /// A native boundary failed with the retained operation and error number.
+  NativeFailure {
+    /// The native or byte-I/O operation that failed.
+    pub operation: NativeSocketOperation,
+    /// The native error number reported by the selected platform.
+    pub errno: i32,
+  },
+}
+
+/// Namespace anchor for the selected native socket actor.
+pub struct NativeSocket {}
+
+/// Finite readiness and attempt policy copied into one connection.
+pub struct ConnectOptions {
+  noDelayValue: bool
+  pollIntervalNanoseconds: u64
+  maxAttemptsValue: usize
+}
+
+/// Finite kernel admission and cooperative accept policy.
+pub struct ListenOptions {
+  kernelBacklogValue: usize
+  reuseAddressValue: bool
+  pollIntervalNanoseconds: u64
+}
+
+/// One owned pathname spelling used by listener metadata.
+pub struct UnixSocketPath {
+  bytesValue: [u8; 108]
+  lengthValue: usize
+}
+
+/// The actual local address owned by a published listener.
+pub union BoundAddress {
+  /// An owned numeric TCP endpoint.
+  Tcp {
+    /// The owned numeric address and port.
+    pub endpoint: Endpoint,
+  },
+  /// An owned Unix-domain address.
+  Unix {
+    /// The owned Unix pathname spelling.
+    pub path: UnixSocketPath,
+  },
+}
+
+/// The peer identity returned for one accepted Unix connection.
+pub union UnixPeerAddress {
+  /// The peer has no bound pathname.
+  Unnamed,
+  /// The peer has an owned pathname spelling.
+  Pathname {
+    /// The owned Unix pathname spelling.
+    pub path: UnixSocketPath,
+  },
+}
+
+/// The owned peer identity returned with one accepted connection.
+pub union PeerAddress {
+  /// An owned numeric TCP endpoint.
+  Tcp {
+    /// The owned numeric address and port.
+    pub endpoint: Endpoint,
+  },
+  /// An owned Unix-domain address.
+  Unix {
+    /// The accepted peer identity.
+    pub peer: UnixPeerAddress,
+  },
+}
+
+impl Copy for ConnectOptionsError {}
+impl Copy for AttemptFailure {}
+impl Copy for NativeSocketError {}
+impl Copy for ConnectOptions {}
+impl Copy for ListenOptionsError {}
+impl Copy for ListenOptions {}
+impl Copy for UnixSocketPath {}
+impl Copy for BoundAddress {}
+impl Copy for UnixPeerAddress {}
+impl Copy for PeerAddress {}
+
+impl ConnectOptions {
+  /// Admits a 1..1,000,000,000ns interval and 1..1024 native attempts.
+  pub fn make(
+    noDelay: bool,
+    pollIntervalNanoseconds: u64,
+    maxAttempts: usize,
+  ) -> Result<ConnectOptions, ConnectOptionsError> {
+    if pollIntervalNanoseconds == 0 || pollIntervalNanoseconds > 1000000000 {
+      return Result.failResult<ConnectOptions, ConnectOptionsError>(ConnectOptionsError {
+        reason: ConnectOptionsReason.PollInterval,
+        value: pollIntervalNanoseconds,
+      })
+    }
+    if maxAttempts == usize.ZERO || maxAttempts > 1024 {
+      return Result.failResult<ConnectOptions, ConnectOptionsError>(ConnectOptionsError {
+        reason: ConnectOptionsReason.MaxAttempts,
+        value: usize.toU64(maxAttempts),
+      })
+    }
+    return Result.succeed<ConnectOptions, ConnectOptionsError>(ConnectOptions {
+      noDelayValue: noDelay,
+      pollIntervalNanoseconds: pollIntervalNanoseconds,
+      maxAttemptsValue: maxAttempts,
+    })
+  }
+
+  /// Selects Nagle, a one-millisecond readiness interval, and 64 attempts.
+  pub fn defaults() -> ConnectOptions {
+    return ConnectOptions {
+      noDelayValue: false,
+      pollIntervalNanoseconds: 1000000,
+      maxAttemptsValue: 64,
+    }
+  }
+
+  /// Reports whether outbound TCP disables Nagle buffering.
+  pub fn noDelay(self: &Self) -> bool { return self.noDelayValue }
+  /// Returns the positive polling interval in nanoseconds.
+  pub fn pollInterval(self: &Self) -> u64 { return self.pollIntervalNanoseconds }
+  /// Returns the maximum number of native connection attempts.
+  pub fn maxAttempts(self: &Self) -> usize { return self.maxAttemptsValue }
+}
+
+impl ListenOptions {
+  /// Admits backlog 1..65535 and a 1..1,000,000,000ns polling interval.
+  pub fn make(
+    kernelBacklog: usize,
+    reuseAddress: bool,
+    pollIntervalNanoseconds: u64,
+  ) -> Result<ListenOptions, ListenOptionsError> {
+    if kernelBacklog == usize.ZERO || kernelBacklog > 65535 {
+      return Result.failResult<ListenOptions, ListenOptionsError>(ListenOptionsError {
+        reason: ListenOptionsReason.KernelBacklog,
+        value: usize.toU64(kernelBacklog),
+      })
+    }
+    if pollIntervalNanoseconds == 0 || pollIntervalNanoseconds > 1000000000 {
+      return Result.failResult<ListenOptions, ListenOptionsError>(ListenOptionsError {
+        reason: ListenOptionsReason.PollInterval,
+        value: pollIntervalNanoseconds,
+      })
+    }
+    return Result.succeed<ListenOptions, ListenOptionsError>(ListenOptions {
+      kernelBacklogValue: kernelBacklog,
+      reuseAddressValue: reuseAddress,
+      pollIntervalNanoseconds: pollIntervalNanoseconds,
+    })
+  }
+
+  /// Selects backlog 128, no address reuse, and a one-millisecond polling interval.
+  pub fn defaults() -> ListenOptions {
+    return ListenOptions {
+      kernelBacklogValue: 128,
+      reuseAddressValue: false,
+      pollIntervalNanoseconds: 1000000,
+    }
+  }
+
+  /// Returns the requested kernel backlog limit.
+  pub fn kernelBacklog(self: &Self) -> usize { return self.kernelBacklogValue }
+  /// Reports whether listener creation enables SO_REUSEADDR.
+  pub fn reuseAddress(self: &Self) -> bool { return self.reuseAddressValue }
+  /// Returns the positive polling interval in nanoseconds.
+  pub fn pollInterval(self: &Self) -> u64 { return self.pollIntervalNanoseconds }
+}
+
+impl UnixSocketPath {
+  /// Borrows the exact owned pathname spelling.
+  pub fn bytes(self: &Self) -> &[u8] {
+    return Slice.view<u8>(&self.bytesValue, usize.ZERO, self.lengthValue)
+  }
+}
+
+extern "C" struct SockAddr {}
+extern "C" struct Linger {
+  enabled: i32
+  seconds: i32
+}
+extern "C" struct PollFd {
+  fd: i32
+  events: i16
+  revents: i16
+}
+extern "C" struct SockAddrStorage {
+  words: [u64; 16]
+}
+
+static if Intrinsic.targetOperatingSystem() == "darwin" {
+  extern "C" struct SockAddrV4 {
+    length: u8
+    family: u8
+    port: u16
+    address: [u8; 4]
+    zero: [u8; 8]
+  }
+  extern "C" struct SockAddrV6 {
+    length: u8
+    family: u8
+    port: u16
+    flowInfo: u32
+    address: [u8; 16]
+    scopeId: u32
+  }
+  extern "C" struct SockAddrUnix {
+    length: u8
+    family: u8
+    path: [u8; 104]
+  }
+  const IPV4_FAMILY: i32 = 2
+  const IPV6_FAMILY: i32 = 30
+  const UNIX_FAMILY: i32 = 1
+  const STREAM_SOCKET: i32 = 1
+  const SOCKET_LEVEL: i32 = 65535
+  const SOCKET_ERROR: i32 = 4103
+  const SOCKET_LINGER: i32 = 128
+  const SOCKET_REUSE_ADDRESS: i32 = 4
+  const SOCKET_NO_SIGPIPE: i32 = 4130
+  const IPV6_LEVEL: i32 = 41
+  const IPV6_ONLY: i32 = 27
+  const NONBLOCK: i32 = 4
+  const GET_STATUS_FLAGS: i32 = 3
+  const SET_STATUS_FLAGS: i32 = 4
+  const GET_DESCRIPTOR_FLAGS: i32 = 1
+  const SET_DESCRIPTOR_FLAGS: i32 = 2
+  const CLOSE_ON_EXEC: i32 = 1
+  const AGAIN: i32 = 35
+  const IN_PROGRESS: i32 = 36
+  const CONNECTION_REFUSED: i32 = 61
+  const NETWORK_UNREACHABLE: i32 = 51
+  const ADDRESS_UNAVAILABLE: i32 = 49
+  const ADDRESS_IN_USE: i32 = 48
+  const NO_BUFFERS: i32 = 55
+  const FAMILY_UNSUPPORTED: i32 = 47
+  const NOT_CONNECTED: i32 = 57
+  const CONNECTION_RESET: i32 = 54
+  unsafe extern "C" fn __error() -> *mut i32
+  unsafe extern "C" fn closeSocket(fd: i32) -> i32 as "close$NOCANCEL"
+  unsafe extern "C" fn poll(fds: [*]mut PollFd, count: u32, timeout: i32) -> i32 with Intrinsic.foreign(noCapture: ("fds",))
+  unsafe extern "C" fn fcntl(fd: i32, command: i32, ...) -> i32
+  unsafe extern "C" fn acceptSocket(fd: i32, address: *mut SockAddrStorage, length: *mut u32) -> i32 as "accept" with Intrinsic.foreign(noCapture: ("address", "length"))
+  unsafe fn currentError() -> i32 { unsafe { return Pointer.read<i32>(__error()) } }
+  fn socketType() -> i32 { return STREAM_SOCKET }
+  fn sendFlags() -> i32 { return 0 }
+  fn unixCapacity() -> usize { return 104 }
+} else {
+  extern "C" struct SockAddrV4 {
+    family: u16
+    port: u16
+    address: [u8; 4]
+    zero: [u8; 8]
+  }
+  extern "C" struct SockAddrV6 {
+    family: u16
+    port: u16
+    flowInfo: u32
+    address: [u8; 16]
+    scopeId: u32
+  }
+  extern "C" struct SockAddrUnix {
+    family: u16
+    path: [u8; 108]
+  }
+  const IPV4_FAMILY: i32 = 2
+  const IPV6_FAMILY: i32 = 10
+  const UNIX_FAMILY: i32 = 1
+  const STREAM_SOCKET: i32 = 1
+  const SOCKET_LEVEL: i32 = 1
+  const SOCKET_ERROR: i32 = 4
+  const SOCKET_LINGER: i32 = 13
+  const SOCKET_REUSE_ADDRESS: i32 = 2
+  const SOCKET_NO_SIGPIPE: i32 = -1
+  const IPV6_LEVEL: i32 = 41
+  const IPV6_ONLY: i32 = 26
+  const NONBLOCK: i32 = 2048
+  const CLOSE_ON_EXEC: i32 = 524288
+  const AGAIN: i32 = 11
+  const IN_PROGRESS: i32 = 115
+  const CONNECTION_REFUSED: i32 = 111
+  const NETWORK_UNREACHABLE: i32 = 101
+  const ADDRESS_UNAVAILABLE: i32 = 99
+  const ADDRESS_IN_USE: i32 = 98
+  const NO_BUFFERS: i32 = 105
+  const FAMILY_UNSUPPORTED: i32 = 97
+  const NOT_CONNECTED: i32 = 107
+  const CONNECTION_RESET: i32 = 104
+  const CONNECTION_ABORTED: i32 = 103
+  const NETWORK_DOWN: i32 = 100
+  const PROTOCOL_ERROR: i32 = 71
+  const NO_PROTOCOL_OPTION: i32 = 92
+  const HOST_DOWN: i32 = 112
+  const NO_NETWORK: i32 = 64
+  const HOST_UNREACHABLE: i32 = 113
+  const OPERATION_NOT_SUPPORTED: i32 = 95
+  unsafe extern "C" fn __errno_location() -> *mut i32
+  unsafe extern "C" fn closeSocket(fd: i32) -> i32 as "close"
+  unsafe extern "C" fn poll(fds: [*]mut PollFd, count: usize, timeout: i32) -> i32 with Intrinsic.foreign(noCapture: ("fds",))
+  unsafe extern "C" fn acceptSocket(fd: i32, address: *mut SockAddrStorage, length: *mut u32, flags: i32) -> i32 as "accept4" with Intrinsic.foreign(noCapture: ("address", "length"))
+  unsafe fn currentError() -> i32 { unsafe { return Pointer.read<i32>(__errno_location()) } }
+  fn socketType() -> i32 {
+    return i32.bitOr(STREAM_SOCKET, i32.bitOr(NONBLOCK, CLOSE_ON_EXEC))
+  }
+  fn sendFlags() -> i32 { return 16384 }
+  fn unixCapacity() -> usize { return 108 }
+}
+
+const TCP_PROTOCOL: i32 = 6
+const TCP_LEVEL: i32 = 6
+const TCP_NO_DELAY: i32 = 1
+const SHUT_WRITE: i32 = 1
+const INTERRUPTED: i32 = 4
+const PERMISSION: i32 = 13
+const OPERATION_NOT_PERMITTED: i32 = 1
+const OUT_OF_MEMORY: i32 = 12
+const PROCESS_FILES: i32 = 23
+const DESCRIPTOR_FILES: i32 = 24
+const INVALID_DESCRIPTOR: i32 = 9
+const BROKEN_PIPE: i32 = 32
+const READABLE: i16 = 1
+const WRITABLE: i16 = 4
+const POLL_ERROR: i16 = 8
+const HANGUP: i16 = 16
+const INVALID_POLL: i16 = 32
+const MAX_TRANSFER: usize = 9223372036854775807
+
+unsafe extern "C" fn socket(domain: i32, socketType: i32, protocol: i32) -> i32
+unsafe extern "C" fn connect(fd: i32, address: ?[*]const u8, length: u32) -> i32 with Intrinsic.foreign(noCapture: ("address",))
+unsafe extern "C" fn bindSocket(fd: i32, address: ?[*]const u8, length: u32) -> i32 as "bind" with Intrinsic.foreign(noCapture: ("address",))
+unsafe extern "C" fn listenSocket(fd: i32, backlog: i32) -> i32 as "listen"
+unsafe extern "C" fn getSocketName(fd: i32, address: *mut SockAddrStorage, length: *mut u32) -> i32 as "getsockname" with Intrinsic.foreign(noCapture: ("address", "length"))
+unsafe extern "C" fn getsockopt(fd: i32, level: i32, option: i32, value: *mut i32, length: *mut u32) -> i32 with Intrinsic.foreign(noCapture: ("value", "length"))
+unsafe extern "C" fn setsockopt(fd: i32, level: i32, option: i32, value: ?[*]const u8, length: u32) -> i32 with Intrinsic.foreign(noCapture: ("value",))
+unsafe extern "C" fn recv(fd: i32, buffer: ?[*]mut u8, length: usize, flags: i32) -> isize with Intrinsic.foreign(noCapture: ("buffer",))
+unsafe extern "C" fn send(fd: i32, buffer: ?[*]const u8, length: usize, flags: i32) -> isize with Intrinsic.foreign(noCapture: ("buffer",))
+unsafe extern "C" fn shutdown(fd: i32, how: i32) -> i32
+
+struct Descriptor { fd: i32 }
+
+impl Drop for Descriptor {
+  fn drop(self: &mut Descriptor) -> () {
+    let fd = Intrinsic.replace(self.fd, -1)
+    if fd >= 0 { let ignored = unsafe closeSocket(fd) }
+  }
+}
+
+/// One affine native descriptor lent only inside a connection callback.
+pub struct Connection {
+  descriptor: Descriptor
+  phaseValue: ConnectionPhase
+  readEnded: bool
+  options: ConnectOptions
+}
+
+/// One affine native listening descriptor and its validated local identity.
+pub struct Listener {
+  descriptor: Descriptor
+  phaseValue: ListenerPhase
+  boundValue: BoundAddress
+  options: ListenOptions
+}
+
+/// One independently owned accepted connection and peer identity.
+pub struct Accepted {
+  connection: Connection
+  peerValue: PeerAddress
+}
+
+/// The higher-ranked loans available only inside one accepted-result scope.
+pub struct AcceptedView<'a> {
+  /// The exclusive connection loan valid only within this accepted-result scope.
+  pub connection: &'a mut Connection
+  /// The accepted peer identity.
+  pub peer: &'a PeerAddress
+}
+
+/// Compile-time adapter from one owned context to an accepted-connection use.
+///
+/// # Details
+///
+/// Implement this interface when the scoped use owns affine or once-callable state. The first row
+/// preserves caller-selected requirements and the second records requirements introduced by the
+/// concrete context. Selection adds no runtime service or requirement-row member: `context` is
+/// consumed once and the accepted loans remain independently higher-ranked.
+pub interface AcceptedContext<A, E, ?CallbackRequirements, ?ContextRequirements> {
+  /// Consumes one owned context while using temporary accepted-connection loans.
+  effect<'call> fn use<'call>(
+    context: Self,
+    view: &'call mut AcceptedView<'call>,
+  ) -> A ! E ? CallbackRequirements | ContextRequirements
+}
+
+struct AcceptedUsingOwner<C> {
+  accepted: Accepted
+  context: Option<C>
+}
+
+impl Connection {
+  /// Returns the current descriptor lifecycle phase.
+  pub fn phase(self: &Self) -> ConnectionPhase { return self.phaseValue }
+
+  /// Explicitly closes this connection once. Scoped cleanup recovers this error.
+  pub effect fn close(self: &mut Self) -> () ! NativeSocketError {
+    let fd = Intrinsic.replace(self.descriptor.fd, -1)
+    self.phaseValue = ConnectionPhase.Closed
+    self.readEnded = true
+    if fd < 0 { return () }
+    let status = unsafe closeSocket(fd)
+    if status == 0 { return () }
+    let code = unsafe currentError()
+    static if Intrinsic.targetOperatingSystem() == "darwin" {
+      if code == INTERRUPTED || code == IN_PROGRESS { return () }
+    }
+    fail NativeSocketError.NativeFailure {
+      operation: NativeSocketOperation.Close,
+      errno: code,
+    }
+  }
+}
+
+impl Listener {
+  /// Returns the current descriptor lifecycle phase.
+  pub fn phase(self: &Self) -> ListenerPhase { return self.phaseValue }
+  /// Returns a copy of the actual local address recorded after listener creation.
+  pub fn boundAddress(self: &Self) -> BoundAddress { return self.boundValue }
+
+  /// Explicitly closes this listener once without unlinking a Unix pathname.
+  pub effect fn close(self: &mut Self) -> () ! NativeSocketError {
+    let fd = Intrinsic.replace(self.descriptor.fd, -1)
+    self.phaseValue = ListenerPhase.Closed
+    if fd < 0 { return () }
+    let status = unsafe closeSocket(fd)
+    if status == 0 { return () }
+    let code = unsafe currentError()
+    static if Intrinsic.targetOperatingSystem() == "darwin" {
+      if code == INTERRUPTED || code == IN_PROGRESS { return () }
+    }
+    fail NativeSocketError.NativeFailure {
+      operation: NativeSocketOperation.Close,
+      errno: code,
+    }
+  }
+}
+
+impl Accepted {
+  /// Returns a copy of the independently owned accepted peer identity.
+  pub fn peer(self: &Self) -> PeerAddress { return self.peerValue }
+  /// Returns the accepted connection lifecycle phase.
+  pub fn connectionPhase(self: &Self) -> ConnectionPhase {
+    return Connection.phase(&self.connection)
+  }
+}
+
+fn zero8() -> [u8; 8] { return [0, 0, 0, 0, 0, 0, 0, 0] }
+fn zeroStorage() -> SockAddrStorage {
+  return SockAddrStorage {words: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}
+}
+fn zeroUnixDarwin() -> [u8; 104] { return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
+fn zeroUnixGnu() -> [u8; 108] { return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }
+
+fn networkPort(value: u16) -> u16 {
+  return (value % 256) * 256 + value / 256
+}
+
+fn hasEvent(events: i16, flag: i16) -> bool {
+  return i16.bitAnd(events, flag) != 0
+}
+
+fn reached(now: &Instant, deadline: &Instant) -> bool {
+  let nowSeconds = SystemClock.seconds(now)
+  let deadlineSeconds = SystemClock.seconds(deadline)
+  if nowSeconds > deadlineSeconds { return true }
+  if nowSeconds < deadlineSeconds { return false }
+  return SystemClock.nanoseconds(now) >= SystemClock.nanoseconds(deadline)
+}
+
+fn earlier(left: &Instant, right: &Instant) -> bool {
+  let leftSeconds = SystemClock.seconds(left)
+  let rightSeconds = SystemClock.seconds(right)
+  if leftSeconds < rightSeconds { return true }
+  if leftSeconds > rightSeconds { return false }
+  return SystemClock.nanoseconds(left) < SystemClock.nanoseconds(right)
+}
+
+fn copyInstant(value: &Instant) -> Instant {
+  return SystemClock.make(SystemClock.seconds(value), SystemClock.nanoseconds(value))
+}
+
+fn deadlineWithinInterval(now: &Instant, deadline: &Instant, interval: u64) -> bool {
+  let nowSeconds = SystemClock.seconds(now)
+  let deadlineSeconds = SystemClock.seconds(deadline)
+  if deadlineSeconds == nowSeconds {
+    let gap = SystemClock.nanoseconds(deadline) - SystemClock.nanoseconds(now)
+    return i64.toU64(gap) <= interval
+  }
+  if nowSeconds < i64.MAX && deadlineSeconds == nowSeconds + 1 {
+    let gap = 1000000000 - SystemClock.nanoseconds(now) + SystemClock.nanoseconds(deadline)
+    return i64.toU64(gap) <= interval
+  }
+  return false
+}
+
+fn nextWake(
+  now: &Instant,
+  deadline: &Option<Instant>,
+  interval: u64,
+) -> Result<Instant, ()> {
+  if let Option<Instant>.Some {value: limit} = &deadline.* {
+    if deadlineWithinInterval(now, &limit, interval) {
+      return Result.succeed<Instant, ()>(copyInstant(&limit))
+    }
+  }
+  let billion = u64.toU64(1000000000)
+  let whole = u64.toI64(interval / billion)
+  let fraction = u64.toI64(interval % billion)
+  let mut nanos = SystemClock.nanoseconds(now) + fraction
+  let mut carry = i64.toI64(0)
+  if nanos >= 1000000000 {
+    nanos = nanos - 1000000000
+    carry = i64.toI64(1)
+  }
+  let first = i64.checkedAdd(SystemClock.seconds(now), whole)
+  let seconds = match move first {
+    Option<i64>.None => { return Result.failResult<Instant, ()>(()) }
+    Option<i64>.Some {value} => value
+  }
+  let second = i64.checkedAdd(seconds, carry)
+  let finalSeconds = match move second {
+    Option<i64>.None => { return Result.failResult<Instant, ()>(()) }
+    Option<i64>.Some {value} => value
+  }
+  let candidate = SystemClock.make(finalSeconds, nanos)
+  if let Option<Instant>.Some {value: limit} = &deadline.* {
+    if earlier(&limit, &candidate) {
+      return Result.succeed<Instant, ()>(copyInstant(&limit))
+    }
+  }
+  return Result.succeed<Instant, ()>(move candidate)
+}
+
+effect fn checkConnectDeadline(deadline: &Option<Instant>) -> ()
+! NativeSocketError
+? &mut MonotonicClock {
+  if let Option<Instant>.Some {value: limit} = &deadline.* {
+    let now = run MonotonicClock.now()
+    if reached(&now, &limit) { fail NativeSocketError.Timeout }
+  }
+  return ()
+}
+
+effect fn waitConnect(options: &ConnectOptions, deadline: &Option<Instant>) -> ()
+! NativeSocketError
+? &mut MonotonicClock {
+  let before = run MonotonicClock.now()
+  if let Option<Instant>.Some {value: limit} = &deadline.* {
+    if reached(&before, &limit) { fail NativeSocketError.Timeout }
+  }
+  let made = nextWake(&before, deadline, options.pollIntervalNanoseconds)
+  let wake = match move made {
+    Result<Instant, ()>.Failure {error} => { fail NativeSocketError.TimeRangeError }
+    Result<Instant, ()>.Success {value} => value
+  }
+  run MonotonicClock.waitUntil(move wake)
+  let after = run MonotonicClock.now()
+  if let Option<Instant>.Some {value: limit} = &deadline.* {
+    if reached(&after, &limit) { fail NativeSocketError.Timeout }
+  }
+  return ()
+}
+
+effect fn checkIoDeadline(
+  deadline: &Option<Instant>,
+  operation: ByteIoOperation,
+) -> () ! ByteIoError ? &mut MonotonicClock {
+  if let Option<Instant>.Some {value: limit} = &deadline.* {
+    let now = run MonotonicClock.now()
+    if reached(&now, &limit) { fail ByteDuplex.timeout(move operation) }
+  }
+  return ()
+}
+
+effect fn waitIo(
+  options: &ConnectOptions,
+  deadline: &Option<Instant>,
+  operation: ByteIoOperation,
+) -> () ! ByteIoError ? &mut MonotonicClock {
+  let before = run MonotonicClock.now()
+  if let Option<Instant>.Some {value: limit} = &deadline.* {
+    if reached(&before, &limit) { fail ByteDuplex.timeout(move operation) }
+  }
+  let made = nextWake(&before, deadline, options.pollIntervalNanoseconds)
+  let wake = match move made {
+    Result<Instant, ()>.Failure {error} => {
+      fail ByteDuplex.provider(move operation, -1)
+    }
+    Result<Instant, ()>.Success {value} => value
+  }
+  run MonotonicClock.waitUntil(move wake)
+  let after = run MonotonicClock.now()
+  if let Option<Instant>.Some {value: limit} = &deadline.* {
+    if reached(&after, &limit) { fail ByteDuplex.timeout(move operation) }
+  }
+  return ()
+}
+
+effect fn reject(operation: NativeSocketOperation, code: i32) -> never ! NativeSocketError {
+  if code == PERMISSION || code == OPERATION_NOT_PERMITTED {
+    fail NativeSocketError.PermissionDenied
+  }
+  if code == CONNECTION_REFUSED { fail NativeSocketError.ConnectionRefused }
+  if code == NETWORK_UNREACHABLE { fail NativeSocketError.NetworkUnreachable }
+  if code == ADDRESS_UNAVAILABLE { fail NativeSocketError.AddressUnavailable }
+  if code == ADDRESS_IN_USE { fail NativeSocketError.AddressInUse }
+  if code == OUT_OF_MEMORY || code == PROCESS_FILES || code == DESCRIPTOR_FILES || code == NO_BUFFERS {
+    fail NativeSocketError.SystemResources
+  }
+  if code == FAMILY_UNSUPPORTED { fail NativeSocketError.FamilyUnsupported }
+  fail NativeSocketError.NativeFailure {operation: move operation, errno: code}
+}
+
+effect fn rejectListener(operation: NativeSocketOperation, code: i32) -> never ! NativeSocketError {
+  if code == PERMISSION || code == OPERATION_NOT_PERMITTED {
+    fail NativeSocketError.PermissionDenied
+  }
+  if code == ADDRESS_IN_USE { fail NativeSocketError.AddressInUse }
+  if code == OUT_OF_MEMORY || code == PROCESS_FILES || code == DESCRIPTOR_FILES || code == NO_BUFFERS {
+    fail NativeSocketError.SystemResources
+  }
+  if code == FAMILY_UNSUPPORTED { fail NativeSocketError.FamilyUnsupported }
+  fail NativeSocketError.NativeFailure {operation: move operation, errno: code}
+}
+
+effect fn configureListenerDescriptorFlags(descriptor: &Descriptor) -> () ! NativeSocketError {
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    let statusFlags = unsafe fcntl(descriptor.fd, GET_STATUS_FLAGS)
+    if statusFlags < 0 {
+      return run rejectListener(NativeSocketOperation.Configure, unsafe currentError())
+    }
+    if unsafe fcntl(descriptor.fd, SET_STATUS_FLAGS, i32.bitOr(statusFlags, NONBLOCK)) < 0 {
+      return run rejectListener(NativeSocketOperation.Configure, unsafe currentError())
+    }
+    let descriptorFlags = unsafe fcntl(descriptor.fd, GET_DESCRIPTOR_FLAGS)
+    if descriptorFlags < 0 {
+      return run rejectListener(NativeSocketOperation.Configure, unsafe currentError())
+    }
+    if unsafe fcntl(descriptor.fd, SET_DESCRIPTOR_FLAGS, i32.bitOr(descriptorFlags, CLOSE_ON_EXEC)) < 0 {
+      return run rejectListener(NativeSocketOperation.Configure, unsafe currentError())
+    }
+  }
+  return ()
+}
+
+effect fn configureAcceptedDescriptorFlags(descriptor: &Descriptor, deadline: &Option<Instant>) -> () ! NativeSocketError ? &mut MonotonicClock {
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    run checkConnectDeadline(deadline)
+    let statusFlags = unsafe fcntl(descriptor.fd, GET_STATUS_FLAGS)
+    if statusFlags < 0 {
+      return run rejectListener(NativeSocketOperation.Configure, unsafe currentError())
+    }
+    run checkConnectDeadline(deadline)
+    if unsafe fcntl(descriptor.fd, SET_STATUS_FLAGS, i32.bitOr(statusFlags, NONBLOCK)) < 0 {
+      return run rejectListener(NativeSocketOperation.Configure, unsafe currentError())
+    }
+    run checkConnectDeadline(deadline)
+    let descriptorFlags = unsafe fcntl(descriptor.fd, GET_DESCRIPTOR_FLAGS)
+    if descriptorFlags < 0 {
+      return run rejectListener(NativeSocketOperation.Configure, unsafe currentError())
+    }
+    run checkConnectDeadline(deadline)
+    if unsafe fcntl(descriptor.fd, SET_DESCRIPTOR_FLAGS, i32.bitOr(descriptorFlags, CLOSE_ON_EXEC)) < 0 {
+      return run rejectListener(NativeSocketOperation.Configure, unsafe currentError())
+    }
+  }
+  return ()
+}
+
+effect fn configureConnectionDescriptorFlags(
+  descriptor: &Descriptor,
+  deadline: &Option<Instant>,
+) -> () ! NativeSocketError ? &mut MonotonicClock {
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    run checkConnectDeadline(deadline)
+    let statusFlags = unsafe fcntl(descriptor.fd, GET_STATUS_FLAGS)
+    if statusFlags < 0 { return run reject(NativeSocketOperation.Configure, unsafe currentError()) }
+    run checkConnectDeadline(deadline)
+    if unsafe fcntl(descriptor.fd, SET_STATUS_FLAGS, i32.bitOr(statusFlags, NONBLOCK)) < 0 {
+      return run reject(NativeSocketOperation.Configure, unsafe currentError())
+    }
+    run checkConnectDeadline(deadline)
+    let descriptorFlags = unsafe fcntl(descriptor.fd, GET_DESCRIPTOR_FLAGS)
+    if descriptorFlags < 0 { return run reject(NativeSocketOperation.Configure, unsafe currentError()) }
+    run checkConnectDeadline(deadline)
+    if unsafe fcntl(descriptor.fd, SET_DESCRIPTOR_FLAGS, i32.bitOr(descriptorFlags, CLOSE_ON_EXEC)) < 0 {
+      return run reject(NativeSocketOperation.Configure, unsafe currentError())
+    }
+  }
+  return ()
+}
+
+effect fn setListenerInteger(fd: i32, level: i32, option: i32, value: i32) -> ()
+! NativeSocketError {
+  let status = unsafe setsockopt(
+    fd,
+    level,
+    option,
+    unsafe Pointer.bytes<i32>(Pointer.fromRef<i32>(&value)),
+    4,
+  )
+  if status != 0 {
+    return run rejectListener(NativeSocketOperation.Configure, unsafe currentError())
+  }
+  return ()
+}
+
+effect fn setConnectionInteger(
+  fd: i32,
+  level: i32,
+  option: i32,
+  value: i32,
+  deadline: &Option<Instant>,
+) -> () ! NativeSocketError ? &mut MonotonicClock {
+  run checkConnectDeadline(deadline)
+  let status = unsafe setsockopt(
+    fd,
+    level,
+    option,
+    unsafe Pointer.bytes<i32>(Pointer.fromRef<i32>(&value)),
+    4,
+  )
+  if status != 0 { return run reject(NativeSocketOperation.Configure, unsafe currentError()) }
+  return ()
+}
+
+effect fn configureAcceptedSocket(descriptor: &Descriptor, tcp: bool, options: &ConnectOptions, deadline: &Option<Instant>) -> ()
+! NativeSocketError ? &mut MonotonicClock {
+  run configureAcceptedDescriptorFlags(descriptor, deadline)
+  let linger = Linger {enabled: 0, seconds: 0}
+  run checkConnectDeadline(deadline)
+  let lingerStatus = unsafe setsockopt(
+    descriptor.fd,
+    SOCKET_LEVEL,
+    SOCKET_LINGER,
+    unsafe Pointer.bytes<Linger>(Pointer.fromRef<Linger>(&linger)),
+    8,
+  )
+  if lingerStatus != 0 {
+    return run rejectListener(NativeSocketOperation.Configure, unsafe currentError())
+  }
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    run checkConnectDeadline(deadline)
+    run setListenerInteger(descriptor.fd, SOCKET_LEVEL, SOCKET_NO_SIGPIPE, 1)
+  }
+  if tcp && options.noDelayValue {
+    run checkConnectDeadline(deadline)
+    run setListenerInteger(descriptor.fd, TCP_LEVEL, TCP_NO_DELAY, 1)
+  }
+  return ()
+}
+
+effect fn configureConnectionSocket(
+  descriptor: &Descriptor,
+  tcp: bool,
+  options: &ConnectOptions,
+  deadline: &Option<Instant>,
+) -> () ! NativeSocketError ? &mut MonotonicClock {
+  run configureConnectionDescriptorFlags(descriptor, deadline)
+  let linger = Linger {enabled: 0, seconds: 0}
+  run checkConnectDeadline(deadline)
+  let lingerStatus = unsafe setsockopt(
+    descriptor.fd,
+    SOCKET_LEVEL,
+    SOCKET_LINGER,
+    unsafe Pointer.bytes<Linger>(Pointer.fromRef<Linger>(&linger)),
+    8,
+  )
+  if lingerStatus != 0 {
+    return run reject(NativeSocketOperation.Configure, unsafe currentError())
+  }
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    run setConnectionInteger(descriptor.fd, SOCKET_LEVEL, SOCKET_NO_SIGPIPE, 1, deadline)
+  }
+  if tcp && options.noDelayValue {
+    run setConnectionInteger(descriptor.fd, TCP_LEVEL, TCP_NO_DELAY, 1, deadline)
+  }
+  return ()
+}
+
+effect fn makeConnectionDescriptor(
+  family: i32,
+  tcp: bool,
+  options: &ConnectOptions,
+  deadline: &Option<Instant>,
+) -> Descriptor ! NativeSocketError ? &mut MonotonicClock {
+  let mut protocol = 0
+  if tcp { protocol = TCP_PROTOCOL }
+  run checkConnectDeadline(deadline)
+  let fd = unsafe socket(family, socketType(), protocol)
+  if fd < 0 { return run reject(NativeSocketOperation.Socket, unsafe currentError()) }
+  let descriptor = Descriptor {fd: fd}
+  run configureConnectionSocket(&descriptor, tcp, options, deadline)
+  return move descriptor
+}
+
+union PollOutcome {
+  Ready {events: i16},
+  Interrupted,
+  Failed {code: i32},
+}
+
+fn pollOnce(fd: i32, requested: i16) -> PollOutcome {
+  let mut watched = [PollFd {fd: fd, events: requested, revents: 0}]
+  let mut status = 0
+  unsafe {
+    let pointer = Intrinsic.pointerRequalify<?[*]mut PollFd, [*]mut PollFd>(
+      Pointer.fromMutSlice<PollFd>(&mut watched),
+    )
+    status = poll(pointer, 1, 0)
+  }
+  if status < 0 {
+    let code = unsafe currentError()
+    if code == INTERRUPTED { return PollOutcome.Interrupted }
+    return PollOutcome.Failed {code: code}
+  }
+  if status == 0 { return PollOutcome.Ready {events: 0} }
+  return PollOutcome.Ready {events: watched[0].revents}
+}
+
+union SocketErrorOutcome {
+  Value {code: i32},
+  Failed {code: i32},
+}
+
+fn socketError(fd: i32) -> SocketErrorOutcome {
+  let mut code = 0
+  let mut length: u32 = 4
+  let status = unsafe getsockopt(
+    fd,
+    SOCKET_LEVEL,
+    SOCKET_ERROR,
+    Pointer.fromMutRef<i32>(&mut code),
+    Pointer.fromMutRef<u32>(&mut length),
+  )
+  if status != 0 { return SocketErrorOutcome.Failed {code: unsafe currentError()} }
+  if length < 4 { return SocketErrorOutcome.Failed {code: 0} }
+  return SocketErrorOutcome.Value {code: code}
+}
+
+effect fn connectOwned<T>(
+  descriptor: Descriptor,
+  address: &T,
+  length: u32,
+  options: ConnectOptions,
+  deadline: &Option<Instant>,
+  attempts: &mut usize,
+) -> Connection ! NativeSocketError ? &mut MonotonicClock {
+  let mut owner = Connection {
+    descriptor: move descriptor,
+    phaseValue: ConnectionPhase.Connecting,
+    readEnded: false,
+    options: options,
+  }
+  run checkConnectDeadline(deadline)
+  attempts.* = attempts.* + usize.ONE
+  let status = unsafe connect(
+    owner.descriptor.fd,
+    unsafe Pointer.bytes<T>(Pointer.fromRef<T>(address)),
+    length,
+  )
+  if status == 0 {
+    owner.phaseValue = ConnectionPhase.Open
+    return move owner
+  }
+  let initial = unsafe currentError()
+  if initial != IN_PROGRESS {
+    return run reject(NativeSocketOperation.Connect, initial)
+  }
+  while true {
+    run checkConnectDeadline(deadline)
+    let observed = pollOnce(owner.descriptor.fd, WRITABLE)
+    match move observed {
+      PollOutcome.Interrupted => { run waitConnect(&options, deadline) }
+      PollOutcome.Failed {code} => { return run reject(NativeSocketOperation.Poll, code) }
+      PollOutcome.Ready {events} => {
+        if hasEvent(events, INVALID_POLL) {
+          return run reject(NativeSocketOperation.Poll, INVALID_DESCRIPTOR)
+        }
+        if events == 0 {
+          run waitConnect(&options, deadline)
+        } else {
+          run checkConnectDeadline(deadline)
+          let completion = socketError(owner.descriptor.fd)
+          match move completion {
+            SocketErrorOutcome.Failed {code} => {
+              return run reject(NativeSocketOperation.GetSocketOption, code)
+            }
+            SocketErrorOutcome.Value {code} => {
+              if code == 0 {
+                owner.phaseValue = ConnectionPhase.Open
+                return move owner
+              }
+              if code == IN_PROGRESS || code == AGAIN {
+                run waitConnect(&options, deadline)
+              } else {
+                return run reject(NativeSocketOperation.Connect, code)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  fail NativeSocketError.NativeFailure {operation: NativeSocketOperation.Connect, errno: 0}
+}
+
+effect fn attemptTcp(
+  endpoint: &Endpoint,
+  options: ConnectOptions,
+  deadline: &Option<Instant>,
+  attempts: &mut usize,
+) -> Connection ! NativeSocketError ? &mut MonotonicClock {
+  let address = Endpoint.address(endpoint)
+  let port = networkPort(Port.value(&Endpoint.port(endpoint)))
+  match move address {
+    IpAddress.V4 {value} => {
+      run checkConnectDeadline(deadline)
+      let descriptor = run makeConnectionDescriptor(IPV4_FAMILY, true, &options, deadline)
+      static if Intrinsic.targetOperatingSystem() == "darwin" {
+        let native = SockAddrV4 {
+          length: 16,
+          family: i32.toU8(IPV4_FAMILY),
+          port: port,
+          address: Ipv4Address.octets(&value),
+          zero: zero8(),
+        }
+        return run connectOwned<SockAddrV4>(move descriptor, &native, 16, move options, deadline, move attempts)
+      } else {
+        let native = SockAddrV4 {
+          family: i32.toU16(IPV4_FAMILY),
+          port: port,
+          address: Ipv4Address.octets(&value),
+          zero: zero8(),
+        }
+        return run connectOwned<SockAddrV4>(move descriptor, &native, 16, move options, deadline, move attempts)
+      }
+    }
+    IpAddress.V6 {value} => {
+      run checkConnectDeadline(deadline)
+      let descriptor = run makeConnectionDescriptor(IPV6_FAMILY, true, &options, deadline)
+      static if Intrinsic.targetOperatingSystem() == "darwin" {
+        let native = SockAddrV6 {
+          length: 28,
+          family: i32.toU8(IPV6_FAMILY),
+          port: port,
+          flowInfo: 0,
+          address: Ipv6Address.octets(&value),
+          scopeId: 0,
+        }
+        return run connectOwned<SockAddrV6>(move descriptor, &native, 28, move options, deadline, move attempts)
+      } else {
+        let native = SockAddrV6 {
+          family: i32.toU16(IPV6_FAMILY),
+          port: port,
+          flowInfo: 0,
+          address: Ipv6Address.octets(&value),
+          scopeId: 0,
+        }
+        return run connectOwned<SockAddrV6>(move descriptor, &native, 28, move options, deadline, move attempts)
+      }
+    }
+  }
+}
+
+fn isInterruptedConnect(error: NativeSocketError) -> bool {
+  return match move error {
+    NativeSocketError.NativeFailure {operation, errno} => {
+      return operation == NativeSocketOperation.Connect && errno == INTERRUPTED
+    }
+    _ => false
+  }
+}
+
+fn candidateFailure(error: NativeSocketError) -> Option<AttemptFailure> {
+  return match move error {
+    NativeSocketError.ConnectionRefused => Option.some<AttemptFailure>(AttemptFailure.ConnectionRefused)
+    NativeSocketError.NetworkUnreachable => Option.some<AttemptFailure>(AttemptFailure.NetworkUnreachable)
+    NativeSocketError.AddressUnavailable => Option.some<AttemptFailure>(AttemptFailure.AddressUnavailable)
+    _ => Option.none<AttemptFailure>()
+  }
+}
+
+effect fn acquireResolved(
+  endpoints: &[Endpoint],
+  options: ConnectOptions,
+  deadline: &Option<Instant>,
+) -> Connection ! NativeSocketError ? &mut MonotonicClock {
+  if endpoints.length == usize.ZERO {
+    fail NativeSocketError.InvalidEndpoint {
+      reason: InvalidEndpointReason.EmptyEndpoints,
+      offset: usize.ZERO,
+      limit: options.maxAttemptsValue,
+    }
+  }
+  if endpoints.length > options.maxAttemptsValue {
+    fail NativeSocketError.InvalidEndpoint {
+      reason: InvalidEndpointReason.TooManyEndpoints,
+      offset: endpoints.length,
+      limit: options.maxAttemptsValue,
+    }
+  }
+  let mut index = usize.ZERO
+  let mut attempts = usize.ZERO
+  let mut last = AttemptFailure.NativeFailure {
+    operation: NativeSocketOperation.Connect,
+    errno: 0,
+  }
+  while index < endpoints.length {
+    if attempts >= options.maxAttemptsValue {
+      fail NativeSocketError.AttemptsExhausted {attempted: attempts, last: move last}
+    }
+    let attempted = run Effect.result(attemptTcp(
+      &endpoints[index],
+      options,
+      deadline,
+      &mut attempts,
+    ))
+    match move attempted {
+      Result<Connection, NativeSocketError>.Success {value} => { return move value }
+      Result<Connection, NativeSocketError>.Failure {error} => {
+        if isInterruptedConnect(error) {
+          last = AttemptFailure.NativeFailure {
+            operation: NativeSocketOperation.Connect,
+            errno: INTERRUPTED,
+          }
+          if attempts >= options.maxAttemptsValue {
+            fail NativeSocketError.AttemptsExhausted {attempted: attempts, last: move last}
+          }
+          run waitConnect(&options, deadline)
+        } else {
+          let candidate = candidateFailure(error)
+          match move candidate {
+            Option<AttemptFailure>.None => { fail move error }
+            Option<AttemptFailure>.Some {value} => {
+              last = move value
+              index = index + usize.ONE
+            }
+          }
+        }
+      }
+    }
+  }
+  fail NativeSocketError.AttemptsExhausted {attempted: attempts, last: move last}
+}
+
+effect fn validateUnixPath(path: &[u8]) -> () ! NativeSocketError {
+  if path.length == usize.ZERO {
+    fail NativeSocketError.InvalidEndpoint {
+      reason: InvalidEndpointReason.EmptyPath,
+      offset: usize.ZERO,
+      limit: unixCapacity(),
+    }
+  }
+  if path[0] == 0 {
+    fail NativeSocketError.InvalidEndpoint {
+      reason: InvalidEndpointReason.AbstractPath,
+      offset: usize.ZERO,
+      limit: unixCapacity(),
+    }
+  }
+  if path[0] != 47 {
+    fail NativeSocketError.InvalidEndpoint {
+      reason: InvalidEndpointReason.RelativePath,
+      offset: usize.ZERO,
+      limit: unixCapacity(),
+    }
+  }
+  let mut index = usize.ZERO
+  while index < path.length {
+    if path[index] == 0 {
+      fail NativeSocketError.InvalidEndpoint {
+        reason: InvalidEndpointReason.NulPath,
+        offset: index,
+        limit: unixCapacity(),
+      }
+    }
+    index = index + usize.ONE
+  }
+  if path.length >= unixCapacity() {
+    fail NativeSocketError.InvalidEndpoint {
+      reason: InvalidEndpointReason.PathTooLong,
+      offset: path.length,
+      limit: unixCapacity() - usize.ONE,
+    }
+  }
+  return ()
+}
+
+effect fn attemptUnix(
+  path: &[u8],
+  options: ConnectOptions,
+  deadline: &Option<Instant>,
+  attempts: &mut usize,
+) -> Connection ! NativeSocketError ? &mut MonotonicClock {
+  run checkConnectDeadline(deadline)
+  let descriptor = run makeConnectionDescriptor(UNIX_FAMILY, false, &options, deadline)
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    let mut bytes = zeroUnixDarwin()
+    let mut index = usize.ZERO
+    while index < path.length {
+      bytes[index] = path[index]
+      index = index + usize.ONE
+    }
+    let native = SockAddrUnix {
+      length: usize.toU8(path.length + 3),
+      family: i32.toU8(UNIX_FAMILY),
+      path: move bytes,
+    }
+    return run connectOwned<SockAddrUnix>(
+      move descriptor,
+      &native,
+      usize.toU32(path.length + 3),
+      move options,
+      deadline,
+      move attempts,
+    )
+  } else {
+    let mut bytes = zeroUnixGnu()
+    let mut index = usize.ZERO
+    while index < path.length {
+      bytes[index] = path[index]
+      index = index + usize.ONE
+    }
+    let native = SockAddrUnix {
+      family: i32.toU16(UNIX_FAMILY),
+      path: move bytes,
+    }
+    return run connectOwned<SockAddrUnix>(
+      move descriptor,
+      &native,
+      usize.toU32(path.length + 3),
+      move options,
+      deadline,
+      move attempts,
+    )
+  }
+}
+
+effect fn acquireUnix(
+  path: &[u8],
+  options: ConnectOptions,
+  deadline: &Option<Instant>,
+) -> Connection ! NativeSocketError ? &mut MonotonicClock {
+  run validateUnixPath(path)
+  let mut attempts = usize.ZERO
+  let mut last = AttemptFailure.NativeFailure {
+    operation: NativeSocketOperation.Connect,
+    errno: 0,
+  }
+  while attempts < options.maxAttemptsValue {
+    let attempted = run Effect.result(attemptUnix(path, options, deadline, &mut attempts))
+    match move attempted {
+      Result<Connection, NativeSocketError>.Success {value} => { return move value }
+      Result<Connection, NativeSocketError>.Failure {error} => {
+        let mut retry = isInterruptedConnect(error)
+        static if Intrinsic.targetOperatingSystem() == "linux" {
+          match error {
+            NativeSocketError.NativeFailure {operation, errno} => {
+              if operation == NativeSocketOperation.Connect && errno == AGAIN { retry = true }
+            }
+            _ => {}
+          }
+        }
+        if !retry { fail move error }
+        let retainedCode = match error {
+          NativeSocketError.NativeFailure {operation, errno} => errno
+          _ => 0
+        }
+        last = AttemptFailure.NativeFailure {
+          operation: NativeSocketOperation.Connect,
+          errno: retainedCode,
+        }
+        if attempts >= options.maxAttemptsValue {
+          fail NativeSocketError.AttemptsExhausted {attempted: attempts, last: move last}
+        }
+        run waitConnect(&options, deadline)
+      }
+    }
+  }
+  fail NativeSocketError.AttemptsExhausted {attempted: attempts, last: move last}
+}
+
+fn ownedPath(path: &[u8]) -> UnixSocketPath {
+  let mut bytes = zeroUnixGnu()
+  let mut index = usize.ZERO
+  while index < path.length {
+    bytes[index] = path[index]
+    index = index + usize.ONE
+  }
+  return UnixSocketPath {bytesValue: move bytes, lengthValue: path.length}
+}
+
+effect fn validateListenPath(path: &[u8]) -> () ! NativeSocketError {
+  if path.length == usize.ZERO {
+    fail NativeSocketError.InvalidBindAddress {
+      reason: InvalidBindReason.EmptyPath,
+      offset: usize.ZERO,
+    }
+  }
+  if path[0] == 0 {
+    fail NativeSocketError.InvalidBindAddress {
+      reason: InvalidBindReason.AbstractPath,
+      offset: usize.ZERO,
+    }
+  }
+  if path[0] != 47 {
+    fail NativeSocketError.InvalidBindAddress {
+      reason: InvalidBindReason.RelativePath,
+      offset: usize.ZERO,
+    }
+  }
+  let mut index = usize.ZERO
+  while index < path.length {
+    if path[index] == 0 {
+      fail NativeSocketError.InvalidBindAddress {
+        reason: InvalidBindReason.NulPath,
+        offset: index,
+      }
+    }
+    index = index + usize.ONE
+  }
+  if path.length >= unixCapacity() {
+    fail NativeSocketError.PathTooLong {
+      length: path.length,
+      limit: unixCapacity() - usize.ONE,
+    }
+  }
+  return ()
+}
+
+effect fn makeListenerDescriptor(family: i32, tcp: bool, options: &ListenOptions) -> Descriptor
+! NativeSocketError {
+  let mut protocol = 0
+  if tcp { protocol = TCP_PROTOCOL }
+  let fd = unsafe socket(family, socketType(), protocol)
+  if fd < 0 { return run rejectListener(NativeSocketOperation.Socket, unsafe currentError()) }
+  let descriptor = Descriptor {fd: fd}
+  run configureListenerDescriptorFlags(&descriptor)
+  if options.reuseAddressValue {
+    run setListenerInteger(descriptor.fd, SOCKET_LEVEL, SOCKET_REUSE_ADDRESS, 1)
+  }
+  if family == IPV6_FAMILY {
+    run setListenerInteger(descriptor.fd, IPV6_LEVEL, IPV6_ONLY, 1)
+  }
+  return move descriptor
+}
+
+effect fn bindAndListen<T>(
+  descriptor: &Descriptor,
+  address: &T,
+  length: u32,
+  options: &ListenOptions,
+) -> () ! NativeSocketError {
+  let bound = unsafe bindSocket(
+    descriptor.fd,
+    unsafe Pointer.bytes<T>(Pointer.fromRef<T>(address)),
+    length,
+  )
+  if bound != 0 { return run rejectListener(NativeSocketOperation.Bind, unsafe currentError()) }
+  let listened = unsafe listenSocket(descriptor.fd, usize.toI32(options.kernelBacklogValue))
+  if listened != 0 { return run rejectListener(NativeSocketOperation.Listen, unsafe currentError()) }
+  return ()
+}
+
+unsafe fn storageBytes(storage: &SockAddrStorage) -> [*]const u8 {
+  unsafe {
+    return Intrinsic.pointerRequalify<?[*]const u8, [*]const u8>(
+      Pointer.bytes<SockAddrStorage>(Pointer.fromRef<SockAddrStorage>(storage)),
+    )
+  }
+}
+
+unsafe fn addressFamily(bytes: [*]const u8) -> i32 {
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    unsafe { return u8.toI32(Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, usize.ONE))) }
+  } else {
+    let low = unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, usize.ZERO))
+    let high = unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, usize.ONE))
+    return u8.toI32(low) + u8.toI32(high) * 256
+  }
+}
+
+unsafe effect fn checkedAddressFamily(
+  storage: &SockAddrStorage,
+  length: usize,
+) -> i32 ! NativeSocketError {
+  if length < 2 || length > 128 {
+    fail NativeSocketError.InvalidNativeAddress {family: -1, length: length}
+  }
+  let bytes = unsafe storageBytes(storage)
+  let family = unsafe addressFamily(bytes)
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    let declaredLength = u8.toUsize(
+      unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, usize.ZERO)),
+    )
+    if declaredLength != length {
+      fail NativeSocketError.InvalidNativeAddress {family: family, length: length}
+    }
+  }
+  return family
+}
+
+unsafe effect fn decodeInternetAddress(
+  storage: &SockAddrStorage,
+  length: usize,
+) -> Endpoint ! NativeSocketError {
+  let bytes = unsafe storageBytes(storage)
+  let family = run unsafe checkedAddressFamily(storage, length)
+  if family == IPV4_FAMILY {
+    if length != 16 {
+      fail NativeSocketError.InvalidNativeAddress {family: family, length: length}
+    }
+    let octets = [
+      unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 4)),
+      unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 5)),
+      unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 6)),
+      unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 7)),
+    ]
+    let port: u16 = u8.toU16(unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 2))) * 256
+      + u8.toU16(unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 3)))
+    return Endpoint.make(
+      IpAddress.V4 {value: Ipv4Address.fromOctets(move octets)},
+      Port.fromU16(port),
+    )
+  }
+  if family == IPV6_FAMILY {
+    if length != 28 {
+      fail NativeSocketError.InvalidNativeAddress {family: family, length: length}
+    }
+    let mut octets: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    let mut index = usize.ZERO
+    while index < 16 {
+      octets[index] = unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, index + 8))
+      index = index + usize.ONE
+    }
+    let port: u16 = u8.toU16(unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 2))) * 256
+      + u8.toU16(unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 3)))
+    return Endpoint.make(
+      IpAddress.V6 {value: Ipv6Address.fromOctets(move octets)},
+      Port.fromU16(port),
+    )
+  }
+  fail NativeSocketError.InvalidNativeAddress {family: family, length: length}
+}
+
+unsafe effect fn actualBoundEndpoint(descriptor: &Descriptor) -> Endpoint ! NativeSocketError {
+  let mut storage = zeroStorage()
+  let mut length: u32 = 128
+  let status = unsafe getSocketName(
+    descriptor.fd,
+    Pointer.fromMutRef<SockAddrStorage>(&mut storage),
+    Pointer.fromMutRef<u32>(&mut length),
+  )
+  if status != 0 {
+    return run rejectListener(NativeSocketOperation.GetSocketName, unsafe currentError())
+  }
+  return run unsafe decodeInternetAddress(&storage, u32.toUsize(length))
+}
+
+/// Creates one IPv4 or IPv6 listener and publishes its actual bound endpoint.
+pub effect fn listen(endpoint: Endpoint, options: ListenOptions) -> Listener ! NativeSocketError {
+  let address = Endpoint.address(&endpoint)
+  let port = networkPort(Port.value(&Endpoint.port(&endpoint)))
+  return match move address {
+    IpAddress.V4 {value} => {
+      let descriptor = run makeListenerDescriptor(IPV4_FAMILY, true, &options)
+      static if Intrinsic.targetOperatingSystem() == "darwin" {
+        let native = SockAddrV4 {
+          length: 16,
+          family: i32.toU8(IPV4_FAMILY),
+          port: port,
+          address: Ipv4Address.octets(&value),
+          zero: zero8(),
+        }
+        run bindAndListen(&descriptor, &native, 16, &options)
+      } else {
+        let native = SockAddrV4 {
+          family: i32.toU16(IPV4_FAMILY),
+          port: port,
+          address: Ipv4Address.octets(&value),
+          zero: zero8(),
+        }
+        run bindAndListen(&descriptor, &native, 16, &options)
+      }
+      let bound = run unsafe actualBoundEndpoint(&descriptor)
+      return Listener {
+        descriptor: move descriptor,
+        phaseValue: ListenerPhase.Open,
+        boundValue: BoundAddress.Tcp {endpoint: move bound},
+        options: options,
+      }
+    }
+    IpAddress.V6 {value} => {
+      let descriptor = run makeListenerDescriptor(IPV6_FAMILY, true, &options)
+      static if Intrinsic.targetOperatingSystem() == "darwin" {
+        let native = SockAddrV6 {
+          length: 28,
+          family: i32.toU8(IPV6_FAMILY),
+          port: port,
+          flowInfo: 0,
+          address: Ipv6Address.octets(&value),
+          scopeId: 0,
+        }
+        run bindAndListen(&descriptor, &native, 28, &options)
+      } else {
+        let native = SockAddrV6 {
+          family: i32.toU16(IPV6_FAMILY),
+          port: port,
+          flowInfo: 0,
+          address: Ipv6Address.octets(&value),
+          scopeId: 0,
+        }
+        run bindAndListen(&descriptor, &native, 28, &options)
+      }
+      let bound = run unsafe actualBoundEndpoint(&descriptor)
+      return Listener {
+        descriptor: move descriptor,
+        phaseValue: ListenerPhase.Open,
+        boundValue: BoundAddress.Tcp {endpoint: move bound},
+        options: options,
+      }
+    }
+  }
+}
+
+/// Creates one pathname-Unix listener without unlinking before bind or after close.
+pub effect fn listenUnix(path: &[u8], options: ListenOptions) -> Listener ! NativeSocketError {
+  run validateListenPath(path)
+  let owned = ownedPath(path)
+  let descriptor = run makeListenerDescriptor(UNIX_FAMILY, false, &options)
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    let mut bytes = zeroUnixDarwin()
+    let mut index = usize.ZERO
+    while index < path.length { bytes[index] = path[index] index = index + usize.ONE }
+    let native = SockAddrUnix {
+      length: usize.toU8(path.length + 3),
+      family: i32.toU8(UNIX_FAMILY),
+      path: move bytes,
+    }
+    run bindAndListen(&descriptor, &native, usize.toU32(path.length + 3), &options)
+  } else {
+    let mut bytes = zeroUnixGnu()
+    let mut index = usize.ZERO
+    while index < path.length { bytes[index] = path[index] index = index + usize.ONE }
+    let native = SockAddrUnix {
+      family: i32.toU16(UNIX_FAMILY),
+      path: move bytes,
+    }
+    run bindAndListen(&descriptor, &native, usize.toU32(path.length + 3), &options)
+  }
+  return Listener {
+    descriptor: move descriptor,
+    phaseValue: ListenerPhase.Open,
+    boundValue: BoundAddress.Unix {path: move owned},
+    options: options,
+  }
+}
+
+unsafe fn acceptNative(fd: i32, address: *mut SockAddrStorage, length: *mut u32) -> i32 {
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    unsafe { return acceptSocket(fd, address, length) }
+  } else {
+    unsafe { return acceptSocket(fd, address, length, i32.bitOr(NONBLOCK, CLOSE_ON_EXEC)) }
+  }
+}
+
+fn retryableAccept(code: i32, tcp: bool) -> bool {
+  if code == AGAIN || code == INTERRUPTED { return true }
+  static if Intrinsic.targetOperatingSystem() == "linux" {
+    return tcp && (code == CONNECTION_ABORTED
+      || code == NETWORK_DOWN
+      || code == PROTOCOL_ERROR
+      || code == NO_PROTOCOL_OPTION
+      || code == HOST_DOWN
+      || code == NO_NETWORK
+      || code == HOST_UNREACHABLE
+      || code == OPERATION_NOT_SUPPORTED
+      || code == NETWORK_UNREACHABLE)
+  }
+  return false
+}
+
+effect fn waitAccept(listener: &Listener, deadline: &Option<Instant>) -> ()
+! NativeSocketError
+? &mut MonotonicClock {
+  let before = run MonotonicClock.now()
+  if let Option<Instant>.Some {value: limit} = &deadline.* {
+    if reached(&before, &limit) { fail NativeSocketError.Timeout }
+  }
+  let made = nextWake(&before, deadline, listener.options.pollIntervalNanoseconds)
+  let wake = match move made {
+    Result<Instant, ()>.Failure {error} => { fail NativeSocketError.TimeRangeError }
+    Result<Instant, ()>.Success {value} => value
+  }
+  run MonotonicClock.waitUntil(move wake)
+  let after = run MonotonicClock.now()
+  if let Option<Instant>.Some {value: limit} = &deadline.* {
+    if reached(&after, &limit) { fail NativeSocketError.Timeout }
+  }
+  return ()
+}
+
+unsafe effect fn decodePeer(
+  storage: &SockAddrStorage,
+  length: usize,
+  unixListener: bool,
+) -> PeerAddress
+! NativeSocketError {
+  if unixListener && length == usize.ZERO {
+    return PeerAddress.Unix {peer: UnixPeerAddress.Unnamed}
+  }
+  let bytes = unsafe storageBytes(storage)
+  let family = run unsafe checkedAddressFamily(storage, length)
+  if family == IPV4_FAMILY || family == IPV6_FAMILY {
+    let endpoint = run unsafe decodeInternetAddress(storage, length)
+    return PeerAddress.Tcp {endpoint: move endpoint}
+  }
+  if family != UNIX_FAMILY {
+    fail NativeSocketError.InvalidNativeAddress {family: family, length: length}
+  }
+  if length > unixCapacity() + 2 {
+    fail NativeSocketError.InvalidNativeAddress {family: family, length: length}
+  }
+  if length == 2 { return PeerAddress.Unix {peer: UnixPeerAddress.Unnamed} }
+  let first = unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 2))
+  if first == 0 {
+    static if Intrinsic.targetOperatingSystem() == "darwin" {
+      return PeerAddress.Unix {peer: UnixPeerAddress.Unnamed}
+    } else {
+      fail NativeSocketError.UnsupportedPeerAddress {family: family, length: length}
+    }
+  }
+  let mut pathLength = length - 2
+  while pathLength > usize.ZERO {
+    let value = unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, pathLength + 1))
+    if value != 0 { break }
+    pathLength = pathLength - usize.ONE
+  }
+  if pathLength > unixCapacity() {
+    fail NativeSocketError.InvalidNativeAddress {family: family, length: length}
+  }
+  let mut pathBytes = zeroUnixGnu()
+  let mut index = usize.ZERO
+  while index < pathLength {
+    pathBytes[index] = unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, index + 2))
+    index = index + usize.ONE
+  }
+  return PeerAddress.Unix {
+    peer: UnixPeerAddress.Pathname {
+      path: UnixSocketPath {bytesValue: move pathBytes, lengthValue: pathLength},
+    },
+  }
+}
+
+/// Accepts one independently owned connection under an unchanged absolute deadline.
+pub effect fn accept(
+  listener: &mut Listener,
+  deadline: Option<Instant>,
+) -> Accepted ! NativeSocketError ? &mut MonotonicClock {
+  if listener.phaseValue == ListenerPhase.Closed { fail NativeSocketError.Closed }
+  let tcp = match &listener.boundValue {
+    BoundAddress.Tcp {endpoint} => true
+    _ => false
+  }
+  let mut followedImmediateReadiness = false
+  while true {
+    run checkConnectDeadline(&deadline)
+    let mut storage = zeroStorage()
+    let mut length: u32 = 128
+    let fd = unsafe acceptNative(
+      listener.descriptor.fd,
+      Pointer.fromMutRef<SockAddrStorage>(&mut storage),
+      Pointer.fromMutRef<u32>(&mut length),
+    )
+    if fd >= 0 {
+      let descriptor = Descriptor {fd: fd}
+      let unixListener = match & listener.boundValue {
+        BoundAddress.Unix {path} => true
+        _ => false
+      }
+      let connectionOptions = ConnectOptions {
+        noDelayValue: false,
+        pollIntervalNanoseconds: listener.options.pollIntervalNanoseconds,
+        maxAttemptsValue: usize.ONE,
+      }
+      run configureAcceptedSocket(&descriptor, tcp, &connectionOptions, &deadline)
+      let peer = run unsafe decodePeer(&storage, u32.toUsize(length), unixListener)
+      return Accepted {
+        connection: Connection {
+          descriptor: move descriptor,
+          phaseValue: ConnectionPhase.Open,
+          readEnded: false,
+          options: connectionOptions,
+        },
+        peerValue: move peer,
+      }
+    }
+    let code = unsafe currentError()
+    if !retryableAccept(code, tcp) {
+      return run rejectListener(NativeSocketOperation.Accept, code)
+    }
+    if code == AGAIN && !followedImmediateReadiness {
+      run checkConnectDeadline(&deadline)
+      let observed = pollOnce(listener.descriptor.fd, READABLE)
+      match move observed {
+        PollOutcome.Interrupted => {}
+        PollOutcome.Failed {code: pollCode} => {
+          return run rejectListener(NativeSocketOperation.Poll, pollCode)
+        }
+        PollOutcome.Ready {events} => {
+          if hasEvent(events, INVALID_POLL) {
+            return run rejectListener(NativeSocketOperation.Poll, INVALID_DESCRIPTOR)
+          }
+          if hasEvent(events, POLL_ERROR) {
+            run checkConnectDeadline(&deadline)
+            let detail = socketError(listener.descriptor.fd)
+            match move detail {
+              SocketErrorOutcome.Failed {code: detailCode} => {
+                return run rejectListener(NativeSocketOperation.GetSocketOption, detailCode)
+              }
+              SocketErrorOutcome.Value {code: detailCode} => {
+                if detailCode != 0 {
+                  return run rejectListener(NativeSocketOperation.Accept, detailCode)
+                }
+              }
+            }
+          }
+          if hasEvent(events, READABLE) {
+            followedImmediateReadiness = true
+            continue
+          }
+        }
+      }
+    }
+    followedImmediateReadiness = false
+    run waitAccept(&listener.*, &deadline)
+  }
+  fail NativeSocketError.NativeFailure {operation: NativeSocketOperation.Accept, errno: 0}
+}
+
+effect fn discardNativeError(error: NativeSocketError) -> () { drop error return () }
+
+effect fn releaseAccepted(accepted: &mut Accepted) -> () {
+  let closed = Connection.close(&mut accepted.connection)
+  return run Effect.catchAll(move closed, discardNativeError)
+}
+
+fn unavailableAcceptedContext<C>() -> C {
+  let impossible = 1 / 0
+  return unavailableAcceptedContext<C>()
+}
+
+/// Consumes one listener and lends it through a nonparking structured finalizer.
+pub effect fn withListener<'env, A, E, ?CallbackRequirements>(
+  listener: Listener,
+  callback: for<'call> once fn<'env>(
+    &'call mut Listener
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> A ! E ? CallbackRequirements {
+  let use = effect fn(owned: &mut Listener) -> A ! E ? CallbackRequirements {
+    return run callback(move owned)
+  }
+  let release = effect fn(owned: &mut Listener) -> () {
+    let closed = Listener.close(move owned)
+    return run Effect.catchAll(move closed, discardNativeError)
+  }
+  return run Effect.useReleaseNonParking(move listener, move use, move release)
+}
+
+/// Consumes one accepted owner and lends its connection plus borrowed peer metadata.
+pub effect fn withAccepted<'env, A, E, ?CallbackRequirements>(
+  accepted: Accepted,
+  callback: for<'call> once fn<'env>(
+    &'call mut AcceptedView<'call>
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> A ! E ? CallbackRequirements
+where CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  let use = effect fn(owned: &mut Accepted) -> A ! E ? CallbackRequirements {
+    let mut view = AcceptedView {
+      connection: &mut owned.connection,
+      peer: &owned.peerValue,
+    }
+    return run callback(&mut view)
+  }
+  let release = effect fn(owned: &mut Accepted) -> () {
+    return run releaseAccepted(move owned)
+  }
+  return run Effect.useReleaseNonParking(move accepted, move use, move release)
+}
+
+effect fn withAcceptedUsing<
+  A,
+  E,
+  ?CallbackRequirements,
+  ?ContextRequirements,
+  C: AcceptedContext<A, E, CallbackRequirements ? ContextRequirements>,
+>(
+  accepted: Accepted,
+  context: C,
+) -> A ! E ? CallbackRequirements | ContextRequirements
+where CallbackRequirements in Without<CallbackRequirements, ByteDuplex>,
+  ContextRequirements in Without<ContextRequirements, ByteDuplex> {
+  let owner = AcceptedUsingOwner<C> {
+    accepted: move accepted,
+    context: Option.some<C>(move context),
+  }
+  let use = effect fn(owned: &mut AcceptedUsingOwner<C>) -> A
+  ! E
+  ? CallbackRequirements | ContextRequirements {
+    let stored = Intrinsic.replace(owned.context, Option.none<C>())
+    let context = match move stored {
+      Option<C>.Some {value} => move value
+      Option<C>.None => unavailableAcceptedContext<C>()
+    }
+    let mut view = AcceptedView {
+      connection: &mut owned.accepted.connection,
+      peer: &owned.accepted.peerValue,
+    }
+    return run invokeAcceptedContext<
+      A,
+      E,
+      CallbackRequirements,
+      ContextRequirements,
+      C,
+    >(move context, &mut view)
+  }
+  let release = effect fn(owned: &mut AcceptedUsingOwner<C>) -> () {
+    return run releaseAccepted(&mut owned.accepted)
+  }
+  return run Effect.useReleaseNonParking(move owner, move use, move release)
+}
+
+effect<'call> fn invokeAcceptedContext<
+  'call,
+  A,
+  E,
+  ?CallbackRequirements,
+  ?ContextRequirements,
+  C: AcceptedContext<A, E, CallbackRequirements ? ContextRequirements>,
+>(
+  context: C,
+  view: &'call mut AcceptedView<'call>,
+) -> A ! E ? CallbackRequirements | ContextRequirements {
+  return run AcceptedContext<A, E, CallbackRequirements ? ContextRequirements>.use(
+    move context,
+    move view,
+  )
+}
+
+/// Consumes one compile-time-selected context with temporary accepted-connection loans.
+///
+/// # Details
+///
+/// The context is captured by the once-callable protected use and consumed exactly once. Structured
+/// success, typed failure, and cancellation close the connection once; close failure never
+/// replaces the protected outcome.
+pub effect fn withAcceptedContext<
+  A,
+  E,
+  ?CallbackRequirements,
+  ?ContextRequirements,
+  C: AcceptedContext<A, E, CallbackRequirements ? ContextRequirements>,
+>(
+  accepted: Accepted,
+  context: C,
+) -> A ! E ? CallbackRequirements | ContextRequirements
+where CallbackRequirements in Without<CallbackRequirements, ByteDuplex>,
+  ContextRequirements in Without<ContextRequirements, ByteDuplex> {
+  return run withAcceptedUsing<
+    A,
+    E,
+    CallbackRequirements,
+    ContextRequirements,
+    C,
+  >(
+    move accepted,
+    move context,
+  )
+}
+
+/// Connects an ordered nonempty numeric endpoint slice and returns one affine provider owner.
+pub effect fn connectResolvedOwned(
+  endpoints: &[Endpoint],
+  options: ConnectOptions,
+  deadline: Option<Instant>,
+) -> Connection ! NativeSocketError ? &mut MonotonicClock {
+  return run acquireResolved(endpoints, options, &deadline)
+}
+
+/// Connects one absolute pathname Unix socket and returns one affine provider owner.
+pub effect fn connectUnixOwned(
+  path: &[u8],
+  options: ConnectOptions,
+  deadline: Option<Instant>,
+) -> Connection ! NativeSocketError ? &mut MonotonicClock {
+  return run acquireUnix(path, options, &deadline)
+}
+
+/// Connects an ordered nonempty numeric endpoint slice and lends the owned provider in one scope.
+pub effect fn connectResolved<'env, A, E, ?CallbackRequirements>(
+  endpoints: &[Endpoint],
+  options: ConnectOptions,
+  deadline: Option<Instant>,
+  callback: for<'call> once fn<'env>(
+    &'call mut Connection
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> A ! E | NativeSocketError ? CallbackRequirements | &mut MonotonicClock
+where CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  let connection = run connectResolvedOwned(endpoints, options, move deadline)
+  let use = effect fn(owned: &mut Connection) -> A ! E ? CallbackRequirements {
+    return run callback(move owned)
+  }
+  let release = effect fn(owned: &mut Connection) -> () {
+    let closed = Connection.close(move owned)
+    return run Effect.catchAll(move closed, discardNativeError)
+  }
+  return run Effect.useReleaseNonParking(move connection, move use, move release)
+}
+
+/// Connects one absolute pathname Unix socket and lends the owned provider in one scope.
+pub effect fn connectUnix<'env, A, E, ?CallbackRequirements>(
+  path: &[u8],
+  options: ConnectOptions,
+  deadline: Option<Instant>,
+  callback: for<'call> once fn<'env>(
+    &'call mut Connection
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> A ! E | NativeSocketError ? CallbackRequirements | &mut MonotonicClock
+where CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  let connection = run connectUnixOwned(path, options, move deadline)
+  let use = effect fn(owned: &mut Connection) -> A ! E ? CallbackRequirements {
+    return run callback(move owned)
+  }
+  let release = effect fn(owned: &mut Connection) -> () {
+    let closed = Connection.close(move owned)
+    return run Effect.catchAll(move closed, discardNativeError)
+  }
+  return run Effect.useReleaseNonParking(move connection, move use, move release)
+}
+
+effect fn failProvider(
+  connection: &mut Connection,
+  operation: ByteIoOperation,
+  code: i32,
+) -> never ! ByteIoError {
+  let closed = run Effect.result(Connection.close(move connection))
+  drop closed
+  fail ByteDuplex.provider(move operation, code)
+}
+
+effect fn failInvalidTransfer(
+  connection: &mut Connection,
+  operation: ByteIoOperation,
+  count: usize,
+  limit: usize,
+) -> never ! ByteIoError {
+  let closed = run Effect.result(Connection.close(move connection))
+  drop closed
+  fail ByteDuplex.invalidTransferCount(move operation, count, limit)
+}
+
+enum ReadinessOutcome {
+  Immediate,
+  Waited,
+}
+
+effect fn readSocketError(
+  connection: &mut Connection,
+  deadline: &Option<Instant>,
+) -> never ! ByteIoError ? &mut MonotonicClock {
+  run checkIoDeadline(deadline, ByteIoOperation.Read)
+  let detail = socketError(connection.descriptor.fd)
+  return match move detail {
+    SocketErrorOutcome.Failed {code} => {
+      return run failProvider(&mut connection.*, ByteIoOperation.Read, code)
+    }
+    SocketErrorOutcome.Value {code} => {
+      return run failProvider(&mut connection.*, ByteIoOperation.Read, code)
+    }
+  }
+}
+
+effect fn writeSocketError(
+  connection: &mut Connection,
+  deadline: &Option<Instant>,
+) -> never ! ByteIoError ? &mut MonotonicClock {
+  run checkIoDeadline(deadline, ByteIoOperation.Write)
+  let detail = socketError(connection.descriptor.fd)
+  return match move detail {
+    SocketErrorOutcome.Failed {code} => {
+      return run failProvider(&mut connection.*, ByteIoOperation.Write, code)
+    }
+    SocketErrorOutcome.Value {code} => {
+      return run failProvider(&mut connection.*, ByteIoOperation.Write, code)
+    }
+  }
+}
+
+effect fn readiness(
+  connection: &mut Connection,
+  requested: i16,
+  allowHangup: bool,
+  deadline: &Option<Instant>,
+  operation: ByteIoOperation,
+) -> ReadinessOutcome ! ByteIoError ? &mut MonotonicClock {
+  let observed = pollOnce(connection.descriptor.fd, requested)
+  return match move observed {
+    PollOutcome.Interrupted => {
+      run waitIo(&connection.options, deadline, move operation)
+      return ReadinessOutcome.Waited
+    }
+    PollOutcome.Failed {code} => {
+      return run failProvider(&mut connection.*, move operation, code)
+    }
+    PollOutcome.Ready {events} => {
+      if hasEvent(events, INVALID_POLL) {
+        return run failProvider(&mut connection.*, move operation, INVALID_DESCRIPTOR)
+      }
+      if hasEvent(events, POLL_ERROR) {
+        if allowHangup { return run readSocketError(&mut connection.*, deadline) }
+        return run writeSocketError(&mut connection.*, deadline)
+      }
+      if hasEvent(events, HANGUP) {
+        if allowHangup { return ReadinessOutcome.Immediate }
+        return run failProvider(&mut connection.*, move operation, BROKEN_PIPE)
+      }
+      if hasEvent(events, requested) { return ReadinessOutcome.Immediate }
+      run waitIo(&connection.options, deadline, move operation)
+      return ReadinessOutcome.Waited
+    }
+  }
+}
+
+impl Connection {
+unsafe effect fn readConnection(
+  connection: &mut Connection,
+  output: &mut [u8],
+  deadline: Option<Instant>,
+) -> ReadTransfer ! ByteIoError ? &mut MonotonicClock {
+  if output.length == usize.ZERO { return ReadTransfer.Data {count: usize.ZERO} }
+  if connection.phaseValue == ConnectionPhase.Closed || connection.phaseValue == ConnectionPhase.Connecting {
+    fail ByteDuplex.closed(ByteIoOperation.Read)
+  }
+  if connection.readEnded { return ReadTransfer.End }
+  let mut requested = output.length
+  if requested > MAX_TRANSFER { requested = MAX_TRANSFER }
+  let pointer = Pointer.fromMutSlice<u8>(move output)
+  let mut followedImmediateReadiness = false
+  while true {
+    run checkIoDeadline(&deadline, ByteIoOperation.Read)
+    let transferred = unsafe recv(connection.descriptor.fd, pointer, requested, 0)
+    if transferred > 0 {
+      let count = isize.toUsize(transferred)
+      if count > requested {
+        return run failInvalidTransfer(
+          &mut connection.*,
+          ByteIoOperation.Read,
+          count,
+          requested,
+        )
+      }
+      return ReadTransfer.Data {count: count}
+    }
+    if transferred == 0 {
+      connection.readEnded = true
+      return ReadTransfer.End
+    }
+    let code = unsafe currentError()
+    if code == INTERRUPTED {
+      followedImmediateReadiness = false
+      run waitIo(&connection.options, &deadline, ByteIoOperation.Read)
+    } else {
+      if code == AGAIN {
+        if followedImmediateReadiness {
+          followedImmediateReadiness = false
+          run waitIo(&connection.options, &deadline, ByteIoOperation.Read)
+        } else {
+          run checkIoDeadline(&deadline, ByteIoOperation.Read)
+          let available = run readiness(
+            &mut connection.*,
+            READABLE,
+            true,
+            &deadline,
+            ByteIoOperation.Read,
+          )
+          followedImmediateReadiness = available == ReadinessOutcome.Immediate
+        }
+      } else {
+        return run failProvider(&mut connection.*, ByteIoOperation.Read, code)
+      }
+    }
+  }
+  return ReadTransfer.End
+}
+
+unsafe effect fn writeConnection(
+  connection: &mut Connection,
+  input: &[u8],
+  deadline: Option<Instant>,
+) -> usize ! ByteIoError ? &mut MonotonicClock {
+  if input.length == usize.ZERO { return usize.ZERO }
+  if connection.phaseValue == ConnectionPhase.WriteClosed || connection.phaseValue == ConnectionPhase.Closed || connection.phaseValue == ConnectionPhase.Connecting {
+    fail ByteDuplex.closed(ByteIoOperation.Write)
+  }
+  let mut requested = input.length
+  if requested > MAX_TRANSFER { requested = MAX_TRANSFER }
+  let pointer = Pointer.fromSlice<u8>(input)
+  let mut followedImmediateReadiness = false
+  while true {
+    run checkIoDeadline(&deadline, ByteIoOperation.Write)
+    let transferred = unsafe send(connection.descriptor.fd, pointer, requested, sendFlags())
+    if transferred > 0 {
+      let count = isize.toUsize(transferred)
+      if count > requested {
+        return run failInvalidTransfer(
+          &mut connection.*,
+          ByteIoOperation.Write,
+          count,
+          requested,
+        )
+      }
+      return count
+    }
+    if transferred == 0 {
+      return run failInvalidTransfer(
+        &mut connection.*,
+        ByteIoOperation.Write,
+        usize.ZERO,
+        requested,
+      )
+    }
+    let code = unsafe currentError()
+    if code == INTERRUPTED {
+      followedImmediateReadiness = false
+      run waitIo(&connection.options, &deadline, ByteIoOperation.Write)
+    } else {
+      if code == AGAIN {
+        if followedImmediateReadiness {
+          followedImmediateReadiness = false
+          run waitIo(&connection.options, &deadline, ByteIoOperation.Write)
+        } else {
+          run checkIoDeadline(&deadline, ByteIoOperation.Write)
+          let available = run readiness(
+            &mut connection.*,
+            WRITABLE,
+            false,
+            &deadline,
+            ByteIoOperation.Write,
+          )
+          followedImmediateReadiness = available == ReadinessOutcome.Immediate
+        }
+      } else {
+        return run failProvider(&mut connection.*, ByteIoOperation.Write, code)
+      }
+    }
+  }
+  return usize.ZERO
+}
+
+unsafe effect fn flushConnection(
+  connection: &mut Connection,
+  deadline: Option<Instant>,
+) -> () ! ByteIoError ? &mut MonotonicClock {
+  drop deadline
+  if connection.phaseValue == ConnectionPhase.Closed || connection.phaseValue == ConnectionPhase.Connecting {
+    fail ByteDuplex.closed(ByteIoOperation.Flush)
+  }
+  return ()
+}
+
+unsafe effect fn shutdownConnection(
+  connection: &mut Connection,
+  deadline: Option<Instant>,
+) -> () ! ByteIoError ? &mut MonotonicClock {
+  if connection.phaseValue == ConnectionPhase.WriteClosed { return () }
+  if connection.phaseValue != ConnectionPhase.Open {
+    fail ByteDuplex.closed(ByteIoOperation.ShutdownWrite)
+  }
+  while true {
+    run checkIoDeadline(&deadline, ByteIoOperation.ShutdownWrite)
+    let status = unsafe shutdown(connection.descriptor.fd, SHUT_WRITE)
+    if status == 0 {
+      connection.phaseValue = ConnectionPhase.WriteClosed
+      return ()
+    }
+    let code = unsafe currentError()
+    if code == INTERRUPTED {
+      run waitIo(&connection.options, &deadline, ByteIoOperation.ShutdownWrite)
+    } else {
+      if code == NOT_CONNECTED {
+        let closed = run Effect.result(Connection.close(&mut connection.*))
+        drop closed
+        fail ByteDuplex.closed(ByteIoOperation.ShutdownWrite)
+      }
+      return run failProvider(&mut connection.*, ByteIoOperation.ShutdownWrite, code)
+    }
+  }
+  return ()
+}
+
+unsafe effect fn closeByteConnection(connection: &mut Connection) -> () ! ByteIoError {
+  let attempted = run Effect.result(Connection.close(&mut connection.*))
+  return match move attempted {
+    Result<(), NativeSocketError>.Success {value} => ()
+    Result<(), NativeSocketError>.Failure {error} => match move error {
+      NativeSocketError.NativeFailure {operation, errno} => {
+        fail ByteDuplex.provider(ByteIoOperation.Close, errno)
+      }
+      _ => { fail ByteDuplex.provider(ByteIoOperation.Close, -1) }
+    }
+  }
+}
+}
+
+impl ByteDuplex for Connection {
+  readSomeRaw: Connection.readConnection
+  writeSomeRaw: Connection.writeConnection
+  flushRaw: Connection.flushConnection
+  shutdownWriteRaw: Connection.shutdownConnection
+  closeRaw: Connection.closeByteConnection
+}
+}

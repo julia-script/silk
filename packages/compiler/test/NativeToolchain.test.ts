@@ -1,4 +1,8 @@
 import * as AnalysisFixture from './support/AnalysisFixture.js'
+import {
+  linkedForeignDollarCSource,
+  linkedForeignDollarSource,
+} from './support/foreignDollarSymbol.js'
 import type * as Backend from '../src/Backend.js'
 import * as ForeignContract from '../src/ForeignContract.js'
 import * as Result from 'effect/Result'
@@ -24,7 +28,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterAll, assert, it } from '@effect/vitest'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
@@ -39,17 +43,22 @@ import * as ToolchainPlan from '../src/ToolchainPlan.js'
 const defaultClang = (): string => {
   if (existsSync('/opt/homebrew/opt/llvm/bin/clang')) return '/opt/homebrew/opt/llvm/bin/clang'
   if (existsSync('/usr/local/opt/llvm/bin/clang')) return '/usr/local/opt/llvm/bin/clang'
-  return 'clang'
+  return '/usr/bin/clang'
 }
 
 const testPath = Effect.runSync(Config.string('PATH').pipe(Config.withDefault('')))
 const clang = Effect.runSync(
   Config.string('SILK_TEST_CLANG').pipe(Config.withDefault(defaultClang())),
 )
+const defaultLlvmAr = join(dirname(clang), 'llvm-ar')
 const toolchain: NativeToolchain.Toolchain = Object.freeze({
   _tag: 'Toolchain',
   clang,
-  llvmAr: 'llvm-ar',
+  llvmAr: Effect.runSync(
+    Config.string('SILK_TEST_LLVM_AR').pipe(
+      Config.withDefault(existsSync(defaultLlvmAr) ? defaultLlvmAr : '/usr/bin/llvm-ar'),
+    ),
+  ),
 })
 
 const testRoot = mkdtempSync(join(tmpdir(), 'silk-native-boundary-test-'))
@@ -1122,6 +1131,83 @@ it.effect(
   15_000,
 )
 
+it.effect(
+  'preserves dollar-bearing foreign symbols through objects and a separate C link',
+  () =>
+    Effect.gen(function* () {
+      const target = yield* NativeToolchain.hostTarget()
+      const snapshot = yield* AnalysisFixture.declarations(
+        'native/dollar-symbols',
+        ascii(linkedForeignDollarSource),
+        target.id,
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+      assert.deepEqual(
+        artifact.foreignImports.map((entry) => entry.symbol),
+        ['close$NOCANCEL', 'helper$version'],
+      )
+      for (const symbol of ['close$NOCANCEL', 'helper$version']) {
+        assert.include(artifact.ir, `@${symbol}`)
+      }
+
+      const compilation = yield* profileFor(target)
+      const destination = join(testRoot, 'linked-dollar-symbols')
+      const linked = yield* NativeToolchain.withBuildScope('dollar-symbol-link', (scope) =>
+        Effect.gen(function* () {
+          const program = yield* NativeToolchain.emitObject(toolchain, scope, artifact, compilation)
+          const definitions = yield* NativeToolchain.compileCObject(
+            toolchain,
+            scope,
+            target,
+            'dollar-symbol-definitions',
+            linkedForeignDollarCSource,
+          )
+          const inspect = (object: NativeToolchain.PathArtifact): ObjectSymbols.Inventory => {
+            const inventory = ObjectSymbols.inspect(readFileSync(object.path), target)
+            if (Result.isFailure(inventory)) return assert.fail(inventory.failure.detail)
+            return {
+              ...inventory.success,
+              symbols: inventory.success.symbols.map((entry) => ({
+                ...entry,
+                name: HelperCapability.symbolName(target, entry.name),
+              })),
+              references: inventory.success.references.map((name) =>
+                HelperCapability.symbolName(target, name),
+              ),
+            }
+          }
+          const programSymbols = inspect(program.artifact)
+          const definitionSymbols = inspect(definitions.artifact)
+          for (const symbol of ['close$NOCANCEL', 'helper$version']) {
+            assert.isTrue(
+              programSymbols.symbols.some((entry) => entry.name === symbol && !entry.defined),
+              symbol,
+            )
+            assert.include(programSymbols.references, symbol)
+            assert.isTrue(
+              definitionSymbols.symbols.some((entry) => entry.name === symbol && entry.defined),
+              symbol,
+            )
+          }
+          const runtime = yield* NativeToolchain.compileRuntime(toolchain, scope, target)
+          return yield* finalize(
+            toolchain,
+            scope,
+            'NativeExecutable',
+            target,
+            [program.artifact, runtime.artifact, definitions.artifact],
+            [],
+            destination,
+          )
+        }),
+      )
+      const run = spawnSync(linked.path, [], { encoding: 'utf8' })
+      assert.strictEqual(run.status, 42, run.stderr)
+    }),
+  15_000,
+)
+
 it('keeps relocatable form, exact loader symbols and ordered scripts distinct', () => {
   const tools = { clang, llvmAr: 'llvm-ar' }
   const target = Target.x8664UnknownLinuxGnu
@@ -1675,9 +1761,9 @@ it.effect(
       const input = {
         foreignImports: [foreign],
         foreignStatics: [],
-        nativeRuntimeSymbols: ['malloc'],
+        nativeRuntimeSymbols: ['malloc', 'calloc'],
       }
-      const symbols = ['memcpy', 'fmodf', 'malloc', 'foreign_read'].map((name) => ({
+      const symbols = ['memcpy', 'fmodf', 'malloc', 'calloc', 'foreign_read'].map((name) => ({
         name,
         defined: false,
         weak: false,
@@ -1701,7 +1787,7 @@ it.effect(
           ['memcpy', ['pointer', 'pointer', 'u64'], 'pointer'],
         ],
       )
-      assert.deepEqual(report.runtime, ['malloc'])
+      assert.deepEqual(report.runtime, ['calloc', 'malloc'])
       assert.deepEqual(report.foreign, ['foreign_read'])
       assert.deepEqual(HelperCapability.linkInputs([report]), [
         NativeLinkInput.library('m', 'Dynamic'),
@@ -1717,6 +1803,7 @@ it.effect(
       assert.notStrictEqual(report.identity, empty.identity)
       for (const [symbol, code] of [
         ['unknown_helper', 'UnexplainedSymbol'],
+        ['calloc', 'UnexplainedSymbol'],
         ['__atomic_load_16', 'UnsupportedFamily'],
         ['__stack_chk_fail', 'UnsupportedFamily'],
         ['__divti3', 'UnsupportedFamily'],

@@ -116,7 +116,8 @@ export const discoverRoots = (
     ...blocks.flatMap((block) =>
       block.operations.flatMap((operation) =>
         operation._tag === 'WritePlace' &&
-        fn.localTypes.at(operation.root.ordinal)?._tag !== 'Slice'
+        (fn.localTypes.at(operation.root.ordinal)?._tag !== 'Slice' ||
+          operation.selectors.length === 0)
           ? [operation.root.ordinal]
           : [],
       ),
@@ -150,6 +151,15 @@ export const discoverRoots = (
     ...borrowedCaptureRoots,
   ])
   const address = new Set([
+    ...blocks.flatMap((block) =>
+      block.operations.flatMap((operation) =>
+        operation._tag === 'BindMatch' &&
+        operation.type._tag === 'EnvironmentBorrow' &&
+        fn.localTypes.at(operation.scrutinee.ordinal)?._tag !== 'Reference'
+          ? [operation.scrutinee.ordinal]
+          : [],
+      ),
+    ),
     ...blocks.flatMap((block) =>
       block.operations.flatMap((operation) =>
         operation._tag === 'EnterDiagnosticScope'
@@ -562,7 +572,9 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
         const addressStorage = new Map<number, Value.Input>()
         const transientOutcomes = NativeOutcomeStorage.transientLocals(entry.fn, entry.linear)
         const placeRoots = entry.fn.localTypes.flatMap((type, ordinal) =>
-          NativeValue.classify(program.layout, type) === 'Place' && !transientOutcomes.has(ordinal)
+          (NativeValue.classify(program.layout, type) === 'Place' ||
+            type._tag === 'EnvironmentBorrow') &&
+          !transientOutcomes.has(ordinal)
             ? [ordinal]
             : [],
         )
@@ -570,7 +582,13 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           (left, right) => left - right,
         )) {
           const logicalType = entry.fn.localTypes.at(root)
-          if (logicalType?._tag === 'EnvironmentBorrow') continue
+          if (logicalType?._tag === 'EnvironmentBorrow') {
+            addressStorage.set(
+              root,
+              yield* FunctionBody.alloca(body, pointer, `borrow${root}_slot`),
+            )
+            continue
+          }
           if (
             logicalType !== undefined &&
             NativeValue.classify(program.layout, logicalType) === 'Place'
@@ -691,7 +709,8 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
             const base = values.at(0)
             if (base === undefined)
               throw new RangeError(`Backend lost environment borrow %${ordinal}`)
-            const slot = yield* FunctionBody.alloca(body, pointer, `borrow${ordinal}_slot`)
+            const slot = addressStorage.get(ordinal)
+            if (slot === undefined) throw new RangeError('Environment borrow lost its entry slot')
             yield* FunctionBody.store(body, base, slot)
             addressStorage.set(ordinal, slot)
             continue
@@ -717,6 +736,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           }
         }
         if (entry.diagnosticParameter !== undefined) physicalParameter += 2
+        if (entry.resultStorage !== undefined) physicalParameter += 1
         const transferPointer = entry.suspendable
           ? yield* Value.argument(body, physicalParameter)
           : undefined

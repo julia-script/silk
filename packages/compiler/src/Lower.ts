@@ -276,12 +276,54 @@ import {
   lowerEffectRunner,
   lowerInstance,
   lowerWitnessEffectRunner,
+  requireGeneratedEffectRunner,
   returnedEffectBlock,
   returnedValueType,
+  unavailableReferencedEffectRunner,
 } from './EntryAssembly.js'
 import type {} from './Forwarding.js'
-import type { GeneratedEffectRunner } from './ValueType.js'
+import type { GeneratedEffectRunner, SpecializedWitnessEffectTarget } from './ValueType.js'
 import { baseRunnerKey, effectValueType, instanceText } from './ValueType.js'
+
+/**
+ * Re-proves source witness effects while their concrete instance context is still authoritative.
+ *
+ * A generated block runner retains authored HIR, whose interface call remains intentionally
+ * symbolic. Repeating discovery's declaration substitution here, and carrying that exact target
+ * into the runner, prevents lowering's proof-context compatibility from replacing the source
+ * conformance identity when its execution boundary is synthesized later.
+ */
+export const specializedWitnessEffectTargets = (
+  index: DeclarationIndex.Index,
+  owner: Instances.Instance,
+  block: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>,
+): ReadonlyArray<SpecializedWitnessEffectTarget> =>
+  Object.freeze(
+    Hir.runtimeExpressionTree(block).flatMap((expression) => {
+      if (
+        (expression._tag !== 'BuiltinCall' && expression._tag !== 'InterfaceOperationCall') ||
+        expression.witnessEffectSite === undefined
+      )
+        return []
+      const bound =
+        expression._tag === 'InterfaceOperationCall' ? expression : expression.interfaceOperation
+      if (bound === undefined) return []
+      const capability = Type.substitute(bound.capability, owner.substitution)
+      if (!Type.isNominal(capability)) return []
+      const target = ConformanceProof.interfaceWitnessTarget(
+        index,
+        Type.substitute(bound.provider, owner.substitution),
+        capability,
+        bound.operation,
+        bound.contract,
+        owner.substitution,
+      )
+      return target === undefined
+        ? []
+        : [Object.freeze({ site: expression.witnessEffectSite, target })]
+    }),
+  )
+
 export const lowerProgram = (
   discovery: Instances.Discovery,
   layout: Layout.Plan,
@@ -353,7 +395,14 @@ export const lowerProgram = (
       instance.key.staticArguments,
     )
     const block = returnedEffectBlock(instance.function)
-    const type = block === undefined ? undefined : effectValueType(layout, instance.key, block)
+    const blockType =
+      block === undefined
+        ? undefined
+        : Type.substitute(block.type, instance.substitution, instance.specialization.compatibility)
+    const type =
+      block === undefined || blockType === undefined || !Type.isEffect(blockType)
+        ? undefined
+        : effectValueType(layout, instance.key, block, blockType)
     if (type !== undefined && block !== undefined) {
       effectResults.set(resultKey, type)
       generatedRunners.push(
@@ -363,8 +412,9 @@ export const lowerProgram = (
           owner: instance,
           block,
           type,
-          specializationKey: baseRunnerKey(instance.key, block.site),
+          specializationKey: baseRunnerKey(instance.key, block.site, type.type),
           providedRequirements: Object.freeze([]),
+          witnessTargets: specializedWitnessEffectTargets(index, instance, block),
         }),
       )
       continue
@@ -454,12 +504,23 @@ export const lowerProgram = (
     readonly spec: GeneratedEffectRunner
     readonly runner: Mir.MirFunction
   }> = []
+  const unavailableRunners: Array<
+    Extract<
+      ReturnType<typeof lowerEffectRunner>,
+      { readonly _tag: 'UnavailableGeneratedEffectRunner' }
+    >
+  > = []
+  const unresolvedOpenBase = (spec: GeneratedEffectRunner): boolean => {
+    return (
+      spec.providedRequirements.length === 0 && Type.requirementMembers(spec.type.type).length > 0
+    )
+  }
   for (let ordinal = 0; ordinal < generatedRunners.length; ordinal += 1) {
     const generated = generatedRunners.at(ordinal)
     if (generated === undefined) continue
     let runner: Mir.MirFunction | undefined
     if (generated._tag === 'BlockEffectRunner') {
-      runner = lowerEffectRunner(
+      const outcome = lowerEffectRunner(
         generated,
         ownershipOf(generated.owner),
         layout,
@@ -470,6 +531,8 @@ export const lowerProgram = (
         generatedRunners,
         opaqueRealizations,
       )
+      if (outcome._tag === 'LoweredGeneratedEffectRunner') runner = outcome.runner
+      else unavailableRunners.push(outcome)
     } else if (generated._tag === 'CatchEffectRunner') {
       runner = lowerCatchEffectRunner(
         generated,
@@ -512,11 +575,6 @@ export const lowerProgram = (
   // Lowering a provided parent can discover provided children after their open bases were already
   // visited. Filter only after the worklist reaches its fixed point so backends never compile an
   // unreachable open runner that still calls another open runner without provider arguments.
-  const unresolvedOpenBase = (spec: GeneratedEffectRunner): boolean => {
-    return (
-      spec.providedRequirements.length === 0 && Type.requirementMembers(spec.type.type).length > 0
-    )
-  }
   const runnerKey = (
     declaration: DeclarationFacts.CanonicalId,
     typeArguments: ReadonlyArray<Type.GenericArgument>,
@@ -577,6 +635,8 @@ export const lowerProgram = (
       if (retainReferencedRunners(runner)) retainedChanged = true
     }
   }
+  const unavailable = unavailableReferencedEffectRunner(unavailableRunners, retainedRunners)
+  if (unavailable !== undefined) requireGeneratedEffectRunner(unavailable)
   functions.push(
     ...loweredRunners.flatMap(({ spec, runner }) => {
       return retainedRunners.has(

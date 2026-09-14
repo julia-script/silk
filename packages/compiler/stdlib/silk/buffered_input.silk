@@ -1,0 +1,464 @@
+//! Fixed-capacity retained byte input for incremental protocol parsing.
+//!
+//! # Details
+//!
+//! `BufferedInput` owns one reusable initialized allocation. `peek` borrows only the unread prefix;
+//! `consume` advances it explicitly, so bytes read beyond a protocol delimiter remain available.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.byte_duplex {ByteDuplex, ByteIoError, ReadTransfer}
+import silk.effect {Effect}
+import silk.layout {Layout}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.raw_buffer {RawBuffer}
+import silk.result {Result}
+import silk.standard_input {ReadOutcome, StandardInput, StreamReadError}
+import silk.system_clock {Instant, SystemClock}
+import silk.usize
+import silk.writer {WriterError}
+
+/// The largest allocation accepted by one buffered direction.
+pub const MAX_CAPACITY: usize = 1048576
+
+/// A typed buffering, progress, or source-boundary failure.
+pub union BufferError {
+  /// Construction rejected a zero or excessive capacity before allocation.
+  InvalidCapacity {
+    /// The rejected allocation size in bytes.
+    pub capacity: usize,
+  },
+  /// A fill request cannot fit in the fixed allocation.
+  BufferTooSmall {
+    /// The minimum retained byte count requested.
+    pub requested: usize,
+    /// The fixed allocation size in bytes.
+    pub capacity: usize,
+  },
+  /// Consume would advance beyond the initialized unread prefix.
+  InvalidConsumption {
+    /// The byte count requested for consumption.
+    pub requested: usize,
+    /// The initialized unread byte count.
+    pub available: usize,
+  },
+  /// An input provider reported an impossible successful count.
+  InvalidReadCount {
+    /// The successful count reported by the provider.
+    pub count: usize,
+    /// The destination length offered to the provider.
+    pub limit: usize,
+  },
+  /// Underlying end arrived before an exact operation completed.
+  UnexpectedEnd {
+    /// The exact prefix copied or discarded before end.
+    pub progress: usize,
+  },
+  /// A ByteDuplex read failed after `progress` bytes had already been copied by this operation.
+  ReadFailed {
+    /// The exact prefix copied before the failed read.
+    pub progress: usize,
+    /// The underlying duplex read failure.
+    pub error: ByteIoError,
+  },
+  /// A StandardInput read failed after `progress` bytes had already been copied by this operation.
+  InputFailed {
+    /// The exact prefix copied before the failed read.
+    pub progress: usize,
+    /// The underlying standard-input failure.
+    pub error: StreamReadError,
+  },
+  /// A ByteDuplex write or flush failed after accepting a caller prefix and draining pending bytes.
+  WriteFailed {
+    /// The exact current caller-input prefix accepted into buffered ownership.
+    pub accepted: usize,
+    /// The exact pending prefix acknowledged by the transport during the failing drain operation.
+    pub drained: usize,
+    /// The underlying transport failure.
+    pub error: ByteIoError,
+  },
+  /// Writer failed an all-or-error call after earlier complete arguments were accepted.
+  UnknownExternalTransfer {
+    /// The bytes accepted before the failed Writer call; the failed call has unknown external progress.
+    pub progress: usize,
+    /// The underlying Writer failure.
+    pub error: WriterError,
+  },
+  /// Finite vector-length arithmetic overflowed before output.
+  LengthOverflow,
+  /// A preceding external failure made the state unusable.
+  Terminal,
+}
+
+/// The observable result of satisfying a minimum retained prefix.
+pub union FillOutcome {
+  /// At least the requested minimum is available.
+  Available {
+    /// The initialized unread byte count.
+    pub count: usize,
+  },
+  /// The source ended; `available` retained bytes can still be consumed.
+  End {
+    /// The retained byte count still available after source end.
+    pub available: usize,
+  },
+}
+
+/// The result of a finite discard.
+pub struct DiscardOutcome {
+  /// The exact consumed byte count.
+  pub count: usize
+  /// True only when the operation actually observed source end.
+  pub endObserved: bool
+}
+
+/// One fixed-capacity retained input buffer.
+pub struct BufferedInput {
+  storage: RawBuffer<u8>
+  capacityValue: usize
+  start: usize
+  end: usize
+  ended: bool
+  terminal: bool
+}
+
+impl BufferedInput {
+  /// Allocates and initializes one fixed-capacity input buffer.
+  pub effect fn make(capacity: usize) -> BufferedInput
+  ! BufferError | OutOfMemoryError
+  ? &mut Allocator {
+    if capacity == usize.ZERO || capacity > MAX_CAPACITY {
+      fail BufferError.InvalidCapacity {capacity: capacity}
+    }
+    let allocation = run Allocator.allocate(Layout {bytes: capacity, alignment: usize.ONE})
+    let mut storage = RawBuffer.from<u8>(move allocation, capacity)
+    RawBuffer.fill(&mut storage, usize.ZERO, capacity, 0)
+    return BufferedInput {
+      storage: move storage,
+      capacityValue: capacity,
+      start: usize.ZERO,
+      end: usize.ZERO,
+      ended: false,
+      terminal: false,
+    }
+  }
+
+  /// Returns the immutable fixed capacity.
+  pub fn capacity(self: &Self) -> usize { return self.capacityValue }
+
+  /// Returns the initialized unread count.
+  pub fn unread(self: &Self) -> usize { return self.end - self.start }
+
+  /// Reports whether the source has reached sticky end.
+  pub fn isEnded(self: &Self) -> bool { return self.ended }
+
+  /// Reports whether an external failure made this input terminal.
+  pub fn isTerminal(self: &Self) -> bool { return self.terminal }
+
+  /// Borrows exactly the initialized unread slice.
+  pub fn peek<'a>(self: &'a Self) -> &'a [u8] {
+    return RawBuffer.view<u8>(&self.storage, self.start, self.end - self.start)
+  }
+
+  /// Advances by `count` initialized bytes, preserving state on overrun.
+  pub effect fn consume(self: &mut Self, count: usize) -> () ! BufferError {
+    let available = self.end - self.start
+    if count > available {
+      fail BufferError.InvalidConsumption {requested: count, available: available}
+    }
+    self.start = self.start + count
+    if self.start == self.end {
+      self.start = usize.ZERO
+      self.end = usize.ZERO
+    }
+    return ()
+  }
+
+  /// Retains at least `minimum` bytes or reports sticky source end.
+  pub effect fn fill(
+    self: &mut Self,
+    minimum: usize,
+    deadline: Option<Instant>,
+  ) -> FillOutcome
+  ! BufferError
+  ? &mut ByteDuplex | &mut MonotonicClock {
+    if minimum > self.capacityValue {
+      fail BufferError.BufferTooSmall {requested: minimum, capacity: self.capacityValue}
+    }
+    if minimum == usize.ZERO {
+      return FillOutcome.Available {count: self.end - self.start}
+    }
+    if self.terminal { fail BufferError.Terminal }
+    let initial = self.end - self.start
+    while self.end - self.start < minimum && !self.ended {
+      compact(&mut self.*)
+      let tail = self.capacityValue - self.end
+      let mut output = RawBuffer.viewMut<u8>(&mut self.storage, self.end, tail)
+      let attempted = run Effect.result(ByteDuplex.readSome(&mut output, copyDeadline(&deadline)))
+      drop output
+      let transfer = match move attempted {
+        Result<ReadTransfer, ByteIoError>.Success {value} => move value
+        Result<ReadTransfer, ByteIoError>.Failure {error} => {
+          self.terminal = true
+          fail BufferError.ReadFailed {
+            progress: self.end - self.start - initial,
+            error: move error,
+          }
+        }
+      }
+      match move transfer {
+        ReadTransfer.Data {count} => { self.end = self.end + count }
+        ReadTransfer.End => { self.ended = true }
+      }
+    }
+    let available = self.end - self.start
+    if self.ended { return FillOutcome.End {available: available} }
+    return FillOutcome.Available {count: available}
+  }
+
+  /// Retains through StandardInput without advertising a deadline.
+  pub effect fn fillStandard(self: &mut Self, minimum: usize) -> FillOutcome
+  ! BufferError
+  ? &mut StandardInput {
+    if minimum > self.capacityValue {
+      fail BufferError.BufferTooSmall {requested: minimum, capacity: self.capacityValue}
+    }
+    if minimum == usize.ZERO {
+      return FillOutcome.Available {count: self.end - self.start}
+    }
+    if self.terminal { fail BufferError.Terminal }
+    let initial = self.end - self.start
+    while self.end - self.start < minimum && !self.ended {
+      compact(&mut self.*)
+      let tail = self.capacityValue - self.end
+      let mut output = RawBuffer.viewMut<u8>(&mut self.storage, self.end, tail)
+      let attempted = run Effect.result(StandardInput.receive(&mut output))
+      drop output
+      let outcome = match move attempted {
+        Result<ReadOutcome, StreamReadError>.Success {value} => move value
+        Result<ReadOutcome, StreamReadError>.Failure {error} => {
+          self.terminal = true
+          fail BufferError.InputFailed {
+            progress: self.end - self.start - initial,
+            error: move error,
+          }
+        }
+      }
+      if StandardInput.isEndOfInput(&outcome) {
+        self.ended = true
+      } else {
+        let count = StandardInput.count(&outcome)
+        if count == usize.ZERO || count > tail {
+          self.terminal = true
+          fail BufferError.InvalidReadCount {count: count, limit: tail}
+        }
+        self.end = self.end + count
+      }
+    }
+    let available = self.end - self.start
+    if self.ended { return FillOutcome.End {available: available} }
+    return FillOutcome.Available {count: available}
+  }
+
+  /// Copies one positive prefix or reports sticky end.
+  pub effect fn readSome(
+    self: &mut Self,
+    output: &mut [u8],
+    deadline: Option<Instant>,
+  ) -> ReadTransfer
+  ! BufferError
+  ? &mut ByteDuplex | &mut MonotonicClock {
+    if output.length == usize.ZERO { return ReadTransfer.Data {count: usize.ZERO} }
+    let filled = run BufferedInput.fill(&mut self.*, usize.ONE, move deadline)
+    let available = self.end - self.start
+    if available == usize.ZERO {
+      drop filled
+      return ReadTransfer.End
+    }
+    let count = minimum(available, output.length)
+    copyOut(&self.storage, self.start, move output, count)
+    run BufferedInput.consume(&mut self.*, count)
+    drop filled
+    return ReadTransfer.Data {count: count}
+  }
+
+  /// Copies one positive prefix through StandardInput or reports sticky end.
+  pub effect fn readSomeStandard(self: &mut Self, output: &mut [u8]) -> ReadTransfer
+  ! BufferError
+  ? &mut StandardInput {
+    if output.length == usize.ZERO { return ReadTransfer.Data {count: usize.ZERO} }
+    let filled = run BufferedInput.fillStandard(&mut self.*, usize.ONE)
+    let available = self.end - self.start
+    if available == usize.ZERO {
+      drop filled
+      return ReadTransfer.End
+    }
+    let count = minimum(available, output.length)
+    copyOut(&self.storage, self.start, move output, count)
+    run BufferedInput.consume(&mut self.*, count)
+    drop filled
+    return ReadTransfer.Data {count: count}
+  }
+
+  /// Fills the complete destination or reports its precisely copied prefix.
+  pub effect fn readExact(
+    self: &mut Self,
+    output: &mut [u8],
+    deadline: Option<Instant>,
+  ) -> ()
+  ! BufferError
+  ? &mut ByteDuplex | &mut MonotonicClock {
+    let mut copied = usize.ZERO
+    while copied < output.length {
+      let attempted = run Effect.result(BufferedInput.fill(
+        &mut self.*,
+        usize.ONE,
+        copyDeadline(&deadline),
+      ))
+      match move attempted {
+        Result<FillOutcome, BufferError>.Failure {error} => {
+          fail addReadProgress(move error, copied)
+        }
+        Result<FillOutcome, BufferError>.Success {value} => {
+          let available = self.end - self.start
+          if available == usize.ZERO {
+            drop value
+            fail BufferError.UnexpectedEnd {progress: copied}
+          }
+          let count = minimum(available, output.length - copied)
+          copyOutAt(&self.storage, self.start, &mut output, copied, count)
+          run BufferedInput.consume(&mut self.*, count)
+          copied = copied + count
+          drop value
+        }
+      }
+    }
+    return ()
+  }
+
+  /// Discards no more than `limit` and reports whether end was actually observed.
+  pub effect fn discardAtMost(
+    self: &mut Self,
+    limit: usize,
+    deadline: Option<Instant>,
+  ) -> DiscardOutcome
+  ! BufferError
+  ? &mut ByteDuplex | &mut MonotonicClock {
+    let mut discarded = usize.ZERO
+    while discarded < limit {
+      let filled = run BufferedInput.fill(&mut self.*, usize.ONE, copyDeadline(&deadline))
+      let available = self.end - self.start
+      if available == usize.ZERO {
+        drop filled
+        return DiscardOutcome {count: discarded, endObserved: true}
+      }
+      let count = minimum(available, limit - discarded)
+      run BufferedInput.consume(&mut self.*, count)
+      discarded = discarded + count
+      drop filled
+    }
+    return DiscardOutcome {count: discarded, endObserved: false}
+  }
+
+  /// Discards exactly `count` bytes or reports the consumed prefix at early end.
+  pub effect fn discardExact(
+    self: &mut Self,
+    count: usize,
+    deadline: Option<Instant>,
+  ) -> ()
+  ! BufferError
+  ? &mut ByteDuplex | &mut MonotonicClock {
+    let outcome = run BufferedInput.discardAtMost(&mut self.*, count, move deadline)
+    if outcome.count != count {
+      fail BufferError.UnexpectedEnd {progress: outcome.count}
+    }
+    return ()
+  }
+}
+
+fn compact(input: &mut BufferedInput) -> () {
+  if input.start == usize.ZERO { return () }
+  let unread = input.end - input.start
+  let mut index = usize.ZERO
+  while index < unread {
+    let value = RawBuffer.read<u8>(&input.storage, input.start + index)
+    let mut destination = RawBuffer.viewMut<u8>(&mut input.storage, index, usize.ONE)
+    destination[usize.ZERO] = value
+    drop destination
+    index = index + usize.ONE
+  }
+  input.start = usize.ZERO
+  input.end = unread
+}
+
+fn copyOut(storage: &RawBuffer<u8>, start: usize, output: &mut [u8], count: usize) -> () {
+  copyOutAt(storage, start, move output, usize.ZERO, count)
+}
+
+fn copyOutAt(
+  storage: &RawBuffer<u8>,
+  start: usize,
+  output: &mut [u8],
+  outputStart: usize,
+  count: usize,
+) -> () {
+  let mut index = usize.ZERO
+  while index < count {
+    output[outputStart + index] = RawBuffer.read<u8>(storage, start + index)
+    index = index + usize.ONE
+  }
+}
+
+fn minimum(left: usize, right: usize) -> usize {
+  if left < right { return left }
+  return right
+}
+
+fn copyInstant(value: &Instant) -> Instant {
+  return SystemClock.make(SystemClock.seconds(value), SystemClock.nanoseconds(value))
+}
+
+fn copyDeadline(value: &Option<Instant>) -> Option<Instant> {
+  return match &value.* {
+    Option<Instant>.None => Option.none<Instant>()
+    Option<Instant>.Some {value: present} => Option.some<Instant>(copyInstant(&present))
+  }
+}
+
+fn addReadProgress(failure: BufferError, prior: usize) -> BufferError {
+  return match move failure {
+    BufferError.ReadFailed {progress, error: cause} => BufferError.ReadFailed {
+      progress: prior + progress,
+      error: move cause,
+    }
+    BufferError.InputFailed {progress, error: cause} => BufferError.InputFailed {
+      progress: prior + progress,
+      error: move cause,
+    }
+    BufferError.UnexpectedEnd {progress} => BufferError.UnexpectedEnd {progress: prior + progress}
+    BufferError.InvalidCapacity {capacity} => BufferError.InvalidCapacity {capacity: capacity}
+    BufferError.BufferTooSmall {requested, capacity} => BufferError.BufferTooSmall {
+      requested: requested,
+      capacity: capacity,
+    }
+    BufferError.InvalidConsumption {requested, available} => BufferError.InvalidConsumption {
+      requested: requested,
+      available: available,
+    }
+    BufferError.InvalidReadCount {count, limit} => BufferError.InvalidReadCount {
+      count: count,
+      limit: limit,
+    }
+    BufferError.WriteFailed {accepted, drained, error: cause} => BufferError.WriteFailed {
+      accepted: accepted,
+      drained: drained,
+      error: move cause,
+    }
+    BufferError.UnknownExternalTransfer {progress, error: cause} => BufferError.UnknownExternalTransfer {
+      progress: progress,
+      error: move cause,
+    }
+    BufferError.LengthOverflow => BufferError.LengthOverflow
+    BufferError.Terminal => BufferError.Terminal
+  }
+}

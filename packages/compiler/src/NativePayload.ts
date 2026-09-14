@@ -3,6 +3,7 @@ import type * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import type * as Layout from './Layout.js'
 import type * as Mir from './Mir.js'
+import type * as Type from './Type.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativePlace from './NativePlace.js'
 import * as NativeStorage from './NativeStorage.js'
@@ -54,6 +55,47 @@ export const place = (
   _tag: 'Place',
   place,
   length: NativeType.valueLanesFor(context, place.type).length,
+})
+
+/** Returns authoritative storage when the payload has not crossed an ABI lane boundary. */
+export const storage = (
+  self: NativePayload,
+  context: Context,
+): NativePlace.NativePlace | undefined => {
+  if (self._tag === 'Place') return self.place
+  if (self._tag !== 'Local') return undefined
+  const value = NativeStorage.readLocal(context.storage, self.local)
+  return value._tag === 'NativePlace' ? value : undefined
+}
+
+/** Preserves a selected canonical subplace; boundary-only values retain their lane projection. */
+export const projectStored = Effect.fnUntraced(function* (
+  self: NativePayload,
+  context: Context,
+  type: Type.Type,
+  offset: number,
+  slots: ReadonlyArray<number>,
+  tag: string,
+  conversion?: Extract<NativePayload, { readonly _tag: 'Projection' }>['conversion'],
+  concrete?: Mir.Type,
+) {
+  const source = storage(self, context)
+  if (source === undefined) return project(self, slots, conversion)
+  const model =
+    concrete === undefined
+      ? NativePlace.stored(context.types.program.layout, type, source.base)
+      : NativePlace.make(context.types.program.layout, concrete, source.base)
+  return place(
+    context.types,
+    yield* NativePlace.project(
+      source,
+      context.storage,
+      model.type,
+      offset,
+      tag,
+      model.representation,
+    ),
+  )
 })
 
 export const project = (

@@ -1,0 +1,111 @@
+//! Serial native admission for one scoped HTTP server connection.
+//!
+//! # Details
+//!
+//! `serveNext` accepts exactly one connection and lends the portable server actor inside the same
+//! accepted-owner scope. Applications repeat the operation explicitly; this module creates no
+//! background queue, router, supervisor, or detached task.
+
+static if (Intrinsic.targetOperatingSystem() == "darwin"
+  && Intrinsic.targetArchitecture() == "aarch64"
+  && Intrinsic.targetAbi() == "apple"
+  && Intrinsic.profileText("libc") == "system")
+  || (Intrinsic.targetOperatingSystem() == "linux"
+    && Intrinsic.targetAbi() == "gnu"
+    && Intrinsic.profileText("libc") == "gnu"
+    && (Intrinsic.targetArchitecture() == "aarch64"
+      || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.allocator {Allocator, OutOfMemoryError}
+  import silk.buffered_input {BufferError}
+  import silk.byte_duplex {ByteDuplex}
+  import silk.effect {Effect}
+  import silk.http_server {
+    ConnectionHandler,
+    Limits,
+    ServerError,
+    withConnection,
+  }
+  import silk.monotonic_clock {MonotonicClock}
+  import silk.native_socket {
+    AcceptedContext,
+    AcceptedView,
+    Connection as NativeConnection,
+    Listener,
+    NativeSocketError,
+    accept,
+    withAcceptedContext,
+  }
+  import silk.system_clock {Instant}
+  import silk.option {Option}
+
+  /// Namespace anchor for native HTTP admission.
+  pub struct HttpServerNative {}
+
+  struct ServerAcceptedContext<A, E, ?HandlerRequirements, H> {
+    limits: Limits
+    handler: H
+  }
+
+  impl<A, E, ?HandlerRequirements, OuterH>
+    ServerAcceptedContext<A, E, HandlerRequirements, OuterH> {
+    effect<'call> fn use<
+      'call,
+      H: ConnectionHandler<NativeConnection, A, E ? HandlerRequirements>,
+    >(
+      context: ServerAcceptedContext<A, E, HandlerRequirements, H>,
+      view: &'call mut AcceptedView<'call>,
+    ) -> A
+    ! E | ServerError | BufferError | OutOfMemoryError
+    ? HandlerRequirements | &mut Allocator | &mut MonotonicClock
+    where HandlerRequirements in Without<HandlerRequirements, ByteDuplex> {
+      let ServerAcceptedContext<A, E, HandlerRequirements, H> {limits, handler} = move context
+      return run withConnection<A, E, HandlerRequirements, NativeConnection>(
+        &mut view.connection.*,
+        limits,
+        move handler,
+      )
+    }
+  }
+
+  impl<
+    A,
+    E,
+    ?HandlerRequirements,
+    H: ConnectionHandler<NativeConnection, A, E ? HandlerRequirements>,
+  > AcceptedContext<
+    A,
+    E | ServerError | BufferError | OutOfMemoryError,
+    HandlerRequirements
+    ? &mut Allocator | &mut MonotonicClock
+  > for ServerAcceptedContext<A, E, HandlerRequirements, H> {
+    use: ServerAcceptedContext.use
+  }
+
+  /// Accepts and serves exactly one connection inside the listener's accepted-owner scope.
+  pub effect fn serveNext<
+    'listener,
+    A,
+    E,
+    ?HandlerRequirements,
+    H: ConnectionHandler<NativeConnection, A, E ? HandlerRequirements>,
+  >(
+    listener: &'listener mut Listener,
+    limits: Limits,
+    acceptDeadline: Option<Instant>,
+    handler: H,
+  ) -> A
+  ! E | NativeSocketError | ServerError | BufferError | OutOfMemoryError
+  ? HandlerRequirements | &mut Allocator | &mut MonotonicClock
+  where HandlerRequirements in Without<HandlerRequirements, ByteDuplex> {
+    let accepted = run accept(move listener, move acceptDeadline)
+    let context = ServerAcceptedContext<A, E, HandlerRequirements, H> {
+      limits: limits,
+      handler: move handler,
+    }
+    return run withAcceptedContext<
+      A,
+      E | ServerError | BufferError | OutOfMemoryError,
+      HandlerRequirements,
+    >(move accepted, move context)
+  }
+}

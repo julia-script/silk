@@ -562,6 +562,10 @@ structural union, selection retains both the structural member and nominal varia
 Guards remain provisional, and exhausting the parent requires every declared variant even when a
 payload contains `never`.
 
+A nested variant pattern checks the inner variant before binding its fields or evaluating the arm
+guard. An inner mismatch continues to the next arm. Covering one inner variant leaves the other
+inner alternatives available; covering all of them exhausts that outer variant.
+
 **Boundary:** Pattern generic arguments are explicit rather than inferred from the scrutinee. A
 variant cannot be used as a type, projected before selection, or flattened into the surrounding
 structural union. A false guarded move leaves the whole active payload available to later arms.

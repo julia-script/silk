@@ -224,7 +224,7 @@ it.effect('shares one project frontend across overlapping open roots', () =>
         })
       }),
     )
-    assert.deepEqual(phases, ['ConfigurationSelected', 'CatalogSelected', 'ProjectAnalyzed'])
+    assert.deepEqual(phases, ['ConfigurationSelected', 'ProjectAnalyzed'])
     const mainSession = analyzed.get(main.uri)
     const utilSession = analyzed.get(util.uri)
 
@@ -339,8 +339,10 @@ it.effect('indexes closed source-root modules without widening semantic project 
         .filter((name) => !name.startsWith('silk/')),
       ['Main'],
     )
+    // A committed semantic snapshot must not perform whole-workspace catalog selection.
+    assert.isTrue(Option.isNone(yield* session.inventory.completed))
     assert.deepEqual(
-      WorkspaceInventory.candidates(session.inventory, 'closedCandidate').map(
+      WorkspaceInventory.candidates(yield* session.inventory.get, 'closedCandidate').map(
         (candidate) => candidate.module,
       ),
       ['Candidate'],
@@ -457,9 +459,13 @@ it.effect(
       const left = yield* makeDocument(false)
       const right = yield* makeDocument(true)
       const first = yield* Workspace.analyzeProject([left])
+      const firstSession = first.get(left.uri)
+      assert.ok(firstSession)
+      const firstInventory = yield* firstSession.inventory.get
       const next = yield* Workspace.analyzeProject([right], first)
-      const firstInventory = first.get(left.uri)?.inventory
-      const nextInventory = next.get(right.uri)?.inventory
+      const nextSession = next.get(right.uri)
+      assert.ok(nextSession)
+      const nextInventory = yield* nextSession.inventory.get
       assert.ok(firstInventory)
       assert.ok(nextInventory)
       assert.lengthOf(WorkspaceInventory.candidates(firstInventory, 'disabledChoice'), 1)
@@ -469,18 +475,18 @@ it.effect(
       assert.lengthOf(WorkspaceInventory.candidates(nextInventory, 'OsMonotonicClock'), 0)
       assert.notStrictEqual(firstInventory.identity, nextInventory.identity)
       const repeated = yield* Workspace.analyzeProject([right], next)
-      assert.strictEqual(repeated.get(right.uri)?.inventory.identity, nextInventory.identity)
-      assert.strictEqual(
-        repeated.get(right.uri)?.inventory.project.get('Main'),
-        nextInventory.project.get('Main'),
-      )
+      const repeatedSession = repeated.get(right.uri)
+      assert.ok(repeatedSession)
+      const repeatedInventory = yield* repeatedSession.inventory.get
+      assert.strictEqual(repeatedInventory.identity, nextInventory.identity)
+      assert.strictEqual(repeatedInventory.project.get('Main'), nextInventory.project.get('Main'))
       const before = first.get(left.uri)?.snapshot.profile
       const after = next.get(right.uri)?.snapshot.profile
       assert.deepStrictEqual(first.get(left.uri)?.snapshot.diagnostics, [])
       assert.ok(before)
       assert.ok(after)
       assert.notStrictEqual(before.identity, after.identity)
-      const direct = yield* Analysis.makeRealized({
+      const direct = yield* Analysis.make({
         root: SourceFile.make('Main', bytes),
         configuration: {
           package: 'demo@0.1.0',
@@ -509,4 +515,5 @@ it.effect(
         assert.notInclude(modules, 'silk/native_start')
       }
     }).pipe(Effect.provide(NodeServices.layer)),
+  180_000,
 )

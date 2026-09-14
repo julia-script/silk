@@ -1,5 +1,4 @@
 import * as ContinuationTransfer from './ContinuationTransfer.js'
-import * as NativeArgument from './NativeArgument.js'
 import * as ByteString from '@silklang/llvm/ByteString'
 import * as NativeForeignGuard from './NativeForeignGuard.js'
 import * as NativeCAbi from './NativeCAbi.js'
@@ -107,50 +106,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
   for (const bits of [8, 16, 64] as const) {
     if (!integerTypes.has(bits)) integerTypes.set(bits, yield* LlvmType.integer(builder, bits))
   }
-  const hasAddressLane =
-    frameRuntimeEnabled ||
-    (program.staticData?.length ?? 0) > 0 ||
-    program.functions.some((fn) =>
-      MirVerification.operations(fn).some(
-        (operation) =>
-          operation._tag === 'Allocate' ||
-          operation._tag === 'DiagnosticScope' ||
-          operation._tag === 'RawBufferFrom' ||
-          operation._tag === 'SharedFromAllocation' ||
-          operation._tag === 'SharedClone' ||
-          operation._tag === 'RawBufferCount' ||
-          operation._tag === 'RawBufferSlot' ||
-          operation._tag === 'RawBufferRead' ||
-          operation._tag === 'SliceView' ||
-          operation._tag === 'RawBufferView' ||
-          operation._tag === 'RawBufferCopy' ||
-          operation._tag === 'RawBufferFill' ||
-          operation._tag === 'SlotWrite' ||
-          operation._tag === 'SlotTake' ||
-          operation._tag === 'SlotCopy' ||
-          operation._tag === 'SlotDrop',
-      ),
-    ) ||
-    program.layout.callingShapes.some((shape) =>
-      shape.lanes.some((lane) => typeof lane.type !== 'string'),
-    ) ||
-    program.layout.effectEnvironments.some(
-      (environment) =>
-        environment._tag === 'EffectEnvironment' &&
-        environment.fields.some((field) => field.representation === 'Borrow'),
-    ) ||
-    program.layout.callableEnvironments.some(
-      (environment) =>
-        environment._tag === 'CallableEnvironment' &&
-        environment.fields.some((field) => field.representation === 'Borrow'),
-    )
-  const hasIndirectArguments = program.functions.some((fn) =>
-    fn.localTypes
-      .slice(0, fn.parameterCount)
-      .some((type) => NativeArgument.isIndirect(program.layout, fn, type)),
-  )
-  const i8 = hasAddressLane || hasIndirectArguments ? yield* LlvmType.integer(builder, 8) : i32
-  const pointer = hasAddressLane || hasIndirectArguments ? yield* LlvmType.pointer(builder) : i32
+  const i8 = yield* LlvmType.integer(builder, 8)
+  const pointer = yield* LlvmType.pointer(builder)
   const lanePointers: NativeLanePointer.Context = Object.freeze({
     builder,
     byteType: i8,
@@ -696,7 +653,8 @@ export const emit = Effect.fn('NativeProgram.emit')(function* (
       }),
     ),
     nativeRuntimeSymbols: Object.freeze([
-      ...(malloc === undefined ? [] : ['malloc']),
+      // LLVM may fold allocation followed by zero initialization into calloc.
+      ...(malloc === undefined ? [] : ['malloc', 'calloc']),
       ...(free === undefined ? [] : ['free']),
     ]),
     runtimeFeatures: Object.freeze([...runtimeFeatures].sort()),

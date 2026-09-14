@@ -82,7 +82,12 @@ export const stored = (layout: Layout.Plan, type: Type.Type, base: Value.Input):
     const identity = type.representation.argument.identity
     let concrete: Mir.Type | undefined
     if (Type.isEffectIdentityArgument(identity))
-      concrete = ValueType.effectValueByIdentity(layout, identity.identity, identity.owner)
+      concrete = ValueType.effectValueByIdentity(
+        layout,
+        identity.identity,
+        Type.isEffect(type.contract) ? type.contract : undefined,
+        identity.owner,
+      )
     else if (Type.isCallableIdentityArgument(identity) && Type.isCallable(type.contract))
       concrete = ValueType.callableValueByIdentity(layout, identity, type.contract)
     if (concrete === undefined) throw new RangeError('Stored executable lost its exact environment')

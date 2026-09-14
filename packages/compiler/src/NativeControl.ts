@@ -14,13 +14,14 @@ import type { LinearTerminator } from './MirLinearization.js'
 import * as NativeAggregate from './NativeAggregate.js'
 import * as NativeArith from './NativeArith.js'
 import * as NativeDebug from './NativeDebug.js'
-import * as NativeOwnedPlace from './NativeOwnedPlace.js'
+import * as NativePlaceAddress from './NativePlaceAddress.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import type * as NativeSuspension from './NativeSuspension.js'
 import * as NativeReturn from './NativeReturn.js'
 import * as NativeTermination from './NativeTermination.js'
 import * as NativeType from './NativeType.js'
 import * as NativeStorage from './NativeStorage.js'
+import * as NativePlace from './NativePlace.js'
 import * as SilkType from './Type.js'
 
 export interface Context {
@@ -48,25 +49,28 @@ const discriminants = Effect.fnUntraced(function* (
   count: number,
   tag: string,
 ) {
-  if (selectors.length === 0) {
-    const values: Array<Value.Input> = []
-    for (let ordinal = 0; ordinal < count; ordinal += 1)
-      values.push(yield* NativeStorage.readLane(context.storage, local, ordinal))
-    return values
-  }
-  const root = context.entry.fn.localTypes.at(local.ordinal)
-  const place =
-    root === undefined
-      ? undefined
-      : NativeOwnedPlace.make(context.cleanup.program.layout, Mir.semanticType(root), selectors)
-  if (place === undefined) throw new RangeError('Match discriminant lost its verified owned place')
-  return yield* NativeOwnedPlace.read(
-    place,
-    context.cleanup.arith,
-    (ordinal) => NativeStorage.readLane(context.storage, local, ordinal),
+  const type = context.entry.fn.localTypes.at(local.ordinal)
+  if (selectors.length === 0 && type !== undefined && !SilkType.isReference(Mir.semanticType(type)))
+    return (yield* read(context, local)).slice(0, count)
+  const resolved = yield* NativePlaceAddress.resolve(
+    {
+      ...context.cleanup,
+      debug: context.debug,
+      termination: context.termination,
+    },
+    local,
+    selectors,
     tag,
-    Array.from({ length: count }, (_, ordinal) => ordinal),
   )
+  const storage = NativePlace.stored(
+    context.cleanup.program.layout,
+    resolved.type,
+    resolved.address,
+  )
+  const values: Array<Value.Input> = []
+  for (let ordinal = 0; ordinal < count; ordinal += 1)
+    values.push(yield* NativePlace.loadLane(storage, context.storage, ordinal, `${tag}_${ordinal}`))
+  return values
 })
 
 /** Resolves one MIR control target to its declared LLVM block. */

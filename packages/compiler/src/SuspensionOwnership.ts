@@ -273,33 +273,9 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
       return root === ordinal ? [] : [[ordinal, root] as const]
     }),
   )
-  const edges = Mir.controlEdges(fn)
-  const liveIn = new Map<number, Set<number>>(
-    fn.regions.map((region) => [region.id.ordinal, new Set()]),
-  )
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const region of [...fn.regions].reverse()) {
-      const successors = edges
-        .filter((edge) => edge.from.ordinal === region.id.ordinal)
-        .flatMap((edge) => [...(liveIn.get(edge.to.ordinal) ?? [])])
-      const before = transferSequence(
-        regionOperations(region),
-        SetOf.union(new Set(successors), outcomeUses(region)),
-        borrowedRoots,
-      )
-      const current = liveIn.get(region.id.ordinal) ?? new Set()
-      if (!SetOf.equal(before, current)) {
-        liveIn.set(region.id.ordinal, before)
-        changed = true
-      }
-    }
-  }
-
   const liveAfter = new Map<Mir.Operation, ReadonlySet<number>>()
   const analyzeExecution = (
-    execution: Mir.Execution,
+    execution: Pick<Mir.Execution, 'entry' | 'regions'>,
     following: ReadonlySet<number>,
   ): Set<number> => {
     const loops = new Map(
@@ -430,20 +406,22 @@ const liveness = (fn: Mir.MirFunction): ReadonlyMap<Mir.Operation, ReadonlySet<n
     return live
   }
 
-  for (const region of fn.regions) {
-    const successors = edges
-      .filter((edge) => edge.from.ordinal === region.id.ordinal)
-      .flatMap((edge) => [...(liveIn.get(edge.to.ordinal) ?? [])])
-    analyzeSequence(regionOperations(region), SetOf.union(new Set(successors), outcomeUses(region)))
-  }
+  analyzeExecution(fn, new Set())
   return liveAfter
 }
 
 const definitionMap = (fn: Mir.MirFunction): ReadonlyMap<number, Mir.Operation> =>
   new Map(
-    MirVerification.operations(fn).flatMap((operation) =>
-      'destination' in operation ? [[operation.destination.ordinal, operation] as const] : [],
-    ),
+    MirVerification.operations(fn).flatMap((operation) => [
+      ...('destination' in operation ? [[operation.destination.ordinal, operation] as const] : []),
+      ...(operation._tag === 'Match'
+        ? operation.arms.flatMap((arm) =>
+            arm.bindings
+              .filter((binding) => binding.type._tag === 'EnvironmentBorrow')
+              .map((binding) => [binding.destination.ordinal, operation] as const),
+          )
+        : []),
+    ]),
   )
 
 const borrowOf = (
@@ -473,6 +451,10 @@ const borrowOf = (
     })
   const next = new Set(seen).add(local.ordinal)
   const definition = definitions.get(local.ordinal)
+  if (definition?._tag === 'Match') {
+    const parent = borrowOf(fn, definitions, definition.scrutinee, next)
+    return Object.freeze({ ...parent, access })
+  }
   if (definition?._tag === 'BeginLoan') {
     const parent = borrowOf(fn, definitions, definition.root, next)
     return Object.freeze({

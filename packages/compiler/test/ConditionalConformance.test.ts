@@ -5,6 +5,7 @@ import * as Analysis from '../src/Analysis.js'
 import * as ConformanceProof from '../src/ConformanceProof.js'
 import * as Hir from '../src/Hir.js'
 import * as MirEncoding from '../src/MirEncoding.js'
+import * as MirVerification from '../src/MirVerification.js'
 import * as Type from '../src/Type.js'
 import * as Projections from './support/projections.js'
 import { raise } from './support/raise.js'
@@ -13,6 +14,282 @@ const ascii = (value: string): Uint8Array => Uint8Array.from(value, (unit) => un
 
 const analyze = (name: string, source: string) =>
   AnalysisFixture.retainingMain(name, ascii(source), 'wasm32-unknown-unknown')
+
+const effectContext = `interface Handler<P, A, E, ?R> {
+  effect fn handle(handler: Self, provider: &mut P) -> A ! E ? R
+}
+
+interface Contextual<P, A, E, ?R> {
+  effect fn use(context: Self, provider: &mut P) -> A ! E ? R
+}
+
+struct Context<P, A, E, ?R, H> { handler: H }
+
+impl<P, A, E, ?R, OuterH> Context<P, A, E, R, OuterH> {
+  effect fn use<H: Handler<P, A, E ? R>>(
+    context: Context<P, A, E, R, H>,
+    provider: &mut P,
+  ) -> A ! E ? R {
+    let Context<P, A, E, R, H> {handler} = move context
+    return run Handler<P, A, E ? R>.handle(move handler, move provider)
+  }
+}
+
+impl<P, A, E, ?R, H: Handler<P, A, E ? R>>
+  Contextual<P, A, E ? R> for Context<P, A, E, R, H> {
+  use: Context.use
+}
+
+effect fn acquire<P, A, E, ?R, C: Contextual<P, A, E ? R>>(
+  provider: &mut P,
+  context: C,
+) -> A ! E ? R {
+  return run Contextual<P, A, E ? R>.use(move context, move provider)
+}
+`
+
+const splitContext = `service ByteDuplex {}
+service Clock {}
+struct Problem {}
+struct OtherProblem {}
+interface SplitHandler<A, E, ?R> {
+  effect fn handle(handler: Self) -> A ! E ? R
+}
+interface Split<A, E, ?R, ?Q> {
+  effect fn use(context: Self) -> A ! E ? R | Q
+}
+struct SplitContext<A, E, ?R, H> { handler: H }
+impl<A, E, ?R, OuterH> SplitContext<A, E, R, OuterH> {
+  effect fn use<H: SplitHandler<A, E ? R>>(context: SplitContext<A, E, R, H>)
+  -> A ! E | Problem ? R | &mut Clock {
+    let SplitContext<A, E, R, H> {handler} = move context
+    return run SplitHandler<A, E ? R>.handle(move handler)
+  }
+}
+impl<A, E, ?R, H: SplitHandler<A, E ? R>>
+  Split<A, E | Problem, R ? &mut Clock> for SplitContext<A, E, R, H> {
+  use: SplitContext.use
+}
+effect fn acceptSplit<A, E, ?R, ?Q, C: Split<A, E, R ? Q>>(context: C) -> A ! E ? R | Q
+where R in Without<R, ByteDuplex>, Q in Without<Q, ByteDuplex> {
+  return run Split<A, E, R ? Q>.use(move context)
+}
+effect fn splitBridge<A, E, ?R, H: SplitHandler<A, E ? R>>(handler: H)
+-> A ! E | Problem ? R | &mut Clock
+where R in Without<R, ByteDuplex> {
+  return run acceptSplit<A, E | Problem, R>(
+    SplitContext<A, E, R, H> {handler: move handler},
+  )
+}
+`
+
+it.effect('infers exact Effect-polymorphic and split-row conditional contexts', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* analyze(
+      'conditional-conformance/effect-context',
+      `${effectContext}
+${splitContext}
+
+effect fn bridge<P, A, E, ?R, H: Handler<P, A, E ? R>>(
+  provider: &mut P,
+  handler: H,
+) -> A ! E ? R {
+  let context = Context<P, A, E, R, H> {handler: move handler}
+  return run acquire(move provider, move context)
+}
+
+struct Provider {}
+struct ConcreteHandler {}
+impl Handler<Provider, i32, never ? never> for ConcreteHandler {
+  effect fn handle(handler: Self, provider: &mut Provider) -> i32 {
+    drop handler
+    drop provider
+    return 42
+  }
+}
+
+struct SplitValue {}
+impl SplitHandler<i32, Problem | OtherProblem ? never> for SplitValue {
+  effect fn handle(handler: Self) -> i32 ! Problem | OtherProblem {
+    drop handler
+    return 42
+  }
+}
+
+pub fn main() -> i32 {
+  let pending = splitBridge(SplitValue {})
+  drop pending
+  let mut provider = Provider {}
+  return run bridge(&mut provider, ConcreteHandler {})
+}`,
+    )
+    const hir = Projections.hirOf(snapshot, 'conditional-conformance/effect-context')
+    const discovery = Analysis.instancesOf(snapshot)
+    assert.deepEqual(
+      discovery.specializationFailures.map((failure) => ({
+        declaration: failure.key.declaration.name,
+        typeArguments: failure.key.typeArguments.map(Type.encodeGenericArgument),
+        contractRow: failure.key.contractRow,
+        evidence: failure.key.evidence,
+      })),
+      [],
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    // The concrete provider fixes E before E | Problem is normalized in the capability head.
+    assert.isTrue(
+      discovery.instances.some((instance) => instance.key.declaration.name === 'splitBridge'),
+    )
+    const conformance = Analysis.declarationIndex(snapshot)
+      .modules.flatMap((module) => module.conformances)
+      .find((candidate) =>
+        candidate.operations.some(
+          (operation) =>
+            operation.target._tag === 'TypePath' && operation.target.spelling === 'Context.use',
+        ),
+      )
+    const mapping = conformance?.operations.at(0)
+    assert.strictEqual(mapping?.targetArguments?.length, 6)
+    assert.deepEqual(mapping?.targetArguments?.slice(0, 5).map(Type.encodeGenericArgument), [
+      'P',
+      'A',
+      'E',
+      '? R',
+      'H',
+    ])
+    const acquireInstance = discovery.instances.find(
+      (instance) => instance.key.declaration.name === 'acquire',
+    )
+    const contextualOperation = acquireInstance?.function.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .find((expression) => expression._tag === 'InterfaceOperationCall')
+    assert.strictEqual(contextualOperation?._tag, 'InterfaceOperationCall')
+    if (acquireInstance === undefined || contextualOperation?._tag !== 'InterfaceOperationCall')
+      return
+    const capability = Type.substitute(contextualOperation.capability, acquireInstance.substitution)
+    const provider = Type.substitute(contextualOperation.provider, acquireInstance.substitution)
+    assert.isTrue(Type.isNominal(capability))
+    if (!Type.isNominal(capability)) return
+    const target = ConformanceProof.interfaceWitnessTarget(
+      Analysis.declarationIndex(snapshot),
+      provider,
+      capability,
+      contextualOperation.operation,
+      contextualOperation.contract,
+      acquireInstance.substitution,
+    )
+    assert.deepEqual(target?.selection, {
+      _tag: 'SourceSelection',
+      module: 'conditional-conformance/effect-context',
+      ordinal: conformance?.ordinal,
+    })
+    assert.strictEqual(target?.implementation.name, 'Context.use')
+    const realized = discovery.instances.find(
+      (instance) => instance.key.declaration.name === 'Context.use',
+    )
+    assert.isDefined(realized)
+    assert.deepEqual(realized?.key.evidence, [])
+    assert.deepEqual(realized?.specialization.evidence, [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const runner = mir.functions.find((fn) => fn.id.name === 'acquire$effect$0')
+    assert.isDefined(runner)
+    if (runner === undefined) return
+    const witnessCalls = MirVerification.operations(runner).filter(
+      (operation) =>
+        operation._tag === 'MakeEffect' && operation.runner.name === 'Context.use$effect$-1',
+    )
+    assert.lengthOf(witnessCalls, 1)
+    assert.isTrue(
+      witnessCalls.every(
+        (call) =>
+          call._tag === 'MakeEffect' &&
+          call.runnerTypeArguments.every(Type.isRuntimeConcreteGenericArgument),
+      ),
+    )
+    const acquireCall = hir?.functions
+      .flatMap((fn) => fn.statements)
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .find(
+        (expression) =>
+          expression._tag === 'EffectConstruct' && expression.target.name === 'acquire',
+      )
+    assert.strictEqual(acquireCall?._tag, 'EffectConstruct')
+    if (acquireCall?._tag !== 'EffectConstruct') return
+    assert.deepEqual(
+      acquireCall.symbolicConformances.map((selection) => selection.selection),
+      [
+        {
+          _tag: 'SourceSelection',
+          module: 'conditional-conformance/effect-context',
+          ordinal: conformance?.ordinal,
+        },
+      ],
+    )
+  }),
+)
+
+it.effect('rejects conditional Effect contexts without the exact handler evidence', () =>
+  Effect.gen(function* () {
+    const negativeSource = `${effectContext}
+
+effect fn missing<P, A, E, ?R, H>(provider: &mut P, handler: H) -> A ! E ? R {
+  let context = Context<P, A, E, R, H> {handler: move handler}
+  return run acquire(move provider, move context)
+}
+
+effect fn mismatch<P, A, E, ?R, ?S, H: Handler<P, A, E ? R>>(
+  provider: &mut P,
+  handler: H,
+) -> A ! E ? S {
+  let context = Context<P, A, E, S, H> {handler: move handler}
+  return run acquire(move provider, move context)
+}
+
+pub fn main() -> i32 { return 0 }`
+    const snapshot = yield* analyze(
+      'conditional-conformance/effect-context-invalid',
+      negativeSource,
+    )
+    const responsibleExpression = ' acquire(move provider, move context)'
+    const missingCallStart = negativeSource.indexOf(responsibleExpression)
+    const mismatchedCallStart = negativeSource.lastIndexOf(responsibleExpression)
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((entry) => ({
+        code: entry.code,
+        message: entry.message,
+        notes: entry.notes,
+        span: negativeSource.slice(entry.span.start, entry.span.end),
+        spanStart: entry.span.start,
+      })),
+      [
+        {
+          code: 'SEM0121',
+          message:
+            'conditional-conformance/effect-context-invalid.Contextual<P, A, E, ? R> for conditional-conformance/effect-context-invalid.Context<P, A, E, ? R, H> cannot be proved: the exact enclosing bound is not declared',
+          notes: [
+            'required by conditional-conformance/effect-context-invalid.Contextual<P, A, E, ? R> for conditional-conformance/effect-context-invalid.Context<P, A, E, ? R, H>',
+            '  conditional-conformance/effect-context-invalid.Handler<P, A, E, ? R> for H: the exact enclosing bound is not declared',
+          ],
+          span: responsibleExpression,
+          spanStart: missingCallStart,
+        },
+        {
+          code: 'SEM0121',
+          message:
+            'conditional-conformance/effect-context-invalid.Contextual<P, A, E, ? S> for conditional-conformance/effect-context-invalid.Context<P, A, E, ? S, H> cannot be proved: declared conditional-conformance/effect-context-invalid.Handler<P, A, E, ? R> does not exactly match required conditional-conformance/effect-context-invalid.Handler<P, A, E, ? S>',
+          notes: [
+            'required by conditional-conformance/effect-context-invalid.Contextual<P, A, E, ? S> for conditional-conformance/effect-context-invalid.Context<P, A, E, ? S, H>',
+            '  conditional-conformance/effect-context-invalid.Handler<P, A, E, ? S> for H: declared conditional-conformance/effect-context-invalid.Handler<P, A, E, ? R> does not exactly match required conditional-conformance/effect-context-invalid.Handler<P, A, E, ? S>',
+          ],
+          span: responsibleExpression,
+          spanStart: mismatchedCallStart,
+        },
+      ],
+    )
+  }),
+)
 
 /**
  * One wrapper whose decoder conformance holds exactly when its source type has one.

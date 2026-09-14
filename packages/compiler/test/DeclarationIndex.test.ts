@@ -1818,7 +1818,7 @@ it.effect('indexes foreign headers as unsafe bodiless function facts with a nati
       [
         'root',
         `pub unsafe extern "C" fn abs(value: i32) -> i32
-unsafe extern "C" fn cAbs(value: i32) -> i32 as "abs"
+unsafe extern "C" fn closeSocket(value: i32) -> i32 as "close$NOCANCEL"
 unsafe extern "C" fn every(a: i8, b: u8, c: i16, d: u16, e: i32, f: u32, g: i64, h: u64, i: isize, j: usize, k: f32, l: f64) -> ()
 unsafe extern "C" fn bare(value: u8)`,
       ],
@@ -1849,13 +1849,13 @@ unsafe extern "C" fn bare(value: u8)`,
     assert.deepEqual(renamed?.foreign, {
       variadic: false,
       abi: 'C',
-      symbol: 'abs',
+      symbol: 'close$NOCANCEL',
       contract: ForeignContract.conservative,
     })
     assert.strictEqual(renamed?.visibility, 'Private')
     const spelling = (declaration: DeclarationFacts.DeclarationFact): string | undefined =>
       declaration.name._tag === 'Present' ? declaration.name.spelling : undefined
-    assert.strictEqual(renamed === undefined ? undefined : spelling(renamed), 'cAbs')
+    assert.strictEqual(renamed === undefined ? undefined : spelling(renamed), 'closeSocket')
     assert.deepEqual(
       (index.modules.at(0)?.declarations ?? [])
         .filter((declaration) => spelling(declaration) === 'abs')
@@ -1908,6 +1908,9 @@ it.effect('rejects foreign headers outside the C contract and publishes no calla
       ['unsafe extern "C" fn bad(bytes: &[u8]) -> ()', 'SEM0187', ['&[u8]']],
       ['unsafe extern "C" fn bad(value: &mut i32) -> ()', 'SEM0187', ['&mut i32']],
       ['unsafe extern "C" fn f() -> () as "not a symbol"', 'SEM0190', ['"not a symbol"']],
+      ['unsafe extern "C" fn f() -> () as "$leading"', 'SEM0190', ['"$leading"']],
+      ['unsafe extern "C" fn f() -> () as "a\\0b"', 'SEM0190', ['"a\\0b"']],
+      ['unsafe extern "C" fn f() -> () as "\\u{FC}n\\u{EF}"', 'SEM0190', ['"\\u{FC}n\\u{EF}"']],
       [
         'unsafe extern "C" fn f() -> i32 as "__silk_foreign_personality"',
         'SEM0191',
@@ -1932,7 +1935,7 @@ it.effect('indexes exported functions as ordinary facts with a native export sym
       [
         'root',
         `export "C" fn double(value: i32) -> i32 { return value * 2 }
-pub export "C" fn twice(value: i32) -> i32 as "silk_test_double_v1" { return value * 2 }
+pub export "C" fn twice(value: i32) -> i32 as "silk$test$double_v1" { return value * 2 }
 pub fn plain(value: i32) -> i32 { return value }`,
       ],
     ])
@@ -1959,7 +1962,7 @@ pub fn plain(value: i32) -> i32 { return value }`,
     assert.deepEqual(renamed?.foreignExport, {
       variadic: false,
       abi: 'C',
-      symbol: 'silk_test_double_v1',
+      symbol: 'silk$test$double_v1',
       contract: ForeignContract.conservative,
     })
     assert.strictEqual(renamed?.visibility, 'Public')
@@ -1974,8 +1977,8 @@ it.effect('indexes imported and exported C statics as immutable typed data symbo
     const index = yield* collect('root', [
       [
         'root',
-        `unsafe extern "C" static environment: *mut *mut u8 as "environ"
-export "C" static answer: i32 = 42`,
+        `unsafe extern "C" static environment: *mut *mut u8 as "environ$data"
+export "C" static answer: i32 as "silk$data" = 42`,
       ],
     ])
     const [environment, answer] = index.modules.at(0)?.members ?? []
@@ -1989,10 +1992,10 @@ export "C" static answer: i32 = 42`,
     )
       return
     assert.strictEqual(environment.direction, 'Import')
-    assert.deepEqual(environment.foreign, { abi: 'C', symbol: 'environ' })
+    assert.deepEqual(environment.foreign, { abi: 'C', symbol: 'environ$data' })
     assert.strictEqual(environment.declaredType._tag, 'Resolved')
     assert.strictEqual(answer.direction, 'Export')
-    assert.deepEqual(answer.foreign, { abi: 'C', symbol: 'answer' })
+    assert.deepEqual(answer.foreign, { abi: 'C', symbol: 'silk$data' })
     assert.deepEqual(answer.literal?._tag, 'IntegerLiteral')
     assert.strictEqual(answer.declaredType._tag, 'Resolved')
   }),

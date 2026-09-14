@@ -1,0 +1,293 @@
+//! Selected synchronous libc host resolution with one affine result-chain owner.
+//!
+//! # When to use
+//!
+//! Install NativeSystemResolver at a native application edge when blocking system DNS/NSS is
+//! acceptable. Portable code should depend only on the Resolver service.
+//!
+//! # Details
+//!
+//! A deadline-free domain request makes exactly one getaddrinfo call and copies a finite result.
+//! Every successful non-null chain is owned immediately and freed exactly once on every later exit.
+//!
+//! # Gotchas
+//!
+//! NativeSystemResolver rejects every domain deadline before observable work. Once getaddrinfo is
+//! entered it has no cancellation, timeout, scheduler-parking, elapsed-time, or memory bound.
+
+static if (Intrinsic.targetOperatingSystem() == "darwin" && Intrinsic.targetArchitecture() == "aarch64" && Intrinsic.targetAbi() == "apple" && Intrinsic.profileText("libc") == "system") || (Intrinsic.targetOperatingSystem() == "linux" && Intrinsic.targetAbi() == "gnu" && Intrinsic.profileText("libc") == "gnu" && (Intrinsic.targetArchitecture() == "aarch64" || Intrinsic.targetArchitecture() == "x86_64")) {
+  import silk.allocator {Allocator, OutOfMemoryError}
+  import silk.network_address {DomainHost, Endpoint, IpAddress, Ipv4Address, Ipv6Address, Port}
+  import silk.option {Option}
+  import silk.pointer {Pointer}
+  import silk.resolver {FamilySelection, NativeResolverOperation, NativeResultReason, ResolveRequest, ResolvedEndpoints, Resolver, ResolverError}
+  import silk.result {Result}
+  import silk.slice {Slice}
+  import silk.u16
+  import silk.u32
+  import silk.usize
+
+  extern "C" struct SockAddr {}
+
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    extern "C" struct AddrInfo {
+      flags: i32
+      family: i32
+      socketType: i32
+      protocol: i32
+      addressLength: u32
+      canonicalName: ?[*]mut u8
+      address: ?*mut SockAddr
+      next: ?*mut AddrInfo
+    }
+    impl Copy for AddrInfo {}
+    const IPV4_FAMILY: i32 = 2
+    const IPV6_FAMILY: i32 = 30
+    const NUMERIC_SERVICE: i32 = 4096
+    const AGAIN: i32 = 2
+    const FAMILY: i32 = 5
+    const MEMORY: i32 = 6
+    const NONAME: i32 = 8
+    const SYSTEM: i32 = 11
+    unsafe extern "C" fn __error() -> *mut i32
+    unsafe fn currentError() -> i32 { unsafe { return Pointer.read<i32>(__error()) } }
+  } else {
+    extern "C" struct AddrInfo {
+      flags: i32
+      family: i32
+      socketType: i32
+      protocol: i32
+      addressLength: u32
+      address: ?*mut SockAddr
+      canonicalName: ?[*]mut u8
+      next: ?*mut AddrInfo
+    }
+    impl Copy for AddrInfo {}
+    const IPV4_FAMILY: i32 = 2
+    const IPV6_FAMILY: i32 = 10
+    const NUMERIC_SERVICE: i32 = 1024
+    const AGAIN: i32 = -3
+    const FAMILY: i32 = -6
+    const MEMORY: i32 = -10
+    const NONAME: i32 = -2
+    const SYSTEM: i32 = -11
+    unsafe extern "C" fn __errno_location() -> *mut i32
+    unsafe fn currentError() -> i32 { unsafe { return Pointer.read<i32>(__errno_location()) } }
+  }
+
+  unsafe extern "C" fn getaddrinfo(
+    node: ?[*]const u8,
+    serviceText: ?[*]const u8,
+    hints: *const AddrInfo,
+    result: *mut ?*mut AddrInfo,
+  ) -> i32 with Intrinsic.foreign(noCapture: ("node", "serviceText", "hints", "result"))
+  unsafe extern "C" fn freeaddrinfo(result: *mut AddrInfo) -> ()
+
+  const UNSPECIFIED_FAMILY: i32 = 0
+  const STREAM_SOCKET: i32 = 1
+  const TCP_PROTOCOL: i32 = 6
+
+  struct AddrInfoChain { head: ?*mut AddrInfo }
+
+  impl Drop for AddrInfoChain {
+    fn drop(self: &mut AddrInfoChain) -> () {
+      let head = Intrinsic.replace(self.head, Pointer.null<AddrInfo>())
+      if !Pointer.isNull<AddrInfo>(head) {
+        let present = unsafe Intrinsic.pointerRequalify<?*mut AddrInfo, *mut AddrInfo>(head)
+        unsafe { freeaddrinfo(present) }
+      }
+    }
+  }
+
+  /// The selected synchronous system Resolver provider.
+  pub struct NativeSystemResolver {}
+
+  impl NativeSystemResolver {
+    /// Creates a stateless synchronous native provider.
+    pub fn make() -> NativeSystemResolver { return NativeSystemResolver {} }
+
+    effect fn resolveDomain(
+      self: &mut Self,
+      request: &ResolveRequest,
+      domain: &DomainHost,
+    ) -> ResolvedEndpoints
+    ! ResolverError | OutOfMemoryError
+    ? &mut Allocator {
+      if ResolveRequest.hasDeadline(request) { fail ResolverError.DeadlineUnsupported }
+
+      let mut node = zeroNode()
+      let source = DomainHost.bytes(domain)
+      let mut index = usize.ZERO
+      while index < source.length {
+        node[index] = source[index]
+        index = index + usize.ONE
+      }
+      node[source.length] = 46
+      node[source.length + usize.ONE] = 0
+
+      let mut serviceText = zeroService()
+      let port = ResolveRequest.port(request)
+      writePort(Port.value(&port), &mut serviceText)
+
+      let hints = emptyHints(ResolveRequest.family(request))
+      let mut head = Pointer.null<AddrInfo>()
+      let status = unsafe getaddrinfo(
+        Pointer.fromSlice<u8>(Slice.view<u8>(&node, usize.ZERO, source.length + 2)),
+        Pointer.fromSlice<u8>(&serviceText),
+        Pointer.fromRef<AddrInfo>(&hints),
+        Pointer.fromMutRef<?*mut AddrInfo>(&mut head),
+      )
+      if status != 0 { return run rejectStatus(status) }
+      if Pointer.isNull<AddrInfo>(head) {
+        fail ResolverError.InvalidNativeResult {
+          reason: NativeResultReason.NullChain,
+          index: usize.ZERO,
+        }
+      }
+
+      let mut owner = AddrInfoChain {head: head}
+      let made = ResolvedEndpoints.make(ResolveRequest.maxResults(request))
+      let mut resolved = match move made {
+        Result<ResolvedEndpoints, ResolverError>.Failure {error} => { fail move error }
+        Result<ResolvedEndpoints, ResolverError>.Success {value} => value
+      }
+      let mut current = head
+      let mut ordinal = usize.ZERO
+      while !Pointer.isNull<AddrInfo>(current) {
+        let pointer = unsafe Intrinsic.pointerRequalify<?*mut AddrInfo, *const AddrInfo>(current)
+        let entry = unsafe Pointer.read<AddrInfo>(pointer)
+        run admitEntry(&entry, ordinal, request, &mut resolved)
+        current = entry.next
+        ordinal = ordinal + usize.ONE
+      }
+      if ResolvedEndpoints.length(&resolved) == usize.ZERO { fail ResolverError.NoAddress }
+      return move resolved
+    }
+  }
+
+  impl Resolver for NativeSystemResolver {
+    resolveDomain: NativeSystemResolver.resolveDomain
+  }
+
+  fn zeroNode() -> [u8; 255] {
+    return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  }
+
+  fn zeroService() -> [u8; 6] { return [0, 0, 0, 0, 0, 0] }
+
+  fn writePort(port: u16, output: &mut [u8]) -> () {
+    let mut remaining = port
+    let mut divisor: u16 = 10000
+    let mut started = false
+    let mut cursor = usize.ZERO
+    while divisor > 0 {
+      let digit = remaining / divisor
+      if digit != 0 || started || divisor == 1 {
+        output[cursor] = 48 + u16.toU8(digit)
+        cursor = cursor + usize.ONE
+        started = true
+      }
+      remaining = remaining % divisor
+      divisor = divisor / 10
+    }
+    output[cursor] = 0
+  }
+
+  fn emptyHints(family: FamilySelection) -> AddrInfo {
+    let selected = match family {
+      FamilySelection.Any => UNSPECIFIED_FAMILY
+      FamilySelection.V4 => IPV4_FAMILY
+      FamilySelection.V6 => IPV6_FAMILY
+    }
+    return AddrInfo {
+      flags: NUMERIC_SERVICE,
+      family: selected,
+      socketType: STREAM_SOCKET,
+      protocol: TCP_PROTOCOL,
+      addressLength: 0,
+      canonicalName: unsafe Intrinsic.pointerRequalify<?*mut u8, ?[*]mut u8>(Pointer.null<u8>()),
+      address: Pointer.null<SockAddr>(),
+      next: Pointer.null<AddrInfo>(),
+    }
+  }
+
+  effect fn rejectStatus(status: i32) -> never ! ResolverError {
+    if status == NONAME { fail ResolverError.NameNotFound }
+    if status == AGAIN { fail ResolverError.TemporaryFailure }
+    if status == FAMILY { fail ResolverError.FamilyUnsupported }
+    if status == MEMORY { fail ResolverError.SystemResources }
+    let mut errno = Option.none<i32>()
+    if status == SYSTEM { errno = Option.some<i32>(unsafe currentError()) }
+    fail ResolverError.NativeFailure {
+      operation: NativeResolverOperation.GetAddrInfo,
+      eai: status,
+      errno: move errno,
+    }
+  }
+
+  effect fn admitEntry(
+    entry: &AddrInfo,
+    ordinal: usize,
+    request: &ResolveRequest,
+    output: &mut ResolvedEndpoints,
+  ) -> ()
+  ! ResolverError | OutOfMemoryError
+  ? &mut Allocator {
+    if entry.family != IPV4_FAMILY && entry.family != IPV6_FAMILY {
+      fail ResolverError.InvalidNativeResult {
+        reason: NativeResultReason.UnknownFamily,
+        index: ordinal,
+      }
+    }
+    if Pointer.isNull<SockAddr>(entry.address) {
+      fail ResolverError.InvalidNativeResult {
+        reason: NativeResultReason.NullAddress,
+        index: ordinal,
+      }
+    }
+    let mut needed: usize = 16
+    if entry.family == IPV6_FAMILY { needed = 28 }
+    if u32.toUsize(entry.addressLength) < needed {
+      fail ResolverError.InvalidNativeResult {
+        reason: NativeResultReason.ShortAddress,
+        index: ordinal,
+      }
+    }
+    let selection = ResolveRequest.family(request)
+    if entry.family == IPV4_FAMILY && selection == FamilySelection.V6 { return () }
+    if entry.family == IPV6_FAMILY && selection == FamilySelection.V4 { return () }
+    let bytes = unsafe Intrinsic.pointerRequalify<?[*]const u8, [*]const u8>(
+      unsafe Pointer.bytes<SockAddr>(entry.address),
+    )
+    if entry.family == IPV4_FAMILY {
+      let octets = [
+        unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 4)),
+        unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 5)),
+        unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 6)),
+        unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 7)),
+      ]
+      let admitted = run ResolvedEndpoints.admit(
+        move output,
+        Endpoint.make(
+          IpAddress.V4 {value: Ipv4Address.fromOctets(move octets)},
+          ResolveRequest.port(request),
+        ),
+      )
+    } else {
+      let mut octets: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      let mut index = usize.ZERO
+      while index < 16 {
+        octets[index] = unsafe Pointer.read<u8>(unsafe Pointer.at<u8>(bytes, 8 + index))
+        index = index + usize.ONE
+      }
+      let admitted = run ResolvedEndpoints.admit(
+        move output,
+        Endpoint.make(
+          IpAddress.V6 {value: Ipv6Address.fromOctets(move octets)},
+          ResolveRequest.port(request),
+        ),
+      )
+    }
+    return ()
+  }
+}

@@ -365,7 +365,13 @@ export const analyze = (
       snapshots.set(operation, merge(snapshots.get(operation) ?? new Set(), states))
       if (operation._tag === 'Match')
         for (const state of states) {
-          const path = pathOf(operation.selectors ?? []) ?? []
+          const sourceType = fn.localTypes.at(operation.scrutinee.ordinal)
+          const path =
+            sourceType?._tag === 'Reference' ||
+            sourceType?._tag === 'Slice' ||
+            sourceType?._tag === 'EnvironmentBorrow'
+              ? []
+              : (pathOf(operation.selectors ?? []) ?? [])
           if (operation.access !== 'Place')
             read(state, operation.scrutinee, path, operation.provenance)
           else {

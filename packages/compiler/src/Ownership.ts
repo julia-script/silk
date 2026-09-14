@@ -4443,7 +4443,13 @@ const checkFunction = (
       for (const site of sites) afterGuard.delete(siteKey(site))
       for (const member of selected) {
         const key = Match.encodeIdentity(member)
-        if (arm.guard !== undefined && guardCompletes) candidates.set(key, new Map(afterGuard))
+        const remains = arm.after.some((candidate) => Match.identityEquals(candidate, member))
+        const rejected = (arm.tests?.length ?? 0) > 0 ? candidates.get(key) : undefined
+        const guardRejected = arm.guard !== undefined && guardCompletes ? afterGuard : undefined
+        const continuations = [rejected, guardRejected].filter(
+          (flow): flow is FlowState => flow !== undefined,
+        )
+        if (remains && continuations.length > 0) candidates.set(key, intersection(continuations))
         else candidates.delete(key)
       }
       let completes = false

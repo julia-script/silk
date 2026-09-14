@@ -533,6 +533,7 @@ export type MatchArmBodyFact =
     }
 
 export interface MatchArmFact {
+  readonly tests: ReadonlyArray<Match.PatternTest>
   readonly _tag: 'MatchArm'
   readonly id: Match.ArmId
   readonly pattern: PatternFact
@@ -559,6 +560,7 @@ export interface MatchExpressionFact {
 
 /** One statement-form pattern decision shared by irrefutable let and refutable if-let. */
 export interface PatternSelectionFact {
+  readonly tests: ReadonlyArray<Match.PatternTest>
   readonly _tag: 'PatternSelection'
   readonly id: Match.MatchId
   readonly arm: Match.ArmId
@@ -1243,6 +1245,8 @@ export type CallContractFact =
       readonly substitution: Type.Substitution
       readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
       readonly inferredProviderSelectors: ReadonlyArray<InferredProviderSelector>
+      /** Open source selections justified by exact bounds of the enclosing generic declaration. */
+      readonly symbolicConformances?: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection>
     }
   | {
       readonly _tag: 'ArityMismatch'

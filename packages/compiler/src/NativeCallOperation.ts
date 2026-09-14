@@ -300,26 +300,33 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       const handle = callableTarget.suspendable ? callableTarget.driver : callableTarget.handle
       if (handle === undefined)
         throw new RangeError('Backend callable application lost its completion driver')
+      const resultAddress = yield* NativeResult.allocate(
+        body,
+        callableTarget,
+        `callable${operation.destination.ordinal}_result`,
+      )
       const called = yield* FunctionBody.callDirect(
         body,
         handle,
-        yield* NativeCall.lowerArguments(
-          call.synchronous,
+        NativeResult.argumentsFor(
           callableTarget,
-          NativeArgument.fromValues(operands),
+          yield* NativeCall.lowerArguments(
+            call.synchronous,
+            callableTarget,
+            NativeArgument.fromValues(operands),
+          ),
+          resultAddress,
         ),
         `callable${operation.destination.ordinal}`,
       )
       // A never-returning callback may inhabit a wider join result type. It produces no
       // payload to store; the enclosing MIR control flow owns its unreachable terminator.
       if (callableTarget.fn.result._tag === 'Bottom') break
-      const result = yield* NativeResult.unpack(
+      const result = yield* NativeResult.read(
         body,
-        {
-          resultLaneCount: callableTarget.resultLaneCount,
-          diagnosticResult: callableTarget.diagnosticResult !== undefined,
-        },
+        callableTarget,
         called,
+        resultAddress,
         `callable${operation.destination.ordinal}`,
       )
       for (const root of [...nativeStorage.addressRoots].sort((left, right) => left - right)) {
@@ -355,13 +362,22 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         throw new RangeError(
           `Backend cannot drive suspendable call target ${operation.target.name}`,
         )
+      const resultAddress = yield* NativeResult.allocate(
+        body,
+        target,
+        `t${operation.destination.ordinal}_result`,
+      )
       const result = yield* FunctionBody.callDirect(
         body,
         handle,
-        yield* NativeCall.lowerArguments(
-          call.synchronous,
+        NativeResult.argumentsFor(
           target,
-          NativeArgument.fromLocals(nativeStorage, operation.arguments),
+          yield* NativeCall.lowerArguments(
+            call.synchronous,
+            target,
+            NativeArgument.fromLocals(nativeStorage, operation.arguments),
+          ),
+          resultAddress,
         ),
         `t${operation.destination.ordinal}`,
       )
@@ -377,18 +393,17 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
         break
       }
-      if (result === undefined) {
+      if (result === undefined && target.resultStorage === undefined)
         throw new RangeError('Backend call produced no value')
+      if (result !== undefined) {
+        const instruction = yield* Value.instruction(body, result)
+        yield* NativeDebug.locate(debug, operation.provenance.span, instruction)
       }
-      const instruction = yield* Value.instruction(body, result)
-      yield* NativeDebug.locate(debug, operation.provenance.span, instruction)
-      const unpacked = yield* NativeResult.unpack(
+      const unpacked = yield* NativeResult.read(
         body,
-        {
-          resultLaneCount: target.resultLaneCount,
-          diagnosticResult: target.diagnosticResult !== undefined,
-        },
+        target,
         result,
+        resultAddress,
         `t${operation.destination.ordinal}`,
       )
       yield* NativeStorage.writeLocal(

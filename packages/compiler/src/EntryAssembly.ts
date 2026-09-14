@@ -1,10 +1,12 @@
+import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
+import * as Data from 'effect/Data'
 import { generated, indexExits, initializationFlagsOf } from './CleanupEmission.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type { LoweredExpression } from './EffectLowering.js'
 import { lowerEffectCatch, lowerRunEffectComposite, lowerRunEffectValue } from './EffectLowering.js'
 import type {} from './Forwarding.js'
-import { FunctionLowering } from './FunctionLowering.js'
+import { FunctionLowering, type LoweringFailure } from './FunctionLowering.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as TypeInference from './internal/TypeInference.js'
@@ -120,6 +122,78 @@ export const trapFunction = (
     ]),
   })
 }
+
+export interface LoweredGeneratedEffectRunner {
+  readonly _tag: 'LoweredGeneratedEffectRunner'
+  readonly runner: Mir.MirFunction
+}
+
+export interface UnavailableGeneratedEffectRunner {
+  readonly _tag: 'UnavailableGeneratedEffectRunner'
+  readonly runner: DeclarationFacts.CanonicalId
+  readonly base: DeclarationFacts.CanonicalId
+  readonly owner: Instances.InstanceKey
+  readonly cause: LoweringFailure
+}
+
+export type GeneratedEffectRunnerLowering =
+  | LoweredGeneratedEffectRunner
+  | UnavailableGeneratedEffectRunner
+
+export const unavailableGeneratedEffectRunner = (
+  failure: Omit<UnavailableGeneratedEffectRunner, '_tag'>,
+): UnavailableGeneratedEffectRunner =>
+  Object.freeze({ _tag: 'UnavailableGeneratedEffectRunner', ...failure })
+
+export const generatedEffectRunnerKey = (
+  runner: DeclarationFacts.CanonicalId,
+  owner: Instances.InstanceKey,
+): string => instanceText(runner, owner.typeArguments, owner.staticArguments)
+
+/** Selects the first failed producer outcome that survived generated-runner reachability pruning. */
+export const unavailableReferencedEffectRunner = (
+  outcomes: ReadonlyArray<UnavailableGeneratedEffectRunner>,
+  retainedRunnerKeys: ReadonlySet<string>,
+): UnavailableGeneratedEffectRunner | undefined =>
+  outcomes.find((outcome) =>
+    retainedRunnerKeys.has(generatedEffectRunnerKey(outcome.runner, outcome.owner)),
+  )
+
+export class GeneratedEffectRunnerLoweringError extends Data.TaggedError(
+  'GeneratedEffectRunnerLoweringError',
+)<{
+  readonly failure: UnavailableGeneratedEffectRunner
+  readonly message: string
+}> {}
+
+export const requireGeneratedEffectRunner = (
+  outcome: GeneratedEffectRunnerLowering,
+): Mir.MirFunction => {
+  if (outcome._tag === 'UnavailableGeneratedEffectRunner')
+    throw new GeneratedEffectRunnerLoweringError({
+      failure: outcome,
+      message: `Generated Effect runner ${outcome.runner.module}:${outcome.runner.name} failed to lower at ${outcome.cause.provenance.span.sourceId}:${outcome.cause.provenance.span.start}-${outcome.cause.provenance.span.end}`,
+    })
+  return outcome.runner
+}
+
+const unavailableEffectRunner = (
+  spec: GeneratedBlockEffectRunner,
+  cause: LoweringFailure,
+): UnavailableGeneratedEffectRunner =>
+  unavailableGeneratedEffectRunner({
+    runner: spec.id,
+    base: Hir.effectRunnerId(spec.type.environment.instance.declaration, spec.type.site),
+    owner: spec.owner.key,
+    cause,
+  })
+
+const runnerFallback = (spec: GeneratedBlockEffectRunner): LoweringFailure =>
+  Object.freeze({
+    boundary: 'Expression',
+    construct: 'EffectBlock',
+    provenance: Object.freeze({ span: spec.block.span, generated: false }),
+  })
 
 export const planFor = (
   ownership: Ownership.ModuleOwnership | undefined,
@@ -254,8 +328,36 @@ export const lowerInstance = (
             ? representation.identity
             : undefined
         const effectValue =
-          identity === undefined ? undefined : effectValueByIdentity(layout, identity)
+          identity === undefined
+            ? undefined
+            : effectValueByIdentity(layout, identity, EffectExecutionContract.fromType(specialized))
         if (effectValue !== undefined) return [effectValue]
+        // A constructor's captured parameter may already be a provided implementation. Its
+        // physical capture contract is published by layout under this exact owner and ordinal.
+        const captures = layout.effectEnvironments.flatMap((environment) =>
+          environment._tag === 'EffectEnvironment' &&
+          Instances.keyText(environment.instance) === Instances.keyText(instance.key)
+            ? environment.fields.filter(
+                (field) =>
+                  field.source === 'Parameter' &&
+                  field.ordinal === ordinal &&
+                  field.effectIdentity === identity,
+              )
+            : [],
+        )
+        const capture = captures.at(0)
+        if (
+          capture !== undefined &&
+          Type.isEffect(capture.type) &&
+          captures.every((field) => Type.equals(field.type, capture.type))
+        ) {
+          const captured = effectValueByIdentity(
+            layout,
+            capture.resolvedEffectIdentity ?? capture.effectIdentity ?? '',
+            capture.type,
+          )
+          if (captured !== undefined) return [captured]
+        }
         if (Type.isEffect(specialized)) return []
       }
       if (
@@ -309,7 +411,9 @@ export const lowerInstance = (
       : undefined
   const returnedBlock = contract._tag === 'Contract' ? returnedEffectBlock(fn) : undefined
   const hiddenEffectValue =
-    returnedBlock === undefined ? undefined : effectValueType(layout, instance.key, returnedBlock)
+    returnedBlock === undefined || effectOutcome === undefined
+      ? undefined
+      : effectValueType(layout, instance.key, returnedBlock, effectOutcome)
   const hiddenCompositeResult = returnedValueType(
     layout,
     opaqueRealizations,
@@ -319,7 +423,7 @@ export const lowerInstance = (
   const specializedEffectValue =
     instance.resultEffect === undefined
       ? undefined
-      : effectValueByIdentity(layout, instance.resultEffect)
+      : effectValueByIdentity(layout, instance.resultEffect, effectOutcome)
   const resultType =
     specializedEffectValue ??
     hiddenEffectValue ??
@@ -407,7 +511,21 @@ const effectCaptureParameterTypes = (
   Object.freeze(
     fields.flatMap((field) => {
       if (field.effectIdentity !== undefined) {
-        const effectValue = effectValueByIdentity(layout, field.effectIdentity)
+        const resolvedEffectValue =
+          field.resolvedEffectIdentity === undefined
+            ? undefined
+            : effectValueByIdentity(
+                layout,
+                field.resolvedEffectIdentity,
+                EffectExecutionContract.fromType(field.type),
+              )
+        const effectValue =
+          resolvedEffectValue ??
+          effectValueByIdentity(
+            layout,
+            field.effectIdentity,
+            EffectExecutionContract.fromType(field.type),
+          )
         return effectValue === undefined ? [] : [effectValue]
       }
       if (field.callableIdentity !== undefined && Type.isCallable(field.type)) {
@@ -444,7 +562,7 @@ export const lowerEffectRunner = (
   effectResults: ReadonlyMap<string, ExecutableEffectType>,
   generatedRunners: Array<GeneratedEffectRunner>,
   opaqueRealizations: OpaqueRealization.Catalog,
-): Mir.MirFunction | undefined => {
+): GeneratedEffectRunnerLowering => {
   const { owner, block, type } = spec
   const id = spec.id
   const instance: Instances.InstanceKey = Object.freeze({
@@ -464,7 +582,8 @@ export const lowerEffectRunner = (
     layout,
     opaqueRealizations,
   )
-  if (captureParameterTypes.length !== block.captures.length) return undefined
+  if (captureParameterTypes.length !== block.captures.length)
+    return unavailableEffectRunner(spec, runnerFallback(spec))
   const parameterizedRequirements = spec.providedRequirements.filter(
     (requirement) => requirement.witness._tag === 'SourceConformanceWitness',
   )
@@ -479,7 +598,8 @@ export const lowerEffectRunner = (
     )
     return type === undefined ? [] : [type]
   })
-  if (requirementParameterTypes.length !== parameterizedRequirements.length) return undefined
+  if (requirementParameterTypes.length !== parameterizedRequirements.length)
+    return unavailableEffectRunner(spec, runnerFallback(spec))
   const parameterTypes = Object.freeze([...captureParameterTypes, ...requirementParameterTypes])
   const plan = planFor(ownership, owner.function)
   const lowering = new FunctionLowering(
@@ -504,6 +624,7 @@ export const lowerEffectRunner = (
         })
       }),
     ),
+    spec.witnessTargets,
   )
   lowering.parameterLocals.clear()
   block.captures.forEach((capture, ordinal) => {
@@ -527,40 +648,43 @@ export const lowerEffectRunner = (
       (region, ordinal) => region === undefined && !lowering.extractedRegions.has(ordinal),
     )
   )
-    return undefined
+    return unavailableEffectRunner(spec, lowering.loweringFailure ?? runnerFallback(spec))
   const result: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
     _tag: 'EffectOutcome',
     type: type.type,
   })
   return Object.freeze({
-    _tag: 'MirFunction',
-    id,
-    instance,
-    parameterCount: parameterTypes.length,
-    localTypes: Object.freeze([...lowering.localTypes]),
-    initializationFlags: initializationFlagsOf(lowering),
-    result,
-    entry,
-    regions: Object.freeze(
-      lowering.regions.flatMap((region) => (region === undefined ? [] : [region])),
-    ),
-    effectRunner: Object.freeze({
-      base: Object.freeze({
-        declaration: Hir.effectRunnerId(type.environment.instance.declaration, type.site),
-        typeArguments: type.environment.instance.typeArguments,
-      }),
-      providers: Object.freeze(
-        spec.providedRequirements.map((requirement) =>
-          Object.freeze({
-            capability: requirement.capability,
-            providerType: requirement.providerType,
-            witness: requirement.witness,
-            role: requirement.role,
-            requirementAccess: requirement.requirementAccess,
-            access: requirement.access,
-          }),
-        ),
+    _tag: 'LoweredGeneratedEffectRunner',
+    runner: Object.freeze({
+      _tag: 'MirFunction',
+      id,
+      instance,
+      parameterCount: parameterTypes.length,
+      localTypes: Object.freeze([...lowering.localTypes]),
+      initializationFlags: initializationFlagsOf(lowering),
+      result,
+      entry,
+      regions: Object.freeze(
+        lowering.regions.flatMap((region) => (region === undefined ? [] : [region])),
       ),
+      effectRunner: Object.freeze({
+        base: Object.freeze({
+          declaration: Hir.effectRunnerId(type.environment.instance.declaration, type.site),
+          typeArguments: type.environment.instance.typeArguments,
+        }),
+        providers: Object.freeze(
+          spec.providedRequirements.map((requirement) =>
+            Object.freeze({
+              capability: requirement.capability,
+              providerType: requirement.providerType,
+              witness: requirement.witness,
+              role: requirement.role,
+              requirementAccess: requirement.requirementAccess,
+              access: requirement.access,
+            }),
+          ),
+        ),
+      }),
     }),
   })
 }

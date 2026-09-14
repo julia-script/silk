@@ -3,6 +3,7 @@ import * as ProjectAnalysis from '@silklang/compiler/ProjectAnalysis'
 import * as SourceFile from '@silklang/compiler/SourceFile'
 import * as SourceResolver from '@silklang/compiler/SourceResolver'
 import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
+import * as WorkspaceCatalog from '../src/WorkspaceCatalog.js'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Inspectable from 'effect/Inspectable'
@@ -52,7 +53,7 @@ const analyze = Effect.fnUntraced(function* (
       : ProjectAnalysis.revise(previousProject, roots)
   ).pipe(Effect.provide(SourceResolver.empty))
   const moduleUris = new Map(documents.map((document) => [document.module, document.uri]))
-  const inventory = WorkspaceInventory.make()
+  const inventory = yield* WorkspaceCatalog.defer(Effect.sync(() => WorkspaceInventory.make()))
   const snapshots: Array<readonly [string, ProjectSnapshot.DocumentSnapshot]> = []
   for (const document of documents) {
     const snapshot = ProjectAnalysis.view(project, document.module)

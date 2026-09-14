@@ -32,6 +32,7 @@ import {
   endReturnedViewLoans,
   ownedWriteRoot,
   retainedEffectLoans,
+  lowerPlacePath,
 } from './EffectLowering.js'
 import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
@@ -49,13 +50,13 @@ import * as Layout from './Layout.js'
 import type { DelayedEffectState } from './Lower.js'
 import { borrowKey, i32, patternKey, spanKey } from './Lower.js'
 import type {} from './LowerExpression.js'
-import { lowerExpression, lowerExecution } from './LowerExpression.js'
+import { lowerExpression, lowerExecution, lowerPatternTests } from './LowerExpression.js'
 import * as Match from './Match.js'
 import * as Mir from './Mir.js'
 import * as MovePath from './MovePath.js'
 import * as Ownership from './Ownership.js'
 import * as Type from './Type.js'
-import { effectValueByIdentity, instanceText } from './ValueType.js'
+import { effectValueForCall, instanceText } from './ValueType.js'
 
 export interface LoweredPatternSelection {
   readonly result: Mir.LocalId
@@ -68,7 +69,12 @@ export const lowerPatternSelection = (
   result: 'Unit' | 'Bool',
 ): LoweredPatternSelection | 'Transferred' | undefined => {
   if (selection.subject._tag === 'Unavailable') return undefined
-  const subject = lowerExpression(fn, selection.subject)
+  const borrowed = selection.access === 'Shared' || selection.access === 'Exclusive'
+  const place = borrowed ? lowerPlacePath(fn, selection.subject) : undefined
+  if (place === 'Transferred') return place
+  let subject: LoweredExpression | undefined
+  if (borrowed) subject = place === undefined ? undefined : { result: place.root }
+  else subject = lowerExpression(fn, selection.subject)
   if (subject === 'Transferred') return subject
   const semanticSubject = fn.semantic(selection.subject.type)
   const subjectType = fn.type(selection.subject.type)
@@ -118,7 +124,14 @@ export const lowerPatternSelection = (
   )
   const selectedBindings: Array<Mir.MatchBinding> = []
   for (const binding of selection.bindings) {
-    const type = fn.type(binding.type)
+    const type =
+      binding.access === 'Shared' || binding.access === 'Exclusive'
+        ? {
+            _tag: 'EnvironmentBorrow' as const,
+            type: fn.semantic(binding.type),
+            access: binding.access,
+          }
+        : fn.type(binding.type)
     if (type === undefined) return undefined
     const destination = fn.alloc(type)
     fn.patternLocals.set(patternKey(binding.id), destination)
@@ -135,14 +148,27 @@ export const lowerPatternSelection = (
   }
   const [selectedResult, selectedOperations] = fn.capture(() => literal(true))
   if (selectedResult === undefined || selectedResult === 'Transferred') return selectedResult
-  const emptyCoverage: ReadonlyArray<Match.CoverageIdentity> = Object.freeze([])
-  const selectedAfter = selection.universal
-    ? emptyCoverage
-    : Object.freeze(
-        members.filter(
-          (candidate) => member === undefined || !Match.selects(member, candidate, 'Runtime'),
-        ),
-      )
+  const tests = lowerPatternTests(
+    fn,
+    semanticSubject,
+    member,
+    selection.tests ?? [],
+    place?.selectors ?? [],
+    specializeMember,
+  )
+  if (tests === undefined) return undefined
+  const selectedAfter = Match.cover(
+    members,
+    [
+      {
+        ...(member === undefined ? {} : { member }),
+        universal: selection.universal,
+        guarded: false,
+        tests,
+      },
+    ],
+    'Runtime',
+  ).missing
   const ownedArm = ownership?.arms.find(
     (candidate) => candidate.id.ordinal === selection.arm.ordinal,
   )
@@ -181,6 +207,7 @@ export const lowerPatternSelection = (
   if (selectedExecution === undefined) return undefined
   const selectedArm: Mir.MatchArm = Object.freeze({
     id: selection.arm,
+    tests,
     ...(member === undefined ? {} : { member }),
     universal: selection.universal,
     before: members,
@@ -228,6 +255,7 @@ export const lowerPatternSelection = (
       id: selection.id,
       destination,
       scrutinee: subject.result,
+      ...(place === undefined ? {} : { selectors: place.selectors }),
       scrutineeType: subjectType,
       scrutineeShape: subjectShape,
       access: selection.access,
@@ -287,7 +315,10 @@ export const lowerSequence = (
     fn.ownerLoop = ownerLoop
     const following = lowerStatement(fn, statement, exits, ownerLoop, terminal, region)
     fn.ownerLoop = previousLoop
-    if (following === undefined) return undefined
+    if (following === undefined) {
+      fn.recordLoweringFailure('Statement', statement._tag, statement.span)
+      return undefined
+    }
     if (following === 'Terminated') return id
     region = following
   }
@@ -428,7 +459,7 @@ const lowerStatement = (
       return following
     }
     const forwardedRequirement = inlineForwardedRequirement(fn, statement.initializer)
-    const forwardedResultEffect =
+    const forwardedCall =
       forwardedRequirement === undefined
         ? undefined
         : fn.call(
@@ -440,18 +471,25 @@ const lowerStatement = (
             statement.initializer._tag === 'EffectConstruct'
               ? statement.initializer.staticArguments
               : undefined,
-          )?.resultEffect
+          )
+    const forwardedResultEffect = forwardedCall?.resultEffect
     const protectedRecipe =
       forwardedRequirement === undefined
         ? undefined
         : effectRecipe(fn, forwardedRequirement.binding.protected)
+    const forwardedSemantic =
+      'type' in statement.initializer ? fn.semantic(statement.initializer.type) : undefined
     // A borrowed provider can materialize its service Effect at construction through
     // forwardedServiceProvision. Keeping that value only as a recipe loses it when a
     // later combinator (such as catchAll) consumes the binding as an ordinary operand.
     const forwardedRequirementNeedsRecipe =
       forwardedRequirement !== undefined &&
       (forwardedResultEffect === undefined ||
-        effectValueByIdentity(fn.layout, forwardedResultEffect) === undefined ||
+        forwardedCall === undefined ||
+        forwardedSemantic === undefined ||
+        !Type.isEffect(forwardedSemantic) ||
+        effectValueForCall(fn.layout, forwardedCall, forwardedSemantic, fn.providedRequirements) ===
+          undefined ||
         (protectedRecipe?._tag === 'ServiceEffectConstruct' &&
           (forwardedRequirement.selection.access === 'Take' ||
             forwardedRequirement.provider._tag !== 'ValueBorrow')) ||

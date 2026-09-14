@@ -2,6 +2,8 @@ import * as AnalysisFixture from './support/AnalysisFixture.js'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
+import * as SourceFile from '../src/SourceFile.js'
+import * as SourceResolver from '../src/SourceResolver.js'
 import * as MirEncoding from '../src/MirEncoding.js'
 import * as MirVerification from '../src/MirVerification.js'
 
@@ -54,7 +56,10 @@ struct First {}
 struct Second {}
 effect fn select(input: First | Second) -> i32 ? &mut Choice {
   return match move input {
-    First {} => { return run Choice.left() }
+    First {} => {
+      let operation = effect { return run Choice.left() }
+      return run operation
+    }
     Second {} => run Choice.right()
   }
 }
@@ -79,5 +84,122 @@ pub fn main() -> i32 {
     ])
     const mir = Analysis.loweredMir(self)
     assert.deepEqual(MirVerification.verify(mir), [], MirEncoding.encode(mir))
+  }),
+)
+
+it.effect('keeps provided recovery families and contextual constructor contracts exact', () =>
+  Effect.gen(function* () {
+    const self = yield* AnalysisFixture.retainingMain(
+      'effect-forwarding/execution-contract',
+      encoder.encode(`import silk.effect { Effect }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.vector { Vector }
+service Input { effect fn count() -> i32 ? &mut Input }
+struct Provider {}
+effect fn count(self: &mut Provider) -> i32 { return 42 }
+impl Input for Provider { count: Provider.count }
+struct Payload { value: i32 }
+struct FirstFailure {}
+struct SecondFailure {}
+effect fn first() -> i32 ! FirstFailure ? &mut Input { return run Input.count() }
+effect fn second() -> Payload ! SecondFailure ? &mut Input {
+  let value = run Input.count()
+  return Payload { value: value }
+}
+effect fn append() -> () ! OutOfMemoryError ? &mut Allocator {
+  let mut values = Vector.make<i32>()
+  run Vector.append(&mut values, 42)
+  drop values
+  return ()
+}
+pub fn main() -> i32 {
+  let mut provider = Provider {}
+  let firstResult = run Effect.result(first()) |> Effect.provideMut<Input>(&mut provider)
+  let secondResult = run Effect.result(second()) |> Effect.provideMut<Input>(&mut provider)
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let appended = run Effect.result(append()) |> Effect.provideMut<Allocator>(&mut allocator)
+  drop firstResult
+  drop secondResult
+  drop appended
+  return 0
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const constructors = mir.functions.filter((fn) => fn.id.name === 'Vector.append')
+    assert.isNotEmpty(constructors)
+    const constructor = constructors.at(0)
+    assert.strictEqual(constructor?.result._tag, 'EffectValue')
+    if (constructor?.result._tag !== 'EffectValue') return
+    const wrongSite = {
+      ...constructor,
+      result: { ...constructor.result, site: { ...constructor.result.site, ordinal: 999 } },
+    }
+    const corrupted = {
+      ...mir,
+      functions: mir.functions.map((fn) => (fn === constructor ? wrongSite : fn)),
+    }
+    assert.isTrue(
+      MirVerification.verify(corrupted).some((violation) => violation.rule === 'InvalidCallShape'),
+    )
+  }),
+)
+
+it.effect('preserves observed application closure parameters through native startup', () =>
+  Effect.gen(function* () {
+    const self = yield* Analysis.makeRealized({
+      root: SourceFile.make(
+        'effect-forwarding/native-start',
+        encoder.encode('pub fn main() -> i32 { return 42 }'),
+      ),
+      configuration: { profile: { target: 'x86_64-unknown-linux-gnu', artifact: 'executable' } },
+    }).pipe(Effect.provide(SourceResolver.empty))
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(self)), [])
+  }),
+)
+
+it.effect('reuses exact provider runners across distinct lexical proof origins', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'effect-forwarding/contextual-provider',
+      encoder.encode(`import silk.effect {Effect}
+service Clock { effect fn tick() -> i32 ? &mut Clock }
+service Input { effect fn read() -> i32 ? &mut Input | &mut Clock }
+struct ClockProvider {}
+struct InputProvider {}
+impl Clock for ClockProvider {
+  effect fn tick(self: &mut Self) -> i32 { return 21 }
+}
+impl Input for InputProvider {
+  effect fn read(self: &mut Self) -> i32 ? &mut Clock { return run Clock.tick() }
+}
+struct Holder<P> { provider: P }
+impl<P> Holder<P> {
+  effect fn read(self: &mut Self) -> i32 ? &mut Clock
+  where &mut P provides &Input from &mut Input | &mut Clock {
+    return run Input.read() |> Effect.provideMut<Input>(&mut self.provider)
+  }
+}
+effect fn first<P>(holder: &mut Holder<P>) -> i32 ? &mut Clock
+where &mut P provides &Input from &mut Input | &mut Clock {
+  return run Holder.read(&mut holder.*)
+}
+effect fn second<P>(holder: &mut Holder<P>) -> i32 ? &mut Clock
+where &mut P provides &Input from &mut Input | &mut Clock {
+  return run Holder.read(&mut holder.*)
+}
+pub fn main() -> i32 {
+  let mut clock = ClockProvider {}
+  let mut holder = Holder {provider: InputProvider {}}
+  let a = run first(&mut holder) |> Effect.provideMut<Clock>(&mut clock)
+  let b = run second(&mut holder) |> Effect.provideMut<Clock>(&mut clock)
+  return a + b
+}
+`),
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
   }),
 )

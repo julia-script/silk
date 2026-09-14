@@ -123,11 +123,15 @@ it.effect(
 struct Wide { marker: u8 wide: i64 items: [i32; 2] }
 struct Small { value: i32 }
 struct Empty {}
+union Pair { Narrow {left: i32, right: i32}, Wide {left: i64, right: i64} }
 fn choose(flag: bool) -> Wide | Small {
   if flag { return Wide { marker: 1, wide: 2, items: [3, 4] } }
   return Small { value: 42 }
 }
 pub fn main() -> i32 {
+  let pair = Pair.Narrow {left: 1, right: 2}
+  let right = match &pair { Pair.Narrow {right, ..} => right Pair.Wide {..} => 0 }
+  drop right
   let empty = Empty {}
   drop empty
   let candidate = choose(false)
@@ -203,6 +207,22 @@ pub fn main() -> i32 {
           locations.some(
             (location) => location._tag === 'Choice' && location.alternatives.length === 2,
           ),
+        )
+        const pair = Type.nominal('layout/places', 'Pair')
+        const pairEntry = Layout.entry(module.layout, pair) ?? unreachable('expected nominal pair')
+        const pairShape =
+          Layout.callingShape(module.layout, pair) ?? unreachable('expected pair calling shape')
+        const rightLane = pairShape.lanes.at(2) ?? unreachable('expected right calling lane')
+        const rightLocation = ValueStorage.location(module.layout, pair, rightLane)
+        assert.strictEqual(rightLocation?._tag, 'Choice')
+        if (rightLocation?._tag !== 'Choice' || pairEntry.representation._tag !== 'NominalUnion')
+          return unreachable('expected canonical variant locations')
+        const payloadOffset = pairEntry.representation.payloadOffset
+        assert.deepEqual(
+          rightLocation.alternatives.map((alternative) =>
+            alternative.location._tag === 'Slot' ? alternative.location.offset - payloadOffset : -1,
+          ),
+          [4, 8],
         )
       }
     }),

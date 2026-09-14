@@ -3499,11 +3499,21 @@ const sameExecutableOwnerDeclaration = (
  * This stays a semantic type transformation: it neither inspects construction syntax nor creates a
  * second representation identity.
  */
-export const specializeExecutableOwner = (
+export function specializeExecutableOwner(
   self: Type,
   owner: ExecutableSpecializationOwner,
   specializeSchema?: CallableSchemaOwnerSpecializer,
-): Type => {
+): Type
+export function specializeExecutableOwner(
+  self: GenericArgument,
+  owner: ExecutableSpecializationOwner,
+  specializeSchema?: CallableSchemaOwnerSpecializer,
+): GenericArgument
+export function specializeExecutableOwner(
+  self: GenericArgument,
+  owner: ExecutableSpecializationOwner,
+  specializeSchema?: CallableSchemaOwnerSpecializer,
+): GenericArgument {
   const specializeOwner = (
     current: ExecutableSpecializationOwner,
   ): ExecutableSpecializationOwner =>
@@ -3659,7 +3669,7 @@ export const specializeExecutableOwner = (
     }
     return type
   }
-  return specializeType(self)
+  return specializeArgument(self)
 }
 
 /** Collects every free semantic lifetime without conflating it with a value type parameter. */
@@ -3762,7 +3772,9 @@ export const storageParameters = (self: Type): ReadonlyArray<Parameter> =>
     ...new Map(
       fold(self, {
         type: (type) =>
-          isParameter(type) && type.representationBound === undefined ? type : undefined,
+          isParameter(type) && type.kind === 'Value' && type.representationBound === undefined
+            ? type
+            : undefined,
         descendArgument: (argument) =>
           !isRepresentationArgument(argument) && !isHiddenIdentityArgument(argument),
         descend: (type) =>

@@ -301,6 +301,10 @@ const operationLines = (operation: Operation, indent: string): ReadonlyArray<str
       else if (arm.member !== undefined) pattern = Match.encodeIdentity(arm.member)
       return [
         `${indent}  arm #${arm.id.ordinal} ${pattern} before=${arm.before.map(Match.encodeIdentity).join(',') || 'empty'} after=${arm.after.map(Match.encodeIdentity).join(',') || 'empty'} ${provenanceText(arm.provenance)}`,
+        ...(arm.tests ?? []).map(
+          (test) =>
+            `${indent}    test ${fieldPathText(test.path)} is ${Match.encodeIdentity(test.member)}`,
+        ),
         ...arm.bindings.map(
           (binding) =>
             `${indent}    bind #${binding.id.ordinal} ${localText(binding.destination)} <- ${fieldPathText(binding.path)} : ${typeText(binding.type)} access=${binding.access} ${provenanceText(binding.provenance)}`,

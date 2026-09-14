@@ -19,8 +19,8 @@ export type Location =
 /**
  * Resolves ABI selectors through canonical storage, retaining overlay choices rather than
  * mistaking a unified carrier's ordinal for an offset in the largest member's bytes.
- * Nominal unions already store their planned carriers; anonymous unions and represented
- * composite environments store an active alternative and require conversion.
+ * Union storage retains the active alternative's native field layout; calling carriers
+ * convert through its selected locations rather than changing those bytes.
  */
 export const location = (
   self: Layout.Plan,
@@ -60,6 +60,30 @@ export const location = (
     }
   }
   const composite = find(self, 'CompositeCarrier', type)?.stored
+  if (head?._tag === 'NominalUnionPayloadSelector' && representation?._tag === 'NominalUnion') {
+    const alternatives: Array<{ readonly tag: number; readonly location: Location }> = []
+    for (const variant of representation.variants) {
+      let slot = head.slot
+      for (const field of variant.fields) {
+        const lanes = Layout.callingShape(self, field.type)?.lanes
+        if (lanes === undefined) return undefined
+        const source = lanes.at(slot)
+        if (source !== undefined) {
+          const selected = location(
+            self,
+            field.type,
+            source,
+            base + representation.payloadOffset + field.offset,
+          )
+          if (selected === undefined) return undefined
+          alternatives.push({ tag: variant.ordinal, location: selected })
+          break
+        }
+        slot -= lanes.length
+      }
+    }
+    return { _tag: 'Choice', tagOffset: base, alternatives }
+  }
   if (head?._tag === 'UnionTagSelector' && composite !== undefined)
     return { _tag: 'Slot', lane, offset: base }
   if (

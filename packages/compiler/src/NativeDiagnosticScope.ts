@@ -12,8 +12,7 @@ import * as NativeDiagnosticContext from './NativeDiagnosticContext.js'
 import type * as NativeLoweringContext from './NativeLoweringContext.js'
 import type * as NativeOperationContext from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
-import * as NativeLanePointer from './NativeLanePointer.js'
-import * as NativeType from './NativeType.js'
+import * as NativePlace from './NativePlace.js'
 
 export interface NativeDiagnosticScope {
   readonly record: Value.Input
@@ -29,7 +28,7 @@ interface Context extends NativeCallable.Context {
 
 /** Preallocates synchronous descriptors and adapters borrowing the represented callback owner. */
 export const prepare = Effect.fnUntraced(function* (context: Context) {
-  const { builder, body, entry, diagnostic, types } = context
+  const { builder, body, entry, diagnostic } = context
   const scopes = new Map<number, NativeDiagnosticScope>()
   for (const operation of entry.linear.flatMap((block) => block.operations)) {
     if (operation._tag !== 'EnterDiagnosticScope') continue
@@ -47,7 +46,6 @@ export const prepare = Effect.fnUntraced(function* (context: Context) {
     )
     if (target === undefined || target.suspendable || target.diagnosticParameter === undefined)
       throw new RangeError('Diagnostic observer lost its direct internal target')
-    const captureLanes = NativeType.lanesFor(types, type)
     const callback = yield* FunctionActor.declare(
       builder,
       `${entry.symbol}$diagnostic${operation.scope.ordinal}`,
@@ -60,26 +58,11 @@ export const prepare = Effect.fnUntraced(function* (context: Context) {
       Effect.fnUntraced(function* (callbackBody) {
         yield* Block.make(callbackBody, 'entry')
         const environment = yield* Value.argument(callbackBody, 0)
-        const values: Array<Value.Input> = []
-        for (const [ordinal, lane] of captureLanes.entries()) {
-          const offset = NativeType.addressLaneOffset(context.program.layout, type, lane, ordinal)
-          if (offset === undefined)
-            throw new RangeError('Diagnostic callback lost its capture address layout')
-          values.push(
-            yield* FunctionBody.load(
-              callbackBody,
-              NativeType.laneType(types, lane),
-              yield* NativeLanePointer.lanePointer(
-                context.lanePointers,
-                callbackBody,
-                environment,
-                offset,
-                `observer_capture${ordinal}_ptr`,
-              ),
-              `observer_capture${ordinal}`,
-            ),
-          )
-        }
+        const values = yield* NativePlace.loadLanes(
+          NativePlace.make(context.program.layout, type, environment),
+          { ...context, body: callbackBody },
+          'observer_capture',
+        )
         const groups = yield* NativeCallable.capturedArguments(
           { ...context, body: callbackBody },
           type,

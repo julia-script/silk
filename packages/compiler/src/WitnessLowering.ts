@@ -7,6 +7,7 @@ import type {} from './EntryAssembly.js'
 import type {} from './Forwarding.js'
 import type { FunctionLowering } from './FunctionLowering.js'
 import * as Hir from './Hir.js'
+import * as Instances from './Instances.js'
 import type * as Intrinsic from './Intrinsic.js'
 import * as TypeInference from './internal/TypeInference.js'
 import { borrowKey } from './Lower.js'
@@ -107,6 +108,8 @@ export const lowerInterfaceWitnessCall = (
     provider,
     capability,
     bound.operation,
+    bound.contract,
+    fn.substitution,
   )
   const resultType = fn.type(expression.type)
   const operandTypes = bound.contract.operands.flatMap((operand) => {
@@ -133,23 +136,58 @@ export interface InterfaceOperands {
   readonly borrows: ReadonlyArray<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }>
 }
 
+export interface InterfaceOperandLoweringFailure {
+  readonly _tag: 'InterfaceOperandLoweringFailure'
+  readonly reason:
+    | 'Arity'
+    | 'Argument'
+    | 'Contract'
+    | 'ExpectedType'
+    | 'ActualType'
+    | 'Incompatible'
+  readonly ordinal?: number
+}
+
 export const lowerInterfaceOperands = (
   fn: FunctionLowering,
   arguments_: ReadonlyArray<Hir.Expression>,
   operands: ReadonlyArray<DeclarationFacts.InterfaceOperandFact>,
   span: SourceSpan.SourceSpan,
-): InterfaceOperands | 'Transferred' | undefined => {
-  if (arguments_.length !== operands.length) return undefined
+): InterfaceOperands | InterfaceOperandLoweringFailure | 'Transferred' => {
+  if (arguments_.length !== operands.length)
+    return Object.freeze({ _tag: 'InterfaceOperandLoweringFailure', reason: 'Arity' })
   const lowered: Array<Mir.LocalId> = []
   const borrows: Array<{ readonly borrow: Hir.BorrowId; readonly local: Mir.LocalId }> = []
   for (const [ordinal, argument] of arguments_.entries()) {
     const value = lowerExpression(fn, argument)
     if (value === 'Transferred') return value
     const operand = operands.at(ordinal)
-    if (value === undefined || operand?.type._tag !== 'Resolved') return undefined
+    if (value === undefined)
+      return Object.freeze({
+        _tag: 'InterfaceOperandLoweringFailure',
+        reason: 'Argument',
+        ordinal,
+      })
+    if (operand?.type._tag !== 'Resolved')
+      return Object.freeze({
+        _tag: 'InterfaceOperandLoweringFailure',
+        reason: 'Contract',
+        ordinal,
+      })
     const expected = fn.type(fn.semantic(operand.type.type))
     const actual = fn.localTypes.at(value.result.ordinal)
-    if (expected === undefined || actual === undefined) return undefined
+    if (expected === undefined)
+      return Object.freeze({
+        _tag: 'InterfaceOperandLoweringFailure',
+        reason: 'ExpectedType',
+        ordinal,
+      })
+    if (actual === undefined)
+      return Object.freeze({
+        _tag: 'InterfaceOperandLoweringFailure',
+        reason: 'ActualType',
+        ordinal,
+      })
     if (Type.runtimeKey(Mir.semanticType(actual)) === Type.runtimeKey(Mir.semanticType(expected))) {
       lowered.push(value.result)
       continue
@@ -158,7 +196,11 @@ export const lowerInterfaceOperands = (
       expected._tag !== 'Reference' ||
       !Type.equals(Mir.semanticType(actual), expected.type.target)
     )
-      return undefined
+      return Object.freeze({
+        _tag: 'InterfaceOperandLoweringFailure',
+        reason: 'Incompatible',
+        ordinal,
+      })
     const borrow = fn.beginRecipeBorrow(
       Object.freeze({
         _tag: 'BorrowId' as const,
@@ -341,7 +383,13 @@ export const lowerWitnessEffect = (
 ): LoweredExpression | undefined => {
   const site = expression.witnessEffectSite
   const contract = witnessEffectContract(expression)
-  if (site === undefined || contract === undefined) return undefined
+  const fail = (reason: NonNullable<Parameters<FunctionLowering['recordLoweringFailure']>[3]>) => {
+    fn.recordLoweringFailure('Expression', expression._tag, expression.span, reason)
+    return undefined
+  }
+  if (site === undefined) return fail(Object.freeze({ _tag: 'WitnessEffectMissingSite' }))
+  if (contract === undefined) return fail(Object.freeze({ _tag: 'WitnessEffectMissingContract' }))
+  const siteKey = Hir.executableSiteKey(site)
   const capability = fn.semantic(
     expression._tag === 'InterfaceOperationCall'
       ? expression.capability
@@ -352,26 +400,74 @@ export const lowerWitnessEffect = (
       ? expression.provider
       : (expression.interfaceOperation?.provider ?? 'never'),
   )
-  if (!Type.isNominal(capability)) return undefined
-  const target = ConformanceProof.interfaceWitnessTarget(
-    fn.index,
-    provider,
-    capability,
-    expression._tag === 'InterfaceOperationCall'
-      ? expression.operation
-      : (expression.interfaceOperation?.operation ?? ''),
+  const inherited = fn.witnessTargets?.find((candidate) =>
+    Hir.sameExecutableSite(candidate.site, site),
   )
-  const intrinsic = ConformanceProof.interfaceOperationIntrinsic(
-    fn.index,
-    provider,
-    capability,
-    expression._tag === 'InterfaceOperationCall'
-      ? expression.operation
-      : (expression.interfaceOperation?.operation ?? ''),
-  )
-  if (target === undefined && intrinsic?.rule._tag !== 'BuiltinRule') return undefined
-  const type = effectValueAtSite(fn.layout, fn.owner.key, site)
-  if (type === undefined) return undefined
+  if (!Type.isNominal(capability) && inherited === undefined)
+    return fail(
+      Object.freeze({
+        _tag: 'WitnessEffectMissingTarget',
+        site: siteKey,
+        publishedSites: Object.freeze(
+          fn.witnessTargets?.map((candidate) => Hir.executableSiteKey(candidate.site)) ?? [],
+        ),
+      }),
+    )
+  let target: ConformanceProof.InterfaceWitnessTarget | undefined
+  if (fn.witnessTargets !== undefined) {
+    target = inherited?.target
+  } else {
+    if (!Type.isNominal(capability)) return undefined
+    target = ConformanceProof.interfaceWitnessTarget(
+      fn.index,
+      provider,
+      capability,
+      expression._tag === 'InterfaceOperationCall'
+        ? expression.operation
+        : (expression.interfaceOperation?.operation ?? ''),
+      contract,
+      fn.substitution,
+    )
+  }
+  const intrinsic = Type.isNominal(capability)
+    ? ConformanceProof.interfaceOperationIntrinsic(
+        fn.index,
+        provider,
+        capability,
+        expression._tag === 'InterfaceOperationCall'
+          ? expression.operation
+          : (expression.interfaceOperation?.operation ?? ''),
+      )
+    : undefined
+  if (target === undefined && intrinsic?.rule._tag !== 'BuiltinRule')
+    return fail(
+      Object.freeze({
+        _tag: 'WitnessEffectMissingTarget',
+        site: siteKey,
+        publishedSites: Object.freeze(
+          fn.witnessTargets?.map((candidate) => Hir.executableSiteKey(candidate.site)) ?? [],
+        ),
+      }),
+    )
+  const semanticType = fn.semantic(expression.type)
+  const type = Type.isEffect(semanticType)
+    ? effectValueAtSite(fn.layout, fn.owner.key, site, semanticType)
+    : undefined
+  if (type === undefined)
+    return fail(
+      Object.freeze({
+        _tag: 'WitnessEffectMissingLayout',
+        site: siteKey,
+        availableSites: Object.freeze(
+          fn.layout.effectEnvironments
+            .filter(
+              (candidate) =>
+                Instances.keyText(candidate.instance) === Instances.keyText(fn.owner.key),
+            )
+            .map((candidate) => Hir.executableSiteKey(candidate.site)),
+        ),
+      }),
+    )
   const operands = lowerInterfaceOperands(
     fn,
     expression.arguments,
@@ -379,7 +475,15 @@ export const lowerWitnessEffect = (
     expression.span,
   )
   if (operands === 'Transferred') return operands
-  if (operands === undefined) return undefined
+  if ('_tag' in operands)
+    return fail(
+      Object.freeze({
+        _tag: 'WitnessEffectOperandLowering',
+        site: siteKey,
+        failure: operands.reason,
+        ...(operands.ordinal === undefined ? {} : { ordinal: operands.ordinal }),
+      }),
+    )
   const destination = fn.alloc(type)
   const runner = Hir.effectRunnerId(fn.owner.key.declaration, site)
   fn.emit(
@@ -400,7 +504,7 @@ export const lowerWitnessEffect = (
       provenance: generated(expression.span),
     }),
   )
-  const key = baseRunnerKey(fn.owner.key, site)
+  const key = baseRunnerKey(fn.owner.key, site, type.type)
   if (!fn.generatedRunners.some((candidate) => candidate.specializationKey === key))
     fn.generatedRunners.push(
       Object.freeze({
@@ -438,6 +542,8 @@ export const lowerStaticInterfaceWitnessCall = (
     provider,
     capability,
     expression.operation,
+    expression.contract,
+    fn.substitution,
   )
   const resultType = fn.type(expression.type)
   if (target === undefined || resultType === undefined) return undefined

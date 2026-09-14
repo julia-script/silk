@@ -1,4 +1,5 @@
 import * as ConformanceProof from './ConformanceProof.js'
+import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Instances from './Instances.js'
 import * as Mir from './Mir.js'
@@ -127,10 +128,19 @@ const runnerOf = (
   else if (operation._tag === 'RunEffectValue' || operation._tag === 'CatchEffect')
     staticArguments = operation.runnerStaticArguments ?? Object.freeze([])
   else staticArguments = Object.freeze([])
-  const exact =
-    declaration === undefined
-      ? undefined
-      : functions.find((fn) => Mir.matchesInstance(fn, declaration, typeArguments, staticArguments))
+  const exact = functions.find((fn) => {
+    if (declaration === undefined) return false
+    if (operation === undefined || operation._tag === 'ExecutionPark')
+      return Mir.matchesInstance(fn, declaration, typeArguments, staticArguments)
+    return Mir.matchesEffectInstance(
+      fn,
+      declaration,
+      typeArguments,
+      staticArguments,
+      operation.outcomeType.type,
+      operation._tag === 'RunEffectValue' ? operation.providers : undefined,
+    )
+  })
   let instance = exact?.instance
   if (
     instance === undefined &&
@@ -349,6 +359,156 @@ const regionsOf = (
   )
 }
 
+interface SuspensionCallTarget {
+  readonly declaration: DeclarationFacts.CanonicalId
+  readonly typeArguments: ReadonlyArray<Type.GenericArgument>
+  readonly staticArguments: ReadonlyArray<StaticValue.Value>
+}
+
+const suspensionCallTargets = (
+  operation: Mir.Operation,
+  fn: Mir.MirFunction,
+): ReadonlyArray<SuspensionCallTarget> => {
+  switch (operation._tag) {
+    case 'Call':
+    case 'RunEffect':
+      return [
+        Object.freeze({
+          declaration: operation.target,
+          typeArguments: operation.typeArguments,
+          staticArguments: operation.staticArguments ?? Object.freeze([]),
+        }),
+      ]
+    case 'RunEffectValue':
+    case 'RunStaticEffect':
+    case 'CatchEffect':
+      return [
+        Object.freeze({
+          declaration: operation.runner,
+          typeArguments: operation.runnerTypeArguments,
+          staticArguments: operation.runnerStaticArguments ?? Object.freeze([]),
+        }),
+        ...('cancellationFinalizer' in operation && operation.cancellationFinalizer !== undefined
+          ? [
+              Object.freeze({
+                declaration: operation.cancellationFinalizer.runner,
+                typeArguments: operation.cancellationFinalizer.runnerTypeArguments,
+                staticArguments:
+                  operation.cancellationFinalizer.runnerStaticArguments ?? Object.freeze([]),
+              }),
+            ]
+          : []),
+        ...('cancellationFinalizer' in operation &&
+        operation.cancellationFinalizer?._tag === 'ResourceCancellationFinalizer'
+          ? [
+              Object.freeze({
+                declaration: operation.cancellationFinalizer.releaseTarget,
+                typeArguments: operation.cancellationFinalizer.releaseTypeArguments,
+                staticArguments: Object.freeze([]),
+              }),
+            ]
+          : []),
+      ]
+    case 'RunEffectComposite':
+      return operation.alternatives.map((alternative) =>
+        Object.freeze({
+          declaration: alternative.runner,
+          typeArguments: alternative.runnerTypeArguments,
+          staticArguments: alternative.runnerStaticArguments ?? Object.freeze([]),
+        }),
+      )
+    case 'ApplyCallable': {
+      const type =
+        operation.callable === undefined ? undefined : fn.localTypes.at(operation.callable.ordinal)
+      const target = operation.target ?? (type?._tag === 'CallableValue' ? type.target : undefined)
+      return target?._tag === 'DeclarationCallableTarget'
+        ? [
+            Object.freeze({
+              declaration: target.declaration,
+              typeArguments: operation.typeArguments,
+              staticArguments: Object.freeze([]),
+            }),
+          ]
+        : []
+    }
+    default:
+      return []
+  }
+}
+
+/** Functions that can originate or relay a transfer through an actual lowered call. */
+export const originReachableFunctions = (self: Mir.Module): ReadonlySet<string> => {
+  const reachable = new Set(
+    self.functions
+      .filter((fn) =>
+        fn.suspension?.regions.some(
+          (region) =>
+            region._tag === 'SuspendEffectRegion' ||
+            (region._tag === 'RunSuspendableEffectRegion' &&
+              region.operation._tag === 'ExecutionPark'),
+        ),
+      )
+      .map((fn) => Instances.keyText(fn.instance)),
+  )
+  const byDeclaration = new Map<string, Array<Mir.MirFunction>>()
+  for (const fn of self.functions) {
+    const declarationKey = `${fn.id.module}\u0000${fn.id.name}`
+    const bucket = byDeclaration.get(declarationKey)
+    if (bucket === undefined) byDeclaration.set(declarationKey, [fn])
+    else bucket.push(fn)
+  }
+  const pending = self.functions
+    .filter((fn) => !reachable.has(Instances.keyText(fn.instance)))
+    .map((fn) => ({
+      key: Instances.keyText(fn.instance),
+      targets: [
+        ...Mir.topologicalRegions(fn)
+          .flatMap(Mir.operationsOf)
+          .flatMap(Mir.operationTree)
+          .flatMap((operation) => suspensionCallTargets(operation, fn)),
+        ...(fn.suspension?.regions ?? []).flatMap((region) =>
+          region._tag === 'RunSuspendableEffectRegion' && region.runner.declaration !== undefined
+            ? [
+                {
+                  declaration: region.runner.declaration,
+                  typeArguments: region.runner.typeArguments,
+                  staticArguments: region.runner.instance?.staticArguments ?? Object.freeze([]),
+                },
+              ]
+            : [],
+        ),
+      ],
+    }))
+  let changed = true
+  while (changed) {
+    changed = false
+    for (let index = pending.length - 1; index >= 0; index -= 1) {
+      const entry = pending[index]
+      if (entry === undefined) continue
+      const reachesOrigin = entry.targets.some((target) =>
+        (
+          byDeclaration.get(`${target.declaration.module}\u0000${target.declaration.name}`) ?? []
+        ).some(
+          (candidate) =>
+            reachable.has(Instances.keyText(candidate.instance)) &&
+            Mir.matchesInstance(
+              candidate,
+              target.declaration,
+              target.typeArguments,
+              target.staticArguments,
+            ),
+        ),
+      )
+      if (reachesOrigin) {
+        reachable.add(entry.key)
+        pending.splice(index, 1)
+        changed = true
+      }
+    }
+  }
+  return reachable
+}
+
 /** Produces final MIR. Provisional control and ownership facts are consumed, never embedded. */
 export const finalize = (
   program: Mir.Module,
@@ -395,17 +555,59 @@ export const finalize = (
       })
     }),
   )
-  const hasRetainedOrigin = functions.some((fn) =>
-    fn.suspension?.regions.some(
-      (region) =>
-        region._tag === 'SuspendEffectRegion' ||
-        (region._tag === 'RunSuspendableEffectRegion' && region.operation._tag === 'ExecutionPark'),
-    ),
-  )
-  if (!hasRetainedOrigin) return program
+  // Unknown provisional runners are conservative discovery facts. In closed MIR, only actual
+  // calls to a retained origin require a transfer ABI; an independently managed execution must
+  // not keep suspension machinery alive in an otherwise synchronous part of the program.
+  const reachable = originReachableFunctions({ ...program, functions })
   return Object.freeze({
     ...program,
-    functions,
+    functions: Object.freeze(
+      functions.map((fn, ordinal) => {
+        if (!reachable.has(Instances.keyText(fn.instance))) return program.functions[ordinal] ?? fn
+        if (fn.suspension === undefined) return fn
+        const regions = fn.suspension.regions.filter(
+          (region) =>
+            region._tag === 'SuspendEffectRegion' ||
+            region.operation._tag === 'ExecutionPark' ||
+            functions.some(
+              (candidate) =>
+                reachable.has(Instances.keyText(candidate.instance)) &&
+                region.runner.declaration !== undefined &&
+                Mir.matchesInstance(
+                  candidate,
+                  region.runner.declaration,
+                  region.runner.typeArguments,
+                  region.runner.instance?.staticArguments,
+                ),
+            ),
+        )
+        const retainedStates = new Set(
+          regions.flatMap((region) =>
+            region._tag === 'RunSuspendableEffectRegion' && region.relay.state !== undefined
+              ? [region.relay.state]
+              : [],
+          ),
+        )
+        const states =
+          fn.suspension.frame?.states.filter((state) => retainedStates.has(state)) ?? []
+        return Object.freeze({
+          ...fn,
+          suspension: Object.freeze({
+            classification: fn.suspension.classification,
+            regions: Object.freeze(regions),
+            ...(states.length === 0
+              ? {}
+              : {
+                  frame: Object.freeze({
+                    _tag: 'CoroutineFrameDescriptor' as const,
+                    function: fn.instance,
+                    states: Object.freeze(states),
+                  }),
+                }),
+          }),
+        })
+      }),
+    ),
   })
 }
 

@@ -671,16 +671,27 @@ const handledEffectEdit = (
  * A diagnostic that carries no edit contributes no action, and the actions follow diagnostic
  * order, which is deterministic because every phase is.
  */
-export const codeActions = (
+export const codeActions = Effect.fn('Document.codeActions')(function* (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
   range: Range,
   uriOf: (module: string) => string | undefined,
-  inventory?: WorkspaceInventory.WorkspaceInventory,
-): ReadonlyArray<CodeAction> => {
+  loadInventory?: Effect.Effect<WorkspaceInventory.WorkspaceInventory>,
+): Effect.fn.Return<ReadonlyArray<CodeAction>> {
   // `diagnostics` maps the same `owned` list one-to-one, so the two stay index-aligned.
   const published = compilerDiagnostics(self, snapshot, uriOf)
-  const compiler = owned(self, snapshot).flatMap((diagnostic, order) => {
+  const diagnostics = owned(self, snapshot)
+  const needsInventory = diagnostics.some((diagnostic, order) => {
+    const source = published[order]
+    return (
+      source !== undefined &&
+      overlaps(source.range, range) &&
+      Analysis.semanticOccurrenceAt(snapshot, self.module, diagnostic.span.start)?.resolution
+        ._tag === 'Missing'
+    )
+  })
+  const inventory = needsInventory && loadInventory !== undefined ? yield* loadInventory : undefined
+  const compiler = diagnostics.flatMap((diagnostic, order) => {
     const source = published[order]
     if (source === undefined || !overlaps(source.range, range)) return []
     const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
@@ -783,7 +794,7 @@ export const codeActions = (
     return [{ title: expansion.descriptor.title, kind: CodeActionKind.RefactorRewrite, data }]
   })
   return [...compiler, ...redundancy, ...unused, ...expansions]
-}
+})
 
 export const disableCodeAction = (action: CodeAction, reason: string): CodeAction => {
   const { edit: discarded, ...withoutEdit } = action
@@ -792,13 +803,13 @@ export const disableCodeAction = (action: CodeAction, reason: string): CodeActio
 }
 
 /** Revalidates a descriptor into one revision-checked protocol workspace edit. */
-export const resolveCodeAction = (
+export const resolveCodeAction = Effect.fn('Document.resolveCodeAction')(function* (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
-  inventory: WorkspaceInventory.WorkspaceInventory,
+  loadInventory: Effect.Effect<WorkspaceInventory.WorkspaceInventory>,
   action: CodeAction,
   uriOf: (module: string) => string | undefined,
-): CodeAction => {
+): Effect.fn.Return<CodeAction> {
   const data = parseCodeActionData(action.data)
   if (
     data === undefined ||
@@ -854,6 +865,7 @@ export const resolveCodeAction = (
       ? disableCodeAction(action, 'The unused import could not be mapped to a workspace document')
       : { ...action, edit }
   }
+  const inventory = yield* loadInventory
   const plan = Option.getOrUndefined(
     Analysis.resolveAutoImport(snapshot, inventory, data.module, data.target.start, data.candidate),
   )
@@ -863,7 +875,7 @@ export const resolveCodeAction = (
   return edit === undefined
     ? disableCodeAction(action, 'The import target could not be mapped to a workspace document')
     : { ...action, edit }
-}
+})
 
 /** Returns the source-like semantic presentation under one position. */
 export const hover = (
@@ -1621,12 +1633,12 @@ const completionKind = (kind: string): CompletionItemKind => {
 }
 
 /** Converts compiler-owned semantic candidates into deterministic protocol completion items. */
-export const completion = (
+export const completion = Effect.fn('Document.completion')(function* (
   self: Document,
   snapshot: Analysis.FrontendSnapshot,
   position: Position,
-  inventory?: WorkspaceInventory.WorkspaceInventory,
-): CompletionList => {
+  loadInventory?: Effect.Effect<WorkspaceInventory.WorkspaceInventory>,
+): Effect.fn.Return<CompletionList> {
   const result = Analysis.completionAt(
     snapshot,
     self.module,
@@ -1643,12 +1655,13 @@ export const completion = (
     ...(candidate.detail === undefined ? {} : { detail: candidate.detail.text }),
   }))
   if (
-    inventory === undefined ||
+    loadInventory === undefined ||
     result.context._tag === 'ActorMemberContext' ||
     result.context._tag === 'ValueMemberContext'
   )
     return { isIncomplete: false, items: [...items] }
 
+  const inventory = yield* loadInventory
   const syntax = Analysis.moduleAnalysis(snapshot, self.module)?.syntax
   if (syntax === undefined) return { isIncomplete: false, items: [...items] }
   const visible = new Set(items.map((item) => item.label))
@@ -1799,7 +1812,7 @@ export const completion = (
       ]
     })
   return { isIncomplete: false, items: [...items, ...namespaces, ...catalog] }
-}
+})
 
 /** Inherent impl heads as symbols, each nesting the members declared in its block. */
 const inherentImplSymbols = (

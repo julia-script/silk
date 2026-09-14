@@ -8,6 +8,7 @@ import * as Hir from '../src/Hir.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as CleanupPlan from '../src/CleanupPlan.js'
 import * as MirVerification from '../src/MirVerification.js'
+import * as Mir from '../src/Mir.js'
 import * as Ownership from '../src/Ownership.js'
 import * as Type from '../src/Type.js'
 import { ordinaryStorageSource } from './support/ordinaryStorageSource.js'
@@ -640,4 +641,61 @@ pub fn main() -> i32 { return 0 }`,
   // Measured near the 60s floor while the full parallel gate saturates the host; the timeout
   // is headroom for contention, not a performance assertion.
   180_000,
+)
+
+it.effect(
+  'proves local-shared provenance through stored recipes and nested provider forwarding',
+  () =>
+    Effect.gen(function* () {
+      const module = 'allocation/stored-provider-forwarding'
+      const source = `import silk.allocator {Allocator, OutOfMemoryError}
+import silk.effect {Effect}
+import silk.shared {Shared}
+
+service Marker {
+  effect fn mark() -> i32 ? &mut Marker
+}
+struct FixedMarker {}
+impl Marker for FixedMarker {
+  effect fn mark(self: &mut Self) -> i32 { drop self return 42 }
+}
+struct Audit {value: i32}
+fn read(audit: &Audit) -> i32 { return audit.value }
+
+effect fn runCases() -> i32 ! OutOfMemoryError ? &mut Allocator | &mut Marker {
+  let allocation = Shared.make<Audit>(Audit {value: 42})
+  let audit = run move allocation
+  let value = Shared.with(&audit, read)
+  let marked = run Marker.mark()
+  return value + marked
+}
+
+effect fn program() -> i32 ! OutOfMemoryError {
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let mut marker = FixedMarker {}
+  let recipe = runCases()
+  let marked = move recipe |> Effect.provideMut<Marker>(&mut marker)
+  let provided = move marked |> Effect.provideMut<Allocator>(&mut allocator)
+  return run move provided
+}
+effect fn failed(error: OutOfMemoryError) -> i32 { drop error return -1 }
+pub fn main() -> i32 { return run Effect.catchAll(program(), failed) }`
+      const snapshot = yield* Analysis.makeRealized({
+        root: SourceFile.make(module, ascii(source)),
+        configuration: AnalysisFixture.configuration(module, 'wasm32-unknown-unknown'),
+      }).pipe(Effect.provide(SourceResolver.empty))
+      assert.deepEqual(
+        Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+        [],
+      )
+      const mir = Analysis.loweredMir(snapshot)
+      assert.isTrue(
+        mir.functions
+          .flatMap((fn) => fn.regions)
+          .flatMap(Mir.operationsOf)
+          .flatMap(Mir.operationTree)
+          .some((operation) => operation._tag === 'SharedFromAllocation'),
+      )
+      assert.deepEqual(MirVerification.verify(mir), [])
+    }),
 )

@@ -1,6 +1,7 @@
 import type * as NativeAssembly from './NativeAssembly.js'
 import * as Lifetime from './Lifetime.js'
 import * as Constraint from './Constraint.js'
+import type * as ConformanceProof from './ConformanceProof.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as Diagnostic from './Diagnostic.js'
 import * as Intrinsic from './Intrinsic.js'
@@ -400,6 +401,7 @@ export interface PatternBinding {
 }
 
 export interface PatternSelection {
+  readonly tests?: ReadonlyArray<Match.PatternTest>
   readonly id: Match.MatchId
   readonly arm: Match.ArmId
   readonly access: Match.Access
@@ -566,6 +568,7 @@ export type Expression =
       readonly scrutinee: Expression
       readonly members: ReadonlyArray<Match.CoverageIdentity>
       readonly arms: ReadonlyArray<{
+        readonly tests?: ReadonlyArray<Match.PatternTest>
         readonly id: Match.ArmId
         readonly member?: Match.CoverageIdentity
         readonly universal: boolean
@@ -717,6 +720,8 @@ export type Expression =
       readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+      /** Symbolic source identities to be checked against the later concrete proof selection. */
+      readonly symbolicConformances: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection>
       readonly staticArguments: ReadonlyArray<StaticValue.Value>
       /** Caller-authored origins aligned with static arguments, excluded from instance identity. */
       readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
@@ -800,6 +805,7 @@ export type Expression =
       readonly target: DeclarationFacts.CanonicalId
       readonly typeArguments: ReadonlyArray<Type.GenericArgument>
       readonly evidence: ReadonlyArray<Constraint.ConstraintEvidence>
+      readonly symbolicConformances: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection>
       readonly staticArguments: ReadonlyArray<StaticValue.Value>
       /** Caller-authored origins aligned with static arguments, excluded from instance identity. */
       readonly staticArgumentOrigins?: ReadonlyArray<StaticEvaluation.TextOrigin | undefined>
@@ -1206,7 +1212,10 @@ export const returnExpressions = (body: ReadonlyArray<Statement>): ReadonlyArray
         )
         if (!arm.reachable || selected.length === 0) continue
         const guardCompletes = arm.guard === undefined || expression(arm.guard)
-        if (arm.guard === undefined || !guardCompletes)
+        remaining = remaining.filter((candidate) =>
+          arm.after.some((member) => Match.identityEquals(candidate, member)),
+        )
+        if (!guardCompletes && (arm.tests?.length ?? 0) === 0)
           remaining = remaining.filter((candidate) => !selected.includes(candidate))
         if (!guardCompletes) continue
         const normal =
@@ -1618,6 +1627,7 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
             ...(arm.member === undefined ? {} : { member: arm.member }),
             universal: arm.universal,
             guarded: arm.guard !== undefined,
+            tests: arm.tests ?? [],
           }),
         ),
       )
@@ -1628,12 +1638,17 @@ export const verify = (self: Module): ReadonlyArray<VerificationIssue> => {
             arm.universal || (arm.member !== undefined && Match.selects(arm.member, candidate)),
         )
         const executes = selected.length > 0
+        const transition = coverage.transitions.at(index)
+        remaining = remaining.filter((candidate) =>
+          transition?.after.some((member) => Match.identityEquals(candidate, member)),
+        )
         if (
-          arm.guard === undefined ||
-          (arm.guard._tag !== 'Unavailable' && Type.isNever(arm.guard.type))
+          arm.guard !== undefined &&
+          arm.guard._tag !== 'Unavailable' &&
+          Type.isNever(arm.guard.type) &&
+          (arm.tests?.length ?? 0) === 0
         )
           remaining = remaining.filter((candidate) => !selected.includes(candidate))
-        const transition = coverage.transitions.at(index)
         if (arm.id.ordinal !== index) {
           issues.push(Object.freeze({ _tag: 'InvalidMatchArmOrder', span: arm.span }))
         }

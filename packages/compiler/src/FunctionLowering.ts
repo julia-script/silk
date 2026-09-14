@@ -1,6 +1,7 @@
 import { indexExits, loanEndOperations } from './CleanupEmission.js'
 import type { ExitIndex } from './CleanupEmission.js'
 import type * as CleanupPlan from './CleanupPlan.js'
+import * as Constraint from './Constraint.js'
 import type * as DeclarationFacts from './DeclarationFacts.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import type * as Hir from './Hir.js'
@@ -15,12 +16,47 @@ import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
-import type { GeneratedEffectRunner } from './ValueType.js'
+import type { GeneratedEffectRunner, SpecializedWitnessEffectTarget } from './ValueType.js'
 import {
   representedValueType,
   storedCallableValueType,
   storedEffectValueType,
 } from './ValueType.js'
+
+export interface LoweringFailure {
+  readonly boundary: 'Expression' | 'Statement'
+  readonly construct: Hir.Expression['_tag'] | Hir.Statement['_tag']
+  readonly provenance: Mir.Provenance
+  readonly reason?:
+    | {
+        readonly _tag: 'WitnessEffectMissingSite'
+      }
+    | {
+        readonly _tag: 'WitnessEffectMissingContract'
+      }
+    | {
+        readonly _tag: 'WitnessEffectMissingTarget'
+        readonly site: string
+        readonly publishedSites: ReadonlyArray<string>
+      }
+    | {
+        readonly _tag: 'WitnessEffectMissingLayout'
+        readonly site: string
+        readonly availableSites: ReadonlyArray<string>
+      }
+    | {
+        readonly _tag: 'WitnessEffectOperandLowering'
+        readonly site: string
+        readonly failure:
+          | 'Arity'
+          | 'Argument'
+          | 'Contract'
+          | 'ExpectedType'
+          | 'ActualType'
+          | 'Incompatible'
+        readonly ordinal?: number
+      }
+}
 
 export class FunctionLowering {
   /** Only the generated primitive runner may emit the terminal suspension origin. */
@@ -69,6 +105,7 @@ export class FunctionLowering {
   private syntheticBorrowOrdinal = 0
   private replayBorrowSubstitution: Map<string, Hir.BorrowId> | undefined
   private readonly directBorrowSubstitution = new Map<string, Hir.BorrowId>()
+  loweringFailure: LoweringFailure | undefined
 
   constructor(
     readonly layout: Layout.Plan,
@@ -84,6 +121,7 @@ export class FunctionLowering {
     readonly generatedRunners: Array<GeneratedEffectRunner>,
     readonly opaqueRealizations: OpaqueRealization.Catalog,
     readonly providedRequirements: ReadonlyArray<ProvidedRequirement> = Object.freeze([]),
+    readonly witnessTargets?: ReadonlyArray<SpecializedWitnessEffectTarget>,
   ) {
     this.exits = indexExits(ownership)
     this.issuedBorrowKeys = new Set((ownership?.loans ?? []).map((loan) => borrowKey(loan.id)))
@@ -156,6 +194,20 @@ export class FunctionLowering {
 
   publish(region: Mir.Region): void {
     this.regions[region.id.ordinal] = region
+  }
+
+  recordLoweringFailure(
+    boundary: LoweringFailure['boundary'],
+    construct: LoweringFailure['construct'],
+    span: SourceSpan.SourceSpan,
+    reason?: LoweringFailure['reason'],
+  ): void {
+    this.loweringFailure ??= Object.freeze({
+      boundary,
+      construct,
+      provenance: Object.freeze({ span, generated: false }),
+      ...(reason === undefined ? {} : { reason }),
+    })
   }
 
   capture<A>(body: () => A): readonly [A, ReadonlyArray<Mir.Operation>] {
@@ -243,10 +295,18 @@ export class FunctionLowering {
   }
 
   semanticArgument(argument: Type.GenericArgument): Type.GenericArgument {
-    return Type.substituteGenericArgument(
-      argument,
-      this.substitution,
-      this.owner.specialization.compatibility,
+    return Type.specializeExecutableOwner(
+      Type.substituteGenericArgument(
+        argument,
+        this.substitution,
+        this.owner.specialization.compatibility,
+      ),
+      {
+        declaration: this.owner.key.declaration,
+        typeArguments: this.owner.key.typeArguments,
+        staticArgumentKeys: this.owner.key.staticArguments.map(StaticValue.key),
+      },
+      Constraint.specializeCallableSchemaExecutableOwner,
     )
   }
 
@@ -274,7 +334,7 @@ export class FunctionLowering {
               call.target.declaration.name === implementation.name,
           )
     const expected = typeArguments?.filter((argument) => !Type.isHiddenExecutableArgument(argument))
-    const specialized =
+    const exactSpecialized =
       expected === undefined
         ? selected
         : selected.filter((call) => {
@@ -289,6 +349,27 @@ export class FunctionLowering {
               })
             )
           })
+    let usedRuntimeFallback = false
+    let specialized = exactSpecialized
+    if (expected !== undefined && exactSpecialized.length === 0) {
+      usedRuntimeFallback = true
+      // Runtime instance discovery deliberately coalesces proof-only caller lifetimes. If another
+      // proof context supplied the retained call shape, recover only its unique runtime-equivalent
+      // visible arguments so lowering also retains its hidden callable and Effect identities.
+      // Ambiguous physical targets remain unavailable.
+      const expectedRuntime = Type.runtimeArgumentKeys(expected)
+      specialized = selected.filter((call) => {
+        const actualRuntime = Type.runtimeArgumentKeys(
+          call.target.typeArguments.filter(
+            (argument) => !Type.isHiddenExecutableArgument(argument),
+          ),
+        )
+        return (
+          actualRuntime.length === expectedRuntime.length &&
+          actualRuntime.every((argument, ordinal) => argument === expectedRuntime.at(ordinal))
+        )
+      })
+    }
     const staticallySpecialized =
       staticArguments === undefined || staticArguments.length === 0
         ? specialized
@@ -300,6 +381,11 @@ export class FunctionLowering {
                 return wanted !== undefined && StaticValue.equals(argument, wanted)
               }),
           )
-    return staticallySpecialized.length === 1 ? staticallySpecialized.at(0) : undefined
+    if (staticallySpecialized.length === 1) return staticallySpecialized.at(0)
+    if (!usedRuntimeFallback || staticallySpecialized.length === 0) return undefined
+    const targets = new Map(
+      staticallySpecialized.map((call) => [Instances.keyText(call.target), call] as const),
+    )
+    return targets.size === 1 ? [...targets.values()].at(0) : undefined
   }
 }

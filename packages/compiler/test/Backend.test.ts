@@ -1,4 +1,5 @@
 import * as AnalysisFixture from './support/AnalysisFixture.js'
+import { selectedForeignDollarSource } from './support/foreignDollarSymbol.js'
 import * as ForeignContract from '../src/ForeignContract.js'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
@@ -159,7 +160,10 @@ pub fn main() -> i32 { return run observing((), observer, Effect.catchAll(choose
         ?.at(1) ?? unreachable('expected the returned payload projection')
     assert.include(choose, `ptr ${projection}`)
     assert.match(choose, /phi i32[^\n]+\[ %place[^,]+, %completion_exit/)
-    assert.match(choose, /insertvalue [^\n]+%completion_lane/)
+    assert.match(choose, /^define hidden void /)
+    assert.match(choose, /store i32 %completion_lane0, ptr %completion_result_0_ptr/)
+    assert.match(choose, /getelementptr \{[^\n]+\}, ptr %[^,]+, i32 0, i32 0/)
+    assert.notMatch(choose, /insertvalue [^\n]+%completion_lane/)
   }),
 )
 
@@ -387,7 +391,7 @@ pub fn main() -> i32 { return choose([Pair { left: 10, right: 11 }, Pair { left:
     assert.include(first.ir, 'icmp ult')
     assert.notInclude(first.ir, 'select i1')
     assert.match(first.ir, /%owned_read\d+_stride0 = mul i64 %\w+, 8/)
-    assert.match(first.ir, /getelementptr i32, ptr %addr0, i64 %owned_read\d+_stride0/)
+    assert.match(first.ir, /getelementptr i8, ptr %addr0, i64 %owned_read\d+_stride0/)
     assert.match(first.ir, /%project\w+ = load i32, ptr %owned_read\d+_field/)
     assert.include(first.ir, '@llvm.trap()')
     assert.deepEqual(first.bitcode, second.bitcode)
@@ -592,6 +596,34 @@ pub fn main() -> i32 {
 
     const plain = yield* emit(nestedSource, { mode: 'release' })
     assert.deepEqual(plain.foreignImports, [])
+  }),
+)
+
+it.effect('preserves selected dollar-bearing symbols and excludes inactive imports', () =>
+  Effect.gen(function* () {
+    for (const [target, expected] of [
+      ['aarch64-apple-darwin', ['close$NOCANCEL', 'helper$version']],
+      ['x86_64-unknown-linux-gnu', ['helper$version']],
+      ['wasm32-unknown-unknown', []],
+    ] as const) {
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        `backend/foreign-dollar-${target}`,
+        ascii(selectedForeignDollarSource),
+        target,
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [], target)
+      const artifact = yield* Analysis.codegen(snapshot, { mode: 'release' })
+      assert.deepEqual(
+        artifact.foreignImports.map((entry) => entry.symbol),
+        [...expected],
+        target,
+      )
+      for (const symbol of expected) assert.include(artifact.ir, `@${symbol}`, target)
+      for (const symbol of ['close$NOCANCEL', 'helper$version']) {
+        if (!expected.some((candidate) => candidate === symbol))
+          assert.notInclude(artifact.ir, symbol, target)
+      }
+    }
   }),
 )
 

@@ -5,6 +5,7 @@ import {
   generated,
   ownershipLocal,
   lowerOwnershipPath,
+  lowerReferencePlace,
   propagationLoanEnds,
   propagationReleases,
 } from './CleanupEmission.js'
@@ -30,7 +31,7 @@ import * as TypeCompatibility from './TypeCompatibility.js'
 import {
   baseRunnerKey,
   effectValueByIdentity,
-  ensureProvidedRunner,
+  ensureEffectRunner,
   instanceText,
   providerBindings,
   requirementsFor,
@@ -64,13 +65,16 @@ export const lowerCatchEffectValue = (
     fn.owner.key.declaration,
     expression.span,
   )
+  const semanticType = fn.semantic(expression.type)
+  if (!Type.isEffect(semanticType)) return undefined
   const environment = fn.layout.effectEnvironments.find(
     (
       candidate,
     ): candidate is Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
       candidate._tag === 'EffectEnvironment' &&
       Instances.keyText(candidate.instance) === Instances.keyText(fn.owner.key) &&
-      Hir.sameExecutableSite(candidate.site, site),
+      Hir.sameExecutableSite(candidate.site, site) &&
+      Type.equals(candidate.effect, semanticType),
   )
   if (environment === undefined || environment.fields.length !== 2) return undefined
   const type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }> = Object.freeze({
@@ -80,7 +84,7 @@ export const lowerCatchEffectValue = (
     environment,
   })
   const runner = Hir.effectRunnerId(fn.owner.key.declaration, site)
-  const specializationKey = baseRunnerKey(fn.owner.key, site)
+  const specializationKey = baseRunnerKey(fn.owner.key, site, type.type)
   const destination = fn.alloc(type)
   fn.emit(
     Object.freeze({
@@ -136,11 +140,7 @@ const cancellationFinalizerOf = (
 ): Mir.CancellationFinalizer | undefined => {
   const provided = requirementsFor(availableRequirements, effectType.type)
   if (provided === undefined) return undefined
-  const runner =
-    provided.length === 0
-      ? (effectType.storage?.realization.runner ??
-        Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site))
-      : ensureProvidedRunner(fn, effectType, provided)
+  const runner = ensureEffectRunner(fn, effectType, provided)
   if (runner === undefined) return undefined
   const runnerInstance =
     effectType.storage?.realization.runnerInstance ?? effectType.environment.instance
@@ -170,8 +170,13 @@ export const lowerRunEffectValue = (
   cancellationFinalizer?: Mir.CancellationFinalizer,
 ): LoweredExpression | undefined => {
   // A success that is itself an Effect is the value the environment's success identity names.
-  const successType = Type.isEffect(fn.semantic(success))
-    ? effectValueByIdentity(fn.layout, effectType.environment.successEffectIdentity ?? '')
+  const semanticSuccess = fn.semantic(success)
+  const successType = Type.isEffect(semanticSuccess)
+    ? effectValueByIdentity(
+        fn.layout,
+        effectType.environment.successEffectIdentity ?? '',
+        semanticSuccess,
+      )
     : fn.type(success)
   if (successType === undefined || successType._tag === 'EffectOutcome') return undefined
   const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
@@ -200,12 +205,8 @@ export const lowerRunEffectValue = (
   const propagationShape =
     propagationType === undefined ? undefined : Layout.callingShape(fn.layout, propagationType.type)
   const provided = requirementsFor(availableRequirements, effectType.type)
-  const providedRunner =
-    provided === undefined || provided.length === 0
-      ? undefined
-      : ensureProvidedRunner(fn, effectType, provided)
-  if (provided !== undefined && provided.length > 0 && providedRunner === undefined)
-    return undefined
+  const runner = provided === undefined ? undefined : ensureEffectRunner(fn, effectType, provided)
+  if (provided === undefined || runner === undefined) return undefined
   const baseRunner =
     effectType.storage?.realization.runner ??
     Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site)
@@ -221,12 +222,12 @@ export const lowerRunEffectValue = (
       destination,
       outcome,
       effect,
-      runner: providedRunner ?? baseRunner,
+      runner,
       runnerTypeArguments: baseRunnerTypeArguments,
       ...(runnerInstance.staticArguments.length === 0
         ? {}
         : { runnerStaticArguments: runnerInstance.staticArguments }),
-      ...(providedRunner === undefined
+      ...(provided.length === 0
         ? {}
         : {
             runnerBase: Object.freeze({
@@ -286,13 +287,8 @@ export const lowerRunEffectComposite = (
   const alternatives = effectType.alternatives.flatMap((alternative) => {
     const provided = requirementsFor(availableRequirements, alternative.type)
     if (provided === undefined) return []
-    const providedRunner =
-      provided.length === 0 ? undefined : ensureProvidedRunner(fn, alternative, provided)
-    if (provided.length > 0 && providedRunner === undefined) return []
-    const runner =
-      providedRunner ??
-      alternative.storage?.realization.runner ??
-      Hir.effectRunnerId(alternative.environment.instance.declaration, alternative.site)
+    const runner = ensureEffectRunner(fn, alternative, provided)
+    if (runner === undefined) return []
     const runnerTypeArguments =
       alternative.storage?.realization.runnerArguments ??
       alternative.environment.instance.typeArguments
@@ -387,11 +383,7 @@ export const runCaughtEffectValue = (
 ): CaughtEffect | undefined => {
   const provided = requirementsFor(availableRequirements, effectType.type)
   if (provided === undefined) return undefined
-  const runner =
-    provided.length === 0
-      ? (effectType.storage?.realization.runner ??
-        Hir.effectRunnerId(effectType.environment.instance.declaration, effectType.site))
-      : ensureProvidedRunner(fn, effectType, provided)
+  const runner = ensureEffectRunner(fn, effectType, provided)
   if (runner === undefined) return undefined
   const outcomeType: Extract<Mir.Type, { readonly _tag: 'EffectOutcome' }> = Object.freeze({
     _tag: 'EffectOutcome',
@@ -699,14 +691,7 @@ const resourceCancellationFinalizerOf = (
   if (releaseType.target._tag !== 'DeclarationCallableTarget') return undefined
   const provided = requirementsFor(availableRequirements, releaseEffectType.type)
   if (provided === undefined) return undefined
-  const runner =
-    provided.length === 0
-      ? (releaseEffectType.storage?.realization.runner ??
-        Hir.effectRunnerId(
-          releaseEffectType.environment.instance.declaration,
-          releaseEffectType.site,
-        ))
-      : ensureProvidedRunner(fn, releaseEffectType, provided)
+  const runner = ensureEffectRunner(fn, releaseEffectType, provided)
   if (runner === undefined) return undefined
   const runnerInstance =
     releaseEffectType.storage?.realization.runnerInstance ?? releaseEffectType.environment.instance
@@ -1472,8 +1457,12 @@ export const lowerPlacePath = (
       : Object.freeze({ root: root.result, selectors: Object.freeze([]) })
   }
   if (expression._tag === 'Project') {
-    const subject = lowerPlacePath(fn, expression.subject, availableRequirements)
-    if (subject === 'Transferred') return subject
+    const path = lowerPlacePath(fn, expression.subject, availableRequirements)
+    if (path === 'Transferred') return path
+    const subject =
+      path === undefined
+        ? undefined
+        : lowerReferencePlace(fn, path.root, path.selectors, authored(expression.span))
     if (subject === undefined) return undefined
     return Object.freeze({
       root: subject.root,
@@ -1488,8 +1477,12 @@ export const lowerPlacePath = (
     })
   }
   if (expression._tag === 'IndexPlace') {
-    const subject = lowerPlacePath(fn, expression.subject, availableRequirements)
-    if (subject === 'Transferred') return subject
+    const path = lowerPlacePath(fn, expression.subject, availableRequirements)
+    if (path === 'Transferred') return path
+    const subject =
+      path === undefined
+        ? undefined
+        : lowerReferencePlace(fn, path.root, path.selectors, authored(expression.span))
     if (subject === undefined) return undefined
     const index:
       | Extract<Mir.PlaceSelector, { readonly _tag: 'ElementSelector' }>['index']
@@ -1555,8 +1548,9 @@ export const lowerPlace = (
   availableRequirements: ReadonlyArray<ProvidedRequirement> = fn.activeRequirements ??
     fn.providedRequirements,
 ): LoweredExpression | undefined => {
-  const place = lowerPlacePath(fn, expression, availableRequirements)
-  if (place === 'Transferred') return place
+  const path = lowerPlacePath(fn, expression, availableRequirements)
+  if (path === 'Transferred') return path
+  const place = path === undefined ? undefined : lowerReferencePlace(fn, path.root, path.selectors)
   const type = fn.type(expression.type)
   if (place === undefined || type === undefined) return undefined
   const destination = fn.alloc(type)
@@ -1781,10 +1775,15 @@ export const lowerServiceEffectValue = (
   )
     return undefined
   const typeArguments = call?.target.typeArguments ?? provided.witness.typeArguments
+  const semanticType = fn.semantic(subject.type)
   const effectValue =
     (call?.resultEffect === undefined
       ? undefined
-      : effectValueByIdentity(fn.layout, call.resultEffect)) ??
+      : effectValueByIdentity(
+          fn.layout,
+          call.resultEffect,
+          Type.isEffect(semanticType) ? semanticType : undefined,
+        )) ??
     fn.effectResults.get(instanceText(target, typeArguments, call?.target.staticArguments))
   if (effectValue === undefined) return undefined
   const effect = fn.alloc(effectValue)

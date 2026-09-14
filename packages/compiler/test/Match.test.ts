@@ -1,4 +1,7 @@
 import { assert, it } from '@effect/vitest'
+import * as DeclarationFacts from '../src/DeclarationFacts.js'
+import * as SourceSpan from '../src/SourceSpan.js'
+import { raise } from './support/raise.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as Match from '../src/Match.js'
 import * as Type from '../src/Type.js'
@@ -111,4 +114,50 @@ it('joins equal types precisely and nominal results canonically', () => {
   const ordinary = Match.join(['i32', 'bool'])
   assert.strictEqual(ordinary._tag, 'Joined')
   if (ordinary._tag === 'Joined') assert.strictEqual(Type.encode(ordinary.type), 'bool | i32')
+})
+
+it('subtracts correlated nested tests without covering the other field combinations', () => {
+  const root = Match.structuralMember(token)
+  const first = Match.structuralMember(Type.nominal('main', 'First'))
+  const second = Match.structuralMember(Type.nominal('main', 'Second'))
+  const span = SourceSpan.fromOffsets('main', 0, 1) ?? raise('expected span')
+  const test = (ordinal: number, member: Match.CoverageIdentity): Match.PatternTest => {
+    const field: DeclarationFacts.FieldId = {
+      _tag: 'FieldId',
+      owner: {
+        _tag: 'StructFieldOwnerId',
+        declaration: { _tag: 'DeclarationId', sourceId: 'main', ordinal: 0 },
+      },
+      ordinal,
+    }
+    return { path: [field], member, domain: [first, second], span }
+  }
+  const decision = (
+    left: Match.CoverageIdentity,
+    right: Match.CoverageIdentity,
+    guarded = false,
+  ): Match.Decision => ({
+    member: root,
+    universal: false,
+    guarded,
+    tests: [test(0, left), test(1, right)],
+  })
+  const coverage = Match.cover(
+    [root],
+    [
+      decision(first, first),
+      decision(second, second),
+      decision(first, second, true),
+      decision(first, second),
+      decision(second, first),
+      decision(second, first),
+    ],
+  )
+  assert.deepEqual(
+    coverage.transitions.map((transition) => transition.reachable),
+    [true, true, true, true, true, false],
+  )
+  assert.deepEqual(coverage.transitions.at(1)?.after, [root])
+  assert.deepEqual(coverage.transitions.at(2)?.after, [root])
+  assert.isTrue(coverage.exhaustive)
 })

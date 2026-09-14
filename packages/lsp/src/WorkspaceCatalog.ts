@@ -13,6 +13,10 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Result from 'effect/Result'
+import * as Ref from 'effect/Ref'
+import * as Fiber from 'effect/Fiber'
+import type * as Scope from 'effect/Scope'
+import * as Semaphore from 'effect/Semaphore'
 import type * as Document from './Document.js'
 
 /** Filesystem hints accumulated for one accepted workspace revision. */
@@ -227,4 +231,52 @@ export const refresh = Effect.fn('WorkspaceCatalog.refresh')(function* (
   })
   analyses.set(inventory, analysis)
   return inventory
+})
+
+/** A generation's lazy catalog; only completed selections are retained for later revisions. */
+export interface DeferredInventory {
+  readonly get: Effect.Effect<WorkspaceInventory.WorkspaceInventory>
+  readonly completed: Effect.Effect<Option.Option<WorkspaceInventory.WorkspaceInventory>>
+}
+
+/** Shares successful selection while allowing an interrupted query to retry. */
+export const defer = Effect.fn('WorkspaceCatalog.defer')(function* (
+  select: Effect.Effect<WorkspaceInventory.WorkspaceInventory>,
+): Effect.fn.Return<DeferredInventory> {
+  const completed = yield* Ref.make(Option.none<WorkspaceInventory.WorkspaceInventory>())
+  const permit = yield* Semaphore.make(1)
+  const get = permit.withPermit(
+    Effect.gen(function* () {
+      const prior = yield* Ref.get(completed)
+      if (Option.isSome(prior)) return prior.value
+      const inventory = yield* select
+      yield* Ref.set(completed, Option.some(inventory))
+      return inventory
+    }),
+  )
+  return Object.freeze({ get, completed: Ref.get(completed) })
+})
+
+/** Keeps demand-started selection alive across query cancellation, until its generation closes. */
+export const retain = Effect.fn('WorkspaceCatalog.retain')(function* (
+  inventory: DeferredInventory,
+  scope: Scope.Scope,
+): Effect.fn.Return<DeferredInventory> {
+  const started = yield* Ref.make(Option.none<Fiber.Fiber<WorkspaceInventory.WorkspaceInventory>>())
+  const permit = yield* Semaphore.make(1)
+  const start = permit
+    .withPermit(
+      Effect.gen(function* () {
+        const existing = yield* Ref.get(started)
+        if (Option.isSome(existing)) return existing.value
+        const fiber = yield* Effect.forkIn(inventory.get, scope)
+        yield* Ref.set(started, Option.some(fiber))
+        return fiber
+      }),
+    )
+    .pipe(Effect.uninterruptible)
+  return Object.freeze({
+    completed: inventory.completed,
+    get: start.pipe(Effect.flatMap(Fiber.join)),
+  })
 })

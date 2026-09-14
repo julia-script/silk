@@ -15,7 +15,14 @@ import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { nativeCorpus, type NativeRun } from './support/corpus.js'
+import { base64AcceptanceSource } from './support/base64Acceptance.js'
+import { bufferedByteIoWasmAcceptanceSource } from './support/bufferedByteIoAcceptance.js'
+import { httpHeadAcceptanceSource } from './support/httpHeadAcceptance.js'
+import { httpBodyAcceptanceSource } from './support/httpBodyAcceptance.js'
+import { httpContentAcceptanceSource } from './support/httpContentAcceptance.js'
+import { httpServerPortableAcceptanceSource } from './support/httpServerPortableAcceptance.js'
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
+import { networkAddressResolutionCorpusProgram } from './support/networkAddressResolutionAcceptance.js'
 import * as Driver from './support/TestDriver.js'
 
 const defaultClang = (): string => {
@@ -68,13 +75,15 @@ const compileSource = Effect.fnUntraced(function* (
     readonly nativeLinkInputs?: ReadonlyArray<NativeLinkInput.NativeLinkInput>
     readonly cache?: boolean
     readonly artifactCache?: NativeToolchain.ArtifactCache
+    readonly optimization?: CompilationProfile.Optimization
+    readonly debug?: boolean
   } = {},
 ) {
   const profile = yield* CompilationProfile.normalize({
     target: (yield* NativeToolchain.hostTarget()).id,
     artifact: ArtifactKind.profileArtifact(options.artifactKind ?? 'NativeExecutable'),
-    optimization: 'speed',
-    debug: false,
+    optimization: options.optimization ?? 'speed',
+    debug: options.debug ?? false,
   })
   return yield* Driver.compile({
     compilation: {
@@ -152,8 +161,23 @@ const selectedNativeCases = new Set(
 const selectedCorpus = shardedCorpus.filter(
   (program) => selectedNativeCases.size === 0 || selectedNativeCases.has(program.name),
 )
-const runHttpValuesWasm =
-  selectedNativeCases.has('http-values') || (selectedNativeCases.size === 0 && runFixedTests)
+const portableWasmCorpus = [
+  { name: 'http-values', source: httpValuesAcceptanceSource, expected: 0 },
+  { name: 'http-head-parsing', source: httpHeadAcceptanceSource, expected: 42 },
+  { name: 'http-body-framing', source: httpBodyAcceptanceSource, expected: 42 },
+  { name: 'http-content-decoding', source: httpContentAcceptanceSource, expected: 0 },
+  { name: 'http-server', source: httpServerPortableAcceptanceSource, expected: 0 },
+  { name: 'base64-rfc4648', source: base64AcceptanceSource, expected: 42 },
+  { name: 'buffered-byte-io', source: bufferedByteIoWasmAcceptanceSource, expected: 0 },
+  {
+    name: networkAddressResolutionCorpusProgram.name,
+    source: networkAddressResolutionCorpusProgram.source,
+    expected: 42,
+  },
+] as const
+const selectedWasmCorpus = portableWasmCorpus.filter(({ name }) =>
+  selectedNativeCases.size === 0 ? runFixedTests : selectedNativeCases.has(name),
+)
 
 it('finds every requested native corpus case', () => {
   assert.deepStrictEqual(
@@ -391,80 +415,86 @@ it.effect.each(selectedCorpus)(
   'runs the native corpus case $name',
   (program) =>
     Effect.gen(function* () {
-      // Driver compilation checks and lowers this program once. MIR structure is covered by
-      // the shared verifier suite; repeating that pipeline here adds no runtime oracle.
       const compiledObjects =
         program.nativeCSources === undefined
           ? []
           : yield* compileCSources(`corpus-${program.name}`, program.nativeCSources)
-      const outcome = yield* compileSource(
-        `corpus-${program.name}`,
-        program.nativeSource ?? program.source,
-        program.nativeImports,
-        {
-          ...(program.nativeComponents === undefined
-            ? {}
-            : { components: program.nativeComponents }),
-          nativeLinkInputs: [
-            ...compiledObjects.map(NativeLinkInput.object),
-            ...(program.nativeDynamicLibraries ?? []).map((name) =>
-              NativeLinkInput.library(name, 'Dynamic'),
-            ),
-          ],
-        },
-      )
+      const profiles = program.nativeProfiles ?? [
+        { name: 'optimized', optimization: 'speed' as const, debug: false },
+      ]
+      for (const profile of profiles) {
+        const outcome = yield* compileSource(
+          `corpus-${program.name}-${profile.name}`,
+          program.nativeSource ?? program.source,
+          program.nativeImports,
+          {
+            ...(program.nativeComponents === undefined
+              ? {}
+              : { components: program.nativeComponents }),
+            nativeLinkInputs: [
+              ...compiledObjects.map(NativeLinkInput.object),
+              ...(program.nativeDynamicLibraries ?? []).map((name) =>
+                NativeLinkInput.library(name, 'Dynamic'),
+              ),
+            ],
+            optimization: profile.optimization,
+            debug: profile.debug,
+          },
+        )
 
-      let compilationMessage = program.name
-      if (outcome._tag === 'BackendFailed') {
-        compilationMessage = `${program.name}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
-      } else if (outcome._tag === 'Rejected') {
-        compilationMessage = `${program.name}: ${outcome.diagnostics
-          .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
-          .join('\n')}`
-      }
-      assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)
-      if (outcome._tag !== 'Compiled') return
+        const caseName = `${program.name} [${profile.name}]`
+        let compilationMessage = caseName
+        if (outcome._tag === 'BackendFailed') {
+          compilationMessage = `${caseName}: ${outcome.error.message}\n${Json.stringify(outcome.error.reason)}`
+        } else if (outcome._tag === 'Rejected') {
+          compilationMessage = `${caseName}: ${outcome.diagnostics
+            .map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`)
+            .join('\n')}`
+        }
+        assert.strictEqual(outcome._tag, 'Compiled', compilationMessage)
+        if (outcome._tag !== 'Compiled') return
 
-      // Invocation variants exercise startup policy without recompiling the same program.
-      for (const invocation of program.nativeRuns ?? [{}]) {
-        const run = yield* runCompiled(outcome.path, invocation)
-        if (program.nativeStdout !== undefined)
-          assert.strictEqual(run.stdout, program.nativeStdout, program.name)
-        if (!invocation.closeStderr && program.nativeStderr !== undefined)
-          assert.strictEqual(run.stderr, program.nativeStderr, program.name)
-        if (program.expected._tag === 'Completes') {
-          const nativeStatus = run.status === null ? null : BigInt(run.status)
-          // POSIX exposes only the low unsigned byte of a process exit value.
-          const expectedStatus = BigInt(program.expected.result) & 0xffn
-          assert.strictEqual(
-            nativeStatus,
-            expectedStatus,
-            `unexpected native result for ${program.name}: expected ${program.expected.result}, native ${run.status}; ${Json.stringify({ signal: run.signal, stderr: run.stderr })}`,
-          )
-        } else {
-          assert.strictEqual(
-            run.signal !== null || (run.status !== null && run.status !== 0),
-            true,
-            `expected ${program.name} to trap, native exited ${run.status}`,
-          )
+        // Invocation variants exercise startup policy without recompiling the same profile.
+        for (const invocation of program.nativeRuns ?? [{}]) {
+          const run = yield* runCompiled(outcome.path, invocation)
+          if (program.nativeStdout !== undefined)
+            assert.strictEqual(run.stdout, program.nativeStdout, caseName)
+          if (!invocation.closeStderr && program.nativeStderr !== undefined)
+            assert.strictEqual(run.stderr, program.nativeStderr, caseName)
+          if (program.expected._tag === 'Completes') {
+            const nativeStatus = run.status === null ? null : BigInt(run.status)
+            // POSIX exposes only the low unsigned byte of a process exit value.
+            const expectedStatus = BigInt(program.expected.result) & 0xffn
+            assert.strictEqual(
+              nativeStatus,
+              expectedStatus,
+              `unexpected native result for ${caseName}: expected ${program.expected.result}, native ${run.status}; ${Json.stringify({ signal: run.signal, stderr: run.stderr })}`,
+            )
+          } else {
+            assert.strictEqual(
+              run.signal !== null || (run.status !== null && run.status !== 0),
+              true,
+              `expected ${caseName} to trap, native exited ${run.status}`,
+            )
+          }
         }
       }
     }),
   1_500_000,
 )
 
-it.effect.skipIf(!runHttpValuesWasm)(
-  'runs the shared HTTP values corpus case through LLVM-to-Wasm',
-  () =>
+it.effect.each(selectedWasmCorpus)(
+  'runs the shared portable corpus case $name through LLVM-to-Wasm',
+  ({ name, source, expected }) =>
     Effect.gen(function* () {
       const outcome = yield* Driver.compile({
         compilation: {
-          root: SourceFile.make('memory/http-values-wasm', ascii(httpValuesAcceptanceSource)),
+          root: SourceFile.make(`memory/${name}-wasm`, ascii(source)),
           target: 'wasm32-unknown-unknown',
         },
         toolchain,
         optimization: 'release',
-        destination: join(destinationRoot, 'http-values.wasm'),
+        destination: join(destinationRoot, `${name}.wasm`),
         cache: false,
         artifactKind: 'WebAssemblyModule',
       }).pipe(Effect.provide(SourceResolver.empty))
@@ -483,7 +513,7 @@ it.effect.skipIf(!runHttpValuesWasm)(
         assert.deepEqual(WebAssembly.Module.imports(module), [])
         const main = new WebAssembly.Instance(module).exports['main']
         assert.isFunction(main)
-        if (typeof main === 'function') assert.strictEqual(main(), 0)
+        if (typeof main === 'function') assert.strictEqual(main(), expected)
       })
     }),
   600_000,

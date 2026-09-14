@@ -12,7 +12,10 @@ A match SHALL evaluate its scrutinee exactly once. Bare `match value` SHALL be a
 Copy scrutinee. `match move value` SHALL consume one complete owned value. `match &value` SHALL
 create shared match-local bindings, and `match &mut value` SHALL require one mutable live place and
 create exclusive match-local bindings. Shared and exclusive bindings MUST NOT escape their arm,
-enter owned storage, or be moved, returned, or captured beyond the match.
+enter owned storage, or be moved, returned, or captured beyond the match. Borrowed bindings SHALL
+refer to the selected original payload, including when the scrutinee is projected through a reference.
+A scoped operation or capture using an exclusive binding SHALL mutate that original payload, and
+suspension SHALL preserve its alias identity until the match loan ends.
 
 #### Scenario: Borrow then reuse an owner
 
@@ -28,6 +31,11 @@ enter owned storage, or be moved, returned, or captured beyond the match.
 
 - **WHEN** a bare match scrutinee is not Copy
 - **THEN** analysis reports that an explicit consuming or borrowing mode is required
+
+#### Scenario: Publish an owner after a borrowed operation
+
+- **WHEN** an exclusive match lends its selected provider to an operation and the enclosing owner is moved after the arm
+- **THEN** the published owner contains the operation's mutations rather than the payload's pre-match state
 
 ### Requirement: Nominal patterns bind complete member structure
 
@@ -298,7 +306,9 @@ foreign-enum, and integer enum patterns SHALL receive deterministic enum-specifi
 A named-field variant pattern SHALL bind, rename, nest, borrow, move, omit with `..`, and validate
 fields under the same rules as a nominal struct pattern. A unit variant SHALL bind no fields. Pattern
 selection SHALL retain the applied parent type and canonical variant identity without introducing a
-variant subtype.
+variant subtype. Nested variant patterns SHALL test every selected inner variant before binding
+its fields or evaluating the arm guard. An inner mismatch SHALL continue to the next source arm,
+and coverage SHALL retain the outer variant until all of its nested alternatives are covered.
 
 #### Scenario: Move fields from one selected variant
 
@@ -309,3 +319,13 @@ variant subtype.
 
 - **WHEN** a variant pattern omits a declared field without `..`
 - **THEN** analysis reports the same missing-field condition as struct destructuring and creates no executable arm
+
+#### Scenario: Distinguish nested variant alternatives
+
+- **WHEN** an outer `Io` variant contains an inner error with `Closed` and `Open` alternatives
+- **THEN** an `Io { error: Closed { operation } }` arm binds `operation` only for `Closed`, and `Open` remains available to a later arm
+
+#### Scenario: Exhaust all nested alternatives
+
+- **WHEN** unguarded arms cover every inner alternative of an outer variant and every other outer variant
+- **THEN** the match is exhaustive without a redundant whole-parent fallback

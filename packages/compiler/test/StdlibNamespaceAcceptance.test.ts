@@ -53,9 +53,8 @@ import silk.option { Option }
 import silk.random { Random }
 import silk.system_clock { SystemClock }
 import silk.tls_client { ClientConfig }
-import silk.tls_connection { Connection, ConnectionError, ConnectionOptions, ConnectionPhase, withClient }
-import silk.trust_snapshot { TrustSourceError }
-import silk.trust_source { TrustSource }
+import silk.tls_connection { OwnedConnection, ConnectionError, ConnectionOptions, ConnectionPhase, withClient }
+import silk.trust_snapshot { TrustSnapshot }
 import silk.vector { Vector }
 service Audit { effect fn record() -> () ? &mut Audit }
 effect fn makeProvider() -> MemoryByteDuplex ! OutOfMemoryError ? &mut Allocator {
@@ -72,31 +71,12 @@ effect fn makeProvider() -> MemoryByteDuplex ! OutOfMemoryError ? &mut Allocator
   })
   return run MemoryByteDuplex.make(move reads, move writes, 16, 8, Option.none<i32>())
 }
-effect<'transport> fn authenticated<'transport, P>(
-  connection: &'transport mut Connection<'transport, P>
+effect fn authenticated<P>(
+  connection: &mut OwnedConnection<P>
 ) -> i32 ? &mut Audit {
   if connection.phase() == ConnectionPhase.Invalid { return 0 }
   run Audit.record()
   return 42
-}
-effect fn connect<'env, P>(
-  transport: &'env mut P,
-  config: &ClientConfig,
-  options: ConnectionOptions,
-) -> i32
-! ConnectionError | TrustSourceError | OutOfMemoryError
-? &mut Audit
-  | &mut TrustSource
-  | &mut SystemClock
-  | &mut MonotonicClock
-  | &mut Allocator
-  | &mut Random
-where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
-  &'env mut P provides &ByteDuplex from &mut ByteDuplex
-    | &mut MonotonicClock
-    | &mut Allocator
-    | &mut Random {
-  return run withClient<i32, never>(move transport, config, move options, authenticated)
 }
 pub fn main() -> i32 { return 42 }`
       const snapshot = yield* AnalysisFixture.retainingMain(
@@ -165,8 +145,45 @@ pub fn main() -> i32 { return 42 }`
       const tlsModule = index.modules.find(
         (candidate) => candidate.module === 'silk/tls_connection',
       )
+      const ownedConnection = tlsModule?.structs.find(
+        (candidate) =>
+          candidate.name._tag === 'Present' && candidate.name.spelling === 'OwnedConnection',
+      )
+      assert.deepEqual(
+        ownedConnection?.fields.map((field) => field.visibility),
+        ['Private', 'Private', 'Private'],
+      )
+      const authenticateOwned = tlsModule?.declarations.find(
+        (declaration) =>
+          declaration.name._tag === 'Present' && declaration.name.spelling === 'authenticateOwned',
+      )
+      assert.isDefined(authenticateOwned)
+      if (authenticateOwned !== undefined) {
+        const contract = DeclarationFacts.callableContract(authenticateOwned)
+        assert.strictEqual(
+          Type.encode(contract.parameters.at(2)?.type ?? 'never'),
+          'silk/trust_snapshot.TrustSnapshot',
+        )
+        assert.isTrue(Type.isEffect(contract.result))
+        if (!Type.isEffect(contract.result)) return
+        assert.deepEqual(Type.failureMembers(contract.result).map(Type.encode), [
+          'silk/allocator.OutOfMemoryError',
+          'silk/tls_connection.ConnectionError',
+        ])
+        assert.deepEqual(
+          Type.requirementMembers(contract.result).map((requirement) =>
+            Type.encode(requirement.capability),
+          ),
+          [
+            'silk/allocator.Allocator',
+            'silk/monotonic_clock.MonotonicClock',
+            'silk/random.Random',
+            'silk/system_clock.SystemClock',
+          ],
+        )
+      }
       const connectionOperations = (tlsModule?.declarations ?? []).filter(
-        (declaration) => declaration.associatedMember?.owner?.name === 'Connection',
+        (declaration) => declaration.associatedMember?.owner?.name === 'OwnedConnection',
       )
       for (const name of ['readSome', 'writeSome', 'flush', 'shutdownWrite'] as const) {
         const operation = connectionOperations.find(
@@ -181,6 +198,20 @@ pub fn main() -> i32 { return 42 }`
           ['silk/allocator.Allocator', 'silk/monotonic_clock.MonotonicClock', 'silk/random.Random'],
         )
       }
+      const connectionClose = connectionOperations.find(
+        (declaration) => declaration.associatedMember?.name === 'close',
+      )
+      const connectionCloseResult =
+        connectionClose === undefined
+          ? undefined
+          : DeclarationFacts.callableContract(connectionClose).result
+      assert.isTrue(connectionCloseResult !== undefined && Type.isEffect(connectionCloseResult))
+      if (connectionCloseResult !== undefined && Type.isEffect(connectionCloseResult)) {
+        assert.deepEqual(Type.failureMembers(connectionCloseResult).map(Type.encode), [
+          'silk/tls_connection.ConnectionError',
+        ])
+        assert.deepEqual(Type.requirementMembers(connectionCloseResult), [])
+      }
       const withClient = tlsModule?.declarations.find(
         (declaration) =>
           declaration.name._tag === 'Present' && declaration.name.spelling === 'withClient',
@@ -189,10 +220,10 @@ pub fn main() -> i32 { return 42 }`
       if (withClient !== undefined) {
         const contract = DeclarationFacts.callableContract(withClient)
         assert.include(
-          Type.encode(contract.parameters.at(3)?.type ?? 'never'),
+          Type.encode(contract.parameters.at(4)?.type ?? 'never'),
           'CallbackRequirements',
         )
-        assert.include(Type.encode(contract.parameters.at(3)?.type ?? 'never'), 'Connection')
+        assert.include(Type.encode(contract.parameters.at(4)?.type ?? 'never'), 'OwnedConnection')
         assert.include(Type.encode(contract.result), 'CallbackRequirements')
         const exclusion = withClient.constraints.find(
           (constraint) =>
@@ -211,38 +242,74 @@ pub fn main() -> i32 { return 42 }`
       const bypassSource = `import silk.allocator { Allocator, OutOfMemoryError }
 import silk.byte_duplex { ByteDuplex }
 import silk.effect { Effect }
+import silk.memory_byte_duplex { MemoryByteDuplex }
 import silk.monotonic_clock { MonotonicClock }
 import silk.random { Random }
 import silk.system_clock { SystemClock }
 import silk.tls_client { ClientConfig }
-import silk.tls_connection { Connection, ConnectionError, ConnectionOptions, withClient }
-import silk.trust_snapshot { TrustSourceError }
-import silk.trust_source { TrustSource }
-effect<'transport> fn bypass<'transport, P>(
-  connection: &'transport mut Connection<'transport, P>
+import silk.tls_connection { OwnedConnection, ConnectionError, ConnectionOptions, withClient }
+import silk.trust_snapshot { TrustSnapshot }
+impl Copy for OwnedConnection<MemoryByteDuplex> {}
+fn forgeOwner() -> OwnedConnection<MemoryByteDuplex> {
+  return OwnedConnection<MemoryByteDuplex> {}
+}
+fn rawProvider(owner: &OwnedConnection<MemoryByteDuplex>) -> () {
+  drop owner.provider
+  return ()
+}
+fn rawProvenance(owner: &OwnedConnection<MemoryByteDuplex>) -> () {
+  drop owner.provenance
+  return ()
+}
+fn substituteProvider(
+  owner: &mut OwnedConnection<MemoryByteDuplex>,
+  replacement: MemoryByteDuplex,
+) -> () {
+  owner.provider = move replacement
+  return ()
+}
+effect<'call> fn leakOwner<'call>(
+  owner: &'call mut OwnedConnection<MemoryByteDuplex>,
+) -> &'call mut OwnedConnection<MemoryByteDuplex> {
+  return move owner
+}
+effect fn escapeOwner<'env>(
+  transport: MemoryByteDuplex,
+  config: &ClientConfig,
+  trust: TrustSnapshot,
+  options: ConnectionOptions,
+) -> &'env mut OwnedConnection<MemoryByteDuplex>
+! ConnectionError | OutOfMemoryError
+? &mut SystemClock | &mut MonotonicClock | &mut Allocator | &mut Random {
+  return run withClient<&'env mut OwnedConnection<MemoryByteDuplex>, never>(
+    move transport,
+    config,
+    move trust,
+    move options,
+    leakOwner,
+  )
+}
+effect fn bypass(
+  connection: &mut OwnedConnection<MemoryByteDuplex>
 ) -> i32 ? &mut ByteDuplex {
   drop connection
   let closed = run Effect.result(ByteDuplex.close())
   drop closed
   return 42
 }
-effect fn rejected<'env, P>(
-  transport: &'env mut P,
+effect fn rejected(
+  transport: MemoryByteDuplex,
   config: &ClientConfig,
+  trust: TrustSnapshot,
   options: ConnectionOptions,
 ) -> i32
-! ConnectionError | TrustSourceError | OutOfMemoryError
-? &mut TrustSource
-  | &mut SystemClock
+! ConnectionError | OutOfMemoryError
+? &mut SystemClock
   | &mut MonotonicClock
   | &mut Allocator
   | &mut Random
-where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
-  &'env mut P provides &ByteDuplex from &mut ByteDuplex
-    | &mut MonotonicClock
-    | &mut Allocator
-    | &mut Random {
-  return run withClient<i32, never>(move transport, config, move options, bypass)
+{
+  return run withClient<i32, never>(move transport, config, move trust, move options, bypass)
 }
 pub fn main() -> i32 { return 42 }`
       const bypassSnapshot = yield* AnalysisFixture.retainingMain(
@@ -251,12 +318,25 @@ pub fn main() -> i32 { return 42 }`
       )
       const bypassDiagnostics = Analysis.diagnostics(bypassSnapshot)
       assert.deepEqual(
-        bypassDiagnostics.map((diagnostic) => diagnostic.code),
-        ['SEM0074'],
-      )
-      assert.strictEqual(
-        bypassDiagnostics.at(0)?.span.start,
-        bypassSource.indexOf(' withClient<i32, never>(move transport'),
+        bypassDiagnostics.map((diagnostic) => ({
+          code: diagnostic.code,
+          span: bypassSource.slice(diagnostic.span.start, diagnostic.span.end).trim(),
+        })),
+        [
+          { code: 'SEM0083', span: 'impl Copy for OwnedConnection<MemoryByteDuplex> {}' },
+          { code: 'SEM0021', span: 'OwnedConnection<MemoryByteDuplex> {}' },
+          { code: 'SEM0028', span: 'provider' },
+          { code: 'SEM0028', span: 'provenance' },
+          { code: 'SEM0028', span: 'provider' },
+          {
+            code: 'SEM0074',
+            span: "withClient<&'env mut OwnedConnection<MemoryByteDuplex>, never>(\n    move transport,\n    config,\n    move trust,\n    move options,\n    leakOwner,\n  )",
+          },
+          {
+            code: 'SEM0074',
+            span: 'withClient<i32, never>(move transport, config, move trust, move options, bypass)',
+          },
+        ],
       )
     }),
   // Both the accepted callback and the bypass rejection analyze the TLS dependency graph.
@@ -382,6 +462,28 @@ pub fn main() -> i32 {
         source.slice(diagnostic.span.start, diagnostic.span.end).trim(),
       ),
       ['&mut output', '&mut output'],
+    )
+  }),
+)
+
+it.effect('rejects overlapping Base64 input and output borrows', () =>
+  Effect.gen(function* () {
+    const source = `import silk.base64 { Base64 }
+pub fn main() -> i32 {
+  let mut bytes: [u8; 4] = [90, 103, 61, 61]
+  let encoded = Base64.encodeInto(&mut bytes, &bytes)
+  let decoded = Base64.decodeInto(&mut bytes, &bytes)
+  drop encoded
+  drop decoded
+  return 42
+}`
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'stdlib-namespace/base64-overlapping-borrows',
+      ascii(source),
+    )
+    assert.deepEqual(
+      Analysis.diagnostics(snapshot).map((diagnostic) => diagnostic.code),
+      ['OWN0010', 'OWN0010'],
     )
   }),
 )

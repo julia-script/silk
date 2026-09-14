@@ -348,6 +348,7 @@ it.effect('keeps invalid match corpus failures phase-owned and downstream facts 
       )
       const codes = Analysis.diagnostics(self).map((diagnostic) => diagnostic.code)
       for (const code of program.codes) assert.include(codes, code, program.name)
+      assert.strictEqual(Analysis.mirOf(self)._tag, 'Unavailable', program.name)
       assert.isAtLeast(
         Projections.matchesOf(self, `memory/${program.name}`).length,
         1,
@@ -742,11 +743,19 @@ pub fn main() -> i32 { return 0 }`
 
 it.effect('realizes immutable target snapshots from the same frontend facts', () =>
   Effect.gen(function* () {
-    const frontend = yield* Analysis.ofSource('main', ascii('pub fn main() -> i32 { return 42 }'))
-    const native = yield* Analysis.realize(frontend).pipe(Effect.provide(SourceResolver.empty))
-    const wasm = yield* Analysis.realize(frontend, 'wasm32-unknown-unknown').pipe(
+    const frontend = yield* AnalysisFixture.frontend(
+      'main',
+      ascii('pub fn main() -> i32 { return 42 }'),
+    )
+    const native = yield* Analysis.realize(frontend, AnalysisFixture.configuration('main')).pipe(
       Effect.provide(SourceResolver.empty),
     )
+    const wasm = yield* Analysis.realize(
+      frontend,
+      AnalysisFixture.configuration('main', 'wasm32-unknown-unknown'),
+    ).pipe(Effect.provide(SourceResolver.empty))
+    assert.deepEqual(Analysis.diagnostics(native), [])
+    assert.deepEqual(Analysis.diagnostics(wasm), [])
 
     assert.strictEqual(native.results, frontend.results)
     assert.strictEqual(wasm.results, frontend.results)

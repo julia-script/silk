@@ -277,10 +277,20 @@ function discoverAndLower(
         message: 'MIR is unavailable after failed source residualization',
       })
     : undefined
+  // Source diagnostics are the recovery result for an invalid program. Keep declaration,
+  // instance, and layout facts queryable, but do not demand executable runners from invalid HIR.
+  // Valid programs still pass through the complete lowering and verification boundary below.
+  const sourceDiagnosticError = Diagnostic.hasErrors(diagnostics)
+    ? new AnalysisUnavailable({
+        operation: 'Analysis.realize',
+        message: 'MIR is unavailable for a program with source diagnostics',
+      })
+    : undefined
   const finalized =
     targetLayout._tag === 'Available' &&
     targetLiteralError === undefined &&
-    residualizationError === undefined
+    residualizationError === undefined &&
+    sourceDiagnosticError === undefined
       ? PhaseReport.measureInto(
           report,
           'mir-lowering',
@@ -365,6 +375,7 @@ function discoverAndLower(
             error:
               targetLiteralError ??
               residualizationError ??
+              sourceDiagnosticError ??
               unavailable ??
               new AnalysisUnavailable({
                 operation: 'Analysis.realize',

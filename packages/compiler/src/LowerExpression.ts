@@ -8,7 +8,7 @@ import {
   initializeBinding,
   matchCleanupKey,
   ownerFields,
-  lowerBorrowSelectors,
+  lowerBorrowPlace,
   lowerWriteSelectors,
   lowerOwnershipPath,
   ownershipLocal,
@@ -34,6 +34,7 @@ import {
   lowerFinalizedEffect,
   lowerUseReleaseNonParking,
   lowerPlace,
+  lowerPlacePath,
   lowerRunEffectComposite,
   lowerRunEffectValue,
   lowerServiceEffectValue,
@@ -54,7 +55,15 @@ import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import * as Layout from './Layout.js'
 import type { DelayedEffectState, ProvidedRequirement } from './Lower.js'
-import { bool, borrowKey, character, patternKey, spanKey, usize } from './Lower.js'
+import {
+  bool,
+  borrowKey,
+  character,
+  patternKey,
+  spanKey,
+  specializedWitnessEffectTargets,
+  usize,
+} from './Lower.js'
 import { lowerSequence } from './LowerStatements.js'
 import { lowerBuiltinExpression } from './LowerBuiltin.js'
 import * as Match from './Match.js'
@@ -72,8 +81,9 @@ import {
   stagedCallableValueType,
   effectCompositeShape,
   effectValueByIdentity,
+  effectValueForCall,
   effectValueType,
-  ensureProvidedRunner,
+  ensureEffectRunner,
   functionItemValueType,
   instanceText,
   providerBindings,
@@ -243,6 +253,7 @@ export function lowerExpression(
   fn.activeRequirements = availableRequirements
   const result = expression._tag === 'Run' ? fn.withRecipeReplay(lower) : lower()
   fn.activeRequirements = previousRequirements
+  if (result === undefined) fn.recordLoweringFailure('Expression', expression._tag, expression.span)
   return result
 }
 
@@ -1087,10 +1098,16 @@ function lowerCallableApplyExpression(
     realizedTarget?._tag === 'DeclarationCallableTarget'
       ? fn.effectResults.get(instanceText(realizedTarget.declaration, typeArguments))
       : undefined
+  const semanticType = fn.semantic(expression.type)
   const type =
-    (call?.resultEffect === undefined
+    (call === undefined || !Type.isEffect(semanticType)
       ? undefined
-      : effectValueByIdentity(fn.layout, call.resultEffect)) ??
+      : effectValueForCall(
+          fn.layout,
+          call,
+          semanticType,
+          provision === undefined ? availableRequirements : provision.requirements,
+        )) ??
     declaredEffectValue ??
     fn.type(expression.type) ??
     (realizedTarget?._tag === 'DeclarationCallableTarget'
@@ -1099,7 +1116,7 @@ function lowerCallableApplyExpression(
           fn.instances,
           realizedTarget.declaration,
           typeArguments,
-          fn.semantic(expression.type),
+          semanticType,
         )
       : undefined)
   if (!lowered || type === undefined || callableType === undefined) return undefined
@@ -1244,14 +1261,19 @@ function lowerEffectConstructExpression(
   )
   const typeArguments = call?.target.typeArguments ?? authoredTypeArguments
   const staticArguments = call?.target.staticArguments ?? expression.staticArguments
-  const resultType =
-    (call?.resultEffect === undefined
-      ? undefined
-      : effectValueByIdentity(fn.layout, call.resultEffect)) ??
-    fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments))
-  if (resultType === undefined) return undefined
+  const semanticType = fn.semantic(expression.type)
   const provision = forwardedServiceProvision(fn, expression, availableRequirements)
   if (provision === 'Transferred') return provision
+  const resultType =
+    (call === undefined || !Type.isEffect(semanticType)
+      ? undefined
+      : effectValueForCall(
+          fn.layout,
+          call,
+          semanticType,
+          provision === undefined ? availableRequirements : provision.requirements,
+        )) ?? fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments))
+  if (resultType === undefined) return undefined
   const arguments_: Array<Mir.LocalId> = []
   for (const argument of expression.arguments) {
     const lowered = lowerOperandWithProvision(fn, provision, argument, availableRequirements)
@@ -1279,7 +1301,10 @@ function lowerEffectBlockExpression(
   fn: FunctionLowering,
   expression: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>,
 ): LoweredExpression | undefined {
-  const type = effectValueType(fn.layout, fn.owner.key, expression)
+  const semanticType = fn.semantic(expression.type)
+  const type = Type.isEffect(semanticType)
+    ? effectValueType(fn.layout, fn.owner.key, expression, semanticType)
+    : undefined
   if (type === undefined) return undefined
   const captures: Array<{
     readonly source: Mir.LocalId
@@ -1314,7 +1339,8 @@ function lowerEffectBlockExpression(
   )
   if (
     !fn.generatedRunners.some(
-      (candidate) => candidate.specializationKey === baseRunnerKey(fn.owner.key, expression.site),
+      (candidate) =>
+        candidate.specializationKey === baseRunnerKey(fn.owner.key, expression.site, type.type),
     )
   ) {
     fn.generatedRunners.push(
@@ -1324,8 +1350,9 @@ function lowerEffectBlockExpression(
         owner: fn.owner,
         block: expression,
         type,
-        specializationKey: baseRunnerKey(fn.owner.key, expression.site),
+        specializationKey: baseRunnerKey(fn.owner.key, expression.site, type.type),
         providedRequirements: Object.freeze([]),
+        witnessTargets: specializedWitnessEffectTargets(fn.index, fn.owner, expression),
       }),
     )
   }
@@ -1393,7 +1420,11 @@ function lowerRunExpression(
       })
       const structuralSuccess = fn.semantic(expression.type)
       const successType = Type.isEffect(structuralSuccess)
-        ? effectValueByIdentity(fn.layout, effectValueType.environment.successEffectIdentity ?? '')
+        ? effectValueByIdentity(
+            fn.layout,
+            effectValueType.environment.successEffectIdentity ?? '',
+            structuralSuccess,
+          )
         : fn.type(expression.type)
       if (successType === undefined || successType._tag === 'EffectOutcome') return undefined
       const outcome = fn.alloc(outcomeType)
@@ -1423,12 +1454,9 @@ function lowerRunExpression(
       const releases = propagationReleases(fn, expression.span)
       const failureEnds = propagationLoanEnds(fn, expression.span)
       const provided = requirementsFor(fn.providedRequirements, effectValueType.type)
-      const providedRunner =
-        provided === undefined || provided.length === 0
-          ? undefined
-          : ensureProvidedRunner(fn, effectValueType, provided)
-      if (provided !== undefined && provided.length > 0 && providedRunner === undefined)
-        return undefined
+      const runner =
+        provided === undefined ? undefined : ensureEffectRunner(fn, effectValueType, provided)
+      if (provided === undefined || runner === undefined) return undefined
       const baseRunner =
         effectValueType.storage?.realization.runner ??
         Hir.effectRunnerId(effectValueType.environment.instance.declaration, effectValueType.site)
@@ -1443,14 +1471,14 @@ function lowerRunExpression(
           destination,
           outcome,
           effect: loweredSubject.result,
-          runner: providedRunner ?? baseRunner,
+          runner,
           runnerTypeArguments: baseRunnerTypeArguments,
           ...(runnerInstance.staticArguments.length === 0
             ? {}
             : {
                 runnerStaticArguments: runnerInstance.staticArguments,
               }),
-          ...(providedRunner === undefined
+          ...(provided.length === 0
             ? {}
             : {
                 runnerBase: Object.freeze({
@@ -1859,6 +1887,21 @@ function lowerRunExpression(
       return Object.freeze({ result: destination })
     }
     if (recipe?._tag !== 'EffectConstruct') return undefined
+    const authoredTypeArguments = recipe.typeArguments.map((argument) =>
+      fn.semanticArgument(argument),
+    )
+    const call = fn.call(
+      recipe.span,
+      undefined,
+      authoredTypeArguments,
+      recipe.staticArguments,
+      availableRequirements,
+    )
+    // Every Effect constructor carries a hidden executable identity. Never emit an authored-only
+    // target when discovery could not select its complete callable/Effect specialization.
+    if (call === undefined) return undefined
+    const typeArguments = Object.freeze(call.target.typeArguments)
+    const staticArguments = call.target.staticArguments
     const arguments_: Array<Mir.LocalId> = []
     for (const argument of recipe.arguments) {
       const lowered = lowerExpression(fn, argument, availableRequirements)
@@ -1899,12 +1942,8 @@ function lowerRunExpression(
           destination,
           outcome,
           target: recipe.target,
-          typeArguments: Object.freeze(
-            recipe.typeArguments.map((argument) => fn.semanticArgument(argument)),
-          ),
-          ...(recipe.staticArguments.length === 0
-            ? {}
-            : { staticArguments: recipe.staticArguments }),
+          typeArguments,
+          ...(staticArguments.length === 0 ? {} : { staticArguments }),
           arguments: Object.freeze(arguments_),
           outcomeType,
           propagationType,
@@ -1925,10 +1964,8 @@ function lowerRunExpression(
         _tag: 'Call',
         destination: outcome,
         target: recipe.target,
-        typeArguments: Object.freeze(
-          recipe.typeArguments.map((argument) => fn.semanticArgument(argument)),
-        ),
-        ...(recipe.staticArguments.length === 0 ? {} : { staticArguments: recipe.staticArguments }),
+        typeArguments,
+        ...(staticArguments.length === 0 ? {} : { staticArguments }),
         arguments: Object.freeze(arguments_),
         type: outcomeType,
         provenance: authored(expression.span),
@@ -2043,6 +2080,40 @@ function lowerShortCircuitExpression(
   return Object.freeze({ result: destination })
 }
 
+/** Retains checked nested discriminants before selected payload bindings. */
+export const lowerPatternTests = (
+  fn: FunctionLowering,
+  root: Type.Type,
+  member: Match.CoverageIdentity | undefined,
+  authoredTests: ReadonlyArray<Match.PatternTest>,
+  selectors: ReadonlyArray<Mir.PlaceSelector>,
+  specializeMember: (member: Match.CoverageIdentity) => Match.CoverageIdentity,
+): NonNullable<Mir.MatchArm['tests']> | undefined => {
+  const tests: Array<NonNullable<Mir.MatchArm['tests']>[number]> = []
+  for (const test of authoredTests) {
+    if (member === undefined) return undefined
+    const resolved = Layout.coveragePath(fn.layout, root, member, test.path)
+    const shape = resolved === undefined ? undefined : Layout.callingShape(fn.layout, resolved.type)
+    if (resolved === undefined || shape === undefined) return undefined
+    const provenance = authored(test.span)
+    tests.push({
+      ...test,
+      member: specializeMember(test.member),
+      domain: test.domain.map(specializeMember),
+      shape,
+      selectors: [
+        ...selectors,
+        ...resolved.selectors.map((selector): Mir.PlaceSelector =>
+          selector._tag === 'Variant'
+            ? { _tag: 'VariantSelector', ordinal: selector.ordinal, provenance }
+            : { _tag: 'FieldSelector', field: selector.field, provenance },
+        ),
+      ],
+    })
+  }
+  return tests
+}
+
 function lowerMatchExpression(
   fn: FunctionLowering,
   expression: Extract<Hir.Expression, { readonly _tag: 'Match' }>,
@@ -2051,7 +2122,12 @@ function lowerMatchExpression(
   if (expression.scrutinee._tag === 'Unavailable') return undefined
   let scrutinee: LoweredExpression | undefined
   let selectors: ReadonlyArray<Mir.PlaceSelector> | undefined
-  if (expression.access === 'Place') {
+  if (expression.access === 'Shared' || expression.access === 'Exclusive') {
+    const place = lowerPlacePath(fn, expression.scrutinee, availableRequirements)
+    if (place === undefined || place === 'Transferred') return place
+    scrutinee = { result: place.root }
+    selectors = place.selectors
+  } else if (expression.access === 'Place') {
     const source = Ownership.placeOf(expression.scrutinee)
     if (source === undefined) return undefined
     const alias = Ownership.allBindings(fn.ownership).find(
@@ -2137,6 +2213,11 @@ function lowerMatchExpression(
         ...(arm.member === undefined ? {} : { member: specializeMember(arm.member) }),
         universal: arm.universal,
         guarded: arm.guard !== undefined,
+        tests: (arm.tests ?? []).map((test) => ({
+          ...test,
+          member: specializeMember(test.member),
+          domain: test.domain.map(specializeMember),
+        })),
       }),
     ),
     'Runtime',
@@ -2155,11 +2236,27 @@ function lowerMatchExpression(
         arm.universal || (member !== undefined && Match.selects(member, candidate, 'Runtime')),
     )
     const executes = selectedMembers.length > 0
+    const tests = lowerPatternTests(
+      fn,
+      fn.semantic(expression.scrutinee.type),
+      member,
+      arm.tests ?? [],
+      selectors ?? [],
+      specializeMember,
+    )
+    if (tests === undefined) return undefined
     const before = transition.before
     const after = transition.after
     const bindings: Array<Mir.MatchBinding> = []
     for (const binding of executes && expression.access !== 'Place' ? arm.bindings : []) {
-      const type = fn.type(binding.type)
+      const type =
+        binding.access === 'Shared' || binding.access === 'Exclusive'
+          ? {
+              _tag: 'EnvironmentBorrow' as const,
+              type: fn.semantic(binding.type),
+              access: binding.access,
+            }
+          : fn.type(binding.type)
       if (type === undefined) return undefined
       const destination = fn.alloc(type)
       fn.patternLocals.set(patternKey(binding.id), destination)
@@ -2221,7 +2318,14 @@ function lowerMatchExpression(
     if (guardExpression !== undefined && guardExecution === undefined) return undefined
     // Coverage records source syntax. Runtime selection also stops on a transferring guard,
     // since it produces no Boolean that could reject this candidate and reach the next arm.
-    if (guardExecution === undefined || guardExecution.result === undefined)
+    pendingMembers = pendingMembers.filter((candidate) =>
+      after.some((remaining) => Match.identityEquals(candidate, remaining, 'Runtime')),
+    )
+    if (
+      guardExecution !== undefined &&
+      guardExecution.result === undefined &&
+      (arm.tests?.length ?? 0) === 0
+    )
       pendingMembers = pendingMembers.filter((candidate) => !selectedMembers.includes(candidate))
     const guard =
       guardExecution === undefined ? undefined : Object.freeze({ execution: guardExecution })
@@ -2301,6 +2405,7 @@ function lowerMatchExpression(
     arms.push(
       Object.freeze({
         id: arm.id,
+        tests,
         ...(member === undefined ? {} : { member }),
         universal: arm.universal,
         before: Object.freeze(before),
@@ -2583,17 +2688,15 @@ function lowerSliceBorrowExpression(
   }
   const destination = fn.alloc(type)
   const borrow = fn.beginRecipeBorrow(expression.borrow)
-  const selected = lowerBorrowSelectors(fn, expression.selectors)
-  if (selected === 'Transferred') return selected
-  if (selected === undefined) return undefined
-  const selectors = [...(alias?.selectors ?? []), ...selected]
+  const place = lowerBorrowPlace(fn, root, expression.selectors, alias?.selectors)
+  if (place === undefined || place === 'Transferred') return place
   fn.emit(
     Object.freeze({
       _tag: 'BeginLoan',
       borrow,
       destination,
-      root,
-      selectors,
+      root: place.root,
+      selectors: place.selectors,
       sourceType,
       type,
       access: expression.access,
@@ -2652,17 +2755,15 @@ function lowerValueBorrowExpression(
   }
   const destination = fn.alloc(type)
   const borrow = fn.beginRecipeBorrow(expression.borrow)
-  const selected = lowerBorrowSelectors(fn, expression.selectors)
-  if (selected === 'Transferred') return selected
-  if (selected === undefined) return undefined
-  const selectors = [...(alias?.selectors ?? []), ...selected]
+  const place = lowerBorrowPlace(fn, root, expression.selectors, alias?.selectors)
+  if (place === undefined || place === 'Transferred') return place
   fn.emit(
     Object.freeze({
       _tag: 'BeginLoan',
       borrow,
       destination,
-      root,
-      selectors,
+      root: place.root,
+      selectors: place.selectors,
       sourceType,
       type,
       access: expression.access,
@@ -2768,10 +2869,11 @@ function lowerCallExpression(
     )
     const typeArguments = Object.freeze(call?.target.typeArguments ?? authoredTypeArguments)
     const staticArguments = call?.target.staticArguments ?? expression.staticArguments
+    const semanticType = fn.semantic(expression.type)
     const type =
-      (call?.resultEffect === undefined
+      (call === undefined || !Type.isEffect(semanticType)
         ? undefined
-        : effectValueByIdentity(fn.layout, call.resultEffect)) ??
+        : effectValueForCall(fn.layout, call, semanticType, availableRequirements)) ??
       fn.effectResults.get(instanceText(expression.target, typeArguments, staticArguments)) ??
       fn.type(expression.type) ??
       resultCallableValueType(
@@ -2779,7 +2881,7 @@ function lowerCallExpression(
         fn.instances,
         expression.target,
         typeArguments,
-        fn.semantic(expression.type),
+        semanticType,
       )
     if (type === undefined) return undefined
     destination = fn.alloc(type)

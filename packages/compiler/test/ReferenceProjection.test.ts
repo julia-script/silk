@@ -458,3 +458,122 @@ fn steal(self: &mut Holder) -> Token {
     )
   }),
 )
+
+it.effect('retains reference field loans and lifetime-erased array elements', () =>
+  Effect.gen(function* () {
+    const snapshot = yield* AnalysisFixture.retainingMain(
+      'reference-projection/stored-reference-place',
+      ascii(`struct Box { value: i32 }
+struct View<'a> { box: &'a mut Box }
+struct ArrayBox { values: [i32; 1] }
+struct ArrayView<'a> { box: &'a ArrayBox }
+fn next(count: &mut i32) -> usize { count.* = count.* + 1 return 0 }
+fn read(value: &i32) -> i32 { return value.* }
+fn ordered(views: &[ArrayView], index: usize, count: &mut i32) -> i32 {
+  return views[index].box.values[next(&mut count)]
+}
+fn orderedBorrow(views: &[ArrayView], index: usize, count: &mut i32) -> i32 {
+  return read(&views[index].box.values[next(&mut count)])
+}
+fn exerciseArray(box: &ArrayBox) -> i32 {
+  let views = [ArrayView { box: box }]
+  let mut count = 0
+  let first = ordered(&views, 0, &mut count)
+  return first + orderedBorrow(&views, 0, &mut count) + count
+}
+struct Text<'a> { name: string<'a> }
+impl<'a> Copy for Text<'a> {}
+union Outcome<'a> { Present { value: Text<'a> } }
+fn makeText<'a>(name: string<'a>) -> Outcome<'a> {
+  return Outcome<'a>.Present { value: Text<'a> { name: name } }
+}
+fn entries(name: string) -> i32 {
+  let local = makeText(name)
+  drop local
+  let constant = match move makeText("static") { Outcome.Present { value: item } => item }
+  let values: [Text<'static>; 1] = [constant]
+  drop values
+  return 42
+}
+fn increment(value: &mut i32) -> () { value.* = value.* + 1 }
+fn inspect(view: &mut View) -> i32 {
+  increment(&mut view.box.value)
+  return view.box.value
+}
+fn use(box: &mut Box) -> i32 {
+  let mut view = View { box: move box }
+  return inspect(&mut view)
+}
+pub fn main() -> i32 {
+  let mut box = Box { value: 41 }
+  let arrayBox = ArrayBox { values: [0] }
+  return use(&mut box) + entries("local") + exerciseArray(&arrayBox) - 44
+}`),
+      'wasm32-unknown-unknown',
+    )
+    assert.deepEqual(Analysis.diagnostics(snapshot), [])
+    const mir = Analysis.loweredMir(snapshot)
+    assert.isTrue(mir.functions.some((fn) => fn.id.name === 'inspect'))
+    assert.deepEqual(MirVerification.verify(mir), [])
+    for (const name of ['ordered', 'orderedBorrow']) {
+      const ordered =
+        mir.functions.find((fn) => fn.id.name === name) ??
+        unreachable('expected ordered projection')
+      const operations = MirVerification.operations(ordered)
+      const checkedDescriptor = operations.findIndex(
+        (operation) =>
+          operation._tag === 'ReadPlace' &&
+          operation.type._tag === 'Reference' &&
+          operation.selectors.some((selector) => selector._tag === 'SliceElementSelector'),
+      )
+      const laterIndex = operations.findIndex(
+        (operation) => operation._tag === 'Call' && operation.target.name === 'next',
+      )
+      assert.isAtLeast(checkedDescriptor, 0)
+      assert.isAbove(laterIndex, checkedDescriptor)
+    }
+
+    const entries =
+      mir.functions.find((fn) => fn.id.name === 'entries') ?? unreachable('expected entries')
+    const array =
+      MirVerification.operations(entries).find(
+        (operation) => operation._tag === 'ConstructArray',
+      ) ?? unreachable('expected array')
+    if (array._tag !== 'ConstructArray') return unreachable('expected array construction')
+    const integerOrdinal = entries.localTypes.findIndex((type) => type._tag === 'i32')
+    assert.isAtLeast(integerOrdinal, 0)
+    const incompatible: Mir.LocalId = { _tag: 'Local', ordinal: integerOrdinal }
+    const region =
+      entries.regions.find(
+        (region) => region._tag === 'OperationRegion' && region.operations.includes(array),
+      ) ?? unreachable('expected array region')
+    const invalid = {
+      ...mir,
+      functions: mir.functions.map((fn) =>
+        fn !== entries
+          ? fn
+          : {
+              ...fn,
+              regions: fn.regions.map((candidate) =>
+                candidate !== region || candidate._tag !== 'OperationRegion'
+                  ? candidate
+                  : {
+                      ...candidate,
+                      operations: candidate.operations.map((operation) =>
+                        operation !== array ? operation : { ...array, elements: [incompatible] },
+                      ),
+                    },
+              ),
+            },
+      ),
+    }
+    assert.isTrue(
+      MirVerification.verify(invalid).some(
+        (violation) =>
+          violation.rule === 'InvalidAggregateOperation' &&
+          violation.function === entries.id &&
+          violation.region === region.id,
+      ),
+    )
+  }),
+)

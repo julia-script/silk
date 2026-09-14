@@ -968,6 +968,7 @@ const genericArgumentForParameter = (
   if (parameter?.kind === 'RequirementRow') {
     if (Type.isParameter(type) && type.kind === 'RequirementRow')
       return Type.requirementRowArgument([], [type])
+    if (Type.isNever(type)) return Type.requirementRowArgument([])
     if (Type.isNominal(type) || (Type.isParameter(type) && type.kind === 'Value'))
       return Type.requirementRowArgument([
         Object.freeze({ capability: type, role: 'DefaultRole', access: 'Shared' }),

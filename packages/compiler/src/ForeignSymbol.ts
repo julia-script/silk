@@ -9,7 +9,7 @@ export const reservedPatterns: ReadonlyArray<RegExp> = Object.freeze([
   /^silk_.*__/,
 ])
 
-export const isValidSpelling = (symbol: string): boolean => /^[A-Za-z_][A-Za-z0-9_]*$/.test(symbol)
+export const isValidSpelling = (symbol: string): boolean => /^[A-Za-z_][A-Za-z0-9_$]*$/.test(symbol)
 
 export const isReserved = (symbol: string): boolean =>
   reservedSymbols.includes(symbol) || reservedPatterns.some((pattern) => pattern.test(symbol))

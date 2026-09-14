@@ -7,6 +7,7 @@ import * as Document from './Document.js'
 import type * as EditorQuery from './EditorQuery.js'
 import * as IncidentId from './IncidentId.js'
 import * as Inspection from './Inspection.js'
+import * as WorkspaceCatalog from './WorkspaceCatalog.js'
 import type * as ProjectGeneration from './ProjectGeneration.js'
 import type * as ProjectSnapshot from './ProjectSnapshot.js'
 import type * as RequestId from './RequestId.js'
@@ -64,27 +65,27 @@ const execute = Effect.fnUntraced(function* (
     case 'Hover':
       return Document.hover(session.document, session.snapshot, query.parameters)
     case 'Completion':
-      return Document.completion(
+      return yield* Document.completion(
         session.document,
         session.snapshot,
         query.parameters,
-        session.inventory,
+        session.inventory.get,
       )
     case 'SignatureHelp':
       return Document.signatureHelp(session.document, session.snapshot, query.parameters)
     case 'CodeActions':
-      return Document.codeActions(
+      return yield* Document.codeActions(
         session.document,
         session.snapshot,
         query.parameters,
         uriOf,
-        session.inventory,
+        session.inventory.get,
       )
     case 'ResolveCodeAction':
-      return Document.resolveCodeAction(
+      return yield* Document.resolveCodeAction(
         session.document,
         session.snapshot,
-        session.inventory,
+        session.inventory.get,
         query.parameters,
         uriOf,
       )
@@ -169,6 +170,7 @@ export const make = Effect.fn('ProjectWorkerRuntime.make')(function* <R>(
   let committedGeneration: ProjectGeneration.ProjectGeneration | undefined
   let committed = new Map<string, ProjectSnapshot.DocumentSnapshot>()
   let activeAnalysis: ActiveAnalysis | undefined
+  let catalogScope: Scope.Closeable | undefined
   const queries = new Map<number, ActiveQuery>()
   let nextIncident = IncidentId.initial
   let closed = false
@@ -224,11 +226,19 @@ export const make = Effect.fn('ProjectWorkerRuntime.make')(function* <R>(
     queries.set(key, Object.freeze({ generation: message.generation, fiber }))
   })
 
+  const closeCatalog = Effect.fnUntraced(function* () {
+    const current = catalogScope
+    catalogScope = undefined
+    if (current !== undefined) yield* Scope.close(current, Exit.succeed(undefined))
+  })
+
   const supersede = Effect.fnUntraced(function* (generation: ProjectGeneration.ProjectGeneration) {
+    if (committedGeneration?.value === generation.value) yield* closeCatalog()
     const active = activeAnalysis
     if (active?.generation.value === generation.value) {
       activeAnalysis = undefined
       yield* Fiber.interrupt(active.fiber)
+      yield* closeCatalog()
     }
     for (const [key, query] of queries) {
       if (query.generation.value !== generation.value) continue
@@ -243,6 +253,7 @@ export const make = Effect.fn('ProjectWorkerRuntime.make')(function* <R>(
   ) {
     const prior = activeAnalysis
     if (prior !== undefined) yield* supersede(prior.generation)
+    yield* closeCatalog()
     const documents = message.sources.map((source) =>
       Document.make({
         uri: source.uri,
@@ -267,8 +278,8 @@ export const make = Effect.fn('ProjectWorkerRuntime.make')(function* <R>(
         ),
       )
       if (closed || activeAnalysis?.generation.value !== message.generation.value) return
-      activeAnalysis = undefined
       if (Exit.isFailure(result)) {
+        activeAnalysis = undefined
         nextIncident = IncidentId.next(nextIncident)
         yield* emit({
           _tag: 'Failure',
@@ -278,7 +289,24 @@ export const make = Effect.fn('ProjectWorkerRuntime.make')(function* <R>(
         })
         return
       }
-      committed = new Map(result.value)
+      const generationScope = yield* Scope.fork(scope)
+      catalogScope = generationScope
+      const inventories = new Map<
+        WorkspaceCatalog.DeferredInventory,
+        WorkspaceCatalog.DeferredInventory
+      >()
+      const snapshots = new Map<string, ProjectSnapshot.DocumentSnapshot>()
+      for (const [uri, snapshot] of result.value) {
+        let inventory = inventories.get(snapshot.inventory)
+        if (inventory === undefined) {
+          inventory = yield* WorkspaceCatalog.retain(snapshot.inventory, generationScope)
+          inventories.set(snapshot.inventory, inventory)
+        }
+        snapshots.set(uri, Object.freeze({ ...snapshot, inventory }))
+      }
+      if (closed || activeAnalysis?.generation.value !== message.generation.value) return
+      activeAnalysis = undefined
+      committed = snapshots
       committedGeneration = message.generation
       yield* emit({
         _tag: 'Commit',
@@ -295,6 +323,7 @@ export const make = Effect.fn('ProjectWorkerRuntime.make')(function* <R>(
     closed = true
     activeAnalysis = undefined
     queries.clear()
+    catalogScope = undefined
     yield* Scope.close(scope, Exit.succeed(undefined))
     yield* emit({ _tag: 'Stopped' })
   })

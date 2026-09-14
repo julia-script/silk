@@ -181,37 +181,6 @@ export type Representation =
       readonly cleanupHook?: CleanupHook
     }
 
-/** Canonical struct-like storage used transiently for one selected nominal-union variant. */
-export interface NominalUnionMaterialization {
-  readonly payloadOffset: number
-  readonly payloadSize: number
-  readonly payloadAlignment: number
-  readonly size: number
-  readonly alignment: number
-}
-
-export const nominalUnionMaterialization = (
-  representation: Extract<Representation, { readonly _tag: 'NominalUnion' }>,
-): NominalUnionMaterialization => {
-  const payloadSize = representation.variants.reduce(
-    (maximum, variant) => Math.max(maximum, variant.size),
-    0,
-  )
-  const payloadAlignment = representation.variants.reduce(
-    (maximum, variant) => Math.max(maximum, variant.alignment),
-    1,
-  )
-  const payloadOffset = alignUp(4, payloadAlignment)
-  const alignment = Math.max(4, payloadAlignment)
-  return Object.freeze({
-    payloadOffset,
-    payloadSize,
-    payloadAlignment,
-    size: alignUp(payloadOffset + payloadSize, alignment),
-    alignment,
-  })
-}
-
 /** One compiler-owned concrete layout entry. */
 export interface Entry {
   readonly _tag: 'LayoutEntry'
@@ -412,6 +381,7 @@ const effectInstanceByIdentity = (
 export const effectEnvironmentByIdentity = (
   environments: ReadonlyArray<EffectEnvironment>,
   identity: Type.EffectIdentityArgument,
+  requested?: Type.Effect,
 ): Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> | undefined => {
   const available = environments.filter(
     (candidate): candidate is Extract<EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
@@ -422,14 +392,21 @@ export const effectEnvironmentByIdentity = (
       Instances.effectIdentity(candidate.instance, candidate.site) === identity.identity ||
       candidate.successEffectIdentity === identity.identity,
   )
-  if (concrete.length === 1) return concrete.at(0)
+  const semantic =
+    requested === undefined
+      ? undefined
+      : concrete.find((candidate) => Type.equals(candidate.effect, requested))
+  if (semantic !== undefined) return semantic
+  // Semantic Effect variants at one physical site share this layout. Callers that require the
+  // contract select it separately; this helper owns only the capture placement.
+  if (concrete.length > 0) return concrete.at(0)
   const represented = available.filter(
     (candidate) => Hir.effectRepresentationIdentity(candidate.site) === identity.identity,
   )
   const owner = identity.owner
   if (owner === undefined) return represented.length === 1 ? represented.at(0) : undefined
   const exact = represented.filter((candidate) => sameExactOwner(candidate.instance, owner))
-  if (exact.length === 1) return exact.at(0)
+  if (exact.length > 0) return exact.at(0)
   const visible = represented.filter((candidate) => sameVisibleOwner(candidate.instance, owner))
   return visible.length === 1 ? visible.at(0) : undefined
 }
@@ -441,6 +418,8 @@ export interface EffectEnvironmentField extends PlacedField {
   readonly type: DeclarationFacts.SemanticType
   readonly representation: 'Value' | 'Borrow' | 'Callable'
   readonly effectIdentity?: string
+  /** Canonical environment selected when `effectIdentity` was a representation-site alias. */
+  readonly resolvedEffectIdentity?: string
   readonly callableIdentity?: Type.CallableIdentityArgument
   readonly providedRequirement?: NonNullable<
     FieldRealization.EffectEnvironmentSlot['providedRequirement']
@@ -1428,44 +1407,11 @@ export const catalog = (
         completed.set(key, failure)
         return failure
       }
-      const callingEntries = new Map(
-        [...completed].flatMap(([entryKey, candidate]) =>
-          candidate._tag === 'LayoutEntry' ? [[entryKey, candidate] as const] : [],
-        ),
+      const payloadAlignment = variants.reduce(
+        (maximum, variant) => Math.max(maximum, variant.alignment),
+        1,
       )
-      const callingContext = Object.freeze({
-        target,
-        entries: callingEntries,
-        effectEnvironments: Object.freeze([]),
-        callableEnvironments: Object.freeze([]),
-        active: new Set<string>(),
-      })
-      const variantShapes = variants.map((variant): CallingShapeNode => {
-        const fields = Object.freeze(
-          variant.fields.map((field) =>
-            Object.freeze({ field: field.id, shape: shapeNode(field.type, callingContext) }),
-          ),
-        )
-        return Object.freeze({
-          _tag: 'ProductShape',
-          type,
-          fields,
-          laneCount: fields.reduce((total, field) => total + field.shape.laneCount, 0),
-        })
-      })
-      const payloadTypes = unifyPayloadTypes(variantShapes, target)
-      const payload = Packing.pack(
-        payloadTypes.map((payloadType) => {
-          const scalar = scalarEntry(target, payloadType)
-          return Object.freeze({
-            value: payloadType,
-            size: scalar.size,
-            alignment: scalar.alignment,
-          })
-        }),
-      )
-      const payloadAlignment = payload.alignment
-      const payloadSize = payload.size
+      const payloadSize = variants.reduce((maximum, variant) => Math.max(maximum, variant.size), 0)
       const payloadOffset = alignUp(4, payloadAlignment)
       const alignment = Math.max(4, payloadAlignment)
       const size = alignUp(payloadOffset + payloadSize, alignment)
@@ -2419,6 +2365,8 @@ const effectEnvironments = (
   discovery: Instances.Discovery,
   callablePlans: ReadonlyArray<CallableEnvironment>,
 ): ReadonlyArray<EffectEnvironment> => {
+  const environmentKey = (environment: EffectEnvironment): string =>
+    `${Instances.effectIdentity(environment.instance, environment.site)}\u0000${Type.key(environment.effect)}`
   const layouts = new Map(
     entries.map((candidate) => [Type.runtimeKey(candidate.type), candidate] as const),
   )
@@ -2442,9 +2390,7 @@ const effectEnvironments = (
   for (let pass = 0; pass <= discovery.instances.length; pass += 1) {
     const availableBefore = new Set(
       environments.flatMap((environment) =>
-        environment._tag === 'EffectEnvironment'
-          ? [Instances.effectIdentity(environment.instance, environment.site)]
-          : [],
+        environment._tag === 'EffectEnvironment' ? [environmentKey(environment)] : [],
       ),
     ).size
     for (const instance of [...discovery.instances].reverse()) {
@@ -2782,6 +2728,14 @@ const effectEnvironments = (
               ...(capturedEffectIdentity === undefined
                 ? {}
                 : { effectIdentity: capturedEffectIdentity }),
+              ...(capturedEffectEnvironment === undefined
+                ? {}
+                : {
+                    resolvedEffectIdentity: Instances.effectIdentity(
+                      capturedEffectEnvironment.instance,
+                      capturedEffectEnvironment.site,
+                    ),
+                  }),
               ...(capturedCallableIdentity === undefined
                 ? {}
                 : { callableIdentity: capturedCallableIdentity }),
@@ -2936,9 +2890,7 @@ const effectEnvironments = (
     }
     const availableAfter = new Set(
       environments.flatMap((environment) =>
-        environment._tag === 'EffectEnvironment'
-          ? [Instances.effectIdentity(environment.instance, environment.site)]
-          : [],
+        environment._tag === 'EffectEnvironment' ? [environmentKey(environment)] : [],
       ),
     ).size
     if (availableAfter === availableBefore) break
@@ -2946,17 +2898,18 @@ const effectEnvironments = (
 
   const resolved = new Map<string, EffectEnvironment>()
   for (const environment of environments) {
-    const identity = Instances.effectIdentity(environment.instance, environment.site)
-    const previous = resolved.get(identity)
+    const key = environmentKey(environment)
+    const previous = resolved.get(key)
     if (previous === undefined || environment._tag === 'EffectEnvironment')
-      resolved.set(identity, environment)
+      resolved.set(key, environment)
   }
   return Object.freeze(
     [...resolved.values()].sort(
       (left, right) =>
         left.instance.declaration.module.localeCompare(right.instance.declaration.module) ||
         left.instance.declaration.name.localeCompare(right.instance.declaration.name) ||
-        Hir.compareExecutableSites(left.site, right.site),
+        Hir.compareExecutableSites(left.site, right.site) ||
+        Type.key(left.effect).localeCompare(Type.key(right.effect)),
     ),
   )
 }
@@ -4215,8 +4168,21 @@ export const entry = (self: Plan, type: DeclarationFacts.SemanticType): Entry | 
 export const callingShape = (
   self: Plan,
   type: DeclarationFacts.SemanticType,
-): CallingShape | undefined =>
-  indexByTypeKey(callingShapeIndexCache, self.callingShapes).get(Type.runtimeKey(type))
+): CallingShape | undefined => {
+  const physical = indexByTypeKey(callingShapeIndexCache, self.callingShapes).get(
+    Type.runtimeKey(type),
+  )
+  if (physical === undefined || Type.equals(physical.type, type)) return physical
+  return Object.freeze({
+    _tag: 'CallingShape',
+    type,
+    tree: physical.tree,
+    laneCount: physical.laneCount,
+    get lanes(): ReadonlyArray<CallingLane> {
+      return physical.lanes
+    },
+  })
+}
 
 /**
  * Plans the bit-exact movement of one nominal failure payload between two tagged carriers.
@@ -4519,6 +4485,16 @@ const fieldSlice = (
 ): { readonly offset: number; readonly length: number } | undefined => {
   const [field, ...rest] = path
   if (field === undefined) return Object.freeze({ offset, length: node.laneCount })
+  if (node._tag === 'NominalUnionShape') {
+    const variant = node.variants.find(
+      (variant) =>
+        variant.shape._tag === 'ProductShape' &&
+        variant.shape.fields.some((candidate) =>
+          DeclarationFacts.sameFieldId(candidate.field, field),
+        ),
+    )
+    return variant === undefined ? undefined : fieldSlice(variant.shape, path, offset + 1)
+  }
   if (node._tag !== 'ProductShape') return undefined
   let fieldOffset = offset
   for (const candidate of node.fields) {
@@ -4583,6 +4559,63 @@ export const coverageMembers = (shape: CallingShape): ReadonlyArray<Match.Covera
         : [Match.structuralMember(member.member)],
     ),
   )
+}
+
+/** Resolves a pattern field path through canonical variant and aggregate owners. */
+export const coveragePath = (
+  layout: Plan,
+  root: Type.Type,
+  member: Match.CoverageIdentity,
+  path: ReadonlyArray<DeclarationFacts.FieldId>,
+):
+  | {
+      readonly type: Type.Type
+      readonly selectors: ReadonlyArray<
+        | { readonly _tag: 'Variant'; readonly ordinal: number }
+        | { readonly _tag: 'Field'; readonly field: DeclarationFacts.FieldId }
+      >
+    }
+  | undefined => {
+  let current = root
+  const selectors: Array<
+    | { readonly _tag: 'Variant'; readonly ordinal: number }
+    | { readonly _tag: 'Field'; readonly field: DeclarationFacts.FieldId }
+  > = []
+  if (
+    Type.isUnion(current) &&
+    Type.runtimeKey(current) !== Type.runtimeKey(Match.sourceType(member))
+  ) {
+    const selected = Match.sourceType(member)
+    const ordinal = current.members.findIndex(
+      (candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(selected),
+    )
+    if (ordinal < 0) return undefined
+    selectors.push({ _tag: 'Variant', ordinal })
+    current = selected
+  }
+  for (const [ordinal, id] of path.entries()) {
+    const representation = entry(layout, current)?.representation
+    let field: Field | undefined
+    if (representation?._tag === 'NominalUnion') {
+      const variant = representation.variants.find(
+        (candidate) =>
+          (ordinal !== 0 ||
+            member._tag !== 'NominalUnionVariant' ||
+            candidate.ordinal === member.variantOrdinal) &&
+          candidate.fields.some((field) => DeclarationFacts.sameFieldId(field.id, id)),
+      )
+      field = variant?.fields.find((candidate) => DeclarationFacts.sameFieldId(candidate.id, id))
+      if (variant !== undefined) selectors.push({ _tag: 'Variant', ordinal: variant.ordinal })
+    } else if (representation?._tag === 'Aggregate') {
+      field = representation.fields.find((candidate) =>
+        DeclarationFacts.sameFieldId(candidate.id, id),
+      )
+    }
+    if (field === undefined) return undefined
+    selectors.push({ _tag: 'Field', field: id })
+    current = field.type
+  }
+  return { type: current, selectors }
 }
 
 /** Physical calling-lane slots for a field selected by one exact match coverage identity. */

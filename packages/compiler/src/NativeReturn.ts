@@ -2,7 +2,7 @@ import * as NativeDiagnosticOutcome from './NativeDiagnosticOutcome.js'
 import * as Block from '@silklang/llvm/Block'
 import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as LlvmError from '@silklang/llvm/LlvmError'
-import type * as Value from '@silklang/llvm/Value'
+import * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import * as NativeSuspension from './NativeSuspension.js'
 import * as NativeResult from './NativeResult.js'
@@ -127,6 +127,19 @@ const emitResult = Effect.fnUntraced(function* (
       yield* NativeDiagnosticOutcome.release(outcome, context.diagnostic)
   if (context.entry.suspendable)
     return yield* NativeSuspension.returnStep(context, 0n, result.values, name, result.diagnostic)
+  if (context.entry.resultStorage !== undefined) {
+    yield* NativeResult.store(
+      context.body,
+      context.entry.resultStorage,
+      yield* Value.argument(context.body, context.entry.resultStorage.parameter),
+      NativeResult.fields(result, {
+        resultLaneCount: context.entry.resultLaneCount,
+        diagnosticResult: context.entry.diagnosticResult !== undefined,
+      }),
+      name,
+    )
+    return yield* FunctionBody.returnVoid(context.body)
+  }
   const packed = yield* NativeResult.pack(
     result,
     context,

@@ -8,11 +8,13 @@ import * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
 import * as NativeArith from './NativeArith.js'
-import * as NativeOwnedPlace from './NativeOwnedPlace.js'
+import * as NativePlaceAddress from './NativePlaceAddress.js'
 import type { Context } from './NativeOperationContext.js'
 import * as NativeStorage from './NativeStorage.js'
 import * as NativeType from './NativeType.js'
 import * as Scalar from './Scalar.js'
+import * as NativePlace from './NativePlace.js'
+import * as Type from './Type.js'
 
 type Operation = Extract<
   LinearOperation,
@@ -47,6 +49,48 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
   const checkOrdinal = context.state.checkOrdinal
   switch (operation._tag) {
     case 'BindMatch': {
+      if (operation.type._tag === 'EnvironmentBorrow') {
+        const selectors: Array<Mir.PlaceSelector> = [...(operation.selectors ?? [])]
+        const matched = operation.shape.type
+        if (
+          Type.runtimeKey(operation.type.type) !== Type.runtimeKey(matched) ||
+          operation.path.length > 0
+        ) {
+          const resolved = Layout.coveragePath(
+            context.program.layout,
+            matched,
+            operation.member,
+            operation.path,
+          )
+          if (resolved === undefined)
+            throw new RangeError('Borrowed match lost its canonical field path')
+          selectors.push(
+            ...resolved.selectors.map((selector): Mir.PlaceSelector =>
+              selector._tag === 'Variant'
+                ? {
+                    _tag: 'VariantSelector',
+                    ordinal: selector.ordinal,
+                    provenance: operation.provenance,
+                  }
+                : {
+                    _tag: 'FieldSelector',
+                    field: selector.field,
+                    provenance: operation.provenance,
+                  },
+            ),
+          )
+        }
+        const { address } = yield* NativePlaceAddress.resolve(
+          context,
+          operation.scrutinee,
+          selectors,
+          `match${operation.destination.ordinal}`,
+        )
+        const slot = nativeStorage.addressStorage.get(operation.destination.ordinal)
+        if (slot === undefined) throw new RangeError('Borrowed match lost its entry slot')
+        yield* FunctionBody.store(body, address, slot)
+        break
+      }
       const physical = Layout.coverageBindingSlots(
         operation.shape,
         operation.member,
@@ -56,27 +100,40 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
       if (physical === undefined) {
         throw new RangeError('LLVM match lost a pattern payload path')
       }
-      const root = context.entry.fn.localTypes.at(operation.scrutinee.ordinal)
-      const place =
-        (operation.selectors?.length ?? 0) === 0 || root === undefined
+      const rootType = nativeStorage.fn.localTypes.at(operation.scrutinee.ordinal)
+      const direct =
+        (operation.selectors?.length ?? 0) === 0 &&
+        rootType !== undefined &&
+        !Type.isReference(Mir.semanticType(rootType))
+      const values = direct
+        ? yield* NativeStorage.materialize(nativeStorage, operation.scrutinee)
+        : undefined
+      const resolved = direct
+        ? undefined
+        : yield* NativePlaceAddress.resolve(
+            context,
+            operation.scrutinee,
+            operation.selectors ?? [],
+            `match${operation.destination.ordinal}`,
+          )
+      const storage =
+        resolved === undefined
           ? undefined
-          : NativeOwnedPlace.make(
-              context.program.layout,
-              Mir.semanticType(root),
-              operation.selectors ?? [],
-            )
-      if ((operation.selectors?.length ?? 0) > 0 && place === undefined)
-        throw new RangeError('LLVM pattern binding lost its owned scrutinee path')
-      const sourceLanes = place?.source.lanes ?? operation.shape.lanes
+          : NativePlace.stored(context.program.layout, resolved.type, resolved.address)
+      const sourceLanes = operation.shape.lanes
       const targetLanes = NativeType.lanesFor(types, operation.type)
       const selected: Array<Value.Input> = []
       for (const [targetOrdinal, ordinal] of physical.entries()) {
-        const slot = place === undefined ? ordinal : place.slots.at(ordinal)
         const value =
-          slot === undefined
-            ? undefined
-            : yield* NativeStorage.readLane(nativeStorage, operation.scrutinee, slot)
-        const sourceLane = slot === undefined ? undefined : sourceLanes.at(slot)
+          storage === undefined
+            ? values?.at(ordinal)
+            : yield* NativePlace.loadLane(
+                storage,
+                nativeStorage,
+                ordinal,
+                `match${operation.destination.ordinal}_${ordinal}`,
+              )
+        const sourceLane = sourceLanes.at(ordinal)
         const targetLane = targetLanes.at(targetOrdinal)
         if (value === undefined || sourceLane === undefined || targetLane === undefined) {
           continue

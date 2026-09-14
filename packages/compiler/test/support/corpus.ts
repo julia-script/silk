@@ -43,11 +43,20 @@ import {
   tlsClientWasmSource,
 } from './tlsClientAcceptance.js'
 import { byteDuplexAcceptanceSource } from './byteDuplexAcceptance.js'
+import { bufferedByteIoAcceptanceSource } from './bufferedByteIoAcceptance.js'
 import { tlsConnectionAcceptanceSource } from './tlsConnectionAcceptance.js'
 import { zstdAcceptanceSource } from './zstdAcceptance.js'
 import { inflateAcceptanceSource } from './inflateAcceptance.js'
 import { uriAcceptanceSource } from './uriAcceptance.js'
 import { httpValuesAcceptanceSource } from './httpValuesAcceptance.js'
+import { httpHeadAcceptanceSource } from './httpHeadAcceptance.js'
+import { httpBodyAcceptanceSource } from './httpBodyAcceptance.js'
+import { httpContentAcceptanceSource } from './httpContentAcceptance.js'
+import { httpServerAcceptanceSource } from './httpServerAcceptance.js'
+import { base64AcceptanceSource } from './base64Acceptance.js'
+import { networkAddressResolutionCorpusProgram } from './networkAddressResolutionAcceptance.js'
+import { nativeListenerCorpusProgram } from './nativeListenerAcceptance.js'
+import { nativeSocketCorpusProgram } from './nativeSocketAcceptance.js'
 import { ecdsaP256AcceptanceSource } from './ecdsaP256Acceptance.js'
 import { p256AcceptanceSource } from './p256Acceptance.js'
 import { certificateAcceptanceSource } from './certificateAcceptance.js'
@@ -211,6 +220,13 @@ export interface NativeRun {
   readonly closeStderr?: boolean
 }
 
+/** Native compilation profiles required to distinguish one corpus program's contract. */
+export interface NativeProfile {
+  readonly name: string
+  readonly optimization: 'none' | 'speed'
+  readonly debug: boolean
+}
+
 export interface CorpusProgram {
   readonly name: string
   readonly source: string
@@ -223,6 +239,7 @@ export interface CorpusProgram {
   readonly nativeStdout?: string
   readonly nativeStderr?: string
   readonly nativeRuns?: ReadonlyArray<NativeRun>
+  readonly nativeProfiles?: ReadonlyArray<NativeProfile>
   readonly expected:
     | { readonly _tag: 'Completes'; readonly result: number }
     | { readonly _tag: 'Trap' }
@@ -1795,9 +1812,15 @@ pub fn main() -> i32 {
 union Deferred<F: once Effect<'static; i32>> { Empty, Ready { operation: F } }
 union Flag { Empty, Value { value: i32 } }
 impl Copy for Flag {}
-struct Token {}
-impl Drop for Token { fn drop(self: &mut Token) -> () { return () } }
-union Owner { Empty, Present { token: Token, value: i32 } }
+struct Token<'a> { first: i32 second: i32 audit: &'a mut i32 }
+impl<'a> Drop for Token<'a> {
+  fn drop(self: &mut Token<'a>) -> () {
+    self.second = self.first + self.second
+    self.audit.* = self.second
+    return ()
+  }
+}
+union Owner<'a> { Empty, Present { token: Token<'a>, value: i32 }, Wide { first: i64, second: i64, third: i64 } }
 
 fn increment(value: i32) -> i32 { return value + 1 }
 fn parse<F: once fn<'static>(i32) -> i32>(parser: Parser<F>) -> i32 {
@@ -1816,14 +1839,17 @@ fn copyFlag(flag: Flag) -> i32 {
   let copied = flag
   return match move copied { Flag.Empty => 0 Flag.Value { value } => value }
 }
-fn consume(owner: Owner) -> i32 {
-  return match move owner { Owner.Empty => 0 Owner.Present { value, .. } => value }
+fn consume<'a>(owner: Owner<'a>) -> i32 {
+  return match move owner { Owner<'a>.Empty => 0 Owner<'a>.Present { value, .. } => value Owner<'a>.Wide {..} => 0 }
 }
 pub fn main() -> i32 {
   let parser = Parser.Ready { parse: increment }
   let deferred = Deferred.Ready { operation: effect { return 18 } }
-  let owner = Owner.Present { token: Token {}, value: 2 }
-  return parse(move parser) + force(move deferred) + copyFlag(Flag.Value { value: 2 }) + consume(move owner)
+  let mut audit = 0
+  let owner = Owner.Present { token: Token {first: 17, second: 25, audit: &mut audit}, value: 2 }
+  let consumed = consume(move owner)
+  if audit != 42 { return 0 }
+  return parse(move parser) + force(move deferred) + copyFlag(Flag.Value { value: 2 }) + consumed
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -2187,16 +2213,61 @@ pub fn main() -> i32 {
   },
   {
     name: 'nominal-union-operator-provider',
-    source: `union Choice { Left { value: i32 }, Right { value: i32 } }
+    source: `struct Narrow {first: i32 second: i32}
+struct Wide {first: i64 second: i64}
+union Choice { Left { value: Narrow }, Right { value: Wide } }
+union ScalarChoice { Value {value: i32} }
+fn copyScalar(input: &ScalarChoice) -> ScalarChoice {
+  return match &input.* { ScalarChoice.Value {value} => ScalarChoice.Value {value: value} }
+}
+union Inner { Closed {operation: i32}, Open {operation: i32} }
+union Outer { Io {error: Inner}, Other }
+fn nested(input: &Outer) -> i32 {
+  return match &input.* {
+    Outer.Io {error: Inner.Closed {operation}} if false => 99
+    Outer.Io {error: Inner.Closed {operation}} => operation
+    Outer.Io {error: Inner.Open {operation}} => 0
+    Outer.Other => 0
+  }
+}
+struct Choices { values: [Choice; 1] }
 interface Merge { operator + fn add(left: Self, right: Self) -> Self }
 fn add(left: Choice, right: Choice) -> Choice { return move left }
 impl Merge for Choice { add: Choice.add }
-pub fn main() -> i32 {
-  let combined = Choice.Left { value: 42 } + Choice.Right { value: 0 }
-  return match move combined {
-    Choice.Left { value } => value
-    Choice.Right { value } => value
+fn increment(value: &mut Narrow) -> () {
+  value.first = value.first + 1
+  value.second = value.second + 1
+}
+fn readArray(values: &Choices, index: usize) -> i32 {
+  return match &values.values[index] {
+    Choice.Left {value} => value.first + value.second
+    Choice.Right {..} => 0
   }
+}
+fn readSlice(values: &[Choice], index: usize) -> i32 {
+  return match &values[index] {
+    Choice.Left {value} => value.first + value.second
+    Choice.Right {..} => 0
+  }
+}
+pub fn main() -> i32 {
+  let closed = Outer.Io {error: Inner.Closed {operation: 42}}
+  let open = Outer.Io {error: Inner.Open {operation: 17}}
+  if nested(&closed) != 42 || nested(&open) != 0 { return 2 }
+  let original = ScalarChoice.Value {value: 42}
+  let copied = copyScalar(&original)
+  match move copied { ScalarChoice.Value {value} => { if value != 42 { return 1 } } }
+  let mut combined = Choice.Left { value: Narrow {first: 20, second: 20} }
+    + Choice.Right { value: Wide {first: 0, second: 0} }
+  match &mut combined {
+    Choice.Left {value} => { increment(&mut value) }
+    Choice.Right {..} => {}
+  }
+  let mut values = Choices {values: [move combined]}
+  let arrayValue = readArray(&values, 0)
+  let sliceValue = readSlice(&values.values, 0)
+  if arrayValue == sliceValue { return arrayValue }
+  return 0
 }`,
     expected: { _tag: 'Completes', result: 42 },
   },
@@ -4484,7 +4555,14 @@ import silk.effect { Effect }
 import silk.layout { Layout }
 import silk.raw_buffer { RawBuffer }
 import silk.slot { Slot }
-struct Element { value: i32 }
+union Element { Narrow { first: i32, second: i32 }, Wide { first: i64, second: i64 } }
+impl Copy for Element {}
+fn score(value: Element) -> i32 {
+  return match move value {
+    Element.Narrow {first, second} => first + second
+    Element.Wide {first, second} => { if first + second == 31 { return 31 } return 0 }
+  }
+}
 
 effect fn build(count: usize) -> i32 ! OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
@@ -4493,14 +4571,14 @@ effect fn build(count: usize) -> i32 ! OutOfMemoryError {
   let allocation = run recipe
   unsafe {
     let mut buffer = RawBuffer.from<Element>(move allocation, 4)
-    let head0 = Element { value: 11 }
-    let tail0 = Element { value: 31 }
+    let head0 = Element.Narrow { first: 10, second: 1 }
+    let tail0 = Element.Wide { first: 30, second: 1 }
     let first = Slot.write(RawBuffer.slot(&mut buffer, 0), move head0)
     let second = Slot.write(RawBuffer.slot(&mut buffer, 1), move tail0)
     let head = Slot.take(RawBuffer.slot(&mut buffer, 0))
-    let tail = Slot.take(RawBuffer.slot(&mut buffer, 1))
+    let tail = RawBuffer.read<Element>(&buffer, 1)
     drop buffer
-    return head.value + tail.value
+    return score(move head) + score(move tail)
   }
   return 0
 }
@@ -6305,6 +6383,51 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
     expected: { _tag: 'Completes', result: 0 },
   },
   {
+    name: 'http-head-parsing',
+    source: httpHeadAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'http-body-framing',
+    source: httpBodyAcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'http-content-decoding',
+    source: httpContentAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'http-server',
+    source: httpServerAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    name: 'base64-rfc4648',
+    source: base64AcceptanceSource,
+    expected: { _tag: 'Completes', result: 42 },
+  },
+  {
+    name: 'buffered-byte-io',
+    source: bufferedByteIoAcceptanceSource,
+    expected: { _tag: 'Completes', result: 0 },
+  },
+  {
+    ...networkAddressResolutionCorpusProgram,
+    nativeProfiles: [
+      { name: 'debug', optimization: 'none', debug: true },
+      { name: 'optimized', optimization: 'speed', debug: false },
+    ],
+  },
+  {
+    ...nativeSocketCorpusProgram,
+    nativeProfiles: [{ name: 'optimized', optimization: 'speed', debug: false }],
+  },
+  {
+    ...nativeListenerCorpusProgram,
+    nativeProfiles: [{ name: 'optimized', optimization: 'speed', debug: false }],
+  },
+  {
     name: 'borrowed-temporary-stream-suspension',
     source: borrowedTemporaryStream,
     expected: { _tag: 'Completes', result: 42 },
@@ -7757,6 +7880,13 @@ pub fn main() -> i32 {
   {
     name: 'runtime-slice-shared-subranges',
     source: `import silk.slice { Slice }
+fn rebind<'a>(flag: bool, original: &'a [i32], replacement: &'a [i32]) -> bool {
+  let mut view = original
+  if flag { view = replacement }
+  if !flag { view = original }
+  if flag { return view.length == 1 && view[0] == 30 }
+  return view.length == 3 && view[0] == 10
+}
 pub fn main() -> i32 {
   let values: [i32; 3] = [10, 20, 30]
   let selected = Slice.view(Slice.view(&values, 1, 2), 1, 1)
@@ -7764,6 +7894,8 @@ pub fn main() -> i32 {
   let empty = Slice.view(&values, 3, 0)
   let nestedEmpty = Slice.view(empty, 0, 0)
   if nestedEmpty.length != 0 { return 2 }
+  if !rebind(true, &values, selected) { return 3 }
+  if !rebind(false, &values, selected) { return 4 }
   return 42
 }`,
     expected: { _tag: 'Completes', result: 42 },

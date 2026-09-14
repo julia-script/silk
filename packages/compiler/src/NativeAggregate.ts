@@ -28,6 +28,7 @@ import * as NativeStorage from './NativeStorage.js'
 import * as NativePayload from './NativePayload.js'
 import * as NativePlace from './NativePlace.js'
 import * as ValueStorage from './ValueStorage.js'
+import * as ValueType from './ValueType.js'
 import * as NativeType from './NativeType.js'
 import * as SilkType from './Type.js'
 
@@ -166,6 +167,71 @@ export const reclaimContextPaths = (
   }
 }
 
+const captureType = (
+  layout: Layout.Plan,
+  field: Layout.CallableEnvironmentField | Layout.EffectEnvironmentField,
+): Mir.Type | undefined => {
+  const contract = SilkType.isRepresented(field.type) ? field.type.contract : field.type
+  if (field.callableIdentity !== undefined && SilkType.isCallable(contract)) {
+    const type = ValueType.callableValueByIdentity(layout, field.callableIdentity, contract)
+    if (type === undefined)
+      throw new RangeError('Capture cleanup lost its exact callable environment')
+    return type
+  }
+  if ('effectIdentity' in field && field.effectIdentity !== undefined) {
+    const environment = Layout.effectEnvironmentByFieldIdentity(
+      layout,
+      field.resolvedEffectIdentity ?? field.effectIdentity,
+    )
+    if (environment === undefined)
+      throw new RangeError('Capture cleanup lost its exact Effect environment')
+    return { _tag: 'EffectValue', type: environment.effect, site: environment.site, environment }
+  }
+  return undefined
+}
+
+const storedFieldOffset = (
+  layout: Layout.Plan,
+  type: SilkType.Type,
+  id: DeclarationFacts.FieldId,
+): number => {
+  const representation = Layout.entry(layout, type)?.representation
+  const field =
+    representation?._tag === 'Aggregate'
+      ? representation.fields.find((field) => DeclarationFacts.sameFieldId(field.id, id))
+      : undefined
+  if (field === undefined) throw new RangeError('Struct cleanup lost its stored field')
+  return field.offset
+}
+const nominalFieldOffset = (
+  layout: Layout.Plan,
+  type: SilkType.Type,
+  ordinal: number,
+  id: DeclarationFacts.FieldId,
+): number => {
+  const representation = Layout.entry(layout, type)?.representation
+  const variant =
+    representation?._tag === 'NominalUnion'
+      ? representation.variants.find((variant) => variant.ordinal === ordinal)
+      : undefined
+  const field = variant?.fields.find((field) => DeclarationFacts.sameFieldId(field.id, id))
+  if (representation?._tag !== 'NominalUnion' || field === undefined)
+    throw new RangeError('Nominal cleanup lost its stored field')
+  return representation.payloadOffset + field.offset
+}
+const arrayElementOffset = (layout: Layout.Plan, type: SilkType.Type, index: number): number => {
+  const representation = Layout.entry(layout, type)?.representation
+  if (representation?._tag !== 'Repeated')
+    throw new RangeError('Array cleanup lost its stored stride')
+  return index * representation.stride
+}
+const unionPayloadOffset = (layout: Layout.Plan, type: SilkType.Type): number => {
+  const representation = Layout.entry(layout, type)?.representation
+  if (representation?._tag !== 'Union')
+    throw new RangeError('Union cleanup lost its stored payload')
+  return representation.payloadOffset
+}
+
 export interface Context {
   readonly builder: Builder.Builder
   readonly body: FunctionBody.FunctionBody
@@ -197,10 +263,9 @@ export interface Context {
 }
 
 /**
- * Releases one owned value's lanes through its complete cleanup plan: hooks run
- * against a stack materialization before their inner cleanup sees the (possibly
- * mutated) lanes, struct fields release in declaration order, and every ticket-backed
- * lane calls the release shim exactly once.
+ * Releases one owned value through its complete cleanup plan. Hooks receive its original
+ * canonical storage; only ABI boundary values require initial materialization. Inner cleanup
+ * observes hook mutations, fields release in declaration order, and each ticket releases once.
  */
 interface Initialization {
   readonly state: MovePath.State
@@ -322,18 +387,32 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
     case 'CallableCleanup': {
       if (plan.environment._tag !== 'CallableEnvironmentIdentity')
         throw new RangeError('LLVM callable cleanup lost its specialized environment')
+      const environment = Layout.callableEnvironmentByIdentity(
+        program.layout,
+        plan.environment.identity,
+      )
       for (const slot of plan.slots) {
+        const field = environment?.fields.find((field) => field.ordinal === slot.ordinal)
         const range = Layout.callableCaptureRange(
           program.layout,
           plan.environment.identity,
           slot.ordinal,
         )
-        if (range === undefined)
+        if (range === undefined || field === undefined)
           throw new RangeError('LLVM callable cleanup lost an owned capture lane')
         yield* dropThroughPlan(
           context,
           slot.cleanup,
-          NativePayload.slice(values, range.laneOffset, range.laneOffset + range.laneCount),
+          yield* NativePayload.projectStored(
+            values,
+            context,
+            field.type,
+            range.byteOffset,
+            Array.from({ length: range.laneCount }, (_, ordinal) => range.laneOffset + ordinal),
+            `${tag}_callable${slot.ordinal}_place`,
+            undefined,
+            captureType(program.layout, field),
+          ),
           `${tag}_callable${slot.ordinal}`,
         )
       }
@@ -378,7 +457,15 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
           yield* dropThroughPlan(
             context,
             field.cleanup,
-            NativePayload.project(values, physical, { source: shape.lanes, target: targetLanes }),
+            yield* NativePayload.projectStored(
+              values,
+              context,
+              field.cleanup.type,
+              nominalFieldOffset(program.layout, plan.type, variant.ordinal, field.field),
+              physical,
+              `${tag}_v${variant.ordinal}_f${fieldOrdinal}_place`,
+              { source: shape.lanes, target: targetLanes },
+            ),
             `${tag}_v${variant.ordinal}_f${fieldOrdinal}`,
             undefined,
             childInitialization(
@@ -396,11 +483,24 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
     case 'EffectCleanup':
       for (const slot of plan.slots) {
         if (!CleanupPlan.hasEffect(slot.cleanup)) continue
-        const selected = NativePayload.slice(
-          values,
-          slot.laneOffset,
-          slot.laneOffset + slot.laneCount,
-        )
+        const source = NativePayload.storage(values, context)
+        const field =
+          source?.type._tag === 'EffectValue'
+            ? source.type.environment.fields.find((field) => field.ordinal === slot.ordinal)
+            : undefined
+        const selected =
+          field === undefined
+            ? NativePayload.slice(values, slot.laneOffset, slot.laneOffset + slot.laneCount)
+            : yield* NativePayload.projectStored(
+                values,
+                context,
+                field.type,
+                field.offset,
+                Array.from({ length: slot.laneCount }, (_, ordinal) => slot.laneOffset + ordinal),
+                `${tag}_effect${slot.ordinal}_place`,
+                undefined,
+                captureType(program.layout, field),
+              )
         if (selected.length !== slot.laneCount)
           throw new RangeError(
             `LLVM Effect cleanup ${tag} lost slot ${slot.ordinal} lanes ${slot.laneOffset}+${slot.laneCount} from ${values.length} value(s)`,
@@ -576,17 +676,22 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
       const layoutEntry = Layout.entry(program.layout, plan.type)
       if (layoutEntry === undefined)
         throw new RangeError(`LLVM hook cleanup lost the layout for ${SilkType.encode(plan.type)}`)
-      const base = yield* FunctionBody.alloca(body, i8, `${tag}_hook_storage`, {
-        count: yield* Constant.integerUnsigned(builder, i32, BigInt(layoutEntry.size)),
-        alignment: yield* Alignment.fromByteUnits(layoutEntry.alignment),
-      })
-      const receiver = NativePlace.stored(program.layout, plan.type, base)
-      yield* NativePlace.storeLanes(
-        receiver,
-        context.storage,
-        yield* NativePayload.materialize(values, context, `${tag}_source`),
-        `${tag}_store`,
-      )
+      let receiver = NativePayload.storage(values, context)
+      if (receiver === undefined) {
+        // A transport-only payload has no owning address until it enters this cleanup.
+        const base = yield* FunctionBody.alloca(body, i8, `${tag}_hook_storage`, {
+          count: yield* Constant.integerUnsigned(builder, i32, BigInt(layoutEntry.size)),
+          alignment: yield* Alignment.fromByteUnits(layoutEntry.alignment),
+        })
+        receiver = NativePlace.stored(program.layout, plan.type, base)
+        yield* NativePlace.storeLanes(
+          receiver,
+          context.storage,
+          yield* NativePayload.materialize(values, context, `${tag}_source`),
+          `${tag}_store`,
+        )
+      }
+      const base = yield* NativePlace.base(receiver, context.storage, `${tag}_receiver`)
       NativeResult.sourceValues(
         yield* NativeCall.callValues(
           call,
@@ -621,7 +726,14 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
         yield* dropThroughPlan(
           context,
           field.cleanup,
-          NativePayload.project(values, fieldSlots),
+          yield* NativePayload.projectStored(
+            values,
+            context,
+            field.cleanup.type,
+            storedFieldOffset(program.layout, plan.type, field.field),
+            fieldSlots,
+            `${tag}_f${fieldOrdinal}_place`,
+          ),
           `${tag}_f${fieldOrdinal}`,
           undefined,
           childInitialization(initialization, { _tag: 'Field', ordinal: field.field.ordinal }),
@@ -642,7 +754,14 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
         yield* dropThroughPlan(
           context,
           plan.element,
-          NativePayload.project(values, elementSlots),
+          yield* NativePayload.projectStored(
+            values,
+            context,
+            plan.element.type,
+            arrayElementOffset(program.layout, plan.type, index),
+            elementSlots,
+            `${tag}_e${index}_place`,
+          ),
           `${tag}_e${index}`,
           undefined,
           childInitialization(initialization, { _tag: 'ConstantIndex', index }),
@@ -683,7 +802,15 @@ export const dropThroughPlan = Effect.fnUntraced(function* (
           yield* dropThroughPlan(
             context,
             caseEntry.cleanup,
-            NativePayload.project(values, physical, { source: shape.lanes, target: targetLanes }),
+            yield* NativePayload.projectStored(
+              values,
+              context,
+              caseEntry.member,
+              unionPayloadOffset(program.layout, plan.type),
+              physical,
+              `${tag}_u${caseEntry.ordinal}_place`,
+              { source: shape.lanes, target: targetLanes },
+            ),
             `${tag}_u${caseEntry.ordinal}`,
             undefined,
             childInitialization(initialization, { _tag: 'Variant', ordinal: caseEntry.ordinal }),

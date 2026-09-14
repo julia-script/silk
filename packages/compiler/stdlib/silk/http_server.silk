@@ -1,0 +1,1900 @@
+//! Scoped bounded streaming HTTP/1.0 and HTTP/1.1 server connections.
+//!
+//! # Details
+//!
+//! `withConnection` binds one concrete byte provider and one buffered session for a serial
+//! connection lifetime. `withRequest` lends one request at a time; its parsed head, body decoder,
+//! response writer, and upgraded channel cannot escape their nested callbacks. Scope release closes
+//! abortively and never hides a protected exit behind flush or drain work.
+
+import silk.allocator {Allocator, OutOfMemoryError}
+import silk.buffered_duplex {
+  BufferedContext,
+  BufferedDuplex,
+  withBufferedCapacityContext,
+}
+import silk.buffered_input {BufferError, FillOutcome, MAX_CAPACITY}
+import silk.byte_duplex {ByteDuplex, ReadTransfer}
+import silk.bytes {Bytes}
+import silk.effect {Effect}
+import silk.http {
+  Header,
+  LimitKind,
+  Method,
+  ResponseHead as ValueResponseHead,
+  Status,
+  ValueComponent,
+  ValueError,
+  ValueReason,
+  Version,
+}
+import silk.http_body {
+  BodyError,
+  Completion,
+  CompletionKind,
+  Decoder,
+  Encoder,
+  Framing,
+  Limits as BodyLimits,
+  Progress as BodyProgress,
+  ProgressState as BodyProgressState,
+  TrailerPolicy,
+  validateOutgoingResponse,
+  selectRequest,
+}
+import silk.http_head {
+  HeaderIterator as ParsedHeaderIterator,
+  Limits as HeadLimits,
+  ParseError,
+  ProgressState as HeadProgressState,
+  RequestHead,
+  RequestParser,
+  ResponseParser,
+  writeResponseInto,
+}
+import silk.http_headers {
+  HeaderIterator,
+  Headers,
+  Limits as HeaderLimits,
+}
+import silk.monotonic_clock {MonotonicClock}
+import silk.option {Option}
+import silk.result {Result}
+import silk.slice {Slice}
+import silk.string {String}
+import silk.system_clock {Instant, SystemClock}
+import silk.u16
+import silk.u64
+import silk.u8
+import silk.usize
+import silk.vector {Vector}
+
+/// The externally visible connection lifecycle.
+pub enum ConnectionPhase {
+  /// Permits admission of the next request within the request budget.
+  Ready,
+  /// Permits request inspection, body reads, and response selection.
+  RequestActive,
+  /// Permits writes through the active response writer.
+  Responding,
+  /// Requires closure and forbids another request.
+  Closing,
+  /// Lends the channel to another protocol and forbids HTTP operations.
+  Upgraded,
+  /// Marks a completed connection with no further I/O permitted.
+  Closed,
+  /// Marks a terminal protocol or transport failure.
+  Failed,
+}
+
+/// The caller-selected response body delimiter.
+pub union BodyMode {
+  /// Sends no response payload, including special responses such as HEAD and 204.
+  NoBody,
+  /// Sends exactly the declared number of payload bytes.
+  ContentLength {
+    /// The exact payload length required before finish.
+    pub length: u64
+  },
+  /// Uses HTTP/1.1 chunk framing and permits bounded trailers.
+  Chunked,
+  /// Uses connection closure as the payload delimiter and forbids reuse.
+  CloseDelimited,
+}
+
+impl Copy for BodyMode {}
+
+/// Persistence policy. A policy never overrides missing completion evidence.
+pub enum ReusePolicy {
+  /// Uses HTTP/1.1 persistence when both message boundaries and peer policy permit it.
+  Automatic,
+  /// Closes after this response regardless of peer persistence policy.
+  CloseAfterResponse,
+  /// Also permits HTTP/1.0 reuse when the peer explicitly requests keep-alive.
+  Http10KeepAlive,
+}
+
+/// Finite server budgets and the exact lower-level limits they compose.
+pub struct Limits {
+  /// The finite limits for request and response head parsing.
+  pub head: HeadLimits
+  /// The finite limits for body framing, payload, trailers, and owned decoder storage.
+  pub body: BodyLimits
+  /// The limits for response values, including generated Connection fields.
+  pub values: HeaderLimits
+  /// The positive fixed capacity of the input buffer.
+  pub readCapacity: usize
+  /// The positive fixed capacity of the output buffer.
+  pub writeCapacity: usize
+  /// The maximum admitted requests; zero prevents any request-head read.
+  pub maxRequestsPerConnection: usize
+  /// The maximum explicit and automatic informational responses per request.
+  pub maxInformationalResponses: usize
+  /// The maximum wire bytes discarded by one request-body discard call.
+  pub maxDiscardWireBytes: u64
+  /// The maximum input bytes discarded by explicit connection finish.
+  pub shutdownDrainBytes: usize
+}
+
+impl Copy for Limits {}
+
+/// Server-owned limits distinct from lower-level parser, value, and framing limits.
+pub enum ServerLimitKind {
+  /// The combined count of explicit and automatic informational responses.
+  InformationalResponses,
+}
+
+/// A precise server lifecycle failure preserving its lower-level cause.
+pub union ServerError {
+  /// A request or response head failed validation.
+  Head {
+    /// The exact head parser failure.
+    pub error: ParseError
+  },
+  /// A request or response body violated its framing contract.
+  Body {
+    /// The framing failure and its committed progress.
+    pub error: BodyError
+  },
+  /// A buffered transport operation failed.
+  Buffer {
+    /// The buffer failure and any recorded transport progress.
+    pub error: BufferError
+  },
+  /// Response framing advanced before buffered output failed.
+  Output {
+    /// The failure from the buffered transport.
+    pub error: BufferError,
+    /// The accepted payload, buffered prefix, and cumulative framing coordinates.
+    pub progress: WriteProgress
+  },
+  /// A response value or normalized header failed validation.
+  Value {
+    /// The exact shared HTTP value failure.
+    pub error: ValueError
+  },
+  /// An operation would exceed a finite server limit.
+  LimitExceeded {
+    /// The exhausted resource.
+    pub limit: ServerLimitKind,
+    /// The configured maximum for this resource.
+    pub allowed: u64,
+    /// The count that the operation attempted to reach.
+    pub attempted: u64,
+  },
+  /// Checked count or byte arithmetic cannot represent the requested result.
+  SizeOverflow,
+  /// A body operation encountered an unsupported request expectation.
+  UnsupportedExpectation,
+  /// The chosen body mode conflicts with the response framing or status.
+  InvalidBodyMode,
+  /// The requested operation is unavailable in the current phase.
+  InvalidState {
+    /// The phase that rejected the operation.
+    pub phase: ConnectionPhase
+  },
+  /// The request, selected protocol, or response cannot perform a generic Upgrade.
+  UpgradeRejected,
+  /// The request or response cannot perform a CONNECT tunnel handoff.
+  TunnelRejected,
+  /// Input ended before a complete HTTP head became available.
+  TruncatedHead,
+}
+
+/// Exact payload accepted by one response-writer call and framed bytes accepted by buffering.
+pub struct WriteProgress {
+  /// The caller payload prefix accepted during this writer call.
+  pub consumed: usize
+  /// The framed prefix accepted by the output buffer during this writer call.
+  pub buffered: usize
+  /// The cumulative payload bytes accepted by the response encoder.
+  pub totalPayload: u64
+  /// The cumulative framed bytes produced by the response encoder.
+  pub totalWire: u64
+}
+
+impl Copy for WriteProgress {}
+
+enum ExpectationState { None, ContinuePending, Rejected }
+
+struct RequestFacts {
+  version: Version
+  peerClose: bool
+  peerKeepAlive: bool
+  connectionUpgrade: bool
+  hasUpgrade: bool
+  bodyEmpty: bool
+  bodyComplete: bool
+  bodyDelimited: bool
+  bodyWireTotal: u64
+  expectation: ExpectationState
+}
+
+impl Copy for RequestFacts {}
+
+/// One affine serial server connection borrowing its concrete buffered channel.
+pub struct Connection<'connection, 'transport, P> {
+  channel: &'connection mut BufferedDuplex<'transport, P>
+  requestParser: RequestParser
+  responseParser: ResponseParser
+  responseScratch: Bytes
+  limits: Limits
+  phaseValue: ConnectionPhase
+  requestCount: usize
+  parserUsed: bool
+  responseParserUsed: bool
+  closeSelected: bool
+}
+
+impl<'connection, 'transport, P> Connection<'connection, 'transport, P> {
+  /// Returns the current connection phase.
+  pub fn phase(self: &Self) -> ConnectionPhase { return self.phaseValue }
+  /// Returns the number of request heads admitted by this connection.
+  pub fn requests(self: &Self) -> usize { return self.requestCount }
+  /// Returns the exact byte count retained in the input buffer.
+  pub fn unread(self: &Self) -> usize { return BufferedDuplex.unread(&self.channel.*) }
+}
+
+/// One callback-scoped active request and its single-message framing decoder.
+pub struct Request<'request, 'connection, 'transport, P> {
+  connection: &'request mut Connection<'connection, 'transport, P>
+  decoder: Decoder
+  facts: RequestFacts
+  informationalCount: usize
+  continueSent: bool
+  responseFinished: bool
+}
+
+impl<'request, 'connection, 'transport, P> Request<'request, 'connection, 'transport, P> {
+  /// Borrows the completed parsed head from active request storage.
+  pub effect fn head<'head>(self: &'head Self) -> RequestHead<'head> ! ServerError {
+    if self.connection.phaseValue != ConnectionPhase.RequestActive {
+      fail ServerError.InvalidState {phase: self.connection.phaseValue}
+    }
+    let found = RequestParser.head(&self.connection.requestParser)
+    return match move found {
+      Result<RequestHead<'head>, ParseError>.Failure {error} => {
+        drop error
+        return absurd<RequestHead<'head>>()
+      }
+      Result<RequestHead<'head>, ParseError>.Success {value} => value
+    }
+  }
+
+  /// Returns whether request framing completed; fails unless the request remains active.
+  pub effect fn bodyComplete(self: &Self) -> bool ! ServerError {
+    if self.connection.phaseValue != ConnectionPhase.RequestActive {
+      fail ServerError.InvalidState {phase: self.connection.phaseValue}
+    }
+    return self.facts.bodyComplete
+  }
+  /// Returns whether Expect requires rejection; fails unless the request remains active.
+  pub effect fn expectationRejected(self: &Self) -> bool ! ServerError {
+    if self.connection.phaseValue != ConnectionPhase.RequestActive {
+      fail ServerError.InvalidState {phase: self.connection.phaseValue}
+    }
+    return self.facts.expectation == ExpectationState.Rejected
+  }
+}
+
+/// One nested final-response writer. Its fields are private so completion cannot be forged.
+pub struct ResponseWriter<'writer, 'request, 'connection, 'transport, P> {
+  request: &'writer mut Request<'request, 'connection, 'transport, P>
+  encoder: Encoder
+  finished: bool
+  callbackSucceeded: bool
+}
+
+/// Compile-time handler selected for one scoped server connection.
+pub interface ConnectionHandler<P, A, E, ?R> {
+  /// Runs within the connection loan and preserves the handler failure and requirement channels.
+  effect<'call> fn handle<'call, 'connection: 'call, 'transport: 'connection>(
+    handler: Self,
+    connection: &'call mut Connection<'connection, 'transport, P>,
+  ) -> A ! E ? R
+  where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock
+}
+
+struct ConnectionContext<P, A, E, ?CallbackRequirements, H: ConnectionHandler<P, A, E ? CallbackRequirements>> {
+  limits: Limits
+  requestParser: RequestParser
+  responseParser: ResponseParser
+  responseScratch: Bytes
+  handler: H
+}
+
+impl<P, A, E, ?CallbackRequirements, OuterH>
+  ConnectionContext<P, A, E, CallbackRequirements, OuterH> {
+  effect<'session> fn use<
+    'session,
+    'transport: 'session,
+    H: ConnectionHandler<P, A, E ? CallbackRequirements>,
+  >(
+    context: ConnectionContext<P, A, E, CallbackRequirements, H>,
+    channel: &'session mut BufferedDuplex<'transport, P>,
+  ) -> A
+  ! E
+  ? CallbackRequirements
+  where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    let ConnectionContext<P, A, E, CallbackRequirements, H> {
+      limits,
+      requestParser,
+      responseParser,
+      responseScratch: scratch,
+      handler,
+    } = move context
+    let mut connection = Connection {
+      channel: move channel,
+      requestParser: move requestParser,
+      responseParser: move responseParser,
+      responseScratch: move scratch,
+      limits: limits,
+      phaseValue: ConnectionPhase.Ready,
+      requestCount: usize.ZERO,
+      parserUsed: false,
+      responseParserUsed: false,
+      closeSelected: limits.maxRequestsPerConnection == usize.ZERO,
+    }
+    return run ConnectionHandler<P, A, E ? CallbackRequirements>.handle(
+      move handler,
+      &mut connection,
+    )
+  }
+}
+
+impl<P, A, E, ?CallbackRequirements, H: ConnectionHandler<P, A, E ? CallbackRequirements>>
+  BufferedContext<P, A, E ? CallbackRequirements>
+  for ConnectionContext<P, A, E, CallbackRequirements, H> {
+  use: ConnectionContext.use
+}
+
+/// Validates server-only construction invariants without allocation or I/O.
+pub fn validateLimits(limits: &Limits) -> Result<(), ServerError> {
+  if limits.readCapacity == usize.ZERO || limits.readCapacity > MAX_CAPACITY {
+    return Result.failResult<(), ServerError>(ServerError.Buffer {
+      error: BufferError.InvalidCapacity {capacity: limits.readCapacity},
+    })
+  }
+  if limits.writeCapacity == usize.ZERO || limits.writeCapacity > MAX_CAPACITY {
+    return Result.failResult<(), ServerError>(ServerError.Buffer {
+      error: BufferError.InvalidCapacity {capacity: limits.writeCapacity},
+    })
+  }
+  return Result.succeed<(), ServerError>(())
+}
+
+/// Runs one higher-ranked server callback over a single bound concrete provider.
+pub effect fn withConnection<
+  'env,
+  A,
+  E,
+  ?CallbackRequirements,
+  P,
+  H: ConnectionHandler<P, A, E ? CallbackRequirements>,
+>(
+  transport: &'env mut P,
+  limits: Limits,
+  handler: H,
+) -> A
+! E | ServerError | BufferError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator
+where &'env mut P provides &ByteDuplex from &mut ByteDuplex,
+  &'env mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock,
+  CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
+  let valid = validateLimits(&limits)
+  if let Result<(), ServerError>.Failure {error} = move valid { fail move error }
+  let requestMade = run RequestParser.make(limits.head)
+  let requestParser = match move requestMade {
+    Result.Failure {error} => { fail ServerError.Head {error: move error} }
+    Result.Success {value} => move value
+  }
+  let responseMade = run ResponseParser.make(limits.head)
+  let responseParser = match move responseMade {
+    Result.Failure {error} => { fail ServerError.Head {error: move error} }
+    Result.Success {value} => move value
+  }
+  let responseScratch = run Bytes.zeroed(limits.head.maxHeadBytes)
+  let context = ConnectionContext<P, A, E, CallbackRequirements, H> {
+    limits: limits,
+    requestParser: move requestParser,
+    responseParser: move responseParser,
+    responseScratch: move responseScratch,
+    handler: move handler,
+  }
+  return run withBufferedCapacityContext(
+    move transport,
+    limits.readCapacity,
+    limits.writeCapacity,
+    move context,
+  )
+}
+
+/// Admits at most one request and lends it exclusively. `None` is clean end between requests.
+pub effect fn withRequest<
+  'request,
+  'connection: 'request,
+  'transport: 'connection,
+  'callback,
+  A,
+  E,
+  ?CallbackRequirements,
+  P,
+>(
+  connection: &'request mut Connection<'connection, 'transport, P>,
+  deadline: Option<Instant>,
+  callback: for<'call, 'requestView: 'call, 'connectionView: 'requestView, 'transportView: 'connectionView> once fn<'callback>(
+    &'call mut Request<'requestView, 'connectionView, 'transportView, P>,
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> Option<A>
+! E | ServerError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator | &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  if connection.phaseValue != ConnectionPhase.Ready {
+    fail ServerError.InvalidState {phase: connection.phaseValue}
+  }
+  if connection.requestCount >= connection.limits.maxRequestsPerConnection {
+    connection.closeSelected = true
+    connection.phaseValue = ConnectionPhase.Closing
+    return Option.none<A>()
+  }
+  if connection.parserUsed {
+    let reset = RequestParser.reset(&mut connection.requestParser)
+    if let Result<(), ParseError>.Failure {error} = move reset {
+      connection.phaseValue = ConnectionPhase.Failed
+      fail ServerError.Head {error: move error}
+    }
+  }
+  connection.parserUsed = true
+  let admitted = run admitHead(&mut connection.*, &deadline)
+  if !admitted { return Option.none<A>() }
+  connection.requestCount = connection.requestCount + usize.ONE
+  let head = match move RequestParser.head(&connection.requestParser) {
+    Result.Failure {error} => {
+      connection.phaseValue = ConnectionPhase.Failed
+      fail ServerError.Head {error: move error}
+    }
+    Result.Success {value} => value
+  }
+  let policy = TrailerPolicy.defaultPolicy()
+  let selected = selectRequest(head, policy)
+  let selection = match move selected {
+    Result.Failure {error} => {
+      connection.phaseValue = ConnectionPhase.Failed
+      fail ServerError.Body {error: move error}
+    }
+    Result.Success {value} => move value
+  }
+  let framing = selection.framing()
+  let facts = requestFacts(head, framing)
+  // The consumed head cannot be admitted again if body storage acquisition fails.
+  connection.phaseValue = ConnectionPhase.Failed
+  let made = run Decoder.make(move selection, connection.limits.body, policy)
+  let decoder = match move made {
+    Result<Decoder, BodyError>.Failure {error} => {
+      connection.phaseValue = ConnectionPhase.Failed
+      fail ServerError.Body {error: move error}
+    }
+    Result<Decoder, BodyError>.Success {value} => move value
+  }
+  connection.phaseValue = ConnectionPhase.RequestActive
+  let mut request = Request {
+    connection: move connection,
+    decoder: move decoder,
+    facts: move facts,
+    informationalCount: usize.ZERO,
+    continueSent: false,
+    responseFinished: false,
+  }
+  let value = run callback(&mut request)
+  settleRequest(&mut request)
+  return Option.some<A>(move value)
+}
+
+effect fn admitHead<'connection, 'transport, P>(
+  connection: &mut Connection<'connection, 'transport, P>,
+  deadline: &Option<Instant>,
+) -> bool
+! ServerError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let mut accepted = usize.ZERO
+  while true {
+    let input = BufferedDuplex.peek(&connection.channel.*)
+    if input.length > usize.ZERO {
+      let fed = RequestParser.feed(&mut connection.requestParser, input, false)
+      drop input
+      let progress = match move fed {
+        Result.Failure {error} => {
+          connection.phaseValue = ConnectionPhase.Failed
+          fail ServerError.Head {error: move error}
+        }
+        Result.Success {value} => value
+      }
+      if progress.consumed > usize.ZERO {
+        let consumed = run Effect.result(BufferedDuplex.consume(
+          &mut connection.channel.*,
+          progress.consumed,
+        ))
+        if let Result<(), BufferError>.Failure {error} = move consumed {
+          connection.phaseValue = ConnectionPhase.Failed
+          fail ServerError.Buffer {error: move error}
+        }
+        accepted = accepted + progress.consumed
+      }
+      if progress.state == HeadProgressState.Complete { return true }
+    }
+    let filled = run Effect.result(BufferedDuplex.fill(
+      &mut connection.channel.*,
+      usize.ONE,
+      copyDeadline(deadline),
+    ))
+    match move filled {
+      Result<FillOutcome, BufferError>.Failure {error} => {
+        connection.phaseValue = ConnectionPhase.Failed
+        fail ServerError.Buffer {error: move error}
+      }
+      Result<FillOutcome, BufferError>.Success {value} => match move value {
+        FillOutcome.Available {count} => {}
+        FillOutcome.End {available} => {
+          if available > usize.ZERO { continue }
+          if accepted == usize.ZERO {
+            connection.phaseValue = ConnectionPhase.Closed
+            return false
+          }
+          let emptyInput: [u8; 0] = []
+          let final = RequestParser.feed(&mut connection.requestParser, &emptyInput, true)
+          if let Result.Failure {error} = move final {
+            connection.phaseValue = ConnectionPhase.Failed
+            fail ServerError.Head {error: move error}
+          }
+          connection.phaseValue = ConnectionPhase.Failed
+          fail ServerError.TruncatedHead
+        }
+      }
+    }
+  }
+  return false
+}
+
+/// Reads one provisional decoded payload prefix.
+pub effect fn readSome<'request, 'connection, 'transport, P>(
+  request: &mut Request<'request, 'connection, 'transport, P>,
+  output: &mut [u8],
+  deadline: Option<Instant>,
+) -> usize
+! ServerError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  if request.connection.phaseValue != ConnectionPhase.RequestActive {
+    fail ServerError.InvalidState {phase: request.connection.phaseValue}
+  }
+  run ensureContinue(&mut request.*, &deadline)
+  if request.facts.expectation == ExpectationState.Rejected {
+    fail ServerError.UnsupportedExpectation
+  }
+  if output.length == usize.ZERO { return usize.ZERO }
+  while true {
+    let input = BufferedDuplex.peek(&request.connection.channel.*)
+    let stepped = Decoder.step(&mut request.decoder, input, &mut output, false)
+    drop input
+    let progress = match move stepped {
+      Result<BodyProgress, BodyError>.Failure {error} => {
+        run consumeBodyProgress(&mut request.*, error.consumed, error.totalWire)
+        request.connection.phaseValue = ConnectionPhase.Failed
+        fail ServerError.Body {error: move error}
+      }
+      Result<BodyProgress, BodyError>.Success {value} => value
+    }
+    run consumeBodyProgress(&mut request.*, progress.consumed, progress.totalWire)
+    if progress.state == BodyProgressState.Complete {
+      request.facts.bodyComplete = true
+      request.facts.bodyDelimited = completionDelimited(&request.decoder)
+    }
+    if progress.written > usize.ZERO || progress.state == BodyProgressState.Complete {
+      return progress.written
+    }
+    let filled = run fillBody(&mut request.*, &deadline)
+    if filled {
+      let finalInput = BufferedDuplex.peek(&request.connection.channel.*)
+      let finalStep = Decoder.step(&mut request.decoder, finalInput, &mut output, true)
+      drop finalInput
+      let finalProgress = match move finalStep {
+        Result<BodyProgress, BodyError>.Failure {error} => {
+          run consumeBodyProgress(&mut request.*, error.consumed, error.totalWire)
+          request.connection.phaseValue = ConnectionPhase.Failed
+          fail ServerError.Body {error: move error}
+        }
+        Result<BodyProgress, BodyError>.Success {value} => value
+      }
+      run consumeBodyProgress(&mut request.*, finalProgress.consumed, finalProgress.totalWire)
+      if finalProgress.state == BodyProgressState.Complete {
+        request.facts.bodyComplete = true
+        request.facts.bodyDelimited = completionDelimited(&request.decoder)
+      }
+      return finalProgress.written
+    }
+  }
+  return usize.ZERO
+}
+
+/// Explicitly discards the remaining framed request under the smaller configured/caller wire bound.
+pub effect fn discardRemaining<'request, 'connection, 'transport, P>(
+  request: &mut Request<'request, 'connection, 'transport, P>,
+  maxWireBytes: u64,
+  deadline: Option<Instant>,
+) -> ()
+! ServerError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  if request.connection.phaseValue != ConnectionPhase.RequestActive {
+    fail ServerError.InvalidState {phase: request.connection.phaseValue}
+  }
+  run ensureContinue(&mut request.*, &deadline)
+  if request.facts.expectation == ExpectationState.Rejected {
+    fail ServerError.UnsupportedExpectation
+  }
+  let mut budget = maxWireBytes
+  if budget > request.connection.limits.maxDiscardWireBytes {
+    budget = request.connection.limits.maxDiscardWireBytes
+  }
+  let absoluteBudget = match move u64.checkedAdd(request.facts.bodyWireTotal, budget) {
+    Option.None => { fail ServerError.SizeOverflow }
+    Option.Some {value} => value
+  }
+  while !request.facts.bodyComplete {
+    let input = BufferedDuplex.peek(&request.connection.channel.*)
+    let discarded = Decoder.discard(&mut request.decoder, input, false, absoluteBudget)
+    drop input
+    let progress = match move discarded {
+      Result<BodyProgress, BodyError>.Failure {error} => {
+        run consumeBodyProgress(&mut request.*, error.consumed, error.totalWire)
+        request.connection.phaseValue = ConnectionPhase.Failed
+        fail ServerError.Body {error: move error}
+      }
+      Result<BodyProgress, BodyError>.Success {value} => value
+    }
+    run consumeBodyProgress(&mut request.*, progress.consumed, progress.totalWire)
+    if progress.state == BodyProgressState.Complete {
+      request.facts.bodyComplete = true
+      request.facts.bodyDelimited = completionDelimited(&request.decoder)
+      return ()
+    }
+    let ended = run fillBody(&mut request.*, &deadline)
+    if ended {
+      let finalInput = BufferedDuplex.peek(&request.connection.channel.*)
+      let finalDiscard = Decoder.discard(&mut request.decoder, finalInput, true, absoluteBudget)
+      drop finalInput
+      let finalProgress = match move finalDiscard {
+        Result<BodyProgress, BodyError>.Failure {error} => {
+          run consumeBodyProgress(&mut request.*, error.consumed, error.totalWire)
+          request.connection.phaseValue = ConnectionPhase.Failed
+          fail ServerError.Body {error: move error}
+        }
+        Result<BodyProgress, BodyError>.Success {value} => value
+      }
+      run consumeBodyProgress(&mut request.*, finalProgress.consumed, finalProgress.totalWire)
+      if finalProgress.state == BodyProgressState.Complete {
+        request.facts.bodyComplete = true
+        request.facts.bodyDelimited = completionDelimited(&request.decoder)
+        return ()
+      }
+    }
+  }
+  return ()
+}
+
+/// Gracefully flushes, shuts down writes, and performs one finite best-effort input drain.
+pub effect fn finishConnection<'connection, 'transport, P>(
+  connection: &mut Connection<'connection, 'transport, P>,
+  maxDrainBytes: usize,
+  deadline: Instant,
+) -> ()
+! ServerError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  if connection.phaseValue != ConnectionPhase.Ready
+    && connection.phaseValue != ConnectionPhase.Closing
+    && connection.phaseValue != ConnectionPhase.Upgraded {
+    fail ServerError.InvalidState {phase: connection.phaseValue}
+  }
+  let mut drain = maxDrainBytes
+  if drain > connection.limits.shutdownDrainBytes {
+    drain = connection.limits.shutdownDrainBytes
+  }
+  let shutdown = run Effect.result(BufferedDuplex.shutdownWrite(
+    &mut connection.channel.*,
+    Option.some<Instant>(copyInstant(&deadline)),
+  ))
+  if let Result.Failure {error} = move shutdown {
+    connection.phaseValue = ConnectionPhase.Failed
+    fail ServerError.Buffer {error: move error}
+  }
+  if drain > usize.ZERO {
+    let drained = run Effect.result(BufferedDuplex.discardAtMost(
+      &mut connection.channel.*,
+      drain,
+      Option.some<Instant>(copyInstant(&deadline)),
+    ))
+    if let Result.Failure {error} = move drained {
+      connection.phaseValue = ConnectionPhase.Failed
+      fail ServerError.Buffer {error: move error}
+    }
+  }
+  connection.phaseValue = ConnectionPhase.Closed
+  return ()
+}
+
+effect fn consumeBodyProgress<'request, 'connection, 'transport, P>(
+  request: &mut Request<'request, 'connection, 'transport, P>,
+  count: usize,
+  totalWire: u64,
+) -> () ! ServerError {
+  request.facts.bodyWireTotal = totalWire
+  if count == usize.ZERO { return () }
+  let consumed = run Effect.result(BufferedDuplex.consume(
+    &mut request.connection.channel.*,
+    count,
+  ))
+  if let Result<(), BufferError>.Failure {error} = move consumed {
+    request.connection.phaseValue = ConnectionPhase.Failed
+    fail ServerError.Buffer {error: move error}
+  }
+  return ()
+}
+
+effect fn fillBody<'request, 'connection, 'transport, P>(
+  request: &mut Request<'request, 'connection, 'transport, P>,
+  deadline: &Option<Instant>,
+) -> bool
+! ServerError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let filled = run Effect.result(BufferedDuplex.fill(
+    &mut request.connection.channel.*,
+    usize.ONE,
+    copyDeadline(deadline),
+  ))
+  return match move filled {
+    Result<FillOutcome, BufferError>.Failure {error} => {
+      request.connection.phaseValue = ConnectionPhase.Failed
+      fail ServerError.Buffer {error: move error}
+    }
+    Result<FillOutcome, BufferError>.Success {value} => match move value {
+      FillOutcome.Available {count} => false
+      FillOutcome.End {available} => true
+    }
+  }
+}
+
+fn completionDelimited(decoder: &Decoder) -> bool {
+  return match move Decoder.completion(decoder) {
+    Option.None => false
+    Option.Some {value} => value.kind() == CompletionKind.Delimited
+  }
+}
+
+fn requestFacts(head: RequestHead, framing: Framing) -> RequestFacts {
+  let mut peerClose = false
+  let mut peerKeepAlive = false
+  let mut connectionUpgrade = false
+  let mut hasUpgrade = false
+  let mut expectation = ExpectationState.None
+  let mut sawExpectation = false
+  let mut expectationSupported = true
+  let mut fields = head.fields()
+  while true {
+    let next = ParsedHeaderIterator.next(&mut fields)
+    match move next {
+      Option.None => { break }
+      Option.Some {value} => {
+        let name = Header.name(&value)
+        if asciiName(name, "connection") {
+          let tokens = scanTokens(Header.value(&value), true)
+          peerClose = peerClose || tokens.close
+          peerKeepAlive = peerKeepAlive || tokens.keepAlive
+          connectionUpgrade = connectionUpgrade || tokens.upgrade
+        } else if asciiName(name, "upgrade") {
+          hasUpgrade = true
+        } else if asciiName(name, "expect") {
+          sawExpectation = true
+          if !onlyContinueTokens(Header.value(&value)) { expectationSupported = false }
+        }
+      }
+    }
+  }
+  let complete = match framing {
+    Framing.Empty => true
+    Framing.Fixed {length} => length == u64.MIN
+    _ => false
+  }
+  if sawExpectation {
+    if !expectationSupported {
+      expectation = ExpectationState.Rejected
+    } else if head.version() == Version.Http11 && !complete {
+      expectation = ExpectationState.ContinuePending
+    }
+  }
+  return RequestFacts {
+    version: head.version(),
+    peerClose: peerClose,
+    peerKeepAlive: peerKeepAlive,
+    connectionUpgrade: connectionUpgrade,
+    hasUpgrade: hasUpgrade,
+    bodyEmpty: complete,
+    bodyComplete: complete,
+    bodyDelimited: complete,
+    bodyWireTotal: u64.MIN,
+    expectation: expectation,
+  }
+}
+
+struct TokenFacts { close: bool keepAlive: bool upgrade: bool }
+
+fn scanTokens(bytes: &[u8], tolerateInvalid: bool) -> TokenFacts {
+  let mut facts = TokenFacts {close: false, keepAlive: false, upgrade: false}
+  let mut start = usize.ZERO
+  while start <= bytes.length {
+    let mut end = start
+    while end < bytes.length && bytes[end] != 44 { end = end + usize.ONE }
+    let mut left = start
+    while left < end && (bytes[left] == 32 || bytes[left] == 9) { left = left + usize.ONE }
+    let mut right = end
+    while right > left && (bytes[right - usize.ONE] == 32 || bytes[right - usize.ONE] == 9) {
+      right = right - usize.ONE
+    }
+    let token = Slice.view<u8>(bytes, left, right - left)
+    if asciiBytes(token, b"close") { facts.close = true }
+    if asciiBytes(token, b"keep-alive") { facts.keepAlive = true }
+    if asciiBytes(token, b"upgrade") { facts.upgrade = true }
+    drop token
+    if end == bytes.length { break }
+    start = end + usize.ONE
+  }
+  drop tolerateInvalid
+  return move facts
+}
+
+fn onlyContinueTokens(bytes: &[u8]) -> bool {
+  if bytes.length == usize.ZERO { return false }
+  let mut found = false
+  let mut start = usize.ZERO
+  while start <= bytes.length {
+    let mut end = start
+    while end < bytes.length && bytes[end] != 44 { end = end + usize.ONE }
+    let mut left = start
+    while left < end && (bytes[left] == 32 || bytes[left] == 9) { left = left + usize.ONE }
+    let mut right = end
+    while right > left && (bytes[right - usize.ONE] == 32 || bytes[right - usize.ONE] == 9) {
+      right = right - usize.ONE
+    }
+    if left == right { return false }
+    let token = Slice.view<u8>(bytes, left, right - left)
+    let valid = asciiBytes(token, b"100-continue")
+    drop token
+    if !valid { return false }
+    found = true
+    if end == bytes.length { break }
+    start = end + usize.ONE
+  }
+  return found
+}
+
+effect fn ensureContinue<'request, 'connection, 'transport, P>(
+  request: &mut Request<'request, 'connection, 'transport, P>,
+  deadline: &Option<Instant>,
+) -> ()
+! ServerError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  if request.facts.expectation != ExpectationState.ContinuePending { return () }
+  let attempted = match move usize.checkedAdd(request.informationalCount, usize.ONE) {
+    Option.None => {
+      fail ServerError.SizeOverflow
+    }
+    Option.Some {value} => value
+  }
+  let sent = request.informationalCount
+  if sent >= request.connection.limits.maxInformationalResponses {
+    fail ServerError.LimitExceeded {
+      limit: ServerLimitKind.InformationalResponses,
+      allowed: usize.toU64(request.connection.limits.maxInformationalResponses),
+      attempted: usize.toU64(attempted),
+    }
+  }
+  run writeServerBytes(&mut request.connection.*, b"HTTP/1.1 100 Continue\r\n\r\n", deadline)
+  run flushServer(&mut request.connection.*, deadline)
+  request.facts.expectation = ExpectationState.None
+  request.continueSent = true
+  request.informationalCount = attempted
+  return ()
+}
+
+/// Sends one bounded informational response and flushes it before returning.
+pub effect fn sendInformational<'request, 'connection, 'transport, 'value, P>(
+  request: &mut Request<'request, 'connection, 'transport, P>,
+  head: &ValueResponseHead<'value>,
+  deadline: Option<Instant>,
+) -> ()
+! ServerError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  if request.connection.phaseValue != ConnectionPhase.RequestActive {
+    fail ServerError.InvalidState {phase: request.connection.phaseValue}
+  }
+  let status = head.status()
+  let code = Status.code(&status)
+  if code < 100 || code >= 200 || code == 101 || head.version() != request.facts.version {
+    fail ServerError.InvalidState {phase: request.connection.phaseValue}
+  }
+  if code == 100 && request.continueSent {
+    fail ServerError.InvalidState {phase: request.connection.phaseValue}
+  }
+  if hasHeader(head, "content-length")
+    || hasHeader(head, "transfer-encoding")
+    || hasHeader(head, "trailer") {
+    fail ServerError.InvalidBodyMode
+  }
+  if hasHeader(head, "connection") { fail ServerError.InvalidBodyMode }
+  let attempted = match move usize.checkedAdd(request.informationalCount, usize.ONE) {
+    Option.None => {
+      fail ServerError.SizeOverflow
+    }
+    Option.Some {value} => value
+  }
+  if attempted > request.connection.limits.maxInformationalResponses {
+    fail ServerError.LimitExceeded {
+      limit: ServerLimitKind.InformationalResponses,
+      allowed: usize.toU64(request.connection.limits.maxInformationalResponses),
+      attempted: usize.toU64(attempted),
+    }
+  }
+  let size = run serializeResponse(&mut request.connection.*, head)
+  run writeScratch(&mut request.connection.*, size, &deadline)
+  run flushServer(&mut request.connection.*, &deadline)
+  request.informationalCount = attempted
+  if code == 100 {
+    request.continueSent = true
+    if request.facts.expectation == ExpectationState.ContinuePending {
+      request.facts.expectation = ExpectationState.None
+    }
+  }
+  return ()
+}
+
+/// Begins exactly one final response and lends its streaming writer.
+pub effect fn respond<
+  'writer,
+  'request: 'writer,
+  'connection: 'request,
+  'transport: 'connection,
+  'value: 'writer,
+  'names: 'request,
+  'callback,
+  A,
+  E,
+  ?CallbackRequirements,
+  P,
+>(
+  request: &'writer mut Request<'request, 'connection, 'transport, P>,
+  head: &ValueResponseHead<'value>,
+  mode: BodyMode,
+  reuse: ReusePolicy,
+  trailerPolicy: TrailerPolicy<'names>,
+  deadline: Option<Instant>,
+  callback: for<'call, 'writerView: 'call, 'requestView: 'writerView, 'connectionView: 'requestView, 'transportView: 'connectionView> once fn<'callback>(
+    &'call mut ResponseWriter<'writerView, 'requestView, 'connectionView, 'transportView, P>,
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> A
+! E | ServerError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator | &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  if request.connection.phaseValue != ConnectionPhase.RequestActive {
+    fail ServerError.InvalidState {phase: request.connection.phaseValue}
+  }
+  let status = head.status()
+  if Status.code(&status) < 200 || head.version() != request.facts.version {
+    fail ServerError.InvalidBodyMode
+  }
+  let close = selectClose(&request.*, mode, reuse)
+  let keepAlive = !close && request.facts.version == Version.Http10
+  let size = run normalizeResponse(&mut request.connection.*, head, close, keepAlive, false)
+  let encoder = run makeResponseEncoder(&mut request.*, size, mode, trailerPolicy)
+  run writeScratch(&mut request.connection.*, size, &deadline)
+  request.connection.phaseValue = ConnectionPhase.Responding
+  let mut writer = ResponseWriter {
+    request: move request,
+    encoder: move encoder,
+    finished: false,
+    callbackSucceeded: false,
+  }
+  let use = effect fn(
+    owned: &mut ResponseWriter<'writer, 'request, 'connection, 'transport, P>,
+  ) -> A
+  ! E
+  ? CallbackRequirements {
+    let value = run callback(&mut owned.*)
+    owned.callbackSucceeded = true
+    return move value
+  }
+  let release = effect fn(
+    owned: &mut ResponseWriter<'writer, 'request, 'connection, 'transport, P>,
+  ) -> () {
+    if !owned.finished || !owned.callbackSucceeded {
+      owned.request.connection.closeSelected = true
+      if owned.request.connection.phaseValue != ConnectionPhase.Failed {
+        owned.request.connection.phaseValue = ConnectionPhase.Closing
+      }
+      Encoder.abandon(&mut owned.encoder)
+    } else {
+      owned.request.responseFinished = true
+      owned.request.connection.closeSelected = close
+      if close { owned.request.connection.phaseValue = ConnectionPhase.Closing }
+      else { owned.request.connection.phaseValue = ConnectionPhase.Ready }
+    }
+    return ()
+  }
+  return run Effect.useReleaseNonParking(move writer, move use, move release)
+}
+
+/// Sends a final body-free response without waiting for unread request content.
+pub effect fn reject<
+  'loan,
+  'request: 'loan,
+  'connection: 'request,
+  'transport: 'connection,
+  'value,
+  P,
+>(
+  request: &'loan mut Request<'request, 'connection, 'transport, P>,
+  head: &ValueResponseHead<'value>,
+  deadline: Option<Instant>,
+) -> ()
+! ServerError | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let emptyEntries: [Header<'static>; 0] = []
+  let empty = match move Headers.make(&emptyEntries, request.connection.limits.values) {
+    Result.Failure {error} => { fail ServerError.Value {error: move error} }
+    Result.Success {value} => value
+  }
+  if request.connection.phaseValue != ConnectionPhase.RequestActive {
+    fail ServerError.InvalidState {phase: request.connection.phaseValue}
+  }
+  let status = head.status()
+  if Status.code(&status) < 200 || head.version() != request.facts.version {
+    fail ServerError.InvalidBodyMode
+  }
+  let size = run normalizeResponse(&mut request.connection.*, head, true, false, false)
+  let encoder = run makeResponseEncoder(
+    &mut request.*,
+    size,
+    BodyMode.NoBody,
+    TrailerPolicy.defaultPolicy(),
+  )
+  run writeScratch(&mut request.connection.*, size, &deadline)
+  let mut finishing = move encoder
+  let begun = Encoder.beginFinish(&mut finishing, &empty)
+  if let Result.Failure {error} = move begun {
+    request.connection.phaseValue = ConnectionPhase.Failed
+    fail ServerError.Body {error: move error}
+  }
+  while !encoderComplete(&finishing) {
+    let scratch = Bytes.asMutSlice(&mut request.connection.responseScratch)
+    let continued = Encoder.continueFinish(&mut finishing, &mut scratch)
+    drop scratch
+    let progress = match move continued {
+      Result.Failure {error} => {
+        request.connection.phaseValue = ConnectionPhase.Failed
+        fail ServerError.Body {error: move error}
+      }
+      Result.Success {value} => value
+    }
+    if progress.written > usize.ZERO {
+      run writeScratch(&mut request.connection.*, progress.written, &deadline)
+    }
+  }
+  run flushServer(&mut request.connection.*, &deadline)
+  request.responseFinished = true
+  request.connection.closeSelected = true
+  request.connection.phaseValue = ConnectionPhase.Closing
+  return ()
+}
+
+/// Completes a validated HTTP Upgrade response and lends the exact buffered suffix.
+pub effect fn withUpgrade<
+  'loan,
+  'request: 'loan,
+  'connection: 'request,
+  'transport: 'connection,
+  'value: 'loan,
+  'callback,
+  A,
+  E,
+  ?CallbackRequirements,
+  P,
+>(
+  request: &'loan mut Request<'request, 'connection, 'transport, P>,
+  selectedProtocol: string,
+  response: &ValueResponseHead<'value>,
+  deadline: Option<Instant>,
+  callback: for<'call, 'transportView: 'call> once fn<'callback>(
+    &'call mut BufferedDuplex<'transportView, P>,
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> A
+! E | ServerError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator | &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let protocolRequested = run requestHasToken(&request.*, "upgrade", selectedProtocol)
+  if request.connection.phaseValue != ConnectionPhase.RequestActive
+    || !request.facts.bodyEmpty
+    || !request.facts.connectionUpgrade
+    || !request.facts.hasUpgrade
+    || !validTokenString(selectedProtocol)
+    || !protocolRequested {
+    fail ServerError.UpgradeRejected
+  }
+  let status = response.status()
+  if Status.code(&status) != 101
+    || response.version() != request.facts.version
+    || hasHeader(response, "content-length")
+    || hasHeader(response, "transfer-encoding")
+    || hasHeader(response, "trailer")
+    || !responseHasToken(response, "upgrade", selectedProtocol) {
+    fail ServerError.UpgradeRejected
+  }
+  let size = run normalizeResponse(&mut request.connection.*, response, false, false, true)
+  run writeScratch(&mut request.connection.*, size, &deadline)
+  run flushServer(&mut request.connection.*, &deadline)
+  request.responseFinished = true
+  request.connection.closeSelected = true
+  request.connection.phaseValue = ConnectionPhase.Upgraded
+  return run callback(&mut request.connection.channel.*)
+}
+
+/// Completes a successful CONNECT response and lends the exact buffered tunnel suffix.
+pub effect fn withTunnel<
+  'loan,
+  'request: 'loan,
+  'connection: 'request,
+  'transport: 'connection,
+  'value: 'loan,
+  'callback,
+  A,
+  E,
+  ?CallbackRequirements,
+  P,
+>(
+  request: &'loan mut Request<'request, 'connection, 'transport, P>,
+  response: &ValueResponseHead<'value>,
+  deadline: Option<Instant>,
+  callback: for<'call, 'transportView: 'call> once fn<'callback>(
+    &'call mut BufferedDuplex<'transportView, P>,
+  ) -> once Effect<'call; A ! E ? CallbackRequirements>,
+) -> A
+! E | ServerError | OutOfMemoryError
+? CallbackRequirements | &mut Allocator | &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let head = run Request.head(&request.*)
+  let method = head.method()
+  let status = response.status()
+  let valid = Method.format(&method) == "CONNECT"
+    && request.facts.bodyEmpty
+    && Status.code(&status) >= 200
+    && Status.code(&status) < 300
+    && response.version() == request.facts.version
+    && !hasHeader(response, "content-length")
+    && !hasHeader(response, "transfer-encoding")
+    && !hasHeader(response, "trailer")
+  drop method
+  drop head
+  if !valid || request.connection.phaseValue != ConnectionPhase.RequestActive {
+    fail ServerError.TunnelRejected
+  }
+  let size = run normalizeResponse(&mut request.connection.*, response, false, false, false)
+  run writeScratch(&mut request.connection.*, size, &deadline)
+  run flushServer(&mut request.connection.*, &deadline)
+  request.responseFinished = true
+  request.connection.closeSelected = true
+  request.connection.phaseValue = ConnectionPhase.Upgraded
+  return run callback(&mut request.connection.channel.*)
+}
+
+impl<'writer, 'request, 'connection, 'transport, P>
+  ResponseWriter<'writer, 'request, 'connection, 'transport, P> {
+  /// Accepts one payload prefix into the shared framing and bounded output owners.
+  pub effect fn writeSome(
+    self: &mut Self,
+    input: &[u8],
+    deadline: Option<Instant>,
+  ) -> WriteProgress
+  ! ServerError
+  ? &mut MonotonicClock
+  where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    if self.finished || self.request.connection.phaseValue != ConnectionPhase.Responding {
+      fail ServerError.InvalidState {phase: self.request.connection.phaseValue}
+    }
+    let mut consumed = usize.ZERO
+    let mut buffered = usize.ZERO
+    while true {
+      let scratch = Bytes.asMutSlice(&mut self.request.connection.responseScratch)
+      let remaining = Slice.view<u8>(input, consumed, input.length - consumed)
+      let stepped = Encoder.step(&mut self.encoder, remaining, &mut scratch)
+      drop remaining
+      drop scratch
+      let progress = match move stepped {
+        Result<BodyProgress, BodyError>.Failure {error} => {
+          self.request.connection.phaseValue = ConnectionPhase.Failed
+          fail ServerError.Body {error: move error}
+        }
+        Result<BodyProgress, BodyError>.Success {value} => value
+      }
+      consumed = match move usize.checkedAdd(consumed, progress.consumed) {
+        Option.None => {
+          self.request.connection.phaseValue = ConnectionPhase.Failed
+          fail ServerError.SizeOverflow
+        }
+        Option.Some {value} => value
+      }
+      if progress.written > usize.ZERO {
+        run writeOutputScratch(
+          &mut self.request.connection.*,
+          progress.written,
+          &deadline,
+          WriteProgress {
+            consumed: consumed,
+            buffered: buffered,
+            totalPayload: progress.totalPayload,
+            totalWire: progress.totalWire,
+          },
+        )
+        buffered = match move usize.checkedAdd(buffered, progress.written) {
+          Option.None => {
+            self.request.connection.phaseValue = ConnectionPhase.Failed
+            fail ServerError.SizeOverflow
+          }
+          Option.Some {value} => value
+        }
+      }
+      if consumed > usize.ZERO || input.length == usize.ZERO {
+        return WriteProgress {
+          consumed: consumed,
+          buffered: buffered,
+          totalPayload: progress.totalPayload,
+          totalWire: progress.totalWire,
+        }
+      }
+    }
+    return WriteProgress {consumed: consumed, buffered: buffered, totalPayload: 0, totalWire: 0}
+  }
+
+  /// Accepts the complete caller payload in order.
+  pub effect fn writeAll(
+    self: &mut Self,
+    input: &[u8],
+    deadline: Option<Instant>,
+  ) -> WriteProgress
+  ! ServerError
+  ? &mut MonotonicClock
+  where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    if self.finished || self.request.connection.phaseValue != ConnectionPhase.Responding {
+      fail ServerError.InvalidState {phase: self.request.connection.phaseValue}
+    }
+    if input.length == usize.ZERO {
+      return run ResponseWriter.writeSome(&mut self.*, input, move deadline)
+    }
+    let mut consumed = usize.ZERO
+    let mut buffered = usize.ZERO
+    let mut totalPayload: u64 = 0
+    let mut totalWire: u64 = 0
+    while consumed < input.length {
+      let remaining = Slice.view<u8>(input, consumed, input.length - consumed)
+      let attempted = run Effect.result(ResponseWriter.writeSome(
+        &mut self.*,
+        remaining,
+        copyDeadline(&deadline),
+      ))
+      drop remaining
+      let progress = match move attempted {
+        Result<WriteProgress, ServerError>.Failure {error} => {
+          return run rerouteWriteAllFailure(move error, consumed, buffered)
+        }
+        Result<WriteProgress, ServerError>.Success {value} => value
+      }
+      consumed = match move usize.checkedAdd(consumed, progress.consumed) {
+        Option.None => {
+          self.request.connection.phaseValue = ConnectionPhase.Failed
+          fail ServerError.SizeOverflow
+        }
+        Option.Some {value} => value
+      }
+      buffered = match move usize.checkedAdd(buffered, progress.buffered) {
+        Option.None => {
+          self.request.connection.phaseValue = ConnectionPhase.Failed
+          fail ServerError.SizeOverflow
+        }
+        Option.Some {value} => value
+      }
+      totalPayload = progress.totalPayload
+      totalWire = progress.totalWire
+    }
+    return WriteProgress {
+      consumed: consumed,
+      buffered: buffered,
+      totalPayload: totalPayload,
+      totalWire: totalWire,
+    }
+  }
+
+  /// Snapshots trailers, completes response framing, and flushes the response exactly once.
+  pub effect fn finish<'value>(
+    self: &mut Self,
+    trailers: &Headers<'value>,
+    deadline: Option<Instant>,
+  ) -> ()
+  ! ServerError
+  ? &mut MonotonicClock
+  where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+    if self.finished || self.request.connection.phaseValue != ConnectionPhase.Responding {
+      fail ServerError.InvalidState {phase: self.request.connection.phaseValue}
+    }
+    let begun = Encoder.beginFinish(&mut self.encoder, trailers)
+    if let Result<(), BodyError>.Failure {error} = move begun {
+      self.request.connection.phaseValue = ConnectionPhase.Failed
+      fail ServerError.Body {error: move error}
+    }
+    let mut buffered = usize.ZERO
+    while !encoderComplete(&self.encoder) {
+      let scratch = Bytes.asMutSlice(&mut self.request.connection.responseScratch)
+      let continued = Encoder.continueFinish(&mut self.encoder, &mut scratch)
+      drop scratch
+      let progress = match move continued {
+        Result<BodyProgress, BodyError>.Failure {error} => {
+          self.request.connection.phaseValue = ConnectionPhase.Failed
+          fail ServerError.Body {error: move error}
+        }
+        Result<BodyProgress, BodyError>.Success {value} => value
+      }
+      if progress.written > usize.ZERO {
+        run writeOutputScratch(
+          &mut self.request.connection.*,
+          progress.written,
+          &deadline,
+          WriteProgress {
+            consumed: usize.ZERO,
+            buffered: buffered,
+            totalPayload: progress.totalPayload,
+            totalWire: progress.totalWire,
+          },
+        )
+        buffered = match move usize.checkedAdd(buffered, progress.written) {
+          Option.None => {
+            self.request.connection.phaseValue = ConnectionPhase.Failed
+            fail ServerError.SizeOverflow
+          }
+          Option.Some {value} => value
+        }
+      }
+    }
+    run flushServer(&mut self.request.connection.*, &deadline)
+    self.finished = true
+    return ()
+  }
+}
+
+effect fn rerouteWriteAllFailure(
+  error: ServerError,
+  consumed: usize,
+  buffered: usize,
+) -> never ! ServerError {
+  return match move error {
+    ServerError.Output {error: cause, progress} => {
+      fail ServerError.Output {
+        error: move cause,
+        progress: WriteProgress {
+          consumed: consumed + progress.consumed,
+          buffered: buffered + progress.buffered,
+          totalPayload: progress.totalPayload,
+          totalWire: progress.totalWire,
+        },
+      }
+    }
+    ServerError.Head {error: cause} => { fail ServerError.Head {error: move cause} }
+    ServerError.Body {error: cause} => { fail ServerError.Body {error: move cause} }
+    ServerError.Buffer {error: cause} => { fail ServerError.Buffer {error: move cause} }
+    ServerError.Value {error: cause} => { fail ServerError.Value {error: move cause} }
+    ServerError.LimitExceeded {limit, allowed, attempted} => {
+      fail ServerError.LimitExceeded {limit: limit, allowed: allowed, attempted: attempted}
+    }
+    ServerError.SizeOverflow => { fail ServerError.SizeOverflow }
+    ServerError.UnsupportedExpectation => { fail ServerError.UnsupportedExpectation }
+    ServerError.InvalidBodyMode => { fail ServerError.InvalidBodyMode }
+    ServerError.InvalidState {phase} => { fail ServerError.InvalidState {phase: phase} }
+    ServerError.UpgradeRejected => { fail ServerError.UpgradeRejected }
+    ServerError.TunnelRejected => { fail ServerError.TunnelRejected }
+    ServerError.TruncatedHead => { fail ServerError.TruncatedHead }
+  }
+}
+
+fn encoderComplete(encoder: &Encoder) -> bool {
+  return match move Encoder.completion(encoder) {
+    Option.None => false
+    Option.Some {value} => { drop value return true }
+  }
+}
+
+fn settleRequest<'request, 'connection, 'transport, P>(
+  request: &mut Request<'request, 'connection, 'transport, P>,
+) -> () {
+  if request.responseFinished { return () }
+  request.connection.closeSelected = true
+  if request.connection.phaseValue != ConnectionPhase.Failed
+    && request.connection.phaseValue != ConnectionPhase.Upgraded {
+    request.connection.phaseValue = ConnectionPhase.Closing
+  }
+  Decoder.abandon(&mut request.decoder)
+  return ()
+}
+
+fn selectClose<'request, 'connection, 'transport, P>(
+  request: &Request<'request, 'connection, 'transport, P>,
+  mode: BodyMode,
+  policy: ReusePolicy,
+) -> bool {
+  if policy == ReusePolicy.CloseAfterResponse || request.facts.peerClose
+    || request.facts.expectation == ExpectationState.Rejected {
+    return true
+  }
+  if !request.facts.bodyComplete || !request.facts.bodyDelimited { return true }
+  if !selfDelimited(mode) { return true }
+  if request.connection.requestCount >= request.connection.limits.maxRequestsPerConnection {
+    return true
+  }
+  if request.facts.version == Version.Http10 {
+    return policy != ReusePolicy.Http10KeepAlive || !request.facts.peerKeepAlive
+  }
+  return false
+}
+
+fn selfDelimited(mode: BodyMode) -> bool {
+  return match mode {
+    BodyMode.NoBody => true
+    BodyMode.ContentLength {length} => { drop length return true }
+    BodyMode.Chunked => true
+    BodyMode.CloseDelimited => false
+  }
+}
+
+fn modeMatches(mode: BodyMode, framing: Framing) -> bool {
+  return match mode {
+    BodyMode.NoBody => match framing {
+      Framing.Empty => true
+      Framing.Fixed {length} => length == u64.MIN
+      _ => false
+    }
+    BodyMode.ContentLength {length} => match framing {
+      Framing.Fixed {length: selected} => selected == length
+      _ => false
+    }
+    BodyMode.Chunked => match framing { Framing.Chunked => true _ => false }
+    BodyMode.CloseDelimited => match framing { Framing.CloseDelimited => true _ => false }
+  }
+}
+
+effect fn makeResponseEncoder<'request, 'connection, 'transport, 'names, P>(
+  request: &mut Request<'request, 'connection, 'transport, P>,
+  size: usize,
+  mode: BodyMode,
+  trailerPolicy: TrailerPolicy<'names>,
+) -> Encoder
+! ServerError | OutOfMemoryError
+? &mut Allocator {
+  if request.connection.responseParserUsed {
+    let reset = ResponseParser.reset(&mut request.connection.responseParser)
+    if let Result<(), ParseError>.Failure {error} = move reset {
+      fail ServerError.Head {error: move error}
+    }
+  }
+  request.connection.responseParserUsed = true
+  let scratch = Bytes.asSlice(&request.connection.responseScratch)
+  let bytes = Slice.view<u8>(scratch, usize.ZERO, size)
+  let fed = ResponseParser.feed(&mut request.connection.responseParser, bytes, true)
+  drop bytes
+  drop scratch
+  let progress = match move fed {
+    Result.Failure {error} => { fail ServerError.Head {error: move error} }
+    Result.Success {value} => value
+  }
+  if progress.state != HeadProgressState.Complete { fail ServerError.TruncatedHead }
+  let response = match move ResponseParser.head(&request.connection.responseParser) {
+    Result.Failure {error} => { fail ServerError.Head {error: move error} }
+    Result.Success {value} => value
+  }
+  let requestHead = match move RequestParser.head(&request.connection.requestParser) {
+    Result.Failure {error} => { fail ServerError.Head {error: move error} }
+    Result.Success {value} => value
+  }
+  let method = requestHead.method()
+  let selected = validateOutgoingResponse(response, &method, trailerPolicy)
+  drop method
+  drop requestHead
+  drop response
+  let selection = match move selected {
+    Result.Failure {error} => { fail ServerError.Body {error: move error} }
+    Result.Success {value} => move value
+  }
+  if !modeMatches(mode, selection.framing()) { fail ServerError.InvalidBodyMode }
+  let made = run Encoder.make(move selection, request.connection.limits.body, trailerPolicy)
+  return match move made {
+    Result<Encoder, BodyError>.Failure {error} => { fail ServerError.Body {error: move error} }
+    Result<Encoder, BodyError>.Success {value} => move value
+  }
+}
+
+effect fn normalizeResponse<'connection, 'transport, 'value, P>(
+  connection: &mut Connection<'connection, 'transport, P>,
+  head: &ValueResponseHead<'value>,
+  close: bool,
+  keepAlive: bool,
+  upgrade: bool,
+) -> usize
+! ServerError | OutOfMemoryError
+? &mut Allocator {
+  let source = head.headers()
+  let connectionValue = connectionHeaderValue(close, keepAlive, upgrade)
+  let mut retainedCount = usize.ZERO
+  let mut counting = Headers.iter(&source)
+  while true {
+    let next = HeaderIterator.next(&mut counting)
+    match move next {
+      Option.None => { break }
+      Option.Some {value} => {
+        if !asciiName(Header.name(&value), "connection") {
+          retainedCount = match move usize.checkedAdd(retainedCount, usize.ONE) {
+            Option.None => { fail ServerError.SizeOverflow }
+            Option.Some {value: nextCount} => nextCount
+          }
+        }
+      }
+    }
+  }
+  let mut generatedCount = usize.ZERO
+  if connectionValue.length > usize.ZERO { generatedCount = usize.ONE }
+  let normalizedCount = match move usize.checkedAdd(retainedCount, generatedCount) {
+    Option.None => { fail ServerError.SizeOverflow }
+    Option.Some {value} => value
+  }
+  if normalizedCount > connection.limits.values.maxFields {
+    fail ServerError.Value {
+      error: ValueError {
+        reason: ValueReason.LimitExceeded {
+          limit: LimitKind.Fields,
+          allowed: connection.limits.values.maxFields,
+          attempted: normalizedCount,
+        },
+        component: ValueComponent.Headers,
+        fieldIndex: Option.none<usize>(),
+        offset: normalizedCount,
+      },
+    }
+  }
+  let mut entries = Vector.make<Header<'value>>()
+  let reserved = run Vector.reserveExact<Header<'value>>(&mut entries, normalizedCount)
+  drop reserved
+  let mut iterator = Headers.iter(&source)
+  while true {
+    let next = HeaderIterator.next(&mut iterator)
+    match move next {
+      Option.None => { break }
+      Option.Some {value} => {
+        if !asciiName(Header.name(&value), "connection") {
+          let appended = run Vector.append<Header<'value>>(&mut entries, value)
+          drop appended
+        }
+      }
+    }
+  }
+  if connectionValue.length > usize.ZERO {
+    let generated = match move Header.make("Connection", connectionValue, connection.limits.values) {
+      Result.Failure {error} => { fail ServerError.Value {error: move error} }
+      Result.Success {value} => value
+    }
+    let appended = run Vector.append<Header<'value>>(&mut entries, generated)
+    drop appended
+  }
+  let values = Vector.asSlice<Header<'value>>(&entries)
+  let headers = match move Headers.make(values, connection.limits.values) {
+    Result.Failure {error} => { fail ServerError.Value {error: move error} }
+    Result.Success {value} => value
+  }
+  let normalized = match move ValueResponseHead.make(
+    head.version(),
+    head.status(),
+    head.reason(),
+    headers,
+    connection.limits.values,
+  ) {
+    Result.Failure {error} => { fail ServerError.Value {error: move error} }
+    Result.Success {value} => value
+  }
+  return run serializeResponse(&mut connection.*, &normalized)
+}
+
+effect fn serializeResponse<'connection, 'transport, 'value, P>(
+  connection: &mut Connection<'connection, 'transport, P>,
+  head: &ValueResponseHead<'value>,
+) -> usize ! ServerError {
+  let scratch = Bytes.asMutSlice(&mut connection.responseScratch)
+  let serialized = writeResponseInto(head, &mut scratch, connection.limits.values)
+  return match move serialized {
+    Result<usize, ValueError>.Failure {error} => {
+      drop scratch
+      fail ServerError.Value {error: move error}
+    }
+    Result<usize, ValueError>.Success {value} => {
+      drop scratch
+      return value
+    }
+  }
+}
+
+fn connectionHeaderValue(close: bool, keepAlive: bool, upgrade: bool) -> &'static [u8] {
+  if close { return b"close" }
+  if keepAlive { return b"keep-alive" }
+  if upgrade { return b"upgrade" }
+  return b""
+}
+
+effect fn writeScratch<'connection, 'transport, P>(
+  connection: &mut Connection<'connection, 'transport, P>,
+  size: usize,
+  deadline: &Option<Instant>,
+) -> ()
+! ServerError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let scratch = Bytes.asSlice(&connection.responseScratch)
+  let bytes = Slice.view<u8>(scratch, usize.ZERO, size)
+  let written = run Effect.result(BufferedDuplex.writeAll(
+    &mut connection.channel.*,
+    bytes,
+    copyDeadline(deadline),
+  ))
+  drop bytes
+  drop scratch
+  if let Result<(), BufferError>.Failure {error} = move written {
+    connection.phaseValue = ConnectionPhase.Failed
+    fail ServerError.Buffer {error: move error}
+  }
+  return ()
+}
+
+effect fn writeOutputScratch<'connection, 'transport, P>(
+  connection: &mut Connection<'connection, 'transport, P>,
+  size: usize,
+  deadline: &Option<Instant>,
+  progress: WriteProgress,
+) -> ()
+! ServerError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let scratch = Bytes.asSlice(&connection.responseScratch)
+  let bytes = Slice.view<u8>(scratch, usize.ZERO, size)
+  let written = run Effect.result(BufferedDuplex.writeAll(
+    &mut connection.channel.*,
+    bytes,
+    copyDeadline(deadline),
+  ))
+  drop bytes
+  drop scratch
+  if let Result<(), BufferError>.Failure {error} = move written {
+    let accepted = bufferAccepted(&error)
+    let buffered = progress.buffered + accepted
+    connection.phaseValue = ConnectionPhase.Failed
+    fail ServerError.Output {
+      error: move error,
+      progress: WriteProgress {
+        consumed: progress.consumed,
+        buffered: buffered,
+        totalPayload: progress.totalPayload,
+        totalWire: progress.totalWire,
+      },
+    }
+  }
+  return ()
+}
+
+fn bufferAccepted(error: &BufferError) -> usize {
+  return match &error.* {
+    BufferError.WriteFailed {accepted, drained, error: cause} => accepted
+    BufferError.UnknownExternalTransfer {progress, error: cause} => progress
+    _ => usize.ZERO
+  }
+}
+
+effect fn writeServerBytes<'connection, 'transport, P>(
+  connection: &mut Connection<'connection, 'transport, P>,
+  bytes: &[u8],
+  deadline: &Option<Instant>,
+) -> ()
+! ServerError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let written = run Effect.result(BufferedDuplex.writeAll(
+    &mut connection.channel.*,
+    bytes,
+    copyDeadline(deadline),
+  ))
+  if let Result<(), BufferError>.Failure {error} = move written {
+    connection.phaseValue = ConnectionPhase.Failed
+    fail ServerError.Buffer {error: move error}
+  }
+  return ()
+}
+
+effect fn flushServer<'connection, 'transport, P>(
+  connection: &mut Connection<'connection, 'transport, P>,
+  deadline: &Option<Instant>,
+) -> ()
+! ServerError
+? &mut MonotonicClock
+where &'transport mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
+  let flushed = run Effect.result(BufferedDuplex.flush(
+    &mut connection.channel.*,
+    copyDeadline(deadline),
+  ))
+  if let Result<(), BufferError>.Failure {error} = move flushed {
+    connection.phaseValue = ConnectionPhase.Failed
+    fail ServerError.Buffer {error: move error}
+  }
+  return ()
+}
+
+fn hasHeader<'value>(head: &ValueResponseHead<'value>, name: string) -> bool {
+  let headers = head.headers()
+  let mut iterator = Headers.iter(&headers)
+  while true {
+    let next = HeaderIterator.next(&mut iterator)
+    match move next {
+      Option.None => { return false }
+      Option.Some {value} => {
+        if asciiName(Header.name(&value), name) { return true }
+      }
+    }
+  }
+  return false
+}
+
+fn responseHasToken<'value>(
+  head: &ValueResponseHead<'value>,
+  name: string,
+  token: string,
+) -> bool {
+  let headers = head.headers()
+  let mut iterator = Headers.iter(&headers)
+  while true {
+    let next = HeaderIterator.next(&mut iterator)
+    match move next {
+      Option.None => { return false }
+      Option.Some {value} => {
+        if asciiName(Header.name(&value), name)
+          && containsToken(Header.value(&value), token) { return true }
+      }
+    }
+  }
+  return false
+}
+
+effect fn requestHasToken<'request, 'connection, 'transport, P>(
+  request: &Request<'request, 'connection, 'transport, P>,
+  name: string,
+  token: string,
+) -> bool ! ServerError {
+  let head = run Request.head(request)
+  let mut fields = head.fields()
+  while true {
+    let next = ParsedHeaderIterator.next(&mut fields)
+    match move next {
+      Option.None => { return false }
+      Option.Some {value} => {
+        if asciiName(Header.name(&value), name)
+          && containsToken(Header.value(&value), token) { return true }
+      }
+    }
+  }
+  return false
+}
+
+fn containsToken(bytes: &[u8], sought: string) -> bool {
+  let mut start = usize.ZERO
+  while start <= bytes.length {
+    let mut end = start
+    while end < bytes.length && bytes[end] != 44 { end = end + usize.ONE }
+    let mut left = start
+    while left < end && (bytes[left] == 32 || bytes[left] == 9) { left = left + usize.ONE }
+    let mut right = end
+    while right > left && (bytes[right - usize.ONE] == 32 || bytes[right - usize.ONE] == 9) {
+      right = right - usize.ONE
+    }
+    let token = Slice.view<u8>(bytes, left, right - left)
+    let found = asciiBytes(token, String.utf8Bytes(sought))
+    drop token
+    if found { return true }
+    if end == bytes.length { break }
+    start = end + usize.ONE
+  }
+  return false
+}
+
+fn validTokenString(value: string) -> bool {
+  let bytes = String.utf8Bytes(value)
+  if bytes.length == usize.ZERO { return false }
+  let mut index = usize.ZERO
+  while index < bytes.length {
+    let byte = bytes[index]
+    let alpha = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+    let digit = byte >= 48 && byte <= 57
+    let punctuation = byte == 33 || byte == 35 || byte == 36 || byte == 37 || byte == 38
+      || byte == 39 || byte == 42 || byte == 43 || byte == 45 || byte == 46
+      || byte == 94 || byte == 95 || byte == 96 || byte == 124 || byte == 126
+    if !alpha && !digit && !punctuation { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn asciiName(left: string, right: string) -> bool {
+  return asciiBytes(String.utf8Bytes(left), String.utf8Bytes(right))
+}
+
+fn asciiBytes(left: &[u8], right: &[u8]) -> bool {
+  if left.length != right.length { return false }
+  let mut index = usize.ZERO
+  while index < left.length {
+    if asciiLower(left[index]) != asciiLower(right[index]) { return false }
+    index = index + usize.ONE
+  }
+  return true
+}
+
+fn asciiLower(value: u8) -> u8 {
+  if value >= 65 && value <= 90 { return value + 32 }
+  return value
+}
+
+fn copyDeadline(value: &Option<Instant>) -> Option<Instant> {
+  return match &value.* {
+    Option<Instant>.None => Option.none<Instant>()
+    Option<Instant>.Some {value: present} => Option.some<Instant>(
+      SystemClock.make(SystemClock.seconds(&present), SystemClock.nanoseconds(&present)),
+    )
+  }
+}
+
+fn copyInstant(value: &Instant) -> Instant {
+  return SystemClock.make(SystemClock.seconds(value), SystemClock.nanoseconds(value))
+}
+
+fn absurd<T>() -> T {
+  let boom = 1 / 0
+  return absurd<T>()
+}

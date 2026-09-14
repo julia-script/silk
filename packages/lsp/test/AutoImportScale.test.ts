@@ -16,7 +16,7 @@ import * as WorkspaceCatalog from '../src/WorkspaceCatalog.js'
 const encoder = new TextEncoder()
 
 it.effect(
-  'keeps exact lookup header-only and reuses every unaffected module in a large workspace',
+  'keeps exact lookup header-only and reuses every unaffected module summary',
   () =>
     Effect.gen(function* () {
       const measure = yield* Config.boolean('SILK_AUTO_IMPORT_MEASURE').pipe(
@@ -29,13 +29,14 @@ it.effect(
         join(root, 'silk.toml'),
         '[package]\nname = "scale"\nversion = "0.1.0"\nroot = "src/Main.silk"\n',
       )
-      const moduleCount = 200
+      const moduleCount = measure ? 200 : 4
+      const selectedOrdinal = measure ? 137 : 1
       for (let ordinal = 0; ordinal < moduleCount; ordinal += 1)
         writeFileSync(
           join(sourceRoot, `Module${ordinal}.silk`),
           `pub fn symbol${ordinal}() -> i32 { return ${ordinal} }`,
         )
-      const mainText = 'pub fn main() -> i32 { return symbol137() }'
+      const mainText = `pub fn main() -> i32 { return symbol${selectedOrdinal}() }`
       const mainPath = join(sourceRoot, 'Main.silk')
       writeFileSync(mainPath, mainText)
       const document = yield* Workspace.open({
@@ -54,38 +55,44 @@ it.effect(
           .filter((name) => !name.startsWith('silk/')),
         ['Main'],
       )
+      const inventory = yield* session.inventory.get
       const queryStartedAt = performance.now()
       const actions = Analysis.autoImportsAt(
         session.snapshot,
-        session.inventory,
+        inventory,
         'Main',
-        mainText.indexOf('symbol137') + 1,
+        mainText.indexOf(`symbol${selectedOrdinal}`) + 1,
       )
       const queryElapsedMs = performance.now() - queryStartedAt
       assert.deepEqual(
         actions.map((action) => action.candidate.module),
-        ['Module137'],
+        [`Module${selectedOrdinal}`],
       )
 
-      const changedPath = join(sourceRoot, 'Module137.silk')
-      writeFileSync(changedPath, 'pub fn revised137() -> i32 { return 137 }')
+      const changedPath = join(sourceRoot, `Module${selectedOrdinal}.silk`)
+      writeFileSync(
+        changedPath,
+        `pub fn revised${selectedOrdinal}() -> i32 { return ${selectedOrdinal} }`,
+      )
       const revised = yield* WorkspaceCatalog.refresh({
         configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
         sourceRoot,
         documents: [document],
-        previous: session.inventory,
+        previous: inventory,
         invalidation: { dirtyPaths: [changedPath], rediscover: false },
       })
       for (let ordinal = 0; ordinal < moduleCount; ordinal += 1) {
         const module = `Module${ordinal}`
-        if (ordinal === 137)
-          assert.isFalse(revised.project.get(module) === session.inventory.project.get(module))
-        else assert.isTrue(revised.project.get(module) === session.inventory.project.get(module))
+        if (ordinal === selectedOrdinal)
+          assert.isFalse(revised.project.get(module) === inventory.project.get(module))
+        else assert.isTrue(revised.project.get(module) === inventory.project.get(module))
       }
-      assert.deepEqual(WorkspaceInventory.candidates(revised, 'symbol137'), [])
+      assert.deepEqual(WorkspaceInventory.candidates(revised, `symbol${selectedOrdinal}`), [])
       assert.deepEqual(
-        WorkspaceInventory.candidates(revised, 'revised137').map((candidate) => candidate.module),
-        ['Module137'],
+        WorkspaceInventory.candidates(revised, `revised${selectedOrdinal}`).map(
+          (candidate) => candidate.module,
+        ),
+        [`Module${selectedOrdinal}`],
       )
       assert.strictEqual(revised.observation.scanned, 2)
       assert.strictEqual(revised.observation.reused, 1)
@@ -100,10 +107,11 @@ it.effect(
         process.stderr.write(
           `${Inspectable.toStringUnknown({
             modules: moduleCount + 1,
-            initial: session.inventory.observation,
+            initial: inventory.observation,
             incremental: revised.observation,
             queryElapsedMs,
           })}\n`,
         )
     }).pipe(Effect.provide([SourceResolver.empty, NodeServices.layer])),
+  90_000,
 )

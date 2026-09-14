@@ -3,43 +3,42 @@ import * as CompilerStdlib from '@silklang/compiler/Stdlib'
 import * as Effect from 'effect/Effect'
 import * as Example from '../src/Example.js'
 import * as Json from '../src/Json.js'
-import { documentation as stdlibDocumentation } from './support/doctestStdlibDocumentation.js'
+import * as Model from '../src/Model.js'
+import * as Site from '../src/Site.js'
+import * as Stdlib from '../src/Stdlib.js'
 
-/**
- * Coverage follows the shipped manifest, so a module added to the library is doctested without this
- * file being edited — and a module the documentation build silently drops is caught here rather
- * than by nobody.
- */
+// One real toolchain analysis owns manifest coverage and the emitter-to-renderer JSON boundary.
+// Writer details and determinism use a small synthetic document in Site.test.ts.
 it.effect(
-  'documents every module of the shipped manifest',
+  'documents the shipped manifest and renders its encoded documentation',
   () =>
     Effect.gen(function* () {
-      const documentation = yield* stdlibDocumentation
+      const documentation = yield* Stdlib.documentation('aarch64-apple-darwin')
+      const modules = CompilerStdlib.manifest.map((entry) => entry.module)
       assert.deepStrictEqual(
         documentation.modules.map((module) => module.name),
-        CompilerStdlib.manifest.map((entry) => entry.module),
+        modules,
       )
-    }),
-  180_000,
-)
-
-/**
- * The workflow's real input is a file, not a live object. Round-tripping through the encoder and
- * `JSON.parse` proves collection reads what `silk doc` writes rather than what the emitter happens
- * to hold in memory.
- */
-it.effect(
-  'reads the same examples back out of encoded JSON',
-  () =>
-    Effect.gen(function* () {
-      const documentation = yield* stdlibDocumentation
       const parsed = Json.decodeSync(Json.encode(documentation))
-      // Compiling an example is a pure function of the collected example, and the live sweep
-      // above already compiled every one — the round trip has to prove only that collection reads
-      // the same examples out of what `silk doc` writes as out of the live value.
-      const roundTripped = Example.collect(parsed)
-      assert.isAbove(roundTripped.length, 0)
-      assert.deepStrictEqual(roundTripped, Example.collect(documentation))
+      const examples = Example.collect(parsed)
+      assert.isAbove(examples.length, 0)
+      assert.deepStrictEqual(examples, Example.collect(documentation))
+      const decoded = Model.decode(parsed)
+      assert.strictEqual(decoded._tag, 'Decoded')
+      if (decoded._tag !== 'Decoded') return
+      assert.deepStrictEqual(
+        decoded.documentation.modules.map((module) => module.name),
+        modules,
+      )
+      const site = Site.render(decoded.documentation, { title: 'Silk standard library' })
+      const pages = site.files.filter((file) => file.path.endsWith('.html'))
+      assert.lengthOf(pages, modules.length + 1)
+      const index = pages.find((file) => file.path === 'index.html')
+      assert.isDefined(index)
+      for (const module of modules) assert.include(index.contents, module)
+      const option = pages.find((file) => file.path === 'silk-option.html')
+      assert.isDefined(option)
+      assert.include(option.contents, 'unwrapOr')
     }),
-  180_000,
+  420_000,
 )

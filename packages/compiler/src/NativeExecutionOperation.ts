@@ -172,6 +172,7 @@ const packagePayload = Effect.fnUntraced(function* (
 
 const exactEffect = (context: Context, package_: ExecutionPackage.Plan) => {
   const represented = package_.specialization.body
+  const contract = SilkType.isRepresented(represented) ? represented.contract : represented
   const representation = SilkType.isRepresented(represented)
     ? represented.representation.argument
     : undefined
@@ -181,20 +182,25 @@ const exactEffect = (context: Context, package_: ExecutionPackage.Plan) => {
       : undefined
   const environment =
     identity !== undefined && SilkType.isEffectIdentityArgument(identity)
-      ? Layout.effectEnvironmentByIdentity(context.program.layout.effectEnvironments, identity)
+      ? Layout.effectEnvironmentByIdentity(
+          context.program.layout.effectEnvironments,
+          identity,
+          SilkType.isRepresented(represented) && SilkType.isEffect(represented.contract)
+            ? represented.contract
+            : undefined,
+        )
       : undefined
   const target =
     environment === undefined
       ? undefined
-      : context.declared.find(
-          (candidate) =>
-            candidate.fn.id.module === environment.instance.declaration.module &&
-            candidate.fn.id.name ===
-              Hir.effectRunnerId(environment.instance.declaration, environment.site).name &&
-            Mir.runtimeArgumentsEqual(
-              candidate.fn.instance.typeArguments,
-              environment.instance.typeArguments,
-            ),
+      : context.declared.find((candidate) =>
+          Mir.matchesEffectInstance(
+            candidate.fn,
+            Hir.effectRunnerId(environment.instance.declaration, environment.site),
+            environment.instance.typeArguments,
+            environment.instance.staticArguments,
+            SilkType.isEffect(contract) ? contract : environment.effect,
+          ),
         )
   if (environment === undefined || target === undefined)
     throw new RangeError('LLVM execution drive lost its exact body runner')
@@ -210,31 +216,21 @@ const bodyOperands = Effect.fnUntraced(function* (
   const { environment, target } = exactEffect(context, package_)
   const bodyOffset = componentOffset(package_, 'BodyEnvironment')
   if (bodyOffset === undefined) throw new RangeError('LLVM execution drive lost body storage')
-  const values: Array<Value.Input> = []
-  for (const [ordinal, placement] of Layout.effectEnvironmentLanePlacements(
-    context.program.layout,
-    environment,
-  ).entries()) {
-    const laneOffset =
-      placement.root === undefined
-        ? 0
-        : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
-    if (laneOffset === undefined) throw new RangeError('LLVM execution body lost a capture lane')
-    values.push(
-      yield* FunctionBody.load(
+  const values = yield* NativePlace.loadLanes(
+    NativePlace.stored(
+      context.program.layout,
+      package_.specialization.body,
+      yield* NativeLanePointer.lanePointer(
+        context.lanePointers,
         context.body,
-        NativeType.laneType(context.types, placement.lane),
-        yield* NativeLanePointer.lanePointer(
-          context.lanePointers,
-          context.body,
-          base,
-          bodyOffset + placement.byteOffset + laneOffset,
-          `${tag}_${ordinal}_ptr`,
-        ),
-        `${tag}_${ordinal}`,
+        base,
+        bodyOffset,
+        `${tag}_body`,
       ),
-    )
-  }
+    ),
+    context,
+    tag,
+  )
   return Object.freeze({ environment, target, values: Object.freeze(values) })
 })
 
@@ -294,37 +290,34 @@ const notifyReady = Effect.fnUntraced(function* (
     readonly parameterOrdinal: number
     readonly items: ReadonlyArray<Value.Input>
   }> = []
-  for (const field of environment?.fields ?? []) {
-    const values: Array<Value.Input> = []
-    // Mirrors the placement-driven storePackageValue so nested callable captures agree.
-    for (const [ordinal, placement] of Layout.callableFieldLanePlacements(
-      context.program.layout,
-      field,
-    ).entries()) {
-      const laneOffset =
-        placement.root === undefined
-          ? 0
-          : LayoutVerify.laneOffset(context.program.layout, placement.root, placement.lane.path)
-      if (laneOffset === undefined)
-        throw new RangeError('LLVM readiness callback lost a capture lane')
-      values.push(
-        yield* FunctionBody.load(
-          context.body,
-          NativeType.laneType(context.types, placement.lane),
-          yield* NativeLanePointer.lanePointer(
-            context.lanePointers,
-            context.body,
-            base,
-            (callbackOffset ?? 0) + placement.byteOffset + laneOffset,
-            `${tag}_capture${field.parameterOrdinal}_${ordinal}_ptr`,
+  const callbackValues =
+    environment === undefined
+      ? []
+      : yield* NativePlace.loadLanes(
+          NativePlace.stored(
+            context.program.layout,
+            callback,
+            yield* NativeLanePointer.lanePointer(
+              context.lanePointers,
+              context.body,
+              base,
+              callbackOffset ?? 0,
+              `${tag}_callback`,
+            ),
           ),
-          `${tag}_capture${field.parameterOrdinal}_${ordinal}`,
-        ),
-      )
-    }
+          context,
+          `${tag}_callback`,
+        )
+  let captureOrdinal = 0
+  for (const field of environment?.fields ?? []) {
+    const count = Layout.callableFieldLanes(context.program.layout, field).length
     captures.push(
-      Object.freeze({ parameterOrdinal: field.parameterOrdinal, items: Object.freeze(values) }),
+      Object.freeze({
+        parameterOrdinal: field.parameterOrdinal,
+        items: Object.freeze(callbackValues.slice(captureOrdinal, captureOrdinal + count)),
+      }),
     )
+    captureOrdinal += count
   }
   const endpoint = yield* NativeLanePointer.lanePointer(
     context.lanePointers,
@@ -558,11 +551,12 @@ const runCancellationFinalizer = Effect.fnUntraced(function* (
   if (finalizer === undefined) return new Set<number>()
   const { body, declared } = context
   const target = declared.find((candidate) =>
-    Mir.matchesInstance(
+    Mir.matchesEffectInstance(
       candidate.fn,
       finalizer.runner,
       finalizer.runnerTypeArguments,
       finalizer.runnerStaticArguments,
+      finalizer.outcomeType.type,
     ),
   )
   if (target === undefined)
@@ -650,10 +644,15 @@ const runCancellationFinalizer = Effect.fnUntraced(function* (
   const callable = target.suspendable ? target.driver : target.handle
   if (callable === undefined)
     throw new RangeError('LLVM nonparking cancellation finalizer lost its machine driver')
+  const resultAddress = yield* NativeResult.allocate(body, target, `${tag}_result`)
   yield* FunctionBody.callDirect(
     body,
     callable,
-    yield* NativeCall.argumentsFor(context.call.synchronous, target, lowered),
+    NativeResult.argumentsFor(
+      target,
+      yield* NativeCall.argumentsFor(context.call.synchronous, target, lowered),
+      resultAddress,
+    ),
     `${tag}_run`,
   )
   return new Set([
@@ -2089,24 +2088,31 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
         if (executable.target.suspendable)
           throw new RangeError('LLVM direct execution selected a suspendable body')
+        const resultAddress = yield* NativeResult.allocate(
+          body,
+          executable.target,
+          `drive${operation.destination.ordinal}_direct_result`,
+        )
         const started = yield* FunctionBody.callDirect(
           body,
           executable.target.handle,
-          yield* NativeCall.lowerArguments(
-            context.call.synchronous,
+          NativeResult.argumentsFor(
             executable.target,
-            NativeArgument.fromValues(executable.values),
-            'Independent',
+            yield* NativeCall.lowerArguments(
+              context.call.synchronous,
+              executable.target,
+              NativeArgument.fromValues(executable.values),
+              'Independent',
+            ),
+            resultAddress,
           ),
           `drive${operation.destination.ordinal}_direct_started`,
         )
-        const completedResult = yield* NativeResult.unpack(
+        const completedResult = yield* NativeResult.read(
           body,
-          {
-            resultLaneCount: executable.target.resultLaneCount,
-            diagnosticResult: executable.target.diagnosticResult !== undefined,
-          },
+          executable.target,
           started,
+          resultAddress,
           `drive${operation.destination.ordinal}_direct_result`,
         )
         const outcome = yield* NativeDiagnosticOutcome.consume(
@@ -2395,42 +2401,40 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           base,
           `drive${operation.destination.ordinal}_body`,
         )
-        const started = executable.target.suspendable
-          ? yield* FunctionBody.callDirect(
-              body,
-              executable.target.handle,
-              [
-                ...(yield* NativeCall.lowerArguments(
-                  context.call.synchronous,
-                  executable.target,
-                  NativeArgument.fromValues(executable.values),
-                  'Independent',
-                )),
+        const resultAddress = yield* NativeResult.allocate(
+          body,
+          executable.target,
+          `drive${operation.destination.ordinal}_result`,
+        )
+        const callArguments = NativeResult.argumentsFor(
+          executable.target,
+          yield* NativeCall.lowerArguments(
+            context.call.synchronous,
+            executable.target,
+            NativeArgument.fromValues(executable.values),
+            'Independent',
+          ),
+          resultAddress,
+        )
+        const started = yield* FunctionBody.callDirect(
+          body,
+          executable.target.handle,
+          executable.target.suspendable
+            ? [
+                ...callArguments,
                 transfer,
                 nullPointer,
                 yield* Constant.integerUnsigned(builder, i32, 0n),
-              ],
-              `drive${operation.destination.ordinal}_started`,
-            )
-          : yield* FunctionBody.callDirect(
-              body,
-              executable.target.handle,
-              yield* NativeCall.lowerArguments(
-                context.call.synchronous,
-                executable.target,
-                NativeArgument.fromValues(executable.values),
-                'Independent',
-              ),
-              `drive${operation.destination.ordinal}_started`,
-            )
+              ]
+            : callArguments,
+          `drive${operation.destination.ordinal}_started`,
+        )
         const outcomeLanes = NativeType.lanesFor(context.types, executable.target.fn.result)
-        const initialResult = yield* NativeResult.unpack(
+        const initialResult = yield* NativeResult.read(
           body,
-          {
-            resultLaneCount: executable.target.resultLaneCount,
-            diagnosticResult: executable.target.diagnosticResult !== undefined,
-          },
+          executable.target,
           started,
+          resultAddress,
           `drive${operation.destination.ordinal}_initial_result`,
           executable.target.suspendable ? 'SuspensionStep' : 'Synchronous',
         )
@@ -2462,10 +2466,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         }
         const startedStatus =
           executable.target.suspendable && started !== undefined
-            ? yield* FunctionBody.extractValue(
+            ? yield* NativeResult.status(
                 body,
+                executable.target,
                 started,
-                [0],
                 `drive${operation.destination.ordinal}_initial_status`,
               )
             : yield* Constant.integerUnsigned(builder, i32, 0n)

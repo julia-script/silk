@@ -175,13 +175,9 @@ const forwardedReferenceProvider = (
     }
   | undefined => {
   const source = provider._tag === 'Move' ? provider.subject : provider
-  if (access !== 'Exclusive' || source._tag !== 'ParameterReference') return undefined
+  if (access === 'Take' || source._tag !== 'ParameterReference') return undefined
   const type = fn.semantic(source.type)
-  if (
-    !Type.isReference(type) ||
-    type.access !== 'Exclusive' ||
-    !Type.equals(type.target, providerType)
-  )
+  if (!Type.isReference(type) || type.access !== access || !Type.equals(type.target, providerType))
     return undefined
   return Object.freeze({
     parameter: source.parameter,
@@ -499,11 +495,13 @@ export const inlineForwardedRequirement = (
     forwarded.provider.selectionAccess,
     proof.provider,
   )
+  // Pattern-rooted borrows remain valid here: the inline path lowers the original provider while
+  // the selected match arm's ownership place is active, so it does not need a stored binding or
+  // parameter identity in the synthetic requirement metadata below.
   if (
-    (borrowedProvider === undefined &&
-      referenceProvider === undefined &&
-      forwarded.provider.selectionAccess !== 'Take') ||
-    borrowedProvider?.root._tag === 'PatternSliceRoot'
+    borrowedProvider === undefined &&
+    referenceProvider === undefined &&
+    forwarded.provider.selectionAccess !== 'Take'
   )
     return undefined
   const selected = proof.selected

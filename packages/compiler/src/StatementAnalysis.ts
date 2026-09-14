@@ -44,6 +44,7 @@ import type {
 import {
   analyzeExpression,
   analyzePattern,
+  patternTests,
   bindingName,
   coverageMembersOf,
   containsOrdinaryArm,
@@ -450,12 +451,14 @@ export const analyzeStatements = (
         ),
       )
     }
+    const tests = patternTests(context.resolution.index, pattern.fact)
     const coverage = Match.cover(
       members,
       Object.freeze([
         Object.freeze({
           ...(member === undefined ? {} : { member }),
           universal: pattern.fact._tag === 'UniversalPattern',
+          tests,
           guarded: false,
         }),
       ]),
@@ -463,6 +466,7 @@ export const analyzeStatements = (
     const complete = pattern.fact._tag === 'UniversalPattern' ? true : pattern.fact.complete
     return Object.freeze({
       _tag: 'PatternSelection',
+      tests,
       id,
       arm,
       access,
@@ -1605,7 +1609,10 @@ export const expressionReturnFlow = (expression: ExpressionFact): ReturnFlow => 
         )
         if (!arm.reachable || selected.length === 0) continue
         const guardCompletes = arm.guard === undefined || visit(arm.guard)
-        if (arm.guard === undefined || !guardCompletes)
+        remaining = remaining.filter((candidate) =>
+          arm.after.some((member) => Match.identityEquals(candidate, member)),
+        )
+        if (!guardCompletes && arm.tests.length === 0)
           remaining = remaining.filter((candidate) => !selected.includes(candidate))
         if (!guardCompletes) continue
         if (arm.body._tag === 'Expression') {

@@ -7,6 +7,7 @@ import type * as Backend from './Backend.js'
 import type * as Layout from './Layout.js'
 import type * as Mir from './Mir.js'
 import type * as MirLinearization from './MirLinearization.js'
+import type * as NativeResult from './NativeResult.js'
 import type * as NativeArgument from './NativeArgument.js'
 
 /** One declared MIR function and its fixed native ABI ownership. */
@@ -18,6 +19,7 @@ export interface DeclaredFunction {
   readonly resultType: LlvmType.Type
   readonly emittedResultType: LlvmType.Type
   readonly resultLaneCount: number
+  readonly resultStorage?: NativeResult.Storage
   /** Owned failure metadata follows the source result lanes in the private ABI. */
   readonly diagnosticResult?: LlvmType.Type
   readonly suspendable: boolean
@@ -29,7 +31,7 @@ export interface DeclaredFunction {
   readonly driver?: FunctionActor.Function
   readonly parameterTypes: ReadonlyArray<LlvmType.Type>
   readonly argumentParameters: ReadonlyArray<NativeArgument.Parameter>
-  /** Physical observer parameter, followed by a borrowed cause aggregate and then suspension lanes. */
+  /** Physical observer parameter, followed by a borrowed cause, optional result storage, and suspension lanes. */
   readonly diagnosticParameter?: number
   readonly linear: ReadonlyArray<MirLinearization.LinearBlock>
 }
