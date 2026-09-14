@@ -15,6 +15,12 @@ for transfer, validate all four capacities before allocation or lease acquisitio
 independently borrowed sessions to one higher-ranked callback, and close both providers exactly once
 on every structured Effect exit without replacing the callback outcome.
 
+The actor SHALL also expose `withBufferedCapacityContext`, which consumes one affine context value
+into the same validated exclusive provider bracket. A compile-time `BufferedContext` witness SHALL
+select a named adapter that consumes the context and receives an independently higher-ranked
+temporary session; selection SHALL add no runtime service or requirement-row member. Neither the
+session nor a derived peek MAY escape through the context or result.
+
 #### Scenario: Close after callback success or failure
 
 - **WHEN** a buffered callback succeeds or returns a typed failure
@@ -24,6 +30,12 @@ on every structured Effect exit without replacing the callback outcome.
 
 - **WHEN** a callback attempts independent ByteDuplex access while the scoped session retains its lease
 - **THEN** requirement-row ownership rejects the program before execution
+
+#### Scenario: Consume callback context without leaking the session
+
+- **WHEN** contextual acquisition selects a named adapter for one owned affine context
+- **THEN** the adapter may consume that state while ownership rejects returning the session or a
+  borrow derived from it, and no runtime service is introduced
 
 #### Scenario: Acquire two transfer sessions atomically
 

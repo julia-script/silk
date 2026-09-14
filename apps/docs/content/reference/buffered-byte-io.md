@@ -10,14 +10,25 @@ transfer contract or turn `Writer` and `StandardInput` into a duplex service.
 They validate the capacity before allocating, allocate one fully initialized buffer through the
 active `Allocator`, and never grow it. `BufferedDuplex.withBuffered` uses 8,192 bytes for each
 direction; `withBufferedCapacity` accepts explicit direction capacities and validates both before
-allocating either buffer or acquiring the transport lease. `withBufferedPairCapacity` accepts two
-transports plus four explicit direction capacities, validates all four before allocation or lease
-acquisition, and publishes both sessions to one callback.
+allocating either buffer or acquiring the transport lease. `withBufferedCapacityContext` consumes
+one affine context whose compile-time `BufferedContext` witness selects a named adapter; that
+adapter receives an independently higher-ranked temporary session without adding a runtime service
+or requirement-row member.
+`withBufferedPairCapacity` accepts two transports plus four explicit direction capacities,
+validates all four before allocation or lease acquisition, and publishes both sessions to one
+callback.
 
 The duplex operations exclusively retain one concrete transport for the callback scope. The
 session and any slice returned by `peek` borrow that scope and cannot escape it. While a peek is
 live, Silk's ordinary ownership rules reject `consume`, `fill`, `readSome`, and other conflicting
 mutations. Callback requirements exclude independent ambient `ByteDuplex` access.
+
+`BufferedDuplex.shutdownWrite(deadline)` is the explicit half-close operation. It drains retained
+output, delegates canonical `ByteDuplex.shutdownWrite` through the session's private provider with
+the unchanged absolute deadline, and keeps input readable after success. Repeated shutdown is
+idempotent; later buffered output is rejected without provider I/O. A typed drain, flush, or
+shutdown failure instead terminalizes the complete session. Structured cancellation during the
+operation unwinds the enclosing buffered scope and terminally closes the retained provider.
 
 Success, typed failure, and structured cancellation or interruption terminally close the provider
 through the nonparking resource bracket. Fatal traps bypass finalizers and `Drop`, as they do for
@@ -31,7 +42,11 @@ and lets the scope close the transport:
 
 ```silk
 import silk.allocator { Allocator, OutOfMemoryError }
-import silk.buffered_duplex { BufferedDuplex, withBufferedCapacity }
+import silk.buffered_duplex {
+  BufferedContext,
+  BufferedDuplex,
+  withBufferedCapacityContext,
+}
 import silk.buffered_input { BufferError, FillOutcome }
 import silk.byte_duplex { ByteDuplex }
 import silk.effect { Effect }
@@ -44,6 +59,7 @@ import silk.usize
 import silk.vector { Vector }
 
 struct FixedClock {}
+struct Inspection { minimum: usize }
 
 impl MonotonicClock for FixedClock {
   effect fn now(self: &mut Self) -> Instant { return SystemClock.make(0, 0) }
@@ -52,19 +68,31 @@ impl MonotonicClock for FixedClock {
   effect fn waitFor(self: &mut Self, duration: u64) -> () { drop duration return () }
 }
 
-effect<'session> fn inspect<'session, P>(
-  session: &'session mut BufferedDuplex<'session, P>,
-) -> usize ! BufferError ? &mut MonotonicClock
-where &'session mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock {
-  let filled = run BufferedDuplex.fill(
-    &mut session.*,
-    usize.ZERO,
-    Option.none<Instant>(),
-  )
-  return match move filled {
-    FillOutcome.Available { count } => count
-    FillOutcome.End { available } => available
+impl Inspection {
+  effect<'session> fn use<'session, 'transport: 'session>(
+    context: Self,
+    session: &'session mut BufferedDuplex<'transport, MemoryByteDuplex>,
+  ) -> usize ! BufferError ? &mut MonotonicClock
+  where &'transport mut MemoryByteDuplex provides &ByteDuplex
+    from &mut ByteDuplex | &mut MonotonicClock {
+    let filled = run BufferedDuplex.fill(
+      &mut session.*,
+      context.minimum,
+      Option.none<Instant>(),
+    )
+    return match move filled {
+      FillOutcome.Available { count } => count
+      FillOutcome.End { available } => available
+    }
   }
+}
+
+impl BufferedContext<
+  MemoryByteDuplex,
+  usize,
+  BufferError ? &mut MonotonicClock
+> for Inspection {
+  use: Inspection.use
 }
 
 effect fn program() -> usize ! BufferError | OutOfMemoryError {
@@ -77,7 +105,12 @@ effect fn program() -> usize ! BufferError | OutOfMemoryError {
     usize.ONE,
     Option.none<i32>(),
   ) |> Effect.provideMut<Allocator>(&mut allocator)
-  return run withBufferedCapacity<usize, BufferError>(&mut transport, 16, 16, inspect)
+  return run withBufferedCapacityContext(
+    &mut transport,
+    16,
+    16,
+    Inspection { minimum: usize.ZERO },
+  )
     |> Effect.provideMut<MonotonicClock>(&mut clock)
     |> Effect.provideMut<Allocator>(&mut allocator)
 }

@@ -16,6 +16,7 @@ import * as SourceFile from '../src/SourceFile.js'
 import * as SourceResolver from '../src/SourceResolver.js'
 import { nativeCorpus, type NativeRun } from './support/corpus.js'
 import { base64AcceptanceSource } from './support/base64Acceptance.js'
+import { bufferedByteIoWasmAcceptanceSource } from './support/bufferedByteIoAcceptance.js'
 import { httpHeadAcceptanceSource } from './support/httpHeadAcceptance.js'
 import { httpBodyAcceptanceSource } from './support/httpBodyAcceptance.js'
 import { httpValuesAcceptanceSource } from './support/httpValuesAcceptance.js'
@@ -164,6 +165,7 @@ const portableWasmCorpus = [
   { name: 'http-head-parsing', source: httpHeadAcceptanceSource, expected: 42 },
   { name: 'http-body-framing', source: httpBodyAcceptanceSource, expected: 42 },
   { name: 'base64-rfc4648', source: base64AcceptanceSource, expected: 42 },
+  { name: 'buffered-byte-io', source: bufferedByteIoWasmAcceptanceSource, expected: 0 },
   {
     name: networkAddressResolutionCorpusProgram.name,
     source: networkAddressResolutionCorpusProgram.source,

@@ -22,19 +22,50 @@ pub const MAX_CAPACITY: usize = 1048576
 /// A typed buffering, progress, or source-boundary failure.
 pub union BufferError {
   /// Construction rejected a zero or excessive capacity before allocation.
-  InvalidCapacity { pub capacity: usize },
+  InvalidCapacity {
+    /// The rejected allocation size in bytes.
+    pub capacity: usize,
+  },
   /// A fill request cannot fit in the fixed allocation.
-  BufferTooSmall { pub requested: usize, pub capacity: usize },
+  BufferTooSmall {
+    /// The minimum retained byte count requested.
+    pub requested: usize,
+    /// The fixed allocation size in bytes.
+    pub capacity: usize,
+  },
   /// Consume would advance beyond the initialized unread prefix.
-  InvalidConsumption { pub requested: usize, pub available: usize },
+  InvalidConsumption {
+    /// The byte count requested for consumption.
+    pub requested: usize,
+    /// The initialized unread byte count.
+    pub available: usize,
+  },
   /// An input provider reported an impossible successful count.
-  InvalidReadCount { pub count: usize, pub limit: usize },
+  InvalidReadCount {
+    /// The successful count reported by the provider.
+    pub count: usize,
+    /// The destination length offered to the provider.
+    pub limit: usize,
+  },
   /// Underlying end arrived before an exact operation completed.
-  UnexpectedEnd { pub progress: usize },
+  UnexpectedEnd {
+    /// The exact prefix copied or discarded before end.
+    pub progress: usize,
+  },
   /// A ByteDuplex read failed after `progress` bytes had already been copied by this operation.
-  ReadFailed { pub progress: usize, pub error: ByteIoError },
+  ReadFailed {
+    /// The exact prefix copied before the failed read.
+    pub progress: usize,
+    /// The underlying duplex read failure.
+    pub error: ByteIoError,
+  },
   /// A StandardInput read failed after `progress` bytes had already been copied by this operation.
-  InputFailed { pub progress: usize, pub error: StreamReadError },
+  InputFailed {
+    /// The exact prefix copied before the failed read.
+    pub progress: usize,
+    /// The underlying standard-input failure.
+    pub error: StreamReadError,
+  },
   /// A ByteDuplex write or flush failed after accepting a caller prefix and draining pending bytes.
   WriteFailed {
     /// The exact current caller-input prefix accepted into buffered ownership.
@@ -45,7 +76,12 @@ pub union BufferError {
     pub error: ByteIoError,
   },
   /// Writer failed an all-or-error call after earlier complete arguments were accepted.
-  UnknownExternalTransfer { pub progress: usize, pub error: WriterError },
+  UnknownExternalTransfer {
+    /// The bytes accepted before the failed Writer call; the failed call has unknown external progress.
+    pub progress: usize,
+    /// The underlying Writer failure.
+    pub error: WriterError,
+  },
   /// Finite vector-length arithmetic overflowed before output.
   LengthOverflow,
   /// A preceding external failure made the state unusable.
@@ -55,9 +91,15 @@ pub union BufferError {
 /// The observable result of satisfying a minimum retained prefix.
 pub union FillOutcome {
   /// At least the requested minimum is available.
-  Available { pub count: usize },
+  Available {
+    /// The initialized unread byte count.
+    pub count: usize,
+  },
   /// The source ended; `available` retained bytes can still be consumed.
-  End { pub available: usize },
+  End {
+    /// The retained byte count still available after source end.
+    pub available: usize,
+  },
 }
 
 /// The result of a finite discard.
