@@ -176,7 +176,7 @@ fail after an arbitrary prefix and HTTP/1 has no safe rollback delimiter.
 `withUpgrade` validates request tokens, offered/selected protocol equality, empty request framing,
 and a 101 head; `withTunnel` validates CONNECT, empty request framing, and a 2xx head. Both use the
 same staged head path, force one flush, set Upgraded, and then lend the underlying
-`BufferedDuplex<'session, P>` to a higher-ranked callback. Its `peek` exposes the exact coalesced
+`BufferedDuplex<'session, P>` to a higher-ranked callback. Both the callback loan and the buffered transport view are fresh higher-ranked lifetimes; the callback does not depend on the caller's original transport lifetime. Its `peek` exposes the exact coalesced
 suffix. The transition consumes the active HTTP disposition by moving the connection to Upgraded;
 every request/head/writer operation is phase-guarded, so even a still-borrowed request value cannot
 resume HTTP after the callback. The callback cannot escape the channel loan and the outer provider

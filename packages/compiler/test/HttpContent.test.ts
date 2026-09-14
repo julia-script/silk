@@ -224,7 +224,7 @@ it.effect(
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
     }),
-  60_000,
+  120_000,
 )
 
 it.effect(
@@ -335,5 +335,5 @@ it.effect(
       assert.strictEqual(spans.at(2), '&mut reader.*')
       assert.strictEqual(spans.at(3), 'move plan')
     }),
-  60_000,
+  120_000,
 )

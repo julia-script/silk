@@ -119,7 +119,7 @@ it.effect('measures Effect phases with the fiber clock', () =>
 
 it.effect('reports every phase in order with counts and totals', () =>
   Effect.gen(function* () {
-    const source = 'pub fn main() -> i32 { return 42 }'
+    const source = 'pub fn main() -> i32 { let values = [10, 42] return values[1] }'
     const outcome = yield* compileSource('report', source)
     const analysis = yield* Analysis.ofSourceRealized('memory/driver', ascii(source))
 
@@ -134,6 +134,8 @@ it.effect('reports every phase in order with counts and totals', () =>
       assert.isAtLeast(entry.outputs, 0, entry.phase)
       assert.isAtLeast(entry.heapBytes, 0, entry.phase)
     }
+    const layout = outcome.report.find((entry) => entry.phase === 'target-layout')
+    assert.isAtLeast(layout?.outputs ?? 0, 2)
     const closure = outcome.report.find((entry) => entry.phase === 'closure')
     assert.strictEqual(closure?.inputs, 1)
     // The initial closure contains the application and selected runtime; static selection expands it.
@@ -148,17 +150,8 @@ it.effect('reports every phase in order with counts and totals', () =>
   }),
 )
 
-it.effect('reports array layouts and keeps array failures in their owning phase', () =>
+it.effect('keeps array failures in their owning phase', () =>
   Effect.gen(function* () {
-    const compiled = yield* compileSource(
-      'array-report',
-      'pub fn main() -> i32 { let values = [10, 42] return values[1] }',
-    )
-    assert.strictEqual(compiled._tag, 'Compiled')
-    if (compiled._tag !== 'Compiled') return
-    const layout = compiled.report.find((entry) => entry.phase === 'target-layout')
-    assert.isAtLeast(layout?.outputs ?? 0, 2)
-
     const mismatch = yield* compileSource(
       'array-mismatch',
       'pub fn main() -> [i32; 2] { return [1] }',

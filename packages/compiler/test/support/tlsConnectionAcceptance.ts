@@ -860,29 +860,30 @@ fn observedTerminalClose(state: &OwnedMemoryAudit) -> bool {
     && state.laterIo == usize.ZERO
 }
 
-fn observedSuccessfulScope(state: &OwnedMemoryAudit) -> bool {
-  return observedTerminalClose(state)
-    && state.helloPrefix
-    && state.applicationWrite
-    && state.shortWritePrefix
-    && state.shutdowns == usize.ONE
-    && state.shutdownAfterFlush
-    && state.reads >= 3
-    && state.writes >= 2
-    && state.flushes >= usize.ONE
-    && state.handshakeReads == 3
-    && state.handshakeWrites >= 3
-    && state.handshakeFlushes >= usize.ONE
-    && state.handshakeShutdowns == usize.ZERO
-    && state.reads > state.handshakeReads
-    && state.writes > state.handshakeWrites
-    && state.flushes > state.handshakeFlushes
-    && state.handshakeCalls == state.handshakeReads
+fn observedSuccessfulScope(state: &OwnedMemoryAudit) -> i32 {
+  if !(observedTerminalClose(state)) { return 1101 }
+  if !(state.helloPrefix) { return 1102 }
+  if !(state.applicationWrite) { return 1103 }
+  if !(state.shortWritePrefix) { return 1104 }
+  if !(state.shutdowns == usize.ONE) { return 1105 }
+  if !(state.shutdownAfterFlush) { return 1106 }
+  if !(state.reads >= 3) { return 1107 }
+  if !(state.writes >= 2) { return 1108 }
+  if !(state.flushes >= usize.ONE) { return 1109 }
+  if !(state.handshakeReads == 3) { return 1110 }
+  if !(state.handshakeWrites >= 3) { return 1111 }
+  if !(state.handshakeFlushes >= usize.ONE) { return 1112 }
+  if !(state.handshakeShutdowns == usize.ZERO) { return 1113 }
+  if !(state.reads > state.handshakeReads) { return 1114 }
+  if !(state.writes > state.handshakeWrites) { return 1115 }
+  if !(state.flushes > state.handshakeFlushes) { return 1116 }
+  if !(state.handshakeCalls == state.handshakeReads
       + state.handshakeWrites
-      + state.handshakeFlushes
-    && state.handshakeDeadlineConsistent
-    && state.handshakeDeadlineSeconds == 130
-    && state.handshakeDeadlineNanoseconds == 0
+      + state.handshakeFlushes) { return 1117 }
+  if !(state.handshakeDeadlineConsistent) { return 1118 }
+  if !(state.handshakeDeadlineSeconds == 130) { return 1119 }
+  if !(state.handshakeDeadlineNanoseconds == 0) { return 1120 }
+  return 0
 }
 
 ${
@@ -1527,7 +1528,8 @@ effect fn runCases(
     Result<i32, ConnectionError | OutOfMemoryError>.Failure {error} => { return run failed(move error) }
   }
   if completed != 42 { return 1000 + completed }
-  if !Shared.with(&successAudit, observedSuccessfulScope) { return 11 }
+  let auditResult = Shared.with(&successAudit, observedSuccessfulScope)
+  if auditResult != 0 { return auditResult }
 
 ${
   includeFailureCases

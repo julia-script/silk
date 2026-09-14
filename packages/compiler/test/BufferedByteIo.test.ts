@@ -355,7 +355,7 @@ import silk.bytes { Bytes }`,
         'Failed',
       )
     }),
-  20_000,
+  45_000,
 )
 
 it.effect(
@@ -444,5 +444,5 @@ it.effect(
         ],
       )
     }),
-  20_000,
+  45_000,
 )

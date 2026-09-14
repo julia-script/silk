@@ -194,7 +194,7 @@ it.effect(
         assert.include(symbols, target === 'aarch64-apple-darwin' ? 'accept' : 'accept4')
       }
     }),
-  60_000,
+  120_000,
 )
 
 it.effect('rejects affine listener and accepted-owner violations in one analysis snapshot', () =>

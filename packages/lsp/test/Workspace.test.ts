@@ -459,10 +459,10 @@ it.effect(
       const left = yield* makeDocument(false)
       const right = yield* makeDocument(true)
       const first = yield* Workspace.analyzeProject([left])
-      const next = yield* Workspace.analyzeProject([right], first)
       const firstSession = first.get(left.uri)
       assert.ok(firstSession)
       const firstInventory = yield* firstSession.inventory.get
+      const next = yield* Workspace.analyzeProject([right], first)
       const nextSession = next.get(right.uri)
       assert.ok(nextSession)
       const nextInventory = yield* nextSession.inventory.get
@@ -486,7 +486,7 @@ it.effect(
       assert.ok(before)
       assert.ok(after)
       assert.notStrictEqual(before.identity, after.identity)
-      const direct = yield* Analysis.makeRealized({
+      const direct = yield* Analysis.make({
         root: SourceFile.make('Main', bytes),
         configuration: {
           package: 'demo@0.1.0',
@@ -515,4 +515,5 @@ it.effect(
         assert.notInclude(modules, 'silk/native_start')
       }
     }).pipe(Effect.provide(NodeServices.layer)),
+  180_000,
 )

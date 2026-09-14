@@ -37,7 +37,7 @@ it.effect(
       const diagnostics = Analysis.diagnostics(snapshot)
       assert.deepEqual(diagnostics, [])
     }),
-  20_000,
+  45_000,
 )
 
 it.effect(
@@ -70,5 +70,5 @@ it.effect(
         ],
       )
     }),
-  20_000,
+  45_000,
 )

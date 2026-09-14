@@ -4,25 +4,29 @@
 
 Profiles: `aarch64-apple-darwin`, `aarch64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu-no-libc`, `wasm32-unknown-unknown`, `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu-no-libc`.
 
-Authenticated TLS 1.3 over one explicitly scoped partial-byte transport.
+Authenticated TLS 1.3 with one owned partial-byte transport.
 
 ## When to use
 
-Use [`withClient`](#declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a77697468436c69656e74) when an application already selected a [`ByteDuplex`](./byte-duplex.md#declaration-73696c6b2f627974655f6475706c65783a3a427974654475706c6578) provider and wants a
-bounded authenticated client scope. Use `silk.tls_client.Client` directly for protocol tests or
-for a transport integration with different ownership.
+Use [`authenticateOwned`](#declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a61757468656e7469636174654f776e6564) when a caller must retain, move, pool, or explicitly close one
+authenticated provider owner. Use [`withClient`](#declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a77697468436c69656e74) when the owner belongs to one lexical scope.
+Prepare the trust snapshot independently before transferring the provider to either operation.
 
 ## Details
 
-The adapter loads one owned trust snapshot, samples wall time once, constructs the TLS client,
-and drives its handshake through exact partial transfers. One absolute monotonic deadline bounds
-all handshake transport work. The callback receives a connection only after authentication.
+Authentication consumes one provider and one already-prepared trust snapshot, samples wall time
+once, constructs the TLS client, and drives its handshake through exact partial transfers. The
+earlier of the finite handshake-duration deadline and an optional external absolute deadline
+bounds all handshake transport work. Ownership is published only after authentication and a
+final deadline check.
 
 ## Gotchas
 
-The transport is terminally closed on every structured scope exit. A close failure is suppressed
-only by that finalizer so it cannot replace the protected result. Fatal traps remain outside the
-structured finalization guarantee.
+Direct owned I/O is guarded: typed failure or structured cancellation closes the owner and its
+provider before an ambiguous buffer can be offered again. [`OwnedConnection.shutdownWrite`](#declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a4f776e6564436f6e6e656374696f6e2e73687574646f776e5772697465)
+performs TLS grace for the write direction; [`OwnedConnection.close`](#declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a4f776e6564436f6e6e656374696f6e2e636c6f7365) immediately invalidates
+and terminally closes the provider. Scoped close failures are suppressed so they cannot replace
+the protected result. Fatal traps remain outside structured finalization guarantees.
 
 ## Examples
 
@@ -37,17 +41,15 @@ import silk.allocator { Allocator, OutOfMemoryError }
 import silk.effect { Effect }
 import silk.https_identity { HttpsIdentity, OriginHost, ReferenceIdentity }
 import silk.memory_byte_duplex { MemoryByteDuplex, MemoryReadEvent, MemoryWriteEvent }
-import silk.memory_trust_source { MemoryTrustSource }
 import silk.monotonic_clock { MonotonicClock }
 import silk.option { Option }
 import silk.random { Random }
 import silk.result { Result }
 import silk.system_clock { Instant, SystemClock }
 import silk.tls_client { AlpnConfig, ClientConfig, ClientLimits }
-import silk.tls_connection { Connection, ConnectionOptions, withClient }
+import silk.tls_connection { OwnedConnection, ConnectionOptions, withClient }
 import silk.trust_anchor { TrustAnchor }
 import silk.trust_snapshot { SnapshotLimits, TrustSnapshot }
-import silk.trust_source { TrustSource }
 import silk.u64
 import silk.usize
 import silk.vector { Vector }
@@ -92,8 +94,8 @@ fn emptyTrust() -> TrustSnapshot {
   }
 }
 
-effect<'transport> fn inspect<'transport, P>(
-  connection: &'transport mut Connection<'transport, P>,
+effect fn inspect<P>(
+  connection: &mut OwnedConnection<P>,
 ) -> i32 {
   drop connection
   return 0
@@ -112,7 +114,7 @@ effect fn program() -> i32 ! OutOfMemoryError {
     4,
     Option.none<i32>(),
   ) |> Effect.provideMut<Allocator>(&mut allocator)
-  let mut trust = MemoryTrustSource.make(emptyTrust())
+  let trust = emptyTrust()
   let mut wall = FixedWall {}
   let mut monotonic = FixedMonotonic {}
   let mut random = ExampleRandom {}
@@ -123,12 +125,12 @@ effect fn program() -> i32 ! OutOfMemoryError {
     limits: ClientLimits.defaults(),
   }
   let attempt = withClient<i32, never>(
-    &mut transport,
+    move transport,
     &config,
+    move trust,
     ConnectionOptions.defaults(),
     inspect,
   )
-    |> Effect.provideMut<TrustSource>(&mut trust)
     |> Effect.provideMut<SystemClock>(&mut wall)
     |> Effect.provideMut<MonotonicClock>(&mut monotonic)
     |> Effect.provideMut<Random>(&mut random)
@@ -139,9 +141,9 @@ effect fn program() -> i32 ! OutOfMemoryError {
 pub fn main() -> i32 { return run Effect.catchAll(program(), failed) }
 ```
 
-Import as `Connection` with `import silk.tls_connection { Connection }`.
+Import as `OwnedConnection` with `import silk.tls_connection { OwnedConnection }`.
 
-Public declarations: 5.
+Public declarations: 6.
 
 <a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e5068617365"></a>
 
@@ -192,6 +194,16 @@ Invalid = 3
 ```
 
 A protocol or transport failure made the lease unusable.
+
+<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e50686173653a3a6d656d6265723a34"></a>
+
+### `Closed`
+
+```silk
+Closed = 4
+```
+
+Terminal close consumed provider authority; later I/O cannot reach the provider.
 
 <a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e4572726f72"></a>
 
@@ -261,19 +273,9 @@ The single absolute handshake deadline was reached.
 pub struct ConnectionOptions
 ```
 
-Bounded policy copied for one scoped client acquisition.
+Bounded policy copied for one owned client authentication.
 
 <a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e4f7074696f6e733a3a6669656c643a30"></a>
-
-### Field `trust`
-
-```silk
-pub trust: TrustLoadLimits
-```
-
-Inclusive limits for the one loaded trust snapshot.
-
-<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e4f7074696f6e733a3a6669656c643a31"></a>
 
 ### Field `handshakeTimeoutNanoseconds`
 
@@ -283,6 +285,16 @@ pub handshakeTimeoutNanoseconds: u64
 
 Complete handshake duration on the active monotonic timeline.
 
+<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e4f7074696f6e733a3a6669656c643a31"></a>
+
+### Field `externalDeadline`
+
+```silk
+pub externalDeadline: silk/option.Option<silk/system_clock.Instant>
+```
+
+Optional caller-owned absolute deadline clamped against the handshake duration.
+
 <a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e4f7074696f6e732e64656661756c7473"></a>
 
 ### Associated function `ConnectionOptions.defaults`
@@ -291,52 +303,44 @@ Complete handshake duration on the active monotonic timeline.
 pub fn defaults() -> ConnectionOptions
 ```
 
-Returns bounded trust defaults and the 30-second handshake timeout.
+Returns the 30-second handshake timeout without an external deadline.
 
-<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a696d706c656d656e746174696f6e3a30"></a>
+<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a4f776e6564436f6e6e656374696f6e"></a>
 
-## Implementation `Copy for ConnectionOptions`
+## `OwnedConnection`
 
 ```silk
-impl Copy for ConnectionOptions
+pub struct OwnedConnection<P>
 ```
 
-<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e"></a>
+One affine authenticated TLS client owning its exact byte provider.
 
-## `Connection`
+<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a4f776e6564436f6e6e656374696f6e2e7068617365"></a>
+
+### Method `OwnedConnection.phase`
 
 ```silk
-pub struct Connection<'transport, P>
+pub fn phase<P, 'life1>(self: &'life1 OwnedConnection<P>) -> ConnectionPhase
 ```
 
-One authenticated TLS client borrowing its explicit transport for the callback scope.
+Returns the current directional, invalid, or terminal phase.
 
-<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e2e7068617365"></a>
+<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a4f776e6564436f6e6e656374696f6e2e61757468656e7469636174696f6e"></a>
 
-### Method `Connection.phase`
-
-```silk
-pub fn phase<'transport, P, 'life2>(self: &'life2 Connection<'transport, P>) -> ConnectionPhase
-```
-
-Returns the current directional or invalid phase.
-
-<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e2e61757468656e7469636174696f6e"></a>
-
-### Method `Connection.authentication`
+### Method `OwnedConnection.authentication`
 
 ```silk
-pub fn authentication<'transport, P, 'a>(self: &'a Connection<'transport, P>) -> silk/option.Option<silk/tls_client.Authentication<'a>>
+pub fn authentication<P, 'a>(self: &'a OwnedConnection<P>) -> silk/option.Option<silk/tls_client.Authentication<'a>>
 ```
 
 Borrows the authenticated session evidence retained by this connection.
 
-<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e2e72656164536f6d65"></a>
+<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a4f776e6564436f6e6e656374696f6e2e72656164536f6d65"></a>
 
-### Method `Connection.readSome`
+### Method `OwnedConnection.readSome`
 
 ```silk
-pub effect<'env> fn readSome<'transport: 'env, P: 'env, 'life2: 'env, 'life3: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, output: &'life3 mut [u8], deadline: silk/option.Option<silk/system_clock.Instant>) -> ReadTransfer ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
+pub effect<'env> fn readSome<P: 'env, 'connection: 'env, 'life2: 'env, 'env>(self: &'connection mut OwnedConnection<P>, output: &'life2 mut [u8], deadline: silk/option.Option<silk/system_clock.Instant>) -> ReadTransfer ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
 ```
 
 Reads one verified plaintext prefix or clean authenticated peer end.
@@ -345,47 +349,73 @@ Reads one verified plaintext prefix or clean authenticated peer end.
 
 Mandatory TLS output is sent first. Underlying end without `close_notify` is truncation.
 
-<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e2e7772697465536f6d65"></a>
+<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a4f776e6564436f6e6e656374696f6e2e7772697465536f6d65"></a>
 
-### Method `Connection.writeSome`
+### Method `OwnedConnection.writeSome`
 
 ```silk
-pub effect<'env> fn writeSome<'transport: 'env, P: 'env, 'life2: 'env, 'life3: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, input: &'life3 [u8], deadline: silk/option.Option<silk/system_clock.Instant>) -> usize ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
+pub effect<'env> fn writeSome<P: 'env, 'connection: 'env, 'life2: 'env, 'env>(self: &'connection mut OwnedConnection<P>, input: &'life2 [u8], deadline: silk/option.Option<silk/system_clock.Instant>) -> usize ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
 ```
 
 Encrypts and transmits one positive application prefix.
 
-<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e2e666c757368"></a>
+<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a4f776e6564436f6e6e656374696f6e2e666c757368"></a>
 
-### Method `Connection.flush`
+### Method `OwnedConnection.flush`
 
 ```silk
-pub effect<'env> fn flush<'transport: 'env, P: 'env, 'life2: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, deadline: silk/option.Option<silk/system_clock.Instant>) -> () ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
+pub effect<'env> fn flush<P: 'env, 'connection: 'env, 'env>(self: &'connection mut OwnedConnection<P>, deadline: silk/option.Option<silk/system_clock.Instant>) -> () ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
 ```
 
 Drains mandatory TLS output and flushes the underlying byte boundary.
 
-<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a436f6e6e656374696f6e2e73687574646f776e5772697465"></a>
+<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a4f776e6564436f6e6e656374696f6e2e73687574646f776e5772697465"></a>
 
-### Method `Connection.shutdownWrite`
+### Method `OwnedConnection.shutdownWrite`
 
 ```silk
-pub effect<'env> fn shutdownWrite<'transport: 'env, P: 'env, 'life2: 'env, 'env>(self: &'life2 mut Connection<'transport, P>, deadline: silk/option.Option<silk/system_clock.Instant>) -> () ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
+pub effect<'env> fn shutdownWrite<P: 'env, 'connection: 'env, 'env>(self: &'connection mut OwnedConnection<P>, deadline: silk/option.Option<silk/system_clock.Instant>) -> () ! ConnectionError | OutOfMemoryError ? &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
 ```
 
 Sends and flushes TLS `close_notify`, then closes only the transport write direction.
+
+<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a4f776e6564436f6e6e656374696f6e2e636c6f7365"></a>
+
+### Method `OwnedConnection.close`
+
+```silk
+pub effect<'env> fn close<P: 'env, 'life1: 'env, 'env>(self: &'life1 mut OwnedConnection<P>) -> () ! ConnectionError ? Without<&mut ByteDuplex, &ByteDuplex> where &mut P provides &ByteDuplex from &mut ByteDuplex
+```
+
+Terminally closes the exact provider without TLS grace or retry.
+
+#### Details
+
+The connection becomes `Closed` before provider dispatch. Repeated close is local and
+successful; a first provider close failure remains observable while later I/O stays closed.
+
+<a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a61757468656e7469636174654f776e6564"></a>
+
+## `authenticateOwned`
+
+```silk
+pub effect<'env> fn authenticateOwned<P: 'env, 'life1: 'env, 'life2: 'env, 'env>(provider: P, config: &'life1 silk/tls_client.ClientConfig<'life2>, trust: TrustSnapshot, options: ConnectionOptions) -> silk/tls_connection.OwnedConnection<P> ! ConnectionError | OutOfMemoryError ? &mut SystemClock | &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random
+```
+
+Consumes a provider and prepared trust snapshot and returns one authenticated affine owner.
+
+### Details
+
+The provider enters a nonparking guard before time sampling, client construction, allocation,
+or transport work. Authentication publishes only after the final deadline check; typed failure
+and structured cancellation close an unpublished provider exactly once.
 
 <a id="declaration-73696c6b2f746c735f636f6e6e656374696f6e3a3a77697468436c69656e74"></a>
 
 ## `withClient`
 
 ```silk
-pub effect<'env1> fn withClient<'env: 'env1, A, E, ?CallbackRequirements, P: 'env1, 'life5: 'env1, 'life6: 'env1, 'env1>(transport: &'env mut P, config: &'life5 silk/tls_client.ClientConfig<'life6>, options: ConnectionOptions, callback: for<'call> once fn<'env>(&'call mut silk/tls_connection.Connection<'call, P>) -> once Effect<'call; A ! E ? CallbackRequirements>) -> A ! E | ConnectionError | TrustSourceError | OutOfMemoryError ? CallbackRequirements | &mut TrustSource | &mut SystemClock | &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random, CallbackRequirements in Without<CallbackRequirements, &ByteDuplex>
+pub effect<'env1> fn withClient<'env: 'env1, A, E, ?CallbackRequirements, P: 'env1, 'life5: 'env1, 'life6: 'env1, 'env1>(provider: P, config: &'life5 silk/tls_client.ClientConfig<'life6>, trust: TrustSnapshot, options: ConnectionOptions, callback: for<'call> once fn<'env>(&'call mut silk/tls_connection.OwnedConnection<P>) -> once Effect<'call; A ! E ? CallbackRequirements>) -> A ! E | ConnectionError | OutOfMemoryError ? CallbackRequirements | &mut SystemClock | &mut MonotonicClock | &mut Allocator | &mut Random where &mut P provides &ByteDuplex from &mut ByteDuplex, &mut P provides &ByteDuplex from &mut ByteDuplex | &mut MonotonicClock | &mut Allocator | &mut Random, CallbackRequirements in Without<CallbackRequirements, &ByteDuplex>
 ```
 
-Acquires, authenticates, uses, and terminally closes one scoped TLS client.
-
-### Details
-
-Trust is loaded once and wall time is sampled once. Every handshake transport operation uses
-the same absolute monotonic deadline. The callback is invoked only after authentication.
+Authenticates, lends, and terminally closes the same authoritative owned connection.

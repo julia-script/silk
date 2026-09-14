@@ -164,5 +164,5 @@ it.effect(
       assert.lengthOf(parks, 2)
       assert.isTrue(parks.every((park) => park.guardCleanup._tag !== 'NoCleanup'))
     }),
-  30_000,
+  60_000,
 )

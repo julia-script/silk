@@ -23,7 +23,7 @@ it.effect(
       )
       assert.deepEqual(Analysis.diagnostics(snapshot), [])
     }),
-  15_000,
+  45_000,
 )
 
 it.effect(

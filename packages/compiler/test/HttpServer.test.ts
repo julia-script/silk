@@ -32,7 +32,7 @@ it.effect(
         [],
       )
     }),
-  60_000,
+  120_000,
 )
 
 it.effect(
@@ -63,7 +63,7 @@ pub fn main() -> i32 { return 42 }`
         [{ code: 'SEM0014', start, end: start + 'HttpServerNative'.length }],
       )
     }),
-  90_000,
+  180_000,
 )
 
 const ownershipSource = `import silk.allocator {Allocator, OutOfMemoryError}

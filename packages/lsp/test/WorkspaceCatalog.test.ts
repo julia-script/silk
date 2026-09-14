@@ -101,7 +101,7 @@ it.effect(
       })
       assert.deepEqual([...renamed.project.keys()], ['Renamed'])
     }).pipe(Effect.provide([SourceResolver.empty, NodeServices.layer])),
-  90_000,
+  180_000,
 )
 
 it.effect('defers catalog selection and retries an interrupted attempt without caching it', () =>

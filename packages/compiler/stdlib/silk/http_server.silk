@@ -1137,8 +1137,8 @@ pub effect fn withUpgrade<
   selectedProtocol: string,
   response: &ValueResponseHead<'value>,
   deadline: Option<Instant>,
-  callback: for<'call> once fn<'callback>(
-    &'call mut BufferedDuplex<'transport, P>,
+  callback: for<'call, 'transportView: 'call> once fn<'callback>(
+    &'call mut BufferedDuplex<'transportView, P>,
   ) -> once Effect<'call; A ! E ? CallbackRequirements>,
 ) -> A
 ! E | ServerError | OutOfMemoryError
@@ -1187,8 +1187,8 @@ pub effect fn withTunnel<
   request: &'loan mut Request<'request, 'connection, 'transport, P>,
   response: &ValueResponseHead<'value>,
   deadline: Option<Instant>,
-  callback: for<'call> once fn<'callback>(
-    &'call mut BufferedDuplex<'transport, P>,
+  callback: for<'call, 'transportView: 'call> once fn<'callback>(
+    &'call mut BufferedDuplex<'transportView, P>,
   ) -> once Effect<'call; A ! E ? CallbackRequirements>,
 ) -> A
 ! E | ServerError | OutOfMemoryError

@@ -216,7 +216,9 @@ effect fn serveHttp(listener: &mut Listener) -> i32
     _ => { return 252 }
   }
   if unsafe silk_listener_connect_http(port) != 42 { return 253 }
-  let served = run Effect.result(serveNext(
+  let served = run Effect.result(serveNext<
+    i32, ServerError | OutOfMemoryError,
+  >(
     &mut listener.*, httpLimits(), Option.none<Instant>(), NativeHttpHandler {},
   ))
   let client = unsafe silk_listener_finish_http()

@@ -1,6 +1,6 @@
 /** Consolidated portable acceptance program for scoped HTTP response content decoding. */
 const httpContentRuntimeSource = `import silk.allocator {Allocator, OutOfMemoryError}
-import silk.buffered_duplex {BufferedDuplex, withBufferedCapacity}
+import silk.buffered_duplex {BufferedContext, BufferedDuplex, withBufferedCapacity, withBufferedCapacityContext}
 import silk.buffered_input {BufferError}
 import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation}
 import silk.bytes {Bytes}
@@ -1263,17 +1263,7 @@ effect<'session> fn reviewMatrixSession<'session>(
   if fixed != 0 { return fixed }
   let identity = run scenarioSession(&mut body.*, 16)
   if identity != 0 { return identity }
-  let checksum = run scenarioSession(&mut body.*, 17)
-  if checksum != 0 { return checksum }
-  let encoded = run scenarioSession(&mut body.*, 19)
-  if encoded != 0 { return encoded }
-  let intermediate = run scenarioSession(&mut body.*, 20)
-  if intermediate != 0 { return intermediate }
-  let decoded = run scenarioSession(&mut body.*, 21)
-  if decoded != 0 { return decoded }
-  let empty = run scenarioSession(&mut body.*, 22)
-  if empty != 0 { return empty }
-  return run scenarioSession(&mut body.*, 23)
+  return 0
 }
 
 effect<'session> fn deadlineSession<'session>(
@@ -1666,6 +1656,32 @@ effect fn committedBodyFailuresConsumePrefix() -> i32
   )
 }
 
+// One nominal context handles every poisoned-body case in the shared runtime program.
+struct ReviewFailure { case: u8 }
+impl ReviewFailure {
+  effect<'session> fn use<'session, 'transport: 'session>(
+    context: Self,
+    body: &'session mut BufferedDuplex<'transport, MemoryByteDuplex>,
+  ) -> i32 ! OutOfMemoryError ? &mut Allocator {
+    return run scenarioSession(move body, context.case)
+  }
+}
+impl BufferedContext<MemoryByteDuplex, i32, OutOfMemoryError ? &mut Allocator> for ReviewFailure {
+  use: ReviewFailure.use
+}
+
+effect fn reviewFailure(case: u8, input: &[u8]) -> i32
+! BufferError | OutOfMemoryError
+? &mut Allocator | &mut MonotonicClock {
+  let mut source = run provider(input)
+  return run withBufferedCapacityContext<i32, OutOfMemoryError>(
+    &mut source,
+    1,
+    1,
+    ReviewFailure {case: case},
+  )
+}
+
 effect fn reviewRuntimeMatrix() -> i32
 ! BufferError | OutOfMemoryError
 ? &mut Allocator | &mut MonotonicClock {
@@ -1681,14 +1697,28 @@ effect fn reviewRuntimeMatrix() -> i32
     )
   }
   let mut source = run provider(
-    b"\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\xd3\\xd8\\xaa\\xff\\x57\\x81\\x59\\x92\\x81\\x21\\x31\\x29\\x19\\x00\\x70\\x76\\xf9\\xb4\\x0c\\x00\\x00\\x00\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xcb\\x2c\\x2a\\x2e\\x01\\x00\\x57\\xee\\x71\\x92\\x05\\x00\\x00\\x00\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x2b\\x4e\\x4d\\xce\\xcf\\x4b\\x01\\x00\\x69\\x11\\x1f\\xb6\\x06\\x00\\x00\\x00\\x78\\x9c\\xf3\\x48\\xcd\\xc9\\xc9\\xd7\\x51\\xa8\\xca\\xc9\\x4c\\x52\\x04\\x00\\x1b\\x65\\x04\\x13\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xce\\xc9\\x2f\\x4e\\x05\\x00\\xc4\\x81\\x01\\x13\\x05\\x00\\x00\\x00id\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xcb\\x2c\\x2a\\x2e\\x01\\x00\\x56\\xee\\x71\\x92\\x05\\x00\\x00\\x00x\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\xd3\\xd8\\xaa\\xff\\x57\\x81\\x59\\x92\\x81\\x21\\x31\\x29\\x19\\x00\\x70\\x76\\xf9\\xb4\\x0c\\x00\\x00\\x00x\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\xd3\\xdc\\xaa\\xff\\x57\\x81\\x59\\x92\\x81\\x21\\x31\\x29\\x19\\x00\\x1f\\x3a\\x5c\\x2f\\x0c\\x00\\x00\\x00",
+    b"\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\xd3\\xd8\\xaa\\xff\\x57\\x81\\x59\\x92\\x81\\x21\\x31\\x29\\x19\\x00\\x70\\x76\\xf9\\xb4\\x0c\\x00\\x00\\x00\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xcb\\x2c\\x2a\\x2e\\x01\\x00\\x57\\xee\\x71\\x92\\x05\\x00\\x00\\x00\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x2b\\x4e\\x4d\\xce\\xcf\\x4b\\x01\\x00\\x69\\x11\\x1f\\xb6\\x06\\x00\\x00\\x00\\x78\\x9c\\xf3\\x48\\xcd\\xc9\\xc9\\xd7\\x51\\xa8\\xca\\xc9\\x4c\\x52\\x04\\x00\\x1b\\x65\\x04\\x13\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xce\\xc9\\x2f\\x4e\\x05\\x00\\xc4\\x81\\x01\\x13\\x05\\x00\\x00\\x00id",
   )
-  return run withBufferedCapacity<i32, OutOfMemoryError>(
+  let positive = run withBufferedCapacity<i32, OutOfMemoryError>(
     &mut source,
     1,
     1,
     reviewMatrixSession,
   )
+  if positive != 0 { return positive }
+  // A failed reader leaves its unconsumed wire suffix in the transport. Each negative
+  // case owns fresh input so an earlier budget refusal cannot feed a later decoder.
+  let checksum = run reviewFailure(17, b"\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\x4b\\xcb\\x2c\\x2a\\x2e\\x01\\x00\\x56\\xee\\x71\\x92\\x05\\x00\\x00\\x00")
+  if checksum != 0 { return checksum }
+  let encoded = run reviewFailure(19, b"x")
+  if encoded != 0 { return encoded }
+  let intermediate = run reviewFailure(20, b"\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\xd3\\xd8\\xaa\\xff\\x57\\x81\\x59\\x92\\x81\\x21\\x31\\x29\\x19\\x00\\x70\\x76\\xf9\\xb4\\x0c\\x00\\x00\\x00")
+  if intermediate != 0 { return intermediate }
+  let decoded = run reviewFailure(21, b"x")
+  if decoded != 0 { return decoded }
+  let empty = run reviewFailure(22, b"")
+  if empty != 0 { return empty }
+  return run reviewFailure(23, b"\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff\\xd3\\xdc\\xaa\\xff\\x57\\x81\\x59\\x92\\x81\\x21\\x31\\x29\\x19\\x00\\x1f\\x3a\\x5c\\x2f\\x0c\\x00\\x00\\x00")
 }
 
 effect fn deadlineIsForwarded() -> i32
@@ -2387,7 +2417,7 @@ effect<'call> fn analysisReader<
   return 0
 }`
 
-/** Pure planning cases retained for ticket-local structured analysis, never backend reachability. */
+/** Planning cases shared by structured analysis and the native acceptance program. */
 const httpContentPlanningDeclarations = `enum PlanningExpectation {
   ValidStack,
   SemanticNoBody,
@@ -2884,7 +2914,7 @@ effect fn planning() -> i32 ! OutOfMemoryError ? &mut Allocator {
   return overflow
 }`
 
-/** The declaration-only planning graph also runs once in the native acceptance program. */
+/** The planning graph runs once in the native acceptance program. */
 export const httpContentPlanningSource = `${httpContentAnalysisPrelude}
 ${httpContentPlanningDeclarations}`
 

@@ -207,7 +207,9 @@ effect fn providerFor(inputBytes: &[u8], writeCount: usize) -> MemoryByteDuplex
     })
     index = index + usize.ONE
   }
-  return run MemoryByteDuplex.make(move reads, move writes, 256, 32, Option.none<i32>())
+  // Tiny buffers can produce one read per byte; retain writes, flushes, and lifecycle events too.
+  let auditCapacity = inputBytes.length + 2 * writeCount + 8
+  return run MemoryByteDuplex.make(move reads, move writes, 256, auditCapacity, Option.none<i32>())
 }
 
 effect fn splitProvider(firstBytes: &[u8], secondBytes: &[u8], writeCount: usize)
@@ -1073,7 +1075,7 @@ effect<'call> fn consumeBodyFailureProgress<
   }
 }
 
-effect<'call, 'transport> fn inspectUpgradeSuffix(
+effect<'call> fn inspectUpgradeSuffix<'call, 'transport: 'call>(
   channel: &'call mut BufferedDuplex<'transport, MemoryByteDuplex>,
 ) -> i32 {
   let suffix = BufferedDuplex.peek(&channel.*)
@@ -1121,7 +1123,7 @@ effect<'call> fn upgradeRequest<
     Result.Failure {error} => { drop error return 165 }
     Result.Success {value} => value
   }
-  let code = run withUpgrade(
+  let code = run withUpgrade<i32, never>(
     &mut request.*,
     "websocket",
     &response,
@@ -1142,7 +1144,7 @@ effect<'call> fn upgradeRequest<
   }
 }
 
-effect<'call, 'transport> fn inspectTunnelSuffix(
+effect<'call> fn inspectTunnelSuffix<'call, 'transport: 'call>(
   channel: &'call mut BufferedDuplex<'transport, MemoryByteDuplex>,
 ) -> i32 {
   let suffix = BufferedDuplex.peek(&channel.*)
@@ -1190,7 +1192,7 @@ effect<'call> fn tunnelRequest<
     Result.Failure {error} => { drop error return 175 }
     Result.Success {value} => value
   }
-  let code = run withTunnel(
+  let code = run withTunnel<i32, never>(
     &mut request.*,
     &response,
     Option.none<Instant>(),
@@ -1511,24 +1513,25 @@ effect<'call> fn matrixConnection<
     run finishConnection(&mut connection.*, usize.ZERO, SystemClock.make(7, 9))
     return 0
   }
-  let handled = if scenario == 1 {
-    run withRequest(&mut connection.*, Option.none<Instant>(), fixedResponseRequest)
+  let mut handled: Option<i32> = Option.none<i32>()
+  if scenario == 1 {
+    handled = run withRequest(&mut connection.*, Option.none<Instant>(), fixedResponseRequest)
   } else if scenario == 2 {
-    run withRequest(&mut connection.*, Option.none<Instant>(), chunkedResponseRequest)
+    handled = run withRequest(&mut connection.*, Option.none<Instant>(), chunkedResponseRequest)
   } else if scenario == 3 {
-    run withRequest(&mut connection.*, Option.none<Instant>(), informationalRequest)
+    handled = run withRequest(&mut connection.*, Option.none<Instant>(), informationalRequest)
   } else if scenario == 4 {
-    run withRequest(&mut connection.*, Option.none<Instant>(), discardChunkedRequest)
+    handled = run withRequest(&mut connection.*, Option.none<Instant>(), discardChunkedRequest)
   } else if scenario == 5 {
-    run withRequest(&mut connection.*, Option.none<Instant>(), recoverBeforeOutput)
+    handled = run withRequest(&mut connection.*, Option.none<Instant>(), recoverBeforeOutput)
   } else if scenario == 7 {
-    run withRequest(&mut connection.*, Option.none<Instant>(), upgradeRequest)
+    handled = run withRequest(&mut connection.*, Option.none<Instant>(), upgradeRequest)
   } else if scenario == 8 {
-    run withRequest(&mut connection.*, Option.none<Instant>(), tunnelRequest)
+    handled = run withRequest(&mut connection.*, Option.none<Instant>(), tunnelRequest)
   } else if scenario == 10 {
-    run withRequest(&mut connection.*, Option.none<Instant>(), unreadBodyRequest)
+    handled = run withRequest(&mut connection.*, Option.none<Instant>(), unreadBodyRequest)
   } else {
-    run withRequest(&mut connection.*, Option.none<Instant>(), closeDelimitedRequest)
+    handled = run withRequest(&mut connection.*, Option.none<Instant>(), closeDelimitedRequest)
   }
   let code = match move handled {
     Option.None => 178
@@ -1699,7 +1702,7 @@ effect fn runFixedZero() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut clock = FixedClock {}
   let mut transport = run providerFor(
-    b"GET / HTTP/1.1\r\nHost: example.test\r\nContent-Length: 0\r\n\r\n",
+    b"GET / HTTP/1.1\\r\\nHost: example.test\\r\\nContent-Length: 0\\r\\n\\r\\n",
     usize.ONE,
   ) |> Effect.provideMut<Allocator>(&mut allocator)
   let served = withConnection(&mut transport, limits(), ZeroHandler {})
@@ -1709,7 +1712,7 @@ effect fn runFixedZero() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   if code != 0 { return code }
   if !equal(
     transport.outbound(),
-    b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
+    b"HTTP/1.1 204 No Content\\r\\nConnection: close\\r\\n\\r\\n",
   ) { return 86 }
   return 0
 }
@@ -1718,8 +1721,8 @@ effect fn runCoalescedReuse() -> i32 ! ServerError | BufferError | OutOfMemoryEr
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut clock = FixedClock {}
   let mut transport = run providerFor(
-    b"GET /one HTTP/1.1\r\nHost: example.test\r\n\r\nGET /two HTTP/1.1\r\nHost: example.test\r\n\r\n",
-    usize.ONE,
+    b"GET /one HTTP/1.1\\r\\nHost: example.test\\r\\n\\r\\nGET /two HTTP/1.1\\r\\nHost: example.test\\r\\n\\r\\n",
+    2,
   ) |> Effect.provideMut<Allocator>(&mut allocator)
   let mut serverLimits = limits()
   serverLimits.maxRequestsPerConnection = 2
@@ -1730,7 +1733,7 @@ effect fn runCoalescedReuse() -> i32 ! ServerError | BufferError | OutOfMemoryEr
   if code != 0 { return code }
   if !equal(
     transport.outbound(),
-    b"HTTP/1.1 204 No Content\r\n\r\nHTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
+    b"HTTP/1.1 204 No Content\\r\\n\\r\\nHTTP/1.1 204 No Content\\r\\nConnection: close\\r\\n\\r\\n",
   ) { return 95 }
   return 0
 }
@@ -1743,7 +1746,8 @@ effect fn runMatrixCase(
 ) -> i32 ! ServerError | BufferError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut clock = FixedClock {}
-  let writeCount = (expected.length + 127) / 128
+  // Each explicit flush may drain a partial buffer; allow one accepted write per wire byte.
+  let writeCount = expected.length
   let mut transport = run providerFor(inputBytes, writeCount)
     |> Effect.provideMut<Allocator>(&mut allocator)
   let served = withConnection(&mut transport, serverLimits, MatrixHandler {scenario: scenario})
@@ -1782,8 +1786,8 @@ effect fn runMatrixCase(
 
 effect fn runFixedResponse() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   return run runMatrixCase(
-    b"GET /fixed HTTP/1.1\r\nHost: example.test\r\n\r\n",
-    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nHello",
+    b"GET /fixed HTTP/1.1\\r\\nHost: example.test\\r\\n\\r\\n",
+    b"HTTP/1.1 200 OK\\r\\nContent-Length: 5\\r\\nConnection: close\\r\\n\\r\\nHello",
     1,
     limits(),
   )
@@ -1791,8 +1795,8 @@ effect fn runFixedResponse() -> i32 ! ServerError | BufferError | OutOfMemoryErr
 
 effect fn runChunkedResponse() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   return run runMatrixCase(
-    b"GET /chunked HTTP/1.1\r\nHost: example.test\r\n\r\n",
-    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTrailer: Content-Digest\r\nConnection: close\r\n\r\n4\r\nWiki\r\n0\r\nContent-Digest: ok\r\n\r\n",
+    b"GET /chunked HTTP/1.1\\r\\nHost: example.test\\r\\n\\r\\n",
+    b"HTTP/1.1 200 OK\\r\\nTransfer-Encoding: chunked\\r\\nTrailer: Content-Digest\\r\\nConnection: close\\r\\n\\r\\n4\\r\\nWiki\\r\\n0\\r\\nContent-Digest: ok\\r\\n\\r\\n",
     2,
     limits(),
   )
@@ -1800,8 +1804,8 @@ effect fn runChunkedResponse() -> i32 ! ServerError | BufferError | OutOfMemoryE
 
 effect fn runInformationalBudget() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   return run runMatrixCase(
-    b"POST /hints HTTP/1.1\r\nHost: example.test\r\nContent-Length: 4\r\nExpect: 100-continue\r\n\r\nWiki",
-    b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 103 Early Hints\r\n\r\nHTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
+    b"POST /hints HTTP/1.1\\r\\nHost: example.test\\r\\nContent-Length: 4\\r\\nExpect: 100-continue\\r\\n\\r\\nWiki",
+    b"HTTP/1.1 100 Continue\\r\\n\\r\\nHTTP/1.1 103 Early Hints\\r\\n\\r\\nHTTP/1.1 204 No Content\\r\\nConnection: close\\r\\n\\r\\n",
     3,
     limits(),
   )
@@ -1811,8 +1815,8 @@ effect fn runChunkedDiscard() -> i32 ! ServerError | BufferError | OutOfMemoryEr
   let mut serverLimits = limits()
   serverLimits.readCapacity = 3
   return run runMatrixCase(
-    b"POST /discard HTTP/1.1\r\nHost: example.test\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n0\r\n\r\n",
-    b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
+    b"POST /discard HTTP/1.1\\r\\nHost: example.test\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\n4\\r\\nWiki\\r\\n0\\r\\n\\r\\n",
+    b"HTTP/1.1 204 No Content\\r\\nConnection: close\\r\\n\\r\\n",
     4,
     serverLimits,
   )
@@ -1820,8 +1824,8 @@ effect fn runChunkedDiscard() -> i32 ! ServerError | BufferError | OutOfMemoryEr
 
 effect fn runPreOutputRecovery() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   return run runMatrixCase(
-    b"GET /recover HTTP/1.1\r\nHost: example.test\r\n\r\n",
-    b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
+    b"GET /recover HTTP/1.1\\r\\nHost: example.test\\r\\n\\r\\n",
+    b"HTTP/1.1 204 No Content\\r\\nConnection: close\\r\\n\\r\\n",
     5,
     limits(),
   )
@@ -1830,9 +1834,9 @@ effect fn runPreOutputRecovery() -> i32 ! ServerError | BufferError | OutOfMemor
 effect fn runPostOutputFailure() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   let mut allocator = Allocator.systemAllocatorProvider()
   let mut clock = FixedClock {}
-  let expected = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n"
+  let expected = b"HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\nConnection: close\\r\\n\\r\\n"
   let mut transport = run failingOutputProvider(
-    b"GET /partial HTTP/1.1\r\nHost: example.test\r\n\r\n",
+    b"GET /partial HTTP/1.1\\r\\nHost: example.test\\r\\n\\r\\n",
     expected.length,
     73,
   ) |> Effect.provideMut<Allocator>(&mut allocator)
@@ -1866,8 +1870,8 @@ effect fn runPostOutputFailure() -> i32 ! ServerError | BufferError | OutOfMemor
 
 effect fn runUpgradeHandoff() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   return run runMatrixCase(
-    b"GET /chat HTTP/1.1\r\nHost: example.test\r\nConnection: keep-alive, Upgrade\r\nUpgrade: websocket\r\n\r\nXYZ",
-    b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: upgrade\r\n\r\n",
+    b"GET /chat HTTP/1.1\\r\\nHost: example.test\\r\\nConnection: keep-alive, Upgrade\\r\\nUpgrade: websocket\\r\\n\\r\\nXYZ",
+    b"HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: upgrade\\r\\n\\r\\n",
     7,
     limits(),
   )
@@ -1875,8 +1879,8 @@ effect fn runUpgradeHandoff() -> i32 ! ServerError | BufferError | OutOfMemoryEr
 
 effect fn runTunnelHandoff() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   return run runMatrixCase(
-    b"CONNECT example.test:443 HTTP/1.1\r\nHost: example.test:443\r\n\r\nTLS",
-    b"HTTP/1.1 200 Connection Established\r\n\r\n",
+    b"CONNECT example.test:443 HTTP/1.1\\r\\nHost: example.test:443\\r\\n\\r\\nTLS",
+    b"HTTP/1.1 200 Connection Established\\r\\n\\r\\n",
     8,
     limits(),
   )
@@ -1886,8 +1890,8 @@ effect fn runHttp10KeepAlive() -> i32 ! ServerError | BufferError | OutOfMemoryE
   let mut serverLimits = limits()
   serverLimits.maxRequestsPerConnection = 2
   return run runMatrixCase(
-    b"GET /one HTTP/1.0\r\nConnection: keep-alive\r\n\r\nGET /two HTTP/1.0\r\nConnection: keep-alive\r\n\r\n",
-    b"HTTP/1.0 204 No Content\r\nConnection: keep-alive\r\n\r\nHTTP/1.0 204 No Content\r\nConnection: close\r\n\r\n",
+    b"GET /one HTTP/1.0\\r\\nConnection: keep-alive\\r\\n\\r\\nGET /two HTTP/1.0\\r\\nConnection: keep-alive\\r\\n\\r\\n",
+    b"HTTP/1.0 204 No Content\\r\\nConnection: keep-alive\\r\\n\\r\\nHTTP/1.0 204 No Content\\r\\nConnection: close\\r\\n\\r\\n",
     9,
     serverLimits,
   )
@@ -1895,8 +1899,8 @@ effect fn runHttp10KeepAlive() -> i32 ! ServerError | BufferError | OutOfMemoryE
 
 effect fn runUnreadBodyClose() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   return run runMatrixCase(
-    b"POST /unread HTTP/1.1\r\nHost: example.test\r\nContent-Length: 4\r\n\r\n",
-    b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
+    b"POST /unread HTTP/1.1\\r\\nHost: example.test\\r\\nContent-Length: 4\\r\\n\\r\\n",
+    b"HTTP/1.1 204 No Content\\r\\nConnection: close\\r\\n\\r\\n",
     10,
     limits(),
   )
@@ -1906,7 +1910,7 @@ effect fn runZeroRequestBound() -> i32 ! ServerError | BufferError | OutOfMemory
   let mut serverLimits = limits()
   serverLimits.maxRequestsPerConnection = usize.ZERO
   return run runMatrixCase(
-    b"GET /not-read HTTP/1.1\r\nHost: example.test\r\n\r\n",
+    b"GET /not-read HTTP/1.1\\r\\nHost: example.test\\r\\n\\r\\n",
     b"",
     11,
     serverLimits,
@@ -1915,8 +1919,8 @@ effect fn runZeroRequestBound() -> i32 ! ServerError | BufferError | OutOfMemory
 
 effect fn runCloseDelimitedResponse() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   return run runMatrixCase(
-    b"GET /close HTTP/1.1\r\nHost: example.test\r\n\r\n",
-    b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nbye",
+    b"GET /close HTTP/1.1\\r\\nHost: example.test\\r\\n\\r\\n",
+    b"HTTP/1.1 200 OK\\r\\nConnection: close\\r\\n\\r\\nbye",
     12,
     limits(),
   )
@@ -1924,7 +1928,7 @@ effect fn runCloseDelimitedResponse() -> i32 ! ServerError | BufferError | OutOf
 
 effect fn runBodyFailureProgress() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   return run runMatrixCase(
-    b"POST /bad HTTP/1.1\r\nHost: example.test\r\nTransfer-Encoding: chunked\r\n\r\nZ\r\n",
+    b"POST /bad HTTP/1.1\\r\\nHost: example.test\\r\\nTransfer-Encoding: chunked\\r\\n\\r\\nZ\\r\\n",
     b"",
     13,
     limits(),
@@ -1942,7 +1946,7 @@ effect fn allCases() -> i32 ! ServerError | BufferError | OutOfMemoryError {
   let mut acquisitionLimits = limits()
   acquisitionLimits.maxRequestsPerConnection = 2
   let acquisition = run runMatrixCase(
-    b"POST /oom HTTP/1.1\r\nHost: example.test\r\nContent-Length: 4\r\n\r\nBODY",
+    b"POST /oom HTTP/1.1\\r\\nHost: example.test\\r\\nContent-Length: 4\\r\\n\\r\\nBODY",
     b"",
     14,
     acquisitionLimits,
