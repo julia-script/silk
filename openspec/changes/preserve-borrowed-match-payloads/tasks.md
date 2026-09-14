@@ -17,3 +17,7 @@
 - [x] 2.3 Retain nested variant tests and canonical field paths through matching and lowering;
       distinguish inner-variant mismatches before bindings and guards, preserve source-order
       fallback, and recognize exhaustive nested alternatives without consuming an outer variant early.
+
+- [x] 2.4 Carry private native aggregate results and failure metadata through caller-owned storage;
+      keep suspension status separate, update all call/return/resume paths and foreign adapters,
+      and cover result transport with structural and existing shared runtime evidence.

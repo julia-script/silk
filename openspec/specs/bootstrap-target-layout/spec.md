@@ -590,3 +590,25 @@ For every valid C-layout record, the nominal layout catalog SHALL retain declara
 
 - **WHEN** native and WebAssembly consumers inspect one valid C-layout record's compiler layout fact for the same target
 - **THEN** both receive the identical backend-neutral layout entry selected before lowering
+
+### Requirement: Private native aggregate results use caller-owned storage
+
+Native functions SHALL transport recursively growing result representations through caller-owned
+result records selected by the compiler's typed-place classification. The record SHALL retain all
+source result lanes and owned failure metadata. Synchronous calls SHALL return without an aggregate
+SSA payload; suspension steps SHALL return their status separately and receive a fresh result
+destination for each invocation. No transient result destination SHALL be retained across a park.
+Foreign and machine signatures SHALL remain governed by their own ABI contracts, with private
+result adaptation at the boundary.
+
+#### Scenario: An owned aggregate crosses a private call boundary
+
+- **WHEN** a native function returns an owned aggregate through normal or resumed completion
+- **THEN** the caller receives every source lane and diagnostic owner through its result record
+- **AND** generated private returns do not build a flat aggregate SSA chain for that representation
+
+#### Scenario: A suspended invocation transfers without a completed payload
+
+- **WHEN** a suspension step originates or relays a transfer
+- **THEN** its result record contains the defined empty payload and empty diagnostic metadata
+- **AND** subsequent resume steps receive fresh invocation-local result storage

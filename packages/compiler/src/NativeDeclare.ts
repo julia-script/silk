@@ -1,3 +1,5 @@
+import * as NativeResult from './NativeResult.js'
+import * as NativeValue from './NativeValue.js'
 import * as Attribute from '@silklang/llvm/Attribute'
 import * as NativeForeignGuard from './NativeForeignGuard.js'
 import * as Constant from '@silklang/llvm/Constant'
@@ -113,16 +115,42 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
               ),
             ),
           })
-    const emittedResultType = suspendable
-      ? yield* LlvmType.structure(context.builder, [
-          context.i32,
-          ...resultLanes.map(context.laneType),
-          ...(diagnosticResult === undefined ? [] : [diagnosticResult]),
-        ])
-      : resultType
+    const resultStorage =
+      fn.machine === undefined &&
+      resultLaneCount > 0 &&
+      NativeValue.classify(context.program.layout, fn.result) === 'Place'
+        ? {
+            type: yield* LlvmType.structure(context.builder, [
+              ...resultLanes.map(context.laneType),
+              ...(diagnosticResult === undefined ? [] : [diagnosticResult]),
+            ]),
+            fields: [
+              ...resultLanes.map(context.laneType),
+              ...(diagnosticResult === undefined ? [] : [diagnosticResult]),
+            ],
+            parameter: parameters.length,
+          }
+        : undefined
+    const physicalParameters =
+      resultStorage === undefined ? parameters : [...parameters, context.pointer]
+    const directResultType =
+      resultStorage === undefined
+        ? resultType
+        : (voidType ??= yield* LlvmType.voidType(context.builder))
+    let emittedResultType = directResultType
+    if (suspendable) {
+      emittedResultType =
+        resultStorage === undefined
+          ? yield* LlvmType.structure(context.builder, [
+              context.i32,
+              ...resultLanes.map(context.laneType),
+              ...(diagnosticResult === undefined ? [] : [diagnosticResult]),
+            ])
+          : context.i32
+    }
     const parameterTypes = suspendable
-      ? Object.freeze([...parameters, context.pointer, context.pointer, context.i32])
-      : Object.freeze(parameters)
+      ? Object.freeze([...physicalParameters, context.pointer, context.pointer, context.i32])
+      : Object.freeze(physicalParameters)
     const signature = yield* LlvmType.functionType(
       context.builder,
       emittedResultType,
@@ -133,7 +161,7 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
       ? yield* FunctionActor.declare(
           context.builder,
           `${publicSymbol}$drive`,
-          yield* LlvmType.functionType(context.builder, resultType, parameters),
+          yield* LlvmType.functionType(context.builder, directResultType, physicalParameters),
           { visibility: 'hidden' },
         )
       : undefined
@@ -150,6 +178,7 @@ export const functions = Effect.fn('NativeDeclare.functions')(function* (
         resultType,
         emittedResultType,
         resultLaneCount,
+        ...(resultStorage === undefined ? {} : { resultStorage }),
         ...(diagnosticResult === undefined ? {} : { diagnosticResult }),
         suspendable,
         ...(driver === undefined ? {} : { driver }),
@@ -264,16 +293,43 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
             yield* Constant.nullValue(context.builder, causeType),
           )
         }
+        const resultAddress = yield* NativeResult.allocate(body, implementation, 'export_result')
+        const physicalArguments = NativeResult.argumentsFor(
+          implementation,
+          arguments_,
+          resultAddress,
+        )
+        const exportResult = Effect.fnUntraced(function* (value: Value.Input | undefined) {
+          if (implementation.resultStorage === undefined) return value
+          const result = yield* NativeResult.read(
+            body,
+            implementation,
+            value,
+            resultAddress,
+            'export_result',
+          )
+          return yield* NativeResult.pack(
+            result,
+            { body },
+            {
+              resultLaneCount: implementation.resultLaneCount,
+              diagnosticResult: implementation.diagnosticResult !== undefined,
+            },
+            implementation.resultType,
+            'export_result',
+          )
+        })
         if (context.support) {
           const result = yield* FunctionBody.callDirect(
             body,
             implementation.handle,
-            arguments_,
+            physicalArguments,
             'forward',
           )
           if (record.signature.result._tag === 'Void') return yield* FunctionBody.returnVoid(body)
-          if (result === undefined) throw new RangeError('LLVM support export lost its result')
-          return yield* FunctionBody.returnValue(body, result)
+          const exported = yield* exportResult(result)
+          if (exported === undefined) throw new RangeError('LLVM support export lost its result')
+          return yield* FunctionBody.returnValue(body, exported)
         }
         if (guard === undefined) throw new RangeError('Export thunk lost its fatal unwind guard')
         const normal = yield* LlvmBlock.make(body, 'returned')
@@ -290,7 +346,7 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
           body,
           implementationProperties.type,
           callee,
-          arguments_,
+          physicalArguments,
           normal,
           unwind,
           'forward',
@@ -301,8 +357,9 @@ export const exportThunks = Effect.fn('NativeDeclare.exportThunks')(function* (
         yield* FunctionBody.unreachable(body)
         yield* LlvmBlock.setInsertionPoint(body, normal)
         if (record.signature.result._tag === 'Void') return yield* FunctionBody.returnVoid(body)
-        if (result === undefined) throw new RangeError('LLVM export thunk lost its result')
-        return yield* FunctionBody.returnValue(body, result)
+        const exported = yield* exportResult(result)
+        if (exported === undefined) throw new RangeError('LLVM export thunk lost its result')
+        return yield* FunctionBody.returnValue(body, exported)
       }),
     )
     thunks.set(record.symbol, thunk)

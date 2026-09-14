@@ -40,6 +40,14 @@ ABI, or alter the owned TLS API to avoid the compiler defect.
    variant as covering its entire outer variant. This repairs the existing recursive-pattern
    contract exposed by the TLS error patterns; it adds no pattern syntax.
 
+6. Native aggregate results use caller-owned private storage, classified by the existing typed-place
+   representation rather than a lane-count threshold. Source result lanes and owned diagnostic
+   metadata share one result record. Synchronous callees return void; suspension steps return only
+   status and receive a fresh result destination for each invocation. No transient destination is
+   retained across suspension. Machine and foreign ABI signatures retain their separately specified
+   contracts. This removes flat aggregate SSA return chains that made LLVM constant propagation
+   stall on the owned TLS connection matrix.
+
 ## Risks / Trade-offs
 
 - Changed nominal union size or padding can affect nested aggregates and suspension frames → derive

@@ -644,10 +644,15 @@ const runCancellationFinalizer = Effect.fnUntraced(function* (
   const callable = target.suspendable ? target.driver : target.handle
   if (callable === undefined)
     throw new RangeError('LLVM nonparking cancellation finalizer lost its machine driver')
+  const resultAddress = yield* NativeResult.allocate(body, target, `${tag}_result`)
   yield* FunctionBody.callDirect(
     body,
     callable,
-    yield* NativeCall.argumentsFor(context.call.synchronous, target, lowered),
+    NativeResult.argumentsFor(
+      target,
+      yield* NativeCall.argumentsFor(context.call.synchronous, target, lowered),
+      resultAddress,
+    ),
     `${tag}_run`,
   )
   return new Set([
@@ -2083,24 +2088,31 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
         if (executable.target.suspendable)
           throw new RangeError('LLVM direct execution selected a suspendable body')
+        const resultAddress = yield* NativeResult.allocate(
+          body,
+          executable.target,
+          `drive${operation.destination.ordinal}_direct_result`,
+        )
         const started = yield* FunctionBody.callDirect(
           body,
           executable.target.handle,
-          yield* NativeCall.lowerArguments(
-            context.call.synchronous,
+          NativeResult.argumentsFor(
             executable.target,
-            NativeArgument.fromValues(executable.values),
-            'Independent',
+            yield* NativeCall.lowerArguments(
+              context.call.synchronous,
+              executable.target,
+              NativeArgument.fromValues(executable.values),
+              'Independent',
+            ),
+            resultAddress,
           ),
           `drive${operation.destination.ordinal}_direct_started`,
         )
-        const completedResult = yield* NativeResult.unpack(
+        const completedResult = yield* NativeResult.read(
           body,
-          {
-            resultLaneCount: executable.target.resultLaneCount,
-            diagnosticResult: executable.target.diagnosticResult !== undefined,
-          },
+          executable.target,
           started,
+          resultAddress,
           `drive${operation.destination.ordinal}_direct_result`,
         )
         const outcome = yield* NativeDiagnosticOutcome.consume(
@@ -2389,42 +2401,40 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           base,
           `drive${operation.destination.ordinal}_body`,
         )
-        const started = executable.target.suspendable
-          ? yield* FunctionBody.callDirect(
-              body,
-              executable.target.handle,
-              [
-                ...(yield* NativeCall.lowerArguments(
-                  context.call.synchronous,
-                  executable.target,
-                  NativeArgument.fromValues(executable.values),
-                  'Independent',
-                )),
+        const resultAddress = yield* NativeResult.allocate(
+          body,
+          executable.target,
+          `drive${operation.destination.ordinal}_result`,
+        )
+        const callArguments = NativeResult.argumentsFor(
+          executable.target,
+          yield* NativeCall.lowerArguments(
+            context.call.synchronous,
+            executable.target,
+            NativeArgument.fromValues(executable.values),
+            'Independent',
+          ),
+          resultAddress,
+        )
+        const started = yield* FunctionBody.callDirect(
+          body,
+          executable.target.handle,
+          executable.target.suspendable
+            ? [
+                ...callArguments,
                 transfer,
                 nullPointer,
                 yield* Constant.integerUnsigned(builder, i32, 0n),
-              ],
-              `drive${operation.destination.ordinal}_started`,
-            )
-          : yield* FunctionBody.callDirect(
-              body,
-              executable.target.handle,
-              yield* NativeCall.lowerArguments(
-                context.call.synchronous,
-                executable.target,
-                NativeArgument.fromValues(executable.values),
-                'Independent',
-              ),
-              `drive${operation.destination.ordinal}_started`,
-            )
+              ]
+            : callArguments,
+          `drive${operation.destination.ordinal}_started`,
+        )
         const outcomeLanes = NativeType.lanesFor(context.types, executable.target.fn.result)
-        const initialResult = yield* NativeResult.unpack(
+        const initialResult = yield* NativeResult.read(
           body,
-          {
-            resultLaneCount: executable.target.resultLaneCount,
-            diagnosticResult: executable.target.diagnosticResult !== undefined,
-          },
+          executable.target,
           started,
+          resultAddress,
           `drive${operation.destination.ordinal}_initial_result`,
           executable.target.suspendable ? 'SuspensionStep' : 'Synchronous',
         )
@@ -2456,10 +2466,10 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         }
         const startedStatus =
           executable.target.suspendable && started !== undefined
-            ? yield* FunctionBody.extractValue(
+            ? yield* NativeResult.status(
                 body,
+                executable.target,
                 started,
-                [0],
                 `drive${operation.destination.ordinal}_initial_status`,
               )
             : yield* Constant.integerUnsigned(builder, i32, 0n)

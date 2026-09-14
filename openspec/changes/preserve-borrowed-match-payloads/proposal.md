@@ -30,3 +30,8 @@ Compiler layout, value storage, MIR match bindings, suspension storage, and LLVM
 Existing ownership restrictions and the source TLS API remain intact. Structural layout and MIR
 evidence cover the representation; the shared native corpus and owned TLS Wasm witness cover mutation
 and publication through real execution.
+
+Private native aggregate results also use caller-owned storage. The owned TLS integration exposed
+flat result structs with over a thousand fields, making LLVM interprocedural constant propagation
+exceed the native acceptance job's limit. The result transport follows typed-place classification
+and preserves suspension status, diagnostic ownership, and foreign ABI boundaries.

@@ -160,7 +160,10 @@ pub fn main() -> i32 { return run observing((), observer, Effect.catchAll(choose
         ?.at(1) ?? unreachable('expected the returned payload projection')
     assert.include(choose, `ptr ${projection}`)
     assert.match(choose, /phi i32[^\n]+\[ %place[^,]+, %completion_exit/)
-    assert.match(choose, /insertvalue [^\n]+%completion_lane/)
+    assert.match(choose, /^define hidden void /)
+    assert.match(choose, /store i32 %completion_lane0, ptr %completion_result_0_ptr/)
+    assert.match(choose, /getelementptr \{[^\n]+\}, ptr %[^,]+, i32 0, i32 0/)
+    assert.notMatch(choose, /insertvalue [^\n]+%completion_lane/)
   }),
 )
 

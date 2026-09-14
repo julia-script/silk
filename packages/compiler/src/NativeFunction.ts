@@ -736,6 +736,7 @@ export const emitBodies = Effect.fnUntraced(function* (context: EmissionContext)
           }
         }
         if (entry.diagnosticParameter !== undefined) physicalParameter += 2
+        if (entry.resultStorage !== undefined) physicalParameter += 1
         const transferPointer = entry.suspendable
           ? yield* Value.argument(body, physicalParameter)
           : undefined
