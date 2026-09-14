@@ -6,6 +6,7 @@ import * as NominalVariance from '../src/NominalVariance.js'
 import * as CallableContract from '../src/CallableContract.js'
 import * as Constraint from '../src/Constraint.js'
 import * as FiniteRow from '../src/FiniteRow.js'
+import * as EffectExecutionContract from '../src/internal/EffectExecutionContract.js'
 import * as TypeInference from '../src/internal/TypeInference.js'
 import * as Lifetime from '../src/Lifetime.js'
 import * as LifetimeFlow from '../src/LifetimeFlow.js'
@@ -22,6 +23,71 @@ const detached: Type.ExecutableLifetimes = Object.freeze({
   lifetimeBinders: [],
 })
 const staticText = Type.string(Lifetime.staticLifetime)
+
+it('keys Effect execution by exact channels while erasing only outer lifetime proofs', () => {
+  const owner = { module: 'effect-execution', name: 'runner' }
+  const source = Lifetime.bound(owner, 0, 'source')
+  const contextual = Lifetime.bound({ ...owner, name: 'caller' }, 0, 'contextual')
+  const failure = Type.nominal('effect-execution', 'Failure')
+  const otherFailure = Type.nominal('effect-execution', 'OtherFailure')
+  const capability = Type.nominal('effect-execution', 'Capability')
+  const otherCapability = Type.nominal('effect-execution', 'OtherCapability')
+  const requirement: Type.Requirement = Object.freeze({
+    capability,
+    role: 'DefaultRole',
+    access: 'Exclusive',
+  })
+  const physical = Type.effect(
+    'i32',
+    [failure],
+    { environment: source, lifetimeBinders: [source] },
+    'Take',
+    [requirement],
+  )
+  const proofVariant = Type.effect(
+    'i32',
+    [failure],
+    { environment: contextual, lifetimeBinders: [] },
+    'Exclusive',
+    [requirement],
+  )
+  const differentSuccess = Type.effect('u32', [failure], detached, 'Take', [requirement])
+  const differentFailure = Type.effect('i32', [otherFailure], detached, 'Take', [requirement])
+  const differentRequirement = Type.effect('i32', [failure], detached, 'Take', [
+    { ...requirement, capability: otherCapability },
+  ])
+  const provided = Type.effect('i32', [failure], detached, 'Take')
+
+  assert.strictEqual(
+    EffectExecutionContract.key(physical),
+    EffectExecutionContract.key(proofVariant),
+  )
+  assert.isTrue(EffectExecutionContract.equals(physical, proofVariant))
+  assert.isFalse(EffectExecutionContract.equals(physical, differentSuccess))
+  assert.isFalse(EffectExecutionContract.equals(physical, differentFailure))
+  assert.isFalse(EffectExecutionContract.equals(physical, differentRequirement))
+  assert.isTrue(
+    EffectExecutionContract.providerSubtractionMatches(physical, provided, [
+      { capability, role: 'DefaultRole', requirementAccess: 'Exclusive' },
+    ]),
+  )
+  assert.isFalse(
+    EffectExecutionContract.providerSubtractionMatches(physical, provided, [
+      { capability, role: 'DefaultRole', requirementAccess: 'Shared' },
+    ]),
+  )
+})
+
+it('keeps requirement rows out of stored generic lifetime obligations', () => {
+  const owner = { module: 'storage-parameters', name: 'Context' }
+  const value = Type.parameter(owner, 0, 'T')
+  const requirements = Type.parameter(owner, 1, 'R', 'RequirementRow')
+  const context = Type.nominal(owner.module, owner.name, [
+    value,
+    Type.requirementRowArgument([], [requirements]),
+  ])
+  assert.deepEqual(Type.storageParameters(context), [value])
+})
 
 it('reuses the runtime identity of an immutable type across nested layout queries', () => {
   let argumentReads = 0

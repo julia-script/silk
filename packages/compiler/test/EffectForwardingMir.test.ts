@@ -81,3 +81,62 @@ pub fn main() -> i32 {
     assert.deepEqual(MirVerification.verify(mir), [], MirEncoding.encode(mir))
   }),
 )
+
+it.effect('keeps provided recovery families and contextual constructor contracts exact', () =>
+  Effect.gen(function* () {
+    const self = yield* AnalysisFixture.retainingMain(
+      'effect-forwarding/execution-contract',
+      encoder.encode(`import silk.effect { Effect }
+import silk.allocator { Allocator, OutOfMemoryError }
+import silk.vector { Vector }
+service Input { effect fn count() -> i32 ? &mut Input }
+struct Provider {}
+effect fn count(self: &mut Provider) -> i32 { return 42 }
+impl Input for Provider { count: Provider.count }
+struct Payload { value: i32 }
+struct FirstFailure {}
+struct SecondFailure {}
+effect fn first() -> i32 ! FirstFailure ? &mut Input { return run Input.count() }
+effect fn second() -> Payload ! SecondFailure ? &mut Input {
+  let value = run Input.count()
+  return Payload { value: value }
+}
+effect fn append() -> () ! OutOfMemoryError ? &mut Allocator {
+  let mut values = Vector.make<i32>()
+  run Vector.append(&mut values, 42)
+  drop values
+  return ()
+}
+pub fn main() -> i32 {
+  let mut provider = Provider {}
+  let firstResult = run Effect.result(first()) |> Effect.provideMut<Input>(&mut provider)
+  let secondResult = run Effect.result(second()) |> Effect.provideMut<Input>(&mut provider)
+  let mut allocator = Allocator.systemAllocatorProvider()
+  let appended = run Effect.result(append()) |> Effect.provideMut<Allocator>(&mut allocator)
+  drop firstResult
+  drop secondResult
+  drop appended
+  return 0
+}`),
+    )
+    assert.deepEqual(Analysis.diagnostics(self), [])
+    const mir = Analysis.loweredMir(self)
+    assert.deepEqual(MirVerification.verify(mir), [])
+    const constructors = mir.functions.filter((fn) => fn.id.name === 'Vector.append')
+    assert.isNotEmpty(constructors)
+    const constructor = constructors.at(0)
+    assert.strictEqual(constructor?.result._tag, 'EffectValue')
+    if (constructor?.result._tag !== 'EffectValue') return
+    const wrongSite = {
+      ...constructor,
+      result: { ...constructor.result, site: { ...constructor.result.site, ordinal: 999 } },
+    }
+    const corrupted = {
+      ...mir,
+      functions: mir.functions.map((fn) => (fn === constructor ? wrongSite : fn)),
+    }
+    assert.isTrue(
+      MirVerification.verify(corrupted).some((violation) => violation.rule === 'InvalidCallShape'),
+    )
+  }),
+)

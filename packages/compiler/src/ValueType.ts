@@ -7,14 +7,21 @@ import type { FunctionLowering } from './FunctionLowering.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
 import type * as Intrinsic from './Intrinsic.js'
+import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
 import * as Layout from './Layout.js'
 import type { ProvidedRequirement } from './Lower.js'
 import type {} from './LowerExpression.js'
-import type * as Mir from './Mir.js'
+import * as Mir from './Mir.js'
 import * as OpaqueRealization from './OpaqueRealization.js'
 import * as Specialization from './Specialization.js'
 import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
+
+/** One concrete source witness selected before an enclosing Effect block becomes a runner. */
+export interface SpecializedWitnessEffectTarget {
+  readonly site: Hir.EffectSiteId
+  readonly target: ConformanceProof.InterfaceWitnessTarget
+}
 
 export interface GeneratedBlockEffectRunner {
   readonly _tag: 'BlockEffectRunner'
@@ -24,6 +31,7 @@ export interface GeneratedBlockEffectRunner {
   readonly type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>
   readonly specializationKey: string
   readonly providedRequirements: ReadonlyArray<Omit<ProvidedRequirement, 'local'>>
+  readonly witnessTargets: ReadonlyArray<SpecializedWitnessEffectTarget>
 }
 
 export interface GeneratedWitnessEffectRunner {
@@ -75,8 +83,15 @@ export const instanceText = (
   staticArguments: ReadonlyArray<StaticValue.Value> = Object.freeze([]),
 ): string => Specialization.runtimeKey({ declaration, typeArguments, staticArguments })
 
-export const baseRunnerKey = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): string =>
+const runnerSiteKey = (owner: Instances.InstanceKey, site: Hir.EffectSiteId): string =>
   `${instanceText(owner.declaration, owner.typeArguments, owner.staticArguments)}\u0000${Hir.executableSiteKey(site)}`
+
+/** Exact semantic specialization of one generated Effect runner at a physical source site. */
+export const baseRunnerKey = (
+  owner: Instances.InstanceKey,
+  site: Hir.EffectSiteId,
+  effect: Type.Effect,
+): string => `${runnerSiteKey(owner, site)}\u0000effect:${EffectExecutionContract.key(effect)}`
 
 export const witnessKey = (witness: DeclarationFacts.ConformanceWitness): string =>
   witness._tag === 'SourceConformanceWitness'
@@ -91,10 +106,17 @@ export const witnessKey = (witness: DeclarationFacts.ConformanceWitness): string
 export const providedContractEntry = (requirement: Omit<ProvidedRequirement, 'local'>): string =>
   `provided:${Type.key(requirement.capability)}@${requirement.role}:${requirement.requirementAccess}:${requirement.access}:${Type.key(requirement.providerType)}:${requirement.witness._tag}`
 
+const effectRunnerSiteKey = (type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>): string =>
+  runnerSiteKey(
+    type.storage?.realization.runnerInstance ?? type.environment.instance,
+    type.storage?.realization.site ?? type.site,
+  )
+
 const effectRunnerKey = (type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>): string =>
   baseRunnerKey(
     type.storage?.realization.runnerInstance ?? type.environment.instance,
     type.storage?.realization.site ?? type.site,
+    type.type,
   )
 
 export const providedRunnerKey = (
@@ -104,20 +126,41 @@ export const providedRunnerKey = (
   `${effectRunnerKey(type)}\u0000${requirements
     .map(
       (requirement) =>
-        `${Type.key(requirement.capability)}@${requirement.role}:${requirement.access}:${Type.key(requirement.providerType)}:${witnessKey(requirement.witness)}`,
+        `${Type.key(requirement.capability)}@${requirement.role}:${requirement.requirementAccess}:${requirement.access}:${Type.key(requirement.providerType)}:${witnessKey(requirement.witness)}`,
     )
     .join('\u0000')}`
+
+const providerRequirementSubtractionMatches = (
+  candidate: Type.Effect,
+  requested: Type.Effect,
+  call: Instances.CallInstance,
+  provided: ReadonlyArray<ProvidedRequirement>,
+): boolean =>
+  EffectExecutionContract.providerSubtractionMatches(
+    candidate,
+    requested,
+    provided.filter((selection) =>
+      (call.providers ?? []).some(
+        (provider) =>
+          provider.role === selection.role &&
+          Type.equals(provider.capability, selection.capability) &&
+          Type.equals(provider.providerType, selection.providerType),
+      ),
+    ),
+  )
 
 export const effectValueType = (
   layout: Layout.Plan,
   instance: Instances.InstanceKey,
   block: Extract<Hir.Expression, { readonly _tag: 'EffectBlock' }>,
+  requested: Type.Effect,
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
   const environment = layout.effectEnvironments.find(
     (candidate) =>
       candidate._tag === 'EffectEnvironment' &&
       Instances.keyText(candidate.instance) === Instances.keyText(instance) &&
-      Hir.sameExecutableSite(candidate.site, block.site),
+      Hir.sameExecutableSite(candidate.site, block.site) &&
+      EffectExecutionContract.equals(candidate.effect, requested),
   )
   if (environment?._tag !== 'EffectEnvironment') return undefined
   return Object.freeze({
@@ -132,51 +175,95 @@ export const effectValueAtSite = (
   layout: Layout.Plan,
   instance: Instances.InstanceKey,
   site: Hir.EffectSiteId,
+  requested: Type.Effect,
 ): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
   const environment = layout.effectEnvironments.find(
     (candidate) =>
       candidate._tag === 'EffectEnvironment' &&
       Instances.keyText(candidate.instance) === Instances.keyText(instance) &&
-      Hir.sameExecutableSite(candidate.site, site),
+      Hir.sameExecutableSite(candidate.site, site) &&
+      EffectExecutionContract.equals(candidate.effect, requested),
   )
   return environment?._tag !== 'EffectEnvironment'
     ? undefined
     : Object.freeze({ _tag: 'EffectValue', type: environment.effect, site, environment })
 }
 
-export const effectValueByIdentity = (
+const effectEnvironmentsByIdentity = (
   layout: Layout.Plan,
   identity: string,
   owner?: Type.ExecutableSpecializationOwner,
-): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
+): ReadonlyArray<Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }>> => {
   const available = layout.effectEnvironments.filter(
     (
       candidate,
     ): candidate is Extract<Layout.EffectEnvironment, { readonly _tag: 'EffectEnvironment' }> =>
       candidate._tag === 'EffectEnvironment',
   )
-  const environment =
-    available.find(
-      (candidate) => Instances.effectIdentity(candidate.instance, candidate.site) === identity,
-    ) ??
-    available.find((candidate) => candidate.successEffectIdentity === identity) ??
-    available.find(
-      (candidate) =>
-        Hir.effectRepresentationIdentity(candidate.site) === identity &&
-        owner !== undefined &&
-        candidate.instance.declaration.module === owner.declaration.module &&
-        candidate.instance.declaration.name === owner.declaration.name &&
-        sameArguments(candidate.instance.typeArguments, owner.typeArguments) &&
-        candidate.instance.staticArguments.length === owner.staticArgumentKeys.length &&
-        candidate.instance.staticArguments.every(
-          (argument, ordinal) => StaticValue.key(argument) === owner.staticArgumentKeys.at(ordinal),
-        ),
-    )
+  const direct = available.filter(
+    (candidate) => Instances.effectIdentity(candidate.instance, candidate.site) === identity,
+  )
+  const success = available.filter((candidate) => candidate.successEffectIdentity === identity)
+  const recovered = available.filter(
+    (candidate) =>
+      Hir.effectRepresentationIdentity(candidate.site) === identity &&
+      owner !== undefined &&
+      candidate.instance.declaration.module === owner.declaration.module &&
+      candidate.instance.declaration.name === owner.declaration.name &&
+      sameArguments(candidate.instance.typeArguments, owner.typeArguments) &&
+      candidate.instance.staticArguments.length === owner.staticArgumentKeys.length &&
+      candidate.instance.staticArguments.every(
+        (argument, ordinal) => StaticValue.key(argument) === owner.staticArgumentKeys.at(ordinal),
+      ),
+  )
+  if (direct.length > 0) return direct
+  return success.length > 0 ? success : recovered
+}
+
+export const effectValueByIdentity = (
+  layout: Layout.Plan,
+  identity: string,
+  requested: Type.Effect | undefined,
+  owner?: Type.ExecutableSpecializationOwner,
+): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
+  const candidates = effectEnvironmentsByIdentity(layout, identity, owner)
+  if (requested === undefined && candidates.length !== 1) return undefined
+  const exact =
+    requested === undefined
+      ? candidates.at(0)
+      : candidates.find((candidate) => Type.equals(candidate.effect, requested))
+  return exact === undefined
+    ? undefined
+    : Object.freeze({
+        _tag: 'EffectValue',
+        type: requested ?? exact.effect,
+        site: exact.site,
+        environment: exact,
+      })
+}
+
+/** Resolves a contextual Effect result only through its already-selected concrete call edge. */
+export const effectValueForCall = (
+  layout: Layout.Plan,
+  call: Instances.CallInstance,
+  requested: Type.Effect,
+  provided: ReadonlyArray<ProvidedRequirement> = Object.freeze([]),
+): Extract<Mir.Type, { readonly _tag: 'EffectValue' }> | undefined => {
+  if (call.resultEffect === undefined) return undefined
+  const candidates = effectEnvironmentsByIdentity(layout, call.resultEffect)
+  const exact = candidates.filter((candidate) => Type.equals(candidate.effect, requested))
+  const contextual = candidates.filter(
+    (candidate) =>
+      EffectExecutionContract.equals(candidate.effect, requested) ||
+      providerRequirementSubtractionMatches(candidate.effect, requested, call, provided),
+  )
+  const selected = exact.length === 1 ? exact : contextual
+  const environment = selected.length === 1 ? selected.at(0) : undefined
   return environment === undefined
     ? undefined
     : Object.freeze({
         _tag: 'EffectValue',
-        type: environment.effect,
+        type: requested,
         site: environment.site,
         environment,
       })
@@ -279,11 +366,13 @@ export const representedValueType = (
     Type.isCompositeEffectRepresentationArgument(representation) &&
     Type.isEffect(specialized.contract)
   ) {
+    const contract = specialized.contract
     const alternatives = representation.alternatives.flatMap((alternative) =>
       Type.isEffectIdentityArgument(alternative.identity)
         ? (effectValueByIdentity(
             layout,
             alternative.identity.identity,
+            contract,
             alternative.identity.owner,
           ) ?? [])
         : [],
@@ -310,6 +399,7 @@ export const representedValueType = (
       return effectValueByIdentity(
         layout,
         representation.identity.identity,
+        specialized.contract,
         representation.identity.owner,
       )
     return undefined
@@ -373,13 +463,14 @@ export const representedValueType = (
           ),
           definition.construction.arguments,
         ) &&
-        definition.construction.site === Hir.effectRepresentationIdentity(candidate.site),
+        definition.construction.site === Hir.effectRepresentationIdentity(candidate.site) &&
+        Type.equals(candidate.effect, specialized.contract),
     )
     return environment === undefined
       ? undefined
       : Object.freeze({
           _tag: 'EffectValue',
-          type: environment.effect,
+          type: specialized.contract,
           site: environment.site,
           environment,
         })
@@ -483,17 +574,25 @@ export const requirementsFor = (
     : undefined
 }
 
-export const ensureProvidedRunner = (
+export const ensureEffectRunner = (
   fn: FunctionLowering,
   type: Extract<Mir.Type, { readonly _tag: 'EffectValue' }>,
   requirements: ReadonlyArray<ProvidedRequirement>,
 ): DeclarationFacts.CanonicalId | undefined => {
-  const key = providedRunnerKey(type, requirements)
+  const key =
+    requirements.length === 0 ? effectRunnerKey(type) : providedRunnerKey(type, requirements)
   const existing = fn.generatedRunners.find((candidate) => candidate.specializationKey === key)
   if (existing !== undefined) return existing.id
-  const baseKey = effectRunnerKey(type)
-  const base = fn.generatedRunners.find((candidate) => candidate.specializationKey === baseKey)
+  const physical = fn.generatedRunners.filter(
+    (candidate) =>
+      candidate.providedRequirements.length === 0 &&
+      effectRunnerSiteKey(candidate.type) === effectRunnerSiteKey(type) &&
+      candidate.type.environment === type.environment &&
+      EffectExecutionContract.matches(candidate.type.type, type.type, requirements),
+  )
+  const base = physical.length === 1 ? physical.at(0) : undefined
   if (base === undefined) return undefined
+  if (requirements.length === 0) return base.id
   const id: DeclarationFacts.CanonicalId = Object.freeze({
     _tag: 'CanonicalDeclarationId',
     module: base.id.module,
@@ -503,6 +602,7 @@ export const ensureProvidedRunner = (
     Object.freeze({
       ...base,
       id,
+      type: base.type,
       specializationKey: key,
       providedRequirements: Object.freeze(
         requirements.map(({ local: _local, ...requirement }) => Object.freeze(requirement)),

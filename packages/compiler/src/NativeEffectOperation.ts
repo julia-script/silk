@@ -7,6 +7,7 @@ import * as FunctionBody from '@silklang/llvm/FunctionBody'
 import type * as Value from '@silklang/llvm/Value'
 import * as Effect from 'effect/Effect'
 import * as CleanupPlan from './CleanupPlan.js'
+import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
 import type * as Layout from './Layout.js'
 import * as Mir from './Mir.js'
 import type { LinearOperation } from './MirLinearization.js'
@@ -452,11 +453,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     }
     case 'RunEffect': {
       const target = declared.find((candidate) =>
-        Mir.matchesInstance(
+        Mir.matchesEffectInstance(
           candidate.fn,
           operation.target,
           operation.typeArguments,
           operation.staticArguments,
+          operation.outcomeType.type,
         ),
       )
       if (target === undefined)
@@ -625,11 +627,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
         )
         yield* LlvmBlock.setInsertionPoint(body, selected)
         const target = declared.find((candidate) =>
-          Mir.matchesInstance(
+          Mir.matchesEffectInstance(
             candidate.fn,
             alternative.runner,
             alternative.runnerTypeArguments,
             alternative.runnerStaticArguments,
+            alternative.type.type,
           ),
         )
         if (target === undefined)
@@ -843,16 +846,22 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
           : undefined
       const target = declared.find(
         (candidate) =>
-          Mir.matchesInstance(
+          Mir.matchesEffectInstance(
             candidate.fn,
             operation.runner,
             operation.runnerTypeArguments,
             operation.runnerStaticArguments,
+            operation.outcomeType.type,
+            operation._tag === 'RunEffectValue' ? operation.providers : undefined,
           ) &&
           (operation._tag !== 'RunStaticEffect' ||
             (logicalInputs !== undefined &&
               candidate.fn.result._tag === 'EffectOutcome' &&
-              SilkType.equals(candidate.fn.result.type, operation.outcomeType.type) &&
+              EffectExecutionContract.matches(
+                candidate.fn.result.type,
+                operation.outcomeType.type,
+                candidate.fn.effectRunner?.providers ?? Object.freeze([]),
+              ) &&
               candidate.fn.parameterCount === logicalInputs.length &&
               logicalInputs.every((input, ordinal) => {
                 const actual = entry.fn.localTypes.at(input.ordinal)
@@ -1036,11 +1045,12 @@ export const emit = Effect.fnUntraced(function* (context: Context, operation: Op
     }
     case 'CatchEffect': {
       const target = declared.find((candidate) =>
-        Mir.matchesInstance(
+        Mir.matchesEffectInstance(
           candidate.fn,
           operation.runner,
           operation.runnerTypeArguments,
           operation.runnerStaticArguments,
+          operation.outcomeType.type,
         ),
       )
       if (target === undefined) throw new RangeError('Backend cannot resolve Effect result runner')

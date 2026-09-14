@@ -15,7 +15,7 @@ import type * as Ownership from './Ownership.js'
 import type * as SourceSpan from './SourceSpan.js'
 import * as StaticValue from './StaticValue.js'
 import * as Type from './Type.js'
-import type { GeneratedEffectRunner } from './ValueType.js'
+import type { GeneratedEffectRunner, SpecializedWitnessEffectTarget } from './ValueType.js'
 import {
   representedValueType,
   storedCallableValueType,
@@ -26,6 +26,35 @@ export interface LoweringFailure {
   readonly boundary: 'Expression' | 'Statement'
   readonly construct: Hir.Expression['_tag'] | Hir.Statement['_tag']
   readonly provenance: Mir.Provenance
+  readonly reason?:
+    | {
+        readonly _tag: 'WitnessEffectMissingSite'
+      }
+    | {
+        readonly _tag: 'WitnessEffectMissingContract'
+      }
+    | {
+        readonly _tag: 'WitnessEffectMissingTarget'
+        readonly site: string
+        readonly publishedSites: ReadonlyArray<string>
+      }
+    | {
+        readonly _tag: 'WitnessEffectMissingLayout'
+        readonly site: string
+        readonly availableSites: ReadonlyArray<string>
+      }
+    | {
+        readonly _tag: 'WitnessEffectOperandLowering'
+        readonly site: string
+        readonly failure:
+          | 'Arity'
+          | 'Argument'
+          | 'Contract'
+          | 'ExpectedType'
+          | 'ActualType'
+          | 'Incompatible'
+        readonly ordinal?: number
+      }
 }
 
 export class FunctionLowering {
@@ -91,6 +120,7 @@ export class FunctionLowering {
     readonly generatedRunners: Array<GeneratedEffectRunner>,
     readonly opaqueRealizations: OpaqueRealization.Catalog,
     readonly providedRequirements: ReadonlyArray<ProvidedRequirement> = Object.freeze([]),
+    readonly witnessTargets?: ReadonlyArray<SpecializedWitnessEffectTarget>,
   ) {
     this.exits = indexExits(ownership)
     this.issuedBorrowKeys = new Set((ownership?.loans ?? []).map((loan) => borrowKey(loan.id)))
@@ -169,11 +199,13 @@ export class FunctionLowering {
     boundary: LoweringFailure['boundary'],
     construct: LoweringFailure['construct'],
     span: SourceSpan.SourceSpan,
+    reason?: LoweringFailure['reason'],
   ): void {
     this.loweringFailure ??= Object.freeze({
       boundary,
       construct,
       provenance: Object.freeze({ span, generated: false }),
+      ...(reason === undefined ? {} : { reason }),
     })
   }
 

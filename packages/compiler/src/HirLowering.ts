@@ -1717,6 +1717,7 @@ export const hirExpression = (
       target: fact.reference.declaration.canonical.id,
       typeArguments: fact.contract.typeArguments,
       evidence: fact.contract.evidence,
+      symbolicConformances: fact.contract.symbolicConformances ?? Object.freeze([]),
       staticArguments: Object.freeze(
         (fact._tag === 'Call' ? (fact.staticArguments ?? []) : []).map(
           (argument) => argument.value,

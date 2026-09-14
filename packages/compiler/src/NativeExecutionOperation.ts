@@ -172,6 +172,7 @@ const packagePayload = Effect.fnUntraced(function* (
 
 const exactEffect = (context: Context, package_: ExecutionPackage.Plan) => {
   const represented = package_.specialization.body
+  const contract = SilkType.isRepresented(represented) ? represented.contract : represented
   const representation = SilkType.isRepresented(represented)
     ? represented.representation.argument
     : undefined
@@ -181,20 +182,25 @@ const exactEffect = (context: Context, package_: ExecutionPackage.Plan) => {
       : undefined
   const environment =
     identity !== undefined && SilkType.isEffectIdentityArgument(identity)
-      ? Layout.effectEnvironmentByIdentity(context.program.layout.effectEnvironments, identity)
+      ? Layout.effectEnvironmentByIdentity(
+          context.program.layout.effectEnvironments,
+          identity,
+          SilkType.isRepresented(represented) && SilkType.isEffect(represented.contract)
+            ? represented.contract
+            : undefined,
+        )
       : undefined
   const target =
     environment === undefined
       ? undefined
-      : context.declared.find(
-          (candidate) =>
-            candidate.fn.id.module === environment.instance.declaration.module &&
-            candidate.fn.id.name ===
-              Hir.effectRunnerId(environment.instance.declaration, environment.site).name &&
-            Mir.runtimeArgumentsEqual(
-              candidate.fn.instance.typeArguments,
-              environment.instance.typeArguments,
-            ),
+      : context.declared.find((candidate) =>
+          Mir.matchesEffectInstance(
+            candidate.fn,
+            Hir.effectRunnerId(environment.instance.declaration, environment.site),
+            environment.instance.typeArguments,
+            environment.instance.staticArguments,
+            SilkType.isEffect(contract) ? contract : environment.effect,
+          ),
         )
   if (environment === undefined || target === undefined)
     throw new RangeError('LLVM execution drive lost its exact body runner')
@@ -558,11 +564,12 @@ const runCancellationFinalizer = Effect.fnUntraced(function* (
   if (finalizer === undefined) return new Set<number>()
   const { body, declared } = context
   const target = declared.find((candidate) =>
-    Mir.matchesInstance(
+    Mir.matchesEffectInstance(
       candidate.fn,
       finalizer.runner,
       finalizer.runnerTypeArguments,
       finalizer.runnerStaticArguments,
+      finalizer.outcomeType.type,
     ),
   )
   if (target === undefined)

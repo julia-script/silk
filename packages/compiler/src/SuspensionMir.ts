@@ -127,10 +127,19 @@ const runnerOf = (
   else if (operation._tag === 'RunEffectValue' || operation._tag === 'CatchEffect')
     staticArguments = operation.runnerStaticArguments ?? Object.freeze([])
   else staticArguments = Object.freeze([])
-  const exact =
-    declaration === undefined
-      ? undefined
-      : functions.find((fn) => Mir.matchesInstance(fn, declaration, typeArguments, staticArguments))
+  const exact = functions.find((fn) => {
+    if (declaration === undefined) return false
+    if (operation === undefined || operation._tag === 'ExecutionPark')
+      return Mir.matchesInstance(fn, declaration, typeArguments, staticArguments)
+    return Mir.matchesEffectInstance(
+      fn,
+      declaration,
+      typeArguments,
+      staticArguments,
+      operation.outcomeType.type,
+      operation._tag === 'RunEffectValue' ? operation.providers : undefined,
+    )
+  })
   let instance = exact?.instance
   if (
     instance === undefined &&

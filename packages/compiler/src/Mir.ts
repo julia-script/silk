@@ -8,6 +8,7 @@ import type * as ExecutionPackage from './ExecutionPackage.js'
 import type * as ExecutionTransition from './ExecutionTransition.js'
 import type * as Hir from './Hir.js'
 import type * as Instances from './Instances.js'
+import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
 import * as Layout from './Layout.js'
 import * as LayoutVerify from './LayoutVerify.js'
 import type * as LocalSharedControlBlock from './LocalSharedControlBlock.js'
@@ -1785,6 +1786,23 @@ export const matchesInstance = (
     const expected = staticArguments.at(index)
     return expected !== undefined && StaticValue.key(argument) === StaticValue.key(expected)
   })
+
+/** Selects the exact semantic Effect runner before runtime-equivalent instance matching. */
+export const matchesEffectInstance = (
+  fn: MirFunction,
+  declaration: DeclarationFacts.CanonicalId,
+  typeArguments: ReadonlyArray<SilkType.GenericArgument>,
+  staticArguments: ReadonlyArray<StaticValue.Value> | undefined,
+  effect: SilkType.Effect,
+  providers?: ReadonlyArray<EffectExecutionContract.RequirementAuthorization>,
+): boolean =>
+  fn.result._tag === 'EffectOutcome' &&
+  EffectExecutionContract.matches(
+    fn.result.type,
+    effect,
+    providers ?? fn.effectRunner?.providers ?? Object.freeze([]),
+  ) &&
+  matchesInstance(fn, declaration, typeArguments, staticArguments)
 
 /** Tests exact concrete instance identity, including the resolved contract row. */
 export const matchesInstanceKey = (fn: MirFunction, key: Instances.InstanceKey): boolean =>

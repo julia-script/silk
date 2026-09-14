@@ -608,7 +608,7 @@ const inferEnvironment = (
 }
 
 /** Includes hidden representation identities when checking whether a rigid region escaped. */
-const argumentLifetimes = (argument: GenericArgument): ReadonlyArray<Lifetime.Lifetime> => {
+export const argumentLifetimes = (argument: GenericArgument): ReadonlyArray<Lifetime.Lifetime> => {
   if (Lifetime.isLifetime(argument)) return Lifetime.atoms(argument)
   if (
     (typeof argument !== 'string' && argument._tag === 'TypeParameter') ||

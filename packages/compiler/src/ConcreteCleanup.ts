@@ -1,3 +1,4 @@
+import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
 import * as CleanupPlan from './CleanupPlan.js'
 import type * as DeclarationIndex from './DeclarationIndex.js'
 import * as Instances from './Instances.js'
@@ -79,7 +80,11 @@ export function forEffect(
     const nested =
       field.effectIdentity === undefined
         ? undefined
-        : effectValueByIdentity(fn.layout, field.effectIdentity)
+        : effectValueByIdentity(
+            fn.layout,
+            field.effectIdentity,
+            EffectExecutionContract.fromType(field.type),
+          )
     const callable =
       field.callableIdentity === undefined || !Type.isCallable(field.type)
         ? undefined

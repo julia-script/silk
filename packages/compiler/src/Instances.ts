@@ -566,6 +566,20 @@ const hirEvidence = (
       }),
   )
 
+const hirSymbolicConformances = (
+  fn: Hir.HirFunction,
+): ReadonlyArray<ConformanceProof.SymbolicConformanceSelection> =>
+  Object.freeze(
+    fn.statements
+      .flatMap(Hir.statementExpressions)
+      .flatMap(Hir.expressionTree)
+      .flatMap((expression) =>
+        expression._tag === 'Call' || expression._tag === 'EffectConstruct'
+          ? expression.symbolicConformances
+          : [],
+      ),
+  )
+
 export const specialize = (
   fn: Hir.HirFunction,
   substitution: Type.Substitution,
@@ -619,6 +633,19 @@ export const specialize = (
     const solved = specializeEvidence(occurrence.evidence, substitution, occurrence.origin, index)
     if (solved === undefined) return undefined
     concreteEvidence.push(...solved)
+  }
+  for (const symbolic of hirSymbolicConformances(fn)) {
+    const provider = Type.substitute(symbolic.provider, substitution, compatibility)
+    const capability = Type.substitute(symbolic.capability, substitution, compatibility)
+    if (!Type.isRuntimeConcrete(provider) || !Type.isNominal(capability)) return undefined
+    const proof = ConformanceProof.prove(index, provider, capability)
+    if (
+      proof._tag !== 'Proved' ||
+      proof.selection._tag !== 'SourceSelection' ||
+      proof.selection.module !== symbolic.selection.module ||
+      proof.selection.ordinal !== symbolic.selection.ordinal
+    )
+      return undefined
   }
   const evidence = Object.freeze(
     [

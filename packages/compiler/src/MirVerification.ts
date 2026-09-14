@@ -8,6 +8,7 @@ import type * as CleanupPlan from './CleanupPlan.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
 import * as ExecutionPackage from './ExecutionPackage.js'
 import * as ExecutionTransition from './ExecutionTransition.js'
+import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
 import * as FieldRealization from './FieldRealization.js'
 import * as Hir from './Hir.js'
 import * as Instances from './Instances.js'
@@ -51,6 +52,7 @@ import {
   regionsTree,
   conformanceWitnessMatches,
   isCopy,
+  matchesEffectInstance,
   matchesInstance,
   matchesInstanceKey,
   runtimeArgumentsEqual,
@@ -666,6 +668,14 @@ const runnerText = (runner: SuspensionRunner): string =>
       .join(','),
     runner.providers.map(providerText).join(','),
   ].join('|')
+
+const runnerOutcomeMatches = (fn: MirFunction, effect: SilkType.Effect): boolean =>
+  fn.result._tag === 'EffectOutcome' &&
+  EffectExecutionContract.matches(
+    fn.result.type,
+    effect,
+    fn.effectRunner?.providers ?? Object.freeze([]),
+  )
 
 const suspensionViolations = (fn: MirFunction, layout: Layout.Plan): ReadonlyArray<Violation> => {
   const violations: Array<Violation> = []
@@ -1582,6 +1592,39 @@ const callArgumentCompatible = (actual: Type, expected: Type): boolean => {
     Hir.sameExecutableSite(actual.site, realization.site) &&
     instanceText(actual.environment.instance) === instanceText(realization.runnerInstance)
   )
+}
+
+// Executable captures carry a semantic view of an already selected physical closure. Running
+// that closure consumes the capture; outer access and invocation lifetime proofs do not select
+// another machine. Keep the source identity and all execution channels exact.
+const executionArgumentCompatible = (actual: Type, expected: Type): boolean => {
+  if (actual._tag === 'EffectValue' && expected._tag === 'EffectValue')
+    return (
+      EffectExecutionContract.equals(actual.type, expected.type) &&
+      Hir.sameExecutableSite(actual.site, expected.site) &&
+      instanceText(actual.environment.instance) === instanceText(expected.environment.instance) &&
+      actual.storage === expected.storage
+    )
+  if (
+    actual._tag === 'CallableValue' &&
+    expected._tag === 'CallableValue' &&
+    SilkType.isEffect(actual.type.result) &&
+    SilkType.isEffect(expected.type.result)
+  )
+    return (
+      callableTargetText(actual.target) === callableTargetText(expected.target) &&
+      runtimeArgumentsEqual(actual.typeArguments ?? [], expected.typeArguments ?? []) &&
+      actual.environment === expected.environment &&
+      actual.type.unsafe === expected.type.unsafe &&
+      SilkType.compareAccess(expected.type.mode, actual.type.mode) &&
+      actual.type.parameters.length === expected.type.parameters.length &&
+      actual.type.parameters.every((parameter, ordinal) => {
+        const compared = expected.type.parameters.at(ordinal)
+        return compared !== undefined && SilkType.equals(parameter, compared)
+      }) &&
+      EffectExecutionContract.equals(actual.type.result, expected.type.result)
+    )
+  return callArgumentCompatible(actual, expected)
 }
 
 const cleanupTypes = (cleanup: CleanupPlan.CleanupPlan): ReadonlyArray<SilkType.Type> => {
@@ -3005,11 +3048,12 @@ const coroutineFrameLayoutViolations = (self: Module): ReadonlyArray<Violation> 
         finalizer === undefined
           ? undefined
           : self.functions.find((candidate) =>
-              matchesInstance(
+              matchesEffectInstance(
                 candidate,
                 finalizer.runner,
                 finalizer.runnerTypeArguments,
                 finalizer.runnerStaticArguments,
+                finalizer.outcomeType.type,
               ),
             )
       const retainedOrZeroLane = (local: LocalId): boolean => {
@@ -6633,7 +6677,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 callArgumentCompatible(actual, expected)
               )
             }) &&
-            sameRuntimeType(semanticType(operation.type), semanticType(target.result))
+            (operation.type._tag === 'EffectValue' && target.result._tag === 'EffectValue'
+              ? EffectExecutionContract.equals(operation.type.type, target.result.type) &&
+                Hir.sameExecutableSite(operation.type.site, target.result.site) &&
+                instanceText(operation.type.environment.instance) ===
+                  instanceText(target.result.environment.instance)
+              : sameRuntimeType(semanticType(operation.type), semanticType(target.result)))
           if (!valid) {
             const argumentsDetail = operation.arguments
               .map((argument, ordinal) => {
@@ -6987,18 +7036,17 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         }
         if (operation._tag === 'RunEffect') {
           const target = self.functions.find((candidate) =>
-            matchesInstance(
+            matchesEffectInstance(
               candidate,
               operation.target,
               operation.typeArguments,
               operation.staticArguments,
+              operation.outcomeType.type,
             ),
           )
           let detail: string | undefined
           if (target === undefined) detail = 'run target specialization is missing'
-          else if (target.result._tag !== 'EffectOutcome')
-            detail = 'run target does not return an Effect outcome'
-          else if (!SilkType.equals(target.result.type, operation.outcomeType.type))
+          else if (!runnerOutcomeMatches(target, operation.outcomeType.type))
             detail = 'run target outcome disagrees with the operation outcome'
           else if (!runPropagationValid(self.layout, fn, operation))
             detail = 'run propagation does not preserve canonical outcome contracts'
@@ -7018,11 +7066,13 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           const outcome = fn.localTypes.at(operation.outcome.ordinal)
           const destination = fn.localTypes.at(operation.destination.ordinal)
           const runner = self.functions.find((candidate) =>
-            matchesInstance(
+            matchesEffectInstance(
               candidate,
               operation.runner,
               operation.runnerTypeArguments,
               operation.runnerStaticArguments,
+              operation.outcomeType.type,
+              operation.providers,
             ),
           )
           const suspensionRegion = fn.suspension?.regions.find(
@@ -7182,9 +7232,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.equals(effectValue.type, operation.outcomeType.type) &&
             SilkType.equals(outcome.type, operation.outcomeType.type) &&
             SilkType.equals(semanticType(destination), semanticType(operation.type)) &&
-            ((runner?.result._tag === 'EffectOutcome' &&
-              SilkType.representationAdmissibility(runner.result.type, operation.outcomeType.type)
-                ._tag === 'Admitted') ||
+            ((runner !== undefined && runnerOutcomeMatches(runner, operation.outcomeType.type)) ||
               (suspensionRunner !== undefined &&
                 SilkType.equals(suspensionRunner.outcome, operation.outcomeType.type))) &&
             storedContractValid &&
@@ -7211,11 +7259,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             operation.alternatives.every((alternative, ordinal) => {
               const expected = effect.alternatives.at(ordinal)
               const runner = self.functions.find((candidate) =>
-                matchesInstance(
+                matchesEffectInstance(
                   candidate,
                   alternative.runner,
                   alternative.runnerTypeArguments,
                   alternative.runnerStaticArguments,
+                  alternative.type.type,
                 ),
               )
               const sourceFailures = SilkType.failureMembers(alternative.type.type)
@@ -7267,8 +7316,8 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
                 expected !== undefined &&
                 SilkType.equals(expected.type, alternative.type.type) &&
                 Hir.sameExecutableSite(expected.site, alternative.type.site) &&
-                runner?.result._tag === 'EffectOutcome' &&
-                SilkType.equals(runner.result.type, alternative.type.type) &&
+                runner !== undefined &&
+                runnerOutcomeMatches(runner, alternative.type.type) &&
                 parametersValid &&
                 mappingsValid
               )
@@ -7303,14 +7352,13 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
           ]
           const runner = self.functions.find(
             (candidate) =>
-              matchesInstance(
+              matchesEffectInstance(
                 candidate,
                 operation.runner,
                 operation.runnerTypeArguments,
                 operation.runnerStaticArguments,
-              ) &&
-              candidate.result._tag === 'EffectOutcome' &&
-              SilkType.equals(candidate.result.type, operation.outcomeType.type),
+                operation.outcomeType.type,
+              ) && runnerOutcomeMatches(candidate, operation.outcomeType.type),
           )
           const parametersValid =
             runner !== undefined &&
@@ -7321,13 +7369,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
               return (
                 actual !== undefined &&
                 expected !== undefined &&
-                acceptsRuntimeOperand(semanticType(actual), semanticType(expected))
+                executionArgumentCompatible(actual, expected)
               )
             })
           const propagationValid = runPropagationValid(self.layout, fn, operation)
           const runnerResultValid =
-            runner?.result._tag === 'EffectOutcome' &&
-            SilkType.equals(runner.result.type, operation.outcomeType.type)
+            runner !== undefined && runnerOutcomeMatches(runner, operation.outcomeType.type)
           const outcomeValid =
             outcome?._tag === 'EffectOutcome' &&
             SilkType.equals(outcome.type, operation.outcomeType.type)
@@ -7369,11 +7416,12 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
         }
         if (operation._tag === 'CatchEffect') {
           const runner = self.functions.find((candidate) =>
-            matchesInstance(
+            matchesEffectInstance(
               candidate,
               operation.runner,
               operation.runnerTypeArguments,
               operation.runnerStaticArguments,
+              operation.outcomeType.type,
             ),
           )
           const destination = fn.localTypes.at(operation.destination.ordinal)
@@ -7385,8 +7433,7 @@ const computeVerify = (self: Module): ReadonlyArray<Violation> => {
             SilkType.failureMembers(operation.outcomeType.type),
           )
           const disagreements = [
-            runner?.result._tag === 'EffectOutcome' &&
-            SilkType.equals(runner.result.type, operation.outcomeType.type)
+            runner !== undefined && runnerOutcomeMatches(runner, operation.outcomeType.type)
               ? undefined
               : `runner(${runner?.result._tag === 'EffectOutcome' ? SilkType.encode(runner.result.type) : (runner?.result._tag ?? 'missing')} != ${SilkType.encode(operation.outcomeType.type)})`,
             effect?._tag === 'EffectValue' &&

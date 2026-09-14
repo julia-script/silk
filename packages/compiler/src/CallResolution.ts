@@ -329,7 +329,7 @@ export const appliedOwnerTypeArgumentNodes = (
 export const analyzeCallTypeArguments = (
   source: SourceFile.SourceFile,
   call: SyntaxTree.Node,
-  caller: DeclarationFact,
+  caller: DeclarationFact | undefined,
   resolution: ResolutionContext,
   leading: ReadonlyArray<SyntaxTree.Node> = Object.freeze([]),
 ): CallTypeArgumentsResult => {
@@ -342,7 +342,7 @@ export const analyzeCallTypeArguments = (
     })
   }
   const environment = new Map(
-    caller.typeParameters.flatMap((parameter) =>
+    (caller?.typeParameters ?? []).flatMap((parameter) =>
       parameter.name._tag === 'Present' ? [[parameter.name.spelling, parameter.type] as const] : [],
     ),
   )
@@ -664,6 +664,7 @@ export const genericArgumentOfTypeArgument = (
   }
   if (Type.isParameter(writtenType) && writtenType.kind === 'RequirementRow')
     return Type.requirementRowArgument([], [writtenType])
+  if (Type.isNever(writtenType)) return Type.requirementRowArgument([])
   if (
     !Type.isNominal(writtenType) &&
     !(Type.isParameter(writtenType) && writtenType.kind === 'Value')
@@ -940,6 +941,7 @@ export const commitSpecialization = (
 
 interface KnownProviderBoundInference {
   readonly substitution: Type.Substitution
+  readonly symbolicConformances: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection>
   readonly diagnostic?: Diagnostic.Diagnostic
 }
 
@@ -958,9 +960,11 @@ const inferKnownProviderBounds = (
   parameters: ReadonlyArray<DeclarationFacts.TypeParameterFact>,
   initial: Type.Substitution,
   resolution: ResolutionContext,
+  caller: DeclarationFact | undefined,
   span: SourceSpan.SourceSpan,
 ): KnownProviderBoundInference => {
   const substitution = new Map(initial)
+  const symbolicConformances: Array<ConformanceProof.SymbolicConformanceSelection> = []
   const callBinders = new Set(parameters.map((parameter) => Type.key(parameter.type)))
   let progressed = true
   while (progressed) {
@@ -978,10 +982,16 @@ const inferKnownProviderBounds = (
         if (bound._tag !== 'ResolvedBound' || !bound.application.providerMatches) continue
         const pattern = Type.substitute(bound.application.capability, substitution)
         if (!Type.isNominal(pattern)) continue
+        const conditional = ConformanceProof.conditionalContractCandidates(
+          resolution.index,
+          resolution.scope.module,
+          provider,
+        ).filter((candidate) => sameNominalDeclaration(candidate.capability, pattern))
         const candidates = ConformanceProof.knownProviderContracts(
           resolution.index,
           resolution.scope.module,
           provider,
+          caller,
         ).filter((candidate) => sameNominalDeclaration(candidate, pattern))
         const matching = candidates.flatMap((candidate) => {
           const trial = new Map(substitution)
@@ -995,7 +1005,74 @@ const inferKnownProviderBounds = (
           const before = substitution.size
           commitSpecialization(substitution, selected.trial)
           if (substitution.size > before) progressed = true
+          const symbolic = conditional.filter(
+            (candidate) =>
+              Type.equals(candidate.capability, selected.candidate) &&
+              caller !== undefined &&
+              candidate.requirements.every((requirement) =>
+                boundAssumedBy(caller, requirement.provider, requirement.capability),
+              ),
+          )
+          const selectedSymbolic = symbolic.length === 1 ? symbolic.at(0) : undefined
+          if (
+            selectedSymbolic !== undefined &&
+            !symbolicConformances.some(
+              (retained) =>
+                retained.selection.module === selectedSymbolic.selection.module &&
+                retained.selection.ordinal === selectedSymbolic.selection.ordinal,
+            )
+          )
+            symbolicConformances.push(selectedSymbolic)
           continue
+        }
+        const conditionalMatches = conditional.flatMap((candidate) => {
+          const trial = new Map(substitution)
+          return TypeInference.inferOpenGenericArguments(
+            pattern,
+            candidate.capability,
+            trial,
+            callBinders,
+          ).matches
+            ? [Object.freeze({ candidate, trial })]
+            : []
+        })
+        const rejected = conditionalMatches.length === 1 ? conditionalMatches.at(0) : undefined
+        const missing =
+          caller === undefined
+            ? undefined
+            : rejected?.candidate.requirements.find(
+                (requirement) =>
+                  !boundAssumedBy(caller, requirement.provider, requirement.capability),
+              )
+        if (caller !== undefined && rejected !== undefined && missing !== undefined) {
+          const mismatched = Type.isParameter(missing.provider)
+            ? caller.typeParameters
+                .find((parameter) => Type.equals(parameter.type, missing.provider))
+                ?.bounds.flatMap((candidate) =>
+                  candidate._tag === 'ResolvedBound' &&
+                  sameNominalDeclaration(candidate.application.capability, missing.capability) &&
+                  !Type.equals(candidate.application.capability, missing.capability)
+                    ? [candidate.application.capability]
+                    : [],
+                )
+                .at(0)
+            : undefined
+          const outer = `${Type.encode(rejected.candidate.capability)} for ${Type.encode(provider)}`
+          const required = `${Type.encode(missing.capability)} for ${Type.encode(missing.provider)}`
+          const detail =
+            mismatched === undefined
+              ? 'the exact enclosing bound is not declared'
+              : `declared ${Type.encode(mismatched)} does not exactly match required ${Type.encode(missing.capability)}`
+          return Object.freeze({
+            substitution,
+            symbolicConformances: Object.freeze(symbolicConformances),
+            diagnostic: Diagnostic.unprovenConformance(
+              outer,
+              detail,
+              Object.freeze([`required by ${outer}`, `  ${required}: ${detail}`]),
+              span,
+            ),
+          })
         }
         if (candidates.length !== 1 || matching.length !== 0) continue
         const candidate = candidates.at(0)
@@ -1027,6 +1104,7 @@ const inferKnownProviderBounds = (
         if (existing === undefined || inferred === undefined) continue
         return Object.freeze({
           substitution,
+          symbolicConformances: Object.freeze(symbolicConformances),
           diagnostic: Diagnostic.typeArgumentConflict(
             target,
             conflict.type.name,
@@ -1039,7 +1117,10 @@ const inferKnownProviderBounds = (
       }
     }
   }
-  return Object.freeze({ substitution })
+  return Object.freeze({
+    substitution,
+    symbolicConformances: Object.freeze(symbolicConformances),
+  })
 }
 
 export const contractSpecializationSites = (
@@ -1599,15 +1680,19 @@ export const analyzeCallContract = (
           ),
       ),
     )
+  let symbolicConformances: ReadonlyArray<ConformanceProof.SymbolicConformanceSelection> =
+    Object.freeze([])
   if (reference._tag === 'Resolved' && resolution !== undefined && mayInferFromKnownProvider) {
     const inferredFromBounds = inferKnownProviderBounds(
       reference.spelling,
       reference.declaration.typeParameters,
       substitution,
       resolution,
+      caller,
       call.span,
     )
     substitution = inferredFromBounds.substitution
+    symbolicConformances = inferredFromBounds.symbolicConformances
     const diagnostic = inferredFromBounds.diagnostic
     if (diagnostic !== undefined)
       return Object.freeze({
@@ -1824,6 +1909,7 @@ export const analyzeCallContract = (
       substitution,
       evidence,
       inferredProviderSelectors,
+      symbolicConformances,
     }),
     diagnostics: Object.freeze([]),
   })
@@ -1876,6 +1962,7 @@ export const interfaceConstraints = (
         const capability = substitutedCapability
         const assumedByCaller =
           boundAssumedBy(caller, provider, capability) ||
+          ConformanceProof.assumedConditionalConformance(index, provider, capability, caller) ||
           (Type.equals(capability, Type.copyCapability) &&
             ConformanceProof.copyType(index, provider, copyAssumptionsOf(caller)))
         if (assumedByCaller) return []

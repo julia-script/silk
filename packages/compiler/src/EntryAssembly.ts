@@ -1,3 +1,4 @@
+import * as EffectExecutionContract from './internal/EffectExecutionContract.js'
 import * as Data from 'effect/Data'
 import { generated, indexExits, initializationFlagsOf } from './CleanupEmission.js'
 import * as DeclarationFacts from './DeclarationFacts.js'
@@ -327,8 +328,36 @@ export const lowerInstance = (
             ? representation.identity
             : undefined
         const effectValue =
-          identity === undefined ? undefined : effectValueByIdentity(layout, identity)
+          identity === undefined
+            ? undefined
+            : effectValueByIdentity(layout, identity, EffectExecutionContract.fromType(specialized))
         if (effectValue !== undefined) return [effectValue]
+        // A constructor's captured parameter may already be a provided implementation. Its
+        // physical capture contract is published by layout under this exact owner and ordinal.
+        const captures = layout.effectEnvironments.flatMap((environment) =>
+          environment._tag === 'EffectEnvironment' &&
+          Instances.keyText(environment.instance) === Instances.keyText(instance.key)
+            ? environment.fields.filter(
+                (field) =>
+                  field.source === 'Parameter' &&
+                  field.ordinal === ordinal &&
+                  field.effectIdentity === identity,
+              )
+            : [],
+        )
+        const capture = captures.at(0)
+        if (
+          capture !== undefined &&
+          Type.isEffect(capture.type) &&
+          captures.every((field) => Type.equals(field.type, capture.type))
+        ) {
+          const captured = effectValueByIdentity(
+            layout,
+            capture.resolvedEffectIdentity ?? capture.effectIdentity ?? '',
+            capture.type,
+          )
+          if (captured !== undefined) return [captured]
+        }
         if (Type.isEffect(specialized)) return []
       }
       if (
@@ -382,7 +411,9 @@ export const lowerInstance = (
       : undefined
   const returnedBlock = contract._tag === 'Contract' ? returnedEffectBlock(fn) : undefined
   const hiddenEffectValue =
-    returnedBlock === undefined ? undefined : effectValueType(layout, instance.key, returnedBlock)
+    returnedBlock === undefined || effectOutcome === undefined
+      ? undefined
+      : effectValueType(layout, instance.key, returnedBlock, effectOutcome)
   const hiddenCompositeResult = returnedValueType(
     layout,
     opaqueRealizations,
@@ -392,7 +423,7 @@ export const lowerInstance = (
   const specializedEffectValue =
     instance.resultEffect === undefined
       ? undefined
-      : effectValueByIdentity(layout, instance.resultEffect)
+      : effectValueByIdentity(layout, instance.resultEffect, effectOutcome)
   const resultType =
     specializedEffectValue ??
     hiddenEffectValue ??
@@ -483,9 +514,18 @@ const effectCaptureParameterTypes = (
         const resolvedEffectValue =
           field.resolvedEffectIdentity === undefined
             ? undefined
-            : effectValueByIdentity(layout, field.resolvedEffectIdentity)
+            : effectValueByIdentity(
+                layout,
+                field.resolvedEffectIdentity,
+                EffectExecutionContract.fromType(field.type),
+              )
         const effectValue =
-          resolvedEffectValue ?? effectValueByIdentity(layout, field.effectIdentity)
+          resolvedEffectValue ??
+          effectValueByIdentity(
+            layout,
+            field.effectIdentity,
+            EffectExecutionContract.fromType(field.type),
+          )
         return effectValue === undefined ? [] : [effectValue]
       }
       if (field.callableIdentity !== undefined && Type.isCallable(field.type)) {
@@ -584,6 +624,7 @@ export const lowerEffectRunner = (
         })
       }),
     ),
+    spec.witnessTargets,
   )
   lowering.parameterLocals.clear()
   block.captures.forEach((capture, ordinal) => {

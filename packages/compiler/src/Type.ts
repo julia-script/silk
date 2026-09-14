@@ -3762,7 +3762,9 @@ export const storageParameters = (self: Type): ReadonlyArray<Parameter> =>
     ...new Map(
       fold(self, {
         type: (type) =>
-          isParameter(type) && type.representationBound === undefined ? type : undefined,
+          isParameter(type) && type.kind === 'Value' && type.representationBound === undefined
+            ? type
+            : undefined,
         descendArgument: (argument) =>
           !isRepresentationArgument(argument) && !isHiddenIdentityArgument(argument),
         descend: (type) =>

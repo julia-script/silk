@@ -55,7 +55,7 @@ import * as Mir from './Mir.js'
 import * as MovePath from './MovePath.js'
 import * as Ownership from './Ownership.js'
 import * as Type from './Type.js'
-import { effectValueByIdentity, instanceText } from './ValueType.js'
+import { effectValueForCall, instanceText } from './ValueType.js'
 
 export interface LoweredPatternSelection {
   readonly result: Mir.LocalId
@@ -431,7 +431,7 @@ const lowerStatement = (
       return following
     }
     const forwardedRequirement = inlineForwardedRequirement(fn, statement.initializer)
-    const forwardedResultEffect =
+    const forwardedCall =
       forwardedRequirement === undefined
         ? undefined
         : fn.call(
@@ -443,18 +443,25 @@ const lowerStatement = (
             statement.initializer._tag === 'EffectConstruct'
               ? statement.initializer.staticArguments
               : undefined,
-          )?.resultEffect
+          )
+    const forwardedResultEffect = forwardedCall?.resultEffect
     const protectedRecipe =
       forwardedRequirement === undefined
         ? undefined
         : effectRecipe(fn, forwardedRequirement.binding.protected)
+    const forwardedSemantic =
+      'type' in statement.initializer ? fn.semantic(statement.initializer.type) : undefined
     // A borrowed provider can materialize its service Effect at construction through
     // forwardedServiceProvision. Keeping that value only as a recipe loses it when a
     // later combinator (such as catchAll) consumes the binding as an ordinary operand.
     const forwardedRequirementNeedsRecipe =
       forwardedRequirement !== undefined &&
       (forwardedResultEffect === undefined ||
-        effectValueByIdentity(fn.layout, forwardedResultEffect) === undefined ||
+        forwardedCall === undefined ||
+        forwardedSemantic === undefined ||
+        !Type.isEffect(forwardedSemantic) ||
+        effectValueForCall(fn.layout, forwardedCall, forwardedSemantic, fn.providedRequirements) ===
+          undefined ||
         (protectedRecipe?._tag === 'ServiceEffectConstruct' &&
           (forwardedRequirement.selection.access === 'Take' ||
             forwardedRequirement.provider._tag !== 'ValueBorrow')) ||
