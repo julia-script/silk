@@ -119,7 +119,10 @@ explicitly, using the same operand relation in verification and native selection
 lookup requires one physical environment with matching execution channels. Base runner references
 use the canonical layout identity independently of source declaration order. Calling-shape roots retain the requested semantic type while sharing physical lanes.
 An Effect constructor's captured parameter types come from the exact owner/parameter capture facts
-when provider specialization has already replaced the source service Effect. Requirement-row
+when provider specialization has already replaced the source service Effect. Provisional classification uses the same capture facts when a generic use bound retains wider
+requirements. A finite Effect join resolves each alternative through its own intrinsic contract;
+the join's combined rows remain on the carrier. Callable operands retain ordinary runtime lifetime
+compatibility for input parameters while the returned Effect channels remain exact. Requirement-row
 parameters do not denote stored values and cannot introduce type-outlives obligations.
 
 Witness invocation substitution resolves only lifetime binders actually forwarded to the selected

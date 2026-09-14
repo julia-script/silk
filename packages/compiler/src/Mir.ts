@@ -2237,7 +2237,7 @@ export const executionArgumentCompatible = (actual: Type, expected: Type): boole
       actual.type.parameters.length === expected.type.parameters.length &&
       actual.type.parameters.every((parameter, ordinal) => {
         const compared = expected.type.parameters.at(ordinal)
-        return compared !== undefined && SilkType.equals(parameter, compared)
+        return compared !== undefined && acceptsRuntimeOperand(compared, parameter)
       }) &&
       EffectExecutionContract.equals(actual.type.result, expected.type.result)
     )

@@ -368,13 +368,12 @@ export const representedValueType = (
     Type.isCompositeEffectRepresentationArgument(representation) &&
     Type.isEffect(specialized.contract)
   ) {
-    const contract = specialized.contract
     const alternatives = representation.alternatives.flatMap((alternative) =>
-      Type.isEffectIdentityArgument(alternative.identity)
+      Type.isEffectIdentityArgument(alternative.identity) && Type.isEffect(alternative.contract)
         ? (effectValueByIdentity(
             layout,
             alternative.identity.identity,
-            contract,
+            alternative.contract,
             alternative.identity.owner,
           ) ?? [])
         : [],

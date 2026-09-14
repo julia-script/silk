@@ -975,6 +975,7 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
     substitution: new Map(),
     evidence: [],
     inferredProviderSelectors: [],
+    symbolicConformances: [],
   })
   assert.deepEqual(
     twoCall.arguments.map((argument) => argument.id.ordinal),
@@ -995,6 +996,7 @@ it('publishes ordered argument identities, expressions, mappings, and compatible
     substitution: new Map(),
     evidence: [],
     inferredProviderSelectors: [],
+    symbolicConformances: [],
   })
   assert.strictEqual(Object.isFrozen(oneCall.arguments), true)
   assert.strictEqual(Object.isFrozen(firstArgument), true)

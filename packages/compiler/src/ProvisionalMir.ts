@@ -613,16 +613,40 @@ const runnerOf = (
     (expressionContract !== undefined && Type.isEffect(expressionContract)
       ? expressionContract
       : undefined)
+  // A generic use bound can retain requirements already absent from its selected capture.
+  // Resolve through the exact owner's layout field rather than treating that wider bound as
+  // the physical runner contract.
+  const captures = context.layout.effectEnvironments.flatMap((candidate) =>
+    candidate._tag === 'EffectEnvironment' &&
+    Instances.keyText(candidate.instance) === Instances.keyText(context.instance.key)
+      ? candidate.fields.filter(
+          (field) =>
+            identity !== undefined &&
+            (field.effectIdentity === identity || field.resolvedEffectIdentity === identity),
+        )
+      : [],
+  )
+  const capture = captures.at(0)
+  const captureContract =
+    capture === undefined ? undefined : EffectExecutionContract.fromType(capture.type)
+  const physicalContract =
+    captureContract !== undefined &&
+    captures.every((field) => {
+      const contract = EffectExecutionContract.fromType(field.type)
+      return contract !== undefined && EffectExecutionContract.equals(contract, captureContract)
+    })
+      ? captureContract
+      : requested
   const availableProviders = resolved?.providers ?? providersOf(expression, context)
   const environment = context.layout.effectEnvironments.find(
     (candidate) =>
       candidate._tag === 'EffectEnvironment' &&
       identity !== undefined &&
       Instances.effectIdentity(candidate.instance, candidate.site) === identity &&
-      (requested === undefined ||
-        EffectExecutionContract.matches(candidate.effect, requested, availableProviders) ||
+      (physicalContract === undefined ||
+        EffectExecutionContract.matches(candidate.effect, physicalContract, availableProviders) ||
         EffectExecutionContract.providerSubtractionMatches(
-          requested,
+          physicalContract,
           candidate.effect,
           availableProviders,
         )),
