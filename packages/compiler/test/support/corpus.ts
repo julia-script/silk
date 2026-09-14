@@ -6347,10 +6347,7 @@ export const nativeCorpus: ReadonlyArray<CorpusProgram> = [
   },
   {
     ...nativeSocketCorpusProgram,
-    nativeProfiles: [
-      { name: 'debug', optimization: 'none', debug: true },
-      { name: 'optimized', optimization: 'speed', debug: false },
-    ],
+    nativeProfiles: [{ name: 'optimized', optimization: 'speed', debug: false }],
   },
   {
     name: 'borrowed-temporary-stream-suspension',

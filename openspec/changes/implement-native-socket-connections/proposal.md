@@ -7,8 +7,9 @@ single-threaded scheduling, exact transfer ownership, and target-selected libc p
 
 ## What Changes
 
-- Add selected `silk.native_socket` source for a scoped, affine native connection that implements
-  `ByteDuplex` over nonblocking TCP and pathname Unix sockets on admitted Darwin and GNU targets.
+- Add selected `silk.native_socket` source for an affine owned native connection that implements
+  `ByteDuplex` over nonblocking TCP and pathname Unix sockets on admitted Darwin and GNU targets,
+  plus scoped convenience over the same acquisition path.
 - Add bounded connect options, one overall absolute monotonic deadline, ordered sequential endpoint
   attempts, cooperative readiness polling, typed native error translation, half-close, EOF, and
   exact-once terminal cleanup.
@@ -24,8 +25,8 @@ single-threaded scheduling, exact transfer ownership, and target-selected libc p
 
 ### New Capabilities
 
-- `native-socket-connections`: Native TCP and pathname-Unix connection acquisition, scoped
-  ByteDuplex publication, readiness/deadline behavior, transfer semantics, and platform cleanup.
+- `native-socket-connections`: Native TCP and pathname-Unix owned connection acquisition, scoped
+  ByteDuplex convenience, readiness/deadline behavior, transfer semantics, and platform cleanup.
 
 ### Modified Capabilities
 

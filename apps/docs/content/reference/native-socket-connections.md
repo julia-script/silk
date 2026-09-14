@@ -1,14 +1,15 @@
 ---
 title: Native socket connections
-description: Open scoped TCP and pathname-Unix ByteDuplex connections with bounded cooperative polling.
+description: Acquire owned or scoped TCP and pathname-Unix ByteDuplex connections with bounded cooperative polling.
 ---
 
 # Native socket connections
 
 `silk.native_socket` is the ordinary-source native transport for numeric TCP endpoints and local
-pathname-Unix sockets. It is selected only for aarch64 Apple Darwin with system libc and aarch64 or
-x86-64 GNU/Linux with GNU libc. Portable, no-libc, musl, and Windows profiles do not expose it or
-its foreign imports.
+pathname-Unix sockets. `connectResolvedOwned` and `connectUnixOwned` return the authoritative
+affine `Connection`; their scoped counterparts consume that owner and lend it to one callback. The
+module is selected only for aarch64 Apple Darwin with system libc and aarch64 or x86-64 GNU/Linux
+with GNU libc. Portable, no-libc, musl, and Windows profiles do not expose it or its foreign imports.
 
 ## Open a local pathname connection
 
@@ -45,9 +46,13 @@ pub effect fn notifyLocalAgent() -> ()
 
 The callback receives a higher-ranked affine `Connection`; it cannot return the connection or keep
 its `ByteDuplex` loan. Structured success, typed failure, and cancellation all run terminal release.
-Fatal traps remain outside that guarantee. Unix paths are copied during acquisition, must be
-absolute and NUL-free, and must fit the target `sun_path` including its terminator (104 bytes on
-Darwin, 108 on GNU). The transport never creates, removes, or owns the filesystem pathname.
+Use the owned constructors when another actor must retain or transfer the connection, and call
+`Connection.close` when that ownership ends. Acquisition failures and structured cancellation
+before publication close the descriptor once; publication transfers that responsibility to the
+caller. Fatal traps remain outside structured cleanup guarantees. Unix paths are copied during
+acquisition, must be absolute and NUL-free, and must fit the target `sun_path` including its
+terminator (104 bytes on Darwin, 108 on GNU). The transport never creates, removes, or owns the
+filesystem pathname.
 
 ## Deadlines, polling, and throughput
 

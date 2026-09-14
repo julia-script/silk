@@ -2,8 +2,9 @@
 //!
 //! # When to use
 //!
-//! Use connectResolved for an ordered finite list of numeric endpoints, or connectUnix for one
-//! absolute pathname. Each operation lends one affine Connection only for its callback.
+//! Use connectResolvedOwned for ordered numeric endpoints or connectUnixOwned for one absolute
+//! pathname. Each operation returns one affine Connection. The connectResolved and connectUnix
+//! helpers consume the same owner into a protected callback scope.
 //!
 //! # Details
 //!
@@ -517,64 +518,6 @@ effect fn reject(operation: NativeSocketOperation, code: i32) -> never ! NativeS
   fail NativeSocketError.NativeFailure {operation: move operation, errno: code}
 }
 
-effect fn setInteger(fd: i32, level: i32, option: i32, value: i32) -> ()
-! NativeSocketError {
-  let status = unsafe setsockopt(
-    fd,
-    level,
-    option,
-    unsafe Pointer.bytes<i32>(Pointer.fromRef<i32>(&value)),
-    4,
-  )
-  if status != 0 { return run reject(NativeSocketOperation.Configure, unsafe currentError()) }
-  return ()
-}
-
-effect fn configureSocket(descriptor: &Descriptor, tcp: bool, options: &ConnectOptions) -> ()
-! NativeSocketError {
-  static if Intrinsic.targetOperatingSystem() == "darwin" {
-    let statusFlags = unsafe fcntl(descriptor.fd, GET_STATUS_FLAGS)
-    if statusFlags < 0 { return run reject(NativeSocketOperation.Configure, unsafe currentError()) }
-    if unsafe fcntl(descriptor.fd, SET_STATUS_FLAGS, i32.bitOr(statusFlags, NONBLOCK)) < 0 {
-      return run reject(NativeSocketOperation.Configure, unsafe currentError())
-    }
-    let descriptorFlags = unsafe fcntl(descriptor.fd, GET_DESCRIPTOR_FLAGS)
-    if descriptorFlags < 0 { return run reject(NativeSocketOperation.Configure, unsafe currentError()) }
-    if unsafe fcntl(descriptor.fd, SET_DESCRIPTOR_FLAGS, i32.bitOr(descriptorFlags, CLOSE_ON_EXEC)) < 0 {
-      return run reject(NativeSocketOperation.Configure, unsafe currentError())
-    }
-  }
-  let linger = Linger {enabled: 0, seconds: 0}
-  let lingerStatus = unsafe setsockopt(
-    descriptor.fd,
-    SOCKET_LEVEL,
-    SOCKET_LINGER,
-    unsafe Pointer.bytes<Linger>(Pointer.fromRef<Linger>(&linger)),
-    8,
-  )
-  if lingerStatus != 0 {
-    return run reject(NativeSocketOperation.Configure, unsafe currentError())
-  }
-  static if Intrinsic.targetOperatingSystem() == "darwin" {
-    run setInteger(descriptor.fd, SOCKET_LEVEL, SOCKET_NO_SIGPIPE, 1)
-  }
-  if tcp && options.noDelayValue {
-    run setInteger(descriptor.fd, TCP_LEVEL, TCP_NO_DELAY, 1)
-  }
-  return ()
-}
-
-effect fn makeDescriptor(family: i32, tcp: bool, options: &ConnectOptions) -> Descriptor
-! NativeSocketError {
-  let mut protocol = 0
-  if tcp { protocol = TCP_PROTOCOL }
-  let fd = unsafe socket(family, socketType(), protocol)
-  if fd < 0 { return run reject(NativeSocketOperation.Socket, unsafe currentError()) }
-  let descriptor = Descriptor {fd: fd}
-  run configureSocket(&descriptor, tcp, options)
-  return move descriptor
-}
-
 union PollOutcome {
   Ready {events: i16},
   Interrupted,
@@ -661,6 +604,7 @@ effect fn connectOwned<T>(
         if events == 0 {
           run waitConnect(&options, deadline)
         } else {
+          run checkConnectDeadline(deadline)
           let completion = socketError(owner.descriptor.fd)
           match move completion {
             SocketErrorOutcome.Failed {code} => {
@@ -695,7 +639,8 @@ effect fn attemptTcp(
   let port = networkPort(Port.value(&Endpoint.port(endpoint)))
   match move address {
     IpAddress.V4 {value} => {
-      let descriptor = run makeDescriptor(IPV4_FAMILY, true, &options)
+      run checkConnectDeadline(deadline)
+      let descriptor = run makeConnectionDescriptor(IPV4_FAMILY, true, &options, deadline)
       static if Intrinsic.targetOperatingSystem() == "darwin" {
         let native = SockAddrV4 {
           length: 16,
@@ -716,7 +661,8 @@ effect fn attemptTcp(
       }
     }
     IpAddress.V6 {value} => {
-      let descriptor = run makeDescriptor(IPV6_FAMILY, true, &options)
+      run checkConnectDeadline(deadline)
+      let descriptor = run makeConnectionDescriptor(IPV6_FAMILY, true, &options, deadline)
       static if Intrinsic.targetOperatingSystem() == "darwin" {
         let native = SockAddrV6 {
           length: 28,
@@ -871,7 +817,8 @@ effect fn attemptUnix(
   deadline: &Option<Instant>,
   attempts: &mut usize,
 ) -> Connection ! NativeSocketError ? &mut MonotonicClock {
-  let descriptor = run makeDescriptor(UNIX_FAMILY, false, &options)
+  run checkConnectDeadline(deadline)
+  let descriptor = run makeConnectionDescriptor(UNIX_FAMILY, false, &options, deadline)
   static if Intrinsic.targetOperatingSystem() == "darwin" {
     let mut bytes = zeroUnixDarwin()
     let mut index = usize.ZERO
@@ -970,7 +917,7 @@ pub effect fn connectResolved<'env, A, E, ?CallbackRequirements>(
   ) -> once Effect<'call; A ! E ? CallbackRequirements>,
 ) -> A ! E | NativeSocketError ? CallbackRequirements | &mut MonotonicClock
 where CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
-  let connection = run acquireResolved(endpoints, options, &deadline)
+  let connection = run connectResolvedOwned(endpoints, options, move deadline)
   let use = effect fn(owned: &mut Connection) -> A ! E ? CallbackRequirements {
     return run callback(move owned)
   }
@@ -991,7 +938,7 @@ pub effect fn connectUnix<'env, A, E, ?CallbackRequirements>(
   ) -> once Effect<'call; A ! E ? CallbackRequirements>,
 ) -> A ! E | NativeSocketError ? CallbackRequirements | &mut MonotonicClock
 where CallbackRequirements in Without<CallbackRequirements, ByteDuplex> {
-  let connection = run acquireUnix(path, options, &deadline)
+  let connection = run connectUnixOwned(path, options, move deadline)
   let use = effect fn(owned: &mut Connection) -> A ! E ? CallbackRequirements {
     return run callback(move owned)
   }
@@ -1042,26 +989,19 @@ effect fn readiness(
       return ReadinessOutcome.Waited
     }
     PollOutcome.Failed {code} => {
-      return run failProvider(move connection, move operation, code)
+      return run failProvider(&mut connection.*, move operation, code)
     }
     PollOutcome.Ready {events} => {
       if hasEvent(events, INVALID_POLL) {
-        return run failProvider(move connection, move operation, INVALID_DESCRIPTOR)
+        return run failProvider(&mut connection.*, move operation, INVALID_DESCRIPTOR)
       }
       if hasEvent(events, POLL_ERROR) {
-        let detail = socketError(connection.descriptor.fd)
-        return match move detail {
-          SocketErrorOutcome.Failed {code} => {
-            return run failProvider(move connection, move operation, code)
-          }
-          SocketErrorOutcome.Value {code} => {
-            return run failProvider(move connection, move operation, code)
-          }
-        }
+        if allowHangup { return run readSocketError(&mut connection.*, deadline) }
+        return run writeSocketError(&mut connection.*, deadline)
       }
       if hasEvent(events, HANGUP) {
         if allowHangup { return ReadinessOutcome.Immediate }
-        return run failProvider(move connection, move operation, BROKEN_PIPE)
+        return run failProvider(&mut connection.*, move operation, BROKEN_PIPE)
       }
       if hasEvent(events, requested) { return ReadinessOutcome.Immediate }
       run waitIo(&connection.options, deadline, move operation)
@@ -1114,6 +1054,7 @@ unsafe effect fn readConnection(
           followedImmediateReadiness = false
           run waitIo(&connection.options, &deadline, ByteIoOperation.Read)
         } else {
+          run checkIoDeadline(&deadline, ByteIoOperation.Read)
           let available = run readiness(
             &mut connection.*,
             READABLE,
@@ -1177,6 +1118,7 @@ unsafe effect fn writeConnection(
           followedImmediateReadiness = false
           run waitIo(&connection.options, &deadline, ByteIoOperation.Write)
         } else {
+          run checkIoDeadline(&deadline, ByteIoOperation.Write)
           let available = run readiness(
             &mut connection.*,
             WRITABLE,
@@ -1256,4 +1198,140 @@ impl ByteDuplex for Connection {
   shutdownWriteRaw: Connection.shutdownConnection
   closeRaw: Connection.closeByteConnection
 }
+effect fn configureConnectionDescriptorFlags(
+  descriptor: &Descriptor,
+  deadline: &Option<Instant>,
+) -> () ! NativeSocketError ? &mut MonotonicClock {
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    run checkConnectDeadline(deadline)
+    let statusFlags = unsafe fcntl(descriptor.fd, GET_STATUS_FLAGS)
+    if statusFlags < 0 { return run reject(NativeSocketOperation.Configure, unsafe currentError()) }
+    run checkConnectDeadline(deadline)
+    if unsafe fcntl(descriptor.fd, SET_STATUS_FLAGS, i32.bitOr(statusFlags, NONBLOCK)) < 0 {
+      return run reject(NativeSocketOperation.Configure, unsafe currentError())
+    }
+    run checkConnectDeadline(deadline)
+    let descriptorFlags = unsafe fcntl(descriptor.fd, GET_DESCRIPTOR_FLAGS)
+    if descriptorFlags < 0 { return run reject(NativeSocketOperation.Configure, unsafe currentError()) }
+    run checkConnectDeadline(deadline)
+    if unsafe fcntl(descriptor.fd, SET_DESCRIPTOR_FLAGS, i32.bitOr(descriptorFlags, CLOSE_ON_EXEC)) < 0 {
+      return run reject(NativeSocketOperation.Configure, unsafe currentError())
+    }
+  }
+  return ()
+}
+
+effect fn setConnectionInteger(
+  fd: i32,
+  level: i32,
+  option: i32,
+  value: i32,
+  deadline: &Option<Instant>,
+) -> () ! NativeSocketError ? &mut MonotonicClock {
+  run checkConnectDeadline(deadline)
+  let status = unsafe setsockopt(
+    fd,
+    level,
+    option,
+    unsafe Pointer.bytes<i32>(Pointer.fromRef<i32>(&value)),
+    4,
+  )
+  if status != 0 { return run reject(NativeSocketOperation.Configure, unsafe currentError()) }
+  return ()
+}
+
+effect fn configureConnectionSocket(
+  descriptor: &Descriptor,
+  tcp: bool,
+  options: &ConnectOptions,
+  deadline: &Option<Instant>,
+) -> () ! NativeSocketError ? &mut MonotonicClock {
+  run configureConnectionDescriptorFlags(descriptor, deadline)
+  let linger = Linger {enabled: 0, seconds: 0}
+  run checkConnectDeadline(deadline)
+  let lingerStatus = unsafe setsockopt(
+    descriptor.fd,
+    SOCKET_LEVEL,
+    SOCKET_LINGER,
+    unsafe Pointer.bytes<Linger>(Pointer.fromRef<Linger>(&linger)),
+    8,
+  )
+  if lingerStatus != 0 {
+    return run reject(NativeSocketOperation.Configure, unsafe currentError())
+  }
+  static if Intrinsic.targetOperatingSystem() == "darwin" {
+    run setConnectionInteger(descriptor.fd, SOCKET_LEVEL, SOCKET_NO_SIGPIPE, 1, deadline)
+  }
+  if tcp && options.noDelayValue {
+    run setConnectionInteger(descriptor.fd, TCP_LEVEL, TCP_NO_DELAY, 1, deadline)
+  }
+  return ()
+}
+
+effect fn makeConnectionDescriptor(
+  family: i32,
+  tcp: bool,
+  options: &ConnectOptions,
+  deadline: &Option<Instant>,
+) -> Descriptor ! NativeSocketError ? &mut MonotonicClock {
+  let mut protocol = 0
+  if tcp { protocol = TCP_PROTOCOL }
+  run checkConnectDeadline(deadline)
+  let fd = unsafe socket(family, socketType(), protocol)
+  if fd < 0 { return run reject(NativeSocketOperation.Socket, unsafe currentError()) }
+  let descriptor = Descriptor {fd: fd}
+  run configureConnectionSocket(&descriptor, tcp, options, deadline)
+  return move descriptor
+}
+
+/// Connects ordered numeric endpoints and returns one affine connection owner.
+pub effect fn connectResolvedOwned(
+  endpoints: &[Endpoint],
+  options: ConnectOptions,
+  deadline: Option<Instant>,
+) -> Connection ! NativeSocketError ? &mut MonotonicClock {
+  return run acquireResolved(endpoints, options, &deadline)
+}
+
+/// Connects one absolute Unix pathname and returns one affine connection owner.
+pub effect fn connectUnixOwned(
+  path: &[u8],
+  options: ConnectOptions,
+  deadline: Option<Instant>,
+) -> Connection ! NativeSocketError ? &mut MonotonicClock {
+  return run acquireUnix(path, options, &deadline)
+}
+
+effect fn readSocketError(
+  connection: &mut Connection,
+  deadline: &Option<Instant>,
+) -> never ! ByteIoError ? &mut MonotonicClock {
+  run checkIoDeadline(deadline, ByteIoOperation.Read)
+  let detail = socketError(connection.descriptor.fd)
+  return match move detail {
+    SocketErrorOutcome.Failed {code} => {
+      return run failProvider(&mut connection.*, ByteIoOperation.Read, code)
+    }
+    SocketErrorOutcome.Value {code} => {
+      return run failProvider(&mut connection.*, ByteIoOperation.Read, code)
+    }
+  }
+}
+
+effect fn writeSocketError(
+  connection: &mut Connection,
+  deadline: &Option<Instant>,
+) -> never ! ByteIoError ? &mut MonotonicClock {
+  run checkIoDeadline(deadline, ByteIoOperation.Write)
+  let detail = socketError(connection.descriptor.fd)
+  return match move detail {
+    SocketErrorOutcome.Failed {code} => {
+      return run failProvider(&mut connection.*, ByteIoOperation.Write, code)
+    }
+    SocketErrorOutcome.Value {code} => {
+      return run failProvider(&mut connection.*, ByteIoOperation.Write, code)
+    }
+  }
+}
+
 }

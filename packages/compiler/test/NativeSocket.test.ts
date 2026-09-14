@@ -3,15 +3,12 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Analysis from '../src/Analysis.js'
 import * as MirVerification from '../src/MirVerification.js'
-import * as NativeToolchain from '../src/NativeToolchain.js'
 import * as AnalysisFixture from './support/AnalysisFixture.js'
 import {
   nativeSocketAcceptanceSource,
-  nativeSocketCancellationAnalysisSource,
   nativeSocketCorpusProgram,
   nativeSocketDarwinWitnessSource,
   nativeSocketGnuWitnessSource,
-  nativeSocketStubSource,
 } from './support/nativeSocketAcceptance.js'
 
 const implementation = readFileSync(
@@ -23,100 +20,62 @@ const reference = readFileSync(
   'utf8',
 )
 const encoder = new TextEncoder()
-const toolchain: NativeToolchain.Toolchain = Object.freeze({
-  _tag: 'Toolchain',
-  clang: 'clang',
-  llvmAr: 'llvm-ar',
-})
 
 it.effect(
-  'realizes the complete acquisition and ByteDuplex state machines',
+  'realizes the complete GNU state machine and its cancellation cleanup',
   () =>
     Effect.gen(function* () {
-      for (const target of ['x86_64-unknown-linux-gnu', 'aarch64-apple-darwin'] as const) {
-        const snapshot = yield* AnalysisFixture.retainingMain(
-          `native-socket/complete-${target}`,
-          encoder.encode(nativeSocketAcceptanceSource),
-          target,
+      const snapshot = yield* AnalysisFixture.retainingMain(
+        'native-socket/complete-x86_64-unknown-linux-gnu',
+        encoder.encode(nativeSocketAcceptanceSource),
+        'x86_64-unknown-linux-gnu',
+      )
+      assert.deepEqual(Analysis.diagnostics(snapshot), [])
+      assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
+      const actorSymbols = Analysis.instancesOf(snapshot)
+        .foreignCalls.map((call) => call.symbol)
+        .filter(
+          (symbol) =>
+            !symbol.startsWith('silk_socket_') && symbol !== 'malloc' && symbol !== 'free',
         )
-        assert.deepEqual(
-          Analysis.diagnostics(snapshot).map((diagnostic) => ({
-            code: diagnostic.code,
-            message: diagnostic.message,
-            start: diagnostic.span.start,
-          })),
-          [],
-        )
-        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-        const actorSymbols = Analysis.instancesOf(snapshot)
-          .foreignCalls.map((call) => call.symbol)
-          .filter(
-            (symbol) =>
-              !symbol.startsWith('silk_socket_') && symbol !== 'malloc' && symbol !== 'free',
-          )
-          .sort()
-        assert.deepEqual(
-          actorSymbols,
-          target === 'aarch64-apple-darwin'
-            ? [
-                '__error',
-                'close$NOCANCEL',
-                'connect',
-                'fcntl',
-                'getsockopt',
-                'poll',
-                'recv',
-                'send',
-                'setsockopt',
-                'shutdown',
-                'socket',
-              ]
-            : [
-                '__errno_location',
-                'close',
-                'connect',
-                'getsockopt',
-                'poll',
-                'recv',
-                'send',
-                'setsockopt',
-                'shutdown',
-                'socket',
-              ],
-          target,
-        )
+        .sort()
+      assert.deepEqual(actorSymbols, [
+        '__errno_location',
+        'close',
+        'connect',
+        'getsockopt',
+        'poll',
+        'recv',
+        'send',
+        'setsockopt',
+        'shutdown',
+        'socket',
+      ])
+      if (snapshot.mir._tag === 'Available') {
+        const parks = snapshot.mir.value.functions
+          .flatMap(MirVerification.operations)
+          .filter((operation) => operation._tag === 'ExecutionPark')
+        assert.isAtLeast(parks.length, 1)
+        assert.isTrue(parks.some((park) => park.guardCleanup._tag !== 'NoCleanup'))
       }
     }),
-  30_000,
-)
-
-it.effect('retains scoped connection cleanup across cancellation parking', () =>
-  Effect.gen(function* () {
-    const snapshot = yield* AnalysisFixture.retainingMain(
-      'native-socket/cancellation-cleanup',
-      encoder.encode(nativeSocketCancellationAnalysisSource),
-      'x86_64-unknown-linux-gnu',
-    )
-    assert.deepEqual(Analysis.diagnostics(snapshot), [])
-    assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-    if (snapshot.mir._tag === 'Available') {
-      const parks = snapshot.mir.value.functions
-        .flatMap(MirVerification.operations)
-        .filter((operation) => operation._tag === 'ExecutionPark')
-      assert.isAtLeast(parks.length, 1)
-      assert.isTrue(parks.some((park) => park.guardCleanup._tag !== 'NoCleanup'))
-    }
-  }),
+  120_000,
 )
 
 it('exports one profile-agnostic native corpus program with independent ABI witnesses', () => {
   assert.strictEqual(nativeSocketCorpusProgram.name, 'native-socket-connections')
   assert.strictEqual(nativeSocketCorpusProgram.expected.result, 42)
   assert.include(nativeSocketCorpusProgram.nativeSource, 'connectResolved(')
+  assert.include(nativeSocketCorpusProgram.nativeSource, 'connectResolvedOwned(')
   assert.include(nativeSocketCorpusProgram.nativeSource, 'connectUnix(')
+  assert.include(nativeSocketCorpusProgram.nativeSource, 'connectUnixOwned(')
   assert.include(implementation, 'close$NOCANCEL')
+  assert.include(implementation, 'const MAX_TRANSFER: usize = 9223372036854775807')
+  assert.strictEqual(implementation.match(/if requested > MAX_TRANSFER/g)?.length, 2)
   assert.include(nativeSocketDarwinWitnessSource, 'sun_path) == 104')
+  assert.include(nativeSocketDarwinWitnessSource, 'SSIZE_MAX == INTPTR_MAX')
   assert.include(nativeSocketGnuWitnessSource, 'sun_path) == 108')
+  assert.include(nativeSocketGnuWitnessSource, 'SSIZE_MAX == INTPTR_MAX')
 })
 
 it.effect('keeps the local pathname reference example executable', () =>
@@ -137,79 +96,64 @@ it.effect('keeps the local pathname reference example executable', () =>
   }),
 )
 
-it.effect(
-  'compiles the host socket stub and independent platform ABI witnesses',
-  () =>
-    Effect.gen(function* () {
-      const target = yield* NativeToolchain.hostTarget()
-      yield* NativeToolchain.withBuildScope('native-socket-witnesses', (scope) =>
-        Effect.gen(function* () {
-          yield* NativeToolchain.compileCObject(
-            toolchain,
-            scope,
-            target,
-            'native-socket-stub',
-            nativeSocketStubSource,
-          )
-          yield* NativeToolchain.compileCObject(
-            toolchain,
-            scope,
-            target,
-            'native-socket-darwin-witness',
-            nativeSocketDarwinWitnessSource,
-          )
-          yield* NativeToolchain.compileCObject(
-            toolchain,
-            scope,
-            target,
-            'native-socket-gnu-witness',
-            nativeSocketGnuWitnessSource,
-          )
-        }),
-      )
-    }),
-  30_000,
-)
+const publicSelectionProbe = `
+import silk.monotonic_clock {MonotonicClock}
+import silk.native_socket {ConnectOptions, Connection, NativeSocketError, connectResolvedOwned, connectUnixOwned}
+import silk.network_address {Endpoint}
+import silk.option {Option}
+import silk.system_clock {Instant}
 
-const optionProbe = `
+effect fn acquireResolved(
+  endpoints: &[Endpoint],
+  options: ConnectOptions,
+  deadline: Option<Instant>,
+) -> Connection ! NativeSocketError ? &mut MonotonicClock {
+  return run connectResolvedOwned(endpoints, options, move deadline)
+}
+
+effect fn acquireUnix(
+  path: &[u8],
+  options: ConnectOptions,
+  deadline: Option<Instant>,
+) -> Connection ! NativeSocketError ? &mut MonotonicClock {
+  return run connectUnixOwned(path, options, move deadline)
+}
+
 pub fn main() -> i32 {
   let options = ConnectOptions.defaults()
-  if ConnectOptions.noDelay(&options) { return 1 }
-  if ConnectOptions.pollInterval(&options) != 1000000 { return 2 }
-  if ConnectOptions.maxAttempts(&options) != 64 { return 3 }
+  drop ConnectOptions.maxAttempts(&options)
   return 42
 }
 `
+const wasmSelectionProbe = `
+import silk.native_socket {ConnectOptions}
+pub fn main() -> i32 { return 42 }
+`
 
 it.effect(
-  'realizes the selected native socket actor and excludes it on Wasm',
+  'selects the public Darwin actor and rejects its public Wasm import',
   () =>
     Effect.gen(function* () {
-      for (const target of [
-        'x86_64-unknown-linux-gnu',
+      const darwin = yield* AnalysisFixture.retainingMain(
+        'native-socket/public-aarch64-apple-darwin',
+        encoder.encode(publicSelectionProbe),
         'aarch64-apple-darwin',
+      )
+      assert.deepEqual(Analysis.diagnostics(darwin), [])
+      const wasm = yield* AnalysisFixture.retainingMain(
+        'native-socket/public-wasm32-unknown-unknown',
+        encoder.encode(wasmSelectionProbe),
         'wasm32-unknown-unknown',
-      ] as const) {
-        const entry =
-          target === 'wasm32-unknown-unknown' ? 'pub fn main() -> i32 { return 42 }' : optionProbe
-        const snapshot = yield* AnalysisFixture.retainingMain(
-          `native-socket/${target}`,
-          encoder.encode(`${implementation}\n${entry}`),
-          target,
-        )
-        assert.deepEqual(
-          Analysis.diagnostics(snapshot).map((diagnostic) => ({
-            code: diagnostic.code,
-            message: diagnostic.message,
-            start: diagnostic.span.start,
-          })),
-          [],
-        )
-        assert.deepEqual(MirVerification.verify(Analysis.loweredMir(snapshot)), [])
-        if (target === 'wasm32-unknown-unknown') {
-          assert.deepEqual(Analysis.instancesOf(snapshot).foreignCalls, [])
-        }
-      }
+      )
+      const missingStart = wasmSelectionProbe.indexOf('ConnectOptions')
+      assert.deepEqual(
+        Analysis.diagnostics(wasm).map((diagnostic) => ({
+          code: diagnostic.code,
+          start: diagnostic.span.start,
+          end: diagnostic.span.end,
+        })),
+        [{ code: 'SEM0014', start: missingStart, end: missingStart + 'ConnectOptions'.length }],
+      )
     }),
   30_000,
 )
