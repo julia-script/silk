@@ -835,7 +835,12 @@ fn nested(input: &Outer) -> i32 {
     Outer.Other => 0
   }
 }
+fn fallback(input: Outer | Empty) -> i32 {
+  return match move input { Empty {} => 0 _ => 42 }
+}
 pub fn main() -> i32 {
+  let fallbackValue = fallback(Outer.Other)
+  drop fallbackValue
   let nestedOwner = Outer.Io {error: Inner.Open {operation: 17}}
   let nestedValue = nested(&nestedOwner)
   drop nestedValue

@@ -4581,7 +4581,10 @@ export const coveragePath = (
     | { readonly _tag: 'Variant'; readonly ordinal: number }
     | { readonly _tag: 'Field'; readonly field: DeclarationFacts.FieldId }
   > = []
-  if (Type.isUnion(current)) {
+  if (
+    Type.isUnion(current) &&
+    Type.runtimeKey(current) !== Type.runtimeKey(Match.sourceType(member))
+  ) {
     const selected = Match.sourceType(member)
     const ordinal = current.members.findIndex(
       (candidate) => Type.runtimeKey(candidate) === Type.runtimeKey(selected),
