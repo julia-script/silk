@@ -7,6 +7,11 @@ import { NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as WorkspaceInventory from '@silklang/compiler/WorkspaceInventory'
 import * as Effect from 'effect/Effect'
+import * as Deferred from 'effect/Deferred'
+import * as Fiber from 'effect/Fiber'
+import * as Exit from 'effect/Exit'
+import * as Scope from 'effect/Scope'
+import * as Option from 'effect/Option'
 import * as Document from '../src/Document.js'
 import * as WorkspaceCatalog from '../src/WorkspaceCatalog.js'
 
@@ -22,7 +27,7 @@ const fixture = (): string => {
 }
 
 it.effect(
-  'enumerates canonical files in order, prefers open bytes, and includes toolchain summaries',
+  'catalogs canonical files and toolchain summaries, then revises only dirty workspace entries',
   () =>
     Effect.gen(function* () {
       const root = fixture()
@@ -53,58 +58,118 @@ it.effect(
       assert.strictEqual(inventory.project.get('nested/Util')?.source.origin._tag, 'Memory')
       assert.strictEqual(inventory.integrity._tag, 'Matched')
       assert.strictEqual(inventory.distribution.digest.length, 64)
+      const initial = inventory
+      const main = initial.project.get('Main')
+      const utilSummary = initial.project.get('nested/Util')
+      writeFileSync(join(root, 'Main.silk'), 'pub fn revised() -> i32 { return 4 }')
+      const revised = yield* WorkspaceCatalog.refresh({
+        configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
+        sourceRoot: root,
+        documents: [util],
+        previous: initial,
+        invalidation: { dirtyPaths: [join(root, 'Main.silk')], rediscover: false },
+      })
+      assert.strictEqual(revised.distribution, initial.distribution)
+      assert.isFalse(revised.project.get('Main') === main)
+      assert.isTrue(revised.project.get('nested/Util') === utilSummary)
+      assert.deepEqual(
+        WorkspaceInventory.candidates(revised, 'revised').map((value) => value.module),
+        ['Main'],
+      )
+
+      rmSync(join(root, 'nested', 'Util.silk'))
+      const removed = yield* WorkspaceCatalog.refresh({
+        configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
+        sourceRoot: root,
+        documents: [],
+        previous: revised,
+        invalidation: { dirtyPaths: [join(root, 'nested', 'Util.silk')], rediscover: false },
+      })
+      assert.strictEqual(removed.project.has('nested/Util'), false)
+      assert.strictEqual(removed.observation.removed, 1)
+
+      renameSync(join(root, 'Main.silk'), join(root, 'Renamed.silk'))
+      const renamed = yield* WorkspaceCatalog.refresh({
+        configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
+        sourceRoot: root,
+        documents: [],
+        previous: removed,
+        invalidation: {
+          dirtyPaths: [join(root, 'Main.silk'), join(root, 'Renamed.silk')],
+          rediscover: false,
+        },
+      })
+      assert.deepEqual([...renamed.project.keys()], ['Renamed'])
     }).pipe(Effect.provide([SourceResolver.empty, NodeServices.layer])),
+  90_000,
 )
 
-it.effect('revises exact dirty files, removes deletions, and reuses unrelated summaries', () =>
+it.effect('defers catalog selection and retries an interrupted attempt without caching it', () =>
   Effect.gen(function* () {
-    const root = fixture()
-    const initial = yield* WorkspaceCatalog.refresh({
-      configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
-      sourceRoot: root,
-      documents: [],
-      invalidation: { dirtyPaths: [], rediscover: true },
-    })
-    const main = initial.project.get('Main')
-    const util = initial.project.get('nested/Util')
-    writeFileSync(join(root, 'Main.silk'), 'pub fn revised() -> i32 { return 4 }')
-    const revised = yield* WorkspaceCatalog.refresh({
-      configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
-      sourceRoot: root,
-      documents: [],
-      previous: initial,
-      invalidation: { dirtyPaths: [join(root, 'Main.silk')], rediscover: false },
-    })
-    assert.strictEqual(revised.distribution, initial.distribution)
-    assert.isFalse(revised.project.get('Main') === main)
-    assert.isTrue(revised.project.get('nested/Util') === util)
-    assert.deepEqual(
-      WorkspaceInventory.candidates(revised, 'revised').map((value) => value.module),
-      ['Main'],
+    let attempts = 0
+    const expected = WorkspaceInventory.make({ project: [], toolchain: [] })
+    const catalog = yield* WorkspaceCatalog.defer(
+      Effect.suspend(() => {
+        attempts += 1
+        return attempts === 1 ? Effect.interrupt : Effect.succeed(expected)
+      }),
     )
+    assert.strictEqual(attempts, 0)
+    assert.isTrue(Option.isNone(yield* catalog.completed))
+    yield* Effect.exit(catalog.get)
+    assert.isTrue(Option.isNone(yield* catalog.completed))
+    assert.strictEqual(yield* catalog.get, expected)
+    assert.strictEqual(yield* catalog.get, expected)
+    assert.strictEqual(attempts, 2)
+    assert.deepEqual(yield* catalog.completed, Option.some(expected))
+  }),
+)
 
-    rmSync(join(root, 'nested', 'Util.silk'))
-    const removed = yield* WorkspaceCatalog.refresh({
-      configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
-      sourceRoot: root,
-      documents: [],
-      previous: revised,
-      invalidation: { dirtyPaths: [join(root, 'nested', 'Util.silk')], rediscover: false },
-    })
-    assert.strictEqual(removed.project.has('nested/Util'), false)
-    assert.strictEqual(removed.observation.removed, 1)
+it.effect(
+  'retains demanded selection across query cancellation and stops it with its generation',
+  () =>
+    Effect.gen(function* () {
+      const owner = yield* Scope.Scope
+      const generation = yield* Scope.fork(owner)
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let attempts = 0
+      const expected = WorkspaceInventory.make()
+      const pending = yield* WorkspaceCatalog.defer(
+        Effect.gen(function* () {
+          attempts += 1
+          yield* Deferred.succeed(started, undefined)
+          yield* Deferred.await(release)
+          return expected
+        }),
+      )
+      const catalog = yield* WorkspaceCatalog.retain(pending, generation)
+      assert.strictEqual(attempts, 0)
+      const first = yield* Effect.forkChild(catalog.get)
+      yield* Deferred.await(started)
+      yield* Fiber.interrupt(first)
+      assert.isTrue(Option.isNone(yield* catalog.completed))
+      yield* Deferred.succeed(release, undefined)
+      assert.strictEqual(yield* catalog.get, expected)
+      assert.strictEqual(yield* catalog.get, expected)
+      assert.strictEqual(attempts, 1)
+      yield* Scope.close(generation, Exit.succeed(undefined))
 
-    renameSync(join(root, 'Main.silk'), join(root, 'Renamed.silk'))
-    const renamed = yield* WorkspaceCatalog.refresh({
-      configuration: { configuration: { profile: { target: 'aarch64-apple-darwin' } } },
-      sourceRoot: root,
-      documents: [],
-      previous: removed,
-      invalidation: {
-        dirtyPaths: [join(root, 'Main.silk'), join(root, 'Renamed.silk')],
-        rediscover: false,
-      },
-    })
-    assert.deepEqual([...renamed.project.keys()], ['Renamed'])
-  }).pipe(Effect.provide([SourceResolver.empty, NodeServices.layer])),
+      const nextGeneration = yield* Scope.fork(owner)
+      const nextStarted = yield* Deferred.make<void>()
+      const stopped = yield* Deferred.make<void>()
+      const nextPending = yield* WorkspaceCatalog.defer(
+        Deferred.succeed(nextStarted, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.ensuring(Deferred.succeed(stopped, undefined)),
+        ),
+      )
+      const next = yield* WorkspaceCatalog.retain(nextPending, nextGeneration)
+      const waiting = yield* Effect.forkChild(next.get)
+      yield* Deferred.await(nextStarted)
+      yield* Scope.close(nextGeneration, Exit.succeed(undefined))
+      yield* Deferred.await(stopped)
+      assert.isTrue(Exit.isFailure(yield* Fiber.await(waiting)))
+      assert.isTrue(Option.isNone(yield* next.completed))
+    }).pipe(Effect.scoped),
 )

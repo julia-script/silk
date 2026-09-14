@@ -241,7 +241,7 @@ pub effect fn main() -> i32 {
       "pub unsafe effect<'static> fn read(value: i32) -> i32",
     )
 
-    const completion = Document.completion(
+    const completion = yield* Document.completion(
       document,
       snapshot,
       positionAt(source, source.indexOf('read(1)') + 2),
@@ -588,10 +588,15 @@ pub fn main() -> i32 {
   return Effect.
 }`
     const { document, snapshot } = yield* open(source)
-    const completion = Document.completion(document, snapshot, {
-      line: 2,
-      character: '  return Effect.'.length,
-    })
+    const completion = yield* Document.completion(
+      document,
+      snapshot,
+      {
+        line: 2,
+        character: '  return Effect.'.length,
+      },
+      Effect.die('Member completion must not load the auto-import catalog'),
+    )
     assert.include(
       completion.items.map((item) => item.label),
       'catch',
@@ -606,7 +611,7 @@ pub fn main() -> i32 {
   return Allocator.
 }`
     const allocator = yield* open(allocatorSource)
-    const allocatorCompletion = Document.completion(allocator.document, allocator.snapshot, {
+    const allocatorCompletion = yield* Document.completion(allocator.document, allocator.snapshot, {
       line: 2,
       character: '  return Allocator.'.length,
     })
@@ -628,7 +633,7 @@ pub fn main() -> i32 {
   return rec
 }`
     const { document, snapshot } = yield* open(source)
-    const completion = Document.completion(document, snapshot, {
+    const completion = yield* Document.completion(document, snapshot, {
       line: 2,
       character: '  return rec'.length,
     })
@@ -652,7 +657,7 @@ pub fn main() -> i32 {
   return pair.
 }`
     const { document, snapshot } = yield* open(source)
-    const completion = Document.completion(document, snapshot, {
+    const completion = yield* Document.completion(document, snapshot, {
       line: 3,
       character: '  return pair.'.length,
     })
@@ -687,7 +692,7 @@ it.effect('keeps anonymous record identities local while serving editor structur
   return args.
 }`
     const completionDocument = yield* open(completionSource)
-    const completion = Document.completion(
+    const completion = yield* Document.completion(
       completionDocument.document,
       completionDocument.snapshot,
       positionAt(completionSource, completionSource.indexOf('args.') + 'args.'.length),
@@ -729,7 +734,7 @@ pub fn main() -> i32 {
   return Effect.
 }`
     const { document, snapshot } = yield* open(source)
-    const completion = Document.completion(document, snapshot, {
+    const completion = yield* Document.completion(document, snapshot, {
       line: 3,
       character: '  return Effect.'.length,
     })
@@ -750,7 +755,7 @@ it.effect('completes types in damaged parameter and generic-argument positions',
 type Trouble = Problem
 fn identity<T>(value: ) -> i32 { return 0 }`
     const parameter = yield* open(parameterSource)
-    const parameterCompletion = Document.completion(parameter.document, parameter.snapshot, {
+    const parameterCompletion = yield* Document.completion(parameter.document, parameter.snapshot, {
       line: 2,
       character: 'fn identity<T>(value: '.length,
     })
@@ -770,7 +775,7 @@ fn identity<T>(value: ) -> i32 { return 0 }`
     const argumentSource = `struct Problem {}
 pub fn main() -> i32 { return Effect.catch< }`
     const argument = yield* open(argumentSource)
-    const argumentCompletion = Document.completion(argument.document, argument.snapshot, {
+    const argumentCompletion = yield* Document.completion(argument.document, argument.snapshot, {
       line: 1,
       character: 'pub fn main() -> i32 { return Effect.catch<'.length,
     })
@@ -802,7 +807,7 @@ pub fn main() -> i32 {
         value: '```silk\nStatus.Ready: Status\n```',
       })
 
-      const completion = Document.completion(
+      const completion = yield* Document.completion(
         document,
         snapshot,
         positionAt(source, source.indexOf('Status.Ready') + 'Status.'.length),
@@ -903,7 +908,7 @@ pub fn main() -> i32 {
       const completionSource = `union Option<T> { Some { value: T }, None }
 pub fn main() -> i32 { let option = Option. return 0 }`
       const completionState = yield* open(completionSource)
-      const completion = Document.completion(
+      const completion = yield* Document.completion(
         completionState.document,
         completionState.snapshot,
         positionAt(completionSource, completionSource.indexOf('Option.') + 'Option.'.length),
@@ -1705,20 +1710,21 @@ it.effect('warns on an unused authored import binding and removes only its selec
       start: positionOf(source, 'boundary'),
       end: positionAt(source, source.indexOf('boundary') + 'boundary'.length),
     })
-    const action = Document.codeActions(
+    const action = (yield* Document.codeActions(
       document,
       snapshot,
       wholeDocument(source),
       uriOfModule,
-    ).find((candidate) => candidate.diagnostics?.[0]?.code === 'LSP0004')
+      Effect.die('Unused import actions must not load the auto-import catalog'),
+    )).find((candidate) => candidate.diagnostics?.[0]?.code === 'LSP0004')
     assert.strictEqual(action?.title, 'Remove unused import')
     assert.isUndefined(action?.edit)
     assert.isDefined(action)
     if (action === undefined) return
-    const resolved = Document.resolveCodeAction(
+    const resolved = yield* Document.resolveCodeAction(
       document,
       snapshot,
-      inventoryOf(modules),
+      Effect.die('Resolving an unused import must not load the auto-import catalog'),
       action,
       uriOfModule,
     )
@@ -1748,8 +1754,13 @@ it.effect('warns on an unused authored import binding and removes only its selec
 
     const stale = Document.make({ ...document, version: 2 })
     assert.include(
-      Document.resolveCodeAction(stale, snapshot, inventoryOf(modules), action, uriOfModule)
-        .disabled?.reason ?? '',
+      (yield* Document.resolveCodeAction(
+        stale,
+        snapshot,
+        Effect.succeed(inventoryOf(modules)),
+        action,
+        uriOfModule,
+      )).disabled?.reason ?? '',
       'revision',
     )
   }),
@@ -2014,7 +2025,7 @@ it.effect('offers one quick fix that deletes a redundant alias clause', () =>
       ],
       'main',
     )
-    const actions = Document.codeActions(
+    const actions = yield* Document.codeActions(
       document,
       snapshot,
       wholeDocument(redundantAlias),
@@ -2061,12 +2072,12 @@ it.effect('warns about combinable imports and consolidates them without compiler
         .map((diagnostic) => diagnostic.code),
       ['LSP0003'],
     )
-    const action = Document.codeActions(
+    const action = (yield* Document.codeActions(
       document,
       snapshot,
       wholeDocument(source),
       uriOfModule,
-    ).find((candidate) => candidate.diagnostics?.[0]?.code === 'LSP0003')
+    )).find((candidate) => candidate.diagnostics?.[0]?.code === 'LSP0003')
     assert.deepEqual(action?.edit?.changes?.[uriOfModule('main')], [
       {
         range: {
@@ -2095,7 +2106,7 @@ it.effect('offers no code action for a diagnostic that carries no edit', () =>
       'SEM0004',
     )
     assert.deepEqual(
-      Document.codeActions(document, snapshot, wholeDocument(source), () => undefined),
+      yield* Document.codeActions(document, snapshot, wholeDocument(source), () => undefined),
       [],
     )
   }),
@@ -2126,11 +2137,11 @@ it.effect('completes catalog declarations with explicit collision-aware imports'
       { module: 'main', text: source },
       { module: 'silk/logger', text: 'pub union Logger { Empty }' },
     ])
-    const completion = Document.completion(
+    const completion = yield* Document.completion(
       document,
       snapshot,
       positionAt(source, source.indexOf('Logg') + 'Logg'.length),
-      inventory,
+      Effect.succeed(inventory),
     )
     const imported = completion.items.find(
       (item) => item.label === 'Logger' && item.detail === 'Import from silk/logger',
@@ -2157,11 +2168,11 @@ it.effect('completes partial and complete Effect spellings with a member import'
     for (const spelling of ['Eff', 'Effect']) {
       const source = `pub fn main() -> i32 { ${spelling} return 0 }`
       const { document, snapshot } = yield* open(source)
-      const completion = Document.completion(
+      const completion = yield* Document.completion(
         document,
         snapshot,
         positionAt(source, source.indexOf(spelling) + spelling.length),
-        inventoryOf([{ module: 'main', text: source }], ['silk/effect']),
+        Effect.succeed(inventoryOf([{ module: 'main', text: source }], ['silk/effect'])),
       )
       // The anchored Effect member makes the namespace form redundant.
       assert.notInclude(
@@ -2192,11 +2203,11 @@ it.effect('keeps Effect type completion import-free', () =>
   Effect.gen(function* () {
     const source = 'fn retain(value: Eff) -> i32 { return 0 }'
     const { document, snapshot } = yield* open(source)
-    const completion = Document.completion(
+    const completion = yield* Document.completion(
       document,
       snapshot,
       positionAt(source, source.indexOf('Eff') + 'Eff'.length),
-      inventoryOf([{ module: 'main', text: source }], ['silk/effect']),
+      Effect.succeed(inventoryOf([{ module: 'main', text: source }], ['silk/effect'])),
     )
     const effect = completion.items.find(
       (item) => item.label === 'Effect' && item.additionalTextEdits === undefined,
@@ -2213,11 +2224,11 @@ it.effect('aliases a colliding Effect member completion deterministically', () =
   Effect.gen(function* () {
     const source = 'struct Effect {}\npub fn main() -> i32 { Eff return 0 }'
     const { document, snapshot } = yield* open(source)
-    const completion = Document.completion(
+    const completion = yield* Document.completion(
       document,
       snapshot,
       positionAt(source, source.lastIndexOf('Eff') + 'Eff'.length),
-      inventoryOf([{ module: 'main', text: source }], ['silk/effect']),
+      Effect.succeed(inventoryOf([{ module: 'main', text: source }], ['silk/effect'])),
     )
     assert.notInclude(
       completion.items.map((item) => item.detail),
@@ -2239,11 +2250,11 @@ it.effect('does not duplicate an existing equivalent Effect import', () =>
     for (const declaration of ['import silk.effect { Effect }', 'import silk.effect {Effect}']) {
       const source = `${declaration}\npub fn main() -> i32 { Eff return 0 }`
       const { document, snapshot } = yield* open(source)
-      const completion = Document.completion(
+      const completion = yield* Document.completion(
         document,
         snapshot,
         positionAt(source, source.lastIndexOf('Eff') + 'Eff'.length),
-        inventoryOf([{ module: 'main', text: source }], ['silk/effect']),
+        Effect.succeed(inventoryOf([{ module: 'main', text: source }], ['silk/effect'])),
       )
       assert.strictEqual(
         completion.items.filter((item) => item.detail === 'Import namespace from silk/effect')
@@ -2297,15 +2308,20 @@ it.effect('resolves explicit lifetime edits only for the analyzed document revis
 struct View<T> { value: &T }`
     const { document, snapshot } = yield* open(source)
     const inventory = inventoryOf([{ module: 'main', text: source }])
-    const actions = Document.codeActions(document, snapshot, wholeDocument(source), uriOfModule)
+    const actions = yield* Document.codeActions(
+      document,
+      snapshot,
+      wholeDocument(source),
+      uriOfModule,
+    )
     const selected = actions.find((action) => action.title === 'Make lifetimes explicit')
     assert.isDefined(selected)
     if (selected === undefined) return
     assert.isUndefined(selected.edit)
-    const resolved = Document.resolveCodeAction(
+    const resolved = yield* Document.resolveCodeAction(
       document,
       snapshot,
-      inventory,
+      Effect.succeed(inventory),
       selected,
       uriOfModule,
     )
@@ -2328,7 +2344,13 @@ struct View<T, 'life1> { value: &'life1 T }`,
       Document.make({ ...document, version: 2 }),
       Document.make({ ...document, bytes: encoder.encode(source.replace('value', 'other')) }),
     ]) {
-      const rejected = Document.resolveCodeAction(stale, snapshot, inventory, resolved, uriOfModule)
+      const rejected = yield* Document.resolveCodeAction(
+        stale,
+        snapshot,
+        Effect.succeed(inventory),
+        resolved,
+        uriOfModule,
+      )
       assert.isDefined(rejected.disabled)
       assert.isUndefined(rejected.edit)
     }
@@ -2348,7 +2370,7 @@ it.effect('withholds lifetime expansions from invalid headers and requests insid
         ? { start: positionAt(source, body), end: positionAt(source, body + 6) }
         : wholeDocument(source)
       assert.deepEqual(
-        Document.codeActions(document, snapshot, range, uriOfModule).filter(
+        (yield* Document.codeActions(document, snapshot, range, uriOfModule)).filter(
           (action) => action.title === 'Make lifetimes explicit',
         ),
         [],
@@ -2365,12 +2387,12 @@ effect fn risky() -> i32 ! Problem { fail Problem {} }
 effect fn recover(error: Problem) -> i32 { return 42 }
 pub effect fn main() -> i32 { return run risky() }`
     const { document, snapshot } = yield* open(source)
-    const actions = Document.codeActions(
+    const actions = (yield* Document.codeActions(
       document,
       snapshot,
       wholeDocument(source),
       uriOfModule,
-    ).filter((action) => action.kind === 'quickfix')
+    )).filter((action) => action.kind === 'quickfix')
     assert.deepEqual(
       actions.map((action) => action.title),
       ['Propagate Problem from this Effect', 'Recover this Effect with recover'],
@@ -2397,12 +2419,12 @@ pub effect fn main() -> i32 {
   return run Clock.read()
 }`
     const { document, snapshot } = yield* open(source)
-    const actions = Document.codeActions(
+    const actions = (yield* Document.codeActions(
       document,
       snapshot,
       wholeDocument(source),
       uriOfModule,
-    ).filter((action) => action.kind === 'quickfix')
+    )).filter((action) => action.kind === 'quickfix')
     assert.deepEqual(
       actions.map((action) => action.title),
       ['Propagate &Clock from this Effect', 'Provide this Effect with provider'],
@@ -2429,12 +2451,12 @@ it.effect('discovers ambiguous auto-import descriptors and resolves the selected
     ]
     const { document, snapshot } = yield* open(source)
     const inventory = inventoryOf(modules)
-    const actions = Document.codeActions(
+    const actions = yield* Document.codeActions(
       document,
       snapshot,
       wholeDocument(source),
       uriOfModule,
-      inventory,
+      Effect.succeed(inventory),
     )
 
     assert.deepEqual(
@@ -2450,10 +2472,10 @@ it.effect('discovers ambiguous auto-import descriptors and resolves the selected
     const selected = actions[0]
     assert.isDefined(selected)
     if (selected === undefined) return
-    const resolved = Document.resolveCodeAction(
+    const resolved = yield* Document.resolveCodeAction(
       document,
       snapshot,
-      inventory,
+      Effect.succeed(inventory),
       selected,
       uriOfModule,
     )
@@ -2466,8 +2488,13 @@ it.effect('discovers ambiguous auto-import descriptors and resolves the selected
 
     const stale = Document.make({ ...document, version: 2 })
     assert.include(
-      Document.resolveCodeAction(stale, snapshot, inventory, selected, uriOfModule).disabled
-        ?.reason ?? '',
+      (yield* Document.resolveCodeAction(
+        stale,
+        snapshot,
+        Effect.succeed(inventory),
+        selected,
+        uriOfModule,
+      )).disabled?.reason ?? '',
       'revision',
     )
   }),
@@ -2489,29 +2516,29 @@ pub fn main() -> i32 { return calculate() }`
       const { document, snapshot } = yield* openProject(modules, 'main')
       const inventory = inventoryOf(modules)
       assert.deepEqual(
-        Document.codeActions(
+        yield* Document.codeActions(
           document,
           snapshot,
           { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } },
           uriOfModule,
-          inventory,
+          Effect.succeed(inventory),
         ),
         [],
       )
-      const actions = Document.codeActions(
+      const actions = yield* Document.codeActions(
         document,
         snapshot,
         wholeDocument(source),
         uriOfModule,
-        inventory,
+        Effect.succeed(inventory),
       )
       const action = actions.find((candidate) => candidate.title.includes('calculate'))
       assert.isDefined(action)
       if (action === undefined) return
-      const resolved = Document.resolveCodeAction(
+      const resolved = yield* Document.resolveCodeAction(
         document,
         snapshot,
-        inventory,
+        Effect.succeed(inventory),
         action,
         uriOfModule,
       )
@@ -2541,7 +2568,12 @@ it.effect('returns the quick fixes of two diagnostics in diagnostic order', () =
       ],
       'main',
     )
-    const actions = Document.codeActions(document, snapshot, wholeDocument(twoAliases), uriOfModule)
+    const actions = yield* Document.codeActions(
+      document,
+      snapshot,
+      wholeDocument(twoAliases),
+      uriOfModule,
+    )
     assert.deepEqual(
       actions.map((action) => action.edit?.changes?.[uriOfModule('main')]?.[0]?.range.start),
       [
@@ -2565,7 +2597,7 @@ it.effect('measures a quick fix range in UTF-16 units after non-ASCII source', (
       ],
       'main',
     )
-    const actions = Document.codeActions(
+    const actions = yield* Document.codeActions(
       document,
       snapshot,
       wholeDocument(nonAsciiAlias),
@@ -2590,7 +2622,7 @@ it.effect('offers no quick fix for a diagnostic outside the requested range', ()
       'main',
     )
     assert.deepEqual(
-      Document.codeActions(
+      yield* Document.codeActions(
         document,
         snapshot,
         { start: { line: 1, character: 0 }, end: { line: 1, character: 4 } },
@@ -2833,7 +2865,7 @@ pub fn main() -> i32 {
       [],
     )
     const finalUse = positionOf(source, 'value', 6)
-    const completion = Document.completion(document, snapshot, {
+    const completion = yield* Document.completion(document, snapshot, {
       ...finalUse,
       character: finalUse.character + 3,
     })
