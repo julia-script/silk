@@ -72,6 +72,14 @@ it.effect(
       assert.strictEqual(revised.distribution, initial.distribution)
       assert.isFalse(revised.project.get('Main') === main)
       assert.isTrue(revised.project.get('nested/Util') === utilSummary)
+      assert.strictEqual(revised.observation.scanned, 2)
+      assert.strictEqual(revised.observation.reused, 1)
+      assert.strictEqual(revised.observation.revised, 1)
+      assert.strictEqual(revised.observation.removed, 0)
+      assert.strictEqual(
+        revised.observation.indexedModules,
+        revised.project.size + revised.toolchain.size,
+      )
       assert.deepEqual(
         WorkspaceInventory.candidates(revised, 'revised').map((value) => value.module),
         ['Main'],

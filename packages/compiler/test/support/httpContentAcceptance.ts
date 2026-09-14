@@ -2,11 +2,11 @@
 const httpContentRuntimeSource = `import silk.allocator {Allocator, OutOfMemoryError}
 import silk.buffered_duplex {BufferedContext, BufferedDuplex, withBufferedCapacity, withBufferedCapacityContext}
 import silk.buffered_input {BufferError}
-import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation, ReadTransfer}
+import silk.byte_duplex {ByteDuplex, ByteIoError, ByteIoOperation}
 import silk.bytes {Bytes}
 import silk.effect {Effect}
 import silk.execution {Execution}
-import silk.http {Header, LimitKind, Method, Version, ValueComponent, ValueError, ValueReason}
+import silk.http {Header, LimitKind, Method, ValueComponent, ValueError, ValueReason}
 import silk.http_body {
   Anomaly,
   BodyComponent,
@@ -41,11 +41,11 @@ import silk.http_content {
   withReader,
 }
 import silk.http_head {Limits as HeadLimits, ResponseHead, ResponseParser, parseResponse}
-import silk.http_headers {Headers, Limits as ValueLimits}
+import silk.http_headers {Limits as ValueLimits}
 import silk.inflate {Decoder as InflateDecoder, Limits as InflateLimits}
 import silk.inflate {ErrorKind as InflateErrorKind}
 import silk.layout {Layout}
-import silk.memory_byte_duplex {MemoryByteDuplex, MemoryReadEvent, MemoryWriteEvent, MemoryWriteAction}
+import silk.memory_byte_duplex {MemoryByteDuplex, MemoryReadEvent, MemoryWriteEvent}
 import silk.monotonic_clock {MonotonicClock}
 import silk.option {Option}
 import silk.result {Result}

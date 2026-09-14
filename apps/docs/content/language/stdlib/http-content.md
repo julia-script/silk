@@ -24,13 +24,13 @@ provisional because a later wrapper checksum, trailer, or framed boundary can st
 This low-level actor treats the body supplied to each `withReader` invocation as the encoded
 representation described by the plan. It does not prove that those bytes came from the retained
 head and cannot prevent a copied head from being planned over already-decoded bytes. The affine
-response/body envelope tracked by JUL-23 owns that stronger provenance and decode-once contract.
+response/body envelope in `silk.http_client` owns that stronger provenance and decode-once contract.
 Cleanup is guaranteed for structured Effect exits, including interruption, but not for fatal
 traps that bypass Effect finalizers and Drop.
 
 Import as `ContentReader` with `import silk.http_content { ContentReader }`.
 
-Public declarations: 21.
+Public declarations: 24.
 
 <a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4d6f6465"></a>
 
@@ -1245,6 +1245,158 @@ pub fn acceptEncoding<'value>(mode: Mode, policy: silk/http_content.AcceptEncodi
 ```
 
 Builds at most one validated `Accept-Encoding` field without mutating a request.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f646572"></a>
+
+## `Decoder`
+
+```silk
+pub struct Decoder
+```
+
+Owned framing and content state for a caller-owned wire transport.
+
+### Details
+
+Planning consumes borrowed metadata, but the resulting decoder owns all runtime state. The
+caller retains input bytes not consumed by `step`, including the next HTTP message suffix.
+A higher-level response owner must bind the plan and those wire bytes to the same response.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f6465722e6d616b65"></a>
+
+### Associated function `Decoder.make`
+
+```silk
+pub effect<'env> fn make<'head: 'env, 'method: 'env, 'names: 'env, 'env>(plan: silk/http_content.CodingPlan<'head, 'method, 'names>) -> Decoder ! silk/http_content.ContentError<'head> | OutOfMemoryError ? &mut Allocator
+```
+
+Acquires the existing bounded framing and codec stack from one validated plan.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f6465722e73746570"></a>
+
+### Method `Decoder.step`
+
+```silk
+pub fn step<'life0, 'life1, 'life2>(self: &'life0 mut Decoder, input: &'life1 [u8], output: &'life2 mut [u8], endOfInput: bool) -> silk/result.Result<silk/http_content.DecodeProgress, silk/http_content.DecodeFailure>
+```
+
+Advances without I/O, retaining exact consumed and written prefixes on failure.
+
+#### Details
+
+`endOfInput` promises no bytes follow the supplied input. Returned representation bytes
+remain provisional until `completion` confirms framing, checksums and pending output.
+Empty output completes locally without consuming input or changing a live decoder.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f6465722e70726f6772657373"></a>
+
+### Method `Decoder.progress`
+
+```silk
+pub fn progress<'life0>(self: &'life0 Decoder) -> ContentProgress
+```
+
+Reports the current cumulative representation coordinates without advancing input.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f6465722e636f6d706c6574696f6e"></a>
+
+### Method `Decoder.completion`
+
+```silk
+pub fn completion<'owner>(self: &'owner Decoder) -> silk/result.Result<silk/option.Option<silk/http_content.ContentCompletion<'owner>>, silk/http_content.ContentError<'static>>
+```
+
+Borrows successful framing and content completion from this owner.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f6465722e747261696c657273"></a>
+
+### Method `Decoder.trailers`
+
+```silk
+pub fn trailers<'owner>(self: &'owner Decoder) -> silk/result.Result<silk/option.Option<silk/http_body.Trailers<'owner>>, silk/http_content.ContentError<'static>>
+```
+
+Borrows trailers only after successful content and body completion.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f6465722e6162616e646f6e"></a>
+
+### Method `Decoder.abandon`
+
+```silk
+pub fn abandon<'life0>(self: &'life0 mut Decoder) -> ()
+```
+
+Permanently abandons unfinished decoding without reading or draining the transport.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f646550726f6772657373"></a>
+
+## `DecodeProgress`
+
+```silk
+pub struct DecodeProgress
+```
+
+One incremental wire-to-representation transition.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f646550726f67726573733a3a6669656c643a30"></a>
+
+### Field `consumed`
+
+```silk
+pub consumed: usize
+```
+
+The exact wire prefix consumed from the supplied input.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f646550726f67726573733a3a6669656c643a31"></a>
+
+### Field `progress`
+
+```silk
+pub progress: ContentProgress
+```
+
+Provisional output and cumulative representation coordinates.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f646550726f67726573733a3a6669656c643a32"></a>
+
+### Field `needsInput`
+
+```silk
+pub needsInput: bool
+```
+
+Whether another wire prefix is needed before the decoder can advance.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f64654661696c757265"></a>
+
+## `DecodeFailure`
+
+```silk
+pub struct DecodeFailure
+```
+
+A content failure with its committed input prefix and owned runtime cause.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f64654661696c7572653a3a6669656c643a30"></a>
+
+### Field `consumed`
+
+```silk
+pub consumed: usize
+```
+
+The exact wire prefix consumed before the failure.
+
+<a id="declaration-73696c6b2f687474705f636f6e74656e743a3a4465636f64654661696c7572653a3a6669656c643a31"></a>
+
+### Field `error`
+
+```silk
+pub error: silk/http_content.ContentError<'static>
+```
+
+The original content, framing, or codec failure and output coordinates.
 
 <a id="declaration-73696c6b2f687474705f636f6e74656e743a3a436f6e74656e74526561646572"></a>
 

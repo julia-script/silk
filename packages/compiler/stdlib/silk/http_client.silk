@@ -7,6 +7,8 @@
 
 import silk.allocator {Allocator, OutOfMemoryError}
 import silk.bytes {Bytes}
+import silk.box {Box}
+import silk.layout {Layout}
 import silk.byte_duplex {ReadTransfer, ByteIoError}
 import silk.tls_connection {ConnectionError}
 import silk.effect {Effect}
@@ -38,7 +40,11 @@ import silk.http_body as Body
 import silk.http_content as Content
 import silk.http_content {
   Decoder as ContentDecoder,
+  DecodeProgress as ContentDecodeProgress,
+  DecodeFailure as ContentDecodeFailure,
   ContentError,
+  ContentReason,
+  ContentLimitKind,
   ContentProgress,
   ContentProgressState,
   ResponseContext,
@@ -314,7 +320,7 @@ pub struct Exchange<'exchange, P> {
   connection: &'exchange mut Connection<P>
   encoder: Encoder
   decoder: Option<Decoder>
-  contentDecoder: Option<ContentDecoder>
+  contentDecoder: Option<Box<ContentDecoder>>
   bodySelected: bool
   contentSelected: bool
   options: RequestOptions
@@ -616,7 +622,7 @@ pub effect fn withExchange<'exchange, 'callback, P, A, E, ?R>(
     connection: move connection,
     encoder: move encoder,
     decoder: Option.none<Decoder>(),
-    contentDecoder: Option.none<ContentDecoder>(),
+    contentDecoder: Option.none<Box<ContentDecoder>>(),
     bodySelected: false,
     contentSelected: false,
     options: move options,
@@ -645,7 +651,7 @@ pub effect fn withExchange<'exchange, 'callback, P, A, E, ?R>(
       owned.connection.phaseValue = ConnectionPhase.Closed
       Encoder.abandon(&mut owned.encoder)
       if let Option.Some {value} = &mut owned.contentDecoder {
-        ContentDecoder.abandon(&mut value)
+        abandonContentBox(&mut value)
       }
     }
     return ()
@@ -1116,11 +1122,14 @@ pub effect fn trailers<'head, 'exchange, P>(exchange: &'head Exchange<'exchange,
       Option.None => {
         fail ClientError.InvalidState
       }
-      Option.Some {value} => match move ContentDecoder.trailers(&value) {
-        Result.Failure {error} => {
-          fail ClientError.Content {error: move error}
+      Option.Some {value} => {
+        let decoders = Box.get<ContentDecoder>(&value)
+        return match move ContentDecoder.trailers(&decoders[0]) {
+          Result.Failure {error} => {
+            fail ClientError.Content {error: move error}
+          }
+          Result.Success {value: found} => move found
         }
-        Result.Success {value: found} => move found
       }
     }
   }
@@ -1618,6 +1627,7 @@ pub effect fn beginContent<'head, 'exchange: 'head, P>(
     }
     Result.Success {value} => move value
   }
+  let ownedLimit = limits.maxOwned
   let plan = match move CodingPlan.make(
     move context,
     mode,
@@ -1629,13 +1639,42 @@ pub effect fn beginContent<'head, 'exchange: 'head, P>(
     }
     Result.Success {value} => move value
   }
+  let reserved = match move usize.checkedAdd(
+    plan.ownedBytes(),
+    Layout.of<Box<ContentDecoder>>().bytes,
+  ) {
+    Option.None => {
+      fail ContentError<'head> {
+        reason: ContentReason<'head>.ArithmeticOverflow,
+        written: usize.ZERO,
+        totalEncoded: u64.MIN,
+        totalIntermediate: u64.MIN,
+        totalDecoded: u64.MIN,
+      }
+    }
+    Option.Some {value} => value
+  }
+  if reserved > ownedLimit {
+    fail ContentError<'head> {
+      reason: ContentReason<'head>.InvalidLimit {
+        limit: ContentLimitKind.OwnedBytes,
+        allowed: usize.toU64(ownedLimit),
+        attempted: usize.toU64(reserved),
+      },
+      written: usize.ZERO,
+      totalEncoded: u64.MIN,
+      totalIntermediate: u64.MIN,
+      totalDecoded: u64.MIN,
+    }
+  }
   let decoder = run ContentDecoder.make(move plan)
+  let boxed = run Box.make<ContentDecoder>(move decoder)
   run checkDeadline(&exchange.options.deadline, false)
   drop method
   drop requestHead
   drop head
   exchange.decoder = Option.none<Decoder>()
-  exchange.contentDecoder = Option.some<ContentDecoder>(move decoder)
+  exchange.contentDecoder = Option.some<Box<ContentDecoder>>(move boxed)
   exchange.phaseValue = ExchangePhase.Response
   return ()
 }
@@ -1658,7 +1697,10 @@ where
       Option.None => {
         fail ClientError.InvalidState
       }
-      Option.Some {value} => ContentDecoder.progress(&value)
+      Option.Some {value} => {
+        let decoders = Box.get<ContentDecoder>(&value)
+        return ContentDecoder.progress(&decoders[0])
+      }
     }
     return move progress
   }
@@ -1675,12 +1717,7 @@ where
       Option.None => {
         fail ClientError.InvalidState
       }
-      Option.Some {value} => ContentDecoder.step(
-        &mut value,
-        bytes,
-        &mut output,
-        exchange.connection.eof,
-      )
+      Option.Some {value} => stepContentBox(&mut value, bytes, &mut output, exchange.connection.eof)
     }
     drop bytes
     drop input
@@ -1703,20 +1740,37 @@ where
   return unavailable<ContentProgress>()
 }
 
-effect fn contentComplete(decoder: &Option<ContentDecoder>) -> bool ! ClientError {
+effect fn contentComplete(decoder: &Option<Box<ContentDecoder>>) -> bool ! ClientError {
   return match & decoder.* {
     Option.None => false
-    Option.Some {value} => match move ContentDecoder.completion(&value) {
-      Result.Failure {error} => {
-        fail ClientError.Content {error: move error}
-      }
-      Result.Success {value: evidence} => match move evidence {
-        Option.None => false
-        Option.Some {value: completion} => {
-          drop completion
-          return true
+    Option.Some {value} => {
+      let decoders = Box.get<ContentDecoder>(&value)
+      return match move ContentDecoder.completion(&decoders[0]) {
+        Result.Failure {error} => {
+          fail ClientError.Content {error: move error}
+        }
+        Result.Success {value: evidence} => match move evidence {
+          Option.None => false
+          Option.Some {value: completion} => {
+            drop completion
+            return true
+          }
         }
       }
     }
   }
+}
+
+fn abandonContentBox(boxed: &mut Box<ContentDecoder>) -> () {
+  let mut decoders = Box.getMut<ContentDecoder>(move boxed)
+  ContentDecoder.abandon(&mut decoders[0])
+  return ()
+}
+
+fn stepContentBox(boxed: &mut Box<ContentDecoder>, input: &[u8], output: &mut [u8], ended: bool) -> Result<
+  ContentDecodeProgress,
+  ContentDecodeFailure,
+> {
+  let mut decoders = Box.getMut<ContentDecoder>(move boxed)
+  return ContentDecoder.step(&mut decoders[0], input, move output, ended)
 }

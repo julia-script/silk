@@ -64,3 +64,9 @@ The supported actors (`Document`, `Inspection`, `LineIndex`, `Server`, and `Work
 both as root namespaces and as matching subpaths for embedding the same analysis-to-protocol
 translation elsewhere. Prefer a focused import such as `@silklang/lsp/Inspection` when a module
 depends on one actor.
+
+## Development benchmarks
+
+Run `pnpm --filter @silklang/lsp bench:auto-import` to measure catalog construction, incremental
+refresh, and exact-name lookup over 200 synthetic modules. This opt-in benchmark reports timings;
+the default suite checks lookup and summary reuse on smaller shared fixtures.

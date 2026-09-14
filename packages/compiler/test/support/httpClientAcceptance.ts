@@ -161,23 +161,8 @@ struct TestTransport {
   failFlush: bool
   expireAfterWrite: bool
   memory: MemoryByteDuplex
-  cancellationAudit: Option<Shared<CancellationAudit>>
 }
 
-impl Drop for TestTransport {
-  fn drop(self: &mut TestTransport) -> () {
-    if let Option.Some {value} = &self.cancellationAudit {
-      let closes = MemoryByteDuplex.closeAttempts(&self.memory)
-      let record = fn(audit: &mut CancellationAudit) -> () {
-        audit.drops = audit.drops + usize.ONE
-        audit.closes = closes
-        return ()
-      }
-      Shared.withMut(&value, move record)
-    }
-    return ()
-  }
-}
 
 impl HttpTransport for TestTransport {
   effect fn readSomeRaw(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
@@ -775,7 +760,6 @@ effect fn runCase(scenario: i32) -> i32 ! ClientError | RequestError | OutOfMemo
     |> Effect.provideMut<Allocator>(&mut allocator)
   let adapter = TestTransport {
     memory: move memory,
-    cancellationAudit: Option.none<Shared<CancellationAudit>>(),
     expireAfterWrite: scenario == 18,
     failFlush: scenario == 19 || scenario == 20,
   }
@@ -1381,21 +1365,38 @@ fn inputFor(scenario: i32) -> &'static [u8] {
   return b"HTTP/1.1 200 OK\\r\\nContent-Length: 4\\r\\n\\r\\nWikiHTTP/1.1 404 Not Found\\r\\nContent-Length: 4\\r\\n\\r\\nWiki"
 }
 
-struct LoanHandler<'env> {
-  marker: &'env i32
+struct LoanHandler<'marker, 'transport> {
+  marker: &'marker i32
 }
 
-impl<'env> ConnectionHandler<Loan<'env, TestTransport>, i32, ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random> for LoanHandler<
-  'env,
+impl<'marker, 'transport> ConnectionHandler<Loan<'transport, TestTransport>, i32, ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random> for LoanHandler<
+  'marker,
+  'transport,
 > {
   effect<'call> fn handle<'call>(
     handler: Self,
-    connection: &'call mut Connection<Loan<'env, TestTransport>>,
+    connection: &'call mut Connection<Loan<'transport, TestTransport>>,
   ) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
+    let result = handler.marker.* + 9
     drop handler
     drop connection
-    return 9
+    return result
   }
+}
+
+effect<'transport> fn withBorrowedMarker<'marker, 'transport>(
+  transport: &'transport mut TestTransport,
+  marker: &'marker i32,
+  origin: Origin,
+) -> i32 ! ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random {
+  return run Client.withConnected<'transport>(
+    move transport,
+    origin,
+    Version.Http11,
+    limits(),
+    Option.none<Instant>(),
+    LoanHandler<'marker, 'transport> {marker: marker},
+  )
 }
 
 effect fn borrowedLoan() -> i32 ! ClientError | RequestError | OutOfMemoryError {
@@ -1408,7 +1409,6 @@ effect fn borrowedLoan() -> i32 ! ClientError | RequestError | OutOfMemoryError 
     expireAfterWrite: false,
     failFlush: false,
     memory: move memory,
-    cancellationAudit: Option.none<Shared<CancellationAudit>>(),
   }
   let uri = match move Uri.parse("http://example.test/") {
     Result.Failure {error} => {
@@ -1424,19 +1424,12 @@ effect fn borrowedLoan() -> i32 ! ClientError | RequestError | OutOfMemoryError 
     }
     Result.Success {value} => value
   }
-  let marker = 0
-  let result = run Client.withConnected(
-    &mut transport,
-    origin,
-    Version.Http11,
-    limits(),
-    Option.none<Instant>(),
-    LoanHandler {marker: &marker},
-  )
+  let marker = 7
+  let result = run withBorrowedMarker(&mut transport, &marker, origin)
     |> Effect.provideMut<Random>(&mut random)
     |> Effect.provideMut<MonotonicClock>(&mut clock)
     |> Effect.provideMut<Allocator>(&mut allocator)
-  if result != 9 {
+  if result != 16 {
     return 105
   }
   if transport.memory.phase() != MemoryByteDuplexPhase.Closed || transport.memory.closeAttempts() != usize.ONE {
@@ -1454,7 +1447,7 @@ fn retainCancellationWake(wake: Intrinsic.Wake) -> CancellationWake {
 }
 
 effect<'call> fn canceledExchange<'call, 'exchange: 'call>(
-  exchangeValue: &'call mut Exchange<'exchange, TestTransport>,
+  exchangeValue: &'call mut Exchange<'exchange, CancellationTransport>,
 ) -> i32 {
   drop exchangeValue
   run Execution.park(retainCancellationWake)
@@ -1486,12 +1479,55 @@ fn cancellationAuditResult(audit: &CancellationAudit) -> i32 {
   return 0
 }
 
+struct CancellationTransport {
+  transport: TestTransport
+  audit: Shared<CancellationAudit>
+}
+
+impl Drop for CancellationTransport {
+  fn drop(self: &mut CancellationTransport) -> () {
+    let closes = MemoryByteDuplex.closeAttempts(&self.transport.memory)
+    let record = fn(audit: &mut CancellationAudit) -> () {
+      audit.drops = audit.drops + usize.ONE
+      audit.closes = closes
+      return ()
+    }
+    Shared.withMut<CancellationAudit, ()>(&self.audit, move record)
+    return ()
+  }
+}
+
+impl HttpTransport for CancellationTransport {
+  effect fn readSomeRaw(self: &mut Self, output: &mut [u8], deadline: Option<Instant>) -> ReadTransfer
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random {
+    return run HttpTransport.readSome(move output, move deadline)
+      |> Effect.provideMut<HttpTransport>(&mut self.transport)
+  }
+  effect fn writeSomeRaw(self: &mut Self, input: &[u8], deadline: Option<Instant>) -> usize
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random {
+    return run HttpTransport.writeSome(move input, move deadline)
+      |> Effect.provideMut<HttpTransport>(&mut self.transport)
+  }
+  effect fn flush(self: &mut Self, deadline: Option<Instant>) -> ()
+  ! TransportError | OutOfMemoryError
+  ? &mut MonotonicClock | &mut Allocator | &mut Random {
+    return run HttpTransport.flush(move deadline)
+      |> Effect.provideMut<HttpTransport>(&mut self.transport)
+  }
+  effect fn close(self: &mut Self) -> () ! TransportError {
+    return run HttpTransport.close()
+      |> Effect.provideMut<HttpTransport>(&mut self.transport)
+  }
+}
+
 struct CancellationHandler {
   request: PreparedRequest
 }
 
-impl ConnectionHandler<TestTransport, i32, ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random> for CancellationHandler {
-  effect<'call> fn handle<'call>(handler: Self, connection: &'call mut Connection<TestTransport>) -> i32
+impl ConnectionHandler<CancellationTransport, i32, ClientError | OutOfMemoryError ? &mut Allocator | &mut MonotonicClock | &mut Random> for CancellationHandler {
+  effect<'call> fn handle<'call>(handler: Self, connection: &'call mut Connection<CancellationTransport>) -> i32
   ! ClientError | OutOfMemoryError
   ? &mut Allocator | &mut MonotonicClock | &mut Random {
     let CancellationHandler {request} = move handler
@@ -1549,12 +1585,11 @@ effect fn cancellationBody(audit: Shared<CancellationAudit>) -> i32
     |> Effect.provideMut<Allocator>(&mut allocator)
   let transport = TestTransport {
     memory: move memory,
-    cancellationAudit: Option.some<Shared<CancellationAudit>>(move audit),
     expireAfterWrite: false,
     failFlush: false,
   }
   return run Client.withOwned(
-    move transport,
+    CancellationTransport {transport: move transport, audit: move audit},
     origin,
     Version.Http11,
     limits(),

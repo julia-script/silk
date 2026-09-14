@@ -195,16 +195,23 @@ it.effect('renders the complete public hierarchy in source order with accurate c
   }),
 )
 
-it.effect('keeps primitive module imports unscoped', () =>
+it.effect('distinguishes primitive, public declaration, and module alias imports', () =>
   Effect.gen(function* () {
     const snapshot = yield* Analysis.ofSource('test/reference', encoder.encode(source))
     const project = Project.make(snapshot)
-    const result = Reference.make([{ module: 'test/reference', namespace: 'i32' }], project)
-    assert.strictEqual(result._tag, 'Success')
-    if (result._tag !== 'Success') return
-    const page = result.reference.files.find((file) => file.path === 'reference.md')?.contents
-    assert.isDefined(page)
-    assert.include(page, 'Import as `i32` with `import test.reference`.')
+    for (const { namespace, statement } of [
+      { namespace: 'i32', statement: 'import test.reference' },
+      { namespace: 'Recovery', statement: 'import test.reference { Recovery }' },
+      { namespace: 'Client', statement: 'import test.reference as Client' },
+      { namespace: 'HiddenNode', statement: 'import test.reference as HiddenNode' },
+    ]) {
+      const result = Reference.make([{ module: 'test/reference', namespace }], project)
+      assert.strictEqual(result._tag, 'Success')
+      if (result._tag !== 'Success') return
+      const page = result.reference.files.find((file) => file.path === 'reference.md')?.contents
+      assert.isDefined(page)
+      assert.include(page, `Import as \`${namespace}\` with \`${statement}\`.`)
+    }
   }),
 )
 

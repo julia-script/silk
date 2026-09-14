@@ -1238,7 +1238,7 @@ Server Finished did not authenticate the transcript.
 TlsError.UnsupportedProfile: TlsError
 ```
 
-A server-selected suite, group, signature, or ALPN value is outside the selected profile.
+A server-selected suite, group, signature, or extension shape is outside the selected profile.
 
 <a id="declaration-73696c6b2f746c735f636c69656e743a3a546c734572726f723a3a76617269616e743a39"></a>
 
@@ -1328,7 +1328,7 @@ Transport input ended after authentication without peer `close_notify`.
 TlsError.NoApplicationProtocol: TlsError
 ```
 
-ALPN was required but the server selected no protocol.
+The server omits a required ALPN selection or selects a protocol that was not offered.
 
 <a id="declaration-73696c6b2f746c735f636c69656e743a3a696d706c656d656e746174696f6e3a33"></a>
 
