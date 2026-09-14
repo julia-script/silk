@@ -54,7 +54,9 @@ pub enum NativeResultReason {
 /// A typed host-resolution failure.
 pub union ResolverError {
   InvalidInput {
+    /// The admission rule that rejected the request or native result.
     pub reason: ResolverInputReason,
+    /// The rejected result-count limit.
     pub value: usize,
   },
   UnsupportedForm,
@@ -66,15 +68,21 @@ pub union ResolverError {
   FamilyUnsupported,
   SystemResources,
   LimitExceeded {
+    /// The maximum number of distinct endpoints allowed in the result.
     pub maximum: usize,
   },
   InvalidNativeResult {
+    /// The admission rule that rejected the request or native result.
     pub reason: NativeResultReason,
+    /// The zero-based native result-chain index.
     pub index: usize,
   },
   NativeFailure {
+    /// The native operation that reported this failure.
     pub operation: NativeResolverOperation,
+    /// The exact getaddrinfo error code.
     pub eai: i32,
+    /// The system error number when getaddrinfo reports a system failure.
     pub errno: Option<i32>,
   },
 }

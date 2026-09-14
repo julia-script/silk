@@ -32,7 +32,10 @@ const FOUR: usize = 4
 /// The selected body delimiter.
 pub union Framing {
   Empty,
-  Fixed { pub length: u64 },
+  Fixed {
+    /// The exact payload byte count selected by Content-Length.
+    pub length: u64,
+  },
   Chunked,
   CloseDelimited,
   Tunnel,
@@ -58,15 +61,25 @@ impl<'head> Selection<'head> {
 
 /// Every finite framing and owned-storage budget.
 pub struct Limits {
+  /// Maximum cumulative wire bytes, including framing syntax.
   pub maxWireBytes: u64
+  /// Maximum cumulative payload bytes.
   pub maxPayloadBytes: u64
+  /// Maximum payload bytes in one chunk.
   pub maxChunkBytes: usize
+  /// Maximum nonempty chunks in one body.
   pub maxChunks: usize
+  /// Maximum bytes in one chunk size line.
   pub maxChunkLineBytes: usize
+  /// Maximum cumulative chunk extension bytes.
   pub maxExtensionBytes: u64
+  /// Maximum trailer section bytes.
   pub maxTrailerBytes: usize
+  /// Maximum trailer field count.
   pub maxTrailerFields: usize
+  /// Maximum bytes retained in owned framing storage.
   pub maxOwnedBytes: usize
+  /// Admission limits for each retained trailer name and value.
   pub trailerValues: ValueLimits
 }
 
@@ -76,10 +89,15 @@ pub enum ProgressState { NeedInput, NeedOutput, Complete, Tunnel }
 
 /// Exact local and cumulative committed progress.
 pub struct Progress {
+  /// Input bytes committed by the current operation.
   pub consumed: usize
+  /// Output bytes committed by the current operation.
   pub written: usize
+  /// Cumulative committed wire bytes.
   pub totalWire: u64
+  /// Cumulative committed payload bytes.
   pub totalPayload: u64
+  /// The next required action or completed disposition.
   pub state: ProgressState
 }
 
@@ -139,8 +157,20 @@ pub union BodyReason {
   FixedLengthOverrun,
   UnexpectedPayload,
   UnsupportedTunnelEncoding,
-  DiscardLimit { pub allowed: u64, pub attempted: u64 },
-  LimitExceeded { pub limit: BodyLimitKind, pub allowed: u64, pub attempted: u64 },
+  DiscardLimit {
+    /// The admitted maximum for the rejected operation.
+    pub allowed: u64,
+    /// The count that would exceed the admitted maximum.
+    pub attempted: u64,
+  },
+  LimitExceeded {
+    /// The budget exceeded by this operation.
+    pub limit: BodyLimitKind,
+    /// The admitted maximum for the rejected operation.
+    pub allowed: u64,
+    /// The count that would exceed the admitted maximum.
+    pub attempted: u64,
+  },
   InvalidState,
 }
 
@@ -148,13 +178,21 @@ impl Copy for BodyReason {}
 
 /// A terminal failure with exact committed coordinates.
 pub struct BodyError {
+  /// The rule that made the body terminal.
   pub reason: BodyReason
+  /// The framing component that rejected the operation.
   pub component: BodyComponent
+  /// The zero-based wire byte offset of the failure.
   pub wireOffset: u64
+  /// Input bytes committed by the current operation.
   pub consumed: usize
+  /// Output bytes committed by the current operation.
   pub written: usize
+  /// Cumulative committed wire bytes.
   pub totalWire: u64
+  /// Cumulative committed payload bytes.
   pub totalPayload: u64
+  /// The zero-based trailer field index, when the failure identifies one.
   pub fieldIndex: Option<usize>
 }
 

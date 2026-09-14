@@ -64,22 +64,31 @@ pub enum UnsupportedHostForm {
 /// A typed value-construction or presentation failure.
 pub union AddressError {
   InvalidAddress {
+    /// The admission rule that rejected the supplied bytes.
     pub reason: AddressReason,
+    /// The zero-based byte offset of the rejected input.
     pub offset: usize,
   },
   InvalidHost {
+    /// The admission rule that rejected the supplied bytes.
     pub reason: HostReason,
+    /// The zero-based byte offset of the rejected input.
     pub offset: usize,
   },
   InvalidPort {
+    /// The supplied port number outside the admitted 0..65535 range.
     pub value: usize,
   },
   UnsupportedForm {
+    /// The unsupported URI host form.
     pub form: UnsupportedHostForm,
+    /// The zero-based byte offset of the rejected input.
     pub offset: usize,
   },
   OutputTooSmall {
+    /// The output capacity needed for the complete spelling.
     pub required: usize,
+    /// The output capacity supplied by the caller.
     pub available: usize,
   },
 }
@@ -96,8 +105,14 @@ pub struct Ipv6Address {
 
 /// An owned numeric network address whose family remains explicit.
 pub union IpAddress {
-  V4 { pub value: Ipv4Address },
-  V6 { pub value: Ipv6Address },
+  V4 {
+    /// The four network-order IPv4 octets.
+    pub value: Ipv4Address,
+  },
+  V6 {
+    /// The sixteen network-order IPv6 octets.
+    pub value: Ipv6Address,
+  },
 }
 
 /// A checked transport port. Zero is valid for listener binding.
@@ -119,9 +134,18 @@ pub struct DomainHost {
 
 /// A classified owned origin host.
 pub union Host {
-  Domain { pub value: DomainHost },
-  Ipv4 { pub value: Ipv4Address },
-  Ipv6 { pub value: Ipv6Address },
+  Domain {
+    /// The validated ASCII domain in its original spelling.
+    pub value: DomainHost,
+  },
+  Ipv4 {
+    /// The four network-order IPv4 octets.
+    pub value: Ipv4Address,
+  },
+  Ipv6 {
+    /// The sixteen network-order IPv6 octets.
+    pub value: Ipv6Address,
+  },
 }
 
 /// Operations shared across the network address value family.
